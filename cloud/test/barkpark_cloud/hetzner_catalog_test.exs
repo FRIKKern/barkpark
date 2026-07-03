@@ -68,6 +68,10 @@ defmodule BarkparkCloud.Registry.HetznerCatalogTest do
       assert Enum.map(entries, & &1.resource) == @overview_kinds
       assert Enum.all?(entries, &(&1.tier == :read))
       assert Enum.all?(entries, &(&1.verb == :list))
+
+      # Hetzner paginates every list endpoint — each read must allow the
+      # paging keys or the overview fan-out couldn't walk past page one.
+      assert Enum.all?(entries, &("page" in &1.params and "per_page" in &1.params))
     end
 
     test "read_entries is exactly the :read subset of catalog/0" do

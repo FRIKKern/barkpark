@@ -16,8 +16,10 @@ defmodule BarkparkCloud.HetznerFakeHttpClient do
         "/v1/volumes" => {:ok, %{status: 500, body: "{}"}}
       })
 
-  `request/1` looks the URL's path up in the programmed map; an unprogrammed
-  path defaults to `{:ok, %{status: 200, body: "{}"}}` (an empty upstream).
+  `request/1` looks the URL up in the programmed map — first as the exact
+  `"path?query"` (for pagination tests that answer per page), then as the bare
+  `"path"` (every page of that path gets the same response); an unprogrammed
+  URL defaults to `{:ok, %{status: 200, body: "{}"}}` (an empty upstream).
   """
 
   @requests_key :hetzner_fake_requests
@@ -33,11 +35,21 @@ defmodule BarkparkCloud.HetznerFakeHttpClient do
   @doc "The requests seen so far, in call order."
   def requests, do: Enum.reverse(Process.get(@requests_key, []))
 
-  @doc "The HttpClient contract: record the request, return the path's programmed response."
+  @doc "The HttpClient contract: record the request, return the URL's programmed response."
   def request(%{url: url} = req) do
     Process.put(@requests_key, [req | Process.get(@requests_key, [])])
 
-    path = URI.parse(url).path
-    Map.get(Process.get(@responses_key, %{}), path, {:ok, %{status: 200, body: "{}"}})
+    %URI{path: path, query: query} = URI.parse(url)
+    responses = Process.get(@responses_key, %{})
+
+    with :error <- Map.fetch(responses, path_with_query(path, query)),
+         :error <- Map.fetch(responses, path) do
+      {:ok, %{status: 200, body: "{}"}}
+    else
+      {:ok, response} -> response
+    end
   end
+
+  defp path_with_query(path, nil), do: path
+  defp path_with_query(path, query), do: path <> "?" <> query
 end

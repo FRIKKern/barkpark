@@ -4574,9 +4574,11 @@ defmodule BarkparkCloud.Web.Router do
   # Fan out to the nine read kinds and assemble the charter envelope. The
   # fan-out is SEQUENTIAL and in-process — the injected client seam (like the
   # notifications fake) runs in the calling process, and nine bounded-timeout
-  # GETs are fine for a dashboard snapshot. Partial failure degrades per kind:
-  # that kind is null, its count 0, and `errors` names the failure; `ok` stays
-  # true because the envelope itself succeeded (charter decision 4).
+  # paginated GET walks are fine for a dashboard snapshot (revisit with an
+  # ownership-aware fake if the Infrastructure panel wants Task.async_stream).
+  # Partial failure degrades per kind: that kind is null, its count 0, and
+  # `errors` names the failure; `ok` stays true because the envelope itself
+  # succeeded (charter decision 4).
   defp hetzner_overview_envelope(provider, token) do
     results =
       for {kind, list_key, query} <- @hetzner_overview_kinds do
@@ -4611,12 +4613,32 @@ defmodule BarkparkCloud.Web.Router do
     if errors == %{}, do: envelope, else: Map.put(envelope, :errors, errors)
   end
 
-  # One upstream GET, path taken verbatim from the catalog entry. Returns
-  # {:ok, rows} | {:error, reason} where reason is a SAFE string ("http_502" /
-  # "unreachable" / "bad_payload") — never the transport term, never a header,
-  # never the token.
+  # Hetzner paginates EVERY list endpoint (25/page default, 50 max). The
+  # fan-out asks for the max and walks `meta.pagination.next_page` so `counts`
+  # is estate truth, not first-page truth — an operator with 60 servers must
+  # see 60, and the Go CLI reference (hcloud-go `AllWithOpts`) auto-paginates,
+  # so stopping at page 1 here would be exactly the GUI/CLI drift the charter
+  # forbids. The page walk is bounded (50 rows × 20 pages = 1000 rows/kind) so
+  # a hostile/looping upstream can't wedge the request.
+  @hetzner_per_page 50
+  @hetzner_max_pages 20
+
+  # All pages of one upstream list, path taken verbatim from the catalog
+  # entry. Returns {:ok, rows} | {:error, reason} where reason is a SAFE
+  # string ("http_502" / "unreachable" / "bad_payload") — never the transport
+  # term, never a header, never the token. A failure on ANY page fails the
+  # whole kind: partial rows would silently lie about counts.
   defp hetzner_fetch_kind(entry, list_key, query, token) do
-    url = @hetzner_api_base <> entry.path <> if(query, do: "?" <> query, else: "")
+    base_query =
+      [query, "per_page=#{@hetzner_per_page}"]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("&")
+
+    hetzner_fetch_pages(entry, list_key, base_query, token, 1, [])
+  end
+
+  defp hetzner_fetch_pages(entry, list_key, base_query, token, page, acc) do
+    url = @hetzner_api_base <> entry.path <> "?" <> base_query <> "&page=#{page}"
 
     request = %{
       method: :get,
@@ -4633,7 +4655,18 @@ defmodule BarkparkCloud.Web.Router do
         case Jason.decode(body) do
           {:ok, decoded} when is_map(decoded) ->
             rows = decoded |> Map.get(list_key, []) |> List.wrap()
-            {:ok, rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row/1)}
+            acc = acc ++ (rows |> Enum.filter(&is_map/1) |> Enum.map(&hetzner_row/1))
+
+            # Follow the upstream's own next-page pointer. Guards: it must be
+            # an integer strictly beyond the page just fetched (a payload that
+            # points backwards or at itself can't loop us), within the bound.
+            case get_in(decoded, ["meta", "pagination", "next_page"]) do
+              next when is_integer(next) and next > page and next <= @hetzner_max_pages ->
+                hetzner_fetch_pages(entry, list_key, base_query, token, next, acc)
+
+              _ ->
+                {:ok, acc}
+            end
 
           _ ->
             {:error, "bad_payload"}

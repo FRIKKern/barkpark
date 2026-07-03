@@ -158,8 +158,10 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
                  List.keyfind(req.headers, "Authorization", 0)
       end
 
-      # Backups ride the catalog's allowed type=backup query.
-      assert Enum.any?(requests, &String.ends_with?(&1.url, "/v1/images?type=backup"))
+      # Backups ride the catalog's allowed type=backup query, and every read
+      # asks for the 50-row page max (counts must be estate truth).
+      assert Enum.any?(requests, &(&1.url =~ "/v1/images?type=backup&"))
+      assert Enum.all?(requests, &(&1.url =~ "per_page=50"))
 
       # The raw token must never reach the browser.
       refute conn.resp_body =~ @hetzner_token
@@ -230,6 +232,103 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
       assert body["resources"]["servers"] == nil
       assert body["errors"]["servers"] == "unreachable"
       refute conn.resp_body =~ @hetzner_token
+    end
+
+    test "a paginated estate is walked to the last page — counts are estate truth, not first-page truth" do
+      {user, team} = user_with_team()
+      connect_hetzner(team)
+
+      # Hetzner pages at 25 by default (50 max) — the proxy must follow
+      # meta.pagination.next_page or a 60-server fleet reads as 50.
+      HetznerFakeHttpClient.program(%{
+        "/v1/servers?per_page=50&page=1" =>
+          ok_json(
+            ~s({"servers":[{"id":1,"name":"a","status":"running"},{"id":2,"name":"b","status":"running"}],"meta":{"pagination":{"page":1,"next_page":2}}})
+          ),
+        "/v1/servers?per_page=50&page=2" =>
+          ok_json(
+            ~s({"servers":[{"id":3,"name":"c","status":"running"}],"meta":{"pagination":{"page":2,"next_page":null}}})
+          )
+      })
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 200
+      body = json_body(conn)
+
+      assert body["counts"]["servers"] == 3
+      assert Enum.map(body["resources"]["servers"], & &1["id"]) == [1, 2, 3]
+
+      server_urls =
+        HetznerFakeHttpClient.requests()
+        |> Enum.map(& &1.url)
+        |> Enum.filter(&(&1 =~ "/v1/servers"))
+
+      assert length(server_urls) == 2
+    end
+
+    test "a failure on a LATER page degrades the whole kind — partial rows never lie about counts" do
+      {user, team} = user_with_team()
+      connect_hetzner(team)
+
+      HetznerFakeHttpClient.program(%{
+        "/v1/servers?per_page=50&page=1" =>
+          ok_json(
+            ~s({"servers":[{"id":1,"name":"a","status":"running"}],"meta":{"pagination":{"page":1,"next_page":2}}})
+          ),
+        "/v1/servers?per_page=50&page=2" => {:ok, %{status: 502, body: ""}}
+      })
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 200
+      body = json_body(conn)
+      assert body["resources"]["servers"] == nil
+      assert body["counts"]["servers"] == 0
+      assert body["errors"]["servers"] == "http_502"
+    end
+
+    test "a next_page pointing at or behind the current page cannot loop the walk" do
+      {user, team} = user_with_team()
+      connect_hetzner(team)
+
+      # A hostile/buggy upstream that points back at page 1 forever.
+      HetznerFakeHttpClient.program(%{
+        "/v1/servers?per_page=50&page=1" =>
+          ok_json(
+            ~s({"servers":[{"id":1,"name":"a","status":"running"}],"meta":{"pagination":{"page":1,"next_page":1}}})
+          )
+      })
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn)["counts"]["servers"] == 1
+
+      server_urls =
+        HetznerFakeHttpClient.requests()
+        |> Enum.map(& &1.url)
+        |> Enum.filter(&(&1 =~ "/v1/servers"))
+
+      assert length(server_urls) == 1
+    end
+
+    test "with several connected hetzner accounts the NEWEST is the one proxied" do
+      {user, team} = user_with_team()
+
+      older = connect_hetzner(team, "old account")
+
+      older
+      |> Ecto.Changeset.change(inserted_at: DateTime.add(older.inserted_at, -3600, :second))
+      |> Repo.update!()
+
+      connect_hetzner(team, "new account")
+      program_happy_upstream()
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn)["provider"]["label"] == "new account"
     end
 
     test "tampered ciphertext fails closed: 500 decrypt_failed, upstream never called" do

@@ -27,9 +27,14 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
     `read_entries/0`). Free of confirmation.
   * `:mutate` — DECLARED here, not yet routed. Wave 3 wires them through the
     proxy with an audit event per call (charter decision 3).
-  * `:destroy` — declared, not routed. Every destroy entry carries a
-    `"confirm"` param: the server-verified typed-resource-name echo slot the
-    wave-3 proxy will demand before touching the upstream (charter decision 5).
+  * `:destroy` — declared, not routed, and per the charter NOT in v1 at all
+    ("no delete in v1", decision 3). The entries live here so the tier grammar
+    is complete and the dashboard can render danger tiers, but any wave that
+    routes proxy mutations MUST filter on tier — serving every catalog entry
+    verbatim would ship deletes the charter excluded. Every destroy entry
+    carries a `"confirm"` param: the server-verified typed-resource-name echo
+    slot a delete-bearing wave will demand before touching the upstream
+    (charter decision 5).
 
   This module is deliberately PURE — no HTTP, no config, no deps — so the
   allowlist itself is unit-testable without a network and auditable at a
@@ -47,8 +52,11 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
         }
 
   # ── The nine overview read kinds (charter envelope `resources` keys) ──
-  # `params` names the allowed QUERY keys for reads; the overview fan-out pins
-  # `type=backup` on the images read (Hetzner models backups as images).
+  # `params` names the allowed QUERY keys for reads. Hetzner paginates every
+  # list endpoint (25/page default, 50 max), so all reads allow "page" +
+  # "per_page" — the overview fan-out walks pages so counts are estate truth,
+  # not first-page truth. The images read additionally allows "type": the
+  # fan-out pins `type=backup` (Hetzner models backups as images).
   @reads [
     %{
       resource: :servers,
@@ -56,7 +64,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/servers",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :volumes,
@@ -64,7 +72,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/volumes",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :networks,
@@ -72,7 +80,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/networks",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :firewalls,
@@ -80,7 +88,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/firewalls",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :load_balancers,
@@ -88,7 +96,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/load_balancers",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :floating_ips,
@@ -96,7 +104,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/floating_ips",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :primary_ips,
@@ -104,7 +112,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/primary_ips",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :dns_zones,
@@ -112,7 +120,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/zones",
       tier: :read,
-      params: []
+      params: ["page", "per_page"]
     },
     %{
       resource: :backups,
@@ -120,7 +128,7 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       method: :get,
       path: "/v1/images",
       tier: :read,
-      params: ["type"]
+      params: ["type", "page", "per_page"]
     }
   ]
 
