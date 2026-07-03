@@ -32,6 +32,13 @@ export interface BarkparkReferenceClient {
    */
   fetchRaw?: <T = Response>(path: string, init?: unknown) => Promise<T>
   /**
+   * Type-aware single-document getter. Matches the real `@barkpark/core`
+   * client's `doc(type, id)`, which builds the canonical 3-segment
+   * `/v1/data/doc/:dataset/:type/:id` path and returns the parsed doc (or
+   * `null` on 404). Preferred over `fetchRaw` whenever a target `type` is known.
+   */
+  doc?: <T = ResolvedDoc>(type: string, id: string, opts?: unknown) => Promise<T | null>
+  /**
    * The client's resolved config. When present, the derived `fetchRaw` fetcher
    * scopes the path to `scopePrefix(config)` and uses the configured `dataset`
    * instead of a hardcoded fallback. The real `@barkpark/core` client exposes
@@ -44,6 +51,14 @@ export interface BarkparkReferenceClient {
 export interface BarkparkReferenceProps {
   /** Reference or already-resolved document; plain string = id only. */
   ref: RefInput | ResolvedDoc | string
+  /**
+   * Target document type. Optional. A reference value carries no type by itself,
+   * so client-derived resolution needs one to build the canonical 3-segment
+   * `/v1/data/doc/:dataset/:type/:id` path (or call `client.doc(type, id)`).
+   * Resolution order: this prop → the reference's own `_type` → none (in which
+   * case the client branch falls back to the legacy typeless path).
+   */
+  type?: string
   /** Custom loader. Takes precedence over `client`. */
   fetcher?: (id: DocId) => Promise<ResolvedDoc | null>
   /** Client to derive a default fetcher from (uses `fetchRaw`). */
@@ -74,19 +89,21 @@ const BarkparkReferenceContext = createContext<RefContextValue | null>(null)
 
 function extractId(ref: BarkparkReferenceProps['ref']): {
   id: DocId | null
+  /** Target type carried by the reference value (`_type`), if any. */
+  type: string | null
   resolved: ResolvedDoc | null
 } {
-  if (typeof ref === 'string') return { id: ref, resolved: null }
+  if (typeof ref === 'string') return { id: ref, type: null, resolved: null }
   if (ref && typeof ref === 'object') {
     const r = ref as Record<string, unknown>
     if (typeof r._id === 'string' && typeof r._type === 'string') {
-      return { id: r._id, resolved: ref as ResolvedDoc }
+      return { id: r._id, type: r._type, resolved: ref as ResolvedDoc }
     }
     if (typeof r._ref === 'string') {
-      return { id: r._ref, resolved: null }
+      return { id: r._ref, type: typeof r._type === 'string' ? r._type : null, resolved: null }
     }
   }
-  return { id: null, resolved: null }
+  return { id: null, type: null, resolved: null }
 }
 
 /**
@@ -94,19 +111,47 @@ function extractId(ref: BarkparkReferenceProps['ref']): {
  *
  * Scope-aware: when the client carries a `config` with both `workspace` and
  * `project`, the path is prefixed with `scopePrefix(config)` (→ `/w/:ws/p/:proj`)
- * and uses the configured `dataset`. Unscoped (or no config) falls back to the
- * flat `/v1/...` route the API still serves for back-compat. The literal
- * "production" dataset is only used as a last resort when no config is present.
+ * and uses the configured `dataset`. The literal "production" dataset is only
+ * used as a last resort when no config is present.
+ *
+ * The API's only doc route is the 3-segment `/v1/data/doc/:dataset/:type/:id`
+ * (type required). When `type` is known the canonical 3-segment path is built;
+ * when it is absent we fall back to the legacy 2-segment `…/:dataset/:id` form
+ * — which the current API does NOT serve (it 404s), so an untyped reference
+ * resolves to `notFound`. Pass a `type` prop (or a `_type` on the reference)
+ * to get real resolution.
  */
-function buildDocPath(config: BarkparkReferenceClient['config'], id: DocId): string {
+function buildDocPath(
+  config: BarkparkReferenceClient['config'],
+  id: DocId,
+  type?: string | null,
+): string {
   const dataset = config?.dataset ?? 'production'
   const prefix = config ? scopePrefix(config as BarkparkClientConfig) : ''
-  return `${prefix}/v1/data/doc/${encodeURIComponent(dataset)}/${encodeURIComponent(id)}`
+  const tail = type
+    ? `${encodeURIComponent(dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}`
+    : `${encodeURIComponent(dataset)}/${encodeURIComponent(id)}`
+  return `${prefix}/v1/data/doc/${tail}`
 }
 
-function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<ResolvedDoc | null> {
+function resolveFetcher(
+  props: Pick<BarkparkReferenceProps, 'fetcher' | 'client'>,
+  type: string | null,
+): (id: DocId) => Promise<ResolvedDoc | null> {
   if (props.fetcher) return props.fetcher
   const client = props.client
+  // Prefer the client's type-aware `doc(type, id)` getter when a target type is
+  // known — it builds the canonical 3-segment path and returns a parsed doc.
+  if (type && typeof client?.doc === 'function') {
+    const docFn = client.doc
+    return async (id) => {
+      try {
+        return (await docFn<ResolvedDoc>(type, id)) ?? null
+      } catch {
+        return null
+      }
+    }
+  }
   if (client?.fetchRaw) {
     // Derive a fetcher from the client. Scope + dataset come from the client's
     // config (workspace/project/dataset); see buildDocPath. Users who need
@@ -115,7 +160,7 @@ function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<R
     const config = client.config
     return async (id) => {
       try {
-        const res = await fetchRaw<unknown>(buildDocPath(config, id))
+        const res = await fetchRaw<unknown>(buildDocPath(config, id, type))
         // The real core client's fetchRaw returns a raw Response; unwrap the
         // `/v1/data/doc` envelope ({ result: doc, ... }). A stub that returns
         // an already-parsed object is passed through untouched.
@@ -133,7 +178,7 @@ function resolveFetcher(props: BarkparkReferenceProps): (id: DocId) => Promise<R
       }
     }
   }
-  throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw`')
+  throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw` or `doc`')
 }
 
 function AsyncResolve(props: {
@@ -159,7 +204,7 @@ function AsyncResolve(props: {
  *
  * @param props — {@link BarkparkReferenceProps}
  * @returns The rendered children or `null` when `ref` is unusable.
- * @throws When neither `fetcher` nor a `client` with `fetchRaw` is provided for an unresolved reference.
+ * @throws When neither `fetcher` nor a `client` with `fetchRaw` or `doc` is provided for an unresolved reference.
  *
  * @example
  * import { BarkparkReference } from '@barkpark/react'
@@ -190,18 +235,23 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
   // two props that actually determine the fetcher — never the whole props object.
   const explicitFetcher = props.fetcher
   const client = props.client
+  // Target type resolution order: explicit `type` prop → the reference's own
+  // `_type` → none. Captured before the memo so the derived fetcher can build
+  // the canonical 3-segment path / call `client.doc(type, id)`. `extractId`
+  // is pure (no hook), so calling it here keeps hook order stable.
+  const { id, type: refType, resolved } = extractId(ref)
+  const targetType = props.type ?? refType
   const fetcher = useMemo<((id: DocId) => Promise<ResolvedDoc | null>) | null>(() => {
     if (explicitFetcher) return explicitFetcher
-    if (client?.fetchRaw) return resolveFetcher({ client } as BarkparkReferenceProps)
+    if (client?.fetchRaw || client?.doc) return resolveFetcher({ client }, targetType)
     return null
-  }, [explicitFetcher, client])
+  }, [explicitFetcher, client, targetType])
 
   const depth = parent ? parent.depth : 0
   // Root establishes maxDepth; nested instances inherit the root's cap so
   // callers can't widen it mid-tree.
   const effectiveMaxDepth = parent ? parent.maxDepth : maxDepth
 
-  const { id, resolved } = extractId(ref)
   if (id == null) return null
 
   if (depth >= effectiveMaxDepth) {
@@ -231,7 +281,7 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
     // Only an unresolved reference lacking BOTH a fetcher and a client is an error
     // (a resolved doc or unusable id returned earlier). Same contract as
     // resolveFetcher's own guard; thrown here so the memo above stays pure.
-    throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw`')
+    throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw` or `doc`')
   }
   return createElement(
     Suspense,
