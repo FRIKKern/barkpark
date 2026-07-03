@@ -489,7 +489,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.deleteArmed = true
 			m.deleteDocID = doc.ID
 			m.deleteDocType = typeName
-			m.setStatus(fmt.Sprintf("delete %q? press D again to confirm · esc cancel", doc.Title), true)
+			m.setStatusInfo(fmt.Sprintf("delete %q? press D again to confirm · esc cancel", doc.Title))
 		}
 		return m, nil
 

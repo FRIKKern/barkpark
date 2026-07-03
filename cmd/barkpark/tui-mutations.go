@@ -284,7 +284,7 @@ func (m *model) armDiscard(doc *Doc, typeName string) {
 	m.discardArmed = true
 	m.discardDocID = bare
 	m.discardDocType = typeName
-	m.setStatus(fmt.Sprintf("discard draft of %q, revert to published? press R again · esc cancel", doc.Title), true)
+	m.setStatusInfo(fmt.Sprintf("discard draft of %q, revert to published? press R again · esc cancel", doc.Title))
 }
 
 // performDiscard sends the discardDraft mutation ({"discardDraft":{"id":
@@ -369,12 +369,24 @@ func workerIdentity() string {
 	return "tui-" + host
 }
 
-// setStatus stores a transient status-line message. ok=false marks it an error
-// (rendered red); ok=true marks it a confirmation (rendered green). The message
-// is cleared by clearStatus on the next key action.
+// setStatus stores a transient status-line message. isErr=true marks it an error
+// (rendered red ✕); isErr=false marks it a success confirmation (rendered green
+// ✓). For neutral notices and confirm prompts use setStatusInfo instead. The
+// message is cleared by clearStatus on the next key action.
 func (m *model) setStatus(msg string, isErr bool) {
 	m.status = msg
 	m.statusErr = isErr
+	m.statusInfo = false
+}
+
+// setStatusInfo stores a neutral, non-alarming status message (rendered dim ·,
+// never red) — an informational notice ("no matches", "never published") or a
+// two-press confirm prompt. It is NOT a failure, so it must not render as an
+// error. Cleared by clearStatus on the next key action.
+func (m *model) setStatusInfo(msg string) {
+	m.status = msg
+	m.statusErr = false
+	m.statusInfo = true
 }
 
 // clearStatus wipes any pending status message. Called at the top of each key
@@ -382,4 +394,5 @@ func (m *model) setStatus(msg string, isErr bool) {
 func (m *model) clearStatus() {
 	m.status = ""
 	m.statusErr = false
+	m.statusInfo = false
 }

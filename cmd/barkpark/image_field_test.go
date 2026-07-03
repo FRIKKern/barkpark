@@ -152,8 +152,9 @@ func TestImageCommitWarnsOnAssetSever(t *testing.T) {
 	m.textInput = textinput.New()
 	m.textInput.SetValue("https://elsewhere.test/new.png")
 	m.commitFieldEdit()
-	if !m.statusErr || !strings.Contains(m.status, "asset link removed") {
-		t.Errorf("severing commit should warn, got %q (err=%v)", m.status, m.statusErr)
+	// A neutral notice, not a failure: dim ·, never red ✕.
+	if m.statusErr || !m.statusInfo || !strings.Contains(m.status, "asset link removed") {
+		t.Errorf("severing commit should warn as a neutral notice, got %q (err=%v info=%v)", m.status, m.statusErr, m.statusInfo)
 	}
 
 	// Unchanged URL: envelope kept, no warning.
