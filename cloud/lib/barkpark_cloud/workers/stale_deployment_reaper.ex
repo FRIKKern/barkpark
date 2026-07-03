@@ -12,14 +12,16 @@ defmodule BarkparkCloud.Workers.StaleDeploymentReaper do
   This worker runs every minute (the config.exs Cron entry) on the `:maintenance`
   queue and PROACTIVELY sweeps stale claims to a re-claimable / terminal state via
   `Registry.reap_stale_deployments/0`, which fails exhausted "building" rows,
-  requeues the rest, releases stale "pushing" agent claims, and fails "queued"
-  rows with no build source (no artifact + a site with no connected repo, which
-  can never build) — reusing the same `Registry.deployment_stale_after_seconds/0`
-  threshold and `Registry.max_deploy_claims/0` budget throughout.
+  requeues the rest, fails exhausted "pushing" rows (a permanently-unreachable
+  box past its claim budget — terminal, not re-released forever), releases the
+  still-retriable "pushing" agent claims, and fails "queued" rows with no build
+  source (no artifact + a site with no connected repo, which can never build) —
+  reusing the same `Registry.deployment_stale_after_seconds/0` threshold and
+  `Registry.max_deploy_claims/0` budget throughout.
 
   Idempotent: a sweep that finds nothing returns
-  `{:ok, %{failed: 0, requeued: 0, released: 0, no_source_failed: 0}}` and never
-  raises. The `unique`
+  `{:ok, %{failed: 0, requeued: 0, released: 0, pushing_failed: 0, no_source_failed: 0}}`
+  and never raises. The `unique`
   window (60s) collapses a slow sweep plus the next cron tick to one in-flight
   job instead of stacking, and each status-guarded pass no-ops on a row a
   concurrent claim already moved.

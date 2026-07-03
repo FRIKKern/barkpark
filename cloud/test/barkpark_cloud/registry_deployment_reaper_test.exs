@@ -164,6 +164,54 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     assert reclaimed.id == claimed.id
   end
 
+  ## 4b. (iii) Agent-claim budget — a stale pushing row at the claim cap is FAILED
+  ##          (terminal, actionable reason), not re-released forever. This is the
+  ##          eternal-spinner class: a permanently-down box the agent path keeps
+  ##          re-claiming and never delivering.
+
+  test "stale pushing deployment at the claim budget is failed with an actionable reason" do
+    {bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, _d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "img-1"})
+    {:ok, claimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-1")
+
+    # Pin claim_epoch at the cap so the sweep fails (not releases) it.
+    Repo.update_all(
+      from(x in Deployment, where: x.id == ^claimed.id),
+      set: [claim_epoch: Registry.max_deploy_claims()]
+    )
+
+    backdate(claimed.id)
+
+    assert {:ok, %{pushing_failed: 1, released: 0}} = perform_job(StaleDeploymentReaper, %{})
+
+    failed = Repo.get(Deployment, claimed.id)
+    assert failed.status == "failed"
+    assert failed.failure_reason =~ "instance unreachable"
+    assert is_nil(failed.claim_worker)
+    assert is_nil(failed.claimed_at)
+  end
+
+  ## 4c. (iv) Under budget still retries — a stale pushing row below the cap is
+  ##          RELEASED (a transient blip must still be retried), never failed.
+
+  test "stale pushing deployment under the claim budget is released, not failed" do
+    {bp, site} = setup_site()
+    {:ok, d} = Registry.create_deployment(site, %{git_ref: "main"})
+    {:ok, _d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "img-1"})
+    {:ok, claimed} = Registry.claim_pending_deployment_for_barkpark(bp, "agent-1")
+
+    # One claim → claim_epoch is 1, well under the budget.
+    assert claimed.claim_epoch < Registry.max_deploy_claims()
+    backdate(claimed.id)
+
+    assert {:ok, %{pushing_failed: 0, released: 1}} = perform_job(StaleDeploymentReaper, %{})
+
+    released = Repo.get(Deployment, claimed.id)
+    assert released.status == "pushing"
+    assert is_nil(released.claim_worker)
+  end
+
   ## 5. (d) Fresh claim — a live worker is never yanked.
 
   test "a fresh (non-stale) claim is left untouched" do
