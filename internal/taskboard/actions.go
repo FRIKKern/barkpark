@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -51,6 +52,17 @@ func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult 
 // reasons get a plain-words gloss; anything unrecognised is passed through
 // verbatim-ish (trimmed) so we never swallow a message we don't understand.
 func humanizeReason(err error) string {
+	// Transport failures arrive as *url.Error, whose Error() spells the whole
+	// request ('Post "http://…/claim": dial tcp …: connect: connection
+	// refused') — hopeless on a narrow status line. Keep the honest root cause
+	// ("connection refused", "no such host"), drop the plumbing.
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		if uerr.Timeout() {
+			return "server timeout"
+		}
+		return "server unreachable (" + rootCause(uerr).Error() + ")"
+	}
 	raw := strings.TrimSpace(err.Error())
 	switch strings.ToLower(raw) {
 	case "fenced_off":
@@ -76,6 +88,19 @@ func humanizeReason(err error) string {
 	return raw
 }
 
+// rootCause walks the Unwrap chain to the innermost error — the short truth a
+// wrapped transport error buries ("connection refused" under url.Error →
+// net.OpError → os.SyscallError).
+func rootCause(err error) error {
+	for {
+		next := errors.Unwrap(err)
+		if next == nil {
+			return err
+		}
+		err = next
+	}
+}
+
 // ResolveWorker computes the board's task-claim worker id: BARKPARK_WORKER_ID
 // when set, else "tui-<hostname>", else "tui-unknown" when the hostname is
 // unreadable. This mirrors the desk TUI's workerIdentity convention
@@ -99,11 +124,11 @@ func ResolveWorker() string {
 // api/lib/barkpark_web/router.ex). We only hold baseURL + docID here, so we use
 // the conventional defaults (production dataset, `task` type); Studio resolves
 // the session scope on open. The link is advisory — the board never blocks on
-// it. Returns "" for an empty baseURL. Any scheme (http/https) and a trailing
-// slash on baseURL are handled.
+// it. Returns "" when baseURL or docID is empty (no link rather than a broken
+// one). Any scheme (http/https) and a trailing slash on baseURL are handled.
 func StudioTaskURL(baseURL, docID string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	if base == "" {
+	if base == "" || docID == "" {
 		return ""
 	}
 	return base + "/studio/production/task/" + url.PathEscape(docID)

@@ -103,8 +103,13 @@ func TestDoClaim_NetworkFailure(t *testing.T) {
 	if got.OK {
 		t.Fatalf("expected failure, got %+v", got)
 	}
-	if !strings.HasPrefix(got.Message, "claim failed:") {
-		t.Errorf("message = %q, want a claim-failed transport message", got.Message)
+	// Transport errors must arrive SHORT — "server unreachable (connection
+	// refused)" — never the raw Go url.Error that spells the whole request.
+	if !strings.HasPrefix(got.Message, "claim failed: server unreachable (") {
+		t.Errorf("message = %q, want a short server-unreachable message", got.Message)
+	}
+	if strings.Contains(got.Message, "http://") {
+		t.Errorf("message = %q leaks the raw request URL", got.Message)
 	}
 }
 
@@ -175,8 +180,11 @@ func TestDoClose_NetworkFailure(t *testing.T) {
 	if got.OK {
 		t.Fatalf("expected failure, got %+v", got)
 	}
-	if !strings.HasPrefix(got.Message, "close rejected:") {
-		t.Errorf("message = %q, want a close-rejected transport message", got.Message)
+	if !strings.HasPrefix(got.Message, "close rejected: server unreachable (") {
+		t.Errorf("message = %q, want a short server-unreachable message", got.Message)
+	}
+	if strings.Contains(got.Message, "http://") {
+		t.Errorf("message = %q leaks the raw request URL", got.Message)
 	}
 }
 
@@ -211,7 +219,9 @@ func TestStudioTaskURL(t *testing.T) {
 		{"trailing slash trimmed", "https://acme.test/", "t1", "https://acme.test/studio/production/task/t1"},
 		{"multiple trailing slashes trimmed", "https://acme.test///", "t1", "https://acme.test/studio/production/task/t1"},
 		{"draft doc id escaped", "https://acme.test", "drafts.a b", "https://acme.test/studio/production/task/drafts.a%20b"},
+		{"slash in doc id escaped", "https://acme.test", "a/b", "https://acme.test/studio/production/task/a%2Fb"},
 		{"empty base yields empty", "", "t1", ""},
+		{"empty doc id yields empty", "https://acme.test", "", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
