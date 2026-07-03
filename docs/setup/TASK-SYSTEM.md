@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp            # no config + TTY → the setup wizard, then the TUI
 ```
 
-The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (the server unions `media` in on its own). Accept, and the task schema, routes, and cron workers are live on first boot. Already running a dev server on `:4000`? It blocks the local target's DB reset — stop it first, or pick **connect** instead.
+The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `media`). Accept, and the task schema, routes, and cron workers are live on first boot. A dev server on `:4000` blocks the local DB reset — stop it, or pick **connect**.
 
 **Existing installs** — enable via env and restart:
 
@@ -30,11 +30,9 @@ The wizard's **clean profile pre-checks the `bulldocs` and `tasks` plugins** (th
 BARKPARK_PLUGINS=bulldocs,tasks    # CSV whitelist · unset = all plugins · empty = kill switch
 ```
 
-- **Server (`deploy.sh` / `bp setup --target deploy`):** pass `BARKPARK_PLUGINS=bulldocs,tasks` in the deploy env — it persists into `/opt/barkpark/.env`, sourced by `api/start.sh` (the systemd unit's ExecStart).
-- **Docker:** `docker-compose.yml` passes the variable through as a bare `- BARKPARK_PLUGINS` entry — export it in the invoking shell before `docker compose up`.
-- **Local mix:** `BARKPARK_PLUGINS=bulldocs,tasks mix phx.server`.
+Set it in the deploy env (persists to `/opt/barkpark/.env`), export it before `docker compose up`, or prefix `mix phx.server`.
 
-The `task` schema auto-registers on every boot (idempotent on `(name, dataset)`); two Oban cron jobs come with it — a lease sweeper every minute and compaction every six hours.
+The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); two Oban crons ride along — a lease sweeper (1 min) and compaction (6 h).
 
 ## Point an AI agent at it
 
@@ -66,33 +64,32 @@ curl -X POST $API/v1/tasks/claim \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"worker_id":"agent-1"}'
 # → {"ok":true,"doc":{...,"claim":{"worker":"agent-1","ts_iso":"…","epoch":1}}}
-# → {"ok":false,"reason":"no_ready"} when the queue is empty
+# → {"ok":false,"reason":"no_ready"} when empty
 
 # Targeted claim: name the row
-bp task claim t1 agent-1            # args: <doc_id> <worker_id>
+bp task claim t1 agent-1            # <doc_id> <worker_id>
 
 # ... do the work ...
 
-# Close: CAS on the fencing epoch you were handed at claim time
-bp task close t1 agent-1 1          # args: <doc_id> <worker_id> <observed_epoch> [lifecycle_status] [reason]
+# Close: CAS on the fencing epoch handed at claim
+bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason]
 
-# Close-out with evidence: flip acceptance_criteria met/evidence ATOMICALLY with the close
-# (same rev CAS — never a separate racing mutation). Unmet criteria warn, never block.
+# Close with evidence: flip criteria met/evidence ATOMICALLY with the close (same rev-CAS).
 bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"PR #123"}]'
 ```
 
 The contract, precisely:
 
-- **Claim** flips `lifecycle_status` to `in_progress` and stamps `content.claim = {worker, ts_iso, epoch}`. The epoch bumps on **every** claim (losing a race → 409 `stale_claim`).
-- **Close** requires `worker_id` + `observed_epoch` (string ints accepted). Epoch mismatch → 409 `fenced_off` — the only protection against a stale-but-alive worker writing after its lease was swept. Optional body: `lifecycle_status` (`done` | `cancelled` | `blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — a list of `{index, met (default true), evidence, criterion}` updates merged into `acceptance_criteria` inside the same rev-CAS write as the lifecycle flip (criterion text is never rewritten; `criterion` is an optional stored-text guard → 409 `criteria_mismatch`; bad index → 409 `criteria_index_out_of_range`; either aborts the WHOLE close, no partial state). Unmet criteria at close: see **Criteria progress** below — advisory `warnings`, never a gate.
-- **Leases expire.** A sweeper runs every minute; claims idle past `task_lease_ttl_seconds` (default **300**) are released and emit `task.lease_expired`. Finish or re-claim.
-- **Ready** means: `lifecycle_status` ∈ {`open`, `blocked`} **and** every outbound `blocks` edge points at a `done` task. Closing a task `done` auto-flips dependents from `blocked` → `open` when their full blocker set is done.
-- **Criteria progress (advisory, never a gate).** Task envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` computed over `content.acceptance_criteria` — only `met: true` counts; garbage/missing `met` counts as unmet; the key is **omitted** when criteria are absent/empty (never `0/0`). Closing `done` with unmet criteria returns a top-level `warnings` list (bp prints `warning: …` to stderr); the close still commits. Single owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).
+- **Claim** flips `lifecycle_status` to `in_progress` + stamps `content.claim = {worker, ts_iso, epoch}`; the epoch bumps on every claim (race loss → 409 `stale_claim`).
+- **Close** requires `worker_id` + `observed_epoch`. Epoch mismatch → 409 `fenced_off` (protects against a swept-but-alive worker). Optional body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — `{index, met, evidence, criterion}` updates merged into `acceptance_criteria` in the SAME rev-CAS write as the flip (criterion text never rewritten; a stored-text/index mismatch → 409, aborting the whole close). Unmet criteria only warn (see **Criteria progress**), never gate.
+- **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **300**), emitting `task.lease_expired`. Finish or re-claim.
+- **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
+- **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` over `acceptance_criteria` — only `met:true` counts; omitted (never `0/0`) when absent. A `done` close with unmet criteria adds a `warnings` list but still commits. Owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).
 
 **5. Dependencies, labels, papers.**
 
 ```bash
-# t2 waits on t1 (from = dependent, to = blocker; kind defaults to "blocks")
+# t2 waits on t1 (from=dependent, to=blocker; kind defaults "blocks")
 curl -X POST $API/v1/tasks/edges -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"from_id":"drafts.t2","to_id":"drafts.t1"}'
 
@@ -101,7 +98,7 @@ curl $API/v1/tasks/drafts.t2/edges -H "Authorization: Bearer $TOKEN"   # ?kind=a
 curl -X POST $API/v1/tasks/drafts.t1/labels -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"add":["sprint-3"],"remove":[]}'
 
-# Link a paper (a Bulldocs doc) to a task — design notes travel with the work
+# Link a paper (Bulldocs doc) to a task — design notes travel with the work
 curl -X POST $API/v1/tasks/drafts.t1/papers -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{"add":["design-notes"]}'
 ```
