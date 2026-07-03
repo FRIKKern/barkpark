@@ -716,6 +716,31 @@ func TestDetectTwins_MutualityAndDeterminism(t *testing.T) {
 	})
 }
 
+// TestTitleTokens_Unicode — tokenization is Unicode-aware: non-ASCII letters
+// (æ/ø/å…) are word characters, not separators, so Norwegian titles keep whole
+// words instead of fragmenting into single-letter noise that skews Jaccard.
+func TestTitleTokens_Unicode(t *testing.T) {
+	got := titleTokens("Håndter feil-kø: EKSPORT nr. 2")
+	want := []string{"håndter", "feil", "kø", "eksport", "nr", "2"}
+	if len(got) != len(want) {
+		t.Fatalf("tokens = %v, want %v", got, want)
+	}
+	for _, w := range want {
+		if !got[w] {
+			t.Fatalf("tokens = %v, missing %q", got, w)
+		}
+	}
+	// And the similarity built on it twins two Norwegian near-duplicates.
+	tasks := []Task{
+		{DocID: "n1", Lifecycle: lifeOpen, Title: "Håndter feilkø i eksporten"},
+		{DocID: "n2", Lifecycle: lifeOpen, Title: "Håndter feilkø i eksporten på nytt"},
+	}
+	detectTwins(tasks)
+	if tasks[0].TwinOf != "n2" || tasks[1].TwinOf != "n1" {
+		t.Fatalf("norwegian twins = %q/%q, want mutual n2/n1", tasks[0].TwinOf, tasks[1].TwinOf)
+	}
+}
+
 // TestChildBand_StaleBoundary — the stale band trips EXCLUSIVELY at >7d for a
 // non-terminal row (open); a terminal row is band 6 regardless of age, so a fresh
 // done sinks below a stale open.

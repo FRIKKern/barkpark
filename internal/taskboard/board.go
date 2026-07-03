@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Lifecycle values as the BOARD sees them. Storage holds a 5-value enum —
@@ -170,7 +171,10 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 
 	// Twin detection: near-duplicate titles within the same group point at each
 	// other so "these two are the same work" is impossible to miss. Groups are
-	// epic siblings (by direct parent), whole clusters, and the loose orphans.
+	// epic siblings (by direct parent), whole clusters (the shared label already
+	// relates them), and the loose orphans — also by direct parent, so the
+	// parentless rows form one pile while dangling-parent siblings pair only
+	// among themselves.
 	for ei := range board.Epics {
 		detectTwins(board.Epics[ei].Children)
 	}
@@ -245,7 +249,6 @@ func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
 	freq := looseLabelFreq(loose)
 
 	keyByDoc := make(map[string]string, len(loose))
-	memberCount := make(map[string]int)
 	groups := make(map[string][]Task)
 	var order []string
 	for _, t := range loose {
@@ -258,12 +261,11 @@ func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
 			order = append(order, k)
 		}
 		groups[k] = append(groups[k], t)
-		memberCount[k]++
 	}
 
 	var clusters []Cluster
 	for _, k := range order {
-		if memberCount[k] < clusterMemberMin {
+		if len(groups[k]) < clusterMemberMin {
 			continue
 		}
 		clusters = append(clusters, buildCluster(k, groups[k], now))
@@ -273,7 +275,7 @@ func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
 	remaining := make([]Task, 0, len(loose))
 	for _, t := range loose {
 		k := keyByDoc[t.DocID]
-		if k != "" && memberCount[k] >= clusterMemberMin {
+		if k != "" && len(groups[k]) >= clusterMemberMin {
 			continue // moved into a cluster
 		}
 		remaining = append(remaining, t)
@@ -404,8 +406,10 @@ func assignTwins(tasks []Task, idx []int) {
 	}
 }
 
-// titleTokens is the lowercase [a-z0-9]+ token SET of a title — the unit both
-// the suggestion and twin similarities are measured on.
+// titleTokens is the lowercase letter/digit token SET of a title — the unit
+// both the suggestion and twin similarities are measured on. Unicode-aware so
+// non-ASCII titles ("Håndter feilkø") keep whole words instead of fragmenting
+// into single-letter noise around æ/ø/å.
 func titleTokens(s string) map[string]bool {
 	toks := make(map[string]bool)
 	var b strings.Builder
@@ -416,7 +420,7 @@ func titleTokens(s string) map[string]bool {
 		}
 	}
 	for _, r := range strings.ToLower(s) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 		} else {
 			flush()
