@@ -34,6 +34,12 @@ type debounceMsg struct{ gen int }
 // degrades to ConnPolling when no live event has been seen recently.
 type backstopMsg struct{}
 
+// actionResultMsg carries the outcome of a claim/close command back to the
+// update loop (the act verbs run off-loop so the network never blocks a
+// keystroke). handleActionResult renders res on the strip and, on success,
+// fires the reconciling refetch.
+type actionResultMsg struct{ res ActionResult }
+
 // snapshotMsg is the result of a refetch. viaBackstop records whether the
 // periodic ticker (not a live event) drove it, which is what lets applySnapshot
 // distinguish ConnLive from ConnPolling honestly.
@@ -122,8 +128,13 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if r, ok := m.currentRow(); ok {
 		selected = r.docID
 	}
+	// Recompute repo correlation against the fresh task set BEFORE building, so
+	// the "↳ git" badges and epic-rank boost track the tasks as they move. Pure
+	// and cheap; a no-op (empty Mentioned) outside a git repo.
+	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
 	m.board = m.build(msg.snap, m.repo, m.now())
 	m.ui.LastSync = msg.snap.FetchedAt
+	m.ui.Strip = ActionStrip{} // a landed snapshot clears any transient strip
 	if msg.viaBackstop && !m.liveIsFresh() {
 		m.ui.Conn = ConnPolling
 	} else {

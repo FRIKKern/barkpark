@@ -39,6 +39,12 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	}
 
 	bottom := renderTicker(b.Events, width, now)
+	// The action strip sits directly above the footer, and only when there is
+	// something to say — an empty strip costs no line, so an idle board is byte
+	// -identical to before this slice (the goldens stay green).
+	if strip := renderActionStrip(st.Strip, width); strip != "" {
+		bottom = append(bottom, strip)
+	}
 	bottom = append(bottom, renderFooter(width))
 
 	// Budget the pinned NOW band so a swarm of concurrent claims can never
@@ -84,6 +90,12 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	left += "  ⇄ " + Chrome.Server
 
 	glyph, word := connGlyphWord(st.Conn)
+	if isSyncing(st) {
+		// Before the very first snapshot lands we are not "polling" (which
+		// implies we already hold data and are re-checking) — we are doing the
+		// first fetch. Say so honestly, distinct from offline.
+		word = "syncing…"
+	}
 	cs := roleStyle(connRole(st.Conn))
 	conn := cs.Render(glyph) + " " + dimStyle.Render(word)
 	if age := AgeBadge(st.LastSync, now); age != "" {
@@ -230,9 +242,34 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 	}
 
 	if len(lines) == 0 {
-		emit(dimStyle.Render("All clear — no open tasks."))
+		// An empty board during the first fetch is "syncing", not "all clear" —
+		// only claim the queue is empty once we have actually heard back.
+		if isSyncing(st) {
+			emit(dimStyle.Render("syncing…"))
+		} else {
+			emit(dimStyle.Render("All clear — no open tasks."))
+		}
 	}
 	return lines, cursorLine
+}
+
+// isSyncing is the honest first-paint state: we are polling for the very first
+// snapshot (Conn is ConnPolling, the newModel default) and none has landed yet
+// (LastSync is still zero). It is DISTINCT from offline (a failed fetch) and
+// from steady polling (a live board leaning on the backstop after a sync).
+func isSyncing(st UIState) bool {
+	return st.Conn == ConnPolling && st.LastSync.IsZero()
+}
+
+// renderActionStrip draws the one-line act-verb status directly above the
+// footer, role-colored (green ok / amber warn / red danger). An empty message
+// renders nothing at all — the strip only exists when it has something honest
+// to report.
+func renderActionStrip(s ActionStrip, width int) string {
+	if s.Message == "" {
+		return ""
+	}
+	return stripStyle(s.Role).Render(truncate(s.Message, width))
 }
 
 // windowSpine clips the spine to `avail` lines, keeping the cursor line in

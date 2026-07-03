@@ -81,4 +81,15 @@ type UIState struct {
 	CollapsedEpics map[string]bool // root doc_id -> user-collapsed
 	Conn           ConnState
 	LastSync       time.Time
+	Strip          ActionStrip // the one-line action status above the footer
+}
+
+// ActionStrip is the single role-colored status line rendered directly above
+// the footer: a confirmation on a landed claim/close (RoleOK, green), an
+// honest refusal or arm-prompt otherwise (RoleWarn/RoleDanger). An empty
+// Message renders no line at all. It is cleared on the next keypress or the
+// next applied snapshot — never a modal, never sticky.
+type ActionStrip struct {
+	Message string
+	Role    Role
 }

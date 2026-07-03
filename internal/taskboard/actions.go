@@ -5,10 +5,29 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
+
+// openURL launches the OS browser on a URL. It is a package-level var (the
+// browserOpener seam idiom) so the 'o' reducer's tests observe the launch
+// without spawning a real browser. taskboard must NOT import internal/cli
+// (that would be an import cycle: cli imports taskboard), so the per-OS exec
+// pattern is copied verbatim from internal/cli/cloud_open_cmd.go openInBrowser.
+// It Start()s the helper (never Wait) so the pane never freezes on the launch.
+var openURL = func(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
+	}
+}
 
 // ActionResult is the outcome of a board act verb (claim/close). OK reports
 // whether the mutation landed; Message is a single short human sentence the

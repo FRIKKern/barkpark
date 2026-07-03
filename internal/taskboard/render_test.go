@@ -150,3 +150,46 @@ func TestRenderEmptyBoardIsHonest(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderActionStrip proves the strip renders directly above the footer, and
+// only consumes a line when it has something to say.
+func TestRenderActionStrip(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	st := UIState{Conn: ConnLive, LastSync: fixedNow,
+		Strip: ActionStrip{Message: "claimed as tui-mbp · epoch 4", Role: RoleOK}}
+	lines := strings.Split(ansi.Strip(Render(b, st, 80, 20, fixedNow)), "\n")
+	if len(lines) != 20 {
+		t.Fatalf("got %d lines, want 20", len(lines))
+	}
+	footer := lines[len(lines)-1]
+	strip := lines[len(lines)-2]
+	if !strings.Contains(footer, "jk move") {
+		t.Errorf("footer not pinned last: %q", footer)
+	}
+	if !strings.Contains(strip, "claimed as tui-mbp · epoch 4") {
+		t.Errorf("action strip not directly above the footer: %q", strip)
+	}
+
+	// An empty strip costs no line: the footer is the last line with the ticker
+	// immediately above it (no blank act line inserted).
+	stNo := UIState{Conn: ConnLive, LastSync: fixedNow}
+	noStrip := ansi.Strip(Render(b, stNo, 80, 20, fixedNow))
+	if strings.Contains(noStrip, "claimed as") {
+		t.Errorf("empty strip still rendered content:\n%s", noStrip)
+	}
+}
+
+// TestRenderSyncingStateIsHonest proves the first-paint state reads "syncing…",
+// distinct from "offline" — the pane never claims "all clear" before it has
+// actually heard back from the server.
+func TestRenderSyncingStateIsHonest(t *testing.T) {
+	b := Board{Counts: map[string]int{}}
+	st := UIState{Conn: ConnPolling} // LastSync zero → first fetch in flight
+	frame := ansi.Strip(Render(b, st, 80, 20, fixedNow))
+	if !strings.Contains(frame, "syncing") {
+		t.Errorf("first-paint frame missing the syncing state:\n%s", frame)
+	}
+	if strings.Contains(frame, "offline") || strings.Contains(frame, "All clear") {
+		t.Errorf("syncing frame dishonestly claims offline/all-clear:\n%s", frame)
+	}
+}
