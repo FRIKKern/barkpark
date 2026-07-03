@@ -2693,10 +2693,11 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/internal/provision-jobs/:id/step {step, status, detail?} → dwb-14:
   # record one worker-reported step transition (create|secure|configure|content|
-  # ready × started|progress|done|failed), then push "fleet" so the /new progress
-  # screen refetches + renders SERVER-confirmed state. started/done/failed APPEND
-  # a new entry; dwb-19 `progress` UPDATES the in-flight step's live caption in
-  # place (no new entry; a progress on a terminal/unstarted step is a 200 no-op).
+  # verify|ready × started|progress|done|failed), then push "fleet" so the /new
+  # progress screen refetches + renders SERVER-confirmed state. started/done/
+  # failed APPEND a new entry; dwb-19 `progress` UPDATES the in-flight step's
+  # live caption in place (no new entry; a progress on a terminal/unstarted
+  # step is a 200 no-op).
   # Best-effort telemetry: a step report NEVER affects the job's provisioning
   # outcome. The worker treats any non-2xx as "log and continue".
   #   200 {ok: true}   — recorded (append, in-place caption update, or a no-op).

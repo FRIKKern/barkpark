@@ -706,10 +706,18 @@ defmodule BarkparkCloud.RegistryTest do
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
-      {:ok, _} = Registry.append_provision_step(job.id, "verify", "started", "verify.login: 401 in 182ms")
+      {:ok, _} =
+        Registry.append_provision_step(job.id, "verify", "started", "verify.login: 401 in 182ms")
 
       steps = Repo.get(ProvisionJob, job.id).steps
-      assert [%{"step" => "verify", "status" => "started", "detail" => "verify.login: 401 in 182ms"}] =
+
+      assert [
+               %{
+                 "step" => "verify",
+                 "status" => "started",
+                 "detail" => "verify.login: 401 in 182ms"
+               }
+             ] =
                steps
     end
   end

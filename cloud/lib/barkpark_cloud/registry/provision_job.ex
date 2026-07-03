@@ -40,7 +40,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @kinds ~w(provision deprovision)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
-  # create→live chain. Coarse-by-design (5 phases, not every SSH sub-step) so the
+  # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the
   # /new progress screen renders SERVER-confirmed transitions instead of a pure
   # client-side timer:
   #   * create    — the box is created + its fqdn identity stamped

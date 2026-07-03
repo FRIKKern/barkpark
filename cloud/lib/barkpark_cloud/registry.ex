@@ -1107,9 +1107,10 @@ defmodule BarkparkCloud.Registry do
 
   @doc """
   dwb-14: record one worker-reported step transition on a provision job's
-  narration array. `step` ∈ create|secure|configure|content|ready, `status` ∈
-  started|progress|done|failed; `detail` is an optional short string (a failure
-  reason, or — for `progress` — the live human caption). The `at` timestamp is
+  narration array. `step` ∈ create|secure|configure|content|verify|ready,
+  `status` ∈ started|progress|done|failed; `detail` is an optional short string
+  (a failure reason, a `verify` probe result like "verify.login: 401 in 182ms",
+  or — for `progress` — the live human caption). The `at` timestamp is
   stamped HERE (server clock — the single source of truth for elapsed-time
   rendering), never trusted from the worker.
 

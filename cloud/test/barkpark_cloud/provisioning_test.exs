@@ -724,7 +724,13 @@ defmodule BarkparkCloud.ProvisioningTest do
       {:ok, job} =
         Registry.append_provision_step(job.id, "verify", "progress", "verify.login: 401 in 182ms")
 
-      assert [%{"step" => "verify", "status" => "started", "detail" => "verify.login: 401 in 182ms"}] =
+      assert [
+               %{
+                 "step" => "verify",
+                 "status" => "started",
+                 "detail" => "verify.login: 401 in 182ms"
+               }
+             ] =
                job.steps
 
       # It PERSISTED — the entry rides the row json the serializer reads.
@@ -747,6 +753,15 @@ defmodule BarkparkCloud.ProvisioningTest do
 
     test "validate_step still rejects an unknown step" do
       assert :error = ProvisionJob.validate_step("boot", "started")
+    end
+
+    # Probe NAMES are detail vocabulary, never steps: C2's worker must report
+    # step="verify" with the probe evidence in `detail` — a per-probe step name
+    # would explode the vocabulary and break every step-keyed renderer.
+    test "validate_step rejects a probe name as a step" do
+      for probe <- ~w(verify.api verify.login verify.studio) do
+        assert :error = ProvisionJob.validate_step(probe, "progress")
+      end
     end
   end
 
