@@ -16,6 +16,11 @@ type Task struct {
 	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
 	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
 	TwinOf string
+	// TwinTitle is the partner's title, precomputed alongside TwinOf so an
+	// expanded row can name the twin in words a human reads ("twin ⧉ 'Add a SUM
+	// function'") instead of an opaque doc id. "" when TwinOf is "" or the
+	// partner title was empty; the renderer falls back to TwinOf then.
+	TwinTitle string
 	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
 	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
 	// applied only by the explicit t verb. "" when none.

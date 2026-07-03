@@ -386,6 +386,7 @@ func assignTwins(tasks []Task, idx []int) {
 	for a := range idx {
 		bestJ := 0.0
 		bestPartner := ""
+		bestTitle := ""
 		for b := range idx {
 			if a == b {
 				continue
@@ -398,10 +399,12 @@ func assignTwins(tasks []Task, idx []int) {
 			if j > bestJ || (j == bestJ && (bestPartner == "" || partner < bestPartner)) {
 				bestJ = j
 				bestPartner = partner
+				bestTitle = tasks[idx[b]].Title
 			}
 		}
 		if bestPartner != "" {
 			tasks[idx[a]].TwinOf = bestPartner
+			tasks[idx[a]].TwinTitle = bestTitle
 		}
 	}
 }
