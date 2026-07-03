@@ -42,6 +42,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -475,13 +476,36 @@ func instLookupA(ctx context.Context, dns *hcloud.Client, zone, label string) ([
 	return values, nil
 }
 
+// instHealthPin controls whether the health probe dials the box's IP directly
+// (TLS SNI still carries the fqdn). True in production: the A record was
+// (re)written SECONDS ago, so public resolvers may still hold a negative-cache
+// NXDOMAIN for it — system DNS would fail a perfectly healthy box. Tests flip
+// it off so their instHTTP stub sees the probe.
+var instHealthPin = true
+
 // instHealth polls https://fqdn/api/schemas until it answers 200 — the same
-// smoke the deploy runbook mandates. Bounded by instPoll × instPollMax.
-func instHealth(fqdn string) error {
+// smoke the deploy runbook mandates. Bounded by instPoll × instPollMax. When
+// ip is known the connection is pinned to it (see instHealthPin).
+func instHealth(fqdn, ip string) error {
+	client := instHTTP
+	if ip != "" && instHealthPin {
+		dialer := &net.Dialer{Timeout: 10 * time.Second}
+		client = &http.Client{
+			Timeout: instHTTP.Timeout,
+			Transport: &http.Transport{
+				DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					if host, port, err := net.SplitHostPort(addr); err == nil && strings.EqualFold(host, fqdn) {
+						return dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
+					}
+					return dialer.DialContext(ctx, network, addr)
+				},
+			},
+		}
+	}
 	url := "https://" + fqdn + "/api/schemas"
 	var last error
 	for i := 0; i < instPollMax; i++ {
-		resp, err := instHTTP.Get(url)
+		resp, err := client.Get(url)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -981,7 +1005,7 @@ func runInstanceResurrect(out *writer, g globals, args []string) int {
 	extra := map[string]any{"fqdn": fqdn, "ipv4": ip, "image_id": img.ID}
 	if !a.bools["no-health"] {
 		out.info("waiting for https://%s/api/schemas …", fqdn)
-		if herr := instHealth(fqdn); herr != nil {
+		if herr := instHealth(fqdn, ip); herr != nil {
 			extra["health"] = "FAILED: " + herr.Error()
 			payload := map[string]any{"ok": false, "action": "resurrect", "server": map[string]any{"id": srv.ID, "name": srv.Name}}
 			for k, v := range extra {
@@ -1028,7 +1052,7 @@ func instCloneSwap(ctx context.Context, out *writer, hc *hcloud.Client, dns *hcl
 		return clone, img, fmt.Errorf("clone %s is up at %s but DNS failed: %w", clone.Name, hzIPv4(clone), err)
 	}
 	out.info("waiting for https://%s/api/schemas on the clone…", fqdn)
-	if err := instHealth(fqdn); err != nil {
+	if err := instHealth(fqdn, hzIPv4(clone)); err != nil {
 		return clone, img, fmt.Errorf("clone %s is up but the health gate failed: %w (old box %s left untouched)", clone.Name, err, srv.Name)
 	}
 	if !keepOld {
