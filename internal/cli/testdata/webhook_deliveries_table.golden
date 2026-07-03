@@ -1,0 +1,5 @@
+id  status   attempts  last_attempt          latency_ms  status_code
+--  -------  --------  --------------------  ----------  -----------
+d1  ok       1         2026-07-03T10:00:00Z  42          200
+d2  failed   6         2026-07-03T10:05:00Z  88          500
+d3  pending  0         —                     —           —

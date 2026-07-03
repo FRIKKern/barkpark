@@ -1,0 +1,5 @@
+id    name    status    events               failures  url
+----  ------  --------  -------------------  --------  -------------------
+wh_1  prod    ok        ["create","update"]  0         https://a.test/hook
+wh_2  stale   failed    []                   5         https://b.test/h
+wh_3  paused  inactive  ["publish"]          0         https://c.test/h
