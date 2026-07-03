@@ -29,6 +29,11 @@ config :barkpark_cloud,
 config :barkpark_cloud,
   studio_link_http_client: BarkparkCloud.StudioLinkFakeHttpClient
 
+# hetzner-proxy: swap the server-side Hetzner API fan-out for the in-process
+# per-path fake (same seam shape as notifications/studio-link above).
+config :barkpark_cloud,
+  hetzner_http_client: BarkparkCloud.HetznerFakeHttpClient
+
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still
 # exercising the real Bcrypt code path.
