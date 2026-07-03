@@ -118,6 +118,43 @@ describe('schema introspection', () => {
     await expect(bp.upsertSchema({ name: 'review' } as never)).rejects.toThrow(/fields must be an array/)
   })
 
+  it('upsertSchema fast-fails on structurally-invalid field entries (no network call)', async () => {
+    const bp = createClient(baseConfig)
+    // missing name
+    await expect(
+      bp.upsertSchema({ name: 'review', fields: [{ type: 'string' }] } as never),
+    ).rejects.toThrow(/each field requires a non-empty string name and type/)
+    // non-object entry (a bare string)
+    await expect(
+      bp.upsertSchema({ name: 'review', fields: ['title'] } as never),
+    ).rejects.toThrow(/each field requires a non-empty string name and type/)
+    // missing type
+    await expect(
+      bp.upsertSchema({ name: 'review', fields: [{ name: 'title' }] } as never),
+    ).rejects.toThrow(/each field requires a non-empty string name and type/)
+    // it's a BarkparkValidationError, like the sibling guards
+    await expect(
+      bp.upsertSchema({ name: 'review', fields: [{ type: 'string' }] } as never),
+    ).rejects.toBeInstanceOf(BarkparkValidationError)
+  })
+
+  it('upsertSchema lets a well-formed field pass the guard', async () => {
+    let seenBody: unknown
+    server.use(
+      http.post(`${TEST_BASE_URL}/v1/schemas/:ds`, async ({ request }) => {
+        seenBody = await request.json()
+        return HttpResponse.json(
+          { name: 'review', fields: [{ name: 'body', type: 'text' }] },
+          { status: 201 },
+        )
+      }),
+    )
+    const bp = createClient(baseConfig)
+    const schema = await bp.upsertSchema({ name: 'review', fields: [{ name: 'body', type: 'text' }] })
+    expect(seenBody).toEqual({ name: 'review', fields: [{ name: 'body', type: 'text' }] })
+    expect(schema.name).toBe('review')
+  })
+
   it('deleteSchema fast-fails on a blank name (no network call)', async () => {
     const bp = createClient(baseConfig)
     await expect(bp.deleteSchema('')).rejects.toThrow(/schema name is required/)
