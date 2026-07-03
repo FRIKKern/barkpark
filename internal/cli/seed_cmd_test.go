@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -268,5 +271,114 @@ func TestRunSeedHelp(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("help wrote to stderr: %s", stderr.String())
+	}
+}
+
+// TestRunSeedSchemaFetchFailureEnvelope asserts a schema-fetch failure honours
+// `-o json`: it emits the canonical {ok:false,error:{…}} envelope on stdout (not
+// bare stderr text) and preserves the non-zero not-found exit. This is the parity
+// bug — success at the tail already honoured -o json but this failure did not.
+func TestRunSeedSchemaFetchFailureEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"no such dataset"}}`)
+	}))
+	defer srv.Close()
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	ctx := manifest.Context{Server: srv.URL, Dataset: "production"}
+
+	code := runSeed(w, globals{}, ctx, []string{"post"})
+	if code != exitNotFound {
+		t.Fatalf("exit = %d, want exitNotFound %d", code, exitNotFound)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v\nstdout=%q", err, so.String())
+	}
+	if env.OK {
+		t.Errorf("envelope ok = true, want false")
+	}
+	if env.Error.Code != "not_found" {
+		t.Errorf("envelope error.code = %q, want not_found", env.Error.Code)
+	}
+	if se.Len() != 0 {
+		t.Errorf("machine-mode failure wrote to stderr (should be clean): %q", se.String())
+	}
+}
+
+// TestRunSeedMutateFailureEnvelope drives the mutate (write) failure path: schema
+// fetch succeeds, the createOrReplace POST returns 422. Under -o json the classified
+// error must render via renderError as the {ok:false,error:{…}} envelope on stdout,
+// with the mapped validation exit preserved.
+func TestRunSeedMutateFailureEnvelope(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = io.WriteString(w, `{"schemas":[{"name":"post","fields":[{"name":"title","type":"string"}]}]}`)
+			return
+		}
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":{"code":"validation_failed","message":"bad doc"}}`)
+	}))
+	defer srv.Close()
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	ctx := manifest.Context{Server: srv.URL, Dataset: "production"}
+
+	code := runSeed(w, globals{}, ctx, []string{"post", "--count", "1"})
+	if code != exitValidation {
+		t.Fatalf("exit = %d, want exitValidation %d", code, exitValidation)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
+		t.Fatalf("stdout is not a JSON envelope: %v\nstdout=%q", err, so.String())
+	}
+	if env.OK || env.Error.Code != "validation_failed" {
+		t.Errorf("envelope = %+v, want ok:false code:validation_failed", env)
+	}
+	if se.Len() != 0 {
+		t.Errorf("machine-mode failure wrote to stderr: %q", se.String())
+	}
+}
+
+// TestRunSeedFailureDefaultTextUnchanged pins the default (table) mode: a failure
+// still prints the human "barkpark: …" line to stderr and emits NO JSON envelope
+// on stdout — the -o json parity fix must not alter the text path.
+func TestRunSeedFailureDefaultTextUnchanged(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `{"error":{"code":"not_found","message":"no such dataset"}}`)
+	}))
+	defer srv.Close()
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "table"
+	ctx := manifest.Context{Server: srv.URL, Dataset: "production"}
+
+	code := runSeed(w, globals{}, ctx, []string{"post"})
+	if code != exitNotFound {
+		t.Fatalf("exit = %d, want exitNotFound %d", code, exitNotFound)
+	}
+	if !strings.Contains(se.String(), "barkpark:") {
+		t.Errorf("default mode did not print human stderr line: %q", se.String())
+	}
+	if strings.Contains(so.String(), `"ok"`) {
+		t.Errorf("default mode leaked a JSON envelope to stdout: %q", so.String())
 	}
 }
