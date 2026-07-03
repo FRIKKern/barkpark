@@ -98,10 +98,9 @@
           "Kind": "task",
           "ParentID": "cloud-gui-epic",
           "Priority": "P2",
-          "Labels": ["cutover", "ux", "risk"],
           "DependencyCount": 2,
           "DependentCount": 0,
-          "UpdatedAt": "2026-06-29T11:00:00Z"
+          "UpdatedAt": "2026-07-03T11:00:00Z"
         }
       ],
       "DoneFolded": 7,
@@ -120,6 +119,73 @@
       "Dormant": true
     }
   ],
+  "Clusters": [
+    {
+      "Key": "proj:sheets-parity",
+      "Tasks": [
+        {
+          "DocID": "sheets-sum",
+          "Title": "Add the SUM() spreadsheet function",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "Labels": ["proj:sheets-parity", "phase:build"],
+          "Priority": "P2",
+          "TwinOf": "sheets-sum2",
+          "UpdatedAt": "2026-07-03T10:00:00Z"
+        },
+        {
+          "DocID": "sheets-sum2",
+          "Title": "Add a SUM function to the grid",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "Labels": ["proj:sheets-parity", "phase:build"],
+          "Priority": "P3",
+          "TwinOf": "sheets-sum",
+          "UpdatedAt": "2026-07-03T09:00:00Z"
+        },
+        {
+          "DocID": "sheets-vlookup",
+          "Title": "Implement VLOOKUP across sheets",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "Labels": ["proj:sheets-parity"],
+          "Priority": "P2",
+          "UpdatedAt": "2026-06-27T09:00:00Z"
+        },
+        {
+          "DocID": "sheets-pivot",
+          "Title": "Pivot tables in the Studio grid",
+          "Lifecycle": "open",
+          "Kind": "task",
+          "Labels": ["proj:sheets-parity", "area:grid"],
+          "UpdatedAt": "2026-06-22T09:00:00Z"
+        }
+      ],
+      "DoneFolded": 3
+    },
+    {
+      "Key": "proj:living-values",
+      "Tasks": [
+        {
+          "DocID": "lv-valueref",
+          "Title": "Wire the valueref resolver",
+          "Lifecycle": "ready",
+          "Kind": "task",
+          "Labels": ["proj:living-values", "phase:build"],
+          "Priority": "P1",
+          "UpdatedAt": "2026-07-03T08:30:00Z"
+        },
+        {
+          "DocID": "lv-demo",
+          "Title": "Build the living-values demo dataset",
+          "Lifecycle": "open",
+          "Kind": "task",
+          "Labels": ["proj:living-values"],
+          "UpdatedAt": "2026-07-02T15:00:00Z"
+        }
+      ]
+    }
+  ],
   "Orphans": [
     {
       "DocID": "timeago-clamp",
@@ -128,12 +194,21 @@
       "Kind": "task",
       "ParentID": "",
       "Priority": "P3",
-      "Labels": ["dx"],
       "DependencyCount": 0,
       "DependentCount": 0,
-      "UpdatedAt": "2026-06-25T09:15:00Z"
+      "UpdatedAt": "2026-07-03T09:15:00Z"
+    },
+    {
+      "DocID": "grid-cell-editing",
+      "Title": "Inline cell editing for the grid",
+      "Lifecycle": "open",
+      "Kind": "task",
+      "ParentID": "",
+      "Suggested": "proj:sheets-parity",
+      "UpdatedAt": "2026-07-03T08:00:00Z"
     }
   ],
+  "Stale": 2,
   "Counts": { "in_progress": 3, "blocked": 4, "done": 41 },
   "Events": [
     { "Mutation": "task.closed", "DocID": "sse-reconnect", "At": "2026-07-03T11:58:00Z" },

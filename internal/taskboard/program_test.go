@@ -141,6 +141,170 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 	}
 }
 
+// clusterBoard extends sampleBoard with two derived clusters (freshest-first,
+// AFTER the authored epics, BEFORE the orphan) — the fixture the wave-3 cursor
+// contract must survive. The first cluster's first member is a twin (⧉), so the
+// parity walk also proves the twin glyph never shifts the acted-on row.
+//
+// Fresh (nothing collapsed) it flattens to 14 navigable rows:
+//
+//	0 now n1        5 header e2 (dormant)   10 clusterMember a2
+//	1 now n2        6 header e3             11 clusterHeader beta
+//	2 header e1     7 child c3              12 clusterMember b1
+//	3 child c1      8 clusterHeader alpha   13 orphan o1
+//	4 child c2      9 clusterMember a1
+func clusterBoard() Board {
+	b := sampleBoard()
+	a1 := t("a1")
+	a1.TwinOf = "a2"
+	b.Clusters = []Cluster{
+		{Key: "proj:alpha", Tasks: []Task{a1, t("a2")}},
+		{Key: "proj:beta", Tasks: []Task{t("b1")}},
+	}
+	return b
+}
+
+// clusterHeaderKey mirrors the shell's fold-key namespacing for the tests.
+func clusterHeaderKey(key string) string { return "cluster:" + key }
+
+func TestVisibleRowsWithClusters(t2 *testing.T) {
+	m := testModel(clusterBoard())
+	rows := m.visibleRows()
+	want := []struct {
+		kind  rowKind
+		docID string
+	}{
+		{rowNow, "n1"},
+		{rowNow, "n2"},
+		{rowEpicHeader, "e1"},
+		{rowChild, "c1"},
+		{rowChild, "c2"},
+		{rowEpicHeader, "e2"}, // dormant → no children follow
+		{rowEpicHeader, "e3"},
+		{rowChild, "c3"},
+		{rowClusterHeader, "cluster:proj:alpha"}, // clusters after epics
+		{rowClusterMember, "a1"},
+		{rowClusterMember, "a2"},
+		{rowClusterHeader, "cluster:proj:beta"},
+		{rowClusterMember, "b1"},
+		{rowOrphan, "o1"}, // orphans last, after the clusters
+	}
+	if len(rows) != len(want) {
+		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].kind != w.kind || rows[i].docID != w.docID {
+			t2.Errorf("row %d = {%v %q}, want {%v %q}", i, rows[i].kind, rows[i].docID, w.kind, w.docID)
+		}
+	}
+}
+
+// TestCursorParityWithClusters is the wave-3 extension of the shell↔render
+// tripwire: for EVERY cursor index on a board carrying NOW cards + epics +
+// clusters + a folded cluster + orphans, the ▶ marker in the rendered frame must
+// sit on exactly the row visibleRows says the cursor is on. A cluster header
+// paints its SHORT name (prefix stripped), so its expected token is derived from
+// the fold key; every other row's title equals its doc id (see t()).
+func TestCursorParityWithClusters(t2 *testing.T) {
+	for _, folded := range []bool{false, true} {
+		m := testModel(clusterBoard())
+		m.ui.Conn = ConnLive
+		m.ui.LastSync = time.Unix(1, 0)
+		m.now = func() time.Time { return time.Unix(2, 0) }
+		m.width, m.height = 80, 60
+		if folded {
+			m.ui.CollapsedEpics[clusterHeaderKey("proj:alpha")] = true
+		}
+
+		rows := m.visibleRows()
+		for i, r := range rows {
+			m.ui.Cursor = i
+			frame := ansi.Strip(m.View())
+			var marked []string
+			for _, ln := range strings.Split(frame, "\n") {
+				if strings.Contains(ln, "▶") {
+					marked = append(marked, ln)
+				}
+			}
+			if len(marked) != 1 {
+				t2.Fatalf("folded=%v cursor %d (%v %q): %d ▶-marked lines, want 1\n%s",
+					folded, i, r.kind, r.docID, len(marked), frame)
+			}
+			want := r.docID
+			if r.kind == rowClusterHeader {
+				want = chipText(strings.TrimPrefix(r.docID, "cluster:")) // "cluster:proj:alpha" → "alpha"
+			}
+			if !strings.Contains(marked[0], want) {
+				t2.Errorf("folded=%v cursor %d: marked line %q does not carry %q (kind %v)",
+					folded, i, marked[0], want, r.kind)
+			}
+		}
+	}
+}
+
+// TestClusterFoldHidesMembersAndMovesCursorAcross proves a cluster folds/unfolds
+// exactly like an epic and that j/k step cleanly across the fold — the members
+// leave the navigable list entirely, so the cursor never lands on a hidden row.
+func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
+	m := testModel(clusterBoard())
+	if got := len(m.visibleRows()); got != 14 {
+		t2.Fatalf("unfolded cluster board = %d rows, want 14", got)
+	}
+
+	// Put the cursor on the alpha cluster header (index 8) and fold with h.
+	m.ui.Cursor = 8
+	m, _ = step(t2, m, runes("h"))
+	if !m.ui.CollapsedEpics[clusterHeaderKey("proj:alpha")] {
+		t2.Fatalf("h on a cluster header did not record the fold")
+	}
+	rows := m.visibleRows()
+	if len(rows) != 12 { // a1 + a2 (2 members) gone
+		t2.Fatalf("after folding alpha: %d rows, want 12", len(rows))
+	}
+	for _, r := range rows {
+		if r.docID == "a1" || r.docID == "a2" {
+			t2.Fatalf("folded cluster member %q is still navigable", r.docID)
+		}
+	}
+	// j from the alpha header steps straight to the beta header (index 9 now).
+	m, _ = step(t2, m, runes("j"))
+	if r, _ := m.currentRow(); r.kind != rowClusterHeader || r.docID != clusterHeaderKey("proj:beta") {
+		t2.Fatalf("j across the folded cluster landed on {%v %q}, want the beta header", r.kind, r.docID)
+	}
+
+	// enter on the alpha header (back up two rows) unfolds it again.
+	m.ui.Cursor = 8
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.visibleRows()) != 14 {
+		t2.Fatalf("enter did not unfold alpha: %d rows, want 14", len(m.visibleRows()))
+	}
+}
+
+// TestActVerbsReachClusterMembers proves taskByID finds a cluster member so the
+// act verbs (c/x/o) operate on it — a member is claimable/closable/openable
+// exactly like an epic child, never a dead row.
+func TestActVerbsReachClusterMembers(t2 *testing.T) {
+	b := clusterBoard()
+	b.Clusters[1].Tasks[0].Lifecycle = lifeReady // b1 is claimable
+	m := testModel(b)
+
+	if got, ok := m.taskByID("a2"); !ok || got.DocID != "a2" {
+		t2.Fatalf("taskByID did not find cluster member a2: %v %+v", ok, got)
+	}
+	// Cursor on b1 (index 12), c fires a claim command (ready row).
+	m.ui.Cursor = 12
+	if r, _ := m.currentRow(); r.docID != "b1" {
+		t2.Fatalf("cursor 12 is on %q, want b1", r.docID)
+	}
+	m2, cmd := step(t2, m, runes("c"))
+	if cmd == nil {
+		t2.Fatalf("c on a ready cluster member produced no claim command")
+	}
+	if strings.Contains(m2.ui.Strip.Message, "no task") {
+		t2.Fatalf("c treated a cluster member as no-task: %q", m2.ui.Strip.Message)
+	}
+}
+
 // --- cursor movement ---------------------------------------------------------
 
 func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {

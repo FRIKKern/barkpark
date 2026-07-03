@@ -106,8 +106,15 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	}
 	line1 := leftRight(dimStyle.Render(left), conn, width)
 
-	// Line 2: counts strip.
-	line2 := dimStyle.Render(truncate(countsStrip(b), width))
+	// Line 2: counts strip. Staleness is a first-class instrument (decision 13):
+	// when the board holds non-terminal tasks gone quiet past the warn threshold,
+	// a warn-tinted "· N stale" segment trails the dim active/ready/blocked/done
+	// summary — never a filter, just a number that cannot be ignored.
+	counts := dimStyle.Render(countsStrip(b))
+	if b.Stale > 0 {
+		counts += warnStyle.Render(fmt.Sprintf(" · %d stale", b.Stale))
+	}
+	line2 := truncate(counts, width)
 	lines := []string{line1, line2}
 
 	// Line 3 (only when the 1000-row list clamp truncated the corpus): an honest
@@ -133,8 +140,8 @@ func countsStrip(b Board) string {
 }
 
 // readyCountLabel counts every ready task the board holds — epic roots, epic
-// children and orphans; a ready task is never in NOW, which is in_progress
-// only. Like the neighbouring active/blocked/done numbers this is a corpus
+// children, derived-cluster members and orphans; a ready task is never in NOW,
+// which is in_progress only. Like the neighbouring active/blocked/done numbers this is a corpus
 // summary, not a visible-row count: a dormant epic's hidden children and a
 // ready ROOT (a claimable parent task, shown only as a section header) still
 // count, so the number agrees with what `bp task next` can actually claim. The
@@ -149,6 +156,13 @@ func readyCountLabel(b Board) string {
 		}
 		for _, c := range e.Children {
 			if c.Lifecycle == lifeReady {
+				n++
+			}
+		}
+	}
+	for _, c := range b.Clusters {
+		for _, m := range c.Tasks {
+			if m.Lifecycle == lifeReady {
 				n++
 			}
 		}
@@ -267,7 +281,8 @@ func epicTitleByChild(b Board) map[string]string {
 // The selection index space MUST mirror the shell's visibleRows exactly
 // (program.go): NOW cards occupy [0, len(b.Now)), then each epic HEADER
 // consumes an index (headers are navigable — enter/h/l fold them), then the
-// visible children under the shared foldedEpic rule, then orphans. The
+// visible children under the shared foldedEpic rule; then each derived CLUSTER
+// header + its members under the shared foldedCluster rule; then orphans. The
 // "(no epic)" bucket line, folded-done counts and blank separators are display
 // only — no index. Any divergence here paints the highlight on a different row
 // than the one the act verbs (c/x/o) fire on.
@@ -275,15 +290,16 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 	cursorLine = -1
 	selIdx := len(b.Now) // NOW cards own the first indexes (renderNowBand marks them)
 	emit := func(s string) { lines = append(lines, s) }
-	emitTask := func(t Task) {
+	// emitTask paints one navigable task row. sectionTag is the enclosing cluster
+	// key ("" in epics/orphans) so TaskRow can suppress the chip that would merely
+	// re-name the section the row already sits in.
+	emitTask := func(t Task, sectionTag string) {
 		selected := selIdx == st.Cursor
 		if selected {
 			cursorLine = len(lines)
 		}
 		expanded := st.Expanded[t.DocID]
-		// sectionTag "" — slice 16 owns real per-section tags; until then no
-		// chip is suppressed as a section restatement.
-		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, "", now) {
+		for _, ln := range TaskRow(t, selected, expanded, childIndent, width, sectionTag, now) {
 			emit(ln)
 		}
 		selIdx++
@@ -296,6 +312,14 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		emit(headerLine(e, selected, width))
 		selIdx++
 	}
+	emitClusterHeader := func(c Cluster) {
+		selected := selIdx == st.Cursor
+		if selected {
+			cursorLine = len(lines)
+		}
+		emit(clusterHeaderLine(c, selected, width))
+		selIdx++
+	}
 
 	for ei, e := range b.Epics {
 		if ei > 0 {
@@ -306,10 +330,30 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			continue
 		}
 		for _, c := range e.Children {
-			emitTask(c)
+			emitTask(c, "")
 		}
 		if e.DoneFolded > 0 {
 			emit(dimStyle.Render(fmt.Sprintf("  +%d done", e.DoneFolded)))
+		}
+	}
+
+	// Derived relatedness clusters ride the same seam AFTER the authored epics —
+	// inferred structure outranks nothing, so authored goals come first (decision
+	// 12). Each cluster navigates exactly like an epic: a navigable header that
+	// folds under foldedCluster ("cluster:"+Key), then its band-ordered members.
+	for _, cl := range b.Clusters {
+		if len(lines) > 0 { // blank-line rhythm between sections, like the epics above
+			emit("")
+		}
+		emitClusterHeader(cl)
+		if foldedCluster(st, cl) {
+			continue
+		}
+		for _, m := range cl.Tasks {
+			emitTask(m, cl.Key)
+		}
+		if cl.DoneFolded > 0 {
+			emit(dimStyle.Render(fmt.Sprintf("  +%d done", cl.DoneFolded)))
 		}
 	}
 
@@ -326,7 +370,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 		emit(EpicHeader(Epic{Root: Task{Title: title}}, width))
 		for _, o := range b.Orphans {
-			emitTask(o)
+			emitTask(o, "")
 		}
 		if b.OrphansFolded > 0 {
 			emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
@@ -355,6 +399,44 @@ func headerLine(e Epic, selected bool, width int) string {
 		h = "▶" + strings.TrimPrefix(h, "─")
 	}
 	return h
+}
+
+// clusterHeaderLine renders a derived cluster's section header — the same
+// rule-style line an epic wears, but the title is the cluster key in its chip
+// hue (chipStyle(chipSlot(Key))) with the taxonomy prefix stripped, trailed by a
+// dim "~" that marks the grouping as DERIVED (inferred from a tag, not authored
+// structure). It carries the done/total progress rail over the cluster's members
+// (reusing the epicProgress shape) and swaps its leading dash for the selection
+// marker when the cursor sits on it (cluster headers are navigable — enter/h/l
+// fold them). The final truncate is the width safety net at any pane size.
+func clusterHeaderLine(c Cluster, selected bool, width int) string {
+	name := chipText(c.Key)
+	if width < 8 {
+		return truncate(name, width)
+	}
+	styledName := chipStyle(chipSlot(c.Key)).Render(name) + " " + dimStyle.Render("~")
+
+	head := "── "
+	if selected {
+		head = "▶─ "
+	}
+	leadW := disp(head) + disp(styledName) + 1 // head + name + "~" + trailing space
+
+	done, total := epicProgress(Epic{Children: c.Tasks, DoneFolded: c.DoneFolded})
+	if total == 0 {
+		mid := width - leadW
+		if mid < 0 {
+			return truncate(head+styledName, width)
+		}
+		return truncate(head+styledName+" "+strings.Repeat("─", mid), width)
+	}
+	right := fmt.Sprintf("%d/%d", done, total) + " " + EpicBar(done, total)
+	const minDashes = 3
+	mid := width - leadW - 1 - disp(right)
+	if mid < minDashes {
+		mid = minDashes
+	}
+	return truncate(head+styledName+" "+strings.Repeat("─", mid)+" "+right, width)
 }
 
 // isSyncing is the honest first-paint state: we are polling for the very first
@@ -443,8 +525,16 @@ func eventSentence(e Event, now time.Time) string {
 	return s
 }
 
+// renderFooter is the one hint line. The full wording is 61 cols — one over the
+// 60-col charter minimum — so a tight pane drops the word "move" (jk next to the
+// other single-key verbs still reads as motion) rather than blind-truncating the
+// LAST verb off the end; the trailing truncate stays as the sub-60 safety net.
 func renderFooter(width int) string {
-	return dimStyle.Render(truncate("jk move · enter expand · c claim · x close · o studio", width))
+	hint := "jk move · enter expand · c claim · x close · t tag · o studio"
+	if disp(hint) > width {
+		hint = "jk · enter expand · c claim · x close · t tag · o studio"
+	}
+	return dimStyle.Render(truncate(hint, width))
 }
 
 // ── small shared helpers ─────────────────────────────────────────────────────

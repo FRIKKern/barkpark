@@ -288,14 +288,14 @@ const dropMetaBelow = 52
 
 // TaskRow renders one task. Collapsed = a single line
 //
-//	indent + ▸glyph + title  ·chips·  …right-meta
+//	indent + ▸glyph + [⧉] + title  ·chips·  …right-meta
 //
 // expanded = that line plus hanging-indent detail lines. Everything is
-// width-safe. sectionTag is the tag of the section the row sits under (slice 16
-// supplies real values; "" today): a chip equal to it is suppressed so a row
-// never restates its own section. Column priority when the pane is tight:
-// title (never below 8 cols) > chips > right-meta. Meta sheds first, then chips;
-// below dropMetaBelow the row is glyph+title only.
+// width-safe. sectionTag is the tag of the section the row sits under (the
+// enclosing derived-cluster key; "" in epics/NOW/orphans): a chip equal to it
+// is suppressed so a row never restates its own section. Column priority when
+// the pane is tight: title (never below 8 cols) > chips > right-meta. Meta
+// sheds first, then chips; below dropMetaBelow the row is glyph+title only.
 func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
@@ -306,16 +306,25 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag stri
 	leadW := indent + 2 + 1
 	tStyle := titleStyleFor(t.Lifecycle)
 
+	// Twin marker (decision 14): a warn-tinted ⧉ layered before the title of any
+	// suspected near-duplicate. Two display columns (glyph + space) charged
+	// against the title budget — it never disturbs the fixed gutter.
+	twin, twinW := "", 0
+	if t.TwinOf != "" {
+		twin = warnStyle.Render("⧉") + " "
+		twinW = 2
+	}
+
 	var line string
 	if width < dropMetaBelow {
-		// Narrow degrade: glyph + title only (no chips, no meta).
-		line = lead + tStyle.Render(truncate(t.Title, width-leadW))
+		// Narrow degrade: glyph + [twin] + title only (no chips, no meta).
+		line = lead + twin + tStyle.Render(truncate(t.Title, width-leadW-twinW))
 	} else {
 		metaPlain, metaStyled := rowMeta(t, now)
 		metaW := disp(metaPlain)
 
 		// Reserve the right-meta first — it sheds first when the row is tight.
-		titleBudget := width - leadW
+		titleBudget := width - leadW - twinW
 		if metaPlain != "" && titleBudget-metaW-2 >= 8 {
 			titleBudget -= metaW + 2 // 2 = min gap before meta
 		} else {
@@ -327,13 +336,12 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag stri
 		// before it clips itself.
 		title := truncate(t.Title, titleBudget)
 		chipBudget := titleBudget - disp(title) - 2
-		suggested := "" // Task carries no Suggested field on this branch.
 		chips := ""
 		if chipBudget >= chipMinBudget {
-			chips = Chips(t.Labels, suggested, sectionTag, chipBudget)
+			chips = Chips(t.Labels, t.Suggested, sectionTag, chipBudget)
 		}
 
-		left := lead + tStyle.Render(title)
+		left := lead + twin + tStyle.Render(title)
 		if chips != "" {
 			left += "  " + chips
 		}
@@ -378,6 +386,11 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 			lines = append(lines, truncate(hang+dimStyle.Render("labels ")+chips, width))
 		}
 	}
+	if t.TwinOf != "" {
+		// Name the twin partner (decision 14). TaskRow has no board handle, so
+		// the partner's doc id is what it can honestly render here.
+		emit(fmt.Sprintf("twin ⧉ '%s'", t.TwinOf))
+	}
 	deps := depSummary(t)
 	emit(deps)
 	if t.Priority != "" || !t.UpdatedAt.IsZero() {
@@ -419,8 +432,16 @@ func depSummary(t Task) string {
 func NowCard(t Task, breadcrumb string, selected bool, width int, now time.Time) []string {
 	role := RoleFor(t, now)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
-	title := truncate(t.Title, width-3)
-	line1 := SelectionMarker(selected) + glyph + " " + titleStyle.Render(title)
+	// Twin marker (decision 14), same ⧉ TaskRow wears: a claim on a suspected
+	// near-duplicate is the board's loudest "two of us are doing the same work"
+	// moment, so the pinned card may not hide it.
+	twin, twinW := "", 0
+	if t.TwinOf != "" {
+		twin = warnStyle.Render("⧉") + " "
+		twinW = 2
+	}
+	title := truncate(t.Title, width-3-twinW)
+	line1 := SelectionMarker(selected) + glyph + " " + twin + titleStyle.Render(title)
 
 	var sparts []string
 	add := func(p, s string) {

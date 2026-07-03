@@ -13,14 +13,12 @@ type Task struct {
 	Labels    []string
 	Claim     *Claim
 	Criteria  *Criteria // nil when the envelope omits criteria_progress
-	// TwinOf is the doc_id of this task's nearest title-duplicate within its own
-	// group (epic siblings, cluster peers, or the loose-orphan pile) when their
-	// titles overlap past the twin threshold — the board's "these two look like
-	// the same work" marker. Empty when the task has no near-duplicate.
+	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
+	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
 	TwinOf string
-	// Suggested is the Key of the cluster an UNCLUSTERED orphan's title most
-	// resembles (past the suggestion threshold) — an advisory "this probably
-	// belongs with …" hint that never actually moves the row. Empty otherwise.
+	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
+	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
+	// applied only by the explicit t verb. "" when none.
 	Suggested       string
 	DependencyCount int
 	DependentCount  int
@@ -65,14 +63,10 @@ type RepoContext struct {
 
 // Board is the fully organized, render-ready model.
 type Board struct {
-	Now   []Task // unexpired claims, updated desc
-	Epics []Epic // attention-ranked
-	// Clusters are derived label-sections carved out of the loose-orphan pile:
-	// tasks that share a project/area/most-shared label gather under one Key so
-	// the flat "(no epic)" queue self-organizes by what relates. Freshest-member
-	// first; each holds its own terminal fold.
-	Clusters []Cluster
-	Orphans  []Task // surviving loose tasks (no cluster key), band-ordered
+	Now      []Task    // unexpired claims, updated desc
+	Epics    []Epic    // attention-ranked
+	Clusters []Cluster // derived label clusters, freshest-first (after authored epics)
+	Orphans  []Task    // surviving loose tasks, band-ordered
 	// OrphansFolded is the count of terminal (done/closed/cancelled) orphans
 	// older than the fold threshold, hidden into a single "+N done" line the
 	// same way an epic folds its stale children — so a flat queue of long-closed
@@ -86,23 +80,11 @@ type Board struct {
 	// header say "showing N of M" when the 1000-row list clamp truncated the
 	// board, instead of quietly presenting a partial queue as the whole.
 	TaskCount int
-	// Stale is the count of non-terminal tasks ANYWHERE on the board whose last
-	// movement is older than the staleness threshold — the "you have N tasks
-	// going cold" number the header makes impossible to miss, so the queue never
-	// quietly accumulates outdated work.
+	// Stale is the count of non-terminal tasks untouched longer than the warn
+	// threshold (3d) — the header's "N stale" instrument. 0 renders nothing.
 	Stale  int
 	Counts map[string]int
 	Events []Event
-}
-
-// Cluster is a derived label-section of the loose-orphan pile: every loose task
-// whose resolved cluster Key is the same gathers here, so a flat queue relates
-// itself without any hand-filed hierarchy. It folds its own stale terminal rows
-// exactly like an Epic (DoneFolded) and band-orders its survivors.
-type Cluster struct {
-	Key        string // the shared label that names the section (e.g. "proj:sheets-parity")
-	Tasks      []Task // policy-ordered members (band order, stale sinks, recent-terminal tail)
-	DoneFolded int    // count of terminal members folded away
 }
 
 type Epic struct {
@@ -110,6 +92,15 @@ type Epic struct {
 	Children   []Task // policy-ordered
 	DoneFolded int    // count of done children folded away
 	Dormant    bool   // idle >7d -> renders as one header line
+}
+
+// Cluster is a DERIVED relatedness group: loose tasks sharing a cluster key
+// (their strongest organizing label). It renders and navigates exactly like an
+// Epic section, but the grouping is inferred from tags, not authored structure.
+type Cluster struct {
+	Key        string // the full tag, e.g. "proj:sheets-parity"
+	Tasks      []Task // band-ordered like epic children
+	DoneFolded int    // terminal members older than 24h, folded to a count
 }
 
 type ConnState int
