@@ -119,6 +119,7 @@
                   "precondition_failed",
                   "rate_limited",
                   "rev_mismatch",
+                  "schema_has_documents",
                   "schema_unknown",
                   "storage_unavailable",
                   "unauthorized",

@@ -51,9 +51,22 @@ defmodule BarkparkWeb.SchemaController do
     end
   end
 
-  def delete(conn, %{"dataset" => dataset, "name" => name}) do
-    with {:ok, _} <- Content.delete_schema(name, dataset, scope_opts(conn)) do
+  # `?force=true` opts into orphaning existing documents of the type. Without it,
+  # deleting a schema that still has documents is refused with a 409
+  # `schema_has_documents` (see Content.Schema.delete_schema/3) so a public type
+  # can't be silently removed out from under its now-unreadable documents.
+  def delete(conn, %{"dataset" => dataset, "name" => name} = params) do
+    opts = Keyword.put(scope_opts(conn), :force, force_param?(params))
+
+    with {:ok, _} <- Content.delete_schema(name, dataset, opts) do
       json(conn, %{deleted: name})
+    end
+  end
+
+  defp force_param?(params) do
+    case Map.get(params, "force") do
+      v when v in [true, "true", "1"] -> true
+      _ -> false
     end
   end
 
