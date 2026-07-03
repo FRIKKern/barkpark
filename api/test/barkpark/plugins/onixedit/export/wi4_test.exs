@@ -317,6 +317,64 @@ defmodule Barkpark.Plugins.OnixEdit.Export.WI4Test do
       assert is_list(result)
       assert length(result) == 1
     end
+
+    test "MarketPublishingDetail injects the MANDATORY MarketPublishingStatus after the representative run" do
+      bin = xml(full_book())
+
+      assert bin =~ ~s|<MarketPublishingDetail>|
+      # Default List 68 status "04" (Active) is injected when book.json omits it.
+      assert bin =~ ~s|<MarketPublishingStatus>04</MarketPublishingStatus>|
+
+      # XSD sequence: PublisherRepresentative* then MarketPublishingStatus.
+      rep_pos = position(bin, "<PublisherRepresentative>")
+      status_pos = position(bin, "<MarketPublishingStatus>")
+      assert rep_pos < status_pos
+    end
+
+    test "explicit marketPublishingStatus overrides the default" do
+      element =
+        ProductSupply.build(%{
+          "productSupplies" => [
+            %{
+              "marketPublishingDetail" => %{
+                "marketPublishingStatus" => "02",
+                "publisherRepresentatives" => [%{"agentName" => "Rep"}]
+              }
+            }
+          ]
+        })
+
+      bin = element |> List.first() |> XmlBuilder.generate() |> IO.iodata_to_binary()
+      assert bin =~ ~s|<MarketPublishingStatus>02</MarketPublishingStatus>|
+      refute bin =~ ~s|<MarketPublishingStatus>04</MarketPublishingStatus>|
+    end
+  end
+
+  describe "MarketPublishingDetail — real XSD gate (Export.to_iodata via xmllint)" do
+    @tag :validator
+    test "full_book with an explicit marketPublishingDetail now renders XSD-VALID XML" do
+      if System.find_executable("xmllint") do
+        # Regression guard: before the fix, an explicit <MarketPublishingDetail>
+        # emitted only <PublisherRepresentative> and omitted the mandatory
+        # <MarketPublishingStatus> → xmllint rejected the whole export →
+        # {:error, {:xsd_invalid, _}} → HTTP export 500 / Bokbasen blocked.
+        assert {:ok, _iodata} = Export.to_iodata(full_book())
+      else
+        IO.puts("xmllint not on PATH — skipping real XSD gate (CI installs libxml2-utils)")
+      end
+    end
+
+    @tag :validator
+    test "a complete book WITHOUT any marketPublishingDetail is unchanged and still XSD-valid" do
+      if System.find_executable("xmllint") do
+        book = full_book() |> update_in(["productSupplies", Access.at(0)], &Map.delete(&1, "marketPublishingDetail"))
+
+        assert {:ok, iodata} = Export.to_iodata(book)
+        refute IO.iodata_to_binary(iodata) =~ ~s|<MarketPublishingDetail>|
+      else
+        IO.puts("xmllint not on PATH — skipping real XSD gate (CI installs libxml2-utils)")
+      end
+    end
   end
 
   describe "PublishingDetail — nil-when-empty" do

@@ -12,11 +12,14 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
 
     * `<Market>` — `<Territory><CountriesIncluded>{codes}</CountriesIncluded></Territory>`.
       Defaults to `NO` when book.json lists no countries.
-    * `<MarketPublishingDetail>` — `<PublisherRepresentative>` per
-      `publisherRepresentatives[]` entry (only when present). Each
-      `<PublisherRepresentative>` emits `<AgentRole>` (List 69, default `07`
-      "Local publisher") FIRST, then `<AgentName>` — XSD enforces that
-      ordering.
+    * `<MarketPublishingDetail>` — emitted whenever the supply carries an
+      explicit `marketPublishingDetail` map. Each `<PublisherRepresentative>`
+      (per `publisherRepresentatives[]` entry) emits `<AgentRole>` (List 69,
+      default `07` "Local publisher") FIRST, then `<AgentName>` — XSD enforces
+      that ordering — followed by the MANDATORY `<MarketPublishingStatus>`
+      (List 68, default `04` "Active", overridable via
+      `marketPublishingStatus`). The status is required by the XSD content
+      model; omitting it renders an XSD-invalid `<MarketPublishingDetail>`.
     * `<SupplyDetail>` — emitted once per `supplyDetails[]` entry, or a
       synthesized default when `supplyDetails` is empty. Carries
       `<Supplier>` (SupplierRole defaults to `09` "Publisher to retailers"),
@@ -55,6 +58,7 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
   @default_price_type "02"
   @default_agent_role "07"
   @default_unpriced_item_type "01"
+  @default_market_publishing_status "04"
 
   @doc """
   Build a list of `<ProductSupply>` elements (zero-or-more) from a book document.
@@ -175,10 +179,25 @@ defmodule Barkpark.Plugins.OnixEdit.Export.ProductSupply do
       |> Enum.map(&build_publisher_representative/1)
       |> Enum.reject(&is_nil/1)
 
-    case reps do
-      [] -> nil
-      _ -> XmlBuilder.element(:MarketPublishingDetail, reps)
-    end
+    # `<MarketPublishingStatus>` (List 68) is a MANDATORY child of
+    # `<MarketPublishingDetail>` per the EDItEUR reference XSD — the content
+    # model is `PublisherRepresentative*, ProductContact*, MarketPublishingStatus,
+    # …`. Emitting only `<PublisherRepresentative>` (the pre-fix behaviour)
+    # produced a `<MarketPublishingDetail>` missing that required element, so
+    # xmllint rejected the WHOLE export → `to_iodata` returned `{:xsd_invalid}`
+    # → HTTP export 500 + Bokbasen publish blocked. Inject the status (after the
+    # optional representative run, as the sequence demands), defaulting to `04`
+    # (Active): an exported book is, by definition, published and orderable in
+    # its market. A document may override via `marketPublishingStatus`.
+    status =
+      mpd
+      |> Map.get("marketPublishingStatus")
+      |> presence()
+      |> Kernel.||(@default_market_publishing_status)
+
+    children = reps ++ [XmlBuilder.element(:MarketPublishingStatus, status)]
+
+    XmlBuilder.element(:MarketPublishingDetail, children)
   end
 
   defp build_market_publishing(_), do: nil
