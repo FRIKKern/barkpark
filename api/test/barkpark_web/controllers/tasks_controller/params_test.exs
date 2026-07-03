@@ -3,6 +3,7 @@ defmodule BarkparkWeb.TasksController.ParamsTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias BarkparkWeb.TasksController.Params
 
   # Array-style query params (?type[]=task) arrive as lists. Each filter
@@ -68,6 +69,42 @@ defmodule BarkparkWeb.TasksController.ParamsTest do
 
     test "non-binary value falls to default, then nil passes through" do
       assert Params.parse_limit(["5"], nil, 1000) == nil
+    end
+  end
+
+  # Scope unification (fail-closed nil): the list/prime/events tenancy helpers
+  # route through the ONE shared `Content.Scope.scope_to_workspace/3` — the same
+  # helper the ready-queue and claim paths use — so the tasks resource has a
+  # single nil-scope rule (fail CLOSED → zero rows), not three divergent ones.
+  # These are structural equalities: both sides compile down to the identical
+  # `where(query, …)` call inside `Content.Scope`, so the query structs match.
+  describe "workspace scoping unified through Content.Scope (fail-closed nil)" do
+    test "maybe_filter_workspace/2 with nil no longer passes through — it fails CLOSED" do
+      q = Params.maybe_filter_workspace(Document, nil)
+      # The old behaviour returned the bare schema unchanged (fail-OPEN → all
+      # tenants). Now it is a fail-closed query with a boolean `false` clause.
+      refute q == Document
+      assert %Ecto.Query{wheres: [%Ecto.Query.BooleanExpr{}]} = q
+    end
+
+    test "maybe_filter_workspace/2 with nil == Scope.scope_to_workspace(_, nil, nil)" do
+      assert Params.maybe_filter_workspace(Document, nil) ==
+               Scope.scope_to_workspace(Document, nil, nil)
+    end
+
+    test "maybe_filter_workspace/2 with a real workspace == Scope workspace-only scope" do
+      assert Params.maybe_filter_workspace(Document, "ws-1") ==
+               Scope.scope_to_workspace(Document, "ws-1", nil)
+    end
+
+    test "maybe_filter_event_workspace/2 with nil fails CLOSED via the same helper" do
+      assert Params.maybe_filter_event_workspace(Document, nil) ==
+               Scope.scope_to_workspace(Document, nil, nil)
+    end
+
+    test "maybe_filter_event_workspace/2 with a real workspace == Scope workspace-only scope" do
+      assert Params.maybe_filter_event_workspace(Document, "ws-1") ==
+               Scope.scope_to_workspace(Document, "ws-1", nil)
     end
   end
 end
