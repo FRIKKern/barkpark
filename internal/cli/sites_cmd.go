@@ -155,6 +155,32 @@ func latestDeployment(client *cloudclient.Client, siteID string) (Deployment, bo
 	return ds[0], true
 }
 
+// statusColor wraps a deployment status in a Vercel-parity ANSI color — green
+// for healthy (live/running/ready/active), red for failed/error, yellow for
+// in-flight (queued/building/pushing) — but only when out.color is set (a real
+// TTY, not piped / --no-color / under `go test`). Matching is case-insensitive.
+// The caller must pass the ALREADY space-padded cell: we colorize the padded
+// string so the escape bytes fall outside the width the column was measured at.
+// Mirrors the gated-ANSI idiom in hetzner_confirm.go. Unknown statuses (and the
+// no-color path) return the input unchanged.
+func statusColor(out *writer, status string) string {
+	if !out.color {
+		return status
+	}
+	var code string
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "live", "running", "ready", "active":
+		code = "\033[32m"
+	case "failed", "error":
+		code = "\033[31m"
+	case "queued", "building", "pushing":
+		code = "\033[33m"
+	default:
+		return status
+	}
+	return code + status + "\033[0m"
+}
+
 // renderSitesTable prints the aligned `bp sites` table. The four columns
 // (NAME · DOMAINS · STATUS · LAST DEPLOY) are width-driven from the data so
 // the output is stable for golden compare. Empty domains print "—".
@@ -195,7 +221,10 @@ func renderSitesTable(out *writer, sites []cloudclient.Site, statuses map[string
 
 	out.outf("%-*s  %-*s  %-*s  %s", nameW, hName, domW, hDom, statW, hStat, hDeploy)
 	for _, r := range rows {
-		out.outf("%-*s  %-*s  %-*s  %s", nameW, r[0], domW, r[1], statW, r[2], r[3])
+		// Pad the raw status to the column width FIRST, then colorize, so the
+		// ANSI escape bytes never count toward statW and misalign the table.
+		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[2]))
+		out.outf("%-*s  %-*s  %s  %s", nameW, r[0], domW, r[1], stat, r[3])
 	}
 }
 
@@ -591,7 +620,10 @@ func renderDeploymentsTable(out *writer, ds []Deployment) {
 		if when == "" {
 			when = "—"
 		}
-		out.outf("%-*s  %-*s  %-*s  %s", statW, d.Status, imgW, img, refW, ref, when)
+		// Pad the raw status to the column width FIRST, then colorize, so the
+		// ANSI escape bytes never count toward statW and misalign the table.
+		stat := statusColor(out, fmt.Sprintf("%-*s", statW, d.Status))
+		out.outf("%s  %-*s  %-*s  %s", stat, imgW, img, refW, ref, when)
 	}
 }
 
