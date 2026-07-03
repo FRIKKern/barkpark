@@ -184,4 +184,49 @@ defmodule Barkpark.Tasks.ClaimTest do
       assert "lib/shared.ex" in conflict.resources
     end
   end
+
+  # ─── (7) claim_by_id/3 — nil workspace scope FAILS CLOSED ───────────────────
+  # The tasks resource unifies its workspace scoping through the ONE shared
+  # `Content.Scope.scope_to_workspace/3` helper (matching the ready-queue path),
+  # so a nil `workspace_id` yields ZERO rows — never every tenant's rows. This
+  # protects internal / worker / test callers that drop their scope: they can no
+  # longer reach a task in ANOTHER tenant. HTTP callers are unaffected (they
+  # always carry the Default workspace).
+
+  describe "claim_by_id/3 — nil workspace fails CLOSED (scope unification)" do
+    test "a nil workspace_id can NOT reach a real, scoped task (not_found, not a leak)",
+         %{scope: scope} do
+      doc_id = uniq("nil-scope-target")
+      _task = mk_task!(doc_id, scope)
+
+      # The row exists and is claimable WITH the real scope — but a nil-workspace
+      # claim must fail closed rather than resolving over every tenant's rows.
+      assert {:error, :not_found} =
+               Tasks.claim_by_id(doc_id, "worker-nil", workspace_id: nil, project_id: nil)
+
+      # And the scoped claim still works (byte-identical behaviour for real scope).
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-ok", scope)
+      assert claimed.content["lifecycle_status"] == "in_progress"
+    end
+
+    test "the resource-overlap scan is workspace-scoped — a nil-scope claim sees no holders",
+         %{scope: scope} do
+      holder_id = uniq("nil-holder")
+      mk_task!(holder_id, scope)
+
+      # Holder takes lib/shared.ex under the real scope.
+      assert {:ok, _} =
+               Tasks.claim_by_id(holder_id, "worker-holder", scope ++ [resources: ["lib/shared.ex"]])
+
+      # A nil-scope targeted claim can't even find its OWN target row (fail
+      # closed), so it never reaches the overlap scan — the point is that a
+      # dropped scope resolves to NOTHING, not to a cross-tenant view.
+      assert {:error, :not_found} =
+               Tasks.claim_by_id(holder_id, "worker-nil",
+                 workspace_id: nil,
+                 project_id: nil,
+                 resources: ["lib/shared.ex"]
+               )
+    end
+  end
 end

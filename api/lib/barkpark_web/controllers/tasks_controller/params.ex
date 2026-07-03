@@ -12,6 +12,7 @@ defmodule BarkparkWeb.TasksController.Params do
 
   alias Barkpark.Repo
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edge
 
@@ -22,10 +23,14 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_claim_worker(query, worker) when is_binary(worker),
     do: from(d in query, where: fragment("?->'claim'->>'worker'", d.content) == ^worker)
 
-  def maybe_filter_event_workspace(query, nil), do: query
-
+  # Tenancy: route through the ONE shared, fail-CLOSED helper (a nil
+  # workspace_id yields zero rows, never every tenant's events) — the same
+  # `Scope.scope_to_workspace/3` the ready-queue and claim paths use. HTTP
+  # callers always carry a real workspace (Default scope via AssignDefaultScope),
+  # so scoped requests are unchanged; only an internal nil-scoped caller flips
+  # from all-tenant (fail-OPEN) to zero rows (fail-CLOSED, the safe default).
   def maybe_filter_event_workspace(query, ws_id),
-    do: from(e in query, where: e.workspace_id == ^ws_id)
+    do: Scope.scope_to_workspace(query, ws_id, nil)
 
   def maybe_filter_type(query, nil), do: query
 
@@ -148,11 +153,21 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_dataset(query, ""), do: query
   def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
 
-  def maybe_filter_workspace(query, nil), do: query
-
+  # Tenancy boundary: route the workspace clause through the ONE shared,
+  # fail-CLOSED helper (`Scope.scope_to_workspace/3`) — the SAME semantic the
+  # ready-queue (Queue.ready_query) and claim (Tasks.Claim) paths now use, so
+  # the tasks resource has a single nil-scope rule instead of three divergent
+  # ones. A nil workspace_id yields zero rows (fail-CLOSED), never every
+  # tenant's rows (the old fail-OPEN accident). HTTP callers always carry a real
+  # workspace (Default scope via AssignDefaultScope), so scoped requests are
+  # byte-identical; project narrowing rides the sibling helper below (applied
+  # after this one, so the pair == scope_to_workspace(q, ws, project)).
   def maybe_filter_workspace(query, ws_id),
-    do: from(d in query, where: d.workspace_id == ^ws_id)
+    do: Scope.scope_to_workspace(query, ws_id, nil)
 
+  # Project is a leaf narrowing applied AFTER the workspace clause above; a nil
+  # project means "do not narrow by project" (workspace-only scope), NOT "all
+  # tenants" — the tenant boundary is already enforced by the workspace clause.
   def maybe_filter_project(query, nil), do: query
 
   def maybe_filter_project(query, p_id),
