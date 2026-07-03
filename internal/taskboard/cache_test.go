@@ -245,3 +245,62 @@ func TestCachePrimedStartIsHonestAndDoesNotFlash(t *testing.T) {
 	// empty (see its FLASH CONTRACT comment) or this scenario would false-flash
 	// every row on the first live frame.
 }
+
+// TestCachePrimedStartSurvivesBackwardsClockJump pins the nastiest cache edge:
+// the previous session saved its snapshot under a wall clock AHEAD of this
+// session's (NTP step, VM resume, manual clock change), so the cached FetchedAt
+// is in this session's FUTURE. The out-of-order guard must compare against
+// snapshots applied THIS session only (lastAppliedFetch), never the on-disk
+// stamp — otherwise every live fetch (including each 30s backstop, stamped from
+// the same skewed clock) would read as "older than what's on screen" and be
+// dropped, freezing the board on stale cached rows until real time caught up
+// with the bogus stamp. Live truth always beats the file.
+func TestCachePrimedStartSurvivesBackwardsClockJump(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{BaseURL: "https://guerrilla", Workspace: "gyldendal", Project: "prod", CacheDir: dir}
+
+	// The cache claims it was fetched an hour in this session's future.
+	cachedAt := fixedNow.Add(time.Hour)
+	cached := Snapshot{
+		Tasks:     []Task{{DocID: "stale-1", Title: "Task from the skewed session", Lifecycle: lifeReady, UpdatedAt: cachedAt}},
+		Counts:    map[string]int{"ready": 1},
+		FetchedAt: cachedAt,
+	}
+	SaveCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project), cached)
+
+	m := newModel(nil, "", cfg)
+	m.now = func() time.Time { return fixedNow }
+	if _, ok := m.taskByID("stale-1"); !ok {
+		t.Fatal("cache-primed board is missing the cached task")
+	}
+
+	// The first live snapshot carries an HONEST stamp — this session's clock,
+	// which sits before the cache's skewed one. It must still be applied.
+	live := Snapshot{
+		Tasks:     []Task{{DocID: "live-1", Title: "Live truth", Lifecycle: lifeReady, UpdatedAt: fixedNow}},
+		Counts:    map[string]int{"ready": 1},
+		FetchedAt: fixedNow,
+	}
+	m, _ = step(t, m, snapshotMsg{snap: live})
+
+	if _, ok := m.taskByID("live-1"); !ok {
+		t.Fatal("live snapshot dropped: the future-stamped cache out-ranked live truth (board frozen on stale rows)")
+	}
+	if _, ok := m.taskByID("stale-1"); ok {
+		t.Error("stale cached task survived the live swap")
+	}
+	if !m.ui.LastSync.Equal(fixedNow) {
+		t.Errorf("LastSync = %v, want the live stamp %v", m.ui.LastSync, fixedNow)
+	}
+
+	// And the guard still works intra-session: a slower, genuinely older frame
+	// from THIS session must be dropped as before.
+	older := Snapshot{
+		Tasks:     []Task{{DocID: "straggler", Lifecycle: lifeReady}},
+		FetchedAt: fixedNow.Add(-10 * time.Second),
+	}
+	m, _ = step(t, m, snapshotMsg{snap: older})
+	if _, ok := m.taskByID("straggler"); ok {
+		t.Error("intra-session out-of-order frame was applied — the rollback guard regressed")
+	}
+}

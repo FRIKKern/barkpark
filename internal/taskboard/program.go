@@ -114,6 +114,15 @@ type Model struct {
 	dirty         bool
 	debounceGen   int
 	lastLiveEvent time.Time
+	// lastAppliedFetch is the FetchedAt of the newest snapshot applySnapshot
+	// ACCEPTED this session — the out-of-order guard's baseline. It is distinct
+	// from ui.LastSync (the display stamp) on purpose: primeFromCache seeds
+	// LastSync from the CACHED FetchedAt for the honest age banner but leaves
+	// this zero, so a cache stamped by a clock that has since jumped BACKWARDS
+	// (NTP step, VM resume) can never out-rank live fetches and freeze the board
+	// on stale rows. The guard orders in-flight fetches within THIS session
+	// only; a stamp read from disk never participates.
+	lastAppliedFetch time.Time
 
 	// pendingClose arms the double-press close guard: the first x records the
 	// task's doc id here and the strip prompts; a second consecutive x on the
@@ -181,6 +190,12 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 //     it. (This also lifts the frame out of isSyncing — we DO have data — so the
 //     header says "polling · 3m", while a no-cache cold start still says
 //     "syncing…".) The async first fetch swaps live truth in moments later.
+//   - lastAppliedFetch is NOT seeded: the cached FetchedAt is a stamp from a
+//     PREVIOUS session's clock, so it must never participate in the intra-session
+//     out-of-order guard — if the wall clock jumped backwards between sessions,
+//     a seeded baseline would drop every live snapshot (including each 30s
+//     backstop, stamped from the same skewed clock) and freeze the board on
+//     stale rows indefinitely. Live truth always beats the file.
 //
 // FLASH CONTRACT (charter decision #20): priming MUST NOT seed a change-highlight
 // baseline. A cache load is not a "snapshot applied" — it does NOT run through
