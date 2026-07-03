@@ -489,6 +489,67 @@ defmodule Barkpark.Content.ValueWritebackTest do
       assert draft.content["launch_delay"] == "someone's unpublished edit"
     end
 
+    test "clean (non-diverged) draft twin: inspect→writeback round-trips", %{
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # REGRESSION (clean-twin CAS mismatch): opening the published target in
+      # Studio spawns a CLEAN draft twin — content byte-identical to the
+      # published row but carrying its OWN newer rev. This is the most common
+      # live-Studio state for a published target, yet edit-through used to fail
+      # closed here: `inspect_target` handed back the PUBLISHED rev while the
+      # guarded patch fences the DRAFT twin (get_patch_base reads draft-first),
+      # so the ifRevisionID CAS always mismatched. The fix derives the inspected
+      # rev from the write-target row, so inspect → writeback round-trips.
+      opts = scope(ws_a, proj_a, writer_ctx())
+
+      # Spawn the clean draft twin (set launch_delay to its CURRENT published
+      # value → draft content == published content → non-diverged).
+      assert {:ok, _} =
+               Content.apply_mutations(
+                 [
+                   %{
+                     "patch" => %{
+                       "id" => "m-canon",
+                       "type" => "metric",
+                       "set" => %{"launch_delay" => "14 days"}
+                     }
+                   }
+                 ],
+                 @dataset,
+                 opts
+               )
+
+      # Sanity: a clean draft twin now exists, published row untouched.
+      {:ok, draft} =
+        Content.get_document("drafts.m-canon", "metric", @dataset,
+          workspace_id: ws_a.id,
+          project_id: proj_a.id
+        )
+
+      assert draft.content["launch_delay"] == "14 days"
+
+      # The affordance inspects and captures the CAS rev exactly as the Studio
+      # panel does — this is the rev the confirm handler pins.
+      assert {:ok, %{rev: inspected_rev}} =
+               ValueWriteback.inspect_target("m-canon", "launch_delay", @dataset, opts)
+
+      # Pre-fix this rev was the published rev → the writeback below returned
+      # `{:error, {:rev_mismatch, …}}`. Post-fix it names the draft twin, so the
+      # guarded write lands and propagates to the canonical row.
+      assert {:ok, %{doc_id: "m-canon", impact: %{count: 1}}} =
+               ValueWriteback.writeback(
+                 "m-canon",
+                 "launch_delay",
+                 "21 days",
+                 inspected_rev,
+                 @dataset,
+                 opts
+               )
+
+      assert canon_content(ws_a, proj_a)["launch_delay"] == "21 days"
+    end
+
     test "a missing expected_rev is refused (no blind overwrite)", %{
       ws_a: ws_a,
       proj_a: proj_a
