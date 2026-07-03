@@ -173,9 +173,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # stamps on every data `<td>` so `aria-activedescendant` can point at the
   # active cell; `aria_selected` shares the SAME sel-rect membership
   # predicate `cell_class` uses for its `sheet-sel` mark (nil sel → false).
+  # A NOT-editable grid (the View toggle / the read-only reader) has no
+  # selection at all, so it returns nil — LiveView omits the attribute
+  # entirely rather than stamping a meaningless aria-selected="false" on
+  # every cell.
   def cell_dom_id(table_id, {c, r}), do: "#{table_id}-cell-#{c}-#{r}"
 
-  def aria_selected(sel, c, r), do: if(in_sel_rect?(sel, c, r), do: "true", else: "false")
+  def aria_selected(sel, c, r, editable \\ true)
+
+  def aria_selected(_sel, _c, _r, false), do: nil
+
+  def aria_selected(sel, c, r, _editable),
+    do: if(in_sel_rect?(sel, c, r), do: "true", else: "false")
 
   # Status-bar selection aggregate — Sheets shows SUM/AVG/COUNT for the
   # selected range. `rect` is `Geometry.selection_rect`'s `{c1,c2,r1,r2}`.

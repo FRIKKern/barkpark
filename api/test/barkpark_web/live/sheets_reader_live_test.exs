@@ -147,6 +147,28 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     refute html =~ "aria-activedescendant"
   end
 
+  test "read-only cells carry NO aria-selected and the wrapper is a labelled region",
+       %{conn: conn} do
+    create_draft!("rdr-sel-a11y", one_tab(%{"A1" => %{"v" => "x"}}))
+    publish!("rdr-sel-a11y")
+
+    {:ok, view, html} = live(conn, "/sheets/rdr-sel-a11y")
+
+    # There is no selection in a read-only view, so stamping
+    # aria-selected="false" on every cell was noise: not one td carries the
+    # attribute now (the tab strip's role=tab buttons legitimately keep
+    # theirs, hence the td-scoped checks).
+    refute view |> element(~s(td[data-ref="A1"])) |> render() =~ "aria-selected"
+    refute Regex.match?(~r/<td[^>]*aria-selected/, html)
+
+    # WCAG 4.1.2: the wrapper's aria-label needs a real role to land on in
+    # read-only mode — region (role=application stays edit-only).
+    wrap = view |> element("#sheet-reader-rdr-sel-a11y-grid-view") |> render()
+    assert wrap =~ ~s(role="region")
+    assert wrap =~ ~s(aria-label="Spreadsheet grid")
+    refute html =~ ~s(role="application")
+  end
+
   # ── a11y honest counts on the public reader (same renderer) ─────────────────
 
   test "the reader announces the whole sheet height, not the paged window", %{conn: conn} do

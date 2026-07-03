@@ -1404,4 +1404,128 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
       assert css =~ ~r/@media \(pointer: coarse\) \{[^@]*\.sheet-tab[^@]*min-height/s
     end
   end
+
+  # ── a11y: header menus, toolbar state, remote-change announcement ─────────
+
+  test "header menu triggers carry an accessible name + popup semantics; the open menu is a named menu",
+       %{conn: conn} do
+    create_sheet!("sg-menu-a11y", one_tab(%{"A1" => %{"v" => "x"}}))
+    {view, target, _html} = open!(conn, "sg-menu-a11y")
+
+    # Closed: the "▾" glyph is NAMED (WCAG 4.1.2) and declares its popup
+    # contract — not expanded, opens a menu.
+    trigger = view |> element(~s([data-test-id="sheet-colmenu-2"])) |> render()
+    assert trigger =~ ~s(aria-label="Column B menu")
+    assert trigger =~ ~s(aria-haspopup="menu")
+    assert trigger =~ ~s(aria-expanded="false")
+
+    row_trigger = view |> element(~s([data-test-id="sheet-rowmenu-3"])) |> render()
+    assert row_trigger =~ ~s(aria-label="Row 3 menu")
+    assert row_trigger =~ ~s(aria-haspopup="menu")
+    assert row_trigger =~ ~s(aria-expanded="false")
+
+    # Open column B's menu: ONLY that trigger flips expanded; the popup is a
+    # role=menu named for its column and each action reads as a menuitem.
+    render_click(target, "menu-open", %{"kind" => "col", "index" => "2"})
+
+    assert view |> element(~s([data-test-id="sheet-colmenu-2"])) |> render() =~
+             ~s(aria-expanded="true")
+
+    assert view |> element(~s([data-test-id="sheet-colmenu-1"])) |> render() =~
+             ~s(aria-expanded="false")
+
+    menu = view |> element(~s([data-test-id="sheet-menu"])) |> render()
+    assert menu =~ ~s(role="menu")
+    assert menu =~ ~s(aria-label="Column B menu")
+    assert menu =~ ~s(role="menuitem")
+
+    # The row menu mirrors the contract.
+    render_click(target, "menu-open", %{"kind" => "row", "index" => "3"})
+
+    assert view |> element(~s([data-test-id="sheet-rowmenu-3"])) |> render() =~
+             ~s(aria-expanded="true")
+
+    menu = view |> element(~s([data-test-id="sheet-menu"])) |> render()
+    assert menu =~ ~s(aria-label="Row 3 menu")
+    assert menu =~ ~s(role="menuitem")
+  end
+
+  test "the toolbar mirrors the active cell: fmt select option selected, style buttons aria-pressed",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-toolbar-state",
+      one_tab(%{
+        "A1" => %{"v" => 3, "fmt" => "fixed", "s" => %{"b" => true, "al" => "right"}},
+        "B1" => %{"v" => "plain"}
+      })
+    )
+
+    {view, target, _html} = open!(conn, "sg-toolbar-state")
+
+    # Active defaults to A1 (fixed + bold + right-aligned): AT reads the
+    # select's current value and the buttons' pressed state off the cell.
+    select = view |> element(~s([data-test-id="sheet-fmt-select"])) |> render()
+    assert select =~ ~r/value="fixed"[^>]*selected/
+
+    assert view |> element(~s([data-test-id="sheet-style-bold"])) |> render() =~
+             ~s(aria-pressed="true")
+
+    assert view |> element(~s([data-test-id="sheet-align-right"])) |> render() =~
+             ~s(aria-pressed="true")
+
+    assert view |> element(~s([data-test-id="sheet-align-left"])) |> render() =~
+             ~s(aria-pressed="false")
+
+    # Moving to the unformatted B1 resets the whole mirror.
+    render_hook(target, "cell-click", %{"ref" => "B1", "shift" => false})
+    select = view |> element(~s([data-test-id="sheet-fmt-select"])) |> render()
+    refute select =~ ~r/value="fixed"[^>]*selected/
+
+    assert view |> element(~s([data-test-id="sheet-style-bold"])) |> render() =~
+             ~s(aria-pressed="false")
+
+    assert view |> element(~s([data-test-id="sheet-align-right"])) |> render() =~
+             ~s(aria-pressed="false")
+  end
+
+  test "a remote change to THIS viewer's active cell is announced politely; own echoes stay silent",
+       %{conn: conn} do
+    create_sheet!("sg-remote-announce", one_tab(%{}))
+    {view_a, target_a, _html} = open!(conn, "sg-remote-announce")
+    {view_b, _target_b, _html2} = open!(Phoenix.ConnTest.build_conn(), "sg-remote-announce")
+
+    # Both A and B sit on A1 (the mount default). A commits a value.
+    render_hook(target_a, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target_a, "edit-commit", %{"value" => "5", "move" => "none"})
+
+    # B — a remote viewer with A1 active — hears the rewrite on the polite
+    # region (before the fix the grid re-rendered in silence).
+    assert status_of(view_b) =~ "A1 changed to 5"
+
+    # A's own echo did NOT re-announce: announce_commit already spoke "A1: 5",
+    # and a second "changed to" frame would double-speak the same edit.
+    status_a = status_of(view_a)
+    assert status_a =~ "A1: 5"
+    refute status_a =~ "changed to"
+
+    # A change to a cell B does NOT have active stays silent for B.
+    render_hook(target_a, "cell-click", %{"ref" => "C5", "shift" => false})
+    render_hook(target_a, "edit-commit", %{"value" => "7", "move" => "none"})
+    Process.sleep(80)
+    refute status_of(view_b) =~ "C5"
+  end
+
+  # The polite live region's current text. The delta rides PubSub → the host
+  # LiveView's mailbox; `render/1` flushes it, but give the async hop a
+  # bounded retry window rather than a sleep.
+  defp status_of(view, tries \\ 50) do
+    html = view |> element(~s([data-test-id="sheet-status"])) |> render()
+
+    if html =~ ~r/sheet-status"[^>]*>\s*</ and tries > 0 do
+      Process.sleep(20)
+      status_of(view, tries - 1)
+    else
+      html
+    end
+  end
 end
