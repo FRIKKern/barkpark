@@ -2189,16 +2189,28 @@
 
   // =========================================================== LAUNCH
   // Does this subscription entitle the team to launch? Mirrors the server's
-  // Billing.entitled?/1: an active paid tier or admin "forever" launches; the
-  // self-serve "trial" tier launches ONLY while it hasn't expired (its
-  // current_period_end is still in the future); "free" / no sub does not.
+  // Billing.entitled?/1 (billing.ex) case-for-case:
+  //   * admin "forever" comp  → always entitled;
+  //   * self-serve "trial"    → only while unexpired (current_period_end in the
+  //                             future; an unset/expired trial is NOT entitled);
+  //   * status "active"       → entitled (a "free" row is signed-up-not-paying,
+  //                             so it stays gated);
+  //   * status "past_due"     → STILL entitled inside its dunning grace window
+  //                             (current_period_end in the future, or unset), so
+  //                             a paying customer whose card just failed is not
+  //                             locked out mid-grace;
+  //   * anything else (no sub / expired trial / past-grace) → not entitled.
   function launchEntitled(s) {
-    if (!s || s.status !== "active" || s.plan === "free") return false;
+    if (!s) return false;
+    if (s.plan === "forever") return true;
     if (s.plan === "trial") {
       return !!s.current_period_end && new Date(s.current_period_end) > new Date();
     }
-    // supporter / support_plus / forever — active is sufficient.
-    return true;
+    if (s.status === "active") return s.plan !== "free";
+    if (s.status === "past_due") {
+      return !s.current_period_end || new Date(s.current_period_end) > new Date();
+    }
+    return false;
   }
 
   // Gate the Launch form on a real subscription so the user learns the actual
@@ -2211,6 +2223,27 @@
 
     function paint() {
       var existing = $("#launch-gate");
+      // Couldn't verify entitlement and have no cached answer: keep the submit
+      // disabled (a 402 is worse than a retry) but don't ASSERT "subscription
+      // required" — that mislabels a paying customer whose fetch just blipped.
+      if (subError && !subLoaded) {
+        if (existing) existing.parentNode.removeChild(existing);
+        var e = document.createElement("div");
+        e.id = "launch-gate";
+        e.className = "notice notice-warn";
+        e.innerHTML =
+          "<b>Couldn't verify your subscription.</b> " +
+          "Check your connection and retry. " +
+          '<button class="btn btn-sm" id="launch-gate-retry" type="button">Retry</button>';
+        card.insertBefore(e, card.firstChild);
+        var gr = $("#launch-gate-retry");
+        if (gr) gr.addEventListener("click", function () {
+          subError = false;
+          loadSubscription().then(paint);
+        });
+        if (submit) submit.disabled = true;
+        return;
+      }
       var active = launchEntitled(subCache);
       if (active) {
         if (existing) existing.parentNode.removeChild(existing);
@@ -2229,7 +2262,7 @@
       if (submit) submit.disabled = true;
     }
 
-    if (!subLoaded) loadSubscription().then(paint);
+    if (!subLoaded && !subError) loadSubscription().then(paint);
     else paint();
   }
 
@@ -2291,9 +2324,26 @@
 
     // Always read the real subscription before deciding what to show — the plan
     // state is the server's truth, never assumed.
-    if (!subLoaded) {
+    if (!subLoaded && !subError) {
       box.innerHTML = '<div class="loading">Loading your plan&hellip;</div>';
       loadSubscription().then(renderRecommended);
+      return;
+    }
+
+    // A transient fetch failure with nothing cached yet: offer a retry, NEVER
+    // the free-plan upsell — that would hide a paying customer's real plan and
+    // (via the launch gate) block them. `subLoaded` true means we still have the
+    // server's last real answer, so we fall through and render it below.
+    if (subError && !subLoaded) {
+      box.innerHTML =
+        '<div class="empty-state"><h2>Couldn\'t load your plan</h2>' +
+          "<p>Check your connection and retry.</p>" +
+          '<p><button class="btn btn-primary btn-sm" id="sub-retry" type="button">Retry</button></p></div>';
+      var rb = $("#sub-retry");
+      if (rb) rb.addEventListener("click", function () {
+        subError = false;
+        renderRecommended();
+      });
       return;
     }
 
@@ -2304,7 +2354,11 @@
       return;
     }
 
-    if (subCache && subCache.status === "active" && subCache.plan !== "free") {
+    // An active paid plan OR a past_due one still in dunning both show the
+    // current-plan card (the card surfaces the dunning label + grace date) —
+    // a past_due paying customer must not fall through to the upsell.
+    if (subCache && (subCache.status === "active" || subCache.status === "past_due") &&
+        subCache.plan !== "free") {
       renderCurrentPlan(box);
       return;
     }
@@ -2334,22 +2388,70 @@
     });
   }
 
-  // The active-subscriber state: their real plan, status and start date. There's
-  // no self-serve change/cancel yet (no billing portal) — so we say so honestly
-  // rather than render a button that does nothing.
+  // Human billing-status label — NEVER the raw enum ("past_due" → "Past_due").
+  // A pending grace cancel outranks the bare "active" it rides on.
+  function billingStatusLabel(sub) {
+    if (sub.status === "past_due") return "Payment past due";
+    if (sub.status === "canceled") return "Canceled";
+    if (sub.cancel_at_period_end) return "Cancels at period end";
+    return cap(sub.status || "active");
+  }
+
+  // The short pill in the plan-card header — a compact echo of the status.
+  function billingStatusBadge(sub) {
+    if (sub.status === "past_due") return "Past due";
+    if (sub.status === "canceled") return "Canceled";
+    if (sub.cancel_at_period_end) return "Ending";
+    return "Active";
+  }
+
+  // The renewal / cancel / end date line the server now feeds us
+  // (current_period_end, cancel_at_period_end, canceled_at). "" when there's no
+  // dated milestone to show.
+  function billingPeriodLine(sub) {
+    if (sub.status === "canceled") {
+      return sub.canceled_at ? "Ended " + fmtWhen(sub.canceled_at) : "";
+    }
+    if (sub.cancel_at_period_end && sub.current_period_end) {
+      return "Access until " + fmtWhen(sub.current_period_end);
+    }
+    if (sub.status === "past_due" && sub.current_period_end) {
+      return "Grace period ends " + fmtWhen(sub.current_period_end);
+    }
+    if (sub.current_period_end) {
+      return "Renews " + fmtWhen(sub.current_period_end);
+    }
+    return "";
+  }
+
+  // The active-subscriber state: their real plan, status, start date and the
+  // renewal / dunning / cancel detail the server sends. There's no self-serve
+  // change/cancel yet (no billing portal) — so we say so honestly rather than
+  // render a button that does nothing.
   function renderCurrentPlan(box) {
     var sub = subCache;
+    var periodLine = billingPeriodLine(sub);
+    // Past-due gets a prominent dunning notice: their card failed and there's no
+    // self-serve portal, so point them at support before the grace elapses.
+    var dunning = sub.status === "past_due"
+      ? '<div class="notice notice-warn">' +
+          "<b>Your last payment failed.</b> " +
+          "Update your payment method (contact support) to avoid interruption." +
+        "</div>"
+      : "";
     box.innerHTML =
       '<div class="card plan-card">' +
         '<div class="plan-head"><span class="plan-name">' + esc(planName(sub.plan)) + "</span>" +
-          '<span class="plan-rec">Active</span></div>' +
+          '<span class="plan-rec">' + esc(billingStatusBadge(sub)) + "</span></div>" +
         '<p class="plan-tagline">Your current subscription.</p>' +
         '<div class="plan-price">' + esc(priceFor(sub.plan)) + "<small>/mo</small></div>" +
+        dunning +
         '<ul class="plan-feats">' +
           PLAN_FEATURES.map(function (f) { return '<li><span class="ck">✓</span>' + esc(f) + "</li>"; }).join("") +
         "</ul>" +
-        '<p class="plan-meta dim">Status: ' + esc(cap(sub.status)) +
+        '<p class="plan-meta dim">Status: ' + esc(billingStatusLabel(sub)) +
           (sub.started_at ? " &middot; since " + esc(fmtWhen(sub.started_at)) : "") + "</p>" +
+        (periodLine ? '<p class="plan-meta dim">' + esc(periodLine) + "</p>" : "") +
         '<p class="plan-meta dim">To change or cancel your plan, contact support.</p>' +
         '<a class="plan-more" id="plan-more">See all plans</a>' +
       "</div>";
@@ -2475,11 +2577,25 @@
   // refetch; refreshed on a "subscription" live event and on billing renders.
   var subCache = null;
   var subLoaded = false;
+  // A transient GET /v1/subscription failure (network / 5xx) is NOT the same as
+  // "no plan". `subLoaded` means we have the server's real answer at least once;
+  // `subError` flags the last fetch failed so a paying customer isn't downgraded
+  // to the free-plan upsell / launch gate on a blip. Mirrors ensureFleet, which
+  // only caches on success.
+  var subError = false;
 
   function loadSubscription() {
     return api("GET", "/v1/subscription").then(function (r) {
-      subLoaded = true;
-      subCache = (r.ok && r.data && r.data.subscription) || null;
+      if (r.ok) {
+        subLoaded = true;
+        subError = false;
+        subCache = (r.data && r.data.subscription) || null;
+      } else {
+        // Keep the prior cache untouched; surface a retry instead of a
+        // free-looking null. `subLoaded` stays as-is (false on a cold first
+        // load → the UI shows a retry, not the upsell).
+        subError = true;
+      }
       return subCache;
     });
   }
@@ -3577,6 +3693,7 @@
       meCache = null;
       subCache = null;
       subLoaded = false;
+      subError = false;
       hide($("#app-shell"));
       show($("#auth-screen"));
 
@@ -3712,6 +3829,9 @@
       classifyBp: classifyBp, statusOf: statusOf,
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
+      // Dashboard billing-correctness pure helpers (mirror Billing.entitled?/1).
+      launchEntitled: launchEntitled, billingStatusLabel: billingStatusLabel,
+      billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
     });
   }
 })();
