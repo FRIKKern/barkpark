@@ -94,4 +94,52 @@ defmodule BarkparkWeb.NonBinaryParamSweepTest do
       end
     end
   end
+
+  # `limit`/`offset` flow through each controller's private `parse_int/2`, which
+  # only matched nil/binary/integer — a list param (`?limit[]=1`) raised
+  # FunctionClauseError → 500 before the catch-all clause was added. (ListenController
+  # reads the analogous `lastEventId` scalar but streams SSE, so it can't be exercised
+  # in a synchronous request test; its catch-all is covered by the code fix.)
+  describe "no controller 500s on a non-binary pagination param" do
+    setup %{conn: conn} do
+      Auth.create_token(@token, "dev", "pagination-sweep", ["read", "write", "admin"])
+      SurfaceConfigs.seed_defaults!()
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          @ds
+        )
+
+      {:ok, conn: put_req_header(conn, "authorization", "Bearer " <> @token)}
+    end
+
+    @pagination_endpoints [
+      "/v1/data/query/#{@ds}/post",
+      "/v1/data/history/#{@ds}/post/does-not-exist"
+    ]
+
+    for path <- @pagination_endpoints do
+      test "GET #{path} — array ?limit[]=… & ?offset[]=… stays < 500", %{conn: conn} do
+        resp = get(conn, unquote(path), %{"limit" => ["1", "2"], "offset" => ["3"]})
+        refute resp.status == 500
+        assert resp.status < 500
+      end
+
+      test "GET #{path} — map ?limit[k]=… & ?offset[k]=… stays < 500", %{conn: conn} do
+        resp = get(conn, unquote(path), %{"limit" => %{"k" => "1"}, "offset" => %{"k" => "2"}})
+        refute resp.status == 500
+        assert resp.status < 500
+      end
+    end
+
+    test "query index echoes a clamped limit/offset, not the raw over/under-range values",
+         %{conn: conn} do
+      resp = get(conn, "/v1/data/query/#{@ds}/post", %{"limit" => "999999", "offset" => "-5"})
+      assert resp.status == 200
+      result = json_response(resp, 200)["result"]
+      assert result["limit"] == 1000
+      assert result["offset"] == 0
+    end
+  end
 end
