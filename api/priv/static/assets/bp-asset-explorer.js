@@ -1034,6 +1034,7 @@
       if (!append) {
         this._offset = 0;
         this._total = 0;
+        this._loadError = false;
       }
 
       this._loading = true;
@@ -1096,7 +1097,10 @@
         this._offset = this._assets.length;
       } catch (err) {
         if (err && err.name === "AbortError") return;
-        if (!append) this._assets = [];
+        if (!append) {
+          this._assets = [];
+          this._loadError = true;
+        }
       } finally {
         if (signal.aborted) return;
         this._loading = false;
@@ -1113,18 +1117,51 @@
       }
     }
 
+    _thumbLabel(kind) {
+      return kind === "document"
+        ? "DOC"
+        : kind === "video"
+          ? "VID"
+          : kind === "audio"
+            ? "AUD"
+            : kind === "image"
+              ? "IMG"
+              : "FILE";
+    }
+
+    // onerror attribute that swaps a broken <img> for the same file-icon
+    // placeholder used for non-image kinds, so a deleted/unprocessed/404'd
+    // asset never shows the browser's broken-image glyph.
+    _thumbFallbackAttr(kind) {
+      const label = this._thumbLabel(kind);
+      return (
+        ' onerror="this.onerror=null;this.outerHTML=&quot;' +
+        "<div class='bp-ae-file-icon'>" +
+        label +
+        "</div>&quot;\""
+      );
+    }
+
     _cardThumb(doc) {
       const kind = doc.bp_asset_kind || "other";
       const thumbUrl = assetThumbUrl(doc);
       const previewUrl = doc.previewUrl || thumbUrl;
       if (kind === "image" && thumbUrl) {
-        return '<img src="' + esc(thumbUrl) + '" alt="" loading="lazy" />';
+        return (
+          '<img src="' +
+          esc(thumbUrl) +
+          '" alt="" loading="lazy"' +
+          this._thumbFallbackAttr(kind) +
+          " />"
+        );
       }
       if ((kind === "video" || kind === "document") && previewUrl && previewUrl !== thumbUrl) {
         return (
           '<img src="' +
           esc(previewUrl) +
-          '" alt="" loading="lazy" class="bp-ae-preview-thumb" />'
+          '" alt="" loading="lazy" class="bp-ae-preview-thumb"' +
+          this._thumbFallbackAttr(kind) +
+          " />"
         );
       }
       const label =
@@ -1186,14 +1223,29 @@
         if (this._gridEl) this._gridEl.innerHTML = "";
         if (this._emptyEl) {
           this._emptyEl.hidden = false;
-          this._emptyEl.textContent = this._emptyMessage();
+          if (this._loadError) {
+            this._emptyEl.classList.add("bp-ae-status-error");
+            this._emptyEl.innerHTML =
+              "Couldn't load your media library — the request failed. " +
+              '<button type="button" class="bp-ae-retry-btn">Retry</button>';
+            const retryBtn = this._emptyEl.querySelector(".bp-ae-retry-btn");
+            if (retryBtn) {
+              retryBtn.addEventListener("click", () => this._loadAssets());
+            }
+          } else {
+            this._emptyEl.classList.remove("bp-ae-status-error");
+            this._emptyEl.textContent = this._emptyMessage();
+          }
         }
         if (this._loadMoreEl) this._loadMoreEl.hidden = true;
         this._renderFilmstrip([]);
         return;
       }
 
-      if (this._emptyEl) this._emptyEl.hidden = true;
+      if (this._emptyEl) {
+        this._emptyEl.classList.remove("bp-ae-status-error");
+        this._emptyEl.hidden = true;
+      }
 
       if (this._gridEl) {
         this._gridEl.classList.toggle("bp-ae-list", this._viewMode === "list");
@@ -1832,14 +1884,14 @@
           if (!r.ok) {
             failed++;
             if (r.status === 401) {
-              this._setStatus("Upload blocked — sign in at /login with barkpark-dev-token");
+              this._toast("Upload blocked — sign in at /login with barkpark-dev-token");
             } else {
-              this._setStatus("Upload failed (" + r.status + ")");
+              this._toast("Upload failed (" + r.status + ")");
             }
           }
         } catch (_e) {
           failed++;
-          this._setStatus("Upload failed — check that the API is running");
+          this._toast("Upload failed — check that the API is running");
         }
       }
 

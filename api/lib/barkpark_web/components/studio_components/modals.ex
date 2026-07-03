@@ -46,12 +46,18 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         <div class="image-picker-upload">
           <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
             <.live_file_input upload={@uploads.image} class="image-file-input" />
+            <%= for err <- upload_errors(@uploads.image) do %>
+              <p class="text-sm image-upload-error" role="alert"><%= upload_error_to_string(err) %></p>
+            <% end %>
             <%= for entry <- @uploads.image.entries do %>
               <div class="image-upload-entry">
                 <.live_img_preview entry={entry} width="60" height="60" />
                 <span class="text-sm"><%= entry.client_name %></span>
                 <button type="submit" class="btn btn-primary btn-sm">Upload</button>
               </div>
+              <%= for err <- upload_errors(@uploads.image, entry) do %>
+                <p class="text-sm image-upload-error" role="alert"><%= upload_error_to_string(err) %></p>
+              <% end %>
             <% end %>
           </form>
         </div>
@@ -61,7 +67,11 @@ defmodule BarkparkWeb.StudioComponents.Modals do
           <% end %>
           <%= for file <- @media_files do %>
             <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
-              <img src={"/media/files/#{file.path}"} alt={file.original_name} />
+              <img
+                src={"/media/files/#{file.path}"}
+                alt={file.original_name}
+                onerror="this.onerror=null;this.classList.add('image-picker-thumb-broken');this.removeAttribute('src');"
+              />
               <div class="image-picker-name"><%= file.original_name %></div>
             </div>
           <% end %>
@@ -625,4 +635,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <.discard_modal show_discard={@show_discard} editor_doc={@editor_doc} />
     """
   end
+
+  # Human-readable copy for the client-side `allow_upload` validation errors
+  # (see StudioLive.mount: accept ~w(.jpg .jpeg .png .gif .webp .svg),
+  # max_entries: 1, max_file_size: 10 MB).
+  defp upload_error_to_string(:too_large), do: "That image is too large — the limit is 10 MB."
+  defp upload_error_to_string(:too_many_files), do: "You can only upload one image at a time."
+  defp upload_error_to_string(:not_accepted),
+    do: "That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG."
+
+  defp upload_error_to_string(_), do: "That image couldn't be uploaded."
 end
