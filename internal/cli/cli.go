@@ -118,6 +118,12 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		return runSignupCloud(out, rest[1:])
+	case "logout":
+		// `bp logout` — clear the stored Barkpark Cloud session (cloud-12): the
+		// sign-out sibling of `bp login`. Blanks the three Cloud* fields; `--all`
+		// (a global → g.all) additionally drops the active content token. Help and
+		// any other args arrive in rest.
+		return runLogout(out, g, rest[1:])
 	case "capabilities":
 		return runCapabilities(out, g, ctx)
 	case "whoami":

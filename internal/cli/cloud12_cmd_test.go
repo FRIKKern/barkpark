@@ -813,3 +813,116 @@ func TestBarkparks500StaysGeneric(t *testing.T) {
 		t.Fatalf("a 500 must not claim the session is dead:\n%s", stderr)
 	}
 }
+
+// TestLogoutClearsCloudFields: a plain `bp logout` blanks exactly the three
+// Cloud* session fields and persists, while the per-server content Token and the
+// KnownServers fleet survive — logout is a cloud-session action, not a wipe.
+func TestLogoutClearsCloudFields(t *testing.T) {
+	withTempConfigHome(t)
+	if err := SaveConfig(&Config{
+		Server:     "https://api.barkpark.cloud",
+		Token:      "content-tok",
+		CloudURL:   "https://api.barkpark.cloud",
+		CloudToken: "sess-secret-abc",
+		CloudTeam:  "team-x",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runLogout(w, globals{}, nil); code != exitOK {
+		t.Fatalf("runLogout exit = %d\n%s", code, stderr.String())
+	}
+
+	cfg, _ := LoadConfig()
+	if cfg.CloudToken != "" || cfg.CloudURL != "" || cfg.CloudTeam != "" {
+		t.Fatalf("Cloud* fields not fully cleared: %+v", cfg)
+	}
+	if cfg.Token != "content-tok" {
+		t.Fatalf("content Token must survive a plain logout; got %q", cfg.Token)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("logged out")) {
+		t.Fatalf("expected a logout confirmation:\n%s", stdout.String())
+	}
+}
+
+// TestLogoutAllClearsContentToken: `bp logout --all` (a global → g.all) also
+// drops the ACTIVE content token, not just the Cloud session.
+func TestLogoutAllClearsContentToken(t *testing.T) {
+	withTempConfigHome(t)
+	if err := SaveConfig(&Config{
+		Token:      "content-tok",
+		CloudURL:   "https://api.barkpark.cloud",
+		CloudToken: "sess-secret-abc",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runLogout(w, globals{all: true}, nil); code != exitOK {
+		t.Fatalf("runLogout --all exit = %d\n%s", code, stderr.String())
+	}
+
+	cfg, _ := LoadConfig()
+	if cfg.Token != "" {
+		t.Fatalf("--all must clear the content Token; got %q", cfg.Token)
+	}
+	if cfg.CloudToken != "" {
+		t.Fatalf("--all must still clear the Cloud session; got %q", cfg.CloudToken)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("content token cleared")) {
+		t.Fatalf("expected the content-token note:\n%s", stdout.String())
+	}
+}
+
+// TestLogoutJSONEnvelope: -o json emits a {ok,was_logged_in,token_cleared}
+// receipt for machine consumers.
+func TestLogoutJSONEnvelope(t *testing.T) {
+	withTempConfigHome(t)
+	if err := SaveConfig(&Config{
+		CloudURL:   "https://api.barkpark.cloud",
+		CloudToken: "sess-secret-abc",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+	if code := runLogout(w, globals{}, nil); code != exitOK {
+		t.Fatalf("runLogout exit = %d\n%s", code, stderr.String())
+	}
+	var env map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &env); err != nil {
+		t.Fatalf("parse json: %v\n%s", err, stdout.String())
+	}
+	if env["ok"] != true {
+		t.Errorf("ok = %v, want true", env["ok"])
+	}
+	if env["was_logged_in"] != true {
+		t.Errorf("was_logged_in = %v, want true", env["was_logged_in"])
+	}
+	if env["token_cleared"] != false {
+		t.Errorf("token_cleared = %v, want false (no --all)", env["token_cleared"])
+	}
+}
+
+// TestLogoutIdempotentWhenLoggedOut: logging out with no Cloud session is a clean
+// no-op that still exits 0 and says so.
+func TestLogoutIdempotentWhenLoggedOut(t *testing.T) {
+	withTempConfigHome(t)
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := runLogout(w, globals{}, nil); code != exitOK {
+		t.Fatalf("runLogout on a clean config exit = %d\n%s", code, stderr.String())
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("already logged out")) {
+		t.Fatalf("expected the idempotent message:\n%s", stdout.String())
+	}
+}
