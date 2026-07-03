@@ -456,8 +456,7 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
   # description handle) — the proxy must normalize them into the fixture rows.
   defp program_golden_upstream do
     HetznerFakeHttpClient.program(%{
-      "/v1/servers" =>
-        ok_json(~s({"servers":[{"id":42,"name":"guerrilla","status":"running",
+      "/v1/servers" => ok_json(~s({"servers":[{"id":42,"name":"guerrilla","status":"running",
           "server_type":{"id":1,"name":"cax21"},
           "datacenter":{"id":4,"name":"hel1-dc2","location":{"id":3,"name":"hel1"}},
           "public_net":{"ipv4":{"ip":"192.0.2.10"}},
@@ -469,11 +468,12 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
         ok_json(~s({"networks":[{"id":5,"name":"internal","ip_range":"10.0.0.0/16",
           "subnets":[],"routes":[],"servers":[42],"created":"2026-05-03T08:00:00Z"}]})),
       "/v1/firewalls" =>
-        ok_json(~s({"firewalls":[{"id":9,"name":"web-ingress",
+        ok_json(
+          ~s({"firewalls":[{"id":9,"name":"web-ingress",
           "rules":[{"direction":"in","protocol":"tcp","port":"443"}],
-          "applied_to":[{"type":"server","server":{"id":42}}],"created":"2026-05-04T07:00:00Z"}]})),
-      "/v1/load_balancers" =>
-        ok_json(~s({"load_balancers":[{"id":3,"name":"edge-lb",
+          "applied_to":[{"type":"server","server":{"id":42}}],"created":"2026-05-04T07:00:00Z"}]})
+        ),
+      "/v1/load_balancers" => ok_json(~s({"load_balancers":[{"id":3,"name":"edge-lb",
           "load_balancer_type":{"id":1,"name":"lb11"},"location":{"id":3,"name":"hel1"},
           "public_net":{"enabled":true,"ipv4":{"ip":"192.0.2.7"}},
           "services":[],"targets":[],"created":"2026-05-05T06:00:00Z"}]})),
