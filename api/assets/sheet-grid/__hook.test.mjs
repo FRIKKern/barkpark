@@ -1476,6 +1476,285 @@ check("regression: plain td dblclick still starts an edit", () => {
   assert.deepEqual(h._pushed, [{ event: "edit-start", payload: {} }]);
 });
 
+// ── #813/#858 COMMIT-RIDE REGRESSION WALL ──────────────────────────────────
+// (wave-2 wiring must keep every row green; rows may only change with a
+//  charter-documented contract change — see bp-sheets-formula-ux-epic-charter.md
+//  §Decisions.4, "the pre-existing #813/#858 harness tests are the permanent
+//  regression wall".)
+//
+// The wall freezes TODAY's click-away commit grammar as an explicit, greppable
+// table so the wave-2 point-mode builder inherits named contracts. It pins the
+// pure arbiter (`_rideCommits`) and the FOUR sites that ride it — cell
+// mousedown, header click, header mousedown-drag anchor, and the toolbar
+// mousedown seal — plus the no-anchor guards and the drag trailing-click
+// swallow. Assertions are exact deepEqual on the captured pushEventTo args.
+//
+// KNOWN wave-2 CHANGE POINT: `_rideCommits` today ALWAYS attaches `commit` when
+// a cell editor is open, formula or not. Wave 2 makes click-away caret-context-
+// aware — a click while the caret expects a reference will POINT instead of
+// COMMIT — so the row named `row-formula-draft-clickaway-commits-TODAY` is the
+// single row expected to move, and ONLY under a charter-documented contract
+// change. Every other row is invariant.
+
+// Setup helpers — reuse the fake-DOM factories: _rideCommits looks the cell
+// draft up on `el` (.sheet-cell-input) and the bar up on `root` (.sheet-bar-
+// input, sibling of the grid); the toolbar seal reads td.sheet-active on `el`.
+function wallDraft(h, value) {
+  h.el._input = { value };
+}
+function wallActive(h, ref) {
+  h.el._active = { dataset: { ref } };
+}
+function wallBar(h, { value, raw, focused }) {
+  const bar = { value, dataset: { raw } };
+  h.root._bar = bar;
+  if (focused) sandbox.document.activeElement = bar;
+  return bar;
+}
+
+// A wall check resets the GLOBAL sandbox.document.activeElement before AND
+// after (a dirty-bar row that throws must not leak focus into the next row).
+function wall(name, fn) {
+  check(name, () => {
+    sandbox.document.activeElement = null;
+    try {
+      fn();
+    } finally {
+      sandbox.document.activeElement = null;
+    }
+  });
+}
+
+// (A) The pure arbiter `_rideCommits` — the one function all three riding sites
+// funnel through. Table over draft/bar state → the exact augmented payload.
+const RIDE_COMMITS_MATRIX = [
+  {
+    name: "no draft, no bar → payload untouched",
+    setup: () => {},
+    out: { ref: "A1", shift: false },
+  },
+  {
+    name: "non-formula draft 'hello' → commit:'hello'",
+    setup: (h) => wallDraft(h, "hello"),
+    out: { ref: "A1", shift: false, commit: "hello" },
+  },
+  {
+    // The ONE row wave-2 will move: a formula draft commits TODAY exactly like a
+    // literal one (byte-for-byte #813). Point-mode makes ref-context clicks
+    // POINT instead — changing this expectation requires a charter contract note.
+    name: "row-formula-draft-clickaway-commits-TODAY ('=SUM(B3:B5' → commit, same as a literal)",
+    setup: (h) => wallDraft(h, "=SUM(B3:B5"),
+    out: { ref: "A1", shift: false, commit: "=SUM(B3:B5" },
+  },
+  {
+    // Element-truthiness, NOT value-truthiness: an OPEN-but-empty editor still
+    // rides commit:'' (the server clears the cell), which is not the same as a
+    // closed editor (no commit key at all).
+    name: "open-but-empty draft → commit:'' (element truthiness, not value)",
+    setup: (h) => wallDraft(h, ""),
+    out: { ref: "A1", shift: false, commit: "" },
+  },
+  {
+    name: "dirty focused bar (value!==raw) → bar_commit",
+    setup: (h) => wallBar(h, { value: "=SUM(A1:A9)", raw: "=SUM(A1:A2)", focused: true }),
+    out: { ref: "A1", shift: false, bar_commit: "=SUM(A1:A9)" },
+  },
+  {
+    name: "clean focused bar (value===raw) → NO bar_commit",
+    setup: (h) => wallBar(h, { value: "=SUM(A1:A2)", raw: "=SUM(A1:A2)", focused: true }),
+    out: { ref: "A1", shift: false },
+  },
+  {
+    // The mirror keeps the bar in sync with the cell editor, so a non-focused
+    // dirty bar is a mirror artifact, not a user draft — it rides nothing.
+    name: "dirty UNfocused bar → NO bar_commit",
+    setup: (h) => wallBar(h, { value: "mirror-shadow", raw: "", focused: false }),
+    out: { ref: "A1", shift: false },
+  },
+  {
+    name: "cell draft AND dirty focused bar → BOTH commit and bar_commit",
+    setup: (h) => {
+      wallDraft(h, "x");
+      wallBar(h, { value: "9", raw: "", focused: true });
+    },
+    out: { ref: "A1", shift: false, commit: "x", bar_commit: "9" },
+  },
+];
+for (const row of RIDE_COMMITS_MATRIX) {
+  wall(`_rideCommits — ${row.name}`, () => {
+    const h = mountHook();
+    row.setup(h);
+    // _rideCommits mutates + returns the SAME payload object (node-realm plain
+    // object, node Object.prototype) — strict deepEqual compares by value.
+    assert.deepEqual(h._rideCommits({ ref: "A1", shift: false }), row.out);
+  });
+}
+
+// (B) The FOUR ride sites carry the open cell draft as `commit`, end-to-end
+// through the real event handlers. Exact deepEqual on the full push log.
+const RIDE_SITES = [
+  {
+    name: "cell mousedown (_onCellMousedown)",
+    run: (h) => {
+      wallDraft(h, "hello");
+      h.el.dispatch("mousedown", cellEvent("D4"));
+    },
+    expected: [{ event: "cell-click", payload: { ref: "D4", shift: false, commit: "hello" } }],
+  },
+  {
+    name: "header click (_onClick)",
+    run: (h) => {
+      wallDraft(h, "hello");
+      h.el.dispatch("click", headEvent({ c: "3" }));
+    },
+    expected: [
+      { event: "head-click", payload: { kind: "col", index: 3, shift: false, commit: "hello" } },
+    ],
+  },
+  {
+    // Anchor rides the draft; the shift-EXTENDS that follow are plain (no
+    // re-ride) — the draft commits exactly once, on the anchor.
+    name: "header mousedown-drag anchor (_onHeadMousedown); shift-extend does NOT re-ride",
+    run: (h) => {
+      wallDraft(h, "hello");
+      h.el.dispatch("mousedown", headEvent({ c: "3" }, { button: 0 }));
+      h.el.dispatch("mouseover", headEvent({ c: "5" }));
+    },
+    expected: [
+      { event: "head-click", payload: { kind: "col", index: 3, shift: false, commit: "hello" } },
+      { event: "head-click", payload: { kind: "col", index: 5, shift: true } },
+    ],
+  },
+  {
+    // The toolbar seal builds its OWN payload (not via _rideCommits) — it rides
+    // `commit` but NEVER `bar_commit`, and re-selects the still-active cell.
+    name: "toolbar mousedown (_onToolbarMousedown)",
+    run: (h) => {
+      wallActive(h, "B2");
+      wallDraft(h, "hello");
+      h.root.dispatch("mousedown", toolbarMousedown());
+    },
+    expected: [{ event: "cell-click", payload: { ref: "B2", shift: false, commit: "hello" } }],
+  },
+];
+for (const site of RIDE_SITES) {
+  wall(`ride site rides commit — ${site.name}`, () => {
+    const h = mountHook();
+    site.run(h);
+    assert.deepEqual(h._pushed, site.expected);
+  });
+}
+
+// (B′) The bar_commit path proven end-to-end through a real site (cell
+// mousedown), not just the _rideCommits unit.
+wall("ride site carries bar_commit — cell mousedown with a dirty focused bar", () => {
+  const h = mountHook();
+  wallBar(h, { value: "=SUM(A1:A9)", raw: "=SUM(A1:A2)", focused: true });
+  h.el.dispatch("mousedown", cellEvent("D4"));
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "D4", shift: false, bar_commit: "=SUM(A1:A9)" } },
+  ]);
+});
+
+// (C) The toolbar seal's four guards (#858/#862): it fires ONLY when there is
+// both an open draft AND an active cell, and never when the target is a text
+// input (that is the input's own #813 focus/takeover flow).
+const TOOLBAR_GUARDS = [
+  {
+    name: "open draft + active cell → one cell-click commit",
+    run: (h) => {
+      wallActive(h, "B2");
+      wallDraft(h, "hello");
+      h.root.dispatch("mousedown", toolbarMousedown());
+    },
+    expected: [{ event: "cell-click", payload: { ref: "B2", shift: false, commit: "hello" } }],
+  },
+  {
+    name: "target is a text input/textarea/select → NO push",
+    run: (h) => {
+      wallActive(h, "B2");
+      wallDraft(h, "hello");
+      h.root.dispatch("mousedown", toolbarMousedown({ input: true }));
+    },
+    expected: [],
+  },
+  {
+    name: "no open cell draft → NO push",
+    run: (h) => {
+      wallActive(h, "B2");
+      h.root.dispatch("mousedown", toolbarMousedown());
+    },
+    expected: [],
+  },
+  {
+    name: "no active cell ref → NO push",
+    run: (h) => {
+      wallDraft(h, "hello");
+      h.root.dispatch("mousedown", toolbarMousedown());
+    },
+    expected: [],
+  },
+];
+for (const g of TOOLBAR_GUARDS) {
+  wall(`toolbar seal guard — ${g.name}`, () => {
+    const h = mountHook();
+    g.run(h);
+    assert.deepEqual(h._pushed, g.expected);
+  });
+}
+
+// (D) Cell mousedown NEVER anchors a cell-click when the target is a resize
+// handle, the fill nub, or a text input — those gestures own their own handler.
+function guardTargetMousedown(kind) {
+  // The resize handle carries dataset.{kind,px,index} — the resize-drag handler
+  // (_onMousedown) reads them; a bare {} would throw before the cell guard runs.
+  const rsz = { dataset: { kind: "col", px: "88", index: "1" } };
+  const target = {
+    matches: () => kind === "input",
+    closest(sel) {
+      if (sel === ".sheet-rsz") return kind === "rsz" ? rsz : null;
+      if (sel === ".sheet-fillnub") return kind === "fillnub" ? {} : null;
+      return null; // never a td[data-ref]
+    },
+  };
+  return {
+    button: 0,
+    shiftKey: false,
+    target,
+    pageX: 0,
+    pageY: 0,
+    preventDefault() {},
+    stopPropagation() {},
+  };
+}
+for (const kind of ["rsz", "fillnub", "input"]) {
+  wall(`cell mousedown on a .sheet-${kind === "input" ? "input-target" : kind} pushes NO cell-click`, () => {
+    const h = mountHook();
+    h.el.dispatch("mousedown", guardTargetMousedown(kind));
+    assert.deepEqual(
+      h._pushed.filter((p) => p.event === "cell-click"),
+      [],
+    );
+  });
+}
+
+// (E) The drag-select trailing-click suppression still swallows EXACTLY one
+// click — the synthetic click that trails a mousedown/drag is dropped so it
+// cannot re-anchor and collapse the just-dragged selection; the next real
+// click passes through.
+wall("drag trailing-click suppression swallows exactly one click, then passes", () => {
+  const h = mountHook();
+  h.el.dispatch("mousedown", cellEvent("A1")); // anchors + arms _suppressClick
+  dispatchWindow("mouseup", {});
+  h.el.dispatch("click", cellEvent("A1")); // synthetic post-drag click → swallowed
+  assert.equal(h._pushed.length, 1);
+  h.el.dispatch("click", cellEvent("C4")); // a fresh standalone click → anchors
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "A1", shift: false } },
+    { event: "cell-click", payload: { ref: "C4", shift: false } },
+  ]);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
