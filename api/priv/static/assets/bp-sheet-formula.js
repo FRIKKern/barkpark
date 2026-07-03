@@ -186,6 +186,15 @@
   //   4. caret inside/adjacent an existing ref -> point-replace that ref
   //   5. caret after = ( , : or an operator    -> point-insert (span:null)
   //   6. otherwise (after ) or a complete expr) -> commit
+  //
+  // Rule-order note vs the charter table (decision 4): the charter lists the
+  // after-operator POINT-insert row before the adjacent-ref row. The two rows
+  // overlap in exactly one case — caret at the LEFT edge of a ref whose
+  // previous char is an operator ('=A1+|B2') — and there insert-before would
+  // splice garbage ('=A1+C3B2'), so adjacent-ref (replace, Sheets' actual
+  // muscle memory) deliberately wins here. Rows are disjoint everywhere else.
+  // hotSpan stays ABOVE adjacent-ref so a ':'-extended range ('=B3:B5' with
+  // hot span on the B5 half) replaces only the live half, not the whole range.
   function caretContext(value, caret, hotSpan) {
     var s = String(value == null ? "" : value);
     caret = clampCaret(s.length, caret);
@@ -291,11 +300,35 @@
   // ── (d) extendRef ─────────────────────────────────────────────────────────
   // Rewrite the ref at `span` to anchor:endRef, normalized top-left:bottom-
   // right. If the ref already holds a range, its first cell is the anchor.
+  // Species algebra: cell+cell -> normalizeRange box; whole-col anchor + col
+  // end (a header drag hands endRef as 'D' or 'D:D' — either works) -> min:max
+  // col range; whole-row likewise. Each side keeps its own $ flag. Mixed
+  // species fall back to plain anchor:endRef.
+  var RE_COLPART = /^(\$?)([A-Za-z]{1,3})$/;
+  var RE_ROWPART = /^(\$?)([0-9]+)$/;
   function extendRef(value, span, endRef) {
     var s = String(value == null ? "" : value);
     var cur = s.slice(span.start, span.end);
     var anchor = cur.split(":")[0];
-    var newText = normalizeRange(anchor, String(endRef == null ? "" : endRef));
+    var endText = String(endRef == null ? "" : endRef);
+    var endHead = endText.split(":")[0];
+    var newText = null;
+    var ca = RE_COLPART.exec(anchor);
+    var cb = RE_COLPART.exec(endHead);
+    if (ca && cb) {
+      var lo = colToNum(ca[2]) <= colToNum(cb[2]) ? ca : cb;
+      var hi = lo === ca ? cb : ca;
+      newText = lo[1] + lo[2].toUpperCase() + ":" + hi[1] + hi[2].toUpperCase();
+    } else {
+      var ra = RE_ROWPART.exec(anchor);
+      var rb = RE_ROWPART.exec(endHead);
+      if (ra && rb) {
+        var lo2 = parseInt(ra[2], 10) <= parseInt(rb[2], 10) ? ra : rb;
+        var hi2 = lo2 === ra ? rb : ra;
+        newText = lo2[1] + lo2[2] + ":" + hi2[1] + hi2[2];
+      }
+    }
+    if (newText == null) newText = normalizeRange(anchor, endText);
     var nv = s.slice(0, span.start) + newText + s.slice(span.end);
     var ns = { start: span.start, end: span.start + newText.length };
     return { value: nv, caret: ns.end, span: ns };
@@ -348,7 +381,7 @@
     var target = null;
     for (var i = 0; i < toks.length; i++) {
       var t = toks[i];
-      if (t.type === "ref" && caret >= t.start && caret <= t.end) target = t; // last wins → prefer left
+      if (t.type === "ref" && caret >= t.start && caret <= t.end) target = t; // last containing ref wins (only overlaps when two refs abut)
     }
     if (!target) return null;
     var nt = cycleRefText(target.text);

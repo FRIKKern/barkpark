@@ -243,6 +243,26 @@ check("extendRef: existing range extends from its first cell", () => {
   assert.equal(r.value, "=SUM(B3:B8)");
 });
 
+check("extendRef: whole-col header drag B:B -> D gives B:D (normalized)", () => {
+  // header drag hands endRef as 'D:D' or bare 'D' — both extend
+  let r = F.extendRef("=SUM(B:B", { start: 5, end: 8 }, "D:D");
+  assert.equal(r.value, "=SUM(B:D");
+  spanEq(r.span, 5, 8);
+  // reverse direction still normalizes low:high
+  r = F.extendRef("=SUM(D:D", { start: 5, end: 8 }, "B");
+  assert.equal(r.value, "=SUM(B:D");
+  // $ rides its contributing side
+  r = F.extendRef("=SUM($B:$B", { start: 5, end: 10 }, "D");
+  assert.equal(r.value, "=SUM($B:D");
+});
+
+check("extendRef: whole-row header drag 3:3 -> 5 gives 3:5 (normalized)", () => {
+  let r = F.extendRef("=SUM(3:3", { start: 5, end: 8 }, "5:5");
+  assert.equal(r.value, "=SUM(3:5");
+  r = F.extendRef("=SUM(5:5", { start: 5, end: 8 }, "3");
+  assert.equal(r.value, "=SUM(3:5");
+});
+
 // ── (e) cycleDollar — the F4 table ──────────────────────────────────────────
 
 check("F4 cell cycle A1 -> $A$1 -> A$1 -> $A1 -> A1", () => {
