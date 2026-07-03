@@ -25,15 +25,28 @@ const gitTimeout = 3 * time.Second
 // branch words, so we only trust slugs of at least this many bytes.
 const slugMinLen = 8
 
+// draftsPrefix is Barkpark's draft-document id prefix. A task lives at
+// "drafts.dwb-18" while drafted but is conventionally referenced bare
+// ("dwb-18") in commit subjects — and publishes to the bare id — so each task
+// is matched under both forms (see idForms).
+const draftsPrefix = "drafts."
+
+// bareIDMinLen guards the prefix-stripped alias: a very short bare id
+// ("a", "gh") is indistinguishable from a prose word, so the bare form is
+// only matched when it is at least this many bytes. The full prefixed form
+// always matches regardless.
+const bareIDMinLen = 3
+
 // CorrelateRepo scans recent commit subjects and the current branch name for
-// mentions of each task's doc_id, plus title-slug matches in the branch, and
-// returns a RepoContext whose Mentioned maps doc_id -> mention count. It is
-// PURE: no I/O, no exec — every input is injected, so it is exhaustively
-// table-tested. Matching is boundary-anchored (a doc_id must appear as a whole
-// id token, never as a substring inside a longer word), and doc_id matching is
-// case-sensitive because ids are exact tokens; only the title-slug/branch
-// comparison is case-folded, since branches and titles are conventionally cased
-// differently. Mentioned is always non-nil (empty when nothing correlates).
+// mentions of each task's doc_id (in both its drafts.-prefixed and bare forms
+// — see idForms), plus title-slug matches in the branch, and returns a
+// RepoContext whose Mentioned maps doc_id -> mention count. It is PURE: no
+// I/O, no exec — every input is injected, so it is exhaustively table-tested.
+// Matching is boundary-anchored (an id must appear as a whole id token, never
+// as a substring inside a longer word), and id matching is case-sensitive
+// because ids are exact tokens; only the title-slug/branch comparison is
+// case-folded, since branches and titles are conventionally cased differently.
+// Mentioned is always non-nil (empty when nothing correlates).
 func CorrelateRepo(gitLogSubjects []string, branch, repoName string, tasks []Task) RepoContext {
 	rc := RepoContext{
 		RepoName:  repoName,
@@ -46,12 +59,14 @@ func CorrelateRepo(gitLogSubjects []string, branch, repoName string, tasks []Tas
 			continue
 		}
 		n := 0
-		// (a) exact doc_id token in each commit subject.
-		for _, subj := range gitLogSubjects {
-			n += countBoundedOccurrences(subj, t.DocID, isIDChar)
+		for _, form := range idForms(t.DocID) {
+			// (a) exact id token in each commit subject.
+			for _, subj := range gitLogSubjects {
+				n += countBoundedOccurrences(subj, form, isIDChar)
+			}
+			// (b) exact id token in the branch name.
+			n += countBoundedOccurrences(branch, form, isIDChar)
 		}
-		// (b) exact doc_id token in the branch name.
-		n += countBoundedOccurrences(branch, t.DocID, isIDChar)
 		// (c) title slug appearing as an exact kebab token in the branch.
 		//     Conservative: only slugs >= slugMinLen, and counted once.
 		if slug := slugify(t.Title); len(slug) >= slugMinLen {
@@ -66,14 +81,35 @@ func CorrelateRepo(gitLogSubjects []string, branch, repoName string, tasks []Tas
 	return rc
 }
 
+// idForms returns the token forms a doc_id is matched under: the id itself,
+// plus its drafts.-prefix twin. Real commit subjects in this repo write
+// "(dwb-18)" for the task stored as "drafts.dwb-18" — without the bare alias
+// the correlator would miss essentially every real mention, because '.' is an
+// id char and the prefixed token can never match a bare one. The two forms can
+// never both match the same text position (the '.' adjacency rules one out),
+// so their counts add without double-counting. Bare aliases shorter than
+// bareIDMinLen are dropped: "drafts.a" must not correlate with the article
+// "a" in prose.
+func idForms(docID string) []string {
+	if bare := strings.TrimPrefix(docID, draftsPrefix); bare != docID {
+		if len(bare) >= bareIDMinLen {
+			return []string{docID, bare}
+		}
+		return []string{docID}
+	}
+	// A bare (published) id also matches its drafts.-prefixed mention. The
+	// longer form is strictly more specific, so no floor is needed.
+	return []string{docID, draftsPrefix + docID}
+}
+
 // GatherRepoContext is the SHELL: it execs git in dir to resolve the repo name
-// and current branch, and confirms the repo has commit history. On ANY failure
-// — no git binary, not a repo, detached with no commits, empty history — it
-// returns the zero RepoContext silently (never an error, never output), so a
-// caller can always paint. The returned Mentioned is an empty (non-nil) map:
-// repo identity is known, but correlation against tasks is a separate, pure
-// step. Integration code (a later slice) calls gatherGit for the raw subjects
-// and feeds them to CorrelateRepo alongside the loaded tasks.
+// and current branch. When dir is not inside a git repo (or git is missing,
+// or every probe times out) it returns the zero RepoContext silently (never
+// an error, never output), so a caller can always paint. The returned
+// Mentioned is an empty (non-nil) map: repo identity is known, but
+// correlation against tasks is a separate, pure step. Integration code (a
+// later slice) calls gatherGit for the raw subjects and feeds them to
+// CorrelateRepo alongside the loaded tasks.
 func GatherRepoContext(dir string) RepoContext {
 	name, branch, _, ok := gatherGit(dir)
 	if !ok {
@@ -88,8 +124,11 @@ func GatherRepoContext(dir string) RepoContext {
 
 // gatherGit runs the three git probes and returns the repo name, current branch
 // (empty on detached HEAD — not a failure), the recent commit subjects, and an
-// ok flag. ok is false on any exec failure or empty history. It is the reusable
-// seam the integration slice uses to obtain subjects for CorrelateRepo.
+// ok flag. Only the identity probe (rev-parse) gates ok: a fresh `git init`
+// repo with no commits is still THIS repo — the header should show its name
+// and branch, and branch-based correlation still applies — so an empty or
+// unreadable log just means nil subjects. It is the reusable seam the
+// integration slice uses to obtain subjects for CorrelateRepo.
 func gatherGit(dir string) (repoName, branch string, subjects []string, ok bool) {
 	root, ok := runGit(dir, "rev-parse", "--show-toplevel")
 	if !ok {
@@ -105,18 +144,16 @@ func gatherGit(dir string) (repoName, branch string, subjects []string, ok bool)
 	br, _ := runGit(dir, "branch", "--show-current")
 	branch = strings.TrimSpace(br)
 
-	logOut, ok := runGit(dir, "log", "--format=%s", "-100")
-	if !ok {
-		return "", "", nil, false
-	}
-	for _, line := range strings.Split(logOut, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			subjects = append(subjects, line)
+	// --no-show-signature guards against a user's log.showSignature=true
+	// injecting GPG lines into the %s stream. Failure (e.g. unborn HEAD)
+	// just means no subjects.
+	logOut, logOK := runGit(dir, "log", "--no-show-signature", "--format=%s", "-100")
+	if logOK {
+		for _, line := range strings.Split(logOut, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				subjects = append(subjects, line)
+			}
 		}
-	}
-	if len(subjects) == 0 {
-		// Empty history: nothing to correlate — treat as "no repo".
-		return "", "", nil, false
 	}
 	return repoName, branch, subjects, true
 }

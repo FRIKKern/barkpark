@@ -18,6 +18,27 @@ func tasksFrom(pairs ...[2]string) []Task {
 	return ts
 }
 
+// tempGitRepo creates a throwaway dir and returns it plus a git runner that
+// executes `git -C dir args...` with a hermetic identity/config, failing the
+// test on any error. Callers that need git should LookPath-skip first.
+func tempGitRepo(t *testing.T) (string, func(args ...string)) {
+	t.Helper()
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+		)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	return dir, git
+}
+
 func TestCorrelateRepo_Table(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -51,13 +72,17 @@ func TestCorrelateRepo_Table(t *testing.T) {
 			want:     map[string]int{"t42": 2},
 		},
 		{
-			name:     "drafts.-prefixed id matches whole token",
+			// drafts.abc123 and abc123 are the SAME document (draft vs
+			// published id), so a prefixed mention correlates to both —
+			// but each counts the token exactly once (the bare form cannot
+			// ALSO match inside the prefixed token: '.' is an id char).
+			name:     "drafts.-prefixed id matches whole token, once per task",
 			subjects: []string{"resolve drafts.abc123 lease expiry"},
 			tasks: tasksFrom(
 				[2]string{"drafts.abc123", ""},
-				[2]string{"abc123", ""}, // bare suffix must NOT match after the '.'
+				[2]string{"abc123", ""},
 			),
-			want: map[string]int{"drafts.abc123": 1},
+			want: map[string]int{"drafts.abc123": 1, "abc123": 1},
 		},
 		{
 			name:     "hyphenated id does not match a shorter prefix id",
@@ -76,6 +101,40 @@ func TestCorrelateRepo_Table(t *testing.T) {
 				[2]string{"t12", ""}, // standalone -> match
 			),
 			want: map[string]int{"t12": 1},
+		},
+		{
+			// The repo's real convention: commits write "(dwb-18)" for the
+			// task stored as "drafts.dwb-18". The bare alias must correlate.
+			name:     "bare mention correlates to the drafts.-prefixed task",
+			subjects: []string{"fix(cloud): honest pre-claim state (dwb-18)"},
+			tasks:    tasksFrom([2]string{"drafts.dwb-18", ""}),
+			want:     map[string]int{"drafts.dwb-18": 1},
+		},
+		{
+			name:     "prefixed mention counts once, never doubled via the alias",
+			subjects: []string{"resolve drafts.dwb-18 lease expiry"},
+			tasks:    tasksFrom([2]string{"drafts.dwb-18", ""}),
+			want:     map[string]int{"drafts.dwb-18": 1},
+		},
+		{
+			name:     "bare and prefixed mentions accumulate on one task",
+			subjects: []string{"land dwb-18 first", "then revert drafts.dwb-18"},
+			tasks:    tasksFrom([2]string{"drafts.dwb-18", ""}),
+			want:     map[string]int{"drafts.dwb-18": 2},
+		},
+		{
+			name:     "published bare id matches its drafts.-prefixed mention",
+			subjects: []string{"wire drafts.dwb-18 into the queue"},
+			tasks:    tasksFrom([2]string{"dwb-18", ""}),
+			want:     map[string]int{"dwb-18": 1},
+		},
+		{
+			// "drafts.a" stripped to "a" would match the English article
+			// everywhere; the bareIDMinLen floor must suppress that.
+			name:     "too-short bare alias never matches prose",
+			subjects: []string{"add a test for the parser"},
+			tasks:    tasksFrom([2]string{"drafts.a", ""}),
+			want:     map[string]int{},
 		},
 		{
 			name:     "doc_id mentioned in the branch name",
@@ -147,19 +206,22 @@ func TestCorrelateRepo_Fixture(t *testing.T) {
 	const branch = "work/doc-fresh"
 
 	tasks := tasksFrom(
-		[2]string{"t42", "grid paste"},           // subjects 3 + 4 -> 2
-		[2]string{"drafts.abc123", "lease expiry"}, // subject 2 -> 1
-		[2]string{"abc123", "bare id"},             // suffix after '.' -> 0
-		[2]string{"t1", "one"},                     // inside t12/point1 -> 0
-		[2]string{"t12", "twelve"},                 // subject 5 -> 1
-		[2]string{"point1", "pointer"},             // subject 5 -> 1
-		[2]string{"t99", "Doc fresh"},              // slug "doc-fresh" in branch -> 1
+		[2]string{"t42", "grid paste"},              // subjects 3 + 4 -> 2
+		[2]string{"drafts.abc123", "lease expiry"},  // subject 2 -> 1
+		[2]string{"abc123", "bare id"},              // same doc via drafts. alias -> 1
+		[2]string{"drafts.dwb-18", "pre-claim"},     // bare "(dwb-18)" in subject 8 -> 1
+		[2]string{"t1", "one"},                      // inside t12/point1 -> 0
+		[2]string{"t12", "twelve"},                  // subject 5 -> 1
+		[2]string{"point1", "pointer"},              // subject 5 -> 1
+		[2]string{"t99", "Doc fresh"},               // slug "doc-fresh" in branch -> 1
 		[2]string{"t50", "Repo correlator git log"}, // slug only in a subject -> 0
 	)
 
 	want := map[string]int{
 		"t42":           2,
 		"drafts.abc123": 1,
+		"abc123":        1,
+		"drafts.dwb-18": 1,
 		"t12":           1,
 		"point1":        1,
 		"t99":           1,
@@ -184,11 +246,11 @@ func TestCorrelateRepo_PreservesIdentityWithNoTasks(t *testing.T) {
 func TestSlugify(t *testing.T) {
 	cases := map[string]string{
 		"Repo correlator git log": "repo-correlator-git-log",
-		"  Fix   the BUG!! ":       "fix-the-bug",
-		"already-kebab":            "already-kebab",
-		"":                         "",
-		"---":                      "",
-		"v2.1 API layer":           "v2-1-api-layer", // punctuation collapses to one hyphen
+		"  Fix   the BUG!! ":      "fix-the-bug",
+		"already-kebab":           "already-kebab",
+		"":                        "",
+		"---":                     "",
+		"v2.1 API layer":          "v2-1-api-layer", // punctuation collapses to one hyphen
 	}
 	for in, want := range cases {
 		if got := slugify(in); got != want {
@@ -212,19 +274,7 @@ func TestGatherRepoContext_TempRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	dir := t.TempDir()
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	dir, git := tempGitRepo(t)
 	git("init")
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
@@ -245,25 +295,45 @@ func TestGatherRepoContext_TempRepo(t *testing.T) {
 	}
 }
 
+// TestGatherRepoContext_EmptyHistoryKeepsIdentity: a fresh `git init` with no
+// commits is still THIS repo — the shell must return its name and branch (so
+// the header can show them and the branch can correlate), just no subjects.
+func TestGatherRepoContext_EmptyHistoryKeepsIdentity(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir, git := tempGitRepo(t)
+	git("init")
+	// Pin the unborn branch name deterministically (init -b needs git 2.28+).
+	git("symbolic-ref", "HEAD", "refs/heads/fresh-b")
+
+	got := GatherRepoContext(dir)
+	if got.RepoName == "" {
+		t.Errorf("RepoName is empty; an empty-history repo must keep its identity")
+	}
+	if got.Branch != "fresh-b" {
+		t.Errorf("Branch = %q, want fresh-b", got.Branch)
+	}
+	if got.Mentioned == nil {
+		t.Errorf("Mentioned is nil; a detected repo must carry a non-nil map")
+	}
+
+	name, branch, subjects, ok := gatherGit(dir)
+	if !ok || name == "" || branch != "fresh-b" {
+		t.Errorf("gatherGit = (%q, %q, ok=%v), want identity with ok=true", name, branch, ok)
+	}
+	if len(subjects) != 0 {
+		t.Errorf("subjects = %v, want none in an empty-history repo", subjects)
+	}
+}
+
 // TestGatherGit_TempRepoSubjects proves the reusable seam returns commit
 // subjects the integration slice can feed to CorrelateRepo. Skipped w/o git.
 func TestGatherGit_TempRepoSubjects(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	dir := t.TempDir()
-	git := func(args ...string) {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		cmd.Env = append(os.Environ(),
-			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
-			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
-			"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
-		)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
-	}
+	dir, git := tempGitRepo(t)
 	git("init")
 	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)

@@ -5,3 +5,4 @@ revert: back out task t42 grid change that broke paste
 docs: cover t12 and point1 edge cases in the parser notes
 refactor: tidy the repo-correlator-git-log path in taskboard
 Merge branch 'main' into work/doc-fresh
+fix(cloud): honest pre-claim state for queued deployments (dwb-18)
