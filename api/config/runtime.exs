@@ -472,6 +472,29 @@ if config_env() == :prod do
 
   config :barkpark, :rate_limits, rate_limits
 
+  # Ticket-key abuse rails (BarkparkWeb.Plugs.TicketRateLimit) — per-hour
+  # budgets per key + write class, operator-tunable without a rebuild, same
+  # pattern as BARKPARK_RATE_LIMIT_READ/_WRITE above.
+  base_ticket_limits = Application.get_env(:barkpark, :ticket_rate_limits, [])
+
+  ticket_rate_limits =
+    Enum.reduce(
+      [
+        create: "BARKPARK_TICKET_RATE_CREATE",
+        message: "BARKPARK_TICKET_RATE_MESSAGE",
+        attachment: "BARKPARK_TICKET_RATE_ATTACHMENT"
+      ],
+      base_ticket_limits,
+      fn {class, env_var}, acc ->
+        case System.get_env(env_var) do
+          nil -> acc
+          raw -> Keyword.put(acc, class, String.to_integer(raw))
+        end
+      end
+    )
+
+  config :barkpark, :ticket_rate_limits, ticket_rate_limits
+
   if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
     parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
     config :barkpark, :default_cors_origins, parsed
