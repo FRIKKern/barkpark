@@ -245,6 +245,77 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
     end
   end
 
+  # ── Tenancy: cross-workspace membership isolation (Goal barkpark-qprk) ───
+  #
+  # `add_member`/`remove_member` resolve the asset via `Media.get_file/2`, which
+  # MUST carry the request scope. `ensure_dataset/2` only compares the dataset
+  # STRING (shared across tenants), so without scope a workspace-B writer could
+  # pass a workspace-A blob id: it would resolve cross-tenant and membership
+  # would be written under the FILE's own (workspace-A) scope — mutating another
+  # tenant's asset doc. Scoping the read makes the foreign id resolve to
+  # not_found (404) instead of leaking.
+  describe "tenancy scope — membership" do
+    setup do
+      {default_ws, _default_proj} = ensure_default_scope!()
+
+      ws_a = create_workspace!()
+      proj_a = create_project!(ws_a)
+
+      # A blob owned by workspace A (NOT the request's Default scope).
+      {:ok, foreign_file} =
+        Media.upload(png_upload(), "production", workspace_id: ws_a.id, project_id: proj_a.id)
+
+      on_exit(fn ->
+        File.rm(Path.join(Media.upload_dir(), foreign_file.path))
+        Media.Renditions.delete_for_file(foreign_file.id)
+        Assets.delete_for_blob(foreign_file.id, "production")
+      end)
+
+      %{default_ws: default_ws, foreign_file: foreign_file}
+    end
+
+    test "Default-scoped writer cannot add a workspace-A asset (not_found, no leak)",
+         %{conn: conn, foreign_file: foreign_file} do
+      collection = create_collection!(%{title: "Default folder"})
+
+      resp =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/collections/#{collection.doc_id}/members", %{
+          "assetId" => foreign_file.id
+        })
+
+      assert resp.status == 404
+
+      # The foreign asset must still have zero collection membership — the
+      # rejected call must not have mutated workspace-A's asset doc.
+      assets =
+        conn
+        |> get(~p"/v1/media/production/collections/#{collection.doc_id}/assets")
+        |> json_response(200)
+
+      assert assets["result"]["total"] == 0
+
+      cleanup_collection(collection)
+    end
+
+    test "Default-scoped writer cannot remove a workspace-A asset (not_found)",
+         %{conn: conn, foreign_file: foreign_file} do
+      collection = create_collection!(%{title: "Default folder"})
+
+      resp =
+        conn
+        |> authed()
+        |> delete(
+          ~p"/v1/media/production/collections/#{collection.doc_id}/members/#{foreign_file.id}"
+        )
+
+      assert resp.status == 404
+
+      cleanup_collection(collection)
+    end
+  end
+
   describe "relations" do
     test "outbound and inbound relation graph", %{conn: conn} do
       first = upload_asset(conn)
