@@ -262,14 +262,16 @@ func ansiForRole(role string) string {
 // "behind" is info, not warn ("update available" is news, not an alarm) — and
 // TestStatusRoleMatchesAttentionFixture holds this function to that file. The
 // remaining tokens are the deploy/health/agent vocabulary the control plane
-// emits (queued/building/pushing, up/unknown, online/offline, …).
+// emits (queued/building/pushing, up/unknown, online/offline, …), plus
+// "inactive" — the webhook list's manually-switched-off state, kept distinct
+// from "suspended" (the system-imposed instance state).
 func statusRole(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "live", "up", "online", "ok":
 		return "ok"
 	case "queued", "building", "pushing", "provisioning", "pending", "removing", "behind":
 		return "info"
-	case "degraded", "unknown", "suspended":
+	case "degraded", "unknown", "suspended", "inactive":
 		return "warn"
 	case "failed", "error", "offline", "removal_failed":
 		return "danger"

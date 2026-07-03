@@ -41,7 +41,16 @@ import (
 // Cloud session token (`bp login`) for EVERY verb — even a bare-UUID instance —
 // because the proxy call itself is Bearer-authed against the control plane.
 func runCloudWebhook(out *writer, g globals, args []string) int {
-	if g.help || (len(args) > 0 && (args[0] == "-h" || args[0] == "--help" || args[0] == "help")) {
+	// -h/--help anywhere in the tail prints help (so `bp cloud webhook list -h`
+	// helps instead of erroring as an unknown flag) — the runLoginCloud / cloud12
+	// per-verb convention. No positional can legitimately start with "-".
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printCloudWebhookHelp(out)
+			return exitOK
+		}
+	}
+	if g.help || (len(args) > 0 && args[0] == "help") {
 		printCloudWebhookHelp(out)
 		return exitOK
 	}
@@ -500,7 +509,7 @@ func upstreamDetail(raw json.RawMessage) string {
 // renderWebhookList prints the endpoints as a table, one row each, with a
 // computed STATUS cell painted through the statusRole seam: active → ok (green),
 // auto-disabled (a disable_reason present) → failed (red), manually off →
-// suspended (yellow).
+// inactive (yellow).
 func renderWebhookList(out *writer, data json.RawMessage, dataset string) {
 	var body struct {
 		Webhooks []map[string]any `json:"webhooks"`
@@ -527,8 +536,14 @@ func renderWebhookList(out *writer, data json.RawMessage, dataset string) {
 
 // renderWebhookDeliveries prints the recent deliveries with the STATUS cell
 // role-painted (ok → green, failed → red, pending → cyan). status_code /
-// last_latency_ms / attempts / delivered_at ride as the data columns; a pending
+// last_latency_ms / attempts / last_attempt ride as the data columns; a pending
 // row's null code/latency renders as an em dash rather than a blank.
+//
+// The timestamp column is honestly named: the instance's updated_at is the time
+// of the LAST ATTEMPT (the successful one on an ok row, the give-up on a failed
+// row) — calling it "delivered_at" would stamp a delivery time onto rows that
+// were never delivered. A never-attempted row (attempts 0: updated_at is just
+// the enqueue time) dashes the cell instead.
 func renderWebhookDeliveries(out *writer, data json.RawMessage) {
 	var body struct {
 		Deliveries []map[string]any `json:"deliveries"`
@@ -540,13 +555,17 @@ func renderWebhookDeliveries(out *writer, data json.RawMessage) {
 	}
 	rows := make([]any, 0, len(body.Deliveries))
 	for _, d := range body.Deliveries {
+		lastAttempt := "—"
+		if attempts, _ := d["attempts"].(float64); attempts > 0 {
+			lastAttempt = webhookCell(d["updated_at"])
+		}
 		rows = append(rows, map[string]any{
 			"id":           webhookCell(d["id"]),
 			"status":       deliveryStatusToken(cellString(d["status"])),
 			"status_code":  webhookCell(d["last_status_code"]),
 			"attempts":     webhookCell(d["attempts"]),
 			"latency_ms":   webhookCell(d["last_latency_ms"]),
-			"delivered_at": webhookCell(d["updated_at"]),
+			"last_attempt": lastAttempt,
 		})
 	}
 	b, _ := json.Marshal(rows)
@@ -563,8 +582,11 @@ func webhookStateToken(wh map[string]any) string {
 		// Auto-disabled after repeated terminal failures — this is a fault, red.
 		return "failed"
 	}
-	// Deliberately switched off — a warning, not a fault.
-	return "suspended"
+	// Deliberately switched off — a warning, not a fault. "inactive" is the data
+	// model's own word (active:false) and matches toggle's "is now inactive";
+	// NOT "suspended", which the fleet vocabulary reserves for a system-imposed
+	// instance suspension.
+	return "inactive"
 }
 
 // deliveryStatusToken maps the instance delivery-status enum

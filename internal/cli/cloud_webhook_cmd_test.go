@@ -107,9 +107,13 @@ func writeEnvelope(w http.ResponseWriter, status int, body string) {
 	_, _ = io.WriteString(w, body)
 }
 
+// Three rows, one per STATUS state: active → ok, auto-disabled (disable_reason
+// present) → failed, manually switched off (active:false, NO disable_reason) →
+// inactive.
 const listEnvelope = `{"ok":true,"resource":"webhook","data":{"webhooks":[` +
 	`{"id":"wh_1","name":"prod","url":"https://a.test/hook","dataset":"production","events":["create","update"],"active":true,"consecutive_failures":0,"disable_reason":null},` +
-	`{"id":"wh_2","name":"stale","url":"https://b.test/h","dataset":"production","events":[],"active":false,"consecutive_failures":5,"disable_reason":"too_many_failures"}` +
+	`{"id":"wh_2","name":"stale","url":"https://b.test/h","dataset":"production","events":[],"active":false,"consecutive_failures":5,"disable_reason":"too_many_failures"},` +
+	`{"id":"wh_3","name":"paused","url":"https://c.test/h","dataset":"production","events":["publish"],"active":false,"consecutive_failures":0,"disable_reason":null}` +
 	`]}}`
 
 // TestWebhookDispatch: the verbs route, an unknown verb is usage, and no login
@@ -159,7 +163,9 @@ func TestWebhookListJSONVerbatim(t *testing.T) {
 	}
 }
 
-// TestWebhookListTableGolden pins the human table (piped, uncolored).
+// TestWebhookListTableGolden pins the human table (piped, uncolored) and the
+// tty STATUS paint: active=green(ok), auto-disabled=red(failed), manually
+// off=yellow(inactive — NOT "suspended", which means an instance suspension).
 func TestWebhookListTableGolden(t *testing.T) {
 	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
 		writeEnvelope(w, 200, listEnvelope)
@@ -169,6 +175,54 @@ func TestWebhookListTableGolden(t *testing.T) {
 		t.Fatalf("exit = %d", code)
 	}
 	assertGolden(t, "webhook_list_table", stdout)
+
+	colored, _, _ := runWebhook(t, "table", true, "list", testInstanceID)
+	if !strings.Contains(colored, "\x1b[32mok") || !strings.Contains(colored, "\x1b[31mfailed") || !strings.Contains(colored, "\x1b[33minactive") {
+		t.Fatalf("expected green ok + red failed + yellow inactive cells, got:\n%q", colored)
+	}
+	if rtrimLines(stripANSI(colored)) != rtrimLines(stdout) {
+		t.Fatalf("colored (ansi-stripped) != piped:\n%s", stripANSI(colored))
+	}
+}
+
+// TestWebhookPerVerbHelp: -h anywhere in the tail prints help and exits 0 — a
+// verb-level `bp cloud webhook list -h` must never be an unknown-flag error.
+func TestWebhookPerVerbHelp(t *testing.T) {
+	rec := newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("help must not call the proxy: %s %s", r.Method, r.URL.Path)
+	})
+	for _, args := range [][]string{
+		{"-h"},
+		{"list", "-h"},
+		{"rm", testInstanceID, "wh_1", "--help"},
+	} {
+		stdout, _, code := runWebhook(t, "table", false, args...)
+		if code != exitOK {
+			t.Fatalf("%v exit = %d, want 0", args, code)
+		}
+		if !strings.Contains(stdout, "bp cloud webhook — control") {
+			t.Fatalf("%v did not print help:\n%s", args, stdout)
+		}
+	}
+	if len(rec.all()) != 0 {
+		t.Fatalf("help hit the network: %+v", rec.all())
+	}
+}
+
+// TestWebhookListYAML: -o yaml is a faithful re-encode of the envelope.
+func TestWebhookListYAML(t *testing.T) {
+	newFakeProxy(t, func(w http.ResponseWriter, r *http.Request) {
+		writeEnvelope(w, 200, listEnvelope)
+	})
+	stdout, _, code := runWebhook(t, "yaml", false, "list", testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d", code)
+	}
+	for _, want := range []string{"ok: true", "webhooks:", "wh_1", "https://a.test/hook"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("yaml missing %q:\n%s", want, stdout)
+		}
+	}
 }
 
 // TestWebhookDatasetPassedThrough: --dataset rides as ?dataset= on the proxy.

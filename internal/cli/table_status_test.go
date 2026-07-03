@@ -35,7 +35,10 @@ func TestStatusRoleMapping(t *testing.T) {
 		// ("update available" is news, not an alarm);
 		// TestAttentionVocabularyMatchesFixture cross-checks the committed file.
 		"behind":   "info",
-		"degraded": "warn", "unknown": "warn", "suspended": "warn",
+		// "inactive" is the webhook list's manually-switched-off state (the data
+		// model's own word for active:false) — attention-worthy, not a fault;
+		// "suspended" stays reserved for the system-imposed instance state.
+		"degraded": "warn", "unknown": "warn", "suspended": "warn", "inactive": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Unknown strings get NO role (never a guess).
 		"":                    "",
