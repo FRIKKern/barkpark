@@ -126,6 +126,12 @@ defmodule Barkpark.Application do
           {Registry, keys: :unique, name: Barkpark.Plugins.Sheets.SessionRegistry},
           {DynamicSupervisor,
            name: Barkpark.Plugins.Sheets.SessionSupervisor, strategy: :one_for_one},
+          # /ops idempotency ring (QR-A): owns the public named ETS table
+          # `:sheets_ops_replay` so an exactly-once request_id survives any
+          # single session restart (a 503-retry lands on a FRESH session by
+          # construction). Node-local; a BEAM restart clears it with the
+          # sessions. See Barkpark.Plugins.Sheets.Session.ReplayRing.
+          Barkpark.Plugins.Sheets.Session.ReplayRing,
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,

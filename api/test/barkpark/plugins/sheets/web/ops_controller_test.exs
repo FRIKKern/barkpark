@@ -144,6 +144,8 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
     assert is_integer(body["rev"]) and body["rev"] >= 1
     assert body["applied"] == 1
     assert body["errors"] == []
+    # Additive replayed field: a first (non-retried) request is false.
+    assert body["replayed"] == false
   end
 
   # ── 6. sort_range rides the existing endpoint (SF-A) ──────────────────────
@@ -195,5 +197,70 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
 
     assert body2["applied"] == 0
     assert [%{"code" => "invalid_sort_keys"}] = body2["errors"]
+  end
+
+  # ── 7. Idempotency: request_id validation + exactly-once replay (QR-A) ─────
+
+  test "returns 422 invalid_request_id when request_id is not a non-empty string", %{conn: conn} do
+    create_sheet(@slug)
+    op = %{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "world"}
+
+    for bad <- [123, ["x"], "", %{"k" => "v"}] do
+      body =
+        conn
+        |> authed()
+        |> post(
+          ops_url(@slug, @dataset),
+          Jason.encode!(%{"ops" => [op], "request_id" => bad})
+        )
+        |> json_response(422)
+
+      assert body["error"]["code"] == "invalid_request_id"
+    end
+  end
+
+  test "threads request_id end-to-end: an HTTP retry replays and applies exactly once", %{
+    conn: conn
+  } do
+    # Seed a cell at A3 so a non-idempotent insert_rows is observable: one
+    # application shifts A3 → A5, a double-apply would land it at A7.
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => @slug,
+          "content" => %{"tabs" => [%{"name" => "T0", "cells" => %{"A3" => %{"v" => "x"}}}]}
+        },
+        @dataset
+      )
+
+    insert = %{"op" => "insert_rows", "tab" => 0, "at" => 1, "count" => 2}
+    payload = Jason.encode!(%{"ops" => [insert], "request_id" => "http-retry-1"})
+
+    first =
+      conn
+      |> authed()
+      |> post(ops_url(@slug, @dataset), payload)
+      |> json_response(200)
+
+    assert first["applied"] == 1
+    assert first["replayed"] == false
+
+    # The retry (identical request_id) replays and applies nothing.
+    second =
+      build_conn()
+      |> authed()
+      |> post(ops_url(@slug, @dataset), payload)
+      |> json_response(200)
+
+    assert second["replayed"] == true
+    assert second["rev"] == first["rev"]
+    assert second["applied"] == first["applied"]
+
+    # Single application: A3 shifted to A5 exactly once (no A7 double-shift).
+    {:ok, content} = Session.peek(@slug, @dataset)
+    cells = get_in(content, ["tabs", Access.at(0), "cells"])
+    assert Map.has_key?(cells, "A5")
+    refute Map.has_key?(cells, "A7")
   end
 end
