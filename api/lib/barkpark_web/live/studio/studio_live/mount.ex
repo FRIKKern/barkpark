@@ -63,7 +63,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       delete_refs: [],
       show_discard: false,
       # ── Blast-radius graph pane (Goal ges/graph-edge-seam, Phase 5) ──────
-      # A `graph` doc opens the Cytoscape blast-radius pane
+      # A `graph` doc opens the Canvas2D blast-radius pane (bp-graph.js)
       # (`editor_view: :graph`), rendered by the GraphView LiveComponent. The
       # unpublish guard (gap #5) probes `Content.Graph.reverse_referencers/2`
       # — the arrayOf-aware inbound-edge query — and pops a confirm modal when

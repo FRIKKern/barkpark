@@ -1524,7 +1524,8 @@ defmodule Barkpark.Plugins.Capabilities do
       # are tier "read" (hidden from anon, shown to any authenticated caller).
       # writes:false for all — these are auth exchanges, not content mutations
       # (the manifest `writes` flag drives bp's content --dry-run/confirm path).
-      # Paths mirror router.ex /v1/auth/* (public 716-724, gated 727-734).
+      # Paths mirror the `scope "/v1/auth"` blocks in router.ex (public entry +
+      # session-gated).
       core_cmd(
         "auth.register",
         "auth",

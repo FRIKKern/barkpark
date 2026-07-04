@@ -476,7 +476,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         />
         <% @editor_view == :graph and @graph_doc != nil -> %>
         <%!-- Blast-radius graph pane (Phase 5). The GraphView LiveComponent
-              owns the Cytoscape surface; its div carries the CONSTANT id
+              owns the Canvas2D surface (bp-graph.js); its div carries the CONSTANT id
               "studio-graph" so navigation diffs the data-* attrs rather than
               remounting the hook and losing layout. The component derives the
               JSON payloads in update/2 (the change-tracking contract). --%>

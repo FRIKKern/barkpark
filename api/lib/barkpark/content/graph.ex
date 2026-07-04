@@ -3,8 +3,8 @@ defmodule Barkpark.Content.Graph do
   The content-graph BFS engine (Goal `ges/graph-edge-seam`, Phase 4).
 
   Walks the materialised `content_edges` table from a root document, bounded by
-  three trip-wires, and returns a node/edge payload the Studio Cytoscape pane
-  (Phase 5) and the `/v1/graph/*` HTTP surface consume.
+  three trip-wires, and returns a node/edge payload the Studio Canvas2D graph
+  pane (Phase 5, bp-graph.js) and the `/v1/graph/*` HTTP surface consume.
 
   ## What it reads
 
@@ -693,7 +693,7 @@ defmodule Barkpark.Content.Graph do
   end
 
   defp render_edge(%Edge{} = e) do
-    # `weight` is emitted for the Cytoscape LAYOUT ONLY — it is NEVER read by
+    # `weight` is emitted for the Canvas2D force-sim LAYOUT ONLY — it is NEVER read by
     # ranking (see rank_dependents/3).
     %{
       from_id: e.from_id,
@@ -709,7 +709,7 @@ defmodule Barkpark.Content.Graph do
 
   Order: distance ASC → inbound-edge-count DESC → inserted_at ASC.
 
-  NEVER sort by weight — weight is Cytoscape-layout-only; ranking is topology
+  NEVER sort by weight — weight is Canvas2D-force-sim-layout-only; ranking is topology
   (distance, fan-in, inserted_at). A future author wiring `edge.weight` into
   this sort would silently couple layout to ranking — do NOT.
   """
