@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridDataTest do
   """
   use ExUnit.Case, async: true
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias BarkparkWeb.Studio.SheetGrid.GridData
 
   describe "clamp_frozen/2" do
@@ -59,6 +60,132 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridDataTest do
 
       assert socket.assigns.frozen_rows == 2
       assert socket.assigns.frozen_cols == 1
+    end
+  end
+
+  describe "cf_styles/2 — live-grid conditional-format projection (CF-C stage A)" do
+    test "projects only OCCUPIED matching cells via the ONE kernel (CF-D8)" do
+      rules =
+        CondFormat.parse_rules([
+          %{
+            "id" => "r1",
+            "range" => "A1:A4",
+            "when" => %{"op" => "gt", "value" => 10},
+            "style" => %{"bg" => "#ff0000"}
+          }
+        ])
+
+      cells = %{"A1" => %{"v" => 5}, "A2" => %{"v" => 20}, "A3" => %{"v" => 50}}
+      styles = GridData.cf_styles(rules, cells)
+
+      # A1 (5) doesn't match; A2/A3 do; A4 is blank (occupied-only, no entry).
+      refute Map.has_key?(styles, {1, 1})
+      assert styles[{1, 2}] == %{"bg" => "#ff0000"}
+      assert styles[{1, 3}] == %{"bg" => "#ff0000"}
+      refute Map.has_key?(styles, {1, 4})
+    end
+
+    test "empty rules → empty map (byte-identical no-CF default)" do
+      assert GridData.cf_styles([], %{"A1" => %{"v" => 1}}) == %{}
+    end
+
+    test "first-match-wins under overlapping same-range rules (kernel priority)" do
+      rules =
+        CondFormat.parse_rules([
+          %{
+            "id" => "r1",
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 0},
+            "style" => %{"bg" => "#111111"}
+          },
+          %{
+            "id" => "r2",
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 0},
+            "style" => %{"bg" => "#222222"}
+          }
+        ])
+
+      assert GridData.cf_styles(rules, %{"A1" => %{"v" => 9}}) == %{
+               {1, 1} => %{"bg" => "#111111"}
+             }
+    end
+  end
+
+  describe "derive_grid/1 conditional formatting" do
+    test "derives cf_styles occupied-only and carries the raw rules for the panel" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{"B2" => %{"v" => 200}, "B3" => %{"v" => 1}},
+            "cond_formats" => [
+              %{
+                "id" => "r1",
+                "range" => "B2:B3",
+                "when" => %{"op" => "gt", "value" => 100},
+                "style" => %{"bg" => "#ff0000"}
+              }
+            ]
+          }
+        ]
+      }
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(content: content, tab: 0)
+        |> GridData.derive_grid()
+
+      assert socket.assigns.cf_styles == %{{2, 2} => %{"bg" => "#ff0000"}}
+      assert [%{"id" => "r1"}] = socket.assigns.cf_rules
+    end
+
+    test "malformed cond_formats yields an empty cf_styles map and never raises" do
+      content = %{
+        "tabs" => [
+          %{"name" => "S", "cells" => %{"A1" => %{"v" => 1}}, "cond_formats" => "garbage"}
+        ]
+      }
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(content: content, tab: 0)
+        |> GridData.derive_grid()
+
+      assert socket.assigns.cf_styles == %{}
+      # A non-list stored value collapses to [] so the panel's :for never faults.
+      assert socket.assigns.cf_rules == []
+    end
+
+    test "non-map entries inside a stored rules LIST are dropped from cf_rules" do
+      # The panel reads rule["id"]/["when"]/["style"] per row and Access raises
+      # on a non-map — a gate-bypassed bare-string entry must degrade, not
+      # crash the render. Valid map entries around it survive.
+      valid = %{
+        "id" => "r1",
+        "range" => "A1",
+        "when" => %{"op" => "gt", "value" => 0},
+        "style" => %{"bg" => "#ff0000"}
+      }
+
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{"A1" => %{"v" => 1}},
+            "cond_formats" => ["garbage", valid, 42]
+          }
+        ]
+      }
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(content: content, tab: 0)
+        |> GridData.derive_grid()
+
+      assert socket.assigns.cf_rules == [valid]
+      # The kernel path was already total: only the valid rule paints.
+      assert socket.assigns.cf_styles == %{{1, 1} => %{"bg" => "#ff0000"}}
     end
   end
 end

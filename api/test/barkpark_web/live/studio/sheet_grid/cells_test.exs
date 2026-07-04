@@ -152,6 +152,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
 
     test "a plain-text cell does not gain the link marker" do
       refute Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => "hello"}) =~ "sheet-link-cell"
+
       refute Cells.cell_class(1, 1, nil, {9, 9}, %{"v" => "javascript:alert(1)"}) =~
                "sheet-link-cell"
     end
@@ -539,6 +540,56 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     test "cell with text-align returns alignment style" do
       style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"s" => %{"al" => "center"}})
       assert style =~ "text-align: center"
+    end
+  end
+
+  describe "cell_style/8 — conditional-format compose (CF-C stage A)" do
+    # The whole point of stage A: a nil cf must be byte-identical to today, and
+    # a present cf composes per CF-D3 (CF wins bg/b/i; manual keeps al).
+    test "a nil cf is byte-identical to the manual-only /7 path" do
+      for cell <- [
+            nil,
+            %{"s" => %{"b" => true}},
+            %{"s" => %{"bg" => "#ff0000", "al" => "center"}},
+            %{"v" => 42}
+          ] do
+        assert Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell) ==
+                 Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell, nil)
+      end
+    end
+
+    test "CF bg wins over the manual bg; the manual al survives" do
+      cell = %{"s" => %{"bg" => "#000000", "al" => "center"}}
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell, %{"bg" => "#ff0000"})
+
+      assert style =~ "background: #ff0000"
+      refute style =~ "background: #000000"
+      assert style =~ "text-align: center"
+    end
+
+    test "b/i compose from either side (manual b kept, CF i added)" do
+      cell = %{"s" => %{"b" => true}}
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, cell, %{"bg" => "#bbf7d0", "i" => true})
+
+      assert style =~ "font-weight: 600"
+      assert style =~ "font-style: italic"
+      assert style =~ "background: #bbf7d0"
+    end
+
+    test "CF applies to an occupied cell that has NO manual style" do
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"v" => 5}, %{"bg" => "#fde68a"})
+      assert style =~ "background: #fde68a"
+    end
+
+    # CF-AM2 + the cells.ex:253 ordering: on a frozen (sticky) cell the CF bg
+    # is appended AFTER the sticky "background: var(--bg)" backdrop so it wins.
+    test "CF composes on a frozen cell, its bg appended after the sticky backdrop" do
+      style = Cells.cell_style(1, 1, 1, 1, %{}, %{}, %{"v" => 5}, %{"bg" => "#ff0000"})
+
+      assert style =~ "position: sticky"
+      {sticky_at, _} = :binary.match(style, "background: var(--bg);")
+      {cf_at, _} = :binary.match(style, "background: #ff0000")
+      assert cf_at > sticky_at
     end
   end
 

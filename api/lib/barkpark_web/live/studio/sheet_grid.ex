@@ -17,7 +17,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     * `SheetGrid.GridData`  — grid/tab derivation (`derive_grid/1`,
       `merge_maps/3`, `clamp_row_offset/2`) and the change-tracking contract.
     * `SheetGrid.Cells`     — pure cell presentation (`display/1`,
-      `cell_class/5`, `cell_style/7`) the render template stamps per `<td>`.
+      `cell_class/5`, `cell_style/8`) the render template stamps per `<td>`.
     * `SheetGrid.Ops`       — commit/persistence (`send_ops/2`, `commit/3`,
       delta application, `push_presence/2`).
 
@@ -147,6 +147,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # calls. Mirrors the client PASTE_CELL_CAP and the session's 50k cell_cap.
   @paste_cell_cap 50_000
 
+  # The conditional-format panel's default rule background — the first toolbar
+  # bg swatch, so a freshly-opened form always has a valid #rrggbb selected
+  # (the gate requires bg; an empty selection would reject on submit).
+  @cf_default_bg "#fde68a"
+
   @impl true
   def mount(socket) do
     {:ok,
@@ -181,6 +186,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        find_query: "",
        find_hits: MapSet.new(),
        menu: nil,
+       # Conditional-format panel (editable hosts, CF-C stage B): nil = closed;
+       # a map = open with the create/edit form prefilled. See cf-open/cf-save.
+       cf_panel: nil,
        renaming_tab: nil,
        mode: :edit,
        read_only: false,
@@ -1155,6 +1163,83 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, apply_meta_to_selection(socket, meta_fun)}
   end
 
+  # ── events: conditional formatting (CF-C) ────────────────────────────────
+  #
+  # The whole panel is pure server-rendered LiveView (Decision CF-D1: the live
+  # grid renders CF server-side; the panel does NO client evaluation). Every
+  # write authors the tab's FULL rules list and dispatches ONE set_cond_format
+  # session op, validated with byte-identical strictness to the CF-B gate.
+
+  # Toggle the panel. Opening seeds a fresh create form with the range prefilled
+  # from the current selection (Excel's "apply to" default).
+  def handle_event("cf-open", _params, socket) do
+    panel = if socket.assigns.cf_panel, do: nil, else: cf_new_form(socket)
+    {:noreply, assign(socket, cf_panel: panel)}
+  end
+
+  def handle_event("cf-close", _params, socket) do
+    {:noreply, assign(socket, cf_panel: nil)}
+  end
+
+  # Keep the form and the op state in sync as the user types/switches op — so
+  # the "between" second value appears (and typed values survive the render).
+  def handle_event("cf-form-change", params, socket) do
+    {:noreply, assign(socket, cf_panel: cf_form_state(params))}
+  end
+
+  # Load an existing rule into the edit form.
+  def handle_event("cf-edit", %{"id" => id}, socket) do
+    panel =
+      case Enum.find(socket.assigns.cf_rules, &(to_string(&1["id"]) == id)) do
+        nil -> socket.assigns.cf_panel
+        rule -> cf_edit_form(rule)
+      end
+
+    {:noreply, assign(socket, cf_panel: panel)}
+  end
+
+  # Delete a rule: author the list minus it and dispatch. The list re-renders
+  # when the session delta lands; reset the form to a fresh create.
+  def handle_event("cf-delete", %{"id" => id}, socket) do
+    new_list = Enum.reject(socket.assigns.cf_rules, &(to_string(&1["id"]) == id))
+
+    socket = cf_dispatch(socket, new_list)
+    {:noreply, assign(socket, cf_panel: cf_new_form(socket))}
+  end
+
+  # Create or update a rule. Server-generated id for a new rule; the FULL list
+  # is validated by the op (gate parity) — a rejection surfaces via @notice and
+  # keeps the user's form, a clean apply resets to a fresh create form.
+  def handle_event("cf-save", params, socket) do
+    editing = cf_editing(params["editing"])
+    op = params["op"] || "gt"
+
+    rule = %{
+      "id" => editing || cf_new_id(socket.assigns.cf_rules),
+      "range" => String.trim(params["range"] || ""),
+      "when" =>
+        cf_when(
+          op,
+          cf_value(op, String.trim(params["value"] || "")),
+          cf_value("between", String.trim(params["value2"] || ""))
+        ),
+      "style" => cf_style(params["bg"], cf_checked?(params["b"]), cf_checked?(params["i"]))
+    }
+
+    new_list =
+      if editing do
+        Enum.map(socket.assigns.cf_rules, fn r ->
+          if to_string(r["id"]) == editing, do: rule, else: r
+        end)
+      else
+        socket.assigns.cf_rules ++ [rule]
+      end
+
+    socket = cf_dispatch(socket, new_list)
+    panel = if socket.assigns.notice, do: cf_form_state(params), else: cf_new_form(socket)
+    {:noreply, assign(socket, cf_panel: panel)}
+  end
+
   # ── events: chrome ───────────────────────────────────────────────────────
 
   def handle_event("toggle-mode", _params, socket) do
@@ -1258,6 +1343,167 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # absent) — drives B/I toggle direction and the toolbar's aria-pressed.
   defp active_style(cells, active),
     do: Map.get(Map.get(cells, Sheets.format_ref(active)) || %{}, "s") || %{}
+
+  # ── conditional-formatting helpers (CF-C) ────────────────────────────────
+
+  # One set_cond_format op carrying the tab's FULL new rules list — the session
+  # applies it as a whole-list replace with a structural inverse for undo/redo,
+  # validating with byte-identical strictness to the CF-B gate. Rides the same
+  # send_ops path as every other write (user-stamped, read-only hosts drop it).
+  defp cf_dispatch(socket, rules) do
+    send_ops(socket, [%{"op" => "set_cond_format", "tab" => socket.assigns.tab, "rules" => rules}])
+  end
+
+  # A fresh create form: range prefilled from the current selection (Excel's
+  # "apply to" default), a valid default bg so submit never trips the gate.
+  defp cf_new_form(socket) do
+    %{
+      "editing" => "",
+      "range" => cf_selection_range(socket),
+      "op" => "gt",
+      "value" => "",
+      "value2" => "",
+      "bg" => @cf_default_bg,
+      "b" => false,
+      "i" => false
+    }
+  end
+
+  # The stored rule → the edit form's fields (values back to display strings).
+  defp cf_edit_form(rule) do
+    w = cf_map(rule["when"])
+    style = cf_map(rule["style"])
+
+    %{
+      "editing" => to_string(rule["id"]),
+      "range" => to_string(rule["range"] || ""),
+      "op" => to_string(w["op"] || "gt"),
+      "value" => cf_value_to_str(w["value"]),
+      "value2" => cf_value_to_str(w["value2"]),
+      "bg" => to_string(style["bg"] || @cf_default_bg),
+      "b" => style["b"] == true,
+      "i" => style["i"] == true
+    }
+  end
+
+  # The live form params → the panel state (so a re-render keeps every field).
+  defp cf_form_state(params) do
+    %{
+      "editing" => params["editing"] || "",
+      "range" => params["range"] || "",
+      "op" => params["op"] || "gt",
+      "value" => params["value"] || "",
+      "value2" => params["value2"] || "",
+      "bg" => params["bg"] || @cf_default_bg,
+      "b" => cf_checked?(params["b"]),
+      "i" => cf_checked?(params["i"])
+    }
+  end
+
+  defp cf_selection_range(socket) do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    a = Sheets.format_ref({c1, r1})
+    if {c1, r1} == {c2, r2}, do: a, else: a <> ":" <> Sheets.format_ref({c2, r2})
+  end
+
+  defp cf_editing(editing) when is_binary(editing) and editing != "", do: editing
+  defp cf_editing(_), do: nil
+
+  # A fresh "cf-<n>" id that is NOT already taken in this tab's list.
+  # `System.unique_integer/1` restarts at low values on every BEAM boot, so a
+  # bare counter can re-mint an id persisted in a PREVIOUS run — and the gate's
+  # duplicate-id check would then reject the whole list with an error the user
+  # can't decode. Skipping taken ids closes that (the dup check is per-tab, so
+  # list-local uniqueness is sufficient).
+  defp cf_new_id(rules) do
+    taken = MapSet.new(for r <- rules, is_map(r), do: to_string(r["id"]))
+
+    Stream.repeatedly(fn -> "cf-" <> Integer.to_string(System.unique_integer([:positive])) end)
+    |> Enum.find(&(not MapSet.member?(taken, &1)))
+  end
+
+  # An unchecked HTML checkbox sends nothing; a checked one sends "on".
+  defp cf_checked?(v), do: v in ["on", "true", true]
+
+  # Coerce the value string to the type the op expects — the gate rejects a
+  # mismatch (surfaced as a notice), so an un-coercible value passes through
+  # as its string and gets a clear "must be a number" gate error.
+  defp cf_value(op, str) when op in ["gt", "lt", "between"], do: cf_to_number(str)
+  defp cf_value("eq", str), do: Ops.parse_raw(str)
+  defp cf_value(_op, str), do: str
+
+  defp cf_to_number(str) do
+    case Integer.parse(str) do
+      {i, ""} ->
+        i
+
+      _ ->
+        case Float.parse(str) do
+          {f, ""} -> f
+          _ -> str
+        end
+    end
+  end
+
+  # value2 rides ONLY for between (the gate forbids it elsewhere).
+  defp cf_when("between", value, value2),
+    do: %{"op" => "between", "value" => value, "value2" => value2}
+
+  defp cf_when(op, value, _value2), do: %{"op" => op, "value" => value}
+
+  # bg required; b/i kept only when checked (literal true) — the CF-D6 grammar.
+  defp cf_style(bg, b?, i?) do
+    %{"bg" => if(is_binary(bg), do: bg, else: "")}
+    |> cf_maybe_flag("b", b?)
+    |> cf_maybe_flag("i", i?)
+  end
+
+  defp cf_maybe_flag(map, key, true), do: Map.put(map, key, true)
+  defp cf_maybe_flag(map, _key, _), do: map
+
+  # A stored rule's one-line summary for the panel list — TOTAL, like every
+  # other read seam over stored cond_formats (a gate-bypassed doc must degrade
+  # the panel row, never crash the LiveView render).
+  defp cf_rule_summary(rule) do
+    w = cf_map(rule["when"])
+    range = to_string(rule["range"] || "")
+
+    label =
+      case to_string(w["op"] || "") do
+        "gt" -> "> #{cf_value_to_str(w["value"])}"
+        "lt" -> "< #{cf_value_to_str(w["value"])}"
+        "eq" -> "= #{cf_value_to_str(w["value"])}"
+        "between" -> "#{cf_value_to_str(w["value"])}–#{cf_value_to_str(w["value2"])}"
+        "contains" -> "contains “#{cf_value_to_str(w["value"])}”"
+        other -> other
+      end
+
+    "#{range}: #{label}"
+  end
+
+  # The rule's bg preview swatch. Stored bg is gate-validated #rrggbb, but this
+  # is a render seam over RAW storage — re-validate like Cells.style_css does,
+  # so a gate-bypassed value can never inject CSS into the style attribute.
+  defp cf_swatch_style(rule) do
+    case cf_map(rule["style"])["bg"] do
+      bg when is_binary(bg) ->
+        if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background: #{bg};", else: ""
+
+      _ ->
+        ""
+    end
+  end
+
+  # Total map read for RAW stored rule sub-maps ("when"/"style") — a non-map
+  # (gate-bypassed corruption) reads as empty rather than raising in Access.
+  defp cf_map(%{} = m), do: m
+  defp cf_map(_), do: %{}
+
+  defp cf_value_to_str(nil), do: ""
+  defp cf_value_to_str(true), do: "TRUE"
+  defp cf_value_to_str(false), do: "FALSE"
+  defp cf_value_to_str(v) when is_binary(v), do: v
+  defp cf_value_to_str(v), do: to_string(v)
 
   # Carry the source cell's number format + style onto each filled target —
   # ALWAYS both keys (nil when the source has none) so a stale target format
@@ -1842,6 +2088,94 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           </span>
         </div>
 
+        <%!-- Conditional formatting (CF-C): a pure server-rendered popover to
+              author single-rule-per-range cell-value rules. NO custom JS — the
+              same phx-click/phx-submit shape as every other style control. The
+              rules author the tab's FULL list, dispatched as ONE set_cond_format
+              session op (gate-parity validated, undo/redo via the structural
+              inverse). Editable-mode only — the whole toolbar is @editable-gated,
+              so read-only/View hosts never see it. --%>
+        <div class="sheet-cf-group" role="group" aria-label="Conditional formatting" data-test-id="sheet-cf-group">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="cf-open"
+            phx-target={@myself}
+            aria-haspopup="dialog"
+            aria-expanded={to_string(@cf_panel != nil)}
+            title="Conditional formatting"
+            data-test-id="sheet-cf-btn"
+          >Cond. format</button>
+
+          <div
+            :if={@cf_panel}
+            class="sheet-popover sheet-cf-panel"
+            role="dialog"
+            aria-label="Conditional formatting rules"
+            data-test-id="sheet-cf-panel"
+          >
+            <div class="sheet-cf-head">
+              <span class="sheet-cf-title">Conditional formatting</span>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-close" phx-target={@myself} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
+            </div>
+
+            <%!-- Existing rules for THIS tab (raw stored list). Honest empty state. --%>
+            <ul :if={@cf_rules != []} class="sheet-cf-list" data-test-id="sheet-cf-list">
+              <li :for={rule <- @cf_rules} class="sheet-cf-rule">
+                <span class="sheet-cf-swatch" style={cf_swatch_style(rule)} aria-hidden="true"></span>
+                <span class="sheet-cf-summary"><%= cf_rule_summary(rule) %></span>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-edit" phx-value-id={rule["id"]} phx-target={@myself} aria-label={"Edit rule " <> cf_rule_summary(rule)} data-test-id={"sheet-cf-edit-" <> to_string(rule["id"])}>Edit</button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-delete" phx-value-id={rule["id"]} phx-target={@myself} aria-label={"Delete rule " <> cf_rule_summary(rule)} data-test-id={"sheet-cf-delete-" <> to_string(rule["id"])}>Delete</button>
+              </li>
+            </ul>
+            <p :if={@cf_rules == []} class="sheet-cf-empty" data-test-id="sheet-cf-empty">No rules yet — add one below.</p>
+
+            <%!-- Create / edit form. phx-change tracks the op so value2 appears
+                  only for "between" and typed values survive the re-render. --%>
+            <form class="sheet-cf-form" phx-submit="cf-save" phx-change="cf-form-change" phx-target={@myself} data-test-id="sheet-cf-form">
+              <input type="hidden" name="editing" value={@cf_panel["editing"]} />
+              <label class="sheet-cf-field">
+                <span>Apply to range</span>
+                <input type="text" name="range" value={@cf_panel["range"]} autocomplete="off" spellcheck="false" placeholder="B2:B10" data-test-id="sheet-cf-range" />
+              </label>
+              <label class="sheet-cf-field">
+                <span>Format cells where the value</span>
+                <select name="op" data-test-id="sheet-cf-op">
+                  <option value="gt" selected={@cf_panel["op"] == "gt"}>is greater than</option>
+                  <option value="lt" selected={@cf_panel["op"] == "lt"}>is less than</option>
+                  <option value="eq" selected={@cf_panel["op"] == "eq"}>is equal to</option>
+                  <option value="between" selected={@cf_panel["op"] == "between"}>is between</option>
+                  <option value="contains" selected={@cf_panel["op"] == "contains"}>contains</option>
+                </select>
+              </label>
+              <label class="sheet-cf-field">
+                <span><%= if @cf_panel["op"] == "between", do: "min", else: "value" %></span>
+                <input type="text" name="value" value={@cf_panel["value"]} autocomplete="off" spellcheck="false" data-test-id="sheet-cf-value" />
+              </label>
+              <label :if={@cf_panel["op"] == "between"} class="sheet-cf-field">
+                <span>max</span>
+                <input type="text" name="value2" value={@cf_panel["value2"]} autocomplete="off" spellcheck="false" data-test-id="sheet-cf-value2" />
+              </label>
+              <div class="sheet-cf-field">
+                <span>Background</span>
+                <span class="sheet-bg-swatches" role="radiogroup" aria-label="Rule background color">
+                  <label :for={swatch <- ~w(#fde68a #bbf7d0 #bfdbfe #fecaca #e9d5ff #e5e7eb)} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
+                    <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" />
+                    <span class="sheet-bg-swatch" style={"background: #{swatch};"} data-test-id={"sheet-cf-bg-" <> String.trim_leading(swatch, "#")} data-selected={to_string(@cf_panel["bg"] == swatch)}></span>
+                  </label>
+                </span>
+              </div>
+              <div class="sheet-cf-field sheet-cf-flags">
+                <label><input type="checkbox" name="b" checked={@cf_panel["b"]} data-test-id="sheet-cf-bold" /> Bold</label>
+                <label><input type="checkbox" name="i" checked={@cf_panel["i"]} data-test-id="sheet-cf-italic" /> Italic</label>
+              </div>
+              <div class="sheet-cf-actions">
+                <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-cf-submit"><%= if @cf_panel["editing"] in [nil, ""], do: "Add rule", else: "Save rule" %></button>
+              </div>
+            </form>
+          </div>
+        </div>
+
         <%!-- Visible undo/redo — the ghost buttons a MOUSE user needs; they
               phx-click the SAME "undo"/"redo" events the keyboard fires, so
               zero new server logic. --%>
@@ -2019,6 +2353,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
+              cf_styles={@cf_styles}
               spans={@spans}
               covered={@covered}
               col_widths={@col_widths}
@@ -2042,6 +2377,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               cols_total={@cols_total}
               row_range={@row_range}
               cells={@cells}
+              cf_styles={@cf_styles}
               spans={@spans}
               covered={@covered}
               col_widths={@col_widths}
@@ -2288,7 +2624,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               data-t={Cells.data_t(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
-              style={Cells.cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell)}
+              style={Cells.cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell, Map.get(@cf_styles, {c, r}))}
             >
               <%= if @editable and @editing != nil and @active == {c, r} do %>
                 <input

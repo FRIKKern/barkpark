@@ -273,7 +273,17 @@ defmodule Barkpark.Plugins.Sheets do
   # same shape leniently. A rule a server cannot evaluate must not be
   # stored, so unknown keys anywhere (rule / when / style) are rejected
   # (CF-D6, SERVER-EVAL integrity).
-  defp cond_format_list_errors(cfs, idx) do
+  @doc """
+  Validate a tab's `cond_formats` rule list with the SAME strictness the
+  `before_save` gate applies (CF-D6) — returns a list of human-readable error
+  strings (empty when the list is valid). PUBLIC so the core session's
+  `set_cond_format` op validates a session-authored list identically to the
+  persist gate: a rule the session admits but the gate would reject strands the
+  debounced persist forever (CF-AM1). `idx` is the tab index, only for message
+  context. This is the ONE shared validator — no fourth copy (parked hygiene).
+  """
+  @spec cond_format_list_errors([map()], non_neg_integer()) :: [String.t()]
+  def cond_format_list_errors(cfs, idx) when is_list(cfs) do
     cap_errors =
       if length(cfs) > @cond_format_cap do
         ["tab #{idx}: cond_formats has #{length(cfs)} rules; the cap is #{@cond_format_cap}"]
@@ -285,6 +295,8 @@ defmodule Barkpark.Plugins.Sheets do
 
     cap_errors ++ rule_errors ++ cond_format_dup_errors(cfs, idx)
   end
+
+  def cond_format_list_errors(_cfs, idx), do: ["tab #{idx}: cond_formats must be a list"]
 
   defp cond_format_errors(rule, idx) when is_map(rule) do
     prefix = "tab #{idx}: cond_format #{cf_label(rule)}: "
