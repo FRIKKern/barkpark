@@ -38,6 +38,14 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
       assert Core.parse_ref("") == :error
     end
 
+    test "a trailing newline is rejected (`\\z`, not `$` — no PCRE stowaway)" do
+      # `$` matched before a trailing newline, so "B2\n" used to parse as {2, 2};
+      # the A1 regex is `\z`-anchored now, so a stowaway newline is :error.
+      assert Core.parse_ref("B2\n") == :error
+      assert Core.parse_ref("A1\n") == :error
+      assert Core.parse_ref("AA3\r\n") == :error
+    end
+
     test "non-binary input returns :error" do
       assert Core.parse_ref(nil) == :error
       assert Core.parse_ref(42) == :error
@@ -297,6 +305,21 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
       with_empty = Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => []}]})
       assert with_empty == base
       assert with_empty["styles"] == %{"0,0" => %{"b" => true}}
+    end
+
+    test "manual-style bg sanitizes case-insensitively and rejects a trailing newline" do
+      # Manual `"s".bg` routes through the single `CondFormat.sanitize_bg/1`
+      # owner: uppercase normalizes to lowercase; a trailing-newline stowaway
+      # (`\z`-anchored now) is dropped rather than stored.
+      cells = %{
+        "A1" => %{"v" => "x", "s" => %{"bg" => "#FF00AA"}},
+        "A2" => %{"v" => "y", "s" => %{"bg" => "#ff0000\n"}}
+      }
+
+      snapshot = Core.snapshot_for(%{"tabs" => [%{"cells" => cells}]})
+      assert snapshot["styles"]["0,0"] == %{"bg" => "#ff00aa"}
+      # A2's bg leaked out; no other style keys → no entry at all.
+      refute Map.has_key?(snapshot["styles"], "1,0")
     end
   end
 

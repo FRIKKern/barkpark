@@ -19,7 +19,10 @@ defmodule Barkpark.Plugins.Sheets.Core do
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Fmt
 
-  @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)$/
+  # `\z`, not `$`: PCRE `$` also matches before a trailing newline, so `$`
+  # accepted `"B2\n"` as a cell ref (harmless upstream, but a parse ref must
+  # not admit stowaways). `\z` anchors the absolute end of the string.
+  @a1 ~r/^([A-Za-z]+)([1-9][0-9]*)\z/
 
   # Every synthesized snapshot carries `"sv"` — the snapshot schema version.
   # BUMP this on ANY change to the snapshot's shape or to the value strings it
@@ -476,12 +479,14 @@ defmodule Barkpark.Plugins.Sheets.Core do
   defp put_style_flag(style, key, true), do: Map.put(style, key, true)
   defp put_style_flag(style, _key, _), do: style
 
-  defp put_style_bg(style, bg) when is_binary(bg) do
-    bg = String.downcase(bg)
-    if Regex.match?(~r/^#[0-9a-f]{6}$/, bg), do: Map.put(style, "bg", bg), else: style
+  # The `#rrggbb` sanitizer is single-sourced in CondFormat (arc-2 parked
+  # hygiene) — no fourth copy of the regex lives here.
+  defp put_style_bg(style, bg) do
+    case CondFormat.sanitize_bg(bg) do
+      nil -> style
+      hex -> Map.put(style, "bg", hex)
+    end
   end
-
-  defp put_style_bg(style, _), do: style
 
   defp put_style_align(style, al) when al in ["left", "center", "right"],
     do: Map.put(style, "al", al)

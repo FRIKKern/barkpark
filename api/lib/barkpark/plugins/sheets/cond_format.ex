@@ -27,6 +27,11 @@ defmodule Barkpark.Plugins.Sheets.CondFormat do
       (CF-D4, first-match-wins, no stacking).
     * `compose/2` — per-key merge of a manual `"s"` style with a CF style
       (CF-D3, CF wins the keys it sets).
+    * `sanitize_bg/1` — the ONE `#rrggbb` sanitizer (binary in → normalized
+      lowercase `"#rrggbb"` or `nil`); Core's manual-style sanitizer and the
+      CF-B gate both route through here (single owner — arc-2 parked hygiene).
+    * `valid_bg?/1` — the boolean twin for the gate's reject-with-message path;
+      acceptance is byte-identical to `sanitize_bg/1` returning non-nil.
   """
 
   alias Barkpark.Plugins.Sheets.Core
@@ -36,6 +41,13 @@ defmodule Barkpark.Plugins.Sheets.CondFormat do
   # STRICT typing of each op's value(s) is the gate's job (CF-B) — eval is
   # lenient and simply returns false on a type mismatch.
   @known_ops ~w(gt lt eq between contains)
+
+  # The SINGLE `#rrggbb` sanitizer regex (arc-2 parked-hygiene dedup: this
+  # module is the one owner). `\z`, not `$`: PCRE `$` also matches before a
+  # trailing newline, and a stored bg is emitted into style attributes
+  # downstream — no stowaways. Applied AFTER `String.downcase/1`, so the class
+  # is lowercase-only yet acceptance stays case-insensitive.
+  @bg_re ~r/^#[0-9a-f]{6}\z/
 
   @typedoc """
   A normalized rule: corner-normalized range, the raw `"when"` map (kept
@@ -122,12 +134,57 @@ defmodule Barkpark.Plugins.Sheets.CondFormat do
   defp put_flag(style, key, true), do: Map.put(style, key, true)
   defp put_flag(style, _key, _), do: style
 
-  defp put_bg(style, bg) when is_binary(bg) do
-    bg = String.downcase(bg)
-    if Regex.match?(~r/^#[0-9a-f]{6}$/, bg), do: Map.put(style, "bg", bg), else: style
+  defp put_bg(style, bg) do
+    case sanitize_bg(bg) do
+      nil -> style
+      hex -> Map.put(style, "bg", hex)
+    end
   end
 
-  defp put_bg(style, _), do: style
+  @doc """
+  Sanitize a background-color value to the canonical snapshot form — the ONE
+  `#rrggbb` sanitizer for the sheets plugin (arc-2 parked-hygiene dedup).
+
+  A binary `#rrggbb` (case-insensitive in) normalizes to lowercase; anything
+  else — a non-binary, a bad shape, or a value with stowaway characters like a
+  trailing newline — returns `nil`. Core's manual-style sanitizer routes here;
+  a new consumer MUST call this (or `valid_bg?/1`) rather than write a fourth
+  copy of the regex.
+
+  ## Examples
+
+      iex> Barkpark.Plugins.Sheets.CondFormat.sanitize_bg("#FF0000")
+      "#ff0000"
+
+      iex> Barkpark.Plugins.Sheets.CondFormat.sanitize_bg("#ff0000\\n")
+      nil
+
+      iex> Barkpark.Plugins.Sheets.CondFormat.sanitize_bg("red")
+      nil
+  """
+  @spec sanitize_bg(term()) :: String.t() | nil
+  def sanitize_bg(bg) when is_binary(bg) do
+    down = String.downcase(bg)
+    if Regex.match?(@bg_re, down), do: down, else: nil
+  end
+
+  def sanitize_bg(_), do: nil
+
+  @doc """
+  Is `bg` a valid `#rrggbb` color? The boolean twin of `sanitize_bg/1` for the
+  CF-B gate's reject-with-message path — acceptance is byte-identical (case
+  insensitive, `\\z`-anchored so a trailing newline is rejected).
+
+  ## Examples
+
+      iex> Barkpark.Plugins.Sheets.CondFormat.valid_bg?("#FF0000")
+      true
+
+      iex> Barkpark.Plugins.Sheets.CondFormat.valid_bg?("#ff0000\\n")
+      false
+  """
+  @spec valid_bg?(term()) :: boolean()
+  def valid_bg?(bg), do: not is_nil(sanitize_bg(bg))
 
   @doc """
   The CF-D5 eval matrix — does `when_map` fire on `cell` (a raw cell map or
