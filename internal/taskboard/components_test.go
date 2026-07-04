@@ -16,49 +16,38 @@ import (
 var testNow = time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 
 func TestStatusGlyph(t *testing.T) {
-	// The board-wide checklist grammar (decision 18): ☐ waiting, ✓ done, ◐
-	// blocked, and the frame-0 static spinner glyph for in_progress.
+	// The calm-board steady 4-glyph vocabulary (charter D14): ● in_progress,
+	// ◐ blocked, ○ ready|open, ✓ done|closed — no animation, an unknown lifecycle
+	// degrades to the neutral "·" dot.
 	cases := map[string]string{
-		"in_progress": "◴",
-		"ready":       "☐",
-		"open":        "☐",
+		"in_progress": "●",
+		"ready":       "○",
+		"open":        "○",
 		"blocked":     "◐",
 		"done":        "✓",
 		"closed":      "✓",
 		"weird":       "·",
 	}
 	for life, want := range cases {
-		if got := StatusGlyph(life, 0); got != want {
-			t.Errorf("StatusGlyph(%q, 0) = %q, want %q", life, got, want)
+		if got := StatusGlyph(life); got != want {
+			t.Errorf("StatusGlyph(%q) = %q, want %q", life, got, want)
 		}
 	}
 }
 
-// TestStatusGlyphSpinner — in_progress cycles a 4-glyph spinner from the frame
-// (static at frame 0, wrapping mod 4, negative frames clamped), and every glyph
-// the gutter can paint is exactly one display column so the fixed 2-col gutter
-// never shifts as the lifecycle or the heartbeat frame advances.
-func TestStatusGlyphSpinner(t *testing.T) {
-	frames := []string{"◴", "◷", "◶", "◵"}
-	for f := 0; f < 12; f++ {
-		if got, want := StatusGlyph("in_progress", f), frames[f%4]; got != want {
-			t.Errorf("StatusGlyph(in_progress, %d) = %q, want %q", f, got, want)
-		}
-	}
-	if got := StatusGlyph("in_progress", -3); got != "◴" {
-		t.Errorf("negative frame = %q, want the static ◴", got)
-	}
+// TestStatusGlyphWidth — every glyph the gutter can paint is exactly one display
+// column so the fixed 2-col gutter never shifts as the lifecycle changes. There
+// is no longer any frame-driven animation to test (the spinner was retired).
+func TestStatusGlyphWidth(t *testing.T) {
 	for _, life := range []string{"in_progress", "ready", "open", "blocked", "done", "closed", "weird"} {
-		for f := 0; f < 4; f++ {
-			if w := runewidth.StringWidth(StatusGlyph(life, f)); w != 1 {
-				t.Errorf("StatusGlyph(%q, %d) width = %d, want 1", life, f, w)
-			}
+		if w := runewidth.StringWidth(StatusGlyph(life)); w != 1 {
+			t.Errorf("StatusGlyph(%q) width = %d, want 1", life, w)
 		}
 	}
 }
 
-// TestCriteriaChecklistStates proves the ☐/☑ grammar: a met entry renders ☑ +
-// text, an unmet entry ☐ + text, and a textless (malformed) slot a bare ☐ with
+// TestCriteriaChecklistStates proves the ○/✓ grammar: a met entry renders ✓ +
+// text, an unmet entry ○ + text, and a textless (malformed) slot a bare ○ with
 // no trailing space — honest that an Nth criterion exists even when its text
 // did not decode.
 func TestCriteriaChecklistStates(t *testing.T) {
@@ -72,14 +61,14 @@ func TestCriteriaChecklistStates(t *testing.T) {
 		t.Fatalf("want 3 checklist lines, got %d", len(lines))
 	}
 	p0, p1, p2 := ansi.Strip(lines[0]), ansi.Strip(lines[1]), ansi.Strip(lines[2])
-	if !strings.HasSuffix(p0, "☑ first done") {
-		t.Errorf("met item = %q, want ☑ + text", p0)
+	if !strings.HasSuffix(p0, "✓ first done") {
+		t.Errorf("met item = %q, want ✓ + text", p0)
 	}
-	if !strings.HasSuffix(p1, "☐ second todo") {
-		t.Errorf("unmet item = %q, want ☐ + text", p1)
+	if !strings.HasSuffix(p1, "○ second todo") {
+		t.Errorf("unmet item = %q, want ○ + text", p1)
 	}
-	if !strings.HasSuffix(p2, "☐") || strings.HasSuffix(p2, " ") {
-		t.Errorf("textless slot = %q, want a bare ☐ with no trailing space", p2)
+	if !strings.HasSuffix(p2, "○") || strings.HasSuffix(p2, " ") {
+		t.Errorf("textless slot = %q, want a bare ○ with no trailing space", p2)
 	}
 	// Met and unmet lines must be styled DIFFERENTLY (ok-tint vs dim) so the
 	// checkbox state is legible on a color terminal, not just via the glyph.
@@ -122,12 +111,16 @@ func TestCriteriaChecklistCapsAndFolds(t *testing.T) {
 }
 
 // TestCriteriaChecklistMeterFallback — with no decoded items but a live counter,
-// the detail falls back to the compact meter line (never emptier than before);
+// the detail falls back to one calm "criteria 2/3" digits line (never emptier
+// than before, and never a ▰▱ bar — the calm board's one glyph vocabulary);
 // with nothing at all it renders nothing.
 func TestCriteriaChecklistMeterFallback(t *testing.T) {
 	lines := CriteriaChecklist(nil, &Criteria{Met: 2, Total: 3}, childIndent, 80)
-	if len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "criteria ▰▰▱ 2/3") {
-		t.Fatalf("fallback = %v, want one compact meter line", lines)
+	if len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "criteria 2/3") {
+		t.Fatalf("fallback = %v, want one calm digits line", lines)
+	}
+	if strings.Contains(ansi.Strip(lines[0]), "▰") {
+		t.Fatalf("fallback = %v, the ▰▱ meter cells were retired", lines)
 	}
 	for _, c := range []*Criteria{nil, {}, {Total: 0}} {
 		if got := CriteriaChecklist(nil, c, childIndent, 80); got != nil {
@@ -154,15 +147,15 @@ func TestCriteriaChecklistWidthSafe(t *testing.T) {
 }
 
 func TestSelectionMarker(t *testing.T) {
-	if SelectionMarker(true) != "▶" {
-		t.Error("selected marker should be ▶")
+	if SelectionMarker(true) != "▎" {
+		t.Error("selected marker should be the ▎ left bar")
 	}
 	if SelectionMarker(false) != " " {
 		t.Error("unselected marker should be a single space (keeps glyph aligned)")
 	}
 	// Gutter must be exactly 2 display columns whether selected or not.
 	for _, sel := range []bool{true, false} {
-		w := runewidth.StringWidth(SelectionMarker(sel) + StatusGlyph("in_progress", 0))
+		w := runewidth.StringWidth(SelectionMarker(sel) + StatusGlyph("in_progress"))
 		if w != 2 {
 			t.Errorf("gutter width with selected=%v = %d, want 2", sel, w)
 		}
@@ -308,7 +301,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, false, childIndent, width, "", 0, testNow)
+		rows := TaskRow(task, false, false, childIndent, width, testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -331,7 +324,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, "", 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 40, testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -340,8 +333,11 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 	}
 }
 
-// TestTaskRowExpandedHasHangingDetail proves expansion adds indented detail
-// lines under the row.
+// TestTaskRowExpandedHasHangingDetail proves the SHRUNK inline expand (charter
+// D23) adds an indented criteria stub under the row — and that the density that
+// left the list (labels, twin naming, dependency prose) does NOT reappear here;
+// it lives in the detail view now. The criteria stub is the checklist (met/total
+// digits when the item text did not decode).
 func TestTaskRowExpandedHasHangingDetail(t *testing.T) {
 	task := Task{
 		DocID:          "t",
@@ -352,61 +348,44 @@ func TestTaskRowExpandedHasHangingDetail(t *testing.T) {
 		DependentCount: 2,
 		Claim:          &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-1 * time.Minute)},
 	}
-	rows := TaskRow(task, true, true, childIndent, 80, "", 0, testNow)
+	rows := TaskRow(task, true, true, childIndent, 80, testNow)
 	if len(rows) < 2 {
-		t.Fatalf("expanded row should have detail lines, got %d", len(rows))
+		t.Fatalf("expanded row should have a criteria stub, got %d", len(rows))
 	}
 	body := ansi.Strip(strings.Join(rows[1:], "\n"))
-	// Labels render as a chip run ("live  sse"), not the old comma join.
-	for _, want := range []string{"criteria", "labels", "live", "sse", "dependent"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("expanded body missing %q:\n%s", want, body)
+	if !strings.Contains(body, "criteria") {
+		t.Errorf("expanded body missing the criteria stub:\n%s", body)
+	}
+	// The retired density must NOT reappear in the shrunk stub.
+	for _, gone := range []string{"labels", "live", "sse", "dependent"} {
+		if strings.Contains(body, gone) {
+			t.Errorf("shrunk expand should not carry %q (it moved to the detail view):\n%s", gone, body)
 		}
 	}
 }
 
-// TestExpandedDetailShowsWholeTagSet — the collapsed row caps hued chips at 2,
-// so the expanded detail is the ONE guaranteed place a task's full tag set is
-// readable. With 4 labels and room, all 4 must appear (no "+N" fold).
-func TestExpandedDetailShowsWholeTagSet(t *testing.T) {
+// TestTaskRowExpandedCriteriaChecklist proves the shrunk stub renders a real ○/✓
+// checklist when the per-item text decoded, and stays width-safe.
+func TestTaskRowExpandedCriteriaChecklist(t *testing.T) {
 	task := Task{
 		DocID:     "t",
 		Title:     "Wire the bridge",
 		Lifecycle: "ready",
-		Labels:    []string{"perf", "live", "sse", "theme"},
-		UpdatedAt: testNow.Add(-time.Hour),
-	}
-	rows := TaskRow(task, false, true, childIndent, 80, "", 0, testNow)
-	body := ansi.Strip(strings.Join(rows[1:], "\n"))
-	for _, want := range []string{"perf", "live", "sse", "theme"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("expanded body must list every label, missing %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "+") {
-		t.Errorf("expanded body should not fold labels when there is room:\n%s", body)
-	}
-}
-
-// TestExpandedLabelsLineWidthSafeUnderTruecolor forces real ANSI output and
-// proves the labels detail line (dim "labels " prefix + hued chip run, built
-// outside the emit() dim wrapper) never exceeds the row width — the budget math
-// mixes byte-len(hang) with display widths, so this pins it against styled
-// escape bytes ever counting as columns.
-func TestExpandedLabelsLineWidthSafeUnderTruecolor(t *testing.T) {
-	oldp := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
-
-	task := Task{
-		DocID:     "t",
-		Title:     "Wire the bridge",
-		Lifecycle: "ready",
-		Labels:    []string{"a-rather-long-label", "another-long-label", "backend", "frontend"},
+		Priority:  "P2",
+		Criteria:  &Criteria{Met: 1, Total: 2},
+		CriteriaItems: []CriterionItem{
+			{Criterion: "reconnect after a dropped stream", Met: true},
+			{Criterion: "debounce the refetch", Met: false},
+		},
 		UpdatedAt: testNow.Add(-time.Hour),
 	}
 	for _, width := range []int{60, 80, 100} {
-		for i, ln := range TaskRow(task, false, true, childIndent, width, "", 0, testNow) {
+		rows := TaskRow(task, false, true, childIndent, width, testNow)
+		body := ansi.Strip(strings.Join(rows[1:], "\n"))
+		if !strings.Contains(body, "✓") || !strings.Contains(body, "○") {
+			t.Errorf("width %d: expected a ○/✓ checklist stub:\n%s", width, body)
+		}
+		for i, ln := range rows {
 			if w := ansi.StringWidth(ln); w > width {
 				t.Errorf("width %d: expanded line %d is %d cols: %q", width, i, w, ansi.Strip(ln))
 			}
@@ -424,7 +403,7 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 		Lifecycle: "in_progress",
 		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
 	}
-	line := ansi.Strip(TaskRow(task, false, false, childIndent, 80, "", 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, false, childIndent, 80, testNow)[0])
 	if !strings.Contains(line, "8d") {
 		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
 	}

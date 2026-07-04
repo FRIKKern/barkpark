@@ -41,25 +41,23 @@ func loadBoardFixture(t *testing.T) Board {
 	return b
 }
 
-// fixtureUIState pins a cursor-selected row and one expanded task (the SSE
-// bridge) so the goldens exercise both selection and inline expansion. The
-// cursor indexes the SHELL's visibleRows order (NOW cards, then each epic's
-// header + children, then orphans): with two NOW cards and one header ahead of
-// the spine children, index 5 is the ready "Reconcile the #979 role seam".
+// fixtureUIState pins a cursor-selected row and one expanded task so the goldens
+// exercise both selection and the shrunk inline expand. The cursor indexes the
+// SHELL's visibleRows order (NOW cards, then each epic's header + children, then
+// clusters, then orphans). After the NOW de-dup the two claimed tasks render ONLY
+// in the pinned band, so the first spine child under the epic header is index 3 —
+// the ready "Reconcile the #979 role seam", which carries CriteriaItems so the
+// golden shows the ○/✓ criteria stub of the shrunk expand.
 //
-// Frame is pinned to 2 (mid-cycle) so the goldens capture the in_progress
-// spinner in a MOVING state — the ◶ third quadrant on the spine's claimed rows —
-// while the ticker's past events keep their static frame-0 glyph. It is injected
-// exactly like fixedNow, so a heartbeat state goldens deterministically
-// (decision 16). The expanded SSE-bridge row also carries CriteriaItems, so the
-// same golden exercises the ☐/☑ acceptance-criteria checklist (decision 18).
+// Frame is left at 0: the calm-board subtraction retired the frame-driven glyph
+// animation (there is no spinner to capture in a moving state anymore), so a
+// still and a moving frame render identically for the steady spine.
 func fixtureUIState() UIState {
 	return UIState{
-		Cursor:   5,
-		Expanded: map[string]bool{"wire-sse-bridge": true},
+		Cursor:   3,
+		Expanded: map[string]bool{"reconcile-979-seam": true},
 		Conn:     ConnLive,
 		LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC),
-		Frame:    2,
 	}
 }
 
@@ -334,11 +332,11 @@ func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
 // --- wave 4: motion paint (flash fades / live elapsed / working ticker) ------
 
 // stillBoard is a board with NO claims in flight, NO flashes and events that are
-// steady (not syncing) — the "at rest" case. Every wave-4 motion path is a no-op
-// on it (no NOW cards to tick, no working line, no flash), so it must render
-// BYTE-FOR-BYTE identical to the pre-slice code. still_golden_* was captured on
-// the unmodified render.go: TestRenderAtRestGolden is the aliveness-budget
-// tripwire (decision 16 — a diff here is a motion leak).
+// steady (not syncing) — the "at rest" case. Every motion path is a no-op on it
+// (no NOW cards to tick, no flash — the calm board has no working line at all),
+// so it renders identically whatever the Frame index. TestRenderAtRestGolden is
+// the aliveness-budget tripwire (decision 16 — a diff between a still render and
+// its golden is a motion leak).
 func stillBoard() Board {
 	return Board{
 		Epics: []Epic{{
@@ -423,10 +421,9 @@ func motionBoard() Board {
 		Epics: []Epic{{
 			Root: Task{DocID: "motion-epic", Title: "Motion epic", Lifecycle: "in_progress",
 				Kind: "goal", UpdatedAt: fixedNow},
+			// flash-now is claimed, so after the NOW de-dup it renders ONLY in the
+			// pinned band, never as a duplicate spine child.
 			Children: []Task{
-				{DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
-					ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
-					Claim: claim, UpdatedAt: claimed},
 				{DocID: "flash-spine", Title: "Reticulate the splines", Lifecycle: "ready",
 					ParentID: "motion-epic", Priority: "P2", UpdatedAt: fixedNow.Add(-2 * time.Second)},
 				{DocID: "calm-row", Title: "A settled unchanged row", Lifecycle: "ready",
@@ -444,7 +441,7 @@ func motionBoard() Board {
 
 func motionUIState() UIState {
 	return UIState{
-		Frame:    4, // WorkingVerb(4) == "herding"
+		Frame:    4, // vestigial: the calm board no longer animates on the frame
 		Conn:     ConnLive,
 		LastSync: fixedNow.Add(-30 * time.Second),
 		Flashes: map[string]time.Time{
@@ -455,8 +452,9 @@ func motionUIState() UIState {
 }
 
 // TestRenderMotionGolden pins the visible (ANSI-stripped) motion at 60 and 100
-// cols: the NOW card's ticking "4m30s" elapsed and the ticker's "✻ herding… ·
-// 1 in flight" working head. The flash tint is foreground-only (decision 17) so
+// cols: the NOW card's ticking "4m30s" elapsed. The calm-board subtraction
+// retired the ticker's cycling working head, so the only surviving visible motion
+// is the NOW-band stopwatch. The flash tint is foreground-only (decision 17) so
 // it does not survive the strip — TestFlashPaintedInFrame proves it in the
 // styled frame instead.
 func TestRenderMotionGolden(t *testing.T) {
@@ -485,45 +483,33 @@ func TestRenderMotionGolden(t *testing.T) {
 				t.Errorf("motion frame at %d cols diverged from %s\n--- got ---\n%s\n--- want ---\n%s",
 					width, path, got, want)
 			}
-			// The visible motion must be present: the ticking seconds and the
-			// in-flight working head.
-			for _, tok := range []string{"4m30s", "✻ herding… · 1 in flight"} {
-				if !strings.Contains(got, tok) {
-					t.Errorf("width %d: motion frame missing %q:\n%s", width, tok, got)
-				}
+			// The one surviving visible motion must be present: the NOW card's
+			// ticking seconds.
+			if !strings.Contains(got, "4m30s") {
+				t.Errorf("width %d: motion frame missing the ticking 4m30s:\n%s", width, got)
 			}
 		})
 	}
 }
 
 // TestRenderMotionElapsedIsNowBandOnly proves the ticking second-hand runs ONLY
-// where real work runs (decision 19): the NOW card shows "4m30s", but the SAME
-// claim rendered as a spine in_progress row keeps the coarse "4m" AgeBadge — the
-// board does not tick everywhere, only in the pinned NOW band.
+// where real work runs (decision 19): the NOW card shows the seconds form
+// "4m30s", and that seconds vocabulary appears on exactly ONE line — the pinned
+// NOW card's meta line — never anywhere else (the claim is de-duped out of the
+// spine, so it can only ever tick in the band).
 func TestRenderMotionElapsedIsNowBandOnly(t *testing.T) {
 	frame := plainFrame(motionBoard(), motionUIState(), 100, goldenHeight)
 	if !strings.Contains(frame, "4m30s") {
 		t.Errorf("NOW card is missing the ticking LiveElapsed token:\n%s", frame)
 	}
-	// The spine child line ("Ship the live bridge  …  opus-3  4m") must carry the
-	// coarse AgeBadge, never the seconds form.
-	spine := ""
+	n := 0
 	for _, ln := range strings.Split(frame, "\n") {
-		// the spine row is the one indented under the epic header (leading spaces
-		// + status glyph), distinct from the NOW card (which has the "   " meta on
-		// its own second line).
-		if strings.Contains(ln, "opus-3") && strings.Contains(ln, "Ship the live bridge") {
-			spine = ln
+		if strings.Contains(ln, "4m30s") {
+			n++
 		}
 	}
-	if spine == "" {
-		t.Fatalf("could not find the spine in_progress row for the claim:\n%s", frame)
-	}
-	if strings.Contains(spine, "4m30s") {
-		t.Errorf("the spine row is ticking seconds — elapsed must stay NOW-band only: %q", spine)
-	}
-	if !strings.Contains(spine, "4m") {
-		t.Errorf("the spine row lost its coarse age badge: %q", spine)
+	if n != 1 {
+		t.Errorf("the seconds vocabulary appears on %d lines, want exactly 1 (the NOW card only):\n%s", n, frame)
 	}
 }
 
@@ -610,53 +596,23 @@ func TestRenderClusterSection(t *testing.T) {
 			t.Errorf("cluster frame missing %q:\n%s", want, frame)
 		}
 	}
-	// The section-key chip is de-duped: a member never re-states "sheets-parity"
-	// on its own row — the only occurrences in the whole frame are the section
-	// header itself and the orphan's "+sheets-parity?" suggestion chip…
-	if n := strings.Count(frame, "sheets-parity"); n != 2 {
-		t.Errorf("want exactly 2 'sheets-parity' occurrences (header + suggestion), got %d:\n%s", n, frame)
+	// The calm-board subtraction retired per-tag chips: a member row never restates
+	// its section, and no label paints on the row at all. The cluster key appears
+	// exactly ONCE in the whole frame — the section header — because the orphan's
+	// "+key?" suggestion chip is gone too.
+	if n := strings.Count(frame, "sheets-parity"); n != 1 {
+		t.Errorf("want exactly 1 'sheets-parity' occurrence (the dim section header), got %d:\n%s", n, frame)
 	}
-	// …while the cross-cutting phase chip still paints on the member row.
-	if !strings.Contains(frame, "build") {
-		t.Errorf("cross-cutting chip 'build' dropped from the member row:\n%s", frame)
-	}
-}
-
-// TestRenderTwinMarker proves a twin task wears the ⧉ glyph before its title.
-func TestRenderTwinMarker(t *testing.T) {
-	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
-	if !strings.Contains(frame, "⧉ Add the SUM() function") {
-		t.Errorf("twin task missing the ⧉ marker:\n%s", frame)
+	// No ▰▱ progress bar survives on the cluster header (digits only).
+	if strings.ContainsAny(frame, "▰▱") {
+		t.Errorf("cluster header still paints a ▰▱ bar — the subtraction keeps digits only:\n%s", frame)
 	}
 }
 
-// TestRenderTwinExpandedNamesPartner proves an expanded twin names its partner
-// in words — the precomputed TwinTitle, not the opaque doc id.
-func TestRenderTwinExpandedNamesPartner(t *testing.T) {
-	st := UIState{Conn: ConnLive, LastSync: fixedNow, Expanded: map[string]bool{"sum1": true}}
-	frame := ansi.Strip(Render(wave3Board(), st, 80, 40, fixedNow))
-	if !strings.Contains(frame, "twin ⧉ 'Add a SUM function to the grid'") {
-		t.Errorf("expanded twin does not name its partner by title:\n%s", frame)
-	}
-	// The doc id must NOT leak into the detail line when a title is known.
-	if strings.Contains(frame, "twin ⧉ 'sum2'") {
-		t.Errorf("expanded twin leaked the partner doc id instead of its title:\n%s", frame)
-	}
-}
-
-// TestRenderTwinExpandedFallsBackToDocID proves the detail still names something
-// honest when the partner title is unknown (empty-titled partner) — the doc id,
-// never a blank quote.
-func TestRenderTwinExpandedFallsBackToDocID(t *testing.T) {
-	b := Board{Orphans: []Task{
-		{DocID: "a1", Title: "Lonely twin", Lifecycle: "open", TwinOf: "b2", UpdatedAt: fixedNow},
-	}}
-	st := UIState{Conn: ConnLive, LastSync: fixedNow, Expanded: map[string]bool{"a1": true}}
-	frame := ansi.Strip(Render(b, st, 80, 40, fixedNow))
-	if !strings.Contains(frame, "twin ⧉ 'b2'") {
-		t.Errorf("expanded twin with no partner title should fall back to the doc id:\n%s", frame)
-	}
-}
+// The wave-3 twin-marker and suggestion-chip render tests were retired by the
+// calm-board subtraction (charter D14/D22): twins and suggestions leave the list,
+// so there is nothing to assert in the spine. The underlying TwinOf/Suggested
+// derivations are still exercised in board_test.go.
 
 // TestRenderStaleAgesAndCount proves day-scale staleness surfaces: stale
 // non-terminal members show an age token in the meta, and the counts strip
@@ -684,40 +640,42 @@ func TestRenderStaleAgesAndCount(t *testing.T) {
 	}
 }
 
-// TestRenderSuggestionChip proves an unkeyed orphan that plausibly belongs to a
-// cluster wears a dim "+key?" suggestion chip (suggestion only — never applied).
-func TestRenderSuggestionChip(t *testing.T) {
-	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
-	if !strings.Contains(frame, "+sheets-parity?") {
-		t.Errorf("suggested-tag orphan missing the '+key?' chip:\n%s", frame)
-	}
-}
-
-// TestNowCardTwinMarker proves a pinned NOW card wears the ⧉ too — a claim on a
-// suspected near-duplicate is the loudest "two of us are doing the same work"
-// signal the board has, so the NOW band may not render it marker-free.
-func TestNowCardTwinMarker(t *testing.T) {
+// TestNowCardIsCalm proves a pinned NOW card carries the steady ● glyph, its
+// worker and criteria DIGITS (no ▰▱ bar), and no twin ⧉ marker — that density
+// moved to the detail view with the calm-board subtraction.
+func TestNowCardIsCalm(t *testing.T) {
 	claimed := Task{
 		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
-		TwinOf: "sum2", UpdatedAt: fixedNow,
+		TwinOf: "sum2", Criteria: &Criteria{Met: 2, Total: 3}, UpdatedAt: fixedNow,
 		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
 	}
-	lines := NowCard(claimed, "", false, 80, 0, fixedNow)
-	if !strings.Contains(ansi.Strip(lines[0]), "⧉ Add the SUM() function") {
-		t.Errorf("NOW card for a twin is missing the ⧉ marker: %q", ansi.Strip(lines[0]))
+	lines := NowCard(claimed, "", false, 80, fixedNow)
+	l0, l1 := ansi.Strip(lines[0]), ansi.Strip(lines[1])
+	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "● Add the SUM() function") {
+		t.Errorf("NOW card line 1 should be ● + title, got %q", l0)
+	}
+	if strings.Contains(l0, "⧉") {
+		t.Errorf("NOW card should not wear a twin ⧉ marker: %q", l0)
+	}
+	if !strings.Contains(l1, "2/3") || strings.Contains(l1, "▰") || strings.Contains(l1, "▱") {
+		t.Errorf("NOW card line 2 should show bare criteria digits, no bar: %q", l1)
 	}
 }
 
-// TestRenderFooterHasTagVerb proves the footer advertises the new t verb — and
-// that at the 60-col charter minimum EVERY verb still paints (the compact
-// variant drops the word "move", never the trailing "o studio").
-func TestRenderFooterHasTagVerb(t *testing.T) {
+// TestRenderFooterCalmVerbs proves the footer advertises the subtracted verb set
+// (no more `t tag`, and `enter open`) — and that at the 60-col charter minimum
+// EVERY verb still paints (the compact variant drops the word "move", never the
+// trailing "o studio").
+func TestRenderFooterCalmVerbs(t *testing.T) {
 	for _, width := range []int{60, 80} {
 		frame := ansi.Strip(Render(Board{Counts: map[string]int{}}, UIState{Conn: ConnLive, LastSync: fixedNow}, width, 20, fixedNow))
-		for _, verb := range []string{"jk", "enter expand", "c claim", "x close", "t tag", "o studio"} {
+		for _, verb := range []string{"jk", "enter open", "c claim", "x close", "o studio"} {
 			if !strings.Contains(frame, verb) {
 				t.Errorf("width %d: footer missing the %q hint:\n%s", width, verb, frame)
 			}
+		}
+		if strings.Contains(frame, "t tag") {
+			t.Errorf("width %d: footer should no longer advertise the retired t verb:\n%s", width, frame)
 		}
 	}
 }

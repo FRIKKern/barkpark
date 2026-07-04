@@ -100,6 +100,76 @@ func TestBuildBoard_Now(t *testing.T) {
 	}
 }
 
+// TestBuildBoard_NowDedup — the D14 de-dup: a claimed task renders ONLY in the
+// NOW band, never again as a row in its epic OR as a loose orphan. The epic
+// header survives (structure), but its claimed child leaves the spine; a claimed
+// loose leaf leaves the orphan pile entirely.
+func TestBuildBoard_NowDedup(t *testing.T) {
+	claim := &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
+	s := Snapshot{Tasks: []Task{
+		{DocID: "epic", Title: "Epic", Kind: kindGoal, Lifecycle: lifeOpen, UpdatedAt: refNow},
+		{DocID: "child-claimed", Title: "claimed child", ParentID: "epic",
+			Lifecycle: lifeInProgress, Claim: claim, UpdatedAt: refNow},
+		{DocID: "child-ready", Title: "ready child", ParentID: "epic",
+			Lifecycle: lifeReady, UpdatedAt: refNow},
+		{DocID: "loose-claimed", Title: "claimed orphan",
+			Lifecycle: lifeInProgress, Claim: claim, UpdatedAt: refNow},
+		{DocID: "loose-ready", Title: "ready orphan", Lifecycle: lifeReady, UpdatedAt: refNow},
+	}}
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if got := docIDs(b.Now); !eq(got, []string{"child-claimed", "loose-claimed"}) {
+		t.Fatalf("NOW = %v, want both claimed tasks", got)
+	}
+	epic := findEpic(t, b.Epics, "epic")
+	if got := docIDs(epic.Children); !eq(got, []string{"child-ready"}) {
+		t.Fatalf("epic children = %v, want only the ready child (the claimed one is NOW-only)", got)
+	}
+	if got := docIDs(b.Orphans); !eq(got, []string{"loose-ready"}) {
+		t.Fatalf("orphans = %v, want only the ready orphan (the claimed one is NOW-only)", got)
+	}
+}
+
+// TestBuildBoard_NowDedup_ClusterStable — the de-dup is display-only for the
+// derived clusters too: claiming one member of a minimum-size cluster
+// (clusterMemberMin == 2) must NOT dissolve the section and reshuffle its
+// sibling down into "(no epic)". The claim participates in label frequency,
+// membership and freshest-member ranking, and is stripped from the DISPLAYED
+// members only afterwards. Its fresh claim also still ranks the cluster: the
+// just-claimed sheets cluster must sort ABOVE the older docs cluster even
+// though its one visible row is the stalest task on the board.
+func TestBuildBoard_NowDedup_ClusterStable(t *testing.T) {
+	claim := &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
+	old := refNow.Add(-3 * 24 * time.Hour)
+	s := Snapshot{Tasks: []Task{
+		{DocID: "sp1", Title: "Sheets one", Labels: []string{"proj:sheets"},
+			Lifecycle: lifeInProgress, Claim: claim, UpdatedAt: refNow},
+		{DocID: "sp2", Title: "Sheets two", Labels: []string{"proj:sheets"},
+			Lifecycle: lifeOpen, UpdatedAt: old.Add(-time.Hour)},
+		{DocID: "dc1", Title: "Docs one", Labels: []string{"proj:docs"},
+			Lifecycle: lifeOpen, UpdatedAt: old},
+		{DocID: "dc2", Title: "Docs two", Labels: []string{"proj:docs"},
+			Lifecycle: lifeOpen, UpdatedAt: old},
+	}}
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if got := docIDs(b.Now); !eq(got, []string{"sp1"}) {
+		t.Fatalf("NOW = %v, want the claimed sp1", got)
+	}
+	if len(b.Clusters) != 2 {
+		t.Fatalf("clusters = %d, want 2 — claiming sp1 must not dissolve proj:sheets", len(b.Clusters))
+	}
+	if b.Clusters[0].Key != "proj:sheets" {
+		t.Fatalf("first cluster = %q, want proj:sheets on top (its claim's freshness still ranks it)", b.Clusters[0].Key)
+	}
+	if got := docIDs(b.Clusters[0].Tasks); !eq(got, []string{"sp2"}) {
+		t.Fatalf("sheets members = %v, want only sp2 visible (sp1 is NOW-only)", got)
+	}
+	if len(b.Orphans) != 0 {
+		t.Fatalf("orphans = %v, want none — sp2 must stay clustered", docIDs(b.Orphans))
+	}
+}
+
 // TestBuildBoard_EpicOrder_NoRepo — with no git context, epics rank purely by
 // freshest member updated desc.
 func TestBuildBoard_EpicOrder_NoRepo(t *testing.T) {
@@ -126,12 +196,15 @@ func TestBuildBoard_RepoBoost(t *testing.T) {
 // TestBuildBoard_ChildrenOrderAndFold — within G1, children order
 // in_progress -> ready -> blocked -> open -> recent-terminal (updated desc
 // inside each band); the 25h done row and the 48h cancelled row fold into
-// DoneFolded, while the exactly-24h done row stays visible at the bottom.
+// DoneFolded, while the exactly-24h done row stays visible at the bottom. t1 is a
+// LIVE claim, so the NOW de-dup (charter D14) removes it from the spine children
+// — it renders only in the pinned NOW band — while t8 (in_progress but unclaimed)
+// stays and heads the band.
 func TestBuildBoard_ChildrenOrderAndFold(t *testing.T) {
 	b := BuildBoard(loadFixtureSnapshot(t), RepoContext{}, refNow)
 	g1 := findEpic(t, b.Epics, "g1")
 
-	wantChildren := []string{"t1", "t8", "t2", "t3", "t4", "t7", "t5"}
+	wantChildren := []string{"t8", "t2", "t3", "t4", "t7", "t5"}
 	if got := docIDs(g1.Children); !eq(got, wantChildren) {
 		t.Fatalf("G1 children = %v, want %v", got, wantChildren)
 	}
@@ -285,9 +358,11 @@ func loadFlatSnapshot(t *testing.T) Snapshot {
 
 // TestBuildBoard_FlatQueue — the wave-2 orphan policy against the live flat
 // shape: no goals means ZERO epics, so the whole board is the loose queue. The
-// 55 stale-done orphans fold to a single count, the 45 survivors are
-// band-ordered (in_progress -> ready -> blocked -> open -> recent-terminal), and
-// the three live claims still pin the NOW band. TaskCount == the fetched corpus.
+// 55 stale-done orphans fold to a single count, and the three live claims pin the
+// NOW band. The NOW de-dup (charter D14) keeps those three claimed loose leaves
+// OUT of the orphan pile, so 42 survivors remain (the 3 in_progress were all
+// claimed), band-ordered (ready -> blocked -> open -> recent-terminal).
+// TaskCount == the fetched corpus.
 func TestBuildBoard_FlatQueue(t *testing.T) {
 	b := BuildBoard(loadFlatSnapshot(t), RepoContext{}, refNow)
 
@@ -297,8 +372,8 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 	if b.OrphansFolded != 55 {
 		t.Fatalf("OrphansFolded = %d, want 55 (the stale-done pile)", b.OrphansFolded)
 	}
-	if len(b.Orphans) != 45 {
-		t.Fatalf("visible orphans = %d, want 45 (3 in_progress + 8 ready + 4 blocked + 27 open + 3 recent done)", len(b.Orphans))
+	if len(b.Orphans) != 42 {
+		t.Fatalf("visible orphans = %d, want 42 (8 ready + 4 blocked + 27 open + 3 recent done; the 3 claimed in_progress are NOW-only)", len(b.Orphans))
 	}
 	if b.TaskCount != 100 {
 		t.Fatalf("TaskCount = %d, want 100 (fetched corpus)", b.TaskCount)
@@ -324,9 +399,11 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 			t.Fatalf("stale-done orphan %s survived the fold", o.DocID)
 		}
 	}
-	// The very first survivors are the in_progress claims, the tail is recent done.
-	if b.Orphans[0].Lifecycle != lifeInProgress {
-		t.Fatalf("first survivor = %s, want an in_progress row on top", b.Orphans[0].Lifecycle)
+	// The 3 in_progress rows were all claimed, so the NOW de-dup lifts them into
+	// the pinned band; the top survivor is now the freshest ready row, and the
+	// tail is recent done.
+	if b.Orphans[0].Lifecycle != lifeReady {
+		t.Fatalf("first survivor = %s, want a ready row on top (the in_progress rows are NOW-only)", b.Orphans[0].Lifecycle)
 	}
 	if last := b.Orphans[len(b.Orphans)-1]; last.Lifecycle != lifeDone {
 		t.Fatalf("last survivor = %s, want a recent-done row at the tail", last.Lifecycle)
@@ -495,14 +572,16 @@ func TestBuildBoard_ClustersLiveShape(t *testing.T) {
 		t.Fatalf("clusters = %v, want %v", got, wantClusters)
 	}
 
-	// sheets-parity members are band-ordered: in_progress, ready(overlaid),
-	// open, then the 9d-stale open sinks to the stale band at the tail.
+	// sheets-parity members are band-ordered: ready(overlaid), open, then the
+	// 9d-stale open sinks to the stale band at the tail. sp1 is a LIVE claim, so
+	// the NOW de-dup (charter D14) keeps it out of the cluster — it renders only in
+	// the pinned NOW band.
 	sheets := findCluster(t, b.Clusters, "proj:sheets-parity")
-	if got := docIDs(sheets.Tasks); !eq(got, []string{"sp1", "sp2", "sp3", "sp4"}) {
-		t.Fatalf("sheets members = %v, want [sp1 sp2 sp3 sp4]", got)
+	if got := docIDs(sheets.Tasks); !eq(got, []string{"sp2", "sp3", "sp4"}) {
+		t.Fatalf("sheets members = %v, want [sp2 sp3 sp4]", got)
 	}
-	if childBand(sheets.Tasks[3], refNow) != 5 {
-		t.Fatalf("sp4 (9d open) should be in the stale band (5), got %d", childBand(sheets.Tasks[3], refNow))
+	if childBand(sheets.Tasks[2], refNow) != 5 {
+		t.Fatalf("sp4 (9d open) should be in the stale band (5), got %d", childBand(sheets.Tasks[2], refNow))
 	}
 
 	// Remaining orphans: the two title-untethered opens (updated desc), then the
