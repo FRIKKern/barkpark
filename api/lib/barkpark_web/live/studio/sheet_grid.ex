@@ -1215,7 +1215,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     op = params["op"] || "gt"
 
     rule = %{
-      "id" => editing || cf_new_id(),
+      "id" => editing || cf_new_id(socket.assigns.cf_rules),
       "range" => String.trim(params["range"] || ""),
       "when" =>
         cf_when(
@@ -1371,8 +1371,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # The stored rule → the edit form's fields (values back to display strings).
   defp cf_edit_form(rule) do
-    w = rule["when"] || %{}
-    style = rule["style"] || %{}
+    w = cf_map(rule["when"])
+    style = cf_map(rule["style"])
 
     %{
       "editing" => to_string(rule["id"]),
@@ -1409,7 +1409,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp cf_editing(editing) when is_binary(editing) and editing != "", do: editing
   defp cf_editing(_), do: nil
 
-  defp cf_new_id, do: "cf-" <> Integer.to_string(System.unique_integer([:positive]))
+  # A fresh "cf-<n>" id that is NOT already taken in this tab's list.
+  # `System.unique_integer/1` restarts at low values on every BEAM boot, so a
+  # bare counter can re-mint an id persisted in a PREVIOUS run — and the gate's
+  # duplicate-id check would then reject the whole list with an error the user
+  # can't decode. Skipping taken ids closes that (the dup check is per-tab, so
+  # list-local uniqueness is sufficient).
+  defp cf_new_id(rules) do
+    taken = MapSet.new(for r <- rules, is_map(r), do: to_string(r["id"]))
+
+    Stream.repeatedly(fn -> "cf-" <> Integer.to_string(System.unique_integer([:positive])) end)
+    |> Enum.find(&(not MapSet.member?(taken, &1)))
+  end
 
   # An unchecked HTML checkbox sends nothing; a checked one sends "on".
   defp cf_checked?(v), do: v in ["on", "true", true]
@@ -1450,9 +1461,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp cf_maybe_flag(map, key, true), do: Map.put(map, key, true)
   defp cf_maybe_flag(map, _key, _), do: map
 
-  # A stored rule's one-line summary for the panel list.
+  # A stored rule's one-line summary for the panel list — TOTAL, like every
+  # other read seam over stored cond_formats (a gate-bypassed doc must degrade
+  # the panel row, never crash the LiveView render).
   defp cf_rule_summary(rule) do
-    w = rule["when"] || %{}
+    w = cf_map(rule["when"])
     range = to_string(rule["range"] || "")
 
     label =
@@ -1468,13 +1481,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     "#{range}: #{label}"
   end
 
-  # The rule's bg preview swatch — stored bg is gate-validated #rrggbb.
+  # The rule's bg preview swatch. Stored bg is gate-validated #rrggbb, but this
+  # is a render seam over RAW storage — re-validate like Cells.style_css does,
+  # so a gate-bypassed value can never inject CSS into the style attribute.
   defp cf_swatch_style(rule) do
-    case get_in(rule, ["style", "bg"]) do
-      bg when is_binary(bg) -> "background: #{bg};"
-      _ -> ""
+    case cf_map(rule["style"])["bg"] do
+      bg when is_binary(bg) ->
+        if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background: #{bg};", else: ""
+
+      _ ->
+        ""
     end
   end
+
+  # Total map read for RAW stored rule sub-maps ("when"/"style") — a non-map
+  # (gate-bypassed corruption) reads as empty rather than raising in Access.
+  defp cf_map(%{} = m), do: m
+  defp cf_map(_), do: %{}
 
   defp cf_value_to_str(nil), do: ""
   defp cf_value_to_str(true), do: "TRUE"

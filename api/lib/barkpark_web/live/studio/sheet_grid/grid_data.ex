@@ -123,7 +123,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
   def cf_styles(_rules, _cells), do: %{}
 
-  defp cf_rules_list(rules) when is_list(rules), do: rules
+  # Map entries only: the panel reads rule["id"]/["when"]/["style"] per row,
+  # and Access RAISES on a non-map entry (e.g. a bare string in a gate-bypassed
+  # doc) — the same corruption class the non-list clause below absorbs. The
+  # panel must degrade like every other read seam over raw storage, not crash
+  # the LiveView render.
+  defp cf_rules_list(rules) when is_list(rules), do: Enum.filter(rules, &is_map/1)
   defp cf_rules_list(_), do: []
 
   # Clamp a requested page index into `[0, last-page]` so a forged, stale, or

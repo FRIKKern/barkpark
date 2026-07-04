@@ -156,5 +156,36 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridDataTest do
       # A non-list stored value collapses to [] so the panel's :for never faults.
       assert socket.assigns.cf_rules == []
     end
+
+    test "non-map entries inside a stored rules LIST are dropped from cf_rules" do
+      # The panel reads rule["id"]/["when"]/["style"] per row and Access raises
+      # on a non-map — a gate-bypassed bare-string entry must degrade, not
+      # crash the render. Valid map entries around it survive.
+      valid = %{
+        "id" => "r1",
+        "range" => "A1",
+        "when" => %{"op" => "gt", "value" => 0},
+        "style" => %{"bg" => "#ff0000"}
+      }
+
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "S",
+            "cells" => %{"A1" => %{"v" => 1}},
+            "cond_formats" => ["garbage", valid, 42]
+          }
+        ]
+      }
+
+      socket =
+        %Phoenix.LiveView.Socket{}
+        |> Phoenix.Component.assign(content: content, tab: 0)
+        |> GridData.derive_grid()
+
+      assert socket.assigns.cf_rules == [valid]
+      # The kernel path was already total: only the valid rule paints.
+      assert socket.assigns.cf_styles == %{{1, 1} => %{"bg" => "#ff0000"}}
+    end
   end
 end
