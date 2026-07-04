@@ -76,6 +76,14 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
   defp set_cell(ref, raw, tab \\ 0),
     do: %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => raw}
 
+  # S1's dynamic-array marker contract, verbatim: the anchor carries "f" +
+  # "spill"(self) + "spill_dims"; each spilled cell carries "v" + "spill"(anchor)
+  # and NO "f" (engine output, not user content).
+  defp spill_anchor(formula, top_left, dims \\ [3, 1]),
+    do: %{"f" => formula, "v" => top_left, "t" => "n", "spill" => "A1", "spill_dims" => dims}
+
+  defp spilled(v), do: %{"v" => v, "t" => "n", "spill" => "A1"}
+
   defp clear_cell(ref, tab \\ 0), do: %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
 
   # Counts `Ops.recompute_tab/1` invocations (the coalescing probe) by
@@ -1586,6 +1594,171 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       # Exactly-once: the retry replays the cached reply and applies nothing, so
       # the rev is unchanged — a cross-tab batch dedups like any other.
       assert second.rev == first.rev
+    end
+  end
+
+  # ── dynamic-array spill regions (S2) ─────────────────────────────────────────
+  #
+  # Wave-3 (spill) session contract, design §3.3 (B-SP-5/6). The engine (S1)
+  # materializes a spilled array into anchor-owned marked cells: the anchor
+  # keeps its `"f"` and gains `"spill"`(self) + `"spill_dims"`; each non-anchor
+  # spilled cell carries `"v"` + `"spill"`(anchorRef) and NO `"f"` — engine
+  # OUTPUT, not user content. This block locks the three session-layer
+  # invariants that ride that contract:
+  #
+  #   1. THE SEAM — `nonempty_flag/1` excludes engine-owned spilled cells, so a
+  #      spill is invisible to every user-content count (`count_nonempty`,
+  #      `tab_nonempty`, and the incremental cell-cap arithmetic all inherit it
+  #      through that ONE predicate). A spill must never eat the cell-cap budget
+  #      as N user cells.
+  #   2. VACATE-AS-NIL — a shrunk/cleared region's now-empty positions surface
+  #      as `nil` in the coalesced delta, through the ordinary
+  #      captured-prior-vs-recomputed diff (no new delta shape).
+  #   3. UNDO RE-DERIVES — the anchor edit's inverse stays the ordinary
+  #      `{:cell, tab, anchorRef, prior_anchor_cell}`; undo restores the prior
+  #      anchor + recomputes, and the region re-derives — spilled cells need NO
+  #      individual inverse.
+  #
+  # S1 (the engine's array distribution + `#SPILL!`) is a SEPARATE slice; these
+  # tests exercise the session mechanism directly (seeded marker-shaped cells +
+  # the diff/undo rails) so they hold on the plain session cluster, and stay
+  # byte-identical once S1's recompute drives real spills through them.
+
+  describe "dynamic-array spill regions (S2)" do
+    test "nonempty_flag: a non-anchor spilled cell counts 0; the anchor counts 1; plain cells unchanged" do
+      # The seam. Engine-owned spilled output → 0.
+      assert Ops.nonempty_flag(spilled(2)) == 0
+      assert Ops.nonempty_flag(%{"v" => "", "spill" => "A1"}) == 0
+      # The anchor carries "spill" too but ALSO an "f" — user-authored → 1.
+      assert Ops.nonempty_flag(spill_anchor("=SORT(C1:C3)", 3)) == 1
+
+      # No-spill regression: a cell with NO "spill" marker follows the exact
+      # pre-seam v/f predicate, byte-identical.
+      assert Ops.nonempty_flag(%{"v" => 5}) == 1
+      assert Ops.nonempty_flag(%{"f" => "=A1"}) == 1
+      assert Ops.nonempty_flag(%{"v" => ""}) == 0
+      assert Ops.nonempty_flag(%{"v" => nil}) == 0
+      assert Ops.nonempty_flag(nil) == 0
+      # Defensive: a non-binary "spill" is not a marker — falls to the v/f rule.
+      assert Ops.nonempty_flag(%{"v" => 7, "spill" => true}) == 1
+    end
+
+    test "count_nonempty counts the anchor + user cells but not the spilled region" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{
+              # anchor + two engine-owned spilled cells (the array =SORT(C1:C3))
+              "A1" => spill_anchor("=SORT(C1:C3)", 3),
+              "A2" => spilled(5),
+              "A3" => spilled(9),
+              # the source data (real user cells)
+              "C1" => %{"v" => 9},
+              "C2" => %{"v" => 5},
+              "C3" => %{"v" => 3}
+            }
+          }
+        ]
+      }
+
+      # anchor(1) + C1/C2/C3(3) = 4 user cells; A2/A3 (spilled) contribute 0.
+      assert Ops.count_nonempty(content) == 4
+    end
+
+    test "a spilled region does not consume the cell-cap budget as N user cells" do
+      put_cfg(cell_cap: 2)
+      # Anchor (1 user cell) + two engine-owned spilled cells. Under the pre-seam
+      # accounting the session would boot at nonempty=3 — already over the cap of
+      # 2 — and reject the very first user write. With the seam it boots at 1.
+      # The anchor formula is trivial + dependency-free so the first op's
+      # recompute is deterministic and preserves the markers (write_value only
+      # touches v/t).
+      create_sheet("sp-cap", %{
+        "A1" => spill_anchor("=5+1", 6),
+        "A2" => spilled(0),
+        "A3" => spilled(0)
+      })
+
+      # One more USER cell lands (anchor=1 + this=2 == cap).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sp-cap", @dataset, [set_cell("E1", "user")])
+
+      # The next user cell is over the cap — only USER content is budgeted, so
+      # the two spilled cells never counted.
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "cell_cap_exceeded"}]}} =
+        Session.apply_ops("sp-cap", @dataset, [set_cell("E2", "user2")])
+
+      # And the seeded markers survived recompute — the anchor is still a marked
+      # formula (counts 1), the spilled cells still excluded.
+      {:ok, content} = Session.peek("sp-cap", @dataset)
+      assert Ops.count_nonempty(content) == 2
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A1", "spill"]) == "A1"
+      assert get_in(content, ["tabs", Access.at(0), "cells", "A2", "spill"]) == "A1"
+    end
+
+    test "the coalesced delta carries a vacated position as nil (the diff rail a shrunk spill rides)" do
+      # When S1's recompute shrinks/vacates a region it REMOVES the now-empty
+      # positions from the cells map; the session surfaces them through the
+      # ordinary captured-prior-vs-recomputed diff as `nil`. Lock that rail here
+      # without depending on the engine to spill: a batch that removes a seeded
+      # cell must nil it in the ONE coalesced delta, alongside written cells.
+      doc = create_sheet("sp-vacate", %{"A2" => %{"v" => "stale"}, "B1" => %{"f" => "=1+1"}})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("sp-vacate", @dataset, doc.workspace_id)
+      )
+
+      {:ok, %{applied: 2}} =
+        Session.apply_ops("sp-vacate", @dataset, [set_cell("C1", 7), clear_cell("A2")])
+
+      assert_receive {:sheets_op, %{tab: 0, changed: changed}}, 1_000
+      assert changed["C1"] == %{"v" => 7}
+      # Vacated position — present in the delta, as nil (so a client CLEARS it),
+      # not merely absent.
+      assert Map.has_key?(changed, "A2")
+      assert changed["A2"] == nil
+    end
+
+    test "undo of an anchor edit restores the prior anchor + recomputes — no new inverse shape" do
+      # The anchor edit's inverse is the ordinary {:cell, tab, ref, prior}. Undo
+      # restores the prior (marker-bearing) anchor cell and recomputes the tab;
+      # the region re-derives from the restored anchor. Spilled cells carry no
+      # individual inverse — recompute reconstructs them (design §3.3 undo).
+      anchor = spill_anchor("=5+1", 6)
+
+      create_sheet("sp-undo", %{
+        "A1" => anchor,
+        "A2" => spilled(0),
+        "A3" => spilled(0),
+        # a reader of the anchor's top-left proves recompute runs on undo
+        "D1" => %{"f" => "=A1"}
+      })
+
+      # Boot + settle the reader.
+      {:ok, %{applied: 1}} = Session.apply_ops("sp-undo", @dataset, [set_cell("Z1", 0, 0)])
+      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 6, "t" => "n"}
+
+      # Edit the anchor to a plain scalar — the formula + markers drop (set_cell
+      # carries only fmt/s from the prior cell, never "spill").
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("sp-undo", @dataset, [
+          %{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => 42, "user" => "u1"}
+        ])
+
+      # A scalar set_cell stores just "v" (no "t" — the engine only stamps "t"
+      # on formula cells); the anchor is now a plain, unmarked user cell.
+      assert peek_cell("sp-undo", "A1") == %{"v" => 42}
+      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 42, "t" => "n"}
+
+      # Undo: the ordinary cell inverse restores the FULL prior anchor (formula +
+      # "spill" + "spill_dims") and recomputes — D1 re-derives to the anchor's
+      # value. No per-spilled-cell inverse was needed.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("sp-undo", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell("sp-undo", "A1") == anchor
+      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 6, "t" => "n"}
     end
   end
 
