@@ -117,7 +117,6 @@ defmodule Barkpark.PortableDoc.Render.ArticleInlineAllowlistTest do
     # collapsible callout inner spacing (slice 4).
     {"padding-bottom", :theme},
     # byline rule spacing (slice 4).
-    {"padding-left", :theme},
     # list indent (slice 3).
     {"text-transform", :theme},
     # eyebrow + table/sheet header uppercasing (slices 4 & 5).
@@ -167,7 +166,7 @@ defmodule Barkpark.PortableDoc.Render.ArticleInlineAllowlistTest do
       # render silently fell back to :email these vanish and the whole inventory
       # would be measuring the wrong palette.
       assert html =~ "Iowan Old Style"
-      assert html =~ "border-bottom:1px solid var(--paper-accent-soft"
+      assert html =~ "border-bottom:1px solid var(--paper-rule"  # byline rule stays inline (theme; retires slice 4)
       assert MapSet.size(emitted_style_properties()) > 0
     end
   end
