@@ -175,20 +175,31 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # delete_rows/cols). Positions outside the rect and other-tab sorts are
   # untouched. Malformed/missing rect|perm (older peer, shape drift) falls
   # through to the catch-all → today's no-remap, never a crash.
-  defp remap_selection(socket, %{op: "sort_range", tab: tab, rect: {c1, r1, c2, r2}, perm: perm})
+  defp remap_selection(socket, %{op: "sort_range", tab: tab, rect: {c1, r1, c2, r2}, perm: perm} = s)
        when is_list(perm) do
-    if tab == socket.assigns.tab do
-      active = sort_pos(socket.assigns.active, c1, r1, c2, r2, perm)
+    # SF-R×SF-W: the row-follow remap is for REMOTE peers only. The originator
+    # of the sort (`by` == this viewer's user_id) keeps their cursor at its
+    # ADDRESS — SF-W's sort-column/sort-selection already set the selection
+    # (column-top anchor) BEFORE dispatch, and Excel semantics say the initiator's
+    # cursor stays put, it does not chase the data. A missing/blank `by` (the
+    # unit-remap payloads, anonymous/import sorts) is treated as remote → remap.
+    cond do
+      tab != socket.assigns.tab ->
+        socket
 
-      anchor =
-        case socket.assigns.anchor do
-          nil -> nil
-          pos -> sort_pos(pos, c1, r1, c2, r2, perm)
-        end
+      is_binary(Map.get(s, :by)) and Map.get(s, :by) == socket.assigns[:user_id] ->
+        socket
 
-      assign(socket, active: active, anchor: anchor)
-    else
-      socket
+      true ->
+        active = sort_pos(socket.assigns.active, c1, r1, c2, r2, perm)
+
+        anchor =
+          case socket.assigns.anchor do
+            nil -> nil
+            pos -> sort_pos(pos, c1, r1, c2, r2, perm)
+          end
+
+        assign(socket, active: active, anchor: anchor)
     end
   end
 
