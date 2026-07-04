@@ -20,8 +20,10 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
-      # paper-editor style mirror tripwire — the two hand-synced mirrors must not drift.
+      # paper-editor style mirror tripwire — the mirrors + the generated
+      # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
   pull_request:
@@ -37,8 +39,10 @@ on:
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
       - ".github/workflows/doc-gates.yml"
-      # paper-editor style mirror tripwire — the two hand-synced mirrors must not drift.
+      # paper-editor style mirror tripwire — the mirrors + the generated
+      # paper-surface token layer (bundle) must not drift from the ONE source.
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
 

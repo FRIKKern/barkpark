@@ -32,7 +32,7 @@ defmodule Barkpark.PortableDoc.Render do
   engine that preceded the split.
   """
 
-  alias Barkpark.PortableDoc.Render.{Compose, Palettes, Util, Walk}
+  alias Barkpark.PortableDoc.Render.{Compose, Palettes, Stylesheet, Util, Walk}
 
   # Render-output version for the body_html cache. Bump when render output
   # semantics change — e.g. the #857/#861 tolerance change class — so a paper
@@ -40,12 +40,15 @@ defmodule Barkpark.PortableDoc.Render do
   # detectable as stale (its `content["body_html_sv"]` lags this) and can be
   # rehydrated by `mix barkpark.rehydrate_body_html`.
   #
-  # v2: article prose emits bare semantic elements styled by Render.Stylesheet —
+  # v2: article prose emits bare semantic elements styled by Render.Stylesheet.
+  # v3: article ROLES/TONES/CHROME (text roles, callout tones, table/sheet band +
+  # cell rules, wikilink/tag/task-chip/embed/blockref/button/hr frames) emit
+  # `bp-*` classes instead of inline THEME styles — the final Stage-2 emit change.
   # deploy step: run mix barkpark.rehydrate_body_html on guerrilla + prod after
-  # the Stage-2 emit waves merge; prerequisite for deleting the root.html.heex
-  # de-inline overrides. Old cached v1 HTML stays self-styled (inline) and keeps
+  # this wave merges; prerequisite for deleting the root.html.heex de-inline
+  # overrides (wave 3). Old cached v1/v2 HTML stays self-styled (inline) and keeps
   # rendering; block_ops stamps body_html_sv on every fresh render.
-  @body_html_render_version 2
+  @body_html_render_version 3
 
   @doc """
   The current body_html render-version. Stamped onto `content["body_html_sv"]`
@@ -113,11 +116,41 @@ defmodule Barkpark.PortableDoc.Render do
     if Map.get(opts, :doctype, true) == false do
       body
     else
-      ~s(<!doctype html><html><head><meta charset="utf-8"></head>) <>
-        ~s(<body style="background:#{palette.bg};margin:0;padding:0;">) <>
-        body <>
-        "</body></html>"
+      document(body, palette)
     end
+  end
+
+  # Standalone document wrapper.
+  #
+  # `:article` — a self-contained `.html` export. It embeds the ONE canonical
+  # paper-surface stylesheet (`Stylesheet.css/0`, compile-time-inlined from
+  # `api/assets/paper-surface/paper-surface.css`) inside `<head>` and stamps
+  # `class="bp-paper-surface"` on `<body>`, so the article styles itself from the
+  # single source — no network fetch (CSP-safe), no hand-mirror to drift. The
+  # existing inline `background:#{palette.bg}` stays as the no-CSS fallback.
+  #
+  # A standalone export has NO `html[data-theme]` ancestor, so the stylesheet's
+  # unscoped `.bp-paper-surface` fallback token block paints its LIGHT values;
+  # dark mode only engages under a host that stamps `data-theme` on an ancestor.
+  defp document(body, %{style: :article} = palette) do
+    ~s(<!doctype html><html><head><meta charset="utf-8"><style>) <>
+      Stylesheet.css() <>
+      ~s(</style></head>) <>
+      ~s(<body class="bp-paper-surface" style="background:#{palette.bg};margin:0;padding:0;">) <>
+      body <>
+      "</body></html>"
+  end
+
+  # Every other palette (`:email` — Outlook is the contract) keeps today's inline
+  # wrapper BYTE-FOR-BYTE: email clients strip `<style>`, so inline is the only
+  # correct emission there. This wrapper is byte-frozen by a render_test freeze
+  # (and the email golden rides `doctype: false`, so the freeze is the only guard
+  # on the `:email` `doctype: true` document envelope).
+  defp document(body, palette) do
+    ~s(<!doctype html><html><head><meta charset="utf-8"></head>) <>
+      ~s(<body style="background:#{palette.bg};margin:0;padding:0;">) <>
+      body <>
+      "</body></html>"
   end
 
   # ── block → HTML (Wave 4 entry point) ──────────────────────────────────────

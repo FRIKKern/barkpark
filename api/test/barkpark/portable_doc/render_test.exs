@@ -5,11 +5,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
   alias Barkpark.PortableDoc.Render
 
   describe "body_html_render_version/0 — cache cutover" do
-    test "is 2 (Stage 2: article prose emits bare semantic elements)" do
-      # Bumped 1→2 in the same slice that first made article emission bare — old
-      # cached v1 HTML (self-styled inline) stays renderable; the stamp lets
+    test "is 3 (Stage 2 wave 2: article roles/tones/chrome emit bp-* classes)" do
+      # Bumped 1→2 (bare prose) then 2→3 (roles/tones/chrome → classes) — old
+      # cached v1/v2 HTML (self-styled inline) stays renderable; the stamp lets
       # `mix barkpark.rehydrate_body_html` detect and refresh the drift.
-      assert Render.body_html_render_version() == 2
+      assert Render.body_html_render_version() == 3
     end
   end
 
@@ -266,7 +266,52 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_blocks([block], %{style: :article})
       refute html =~ "<details"
-      assert html =~ ~s(<div style="border-left:4px solid)
+      # Stage 2 wave 2: the tone card is class-driven (`.bp-paper-surface`
+      # `.bp-callout.bp-callout--info` owns the tone tokens); no inline border.
+      assert html =~ ~s(<div class="bp-callout bp-callout--info">)
+      refute html =~ "border-left:4px solid"
+    end
+
+    test "article callout tone → modifier class, unknown falls back to info (mirrors Util.tone_palette/1)" do
+      mk = fn tone, extra ->
+        Map.merge(
+          %{
+            "id" => "t",
+            "type" => "callout",
+            "tone" => tone,
+            "content" => [%{"type" => "text", "value" => "x"}]
+          },
+          extra
+        )
+      end
+
+      # Each known tone maps to its own modifier — the class IS the tone now,
+      # so a mis-mapped clause would silently paint the wrong tone tokens.
+      for tone <- ["success", "warning", "danger", "neutral", "info"] do
+        html = Render.render_blocks([mk.(tone, %{})], %{style: :article})
+
+        assert html =~ ~s(<div class="bp-callout bp-callout--#{tone}">),
+               "tone #{inspect(tone)} did not map to its own modifier class"
+      end
+
+      # Unknown (and absent) tones fall back to info, exactly like
+      # Util.tone_palette/1's catch-all — never an unstyled `bp-callout--`.
+      for tone <- ["sparkle", nil] do
+        html = Render.render_blocks([mk.(tone, %{})], %{style: :article})
+        assert html =~ ~s(<div class="bp-callout bp-callout--info">)
+      end
+
+      # The collapsible article form carries the same tone card classes plus
+      # the summary/body chrome hooks (all resolved by paper-surface.css).
+      html =
+        Render.render_blocks(
+          [mk.("warning", %{"collapsible" => true, "title" => "Heads up"})],
+          %{style: :article}
+        )
+
+      assert html =~ ~s(<details open class="bp-callout bp-callout--warning">)
+      assert html =~ ~s(<summary class="bp-callout__summary">Heads up</summary>)
+      assert html =~ ~s(<div class="bp-callout__body">)
     end
 
     test "PdButton primary uses brand background" do
@@ -602,16 +647,22 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_html(tree, %{style: :article})
 
-      # Accent terracotta is unreachable in the email palette. Article palette
-      # now emits it via `var(--paper-accent, #a23925)` so the theme tokens
-      # (root.html.heex `.bp-paper-surface`) can flip it for dark mode while
-      # the fallback hex stays byte-identical for non-themed surfaces. (Carried
-      # by the PdButton child — buttons are wave-2, still self-styled.)
-      assert html =~ "#a23925"
+      # Wave 2 slice 6: :article render_html is now a self-contained export — the
+      # canonical paper-surface stylesheet is embedded in <head>, so the accent
+      # token (`--paper-accent: #a23925`) and the serif stack legitimately live in
+      # that <style> block (covered by the ":article document wrapper" describe).
+      # These guards are about the BODY carrying no INLINE theme, so scope to it.
+      body = html |> String.split("</head>", parts: 2) |> List.last()
+
+      # Stage 2 wave 2: the PdButton child is now CLASS-driven — the accent fill
+      # lives in `.bp-paper-surface .bp-button--primary` (single-sourced from
+      # `var(--paper-accent)`), so no accent hex rides the button inline anymore.
+      assert body =~ ~s(class="bp-button bp-button--primary")
+      refute body =~ "#a23925"
       # Stage 2: the article container is bare of ink/bg/font — the
       # `.bp-paper-surface` root owns the serif family (single-sourced from
       # `--paper-font-serif`). No serif stack rides the container inline anymore.
-      refute html =~
+      refute body =~
                "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
 
       # Default article width budget stays inline — maxWidth is author DATA
@@ -619,9 +670,16 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "max-width:680px"
       # …and the container carries ONLY geometry now (no colour/background/font).
       assert html =~ ~s(<div style="max-width:680px;margin:0 auto;padding:24px">)
-      # Parchment page background on the doctype body — same hex, now wrapped
-      # in `var(--paper-bg-deep, …)` so themed hosts can override.
-      assert html =~ ~s|<body style="background:var(--paper-bg-deep, #f5f2e9);|
+      # Parchment page background on the doctype body — same hex, wrapped in
+      # `var(--paper-bg-deep, …)` so themed hosts can override; the inline bg
+      # stays as the no-CSS fallback. Wave-2 slice 6 (export self-containment):
+      # the standalone article document now also embeds the ONE canonical
+      # stylesheet in <head> and tags <body class="bp-paper-surface">, so the
+      # export styles itself from the single source.
+      assert html =~
+               ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #f5f2e9);|
+
+      assert html =~ "<style>" <> Barkpark.PortableDoc.Render.Stylesheet.css() <> "</style>"
     end
 
     test "email/default mode output is unchanged for an existing block" do
@@ -656,9 +714,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(block, %{style: :article})
 
       assert html =~ "Field notes"
-      assert html =~ "text-transform:uppercase"
-      assert html =~ "letter-spacing:0.08em"
-      assert html =~ "color:var(--paper-accent, #a23925)"
+      # Stage 2 wave 2: the eyebrow role is class-driven (`.bp-paper-surface`
+      # `.bp-role-eyebrow` owns the uppercase accent kicker); no inline theme.
+      assert html =~ ~s(class="bp-role-eyebrow")
+      refute html =~ "text-transform:uppercase"
     end
 
     test "byline joins items with a separator and carries a bottom rule (article)" do
@@ -666,8 +725,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(block, %{style: :article})
 
       assert html =~ "Pelle Jarl · May 2026"
-      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
-      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
+      # Stage 2 wave 2: the byline rule/colour live in `.bp-role-byline` now.
+      assert html =~ ~s(class="bp-role-byline")
+      refute html =~ "border-bottom:1px solid"
     end
 
     test "byline accepts a plain text fallback" do
@@ -684,8 +744,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_block(block, %{style: :article})
       assert html =~ "The lead."
-      assert html =~ "font-size:1.28rem"
-      assert html =~ "font-weight:500"
+      # Stage 2 wave 2: the ingress role (larger, heavier lead) is class-driven.
+      assert html =~ ~s(class="bp-role-ingress")
+      refute html =~ "font-size:1.28rem"
     end
 
     test "eyebrow/byline/ingress degrade to plain text in email mode (no article cues)" do
@@ -965,8 +1026,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "Role"
       assert html =~ "Pelle"
       assert html =~ "Author"
-      # Body cells use the warm rule colour (var-wrapped for dark-mode flip).
-      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
+      # Stage 2 wave 2: body cells are class-driven (`.bp-table__td` owns the
+      # warm rule colour); no inline theme, and never the email gray.
+      assert html =~ ~s(<td class="bp-table__td">)
       refute html =~ "#e5e7eb"
     end
 
@@ -974,13 +1036,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@table_with_head, %{style: :article})
 
       assert html =~ "<thead>"
-      assert html =~ "<th "
-      # Uppercase, muted, 2px bottom rule under the header.
-      assert html =~ "text-transform:uppercase"
-      assert html =~ "border-bottom:2px solid var(--paper-rule, #e6e2d8)"
-      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
-      # Body still renders.
-      assert html =~ "border-bottom:1px solid var(--paper-rule, #e6e2d8)"
+      # Stage 2 wave 2: the header band + body cells are class-driven
+      # (`.bp-table__th` = uppercase/muted/2px rule, `.bp-table__td` = body rule).
+      assert html =~ ~s(<th class="bp-table__th">)
+      assert html =~ ~s(<td class="bp-table__td">)
+      refute html =~ "text-transform:uppercase"
       assert html =~ "Name"
       assert html =~ "Pelle"
     end
@@ -1019,10 +1079,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@pull, %{style: :article})
 
       assert html =~ "The medium is the message."
+      # Stage 2 wave 2: the pullquote role (block, left rule, muted, larger) is
+      # class-driven; only the author `italic` mark stays inline (DATA).
+      assert html =~ ~s(class="bp-role-pullquote")
       assert html =~ "font-style:italic"
-      assert html =~ "border-left:3px solid var(--paper-accent, #a23925)"
-      assert html =~ "color:var(--paper-ink-soft, #6a6a6a)"
-      assert html =~ "font-size:1.2rem"
+      refute html =~ "border-left:3px solid"
     end
 
     test "email mode degrades to a plain italic span (no border cues)" do

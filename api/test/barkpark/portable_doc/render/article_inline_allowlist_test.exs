@@ -26,102 +26,58 @@ defmodule Barkpark.PortableDoc.Render.ArticleInlineAllowlistTest do
   #     leave the list one migration slice at a time and can never silently
   #     return.
   #
-  # LIMITATION (stated honestly): the allowlist is by property NAME, so a name
-  # with ANY permanent DATA use (e.g. `color`, `background`, `margin`, `padding`)
-  # cannot be removed and thus won't catch a THEME reintroduction of that SAME
-  # property. The ratchet bites hardest on the pure-THEME names below (removing
-  # them makes reintroduction fail CI); the charter's grep-refute of `[style*=`
-  # selectors in root.html.heex (Decision 8) is the complementary guard for the
-  # dual-use names.
+  # LIMITATION (stated honestly): the allowlist is by property NAME. Now that the
+  # list is TERMINAL, any brand-new property name on `:article` output fails
+  # immediately (the tripwire). The one remaining hole is a THEME REUSE of a name
+  # that still has a permanent DATA use (e.g. `color`, `background`, `margin`,
+  # `padding`) — those names can't be removed, so a THEME reintroduction of that
+  # SAME property slips past. The charter's grep-refute of `[style*=` selectors in
+  # root.html.heex (Decision 8) is the complementary guard for those dual-use names.
 
   # Each entry: {property, classification}. Classification is DOCUMENTARY — the
-  # assertion only checks set membership — but it names the later slice that
-  # retires each THEME row, so the diff that deletes the walk.ex emission knows
-  # exactly which line to delete here too.
+  # assertion only checks set membership. As of Stage-2 wave 2 the list is
+  # TERMINAL: every `:theme` row has been retired (its walk.ex emission moved to
+  # a `.bp-paper-surface` class rule), so the ONLY inline `style=` on `:article`
+  # output is author DATA — content that must survive a stylesheet-less sink.
   #
   #   :data  — permanent. Author content; survives a stylesheet-less surface.
-  #   :theme — to be DELETED (with its walk.ex emission) in the named slice.
   @allowlist [
-    # ── DATA — author content, stays inline forever ──────────────────────────
-    # A `:data` name may ALSO have a `:theme` co-user today (noted inline); the
-    # name persists because the DATA use is permanent, so its ratcheting power
-    # is limited to blocking brand-new property names (see LIMITATION above).
+    # ── DATA — author content, stays inline forever (TERMINAL, data-only) ─────
     {"background", :data},
-    # DATA: sheet per-cell `bg` (sheets_parity-pinned).
-    # theme co-users → container paper, callout/collapsible bg, inline-code chip,
-    #   tag chip (retire in Wave 2 slices 4 & 5 + prose slice 3).
+    # sheet per-cell `bg` (sheets_parity-pinned).
     {"background-color", :data},
     # PdBox `backgroundColor` geometry.
     {"border", :data},
-    # DATA: PdBox border geometry. theme co-user → hr `border:none` reset (slice 5).
-    {"border-top", :data},
-    # DATA: PdHr thickness. theme co-user → hr rule colour (slice 5).
+    # PdBox border geometry.
+    {"border-top-width", :data},
+    # PdHr thickness — article emits `border-top-width:Npx`; the rule colour +
+    #   `border:none` reset moved to `.bp-hr`.
     {"color", :data},
-    # DATA: author PdText/PdParagraph colour mark + sheet error mark.
-    # theme co-users → container/heading/link/muted-role/button/chip colours
-    #   (retire across slices 3, 4, 5).
+    # author PdText/PdParagraph colour mark + sheet error mark.
     {"display", :data},
-    # DATA: PdBox flex geometry. theme co-users → pullquote block, button
-    #   inline-block (slices 4 & 5).
+    # PdBox flex geometry (`display:flex`).
     {"flex-direction", :data},
     # PdBox flex geometry.
     {"font-style", :data},
-    # DATA: author italic mark + sheet per-cell `i`. theme co-user → unresolved
-    #   embed italic (slice 5).
+    # author italic mark + sheet per-cell `i`.
     {"font-weight", :data},
-    # DATA: author bold mark + sheet per-cell `b` + sheet error bold.
-    # theme co-users → heading/eyebrow/summary/button weight (slices 3, 4, 5).
+    # author bold mark + sheet per-cell `b` + sheet error bold.
     {"height", :data},
-    # DATA: PdBox height geometry + PdImage `height:auto` responsive reset.
+    # PdBox height geometry + PdImage `height:auto` responsive reset.
     {"margin", :data},
-    # DATA: PdBox margin geometry. theme co-users → container/list/hr/byline/
-    #   pullquote/truncation-note margins (slices 3, 4, 5).
+    # PdContainer `margin:0 auto` + PdBox margin geometry.
     {"max-width", :data},
-    # DATA: PdContainer maxWidth + PdImage `max-width:100%`.
+    # PdContainer maxWidth + PdImage `max-width:100%`.
     {"padding", :data},
-    # DATA: PdBox padding geometry. theme co-users → container/callout/table/
-    #   sheet/tag/button padding (slices 3, 4, 5).
+    # PdContainer `padding:24px` + PdBox padding geometry.
     {"text-align", :data},
-    # DATA: sheet per-cell explicit `al` (sheets_parity-pinned). theme co-users →
-    #   table/sheet header `text-align:left` (slice 5).
+    # sheet per-cell explicit `al` (sheets_parity-pinned).
     {"text-decoration", :data},
-    # DATA: author underline/strike marks + sheet URL-cell link. theme co-users →
-    #   link/wikilink/tag/button decoration (slices 3, 4, 5).
+    # author underline/strike marks.
     {"vertical-align", :data},
-    # DATA: PdBox verticalAlign geometry. theme co-user → table/sheet cell
-    #   `vertical-align:top` (slice 5).
-    {"width", :data},
-    # DATA: sheet col_widths + PdBox width geometry. theme co-user → table/sheet
-    #   `width:100%` (slice 5).
-
-    # ── THEME — pure structural chrome, retire entirely in the named slice ────
-    {"border-bottom", :theme},
-    # link soft-border + byline rule + table/sheet header & cell rules (slices 3,4,5).
-    {"border-collapse", :theme},
-    # table/sheet chrome (slice 5).
-    {"border-left", :theme},
-    # callout/collapsible/pullquote/embed accent bar (slices 4 & 5).
-    {"border-radius", :theme},
-    # inline-code/tag/task-chip/button corners (slices 3, 4, 5).
-    {"cursor", :theme},
-    # collapsible <summary> pointer (slice 4).
-    {"font-family", :theme},
-    # container/heading/role/table/sheet/code typography (slices 3, 4, 5).
-    {"font-size", :theme},
-    # heading/role/code/table/sheet/chip/note type scale (slices 3, 4, 5).
-    {"letter-spacing", :theme},
-    # heading + eyebrow + table/sheet header tracking (slices 3, 4, 5).
-    {"line-height", :theme},
-    # heading/ingress/pullquote/list rhythm (slices 3 & 4).
-    {"margin-top", :theme},
-    # collapsible callout inner spacing (slice 4).
-    {"padding-bottom", :theme},
-    # byline rule spacing (slice 4).
-    # list indent (slice 3).
-    {"text-transform", :theme},
-    # eyebrow + table/sheet header uppercasing (slices 4 & 5).
-    {"white-space", :theme}
-    # task-chip `nowrap` (slice 5).
+    # PdBox verticalAlign geometry.
+    {"width", :data}
+    # sheet col_widths + PdBox width geometry.
   ]
 
   @allowed MapSet.new(@allowlist, fn {prop, _class} -> prop end)
@@ -162,11 +118,14 @@ defmodule Barkpark.PortableDoc.Render.ArticleInlineAllowlistTest do
 
     test "the fixture actually exercises the article palette (guards a mis-wired render)" do
       html = Render.render_html(ParityFixture.tree(), ParityFixture.render_opts(:article))
-      # Article-only signals: serif heading font + the soft link border. If the
-      # render silently fell back to :email these vanish and the whole inventory
-      # would be measuring the wrong palette.
-      assert html =~ "Iowan Old Style"
-      assert html =~ "border-bottom:1px solid var(--paper-rule"  # byline rule stays inline (theme; retires slice 4)
+      # Article-only signals: the role + tone CLASS emission. `:email` never
+      # stamps `bp-role-*` or `bp-callout--*` (its clauses emit inline styles),
+      # so if the render silently fell back to :email these vanish and the whole
+      # inventory would be measuring the wrong palette. (Wave 2 moved the byline
+      # rule from an inline `border-bottom` to the `.bp-role-byline` class — hence
+      # a class signal now, not an inline one.)
+      assert html =~ ~s(class="bp-role-byline")
+      assert html =~ ~s(class="bp-callout bp-callout--info")
       assert MapSet.size(emitted_style_properties()) > 0
     end
   end
