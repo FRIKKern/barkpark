@@ -329,7 +329,14 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 			return p, s
 		}
 		if t.Priority != "" {
-			return t.Priority, dimStyle.Render(t.Priority)
+			// The live corpus stores priority as a bare digit ("0"..."4"); a lone
+			// "0" on a row reads as cryptic noise. Prefix "P" so it reads as the
+			// urgency it is (P0 most urgent) — matching the census/`bp` vocabulary.
+			lbl := t.Priority
+			if c := lbl[0]; c >= '0' && c <= '9' {
+				lbl = "P" + lbl
+			}
+			return lbl, dimStyle.Render(lbl)
 		}
 		return "", ""
 	case "done", "closed":

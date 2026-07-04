@@ -94,9 +94,20 @@ func anyInNow(tasks []Task, nowSet map[string]bool) bool {
 // (composeSnapshot marks open/blocked rows ready) — the same signal the header's
 // ready tally and `bp task next` use — so the head is exactly what can be claimed.
 func readyHead(tasks []Task) (head []Task, total int) {
+	// A task that is itself a parent (some other task names it as ParentID) is a
+	// goal/epic ROOT — you claim its leaf children, not the whole goal. Exclude
+	// parents from the claim-forward head so `c` never claims an entire epic
+	// (wave-7 polish: the head is where you pick up ACTIONABLE work). bareID
+	// normalizes the drafts. prefix so a bare ParentID matches a prefixed DocID.
+	parents := make(map[string]bool)
+	for _, t := range tasks {
+		if t.ParentID != "" {
+			parents[bareID(t.ParentID)] = true
+		}
+	}
 	var ready []Task
 	for _, t := range tasks {
-		if t.Lifecycle == lifeReady {
+		if t.Lifecycle == lifeReady && !parents[bareID(t.DocID)] {
 			ready = append(ready, t)
 		}
 	}

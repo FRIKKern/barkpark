@@ -2,11 +2,11 @@ barkpark  ⎇ lead/session-stable  ⇄ guerrilla                                
 0 active · 7 ready · 1 blocked · 3 done
 
 READY TO CLAIM
-  ▎○ Retry the dead-worker sweep                                                                   1
-   ○ Unify the button token scale                                                                  2
-   ○ Add the SUM() spreadsheet function                                                            2
-   ○ Redeploy on a broken promise                                                                  2
-   ○ Fix the timeago clock-skew clamp                                                              3
+  ▎○ Retry the dead-worker sweep                                                                  P1
+   ○ Unify the button token scale                                                                 P2
+   ○ Add the SUM() spreadsheet function                                                           P2
+   ○ Redeploy on a broken promise                                                                 P2
+   ○ Fix the timeago clock-skew clamp                                                             P3
    +2 more ready
 
 ── Aesthetic unification epic ───────────────────────────────────────────────────── 3 ready · 1 done
