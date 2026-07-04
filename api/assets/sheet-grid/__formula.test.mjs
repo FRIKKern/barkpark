@@ -457,6 +457,61 @@ check("wish: type '=sum(', drag B3:B5, Enter -> =SUM(B3:B5)", () => {
   assert.equal(F.normalizeFormula(dropped.value), "=SUM(B3:B5)");
 });
 
+// ── (h) rebaseFormula — the copy/paste $-aware ref shifter (S-CLIP) ───────────
+// The pure-JS twin of structure.ex rebase_formula/3: shift RELATIVE refs by the
+// paste delta (dcol,drow), honor $ anchors, collapse off-grid refs to #REF!,
+// leave string literals + fn names untouched. The client formula clipboard
+// (bp-sheet-grid.js _onPaste) rebuilds the paste grid from these strings.
+
+check("rebaseFormula: charter pin — '=B4+$C$1' by (1,2) -> '=C6+$C$1'", () => {
+  assert.equal(F.rebaseFormula("=B4+$C$1", 1, 2), "=C6+$C$1");
+});
+
+check("rebaseFormula: absolute anchors are immovable; mixed anchors move one axis", () => {
+  assert.equal(F.rebaseFormula("=$A$1", 5, 5), "=$A$1"); // fully pinned
+  assert.equal(F.rebaseFormula("=$A1", 1, 1), "=$A2"); // col pinned, row moves
+  assert.equal(F.rebaseFormula("=A$1", 1, 1), "=B$1"); // row pinned, col moves
+  assert.equal(F.rebaseFormula("=A1", 1, 1), "=B2"); // fully relative
+});
+
+check("rebaseFormula: ranges shift BOTH endpoints; fn names untouched", () => {
+  assert.equal(F.rebaseFormula("=SUM(B3:B5)", 1, 0), "=SUM(C3:C5)"); // col +1
+  assert.equal(F.rebaseFormula("=B3:D5", 0, 2), "=B5:D7"); // row +2, both corners
+  // the fn token SUM is never a ref — it must survive verbatim
+  assert.equal(F.rebaseFormula("=SUM(A1)", 1, 0), "=SUM(B1)");
+});
+
+check("rebaseFormula: refs INSIDE a string literal are untouched", () => {
+  assert.equal(F.rebaseFormula('="A1"&B2', 1, 0), '="A1"&C2'); // "A1" is a str token
+});
+
+check("rebaseFormula: a bare (no leading '=') formula body rebases too", () => {
+  // data-f is stored WITHOUT the leading '=' (QL-D6); the hook prepends it back.
+  assert.equal(F.rebaseFormula("A1+1", 0, 1), "A2+1");
+  assert.equal(F.rebaseFormula("$A$1+1", 0, 1), "$A$1+1");
+});
+
+check("rebaseFormula: a ref pushed off-grid collapses to #REF! (matches the server)", () => {
+  assert.equal(F.rebaseFormula("=A1", -1, 0), "=#REF!"); // col 1-1=0 < 1
+  assert.equal(F.rebaseFormula("=A1", 0, -1), "=#REF!"); // row 1-1=0 < 1
+  // one dead corner kills the whole range (rewrite_range's #REF! rule)
+  assert.equal(F.rebaseFormula("=A1:B2", -1, 0), "=#REF!");
+  // a negative delta that STAYS on-grid just shifts (paste up/left)
+  assert.equal(F.rebaseFormula("=C3", -1, -2), "=B1");
+});
+
+check("rebaseFormula: whole-col / whole-row ranges shift only their own axis", () => {
+  assert.equal(F.rebaseFormula("=SUM(B:B)", 1, 0), "=SUM(C:C)"); // col shift
+  assert.equal(F.rebaseFormula("=SUM(B:B)", 0, 9), "=SUM(B:B)"); // row delta ignored
+  assert.equal(F.rebaseFormula("=SUM(3:3)", 0, 2), "=SUM(5:5)"); // row shift
+  assert.equal(F.rebaseFormula("=SUM(3:3)", 9, 0), "=SUM(3:3)"); // col delta ignored
+  assert.equal(F.rebaseFormula("=SUM($B:$B)", 5, 0), "=SUM($B:$B)"); // $ pins the column
+});
+
+check("rebaseFormula: a zero delta (paste in place) returns the formula unchanged", () => {
+  assert.equal(F.rebaseFormula("=A1+B2*C3", 0, 0), "=A1+B2*C3");
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);

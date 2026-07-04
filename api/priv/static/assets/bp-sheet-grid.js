@@ -26,6 +26,9 @@
       this._refocus = false;
       // Paste preflight bound (mirrors the server cap); overridable in tests.
       this._pasteCellCap = PASTE_CELL_CAP;
+      // Formula clipboard (QL-D5): {sig, origin:{col,row}, formulas:[[…]]} set by
+      // _onCopy; a same-signature paste rebases these instead of pasting values.
+      this._formulaClip = null;
       // One-shot: Ctrl+F sets this so updated() focuses the find input once the
       // server has rendered the find bar.
       this._focusFind = false;
@@ -644,27 +647,45 @@
       };
 
       // Cmd/Ctrl+C — selection as TSV of computed values, written
-      // synchronously in-gesture via the clipboard event.
+      // synchronously in-gesture via the clipboard event. The OS clipboard
+      // always carries the COMPUTED values (Excel/Sheets interop stays intact);
+      // alongside it we stash an in-app formula clipboard (QL-D5) keyed by that
+      // exact TSV, so a same-app paste can carry the FORMULAS, not their frozen
+      // values.
       this._onCopy = (e) => {
         if (e.target.matches && e.target.matches("input, textarea")) return;
         const tsv = this._selectionTsv();
         if (tsv == null) return;
         e.preventDefault();
         e.clipboardData.setData("text/plain", tsv);
+        this._captureFormulaClip(tsv);
       };
 
       // Cmd/Ctrl+V — TSV block applied as batch set_cell ops from the active
-      // cell (values only; the server replies cap-aware errors). Parsed
-      // quote-aware CLIENT-side (_tsvParse) so an Excel cell holding a newline
-      // (a double-quoted field) stays ONE cell instead of shattering into
-      // phantom rows, then pushed as a structured {rows:[[…]]} grid. Over the
-      // cell cap we push a notice instead of the payload — never ship the frame.
+      // cell. Two paths share ONE preflight+push tail (so the value path stays
+      // byte-identical to pre-feature):
+      //   • OUR-OWN-COPY (QL-D5): the clipboard text byte-equals the signature
+      //     of our last in-app copy → rebuild the {rows} grid from the copied
+      //     FORMULAS, rebased by the paste delta (a no-formula cell falls back to
+      //     its TSV value). Formula strings carry a leading '=', which the
+      //     server's set_cell/Ops.parse_raw already types as a formula — no
+      //     server paste change.
+      //   • FOREIGN/anything else (Excel, another app, a hand-typed block, OR our
+      //     own copy when the anchor/kernel is unavailable): fall through to the
+      //     quote-aware TSV VALUE path, parsed client-side (_tsvParse) so an Excel
+      //     cell holding a newline stays ONE cell instead of shattering into
+      //     phantom rows. This is the regression lock — a foreign paste behaves
+      //     exactly as today.
+      // Over the cell cap we push a notice instead of the payload on BOTH paths.
       this._onPaste = (e) => {
         if (e.target.matches && e.target.matches("input, textarea")) return;
         const text = e.clipboardData && e.clipboardData.getData("text/plain");
         if (!text) return;
         e.preventDefault();
-        const rows = this._tsvParse(text);
+        const rows =
+          (this._formulaClip && text === this._formulaClip.sig &&
+            this._formulaPasteGrid(this._formulaClip)) ||
+          this._tsvParse(text);
         let cells = 0;
         for (let i = 0; i < rows.length; i++) cells += rows[i].length;
         if (cells > this._pasteCellCap) {
@@ -1576,6 +1597,71 @@
         return cKeys.map((c) => cols.get(c));
       });
       return this._tsvEncode(grid);
+    },
+
+    // ── formula clipboard (QL-D5, client-owned) ───────────────────────────────
+    // On copy, remember the FORMULAS behind the just-copied selection, keyed by
+    // `sig` (the exact TSV also on the OS clipboard). `formulas` is a row-major
+    // grid parallel to that TSV — walked with the IDENTICAL row/col sort as
+    // _selectionTsv, so formulas[i][j] lines up with _tsvParse(sig)[i][j]. Each
+    // cell is the stored `data-f` (the formula sans leading '=', from the QL-D6
+    // S-GRID stamp) or null for a literal. `origin` is the selection's top-left
+    // (min row/col) — the anchor the paste delta is measured from.
+    _captureFormulaClip(sig) {
+      const tds = this.el.querySelectorAll("td.sheet-sel");
+      if (!tds.length) {
+        this._formulaClip = null;
+        return;
+      }
+      const rows = new Map();
+      let minR = Infinity;
+      let minC = Infinity;
+      tds.forEach((td) => {
+        const r = parseInt(td.dataset.r, 10);
+        const c = parseInt(td.dataset.c, 10);
+        if (r < minR) minR = r;
+        if (c < minC) minC = c;
+        if (!rows.has(r)) rows.set(r, new Map());
+        const f = td.dataset ? td.dataset.f : null;
+        rows.get(r).set(c, f != null && f !== "" ? f : null);
+      });
+      const rKeys = Array.from(rows.keys()).sort((a, b) => a - b);
+      const formulas = rKeys.map((r) => {
+        const cols = rows.get(r);
+        const cKeys = Array.from(cols.keys()).sort((a, b) => a - b);
+        return cKeys.map((c) => cols.get(c));
+      });
+      this._formulaClip = { sig: sig, origin: { col: minC, row: minR }, formulas: formulas };
+    },
+
+    // Build the {rows} paste grid from a matching formula clipboard: each stored
+    // formula is rebased by the delta from the copy origin to the paste anchor
+    // (the active cell) and re-prefixed with '='; a cell with no formula falls
+    // back to its TSV value (parsed from the clip's own signature, which round-
+    // trips its value grid). Returns null when the paste anchor or the kernel is
+    // unavailable, so _onPaste degrades to the plain value paste (fail-safe).
+    _formulaPasteGrid(clip) {
+      const target = this._activePos();
+      if (!target || !this._F || !this._F.rebaseFormula) return null;
+      const dcol = target.c - clip.origin.col;
+      const drow = target.r - clip.origin.row;
+      const values = this._tsvParse(clip.sig);
+      const out = [];
+      for (let i = 0; i < clip.formulas.length; i++) {
+        const frow = clip.formulas[i];
+        const vrow = values[i] || [];
+        const orow = [];
+        for (let j = 0; j < frow.length; j++) {
+          const f = frow[j];
+          if (f != null && f !== "") {
+            orow.push("=" + this._F.rebaseFormula(f, dcol, drow));
+          } else {
+            orow.push(vrow[j] != null ? vrow[j] : "");
+          }
+        }
+        out.push(orow);
+      }
+      return out;
     },
 
     // ── quote-aware TSV (RFC-4180-ish, tab-delimited) ─────────────────────────
