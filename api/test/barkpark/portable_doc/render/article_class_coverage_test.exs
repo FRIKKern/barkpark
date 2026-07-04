@@ -37,6 +37,13 @@ defmodule Barkpark.PortableDoc.Render.ArticleClassCoverageTest do
   # here would fight the walk.ex slice. A @layout_hooks entry that later gains a
   # real rule simply becomes redundant-but-harmless (it is in the union either
   # way); dedup it opportunistically, never on a red build here.
+  #
+  # SCOPE (stated honestly): the scan sees what the ParityFixture's WALK clauses
+  # emit. Classes minted at COMPOSE time inside `_raw` HTML (figures.ex
+  # `bp-asciicast`, forms.ex `bp-form`/`bp-form-question`) are NOT covered — the
+  # fixture cannot grow them without breaking the email golden's byte-lock. They
+  # are content-layer markup like `mermaid`, not walk.ex theme emission, so the
+  # wave-2 class migration this test guards never touches them.
 
   # Class tokens the `:article` render emits that are, BY DESIGN, absent from the
   # canonical stylesheet. Seeded from TODAY'S real `:article` inventory of the
@@ -49,25 +56,40 @@ defmodule Barkpark.PortableDoc.Render.ArticleClassCoverageTest do
     # `td.sheet-al-*` rules live in the hosting layouts (root.html.heex for the
     # Studio paper view, bulldocs.html.heex for /papers); stylesheet-less
     # surfaces degrade to the table's left. See walk.ex sheet_default_align_attr.
-    "sheet-al-center" => "styled by hosting layout td.sheet-al-* rules (walk.ex sheet_default_align_attr)",
-    "sheet-al-right" => "styled by hosting layout td.sheet-al-* rules (walk.ex sheet_default_align_attr)",
+    "sheet-al-center" =>
+      "styled by hosting layout td.sheet-al-* rules (walk.ex sheet_default_align_attr)",
+    "sheet-al-right" =>
+      "styled by hosting layout td.sheet-al-* rules (walk.ex sheet_default_align_attr)",
 
     # The embed frame is an inline-styled <section> (walk.ex embed clause): the
     # embedded body renders on export/email/Studio alike and can't rely on an
     # external `.paper-embed` stylesheet, so the frame carries its own inline
     # styles; the class is a JS/styling hook, not a canonical theme rule.
-    "paper-embed" => "inline-styled embed frame; class is a JS/styling hook (walk.ex embed clause)",
-    "paper-embed--unresolved" => "inline-styled unresolved-embed frame; JS/styling hook (walk.ex embed clause)",
+    "paper-embed" =>
+      "inline-styled embed frame; class is a JS/styling hook (walk.ex embed clause)",
+    "paper-embed--unresolved" =>
+      "inline-styled unresolved-embed frame; JS/styling hook (walk.ex embed clause)",
 
     # Verbatim `_raw` passthrough — the Mermaid engine selects on `pre.mermaid`,
     # so the class must reach the DOM byte-exact from author/compose HTML. It is
     # content/JS-engine markup, never a paper-surface theme class (walk.ex _raw).
-    "mermaid" => "verbatim _raw passthrough; Mermaid engine selects pre.mermaid (walk.ex _raw clause)",
+    "mermaid" =>
+      "verbatim _raw passthrough; Mermaid engine selects pre.mermaid (walk.ex _raw clause)",
 
     # Graceful-degrade wrapper for an unknown/forward-compat PdNode kind (walk.ex
     # degrade clause). It is a fallback marker rendered as plain text, not themed
     # chrome; no canonical rule is wanted.
-    "bp-unknown-block" => "degrade wrapper for unknown PdNode kinds; plain-text fallback marker (walk.ex degrade clause)"
+    "bp-unknown-block" =>
+      "degrade wrapper for unknown PdNode kinds; plain-text fallback marker (walk.ex degrade clause)",
+
+    # Studio-only accept-baseline button on a DRIFTED valueref, emitted ONLY when
+    # the palette opts in via `:valueref_accept` (Studio's per-request paper view;
+    # never the body_html cache, delta frames, or the public reader — walk.ex
+    # valueref_accept_control). Styled by the Studio hosting layout
+    # (root.html.heex `.bp-paper-surface button.bp-valueref-accept`), so it is a
+    # layout hook by construction, not a canonical theme class.
+    "bp-valueref-accept" =>
+      "Studio-only drift accept control (palette-gated :valueref_accept); styled by root.html.heex (walk.ex valueref_accept_control)"
   }
 
   describe ":article class-coverage tripwire" do
@@ -121,13 +143,24 @@ defmodule Barkpark.PortableDoc.Render.ArticleClassCoverageTest do
     end
   end
 
-  defp render, do: Render.render_html(ParityFixture.tree(), ParityFixture.render_opts(:article))
+  # The scan renders the SUPERSET :article emission: `valueref_accept: true`
+  # additionally lights up the palette-gated Studio drift-accept button (the
+  # fixture carries a drifted valueref, fallback "40" vs canonical "42"), which
+  # the plain fixture opts would silently leave unscanned. Sibling rails render
+  # WITHOUT the opt, so this widening cannot perturb their inventories.
+  defp render do
+    opts = ParityFixture.render_opts(:article) |> Map.put(:valueref_accept, true)
+    Render.render_html(ParityFixture.tree(), opts)
+  end
 
   # Every class token appearing in a `class="…"` attribute of the :article
   # render. Attribute values are escaped (`"` → `&quot;`), so `[^"]*` captures
   # the whole attribute body exactly; whitespace splits multi-class attributes.
+  # The lookbehind keeps a future `data-class="…"`-style attribute from leaking
+  # foreign tokens into the scan (a false alarm, since only real class attrs
+  # carry the membership contract).
   defp emitted_class_tokens do
-    ~r/class="([^"]*)"/
+    ~r/(?<![\w-])class="([^"]*)"/
     |> Regex.scan(render())
     |> Enum.flat_map(fn [_, body] -> String.split(body, ~r/\s+/, trim: true) end)
     |> MapSet.new()
