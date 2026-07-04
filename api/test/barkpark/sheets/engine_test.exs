@@ -411,6 +411,40 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  # A2 (Structure) seam lock. The full-axis shapes THIS slice accepts and the
+  # ones it rejects form the exact contract the Structure string-scanner (slice
+  # A2) must recognize byte-identically. These pin the ACCEPTED set (reversed
+  # corners normalize; a function-name word is a legal column; whitespace around
+  # the colon is tolerated like a bounded range) and the REJECTED set ($-anchored
+  # rows, ref:col / col:ref mixes → #REF!) so A2 can't silently drift the grammar.
+  describe "full-axis grammar seam (A2 contract)" do
+    test "reversed corners normalize (C:A == A:C, 5:2 == 2:5)" do
+      cells = %{"A1" => %{"v" => 1}, "B1" => %{"v" => 2}, "C1" => %{"v" => 3}}
+      assert eval!("SUM(C:A)", cells) == 6
+
+      rows = %{"A2" => %{"v" => 10}, "A5" => %{"v" => 20}, "A1" => %{"v" => 99}}
+      assert eval!("SUM(5:2)", rows) == 30
+    end
+
+    test "whitespace around the colon is tolerated (A : A)" do
+      assert eval!("SUM(A : A)", @col) == 6
+    end
+
+    test "a function-name word resolves as its column (SUM:SUM is column 13403)" do
+      # SUM lexes as a colword (letters ≤ XFD) when not followed by `(`; an empty
+      # column 13403 sums to 0 — proof the fn-vs-column split is the `(` lookahead.
+      assert eval!("SUM(SUM:SUM)") == 0
+    end
+
+    test "rejected shapes are #REF! (A2 must reject these identically)" do
+      # $-anchored full-row ($3 doesn't lex as a num), and col:ref / ref:col
+      # mixes — none is a full-axis range; all fail the grammar.
+      assert eval!("SUM($3:$3)", @col) == "#REF!"
+      assert eval!("SUM(A:A2)", @col) == "#REF!"
+      assert eval!("SUM(A1:A)", @col) == "#REF!"
+    end
+  end
+
   # Regression lock (design §5 / instruction): a bounded-range doc must recompute
   # byte-identically — the 3-tuple {:range,p1,p2} clauses are untouched; only new
   # 4-tuple clauses were added. Any accidental interception by the A:A path
