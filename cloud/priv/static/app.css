@@ -30,6 +30,15 @@
      manifest — tune values HERE, never in a component rule. */
   --primary: hsl(163 46% 22%);
   --primary-fg: hsl(0 0% 100%);
+
+  /* Solid button fills — decoupled from --primary so dark can keep a light
+     sage LINK while buttons carry a deeper fill with LIGHT text (user call,
+     2026-07-04: "buttons should have light text in dark"). In light they
+     resolve to the brand pair; dark re-declares them. Contrast-gated. */
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-fg);
+  --btn-danger-bg: var(--danger);
+  --btn-danger-fg: hsl(0 0% 100%);
   --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
   --ring-soft: hsl(163 42% 30% / 0.15);
@@ -141,6 +150,14 @@
      needs luminance ≤0.183 for white text but ≥0.189 to be a link here). */
   --primary: hsl(160 42% 62%);
   --primary-fg: hsl(163 45% 8%);
+
+  /* Solid button fills, dark: deeper greens/reds than the sage link colour so
+     the label can be WHITE (user call 2026-07-04). Re-declared here rather
+     than aliased (E8: scoped-dark subtrees must not freeze light values). */
+  --btn-bg: hsl(163 45% 30%);
+  --btn-fg: hsl(0 0% 100%);
+  --btn-danger-bg: hsl(0 65% 48%);
+  --btn-danger-fg: hsl(0 0% 100%);
   --border: hsl(240 3.7% 15.9%);
   --ring: hsl(160 42% 62%);
   --ring-soft: hsl(160 42% 62% / 0.2);
@@ -281,11 +298,11 @@ a:hover { text-decoration: underline; }
 }
 
 .btn-primary {
-  background: var(--primary);
-  color: var(--primary-fg);
-  border-color: var(--primary);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-color: var(--btn-bg);
 }
-.btn-primary:hover { background: var(--primary); filter: brightness(1.08); }
+.btn-primary:hover { background: var(--btn-bg); filter: brightness(1.08); }
 
 .btn-ghost { background: transparent; border-color: transparent; color: var(--muted-text); }
 .btn-ghost:hover { background: var(--muted-surface); color: var(--text); }
@@ -387,15 +404,15 @@ select.form-input {
 }
 .notice .btn { margin-left: auto; }
 
-/* destructive action button (e.g. Remove instance) — label rides --primary-fg
-   like .btn-primary (white in light, ink in dark where the statuses run
-   lighter); the pairing is contrast-gated in __css_check.mjs. */
+/* destructive action button (e.g. Remove instance) — rides the solid button
+   fill tokens (white label both themes; dark uses a deeper red than the
+   status text colour); the pairing is contrast-gated in __css_check.mjs. */
 .btn-danger {
-  background: var(--destructive);
-  color: var(--primary-fg);
-  border-color: var(--destructive);
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-fg);
+  border-color: var(--btn-danger-bg);
 }
-.btn-danger:hover { background: var(--destructive); filter: brightness(1.08); }
+.btn-danger:hover { background: var(--btn-danger-bg); filter: brightness(1.08); }
 
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
@@ -409,7 +426,9 @@ select.form-input {
 
 .form-error {
   font-size: 13px;
-  color: var(--destructive);
+  /* Copy rides --text like .notice-error / .cm-error — the tint + border say
+     "error"; red-on-red copy read muddy in dark (user call 2026-07-04). */
+  color: var(--text);
   margin: 0 0 calc(var(--step) * 2);
   padding: 10px 12px;
   background: hsl(var(--danger-hsl) / 0.08);

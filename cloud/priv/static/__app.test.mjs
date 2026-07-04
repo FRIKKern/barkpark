@@ -1645,6 +1645,8 @@ test("inviteStateHtml is total over unknown states and escapes hostile team name
   // Missing ctx degrades to calm generic copy, never "undefined".
   assert.doesNotMatch(hooks.inviteStateHtml("joined", {}), /undefined/);
   assert.doesNotMatch(hooks.inviteStateHtml("confirm", {}), /undefined/);
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // C8 — instance Timeline tab + golden-path verify chips (D10/D18/D25/D33/D53)
 // ════════════════════════════════════════════════════════════════════════════

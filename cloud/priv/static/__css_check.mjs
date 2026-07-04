@@ -135,7 +135,9 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
-  { fg: "--primary-fg", bg: "--primary", min: 4.5, why: ".btn-primary / avatar label" },
+  { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
+  { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
+  { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
   { fg: "--primary", bg: "--bg", min: 4.5, why: "links" },
   { fg: "--primary", bg: "--surface", min: 4.5, why: "links on cards" },
   { fg: "--ok", bg: "--surface", min: 4.5, why: "success text (.plan-rec, .new-eyebrow.ok)" },
@@ -155,7 +157,7 @@ const CONTRAST_PAIRS = [
   { fg: "--accent", bg: "--surface", min: 3, why: "branch-preview accent border" },
   { fg: "--ring", bg: "--bg", min: 3, why: "focus-ring visibility" },
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
-  { fg: "--primary-fg", bg: "--danger", min: 4.5, why: ".btn-danger label / toast-error glyph / failed step-dot" },
+  { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
   { fg: "--primary-fg", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
 ];
 

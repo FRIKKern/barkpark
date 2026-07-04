@@ -277,6 +277,7 @@ const EXPECTATIONS = {
     container: "view-invite",
     includes: ["isn&#39;t valid any more", 'data-invite-act="overview"'],
     excludes: ['data-invite-act="join"'],
+  },
   // C8: the tab strip registers Timeline and marks it active on the deep link.
   // (The feed itself mounts through element-level querySelector, which this
   // shim keeps inert — the feed's rendering is pinned in __app.test.mjs.)
