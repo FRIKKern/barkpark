@@ -15,18 +15,71 @@ import (
 
 // recordingRunner records every CaddyStep it is handed instead of shelling out —
 // the fake step-runner seam, mirroring caddy_test.go's fakeStepRunner. It never
-// touches a box and never issues an ACME cert.
+// touches a box and never issues an ACME cert. It ALSO implements the
+// hostCommandRunner capture capability the dwb-17 freshen step type-asserts:
+// RunOutput scripts the cheap-check / rebuild responses so a test can drive the
+// current / behind / rebuild-fail paths.
 type recordingRunner struct {
 	titles []string
 	cmds   []string
 	argvs  [][]string
+
+	// events is the UNIFIED ordering record across BOTH Run (CaddySteps) and
+	// RunOutput (freshen scripts), so a test can assert the freshen check ran
+	// BEFORE the migrate step. Run appends "run:<title>"; RunOutput appends
+	// "out:freshen-check" / "out:freshen-rebuild".
+	events []string
+
+	// freshen (dwb-17) RunOutput controls. Default (zero value) → the box is CURRENT
+	// (HEAD == origin/main), so freshen is a no-op and existing chain tests are
+	// undisturbed. Set `behind` to drive the rebuild path; `checkErr` / `rebuildErr`
+	// to drive the degrade paths.
+	outScripts []string // every RunOutput script, in order
+	rebuildRan bool      // the rebuild script actually ran
+	behind     bool      // cheap check reports HEAD != origin/main → a rebuild is due
+	checkErr   error     // cheap check errors (unreachable fetch)
+	rebuildErr error     // rebuild errors / times out
 }
 
 func (r *recordingRunner) Run(_ context.Context, s CaddyStep) error {
 	r.titles = append(r.titles, s.Title)
 	r.cmds = append(r.cmds, s.Cmd)
 	r.argvs = append(r.argvs, s.Argv)
+	r.events = append(r.events, "run:"+s.Title)
 	return nil
+}
+
+// RunOutput implements the freshen capture capability. It scripts the cheap-check
+// KEY=VALUE output (current by default, behind when r.behind) and the rebuild.
+func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, error) {
+	r.outScripts = append(r.outScripts, script)
+	if strings.Contains(script, "deploy-rebuild.sh") {
+		r.rebuildRan = true
+		r.events = append(r.events, "out:freshen-rebuild")
+		if r.rebuildErr != nil {
+			return "rebuild failed on box", r.rebuildErr
+		}
+		return "rebuilt", nil
+	}
+	r.events = append(r.events, "out:freshen-check")
+	if r.checkErr != nil {
+		return "fatal: unable to access origin", r.checkErr
+	}
+	head, remote := "abc123", "abc123"
+	if r.behind {
+		head, remote = "aaa111", "bbb222"
+	}
+	return fmt.Sprintf("FRESHEN_HEAD=%s\nFRESHEN_REMOTE=%s\nFRESHEN_FROM=v0.42\nFRESHEN_TO=v0.45\n", head, remote), nil
+}
+
+// eventIndex returns the first index in events whose entry contains sub, or -1.
+func (r *recordingRunner) eventIndex(sub string) int {
+	for i, e := range r.events {
+		if strings.Contains(e, sub) {
+			return i
+		}
+	}
+	return -1
 }
 
 func (r *recordingRunner) joined() string { return strings.Join(r.cmds, "\n") }

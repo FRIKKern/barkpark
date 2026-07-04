@@ -44,6 +44,11 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # /new progress screen renders SERVER-confirmed transitions instead of a pure
   # client-side timer:
   #   * create    — the box is created + its fqdn identity stamped
+  #   * freshen    — dwb-17: bring the box's baked snapshot up to origin/main before
+  #     migrate (a working box on the CURRENT release). Narrates "Already up to
+  #     date" or "Updating Barkpark v0.42 → v0.45…"; a freshen that can't rebuild
+  #     degrades to the baked release (rendered `done` with an honest caption, never
+  #     a red `failed` — the box still works, it is just behind).
   #   * secure    — DNS record + Caddy/TLS on the box
   #   * configure — migrate + admin-token install
   #   * content   — template bootstrap (skipped when the job carries no template)
@@ -56,7 +61,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # append a new entry; it UPDATES the in-flight `started` entry's `detail` in
   # place (see Registry.append_provision_step), so `steps` stays one entry per
   # real transition while the active step narrates what is happening right now.
-  @steps ~w(create secure configure content verify ready)
+  @steps ~w(create freshen secure configure content verify ready)
   @step_statuses ~w(started progress done failed)
 
   schema "provision_jobs" do

@@ -833,8 +833,53 @@ defmodule BarkparkCloud.ProvisioningTest do
 
   # C1: the honest `verify` step vocabulary (golden-path probes).
   describe "ProvisionJob step vocabulary — verify (C1)" do
-    test "step_names/0 returns the six steps in order, verify between content and ready" do
-      assert ProvisionJob.step_names() == ~w(create secure configure content verify ready)
+    test "step_names/0 returns the steps in order, verify between content and ready" do
+      assert ProvisionJob.step_names() == ~w(create freshen secure configure content verify ready)
+    end
+
+    # dwb-17: the Go worker's warm-image freshen narrates as the `freshen` step
+    # (started → "Updating Barkpark v0.42 → v0.45…" / "Already up to date" progress
+    # → done). This pins the vocabulary server-side — if `freshen` fell out of
+    # @steps the worker's narration would be silently 422-swallowed and the /new
+    # timeline would hide the update from the user.
+    test "the freshen step is valid vocabulary for every status (dwb-17)" do
+      assert "freshen" in ProvisionJob.step_names()
+
+      for status <- ProvisionJob.step_statuses() do
+        assert {:ok, {"freshen", ^status}} = ProvisionJob.validate_step("freshen", status)
+      end
+    end
+
+    test "the freshen step persists a narrated update transition (dwb-17)" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, job} = Registry.append_provision_step(job.id, "freshen", "started")
+
+      {:ok, job} =
+        Registry.append_provision_step(
+          job.id,
+          "freshen",
+          "progress",
+          "Updating Barkpark v0.42 → v0.45…"
+        )
+
+      # dwb-19: the progress caption UPDATES the in-flight `started` entry in place
+      # (no new array entry), so there is still exactly one entry after progress.
+      assert [%{"step" => "freshen", "status" => "started", "detail" => detail}] = job.steps
+      assert detail =~ "Updating Barkpark"
+
+      {:ok, _job} =
+        Registry.append_provision_step(job.id, "freshen", "done", "Updated Barkpark to v0.45")
+
+      # The terminal `done` is a new entry appended after the (progress-updated)
+      # `started` — the persisted array survives a page refresh.
+      persisted = Repo.get(ProvisionJob, job.id).steps
+      assert [%{"status" => "started"}, %{"status" => "done"}] = persisted
+
+      assert %{"step" => "freshen", "status" => "done", "detail" => "Updated Barkpark to v0.45"} =
+               List.last(persisted)
     end
 
     test "validate_step accepts {\"verify\", status} for every known status" do
