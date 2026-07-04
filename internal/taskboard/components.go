@@ -142,6 +142,12 @@ const meterCells = 5
 
 // Meter renders the acceptance-criteria progress ("▰▰▱ 2/3"). A nil Criteria —
 // or a zero-total one — renders nothing (never a bare "0/0").
+//
+// The calm board itself no longer paints it anywhere (charter D14 — the list
+// and the shrunk expand both use criteriaFraction's bare digits); it is kept,
+// tested, for the detail-frame wave, whose parallel slices build against this
+// same base. If that wave ships its own checklist without it, delete it (and
+// scaleFill) there.
 func Meter(c *Criteria) string {
 	if c == nil || c.Total <= 0 {
 		return ""
@@ -429,19 +435,20 @@ const criteriaCap = 8
 // CriteriaChecklist renders acceptance criteria as a real ○/✓ checklist — one
 // hanging-indent line per criterion, a met item ok-tinted (its ✓ reads as work
 // that has LANDED, the fleet's checklists-that-fill-themselves moment) and an
-// unmet item dim. It is the expanded-detail upgrade of the compact Meter: when
-// the decoded item list is present it paints the text; when only the {met,total}
-// counter survived (a payload without content, an older server) it falls back to
-// the single "criteria ▰▰▱ 2/3" meter line so the detail is never emptier than
-// before. Every line is width-safe; a long set folds past criteriaCap to a dim
-// "… +N more" tail. A malformed (textless) entry keeps its slot as a bare ☐ —
-// honest that an Nth criterion exists even when its text did not decode.
-// nil/empty items with a nil/zero Criteria render nothing.
+// unmet item dim. When the decoded item list is present it paints the text;
+// when only the {met,total} counter survived (a payload without content, an
+// older server) it falls back to
+// the single calm "criteria 2/3" digits line so the detail is never emptier
+// than before (the calm-board subtraction retired the ▰▱ meter cells here too —
+// one glyph vocabulary, charter D14). Every line is width-safe; a long set folds
+// past criteriaCap to a dim "… +N more" tail. A malformed (textless) entry keeps
+// its slot as a bare ○ — honest that an Nth criterion exists even when its text
+// did not decode. nil/empty items with a nil/zero Criteria render nothing.
 func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []string {
 	hang := strings.Repeat(" ", indent+3) // align under the title column, like expandedDetail
 	if len(items) == 0 {
-		if m := Meter(c); m != "" {
-			return []string{dimStyle.Render(truncate(hang+"criteria "+m, width))}
+		if f := criteriaFraction(c); f != "" {
+			return []string{dimStyle.Render(truncate(hang+"criteria "+f, width))}
 		}
 		return nil
 	}

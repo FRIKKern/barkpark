@@ -111,12 +111,16 @@ func TestCriteriaChecklistCapsAndFolds(t *testing.T) {
 }
 
 // TestCriteriaChecklistMeterFallback — with no decoded items but a live counter,
-// the detail falls back to the compact meter line (never emptier than before);
+// the detail falls back to one calm "criteria 2/3" digits line (never emptier
+// than before, and never a ▰▱ bar — the calm board's one glyph vocabulary);
 // with nothing at all it renders nothing.
 func TestCriteriaChecklistMeterFallback(t *testing.T) {
 	lines := CriteriaChecklist(nil, &Criteria{Met: 2, Total: 3}, childIndent, 80)
-	if len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "criteria ▰▰▱ 2/3") {
-		t.Fatalf("fallback = %v, want one compact meter line", lines)
+	if len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "criteria 2/3") {
+		t.Fatalf("fallback = %v, want one calm digits line", lines)
+	}
+	if strings.Contains(ansi.Strip(lines[0]), "▰") {
+		t.Fatalf("fallback = %v, the ▰▱ meter cells were retired", lines)
 	}
 	for _, c := range []*Criteria{nil, {}, {Total: 0}} {
 		if got := CriteriaChecklist(nil, c, childIndent, 80); got != nil {

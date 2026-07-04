@@ -90,9 +90,10 @@ func TestNowBreadcrumbResolvesDormantEpic(t *testing.T) {
 }
 
 // TestBarsNeverLieAtTheEdges pins the scaled-bar honesty clamp on the criteria
-// Meter (still used by the detail criteria-stub fallback): progress > 0 never
-// renders an empty bar, and unfinished work never renders a full one. The epic
-// header's ▰▱ bar was retired by the calm-board subtraction (digits only now).
+// Meter (unreferenced by the calm board itself — kept for the detail-frame
+// wave, see Meter's doc): progress > 0 never renders an empty bar, and
+// unfinished work never renders a full one. Every ▰▱ bar the BOARD painted was
+// retired by the calm-board subtraction (digits only now).
 func TestBarsNeverLieAtTheEdges(t *testing.T) {
 	if got := Meter(&Criteria{Met: 1, Total: 20}); strings.HasPrefix(got, "▱") {
 		t.Errorf("1/20 must show at least one filled cell: %q", got)

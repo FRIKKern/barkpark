@@ -151,12 +151,12 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 		}
 
 		// A goal always headlines; a non-goal root only earns a section when it
-		// actually heads a subtree. Everything else is a loose leaf — unless the
-		// leaf is itself a NOW claim, which renders only in the pinned band.
+		// actually heads a subtree. Everything else is a loose leaf. A claimed
+		// leaf joins the pile too — like the epic children above, it is stripped
+		// for DISPLAY only after cluster derivation + ranking (see below), so a
+		// claim can never dissolve its cluster or demote its cluster's rank.
 		if root.Kind != kindGoal && len(children) == 0 {
-			if !nowSet[root.DocID] {
-				board.Orphans = append(board.Orphans, root)
-			}
+			board.Orphans = append(board.Orphans, root)
 			continue
 		}
 		board.Epics = append(board.Epics, buildEpic(root, children, now))
@@ -175,6 +175,14 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	loose := board.Orphans
 	freq := looseLabelFreq(loose)
 	board.Clusters, board.Orphans = deriveClusters(loose, now)
+
+	// NOW de-dup for the loose pile, mirroring the epic treatment above: the
+	// claims stayed in `loose` through label frequency, cluster membership and
+	// freshest-member ranking — so claiming one member of a minimum-size cluster
+	// never dissolves the section or drops its rank mid-session — and leave the
+	// DISPLAY only now (charter D14).
+	board.Clusters = dedupNowFromClusters(board.Clusters, nowSet)
+	board.Orphans = stripNow(board.Orphans, nowSet)
 
 	// Suggest a cluster for each still-loose orphan that carries no cluster key,
 	// by title similarity. Advisory only — it sets a hint, never moves the row.
@@ -569,14 +577,47 @@ func dedupNowFromEpics(epics []Epic, nowSet map[string]bool) {
 		return
 	}
 	for i := range epics {
-		kept := epics[i].Children[:0]
-		for _, c := range epics[i].Children {
-			if !nowSet[c.DocID] {
-				kept = append(kept, c)
-			}
-		}
-		epics[i].Children = kept
+		epics[i].Children = stripNow(epics[i].Children, nowSet)
 	}
+}
+
+// dedupNowFromClusters strips the NOW-pinned claims from every derived
+// cluster's displayed members. It runs AFTER deriveClusters, so membership,
+// label frequency and freshest-member ranking all saw the claimed tasks — a
+// claim can never dissolve a minimum-size cluster or demote its rank. A cluster
+// left with nothing to show (no member rows AND no folded-done count) is
+// dropped: unlike an epic, whose authored root still earns a header, a derived
+// section exists only through its visible rows — its claims are all pinned in
+// NOW, and the section re-forms untouched when they resolve.
+func dedupNowFromClusters(clusters []Cluster, nowSet map[string]bool) []Cluster {
+	if len(nowSet) == 0 {
+		return clusters
+	}
+	kept := clusters[:0]
+	for _, c := range clusters {
+		c.Tasks = stripNow(c.Tasks, nowSet)
+		if len(c.Tasks) == 0 && c.DoneFolded == 0 {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept
+}
+
+// stripNow filters the NOW-pinned claims out of one task list, in place,
+// preserving order (charter D14 — a claimed task renders ONLY in the pinned
+// band). With no claims it is the identity.
+func stripNow(tasks []Task, nowSet map[string]bool) []Task {
+	if len(nowSet) == 0 {
+		return tasks
+	}
+	kept := tasks[:0]
+	for _, t := range tasks {
+		if !nowSet[t.DocID] {
+			kept = append(kept, t)
+		}
+	}
+	return kept
 }
 
 // orderChildren sorts within an epic/cluster/orphan list:

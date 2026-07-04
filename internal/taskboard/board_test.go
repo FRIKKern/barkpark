@@ -130,6 +130,46 @@ func TestBuildBoard_NowDedup(t *testing.T) {
 	}
 }
 
+// TestBuildBoard_NowDedup_ClusterStable — the de-dup is display-only for the
+// derived clusters too: claiming one member of a minimum-size cluster
+// (clusterMemberMin == 2) must NOT dissolve the section and reshuffle its
+// sibling down into "(no epic)". The claim participates in label frequency,
+// membership and freshest-member ranking, and is stripped from the DISPLAYED
+// members only afterwards. Its fresh claim also still ranks the cluster: the
+// just-claimed sheets cluster must sort ABOVE the older docs cluster even
+// though its one visible row is the stalest task on the board.
+func TestBuildBoard_NowDedup_ClusterStable(t *testing.T) {
+	claim := &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
+	old := refNow.Add(-3 * 24 * time.Hour)
+	s := Snapshot{Tasks: []Task{
+		{DocID: "sp1", Title: "Sheets one", Labels: []string{"proj:sheets"},
+			Lifecycle: lifeInProgress, Claim: claim, UpdatedAt: refNow},
+		{DocID: "sp2", Title: "Sheets two", Labels: []string{"proj:sheets"},
+			Lifecycle: lifeOpen, UpdatedAt: old.Add(-time.Hour)},
+		{DocID: "dc1", Title: "Docs one", Labels: []string{"proj:docs"},
+			Lifecycle: lifeOpen, UpdatedAt: old},
+		{DocID: "dc2", Title: "Docs two", Labels: []string{"proj:docs"},
+			Lifecycle: lifeOpen, UpdatedAt: old},
+	}}
+	b := BuildBoard(s, RepoContext{}, refNow)
+
+	if got := docIDs(b.Now); !eq(got, []string{"sp1"}) {
+		t.Fatalf("NOW = %v, want the claimed sp1", got)
+	}
+	if len(b.Clusters) != 2 {
+		t.Fatalf("clusters = %d, want 2 — claiming sp1 must not dissolve proj:sheets", len(b.Clusters))
+	}
+	if b.Clusters[0].Key != "proj:sheets" {
+		t.Fatalf("first cluster = %q, want proj:sheets on top (its claim's freshness still ranks it)", b.Clusters[0].Key)
+	}
+	if got := docIDs(b.Clusters[0].Tasks); !eq(got, []string{"sp2"}) {
+		t.Fatalf("sheets members = %v, want only sp2 visible (sp1 is NOW-only)", got)
+	}
+	if len(b.Orphans) != 0 {
+		t.Fatalf("orphans = %v, want none — sp2 must stay clustered", docIDs(b.Orphans))
+	}
+}
+
 // TestBuildBoard_EpicOrder_NoRepo — with no git context, epics rank purely by
 // freshest member updated desc.
 func TestBuildBoard_EpicOrder_NoRepo(t *testing.T) {
