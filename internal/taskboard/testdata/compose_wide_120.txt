@@ -1,0 +1,40 @@
+tasks
+barkpark  ⎇ lead/session-stable  … ● live · 2m  Wire the SSE live bridge to the task board pane
+2 active · 1 ready · 0 blocked · 1 done         ● in_progress · P1 · task · fable-3
+                                                
+NOW                                             created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
+   nothing claimed right now                    
+                                                ○ created (Jul 02) → ● claimed by fable-3 (Jul 04)
+── tasks ─────────────────────────────────────  
+  ▎● Wire the SSE live bridge to the task boa…    The board must repaint the moment the queue moves.
+   ✓ Decode the change feed envelope            
+   ● Debounce the refetch at 750ms                • one dirty bit signals the refetch
+   ○ Honest connection dot states                 • one snapshot is the single source of truth
+                                                
+                                                criteria 2/3
+                                                  ✓ SSE dirty-bit triggers a debounced refetch
+                                                    ↳ internal/taskboard/live.go:42
+                                                  ✓ Connection dot renders honestly
+                                                  ○ A stuck reconnect never reads ConnLive
+                                                
+                                                labels  proj:task-tui · area:live
+                                                
+                                                claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:26)
+                                                
+                                                children 1/3 done
+                                                  ✓ Decode the change feed envelope  1d
+                                                  ● Debounce the refetch at 750ms  30m
+                                                  ○ Honest connection dot states  5h
+                                                
+                                                papers
+                                                  ▸ task-tui-wave5-charter
+                                                  ▸ doey-ui-lessons
+                                                
+                                                
+                                                
+                                                
+                                                
+                                                
+──────────────────────────────────────────────  
+no recent activity                              
+jk · enter open · esc back · c claim · x clos…  

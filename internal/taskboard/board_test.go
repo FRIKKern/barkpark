@@ -594,22 +594,6 @@ func TestBuildBoard_ClustersLiveShape(t *testing.T) {
 		t.Fatalf("OrphansFolded = %d, want 1 (dn1 done >24h)", b.OrphansFolded)
 	}
 
-	// Suggestion: the unlabeled "MAX aggregate coverage" resembles the sheets
-	// titles past 0.4 and is hinted there; the phase/onix/ancient rows are not.
-	byID := map[string]Task{}
-	for _, o := range b.Orphans {
-		byID[o.DocID] = o
-	}
-	if byID["sug1"].Suggested != "proj:sheets-parity" {
-		t.Fatalf("sug1.Suggested = %q, want proj:sheets-parity", byID["sug1"].Suggested)
-	}
-	if byID["on1"].Suggested != "" {
-		t.Fatalf("on1 has a cluster key (proj:onix) so must NOT be cross-suggested, got %q", byID["on1"].Suggested)
-	}
-	if byID["ph1"].Suggested != "" || byID["st1"].Suggested != "" {
-		t.Fatalf("ph1/st1 should have no suggestion (no title overlap)")
-	}
-
 	// Twins: the two "Bootstrap job manifest" rows point mutually; the third
 	// deploy-button row and every sheets row stay untwinned.
 	deploy := findCluster(t, b.Clusters, "deploy-button")

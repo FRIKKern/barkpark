@@ -45,4 +45,4 @@ NOW
 
 ────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
-jk move · enter open · c claim · x close · o studio
+jk · enter open · esc back · c claim · x close · o studio

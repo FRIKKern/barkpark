@@ -97,8 +97,27 @@ type Model struct {
 	board Board
 	ui    UIState
 
+	// stack is the navigation stack (charter D11/D29). stack[0] is ALWAYS the
+	// board frame (FrameBoard, "tasks"); enter descends (push), esc/backspace
+	// ascends (pop, no-op at root). Board interaction (cursor/fold) lives in
+	// m.ui; each pushed reading frame carries its own Cursor/Scroll on the Frame.
+	stack []Frame
+	// details is the TaskDetail reading index (charter D28), and tasks is the
+	// merged task set — both refreshed on every applied snapshot. FrameTask reads
+	// its detail out of details[Ref] (zero fetch); ChildrenOf/DrivenTasks walk
+	// tasks. papers caches the async-fetched FramePaper state by slug (papers DO
+	// fetch on push, charter D12/D13e).
+	details DetailIndex
+	tasks   []Task
+	papers  map[string]PaperState
+
 	width  int
 	height int
+	// wide is the adaptive-compositor mode (charter D12/D27): two-pane at
+	// width>=110, full-frame push below, with a ±4 hysteresis deadband [106,110)
+	// so a tmux resize never flaps. Updated ONLY on tea.WindowSizeMsg; Compose
+	// reads it and the pure frame renderers never see the mode.
+	wide bool
 
 	// Repo correlation inputs, gathered ONCE by Run's gatherGit(".") and held so
 	// applySnapshot can recompute m.repo against every fresh task set (pure +
@@ -145,8 +164,10 @@ type Model struct {
 	// SAME row fires the close; ANY other key clears it (handleKey).
 	pendingClose string
 
-	// injected seams (defaults wired in newModel; tests override)
-	fetch   func(*apiclient.Client) (Snapshot, error)
+	// injected seams (defaults wired in newModel; tests override). fetch is the
+	// full-hydration seam (charter D28): FetchSnapshotFull returns the board
+	// Snapshot AND the TaskDetail DetailIndex in one round-trip.
+	fetch   func(*apiclient.Client) (Snapshot, DetailIndex, error)
 	build   func(Snapshot, RepoContext, time.Time) Board
 	doClaim func(*apiclient.Client, string, string) ActionResult
 	doClose func(*apiclient.Client, string, string, int) ActionResult
@@ -169,14 +190,17 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		token:  token,
 		cfg:    cfg,
 		ui: UIState{
-			Expanded:       map[string]bool{},
 			CollapsedEpics: map[string]bool{},
 			Flashes:        map[string]time.Time{},
 			Conn:           ConnPolling,
 		},
+		// The board is ALWAYS stack level 0 (charter D11/D29) — enter descends onto
+		// it, esc no-ops at this root. papers caches async FramePaper fetches by slug.
+		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
+		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
 		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project),
-		fetch:         FetchSnapshot,
+		fetch:         FetchSnapshotFull,
 		build:         BuildBoard,
 		doClaim:       DoClaim,
 		doClose:       DoClose,
@@ -245,6 +269,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		// Adaptive-compositor hysteresis (charter D12/D27): two-pane at width>=110,
+		// full-frame push below 106; the deadband [106,110) holds the previous mode
+		// so a tmux drag across the boundary never flaps.
+		if msg.Width >= wideEnter {
+			m.wide = true
+		} else if msg.Width < wideExit {
+			m.wide = false
+		}
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -260,15 +292,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleFrame(msg)
 	case snapshotMsg:
 		return m.applySnapshot(msg)
+	case paperLoadedMsg:
+		return m.handlePaperLoaded(msg)
 	case actionResultMsg:
 		return m.handleActionResult(msg)
 	}
 	return m, nil
 }
 
-// View renders the whole portrait frame from the current Board + UIState.
+// View composites the whole frame through the adaptive compositor (charter
+// D26): Compose picks two-pane vs full-frame push and paints the navigation
+// stack from the pure frame renderers.
 func (m Model) View() string {
-	return Render(m.board, m.ui, m.width, m.height, m.now())
+	return Compose(m)
 }
 
 // ── Heartbeat: the deterministic animation seam (charter decision 16) ─────────
@@ -344,14 +380,16 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleKey is the tiny interaction surface: navigate, expand/collapse, act
-// (claim/close/studio), quit. No editing, no modes — the layout is the opinion
-// (charter decision #8).
+// handleKey is the navigation-shell dispatcher (charter D29): two navigation
+// domains, one entry point keyed on the stack-top frame kind. The BOARD frame
+// (level 0) keeps its native grammar unchanged; a pushed reading frame
+// (FrameTask/FramePaper) navigates its []Stop. `esc`/`backspace` always ascend
+// (pop, no-op at root) and `q`/ctrl+c always quit, whatever the frame.
 //
-// Two cross-cutting rules run before the switch: every keypress clears the
-// action strip (it is transient — "cleared on the next keypress"), and every
-// key EXCEPT a repeated x disarms the close guard (a second consecutive x is
-// the only thing that confirms a close; anything else cancels it).
+// Two cross-cutting rules run first: every keypress clears the action strip (it
+// is transient — "cleared on the next keypress"), and every key EXCEPT a
+// repeated x disarms the close guard (a second consecutive x is the only thing
+// that confirms a close; anything else cancels it).
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	if key != "x" {
@@ -362,6 +400,23 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "ctrl+c", "q":
 		return m, tea.Quit
+	case "esc", "backspace":
+		(&m).popFrame()
+		return m, nil
+	}
+
+	if m.topFrame().Kind == FrameBoard {
+		return m.handleBoardKey(key)
+	}
+	return m.handleReadingKey(key)
+}
+
+// handleBoardKey is the board's native grammar (charter D29): visibleRows +
+// UIState.Cursor, h/l epic/cluster fold, g/G/jk, c/x/o act, and — the one shell
+// change — enter on a task row PUSHES a FrameTask (enter on a section header
+// still folds), replacing the deleted inline-expand toggle (charter D11/D31).
+func (m Model) handleBoardKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
 	case "j", "down":
 		m.moveCursor(1)
 		return m, nil
@@ -377,17 +432,88 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case "enter":
-		return m.activate(), nil
+		return m.activateBoard(), nil
 	case "h":
 		return m.setEpicFoldUnderCursor(true), nil
 	case "l":
 		return m.setEpicFoldUnderCursor(false), nil
 	case "c":
-		return m.claimUnderCursor()
+		t, ok := m.taskUnderCursor()
+		if !ok {
+			m.setStrip("no task under the cursor to claim", RoleWarn)
+			return m, nil
+		}
+		return m.claimTask(t)
 	case "x":
-		return m.closeUnderCursor()
+		t, ok := m.taskUnderCursor()
+		if !ok {
+			m.pendingClose = ""
+			m.setStrip("nothing to close here — x closes a task with a live claim", RoleWarn)
+			return m, nil
+		}
+		return m.closeTask(t)
 	case "o":
-		return m.openUnderCursor()
+		t, ok := m.taskUnderCursor()
+		if !ok {
+			m.setStrip("no task under the cursor to open", RoleWarn)
+			return m, nil
+		}
+		return m.openTask(t)
+	}
+	return m, nil
+}
+
+// handleReadingKey is the pushed-frame grammar (charter D18/D29): j/k move
+// Frame.Cursor between stops (viewport follows), space/u/d free-scroll prose,
+// enter descends on the cursor stop, and the act verbs follow the reader (D30) —
+// FrameTask targets its own subject task, FramePaper acts on the cursor stop iff
+// it is a task. esc/backspace already popped in handleKey.
+func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
+	switch key {
+	case "j", "down":
+		(&m).moveStopCursor(1)
+		return m, nil
+	case "k", "up":
+		(&m).moveStopCursor(-1)
+		return m, nil
+	case "g", "home":
+		(&m).setTopCursor(0)
+		return m, nil
+	case "G", "end":
+		(&m).setTopCursor(m.frameStopCount() - 1)
+		return m, nil
+	case " ", "space":
+		(&m).freeScroll(m.readingViewportHeight() - 1)
+		return m, nil
+	case "d", "pgdown":
+		(&m).freeScroll(m.readingViewportHeight() / 2)
+		return m, nil
+	case "u", "pgup":
+		(&m).freeScroll(-m.readingViewportHeight() / 2)
+		return m, nil
+	case "enter":
+		return m.descend()
+	case "c":
+		t, ok := m.readingSubjectTask()
+		if !ok {
+			m.setStrip("nothing to act on here", RoleWarn)
+			return m, nil
+		}
+		return m.claimTask(t)
+	case "x":
+		t, ok := m.readingSubjectTask()
+		if !ok {
+			m.setStrip("nothing to act on here", RoleWarn)
+			return m, nil
+		}
+		return m.closeTask(t)
+	case "o":
+		t, ok := m.readingSubjectTask()
+		if !ok {
+			m.setStrip("nothing to act on here", RoleWarn)
+			return m, nil
+		}
+		return m.openTask(t)
 	}
 	return m, nil
 }
@@ -403,16 +529,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // locally by hand (no ghost rows). The doClaim/doClose seams are injected so
 // the reducers are unit-testable without a server.
 
-// claimUnderCursor is 'c': claim the task under the cursor. A claim only makes
-// sense on a READY row (the engine returns not_ready otherwise), so a non-ready
-// row explains why instead of firing a doomed request. The claim itself runs as
-// a command so the reducer never blocks on the network.
-func (m Model) claimUnderCursor() (Model, tea.Cmd) {
-	t, ok := m.taskUnderCursor()
-	if !ok {
-		m.setStrip("no task under the cursor to claim", RoleWarn)
-		return m, nil
-	}
+// claimTask is 'c': claim a task. A claim only makes sense on a READY row (the
+// engine returns not_ready otherwise), so a non-ready row explains why instead
+// of firing a doomed request. The claim itself runs as a command so the reducer
+// never blocks on the network. The board resolves the task under the cursor; a
+// reading frame resolves its own subject (charter D30) — both funnel here.
+func (m Model) claimTask(t Task) (Model, tea.Cmd) {
 	if t.Lifecycle != lifeReady {
 		m.setStrip(claimBlockedReason(t), RoleWarn)
 		return m, nil
@@ -420,15 +542,14 @@ func (m Model) claimUnderCursor() (Model, tea.Cmd) {
 	return m, m.claimCmd(t.DocID, ResolveWorker())
 }
 
-// closeUnderCursor is 'x': the double-press close guard. Only a task holding a
-// LIVE claim can be closed, and only after two consecutive x presses on the
-// same row — the first arms (recording the doc id + prompting), the second
-// fires with the epoch OBSERVED on the row (the CAS token). handleKey has
-// already disarmed pendingClose for any non-x key, so reaching here with
-// pendingClose == this row means a genuine second consecutive x.
-func (m Model) closeUnderCursor() (Model, tea.Cmd) {
-	t, ok := m.taskUnderCursor()
-	if !ok || !hasLiveClaim(t) {
+// closeTask is 'x': the double-press close guard. Only a task holding a LIVE
+// claim can be closed, and only after two consecutive x presses on the same row
+// — the first arms (recording the doc id + prompting), the second fires with the
+// epoch OBSERVED on the row (the CAS token). handleKey has already disarmed
+// pendingClose for any non-x key, so reaching here with pendingClose == this row
+// means a genuine second consecutive x.
+func (m Model) closeTask(t Task) (Model, tea.Cmd) {
+	if !hasLiveClaim(t) {
 		m.pendingClose = ""
 		m.setStrip("nothing to close here — x closes a task with a live claim", RoleWarn)
 		return m, nil
@@ -442,16 +563,11 @@ func (m Model) closeUnderCursor() (Model, tea.Cmd) {
 	return m, nil
 }
 
-// openUnderCursor is 'o': open the task in Studio. The deep link is ALWAYS
-// surfaced on the strip (SSH-friendly — you can copy it even with no browser),
-// and best-effort launched via the injectable openURL seam. A launch failure is
-// not an error: the URL is the deliverable, so the strip keeps showing it.
-func (m Model) openUnderCursor() (Model, tea.Cmd) {
-	t, ok := m.taskUnderCursor()
-	if !ok {
-		m.setStrip("no task under the cursor to open", RoleWarn)
-		return m, nil
-	}
+// openTask is 'o': open the task in Studio. The deep link is ALWAYS surfaced on
+// the strip (SSH-friendly — you can copy it even with no browser), and
+// best-effort launched via the injectable openURL seam. A launch failure is not
+// an error: the URL is the deliverable, so the strip keeps showing it.
+func (m Model) openTask(t Task) (Model, tea.Cmd) {
 	url := StudioTaskURL(m.cfg.BaseURL, t.DocID)
 	if url == "" {
 		m.setStrip("can't build a Studio link (no server or doc id)", RoleWarn)
@@ -591,16 +707,19 @@ func (m Model) currentRow() (row, bool) {
 	return rows[m.ui.Cursor], true
 }
 
-// activate is enter on the row under the cursor:
+// activateBoard is enter on the row under the cursor (charter D11/D29):
 //
 //   - on an epic header → fold/unfold the epic (flip its EFFECTIVE fold state,
 //     so enter also wakes a dormant, auto-collapsed epic — an auto-fold the
 //     user cannot override would be a dead end).
-//   - on a task row     → open/close the inline detail (toggle Expanded).
+//   - on a cluster header → fold/unfold the derived cluster.
+//   - on a task row → PUSH a FrameTask (the navigation-shell descent that
+//     replaced the retired inline-expand toggle). The detail reads out of the
+//     in-hand DetailIndex — no fetch (charter D28).
 //
 // Collapsing an epic can shrink the visible-row list under the cursor, so we
 // clamp afterward to keep the selection on a real row.
-func (m Model) activate() Model {
+func (m Model) activateBoard() Model {
 	r, ok := m.currentRow()
 	if !ok {
 		return m
@@ -618,7 +737,11 @@ func (m Model) activate() Model {
 		m.ui.CollapsedEpics[r.docID] = !m.ui.CollapsedEpics[r.docID]
 		m.clampCursor()
 	case rowNow, rowChild, rowClusterMember, rowOrphan:
-		m.ui.Expanded[r.docID] = !m.ui.Expanded[r.docID]
+		title := r.docID
+		if t, found := m.taskByID(r.docID); found && t.Title != "" {
+			title = t.Title
+		}
+		(&m).pushFrame(Frame{Kind: FrameTask, Ref: r.docID, Title: title})
 	}
 	return m
 }
@@ -766,6 +889,275 @@ func (m Model) visibleRows() []row {
 		rows = append(rows, row{kind: rowOrphan, docID: t.DocID})
 	}
 	return rows
+}
+
+// ── Navigation stack (charter D11/D18/D29) ───────────────────────────────────
+
+// paperLoadedMsg delivers a FetchPaper result back to the update loop — papers
+// (unlike task detail) DO fetch on push (charter D12/D13e), off the loop so a
+// keystroke never blocks on the network.
+type paperLoadedMsg struct{ ps PaperState }
+
+// handlePaperLoaded stores the fetched/failed paper state by slug. The frame
+// re-renders from it on the next paint (honest loading/err/HTML-only states all
+// ride PaperState — never a blank frame, never a crash).
+func (m Model) handlePaperLoaded(msg paperLoadedMsg) (Model, tea.Cmd) {
+	if m.papers == nil {
+		m.papers = map[string]PaperState{}
+	}
+	m.papers[msg.ps.Slug] = msg.ps
+	return m, nil
+}
+
+// topFrame returns the stack-top frame — the one the key grammar dispatches on
+// and the compositor foregrounds. The stack is never empty (newModel seeds the
+// board at level 0); a zero value is returned defensively if it ever is.
+func (m Model) topFrame() Frame {
+	if len(m.stack) == 0 {
+		return Frame{Kind: FrameBoard, Title: "tasks"}
+	}
+	return m.stack[len(m.stack)-1]
+}
+
+// pushFrame descends onto a new frame with the D11 cycle guard: pushing a
+// (Kind,Ref) already on the stack POPS BACK to that existing frame instead of
+// duplicating it (a task→paper→same-task loop lands on the first copy, its saved
+// cursor intact). A genuinely new frame is appended fresh; the covered frames
+// keep their saved Cursor/Scroll for restore on pop. A paper push also fires its
+// async fetch (returned as the cmd); a task push reads the in-hand index.
+func (m *Model) pushFrame(f Frame) tea.Cmd {
+	for i, ex := range m.stack {
+		if ex.Kind == f.Kind && ex.Ref == f.Ref {
+			m.stack = m.stack[:i+1]
+			return nil
+		}
+	}
+	m.stack = append(m.stack, f)
+	if f.Kind == FramePaper {
+		return m.ensurePaper(f.Ref)
+	}
+	return nil
+}
+
+// popFrame ascends one level (esc/backspace). A no-op at the root board frame —
+// the covered frame's saved Cursor/Scroll is simply revealed again.
+func (m *Model) popFrame() {
+	if len(m.stack) > 1 {
+		m.stack = m.stack[:len(m.stack)-1]
+	}
+}
+
+// descend is enter inside a pushed frame: push the frame the cursor stop points
+// at (a child task's FrameTask, a paper's FramePaper). A frame with no stops, or
+// a cursor off the end, is a no-op.
+func (m Model) descend() (tea.Model, tea.Cmd) {
+	top := m.topFrame()
+	_, stops := m.frameContent(top, m.readingWidth(), m.now())
+	if top.Cursor < 0 || top.Cursor >= len(stops) {
+		return m, nil
+	}
+	s := stops[top.Cursor]
+	cmd := (&m).pushFrame(Frame{Kind: s.Kind, Ref: s.Ref, Title: s.Label})
+	return m, cmd
+}
+
+// ensurePaper primes a FramePaper's fetch: a cache hit (already rendered-ready)
+// is reused; otherwise it marks the state Loading and returns the fetch cmd.
+func (m *Model) ensurePaper(slug string) tea.Cmd {
+	if m.papers == nil {
+		m.papers = map[string]PaperState{}
+	}
+	if ps, ok := m.papers[slug]; ok && (ps.HTMLOnly || len(ps.BlocksRaw) > 0) {
+		return nil
+	}
+	m.papers[slug] = PaperState{Slug: slug, Loading: true}
+	return m.fetchPaperCmd(slug)
+}
+
+// fetchPaperCmd runs FetchPaper off the update loop (charter D13e: one direct
+// scoped read). A nil client (unconfigured / test) yields an honest Err state,
+// never a panic.
+func (m Model) fetchPaperCmd(slug string) tea.Cmd {
+	client, dataset := m.client, m.paperDataset()
+	return func() tea.Msg {
+		if client == nil {
+			return paperLoadedMsg{ps: PaperState{Slug: slug, Err: "no server configured"}}
+		}
+		ps, _ := FetchPaper(client, dataset, slug)
+		ps.Slug = slug
+		return paperLoadedMsg{ps: ps}
+	}
+}
+
+// paperDataset resolves the dataset a paper is fetched from — the scoped dataset
+// when set, else the "production" default the paper route assumes.
+func (m Model) paperDataset() string {
+	if m.cfg.Dataset != "" {
+		return m.cfg.Dataset
+	}
+	return "production"
+}
+
+// frameContent renders a pushed frame's body + stops at the given width (charter
+// D18: the reader returns body lines the shell windows, plus the selectable
+// stops j/k walks). FrameTask reads its detail out of the in-hand DetailIndex
+// (zero fetch, D28), FramePaper out of the async papers cache; a not-yet-loaded
+// or unknown ref degrades to one honest dim line, never a blank/crash.
+func (m Model) frameContent(f Frame, width int, now time.Time) ([]string, []Stop) {
+	switch f.Kind {
+	case FrameTask:
+		d, ok := m.details[f.Ref]
+		if !ok {
+			t, found := m.taskByID(f.Ref)
+			if !found {
+				return []string{dimStyle.Render(truncate("task not loaded — esc to go back", width))}, nil
+			}
+			d = TaskDetail{Task: t} // thin best-effort from the board row
+		}
+		return RenderTaskDetail(d, ChildrenOf(m.tasks, f.Ref), f.Cursor, width, now)
+	case FramePaper:
+		ps, ok := m.papers[f.Ref]
+		if !ok {
+			ps = PaperState{Slug: f.Ref, Loading: true}
+		}
+		return RenderPaperFrame(ps, DrivenTasks(m.tasks, m.details, f.Ref), m.tasks, f.Cursor, width, now)
+	default:
+		return nil, nil
+	}
+}
+
+// frameStopCount is the number of selectable stops in the top frame (the j/k
+// clamp bound), measured at the reading width so it matches what Compose paints.
+func (m Model) frameStopCount() int {
+	_, stops := m.frameContent(m.topFrame(), m.readingWidth(), m.now())
+	return len(stops)
+}
+
+// moveStopCursor steps the top frame's stop cursor by delta and snaps the
+// viewport back to it (Scroll=0), clamped to the stop list.
+func (m *Model) moveStopCursor(delta int) {
+	n := m.frameStopCount()
+	if n <= 0 || len(m.stack) == 0 {
+		return
+	}
+	top := &m.stack[len(m.stack)-1]
+	c := top.Cursor + delta
+	if c < 0 {
+		c = 0
+	}
+	if c > n-1 {
+		c = n - 1
+	}
+	top.Cursor = c
+	top.Scroll = 0
+}
+
+// setTopCursor jumps the top frame's stop cursor (g/G) and snaps the viewport
+// back, clamped to the stop list.
+func (m *Model) setTopCursor(c int) {
+	if len(m.stack) == 0 {
+		return
+	}
+	top := &m.stack[len(m.stack)-1]
+	n := m.frameStopCount()
+	if n <= 0 {
+		top.Cursor, top.Scroll = 0, 0
+		return
+	}
+	if c < 0 {
+		c = 0
+	}
+	if c > n-1 {
+		c = n - 1
+	}
+	top.Cursor, top.Scroll = c, 0
+}
+
+// freeScroll pans the reading viewport by delta lines WITHOUT moving the cursor
+// (charter D18: space/u/d read prose; the next j/k snaps back). Entering from
+// cursor-follow it seeds the offset from the current follow top so the first
+// press moves smoothly from where the eye is.
+func (m *Model) freeScroll(delta int) {
+	if len(m.stack) == 0 {
+		return
+	}
+	top := &m.stack[len(m.stack)-1]
+	body, stops := m.frameContent(*top, m.readingWidth(), m.now())
+	avail := m.readingViewportHeight()
+	if avail < 1 {
+		avail = 1
+	}
+	maxTop := len(body) - avail
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	cur := top.Scroll
+	if cur == 0 {
+		cur = followTop(len(body), stops, top.Cursor, avail)
+	}
+	nt := cur + delta
+	if nt < 0 {
+		nt = 0
+	}
+	if nt > maxTop {
+		nt = maxTop
+	}
+	top.Scroll = nt
+}
+
+// readingWidth is the width a pushed frame renders at: full width in narrow
+// push mode, the right-pane width in wide two-pane mode (charter D24: the
+// renderers cap the reading measure at 72 internally, so extra width is margin).
+func (m Model) readingWidth() int {
+	w := m.width
+	if w < 20 {
+		w = 20
+	}
+	if m.wide {
+		w = w - boardPaneWidth - paneGutter2
+		if w < minReadingWidth {
+			w = minReadingWidth
+		}
+	}
+	return w
+}
+
+// readingViewportHeight is the number of body lines a pushed frame gets — it MUST
+// match Compose's layout math (narrow: breadcrumb + footer reserved; wide: the
+// breadcrumb spans the top) or the free-scroll clamp desyncs from the paint.
+func (m Model) readingViewportHeight() int {
+	h := m.height
+	if h < 8 {
+		h = 8
+	}
+	if m.wide {
+		return h - 1
+	}
+	return h - 2
+}
+
+// readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed
+// frame (charter D30): a FrameTask acts on its own subject; a FramePaper acts on
+// the cursor stop iff it is a task, else nothing.
+func (m Model) readingSubjectTask() (Task, bool) {
+	top := m.topFrame()
+	switch top.Kind {
+	case FrameTask:
+		if d, ok := m.details[top.Ref]; ok {
+			return d.Task, true
+		}
+		return m.taskByID(top.Ref)
+	case FramePaper:
+		_, stops := m.frameContent(top, m.readingWidth(), m.now())
+		if top.Cursor >= 0 && top.Cursor < len(stops) && stops[top.Cursor].Kind == FrameTask {
+			ref := stops[top.Cursor].Ref
+			if d, ok := m.details[ref]; ok {
+				return d.Task, true
+			}
+			return m.taskByID(ref)
+		}
+	}
+	return Task{}, false
 }
 
 // Run is the entry point the CLI delegates to. It builds the apiclient from the
