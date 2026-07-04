@@ -20,8 +20,9 @@ defmodule Barkpark.Plugins.Tickets.CLI do
       `/v1/tickets/:id/{answer,close}`). The submitter's leg — file a ticket, list
       your own threads, reply — rides the `:ticket_key` bucket at `/v1/tickets*`,
       but is NOT advertised here: no `bp` credential can run it (see "Who `bp`
-      serves" below), so the submitter's entire surface is the three verbatim curl
-      commands on the mint handoff card (api-v1.md §8a), not a `bp` verb.
+      serves" below), so the submitter's tooling is raw curl — the mint handoff
+      card's quickstart, with the full key-holder route table in api-v1.md §8a —
+      never a `bp` verb.
     * `ticket-key` — the named low-trust credential. `mint`/`ls`/`rotate`/`pause`/
       `unpause`/`revoke` are admin-only key management under the
       `/v1/plugins/tickets/keys` surface. Pause is the REVERSIBLE abuse brake

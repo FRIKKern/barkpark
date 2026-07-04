@@ -64,9 +64,8 @@ func renderTable(out *writer, payload []byte) {
 // rows under "tickets" (the submitter's own-threads list is curl-only, not a bp
 // verb; charter Decision 11), and ticket-key.ls carries its named credentials
 // under "keys"; without them those tables collapse into a single crammed cell.
-// ("keys" is safe to claim: the only
-// other "keys" payload, the sites env-set receipt, goes through emitStructured
-// and never reaches this renderer.)
+// ("keys" is safe to claim: the only other "keys" payload, the sites env-set
+// receipt, goes through emitStructured and never reaches this renderer.)
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
