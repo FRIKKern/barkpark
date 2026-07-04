@@ -122,6 +122,11 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     get_in(content, ["tabs", Access.at(0), "cells", ref])
   end
 
+  defp peek_cell_at(slug, tab, ref) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab), "cells", ref])
+  end
+
   defp merges(slug, tab \\ 0) do
     {:ok, content} = Session.peek(slug, @dataset)
     get_in(content, ["tabs", Access.at(tab), "merges"])
@@ -1852,6 +1857,15 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert peek_cell("grp-paste", "A1") == %{"v" => 1}
       assert peek_cell("grp-paste", "A2") == %{"v" => 2}
       assert peek_cell("grp-paste", "A3") == %{"v" => 3}
+
+      # The redo produced ONE self-similar group entry, not three loose ones:
+      # a SECOND undo reverts the whole batch again (undo/redo/undo cycle).
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-paste", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell("grp-paste", "A1") == nil
+      assert peek_cell("grp-paste", "A2") == nil
+      assert peek_cell("grp-paste", "A3") == nil
     end
 
     test "a same-cell double write in one batch: undo blanks it, redo replays FORWARD to the last write" do
@@ -1947,6 +1961,37 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
       {:ok, %{applied: 0, errors: [%{index: 0, code: "nothing_to_undo"}]}} =
         Session.apply_ops("grp-anon", @dataset, [%{"op" => "undo", "user" => "u1"}])
+    end
+
+    test "a pending group survives a tab reorder — members are remapped, undo reverts the moved tab" do
+      create_multi_tab("grp-remap", [
+        %{"name" => "T0", "cells" => %{}},
+        %{"name" => "T1", "cells" => %{}},
+        %{"name" => "T2", "cells" => %{}}
+      ])
+
+      # A 2-cell paste (⇒ a {:group, …} entry) by u1, pinned to tab 2.
+      {:ok, %{applied: 2, errors: []}} =
+        Session.apply_ops("grp-remap", @dataset, [
+          set_cell_by("u1", "A1", 1, 2),
+          set_cell_by("u1", "A2", 2, 2)
+        ])
+
+      # Reorder tab 2 to the front. The pending group's member tab indices (2)
+      # must permute to their new slot (0) via remap_entry({:group, …}) — a
+      # MISSING clause would crash undo/reorder with a pending group (#843).
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-remap", @dataset, [%{"op" => "move_tab", "from" => 2, "to" => 0}])
+
+      assert peek_cell_at("grp-remap", 0, "A1") == %{"v" => 1}
+      assert peek_cell_at("grp-remap", 0, "A2") == %{"v" => 2}
+
+      # ONE undo reverts the whole group on the CORRECT (permuted) tab 0.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-remap", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell_at("grp-remap", 0, "A1") == nil
+      assert peek_cell_at("grp-remap", 0, "A2") == nil
     end
   end
 
