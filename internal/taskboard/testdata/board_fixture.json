@@ -47,38 +47,6 @@
       },
       "Children": [
         {
-          "DocID": "debounce-refetch",
-          "Title": "Debounce the refetch loop",
-          "Lifecycle": "in_progress",
-          "Kind": "task",
-          "ParentID": "cloud-gui-epic",
-          "Priority": "P2",
-          "Labels": ["perf"],
-          "Claim": { "Worker": "pelle", "Epoch": 2, "ClaimedAt": "2026-07-03T11:58:30Z" },
-          "DependencyCount": 0,
-          "DependentCount": 0,
-          "UpdatedAt": "2026-07-03T11:58:30Z"
-        },
-        {
-          "DocID": "wire-sse-bridge",
-          "Title": "Wire the SSE live bridge",
-          "Lifecycle": "in_progress",
-          "Kind": "task",
-          "ParentID": "cloud-gui-epic",
-          "Priority": "P1",
-          "Labels": ["live", "sse"],
-          "Claim": { "Worker": "opus-3", "Epoch": 4, "ClaimedAt": "2026-07-03T11:56:00Z" },
-          "Criteria": { "Met": 2, "Total": 3 },
-          "CriteriaItems": [
-            { "Criterion": "Reconnect after a dropped stream", "Met": true },
-            { "Criterion": "Debounce the refetch to 750ms", "Met": true },
-            { "Criterion": "Connection dot is honest (live/polling/offline)", "Met": false }
-          ],
-          "DependencyCount": 0,
-          "DependentCount": 2,
-          "UpdatedAt": "2026-07-03T11:56:00Z"
-        },
-        {
           "DocID": "reconcile-979-seam",
           "Title": "Reconcile the #979 role seam",
           "Lifecycle": "ready",
@@ -86,6 +54,11 @@
           "ParentID": "cloud-gui-epic",
           "Priority": "P2",
           "Labels": ["theme"],
+          "Criteria": { "Met": 1, "Total": 2 },
+          "CriteriaItems": [
+            { "Criterion": "Extract the shared statusRole vocabulary", "Met": true },
+            { "Criterion": "Reconcile onto the landed #979 seam", "Met": false }
+          ],
           "DependencyCount": 1,
           "DependentCount": 0,
           "UpdatedAt": "2026-07-03T11:40:00Z"

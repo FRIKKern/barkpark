@@ -1,6 +1,56 @@
 # Epic wish — the Barkpark portrait task TUI
 
-**User's wish (2026-07-03, verbatim spirit):** "Create the best portrait task interactive TUI for Barkpark tasks. It should be connected with your relevant repo. It should be very incredible — we see it's organized well in epics, currently active, latest updated on top. We want ONE simple view — not many toggles — but that view should be fantastic and work very automatically, helping the user understand what's going on. This is a very important goal — loop until perfection."
+## AMENDMENT (2026-07-04) — the REAL upgrade: simple, beautiful, deep
+
+**User's wish (2026-07-04, verbatim):** "We need to do a real upgrade to our task system — it
+need to be a lot more simple and beautiful, also it should be able to open tasks and see the
+task, and also be able to read paper related to it and see the tasks it contains, tasks within
+tasks within tasks — learn from Doey — we have it on this computer — also you are using an even
+stronger model than Doey did, so do smart decisions along the way that might matter — but
+really — we need a large upgrade to our bp tasks tui."
+
+The user attached a screenshot of **Doey's two-pane task UI** (left: sectioned task list with
+2-line cards; right: a full DETAIL pane — title, status·team·priority·type meta line, hybrid
+timestamps, status timeline `○ created → ● done`, Origin quote, Decisions log, Proof of
+Completion with AI-verification prose and files-changed) as the exemplar. The read-only study
+of Doey is already distilled at `.claude/workflows/doey-ui-lessons.md` (path:line citations
+into /Volumes/SATECHI/github/doey) — strategists/architect MUST read it; go back to the Doey
+source when a lesson needs more depth.
+
+What this amendment means, concretely (waves 1–4 shipped the live board; this is the pivot):
+
+1. **A LOT more simple and beautiful.** Waves 3–4 accreted density (chips, clusters, twins,
+   heartbeat verbs, flashes). The user is telling us the pane got busy. Subtract before adding:
+   fewer glyph vocabularies, more whitespace/rhythm, calmer color (color = state only —
+   Doey's discipline: one glyph carries status, text stays monochrome-dim). Every existing
+   feature must re-justify its pixels; folding/removing is a first-class outcome.
+2. **Open a task and SEE it.** A real full detail view, Doey-DETAIL-grade: title, meta line,
+   hybrid timestamps (`2h ago (Jul 04, 15:12)`), status timeline, full description/origin
+   rendered as markdown, decisions/activity, acceptance-criteria checklist, claim/worker
+   history. Not the current few-line inline expand — a place where you can actually READ the
+   task.
+3. **Follow the task to its Paper.** Tasks link to Barkpark Papers (design docs). From a
+   task's detail, open the related paper and READ it in the TUI — `internal/pdrender` already
+   renders PortableDoc for the terminal; reuse it, never fork a second renderer. Verify how
+   task↔paper linkage is expressed today (references? labels? body links?); if the link isn't
+   queryable, a small API/SDK addition is in scope for this epic.
+4. **Tasks within tasks within tasks.** Arbitrary-depth drill-down: a paper shows the tasks it
+   drives; a task shows its children; children have children. Navigation is a stack —
+   enter descends (task → detail → paper → its tasks → …), esc/backspace ascends, and you
+   always know where you are (breadcrumb). The board is level 0 of the same stack, not a
+   separate app.
+5. **Layout: learn from Doey, adapt to the terminal we're in.** Doey is two-pane
+   (list + detail). The portrait constraint from 2026-07-03 still matters (narrow tmux
+   split), but the exemplar screenshot is wide. Smart decision expected here: adaptive —
+   wide terminal = master-detail two-pane; narrow portrait = full-frame push navigation on
+   the same stack. One codebase of pure renderers, two compositions. Simplicity wins ties.
+6. **Smart decisions along the way.** The user explicitly grants latitude: where Doey's
+   choice and the current board's choice conflict, pick the better one and log it in the
+   charter's Decisions — don't preserve wave 1–4 behavior out of inertia.
+
+---
+
+**Original wish (2026-07-03, verbatim spirit):** "Create the best portrait task interactive TUI for Barkpark tasks. It should be connected with your relevant repo. It should be very incredible — we see it's organized well in epics, currently active, latest updated on top. We want ONE simple view — not many toggles — but that view should be fantastic and work very automatically, helping the user understand what's going on. This is a very important goal — loop until perfection."
 
 ## The shape
 

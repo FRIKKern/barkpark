@@ -5,6 +5,13 @@ ONE simple view, no toggle farm, very automatic: organized by epics, active work
 latest-updated first, connected to the repo you're standing in, actively helping the user
 understand what's going on. Loop until perfection. Wish doc: `.claude/workflows/bp-task-tui-wish.md`.
 
+**AMENDED 2026-07-04** (wish doc top section + `doey-ui-lessons.md`): a LOT more simple and
+beautiful (subtract wave-3/4 density); a real Doey-DETAIL-grade task reading view; read the
+task's Paper in the TUI via internal/pdrender; tasks-within-tasks at arbitrary depth on one
+navigation stack; adaptive wide-two-pane / portrait-push from one set of pure renderers.
+Amendment-era decisions: D11–D18 below. Waves 1–4 are MERGED on main
+(#1007, #1026, #1057, #1067, flicker fix #1100).
+
 ## Vision
 
 You split your terminal: editor left, a 60–100-col full-height column right running `bp tasks`.
@@ -98,6 +105,179 @@ All verified against the tree 2026-07-03 (not trusted from strategist claims).
     clock.** Matches the repo's existing discipline (cmd/barkpark/*.golden, apiclient
     change_test.go). No vacuous green: goldens assert full frames, action tests assert request
     bodies + epoch CAS + 409 rendering.
+
+### Amendment-era decisions (2026-07-04 — the simple/beautiful/deep pivot)
+
+Wish amendment: `.claude/workflows/bp-task-tui-wish.md` top section. Doey study:
+`.claude/workflows/doey-ui-lessons.md`. All data claims below LIVE-VERIFIED against
+guerrilla (read-only, 2026-07-04: 158 tasks — 150 with description, 92 with
+acceptance_criteria (entries carry `criterion/met/evidence/index`), 71 design_doc,
+20 papers[], claim carries `worker/epoch/ts_iso/expired_at/previous_worker`).
+
+11. **A navigation STACK replaces inline expand — the ONE detail mechanism.**
+    `[]Frame` in UIState; board = frame 0; enter descends, esc ascends (no-op at root);
+    breadcrumb derived from the stack; per-frame cursor+scroll restored on pop; cycle
+    guard: pushing a ref already on the stack pops back to that frame. `expandedDetail`
+    + `UIState.Expanded` are DELETED. *Why:* the wish's "actually READ a task" and
+    "tasks within tasks within tasks" are structurally impossible inline; two detail
+    mechanisms is exactly the busy-ness the user complained about. (Overrules D8's
+    "enter expand" and the wave-1 vision line — amendment #6 latitude.)
+
+12. **Adaptive composition, zero toggles: two-pane ≥110 cols, full-frame push below.**
+    Renderers stay pure (data,width,clock)→string; ONE compositor picks: wide = board
+    pinned left (46 cols) + 2-col gutter + stack-top right; narrow = stack-top
+    full-frame. Threshold 110 with ±4 hysteresis so tmux resize never flaps. At depth 0
+    in wide mode the right pane previews the cursor-target task's detail (free — detail
+    is zero-fetch, D13); papers render only when pushed (no preview-fetch machinery).
+    *Why:* the exemplar is Doey's wide two-pane, the 2026-07-03 portrait constraint is
+    still real; one renderer set + two compositions honors both without a mode key.
+
+13. **Zero server change this wave — the wire already carries everything.**
+    (a) Detail = ZERO extra fetches: the `/v1/tasks` list envelope ships the full
+    `content` map per task (verified in params.ex `render_doc` — `content: content` —
+    and live). (b) Children = client-side `parent_id` index over the already-fetched
+    corpus. (c) Task→paper = `content.design_doc` ∪ `papers[]` (both on the wire).
+    (d) Paper→tasks = SNAPSHOT INVERSION (`design_doc==slug || slug ∈ papers[]`) —
+    **NOT `GET /v1/graph/:id/tasks`**: live-verified it returns count:0 for
+    `tickets-epic-wish` (4+ tasks name it) because `Tasks.driven_tasks` rides
+    published-coalesced `reverse_referencers` and the live corpus is drafts.*. Fixing
+    that projector is a RESERVED server slice. (e) Paper fetch = one direct
+    `GET /v1/data/doc/:dataset/paper/:slug?perspective=drafts` (live-verified:
+    `result.blocks` present, slug is `_id`) — never paper_cmd.go's fetch-all-then-match.
+    (f) A per-task mutation-events endpoint is RESERVED; the detail timeline derives
+    client-side from inserted_at → claim(ts_iso/worker/previous_worker/expired_at) →
+    last_worked_at → updated_at(+close_reason). *Why:* every hop is a proven read; the
+    epic stays pure-Go and every slice gates on the Go suite alone.
+
+14. **The subtraction pass is a first-class slice that consciously reverses wave-3/4
+    density** (each reversal named here is charter-covered): ONE steady health glyph
+    per row carries status+liveness (StatusGlyph's frame-cycling clock faces DELETED);
+    spine rows collapse to one line (glyph + monochrome title + one dim right-aligned
+    token); chips, criteria meters, twin ⧉ glyphs and suggested `+key?` chips (and the
+    `t` verb) leave the LIST — they reappear in detail where a reader asked for them;
+    `EpicBar` ▰-bars deleted (dim `7/12` digits stay); NOW de-dup — a claimed task
+    renders ONLY in the NOW band (2-line cards there stay), never again inside its
+    epic/cluster; ticker compressed to one dim line and `workingLine` verb-cycling
+    deleted; selection = `▎` left bar (the glyph gutter carries exactly one
+    vocabulary). KEPT because they are information, not decoration: flash-on-change,
+    ticking lease age + escalation tint, cluster GROUPING (structure is what makes the
+    flat live queue legible), stale tint. *Why:* "a lot more simple and beautiful" is
+    the wish's first clause; Doey's core lesson is one glyph per row + monochrome-dim
+    text + color only where it means state.
+
+15. **Detail content model (Doey-DETAIL-grade, conditional sections — a thin task
+    stays thin):** bold title; `glyph lifecycle · P? · kind · worker` meta line; hybrid
+    timestamps `2h ago (Jul 04, 15:12)` everywhere; derived status timeline (D13f);
+    description/design as typography via mdlite→pdrender at a ≤72-cell measure;
+    acceptance-criteria checklist (✓/○ + per-item evidence); labels as dim monochrome
+    text; deps in words ("blocks 2 tasks"); claim block incl. previous_worker + expiry;
+    blocked_reason/close_reason/resolution_note strips; code_refs; then two selectable
+    rails: CHILDREN (→ TaskDetail) and PAPERS (→ PaperRead). Honest truncation
+    (`… and N more`) as a hard rule.
+
+16. **mdlite-minimal: task prose renders through a tiny markdown→`[]pdrender.Block`
+    adapter — one typography engine, no glamour, no goldmark.** v1 covers exactly what
+    the live corpus uses (149/150 descriptions are plain prose): paragraphs, `- `
+    bullets, fenced code, ATX headings; anything unrecognized degrades to a paragraph,
+    never errors; pdrender itself is NOT modified. *Why:* charter law (one rendering
+    stack) + task text becomes typographically identical to papers for free.
+
+17. **Paper frame = pdrender wholesale** (Decode → DefaultRegistry(theme).RenderDoc,
+    the paper_cmd.go pipeline) with a taskboard→pdrender.Theme bridge, render cached by
+    (slug, rev, width) — Doey's markdown-cache lesson; TaskResolver wired to the live
+    snapshot so in-body wikilink task chips show real status (display-only — no
+    in-body cursor targets in v1); below the paper, the snapshot-derived "Tasks driven
+    by this paper" rail IS the frame's stops. A paper with `body_html` but zero blocks
+    (exists live) renders an honest "HTML-only paper — o opens in browser" state.
+
+18. **Cursor grammar — two orthogonal motions, no modes:** j/k moves between
+    selectable stops (viewport follows, clamped to one screenful per press); space/u/d
+    free-scroll for reading prose; the next j/k snaps the viewport back to the cursor;
+    enter always descends on the cursor's stop; esc always ascends. Footer stays one
+    line per frame kind.
+
+### Wave-5 architect decisions (2026-07-04 — verified against the tree, not strategist claims)
+
+19. **SEQUENCING REVERSAL — subtraction + the reading renderers ship THIS wave; the
+    navigation SHELL is the NEXT wave, onto the calm board.** The subtraction pass and
+    the D11/D12/D18 shell BOTH rewrite `render.go` + `program.go` (verified: those are
+    the two largest files and both own the Update/View + board-render internals) — they
+    are irreconcilable as parallel isolated-builder slices. So this wave builds the
+    file-disjoint pieces (data substrate, detail renderer, paper renderer) AND lands the
+    calm board; the shell wires them into the stack next wave — exactly the proven
+    wave-1→wave-2 rhythm (build pure pieces, then integrate). *Why:* it makes "a LOT more
+    simple and beautiful" the first visible PR of the pivot, and every new frame is born
+    against the calm board instead of being re-skinned later. Overrules the roadmap's
+    "slice 18 last" ordering (strategists 1 & 2 called this).
+
+20. **NO theme bridge — pdrender renders papers and task prose through
+    `DefaultRegistry(DarkTheme()/LightTheme())` selected by Profile.** VERIFIED:
+    `pdrender.Theme` has unexported fields and only `DarkTheme()`/`LightTheme()`
+    constructors — a "map the board's statusRole palette onto Heading/Dim/Rule"
+    injection is IMPOSSIBLE without editing pdrender, which charter law forbids.
+    pdrender's dark palette already rides the same zinc/blue/emerald family the board
+    uses, so they harmonize with no bridge. Construction is exactly
+    `reg := DefaultRegistry(DarkTheme()); reg.RenderDoc(blocks, RenderCtx{Width: measure,
+    Theme: DarkTheme(), Profile: p})`. Corrects every strategist "taskboard→pdrender.Theme
+    bridge" claim.
+
+21. **Server stays untouched this wave — the per-task events endpoint (RESERVED slice
+    19) is NOT promoted.** The detail status timeline derives from the envelope
+    (inserted_at → claim(worker/previous_worker/ts_iso/expired_at) → last_worked_at →
+    updated_at+close_reason) and is built as an INTERNAL derivation so a future events
+    endpoint can enrich it WITHOUT changing `RenderTaskDetail`'s frozen signature. *Why:*
+    coupling a 4-slice Go wave to an Elixir deploy is the exact cross-stack sequencing
+    failure this epic keeps avoiding; the derived timeline honestly covers Doey's
+    exemplar (created → claimed(worker) → [reclaimed prev→new] → done). (Rejects
+    strategist 5's promote-slice-19; keeps it RESERVED as chartered.)
+
+22. **Chip HUES retired entirely — labels are dim monochrome text everywhere;
+    `chips.go`'s hash-to-hue engine is DELETED.** Overrules wave 3 (#1057) and the
+    doey-ui-lessons hash-hue ambition. *Why:* a label is identity, not state; under the
+    epic's own law ("color = state, never decoration") hued chips are decoration, and the
+    user's "simpler and beautiful" verdict on the busy result outranks the old ambition.
+    Cluster GROUPING stays (structure is what makes the flat guerrilla queue legible) —
+    only the paint goes. Doey renders tags detail-only and uniformly muted; this matches
+    the exemplar.
+
+23. **Inline expand is SHRUNK this wave, not deleted.** The subtraction slice removes
+    list density and shrinks `expandedDetail` to a minimal title+description+criteria
+    stub so `enter` stays alive; `UIState.Expanded` and the field SURVIVE until the shell
+    wave replaces the whole mechanism with the stack (D11). *Why:* deleting the only
+    detail mechanism one wave before the stack lands would leave `enter` dead mid-wave.
+    (Adjusts D11/D14's "delete now" — the deletion moves to the shell wave.)
+
+24. **Fixed reading measure: prose wraps at `min(paneWidth − gutter, 72)` cells at EVERY
+    width, via one pure `measure()` helper both the detail and paper frames call; extra
+    width becomes margin.** *Why:* terminal typography dies past ~72 cells, and the
+    adaptive compositor's wide right pane (100+ cols) would otherwise feed pdrender an
+    unbounded width and produce unreadable prose. Golden it at 60/80/100 so the cap is
+    asserted. (Adopts strategist 3's helper.)
+
+25. **`FetchSnapshotFull` EXTENDS the existing `fetch.go` decode — zero new network.**
+    VERIFIED: `fetch.go`'s `taskWire` already carries `Content json.RawMessage` per task
+    and already reads `acceptance_criteria` out of it. FetchSnapshotFull decodes the rest
+    of `content` (description, design, design_doc, papers[], per-criterion evidence,
+    blocked_reason, close_reason, resolution_note, code_refs, last_worked_at) plus
+    `claim.previous_worker` / `claim.expired_at` (add both to `claimWire`) into a
+    `DetailIndex`, in the SAME one `/v1/tasks?limit=1000` round-trip. No second fetch,
+    no server change (ratifies D13a-c with the decode site named).
+
+### Wave-5 slice ownership (parallel, file-disjoint — verified zero overlap)
+
+- **Substrate** owns `frames.go` (frozen, byte-identical), `detail_data.go`
+  (`FetchSnapshotFull`, `ChildrenOf`, `DrivenTasks`, `PaperRefs`), `fetch.go` additions.
+- **Detail** owns `detail_render.go`, `mdlite.go` (`MarkdownBlocks` — **ownership MOVED
+  here from the substrate signature list**, because RenderTaskDetail's goldens need REAL
+  mdlite output; a stub would fake them), `detail_*.txt` goldens. Includes `frames.go`
+  byte-identical. Renders labels as plain dim text (never imports `chips.go`).
+- **Paper** owns `paper.go`, `internal/apiclient/client.go` (`PaperDoc`), `paper_*.txt`
+  goldens. Includes `frames.go` byte-identical. In-body chips use pdrender's own
+  `TaskChip` seam (never `chips.go`).
+- **Subtraction** owns `render.go`, `components.go`, `anim.go`, `chips.go` (deleted),
+  `board.go` (NOW de-dup only), `program.go` (verb/ticker trim + shrunk expand), and the
+  `golden_60/80/100.txt` regen. Does NOT touch `frames.go`, `fetch.go`, `types.go`
+  (fields stay declared; it only stops RENDERING the retired ones).
 
 ### Known sequencing facts / drift
 
@@ -212,23 +392,138 @@ clearly-marked `wiring_stub.go` that the lead DELETES at merge):
   `func StudioTaskURL(baseURL, docID string) string`, with
   `type ActionResult struct { OK bool; Message string }` (honest one-line message on failure).
 
+## Frozen wave-5 contract (frames.go — verbatim in every slice branch)
+
+Every wave-5 slice includes this EXACT file at `internal/taskboard/frames.go`
+(identical bytes merge cleanly — the wave-1 gambit). Slices that need another
+slice's function stub it in a clearly-marked `wiring_stub.go` the lead DELETES
+at integration.
+
+```go
+package taskboard
+
+// frames.go — FROZEN wave-5 (amendment-era) contract. Byte-identical in every
+// slice branch; wiring_stub.go files are deleted by the lead at merge.
+
+import "time"
+
+// TaskDetail is the full reading model of one task, hydrated from the SAME
+// /v1/tasks list envelope the board already fetches (charter D13: the wire
+// already carries content — zero extra fetches).
+type TaskDetail struct {
+	Task // the board row (identity, lifecycle, claim, criteria, twins)
+
+	Description    string
+	Design         string    // content.design ("" when absent)
+	DesignDoc      string    // content.design_doc — a paper slug ("" when absent)
+	Papers         []string  // content.papers — paper slugs
+	Evidence       []string  // per-criterion evidence, index-aligned with Task.CriteriaItems ("" when absent)
+	BlockedReason  string
+	CloseReason    string
+	ResolutionNote string
+	CodeRefs       []string
+	Assignee       string
+	PreviousWorker string    // claim.previous_worker ("" when absent)
+	ClaimExpiredAt time.Time // claim.expired_at (zero when absent)
+	LastWorkedAt   time.Time // content.last_worked_at (zero when absent)
+}
+
+// DetailIndex maps doc_id -> TaskDetail for every task in the snapshot.
+type DetailIndex map[string]TaskDetail
+
+// FrameKind discriminates navigation-stack frames.
+type FrameKind int
+
+const (
+	FrameBoard FrameKind = iota // level 0 — the board; always the stack bottom
+	FrameTask                   // TaskDetail reading view
+	FramePaper                  // rendered paper + driven-tasks rail
+)
+
+// Stop is one selectable target inside a frame's rendered body.
+type Stop struct {
+	Line  int       // 0-based index into the frame's body lines
+	Kind  FrameKind // what enter pushes (FrameTask or FramePaper)
+	Ref   string    // task doc_id or paper slug
+	Label string    // breadcrumb segment for the pushed frame
+}
+
+// Frame is one level of the navigation stack.
+type Frame struct {
+	Kind   FrameKind
+	Ref    string // task doc_id / paper slug ("" for the board)
+	Title  string // breadcrumb segment ("" for the board → "tasks")
+	Cursor int    // index into the frame's current Stops
+	Scroll int    // free-scroll line offset (0 = follow cursor)
+}
+
+// PaperState is the async fetch/render state of one FramePaper.
+type PaperState struct {
+	Slug      string
+	Loading   bool
+	Err       string // honest error line ("" when none)
+	Title     string
+	Rev       string
+	BlocksRaw []byte // raw blocks JSON (nil while loading / on error)
+	HTMLOnly  bool   // doc had body_html but zero blocks → browser-handoff state
+}
+```
+
+Frozen wave-5 signatures (implemented by the named slice; others stub in
+`wiring_stub.go`):
+
+- **Substrate slice:** `func FetchSnapshotFull(c *apiclient.Client) (Snapshot, DetailIndex, error)`
+  (same one round-trip as FetchSnapshot; decodes Task AND TaskDetail in one pass),
+  `func ChildrenOf(tasks []Task, docID string) []Task` (inserted_at asc),
+  `func DrivenTasks(tasks []Task, details DetailIndex, slug string) []Task`
+  (design_doc==slug || slug ∈ papers[], band-ordered like epic children),
+  `func (d TaskDetail) PaperRefs() []string` (design_doc first, ∪ papers[], deduped),
+  `func MarkdownBlocks(src string) []pdrender.Block`.
+- **Detail slice:** `func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time.Time) ([]string, []Stop)`
+  — full body lines + stops; the shell windows by Frame.Scroll/height.
+- **Paper slice:** `func FetchPaper(c *apiclient.Client, dataset, slug string) (PaperState, error)`,
+  `func RenderPaperFrame(ps PaperState, driven []Task, chipSource []Task, cursor, width int, now time.Time) ([]string, []Stop)`,
+  and apiclient `func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error)`
+  (raw `result` JSON from `GET /v1/data/doc/:dataset/paper/:slug`).
+- **Shell slice:** stack push/pop with the D11 cycle guard,
+  `func Breadcrumb(stack []Frame, width int) string` (middle-truncating; first+last
+  segments always survive), the D12 compositor, the D18 key grammar.
+
+Cross-slice compile note (amended by D23): THIS wave the subtraction slice SHRINKS
+`expandedDetail` (keeps `enter` alive) and leaves `UIState.Expanded` declared. The
+NEXT-wave shell slice stops using `UIState.Expanded` + the `t` verb and installs the
+stack; the LEAD deletes `expandedDetail` and the field at the shell integration —
+this keeps every branch independently compilable across both waves.
+
+Ownership amendment (D19): `MarkdownBlocks` is implemented by the DETAIL slice
+(`mdlite.go`), not the substrate slice — RenderTaskDetail's goldens need real mdlite
+output, so a substrate stub would produce fake goldens. `frames.go` itself only
+imports `time`, so this changes no frozen bytes.
+
 ## Roadmap (integration order)
 
 | # | Slice | Size | Wave |
 |---|-------|------|------|
-| 1 | Data spine: types + FetchSnapshot + BuildBoard policy (pure, fixture-tested) | M | 1 |
-| 2 | Theme + component kit + portrait Render, goldens at 60/80/100 cols | L | 1 |
-| 3 | Bubble Tea shell: `bp tasks` builtin, nav/expand, SSE live loop, honest conn states | L | 1 |
-| 4 | Action core: DoClaim/DoClose (epoch CAS) / Studio URL, httptest-proven | S | 1 |
-| 5 | Repo correlator: git-log/branch text scan → badges + rank boost (pure, fixtures) | M | 1 |
-| 6 | Integration wave: delete stubs, wire actions to keys, optimistic flip + rollback, end-to-end against guerrilla | M | 2 |
-| 7 | statusRole reconciliation onto merged #979 seam (shared internal package; fixture parity test) | S | 2 |
-| 8 | First-paint snapshot cache + empty/offline/syncing full-frame goldens | M | 2 |
-| 9 | Pulse/decay change-highlighting (updated_at diff tint, closed-task linger, fake-clock tests) | M | 2 |
-| 10 | Live-queue tuning pass: run against guerrilla, retune ordering/folding opinion, resize/narrow-width polish | M | 3 |
-| 11 | Terminal degradation: 256/8-color forced-profile goldens + ASCII glyph fallback | S | 3 |
-| 12 | Docs: tui.md + TASK-SYSTEM.md anchors, fix go-pin drift, anchors-check green | S | 3 |
+| 1 | Data spine: types + FetchSnapshot + BuildBoard policy (pure, fixture-tested) | M | 1 ✅ (#1007) |
+| 2 | Theme + component kit + portrait Render, goldens at 60/80/100 cols | L | 1 ✅ (#1007) |
+| 3 | Bubble Tea shell: `bp tasks` builtin, nav/expand, SSE live loop, honest conn states | L | 1 ✅ (#1007) |
+| 4 | Action core: DoClaim/DoClose (epoch CAS) / Studio URL, httptest-proven | S | 1 ✅ (#1007) |
+| 5 | Repo correlator: git-log/branch text scan → badges + rank boost (pure, fixtures) | M | 1 ✅ (#1007) |
+| 6 | Integration wave: stubs deleted, keys wired, optimistic flip + rollback, live e2e | M | 2 ✅ (#1026) |
+| 7 | statusRole reconciliation onto merged #979 seam | S | 2 ✅ (#1026) |
+| 8 | First-paint snapshot cache + empty/offline/syncing goldens | M | ✅ (cache.go landed; async first fetch) |
+| 9 | Pulse/decay change-highlighting | M | 2 ✅ (#1026/#1067; flicker fix #1100) |
+| 10 | Live-queue tuning: clusters, staleness, twins, chips | M | 3 ✅ (#1057) |
+| 11 | Terminal degradation: forced-profile goldens + ASCII fallback | S | 3 ✅ (render_degrade) |
+| 12 | Docs: tui.md anchors current through wave 3 | S | 3 ✅ |
+| 14 | Detail substrate: TaskDetail/children/driven-tasks decode (pure data, D25) | M | 5 (this wave) |
+| 15 | RenderTaskDetail + mdlite — the Doey-DETAIL-grade reading view (D15/D16/D24) | L | 5 (this wave) |
+| 16 | Paper frame: pdrender wholesale (DarkTheme, no bridge — D20) + driven-tasks rail (D17) | M | 5 (this wave) |
+| 18 | The subtraction pass: calm board, chip-hue retirement, NOW de-dup, shrunk expand (D14/D22/D23) | L | 5 (this wave) |
+| 17 | Navigation shell: stack + breadcrumb + cursor grammar + adaptive compositor (D11/D12/D18) — onto the calm board | L | 6 (next wave, after subtraction lands) |
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
+| 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
+| 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
 
 ## Wave log
 
@@ -329,3 +624,121 @@ is the suggestion-side vocabulary — clusters group loose tasks that HAVE a sha
 tui.md; extend live_probe's decode guard to CriteriaItems (per-item text non-empty, met ==
 #checked); the true "watch the NOW card tick / working-verb cycle / one-shot flash+fold at rest"
 observation — a headless run can verify the still-at-rest mechanism but not the animation itself.
+
+### Wave 2026-07-04 (wave 5 CUT: the simple/beautiful/deep pivot — architect decisions D19–D25)
+
+**Reconciled reality:** waves 1–4 + #1100 MERGED on main (git log confirms #1007/#1026/#1057/
+#1067/#1100 on `internal/taskboard`). The board is live and busy; this wave pivots to calm + deep.
+
+**Verified against the tree before cutting (not trusted from strategists):** pdrender's public
+API is `Decode([]byte)→[]Block`, `DefaultRegistry(Theme)`, `RenderDoc(blocks, RenderCtx)`,
+`DarkTheme()/LightTheme()`, `RenderCtx{Width,Theme,Profile,TaskResolver}`; pdrender imports only
+lipgloss+stdlib and explicitly forbids apiclient/taskboard (import direction taskboard→pdrender
+is LEGAL). `pdrender.Theme` fields are UNEXPORTED with no color-injecting constructor → **no theme
+bridge is possible** (D20). `fetch.go` already decodes `content` as `json.RawMessage` per task →
+FetchSnapshotFull is a decode extension, zero new fetch (D25). Paper route confirmed router.ex:1247.
+
+**The cut (4 file-disjoint parallel slices — the shell is held to wave 6):** subtraction and the
+nav shell both rewrite render.go+program.go, so they cannot parallelize; the shell moves to the
+next wave onto the calm board (D19). This wave: (1) detail substrate, (2) RenderTaskDetail+mdlite,
+(3) paper frame, (4) the subtraction pass. Zero file overlap verified; `frames.go` frozen
+byte-identical in slices 1–3; subtraction owns render/components/anim/chips/board/program +
+golden regen and touches none of the others' files.
+
+**What the next (shell) wave inherits:** a calm board (frame 0), a tested `RenderTaskDetail`
+`([]string,[]Stop)`, a tested `RenderPaperFrame` `([]string,[]Stop)`, `FetchSnapshotFull`+
+`DetailIndex`+`ChildrenOf`+`DrivenTasks`+`PaperRefs`, and `apiclient.PaperDoc`. It must: install
+the `[]Frame` stack (board=frame 0), D11 cycle guard + per-frame cursor/scroll restore, the D12
+compositor (two-pane ≥110 / push <110, ±4 hysteresis, depth-0 zero-fetch detail preview), D18
+cursor grammar, the breadcrumb, then DELETE `UIState.Expanded`/`expandedDetail`/`t` verb for good,
+and update docs/cards/tui.md + fix the go-1.24.2/1.25.0 doc drift.
+
+### Wave 2026-07-04b (wave 5 GREEN: all four slices built + perfected; direction ran a real integration probe)
+
+**Landed (on `-p` branches, ready for lead integration; NOT yet merged):** all four slices
+GREEN with SHIP verdicts. Substrate (`d8ffc76e`-p): FetchSnapshotFull/ChildrenOf/DrivenTasks/
+PaperRefs, +996/−24, fixture+live-probe tested, zero new network (D25 held). Detail
+(`3c5e04d6`-p): RenderTaskDetail + real mdlite, +1925, goldens at 60/80/100, D15/D16/D24 all
+honored, prose renders through the SAME pdrender engine as papers. Paper (`7d3fd43b`):
+apiclient.PaperDoc + FetchPaper/RenderPaperFrame, DarkTheme direct (D20 held, the earlier
+theme-bridge attempt was correctly restarted), (slug,rev,width) render cache. Subtraction
+(`83a946bc`): net −504 lines — chips.go DELETED, one 4-glyph vocabulary, ONE-line ticker,
+NOW de-dup, ▎ selection, shrunk expand (D23), glyph_budget_test allowlist guard.
+
+**Direction integration probe (octopus merge of all four `-p` onto origin/main `cdd1e209`,
+throwaway worktree, suites run):** the merge is FILE-clean (frames.go byte-identical across
+slices 1–3, sha 42010d13; zero path overlap; #1111 touches no taskboard/apiclient/pdrender
+file) but NOT SYMBOL-clean. The lead's integration checklist, each verified mechanical:
+
+1. **`criteriaFraction` collision** — detail_render.go:443 declares
+   `criteriaFraction(d TaskDetail) (met, total int)`; the subtraction's components.go:197
+   declares `criteriaFraction(c *Criteria) string`. Rename the detail one to
+   `detailCriteriaFraction` (2 sites, detail_render.go only). Verified compiles.
+2. **`StatusGlyph` arity** — paper.go:270 calls the OLD two-arg `StatusGlyph(t.Lifecycle, 0)`;
+   the subtraction deleted the frame param. Drop the `0`, then regenerate `paper_80.txt` with
+   `-update-paper` (the stale golden carries the retired ◴/☐ vocabulary).
+3. **Glyph-budget policy decision** — glyph_budget_test.go sweeps ALL `testdata/*.txt` against
+   the tight board allowlist, and the detail/paper goldens legitimately carry a READING-frame
+   vocabulary (— • → ↳ ═ ▌ ▍ ▸ ⧉ from mdlite bullets, timeline arrows, evidence hooks,
+   pdrender rules/quote bars, the detail twin line). Do NOT just grow the one list: split into
+   two closed allowlists (board surface stays tight; `detail_*`/`paper_*` get the documented
+   reading set). The guard WORKED — it caught the cross-slice vocabulary drift it was built for.
+4. Delete `wiring_stub.go` (detail slice's PaperRefs stub) — semantics identical to the
+   substrate's real one.
+5. With fixes 1–4 applied in the probe: `go build ./...` + full taskboard/apiclient/pdrender
+   suites GREEN and `-race` CLEAN (0 warnings). Use `CC=/usr/bin/clang` on this host.
+
+**Perfecter must-knows carried forward:** (a) TWO worktree stashes hold recoverable WIP — the
+substrate worktree's "parallel-slice-wip" (a subtraction duplicate; discard) and the subtraction
+worktree's stash of leaked SHELL-wave WIP (compose.go/stack.go/program.go nav-stack edits —
+recover before cleaning if the shell wave wants a head start). (b) frames.go is deliberately
+gofmt-dirty (charter-frozen bytes); dedupe at integration, and if it should be clean, fix the
+CHARTER block first. (c) DESIGN CALL TO RATIFY at integration: epic/cluster header digits now
+count only the section's displayed+folded rows (claims live in NOW), so denominators shift as
+claims come/go — self-consistent but differs from the vision line's `7/12`; log the ratified
+reading. (d) Now-unreferenced-but-tested: DoRelabel/TaskRelabel, Meter/scaleFill — shell wave
+deletes or consumes. (e) Suggested/TwinOf computed but board no longer renders them (detail's
+twin line does). (f) detailGlyph renders neutral `·` for cancelled — fine, revisit only if a
+dedicated glyph is wanted. (g) pdrender's colored-code-collapse bug is REAL, hit both detail
+(worked around via NoColor prose profile) and will hit papers — warrants the RESERVED pdrender
+fix as its own gated slice. (h) FetchSnapshot now delegates to FetchSnapshotFull and discards
+the DetailIndex — accepted D25 cost; the shell should keep the index instead.
+
+**Learned:** the frozen-bytes contract prevents FILE conflicts, not SYMBOL conflicts — two
+slices declared the same package-level helper name and one called another's pre-subtraction
+signature. Next multi-slice wave: freeze shared-helper SIGNATURES in the charter too, or
+require slice-private helpers to carry a frame prefix (detailX/paperX). Also: goldens created
+in one slice can be invalidated by a sibling slice's vocabulary change in the same wave —
+integration must always re-run golden regen + the budget guard, never trust per-slice green.
+
+**Next wave (6 — the shell, slice 17, where the wish becomes USER-VISIBLE):** integrate wave 5
+first (the checklist above), then ONE integration-shaped wave: the `[]Frame` stack + D11 cycle
+guard + per-frame cursor/scroll, D12 adaptive compositor (two-pane ≥110/push <110, ±4
+hysteresis, depth-0 detail preview), D18 grammar + breadcrumb, DELETE
+Expanded/expandedDetail/`t` for good, consume-or-delete the orphaned helpers, docs/cards/tui.md
+update + go-1.25 drift fix, and a LIVE guerrilla run (the reading frames have never met the
+real corpus). Nothing else — until the shell lands, the user cannot see ANY of wave 5's depth.
+
+### Wave 2026-07-04c (wave 5 INTEGRATED by the lead)
+
+All four slices merged to `integrate/tui-wave5` (sequential, zero file conflicts — the
+frozen-bytes contract held). Checklist applied exactly: (1) detail's helper renamed
+`detailCriteriaFraction` (2 sites); (2) paper.go on one-arg `StatusGlyph` + `paper_80.txt`
+regenerated (retired ◴/☐ gone); (3) glyph budget split into TWO closed allowlists —
+board stays tight, `detail_*`/`paper_*` get the documented 9-rune reading set
+(— • → ↳ ═ ▌ ▍ ▸ ⧉) via `readingGlyphExtras`; (4) `wiring_stub.go` deleted. Full
+taskboard/pdrender/apiclient/cli suites green, `-race` clean, vet clean, CGO_ENABLED=0
+build green.
+
+**RATIFIED (design call c):** epic/cluster header digits count only the section's
+displayed+folded rows — claims live in NOW with a breadcrumb, so denominators shift as
+claims come and go. The header describes what's under it; the vision line's static `7/12`
+reading is superseded.
+
+**NEW for wave 6 (found at integration):** pdrender's in-body task-chip glyphs
+(`taskStatusGlyph`, inline.go — ○ open/◐ in_progress/⊘ blocked/● done/✕ cancelled) are
+kept in LOCKSTEP with the Elixir walker's `task_glyph/1`, and they CLASH with the board's
+wave-5 vocabulary (● in_progress/◐ blocked/✓ done) — on one paper frame the in-body chip
+and the driven-rail can show the same task with contradictory glyphs. Unifying is a
+CROSS-SURFACE change (Elixir walker + pdrender + parity tests + Studio HTML) — schedule it
+with the RESERVED pdrender fix (colored-code collapse), NOT as a quiet local edit.

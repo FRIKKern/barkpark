@@ -102,12 +102,12 @@ func TestCursorParityShellRender(t2 *testing.T) {
 		frame := ansi.Strip(m.View())
 		var marked []string
 		for _, ln := range strings.Split(frame, "\n") {
-			if strings.Contains(ln, "▶") {
+			if strings.Contains(ln, "▎") {
 				marked = append(marked, ln)
 			}
 		}
 		if len(marked) != 1 {
-			t2.Fatalf("cursor %d (%v %q): %d ▶-marked lines, want exactly 1\n%s",
+			t2.Fatalf("cursor %d (%v %q): %d ▎-marked lines, want exactly 1\n%s",
 				i, r.kind, r.docID, len(marked), frame)
 		}
 		// The board's titles equal the doc ids (see t()), and an epic header
@@ -122,13 +122,14 @@ func TestCursorParityShellRender(t2 *testing.T) {
 
 // Folded orphans are absent from Board.Orphans by construction, so the flattened
 // visible-row list — and therefore all cursor math — never touches them. The
-// flat board (3 NOW claims + 45 survivors, 55 folded) navigates exactly 48 rows,
+// flat board has 3 NOW claims + 42 survivors (the 3 claimed in_progress rows are
+// NOW-only after the D14 de-dup) + 55 folded, so it navigates exactly 45 rows,
 // and G lands on a real survivor, never a folded "dn*" ghost.
 func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 	m := testModel(BuildBoard(loadFlatSnapshot(t2), RepoContext{}, refNow))
 	rows := m.visibleRows()
-	if len(rows) != 48 {
-		t2.Fatalf("flat board visible rows = %d, want 48 (3 NOW + 45 survivors)", len(rows))
+	if len(rows) != 45 {
+		t2.Fatalf("flat board visible rows = %d, want 45 (3 NOW + 42 survivors)", len(rows))
 	}
 	for _, r := range rows {
 		if len(r.docID) >= 2 && r.docID[:2] == "dn" {
@@ -136,8 +137,8 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 		}
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 47 {
-		t2.Fatalf("G on the flat board left cursor at %d, want 47 (last survivor)", m.ui.Cursor)
+	if m.ui.Cursor != 44 {
+		t2.Fatalf("G on the flat board left cursor at %d, want 44 (last of 45 rows)", m.ui.Cursor)
 	}
 }
 
@@ -222,17 +223,17 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 			frame := ansi.Strip(m.View())
 			var marked []string
 			for _, ln := range strings.Split(frame, "\n") {
-				if strings.Contains(ln, "▶") {
+				if strings.Contains(ln, "▎") {
 					marked = append(marked, ln)
 				}
 			}
 			if len(marked) != 1 {
-				t2.Fatalf("folded=%v cursor %d (%v %q): %d ▶-marked lines, want 1\n%s",
+				t2.Fatalf("folded=%v cursor %d (%v %q): %d ▎-marked lines, want 1\n%s",
 					folded, i, r.kind, r.docID, len(marked), frame)
 			}
 			want := r.docID
 			if r.kind == rowClusterHeader {
-				want = chipText(strings.TrimPrefix(r.docID, "cluster:")) // "cluster:proj:alpha" → "alpha"
+				want = clusterDisplayName(strings.TrimPrefix(r.docID, "cluster:")) // "cluster:proj:alpha" → "alpha"
 			}
 			if !strings.Contains(marked[0], want) {
 				t2.Errorf("folded=%v cursor %d: marked line %q does not carry %q (kind %v)",
@@ -514,11 +515,6 @@ func TestWindowResizeStoresDimensions(t2 *testing.T) {
 // tasks). claimedTask holds a live claim, so it is closable.
 func readyTask(id string) Task { return Task{DocID: id, Title: id, Lifecycle: lifeReady} }
 
-// suggestedTask is an orphan carrying a derived tag suggestion — the only shape
-// the `t` verb acts on.
-func suggestedTask(id, suggested string) Task {
-	return Task{DocID: id, Title: id, Lifecycle: lifeOpen, Suggested: suggested}
-}
 func claimedTask(id string, epoch int) Task {
 	return Task{DocID: id, Title: id, Lifecycle: lifeInProgress,
 		Claim: &Claim{Worker: "w", Epoch: epoch, ClaimedAt: time.Unix(1000, 0)}}
@@ -592,81 +588,11 @@ func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 	}
 }
 
-// t on a row carrying a derived tag suggestion fires DoRelabel with that row's
-// doc id + suggested key, then on the OK result flashes a green strip and fires
-// the reconciling refetch (handleActionResult, shared with claim/close).
-func TestTagKeyOnSuggestedRowFiresRelabelAndReconciles(t2 *testing.T) {
-	m := testModel(Board{Orphans: []Task{suggestedTask("s1", "proj:sheets-parity")}})
-	m.ui.Cursor = 0
-
-	var gotDoc, gotTag string
-	m.doRelabel = func(_ *apiclient.Client, docID, tag string) ActionResult {
-		gotDoc, gotTag = docID, tag
-		return ActionResult{OK: true, Message: "+proj:sheets-parity applied"}
-	}
-
-	m, cmd := step(t2, m, runes("t"))
-	if cmd == nil {
-		t2.Fatal("t on a suggested row did not fire a relabel command")
-	}
-	msg := cmd()
-	res, ok := msg.(actionResultMsg)
-	if !ok {
-		t2.Fatalf("relabel command produced %T, want actionResultMsg", msg)
-	}
-	if gotDoc != "s1" || gotTag != "proj:sheets-parity" {
-		t2.Fatalf("DoRelabel got (%q,%q), want (s1,proj:sheets-parity)", gotDoc, gotTag)
-	}
-
-	// The OK result lands a green confirmation AND a reconciling refetch.
-	m, cmd = step(t2, m, res)
-	if m.ui.Strip.Message != "+proj:sheets-parity applied" || m.ui.Strip.Role != RoleOK {
-		t2.Fatalf("strip after relabel = %+v, want the ok confirmation", m.ui.Strip)
-	}
-	if cmd == nil {
-		t2.Fatal("a successful relabel did not trigger a reconciling refetch")
-	}
-}
-
-// t on a row WITHOUT a suggestion never hits the network — the refusal doubles
-// as the verb's teaching line (t applies the dim +key? chip). Same for an
-// empty cursor.
-func TestTagKeyWithoutSuggestionExplainsInstead(t2 *testing.T) {
-	fired := false
-	seam := func(*apiclient.Client, string, string) ActionResult {
-		fired = true
-		return ActionResult{}
-	}
-
-	// A labeled row with no suggestion.
-	m := testModel(Board{Orphans: []Task{{DocID: "o1", Title: "o1", Labels: []string{"area:tui"}}}})
-	m.ui.Cursor = 0
-	m.doRelabel = seam
-	m, cmd := step(t2, m, runes("t"))
-	if cmd != nil || fired {
-		t2.Fatal("t on a row with no suggestion must not fire a relabel")
-	}
-	if m.ui.Strip.Role != RoleWarn ||
-		m.ui.Strip.Message != "no suggested tag here — t applies a row's dim +key? chip" {
-		t2.Fatalf("strip = %+v, want the teaching warn line", m.ui.Strip)
-	}
-
-	// An empty cursor (no rows) warns too, and still fires nothing.
-	m2 := testModel(Board{})
-	m2.doRelabel = seam
-	m2, cmd2 := step(t2, m2, runes("t"))
-	if cmd2 != nil || fired {
-		t2.Fatal("t with no task under the cursor must not fire a relabel")
-	}
-	if m2.ui.Strip.Role != RoleWarn || m2.ui.Strip.Message == "" {
-		t2.Fatalf("empty-cursor strip = %+v, want a warn explanation", m2.ui.Strip)
-	}
-}
-
-// A relabel result in flight disarms the close guard exactly like a claim/close
-// result does — the arm-prompt is the guard's only visible face, so once any
-// action result replaces it the guard must not stay silently armed.
-func TestTagResultDisarmsCloseGuard(t2 *testing.T) {
+// An action result in flight disarms the close guard — the arm-prompt is the
+// guard's only visible face, so once any action result replaces it the guard
+// must not stay silently armed. (The calm-board subtraction retired the `t` tag
+// verb; this pins the same behavior on a claim result.)
+func TestActionResultDisarmsCloseGuard(t2 *testing.T) {
 	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
 	m.now = func() time.Time { return time.Unix(10, 0) }
 	m.fetch = func(*apiclient.Client) (Snapshot, error) {
@@ -678,9 +604,9 @@ func TestTagResultDisarmsCloseGuard(t2 *testing.T) {
 	if m.pendingClose != "c1" {
 		t2.Fatalf("pendingClose = %q after arming, want c1", m.pendingClose)
 	}
-	m, _ = step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "+area:tui applied"}})
+	m, _ = step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "claimed"}})
 	if m.pendingClose != "" {
-		t2.Fatal("a relabel result left the close guard armed")
+		t2.Fatal("an action result left the close guard armed")
 	}
 }
 

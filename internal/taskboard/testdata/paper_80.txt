@@ -1,0 +1,15 @@
+Paper frame charter
+drafts.the-paper · rev-7
+
+PAPER FRAME CHARTER                                                   
+───────────────────                                                   
+                                                                      
+Driven by [◐ in_progress · P1 · 2/3] Wire the driven-tasks rail — read
+it inline.                                                            
+                                                                      
+▌ BASH                                                                
+▌ go test ./internal/taskboard/...                                    
+
+Tasks driven by this paper (2)
+▎ ● Wire the driven-tasks rail                                                2h
+  ○ Golden the paper frame at 80                                              1d
