@@ -44,7 +44,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   defp addable_block_valid?(%{"type" => "ingress", "content" => []}), do: true
   defp addable_block_valid?(%{"type" => "pullquote", "content" => []}), do: true
   # diagram (barkpark-woxx) — flat {source, caption} default, both "" (the exact
-  # shape Render.compose_block/2 reads at render.ex:348).
+  # shape Render.Compose.compose_block/2's "diagram" clause reads).
   defp addable_block_valid?(%{"type" => "diagram", "source" => "", "caption" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-string", "value" => ""}), do: true
   defp addable_block_valid?(%{"type" => "field-slug", "value" => ""}), do: true

@@ -109,7 +109,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.ChromeAndDiagramTest do
   end
 
   # ── diagram block (barkpark-woxx): insert + edit round-trip ────────────────
-  # The diagram block RENDERS (render.ex:348 → `<pre class="mermaid">`) but had
+  # The diagram block RENDERS (Render.Figures.diagram_html/3 → `<pre class="mermaid">`) but had
   # no Beta editor path. These prove default_block("diagram", …) yields the flat
   # {source:"", caption:""} default and build_block_patch maps a {source, caption}
   # form submission through the SAME paper-edit-block → patch-block pipeline.
