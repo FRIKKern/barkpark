@@ -292,3 +292,152 @@ html[data-theme="dark"] .bp-paper-body {
 /* Divider rule — the default; author thickness overrides via inline border-top-width. */
 .bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TASK LIST — the Barkpark task design language (bp-task-design-language-spec)
+   Shared vocabulary with the `bp tasks` TUI: white ladder + colour-for-meaning.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.bp-paper-surface .bp-tasks {
+  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  margin: 1.6rem 0;
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface .bp-tasks { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+}
+.bp-paper-surface .bp-tasks--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-faint); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-tasks__list { border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+
+/* the glyph ladder — one shared set with the terminal */
+.bp-paper-surface .bp-g { display: inline-flex; align-items: center; justify-content: center; width: 1.35em; flex: none; font-family: var(--paper-font-mono); font-weight: 600; line-height: 1; }
+.bp-paper-surface .bp-g--open    { color: var(--paper-ink); opacity: 0.5; }   /* 50% white — backlog */
+.bp-paper-surface .bp-g--ready   { color: var(--paper-ink); }                 /* full white — unchecked */
+.bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
+.bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
+.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--progress { color: var(--st-info); }
+/* in_progress: the TUI Braille spinner, pure CSS (no JS) */
+.bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
+@keyframes bp-braille {
+  0%  { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; }
+  40% { content: "\283C"; } 50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; }
+  80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+
+/* rows */
+.bp-paper-surface .bp-trow { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.86rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-trow:first-child { border-top: none; }
+.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
+.bp-paper-surface .bp-trow__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-trow--open .bp-trow__t { opacity: 0.6; }               /* backlog title recedes */
+.bp-paper-surface .bp-trow--done .bp-trow__t { color: var(--paper-ink-soft); } /* done recedes */
+.bp-paper-surface .bp-trow__m { display: flex; align-items: center; gap: 0.6rem; flex: none; }
+.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-trow__p[data-p="1"] { color: var(--st-danger); }
+.bp-paper-surface .bp-trow__p[data-p="2"] { color: var(--st-warn); }
+.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-info); }
+.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-warn); }
+
+/* phase headers with rollup */
+.bp-paper-surface .bp-phase { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.9rem; background: var(--paper-bg-deep); border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-phase:first-child { border-top: none; }
+.bp-paper-surface .bp-phase__nm { font-weight: 600; font-size: 0.8rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-phase__rule { flex: 1; height: 1px; background: var(--paper-chrome-border); }
+.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* momentum header — always feel progress */
+.bp-paper-surface .bp-momentum { border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-momentum__row { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; color: var(--paper-ink-soft); flex-wrap: wrap; }
+.bp-paper-surface .bp-momentum__i { display: inline-flex; align-items: center; gap: 0.35rem; }
+.bp-paper-surface .bp-momentum__i b { color: var(--paper-ink); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-momentum__grow { flex: 1; }
+.bp-paper-surface .bp-momentum__pct { font-weight: 800; font-size: 0.95rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-momentum__track { height: 7px; border-radius: 999px; background: var(--paper-bg-deep); overflow: hidden; margin-top: 0.5rem; }
+.bp-paper-surface .bp-momentum__fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--st-info), var(--st-ok), var(--st-info)); background-size: 200% 100%; animation: bp-shimmer 3s linear infinite; }
+@keyframes bp-shimmer { to { background-position: 200% 0; } }
+
+/* colour reuse for momentum count labels */
+.bp-paper-surface .bp-g--ready { color: var(--paper-ink); }
+.bp-paper-surface .bp-g--done  { color: var(--st-ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-surface .bp-g--progress::before, .bp-paper-surface .bp-momentum__fill { animation: none; }
+  .bp-paper-surface .bp-g--progress::before { content: "\283F"; }
+}
+
+/* ── task detail — the "open a task and SEE it" card ── */
+.bp-paper-surface .bp-tdetail {
+  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface .bp-tdetail { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+}
+.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.4rem; }
+.bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tl__seg { display: inline-flex; align-items: center; gap: 0.3rem; }
+.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-tdetail__desc { font-size: 0.9rem; color: var(--paper-ink); line-height: 1.55; margin-top: 0.9rem; }
+.bp-paper-surface .bp-tdetail__lbl { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); font-weight: 700; margin: 1rem 0 0.45rem; }
+.bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; }
+.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-faint); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
+.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
+.bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); }
+.bp-paper-surface .bp-rail__more { font-size: 0.72rem; color: var(--paper-ink-faint); padding-left: 0.3rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; }
+
+/* ── task board (kanban) ── */
+.bp-paper-surface .bp-board {
+  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-board { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; } }
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
+.bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
+.bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
+.bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
+.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; }
+.bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
+/* ── roadmap (author-dated phase/task bars) ── */
+.bp-paper-surface .bp-roadmap {
+  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 14px 16px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
+}
+@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-roadmap { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; } }
+.bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
+.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
+.bp-paper-surface .bp-rm__lane { display: flex; align-items: center; gap: 10px; }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__lbl { font-weight: 700; color: var(--paper-ink); }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__bar { opacity: 0.32; height: 8px; top: 8px; }
+.bp-paper-surface .bp-rm__lbl { width: 34%; flex: none; font-size: 0.78rem; color: var(--paper-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.bp-paper-surface .bp-rm__track { position: relative; flex: 1; height: 22px; background: var(--paper-bg-deep); border-radius: 5px; }
+.bp-paper-surface .bp-rm__bar { position: absolute; top: 5px; height: 12px; border-radius: 4px; min-width: 3px; }
+.bp-paper-surface .bp-rm__bar--open { background: var(--paper-ink); opacity: 0.35; }
+.bp-paper-surface .bp-rm__bar--ready { background: var(--paper-ink); opacity: 0.55; }
+.bp-paper-surface .bp-rm__bar--progress { background: var(--st-info); }
+.bp-paper-surface .bp-rm__bar--blocked { background: var(--st-warn); }
+.bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
+.bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }

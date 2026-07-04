@@ -644,6 +644,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Forms.form_html(b, style)}
   end
 
+  # Task list — the upgraded `bp tasks` list as a paper block. Snapshot-driven
+  # (block carries a resolved `snapshot` list, same contract as the sheet embed);
+  # the pure emitter lives in Render.Components. `"tasks"` is the canonical type;
+  # `"task-list"` is an accepted alias.
+  def compose_block(%{"type" => t} = b, _style) when t in ["tasks", "task-list"] do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.tasks_html(b)}
+  end
+
+  # Task detail — the "open a task and SEE it" card: conditional sections (meta,
+  # timeline, criteria+evidence, deps-in-words, children & papers rails). Pure,
+  # snapshot-carried (`task` map on the block).
+  def compose_block(%{"type" => "task-detail"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_detail_html(b)}
+  end
+
+  # Task board (kanban by lifecycle) and roadmap (author-dated phase/task bars).
+  def compose_block(%{"type" => "task-board"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_board_html(b)}
+  end
+
+  def compose_block(%{"type" => "roadmap"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.roadmap_html(b)}
+  end
+
   # Unknown / unregistered block type — degrade gracefully instead of crashing
   # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
   # every body_html rebuild 500, public /papers reader). Papers are schemaless,
