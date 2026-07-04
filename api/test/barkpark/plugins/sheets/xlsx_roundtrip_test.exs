@@ -255,7 +255,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       # makes that eager full-inflate blow up; parse_layout's rescue maps it to
       # the same {:error, _} the import controller turns into a 422, instead of
       # letting the exception escape as a 500.
-      good = XlsxExport.to_binary(%{"tabs" => [%{"name" => "S", "cells" => big_cells()}]}) |> ok!()
+      good =
+        XlsxExport.to_binary(%{"tabs" => [%{"name" => "S", "cells" => big_cells()}]}) |> ok!()
+
       bad = corrupt_last_member(good)
 
       # It really does still open — proving the failure is in parse_layout, not open_package.
