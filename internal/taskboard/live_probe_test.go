@@ -119,6 +119,48 @@ func TestLiveProbe(t *testing.T) {
 	}
 	fmt.Printf("criteria decode guard OK: %d meters, all in [0,total]\n", criteriaChecked)
 
+	// ── Detail hydration guard (charter D13/D25 — the reading substrate) ─────
+	// FetchSnapshotFull rides the SAME two calls as FetchSnapshot; assert every
+	// task hydrates a TaskDetail (nothing dropped by an odd content map), that
+	// the detail's embedded board row agrees with the snapshot after the ready
+	// overlay, and that the snapshot-inversion projector returns real work for a
+	// real design_doc-bearing slug — the paper→tasks edge the Papers rail walks.
+	// READ-ONLY: it fetches and decodes, it never mutates a task.
+	fullSnap, details, err := FetchSnapshotFull(c)
+	if err != nil {
+		t.Fatalf("FetchSnapshotFull: %v", err)
+	}
+	if len(details) != len(fullSnap.Tasks) {
+		t.Fatalf("hydrated %d details for %d tasks — an odd content map dropped a task", len(details), len(fullSnap.Tasks))
+	}
+	paperRefTasks, withDesignDoc := 0, ""
+	for _, tk := range fullSnap.Tasks {
+		d, ok := details[tk.DocID]
+		if !ok {
+			t.Fatalf("task %q has no hydrated TaskDetail", tk.DocID)
+		}
+		if d.Task.DocID != tk.DocID || d.Task.Lifecycle != tk.Lifecycle {
+			t.Fatalf("detail row disagrees with snapshot for %q (lifecycle %q vs %q) — syncDetails did not run",
+				tk.DocID, d.Task.Lifecycle, tk.Lifecycle)
+		}
+		if len(d.PaperRefs()) > 0 {
+			paperRefTasks++
+		}
+		if withDesignDoc == "" && d.DesignDoc != "" {
+			withDesignDoc = d.DesignDoc
+		}
+	}
+	fmt.Printf("detail hydration OK: %d/%d tasks carry a paper ref\n", paperRefTasks, len(fullSnap.Tasks))
+	if withDesignDoc != "" {
+		driven := DrivenTasks(fullSnap.Tasks, details, withDesignDoc)
+		if len(driven) == 0 {
+			t.Errorf("DrivenTasks(%q) returned 0 — the snapshot-inversion projector is broken on live data", withDesignDoc)
+		}
+		fmt.Printf("driven-tasks inversion OK: %q drives %d tasks\n", withDesignDoc, len(driven))
+	} else {
+		fmt.Printf("driven-tasks inversion SKIPPED: no design_doc-bearing task in the live corpus\n")
+	}
+
 	// The pure spine + full frame must survive the real corpus at every
 	// supported width without panicking or overrunning the pane.
 	st := UIState{Conn: ConnLive, LastSync: snap.FetchedAt}

@@ -1,0 +1,157 @@
+{
+  "_comment": "Live-shaped /v1/tasks list + prime for the detail substrate tests. Exercises: a swept claim (previous_worker+expired_at), acceptance_criteria with per-entry evidence, papers[] u design_doc overlap and dedupe, a parent + two children (bare and drafts.-prefixed parent_id), the top-level papers fallback, and tolerance to a malformed content map. All hand-crafted from the guerrilla wire shapes (claim keys worker/epoch/ts_iso/expired_at/previous_worker; content keys description/design/design_doc/papers/acceptance_criteria/code_refs/last_worked_at/close_reason/resolution_note/blocked_reason).",
+  "docs": [
+    {
+      "doc_id": "drafts.cc-goal",
+      "title": "Cloud Console: the reference-surface epic",
+      "lifecycle_status": "in_progress",
+      "kind": "task",
+      "parent_id": null,
+      "priority": 1,
+      "labels": ["proj:cloud", "epic"],
+      "claim": {
+        "worker": "cloud-loop",
+        "epoch": 3,
+        "ts_iso": "2026-07-03T11:00:00Z"
+      },
+      "criteria_progress": { "met": 2, "total": 3 },
+      "inserted_at": "2026-07-01T09:00:00Z",
+      "updated_at": "2026-07-03T11:00:00Z",
+      "content": {
+        "description": "Build every reference-surface tab.\n\n- Overview\n- Members\n- Datasets",
+        "design": "One LiveView per tab, shared assign pipeline.",
+        "design_doc": "cloud-console-epic-wish",
+        "papers": ["cloud-console-epic-wish", "cloud-ops-notes"],
+        "acceptance_criteria": [
+          { "criterion": "Overview tab has a live backend", "met": true, "evidence": "#1102" },
+          { "criterion": "Members tab paginates", "met": false },
+          { "criterion": "Datasets tab deploys", "met": true, "evidence": "deployed to guerrilla" }
+        ],
+        "code_refs": {
+          "branch": "feat/cloud-console",
+          "commits": [],
+          "prs": [1112, 1108],
+          "worktree": "/Volumes/SATECHI/github/barkpark"
+        },
+        "assignee": "cloud-loop",
+        "last_worked_at": "2026-07-03T10:45:00Z"
+      }
+    },
+    {
+      "doc_id": "drafts.cc-1",
+      "title": "Members tab backend",
+      "lifecycle_status": "open",
+      "kind": "task",
+      "parent_id": "cc-goal",
+      "priority": 2,
+      "labels": ["proj:cloud"],
+      "claim": null,
+      "papers": ["cloud-console-epic-wish"],
+      "inserted_at": "2026-07-01T09:30:00Z",
+      "updated_at": "2026-07-03T09:00:00Z",
+      "content": {
+        "description": "Paginated members list with role filters."
+      }
+    },
+    {
+      "doc_id": "drafts.cc-2",
+      "title": "Datasets tab backend",
+      "lifecycle_status": "in_progress",
+      "kind": "task",
+      "parent_id": "drafts.cc-goal",
+      "priority": 2,
+      "labels": ["proj:cloud"],
+      "claim": {
+        "worker": "cloud-loop-2",
+        "epoch": 1,
+        "ts_iso": "2026-07-03T10:00:00Z"
+      },
+      "criteria_progress": { "met": 0, "total": 1 },
+      "inserted_at": "2026-07-01T10:00:00Z",
+      "updated_at": "2026-07-03T10:00:00Z",
+      "content": {
+        "description": "Dataset CRUD wired to the API.",
+        "design_doc": "cloud-console-epic-wish",
+        "acceptance_criteria": [
+          { "criterion": "CRUD round-trips", "met": false }
+        ]
+      }
+    },
+    {
+      "doc_id": "drafts.swept-1",
+      "title": "Retire the legacy console shim",
+      "lifecycle_status": "done",
+      "kind": "task",
+      "parent_id": null,
+      "priority": 3,
+      "labels": ["proj:cloud", "chore"],
+      "claim": {
+        "worker": null,
+        "epoch": 2,
+        "ts_iso": "2026-07-03T08:00:00Z",
+        "previous_worker": "sheets-loop",
+        "expired_at": "2026-07-03T08:30:00Z",
+        "closed_at": "2026-07-03T09:15:00Z",
+        "closed_by": "cloud-loop"
+      },
+      "inserted_at": "2026-07-01T08:00:00Z",
+      "updated_at": "2026-07-03T09:15:00Z",
+      "content": {
+        "description": "Delete the shim once every tab is native.",
+        "close_reason": "superseded by the native tabs",
+        "resolution_note": "folded into #1102",
+        "last_worked_at": "2026-07-03T07:30:00Z"
+      }
+    },
+    {
+      "doc_id": "drafts.thin-1",
+      "title": "A thin task with only a description",
+      "lifecycle_status": "open",
+      "kind": "task",
+      "parent_id": null,
+      "priority": 4,
+      "labels": [],
+      "claim": null,
+      "inserted_at": "2026-07-02T12:00:00Z",
+      "updated_at": "2026-07-02T12:00:00Z",
+      "content": {
+        "description": "Just prose, no design, no paper, no criteria."
+      }
+    },
+    {
+      "doc_id": "drafts.malformed-1",
+      "title": "A task whose content is oddly shaped",
+      "lifecycle_status": "blocked",
+      "kind": "task",
+      "parent_id": null,
+      "priority": "high",
+      "labels": ["proj:cloud"],
+      "claim": null,
+      "inserted_at": "2026-07-02T13:00:00Z",
+      "updated_at": "2026-07-02T13:00:00Z",
+      "content": {
+        "description": "Blocked on an upstream decision.",
+        "design_doc": 42,
+        "papers": "not-an-array",
+        "blocked_reason": "waiting on the DNS token owner",
+        "acceptance_criteria": [
+          { "criterion": "First step", "met": true, "evidence": "note" },
+          "a bare string entry",
+          { "met": true }
+        ],
+        "code_refs": "just-a-string",
+        "last_worked_at": "not-a-timestamp"
+      }
+    }
+  ],
+  "prime": {
+    "ok": true,
+    "counts": { "open": 2, "in_progress": 2, "blocked": 1, "done": 1 },
+    "recent_events": [
+      { "event": "task.claimed", "doc_id": "drafts.cc-2", "at": "2026-07-03T10:00:00Z" }
+    ],
+    "ready": [
+      { "doc_id": "drafts.cc-1" }
+    ]
+  }
+}
