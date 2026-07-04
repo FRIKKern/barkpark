@@ -33,11 +33,15 @@ defmodule Barkpark.Plugins.Sheets.CondFormatSeamTest do
 
   # Drive the STRICT CF-B gate exactly as the pure gate test does: the
   # before_save lifecycle hook is a one-element list; call it directly on a
-  # sheet doc whose single tab carries the rule list. Returns :ok | {:halt, msg}.
-  defp gate(cond_formats) do
+  # sheet doc carrying the given content. Returns :ok | {:halt, msg}.
+  defp gate_content(content) do
     [hook] = Barkpark.Plugins.Sheets.lifecycle_hooks().before_save
-    hook.(%{doc: %{"type" => "sheet", "content" => %{"tabs" => [%{"cond_formats" => cond_formats}]}}})
+    hook.(%{doc: %{"type" => "sheet", "content" => content}})
   end
+
+  # Rules-only shorthand for the seam loop: one tab, just the rule list.
+  defp gate(cond_formats),
+    do: gate_content(%{"tabs" => [%{"cond_formats" => cond_formats}]})
 
   # A full storable rule around a fixture row's `when`, ranged to a single cell
   # (B2 == col 2, row 2) so `style_for/3` can be probed at {2, 2}.
@@ -136,7 +140,9 @@ defmodule Barkpark.Plugins.Sheets.CondFormatSeamTest do
     }
 
     test "the gate accepts the doc" do
-      assert gate(@content["tabs"] |> hd() |> Map.fetch!("cond_formats")) == :ok
+      # The FULL content (cells AND rules) — the very doc snapshot_for consumes
+      # below is the one the gate admits, not just its rule list.
+      assert gate_content(@content) == :ok
     end
 
     test "the snapshot styles map carries the composed style for the matched cell only" do

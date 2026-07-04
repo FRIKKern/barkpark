@@ -126,6 +126,17 @@ defmodule Barkpark.Plugins.Sheets.GoldenParityFixtureTest do
   # the substrate for every CF-D3/CF-D4/CF-AM2 assertion below.
   defp styles, do: decode!(@api_path)["snapshot"]["styles"]
 
+  test "storability: the committed golden content passes the before_save gate" do
+    # The generator promises "a legitimately storable sheet" — pin it. If a
+    # future fixture edit adds a gate-invalid rule (or cell/merge), the golden
+    # sheet could never exist through the real save path and the whole parity
+    # lock would be certifying a fiction.
+    [hook] = Barkpark.Plugins.Sheets.lifecycle_hooks().before_save
+
+    assert hook.(%{doc: %{"type" => "sheet", "content" => decode!(@api_path)["content"]}}) ==
+             :ok
+  end
+
   test "CF-D5/CF-D8: a numeric gt rule paints matched occupied cells only" do
     styles = styles()
 
