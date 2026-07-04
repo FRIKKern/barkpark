@@ -20,47 +20,47 @@
           Barkpark.PortableDoc.Render.Stylesheet) — the SAME bytes Studio embeds.
           It provides the `--paper-*`/`--bp-*` tokens + `.bp-paper-surface`
           element rules. It is embedded BEFORE the reader skin below so the
-          parchment `--paper-*` overrides (later + more specific) win. Surface
+          bp-theme `--paper-*` overrides (later + more specific) win. Surface
           CHROME (page bg/width/padding) is NOT in this source — the reader owns
           its own 820/720px shell above, so nothing here clobbers it. --%>
     <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
 
     /* Article chrome — applied only when BulldocsLive marks the doc as
        `content["style"] == "article"` (the LiveView stamps the
-       `.bp-paper-article` class on its <main>). Warm parchment page, a
+       `.bp-paper-article` class on its <main>). Cool bp-theme page, a
        centered ~720px reading column (incl. padding), serif base — so the
        inline-styled article blocks sit on a proper page, not bare white
        full-width. Non-article papers keep the dark chrome above, untouched.
 
        READER SKIN: token overrides layered over the canonical paper-surface
        source (embedded above). These `--paper-*` values are the historical
-       parchment reader look. They are set on the <body> AND on the reader
+       bp-theme reader look. They are set on the <body> AND on the reader
        <main> (`.bp-paper-shell.bp-paper-article`, which now also carries
        `bp-paper-surface`) so they WIN over the shared source's fallback
        `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline
        `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on
-       the reader instead of parchment (ink #1a1a1a vs #1f1a14, rule #e6e2d8,
+       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,
        etc.). Dark-mode note: the shared source keys dark on
        `html[data-theme="dark"]`, which the reader NEVER stamps — so the shared
        dark tokens never match here, and the `prefers-color-scheme: dark` block
        below (also carried onto <main>) is what owns reader dark mode, flipping
-       the palette to warm-dark with light ink so the inline `var(--paper-*)`
+       the palette to cool bp-dark with light ink so the inline `var(--paper-*)`
        HTML stays readable. Without the <main>-scoped override the shared light
        fallback would paint dark ink on the browser's dark theme — the
        visibility bug. */
     body:has(.bp-paper-article),
     body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
-      --paper-bg:         #fefdf9;
-      --paper-bg-deep:    #f5f2e9;
-      --paper-ink:        #1a1a1a;
-      --paper-ink-soft:   #6a6a6a;
-      --paper-rule:       #e6e2d8;
-      --paper-accent:     #a23925;
+      --paper-bg:         #f6faf9;
+      --paper-bg-deep:    #eaf1ee;
+      --paper-ink:        #15211d;
+      --paper-ink-soft:   #55635e;
+      --paper-rule:       #dde7e2;
+      --paper-accent:     #1e5347;
       /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
          read it). Light value matches the shared source's fallback; the dark
          block below MUST re-skin it — otherwise dark-mode link borders resolve
          to this light rgba and vanish against the dark page. */
-      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+      --paper-accent-soft: rgba(30, 83, 71, 0.10);
     }
     body:has(.bp-paper-article) {
       background: var(--paper-bg-deep);
@@ -70,16 +70,16 @@
     @media (prefers-color-scheme: dark) {
       body:has(.bp-paper-article),
       body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
-        --paper-bg:         #1b1815;
-        --paper-bg-deep:    #221e1a;
-        --paper-ink:        #ece6dc;
-        --paper-ink-soft:   #b8ad9e;
-        --paper-rule:       rgba(236, 230, 220, 0.14);
-        --paper-accent:     #d97a5f;
+        --paper-bg:         #0e1614;
+        --paper-bg-deep:    #131d19;
+        --paper-ink:        #e7ede9;
+        --paper-ink-soft:   #9aaaa3;
+        --paper-rule:       rgba(231, 237, 233, 0.13);
+        --paper-accent:     #45b394;
         /* Warm-dark link border (same value as Studio's html[data-theme=dark]
            block in paper-surface.css) — without it links keep the light-theme
            rgba(162,57,37,0.10) border, invisible on the dark page. */
-        --paper-accent-soft: rgba(217, 122, 95, 0.14);
+        --paper-accent-soft: rgba(70, 179, 148, 0.16);
       }
     }
     .bp-paper-shell.bp-paper-article {
@@ -94,7 +94,7 @@
        optional muted <p> rationale/recommendation lines, and controls
        (radio/checkbox <label> rows, <textarea>, scale radios). Scoped under
        `.bp-paper-article` so email / non-article papers stay untouched. The
-       form reuses the article palette — parchment surface, terracotta accent,
+       form reuses the article palette — bp-theme surface, evergreen accent,
        serif body, muted gray for secondary lines. Render-only: no JS, no
        :focus scripting, pure CSS. */
     .bp-paper-article .bp-form {
@@ -109,7 +109,7 @@
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #a23925;
+      color: #1e5347;
       margin-bottom: 0.9rem;
       padding-bottom: 0.5rem;
       border-bottom: 1px solid rgba(162, 57, 37, 0.2);
@@ -123,7 +123,7 @@
       padding: 1.1rem 1.3rem;
       background: #fdfcf8;
       border: 1px solid rgba(26, 26, 26, 0.08);
-      border-left: 3px solid #a23925;
+      border-left: 3px solid #1e5347;
       border-radius: 6px;
     }
     .bp-paper-article .bp-form-question > legend {
@@ -135,7 +135,7 @@
       font-size: 1.12rem;
       font-weight: 600;
       line-height: 1.4;
-      color: #1a1a1a;
+      color: #15211d;
     }
 
     /* Muted rationale / recommendation lines. render.ex stamps these as
@@ -144,7 +144,7 @@
     .bp-paper-article .bp-form-question > p {
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
       font-style: italic;
-      color: #6a6a6a;
+      color: #55635e;
       line-height: 1.5;
     }
 
@@ -165,7 +165,7 @@
       background: rgba(162, 57, 37, 0.06);
     }
     .bp-paper-article .bp-form-question label > input {
-      accent-color: #a23925;
+      accent-color: #1e5347;
       margin: 0;
       flex: 0 0 auto;
     }
@@ -180,7 +180,7 @@
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
       font-size: 1rem;
       line-height: 1.55;
-      color: #1a1a1a;
+      color: #15211d;
       background: #fbfaf6;
       border: 1px solid rgba(26, 26, 26, 0.18);
       border-radius: 5px;
@@ -190,7 +190,7 @@
     /* P6.U5 action bar — the paper doc action buttons (Create plan /
        Grill / Build / Submit) rendered natively on the paper. A restrained
        sticky row at the top of the article column, in the article palette
-       (parchment surface, terracotta accent, sans label). Scoped under
+       (bp-theme surface, evergreen accent, sans label). Scoped under
        `.bp-paper-article` so non-article papers stay untouched. The bar is
        rendered only when BulldocsLive derived a non-empty action set from
        content["source_doc"]. */
@@ -215,7 +215,7 @@
       font-size: 0.82rem;
       font-weight: 600;
       letter-spacing: 0.01em;
-      color: #a23925;
+      color: #1e5347;
       background: #fdfcf8;
       border: 1px solid rgba(162, 57, 37, 0.35);
       border-radius: 6px;
@@ -223,18 +223,18 @@
       transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
     .bp-paper-article .bp-paper-action:hover {
-      background: #a23925;
+      background: #1e5347;
       color: #fdfcf8;
-      border-color: #a23925;
+      border-color: #1e5347;
     }
     .bp-paper-article .bp-paper-action:focus-visible {
-      outline: 2px solid #a23925;
+      outline: 2px solid #1e5347;
       outline-offset: 2px;
     }
     .bp-paper-article .bp-paper-action-ack {
       font-size: 0.78rem;
       font-style: italic;
-      color: #6a6a6a;
+      color: #55635e;
       margin-left: 0.25rem;
     }
 
@@ -259,13 +259,13 @@
       gap: 0.5rem;
     }
     .bp-paper-article .bp-paper-action-reject {
-      color: #6a6a6a;
+      color: #55635e;
       border-color: rgba(26, 26, 26, 0.18);
     }
     .bp-paper-article .bp-paper-action-reject:hover {
-      background: #6a6a6a;
+      background: #55635e;
       color: #fdfcf8;
-      border-color: #6a6a6a;
+      border-color: #55635e;
     }
 
     /* P6.U2 goal-path rail — a 240px sticky right-rail showing the paper's
@@ -301,7 +301,7 @@
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #a23925;
+      color: #1e5347;
       padding-bottom: 0.5rem;
       border-bottom: 1px solid rgba(162, 57, 37, 0.2);
     }
@@ -314,7 +314,7 @@
       font-size: 0.8rem;
       /* Neutralize the shared `.bp-paper-surface pre` code-block chrome
          (border/padding/radius) — the rail's gitGraph is a naked 240px
-         diagram, not a code block; without these it grows a parchment
+         diagram, not a code block; without these it grows a bp-theme
          inset box. Reader-chrome override per charter Decision 5. */
       border: 0;
       border-radius: 0;
@@ -342,13 +342,13 @@
     }
     .bp-paper-article .bp-goal-rail-event.is-selected {
       background: rgba(162, 57, 37, 0.12);
-      box-shadow: inset 3px 0 0 #a23925;
+      box-shadow: inset 3px 0 0 #1e5347;
     }
     .bp-paper-article .bp-goal-rail-event-idx {
       flex: 0 0 auto;
       font-size: 0.72rem;
       font-weight: 600;
-      color: #a23925;
+      color: #1e5347;
       min-width: 1.1em;
       text-align: right;
     }
@@ -369,7 +369,7 @@
 
     /* P6.U3 diff modal — opens when two rail nodes are shift-clicked. A
        full-viewport overlay (backdrop + centered panel) over the article. The
-       diff body reuses the article palette: a parchment panel, monospace diff
+       diff body reuses the article palette: a bp-theme panel, monospace diff
        lines, restrained add/del/ctx coloring. Scoped under `.bp-paper-article`
        like the rest; the modal markup is a child of <main>. */
     .bp-paper-article .bp-diff-overlay {
@@ -421,7 +421,7 @@
     .bp-paper-article .bp-diff-from,
     .bp-paper-article .bp-diff-to {
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      color: #a23925;
+      color: #1e5347;
     }
     .bp-paper-article .bp-diff-arrow {
       margin: 0 0.4rem;
@@ -433,7 +433,7 @@
       background: none;
       font-size: 1.4rem;
       line-height: 1;
-      color: #6a6a6a;
+      color: #55635e;
       cursor: pointer;
       padding: 0 0.25rem;
       border-radius: 4px;
@@ -441,7 +441,7 @@
     }
     .bp-paper-article .bp-diff-close:hover {
       background: rgba(162, 57, 37, 0.08);
-      color: #a23925;
+      color: #1e5347;
     }
 
     /* The diff body itself — TextDiff.format_diff_html/1 emits
@@ -457,7 +457,7 @@
       word-break: break-word;
       /* Neutralize the shared `.bp-paper-surface pre` code-block chrome —
          this diff is a naked aside inside the (always-light) modal panel;
-         the shared parchment box would even resolve DARK here in dark mode
+         the shared bp-theme box would even resolve DARK here in dark mode
          (the tokens are main-scoped). Reader-chrome override, Decision 5. */
       background: none;
       border: 0;
@@ -478,7 +478,7 @@
       color: #8a2d1c;
     }
     .bp-paper-article .bp-diff-ctx {
-      color: #6a6a6a;
+      color: #55635e;
     }
 
     /* Sheet-embed default alignment. The walker (PortableDoc.Render.Walk)

@@ -13,7 +13,7 @@
  * Barkpark.PortableDoc.Render.Stylesheet.css/0 (compile-time @external_resource)
  * by three sinks:
  *   - Studio         barkpark_web/layouts/root.html.heex     (<%= raw(css()) %>)
- *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (parchment
+ *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (bp-theme
  *                    `--paper-*` overrides layer AFTER this source)
  *   - sheet export   plugins/sheets/html.ex                  (standalone <head>)
  *
@@ -26,7 +26,7 @@
  * KEPT in root.html.heex (Studio-shell / NOT portable — Decision 4):
  *   surface CHROME (bg/color/font/size/line-height/tracking, max-width, padding,
  *     media-query padding, .bp-paper-body) — the Studio page shell; the reader
- *     owns its own 820/720px parchment shell, so surface chrome is NOT shared.
+ *     owns its own 820/720px bp-theme shell, so surface chrome is NOT shared.
  *   html[data-editor-focus] interplay, .bp-paper-editor-body typography mirror,
  *     the inline-style de-inline override hacks (a later wave deletes them),
  *     .bp-canvas-* node-view chrome, and the valueref stale-marker /
@@ -36,35 +36,35 @@
 /* ── `--paper-*` theme tokens (scoped to `.bp-paper-surface`). */
 html[data-theme="light"] .bp-paper-surface,
 html[data-theme="light"] .bp-paper-body {
-  /* A3: warm paper chrome tone — matches the original editor canvas
-     (warmer/greyer than pure white), never #fff. */
-  --paper-bg:         #fefdf9;
-  --paper-bg-deep:    #f5f2e9;
-  --paper-ink:        #1f1a14;
-  --paper-ink-soft:   #5b524a;
-  --paper-ink-faint:  #8a8278;
-  --paper-rule:       rgba(31, 26, 20, 0.08);
-  --paper-edit-hover: rgba(31, 26, 20, 0.10);
-  --paper-accent:     #a23925;
-  --paper-accent-soft: rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:  #fefdf9;
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  /* Barkpark theme (aesthetic-unification): cool near-white ground, evergreen
+     accent — the bp/Cloud profile, replacing the legacy warm parchment. */
+  --paper-bg:         #f6faf9;
+  --paper-bg-deep:    #eaf1ee;
+  --paper-ink:        #15211d;
+  --paper-ink-soft:   #55635e;
+  --paper-ink-faint:  #82918b;
+  --paper-rule:       rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent:     #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg:  #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
 }
 html[data-theme="dark"] .bp-paper-surface,
 html[data-theme="dark"] .bp-paper-body {
-  --paper-bg:         #1b1815;
-  --paper-bg-deep:    #221e1a;
-  --paper-ink:        #ece6dc;
-  --paper-ink-soft:   #b8ad9e;
-  --paper-ink-faint:  #7f7568;
-  --paper-rule:       rgba(236, 230, 220, 0.10);
-  --paper-edit-hover: rgba(236, 230, 220, 0.12);
-  --paper-accent:     #d97a5f;
-  --paper-accent-soft: rgba(217, 122, 95, 0.14);
-  --paper-chrome-bg:  #221e1a;
-  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  --paper-bg:         #0e1614;
+  --paper-bg-deep:    #131d19;
+  --paper-ink:        #e7ede9;
+  --paper-ink-soft:   #9aaaa3;
+  --paper-ink-faint:  #6c7a74;
+  --paper-rule:       rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent:     #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg:  #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
   /* Callout TONE tokens — DARK companions (authored): deepened bg, lifted fg,
-     consistent with the warm-dark token style above; kept readable-contrast.
+     consistent with the cool bp-dark token style above; kept readable-contrast.
      Light values are lifted verbatim from Util.tone_palette/1 (fallback block). */
   --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
   --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
@@ -72,26 +72,26 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
   --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
 }
-/* Fallback so a pre-paint load with no data-theme still gets warm paper. */
+/* Fallback so a pre-paint load with no data-theme still gets the light bp theme. */
 .bp-paper-surface, .bp-paper-body {
-  --paper-bg:         #fefdf9;
-  --paper-bg-deep:    #f5f2e9;
-  --paper-ink:        #1f1a14;
-  --paper-ink-soft:   #5b524a;
-  --paper-ink-faint:  #8a8278;
-  --paper-rule:       rgba(31, 26, 20, 0.08);
-  --paper-edit-hover: rgba(31, 26, 20, 0.10);
-  --paper-accent:     #a23925;
-  --paper-accent-soft: rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:  #fefdf9;
+  --paper-bg:         #f6faf9;
+  --paper-bg-deep:    #eaf1ee;
+  --paper-ink:        #15211d;
+  --paper-ink-soft:   #55635e;
+  --paper-ink-faint:  #82918b;
+  --paper-rule:       rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent:     #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg:  #f6faf9;
   /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
      actually renders in the macOS system serif (Iowan Old Style). We mirror
      that rendered face here; self-hosted Source Serif 4 stays in the stack as
      a cross-platform fallback (still @font-face'd above). */
   --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
   --paper-font-mono: ui-monospace, Menlo, monospace;
-  /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  /* Cool evergreen chrome tone (bp/Cloud profile) — never pure white. */
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
   /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
      Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
      the `bp-callout--info` modifier is the emitted default here too. Dark
