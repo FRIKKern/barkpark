@@ -266,16 +266,33 @@ func TestRenderPaperFrameGolden80(t *testing.T) {
 }
 
 // No rendered line may exceed the pane width, across a width sweep, on the
-// multi-byte fixture (chip glyphs + em dashes).
+// multi-byte fixture (chip glyphs + em dashes) — AND across every honest state
+// (loading / error / HTML-only / not-found) and the empty-rail case, whose fixed
+// dim strings ("No tasks reference this paper", 29 cells) must clip to a narrow
+// pane exactly like the body states do.
 func TestRenderPaperFrameNeverExceedsWidth(t *testing.T) {
 	resetPaperCache()
-	ps := PaperState{Slug: "drafts.the-paper", Title: "Paper frame charter", Rev: "rev-7", BlocksRaw: []byte(fixtureBlocks)}
-	driven := drivenFixture()
-	for _, width := range []int{16, 20, 24, 40, 52, 60, 72, 80, 100, 120} {
-		lines, _ := RenderPaperFrame(ps, driven, driven, 0, width, paperNow)
-		for i, ln := range lines {
-			if w := ansi.StringWidth(ln); w > width {
-				t.Errorf("width %d: line %d is %d cols (over budget): %q", width, i, w, ansi.Strip(ln))
+	withBlocks := PaperState{Slug: "drafts.the-paper", Title: "Paper frame charter", Rev: "rev-7", BlocksRaw: []byte(fixtureBlocks)}
+	states := []struct {
+		name   string
+		ps     PaperState
+		driven []Task
+	}{
+		{"body+rail", withBlocks, drivenFixture()},
+		{"body+emptyrail", withBlocks, nil},
+		{"loading", PaperState{Slug: "drafts.the-paper", Title: "Paper frame charter", Loading: true}, nil},
+		{"error", PaperState{Slug: "drafts.the-paper", Err: "boom went the fetch, badly, at length"}, nil},
+		{"htmlonly", PaperState{Slug: "drafts.the-paper", HTMLOnly: true}, nil},
+		{"notfound", PaperState{Slug: "drafts.the-paper"}, nil},
+	}
+	for _, st := range states {
+		for _, width := range []int{12, 16, 20, 24, 40, 52, 60, 72, 80, 100, 120} {
+			resetPaperCache()
+			lines, _ := RenderPaperFrame(st.ps, st.driven, st.driven, 0, width, paperNow)
+			for i, ln := range lines {
+				if w := ansi.StringWidth(ln); w > width {
+					t.Errorf("%s width %d: line %d is %d cols (over budget): %q", st.name, width, i, w, ansi.Strip(ln))
+				}
 			}
 		}
 	}

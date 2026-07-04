@@ -136,14 +136,14 @@ func paperCacheKey(slug, rev string, width int) string {
 func renderPaperBody(ps PaperState, width int, resolver func(id string) *pdrender.TaskChip) []string {
 	switch {
 	case ps.Loading:
-		return []string{dimStyle.Render("loading…")}
+		return []string{dimStyle.Render(truncate("loading…", width))}
 	case ps.Err != "":
 		return []string{dimStyle.Render(truncate("could not load paper — "+ps.Err, width))}
 	case ps.HTMLOnly:
 		return []string{dimStyle.Render(truncate("HTML-only paper — o opens in browser", width))}
 	case !blocksNonEmpty(ps.BlocksRaw):
 		// A dangling / empty result — never a crash, an honest dim line.
-		return []string{dimStyle.Render("not found")}
+		return []string{dimStyle.Render(truncate("not found", width))}
 	}
 
 	key := paperCacheKey(ps.Slug, ps.Rev, width)
@@ -156,7 +156,7 @@ func renderPaperBody(ps PaperState, width int, resolver func(id string) *pdrende
 	paperDecodeCount++
 	blocks, err := pdrender.Decode(ps.BlocksRaw)
 	if err != nil {
-		body := []string{dimStyle.Render("paper body could not be rendered")}
+		body := []string{dimStyle.Render(truncate("paper body could not be rendered", width))}
 		paperCache[key] = body
 		return body
 	}
@@ -215,7 +215,7 @@ func RenderPaperFrame(ps PaperState, driven []Task, chipSource []Task, cursor, w
 	// Driven-tasks rail — the frame's Stops.
 	lines = append(lines, dimStyle.Render(truncate(paperRailHeader(len(driven)), width)))
 	if len(driven) == 0 {
-		lines = append(lines, dimStyle.Render("No tasks reference this paper"))
+		lines = append(lines, dimStyle.Render(truncate("No tasks reference this paper", width)))
 		return lines, stops
 	}
 	if cursor < 0 {
