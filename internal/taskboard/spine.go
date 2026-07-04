@@ -26,7 +26,6 @@ const (
 	spineOrphanHeader                   // the loose "(no epic)" header (selectable)
 	spineTask                           // a task row — epic child / cluster member / orphan (selectable)
 	spineMore                           // "+K more" / "+N done" fold line (display-only)
-	spinePhaseBand                      // a phase sub-band label (display-only)
 	spineEmpty                          // the syncing / all-clear fallback (display-only)
 )
 
@@ -49,7 +48,7 @@ type SpineRow struct {
 	RK         rowKind // the shell rowKind for a selectable row
 
 	task Task          // spineTask
-	hdr  spineHeader   // *Header / spinePhaseBand
+	hdr  spineHeader   // *Header
 	more spineMoreInfo // spineMore
 	text string        // spineEmpty
 }
@@ -81,25 +80,21 @@ func spineRows(b Board, st UIState) []SpineRow {
 		emitted = true
 		// Nest the FULL child set, then cap to the shown head — capping in tree
 		// order shows a coherent top-down slice (charter D42 head-of-5 cap).
+		//
+		// wave-9b (D-B): within-epic phase SUB-BANDS are gone. On the live corpus
+		// they rendered as bare orphan "W6"/"W2"/"W1" lines with no leader/rollup
+		// AND doubled the phase code the rows already carry in their titles
+		// ("W6 · DPA template …"). The mockup groups phases at the SECTION level
+		// (each phase is its own dotted-leader header with a `Wcode · done/total`
+		// rollup — renderSectionHeader already does that via phaseCodeOf(root));
+		// it never nests a sub-band inside an epic. So the epic is ONE clean band
+		// and its rows keep their natural titles — no bare labels, no doubling.
 		nested := nestTasks(tasks)
 		if shown > len(nested) {
 			shown = len(nested)
 		}
 		nested = nested[:shown]
-		var bandCode string
-		haveBands := sectionHasPhase(nested)
 		for _, nt := range nested {
-			if haveBands && nt.depth == 0 {
-				if c := phaseCodeOf(nt.task); c != bandCode {
-					bandCode = c
-					if c != "" {
-						rows = append(rows, SpineRow{
-							Kind: spinePhaseBand, Depth: 0, Selectable: false,
-							hdr: spineHeader{title: phaseName(nt.task, c), code: c},
-						})
-					}
-				}
-			}
 			rows = append(rows, SpineRow{
 				Kind: spineTask, Depth: nt.depth, Ref: nt.task.DocID, Selectable: true,
 				RK: shellRK, task: nt.task,
@@ -207,23 +202,6 @@ func nestTasks(tasks []Task) []nestedTask {
 	return out
 }
 
-// sectionHasPhase reports whether a section should split into display-only phase
-// sub-bands (charter D41): only when its top-level rows carry at least TWO
-// distinct phase codes. A section whose tasks all share one phase (or carry
-// none) gains nothing from a band that just restates the section header, so it
-// stays a plain restyled list — never a fabricated or redundant band.
-func sectionHasPhase(nested []nestedTask) bool {
-	seen := make(map[string]bool)
-	for _, nt := range nested {
-		if nt.depth == 0 {
-			if c := phaseCodeOf(nt.task); c != "" {
-				seen[c] = true
-			}
-		}
-	}
-	return len(seen) >= 2
-}
-
 // wCodeRe matches a phase W-code in a title: W1, W3-4, W3–4, W5.2 (ASCII hyphen
 // or the en-dash the design uses).
 var wCodeRe = regexp.MustCompile(`\bW\d+(?:[–-]\d+)?(?:\.\d+)?\b`)
@@ -254,19 +232,4 @@ func phaseCodeOf(t Task) string {
 		return m
 	}
 	return ""
-}
-
-// phaseName is the human label for a phase sub-band: the phase: label's value
-// title-cased when it is descriptive, else the bare code (W5) — honest, never
-// fabricated beyond what the data carries.
-func phaseName(t Task, code string) string {
-	for _, l := range t.Labels {
-		if strings.HasPrefix(l, labelPhasePrefix) {
-			v := strings.TrimSpace(l[len(labelPhasePrefix):])
-			if v != "" && v != code {
-				return v
-			}
-		}
-	}
-	return code
 }

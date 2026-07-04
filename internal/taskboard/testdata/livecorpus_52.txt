@@ -1,0 +1,72 @@
+barkpark · tasks            ⇄ guerrilla  ● live · 1m
+⠋ 1 in flight · ○ 34 ready · ✓ 100 done · 3 sta… 67%
+██████████████████████████████████░░░░░░░░░░░░░░░░░░
+
+NOW
+▎⠋ inject snapshot into render opts
+   opus-3 · 4m00s · 1/2
+
+  Enterprise-ready auth - one layer, easy f… ··· 2/8
+   ○ W1 · Append-only tenant-wide audit eve…  P1 0/4
+   ○ W1 · Org-admin shell + thin Organizati…  P2 0/3
+   ○ W2 · First-class passwordless magic-li…  P3 0/3
+   ○ W2 · SSO / SAML enterprise connector     P3 0/2
+   ○ W6 · DPA template + support tiers        P4 0/2
+   ○ W6 · Backup/DR with a proven restore d…  P3 0/3
+  +2 done
+
+  Aesthetic Unification - apply the new cl… ··· 6/38
+   ○ W5.0 Component surface adoption slice 0      P3
+   ○ W5.1 Component surface adoption slice 1      P3
+   ○ W5.2 Component surface adoption slice 2      P3
+   ○ W5.3 Component surface adoption slice 3      P3
+   ○ W5.4 Component surface adoption slice 4      P3
+  +33 more
+
+  Token spine ····························· W0 · 2/2
+   ✓ tokens.json - single source of truth     2/2 2h
+   ✓ design/check drift gate                  3/3 2h
+
+  Paper Components ························ W5 · 1/4
+   ○ task-resolver -> live snapshot           P1 2/3
+  ↳  ✓ collect query targets                  1/1 2h
+   ! styleguide + gate                    P2 blocked
+   ○ pc-empty-9f2a3b                              P3
+
+  Cloud fleet lifecycle admin ·················· 9/9
+  +9 done
+
+  Doey-grade reading polish ···················· 0/1
+   ○ hybrid timestamps everywhere             P3 0/2
+
+  sheets-parity ~ ······························ 1/3
+   ○ SUM/AVG spill range                      P2 1/3
+   ○ cross-tab pivot header                       P3
+   ✓ A:A whole-column ref                     4/4 2h
+
+  (no epic) ···································· 5/8
+   ○ quality lint pass on the loose pile          P3
+   ○ orph-empty-4c1d
+   ○ revisit the old migration path            P4 9d
+  +5 done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────
+no recent activity
+jk · enter open · esc back · c claim · x close · o …
