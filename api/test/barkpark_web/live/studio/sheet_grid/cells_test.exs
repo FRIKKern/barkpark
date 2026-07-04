@@ -625,7 +625,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert style =~ "background: #fde68a"
     end
 
-    # CF-AM2 + the cells.ex:253 ordering: on a frozen (sticky) cell the CF bg
+    # CF-AM2 + the Cells.cell_style/8 ordering: on a frozen (sticky) cell the CF bg
     # is appended AFTER the sticky "background: var(--bg)" backdrop so it wins.
     test "CF composes on a frozen cell, its bg appended after the sticky backdrop" do
       style = Cells.cell_style(1, 1, 1, 1, %{}, %{}, %{"v" => 5}, %{"bg" => "#ff0000"})
