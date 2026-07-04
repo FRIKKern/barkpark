@@ -19,8 +19,12 @@
  *   D — right-align lock: every fixture.right_aligned display string reads
  *       numeric; text + header controls read false.
  *   E — isEngineError true at every fixture.error_refs position.
+ *   F — CF-composed snapshot styles: the server-composed snapshot.styles map
+ *       (manual `"s"` merged per-key with the matching conditional-format rule)
+ *       carries the pure-CF, CF-over-manual, and head-dropped entries the
+ *       charter's CF-D3/CF-AM2 decisions prescribe. Closes CF-2 caveat 3 (web).
  *
- * Run: `npm test` (or `node --test __tests__/sheet-golden-parity.test.ts`).
+ * Run: `pnpm test` (or `node --test __tests__/sheet-golden-parity.test.ts`).
  */
 
 import { test } from "node:test";
@@ -34,12 +38,18 @@ import {
   looksNumericDisplay,
   parseA1,
   toRenderModel,
+  type CellStyle,
   type SheetTab,
 } from "../lib/sheets.ts";
 
 interface GoldenFixture {
   content: { tabs: SheetTab[] };
-  snapshot: { rows: string[][]; head: string[]; merges: number[][] };
+  snapshot: {
+    rows: string[][];
+    head: string[];
+    merges: number[][];
+    styles: Record<string, CellStyle>;
+  };
   expected: Record<string, string>;
   head: string[];
   spans: Record<string, number[]>;
@@ -75,6 +85,11 @@ floor(
   fixture.fmt_vocabulary.includes("checkbox") &&
     fixture.fmt_vocabulary.includes("datetime"),
   "fmt_vocabulary lost checkbox/datetime — regenerate the fixture",
+);
+floor(
+  Object.keys(fixture.snapshot.styles ?? {}).length >= 6,
+  `snapshot.styles has ${Object.keys(fixture.snapshot.styles ?? {}).length} ` +
+    "entries, need >= 6 (CF composition dropped from the fixture?)",
 );
 
 /* ── the render model under test (raw content → TS pipeline, no server) ────── */
@@ -202,4 +217,68 @@ test("leg E: isEngineError is true at every fixture error ref position", () => {
 test("leg E control: an ordinary numeric cell is not an engine error", () => {
   const { r, c } = bodyPos("C10"); // v: 5
   assert.equal(isEngineError(model.rows[r]?.[c]), false);
+});
+
+/* ── leg F: CF-composed snapshot styles (CF-2 caveat 3, web half) ─────────────
+ *
+ * `snapshot.styles` is server-composed (Core.build_snapshot → CondFormat
+ * style_for/compose): each cell's manual `"s"` styling merged PER-KEY with the
+ * one matching conditional-format rule — CF wins `bg`/`b`/`i`, manual wins `al`
+ * (charter CF-D3). The TS render model (densifyTab → toRenderModel) collects
+ * MANUAL styles only; it never evaluates `cond_formats`. So the CF-composed
+ * VALUES are asserted against the snapshot map directly here — the model-level
+ * CF render assertion is sp-cf-verify's job. Keys are "bodyRow,col" (the frozen
+ * head band is dropped — CF-AM2); the block below locks that convention. */
+
+const styles = fixture.snapshot.styles;
+{
+  // Key-convention lock: the pure-CF entry MUST sit at B2's body position, or
+  // every ref-derived assertion below would silently target the wrong cell.
+  const b2 = bodyPos("B2");
+  floor(
+    `${b2.r},${b2.c}` === "0,1",
+    `styles key convention drifted: B2 → "${b2.r},${b2.c}", expected "0,1"`,
+  );
+}
+
+test("leg F1: pure CF match — B2 earns a CF-only bg, absent from the manual model", () => {
+  // B2 = 1200 > 1000 (rule cf-gt), no manual "s" → the entry is purely CF-set.
+  assert.deepEqual(styles["0,1"], { bg: "#ff0000" });
+  // The manual-only TS model has NO entry at B2 — CF is a server-side overlay.
+  assert.equal(model.styles["0,1"], undefined);
+});
+
+test("leg F2: CF-over-manual compose — manual al survives, CF wins bg (CF-D3)", () => {
+  // A4 manual "s" = {al:right, b, bg:#e0f0ff, i}; cf-compose (contains "ote")
+  // overrides only bg → the composed entry keeps al/b/i and takes the CF bg.
+  assert.deepEqual(styles["2,0"], {
+    al: "right",
+    b: true,
+    bg: "#123456",
+    i: true,
+  });
+  assert.equal(styles["2,0"].al, "right", "manual al must survive compose");
+  assert.equal(styles["2,0"].bg, "#123456", "CF bg must win over manual");
+  // The pre-compose manual bg is what the manual-only TS model still carries —
+  // proof the snapshot's #123456 is a genuine server-side CF override.
+  assert.equal(model.styles["2,0"]?.bg, "#e0f0ff");
+});
+
+test("leg F3: head-drop — no head-row CF contribution reaches the snapshot (CF-AM2)", () => {
+  // Rule cf-head (bg #abcdef, contains "Q") WOULD paint B1/C1 in the frozen
+  // head, but the head band is dropped from the body-indexed styles map, so its
+  // colour must appear nowhere and every style key must land in the body grid.
+  const bodyRows = fixture.snapshot.rows.length;
+  for (const [key, s] of Object.entries(styles)) {
+    assert.notEqual(s.bg, "#abcdef", `head CF colour leaked into ${key}`);
+    const r = Number(key.split(",")[0]);
+    assert.ok(r >= 0 && r < bodyRows, `styles key ${key} is not a body row`);
+  }
+});
+
+test("leg F4: no ghost styles — an unstyled, CF-untouched ref stays absent", () => {
+  // D4 ("has note"): no manual "s", and col 3 is outside every cond_format
+  // range — the composed map must carry no phantom entry for it.
+  const { r, c } = bodyPos("D4");
+  assert.equal(styles[`${r},${c}`], undefined);
 });
