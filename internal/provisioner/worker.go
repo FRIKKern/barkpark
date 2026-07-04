@@ -45,8 +45,12 @@ const DefaultInterval = 5 * time.Second
 // waits on the health gate — minutes, not seconds — but it MUST be bounded so one
 // hung step (a dead SSH connection the keepalive missed, a wedged apt) fails the
 // job and releases it via fail() instead of pinning the single-threaded worker
-// forever.
-const DefaultProvisionTimeout = 8 * time.Minute
+// forever. Raised 8 → 20 min for dwb-17: the in-chain freshen step can trigger a
+// deploy-rebuild.sh rebuild (build-aside, many minutes) under a ~12-min sub-budget
+// before migrate runs. This MUST move with the control-plane stale-claim threshold
+// (`provision_stale_after_seconds`, now 25 min) or the reaper double-claims a
+// provision that legitimately outlives the old 12-min threshold.
+const DefaultProvisionTimeout = 20 * time.Minute
 
 // claimPath is the queue-drain endpoint; succeedPath/failPath are rendered
 // per-job (they carry the job id). Poll-based by design — no streaming.

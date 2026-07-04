@@ -942,6 +942,23 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		}
 	}
 
+	// 1c. freshen (dwb-17) — bring the box's baked checkout to origin/main BEFORE
+	// migrate (ordering is load-bearing: migrations must run against the code that
+	// will serve). The cheap check runs ALWAYS (seconds); a rebuild runs only when
+	// the box is behind, under a bounded sub-budget. FAIL-OPEN: on ANY freshen
+	// failure (unreachable fetch, or a failed/timed-out rebuild) we DO NOT fail the
+	// go-live — deploy-rebuild.sh builds aside and swaps last, so the box is still
+	// serving working (baked) code, and slice 1's register-time refresh renders it
+	// "behind" with a one-click self-update. A working-but-behind box beats a dead
+	// go-live. The narration rides the honest "freshen" step (banks dwb-18).
+	if _, ferr := EnsureFresh(ctx, runner, FreshenOpts{
+		RebuildTimeout: freshenRebuildBudget,
+		Narrate:        func(status, detail string) { wp.progress("freshen", status, detail) },
+	}); ferr != nil {
+		// Degrade loudly in the worker journal; the chain proceeds on baked code.
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: freshen on %s degraded (continuing on baked release): %v\n", host.IP, ferr)
+	}
+
 	// 2. secrets — mint per-instance credentials.
 	secrets, err := wp.Secrets()
 	if err != nil {

@@ -31,6 +31,15 @@ func greenGate(_ context.Context, base, _ string) (setup.HealthReport, error) {
 type recordingRunner struct {
 	cmds   []string
 	failOn string
+
+	// freshen (dwb-17) capture controls, mirroring the cloud-package recordingRunner.
+	// Default (zero value) → the box is CURRENT, so freshen is a no-op. Set `behind`
+	// to drive the rebuild path; `checkErr` / `rebuildErr` to drive the fail-closed
+	// warm-create teardown paths.
+	behind     bool
+	checkErr   error
+	rebuildErr error
+	rebuildRan bool
 }
 
 func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
@@ -46,6 +55,27 @@ func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
 		return errString("step " + s.Title + " failed: " + redact(out, s.Redact))
 	}
 	return nil
+}
+
+// RunOutput implements the cloud.hostCommandRunner capture capability the freshen
+// step type-asserts. It scripts the cheap-check output (current by default, behind
+// when r.behind) and the rebuild.
+func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, error) {
+	if strings.Contains(script, "deploy-rebuild.sh") {
+		r.rebuildRan = true
+		if r.rebuildErr != nil {
+			return "rebuild failed on box", r.rebuildErr
+		}
+		return "rebuilt", nil
+	}
+	if r.checkErr != nil {
+		return "fatal: unable to access origin", r.checkErr
+	}
+	head, remote := "abc123", "abc123"
+	if r.behind {
+		head, remote = "aaa111", "bbb222"
+	}
+	return "FRESHEN_HEAD=" + head + "\nFRESHEN_REMOTE=" + remote + "\nFRESHEN_FROM=v0.42\nFRESHEN_TO=v0.45\n", nil
 }
 
 // redact mirrors cloud.scrubSecrets (unexported there): replace each secret with

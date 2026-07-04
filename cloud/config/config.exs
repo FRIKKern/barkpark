@@ -75,6 +75,16 @@ config :barkpark_cloud, BarkparkCloud.GitHub,
   webhook_secret: nil,
   app_slug: nil
 
+# dwb-17: the provision stale-claim threshold. A `claimed` provision job whose
+# `claimed_at` is older than this is treated as abandoned and re-claimable by the
+# StaleProvisionJobReaper. Raised 12 → 25 min to stay ABOVE the Go worker's
+# DefaultProvisionTimeout (now 20 min, which includes the freshen deploy-rebuild
+# sub-budget) plus margin for teardown + the report round-trip — otherwise the
+# reaper double-claims a provision that legitimately outlives the old threshold.
+# Read via `BarkparkCloud.Registry.stale_after_seconds/0` (registry.ex keeps its
+# own 12-min DEFAULT; this config value overrides it without editing that module).
+config :barkpark_cloud, :provision_stale_after_seconds, 25 * 60
+
 # Audit trail (activity-audit-log): how many days a team's audit events are
 # retained before a future retention sweeper may prune them (keeping a floor of
 # the most-recent rows per team so a quiet team never loses its whole trail to

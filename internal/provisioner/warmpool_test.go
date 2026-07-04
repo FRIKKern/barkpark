@@ -419,6 +419,76 @@ func TestDefaultWarmRefill_CreatesAndRegisters(t *testing.T) {
 	}
 }
 
+// dwb-17: warm-create is FAIL-CLOSED — a box that can't be freshened to current is
+// torn down and NEVER registered, so the pool only ever holds boxes on today's code.
+
+func TestDefaultWarmRefill_FreshenFailureTearsBoxDownNotRegistered(t *testing.T) {
+	seams, prov, _, runner := fakeSeams(t)
+	wc := &fakeWarmClient{}
+	seams.WarmClient = wc
+	// The freshen cheap check fails (unreachable fetch) → the box can't be proven
+	// current → fail closed.
+	runner.checkErr = fmt.Errorf("git fetch: network unreachable")
+	ctx := context.Background()
+
+	defaultWarmRefill(ctx, seams)
+
+	warm, _ := prov.ListByLabel(ctx, cloud.WarmLabelKey, "true")
+	if len(warm) != 0 {
+		t.Errorf("a box that failed freshen was NOT torn down: %d warm boxes remain", len(warm))
+	}
+	if got, _ := wc.CountReady(ctx); got != 0 {
+		t.Errorf("a stale (freshen-failed) box was registered into the pool: %d ready rows", got)
+	}
+}
+
+func TestDefaultWarmRefill_RebuildFailureTearsBoxDown(t *testing.T) {
+	seams, prov, _, runner := fakeSeams(t)
+	wc := &fakeWarmClient{}
+	seams.WarmClient = wc
+	// The box is behind and the rebuild fails → fail closed (the warm path does NOT
+	// degrade to baked code the way the in-chain go-live does).
+	runner.behind = true
+	runner.rebuildErr = fmt.Errorf("deploy-rebuild.sh: build failed")
+	ctx := context.Background()
+
+	defaultWarmRefill(ctx, seams)
+
+	if !runner.rebuildRan {
+		t.Error("the rebuild was supposed to be attempted (behind box)")
+	}
+	warm, _ := prov.ListByLabel(ctx, cloud.WarmLabelKey, "true")
+	if len(warm) != 0 {
+		t.Errorf("a box whose rebuild failed was NOT torn down: %d warm boxes remain", len(warm))
+	}
+	if got, _ := wc.CountReady(ctx); got != 0 {
+		t.Errorf("a box whose rebuild failed was registered: %d ready rows", got)
+	}
+}
+
+func TestReconcileWarmPool_FreshenFailureStopsGrowAndTearsBoxDown(t *testing.T) {
+	seams, prov, _, runner := fakeSeams(t)
+	wc := &fakeWarmClient{}
+	seams.WarmClient = wc
+	runner.checkErr = fmt.Errorf("git fetch: unreachable")
+	ctx := context.Background()
+
+	created, _, err := ReconcileWarmPoolWith(ctx, seams, 1)
+	if err == nil {
+		t.Fatal("reconcile grow must return an error when a box fails freshen")
+	}
+	if created != 0 {
+		t.Errorf("created=%d, want 0 (the un-freshenable box is not counted)", created)
+	}
+	warm, _ := prov.ListByLabel(ctx, cloud.WarmLabelKey, "true")
+	if len(warm) != 0 {
+		t.Errorf("the un-freshenable box was NOT torn down: %d warm boxes remain", len(warm))
+	}
+	if got, _ := wc.CountReady(ctx); got != 0 {
+		t.Errorf("an un-freshenable box was registered: %d ready rows", got)
+	}
+}
+
 // ── concurrent double-claim: one winner per row (Go-seam defense-in-depth) ──
 
 func TestWarmClient_ConcurrentClaimOneWinnerPerRow(t *testing.T) {

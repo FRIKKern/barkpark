@@ -220,6 +220,23 @@ func (r *SSHStepRunner) Run(ctx context.Context, s CaddyStep) error {
 	return nil
 }
 
+// RunOutput runs an arbitrary shell script ON r.Host over SSH and RETURNS its
+// combined stdout+stderr — the hostCommandRunner capability the freshen step
+// (dwb-17) needs but the error-only Run cannot give (it must READ `git rev-parse`
+// / `git describe` output to decide whether to rebuild and to narrate the version
+// delta). It reuses the SAME base64-to-tempfile ssh plumbing as Run, so the
+// multi-line freshen scripts survive the SSH boundary intact. No per-step secret
+// redaction is applied — the freshen scripts carry no secrets (git/rev-parse/
+// describe/merge/deploy-rebuild), and the caller wraps any error itself.
+func (r *SSHStepRunner) RunOutput(ctx context.Context, script string) (string, error) {
+	key := r.Key
+	if strings.TrimSpace(key) == "" {
+		key = sshKeyPath()
+	}
+	argv := sshStepArgv(r.User, r.Host, key, script)
+	return r.run(ctx, argv[0], argv[1:]...)
+}
+
 // sshReadyProbeInterval is the gap between WaitReady's SSH probes. A var (not a
 // const) only so tests can shrink it; production never reassigns it.
 var sshReadyProbeInterval = 5 * time.Second
@@ -259,5 +276,9 @@ func (r *SSHStepRunner) WaitReady(ctx context.Context, timeout time.Duration) er
 	}
 }
 
-// compile-time assertion that *SSHStepRunner satisfies the StepRunner seam.
-var _ StepRunner = (*SSHStepRunner)(nil)
+// compile-time assertion that *SSHStepRunner satisfies the StepRunner seam AND the
+// hostCommandRunner capture capability the freshen step (dwb-17) type-asserts.
+var (
+	_ StepRunner        = (*SSHStepRunner)(nil)
+	_ hostCommandRunner = (*SSHStepRunner)(nil)
+)

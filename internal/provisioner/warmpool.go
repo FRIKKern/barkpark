@@ -65,8 +65,57 @@ const (
 	warmDeletePathFmt   = "/v1/internal/warm-servers/%s"
 )
 
-// warmRefillTimeout bounds a single async pool refill (create + register one box).
-const warmRefillTimeout = 6 * time.Minute
+// warmRefillTimeout bounds a single async pool refill (create + freshen + register
+// one box). Raised 6 → 20 min for dwb-17: a fresh warm box is now FRESHENED to
+// origin/main before it enters the pool (fail-closed), and a real deploy-rebuild is
+// many minutes — the old 6m budget would abort a legitimate rebuild mid-flight. It
+// runs in the background where nobody waits, so a generous bound is free.
+const warmRefillTimeout = 20 * time.Minute
+
+// sshReadyWaiter is the optional readiness-probe capability a per-host runner
+// advertises (the production cloud.SSHStepRunner implements WaitReady; the test
+// fakes don't). Declared locally so the warm-create freshen path can wait for a
+// freshly-created box's sshd before it SSHes in, mirroring cloud.configureHost.
+type sshReadyWaiter interface {
+	WaitReady(ctx context.Context, timeout time.Duration) error
+}
+
+// freshenWarmBox brings a freshly-CREATED warm box's baked checkout to origin/main
+// BEFORE it is registered into the pool (dwb-17, call site (a)). It is FAIL-CLOSED:
+// it returns an error on any freshen failure so the caller tears the box down — a
+// stale box must NEVER enter the pool (unlike the in-chain go-live path, which
+// degrades to a working baked box; here nobody is waiting, so we can afford to
+// insist on current). It builds the per-host runner (the injected RunnerFor in
+// tests, else the real SSH runner), waits for sshd, then runs the freshen sequence
+// with NO narration (a background refill has no user watching) and no rebuild
+// sub-budget (the whole call is already bounded by the caller's ctx /
+// warmRefillTimeout).
+func freshenWarmBox(ctx context.Context, seams Seams, host cloud.Server) error {
+	var runner cloud.StepRunner
+	if seams.RunnerFor != nil {
+		runner = seams.RunnerFor(host.IP)
+	} else {
+		runner = cloud.NewSSHStepRunner(host.IP)
+	}
+
+	// A freshly-created box isn't SSH-ready the instant create returns (OS still
+	// booting). Wait for sshd before the freshen SSHes in; test fakes without the
+	// capability skip it.
+	if rw, ok := runner.(sshReadyWaiter); ok {
+		if err := rw.WaitReady(ctx, warmFreshenSSHReadyTimeout); err != nil {
+			return fmt.Errorf("ssh not ready on %s: %w", host.IP, err)
+		}
+	}
+
+	if _, err := cloud.EnsureFresh(ctx, runner, cloud.FreshenOpts{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// warmFreshenSSHReadyTimeout bounds the sshd wait before the warm-create freshen —
+// a snapshot boot is ~30-60s; 3 min is generous (parity with cloud.sshReadyTimeout).
+const warmFreshenSSHReadyTimeout = 3 * time.Minute
 
 // HTTPWarmPoolClient is the production WarmPoolClient: it talks to the control
 // plane's /v1/internal/warm-servers/* endpoints with the shared WORKER_TOKEN,
@@ -292,6 +341,16 @@ func defaultWarmRefill(ctx context.Context, seams Seams) {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill create failed: %v\n", err)
 		return
 	}
+	// dwb-17: freshen the box to origin/main BEFORE it enters the pool. FAIL-CLOSED
+	// — a box that can't be brought current is torn down, never registered, so the
+	// pool only ever holds boxes running today's code.
+	if ferr := freshenWarmBox(rctx, seams, host); ferr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill freshen %s failed (tearing box down — a stale box must not enter the pool): %v\n", host.Name, ferr)
+		if derr := seams.Provider.Delete(rctx, host.Name); derr != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill stale-box %s delete failed: %v\n", host.Name, derr)
+		}
+		return
+	}
 	if err := seams.WarmClient.Register(rctx, WarmServer{Name: host.Name, IP: host.IP}); err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill register %s failed (tearing box down): %v\n", host.Name, err)
 		if derr := seams.Provider.Delete(rctx, host.Name); derr != nil {
@@ -341,6 +400,17 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 			if herr != nil {
 				errs = append(errs, fmt.Sprintf("create: %v", herr))
 				break // likely sold out — stop; the next pass retries
+			}
+			// dwb-17: freshen to origin/main before the box enters the pool.
+			// FAIL-CLOSED — tear a box that can't be brought current down rather than
+			// register a stale box; stop the grow loop (the next pass retries).
+			if ferr := freshenWarmBox(ctx, seams, host); ferr != nil {
+				if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
+					errs = append(errs, fmt.Sprintf("freshen %s (stale-box delete also failed: %v): %v", host.Name, derr, ferr))
+				} else {
+					errs = append(errs, fmt.Sprintf("freshen %s (box torn down — stale box kept out of pool): %v", host.Name, ferr))
+				}
+				break
 			}
 			if rerr := seams.WarmClient.Register(ctx, WarmServer{Name: host.Name, IP: host.IP}); rerr != nil {
 				if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
