@@ -255,7 +255,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       # makes that eager full-inflate blow up; parse_layout's rescue maps it to
       # the same {:error, _} the import controller turns into a 422, instead of
       # letting the exception escape as a 500.
-      good = XlsxExport.to_binary(%{"tabs" => [%{"name" => "S", "cells" => big_cells()}]}) |> ok!()
+      good =
+        XlsxExport.to_binary(%{"tabs" => [%{"name" => "S", "cells" => big_cells()}]}) |> ok!()
+
       bad = corrupt_last_member(good)
 
       # It really does still open — proving the failure is in parse_layout, not open_package.
@@ -612,6 +614,44 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
         |> import!()
 
       refute Map.has_key?(hd(imported["tabs"]), "row_heights")
+    end
+  end
+
+  # ── conditional formatting: the CF-D2 v1 baked-not-exported contract ────────
+
+  describe "conditional formatting (CF-D2 v1 asymmetry)" do
+    # v1 bakes the CF-COMPUTED style into the exported cell but does NOT export
+    # the rules as xlsx conditionalFormatting XML (CF-D2). The accepted,
+    # deliberate asymmetry: export→import of a CF-matched cell yields the baked
+    # fill as a MANUAL "s" (visually faithful, lossy on the rule) and the tab
+    # carries no cond_formats back. This test PINS that contract.
+    test "a CF-matched cell re-imports as a manual style; the rule itself does not survive" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" => [
+              %{
+                "id" => "r1",
+                "range" => "A1:A2",
+                "when" => %{"op" => "gt", "value" => 100},
+                "style" => %{"bg" => "#ff0000", "b" => true}
+              }
+            ],
+            "cells" => %{"A1" => %{"v" => 150}, "A2" => %{"v" => 50}}
+          }
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      # the matched cell's CF fill/bold survive as a plain manual style…
+      assert cell(imported, 0, "A1")["s"] == %{"bg" => "#ff0000", "b" => true}
+      # …the unmatched cell gains no style…
+      refute Map.has_key?(cell(imported, 0, "A2"), "s")
+      # …and the RULE is gone (not exported as conditionalFormatting — CF-D2).
+      refute Map.has_key?(hd(imported["tabs"]), "cond_formats")
     end
   end
 

@@ -29,7 +29,16 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       emitted as `<row ht customHeight="1">`; a height set past the last
       occupied cell extends the sheet's row extent so elixlsx still emits it
     * tab `"merges"` → `<mergeCells>`
-    * cell `"s"` → bold / italic / solid bg fill / horizontal alignment
+    * cell `"s"` → bold / italic / solid bg fill / horizontal alignment,
+      composed with the tab's `"cond_formats"` (CF-D) — a conditional-format
+      rule matching a cell has its computed style BAKED into the exported cell
+      (CF wins `bg`/`b`/`i`, manual `al` and any keys the rule doesn't set
+      survive; `CondFormat.compose/2`), on ALL rows incl. a frozen head row
+      (CF-AM2 — CF follows manual styling, which xlsx already emits on every
+      row). The RULES themselves are NOT exported as `conditionalFormatting`
+      XML — v1 bakes the visual result only, so a re-import reads the baked
+      fill as a plain manual `"s"` (CF-D2; lossy on the rule, faithful on the
+      pixels). A tab with no rules exports byte-identically to before.
     * `"frozen_rows"`/`"frozen_cols"` → a frozen pane
 
   Error cells (`"t" => "e"`) export their error string as text. `"locale"`
@@ -37,6 +46,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   setting with no xlsx twin).
   """
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Fmt
   alias Barkpark.Plugins.Sheets.Core, as: Core
   alias Elixlsx.{Sheet, Workbook}
@@ -116,6 +126,11 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
 
     by_pos = Map.new(cells)
 
+    # Conditional-format rules parsed ONCE per tab (CF-D). Non-list / malformed
+    # input → [] (lenient kernel), so a tab with no rules costs nothing and
+    # exports byte-identically to before.
+    rules = CondFormat.parse_rules(Map.get(tab, "cond_formats"))
+
     rows =
       case max_row do
         0 ->
@@ -127,7 +142,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
           col_range = if max_col >= 1, do: 1..max_col, else: []
 
           for r <- 1..max_row do
-            for c <- col_range, do: encode_cell(Map.get(by_pos, {c, r}))
+            for c <- col_range, do: encode_cell(Map.get(by_pos, {c, r}), {c, r}, rules)
           end
       end
 
@@ -202,10 +217,17 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
 
   # ── cells ──────────────────────────────────────────────────────────────────
 
-  defp encode_cell(nil), do: nil
+  # A blank position has no cell to style — CF never matches a blank cell
+  # (CondFormat classifies it :blank, which fires no op), so it stays nil.
+  defp encode_cell(nil, _pos, _rules), do: nil
 
-  defp encode_cell(cell) do
-    props = style_props(Map.get(cell, "s")) ++ fmt_props(cell)
+  defp encode_cell(cell, pos, rules) do
+    # Bake the CF-computed style into the cell (CF-D): compose the manual "s"
+    # with the first matching rule's style (CF-D3/D4 via the kernel). With no
+    # rules or no match, style_for/3 is nil and compose(s, nil) == to_map(s),
+    # so style_props sees exactly today's manual style — byte-stable.
+    composed = CondFormat.compose(Map.get(cell, "s"), CondFormat.style_for(rules, pos, cell))
+    props = style_props(composed) ++ fmt_props(cell)
 
     case {cell_content(cell), props} do
       {nil, []} -> nil

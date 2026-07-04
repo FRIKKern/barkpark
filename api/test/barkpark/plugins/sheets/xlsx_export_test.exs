@@ -293,4 +293,182 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       element
     end
   end
+
+  # PART CF-D — conditional-format styles bake into the exported cell.
+  # The stored tab `"cond_formats"` rules are evaluated (kernel-only, no forked
+  # eval) and composed with the manual `"s"` at export; the RULES are not
+  # exported as conditionalFormatting XML (CF-D2), so a re-import reads the
+  # baked fill as a plain manual style (pinned in xlsx_roundtrip_test.exs).
+  describe "conditional formatting bakes into exported cells" do
+    defp c(imported, addr), do: get_in(imported, ["tabs", Access.at(0), "cells", addr])
+
+    defp export_import(content) do
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      import!(binary)
+    end
+
+    test "a gt rule fills + bolds the matched cell; the unmatched cell keeps neither (CF-D5)" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" => [
+              %{
+                "id" => "r1",
+                "range" => "B1:B2",
+                "when" => %{"op" => "gt", "value" => 100},
+                "style" => %{"bg" => "#ff0000", "b" => true}
+              }
+            ],
+            "cells" => %{"B1" => %{"v" => 150}, "B2" => %{"v" => 50}}
+          }
+        ]
+      }
+
+      imported = export_import(content)
+
+      # matched: the CF fill + bold are baked into the exported cell
+      assert c(imported, "B1")["s"]["bg"] == "#ff0000"
+      assert c(imported, "B1")["s"]["b"] == true
+
+      # unmatched: no CF contribution — no bg, no bold (no ghost style)
+      refute get_in(c(imported, "B2"), ["s", "bg"])
+      refute get_in(c(imported, "B2"), ["s", "b"])
+    end
+
+    test "CF composes over a manual style: CF wins bg, manual al + b survive (CF-D3)" do
+      # The rule sets ONLY bg, so the manual bold and alignment must survive.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" => [
+              %{
+                "id" => "r1",
+                "range" => "A1",
+                "when" => %{"op" => "gt", "value" => 100},
+                "style" => %{"bg" => "#00ff00"}
+              }
+            ],
+            "cells" => %{"A1" => %{"v" => 150, "s" => %{"al" => "center", "b" => true}}}
+          }
+        ]
+      }
+
+      s = c(export_import(content), "A1")["s"]
+
+      # CF wins the bg it set…
+      assert s["bg"] == "#00ff00"
+      # …and the manual keys the rule did NOT set survive unchanged
+      assert s["al"] == "center"
+      assert s["b"] == true
+    end
+
+    test "first matching rule wins under overlapping ranges (CF-D4, no stacking)" do
+      # A1 sits in both ranges and satisfies both conditions; the FIRST rule in
+      # list order supplies the whole CF contribution.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "cond_formats" => [
+              %{
+                "id" => "first",
+                "range" => "A1:A3",
+                "when" => %{"op" => "gt", "value" => 10},
+                "style" => %{"bg" => "#ff0000"}
+              },
+              %{
+                "id" => "second",
+                "range" => "A1:A5",
+                "when" => %{"op" => "gt", "value" => 10},
+                "style" => %{"bg" => "#0000ff"}
+              }
+            ],
+            "cells" => %{"A1" => %{"v" => 50}}
+          }
+        ]
+      }
+
+      assert c(export_import(content), "A1")["s"]["bg"] == "#ff0000"
+    end
+
+    test "malformed cond_formats never raises — export succeeds, cells unstyled (CF-D5 totality)" do
+      # A non-list value, and a list of garbage entries, both flow through the
+      # lenient kernel to [] rather than blowing up the export.
+      for bad <- ["not a list", 42, [%{"garbage" => 1}, "string", 7, nil]] do
+        content = %{
+          "tabs" => [%{"name" => "CF", "cond_formats" => bad, "cells" => %{"A1" => %{"v" => 5}}}]
+        }
+
+        assert {:ok, binary} = XlsxExport.to_binary(content)
+        assert is_binary(binary)
+        # the cell exports as a plain value — no style crept in
+        refute Map.has_key?(c(import!(binary), "A1"), "s")
+      end
+    end
+
+    test "no-rules content exports byte-identically to before (empty compose is a true no-op)" do
+      # A doc carrying manual styles but no CF rules. The compose call collapses
+      # to the manual style, so the bytes must match the SAME doc exported with
+      # (a) no cond_formats key, (b) an empty list, and (c) a rule that matches
+      # NOTHING — every no-match path must leave the export identical.
+      base_cells = %{
+        "A1" => %{"v" => "Header", "s" => %{"b" => true, "bg" => "#eeeeee"}},
+        "A2" => %{"v" => 42},
+        "A3" => %{"v" => "plain", "s" => %{"al" => "right"}}
+      }
+
+      no_key = %{"tabs" => [%{"name" => "T", "cells" => base_cells}]}
+      empty_list = %{"tabs" => [%{"name" => "T", "cells" => base_cells, "cond_formats" => []}]}
+
+      non_matching = %{
+        "tabs" => [
+          %{
+            "name" => "T",
+            "cells" => base_cells,
+            "cond_formats" => [
+              %{
+                "id" => "never",
+                "range" => "A1:A3",
+                "when" => %{"op" => "gt", "value" => 999_999},
+                "style" => %{"bg" => "#ff0000"}
+              }
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, bin_no_key} = XlsxExport.to_binary(no_key)
+      assert {:ok, bin_empty} = XlsxExport.to_binary(empty_list)
+      assert {:ok, bin_non_match} = XlsxExport.to_binary(non_matching)
+
+      assert bin_empty == bin_no_key
+      assert bin_non_match == bin_no_key
+    end
+
+    test "CF applies on a frozen head row too (CF-AM2 — CF follows manual on all rows)" do
+      # xlsx emits manual styles on every row including a frozen head; CF rides
+      # the same path, so a rule over row 1 bakes into the exported head cell.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "CF",
+            "frozen_rows" => 1,
+            "cond_formats" => [
+              %{
+                "id" => "head",
+                "range" => "A1:A1",
+                "when" => %{"op" => "gt", "value" => 0},
+                "style" => %{"bg" => "#123456"}
+              }
+            ],
+            "cells" => %{"A1" => %{"v" => 5}}
+          }
+        ]
+      }
+
+      assert c(export_import(content), "A1")["s"]["bg"] == "#123456"
+    end
+  end
 end
