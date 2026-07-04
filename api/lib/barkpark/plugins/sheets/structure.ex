@@ -1082,6 +1082,15 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
     if word != "" and ref_like?(word) and not next_is_lparen?(rest2) do
       case take_range_tail(rest2) do
+        # A range whose second corner is ITSELF a qualifier (`Sheet2!A1:Sheet3!B2`)
+        # is a two-tab range — not the single-tab range this scanner shifts (the
+        # design makes two-tab ranges `#REF!` at eval; formula text is stored
+        # verbatim under CT-D1, so such a string can reach Structure). Qualify
+        # only the FIRST corner and hand the `:` + second qualifier back to the
+        # scanner: each side then shifts under its own tab. Without this, the
+        # bare second corner (`Sheet3`) parses as a ref and mis-shifts (e.g. a
+        # row op turns `Sheet3` into `SHEET4`), corrupting the stored formula.
+        {:range, _sep, _word2, <<?!, _::binary>>} -> {{:single, word}, rest2}
         {:range, sep, word2, rest3} -> {{:range, word, sep, word2}, rest3}
         :single -> {{:single, word}, rest2}
       end
@@ -1099,8 +1108,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     case take_quoted_body(bin, "") do
       {:ok, raw, rest} ->
         case take_qualified_tail(rest) do
-          {ref_spec, rest2} -> {String.replace(raw, "''", "'"), "'" <> raw <> "'", ref_spec, rest2}
-          :none -> :none
+          {ref_spec, rest2} ->
+            {String.replace(raw, "''", "'"), "'" <> raw <> "'", ref_spec, rest2}
+
+          :none ->
+            :none
         end
 
       :error ->

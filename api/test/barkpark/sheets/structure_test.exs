@@ -893,6 +893,36 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       tabs = [%{"cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}, %{"cells" => %{}}]
       assert Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 3, 1}) == tabs
     end
+
+    test "a two-corner qualified range shifts BOTH corners on column ops" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!B2:D4)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      ins = Structure.shift_cross_tab_refs(tabs, 1, :col, {:insert, 2, 1})
+      assert fof(ins, 0, "A1") == "SUM(Sheet2!C2:E4)"
+
+      # Deleting columns B..C clips the left corner up to the surviving column.
+      del = Structure.shift_cross_tab_refs(tabs, 1, :col, {:delete, 2, 2})
+      assert fof(del, 0, "A1") == "SUM(Sheet2!B2:B4)"
+    end
+
+    test "a two-TAB range (`Sheet2!A1:Sheet3!B2`) shifts per-corner, never corrupts" do
+      # Two-tab ranges are `#REF!` at eval, but the text is stored verbatim
+      # (CT-D1). The scanner must NOT read the bare second qualifier `Sheet3`
+      # as an ordinary cell corner and mis-shift it into `SHEET4` — it splits
+      # the range so each side shifts under its own tab.
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "Sheet2!A1:Sheet3!B2"}}},
+        %{"name" => "Sheet2", "cells" => %{}},
+        %{"name" => "Sheet3", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 1, 1})
+      # Only the Sheet2 side shifts (A1 → A2); the Sheet3 side is another tab.
+      assert fof(out, 0, "A1") == "Sheet2!A2:Sheet3!B2"
+    end
   end
 
   # ── rename_refs/3 (CT-D1) ───────────────────────────────────────────────────
