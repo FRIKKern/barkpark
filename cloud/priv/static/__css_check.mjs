@@ -81,6 +81,8 @@ const ALLOW_PREFIXES = [
   "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
   "inst-tab",                   // instanceTabStripHtml(): + (on ? " is-active" : "")
   "wh-del-status wh-del-status--", // deliveryRowHtml(): + tone (ok | danger | info)
+  "tlv-badge tlv-badge--",      // tlvRowHtml(): + variant (event | verify | verify-fail | audit)
+  "vf-chip vf-chip--",          // verifyChipHtml(): + role (pass | fail | unknown)
 ];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks

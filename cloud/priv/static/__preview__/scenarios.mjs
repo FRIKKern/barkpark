@@ -353,6 +353,52 @@ const mixedAudit = [
   auditEvent({ id: "ev_1", action: "token.minted", target_type: "token", target_id: "tok_1", metadata: { name: "CI deploy" }, inserted_at: tMinus(172800) }),
 ];
 
+// ── instance events + verify runs (event_json: {id,type,payload,inserted_at};
+//    types from the closed AgentEvent vocabulary: health status backup tls
+//    content verify; verify payload ⇐ Verify.run/1's result envelope) ─────────
+function verifyEnvelope(over) {
+  const base = {
+    ok: true,
+    reachable: true,
+    verified_at: tMinus(120),
+    probes: [
+      { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
+      { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 121, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
+      { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 316, evidence: "GET /studio → 200 (renders)" },
+    ],
+  };
+  return Object.assign(base, over);
+}
+const verifyPass = verifyEnvelope({});
+const verifyOneFail = verifyEnvelope({
+  ok: false,
+  probes: [
+    verifyPass.probes[0],
+    verifyPass.probes[1],
+    { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 5031, evidence: "502 — <html>upstream not ready</html>" },
+  ],
+});
+
+const ev = (id, type, payload, at) => ({ id, type, payload, inserted_at: at });
+// Newest-first, exactly as GET /v1/barkparks/:id/events serves them.
+const liveInstanceEvents = [
+  ev(9, "verify", verifyPass, tMinus(120)),
+  ev(8, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 212, uptime_s: 86000 }, tMinus(300)),
+  ev(7, "backup", { status: "ok", size_mb: 88, took_s: 12 }, tMinus(4100)),
+  ev(6, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 211 }, tMinus(7300)),
+  ev(5, "status", { transition: "online", reason: "agent_report" }, tMinus(80000)),
+  ev(4, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
+];
+const liveInstanceEventsOneFail = [ev(10, "verify", verifyOneFail, tMinus(60))].concat(liveInstanceEvents.slice(1));
+const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
+
+// Audit rows scoped to the live instance — what the Timeline's audit half
+// contributes (actor attribution beside the machine events).
+const liveInstanceAudit = [
+  auditEvent({ id: "ev_b2", action: "site.created", target_type: "site", target_id: IDS.siteDocs, metadata: { name: "Docs" }, inserted_at: tMinus(4000) }),
+  auditEvent({ id: "ev_b1", action: "barkpark.go_live", target_type: "barkpark", target_id: IDS.liveInstance, metadata: { name: "Production" }, inserted_at: tMinus(86400) }),
+];
+
 // ── me / subscription helpers ────────────────────────────────────────────────
 // onboarding mirrors onboarding_json (accounts.ex onboarding_status): the step
 // vocabulary is CLOSED — subscription | instance | published_doc — and the
@@ -588,6 +634,73 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── C8: the instance Timeline tab + golden-path verify chips ──────────────
+  timeline: {
+    label: "Instance Timeline — events + audit merged, verify runs inline",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/timeline",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "timeline-events-only": {
+    label: "Timeline as a non-admin — audit 403 degrades to events + one quiet line",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/timeline",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: [],
+      auditDenied: true, // /v1/audit → 403 (team-admin-only)
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "verify-pass": {
+    label: "Verify chips — all three golden-path checks green",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "verify-fail": {
+    label: "Verify chips — Studio probe failing (502), rendered honestly",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsOneFail },
+    },
+  },
+  "verify-never": {
+    label: "Verify chips — never run, the card invites the first check",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -646,7 +759,37 @@ export function route(name, method, path) {
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
-  if (p === "/v1/audit") return { status: 200, body: { events: d.audit } };
+  // /v1/audit is team-admin-only server-side; auditDenied models the member's
+  // 403 (the Timeline must degrade to events-only, never error).
+  if (p === "/v1/audit") {
+    return d.auditDenied
+      ? { status: 403, body: { error: "forbidden" } }
+      : { status: 200, body: { events: d.audit } };
+  }
+
+  // C8: the instance event history (agent events + verify runs, newest first).
+  const evMatch = p.match(/^\/v1\/barkparks\/([^/]+)\/events$/);
+  if (evMatch) {
+    const list = (d.instanceEvents && d.instanceEvents[evMatch[1]]) || [];
+    return { status: 200, body: { events: list } };
+  }
+  // C8: "Check now" — the synchronous verify suite answers a fresh all-pass
+  // envelope so the preview's button exercises the full render path.
+  if (method === "POST" && /^\/v1\/barkparks\/[^/]+\/verify$/.test(p)) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reachable: true,
+        verified_at: new Date().toISOString(),
+        probes: [
+          { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 38, evidence: "GET /v1/capabilities → 200 (API up)" },
+          { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 102, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
+          { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 288, evidence: "GET /studio → 200 (renders)" },
+        ],
+      },
+    };
+  }
 
   // Single-site drill-down (best-effort, for shots that click a site row).
   const siteMatch = p.match(/^\/v1\/sites\/([^/]+)$/);

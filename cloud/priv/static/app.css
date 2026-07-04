@@ -1983,3 +1983,126 @@ select.form-input {
 .auth-invite:empty { display: none; }
 .auth-invite-title { display: block; font-weight: 600; color: var(--text); }
 .auth-invite-email { font-weight: 600; color: var(--text); }
+/* ============================================================================
+   C8 — instance Timeline tab + golden-path verify chips (charter D10/D53).
+   Appended per slice contract; consumes only the semantic status tokens.
+   ========================================================================== */
+
+/* The merged events+audit feed. */
+.tlv { display: flex; flex-direction: column; gap: 8px; }
+.tlv-quiet {
+  font-size: 12px;
+  color: var(--muted-text);
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.tlv-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+.tlv-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tlv-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+}
+.tlv-badge--event { background: var(--info-soft); color: var(--info); border-color: hsl(var(--info-hsl) / 0.28); }
+.tlv-badge--verify { background: var(--ok-soft); color: var(--ok); border-color: hsl(var(--ok-hsl) / 0.28); }
+/* A failed run's badge must not read green — coloured by outcome, not source. */
+.tlv-badge--verify-fail { background: var(--danger-soft); color: var(--danger); border-color: hsl(var(--danger-hsl) / 0.28); }
+.tlv-badge--audit { background: var(--muted-surface); color: var(--muted-text); }
+.tlv-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tlv-when { flex: 0 0 auto; font-size: 12px; color: var(--muted-text); }
+.tlv-toggle {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted-text);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color var(--t), border-color var(--t);
+}
+.tlv-toggle:hover { color: var(--text); border-color: var(--ring); }
+.tlv-toggle[aria-expanded="true"] { color: var(--text); }
+.tlv-detail {
+  margin: 8px 0 0;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--muted-surface);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Golden-path verify card (instance Overview). */
+.vf-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+  margin-bottom: calc(var(--step) * 2);
+}
+.vf-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.vf-head h2 { margin: 0; font-size: 14px; }
+.vf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.vf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.vf-chip--pass { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+.vf-chip--fail { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
+.vf-chip--unknown { background: var(--muted-surface); color: var(--muted-text); }
+.vf-chip-glyph { flex: 0 0 auto; }
+.vf-chip--pass .vf-chip-glyph { color: var(--ok); }
+.vf-chip--fail .vf-chip-glyph { color: var(--danger); }
+.vf-chip-code { font-family: var(--mono); font-size: 11px; color: var(--muted-text); }
+.vf-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
+.vf-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--warn-soft);
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 620px) {
+  .tlv-head { flex-wrap: wrap; }
+  .tlv-title { white-space: normal; }
+}
