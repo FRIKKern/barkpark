@@ -152,6 +152,11 @@ defmodule Barkpark.Plugins.SheetsTest do
       assert msg =~ "invalid color"
     end
 
+    test "a #rrggbb with a stowaway trailing newline halts (canonical \\z-anchor, xlsx-safe)" do
+      assert {:halt, msg} = fire_before_save(%{"color" => "#ffffff\n"})
+      assert msg =~ "invalid color"
+    end
+
     test "a non-string color halts with a shape message" do
       assert {:halt, msg} = fire_before_save(%{"color" => 123})
       assert msg =~ "color must be a #rrggbb string"

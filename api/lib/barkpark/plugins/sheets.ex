@@ -235,8 +235,13 @@ defmodule Barkpark.Plugins.Sheets do
   # fine (handled by the `nil` clause above); anything malformed halts the save
   # (409), so a junk color can never reach storage via plain mutate (synthesis
   # stays lenient and simply drops one that slipped in — the merges precedent).
+  # Routes through the canonical `#rrggbb` sanitizer (CondFormat.valid_bg?/1 —
+  # the sheets-bg-sanitizer capability) rather than a fourth copy of the regex,
+  # so the tab color is accepted on EXACTLY the bytes a cell/CF bg is: `\z`-
+  # anchored, so a stowaway trailing newline (`#ffffff\n`) is rejected here and
+  # can never reach the xlsx `<tabColor>` round-trip.
   defp color_format_errors(color, idx) do
-    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color) do
+    if CondFormat.valid_bg?(color) do
       []
     else
       ["tab #{idx}: invalid color #{inspect(color)} (expected #rrggbb, e.g. #1a2b3c)"]
