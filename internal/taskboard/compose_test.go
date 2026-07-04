@@ -68,8 +68,13 @@ func composeFixture() Model {
 	}
 	return Model{
 		board: Board{
-			Orphans: tasks,
-			Counts:  map[string]int{"in_progress": 2, "done": 1},
+			// The loose bucket holds active in_progress work, so it is OrphansActive
+			// (auto-expanded under wave-7's fold-by-default) — its rows stay visible
+			// for the reading-frame and wide-preview tests. Its navigable header is
+			// row 0; the subject task sits at cursor 1.
+			Orphans:       tasks,
+			OrphansActive: true,
+			Counts:        map[string]int{"in_progress": 2, "done": 1},
 		},
 		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}},
 		details: details,
@@ -146,7 +151,7 @@ func TestComposeWideGolden(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 120, 40, true
-	m.ui.Cursor = 0 // the subject task (orphan row 0) — its detail previews right
+	m.ui.Cursor = 1 // the subject task (row 0 is the loose-bucket header) — its detail previews right
 	got := ansi.Strip(Compose(m))
 	assertWidthSafe(t, got, 120)
 	composeGolden(t, "compose_wide_120.txt", got)

@@ -85,6 +85,23 @@ type Board struct {
 	// same way an epic folds its stale children — so a flat queue of long-closed
 	// tasks collapses to a short honest tail instead of burying the live rows.
 	OrphansFolded int
+	// OrphansActive is true when the loose "(no epic)" bucket owns at least one
+	// NOW task (an in_progress live claim). It is the orphan bucket's twin of
+	// Epic.Active / Cluster.Active: the ONE auto-fold input for the orphan header
+	// (foldedOrphans defaults folded unless OrphansActive), so the loose pile —
+	// the flat-queue live shape's bulk — collapses to a single header line unless
+	// the work you are actually running lives in it (wave-7 decisions 32/33).
+	OrphansActive bool
+	// ReadyHead is the top readyHeadMax ready tasks across the WHOLE corpus,
+	// ordered priority-ascending (P0/P1 first; non-numeric/absent last) then
+	// updated_at desc. It powers the claim-forward READY TO CLAIM band that
+	// replaces the empty-NOW dead-line: when nothing is claimed the band offers
+	// the next tasks to claim so active work is never a dead end (wave-7 D35).
+	ReadyHead []Task
+	// ReadyTotal is the count of EVERY ready task the board holds, so the READY
+	// TO CLAIM band's "+K more ready" tail is honest about the depth of the queue
+	// behind the shown head.
+	ReadyTotal int
 	// ReadyHeadClamped rides through from the Snapshot: the ready count shown in
 	// the header wears a "+" when the prime ready head hit the server clamp.
 	ReadyHeadClamped bool
@@ -104,7 +121,14 @@ type Epic struct {
 	Root       Task
 	Children   []Task // policy-ordered
 	DoneFolded int    // count of done children folded away
-	Dormant    bool   // idle >7d -> renders as one header line
+	Dormant    bool   // idle >7d (computed; no longer drives folding, see Active)
+	// Active is true when the epic owns at least one NOW task (an in_progress
+	// live claim) — the ONE auto-fold input (wave-7 decision 32): an epic folds
+	// to a single header line by DEFAULT and auto-EXPANDS only when it holds the
+	// work you are actually running. Computed in BuildBoard against the same
+	// nowSet the NOW de-dup uses, so "the active group" is exactly "the group
+	// with a task pinned in NOW". An explicit user fold/unfold still overrides.
+	Active bool
 }
 
 // Cluster is a DERIVED relatedness group: loose tasks sharing a cluster key
@@ -114,6 +138,10 @@ type Cluster struct {
 	Key        string // the full tag, e.g. "proj:sheets-parity"
 	Tasks      []Task // band-ordered like epic children
 	DoneFolded int    // terminal members older than 24h, folded to a count
+	// Active mirrors Epic.Active for a derived cluster: true when the cluster
+	// owns a NOW task, folding the section by default and auto-expanding only the
+	// cluster whose work is actually running (wave-7 decision 32).
+	Active bool
 }
 
 type ConnState int

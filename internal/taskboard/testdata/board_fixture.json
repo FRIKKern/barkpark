@@ -7,8 +7,14 @@
       "Kind": "task",
       "ParentID": "cloud-gui-epic",
       "Priority": "P2",
-      "Labels": ["perf"],
-      "Claim": { "Worker": "pelle", "Epoch": 2, "ClaimedAt": "2026-07-03T11:58:30Z" },
+      "Labels": [
+        "perf"
+      ],
+      "Claim": {
+        "Worker": "pelle",
+        "Epoch": 2,
+        "ClaimedAt": "2026-07-03T11:58:30Z"
+      },
       "Criteria": null,
       "DependencyCount": 0,
       "DependentCount": 0,
@@ -22,13 +28,32 @@
       "Kind": "task",
       "ParentID": "cloud-gui-epic",
       "Priority": "P1",
-      "Labels": ["live", "sse"],
-      "Claim": { "Worker": "opus-3", "Epoch": 4, "ClaimedAt": "2026-07-03T11:56:00Z" },
-      "Criteria": { "Met": 2, "Total": 3 },
+      "Labels": [
+        "live",
+        "sse"
+      ],
+      "Claim": {
+        "Worker": "opus-3",
+        "Epoch": 4,
+        "ClaimedAt": "2026-07-03T11:56:00Z"
+      },
+      "Criteria": {
+        "Met": 2,
+        "Total": 3
+      },
       "CriteriaItems": [
-        { "Criterion": "Reconnect after a dropped stream", "Met": true },
-        { "Criterion": "Debounce the refetch to 750ms", "Met": true },
-        { "Criterion": "Connection dot is honest (live/polling/offline)", "Met": false }
+        {
+          "Criterion": "Reconnect after a dropped stream",
+          "Met": true
+        },
+        {
+          "Criterion": "Debounce the refetch to 750ms",
+          "Met": true
+        },
+        {
+          "Criterion": "Connection dot is honest (live/polling/offline)",
+          "Met": false
+        }
       ],
       "DependencyCount": 0,
       "DependentCount": 2,
@@ -53,11 +78,22 @@
           "Kind": "task",
           "ParentID": "cloud-gui-epic",
           "Priority": "P2",
-          "Labels": ["theme"],
-          "Criteria": { "Met": 1, "Total": 2 },
+          "Labels": [
+            "theme"
+          ],
+          "Criteria": {
+            "Met": 1,
+            "Total": 2
+          },
           "CriteriaItems": [
-            { "Criterion": "Extract the shared statusRole vocabulary", "Met": true },
-            { "Criterion": "Reconcile onto the landed #979 seam", "Met": false }
+            {
+              "Criterion": "Extract the shared statusRole vocabulary",
+              "Met": true
+            },
+            {
+              "Criterion": "Reconcile onto the landed #979 seam",
+              "Met": false
+            }
           ],
           "DependencyCount": 1,
           "DependentCount": 0,
@@ -87,7 +123,8 @@
         }
       ],
       "DoneFolded": 7,
-      "Dormant": false
+      "Dormant": false,
+      "Active": true
     },
     {
       "Root": {
@@ -111,7 +148,10 @@
           "Title": "Add the SUM() spreadsheet function",
           "Lifecycle": "ready",
           "Kind": "task",
-          "Labels": ["proj:sheets-parity", "phase:build"],
+          "Labels": [
+            "proj:sheets-parity",
+            "phase:build"
+          ],
           "Priority": "P2",
           "TwinOf": "sheets-sum2",
           "UpdatedAt": "2026-07-03T10:00:00Z"
@@ -121,7 +161,10 @@
           "Title": "Add a SUM function to the grid",
           "Lifecycle": "ready",
           "Kind": "task",
-          "Labels": ["proj:sheets-parity", "phase:build"],
+          "Labels": [
+            "proj:sheets-parity",
+            "phase:build"
+          ],
           "Priority": "P3",
           "TwinOf": "sheets-sum",
           "UpdatedAt": "2026-07-03T09:00:00Z"
@@ -131,7 +174,9 @@
           "Title": "Implement VLOOKUP across sheets",
           "Lifecycle": "ready",
           "Kind": "task",
-          "Labels": ["proj:sheets-parity"],
+          "Labels": [
+            "proj:sheets-parity"
+          ],
           "Priority": "P2",
           "UpdatedAt": "2026-06-27T09:00:00Z"
         },
@@ -140,7 +185,10 @@
           "Title": "Pivot tables in the Studio grid",
           "Lifecycle": "open",
           "Kind": "task",
-          "Labels": ["proj:sheets-parity", "area:grid"],
+          "Labels": [
+            "proj:sheets-parity",
+            "area:grid"
+          ],
           "UpdatedAt": "2026-06-22T09:00:00Z"
         }
       ],
@@ -154,7 +202,10 @@
           "Title": "Wire the valueref resolver",
           "Lifecycle": "ready",
           "Kind": "task",
-          "Labels": ["proj:living-values", "phase:build"],
+          "Labels": [
+            "proj:living-values",
+            "phase:build"
+          ],
           "Priority": "P1",
           "UpdatedAt": "2026-07-03T08:30:00Z"
         },
@@ -163,7 +214,9 @@
           "Title": "Build the living-values demo dataset",
           "Lifecycle": "open",
           "Kind": "task",
-          "Labels": ["proj:living-values"],
+          "Labels": [
+            "proj:living-values"
+          ],
           "UpdatedAt": "2026-07-02T15:00:00Z"
         }
       ]
@@ -192,10 +245,26 @@
     }
   ],
   "Stale": 2,
-  "Counts": { "in_progress": 3, "blocked": 4, "done": 41 },
+  "Counts": {
+    "in_progress": 3,
+    "blocked": 4,
+    "done": 41
+  },
   "Events": [
-    { "Mutation": "task.closed", "DocID": "sse-reconnect", "At": "2026-07-03T11:58:00Z" },
-    { "Mutation": "task.claimed", "DocID": "debounce-refetch", "At": "2026-07-03T11:55:00Z" },
-    { "Mutation": "task.created", "DocID": "empty-state-goldens", "At": "2026-07-03T11:50:00Z" }
+    {
+      "Mutation": "task.closed",
+      "DocID": "sse-reconnect",
+      "At": "2026-07-03T11:58:00Z"
+    },
+    {
+      "Mutation": "task.claimed",
+      "DocID": "debounce-refetch",
+      "At": "2026-07-03T11:55:00Z"
+    },
+    {
+      "Mutation": "task.created",
+      "DocID": "empty-state-goldens",
+      "At": "2026-07-03T11:50:00Z"
+    }
   ]
 }

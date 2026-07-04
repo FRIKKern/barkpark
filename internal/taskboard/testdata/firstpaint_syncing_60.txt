@@ -2,7 +2,7 @@ barkpark  ⎇ work/doc-fresh  ⇄ guerrilla           ◐ syncing…
 0 active · 0 ready · 0 blocked · 0 done
 
 NOW
-   nothing claimed right now
+   nothing ready · all clear
 
 syncing…
 

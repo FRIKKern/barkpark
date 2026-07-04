@@ -2,15 +2,15 @@ barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                              ● liv
 3 active · 2 ready · 4 blocked · 41 done
 
 NOW
-   nothing claimed right now
+   nothing ready · all clear
 
-▎─ Cloud GUI epic ────────────────────────────────────────────────────────── 7/9
-   ○ Reconcile the #979 role seam                                             P2
-   ◐ Cut over the canvas default                                         blocked
-  +7 done
+▎─ Cloud GUI epic ───────────────────────────────────────────── 1 ready · 7 done
 
-── (no epic) ───────────────────────────────────────────────────────────────────
-   ○ Fix the timeago clock-skew clamp                                         P3
+── (no epic) ─────────────────────────────────────────────────────────── 1 ready
+
+
+
+
 
 
 

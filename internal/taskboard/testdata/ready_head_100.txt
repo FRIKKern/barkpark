@@ -1,0 +1,48 @@
+barkpark  ⎇ lead/session-stable  ⇄ guerrilla                                             ● live · 2m
+0 active · 7 ready · 1 blocked · 3 done
+
+READY TO CLAIM
+  ▎○ Retry the dead-worker sweep                                                                  P1
+   ○ Unify the button token scale                                                                 P2
+   ○ Add the SUM() spreadsheet function                                                           P2
+   ○ Redeploy on a broken promise                                                                 P2
+   ○ Fix the timeago clock-skew clamp                                                             P3
+   +2 more ready
+
+── Aesthetic unification epic ───────────────────────────────────────────────────── 3 ready · 1 done
+
+── DWB reliability epic ─────────────────────────────────────────────────────────── 2 ready · 1 done
+
+── Sheets formula UX epic ───────────────────────────────────────────────────────── 1 ready · 1 done
+
+── (no epic) ────────────────────────────────────────────────────────────────────── 1 ready · 1 done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+no recent activity
+jk move · enter open · esc back · c claim · x close · o studio

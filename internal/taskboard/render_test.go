@@ -182,6 +182,78 @@ func TestRenderFlatQueue(t *testing.T) {
 	}
 }
 
+// readyHeadSnapshot is the wave-7 live shape: 0 in_progress (every past claim
+// expired), a deep ready queue, and several authored epics + a loose pile —
+// exactly the guerrilla board the user saw as "a flat wall". Fed through the real
+// BuildBoard so ReadyHead, the fold-by-default (nothing is Active), and the
+// claim-forward header rails are all mutually consistent with what ships.
+func readyHeadSnapshot() Snapshot {
+	now := fixedNow
+	mk := func(id, parent, title, kind, life, pri string, ageH int) Task {
+		return Task{DocID: id, ParentID: parent, Title: title, Kind: kind,
+			Lifecycle: life, Priority: pri, UpdatedAt: now.Add(-time.Duration(ageH) * time.Hour)}
+	}
+	tasks := []Task{
+		mk("aesthetic", "", "Aesthetic unification epic", "goal", "open", "", 1),
+		mk("ae-1", "aesthetic", "Unify the button token scale", "", "ready", "2", 2),
+		mk("ae-2", "aesthetic", "Fold form-error copy into --text", "", "ready", "3", 3),
+		mk("ae-3", "aesthetic", "Repair the union-merge seams", "", "ready", "4", 5),
+		mk("ae-done", "aesthetic", "Old aesthetic pass", "", "done", "", 200), // folds (>24h)
+		mk("dwb", "", "DWB reliability epic", "goal", "open", "", 4),
+		mk("dwb-1", "dwb", "Retry the dead-worker sweep", "", "ready", "1", 1),
+		mk("dwb-2", "dwb", "Redeploy on a broken promise", "", "ready", "2", 8),
+		mk("dwb-done", "dwb", "Landed reliability fix", "", "done", "", 200),
+		mk("sheets", "", "Sheets formula UX epic", "goal", "open", "", 5),
+		mk("sh-1", "sheets", "Add the SUM() spreadsheet function", "", "ready", "2", 6),
+		mk("sh-blocked", "sheets", "Pivot tables in the grid", "", "blocked", "", 9),
+		mk("sh-done", "sheets", "Shipped spill ranges", "", "done", "", 200),
+		mk("loose-ready", "", "Fix the timeago clock-skew clamp", "", "ready", "3", 2),
+		mk("loose-open", "", "Inline cell editing for the grid", "", "open", "", 5),
+		mk("loose-done", "", "Old closed loose task", "", "done", "", 200), // folds
+	}
+	return Snapshot{Tasks: tasks, Counts: map[string]int{"in_progress": 0, "blocked": 1, "done": 3}}
+}
+
+// TestRenderReadyHeadGolden — the claim-forward frame (wave-7 D35): nothing
+// claimed, so the pinned band becomes READY TO CLAIM (top tasks priority-first),
+// every epic/cluster/loose section folds to a one-line "N ready · M done" header,
+// and the board reads compact + grouped instead of a flat wall.
+func TestRenderReadyHeadGolden(t *testing.T) {
+	old := Chrome
+	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "lead/session-stable", Server: "guerrilla"}
+	t.Cleanup(func() { Chrome = old })
+
+	b := BuildBoard(readyHeadSnapshot(), RepoContext{}, fixedNow)
+	if len(b.Now) != 0 {
+		t.Fatalf("fixture must have an empty NOW to exercise the ready head, got %d", len(b.Now))
+	}
+	if !showReadyHead(b) {
+		t.Fatalf("showReadyHead must hold (empty NOW + ready work), ReadyHead=%d", len(b.ReadyHead))
+	}
+	// dwb-1 is the only P1, so it heads the priority-ordered claim list.
+	if b.ReadyHead[0].DocID != "dwb-1" {
+		t.Errorf("ready head should lead with the P1 task, got %q", b.ReadyHead[0].DocID)
+	}
+	st := UIState{Cursor: 0, Conn: ConnLive, LastSync: fixedNow.Add(-2 * time.Minute)}
+	for _, width := range []int{60, 80, 100} {
+		got := plainFrame(b, st, width, goldenHeight)
+		path := filepath.Join("testdata", "ready_head_"+strconv.Itoa(width)+".txt")
+		if *update {
+			if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+				t.Fatalf("write golden: %v", err)
+			}
+			continue
+		}
+		want, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read golden (run with -update): %v", err)
+		}
+		if got != string(want) {
+			t.Errorf("ready-head frame at %d cols diverged from %s\n--- got ---\n%s", width, path, got)
+		}
+	}
+}
+
 // TestRenderReadyClampSuffix — a clamped ready head puts a "+" on the header
 // count, so the pane is honest that the true ready total is at least this many.
 func TestRenderReadyClampSuffix(t *testing.T) {
@@ -245,7 +317,9 @@ func TestRenderTruncationNote(t *testing.T) {
 func TestRenderEmptyBoardIsHonest(t *testing.T) {
 	empty := Board{Counts: map[string]int{}}
 	frame := ansi.Strip(Render(empty, UIState{Conn: ConnOffline}, 80, 30, fixedNow))
-	for _, want := range []string{"NOW", "nothing claimed", "All clear", "offline", "jk move"} {
+	// Empty NOW with no ready work reads the honest all-clear (wave-7 D35), not a
+	// dead "nothing claimed" line.
+	for _, want := range []string{"NOW", "nothing ready", "All clear", "offline", "jk move"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("empty frame missing %q:\n%s", want, frame)
 		}
@@ -561,7 +635,8 @@ func wave3Board() Board {
 	warmNow := fixedNow
 	return Board{
 		Clusters: []Cluster{{
-			Key: "proj:sheets-parity",
+			Key:    "proj:sheets-parity",
+			Active: true, // expanded so the members paint (wave-7 folds an inactive cluster)
 			Tasks: []Task{
 				{DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "ready",
 					Labels: []string{"proj:sheets-parity", "phase:build"},
@@ -590,7 +665,8 @@ func wave3Board() Board {
 // cue and a progress rail, its members below.
 func TestRenderClusterSection(t *testing.T) {
 	frame := ansi.Strip(Render(wave3Board(), UIState{Conn: ConnLive, LastSync: fixedNow}, 80, 40, fixedNow))
-	for _, want := range []string{"sheets-parity ~", "3/7", "Add the SUM() function", "Pivot tables"} {
+	// The header carries the claim-forward rail (wave-7 D34): 3 ready · 3 done.
+	for _, want := range []string{"sheets-parity ~", "3 ready", "3 done", "Add the SUM() function", "Pivot tables"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("cluster frame missing %q:\n%s", want, frame)
 		}

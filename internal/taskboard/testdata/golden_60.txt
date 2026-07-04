@@ -8,28 +8,28 @@ NOW
  ● Wire the SSE live bridge
    opus-3 · 4m00s · 2/3 · Cloud GUI epic
 
-── Cloud GUI epic ───────────────────────────────────── 7/10
+── Cloud GUI epic ───────────────────────── 2 ready · 7 done
   ▎○ Reconcile the #979 role seam                         P2
    ○ Add empty-state goldens                              P3
    ◐ Cut over the canvas default                     blocked
   +7 done
 
-── Search & Media epic ───────────────────────────────── 8/8
+── Search & Media epic ────────────────────────────── 8 done
 
-── sheets-parity ~ ───────────────────────────────────── 3/7
-   ○ Add the SUM() spreadsheet function                   P2
-   ○ Add a SUM function to the grid                       P3
-   ○ Implement VLOOKUP across sheets                      6d
-   ○ Pivot tables in the Studio grid                     11d
-  +3 done
+── sheets-parity ~ ──────────────────────── 3 ready · 3 done
 
-── living-values ~ ───────────────────────────────────── 0/2
-   ○ Wire the valueref resolver                           P1
-   ○ Build the living-values demo dataset
+── living-values ~ ───────────────────────────────── 1 ready
 
-── (no epic) ───────────────────────────────────────────────
-   ○ Fix the timeago clock-skew clamp                     P3
-   ○ Inline cell editing for the grid
+── (no epic) ─────────────────────────────────────── 1 ready
+
+
+
+
+
+
+
+
+
 
 
 

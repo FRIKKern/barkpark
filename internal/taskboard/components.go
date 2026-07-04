@@ -149,62 +149,136 @@ func criteriaFraction(c *Criteria) string {
 	return fmt.Sprintf("%d/%d", c.Met, c.Total)
 }
 
-// epicProgress returns (done, total) for an epic: folded-done are all done,
-// plus any done/closed still shown among the children.
-func epicProgress(e Epic) (done, total int) {
-	total = len(e.Children) + e.DoneFolded
-	done = e.DoneFolded
-	for _, c := range e.Children {
-		if c.Lifecycle == "done" || c.Lifecycle == "closed" {
-			done++
+// (epicProgress — the old done/total tally — was retired with the ▰▱ bar and the
+// done/total header token; the claim-forward rail below is sectionHint's job.)
+
+// sectionCounts tallies a section's members for the claim-forward header rail:
+// ready (immediately claimable), done (terminal, incl. the folded-away tally),
+// and open (the remaining non-terminal, non-ready work — blocked / plain open /
+// unclaimed in_progress). It is the shared unit behind every section header.
+type sectionCounts struct{ ready, done, open int }
+
+// countSection tallies a section's visible tasks plus its folded-done count into
+// a sectionCounts. Terminal survivors (recent done still shown) join the folded
+// pile in `done`, so the header's tally covers ALL finished work, not just the
+// hidden rows.
+func countSection(tasks []Task, doneFolded int) sectionCounts {
+	sc := sectionCounts{done: doneFolded}
+	for _, t := range tasks {
+		switch {
+		case t.Lifecycle == lifeReady:
+			sc.ready++
+		case isTerminal(t.Lifecycle):
+			sc.done++
+		default:
+			sc.open++
 		}
 	}
-	return done, total
+	return sc
 }
 
-// EpicHeader is the rule-style section header:
+// sectionHint is the ONE claim-forward right rail shared by every section header
+// — epics, derived clusters and the loose bucket (wave-7 decision 34):
 //
-//	── Cloud GUI epic ───────────────────────────── 7/12
+//	3 ready · 7 done
 //
-// The calm-board subtraction retired the ▰▱ progress bar; the dim "7/12" digits
-// carry the same completion at a glance without a second glyph vocabulary. A
-// Dormant epic renders exactly the same header line (its children are folded
-// away by the caller), so an idle goal collapses to one glanceable rule.
-func EpicHeader(e Epic, width int) string {
-	if width < 8 {
-		return truncate(e.Root.Title, width)
+// The READY count leads, tinted with the neutral/ready role (readiness is a
+// STATE, so the tint is the legal claim cue under "color = state, never
+// decoration"); the done tally trails dim. Ready is omitted at 0. A section with
+// neither ready nor done shows its open count (dim) instead, and one with nothing
+// to say at all returns "" for a bare rule. Returns (plain, styled) of equal
+// display width so the caller aligns on the plain width and prints the styled.
+func sectionHint(sc sectionCounts) (plain, styled string) {
+	var pp, ss []string
+	if sc.ready > 0 {
+		s := fmt.Sprintf("%d ready", sc.ready)
+		pp, ss = append(pp, s), append(ss, neutralStyle.Render(s))
 	}
-	done, total := epicProgress(e)
-	if total == 0 {
-		// No children and nothing folded (e.g. the "(no epic)" orphan bucket):
-		// a rule + title with no misleading 0/0 progress rail.
-		left := "── " + truncate(e.Root.Title, width-6) + " "
-		mid := width - disp(left)
+	if sc.done > 0 {
+		s := fmt.Sprintf("%d done", sc.done)
+		pp, ss = append(pp, s), append(ss, dimStyle.Render(s))
+	}
+	if len(pp) == 0 {
+		if sc.open > 0 {
+			s := fmt.Sprintf("%d open", sc.open)
+			return s, dimStyle.Render(s)
+		}
+		return "", ""
+	}
+	return strings.Join(pp, " · "), strings.Join(ss, " · ")
+}
+
+// renderSectionHeader is the ONE rule-style section-header layout, shared by
+// epics, derived clusters and the loose bucket so their claim-forward rails can
+// never drift (wave-7 decision 34):
+//
+//	── Cloud GUI epic ───────────────────────── 3 ready · 7 done
+//
+// derived marks an inferred cluster: its title renders monochrome-dim and trails
+// a dim "~". selected swaps the leading dash for the ▎ marker (both one column).
+// The rail is sectionHint(sc); an empty rail lets the dashes run to the edge. The
+// title is budgeted so at least minDashes survive; extreme widths degrade to a
+// rule + title. The final truncate is the width safety net.
+func renderSectionHeader(title string, derived, selected bool, sc sectionCounts, width int) string {
+	if width < 8 {
+		return truncate(title, width)
+	}
+	railPlain, railStyled := sectionHint(sc)
+	railW := disp(railPlain)
+
+	lead := "── "
+	if selected {
+		lead = "▎─ "
+	}
+	suffixW := 0
+	if derived {
+		suffixW = 2 // " ~"
+	}
+
+	const minDashes = 3
+	// layout: lead + title + [ ~] + " " + dashes + [ " " + rail ]
+	fixed := disp(lead) + suffixW + 1 // + the space after the title block
+	titleMax := width - fixed - minDashes
+	if railW > 0 {
+		titleMax -= 1 + railW // space before rail + rail
+	}
+	if titleMax < 1 {
+		// Extremely narrow: rule + title only, drop the rail.
+		t := title
+		if derived {
+			t += " ~"
+		}
+		return truncate(lead+t, width)
+	}
+	title = truncate(title, titleMax)
+
+	titleStyled := title
+	if derived {
+		titleStyled = dimStyle.Render(title + " ~")
+	}
+	left := lead + titleStyled + " "
+	leftW := disp(lead) + disp(title) + suffixW + 1
+
+	if railW == 0 {
+		mid := width - leftW
 		if mid < 0 {
 			return truncate(left, width)
 		}
-		return left + strings.Repeat("─", mid)
+		return truncate(left+strings.Repeat("─", mid), width)
 	}
-	right := fmt.Sprintf("%d/%d", done, total)
-	rightW := disp(right)
-
-	const lead = "── "
-	const minDashes = 3
-	// Budget the title so at least minDashes fit between it and the right rail.
-	titleMax := width - disp(lead) - 1 /*space after title*/ - minDashes - 1 /*space before right*/ - rightW
-	title := e.Root.Title
-	if titleMax < 1 {
-		// Extremely narrow: rule + title only, drop the progress rail.
-		return truncate(lead+title, width)
-	}
-	title = truncate(title, titleMax)
-	left := lead + title + " "
-	mid := width - disp(left) - 1 - rightW
+	mid := width - leftW - 1 - railW
 	if mid < minDashes {
 		mid = minDashes
 	}
-	line := left + strings.Repeat("─", mid) + " " + right
-	return truncate(line, width)
+	return truncate(left+strings.Repeat("─", mid)+" "+railStyled, width)
+}
+
+// EpicHeader is the rule-style section header for an authored epic, carrying the
+// claim-forward rail (wave-7 D34). The calm-board subtraction retired the ▰▱ bar;
+// the rail's "N ready · M done" says what's claimable here at a glance. A folded
+// epic (the default — see foldedEpic) renders exactly this one glanceable line.
+func EpicHeader(e Epic, width int) string {
+	return renderSectionHeader(e.Root.Title, false, false, countSection(e.Children, e.DoneFolded), width)
 }
 
 // titleStyleFor gives in_progress titles weight and done titles a recede.
@@ -255,7 +329,14 @@ func rowMeta(t Task, now time.Time) (plain, styled string) {
 			return p, s
 		}
 		if t.Priority != "" {
-			return t.Priority, dimStyle.Render(t.Priority)
+			// The live corpus stores priority as a bare digit ("0"..."4"); a lone
+			// "0" on a row reads as cryptic noise. Prefix "P" so it reads as the
+			// urgency it is (P0 most urgent) — matching the census/`bp` vocabulary.
+			lbl := t.Priority
+			if c := lbl[0]; c >= '0' && c <= '9' {
+				lbl = "P" + lbl
+			}
+			return lbl, dimStyle.Render(lbl)
 		}
 		return "", ""
 	case "done", "closed":

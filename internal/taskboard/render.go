@@ -215,9 +215,18 @@ func connGlyphWord(c ConnState) (string, string) {
 // so the card at st.Cursor wears the selection marker; a selection folded into
 // the "+N more" line marks that line instead, never vanishing silently.
 func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
+	// Claim-forward (wave-7 D35): when nothing is claimed but ready work exists,
+	// the band is NOT a dead "nothing claimed" line — it becomes the READY TO
+	// CLAIM head so there is always an obvious next task to move into NOW.
+	if showReadyHead(b) {
+		return renderReadyHead(b, st, width, maxLines, now)
+	}
 	lines := []string{boldStyle.Render("NOW")}
 	if len(b.Now) == 0 {
-		lines = append(lines, dimStyle.Render("   nothing claimed right now"))
+		// Both empty: no claims AND nothing ready. An honest all-clear, not a dead
+		// end — there is genuinely nothing to claim. The separator is the board's
+		// calm "·" (the em dash is a reading-frame glyph, not a board one).
+		lines = append(lines, dimStyle.Render("   nothing ready · all clear"))
 		return lines
 	}
 	bc := epicTitleByChild(b)
@@ -255,6 +264,45 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		sel := st.Cursor >= shown && st.Cursor < n
 		lines = append(lines, dimStyle.Render(truncate(
 			SelectionMarker(sel)+fmt.Sprintf("  +%d more claimed", folded), width)))
+	}
+	return lines
+}
+
+// renderReadyHead paints the claim-forward READY TO CLAIM band (wave-7 D35): a
+// label mirroring "NOW", then the top ready tasks as single calm TaskRows (○
+// ready glyph + priority meta — NO new vocabulary), then a dim, display-only
+// "+K more ready" tail naming the depth behind the head. The head rows are the
+// FIRST cursor stops (indexes [0, len(ReadyHead)) — the shell's visibleRows), so
+// the row at st.Cursor wears the ▎ marker; c claims it and enter opens its
+// detail. Over budget it shows as many rows as fit and folds the rest into the
+// tail, marking the tail selected when the cursor is on a folded row (never a
+// silently vanishing selection — the same honesty the NOW fold uses).
+func renderReadyHead(b Board, st UIState, width, maxLines int, now time.Time) []string {
+	lines := []string{boldStyle.Render("READY TO CLAIM")}
+	n := len(b.ReadyHead)
+
+	// Each ready row is one line; reserve the label + the tail line under budget.
+	shown := n
+	if 1+n > maxLines {
+		shown = maxLines - 2 // label + fold/tail line
+		if shown < 0 {
+			shown = 0
+		}
+	}
+
+	for i, t := range b.ReadyHead[:shown] {
+		selected := st.Cursor == i
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, childIndent, width, now) {
+			lines = append(lines, ln)
+		}
+	}
+
+	// The tail counts every ready task NOT shown — both the budget-folded head
+	// rows and the corpus queue beyond the head — so it is honest about the depth.
+	if more := b.ReadyTotal - shown; more > 0 {
+		sel := st.Cursor >= shown && st.Cursor < n
+		lines = append(lines, dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d more ready", more), width)))
 	}
 	return lines
 }
@@ -350,7 +398,13 @@ func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 // than the one the act verbs (c/x/o) fire on.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	selIdx := len(b.Now) // NOW cards own the first indexes (renderNowBand marks them)
+	// The pinned band owns the first indexes (renderNowBand marks them): the READY
+	// TO CLAIM head when nothing is claimed, else the NOW cards. showReadyHead
+	// gates the band identically, so this offset always matches what was painted.
+	selIdx := len(b.Now)
+	if showReadyHead(b) {
+		selIdx = len(b.ReadyHead)
+	}
 	emit := func(s string) { lines = append(lines, s) }
 	// emitTask paints one navigable task row. The calm-board subtraction stripped
 	// the row to gutter-glyph + title + one meta token, so it no longer needs the
@@ -425,19 +479,22 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		if len(lines) > 0 {
 			emit("")
 		}
-		// With zero epics the whole board IS the loose queue, so "(no epic)" is
-		// noise — the section reads as a plain queue title. Otherwise it names
-		// the bucket the loose tasks fall into. Display-only — no selIdx.
-		title := "(no epic)"
-		if len(b.Epics) == 0 {
-			title = "tasks"
+		// The loose bucket is now a NAVIGABLE folding header (wave-7 D33) — it
+		// consumes a selIdx and folds by default unless it owns active work, so the
+		// flat-queue live shape's bulk collapses to one line like every section.
+		selected := selIdx == st.Cursor
+		if selected {
+			cursorLine = len(lines)
 		}
-		emit(EpicHeader(Epic{Root: Task{Title: title}}, width))
-		for _, o := range b.Orphans {
-			emitTask(o)
-		}
-		if b.OrphansFolded > 0 {
-			emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
+		emit(orphanHeaderLine(b, selected, width))
+		selIdx++
+		if !foldedOrphans(st, b) {
+			for _, o := range b.Orphans {
+				emitTask(o)
+			}
+			if b.OrphansFolded > 0 {
+				emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
+			}
 		}
 	}
 
@@ -465,43 +522,30 @@ func headerLine(e Epic, selected bool, width int) string {
 	return h
 }
 
-// clusterHeaderLine renders a derived cluster's section header — the same
-// rule-style line an epic wears, but the title is the cluster key rendered
-// MONOCHROME-DIM (the calm-board subtraction retired the per-tag chip hue — a
-// label is identity, not state), with its taxonomy prefix stripped and trailed by
-// a dim "~" that marks the grouping as DERIVED (inferred from a tag, not authored
-// structure). It carries the dim done/total DIGITS over the cluster's members
-// (the ▰▱ bar is gone, like every other section) and swaps its leading dash for
-// the ▎ selection marker when the cursor sits on it (cluster headers are
-// navigable — enter/h/l fold them). The final truncate is the width safety net.
+// clusterHeaderLine renders a derived cluster's section header through the ONE
+// shared layout (renderSectionHeader): the cluster key is rendered MONOCHROME-DIM
+// (the calm-board subtraction retired the per-tag chip hue — a label is identity,
+// not state), its taxonomy prefix stripped and trailed by a dim "~" that marks the
+// grouping as DERIVED. It wears the SAME claim-forward "N ready · M done" rail as
+// an epic (wave-7 D34) and swaps its leading dash for the ▎ marker when selected
+// (cluster headers are navigable — enter/h/l fold them).
 func clusterHeaderLine(c Cluster, selected bool, width int) string {
-	name := clusterDisplayName(c.Key)
-	if width < 8 {
-		return truncate(name, width)
-	}
-	styledName := dimStyle.Render(name + " ~")
+	return renderSectionHeader(clusterDisplayName(c.Key), true, selected,
+		countSection(c.Tasks, c.DoneFolded), width)
+}
 
-	head := "── "
-	if selected {
-		head = "▎─ "
+// orphanHeaderLine renders the loose "(no epic)" bucket's navigable header
+// (wave-7 D33) through the same shared layout, carrying the claim-forward rail
+// over its loose rows. Its title is "(no epic)" when authored epics exist and
+// "tasks" when the whole board is loose, so a pure flat queue reads as a plain
+// queue title rather than a bucket-of-leftovers.
+func orphanHeaderLine(b Board, selected bool, width int) string {
+	title := "(no epic)"
+	if len(b.Epics) == 0 {
+		title = "tasks"
 	}
-	leadW := disp(head) + disp(styledName) + 1 // head + "name ~" + trailing space
-
-	done, total := epicProgress(Epic{Children: c.Tasks, DoneFolded: c.DoneFolded})
-	if total == 0 {
-		mid := width - leadW
-		if mid < 0 {
-			return truncate(head+styledName, width)
-		}
-		return truncate(head+styledName+" "+strings.Repeat("─", mid), width)
-	}
-	right := fmt.Sprintf("%d/%d", done, total)
-	const minDashes = 3
-	mid := width - leadW - 1 - disp(right)
-	if mid < minDashes {
-		mid = minDashes
-	}
-	return truncate(head+styledName+" "+strings.Repeat("─", mid)+" "+right, width)
+	return renderSectionHeader(title, false, selected,
+		countSection(b.Orphans, b.OrphansFolded), width)
 }
 
 // clusterDisplayName is a cluster key's display form: one proj:/area: taxonomy

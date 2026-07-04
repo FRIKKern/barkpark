@@ -220,7 +220,10 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 	}
 }
 
-func TestEpicHeaderShowsProgress(t *testing.T) {
+// TestEpicHeaderShowsClaimForwardRail — the wave-7 header rail (D34) leads with
+// the claimable READY count, then the done tally, replacing the old done/total
+// token. Here: 1 ready child, 1 in_progress (open, not claimable), 7 folded done.
+func TestEpicHeaderShowsClaimForwardRail(t *testing.T) {
 	e := Epic{
 		Root:       Task{Title: "Cloud GUI epic"},
 		Children:   []Task{{Lifecycle: "ready"}, {Lifecycle: "in_progress"}},
@@ -230,8 +233,11 @@ func TestEpicHeaderShowsProgress(t *testing.T) {
 	if !strings.Contains(line, "Cloud GUI epic") {
 		t.Errorf("header missing title: %q", line)
 	}
-	if !strings.Contains(line, "7/9") {
-		t.Errorf("header should show 7/9 (7 folded done of 9 total): %q", line)
+	if !strings.Contains(line, "1 ready") {
+		t.Errorf("header should lead with the claimable ready count: %q", line)
+	}
+	if !strings.Contains(line, "7 done") {
+		t.Errorf("header should show the done tally: %q", line)
 	}
 	if runewidth.StringWidth(line) > 80 {
 		t.Errorf("header over width: %q", line)
