@@ -56,11 +56,16 @@ var readingGlyphExtras = map[rune]string{
 	'▍': "pdrender quote/callout bar (thin)",
 	'▸': "detail section marker",
 	'⧉': "twin-task marker",
+	'›': "breadcrumb separator (navigation-shell trail, charter D11/D18)",
 }
 
 func allowedGlyphs(golden string) map[rune]string {
 	base := filepath.Base(golden)
-	reading := strings.HasPrefix(base, "detail_") || strings.HasPrefix(base, "paper_")
+	// compose_* goldens composite the reading frames (detail/paper body) under a
+	// breadcrumb — so they carry the reading vocabulary, not just the board grid.
+	reading := strings.HasPrefix(base, "detail_") ||
+		strings.HasPrefix(base, "paper_") ||
+		strings.HasPrefix(base, "compose_")
 	out := map[rune]string{}
 	for r, why := range glyphAllowlist {
 		out[r] = why

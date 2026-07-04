@@ -10,9 +10,6 @@ NOW
 
 ── Cloud GUI epic ───────────────────────────────────────────────────────────────────────────── 7/10
   ▎○ Reconcile the #979 role seam                                                                 P2
-     ✓ Extract the shared statusRole vocabulary
-     ○ Reconcile onto the landed #979 seam
-     P2 · updated 20m
    ○ Add empty-state goldens                                                                      P3
    ◐ Cut over the canvas default                                                             blocked
   +7 done
@@ -43,6 +40,9 @@ NOW
 
 
 
+
+
+
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
-jk move · enter open · c claim · x close · o studio
+jk move · enter open · esc back · c claim · x close · o studio

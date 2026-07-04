@@ -41,13 +41,13 @@ func loadBoardFixture(t *testing.T) Board {
 	return b
 }
 
-// fixtureUIState pins a cursor-selected row and one expanded task so the goldens
-// exercise both selection and the shrunk inline expand. The cursor indexes the
-// SHELL's visibleRows order (NOW cards, then each epic's header + children, then
-// clusters, then orphans). After the NOW de-dup the two claimed tasks render ONLY
-// in the pinned band, so the first spine child under the epic header is index 3 —
-// the ready "Reconcile the #979 role seam", which carries CriteriaItems so the
-// golden shows the ○/✓ criteria stub of the shrunk expand.
+// fixtureUIState pins a cursor-selected spine row so the goldens exercise the ▎
+// selection marker. The cursor indexes the SHELL's visibleRows order (NOW cards,
+// then each epic's header + children, then clusters, then orphans). After the
+// NOW de-dup the two claimed tasks render ONLY in the pinned band, so the first
+// spine child under the epic header is index 3 — the ready "Reconcile the #979
+// role seam". Inline expand is gone (charter D11): enter now PUSHES a detail
+// frame the compositor paints, so the BOARD golden is a single calm line per row.
 //
 // Frame is left at 0: the calm-board subtraction retired the frame-driven glyph
 // animation (there is no spinner to capture in a moving state anymore), so a
@@ -55,7 +55,6 @@ func loadBoardFixture(t *testing.T) Board {
 func fixtureUIState() UIState {
 	return UIState{
 		Cursor:   3,
-		Expanded: map[string]bool{"reconcile-979-seam": true},
 		Conn:     ConnLive,
 		LastSync: time.Date(2026, 7, 3, 11, 58, 0, 0, time.UTC),
 	}
@@ -579,7 +578,7 @@ func wave3Board() Board {
 		}},
 		Orphans: []Task{
 			{DocID: "cell-edit", Title: "Inline cell editing", Lifecycle: "open",
-				Suggested: "proj:sheets-parity", UpdatedAt: warmNow},
+				UpdatedAt: warmNow},
 		},
 		Stale:  2,
 		Counts: map[string]int{"in_progress": 0, "blocked": 0, "done": 3},

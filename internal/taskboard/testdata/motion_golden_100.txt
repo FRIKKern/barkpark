@@ -45,4 +45,4 @@ NOW
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
 ● claimed 'flash-now' · 4m
-jk move · enter open · c claim · x close · o studio
+jk move · enter open · esc back · c claim · x close · o studio

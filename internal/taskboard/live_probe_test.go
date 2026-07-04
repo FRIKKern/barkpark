@@ -161,6 +161,77 @@ func TestLiveProbe(t *testing.T) {
 		fmt.Printf("driven-tasks inversion SKIPPED: no design_doc-bearing task in the live corpus\n")
 	}
 
+	// ── Reading-frame render probe (wave 6 — the frames meet the real corpus) ──
+	// RenderTaskDetail on a MEATY task (description + children + criteria), then
+	// RenderPaperFrame on a real design_doc paper fetched via apiclient.PaperDoc,
+	// then the HTML-only honest state. READ-ONLY: no claim/close/relabel anywhere.
+	// Every rendered line is asserted width-safe at the supported widths so a real
+	// title/prose/timeline can't blow out the pane or garble on truncation.
+	widthSafe := func(label string, lines []string, width int) {
+		for i, ln := range lines {
+			if cw := disp(ln); cw > width {
+				t.Errorf("%s width %d: line %d is %d cols (blowout): %q", label, width, i, cw, ln)
+			}
+		}
+	}
+	meaty := ""
+	for id, d := range details {
+		if strings.TrimSpace(d.Description) == "" {
+			continue
+		}
+		if len(ChildrenOf(fullSnap.Tasks, id)) == 0 {
+			continue
+		}
+		if d.Criteria == nil && len(d.CriteriaItems) == 0 {
+			continue
+		}
+		meaty = id
+		break
+	}
+	if meaty != "" {
+		d := details[meaty]
+		children := ChildrenOf(fullSnap.Tasks, meaty)
+		for _, w := range []int{60, 80, 100} {
+			body, stops := RenderTaskDetail(d, children, 0, w, now)
+			if len(body) == 0 {
+				t.Errorf("RenderTaskDetail(%q) produced an empty body at width %d", meaty, w)
+			}
+			widthSafe("detail", body, w)
+			if w == 80 {
+				fmt.Printf("RenderTaskDetail OK: %q → %d body lines, %d stops (children+papers)\n", d.Title, len(body), len(stops))
+			}
+		}
+	} else {
+		fmt.Printf("RenderTaskDetail SKIPPED: no task with description+children+criteria in the live corpus\n")
+	}
+
+	if withDesignDoc != "" {
+		ps, perr := FetchPaper(c, "production", withDesignDoc)
+		if perr != nil {
+			fmt.Printf("FetchPaper(%q) failed (honest Err state rendered): %v\n", withDesignDoc, perr)
+		}
+		driven := DrivenTasks(fullSnap.Tasks, details, withDesignDoc)
+		for _, w := range []int{60, 80, 100} {
+			body, _ := RenderPaperFrame(ps, driven, fullSnap.Tasks, 0, w, now)
+			if len(body) == 0 {
+				t.Errorf("RenderPaperFrame(%q) produced an empty body at width %d", withDesignDoc, w)
+			}
+			widthSafe("paper", body, w)
+		}
+		fmt.Printf("RenderPaperFrame OK: %q (loading=%v htmlOnly=%v err=%q) drives %d rail tasks\n",
+			ps.Slug, ps.Loading, ps.HTMLOnly, ps.Err, len(driven))
+	}
+
+	// The HTML-only honest state must render a clear browser-handoff line (never a
+	// blank frame) even when no live paper happens to be HTML-only.
+	htmlBody, _ := RenderPaperFrame(PaperState{Slug: "legacy", HTMLOnly: true}, nil, nil, 0, 80, now)
+	joinedHTML := strings.Join(htmlBody, "\n")
+	if !strings.Contains(joinedHTML, "HTML-only") {
+		t.Errorf("HTML-only paper state did not render its honest browser-handoff line:\n%s", joinedHTML)
+	}
+	widthSafe("html-only", htmlBody, 80)
+	fmt.Printf("reading-frame probe OK: detail + paper + HTML-only states render width-safe\n")
+
 	// The pure spine + full frame must survive the real corpus at every
 	// supported width without panicking or overrunning the pane.
 	st := UIState{Conn: ConnLive, LastSync: snap.FetchedAt}

@@ -173,7 +173,6 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// The freq map is computed against the SAME loose set the keys are resolved
 	// from, so suggestion-eligibility below stays consistent with clustering.
 	loose := board.Orphans
-	freq := looseLabelFreq(loose)
 	board.Clusters, board.Orphans = deriveClusters(loose, now)
 
 	// NOW de-dup for the loose pile, mirroring the epic treatment above: the
@@ -183,17 +182,6 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// DISPLAY only now (charter D14).
 	board.Clusters = dedupNowFromClusters(board.Clusters, nowSet)
 	board.Orphans = stripNow(board.Orphans, nowSet)
-
-	// Suggest a cluster for each still-loose orphan that carries no cluster key,
-	// by title similarity. Advisory only — it sets a hint, never moves the row.
-	for i := range board.Orphans {
-		if clusterKey(board.Orphans[i], freq) != "" {
-			continue // it had a key (just too few peers to cluster) — no cross-suggest
-		}
-		if key, ok := bestClusterSuggestion(board.Orphans[i], board.Clusters); ok {
-			board.Orphans[i].Suggested = key
-		}
-	}
 
 	// Twin detection: near-duplicate titles within the same group point at each
 	// other so "these two are the same work" is impossible to miss. Groups are

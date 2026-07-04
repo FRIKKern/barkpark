@@ -360,10 +360,10 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		if selected {
 			cursorLine = len(lines)
 		}
-		expanded := st.Expanded[t.DocID]
 		// Light the title if this row's task just changed (one-shot flash); the
-		// DocID is unchanged, so the expanded lookup above still resolves.
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, expanded, childIndent, width, now) {
+		// row is a single calm line — enter descends into the detail frame now
+		// (charter D11), so there is no inline-expand branch to feed.
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, childIndent, width, now) {
 			emit(ln)
 		}
 		selIdx++
@@ -630,15 +630,16 @@ func eventLifecycle(verb string) string {
 	}
 }
 
-// renderFooter is the one hint line (the calm-board subtraction dropped the `t`
-// tag verb — the derived-tag suggestion left the list with the chips). A tight
-// pane drops the word "move" (jk next to the other single-key verbs still reads
-// as motion) rather than blind-truncating the LAST verb off the end; the trailing
-// truncate stays as the sub-60 safety net.
+// renderFooter is the BOARD frame's one hint line (charter D18: one line per
+// frame kind — the reading frames get their own hint from the compositor). `esc
+// back` teaches the navigation-shell ascend now that enter descends into a
+// detail frame (charter D11). A tight pane drops the word "move" (jk next to the
+// other single-key verbs still reads as motion) rather than blind-truncating the
+// LAST verb off the end; the trailing truncate stays as the sub-60 safety net.
 func renderFooter(width int) string {
-	hint := "jk move · enter open · c claim · x close · o studio"
+	hint := "jk move · enter open · esc back · c claim · x close · o studio"
 	if disp(hint) > width {
-		hint = "jk · enter open · c claim · x close · o studio"
+		hint = "jk · enter open · esc back · c claim · x close · o studio"
 	}
 	return dimStyle.Render(truncate(hint, width))
 }

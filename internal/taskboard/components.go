@@ -138,58 +138,6 @@ func AgeBadge(t, now time.Time) string {
 	}
 }
 
-const meterCells = 5
-
-// Meter renders the acceptance-criteria progress ("▰▰▱ 2/3"). A nil Criteria —
-// or a zero-total one — renders nothing (never a bare "0/0").
-//
-// The calm board itself no longer paints it anywhere (charter D14 — the list
-// and the shrunk expand both use criteriaFraction's bare digits); it is kept,
-// tested, for the detail-frame wave, whose parallel slices build against this
-// same base. If that wave ships its own checklist without it, delete it (and
-// scaleFill) there.
-func Meter(c *Criteria) string {
-	if c == nil || c.Total <= 0 {
-		return ""
-	}
-	met, total := c.Met, c.Total
-	if met < 0 {
-		met = 0
-	}
-	if met > total {
-		met = total
-	}
-	cells := total
-	filled := met
-	if total > meterCells { // scale down to a fixed bar for large criteria sets
-		cells = meterCells
-		filled = scaleFill(met, total, meterCells)
-	}
-	return strings.Repeat("▰", filled) + strings.Repeat("▱", cells-filled) +
-		fmt.Sprintf(" %d/%d", c.Met, c.Total)
-}
-
-// scaleFill maps met/total onto a cells-wide bar, rounding half-up but never
-// lying at the edges: any progress shows at least one filled cell, and an
-// unfinished bar never renders full (a "▱▱▱▱▱ 1/20" or "▰▰▰▰▰ 19/20" reads
-// as broken or done when it is neither).
-func scaleFill(met, total, cells int) int {
-	filled := (met*cells + total/2) / total
-	if filled < 1 && met > 0 {
-		filled = 1
-	}
-	if filled >= cells && met < total {
-		filled = cells - 1
-	}
-	if filled < 0 {
-		filled = 0
-	}
-	if filled > cells {
-		filled = cells
-	}
-	return filled
-}
-
 // criteriaFraction is the calm-board criteria token: the bare "met/total" digits
 // ("2/3"), no ▰▱ bar (the subtraction pass retired the meter's cells; digits
 // carry the same information without a second glyph vocabulary). Empty for a nil
@@ -340,17 +288,17 @@ func staleBadge(t Task, now time.Time) (plain, styled string) {
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
-// TaskRow renders one task. Collapsed = a single calm line
+// TaskRow renders one task as a single calm line
 //
 //	indent + ▎glyph + title              …right-meta
 //
-// expanded = that line plus a minimal hanging-indent detail stub. The calm-board
-// subtraction stripped the list to its essence: ONE status glyph in the gutter,
-// a monochrome-dim title, and ONE dim right-meta token — chips, twin ⧉ glyphs and
-// criteria meters all moved to the detail view. Everything is width-safe; when
-// tight the meta sheds first (title never clips below 8 cols), and below
-// dropMetaBelow the row is glyph + title only.
-func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) []string {
+// The calm-board subtraction stripped the list to its essence: ONE status glyph
+// in the gutter, a monochrome-dim title, and ONE dim right-meta token — chips,
+// twin ⧉ glyphs and criteria meters all moved to the detail FRAME (the
+// navigation shell replaced the old inline expand with the stack, charter D11).
+// Everything is width-safe; when tight the meta sheds first (title never clips
+// below 8 cols), and below dropMetaBelow the row is glyph + title only.
+func TaskRow(t Task, selected bool, indent, width int, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
 	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
@@ -389,92 +337,7 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) 
 		}
 	}
 
-	out := []string{line}
-	if expanded {
-		out = append(out, expandedDetail(t, indent, width, now)...)
-	}
-	return out
-}
-
-// expandedDetail is the MINIMAL hanging-indent stub shown under an expanded row
-// (charter D23): the subtraction pass shrank inline expand to a criteria stub +
-// one dim meta line so `enter` stays alive until the navigation shell replaces
-// the whole mechanism with a real detail frame next wave. Labels, twin naming and
-// dependency prose all moved to that frame — here a thin task stays thin.
-func expandedDetail(t Task, indent, width int, now time.Time) []string {
-	hang := strings.Repeat(" ", indent+3) // align under the title column
-	var lines []string
-
-	// The criteria stub is a real ○/✓ checklist — watching an agent tick a box is
-	// the board's checklists-that-fill-themselves moment. It returns pre-styled
-	// lines (met ok-tinted, unmet dim), so it is appended directly.
-	lines = append(lines, CriteriaChecklist(t.CriteriaItems, t.Criteria, indent, width)...)
-
-	if t.Priority != "" || !t.UpdatedAt.IsZero() {
-		bc := t.Priority
-		if age := AgeBadge(t.UpdatedAt, now); age != "" {
-			if bc != "" {
-				bc += " · "
-			}
-			bc += "updated " + age
-		}
-		if bc != "" {
-			lines = append(lines, dimStyle.Render(truncate(hang+bc, width)))
-		}
-	}
-	return lines
-}
-
-// criteriaCap is how many checklist lines CriteriaChecklist keeps when it
-// folds the remainder into a "… +N more" tail — enough to read a task's shape
-// at a glance without letting a 30-criterion goal shove the spine offscreen.
-// The fold only fires when it saves at least one line (N >= 2), so the tallest
-// unfolded checklist is criteriaCap+1 lines.
-const criteriaCap = 8
-
-// CriteriaChecklist renders acceptance criteria as a real ○/✓ checklist — one
-// hanging-indent line per criterion, a met item ok-tinted (its ✓ reads as work
-// that has LANDED, the fleet's checklists-that-fill-themselves moment) and an
-// unmet item dim. When the decoded item list is present it paints the text;
-// when only the {met,total} counter survived (a payload without content, an
-// older server) it falls back to
-// the single calm "criteria 2/3" digits line so the detail is never emptier
-// than before (the calm-board subtraction retired the ▰▱ meter cells here too —
-// one glyph vocabulary, charter D14). Every line is width-safe; a long set folds
-// past criteriaCap to a dim "… +N more" tail. A malformed (textless) entry keeps
-// its slot as a bare ○ — honest that an Nth criterion exists even when its text
-// did not decode. nil/empty items with a nil/zero Criteria render nothing.
-func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []string {
-	hang := strings.Repeat(" ", indent+3) // align under the title column, like expandedDetail
-	if len(items) == 0 {
-		if f := criteriaFraction(c); f != "" {
-			return []string{dimStyle.Render(truncate(hang+"criteria "+f, width))}
-		}
-		return nil
-	}
-	// Fold only when it SAVES lines: at criteriaCap+1 items the "… +1 more"
-	// tail would spend its line hiding exactly one item — same height, less
-	// truth — so that one extra item paints instead.
-	shown, folded := items, 0
-	if len(items) > criteriaCap+1 {
-		shown, folded = items[:criteriaCap], len(items)-criteriaCap
-	}
-	lines := make([]string, 0, len(shown)+1)
-	for _, it := range shown {
-		glyph, style := "○", dimStyle
-		if it.Met {
-			glyph, style = "✓", okStyle
-		}
-		line := hang + glyph
-		if it.Criterion != "" {
-			line += " " + it.Criterion
-		}
-		lines = append(lines, style.Render(truncate(line, width)))
-	}
-	if folded > 0 {
-		lines = append(lines, dimStyle.Render(truncate(hang+fmt.Sprintf("… +%d more", folded), width)))
-	}
-	return lines
+	return []string{line}
 }
 
 // NowCard is a pinned two-line claim card:

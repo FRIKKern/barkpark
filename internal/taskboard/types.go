@@ -21,10 +21,6 @@ type Task struct {
 	// function'") instead of an opaque doc id. "" when TwinOf is "" or the
 	// partner title was empty; the renderer falls back to TwinOf then.
 	TwinTitle string
-	// Suggested is a derived cluster key this unkeyed task plausibly belongs to
-	// (best member-title Jaccard >= 0.4), rendered as a dim "+key?" chip and
-	// applied only by the explicit t verb. "" when none.
-	Suggested string
 	// CriteriaItems is the decoded content.acceptance_criteria list: criterion
 	// text + met (met === true only, mirroring the server's tolerance contract
 	// in Barkpark.Tasks.Criteria). Malformed entries keep their slot with empty
@@ -128,10 +124,12 @@ const (
 	ConnOffline
 )
 
-// UIState is the interaction state the renderer needs.
+// UIState is the interaction state the renderer needs. It is the BOARD frame's
+// (stack level 0) interaction state; pushed reading frames carry their own
+// Cursor/Scroll on the Frame struct (frames.go). Cursor here indexes the
+// flattened visible-row list the board paints.
 type UIState struct {
 	Cursor         int             // index into the flattened visible-row list
-	Expanded       map[string]bool // doc_id -> inline detail open
 	CollapsedEpics map[string]bool // root doc_id -> user-collapsed
 	Conn           ConnState
 	LastSync       time.Time

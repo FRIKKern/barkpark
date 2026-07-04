@@ -60,7 +60,13 @@ type actionResultMsg struct{ res ActionResult }
 // the action landing, so it must not wipe the action's own confirmation off
 // the strip (any other snapshot clears a stale strip + disarms the close guard).
 type snapshotMsg struct {
-	snap      Snapshot
+	snap Snapshot
+	// details is the TaskDetail reading index decoded in the SAME round-trip as
+	// the board rows (charter D28: the shell keeps the DetailIndex — the fetch
+	// seam widened to FetchSnapshotFull). applySnapshot stores it on the Model so
+	// every FrameTask and the depth-0 wide preview read their detail straight out
+	// of the in-hand index, with zero extra fetches.
+	details   DetailIndex
 	err       error
 	keepStrip bool
 }
@@ -88,8 +94,8 @@ func (m Model) refetchCmd(keepStrip bool) tea.Cmd {
 	fetch := m.fetch
 	client := m.client
 	return func() tea.Msg {
-		snap, err := fetch(client)
-		return snapshotMsg{snap: snap, err: err, keepStrip: keepStrip}
+		snap, details, err := fetch(client)
+		return snapshotMsg{snap: snap, details: details, err: err, keepStrip: keepStrip}
 	}
 }
 
@@ -190,6 +196,13 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	merged := mergeForward(m.prevTasks, msg.snap.Tasks)
 	mergedSnap := msg.snap
 	mergedSnap.Tasks = merged
+	// Keep the reading substrate in hand (charter D28): the merged task set feeds
+	// ChildrenOf/DrivenTasks for the detail + paper frames, and the DetailIndex is
+	// the zero-fetch source every FrameTask + the wide depth-0 preview read from.
+	m.tasks = merged
+	if msg.details != nil {
+		m.details = msg.details
+	}
 	// Recompute repo correlation against the fresh task set BEFORE building, so
 	// the "↳ git" badges and epic-rank boost track the tasks as they move. Pure
 	// and cheap; a no-op (empty Mentioned) outside a git repo.

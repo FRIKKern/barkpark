@@ -51,9 +51,9 @@ func TestDebounceCoalescesBurstToOneRefetch(t2 *testing.T) {
 
 	// The newest generation fires exactly one refetch.
 	fetches := 0
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
 		fetches++
-		return Snapshot{FetchedAt: clk.now()}, nil
+		return Snapshot{FetchedAt: clk.now()}, nil, nil
 	}
 	m2, c := m.handleDebounce(debounceMsg{gen: 3})
 	if c == nil {
@@ -289,19 +289,19 @@ func TestSSEEventDrivesRefetchAndSwap(t2 *testing.T) {
 	// Inject build so the assertion does not depend on the wiring stub's policy
 	// (which the lead deletes at merge); this test owns its own tiny board rule.
 	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board { return Board{Orphans: s.Tasks} }
-	m.fetch = func(_ *apiclient.Client) (Snapshot, error) {
+	m.fetch = func(_ *apiclient.Client) (Snapshot, DetailIndex, error) {
 		resp, err := http.Get(srv.URL + "/snap")
 		if err != nil {
-			return Snapshot{}, err
+			return Snapshot{}, nil, err
 		}
 		defer resp.Body.Close()
 		var body struct {
 			DocID string `json:"doc_id"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return Snapshot{}, err
+			return Snapshot{}, nil, err
 		}
-		return Snapshot{Tasks: []Task{{DocID: body.DocID, Title: body.DocID}}, FetchedAt: fetchedAt}, nil
+		return Snapshot{Tasks: []Task{{DocID: body.DocID, Title: body.DocID}}, FetchedAt: fetchedAt}, nil, nil
 	}
 
 	m, _ = m.handleChange(changeMsg{live: true})
@@ -402,8 +402,8 @@ func TestConnStateFollowsChangeSourceNotRefetch(t2 *testing.T) {
 	}
 
 	// A poll-fallback change → refetch → ConnPolling (lastLiveEvent never bumped).
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
-		return Snapshot{Tasks: []Task{t("x")}, FetchedAt: clk.now()}, nil
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+		return Snapshot{Tasks: []Task{t("x")}, FetchedAt: clk.now()}, nil, nil
 	}
 	m = drive(m, false)
 	if m.ui.Conn != ConnPolling {

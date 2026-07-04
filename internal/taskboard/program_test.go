@@ -448,36 +448,46 @@ func TestHAndLOnTaskAreNoOps(t2 *testing.T) {
 	m.ui.Cursor = 0 // now card n1 (a task, not a header)
 	m, _ = step(t2, m, runes("l"))
 	m, _ = step(t2, m, runes("h"))
-	if m.ui.Expanded["n1"] {
-		t2.Fatal("h/l on a task row toggled expansion; they should only fold epics")
+	// h/l are the section-fold controls; on a task row they must do NOTHING — no
+	// fold, and (charter D11) they must never descend into a frame either.
+	if len(m.stack) != 1 {
+		t2.Fatalf("h/l on a task row changed the stack depth to %d, want 1", len(m.stack))
 	}
 	if len(m.ui.CollapsedEpics) != 0 {
 		t2.Fatalf("h/l on a task row touched CollapsedEpics: %+v", m.ui.CollapsedEpics)
 	}
 }
 
-func TestEnterOnTaskTogglesExpanded(t2 *testing.T) {
+// enter on a task row PUSHES a FrameTask (charter D11/D29) — the navigation-shell
+// descent that replaced the retired inline-expand toggle. It never changes the
+// board's own row count, and esc pops back to the board.
+func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.ui.Cursor = 0 // now card n1
 
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.ui.Expanded["n1"] {
-		t2.Fatal("enter on a NOW card did not expand it")
+	if len(m.stack) != 2 {
+		t2.Fatalf("enter on a NOW card did not push a frame: stack depth %d, want 2", len(m.stack))
 	}
-	// Expanding must NOT change the row count (detail is inline render, not a row).
+	top := m.topFrame()
+	if top.Kind != FrameTask || top.Ref != "n1" {
+		t2.Fatalf("pushed frame = {%v %q}, want {FrameTask n1}", top.Kind, top.Ref)
+	}
+	// The board's own visible-row list is unchanged under the pushed frame.
 	if len(m.visibleRows()) != 9 {
-		t2.Fatalf("expanding a task changed row count to %d, want 9", len(m.visibleRows()))
+		t2.Fatalf("pushing a detail frame changed board row count to %d, want 9", len(m.visibleRows()))
 	}
-	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.ui.Expanded["n1"] {
-		t2.Fatal("second enter did not collapse the inline detail")
+	// esc ascends back to the board (stack root).
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEsc})
+	if len(m.stack) != 1 || m.topFrame().Kind != FrameBoard {
+		t2.Fatalf("esc did not return to the board: depth %d top %v", len(m.stack), m.topFrame().Kind)
 	}
 
-	// enter on a child row expands that child.
+	// enter on a child row pushes that child's FrameTask.
 	m.ui.Cursor = 3 // child c1
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if !m.ui.Expanded["c1"] {
-		t2.Fatal("enter on a child task did not expand it")
+	if top := m.topFrame(); top.Kind != FrameTask || top.Ref != "c1" {
+		t2.Fatalf("enter on a child pushed {%v %q}, want {FrameTask c1}", top.Kind, top.Ref)
 	}
 }
 
@@ -595,8 +605,8 @@ func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 func TestActionResultDisarmsCloseGuard(t2 *testing.T) {
 	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
 	m.now = func() time.Time { return time.Unix(10, 0) }
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
-		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil, nil
 	}
 	m.ui.Cursor = 0
 
@@ -748,8 +758,8 @@ func (e fakeErr) Error() string { return string(e) }
 func TestActionReconcileKeepsConfirmationStrip(t2 *testing.T) {
 	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
 	m.now = func() time.Time { return time.Unix(10, 0) }
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
-		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil, nil
 	}
 
 	m, cmd := step(t2, m, actionResultMsg{res: ActionResult{OK: true, Message: "claimed as w · epoch 1"}})
@@ -803,8 +813,8 @@ func TestSnapshotDisarmsCloseGuard(t2 *testing.T) {
 func TestInitFiresInitialFetch(t2 *testing.T) {
 	m := newModel(nil, "", Config{})
 	m.backstopEvery = time.Millisecond // so the batched backstop tick returns fast
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
-		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil, nil
 	}
 	cmd := m.Init()
 	if cmd == nil {
@@ -1015,8 +1025,8 @@ func TestStaleFrameTickIsDropped(t2 *testing.T) {
 func TestInitSchedulesNoFrame(t2 *testing.T) {
 	m := newModel(nil, "", Config{})
 	m.backstopEvery = time.Millisecond // so calling the backstop tick returns fast
-	m.fetch = func(*apiclient.Client) (Snapshot, error) {
-		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil
+	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
+		return Snapshot{FetchedAt: time.Unix(1, 0)}, nil, nil
 	}
 	batch, ok := m.Init()().(tea.BatchMsg)
 	if !ok {
