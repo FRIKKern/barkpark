@@ -7,8 +7,8 @@ defmodule Barkpark.Search.MediaIntelligence do
   module — not the core directly.
   """
 
+  alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias Barkpark.Search.Intelligence
-  alias BarkparkWeb.V1.MediaSearchParams
 
   @surface "media"
 
