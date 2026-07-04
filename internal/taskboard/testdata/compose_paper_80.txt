@@ -11,7 +11,7 @@ Driven by task-alpha — read it inline.
 ▌ go test ./internal/taskboard/...    
 
 Tasks driven by this paper (1)
-▎ ● Wire the SSE live bridge to the task board pane                           8m
+▎ ⠋ Wire the SSE live bridge to the task board pane                           8m
 
 
 

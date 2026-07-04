@@ -85,12 +85,10 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 // ── Header ───────────────────────────────────────────────────────────────────
 
 func renderHeader(b Board, st UIState, width int, now time.Time) []string {
-	// Line 1: repo (⎇ branch) ⇄ server            ● live · 2m
-	left := Chrome.RepoName
-	if Chrome.Branch != "" {
-		left += "  ⎇ " + Chrome.Branch
-	}
-	left += "  ⇄ " + Chrome.Server
+	// Line 1: barkpark · tasks                    ⇄ <server> ● live · 2m
+	// (branch chrome dropped per wish Amendment 3; the conn dot stays honest —
+	// offline/polling render their own dot + word).
+	left := dimStyle.Render("barkpark") + dimStyle.Render(" · ") + boldStyle.Render("tasks")
 
 	glyph, word := connGlyphWord(st.Conn)
 	if isSyncing(st) {
@@ -100,24 +98,19 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 		word = "syncing…"
 	}
 	cs := roleStyle(connRole(st.Conn))
-	conn := cs.Render(glyph) + " " + dimStyle.Render(word)
+	right := dimStyle.Render("⇄ "+Chrome.Server) + "  " + cs.Render(glyph) + " " + dimStyle.Render(word)
 	if age := AgeBadge(st.LastSync, now); age != "" {
-		conn += dimStyle.Render(" · " + age)
+		right += dimStyle.Render(" · " + age)
 	}
-	line1 := leftRight(dimStyle.Render(left), conn, width)
+	line1 := leftRight(left, right, width)
 
-	// Line 2: counts strip. Staleness is a first-class instrument (decision 13):
-	// when the board holds non-terminal tasks gone quiet past the warn threshold,
-	// a warn-tinted "· N stale" segment trails the dim active/ready/blocked/done
-	// summary — never a filter, just a number that cannot be ignored.
-	counts := dimStyle.Render(countsStrip(b))
-	if b.Stale > 0 {
-		counts += warnStyle.Render(fmt.Sprintf(" · %d stale", b.Stale))
-	}
-	line2 := truncate(counts, width)
-	lines := []string{line1, line2}
+	// Line 2: the MOMENTUM header (spec §0, charter D40) — the always-on progress
+	// read: the in_progress spinner + in-flight/ready/done counts (icons + color,
+	// done teal), a warn "N stale" instrument, and a right-aligned overall %. Line
+	// 3 is the proportional progress BAR beneath it.
+	lines := []string{line1, momentumLine(b, st, width), progressBar(b, width)}
 
-	// Line 3 (only when the 1000-row list clamp truncated the corpus): an honest
+	// Line 4 (only when the 1000-row list clamp truncated the corpus): an honest
 	// "showing N of M" note, so a partial board never masquerades as the whole.
 	if note := truncationNote(b); note != "" {
 		lines = append(lines, dimStyle.Render(truncate(note, width)))
@@ -125,18 +118,58 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 	return lines
 }
 
-// countsStrip is the header's one-line queue summary. active/blocked/done come
-// straight from prime's stored lifecycle counts; the READY count is computed
-// from the overlaid tasks because storage never holds a "ready" count key
-// (readiness is derived), and wears a "+" when the ready head was clamped.
-func countsStrip(b Board) string {
-	parts := []string{
-		fmt.Sprintf("%d active", b.Counts["in_progress"]),
-		fmt.Sprintf("%s ready", readyCountLabel(b)),
-		fmt.Sprintf("%d blocked", b.Counts["blocked"]),
-		fmt.Sprintf("%d done", b.Counts["done"]),
+// momentumLine is the spec §0 aggregate: `⟨spinner⟩ N in flight · ○ N ready ·
+// ✓ N done[ · N stale]   NN%`. The spinner rides the same heartbeat frame as the
+// board (D38), done is teal, the stale count (when > 0) is the warn instrument,
+// and the % is right-aligned. Icons carry state; the counts stay dim.
+func momentumLine(b Board, st UIState, width int) string {
+	spin := infoStyle.Render(spinnerGlyph(st.Frame))
+	segs := []string{
+		spin + " " + dimStyle.Render(fmt.Sprintf("%d in flight", b.Counts["in_progress"])),
+		readyStyle.Render("○") + " " + dimStyle.Render(fmt.Sprintf("%s ready", readyCountLabel(b))),
+		doneStyle.Render("✓") + " " + dimStyle.Render(fmt.Sprintf("%d done", b.Counts["done"])),
 	}
-	return strings.Join(parts, " · ")
+	leftPart := strings.Join(segs, dimStyle.Render(" · "))
+	if b.Stale > 0 {
+		leftPart += dimStyle.Render(" · ") + warnStyle.Render(fmt.Sprintf("%d stale", b.Stale))
+	}
+	right := boldStyle.Render(fmt.Sprintf("%d%%", progressPct(b)))
+	return leftRight(leftPart, right, width)
+}
+
+// progressPct is the overall completion percentage — done / (every counted
+// task), rounded. 0 when the corpus is empty (never a divide-by-zero).
+func progressPct(b Board) int {
+	total := 0
+	for _, v := range b.Counts {
+		total += v
+	}
+	if total <= 0 {
+		return 0
+	}
+	pct := int(float64(b.Counts["done"])/float64(total)*100 + 0.5)
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
+}
+
+// progressBar is the spec §0 proportional bar (charter D40): a full-width track
+// filled to progressPct — teal fill (completion), dim track. "Things grow, not
+// jump": the fill widens as done climbs. ANSI-stripped it reads █████░░░░░, an
+// honest at-a-glance needle.
+func progressBar(b Board, width int) string {
+	if width < 1 {
+		return ""
+	}
+	filled := progressPct(b) * width / 100
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return doneStyle.Render(strings.Repeat("█", filled)) + dimStyle.Render(strings.Repeat("░", width-filled))
 }
 
 // readyCountLabel counts every ready task the board holds — epic roots, epic
@@ -250,7 +283,7 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		}
 		// flashTitle lights line-1's title if this claim just changed; NowCard's
 		// existing ansi-aware truncation carries the emphasis through width-safely.
-		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, now)
+		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, st.Frame, now)
 		// The NOW band is the ONE place real work runs, so its claim age ticks in
 		// SECONDS (decision 19). NowCard builds line-1 (glyph, twin, title); render
 		// rebuilds line-2 so its age reads LiveElapsed instead of the coarse
@@ -292,7 +325,7 @@ func renderReadyHead(b Board, st UIState, width, maxLines int, now time.Time) []
 
 	for i, t := range b.ReadyHead[:shown] {
 		selected := st.Cursor == i
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, childIndent, width, now) {
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, 0, width, st.Frame, now) {
 			lines = append(lines, ln)
 		}
 	}
@@ -388,14 +421,13 @@ func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 // the cursor-selected row when it lives in the spine (-1 when the cursor is on
 // a pinned NOW card, which the spine window never needs to chase).
 //
-// The selection index space MUST mirror the shell's visibleRows exactly
-// (program.go): NOW cards occupy [0, len(b.Now)), then each epic HEADER
-// consumes an index (headers are navigable — enter/h/l fold them), then the
-// visible children under the shared foldedEpic rule; then each derived CLUSTER
-// header + its members under the shared foldedCluster rule; then orphans. The
-// "(no epic)" bucket line, folded-done counts and blank separators are display
-// only — no index. Any divergence here paints the highlight on a different row
-// than the one the act verbs (c/x/o) fire on.
+// It consumes the ONE ordered spine producer (spineRows, charter D42): the shell
+// and the renderer read the SAME list, so the selection index space is
+// structural — NOW cards occupy [0, pinned), then each spineRow that is
+// Selectable consumes the next index in emission order (headers, then their
+// nested children, then clusters, then orphans). Separators, "+K more" folds and
+// phase sub-bands are Selectable:false and never touch the cursor. Any divergence
+// is now impossible: visibleRows filters the SAME producer to its Selectable set.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
 	// The pinned band owns the first indexes (renderNowBand marks them): the READY
@@ -406,149 +438,64 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		selIdx = len(b.ReadyHead)
 	}
 	emit := func(s string) { lines = append(lines, s) }
-	// emitTask paints one navigable task row. The calm-board subtraction stripped
-	// the row to gutter-glyph + title + one meta token, so it no longer needs the
-	// enclosing section tag (chips are gone).
-	emitTask := func(t Task) {
+	markSel := func() bool {
 		selected := selIdx == st.Cursor
 		if selected {
 			cursorLine = len(lines)
 		}
-		// Light the title if this row's task just changed (one-shot flash); the
-		// row is a single calm line — enter descends into the detail frame now
-		// (charter D11), so there is no inline-expand branch to feed.
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, childIndent, width, now) {
-			emit(ln)
-		}
 		selIdx++
+		return selected
 	}
-	emitHeader := func(e Epic) {
-		selected := selIdx == st.Cursor
-		if selected {
-			cursorLine = len(lines)
-		}
-		emit(headerLine(e, selected, width))
-		selIdx++
-	}
-	emitClusterHeader := func(c Cluster) {
-		selected := selIdx == st.Cursor
-		if selected {
-			cursorLine = len(lines)
-		}
-		emit(clusterHeaderLine(c, selected, width))
-		selIdx++
-	}
-
-	// moreLine folds the remainder of a head-capped section behind one dim line.
-	// hiddenChildren = children not shown (the head cap); doneFolded = terminal
-	// rows already dropped by the 24h rule. When a section is head-capped we name
-	// the total remainder ("+K more") so the user knows l/enter reveals it; when
-	// fully expanded only the terminal "+N done" tally remains.
-	moreLine := func(shown, total, doneFolded int) {
-		hidden := total - shown
-		if hidden > 0 {
-			emit(dimStyle.Render(fmt.Sprintf("  +%d more", hidden+doneFolded)))
-		} else if doneFolded > 0 {
-			emit(dimStyle.Render(fmt.Sprintf("  +%d done", doneFolded)))
-		}
-	}
-
-	for ei, e := range b.Epics {
-		if ei > 0 {
+	for _, sr := range spineRows(b, st) {
+		switch sr.Kind {
+		case spineSep:
 			emit("")
-		}
-		emitHeader(e)
-		shown := epicShown(st, e)
-		for i := 0; i < shown; i++ {
-			emitTask(e.Children[i])
-		}
-		moreLine(shown, len(e.Children), e.DoneFolded)
-	}
-
-	// Derived relatedness clusters ride the same seam AFTER the authored epics —
-	// inferred structure outranks nothing, so authored goals come first (decision
-	// 12). Each cluster navigates exactly like an epic: a navigable header that
-	// folds under foldedCluster ("cluster:"+Key), then its band-ordered members.
-	for _, cl := range b.Clusters {
-		if len(lines) > 0 { // blank-line rhythm between sections, like the epics above
-			emit("")
-		}
-		emitClusterHeader(cl)
-		shown := clusterShown(st, cl)
-		for i := 0; i < shown; i++ {
-			emitTask(cl.Tasks[i])
-		}
-		moreLine(shown, len(cl.Tasks), cl.DoneFolded)
-	}
-
-	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
-		if len(lines) > 0 {
-			emit("")
-		}
-		// The loose bucket is now a NAVIGABLE folding header (wave-7 D33) — it
-		// consumes a selIdx and folds by default unless it owns active work, so the
-		// flat-queue live shape's bulk collapses to one line like every section.
-		selected := selIdx == st.Cursor
-		if selected {
-			cursorLine = len(lines)
-		}
-		emit(orphanHeaderLine(b, selected, width))
-		selIdx++
-		shown := orphansShown(st, b)
-		for i := 0; i < shown; i++ {
-			emitTask(b.Orphans[i])
-		}
-		moreLine(shown, len(b.Orphans), b.OrphansFolded)
-	}
-
-	if len(lines) == 0 {
-		// An empty board during the first fetch is "syncing", not "all clear" —
-		// only claim the queue is empty once we have actually heard back.
-		if isSyncing(st) {
-			emit(dimStyle.Render("syncing…"))
-		} else {
-			emit(dimStyle.Render("All clear — no open tasks."))
+		case spineEpicHeader, spineClusterHeader, spineOrphanHeader:
+			selected := markSel()
+			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width))
+		case spineTask:
+			selected := markSel()
+			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, width, st.Frame, now) {
+				emit(ln)
+			}
+		case spinePhaseBand:
+			emit(phaseBandLine(sr.hdr, width))
+		case spineMore:
+			emit(moreLine(sr.more, width))
+		case spineEmpty:
+			emit(dimStyle.Render(truncate(sr.text, width)))
 		}
 	}
 	return lines, cursorLine
 }
 
-// headerLine renders an epic header, swapping the rule's leading dash for the
-// ▎ selection marker when the cursor sits on it (headers are navigable rows —
-// enter/h/l fold them, so the selection must be visible there). ▎ and ─ are
-// both one column, so the swap never disturbs the width budget.
-func headerLine(e Epic, selected bool, width int) string {
-	h := EpicHeader(e, width)
-	if selected && strings.HasPrefix(h, "─") {
-		h = "▎" + strings.TrimPrefix(h, "─")
+// moreLine folds the remainder of a head-capped section behind one dim line
+// (charter D42): "+K more" names the total hidden remainder (head cap + the 24h
+// done fold) when the section is head-capped, else "+N done" is the terminal
+// tally alone.
+func moreLine(m spineMoreInfo, width int) string {
+	if m.hidden > 0 {
+		return dimStyle.Render(truncate(fmt.Sprintf("  +%d more", m.hidden+m.done), width))
 	}
-	return h
+	return dimStyle.Render(truncate(fmt.Sprintf("  +%d done", m.done), width))
 }
 
-// clusterHeaderLine renders a derived cluster's section header through the ONE
-// shared layout (renderSectionHeader): the cluster key is rendered MONOCHROME-DIM
-// (the calm-board subtraction retired the per-tag chip hue — a label is identity,
-// not state), its taxonomy prefix stripped and trailed by a dim "~" that marks the
-// grouping as DERIVED. It wears the SAME claim-forward "N ready · M done" rail as
-// an epic (wave-7 D34) and swaps its leading dash for the ▎ marker when selected
-// (cluster headers are navigable — enter/h/l fold them).
-func clusterHeaderLine(c Cluster, selected bool, width int) string {
-	return renderSectionHeader(clusterDisplayName(c.Key), true, selected,
-		countSection(c.Tasks, c.DoneFolded), width)
-}
-
-// orphanHeaderLine renders the loose "(no epic)" bucket's navigable header
-// (wave-7 D33) through the same shared layout, carrying the claim-forward rail
-// over its loose rows. Its title is "(no epic)" when authored epics exist and
-// "tasks" when the whole board is loose, so a pure flat queue reads as a plain
-// queue title rather than a bucket-of-leftovers.
-func orphanHeaderLine(b Board, selected bool, width int) string {
-	title := "(no epic)"
-	if len(b.Epics) == 0 {
-		title = "tasks"
+// phaseBandLine renders a display-only phase sub-band label (charter D41): an
+// indented, dim `  <name> ·········· <code>` that groups the section's phase-
+// coded rows. It carries no cursor index (Selectable:false), so it never shifts
+// the selection space. Only emitted when the section's tasks actually carry
+// phase metadata — never fabricated.
+func phaseBandLine(h spineHeader, width int) string {
+	left := "  " + h.title + " "
+	// Drop a trailing code that just restates the title (e.g. name == "W1" == code).
+	if h.code == "" || h.code == h.title || disp(left)+disp(h.code)+2 >= width {
+		return dimStyle.Render(truncate(strings.TrimRight(left, " "), width))
 	}
-	return renderSectionHeader(title, false, selected,
-		countSection(b.Orphans, b.OrphansFolded), width)
+	mid := width - disp(left) - disp(h.code) - 1
+	if mid < 1 {
+		mid = 1
+	}
+	return dimStyle.Render(truncate(left+strings.Repeat("·", mid)+" "+h.code, width))
 }
 
 // clusterDisplayName is a cluster key's display form: one proj:/area: taxonomy

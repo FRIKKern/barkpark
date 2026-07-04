@@ -1,37 +1,37 @@
-barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                              ● live · 2m
-3 active · 7 ready · 4 blocked · 41 done · 2 stale
+barkpark · tasks                                        ⇄ guerrilla  ● live · 2m
+⠋ 3 in flight · ○ 7 ready · ✓ 41 done · 2 stale                              85%
+████████████████████████████████████████████████████████████████████░░░░░░░░░░░░
 
 NOW
- ● Debounce the refetch loop
+ ⠋ Debounce the refetch loop
    pelle · 1m30s · Cloud GUI epic
 
- ● Wire the SSE live bridge
+ ⠋ Wire the SSE live bridge
    opus-3 · 4m00s · 2/3 · Cloud GUI epic
 
-── Cloud GUI epic ───────────────────────────────────────────── 2 ready · 7 done
-  ▎○ Reconcile the #979 role seam                                             P2
+  Cloud GUI epic ·························································· 7/10
+  ▎○ Reconcile the #979 role seam                                         P2 1/2
    ○ Add empty-state goldens                                                  P3
-   ◐ Cut over the canvas default                                         blocked
+   ! Cut over the canvas default                                      P2 blocked
   +7 done
 
-── Search & Media epic ────────────────────────────────────────────────── 8 done
+  Search & Media epic ······················································ 8/8
   +8 done
 
-── sheets-parity ~ ──────────────────────────────────────────── 3 ready · 3 done
+  sheets-parity ~ ·························································· 3/7
    ○ Add the SUM() spreadsheet function                                       P2
    ○ Add a SUM function to the grid                                           P3
-   ○ Implement VLOOKUP across sheets                                          6d
+   ○ Implement VLOOKUP across sheets                                       P2 6d
    ○ Pivot tables in the Studio grid                                         11d
   +3 done
 
-── living-values ~ ───────────────────────────────────────────────────── 1 ready
+  living-values ~ ·························································· 0/2
    ○ Wire the valueref resolver                                               P1
    ○ Build the living-values demo dataset
 
-── (no epic) ─────────────────────────────────────────────────────────── 1 ready
+  (no epic) ································································ 0/2
    ○ Fix the timeago clock-skew clamp                                         P3
    ○ Inline cell editing for the grid
-
 
 
 

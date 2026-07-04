@@ -1,16 +1,16 @@
 tasks
-barkpark  ⎇ lead/session-stable  … ● live · 2m  Wire the SSE live bridge to the task board pane
-2 active · 1 ready · 0 blocked · 1 done         ● in_progress · P1 · task · fable-3
+barkpark · tasks      ⇄ guerrilla  ● live · 2m  Wire the SSE live bridge to the task board pane
+⠋ 2 in flight · ○ 1 ready · ✓ 1 done       33%  ⠋ in_progress · P1 · task · fable-3
+███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  
+                                                created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
+NOW                                             
+   nothing ready · all clear                    ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
                                                 
-NOW                                             created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
-   nothing ready · all clear                    
-                                                ○ created (Jul 02) → ● claimed by fable-3 (Jul 04)
-── tasks ──────────────────── 1 ready · 1 done  
-  ▎● Wire the SSE live bridge to the task boa…    The board must repaint the moment the queue moves.
-   ✓ Decode the change feed envelope            
-   ● Debounce the refetch at 750ms                • one dirty bit signals the refetch
-   ○ Honest connection dot states                 • one snapshot is the single source of truth
-                                                
+  tasks ·································· 1/4    The board must repaint the moment the queue moves.
+  ▎⠋ Wire the SSE live bridge to the task boa…  
+  ↳  ✓ Decode the change feed envelope            • one dirty bit signals the refetch
+  ↳  ⠋ Debounce the refetch at 750ms              • one snapshot is the single source of truth
+  ↳  ○ Honest connection dot states             
                                                 criteria 2/3
                                                   ✓ SSE dirty-bit triggers a debounced refetch
                                                     ↳ internal/taskboard/live.go:42
@@ -23,7 +23,7 @@ NOW                                             created 2d ago (Jul 02, 09:12) �
                                                 
                                                 children 1/3 done
                                                   ✓ Decode the change feed envelope  1d
-                                                  ● Debounce the refetch at 750ms  30m
+                                                  ⠋ Debounce the refetch at 750ms  30m
                                                   ○ Honest connection dot states  5h
                                                 
                                                 papers

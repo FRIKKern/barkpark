@@ -36,14 +36,21 @@ func (r Role) String() string {
 	}
 }
 
-// Palette — hues taken verbatim from cmd/barkpark/styles.go (greenDot/amberDot/
-// blueDot + the zinc dims) plus a danger red, kept as AdaptiveColor so the pane
-// reads in both light and dark terminals.
+// Palette — the design-language spec §1 terminal values (charter D37). The hues
+// are the shared task manifest both surfaces read; refreshing them here is a
+// GLYPH-RENDERING refinement, not a role remap (RoleFor is untouched). okColor
+// stays GREEN (cloud health / live-dot / action-strip ok); the spec's teal
+// completion hue is the DISTINCT doneColor, so restyling the done glyph never
+// shifts deploy-table semantics.
 var (
-	okColor      = lipgloss.AdaptiveColor{Light: "#10b981", Dark: "#34d399"} // greenDot
-	infoColor    = lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#60a5fa"} // blueDot
-	warnColor    = lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"} // amberDot
-	dangerColor  = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // red
+	okColor      = lipgloss.AdaptiveColor{Light: "#10b981", Dark: "#34d399"} // greenDot — health/live/ok-strip
+	infoColor    = lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"} // in_progress blue (spec §1)
+	warnColor    = lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"} // blocked amber (spec §1)
+	dangerColor  = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // P0/P1 red (spec §1)
+	doneColor    = lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"} // done TEAL glyph (spec §1) — distinct from okColor
+	readyColor   = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"} // ready ○ = full foreground (unchecked box)
+	openColor    = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"} // open ○ ≈ dim-white 50% (faint backlog)
+	cancelColor  = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"} // cancelled ✕ dim (spec §1)
 	neutralColor = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"} // zinc mid
 	dimColor     = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"} // zinc dim
 	titleColor   = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"} // near-fg
@@ -54,12 +61,56 @@ var (
 	infoStyle    = lipgloss.NewStyle().Foreground(infoColor)
 	warnStyle    = lipgloss.NewStyle().Foreground(warnColor)
 	dangerStyle  = lipgloss.NewStyle().Foreground(dangerColor)
+	doneStyle    = lipgloss.NewStyle().Foreground(doneColor)
+	readyStyle   = lipgloss.NewStyle().Foreground(readyColor)
+	openStyle    = lipgloss.NewStyle().Foreground(openColor)
+	cancelStyle  = lipgloss.NewStyle().Foreground(cancelColor)
 	neutralStyle = lipgloss.NewStyle().Foreground(neutralColor)
 
 	dimStyle   = lipgloss.NewStyle().Foreground(dimColor)
 	titleStyle = lipgloss.NewStyle().Foreground(titleColor).Bold(true)
 	boldStyle  = lipgloss.NewStyle().Bold(true)
 )
+
+// glyphStyleFor paints the STATUS GLYPH by the spec §1 brightness+meaning ladder
+// (charter D36/D37): the neutral "todo" spectrum is monochrome white (open dim →
+// ready full-foreground), and color is reserved for the states that carry
+// meaning — blue in_progress (escalating via the claim lease, board-only),
+// amber blocked, teal done, dim cancelled. It is a RENDERING layer over RoleFor,
+// never a role remap: done's glyph is teal here while roleStyle(RoleOK) still
+// dims the done TITLE so finished work recedes.
+func glyphStyleFor(t Task, now time.Time) lipgloss.Style {
+	switch t.Lifecycle {
+	case lifeInProgress:
+		return roleStyle(RoleFor(t, now)) // blue when fresh, warms as the lease burns
+	case lifeBlocked:
+		return warnStyle
+	case lifeDone, lifeClosed:
+		return doneStyle
+	case lifeCancelled:
+		return cancelStyle
+	case lifeReady:
+		return readyStyle
+	case lifeOpen:
+		return openStyle
+	default:
+		return openStyle
+	}
+}
+
+// priorityStyle is the color-SEVERITY of a priority token (spec §3): P0/P1 red,
+// P2 amber, P3/P4 (and absent) dim. It keys on priorityRank so "0"/"P0" and a
+// bare "3" all grade identically.
+func priorityStyle(p string) lipgloss.Style {
+	switch priorityRank(p) {
+	case 0, 1:
+		return dangerStyle
+	case 2:
+		return warnStyle
+	default:
+		return dimStyle
+	}
+}
 
 // The per-tag chip hue engine was retired by the calm-board subtraction
 // (charter D22): a label is identity, not state, and under the epic's law

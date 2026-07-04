@@ -13,16 +13,17 @@ import (
 var testNow = time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
 
 func TestStatusGlyph(t *testing.T) {
-	// The calm-board steady 4-glyph vocabulary (charter D14): ● in_progress,
-	// ◐ blocked, ○ ready|open, ✓ done|closed — no animation, an unknown lifecycle
-	// degrades to the neutral "·" dot.
+	// The design-language spec §1 vocabulary (charter D36): a steady in_progress
+	// representative (⠋ — the board animates it), `!` blocked, ○ ready|open,
+	// ✓ done|closed, ✕ cancelled, and the neutral "·" dot for an unknown state.
 	cases := map[string]string{
-		"in_progress": "●",
+		"in_progress": "⠋",
 		"ready":       "○",
 		"open":        "○",
-		"blocked":     "◐",
+		"blocked":     "!",
 		"done":        "✓",
 		"closed":      "✓",
+		"cancelled":   "✕",
 		"weird":       "·",
 	}
 	for life, want := range cases {
@@ -33,12 +34,57 @@ func TestStatusGlyph(t *testing.T) {
 }
 
 // TestStatusGlyphWidth — every glyph the gutter can paint is exactly one display
-// column so the fixed 2-col gutter never shifts as the lifecycle changes. There
-// is no longer any frame-driven animation to test (the spinner was retired).
+// column so the fixed 2-col gutter never shifts as the lifecycle changes (the
+// steady in_progress representative and every animated spinner frame are all
+// single-column Braille).
 func TestStatusGlyphWidth(t *testing.T) {
-	for _, life := range []string{"in_progress", "ready", "open", "blocked", "done", "closed", "weird"} {
+	for _, life := range []string{"in_progress", "ready", "open", "blocked", "done", "closed", "cancelled", "weird"} {
 		if w := runewidth.StringWidth(StatusGlyph(life)); w != 1 {
 			t.Errorf("StatusGlyph(%q) width = %d, want 1", life, w)
+		}
+	}
+	for i := 0; i < 10; i++ {
+		if w := runewidth.StringWidth(spinnerGlyph(i)); w != 1 {
+			t.Errorf("spinnerGlyph(%d) width = %d, want 1", i, w)
+		}
+	}
+	if w := runewidth.StringWidth(brailleStill); w != 1 {
+		t.Errorf("brailleStill width = %d, want 1", w)
+	}
+}
+
+// TestReducedMotionFreezesSpinner — NO_MOTION freezes the in_progress spinner on
+// the single steady ⠿ frame at every frame index (spec §2), and it stays one
+// display column so the gutter never shifts.
+func TestReducedMotionFreezesSpinner(t *testing.T) {
+	t.Setenv("NO_MOTION", "1")
+	for i := 0; i < 10; i++ {
+		if got := spinnerGlyph(i); got != brailleStill {
+			t.Errorf("NO_MOTION spinnerGlyph(%d) = %q, want %q", i, got, brailleStill)
+		}
+	}
+	if got := boardGlyph("in_progress", 3); got != brailleStill {
+		t.Errorf("NO_MOTION boardGlyph(in_progress) = %q, want %q", got, brailleStill)
+	}
+}
+
+// TestAsciiEscapeHatch — BP_TASKS_ASCII swaps the whole glyph set for 1-column
+// ASCII so nothing turns to tofu (spec §3), and every glyph stays a single
+// display column.
+func TestAsciiEscapeHatch(t *testing.T) {
+	t.Setenv("BP_TASKS_ASCII", "1")
+	want := map[string]string{
+		"ready": "o", "open": ".", "blocked": "!", "done": "v",
+		"cancelled": "x", "weird": ".",
+	}
+	for life, w := range want {
+		if got := StatusGlyph(life); got != w {
+			t.Errorf("ASCII StatusGlyph(%q) = %q, want %q", life, got, w)
+		}
+	}
+	for _, life := range []string{"in_progress", "ready", "open", "blocked", "done", "cancelled"} {
+		if w := runewidth.StringWidth(boardGlyph(life, 2)); w != 1 {
+			t.Errorf("ASCII boardGlyph(%q) width = %d, want 1", life, w)
 		}
 	}
 }
@@ -172,7 +218,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, childIndent, width, testNow)
+		rows := TaskRow(task, false, 0, width, 0, testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -195,7 +241,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, childIndent, 40, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, 0, 40, 0, testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -214,16 +260,16 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 		Lifecycle: "in_progress",
 		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
 	}
-	line := ansi.Strip(TaskRow(task, false, childIndent, 80, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, 0, 80, 0, testNow)[0])
 	if !strings.Contains(line, "8d") {
 		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
 	}
 }
 
-// TestEpicHeaderShowsClaimForwardRail — the wave-7 header rail (D34) leads with
-// the claimable READY count, then the done tally, replacing the old done/total
-// token. Here: 1 ready child, 1 in_progress (open, not claimable), 7 folded done.
-func TestEpicHeaderShowsClaimForwardRail(t *testing.T) {
+// TestEpicHeaderShowsPhaseRollup — the design-language header rail (charter D41)
+// is a `done/total` completion rollup with a dotted leader. Here: 1 ready + 1
+// in_progress (open) + 7 folded done = 7/9.
+func TestEpicHeaderShowsPhaseRollup(t *testing.T) {
 	e := Epic{
 		Root:       Task{Title: "Cloud GUI epic"},
 		Children:   []Task{{Lifecycle: "ready"}, {Lifecycle: "in_progress"}},
@@ -233,11 +279,11 @@ func TestEpicHeaderShowsClaimForwardRail(t *testing.T) {
 	if !strings.Contains(line, "Cloud GUI epic") {
 		t.Errorf("header missing title: %q", line)
 	}
-	if !strings.Contains(line, "1 ready") {
-		t.Errorf("header should lead with the claimable ready count: %q", line)
+	if !strings.Contains(line, "7/9") {
+		t.Errorf("header should show the done/total rollup 7/9: %q", line)
 	}
-	if !strings.Contains(line, "7 done") {
-		t.Errorf("header should show the done tally: %q", line)
+	if !strings.Contains(line, "·") {
+		t.Errorf("header should carry a dotted leader: %q", line)
 	}
 	if runewidth.StringWidth(line) > 80 {
 		t.Errorf("header over width: %q", line)

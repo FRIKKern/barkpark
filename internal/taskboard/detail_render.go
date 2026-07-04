@@ -88,25 +88,14 @@ const proseGutter = 2 * proseIndent
 // MinWidth degradation takes over.
 const proseFloor = 8
 
-// detailGlyph is the detail view's CALM four-glyph status vocabulary (charter
-// D15): ● in_progress, ◐ blocked, ○ ready|open, ✓ done. It is intentionally a
-// smaller, steadier set than the board's animated StatusGlyph — a reading view
-// never spins. Callers tint it via roleStyle (color = state). Unknown states
-// get a neutral dot.
-func detailGlyph(lifecycle string) string {
-	switch lifecycle {
-	case "in_progress":
-		return "●"
-	case "blocked":
-		return "◐"
-	case "done", "closed":
-		return "✓"
-	case "ready", "open":
-		return "○"
-	default:
-		return "·"
-	}
-}
+// detailGlyph is the detail view's status glyph — the SAME design-language spec
+// §1 vocabulary the board paints (charter D43): a steady in_progress
+// representative (⠋), `!` blocked, ✓ done, ✕ cancelled, ○ ready|open. A reading
+// view does not spin, so it uses the steady representative frame (the board
+// animates it); callers tint it via glyphStyleFor (color = state — done teal,
+// blocked amber, …). It is exactly StatusGlyph, kept as a named seam so the
+// detail frame's intent reads clearly.
+func detailGlyph(lifecycle string) string { return StatusGlyph(lifecycle) }
 
 // detailBuilder accumulates the frame. One mutable value threaded through the
 // section emitters keeps blank-line rhythm correct by construction (an
@@ -219,7 +208,7 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 
 // detailMetaLine is section (2): glyph + dim `lifecycle · P<n> · kind · worker`.
 func detailMetaLine(d TaskDetail, width int, now time.Time) string {
-	glyph := roleStyle(RoleFor(d.Task, now)).Render(detailGlyph(d.Lifecycle))
+	glyph := glyphStyleFor(d.Task, now).Render(detailGlyph(d.Lifecycle))
 	var segs []string
 	if d.Lifecycle != "" {
 		segs = append(segs, d.Lifecycle)
@@ -312,23 +301,27 @@ func timelineSegments(d TaskDetail, now time.Time) []string {
 	if !d.InsertedAt.IsZero() {
 		segs = append(segs, "○ created ("+shortDate(d.InsertedAt)+")")
 	}
+	// The claim/work segments wear the in_progress spinner mark (charter D43: the
+	// timeline's in_progress mark is the live spinner glyph) — steady ⠋ in the
+	// reading frame; the whole strip is dim, the glyphs carry the story.
+	spin := StatusGlyph(lifeInProgress)
 	claimed := d.Claim != nil && d.Claim.Worker != ""
 	if d.PreviousWorker != "" {
-		segs = append(segs, "● claimed by "+d.PreviousWorker)
+		segs = append(segs, spin+" claimed by "+d.PreviousWorker)
 	}
 	if claimed {
 		verb := "claimed by"
 		if d.PreviousWorker != "" {
 			verb = "reclaimed by"
 		}
-		seg := "● " + verb + " " + d.Claim.Worker
+		seg := spin + " " + verb + " " + d.Claim.Worker
 		if !d.Claim.ClaimedAt.IsZero() {
 			seg += " (" + shortDate(d.Claim.ClaimedAt) + ")"
 		}
 		segs = append(segs, seg)
 	}
 	if !d.LastWorkedAt.IsZero() {
-		segs = append(segs, "● worked ("+shortDate(d.LastWorkedAt)+")")
+		segs = append(segs, spin+" worked ("+shortDate(d.LastWorkedAt)+")")
 	}
 	switch d.Lifecycle {
 	case "done", "closed", "cancelled":
@@ -416,8 +409,8 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
 		glyph, gStyle := "○", dimStyle
 		tStyle := lipgloss.NewStyle()
 		if it.Met {
-			glyph, gStyle = "✓", okStyle
-			tStyle = dimStyle // landed work recedes; the ✓ already said it
+			glyph, gStyle = "✓", doneStyle // teal check — the spec's completion hue
+			tStyle = dimStyle              // landed work recedes; the ✓ already said it
 		}
 		if it.Criterion == "" {
 			// Malformed entry: keep its slot as a bare glyph — honest that an
@@ -601,7 +594,7 @@ func childRow(c Task, selected bool, width int, now time.Time) string {
 	if selected {
 		bar = "▎ "
 	}
-	glyph := roleStyle(RoleFor(c, now)).Render(detailGlyph(c.Lifecycle))
+	glyph := glyphStyleFor(c, now).Render(detailGlyph(c.Lifecycle))
 	age := AgeBadge(c.UpdatedAt, now)
 	titleBudget := width - 4 // bar(2) + glyph(1) + space(1)
 	if age != "" {

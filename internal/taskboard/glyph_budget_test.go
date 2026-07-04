@@ -15,24 +15,42 @@ import (
 // CI. Keeping the allowlist tiny is the whole point — the subtraction is only
 // real if new glyphs cannot sneak back in.
 //
-//	status glyphs   ● in_progress · ◐ blocked · ○ ready/open · ✓ done
+//	status glyphs   ⠋…⠏ in_progress spinner (10 frames) · ⠿ frozen (reduced-motion)
+//	                ! blocked (ASCII) · ○ ready/open · ✓ done · ✕ cancelled
 //	connection dot  ● live · ◐ polling · ✗ offline (the honest degraded state)
-//	structure       ─ rule · ▎ selection bar · · separator
-//	header identity ⎇ branch · ⇄ server
+//	momentum        ✓ done tally · █ progress fill · ░ progress track
+//	structure       ─ rule · ▎ selection bar · · dotted leader/separator · ↳ subtask guide
+//	header identity ⇄ server
 //	honest overflow … truncation · ↑ ↓ scroll affordances
 //
-// ~ (tilde, the derived-cluster cue) is ASCII, so it is not — and need not be —
-// listed here; this test only inventories runes outside ASCII.
+// ~ (tilde, the derived-cluster cue) and ! (blocked glyph) are ASCII, so they
+// are not — and need not be — listed here; this test only inventories runes
+// outside ASCII. The design-language redesign (charter D44) promoted the spinner
+// frames + ⠿ + ✕ + ↳ + the progress-bar cells to the board set on purpose.
 var glyphAllowlist = map[rune]string{
-	'●': "in_progress status glyph / live connection dot",
-	'◐': "blocked status glyph / polling connection dot",
+	'⠋': "in_progress spinner frame 0 / steady representative",
+	'⠙': "in_progress spinner frame 1",
+	'⠹': "in_progress spinner frame 2",
+	'⠸': "in_progress spinner frame 3",
+	'⠼': "in_progress spinner frame 4",
+	'⠴': "in_progress spinner frame 5",
+	'⠦': "in_progress spinner frame 6",
+	'⠧': "in_progress spinner frame 7",
+	'⠇': "in_progress spinner frame 8",
+	'⠏': "in_progress spinner frame 9",
+	'⠿': "in_progress spinner frozen frame (reduced-motion / NO_MOTION)",
+	'●': "live connection dot",
+	'◐': "polling connection dot",
 	'○': "ready/open status glyph",
-	'✓': "done status glyph / met criterion",
+	'✓': "done status glyph / met criterion / momentum done tally",
+	'✕': "cancelled status glyph",
 	'✗': "offline connection dot",
+	'█': "progress-bar fill (momentum)",
+	'░': "progress-bar track (momentum)",
 	'─': "section rule",
 	'▎': "selection bar",
-	'·': "meta separator",
-	'⎇': "branch marker",
+	'·': "dotted leader / meta separator",
+	'↳': "nested-subtask guide",
 	'⇄': "server marker",
 	'…': "honest truncation ellipsis",
 	'↑': "scroll-up affordance",
