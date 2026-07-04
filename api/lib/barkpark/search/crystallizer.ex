@@ -34,9 +34,20 @@ defmodule Barkpark.Search.Crystallizer do
         end)
       end)
 
+    # Weeks/months got only a single-shot trigger on their boundary day (Monday /
+    # the 1st). A missed cron run on that exact day stranded the completed week's
+    # or month's crystal permanently — the very hole @backfill_days closes for
+    # days. Widen both to the same trailing catch-up window: crystallize_period
+    # is an idempotent upsert and the target period_start is stable across the
+    # window, so re-runs on the window days dedup rather than duplicate.
     week_stats =
-      if Date.day_of_week(today) == 1 do
-        week_start = Date.add(today, -7)
+      if Date.day_of_week(today) <= @backfill_days do
+        # Start of the most recently completed week (its Monday). Derived from
+        # the current week's Monday so the target is identical on every day of
+        # the window (Mon → today-7, Tue → today-8, Wed → today-9, all the same
+        # Monday), matching the original Monday-only behaviour on Mondays.
+        this_monday = Date.add(today, -(Date.day_of_week(today) - 1))
+        week_start = Date.add(this_monday, -7)
 
         Enum.map(pairs, fn {surface, scope} ->
           {{surface, scope}, crystallize_period(surface, scope, :week, week_start)}
@@ -46,7 +57,9 @@ defmodule Barkpark.Search.Crystallizer do
       end
 
     month_stats =
-      if today.day == 1 do
+      if today.day <= @backfill_days do
+        # Previous month's start — stable for every day in the window, so the 1st,
+        # 2nd and 3rd all target the same month and dedup via upsert.
         month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
 
         Enum.map(pairs, fn {surface, scope} ->

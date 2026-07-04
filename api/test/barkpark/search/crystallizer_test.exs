@@ -169,6 +169,75 @@ defmodule Barkpark.Search.CrystallizerTest do
     assert hd(rows).search_count == 1
   end
 
+  test "crystallize_due backfills the completed week on the days after Monday" do
+    # Tuesday 2026-06-02 — inside the @backfill_days (3) window but NOT the
+    # boundary Monday. The old Monday-only trigger skipped the week entirely on
+    # any non-Monday, so a missed Monday run stranded the week's crystal.
+    today = ~D[2026-06-02]
+    assert Date.day_of_week(today) == 2
+
+    # The most recently completed week is [2026-05-25, 2026-06-01).
+    week_start = ~D[2026-05-25]
+    at = DateTime.new!(~D[2026-05-27], ~T[09:00:00.000000], "Etc/UTC")
+
+    insert_event("weekly", "weekly", %{}, false, "actor-w", at)
+
+    Crystallizer.crystallize_due(today)
+
+    crystal =
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
+        period: "week",
+        period_start: week_start,
+        query_normalized: "weekly",
+        filter_fingerprint: "q:weekly"
+      )
+
+    assert crystal.search_count == 1
+
+    # Idempotent across the window: re-running (e.g. the Wednesday catch-up)
+    # upserts the same key rather than duplicating.
+    Crystallizer.crystallize_due(~D[2026-06-03])
+
+    rows =
+      Repo.all(
+        from(c in Crystal,
+          where:
+            c.surface == ^@surface and c.scope == ^@scope and c.period == "week" and
+              c.period_start == ^week_start and c.query_normalized == "weekly"
+        )
+      )
+
+    assert length(rows) == 1
+  end
+
+  test "crystallize_due backfills the previous month on the days after the 1st" do
+    # 2026-07-02 — day 2, inside the @backfill_days window but NOT the boundary
+    # 1st. The old `today.day == 1` trigger skipped the month on any other day,
+    # so a missed run on the 1st stranded the previous month's crystal.
+    today = ~D[2026-07-02]
+
+    month_start = ~D[2026-06-01]
+    at = DateTime.new!(~D[2026-06-15], ~T[09:00:00.000000], "Etc/UTC")
+
+    insert_event("monthly", "monthly", %{}, false, "actor-m", at)
+
+    Crystallizer.crystallize_due(today)
+
+    crystal =
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
+        period: "month",
+        period_start: month_start,
+        query_normalized: "monthly",
+        filter_fingerprint: "q:monthly"
+      )
+
+    assert crystal.search_count == 1
+  end
+
   defp insert_event(
          query,
          normalized,
