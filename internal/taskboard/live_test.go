@@ -148,6 +148,53 @@ func TestApplySnapshotDropsStaleOutOfOrderFrame(t2 *testing.T) {
 	}
 }
 
+// The state-revert flicker regression: a snapshot with a FRESH FetchedAt (newer
+// CLIENT wall clock) but a STALE row (older server UpdatedAt) must NOT downgrade
+// a row the user just saw advance. FetchedAt orders fetches, not data — the
+// FetchedAt guard passes here, so the per-row forward-only merge is what saves
+// the row. On the unfixed blind-replace this FAILS: the claimed row reverts to
+// unclaimed, then the next poll restores it → CLAIMED→unclaimed→CLAIMED flicker.
+func TestApplySnapshotForwardMergeIgnoresStaleRow(t2 *testing.T) {
+	clk := &fakeClock{t: time.Unix(9000, 0)}
+	m := newModel(nil, "", Config{})
+	m.now = clk.now
+	m.lastLiveEvent = clk.now()
+	m.build = func(s Snapshot, _ RepoContext, _ time.Time) Board {
+		return Board{Orphans: s.Tasks}
+	}
+
+	tOld := time.Unix(1000, 0) // stale server time
+	tNew := time.Unix(2000, 0) // fresh server time
+
+	// Snapshot A: row "x" is CLAIMED, server UpdatedAt = tNew. (First snapshot is
+	// a cold paint — no flashes — and seeds prevTasks.)
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{
+		Tasks: []Task{claimed("x", "worker", 4, tNew)}, FetchedAt: clk.now()}})
+	if m.board.Orphans[0].Claim == nil {
+		t2.Fatal("setup: snapshot A did not land the claimed row")
+	}
+
+	// Snapshot B: NEWER client FetchedAt (passes the out-of-order guard) but the
+	// row is STALE — unclaimed, server UpdatedAt = tOld (an older server read that
+	// a backstop/reconcile fetch happened to stamp with a later wall clock).
+	clk.add(time.Second)
+	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{
+		Tasks: []Task{Task{DocID: "x", Title: "x", Lifecycle: lifeReady, UpdatedAt: tOld}},
+		FetchedAt: clk.now()}})
+
+	// The board must STILL show the row claimed — the stale snapshot cannot revert it.
+	if got := m.board.Orphans[0]; got.Claim == nil {
+		t2.Fatalf("stale snapshot reverted the claimed row (the flicker): %+v", got)
+	}
+	if !m.board.Orphans[0].UpdatedAt.Equal(tNew) {
+		t2.Fatalf("kept row lost its server UpdatedAt: %v, want %v", m.board.Orphans[0].UpdatedAt, tNew)
+	}
+	// And the kept row must NOT spuriously flash (it did not actually move).
+	if _, flashed := m.ui.Flashes["x"]; flashed {
+		t2.Fatalf("a row kept because the incoming copy was stale spuriously flashed: %v", m.ui.Flashes)
+	}
+}
+
 // The 30s backstop keeps the board fresh when the SSE stream silently drops.
 // A refetch's connection state follows the freshness of the last LIVE event,
 // not what drove the fetch: while a live event is recent the stream is trusted
