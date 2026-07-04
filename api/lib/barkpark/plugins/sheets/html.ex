@@ -12,6 +12,7 @@ defmodule Barkpark.Plugins.Sheets.Html do
   """
 
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.PortableDoc.Render.Stylesheet
   alias Barkpark.Plugins.Sheets.Core, as: Core
 
   @doc "Render the content as a full standalone HTML page."
@@ -30,7 +31,12 @@ defmodule Barkpark.Plugins.Sheets.Html do
 
     title = escape(title_or_default(title))
 
-    ~s(<!doctype html><html><head><meta charset="utf-8"><title>#{title}</title></head>) <>
+    # The canonical paper-surface stylesheet is inlined here so the standalone
+    # export is self-contained (no <link>). Additive today — the sheet renders
+    # via inline article styles — and load-bearing once the sheet chrome goes
+    # class-based (wave 2), when these `.bp-paper-surface` rules drive it.
+    ~s(<!doctype html><html><head><meta charset="utf-8"><title>#{title}</title>) <>
+      ~s(<style>#{Stylesheet.css()}</style></head>) <>
       ~s(<body style="margin:2rem auto;max-width:960px;padding:0 1rem;) <>
       ~s(font-family:Georgia,'Source Serif 4',serif;color:#1a1a1a;background:#fbfaf6">) <>
       ~s(<h1 style="font-size:1.6rem">#{title}</h1>) <>

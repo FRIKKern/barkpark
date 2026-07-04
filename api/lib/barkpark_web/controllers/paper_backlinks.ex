@@ -124,7 +124,13 @@ defmodule BarkparkWeb.PaperBacklinks do
     href = Util.escape_attr("/papers/" <> doc_id)
     title_html = Util.escape_html(title_or_slug(Map.get(ref, :title), doc_id))
 
-    ~s(<li style="margin:0 0 1rem">) <>
+    # `list-style:none` is declared per-<li>, not only on the <ul>: the
+    # canonical paper-surface stylesheet's `.bp-paper-surface ul li
+    # { list-style: disc }` targets the li DIRECTLY, which beats the
+    # list-style the <ul>'s inline style would only pass down by inheritance
+    # — without it every backlink row grows a stray disc marker on article
+    # papers (the reader <main> carries `bp-paper-surface` since Stage 2).
+    ~s(<li style="list-style:none;margin:0 0 1rem">) <>
       ~s(<a href="#{href}" style="color:#{@accent};text-decoration:none;font-weight:600">) <>
       title_html <>
       ~s(</a>) <>
