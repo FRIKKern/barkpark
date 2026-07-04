@@ -722,6 +722,25 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  Resolve every query-carrying task block in `blocks` into a snapshot-carrying
+  one — the entry point that makes a paper show LIVE `bp` tasks. Thin: it hands
+  `Barkpark.PortableDoc.TaskResolver.resolve/2` a fetcher that runs each block's
+  `query` against the task substrate under `scope` (`[workspace_id:,
+  project_id:]`, fail-closed). Call it in the render path, and re-call it on a
+  `task.*` mutation event to refresh a live plan. Returns the transformed
+  blocks (unlike the embeds resolver's target→html map — task blocks carry
+  their own snapshot, so the transform is in-place).
+  """
+  @spec resolve_tasks_in_blocks(list(), keyword()) :: list()
+  def resolve_tasks_in_blocks(blocks, scope) when is_list(blocks) do
+    Barkpark.PortableDoc.TaskResolver.resolve(blocks, fn query ->
+      Barkpark.Tasks.Query.rows_for_query(query, scope)
+    end)
+  end
+
+  def resolve_tasks_in_blocks(blocks, _scope), do: blocks
+
+  @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
   render-opts map `%{raw_target => prerendered_html_string}` that
   `Render.render_html/2` threads onto the palette (so `walk/3`'s `embed/2`
@@ -763,25 +782,6 @@ defmodule Barkpark.Content.Papers do
   narrowed. Threading those resolvers (each with `embeds: %{}`) so an embedded
   note's links stay live is the planned follow-up.
   """
-  @doc """
-  Resolve every query-carrying task block in `blocks` into a snapshot-carrying
-  one — the entry point that makes a paper show LIVE `bp` tasks. Thin: it hands
-  `Barkpark.PortableDoc.TaskResolver.resolve/2` a fetcher that runs each block's
-  `query` against the task substrate under `scope` (`[workspace_id:,
-  project_id:]`, fail-closed). Call it in the render path, and re-call it on a
-  `task.*` mutation event to refresh a live plan. Returns the transformed
-  blocks (unlike the embeds resolver's target→html map — task blocks carry
-  their own snapshot, so the transform is in-place).
-  """
-  @spec resolve_tasks_in_blocks(list(), keyword()) :: list()
-  def resolve_tasks_in_blocks(blocks, scope) when is_list(blocks) do
-    Barkpark.PortableDoc.TaskResolver.resolve(blocks, fn query ->
-      Barkpark.Tasks.Query.rows_for_query(query, scope)
-    end)
-  end
-
-  def resolve_tasks_in_blocks(blocks, _scope), do: blocks
-
   @spec resolve_embeds_in_blocks(list(), String.t(), keyword()) :: %{
           optional(String.t()) => String.t()
         }
