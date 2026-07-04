@@ -228,16 +228,24 @@ func sectionHasPhase(nested []nestedTask) bool {
 // or the en-dash the design uses).
 var wCodeRe = regexp.MustCompile(`\bW\d+(?:[–-]\d+)?(?:\.\d+)?\b`)
 
+// structuralPhaseValues are `phase:*` values that name a NODE KIND (the task's
+// place in the tree), not a wave/phase. `phase:goal` / `phase:epic` mark the
+// root of a goal or epic — they are not a rollup code, so they must never leak
+// into the header's phase slot (the mockup shows a W-code or a bare fraction
+// there, never "goal"). The live guerrilla goal roots carry `kind:task` +
+// `phase:goal`, so the earlier `v == t.Kind` guard alone let "goal" through.
+var structuralPhaseValues = map[string]bool{"goal": true, "epic": true, "task": true, "subtask": true}
+
 // phaseCodeOf derives a task's phase code (charter D41): an explicit `phase:*`
 // label wins (its value, W-code-ish), else a W-code parsed from the title, else
-// "" (no phase — the guerrilla reality). Never invents a code.
+// "" (no phase — the guerrilla reality). Never invents a code. A structural
+// `phase:goal`/`phase:epic` marker (or one that just echoes the task's own kind)
+// is a node-type tag, not a phase, so it is skipped.
 func phaseCodeOf(t Task) string {
 	for _, l := range t.Labels {
 		if strings.HasPrefix(l, labelPhasePrefix) {
 			v := strings.TrimSpace(l[len(labelPhasePrefix):])
-			// A `phase:goal` on a goal-kind epic root just echoes the kind — it is
-			// not a phase, so it never becomes a rollup code (honest, not noise).
-			if v != "" && v != t.Kind {
+			if v != "" && v != t.Kind && !structuralPhaseValues[v] {
 				return v
 			}
 		}

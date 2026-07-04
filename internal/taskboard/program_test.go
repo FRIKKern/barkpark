@@ -264,6 +264,112 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 	}
 }
 
+// phaseBoard is the wave-9 fixture: ONE epic whose children form a real nested
+// tree AND carry two distinct phase codes, so the spine emits BOTH new
+// display-only structures the redesign added — phase sub-bands (spinePhaseBand)
+// and arbitrary-depth ↳ rows. The clusterBoard/sampleBoard fixtures are entirely
+// FLAT, so before this fixture no parity guard exercised depth>0 or a phase band.
+// Titles stay == docID so the ▎-marker check still names the acted-on row.
+//
+// nestTasks arranges the children into tree order; the two depth-0 phase codes
+// (W1, W2) open a band each, and the walk descends w1a → w1a1 → w1a2 (depth 2):
+//
+//	pe (header)
+//	  ── W1 band ──
+//	  w1a  (d0)  w1a1 (d1)  w1a2 (d2)
+//	  ── W2 band ──
+//	  w2a  (d0)  w2a1 (d1)
+func phaseBoard() Board {
+	tp := func(id, phase string) Task { x := t(id); x.Labels = []string{labelPhasePrefix + phase}; return x }
+	tn := func(id, parent string) Task { x := t(id); x.ParentID = parent; return x }
+	return Board{
+		Epics: []Epic{{
+			Root:   t("pe"),
+			Active: true,
+			Children: []Task{
+				tp("w1a", "W1"),
+				tn("w1a1", "w1a"),
+				tn("w1a2", "w1a1"),
+				tp("w2a", "W2"),
+				tn("w2a1", "w2a"),
+			},
+		}},
+	}
+}
+
+// TestVisibleRowsWithPhaseAndNesting pins the spine producer for the redesign's
+// new structure: the phase-band lines and the ↳ nesting add NO selectable rows
+// (they are Selectable:false), so the navigable list is exactly the header + the
+// five tasks in tree order — never a band or a fold line.
+func TestVisibleRowsWithPhaseAndNesting(t2 *testing.T) {
+	m := testModel(phaseBoard())
+	rows := m.visibleRows()
+	want := []struct {
+		kind  rowKind
+		docID string
+	}{
+		{rowEpicHeader, "pe"},
+		{rowChild, "w1a"},
+		{rowChild, "w1a1"},
+		{rowChild, "w1a2"},
+		{rowChild, "w2a"},
+		{rowChild, "w2a1"},
+	}
+	if len(rows) != len(want) {
+		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].kind != w.kind || rows[i].docID != w.docID {
+			t2.Errorf("row %d = {%v %q}, want {%v %q}", i, rows[i].kind, rows[i].docID, w.kind, w.docID)
+		}
+	}
+}
+
+// TestCursorParityWithPhaseAndNesting is the wave-9 extension of the shell↔render
+// tripwire: on a board carrying phase sub-bands AND arbitrary-depth ↳ rows, the ▎
+// marker in the painted frame must sit on exactly the row visibleRows says the
+// cursor is on — proving the display-only bands/guides never shift the selection
+// index space (charter D42 structural parity). It also asserts the bands actually
+// render, so the guard fails if phase grouping silently stops emitting.
+func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
+	m := testModel(phaseBoard())
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 60
+
+	// The phase bands must be present, else this fixture would silently degrade to
+	// a flat list and stop testing the new structure.
+	frame0 := ansi.Strip(m.View())
+	if !strings.Contains(frame0, "W1") || !strings.Contains(frame0, "W2") {
+		t2.Fatalf("phase bands W1/W2 missing — fixture no longer exercises bands:\n%s", frame0)
+	}
+	// The ↳ guide must be present, proving depth>0 rows render nested.
+	if !strings.Contains(frame0, "↳") {
+		t2.Fatalf("nesting guide ↳ missing — fixture no longer exercises depth>0:\n%s", frame0)
+	}
+
+	rows := m.visibleRows()
+	for i, r := range rows {
+		m.ui.Cursor = i
+		frame := ansi.Strip(m.View())
+		var marked []string
+		for _, ln := range strings.Split(frame, "\n") {
+			if strings.Contains(ln, "▎") {
+				marked = append(marked, ln)
+			}
+		}
+		if len(marked) != 1 {
+			t2.Fatalf("cursor %d (%v %q): %d ▎-marked lines, want 1\n%s",
+				i, r.kind, r.docID, len(marked), frame)
+		}
+		if !strings.Contains(marked[0], r.docID) {
+			t2.Errorf("cursor %d: marked line %q does not carry %q (kind %v)",
+				i, marked[0], r.docID, r.kind)
+		}
+	}
+}
+
 // TestClusterFoldHidesMembersAndMovesCursorAcross proves a cluster folds/unfolds
 // exactly like an epic and that j/k step cleanly across the fold — the members
 // leave the navigable list entirely, so the cursor never lands on a hidden row.
