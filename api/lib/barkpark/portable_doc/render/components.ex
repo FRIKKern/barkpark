@@ -67,7 +67,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
   · labels. The task map is at `block["task"]` (or the block itself).
   """
   def task_detail_html(block) when is_map(block) do
-    t = case get(block, "task") do m when is_map(m) -> m; _ -> block end
+    t =
+      case get(block, "task") do
+        m when is_map(m) -> m
+        _ -> block
+      end
+
     title = t |> get("title") |> stringish() |> String.trim()
 
     case title do
@@ -166,11 +171,26 @@ defmodule Barkpark.PortableDoc.Render.Components do
           items
           |> Enum.map(fn c ->
             done = truthy(get(c, "met"))
-            g = if done, do: ~s|<span class="bp-g bp-g--done">✓</span>|, else: ~s|<span class="bp-g bp-g--ready">○</span>|
-            txt = c |> get("text") |> stringish() |> then(fn s -> if s == "", do: stringish(get(c, "criterion")), else: s end) |> escape_html()
+
+            g =
+              if done,
+                do: ~s|<span class="bp-g bp-g--done">✓</span>|,
+                else: ~s|<span class="bp-g bp-g--ready">○</span>|
+
+            txt =
+              c
+              |> get("text")
+              |> stringish()
+              |> then(fn s -> if s == "", do: stringish(get(c, "criterion")), else: s end)
+              |> escape_html()
+
             ev = c |> get("evidence") |> stringish() |> String.trim()
-            ev_html = if ev == "", do: "", else: ~s|<div class="bp-crit__ev">↳ #{escape_html(ev)}</div>|
+
+            ev_html =
+              if ev == "", do: "", else: ~s|<div class="bp-crit__ev">↳ #{escape_html(ev)}</div>|
+
             cls = if done, do: " bp-crit--met", else: ""
+
             ~s|<div class="bp-crit#{cls}">#{g}<span class="bp-crit__t">#{txt}</span></div>#{ev_html}|
           end)
           |> Enum.join("")
@@ -191,7 +211,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
       |> Enum.filter(& &1)
       |> Enum.join(" · ")
 
-    if words == "", do: "", else: ~s|<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">#{words}</div>|
+    if words == "",
+      do: "",
+      else:
+        ~s|<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">#{words}</div>|
   end
 
   defp detail_rail(t, key, label) do
@@ -203,7 +226,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
       _ ->
         {shown, extra} = Enum.split(rows, 20)
-        done = Enum.count(rows, fn r -> r |> get("status") |> stringish() |> role_of() == "done" end)
+
+        done =
+          Enum.count(rows, fn r -> r |> get("status") |> stringish() |> role_of() == "done" end)
 
         body =
           shown
@@ -214,7 +239,11 @@ defmodule Barkpark.PortableDoc.Render.Components do
           end)
           |> Enum.join("")
 
-        more = if extra == [], do: "", else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+        more =
+          if extra == [],
+            do: "",
+            else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+
         ~s|<div class="bp-tdetail__lbl">#{label} · #{done}/#{length(rows)} done</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
     end
   end
@@ -231,10 +260,16 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         body =
           shown
-          |> Enum.map(fn p -> ~s|<div class="bp-rail__r bp-rail__paper">▸ #{escape_html(stringish(p))}</div>| end)
+          |> Enum.map(fn p ->
+            ~s|<div class="bp-rail__r bp-rail__paper">▸ #{escape_html(stringish(p))}</div>|
+          end)
           |> Enum.join("")
 
-        more = if extra == [], do: "", else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+        more =
+          if extra == [],
+            do: "",
+            else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+
         ~s|<div class="bp-tdetail__lbl">Papers</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
     end
   end
@@ -243,8 +278,11 @@ defmodule Barkpark.PortableDoc.Render.Components do
     labels = t |> get("labels") |> as_list() |> Enum.map(&stringish/1) |> Enum.reject(&(&1 == ""))
 
     case labels do
-      [] -> ""
-      _ -> ~s|<div class="bp-tdetail__labels">#{labels |> Enum.map(&escape_html/1) |> Enum.join(" · ")}</div>|
+      [] ->
+        ""
+
+      _ ->
+        ~s|<div class="bp-tdetail__labels">#{labels |> Enum.map(&escape_html/1) |> Enum.join(" · ")}</div>|
     end
   end
 
@@ -335,6 +373,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             text = it |> get("text") |> stringish() |> escape_html()
             lead = it |> get("lead") |> stringish() |> String.trim()
             lead_html = if lead == "", do: "", else: ~s|<b>#{escape_html(lead)}</b> |
+
             ~s|<div class="bp-note"><span class="bp-note__k">#{label}</span><div class="bp-note__d">#{lead_html}#{text}</div></div>|
           end)
           |> Enum.join("")
@@ -395,7 +434,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
         by_role = Enum.group_by(rows, fn r -> r |> get("status") |> stringish() |> role_of() end)
 
         cols =
-          [{"ready", "Ready"}, {"progress", "In progress"}, {"blocked", "Blocked"}, {"done", "Done"}]
+          [
+            {"ready", "Ready"},
+            {"progress", "In progress"},
+            {"blocked", "Blocked"},
+            {"done", "Done"}
+          ]
           |> Enum.map(fn {role, label} -> board_col(role, label, Map.get(by_role, role, [])) end)
           |> Enum.reject(&(&1 == ""))
           |> Enum.join("")
@@ -413,8 +457,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
       rows
       |> Enum.map(fn r ->
         title = r |> get("title") |> stringish() |> escape_html()
-        meta = [priority_html(get(r, "priority")), criteria_html(get(r, "criteria"))] |> Enum.join("")
+
+        meta =
+          [priority_html(get(r, "priority")), criteria_html(get(r, "criteria"))] |> Enum.join("")
+
         meta_html = if meta == "", do: "", else: ~s|<div class="bp-bcard__m">#{meta}</div>|
+
         ~s|<div class="bp-bcard">#{glyph_html(role)}<span class="bp-bcard__t">#{title}</span>#{meta_html}</div>|
       end)
       |> Enum.join("")
@@ -438,14 +486,20 @@ defmodule Barkpark.PortableDoc.Render.Components do
       _ ->
         today =
           case get(block, "today") do
-            n when is_number(n) -> ~s|<span class="bp-rm__today" style="left:#{clampf(n)}%"></span>|
-            _ -> ""
+            n when is_number(n) ->
+              ~s|<span class="bp-rm__today" style="left:#{clampf(n)}%"></span>|
+
+            _ ->
+              ""
           end
 
         scale =
           case block |> get("scale") |> as_list() do
-            [] -> ""
-            cells -> ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
+            [] ->
+              ""
+
+            cells ->
+              ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
           end
 
         lanes =
@@ -457,6 +511,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             left = r |> get("left") |> clampf()
             width = r |> get("width") |> clampf_width(left)
             cls = if phase, do: "bp-rm__lane bp-rm__lane--phase", else: "bp-rm__lane"
+
             ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--#{role}" style="left:#{left}%;width:#{width}%"></span>#{today}</div></div>|
           end)
           |> Enum.join("")

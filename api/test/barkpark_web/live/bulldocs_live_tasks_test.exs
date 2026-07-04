@@ -37,7 +37,11 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, doc} =
       Content.create_document(
         "task",
-        %{"doc_id" => doc_id, "title" => title, "content" => %{"kind" => "task", "lifecycle_status" => lifecycle, "parent_id" => epic}},
+        %{
+          "doc_id" => doc_id,
+          "title" => title,
+          "content" => %{"kind" => "task", "lifecycle_status" => lifecycle, "parent_id" => epic}
+        },
         @dataset,
         scope
       )
@@ -45,7 +49,10 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     doc
   end
 
-  test "a task-list query renders live tasks, and a mutation updates the plan", %{conn: conn, scope: scope} do
+  test "a task-list query renders live tasks, and a mutation updates the plan", %{
+    conn: conn,
+    scope: scope
+  } do
     epic = "epic-#{System.unique_integer([:positive])}"
     _done = mk_task!("collect targets", "done", epic, scope)
     open = mk_task!("inject snapshot", "open", epic, scope)
@@ -55,7 +62,13 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _paper} =
       Content.upsert_paper(%{
         slug: slug,
-        blocks: [%{"id" => "t1", "type" => "task-list", "query" => %{"parent_id" => epic, "dataset" => @dataset}}]
+        blocks: [
+          %{
+            "id" => "t1",
+            "type" => "task-list",
+            "query" => %{"parent_id" => epic, "dataset" => @dataset}
+          }
+        ]
       })
 
     {:ok, view, html} = live(conn, "/papers/#{slug}")
@@ -71,7 +84,10 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _} =
       Content.upsert_document(
         "task",
-        %{"doc_id" => open.doc_id, "content" => %{"kind" => "task", "lifecycle_status" => "done", "parent_id" => epic}},
+        %{
+          "doc_id" => open.doc_id,
+          "content" => %{"kind" => "task", "lifecycle_status" => "done", "parent_id" => epic}
+        },
         @dataset,
         scope
       )
@@ -92,7 +108,13 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _paper} =
       Content.upsert_paper(%{
         slug: slug,
-        blocks: [%{"id" => "t1", "type" => "task-list", "snapshot" => [%{"title" => "hand-written", "status" => "ready"}]}]
+        blocks: [
+          %{
+            "id" => "t1",
+            "type" => "task-list",
+            "snapshot" => [%{"title" => "hand-written", "status" => "ready"}]
+          }
+        ]
       })
 
     {:ok, _view, html} = live(conn, "/papers/#{slug}")

@@ -713,7 +713,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     inner =
       cols
       |> List.wrap()
-      |> Enum.map(fn col -> ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), style)}</div>| end)
+      |> Enum.map(fn col ->
+        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), style)}</div>|
+      end)
       |> Enum.join("")
 
     %{"kind" => "_raw", "html" => ~s|<div class="bp-cols" style="--bp-cols:#{n}">#{inner}</div>|}
