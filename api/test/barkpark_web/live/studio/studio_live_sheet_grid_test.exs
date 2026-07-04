@@ -600,6 +600,222 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ "sheet-err"
   end
 
+  # ── per-viewer filter (SF-B, the funnel + the collaborator bar) ────────────
+
+  test "the funnel filters this viewer's rows and stores NOTHING (SF-D2)",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-filter",
+      one_tab(%{"A1" => %{"v" => "hdr"}, "A2" => %{"v" => 5}, "A3" => %{"v" => 1}})
+    )
+
+    {view, target, html} = open!(conn, "sg-filter")
+    # Funnel present per editable column header; not yet active.
+    assert html =~ ~s(data-test-id="sheet-filter-funnel-1")
+    refute html =~ "rows hidden by filter"
+
+    render_click(target, "filter-open", %{"col" => "1"})
+    assert has_element?(view, ~s([data-test-id="sheet-filter-panel"]))
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "gt", "value" => "3"})
+
+    # A2 (5 > 3) stays; A1 (text) and A3 (1) fail the number filter → hidden.
+    assert html =~ ~s(data-ref="A2")
+    refute html =~ ~s(data-ref="A1")
+    refute html =~ ~s(data-ref="A3")
+    # The pager reports the hidden count and the funnel reads active.
+    assert html =~ "rows hidden by filter"
+    assert html =~ ~s(data-active="true")
+
+    # THE ONE-WAY DOOR (SF-D2): filtering dispatched ZERO ops — no session was
+    # ever started, so nothing was written, persisted, or broadcast.
+    assert Session.peek("sg-filter", @dataset) == {:error, :no_session}
+  end
+
+  test "Clear removes the filter and every row returns", %{conn: conn} do
+    create_sheet!("sg-filter-clear", one_tab(%{"A1" => %{"v" => 5}, "A2" => %{"v" => 1}}))
+    {view, target, _html} = open!(conn, "sg-filter-clear")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "gt", "value" => "3"})
+
+    refute html =~ ~s(data-ref="A2")
+
+    html = render_click(target, "filter-clear", %{"col" => "1"})
+    assert html =~ ~s(data-ref="A2")
+    refute html =~ "rows hidden by filter"
+    refute html =~ ~s(data-active="true")
+  end
+
+  # THE WISH's collaborator bar: one viewer filters, the OTHER viewer and the
+  # stored document see everything — the filter is socket view-state, so no op
+  # is dispatched (proved by the second view + the storage staying identical).
+  test "a filter is per-viewer — a collaborator (and the document) is untouched",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-filter-collab",
+      one_tab(%{"A1" => %{"v" => 1}, "A2" => %{"v" => ""}, "A3" => %{"v" => 3}})
+    )
+
+    {view1, target1, _html} = open!(conn, "sg-filter-collab")
+    {view2, _target2, _html2} = open!(Phoenix.ConnTest.build_conn(), "sg-filter-collab")
+
+    # Viewer 2 sees the blank-A2 row before viewer 1 filters.
+    assert render(view2) =~ ~s(data-ref="A2")
+
+    # Viewer 1 hides blank rows in column A.
+    render_click(target1, "filter-open", %{"col" => "1"})
+
+    html1 =
+      view1
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "nonblank"})
+
+    # Viewer 1's own grid hid the blank row (A2).
+    refute html1 =~ ~s(data-ref="A2")
+    assert html1 =~ "rows hidden by filter"
+
+    # Viewer 2 still sees EVERYTHING — no delta reached it (zero ops dispatched).
+    html2 = render(view2)
+    assert html2 =~ ~s(data-ref="A2")
+    refute html2 =~ "rows hidden by filter"
+
+    # The stored document is byte-identical: no op → no session was ever
+    # started, so nothing was written, persisted, or broadcast to viewer 2.
+    assert Session.peek("sg-filter-collab", @dataset) == {:error, :no_session}
+  end
+
+  test "a fill whose span crosses a hidden row is REFUSED (paper §4)", %{conn: conn} do
+    create_sheet!(
+      "sg-filter-fill",
+      one_tab(%{"A1" => %{"v" => 10}, "A2" => %{"v" => ""}, "A3" => %{"v" => 30}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-filter-fill")
+
+    # Hide the blank middle row (A2) so a top-to-bottom span crosses a hidden row.
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    view
+    |> element(~s([data-test-id="sheet-filter-form"]))
+    |> render_submit(%{"col" => "1", "op" => "nonblank"})
+
+    # Select A1:A3 (active A3, anchor A1) and fill down.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "cell-click", %{"ref" => "A3", "shift" => true})
+    html = render_hook(target, "fill", %{"dir" => "down"})
+
+    assert html =~ "hidden by a filter"
+    # The fill was refused: no op ran, so no session was ever started — the
+    # hidden A2 (and every other cell) is untouched in the stored document.
+    assert Session.peek("sg-filter-fill", @dataset) == {:error, :no_session}
+  end
+
+  test "the funnel is editable-only (absent in View mode)", %{conn: conn} do
+    create_sheet!("sg-filter-view", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, html} = open!(conn, "sg-filter-view")
+    assert html =~ ~s(data-test-id="sheet-filter-funnel-1")
+
+    render_hook(target, "toggle-mode", %{})
+    refute render(view) =~ ~s(data-test-id="sheet-filter-funnel-1")
+  end
+
+  # The criteria map is keyed by COLUMN of the tab it was set on — switching
+  # tabs must drop it (the find_hits precedent) or the new tab's rows silently
+  # vanish under a filter the viewer set somewhere else entirely.
+  test "switching tabs drops the filter — criteria never bleed across tabs",
+       %{conn: conn} do
+    create_sheet!("sg-filter-tabs", [
+      %{"name" => "One", "cells" => %{"A1" => %{"v" => 5}, "A2" => %{"v" => ""}}},
+      %{"name" => "Two", "cells" => %{"A1" => %{"v" => ""}, "A2" => %{"v" => 7}}}
+    ])
+
+    {view, target, _html} = open!(conn, "sg-filter-tabs")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "nonblank"})
+
+    assert html =~ "rows hidden by filter"
+
+    # Tab 2's A1 is blank — under a bleeding nonblank filter its row would be
+    # hidden. It must render, filter-free.
+    html = render_click(target, "tab-switch", %{"tab" => "1"})
+    assert html =~ ~s(data-ref="A1")
+    refute html =~ "rows hidden by filter"
+    refute html =~ ~s(data-active="true")
+  end
+
+  # A vacuous criterion (gt/lt/between without a number, eq/contains without a
+  # value) matches NOTHING in the CF-D5 kernel — applying it would blank the
+  # whole data set with zero explanation. It is refused inline instead.
+  test "a value op without a usable value is refused inline, nothing hidden",
+       %{conn: conn} do
+    create_sheet!("sg-filter-vacuous", one_tab(%{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}))
+    {view, target, _html} = open!(conn, "sg-filter-vacuous")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "gt", "value" => ""})
+
+    # Refused: inline error, panel still open, every row still rendered.
+    assert html =~ "enter a number"
+    assert html =~ ~s(data-test-id="sheet-filter-panel")
+    assert html =~ ~s(data-ref="A1")
+    assert html =~ ~s(data-ref="A2")
+    refute html =~ "rows hidden by filter"
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "between", "value" => "1", "value2" => "x"})
+
+    assert html =~ "enter numbers for min and max"
+    refute html =~ "rows hidden by filter"
+
+    # The refusals dispatched nothing — no session, no write (SF-D2 held).
+    assert Session.peek("sg-filter-vacuous", @dataset) == {:error, :no_session}
+  end
+
+  # Jump/find page arithmetic under a filter: `derive_grid` pages over VISIBLE
+  # rows (SF-D8), so name-jump must locate the target by its position in the
+  # visible list — the logical `div(r-1, 500)` would page past it.
+  test "name-jump pages by VISIBLE rows under a filter", %{conn: conn} do
+    # 1200 data rows; eq 0 keeps the 600 even rows. A998 is the 499th visible
+    # row → page 0 of the filtered window; the logical division says page 1.
+    cells = for r <- 1..1200, into: %{}, do: {"A#{r}", %{"v" => rem(r, 2)}}
+    create_sheet!("sg-filter-jump", [%{"name" => "Data", "cells" => cells}])
+    {view, target, _html} = open!(conn, "sg-filter-jump")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    view
+    |> element(~s([data-test-id="sheet-filter-form"]))
+    |> render_submit(%{"col" => "1", "op" => "eq", "value" => "0"})
+
+    html = render_submit(target, "name-jump", %{"ref" => "A998"})
+
+    # The target's page rendered and the cell is active.
+    assert html =~ ~s(data-ref="A998")
+
+    assert view
+           |> element(~s(td[data-ref="A998"]))
+           |> render() =~ "sheet-active"
+  end
+
   # ── keyboard navigation + selection ────────────────────────────────────────
 
   test "arrow-key nav events move the active cell; shift extends a selection", %{conn: conn} do

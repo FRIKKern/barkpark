@@ -3772,6 +3772,43 @@
       box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--ring, #3b82f6);
     }
     .sheet-cf-actions { display: flex; justify-content: flex-end; }
+
+    /* ── Per-column FILTER funnel + editor (SF-B, Studio-only per arc-1
+       Decision 13 — NOT mirrored to layouts/sheets.html.heex; the reader's
+       filter is wave SF-2). Rides the .sheet-popover / .sheet-cf-panel
+       hairline-and-token family. Filter is per-viewer view-state only. */
+    .sheet-filter-funnel {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 2px; margin-left: 1px; border: 0; border-radius: 3px;
+      background: transparent; color: var(--fg-dim, var(--fg));
+      cursor: pointer; opacity: 0; line-height: 0;
+    }
+    th:hover > .sheet-filter-funnel,
+    th:focus-within > .sheet-filter-funnel,
+    .sheet-filter-funnel:focus-visible,
+    .sheet-filter-funnel.sheet-funnel-active { opacity: 0.85; }
+    .sheet-filter-funnel.sheet-funnel-active { color: var(--accent, #3b82f6); opacity: 1; }
+    .sheet-filter-funnel:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: 1px; }
+    .sheet-filter-panel {
+      top: calc(100% + 2px); left: 0; width: 220px; max-width: 92vw;
+      padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+      /* the column header pins sticky (z-index up to 5); float above it */
+      z-index: 12; cursor: default; font-weight: 400;
+    }
+    .sheet-filter-head { display: flex; align-items: center; justify-content: space-between; }
+    .sheet-filter-title { font-weight: 600; font-size: 12px; color: var(--fg); }
+    .sheet-filter-form { display: flex; flex-direction: column; gap: 7px; }
+    .sheet-filter-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
+    .sheet-filter-field > input[type="text"], .sheet-filter-field > select {
+      padding: 4px 6px; font-size: 12px; color: var(--fg);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    }
+    .sheet-filter-field > input:focus-visible, .sheet-filter-field > select:focus-visible {
+      outline: 2px solid var(--ring, #3b82f6); outline-offset: -1px;
+    }
+    .sheet-filter-error { margin: 0; font-size: 11px; color: #f87171; }
+    html[data-theme="light"] .sheet-filter-error { color: #dc2626; }
+    .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
   </style>
 </head>
 <body>
