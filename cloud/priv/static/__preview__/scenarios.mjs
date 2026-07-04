@@ -416,6 +416,17 @@ export const SCENARIOS = {
     deepLink: "#overview",
     data: { me: null, barkparks: [], subscription: null, sites: [], audit: [] },
   },
+  // NOTE: mock.js clears the seeded session for any scenario named loggedout*
+  // (it must decide synchronously, before this module loads) — keep the prefix.
+  "loggedout-invited": {
+    label: "Logged out with an invite link — the sign-in banner announces the parked invitation",
+    authed: false,
+    deepLink: "#/invitations/accept?token=tok-preview-signin",
+    data: {
+      me: null, barkparks: [], subscription: null, sites: [], audit: [],
+      invitation: { preview: foreignInvitePreview },
+    },
+  },
   empty: {
     label: "Fresh team — empty dashboard, first-run onboarding",
     authed: true,

@@ -1518,6 +1518,18 @@ test("deployRow: failed/active rows offer no promote action (and no Current chip
   assert.doesNotMatch(hooks.deployRow(building, "d2"), /dep-promote/);
 });
 
+test("deployRow shortens a full-sha headline to 7 chars (full sha on hover); non-sha refs stay verbatim", () => {
+  const full = "4e7d0c9b3a5f18e2d6c4b0a9f8e7d6c5b4a39281";
+  const html = hooks.deployRow({ id: "d1", status: "live", git_ref: full }, null);
+  assert.match(html, />4e7d0c9</);                       // 7-char short form
+  assert.match(html, new RegExp('title="' + full + '"')); // full sha within reach
+  assert.doesNotMatch(html, new RegExp(">" + full + "<")); // never the 40-char wall
+  // A non-hex ref (tag / hand-set) is NOT a sha — renders verbatim, no title.
+  const tag = hooks.deployRow({ id: "d2", status: "live", git_ref: "release-2026-07" }, null);
+  assert.match(tag, />release-2026-07</);
+  assert.doesNotMatch(tag, /title=/);
+});
+
 test("deployRow escapes hostile git meta (branch, ref, id)", () => {
   const evil = {
     id: 'd5" onclick="x', status: "live",

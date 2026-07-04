@@ -204,10 +204,20 @@ const EXPECTATIONS = {
     },
   },
   empty: {
-    what: "first-run onboarding on an empty dashboard",
+    // A4's welcome runway replaced the old start-card checklist (IA reshape).
+    what: "first-run welcome runway on an empty dashboard",
     container: "overview-body",
-    includes: ["start-card", "Get started", "data-goto=\"billing\"", "data-goto=\"launch\""],
+    includes: ["runway", "launch-flow", "Create your first Barkpark"],
     excludes: ['class="fleet-row"'],
+  },
+  "loggedout-invited": {
+    what: "the sign-in banner announcing the parked invitation",
+    check(reg) {
+      assert.equal(reg.get("auth-screen").hidden, false, "auth screen must be visible");
+      const banner = reg.get("auth-invite").innerHTML;
+      assert.ok(banner.includes("Northwind"), "banner must name the inviting team");
+      assert.ok(banner.includes("ada@acme.com"), "banner must name the invited address");
+    },
   },
   "mixed-fleet": {
     what: "one fleet row per instance, each with a status pill",
@@ -226,6 +236,45 @@ const EXPECTATIONS = {
     what: "the setup-failed state with the verbatim error",
     container: "instance-body",
     includes: ["bp-tl-fail", "bp-tl-step--failed", "Setup failed", "Retry setup", "Studio never came up"],
+  },
+  // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
+  // Current chip, the prior live row offers rollback, the failed row neither.
+  rollback: {
+    what: "deployment rows with Redeploy / Roll-back actions + the Current chip",
+    container: "site-body",
+    includes: ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "],
+  },
+  // The 409-failure twin boots to the same skeleton; the inline-failure morph
+  // itself is click-driven (covered by the vm unit tests + live browser).
+  "promote-failure": {
+    what: "the same deploy rows (failure path is exercised on click)",
+    container: "site-body",
+    includes: ['data-kind="redeploy"', ">Roll back to this<"],
+  },
+  // Invitation accept: each committed terminal renders its designed card with
+  // exactly one [data-invite-act] action (esc() turns ' into &#39; in copy).
+  "invite-joined": {
+    what: "the Join confirm for a live foreign-team invitation",
+    container: "view-invite",
+    includes: ['data-invite-act="join"', "Northwind Trading", "invite-skip", "Not now"],
+  },
+  "invite-expired": {
+    what: "the calm expired dead-end with one next action",
+    container: "view-invite",
+    includes: ["has expired", 'data-invite-act="overview"'],
+    excludes: ['data-invite-act="join"'],
+  },
+  "invite-already-member": {
+    what: "the already-a-member card with one next action",
+    container: "view-invite",
+    includes: ["already a member", 'data-invite-act="overview"'],
+    excludes: ['data-invite-act="join"'],
+  },
+  "invite-invalid": {
+    what: "the revoked/used dead-end with one next action",
+    container: "view-invite",
+    includes: ["isn&#39;t valid any more", 'data-invite-act="overview"'],
+    excludes: ['data-invite-act="join"'],
   },
 };
 

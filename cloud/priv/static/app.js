@@ -399,10 +399,15 @@
       },
       succeed: function () {
         state = confirmModalReduce(state, { type: "succeed" });
-        closeModal();
+        // The operator may have Escape/Cancel-dismissed while the request was
+        // in flight — and might have opened a DIFFERENT modal since. Only close
+        // when OUR button is still mounted, so a stale settle can never shut an
+        // unrelated dialog.
+        if (confirmBtn.isConnected !== false) closeModal();
       },
       fail: function (message, recoveryLabel, onRecover) {
         state = confirmModalReduce(state, { type: "fail", message: message });
+        if (confirmBtn.isConnected === false) return; // dismissed mid-flight: nothing to morph
         mode = "recover";
         recover = onRecover || null;
         if (errMsg) setText(errMsg, state.error || String(message || ""));
@@ -3197,8 +3202,13 @@
 
   function deployRow(d, currentId) {
     var st = d.status || "queued";
+    // Headline ref: a full 40-char commit sha is noise, not information — show
+    // the 7-char short form (full sha on hover). Only hex-sha-shaped refs are
+    // shortened; anything else (a tag, a hand-set ref) renders verbatim.
+    var isSha = d.git_ref && /^[0-9a-f]{8,64}$/i.test(d.git_ref);
     var ref = d.image_tag ? '<span class="mono">' + esc(shortId(d.image_tag)) + "</span>"
-      : d.git_ref ? '<span class="mono">' + esc(d.git_ref) + "</span>"
+      : d.git_ref ? '<span class="mono"' + (isSha ? ' title="' + esc(d.git_ref) + '"' : "") + ">" +
+          esc(isSha ? shortSha(d.git_ref) : d.git_ref) + "</span>"
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
     var isCurrent = currentId != null && String(d.id) === String(currentId);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
@@ -5720,7 +5730,12 @@
     // Invitation resume: a parked accept token (a logged-out landing that just
     // came through login / signup / OAuth) outranks whatever hash the
     // round-trip left behind — the user's intent was "accept this invite".
-    if (parkedInviteToken() && parseHash().view !== "invite") {
+    // EXCEPT an explicit drill-down deep link (#site/…, #instance/…): someone
+    // who just opened a specific resource asked for THAT; an undecided invite
+    // stays parked and resumes on the next plain boot instead of hijacking it.
+    var preInviteView = parseHash().view;
+    if (parkedInviteToken() && preInviteView !== "invite" &&
+        preInviteView !== "site" && preInviteView !== "instance") {
       location.hash = "#invitations/accept";
     }
 
