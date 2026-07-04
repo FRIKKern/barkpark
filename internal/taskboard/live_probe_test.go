@@ -232,11 +232,12 @@ func TestLiveProbe(t *testing.T) {
 	widthSafe("html-only", htmlBody, 80)
 	fmt.Printf("reading-frame probe OK: detail + paper + HTML-only states render width-safe\n")
 
-	// ── Wave-7 compact / grouped / claim-forward guard (the live-queue retune) ─
-	// The whole point of wave 7: on the real guerrilla queue (119 expired claims,
-	// 0 in_progress) the DEFAULT board must read as a short list of folded section
-	// headers with a READY TO CLAIM head — NOT a ~130-row flat wall. Assert it on
-	// the live corpus, read-only.
+	// ── Wave-8 head-cap / claim-forward guard (the "at least 5 per category"
+	// retune) ─ On the real guerrilla queue the DEFAULT board must paint a HEAD of
+	// at most groupHeadMax children per section (the user's "we want to see at
+	// least 5 tasks per category") — a bigger section trims the rest behind a
+	// "+K more" line, a smaller one shows all it has — with a READY TO CLAIM head
+	// and never a fully flat wall. Assert it on the live corpus, read-only.
 	def := UIState{Conn: ConnLive, LastSync: snap.FetchedAt, CollapsedEpics: map[string]bool{}}
 	defaultRows := 0
 	if showReadyHead(b) {
@@ -244,16 +245,28 @@ func TestLiveProbe(t *testing.T) {
 	} else {
 		defaultRows += len(b.Now)
 	}
-	activeEpics, expandedEpics := 0, 0
+	// checkHead asserts a section's default shown-count obeys the head cap: at most
+	// groupHeadMax, and a small section (< groupHeadMax children) shows all of them.
+	checkHead := func(what string, shown, n int) {
+		if shown > groupHeadMax {
+			t.Errorf("%s shows %d children by default, over the head cap %d", what, shown, groupHeadMax)
+		}
+		if n < groupHeadMax && shown != n {
+			t.Errorf("small %s shows %d of %d children by default, want all", what, shown, n)
+		}
+		if n >= groupHeadMax && shown != groupHeadMax {
+			t.Errorf("%s (%d children) shows %d by default, want the head cap %d", what, n, shown, groupHeadMax)
+		}
+	}
+	activeEpics := 0
 	for _, e := range b.Epics {
 		defaultRows++ // the header row is always a stop
 		if e.Active {
 			activeEpics++
 		}
-		if !foldedEpic(def, e) {
-			expandedEpics++
-			defaultRows += len(e.Children)
-		}
+		shown := epicShown(def, e)
+		checkHead("epic "+e.Root.DocID, shown, len(e.Children))
+		defaultRows += shown
 	}
 	activeClusters := 0
 	for _, cl := range b.Clusters {
@@ -261,17 +274,17 @@ func TestLiveProbe(t *testing.T) {
 		if cl.Active {
 			activeClusters++
 		}
-		if !foldedCluster(def, cl) {
-			defaultRows += len(cl.Tasks)
-		}
+		shown := clusterShown(def, cl)
+		checkHead("cluster "+cl.Key, shown, len(cl.Tasks))
+		defaultRows += shown
 	}
 	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
 		defaultRows++ // the loose "(no epic)" header
-		if !foldedOrphans(def, b) {
-			defaultRows += len(b.Orphans)
-		}
+		shown := orphansShown(def, b)
+		checkHead("orphan bucket", shown, len(b.Orphans))
+		defaultRows += shown
 	}
-	// A fully-EXPANDED count (the old wave-6 default) for the compactness ratio.
+	// A fully-EXPANDED count (every child shown) for the compactness ratio.
 	expandedRows := len(b.Now)
 	for _, e := range b.Epics {
 		expandedRows += 1 + len(e.Children)
@@ -282,10 +295,10 @@ func TestLiveProbe(t *testing.T) {
 	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
 		expandedRows += 1 + len(b.Orphans)
 	}
-	fmt.Printf("wave-7: readyHead=%d readyTotal=%d showReadyHead=%v activeEpics=%d/%d expandedEpics=%d activeClusters=%d/%d orphansActive=%v\n",
-		len(b.ReadyHead), b.ReadyTotal, showReadyHead(b), activeEpics, len(b.Epics), expandedEpics,
-		activeClusters, len(b.Clusters), b.OrphansActive)
-	fmt.Printf("wave-7: DEFAULT visible rows=%d vs fully-expanded=%d (compaction %.0f%%)\n",
+	fmt.Printf("wave-8: readyHead=%d readyTotal=%d showReadyHead=%v activeEpics=%d/%d activeClusters=%d/%d orphansActive=%v headCap=%d\n",
+		len(b.ReadyHead), b.ReadyTotal, showReadyHead(b), activeEpics, len(b.Epics),
+		activeClusters, len(b.Clusters), b.OrphansActive, groupHeadMax)
+	fmt.Printf("wave-8: DEFAULT visible rows=%d vs fully-expanded=%d (compaction %.0f%%)\n",
 		defaultRows, expandedRows, 100*(1-float64(defaultRows)/float64(max1(expandedRows))))
 	// Claim-forward: with nothing in flight the band must OFFER work, never dead-end.
 	if len(b.Now) == 0 {
@@ -296,13 +309,24 @@ func TestLiveProbe(t *testing.T) {
 			t.Errorf("ready head is %d, over the cap %d", len(b.ReadyHead), readyHeadMax)
 		}
 	}
-	// Compact: a section auto-expands ONLY when it owns active work, so the default
-	// row count must not be a flat wall — it must be dramatically shorter than the
-	// fully-expanded corpus whenever there are folded sections to collapse.
-	if expandedRows > 40 && defaultRows >= expandedRows {
-		t.Errorf("board did not compact: default rows %d not shorter than expanded %d (flat wall)", defaultRows, expandedRows)
+	// Head cap DOES still compact whenever a single section is bigger than the cap:
+	// the default must never be a full flat wall when the corpus holds a large,
+	// head-capped section (unlike wave-7 this no longer folds SMALL sections away).
+	biggest := len(b.Orphans)
+	for _, e := range b.Epics {
+		if len(e.Children) > biggest {
+			biggest = len(e.Children)
+		}
 	}
-	fmt.Printf("wave-7 guard OK: default board is compact + claim-forward on the live corpus\n")
+	for _, cl := range b.Clusters {
+		if len(cl.Tasks) > biggest {
+			biggest = len(cl.Tasks)
+		}
+	}
+	if biggest > groupHeadMax && defaultRows >= expandedRows {
+		t.Errorf("board did not head-cap: default rows %d not shorter than expanded %d despite a %d-child section", defaultRows, expandedRows, biggest)
+	}
+	fmt.Printf("wave-8 guard OK: default board head-caps every category + stays claim-forward on the live corpus\n")
 
 	// The pure spine + full frame must survive the real corpus at every
 	// supported width without panicking or overrunning the pane.

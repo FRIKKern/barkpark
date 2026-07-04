@@ -113,15 +113,18 @@ func TestApplySnapshotKeepsSelectionOnSameTask(t2 *testing.T) {
 	m := newModel(nil, "", Config{})
 	m.now = func() time.Time { return time.Unix(7000, 0) }
 	m.board = Board{Orphans: []Task{t("a"), t("b"), t("c")}}
-	m.ui.Cursor = 2 // on "c"
+	// Rows: 0 loose-bucket header, 1 a, 2 b, 3 c. The head cap shows all three
+	// loose tasks (n < groupHeadMax), so "c" is the last navigable row.
+	m.ui.Cursor = 3 // on "c"
 
-	// The refetch reorders: "c" moves to the top.
+	// The refetch reorders: "c" moves to the top of the loose bucket.
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
 		return Board{Orphans: []Task{t("c"), t("a"), t("b")}}
 	}
 	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(7000, 0)}})
-	if m.ui.Cursor != 0 {
-		t2.Fatalf("cursor = %d after reorder, want 0 (still on task c)", m.ui.Cursor)
+	// After the reorder "c" is the first loose task → row 1 (row 0 is the header).
+	if m.ui.Cursor != 1 {
+		t2.Fatalf("cursor = %d after reorder, want 1 (still on task c)", m.ui.Cursor)
 	}
 }
 

@@ -6,8 +6,8 @@ NOW
    opus-3 · 12m · 1/3 · Cloud GUI epic
 
 ── Cloud GUI epic ────────────────────────────────── 1 ready
-
-
+   ○ Reconcile the #979 role seam
+   ◐ Ship the offline banner                         blocked
 
 
 

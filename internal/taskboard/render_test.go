@@ -378,27 +378,42 @@ func TestRenderActionStripKeepsURLTail(t *testing.T) {
 	}
 }
 
-// TestRenderWokenDormantEpicShowsChildren pins the shared fold rule on the
-// render side: an explicit CollapsedEpics entry (even =false) OVERRIDES
-// Dormant, so an epic the user woke with enter/l actually paints its children.
-// Before the shared foldedEpic rule the renderer kept a woken dormant epic
-// folded while the shell navigated its (invisible) children.
-func TestRenderWokenDormantEpicShowsChildren(t *testing.T) {
+// TestRenderHeadCapRespectsExpandOverride pins the shared head-cap rule on the
+// render side (the renderer and the shell share sectionShown, so what navigates
+// is what paints): with no fold entry a section paints only its HEAD (the first
+// groupHeadMax children), folding the rest behind a "+K more" line; an explicit
+// CollapsedEpics entry (=false) OVERRIDES the head and paints EVERY child.
+// (Repurposed from TestRenderWokenDormantEpicShowsChildren — the wave-7 dormant
+// auto-fold this pinned no longer exists; the head cap is its successor.)
+func TestRenderHeadCapRespectsExpandOverride(t *testing.T) {
 	b := Board{Epics: []Epic{{
-		Root:     Task{DocID: "e2", Title: "Search epic"},
-		Children: []Task{{DocID: "cx", Title: "Reindex media"}},
-		Dormant:  true,
+		Root: Task{DocID: "big", Title: "Search epic"},
+		Children: []Task{
+			{DocID: "k1", Title: "Head one"},
+			{DocID: "k2", Title: "Head two"},
+			{DocID: "k3", Title: "Head three"},
+			{DocID: "k4", Title: "Head four"},
+			{DocID: "k5", Title: "Head five"},
+			{DocID: "k6", Title: "Tail beyond the head"},
+		},
 	}}}
-	st := UIState{Conn: ConnLive, LastSync: fixedNow,
-		CollapsedEpics: map[string]bool{"e2": false}} // the user woke it
-	frame := ansi.Strip(Render(b, st, 80, 30, fixedNow))
-	if !strings.Contains(frame, "Reindex media") {
-		t.Errorf("woken dormant epic still hides its children:\n%s", frame)
+	// Explicit expand (entry=false): the tail child past the head paints.
+	stOpen := UIState{Conn: ConnLive, LastSync: fixedNow,
+		CollapsedEpics: map[string]bool{"big": false}}
+	if frame := ansi.Strip(Render(b, stOpen, 80, 30, fixedNow)); !strings.Contains(frame, "Tail beyond the head") {
+		t.Errorf("explicitly-expanded epic hides a child past the head:\n%s", frame)
 	}
-	// And without the override the dormant epic stays folded.
-	stAuto := UIState{Conn: ConnLive, LastSync: fixedNow}
-	if frame := ansi.Strip(Render(b, stAuto, 80, 30, fixedNow)); strings.Contains(frame, "Reindex media") {
-		t.Errorf("dormant epic did not auto-fold:\n%s", frame)
+	// Default (no entry): only the head paints; the tail is folded behind "+K more".
+	stHead := UIState{Conn: ConnLive, LastSync: fixedNow}
+	frame := ansi.Strip(Render(b, stHead, 80, 30, fixedNow))
+	if strings.Contains(frame, "Tail beyond the head") {
+		t.Errorf("head-capped epic painted a child past the head:\n%s", frame)
+	}
+	if !strings.Contains(frame, "Head five") {
+		t.Errorf("head-capped epic did not paint its head children:\n%s", frame)
+	}
+	if !strings.Contains(frame, "+1 more") {
+		t.Errorf("head-capped epic did not name the folded remainder:\n%s", frame)
 	}
 }
 
