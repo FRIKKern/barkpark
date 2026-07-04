@@ -22,7 +22,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runVerify } from "./verify-docs.mjs";
+import { runVerify, verifyDocText } from "./verify-docs.mjs";
 import { scanText, scanCorpus } from "./retired-terms.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -47,33 +47,65 @@ function main() {
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
   const vd = [...corpus.linerefs, ...corpus.paths];
 
-  // ── (a) FAIL-BEFORE: verify-docs lineref/path defects ──────────────────────
-  const vdFiles = [...new Set(vd.map((e) => e.file))];
-  const { set: high } = highKeys(vdFiles);
+  // ── (a) FAIL-BEFORE: verify-docs lineref/path defects (FROZEN snapshots) ────
+  // Verify each FIXED defect against a committed frozen WINDOW of its citing
+  // file's pre-fix content (fixtures/frozen/, ±context around the defect), NOT
+  // the live file — so the proof holds after the fix slices corrected the source.
+  // The original path is passed as resolution context only (basename/sibling
+  // lookup); ground-truth targets (router.ex, the sibling types.ts, the absent
+  // path) resolve LIVE, which is what makes the frozen citation surface. One
+  // defect per frozen window, so type+status identifies it (windows shift lines).
+  const frozen = corpus.frozen || {};
   let vdHit = 0;
   for (const e of vd) {
     const type = e.expect === "false" ? "path" : "lineref";
-    if (high.has(`${e.file}:${e.line}:${type}`)) vdHit++;
-    else fails.push(`(a) verify-docs MISS — ${e.file}:${e.line} (${type}) ${e.cite}`);
+    const wantStatus = e.expect === "false" ? "false" : "stale";
+    const snap = frozen[e.file];
+    if (!snap) { fails.push(`(a) verify-docs NO SNAPSHOT — ${e.file}`); continue; }
+    const content = readFileSync(join(HERE, "fixtures/frozen", snap), "utf8");
+    const rep = verifyDocText(e.file, content);
+    const caught = rep.findings.some((f) => f.type === type && f.status === wantStatus);
+    if (caught) vdHit++;
+    else fails.push(`(a) verify-docs MISS (frozen) — ${e.file}:${e.line} (${type}) ${e.cite}`);
   }
-  notes.push(`(a) verify-docs fail-before: ${vdHit}/${vd.length}`);
+  notes.push(`(a) verify-docs fail-before (frozen snapshots): ${vdHit}/${vd.length}`);
 
-  // ── (a) FAIL-BEFORE: retired-terms dead-tech defects + never-worse ─────────
-  const termFindings = scanCorpus();
-  const termSet = new Set(termFindings.map((f) => `${f.file}:${f.line}:${f.term}`));
-  const baseKeys = new Set(corpus.deadTerms.map((e) => `${e.file}:${e.line}:${e.term}`));
+  // ── (a″) PASS-AFTER: the fixed defects no longer surface on the LIVE tree ────
+  // The other half of the regression proof: the corrected source must be clean.
+  // Reads the live citing file (fixed) and requires the defect to be GONE at its
+  // original line — closes the loop so neither the fix nor the guard can rot.
+  let paHit = 0;
+  for (const e of vd) {
+    const type = e.expect === "false" ? "path" : "lineref";
+    const wantStatus = e.expect === "false" ? "false" : "stale";
+    const rep = verifyDocText(e.file, readFileSync(join(ROOT, e.file), "utf8"));
+    const gone = !rep.findings.some((f) => f.type === type && f.status === wantStatus && f.line === e.line);
+    if (gone) paHit++;
+    else fails.push(`(a″) PASS-AFTER regression — ${e.file}:${e.line} still surfaces (${type}) on the live tree`);
+  }
+  notes.push(`(a″) verify-docs pass-after (fixed defects gone from live): ${paHit}/${vd.length}`);
+
+  // ── (a) FAIL-BEFORE: retired-terms dead-tech defects (FROZEN specimens) ─────
+  // Scan each defect's frozen `cite` text directly (scanText is text-in), so
+  // the proof holds after the purge slices strip the term from the live tree.
   let dtHit = 0;
   for (const e of corpus.deadTerms) {
-    if (termSet.has(`${e.file}:${e.line}:${e.term}`)) dtHit++;
-    else fails.push(`(a) retired-terms MISS — ${e.file}:${e.line} ${e.term}`);
+    const found = scanText(e.cite, e.file);
+    if (found.some((f) => f.term === e.term)) dtHit++;
+    else fails.push(`(a) retired-terms MISS (frozen) — ${e.file}:${e.line} ${e.term}`);
   }
-  for (const f of termFindings) {
-    if (!baseKeys.has(`${f.file}:${f.line}:${f.term}`)) {
-      fails.push(`(a) retired-terms NOVEL (never-worse breach) — ${f.file}:${f.line} ${f.term}`);
-    }
+  notes.push(`(a) retired-terms fail-before (frozen specimens): ${dtHit}/${corpus.deadTerms.length}`);
+
+  // ── (a') NEVER-WORSE (live tree): the corrected tree introduces no dead-tech ─
+  // The complement of fail-before: the standing denylist over the REAL tree must
+  // be clean now that the purge slices landed. This is the regression teeth — a
+  // future re-introduction of bin/bd-shim or live-Cytoscape prose fails here.
+  const liveTerm = scanCorpus();
+  if (liveTerm.length !== 0) {
+    fails.push(`(a') retired-terms live never-worse breach: ${liveTerm.length} dead-tech occurrence(s) remain on the corrected tree`);
+    for (const f of liveTerm.slice(0, 12)) fails.push(`      ↳ ${f.file}:${f.line} ${f.term} [${f.kind}] ${f.evidence}`);
   }
-  notes.push(`(a) retired-terms fail-before: ${dtHit}/${corpus.deadTerms.length}` +
-    ` · novel beyond baseline: ${termFindings.length - baseKeys.size >= 0 ? termFindings.length - dtHit : 0}`);
+  notes.push(`(a') retired-terms live never-worse: ${liveTerm.length} occurrence(s) on the corrected tree`);
 
   // ── (b) NEVER CRY WOLF: clean control emits zero ───────────────────────────
   const { rep: crep } = highKeys([CONTROL]);
@@ -141,8 +173,10 @@ function main() {
   // ── report ─────────────────────────────────────────────────────────────────
   const bar = "═".repeat(74);
   process.stdout.write(`\n${bar}\nCODE-COMMENT CITATION GUARD — ACCEPTANCE\n${bar}\n`);
-  process.stdout.write(`corpus: ${corpus._meta.counts.total} frozen defects` +
-    ` (${corpus._meta.counts.linerefs} linerefs · ${corpus._meta.counts.paths} paths · ${corpus._meta.counts.deadTerms} dead-terms)\n\n`);
+  const cc = corpus._meta.counts;
+  process.stdout.write(`corpus: ${cc.total_fixed} FIXED defects frozen` +
+    ` (${cc.fixed_linerefs} linerefs · ${cc.fixed_paths} paths · ${cc.deadTerms} dead-terms)` +
+    ` · ${cc.liveLeads} live leads tracked as follow-up\n\n`);
   for (const n of notes) process.stdout.write(`  ✓ ${n}\n`);
   if (fails.length) {
     process.stdout.write(`\n  FAILURES (${fails.length}):\n`);

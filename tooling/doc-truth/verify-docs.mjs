@@ -926,9 +926,16 @@ function reverify(claim) {
 // ── per-doc verification ─────────────────────────────────────────────────────
 
 function verifyDoc(relDoc) {
-  const abs = join(ROOT, relDoc);
-  const text = readFileSync(abs, "utf8");
+  return verifyDocText(relDoc, readFileSync(join(ROOT, relDoc), "utf8"));
+}
 
+// Same pipeline as verifyDoc, but on SUPPLIED text rather than the file on disk.
+// The doc path is used only as resolution context (basename/sibling lookup and
+// relative-link anchoring); the citations verified come from `text`. This lets
+// the acceptance gate prove FAIL-BEFORE against a FROZEN buggy specimen — the
+// detection stays provable even after the live tree has been corrected, which
+// is exactly the coupling that would otherwise turn every fix into a red gate.
+export function verifyDocText(relDoc, text) {
   const verified = [];
   for (const claim of claimsForDoc(relDoc, text)) {
     let v = verifyClaim(claim);
@@ -1153,6 +1160,18 @@ function main() {
   }
 
   const report = runVerify(docs);
+
+  if (wantCode) {
+    // ONE findings artifact — the sole producer for the Cody Citation-truth GRADE
+    // dimension, CI drill-down, and this report (charter Decision 10). Only the
+    // high-confidence, re-verified findings feed the grade (Decision 11); the
+    // low-confidence leads stay in the human queue and are counted, not graded.
+    const byType = {};
+    let high = 0;
+    for (const d of report.docs) for (const f of d.findings) { high++; byType[f.type] = (byType[f.type] || 0) + 1; }
+    const artifact = { generatedAt: new Date().toISOString(), high, low: report.humanQueue.length, byType, findings: report.docs.flatMap((d) => d.findings) };
+    writeFileSync(join(HERE, "citation-truth-report.json"), JSON.stringify(artifact, null, 2) + "\n");
+  }
 
   if (wantJson) {
     process.stdout.write(JSON.stringify({ ...report, skipped }, null, 2) + "\n");

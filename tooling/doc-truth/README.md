@@ -152,13 +152,20 @@ gone binary path OK to cite. Exit is **never-worse** against the frozen corpus.
 node tooling/doc-truth/acceptance-code-comments.mjs
 ```
 
-Four hard gates: **(a)** every one of the 29 frozen defects
-(`fixtures/citation-corpus-2026-07.json`) surfaces fail-before on the pre-fix
-tree, and retired-terms emits nothing novel beyond that baseline; **(b)** the
-clean control (`fixtures/control-clean.ex`) plus `graph_view.ex` / `root.html.heex`
-(canonical historical mentions) emit **zero** false positives; **(c)** a planted
+Hard gates (`fixtures/citation-corpus-2026-07.json`): **(a) fail-before** — every
+FIXED defect (2 linerefs + 1 path + 7 dead-terms) is caught by the guard. The
+linerefs/paths verify against committed frozen WINDOWS of their pre-fix source
+(`fixtures/frozen/`, ±context), so the proof survives the live tree being
+corrected; the dead-terms verify against their frozen `cite` text. **(a″)
+pass-after** — the same defects are GONE from the live tree (closes the loop).
+**(a′) live never-worse** — retired-terms over the real tree is clean now that
+the purge slices landed (a re-introduction fails here). **(b)** the clean control
+(`fixtures/control-clean.ex`) plus `graph_view.ex` / `root.html.heex` (canonical
+historical mentions) emit **zero** false positives; **(c)** a planted
 live-Cytoscape assertion and a planted stale lineref are both caught; **(d)** the
-markdown `acceptance.mjs` (js-tests.yml gate) still passes. Wired into
+markdown `acceptance.mjs` (js-tests.yml gate) still passes. The `liveLeads` in the
+corpus are drift the guard newly surfaces but no slice fixed — advisory, tracked
+as follow-up, and reflected in the Cody Citation-truth grade. Wired into
 `doc-gates.yml`, fail-closed, triggering on `.ex/.go/.ts/.md` changes.
 
 ## P2 — the waterfall (each fact once)

@@ -12,11 +12,14 @@
       "js/packages/core/src/listen.ts:10 cites types.ts:117-126 for ListenEvent (real def is line 818; resolved same-package)"
     ],
     "counts": {
-      "linerefs": 20,
-      "paths": 2,
+      "fixed_linerefs": 2,
+      "fixed_paths": 1,
       "deadTerms": 7,
-      "total": 29
-    }
+      "total_fixed": 10,
+      "liveLeads": 19
+    },
+    "generated": "2026-07",
+    "note": "Frozen fail-before/pass-after corpus = the defects the fix slices CORRECTED. Verify-docs linerefs/paths verify against frozen pre-fix snapshots (fixtures/frozen/); deadTerms verify against their frozen cite text. liveLeads = drift the guard newly surfaces on the live tree (NOT fixed here) — advisory, tracked as follow-up."
   },
   "linerefs": [
     {
@@ -26,6 +29,82 @@
       "expect": "stale",
       "cite": "router.ex /v1/auth/* (public 716-724, gated 727-734)."
     },
+    {
+      "file": "js/packages/core/src/listen.ts",
+      "line": 10,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "types.ts:117-126."
+    }
+  ],
+  "paths": [
+    {
+      "file": "api/lib/barkpark/portable_doc/patch.ex",
+      "line": 6,
+      "guard": "verify-docs",
+      "expect": "false",
+      "cite": "docs/doc-patch-op-contract.md"
+    }
+  ],
+  "deadTerms": [
+    {
+      "file": "api/lib/barkpark/plugins/tasks.ex",
+      "line": 32,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "* `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`"
+    },
+    {
+      "file": "api/lib/barkpark/plugins/tasks.ex",
+      "line": 133,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,"
+    },
+    {
+      "file": "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      "line": 4,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "bd-compatible shim (`bin/bd-shim`)."
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "line": 479,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "owns the Cytoscape surface; its div carries the CONSTANT id"
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/doc_actions.ex",
+      "line": 210,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# 'View blast radius' — opens the Cytoscape graph pane for THIS doc (Goal"
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/mount.ex",
+      "line": 66,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# A `graph` doc opens the Cytoscape blast-radius pane"
+    },
+    {
+      "file": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "line": 321,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# A `graph` doc opens as the blast-radius Cytoscape pane (Goal"
+    }
+  ],
+  "liveLeads": [
     {
       "file": "api/lib/barkpark_web/components/studio_components/editor.ex",
       "line": 23,
@@ -153,85 +232,16 @@
       "cite": "query_controller.ex:187-189)."
     },
     {
-      "file": "js/packages/core/src/listen.ts",
-      "line": 10,
-      "guard": "verify-docs",
-      "expect": "stale",
-      "cite": "types.ts:117-126."
-    }
-  ],
-  "paths": [
-    {
       "file": "api/lib/barkpark/plugins/onixedit/web/export_controller.ex",
       "line": 18,
       "guard": "verify-docs",
       "expect": "false",
       "cite": "lib/barkpark_web/controllers/onixedit_export_controller.ex"
-    },
-    {
-      "file": "api/lib/barkpark/portable_doc/patch.ex",
-      "line": 6,
-      "guard": "verify-docs",
-      "expect": "false",
-      "cite": "docs/doc-patch-op-contract.md"
     }
   ],
-  "deadTerms": [
-    {
-      "file": "api/lib/barkpark/plugins/tasks.ex",
-      "line": 32,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "* `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`"
-    },
-    {
-      "file": "api/lib/barkpark/plugins/tasks.ex",
-      "line": 133,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,"
-    },
-    {
-      "file": "api/lib/barkpark_web/controllers/tasks_controller.ex",
-      "line": 4,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "bd-compatible shim (`bin/bd-shim`)."
-    },
-    {
-      "file": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
-      "line": 479,
-      "term": "cytoscape",
-      "kind": "stale-tech-ref",
-      "guard": "retired-terms",
-      "cite": "owns the Cytoscape surface; its div carries the CONSTANT id"
-    },
-    {
-      "file": "api/lib/barkpark_web/live/studio/studio_live/doc_actions.ex",
-      "line": 210,
-      "term": "cytoscape",
-      "kind": "stale-tech-ref",
-      "guard": "retired-terms",
-      "cite": "# 'View blast radius' — opens the Cytoscape graph pane for THIS doc (Goal"
-    },
-    {
-      "file": "api/lib/barkpark_web/live/studio/studio_live/mount.ex",
-      "line": 66,
-      "term": "cytoscape",
-      "kind": "stale-tech-ref",
-      "guard": "retired-terms",
-      "cite": "# A `graph` doc opens the Cytoscape blast-radius pane"
-    },
-    {
-      "file": "api/lib/barkpark_web/studio/pane_builder.ex",
-      "line": 321,
-      "term": "cytoscape",
-      "kind": "stale-tech-ref",
-      "guard": "retired-terms",
-      "cite": "# A `graph` doc opens as the blast-radius Cytoscape pane (Goal"
-    }
-  ]
+  "frozen": {
+    "api/lib/barkpark/plugins/capabilities.ex": "api__lib__barkpark__plugins__capabilities.ex.txt",
+    "js/packages/core/src/listen.ts": "js__packages__core__src__listen.ts.txt",
+    "api/lib/barkpark/portable_doc/patch.ex": "api__lib__barkpark__portable_doc__patch.ex.txt"
+  }
 }
