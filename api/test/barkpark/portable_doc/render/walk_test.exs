@@ -718,5 +718,26 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ ~s(<span style="font-weight:bold">hot</span>)
       refute html =~ ~r/<(ul|li)[^>]*style=/
     end
+
+    test "@email palette keeps the pre-Stage-2 self-styled list byte-frozen" do
+      # Email COMPOSE never emits PdList (its list clause builds the "• " PdBox
+      # scaffold), but a raw PdList under a stylesheet-less palette must stay
+      # self-styled — Decision 1: every :email emission is byte-frozen, locked
+      # by the golden corpus (which covers every Pd kind). Exact pre-Stage-2 bytes.
+      node = %{
+        "kind" => "PdList",
+        "children" => [
+          %{"kind" => "PdListItem", "children" => [%{"kind" => "PdText", "children" => ["x"]}]}
+        ]
+      }
+
+      html = Walk.render_body(node, @width, @email)
+
+      assert html ==
+               ~s(<ul style="margin:0 0 24px;padding-left:24px;) <>
+                 ~s(font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;) <>
+                 ~s(color:#111827;line-height:1.7">) <>
+                 ~s(<li style="margin:4pt 0 0"><span>x</span></li></ul>)
+    end
   end
 end
