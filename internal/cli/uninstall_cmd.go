@@ -60,7 +60,7 @@ func runUninstall(out *writer, g globals, args []string) int {
 			printUninstallHelp(out)
 			return exitOK
 		default:
-			out.errf("barkpark: unknown uninstall flag %q", a)
+			out.userErr("unknown uninstall flag %q", a)
 			out.errf("usage: bp uninstall [--local] [--yes] [--dry-run] [-o json]")
 			return exitUsage
 		}
@@ -72,7 +72,7 @@ func runUninstall(out *writer, g globals, args []string) int {
 
 	actions, err := uninstallActions(local)
 	if err != nil {
-		out.errf("barkpark: uninstall: %v", err)
+		out.userErr("uninstall: %v", err)
 		return exitGeneric
 	}
 
@@ -99,7 +99,7 @@ func runUninstall(out *writer, g globals, args []string) int {
 	// Real-run gate: --yes, or a one-line y/N confirm on a genuine TTY.
 	if !g.yes {
 		if !(isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stdout.Fd())) {
-			out.errf("barkpark: bp uninstall removes local state — re-run with --yes, or run it on an interactive terminal")
+			out.userErr("bp uninstall removes local state — re-run with --yes, or run it on an interactive terminal")
 			return exitUsage
 		}
 		out.outf("bp uninstall — about to remove:")
@@ -117,7 +117,7 @@ func runUninstall(out *writer, g globals, args []string) int {
 	var removed []string
 	for _, a := range actions {
 		if err := a.run(out); err != nil {
-			out.errf("barkpark: uninstall: %s: %v", a.desc, err)
+			out.userErr("uninstall: %s: %v", a.desc, err)
 			return exitGeneric
 		}
 		removed = append(removed, a.desc)

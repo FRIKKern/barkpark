@@ -92,7 +92,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if serr != nil {
 		hint := "run `bp schema ls` to list types; check --dataset"
 		if !renderErrorEnvelope(out, "not_found", serr.Error(), "", hint) {
-			out.errf("barkpark: %v", serr)
+			out.userErr("%v", serr)
 			out.errf("  hint: %s", hint)
 		}
 		return exitNotFound
@@ -126,7 +126,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 	status, respBody, err := doRequest("POST", u, headers, body)
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
-			out.errf("barkpark: request failed: %v", err)
+			out.userErr("request failed: %v", err)
 		}
 		return exitGeneric
 	}
@@ -148,7 +148,7 @@ func runSeed(out *writer, g globals, ctx manifest.Context, args []string) int {
 		pstatus, prespBody, perr := doRequest("POST", u, headers, seedPublishBody(ids, typ))
 		if perr != nil {
 			if !renderErrorEnvelope(out, "request_failed", "publish request failed: "+perr.Error(), "", "") {
-				out.errf("barkpark: publish request failed: %v", perr)
+				out.userErr("publish request failed: %v", perr)
 			}
 			return exitGeneric
 		}

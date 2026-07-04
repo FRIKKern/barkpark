@@ -86,7 +86,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 	}
 	opt, perr := parseMigrateArgs(args)
 	if perr != nil {
-		out.errf("barkpark: %v", perr)
+		out.userErr("%v", perr)
 		usageMigrate(out, false)
 		return exitUsage
 	}
@@ -105,7 +105,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 	}
 
 	if opt.from == "" || opt.to == "" {
-		out.errf("barkpark: migrate needs <from> and <to> servers")
+		out.userErr("migrate needs <from> and <to> servers")
 		usageMigrate(out, false)
 		return exitUsage
 	}
@@ -151,7 +151,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 	} else {
 		enumerated, eerr := migrateListTypes(from, dataset)
 		if eerr != nil {
-			out.errf("barkpark: cannot enumerate source types: %v", eerr)
+			out.userErr("cannot enumerate source types: %v", eerr)
 			out.errf("  hint: the source token needs admin to GET /v1/schemas/%s,", dataset)
 			out.errf("        or pass --type <t> to migrate a single known type.")
 			return exitAuth
@@ -172,7 +172,7 @@ func runMigrate(out *writer, g globals, args []string) int {
 	for _, t := range types {
 		docs, qerr := migrateFetchAll(from, dataset, t)
 		if qerr != nil {
-			out.errf("barkpark: query source %s/%s failed: %v", dataset, t, qerr)
+			out.userErr("query source %s/%s failed: %v", dataset, t, qerr)
 			return exitGeneric
 		}
 		plan.types = append(plan.types, migrateTypeCount{Type: t, Count: len(docs)})
@@ -624,7 +624,7 @@ func migrateUnknownServer(out *writer, machineOut bool, cfg *Config, q string) i
 		})
 		return exitUsage
 	}
-	out.errf("barkpark: no known server matches %q", q)
+	out.userErr("no known server matches %q", q)
 	if len(names) > 0 {
 		out.errf("known servers: %s", joinComma(names))
 		out.errf("run `bp servers` for details, or pass a full URL.")
@@ -644,7 +644,7 @@ func migrateError(out *writer, machineOut bool, code, msg string, exit int) int 
 		})
 		return exit
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	return exit
 }
 

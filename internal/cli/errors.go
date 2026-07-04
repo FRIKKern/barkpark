@@ -246,14 +246,14 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 // dispatch or flag validation. On a machine output (json/yaml) it emits the
 // canonical {ok:false,error:{code:"usage",message}} envelope on stdout — so
 // `bp <typo> -o json | jq` gets a parseable body instead of empty stdout —
-// otherwise it prints the human "barkpark: <msg>" stderr line followed by the
+// otherwise it prints the human "bp: <msg>" stderr line followed by the
 // optional usageHelp (suppressed in machine mode). It is the built-in-dispatch
 // counterpart to run.go's manifest-path usage guard, giving both paths the same
 // machine-output parity. Always returns exitUsage.
 func usageErrf(out *writer, usageHelp func(), format string, args ...any) int {
 	msg := fmt.Sprintf(format, args...)
 	if !renderErrorEnvelope(out, "usage", msg, "", "") {
-		out.errf("barkpark: %s", msg)
+		out.userErr("%s", msg)
 		if usageHelp != nil {
 			usageHelp()
 		}

@@ -446,7 +446,7 @@ func webhookExit(res cloudclient.WebhookProxyResult) int {
 func renderWebhookError(out *writer, res cloudclient.WebhookProxyResult, ref string) {
 	e := res.Err
 	if e == nil {
-		out.errf("barkpark: webhook request failed")
+		out.userErr("webhook request failed")
 		return
 	}
 	switch e.Code {

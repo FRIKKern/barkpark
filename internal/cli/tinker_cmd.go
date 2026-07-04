@@ -50,7 +50,7 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 		case "--dataset", "-d":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--dataset")
 			if err != nil {
-				out.errf("barkpark: %v", err)
+				out.userErr("%v", err)
 				return exitUsage
 			}
 			dataset = v
@@ -58,18 +58,18 @@ func runTinker(out *writer, g globals, ctx manifest.Context, args []string) int 
 		case "--perspective", "-P":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--perspective")
 			if err != nil {
-				out.errf("barkpark: %v", err)
+				out.userErr("%v", err)
 				return exitUsage
 			}
 			if !validPerspective(v) {
-				out.errf("barkpark: invalid --perspective %q (want published|drafts|raw)", v)
+				out.userErr("invalid --perspective %q (want published|drafts|raw)", v)
 				return exitUsage
 			}
 			perspective = v
 			i = ni
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
-				out.errf("barkpark: unknown tinker flag %q", a)
+				out.userErr("unknown tinker flag %q", a)
 				return exitUsage
 			}
 			i++

@@ -44,7 +44,7 @@ func runVersion(out *writer, g globals) int {
 func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 	m, err := loadManifest(g, ctx)
 	if err != nil {
-		out.errf("barkpark: %v", err)
+		out.userErr("%v", err)
 		return exitGeneric
 	}
 
@@ -341,7 +341,7 @@ func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) 
 	case "fish":
 		out.outf("%s", fishCompletionScript(nouns, globals, verbMap, flagMap))
 	default:
-		out.errf("barkpark: unsupported shell %q (want bash, zsh, or fish)", shell)
+		out.userErr("unsupported shell %q (want bash, zsh, or fish)", shell)
 		return exitUsage
 	}
 	return exitOK

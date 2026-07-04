@@ -81,7 +81,7 @@ func runPaper(out *writer, g globals, args []string) int {
 		usagePaper(out, true)
 		return exitOK
 	default:
-		out.errf("barkpark: unknown command %q %q", "paper", verb)
+		out.userErr("unknown command %q %q", "paper", verb)
 		usagePaper(out, false)
 		return exitUsage
 	}
@@ -98,12 +98,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 	}
 	opt, perr := parsePaperArgs(args)
 	if perr != nil {
-		out.errf("barkpark: %v", perr)
+		out.userErr("%v", perr)
 		usagePaperView(out, false)
 		return exitUsage
 	}
 	if opt.slug == "" {
-		out.errf("barkpark: paper view needs a <slug>")
+		out.userErr("paper view needs a <slug>")
 		usagePaperView(out, false)
 		return exitUsage
 	}
@@ -948,7 +948,7 @@ func paperNotFound(out *writer, jsonOut bool, slug string, docs []paperRawDoc, s
 		})
 		return exitNotFound
 	}
-	out.errf("barkpark: no paper matches %q on %s", slug, server)
+	out.userErr("no paper matches %q on %s", slug, server)
 	if len(shown) > 0 {
 		out.errf("available papers:")
 		for _, s := range shown {
@@ -973,7 +973,7 @@ func paperError(out *writer, jsonOut bool, code, msg string, exit int) int {
 		})
 		return exit
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	return exit
 }
 

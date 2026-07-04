@@ -47,7 +47,7 @@ func Execute(args []string) int {
 
 	g, rest, err := parseGlobals(args)
 	if err != nil {
-		out.errf("barkpark: %v", err)
+		out.userErr("%v", err)
 		usageTop(out)
 		return exitUsage
 	}
@@ -311,7 +311,7 @@ func Execute(args []string) int {
 	// Acquire the manifest (override file > cache/fetch).
 	m, err := loadManifest(g, ctx)
 	if err != nil {
-		out.errf("barkpark: %v", err)
+		out.userErr("%v", err)
 		return exitGeneric
 	}
 	tree := m.Tree()

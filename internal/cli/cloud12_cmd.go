@@ -417,7 +417,7 @@ func runProvider(out *writer, args []string) int {
 
 	verb := args[0]
 	if verb != "add" {
-		out.errf("barkpark: unknown provider command %q", verb)
+		out.userErr("unknown provider command %q", verb)
 		out.errf("usage: bp provider add hetzner --token <token> [--label <label>]")
 		return exitUsage
 	}
