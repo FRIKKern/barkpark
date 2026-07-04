@@ -2260,6 +2260,34 @@ wall("drag trailing-click suppression swallows exactly one click, then passes", 
   ]);
 });
 
+// ── QR-D critic regression locks ────────────────────────────────────────────
+// Wave-6 integration-critic SAFE-verdict probe, pinned as a permanent lock.
+// The click-away × drag-select cross on the CELL (td) path: a mousedown that
+// COMMITS an open draft, immediately FOLLOWED by a drag-extend. Its HEADER twin
+// already lives at RIDE_SITES[2] ("header mousedown-drag anchor … shift-extend
+// does NOT re-ride") and the pure ride sites (RIDE_SITES[0]) cover the single
+// cell mousedown commit — but the CELL drag-EXTEND with an open draft was
+// unpinned: :855 drags a cell with NO draft, :867 commits with NO extend. This
+// closes the gap — the anchor must ride `commit` exactly once and the extend
+// must stay plain (shift:true, never a second commit). A regression that made
+// the cell `onOver` re-attach `commit` (double-commit on every dragged cell)
+// slips past every existing row but reds here.
+//
+// The draft is deliberately a NON-'='-draft on an EDITABLE hook: the caret-
+// context arbiter classifies it as COMMIT (not point-mode), so this exercises
+// the click-away commit path even though point-mode is fully available — the
+// distinguishing twin of the :1616 formula-draft-POINTS row.
+check("QR-D: cell mousedown-drag with an open non-formula draft commits ONCE on anchor; extend stays plain", () => {
+  const h = editable();
+  openEditor(h, "half-typed"); // non-formula → arbiter routes to COMMIT, not point
+  h.el.dispatch("mousedown", cellEvent("A1")); // anchor: commits the draft
+  h.el.dispatch("mouseover", { target: td({ ref: "B2" }) }); // extend: plain shift, no re-ride
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "A1", shift: false, commit: "half-typed" } },
+    { event: "cell-click", payload: { ref: "B2", shift: true } },
+  ]);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);

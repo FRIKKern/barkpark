@@ -349,4 +349,42 @@ defmodule Barkpark.Plugins.Sheets.CsvTest do
     {:ok, content} = Csv.import_content("TRUE,false\r\n")
     assert {:ok, "TRUE,FALSE\r\n"} = Csv.export(content, 0, ",")
   end
+
+  # QR-D critic regression lock — the documented-lossy formula contract as ONE
+  # greppable pin. The :215 export test proves a formula cell serializes its
+  # cached VALUE (never "=…"); the :339 round-trip proves plain values survive
+  # a full text→content→text cycle. Neither pins the LOSS itself: a formula that
+  # round-trips must come back a PLAIN value (no "f" key), and re-exporting the
+  # re-imported content must be byte-identical to the first export — i.e. the
+  # formula was dropped once on the FIRST export and the pipeline is now a fixed
+  # point. A regression that ever re-emitted the formula text (`=A1+1`) or kept
+  # an "f" key on import would red here.
+  test "documented-lossy: a formula cell exports its cached value, re-imports as a plain value, re-exports byte-identical" do
+    content = %{
+      "tabs" => [
+        %{
+          "name" => "Formulas",
+          "cells" => %{
+            "A1" => %{"v" => 42},
+            "B1" => %{"f" => "A1+1", "v" => 43, "t" => "n"}
+          }
+        }
+      ]
+    }
+
+    assert {:ok, csv} = Csv.export(content, 0, ",")
+    # values only: the formula's cached value serializes, never the "=A1+1" text
+    assert csv == "42,43\r\n"
+
+    # re-importing the exported text loses the formula — CSV carries no formulas,
+    # so the round-tripped cell is a plain value with NO "f" key (lossy contract)
+    assert {:ok, reimported} = Csv.import_content(csv)
+    assert [%{"cells" => cells}] = reimported["tabs"]
+    assert cells == %{"A1" => %{"v" => 42}, "B1" => %{"v" => 43}}
+    refute Map.has_key?(cells["B1"], "f")
+
+    # the pipeline is a fixed point: re-exporting the re-import is byte-identical
+    assert {:ok, csv2} = Csv.export(reimported, 0, ",")
+    assert csv2 == csv
+  end
 end
