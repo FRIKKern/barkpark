@@ -20,12 +20,13 @@ defmodule BarkparkWeb.TasksController do
 
   ## Shape contract
 
-  All read responses carry a `doc` (or `docs`) map shaped to mirror what
-  the real `bd show --json` emits closely enough that the shim can pass
-  it through unchanged (`id`, `title`, `status`, `type`, `lifecycle_status`,
-  `kind`, `content`, `priority`, `assignee`, `dependencies`, …). See
-  `render_doc/1`. The shim translates label-flavoured bd args to query
-  params upstream of this controller.
+  All read responses carry a `doc` (or `docs`) map in the bd-compatible
+  shape (`id`, `title`, `status`, `type`, `lifecycle_status`, `kind`,
+  `content`, `priority`, `assignee`, `dependencies`, …) — close enough to
+  what `bd show --json` emitted that the now-retired `bin/bd-shim` passed
+  it through unchanged, translating label-flavoured args to query params
+  upstream of this controller. The `bp task` CLI consumes the same shape
+  today. See `render_doc/1`.
 
   ## Why the doc_id is a URL segment for close but a body field for claim
 
@@ -223,8 +224,8 @@ defmodule BarkparkWeb.TasksController do
         counts = Params.batch_edge_counts([doc])
 
         # C2 (task carries its rail): the task's direct child tasks — the rows
-        # whose `content.parent_id` points at this doc,
-        # in chronological order. Reuses the SAME prefix-agnostic parent filter
+        # whose `content.parent_id` points at this doc, in chronological
+        # order. Reuses the SAME prefix-agnostic parent filter
         # the index's `parent=` slice walks (`maybe_filter_parent_id/2`) plus
         # the tenancy filters, so the matching logic lives in one place. One
         # level only — children render as lightweight summaries (NOT the full

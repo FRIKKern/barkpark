@@ -5,7 +5,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # on action control-flow. Every function here is pure-ish: it either parses a
   # raw param into a typed value, coerces a body field, applies a tenancy /
   # filter clause to an Ecto query, or renders a Document into the bd-compatible
-  # shape the shim consumes. No `conn`, no action routing — the controller calls
+  # shape the `bp task` CLI consumes. No `conn`, no action routing — the controller calls
   # these as `Params.<name>(...)`.
 
   import Ecto.Query, only: [from: 2]
@@ -51,10 +51,10 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def maybe_filter_lifecycle(query, nil), do: query
 
-  # Missing content.lifecycle_status defaults to "open" — matches the shim's
-  # render fallback. Otherwise a goal POSTed without an explicit
-  # `lifecycle_status` (the common case) would be invisible to
-  # `bd list --status open`.
+  # Missing content.lifecycle_status defaults to "open" — matching the
+  # `COALESCE(..., 'open')` in the filter clause just below. Otherwise a
+  # task POSTed without an explicit `lifecycle_status` (the common case)
+  # would be invisible to a `status=open` list query.
   def maybe_filter_lifecycle(query, "open") do
     from(d in query,
       where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open"
@@ -89,8 +89,8 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_parent(query, _), do: query
 
   # C1 (task as universal node): `parent=<doc_id>` — keep only docs whose
-  # `content.parent_id` points at the given doc_id. This
-  # is the same edge the `phase_id` filter walks, but exposed under the generic
+  # `content.parent_id` points at the given doc_id. This is the same edge
+  # the `phase_id` filter walks, but exposed under the generic
   # `parent` param so it reads as "the child tasks of ANY task" — realizing
   # "a goal is just a root task" and "a rail is the chronological child tasks of
   # a task". Mirrors `maybe_filter_parent/2` EXACTLY (prefix-agnostic match on
@@ -218,10 +218,10 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # ─── Render / shape ─────────────────────────────────────────────────────
 
-  # Render a Document into the bd-compatible shape the shim consumes.
-  # Keep the field set tight enough to translate cleanly into `bd show`
-  # JSON, broad enough that callers like `bd list --json` don't lose
-  # information (priority, assignee, content.kind for filtering).
+  # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
+  # Keep the field set tight enough that it still maps cleanly onto the
+  # bd-compatible `show` JSON shape, broad enough that list callers don't
+  # lose information (priority, assignee, content.kind for filtering).
   def render_doc(%Document{} = doc) do
     content = doc.content || %{}
 
