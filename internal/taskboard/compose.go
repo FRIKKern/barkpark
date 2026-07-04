@@ -25,6 +25,12 @@ const (
 	wideExit  = 106
 	// minReadingWidth is the pathological floor for the wide right pane.
 	minReadingWidth = 24
+	// scrollFollow is the Frame.Scroll sentinel for "follow the cursor stop"
+	// (charter D18). A frame's zero-value Scroll is 0 — a real absolute offset
+	// (the top of the frame), so a freshly opened frame shows its title, never a
+	// mid-body jump onto stop 0; j/k switch the frame INTO follow mode (-1), and
+	// free-scrolling all the way to the top settles on 0 instead of snapping back.
+	scrollFollow = -1
 	// crumbSep is the breadcrumb separator (a chevron — the reading vocabulary,
 	// allowlisted in glyph_budget_test.go's reading set).
 	crumbSep = " › "
@@ -181,10 +187,11 @@ func readingFooter(width int) string {
 	return dimStyle.Render(truncate(hint, width))
 }
 
-// windowFrame clips a reading frame's body to `avail` lines. When Scroll==0 the
-// viewport FOLLOWS the cursor's stop (charter D18); when Scroll>0 it is a
-// free-scroll offset (space/u/d). Hidden overflow is marked with the same dim
-// ↑/↓ affordances the board spine uses.
+// windowFrame clips a reading frame's body to `avail` lines. Scroll==scrollFollow
+// (-1) makes the viewport FOLLOW the cursor's stop (charter D18); Scroll>=0 is an
+// absolute free-scroll offset (space/u/d, and the zero-value top-of-frame a fresh
+// push opens on). Hidden overflow is marked with the same dim ↑/↓ affordances the
+// board spine uses.
 func windowFrame(body []string, stops []Stop, cursor, scroll, avail, width int) []string {
 	if avail <= 0 {
 		return nil
@@ -193,7 +200,7 @@ func windowFrame(body []string, stops []Stop, cursor, scroll, avail, width int) 
 		return body
 	}
 	var top int
-	if scroll > 0 {
+	if scroll >= 0 {
 		top = scroll
 	} else {
 		top = followTop(len(body), stops, cursor, avail)

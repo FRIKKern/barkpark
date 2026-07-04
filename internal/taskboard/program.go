@@ -1033,8 +1033,8 @@ func (m Model) frameStopCount() int {
 	return len(stops)
 }
 
-// moveStopCursor steps the top frame's stop cursor by delta and snaps the
-// viewport back to it (Scroll=0), clamped to the stop list.
+// moveStopCursor steps the top frame's stop cursor by delta and puts the frame
+// into cursor-follow (Scroll=scrollFollow), clamped to the stop list.
 func (m *Model) moveStopCursor(delta int) {
 	n := m.frameStopCount()
 	if n <= 0 || len(m.stack) == 0 {
@@ -1049,11 +1049,12 @@ func (m *Model) moveStopCursor(delta int) {
 		c = n - 1
 	}
 	top.Cursor = c
-	top.Scroll = 0
+	top.Scroll = scrollFollow
 }
 
-// setTopCursor jumps the top frame's stop cursor (g/G) and snaps the viewport
-// back, clamped to the stop list.
+// setTopCursor jumps the top frame's stop cursor (g/G) into cursor-follow,
+// clamped to the stop list. With no stops it falls back to the absolute top
+// (Scroll=0) so g on a stop-less frame still scrolls to the beginning.
 func (m *Model) setTopCursor(c int) {
 	if len(m.stack) == 0 {
 		return
@@ -1070,7 +1071,7 @@ func (m *Model) setTopCursor(c int) {
 	if c > n-1 {
 		c = n - 1
 	}
-	top.Cursor, top.Scroll = c, 0
+	top.Cursor, top.Scroll = c, scrollFollow
 }
 
 // freeScroll pans the reading viewport by delta lines WITHOUT moving the cursor
@@ -1092,7 +1093,9 @@ func (m *Model) freeScroll(delta int) {
 		maxTop = 0
 	}
 	cur := top.Scroll
-	if cur == 0 {
+	if cur < 0 { // in cursor-follow — seed from the current follow top so the
+		// first press moves smoothly from where the eye is, then Scroll becomes
+		// an absolute offset (>=0) the subsequent presses pan directly.
 		cur = followTop(len(body), stops, top.Cursor, avail)
 	}
 	nt := cur + delta

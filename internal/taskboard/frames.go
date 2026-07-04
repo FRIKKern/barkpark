@@ -52,7 +52,7 @@ type Frame struct {
 	Ref    string // task doc_id / paper slug ("" for the board)
 	Title  string // breadcrumb segment ("" for the board → "tasks")
 	Cursor int    // index into the frame's current Stops
-	Scroll int    // free-scroll line offset (0 = follow cursor)
+	Scroll int    // free-scroll viewport top: >=0 is an absolute line offset (0 = top of frame, the zero-value shows a freshly-opened frame from its title); -1 means follow the cursor stop (set by j/k/g/G)
 }
 
 // PaperState is the async fetch/render state of one FramePaper.

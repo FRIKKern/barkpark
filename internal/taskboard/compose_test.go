@@ -269,6 +269,62 @@ func TestWideHysteresis(t *testing.T) {
 	}
 }
 
+// ── Reading viewport (charter D18: Scroll semantics) ─────────────────────────
+
+// A freshly opened frame in a pane too SHORT to hold its whole body shows the
+// frame from its TOP (title first), NOT centered on the first selectable stop
+// (which sits far down the body). The wish is "open a task and SEE it"; the
+// zero-value Scroll=0 is a real absolute offset (top), never the follow sentinel.
+func TestFreshFrameOpensAtTop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 80, 16, false // short pane → body > avail → windows
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	body, stops := m.frameContent(m.topFrame(), m.readingWidth(), m.now())
+	if len(body) <= m.readingViewportHeight() {
+		t.Fatalf("fixture must overflow the short pane (body %d <= avail %d)", len(body), m.readingViewportHeight())
+	}
+	if len(stops) == 0 || stops[0].Line < m.readingViewportHeight() {
+		t.Fatalf("fixture's first stop must sit below the fold to exercise the bug (stop0.Line=%v avail=%d)",
+			stops, m.readingViewportHeight())
+	}
+	frame := ansi.Strip(Compose(m))
+	if !strings.Contains(frame, "Wire the SSE live bridge to the task board pane") {
+		t.Errorf("fresh frame did not open on its title (centered on stop 0 instead):\n%s", frame)
+	}
+	if strings.Contains(frame, "↑ more above") {
+		t.Errorf("fresh frame opened mid-body (has '↑ more above'):\n%s", frame)
+	}
+}
+
+// Free-scrolling up settles at the top (Scroll=0) instead of oscillating back to
+// cursor-follow — the old bug had Scroll==0 mean BOTH "top" and "follow", so a
+// third 'u' snapped the viewport back down (9→2→0→9…). Now it holds at 0.
+func TestFreeScrollUpSettlesAtTop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 80, 16, false
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	// Move the cursor down so follow-mode's top is well below 0, making an
+	// oscillation back to follow visibly different from a settled top.
+	(&m).moveStopCursor(2)
+	last := -999
+	for i := 0; i < 6; i++ {
+		(&m).freeScroll(-m.readingViewportHeight() / 2)
+		s := m.topFrame().Scroll
+		if i > 0 && s > last {
+			t.Fatalf("scroll-up oscillated: press %d moved Scroll %d -> %d (must be monotone toward 0)", i, last, s)
+		}
+		last = s
+	}
+	if m.topFrame().Scroll != 0 {
+		t.Fatalf("scroll-up did not settle at the top: Scroll=%d, want 0", m.topFrame().Scroll)
+	}
+	if strings.Contains(ansi.Strip(Compose(m)), "↑ more above") {
+		t.Error("settled viewport still reports content above the top")
+	}
+}
+
 // ── Reading cursor grammar (charter D18/D29) ─────────────────────────────────
 
 // j/k move the frame's stop cursor (not the board's) and snap the viewport back;
