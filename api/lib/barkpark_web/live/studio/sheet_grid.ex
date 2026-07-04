@@ -140,7 +140,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
-  alias BarkparkWeb.Studio.SheetGrid.{Cells, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
 
   # Paste preflight bound: a fat-finger whole-column paste (Excel ships up to
   # 1M rows) is refused whole rather than ground through 1000s of serial session
@@ -189,6 +189,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # Conditional-format panel (editable hosts, CF-C stage B): nil = closed;
        # a map = open with the create/edit form prefilled. See cf-open/cf-save.
        cf_panel: nil,
+       # Per-viewer FILTER view-state (SF-B, paper §3+§4). `filters` is a
+       # `%{col_index => criterion}` map held ONLY on this socket — it never
+       # mutates the document, sends no op, and dies with the socket (SF-D2).
+       # `filter_panel` is the open funnel editor: nil, or a form map carrying
+       # the column being edited (see filter-open/filter-apply).
+       filters: %{},
+       filter_panel: nil,
        renaming_tab: nil,
        mode: :edit,
        read_only: false,
@@ -399,7 +406,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # socket.assigns.active BEFORE the caller reassigns the active cell/selection.
 
   def handle_event("nav", %{"key" => key} = params, socket) do
-    active = move(socket.assigns.active, key, move_bounds(socket))
+    active = move(socket.assigns.active, key, move_vis(socket))
     anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
@@ -435,7 +442,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("nav-edge", %{"dir" => dir} = params, socket)
       when dir in ["up", "down", "left", "right"] do
-    {cols, row_lo, row_hi} = move_bounds(socket)
+    cols = socket.assigns.cols
 
     {tc, tr} =
       Geometry.data_edge(
@@ -445,7 +452,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         {cols, socket.assigns.rows}
       )
 
-    active = {tc, tr |> max(row_lo) |> min(row_hi)}
+    # Snap the edge target onto a VISIBLE row (SF-D8: edge-jump skips hidden
+    # rows). With no filter `visible_rows` is the contiguous window, so this is
+    # byte-identical to the historical `max(row_lo) |> min(row_hi)` clamp.
+    active = {tc, clamp_visible(socket.assigns.visible_rows, tr)}
     anchor = if params["shift"], do: socket.assigns.anchor || socket.assigns.active, else: nil
     {:noreply, assign(socket, active: active, anchor: anchor, editing: nil, menu: nil)}
   end
@@ -600,7 +610,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
     socket = commit(socket, committed, value)
-    active = move(committed, move_key(params["move"]), move_bounds(socket))
+    active = move(committed, move_key(params["move"]), move_vis(socket))
 
     {:noreply,
      socket
@@ -615,7 +625,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("bar-commit", %{"value" => value} = params, socket) do
     committed = socket.assigns.active
     socket = commit(socket, committed, value)
-    active = move(committed, move_key(params["move"]), move_bounds(socket))
+    active = move(committed, move_key(params["move"]), move_vis(socket))
 
     {:noreply,
      socket
@@ -647,52 +657,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # CELL Ctrl+D (copy from the row above the selection) is a v1 carve-out.
   def handle_event("fill", %{"dir" => dir}, socket) when dir in ["down", "right"] do
     {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
-    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
-    tab = socket.assigns.tab
 
-    covered = socket.assigns.covered
-
-    targets =
-      if dir == "down" do
-        for c <- c1..c2, r <- (r1 + 1)..r2//1, do: {c, r, {c, r1}, 0, r - r1}
-      else
-        for c <- (c1 + 1)..c2//1, r <- r1..r2, do: {c, r, {c1, r}, c - c1, 0}
-      end
-
-    # Never fill INTO or FROM a merge-covered cell: writing a covered target
-    # plants data Studio never renders, and clearing a covered source would
-    # emit a spurious clear_cell. The merge anchor still fills normally.
-    targets =
-      Enum.reject(targets, fn {c, r, src, _dc, _dr} ->
-        MapSet.member?(covered, {c, r}) or MapSet.member?(covered, src)
-      end)
-
-    ops =
-      Enum.map(targets, fn {c, r, src, dc, dr} ->
-        ref = Sheets.format_ref({c, r})
-        src_cell = Map.get(cells, Sheets.format_ref(src))
-
-        case src_cell do
-          %{"f" => f} when is_binary(f) ->
-            stamp_meta(
-              %{
-                "op" => "set_cell",
-                "tab" => tab,
-                "ref" => ref,
-                "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
-              },
-              src_cell
-            )
-
-          %{"v" => v} ->
-            stamp_meta(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}, src_cell)
-
-          _ ->
-            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
-        end
-      end)
-
-    {:noreply, send_ops(socket, ops)}
+    if any_hidden_in_span?(socket, r1, r2) do
+      {:noreply, assign(socket, notice: hidden_write_notice())}
+    else
+      do_fill(socket, dir, {c1, c2, r1, r2})
+    end
   end
 
   # Fill-handle drag (the .sheet-fillnub on the selection corner): the hook
@@ -824,24 +794,29 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
     cell_count = Enum.reduce(rows, 0, fn row, acc -> acc + length(List.wrap(row)) end)
 
-    if cell_count > @paste_cell_cap do
-      {:noreply, assign(socket, notice: paste_too_large_notice(cell_count))}
-    else
-      ops =
-        for {line, i} <- Enum.with_index(rows),
-            {val, j} <- Enum.with_index(List.wrap(line)),
-            is_binary(val),
-            not MapSet.member?(covered, {c0 + j, r0 + i}) do
-          ref = Sheets.format_ref({c0 + j, r0 + i})
+    cond do
+      cell_count > @paste_cell_cap ->
+        {:noreply, assign(socket, notice: paste_too_large_notice(cell_count))}
 
-          if val == "" do
-            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
-          else
-            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+      any_hidden_in_span?(socket, r0, r0 + max(length(rows) - 1, 0)) ->
+        {:noreply, assign(socket, notice: hidden_write_notice())}
+
+      true ->
+        ops =
+          for {line, i} <- Enum.with_index(rows),
+              {val, j} <- Enum.with_index(List.wrap(line)),
+              is_binary(val),
+              not MapSet.member?(covered, {c0 + j, r0 + i}) do
+            ref = Sheets.format_ref({c0 + j, r0 + i})
+
+            if val == "" do
+              %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+            else
+              %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+            end
           end
-        end
 
-      {:noreply, send_ops(socket, ops)}
+        {:noreply, send_ops(socket, ops)}
     end
   end
 
@@ -867,22 +842,26 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         rows -> if List.last(rows) == "", do: Enum.drop(rows, -1), else: rows
       end
 
-    # Skip any target a merge covers — a paste over an xlsx-imported (or
-    # Studio-created) merge must not write cells the grid never renders.
-    ops =
-      for {line, i} <- Enum.with_index(lines),
-          {val, j} <- Enum.with_index(String.split(line, "\t")),
-          not MapSet.member?(covered, {c0 + j, r0 + i}) do
-        ref = Sheets.format_ref({c0 + j, r0 + i})
+    if any_hidden_in_span?(socket, r0, r0 + max(length(lines) - 1, 0)) do
+      {:noreply, assign(socket, notice: hidden_write_notice())}
+    else
+      # Skip any target a merge covers — a paste over an xlsx-imported (or
+      # Studio-created) merge must not write cells the grid never renders.
+      ops =
+        for {line, i} <- Enum.with_index(lines),
+            {val, j} <- Enum.with_index(String.split(line, "\t")),
+            not MapSet.member?(covered, {c0 + j, r0 + i}) do
+          ref = Sheets.format_ref({c0 + j, r0 + i})
 
-        if val == "" do
-          %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
-        else
-          %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+          if val == "" do
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+          else
+            %{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => Ops.parse_raw(val)}
+          end
         end
-      end
 
-    {:noreply, send_ops(socket, ops)}
+      {:noreply, send_ops(socket, ops)}
+    end
   end
 
   # Text-to-columns — split every cell of a SINGLE selected column on a FIXED
@@ -1240,6 +1219,66 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, cf_panel: panel)}
   end
 
+  # ── events: per-viewer filter (SF-B, paper §3+§4) ────────────────────────
+  #
+  # THE ONE-WAY DOOR (SF-D2): filter is per-viewer socket view-state ONLY. NOT
+  # ONE of these handlers sends an op, mutates content, persists, or broadcasts
+  # — they only reshape THIS socket's `filters`/`filter_panel` assigns and re-
+  # derive the grid. There is deliberately ZERO wire surface: a filter wire
+  # endpoint would be a chartered regression. A collaborator on the same sheet
+  # sees nothing of this viewer's filter.
+
+  # Open (or re-open on) a column's funnel editor, prefilled from the column's
+  # active criterion if it has one, else a fresh "is not empty" default.
+  def handle_event("filter-open", %{"col" => col}, socket) do
+    col = to_int(col)
+    panel = filter_open_form(socket.assigns.filters, col)
+    {:noreply, assign(socket, filter_panel: panel, menu: nil)}
+  end
+
+  def handle_event("filter-close", _params, socket) do
+    {:noreply, assign(socket, filter_panel: nil)}
+  end
+
+  # Track the op as the user switches it so the funnel's value/value2 inputs
+  # appear only for the ops that need them (mirrors cf-form-change).
+  def handle_event("filter-form-change", params, socket) do
+    {:noreply, assign(socket, filter_panel: filter_form_state(params))}
+  end
+
+  # Apply the funnel's criterion to this viewer's `filters`. Pure view-state:
+  # assign + `derive_grid` (which recomputes `visible_rows`), then clamp the
+  # active cell onto the nearest still-visible row (SF-D8 — a newly-applied
+  # filter must never strand the cursor on a hidden row). NO op is sent.
+  def handle_event("filter-apply", params, socket) do
+    col = to_int(params["col"])
+
+    case filter_criterion(params) do
+      nil ->
+        {:noreply, socket}
+
+      criterion ->
+        filters = Map.put(socket.assigns.filters, col, criterion)
+
+        {:noreply,
+         socket
+         |> assign(filters: filters, filter_panel: nil)
+         |> GridData.derive_grid()
+         |> clamp_active_to_visible()}
+    end
+  end
+
+  # Clear a single column's filter (from its funnel editor).
+  def handle_event("filter-clear", %{"col" => col}, socket) do
+    filters = Map.delete(socket.assigns.filters, to_int(col))
+
+    {:noreply,
+     socket
+     |> assign(filters: filters, filter_panel: nil)
+     |> GridData.derive_grid()
+     |> clamp_active_to_visible()}
+  end
+
   # ── events: chrome ───────────────────────────────────────────────────────
 
   def handle_event("toggle-mode", _params, socket) do
@@ -1264,6 +1303,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp paste_too_large_notice(_),
     do: "paste too large: exceeds the #{@paste_cell_cap}-cell limit"
+
+  # A fill/paste whose target span crosses a filtered-out row is REFUSED (paper
+  # §4): writing into a row this viewer can't see would corrupt data invisibly.
+  defp hidden_write_notice,
+    do: "can't fill or paste across rows hidden by a filter — clear the filter first"
 
   defp commit_clickaway(socket, params) do
     socket =
@@ -1505,6 +1549,84 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp cf_value_to_str(v) when is_binary(v), do: v
   defp cf_value_to_str(v), do: to_string(v)
 
+  # ── per-viewer filter helpers (SF-B) ─────────────────────────────────────
+
+  # The ops the funnel offers. `blank`/`nonblank` are occupancy tests; the
+  # five value ops ride `CondFormat.matches?/2` through `Filter` (CF-D5 matrix).
+  @filter_value_ops ~w(gt lt eq between contains)
+
+  # Open the funnel editor for `col`, prefilled from its active criterion (so
+  # re-opening shows the current filter), else a fresh "is not empty" default.
+  defp filter_open_form(filters, col) do
+    base = %{"col" => col, "op" => "nonblank", "value" => "", "value2" => ""}
+
+    case Map.get(filters, col) do
+      %{"op" => op} = crit ->
+        %{
+          base
+          | "op" => op,
+            "value" => cf_value_to_str(Map.get(crit, "value")),
+            "value2" => cf_value_to_str(Map.get(crit, "value2"))
+        }
+
+      _ ->
+        base
+    end
+  end
+
+  # phx-change: keep the funnel form state (so the op switch reveals value /
+  # value2 inputs and typed values survive the re-render). The hidden "col"
+  # field carries which column is open.
+  defp filter_form_state(params) do
+    %{
+      "col" => to_int(params["col"]),
+      "op" => params["op"] || "nonblank",
+      "value" => params["value"] || "",
+      "value2" => params["value2"] || ""
+    }
+  end
+
+  # Build the stored criterion from the submitted funnel form. Values coerce
+  # exactly like the CF panel's (`cf_value/2`: numbers for gt/lt/between, a
+  # typed literal for eq, a raw string for contains) so the shared
+  # `CondFormat.matches?/2` kernel evaluates them identically. An unknown op
+  # yields nil (no-op) — the funnel only ever emits the known set.
+  defp filter_criterion(params) do
+    case params["op"] do
+      op when op in ["blank", "nonblank"] ->
+        %{"op" => op}
+
+      "between" ->
+        %{
+          "op" => "between",
+          "value" => cf_value("between", String.trim(params["value"] || "")),
+          "value2" => cf_value("between", String.trim(params["value2"] || ""))
+        }
+
+      op when op in @filter_value_ops ->
+        %{"op" => op, "value" => cf_value(op, String.trim(params["value"] || ""))}
+
+      _ ->
+        nil
+    end
+  end
+
+  # A one-line summary of a column's active criterion, for the funnel's title
+  # + aria-label. TOTAL over the stored criterion shape.
+  defp filter_summary(%{"op" => "blank"}), do: "is empty"
+  defp filter_summary(%{"op" => "nonblank"}), do: "is not empty"
+  defp filter_summary(%{"op" => "gt", "value" => v}), do: "> #{cf_value_to_str(v)}"
+  defp filter_summary(%{"op" => "lt", "value" => v}), do: "< #{cf_value_to_str(v)}"
+  defp filter_summary(%{"op" => "eq", "value" => v}), do: "= #{cf_value_to_str(v)}"
+
+  defp filter_summary(%{"op" => "between", "value" => v, "value2" => v2}),
+    do: "#{cf_value_to_str(v)}–#{cf_value_to_str(v2)}"
+
+  defp filter_summary(%{"op" => "contains", "value" => v}),
+    do: "contains “#{cf_value_to_str(v)}”"
+
+  defp filter_summary(_), do: "filtered"
+
   # Carry the source cell's number format + style onto each filled target —
   # ALWAYS both keys (nil when the source has none) so a stale target format
   # is cleared, Excel's fill semantics.
@@ -1521,8 +1643,71 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # On success the selection extends over the filled range (Excel), so the
   # nub follows the new corner. Anything else (corner/self/inside/up/left)
   # builds no targets → send_ops([]) short-circuits and nothing mutates.
+
+  # The Ctrl+D/R fill body (extracted so the "fill" handler can refuse a
+  # hidden-row span first, SF-D8). Source = the rect's first row (down) / first
+  # column (right); every other cell copies it with the per-step rebase / meta
+  # stamp / merge fence.
+  defp do_fill(socket, dir, {c1, c2, r1, r2}) do
+    cells = Map.get(GridData.current_tab(socket), "cells") || %{}
+    tab = socket.assigns.tab
+
+    covered = socket.assigns.covered
+
+    targets =
+      if dir == "down" do
+        for c <- c1..c2, r <- (r1 + 1)..r2//1, do: {c, r, {c, r1}, 0, r - r1}
+      else
+        for c <- (c1 + 1)..c2//1, r <- r1..r2, do: {c, r, {c1, r}, c - c1, 0}
+      end
+
+    # Never fill INTO or FROM a merge-covered cell: writing a covered target
+    # plants data Studio never renders, and clearing a covered source would
+    # emit a spurious clear_cell. The merge anchor still fills normally.
+    targets =
+      Enum.reject(targets, fn {c, r, src, _dc, _dr} ->
+        MapSet.member?(covered, {c, r}) or MapSet.member?(covered, src)
+      end)
+
+    ops =
+      Enum.map(targets, fn {c, r, src, dc, dr} ->
+        ref = Sheets.format_ref({c, r})
+        src_cell = Map.get(cells, Sheets.format_ref(src))
+
+        case src_cell do
+          %{"f" => f} when is_binary(f) ->
+            stamp_meta(
+              %{
+                "op" => "set_cell",
+                "tab" => tab,
+                "ref" => ref,
+                "raw" => "=" <> Structure.rebase_formula(f, dc, dr)
+              },
+              src_cell
+            )
+
+          %{"v" => v} ->
+            stamp_meta(%{"op" => "set_cell", "tab" => tab, "ref" => ref, "raw" => v}, src_cell)
+
+          _ ->
+            %{"op" => "clear_cell", "tab" => tab, "ref" => ref}
+        end
+      end)
+
+    {:noreply, send_ops(socket, ops)}
+  end
+
   defp fill_to_target(socket, {tc, tr}) do
     {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+
+    if any_hidden_in_span?(socket, min(r1, tr), max(r2, tr)) do
+      assign(socket, notice: hidden_write_notice())
+    else
+      do_fill_to_target(socket, {tc, tr}, {c1, c2, r1, r2})
+    end
+  end
+
+  defp do_fill_to_target(socket, {tc, tr}, {c1, c2, r1, r2}) do
     cells = Map.get(GridData.current_tab(socket), "cells") || %{}
     covered = socket.assigns.covered
     tab = socket.assigns.tab
@@ -1706,6 +1891,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       |> GridData.derive_grid()
 
     range = socket.assigns.row_range
+    # Snap onto a visible row so an active filter never strands the cursor on a
+    # hidden (un-rendered) row (SF-D8). With no filter the target is already in
+    # the contiguous window, so this returns `r` unchanged.
+    r = clamp_visible(socket.assigns.visible_rows, r)
 
     assign(socket,
       active: {c, r},
@@ -1817,27 +2006,120 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # ── nav helpers ───────────────────────────────────────────────────────────
 
-  # `{cols, row_lo, row_hi}` — column extent + the CURRENT row window's bounds
-  # (from `row_range`). Clamping to the window (not row 1..rows) keeps the
-  # active cell on the visible page as it moves; paging is what crosses pages.
+  # `{cols, row_lo, row_hi}` — column extent + the CURRENT page's row bounds
+  # (the first/last VISIBLE row, == the window edges with no filter). Clamping
+  # to these keeps a shift-extend / header selection on the current page.
   defp move_bounds(socket) do
-    range = socket.assigns.row_range
-    {socket.assigns.cols, range.first, range.last}
+    {socket.assigns.cols, socket.assigns.visible_first, socket.assigns.visible_last}
   end
+
+  # `{cols, visible_rows}` — the arrow-stepping bounds. Arrows step to the next
+  # VISIBLE row so filtered-out rows are skipped (SF-D8); with no filter the
+  # visible list is the contiguous window, so stepping is byte-identical to the
+  # old `min/max(r±1, window)` clamp.
+  defp move_vis(socket), do: {socket.assigns.cols, socket.assigns.visible_rows}
 
   defp move(pos, nil, _bounds), do: pos
 
-  defp move({c, r}, key, {cols, row_lo, row_hi}) do
+  defp move({c, r}, key, {cols, vis}) do
     case key do
-      "ArrowUp" -> {c, max(r - 1, row_lo)}
-      "ArrowDown" -> {c, min(r + 1, row_hi)}
+      "ArrowUp" -> {c, prev_visible(vis, r)}
+      "ArrowDown" -> {c, next_visible(vis, r)}
       "ArrowLeft" -> {max(c - 1, 1), r}
       "ArrowRight" -> {min(c + 1, cols), r}
       "Home" -> {1, r}
       "End" -> {cols, r}
-      "PageUp" -> {c, max(r - 20, row_lo)}
-      "PageDown" -> {c, min(r + 20, row_hi)}
+      "PageUp" -> {c, step_visible(vis, r, -20)}
+      "PageDown" -> {c, step_visible(vis, r, 20)}
       _ -> {c, r}
+    end
+  end
+
+  # ── visible-row stepping (filter-aware, SF-D8) ────────────────────────────
+  #
+  # `vis` is the current page's ascending list of visible logical rows. Each
+  # helper degenerates to the historical contiguous-window clamp when `vis`
+  # is a gapless range (the no-filter path), and skips hidden rows otherwise.
+
+  # The next visible row strictly after `r`, clamped to the last visible row.
+  defp next_visible(vis, r) do
+    case Enum.filter(vis, &(&1 > r)) do
+      [] -> List.last(vis) || r
+      [n | _] -> n
+    end
+  end
+
+  # The previous visible row strictly before `r`, clamped to the first visible.
+  defp prev_visible(vis, r) do
+    case Enum.filter(vis, &(&1 < r)) do
+      [] -> List.first(vis) || r
+      less -> List.last(less)
+    end
+  end
+
+  # PageUp/PageDown: jump ~20 rows, snapping to the nearest visible row inside
+  # the step (never overshooting past the window), moving at least one row.
+  defp step_visible(vis, r, delta) when delta > 0 do
+    target = r + delta
+
+    case Enum.filter(vis, &(&1 > r and &1 <= target)) do
+      [] -> next_visible(vis, r)
+      xs -> List.last(xs)
+    end
+  end
+
+  defp step_visible(vis, r, delta) do
+    target = r + delta
+
+    case Enum.filter(vis, &(&1 < r and &1 >= target)) do
+      [] -> prev_visible(vis, r)
+      xs -> List.first(xs)
+    end
+  end
+
+  # Snap a logical row onto the current page's visible rows — the nearest
+  # visible row at or after `r` (clamped to the window ends). With no filter
+  # `r` is already in the contiguous window so this returns `r` unchanged,
+  # matching the old `max(row_lo) |> min(row_hi)` clamp exactly.
+  defp clamp_visible([], r), do: r
+
+  defp clamp_visible(vis, r) do
+    first = List.first(vis)
+    last = List.last(vis)
+
+    cond do
+      r <= first -> first
+      r >= last -> last
+      true -> Enum.find(vis, last, &(&1 >= r))
+    end
+  end
+
+  # Re-anchor the active cell onto a visible row after a filter change so a
+  # newly-hidden active row never strands the cursor (SF-D8). Drops the anchor
+  # (a stale selection rect across now-hidden rows is meaningless).
+  defp clamp_active_to_visible(socket) do
+    {ac, ar} = socket.assigns.active
+    assign(socket, active: {ac, clamp_visible(socket.assigns.visible_rows, ar)}, anchor: nil)
+  end
+
+  # Does the row span `r_lo..r_hi` cross a filtered-out (hidden) row? Only ever
+  # true while a filter is active — the no-filter fast path returns false, so
+  # every write guard below is a no-op without a filter (byte-identical). Used
+  # to REFUSE a fill/paste that would write into rows the viewer cannot see
+  # (paper §4 — a silent write into an invisible row corrupts data).
+  defp any_hidden_in_span?(socket, r_lo, r_hi) do
+    filters = socket.assigns.filters
+
+    if not is_map(filters) or map_size(filters) == 0 or r_lo > r_hi do
+      false
+    else
+      cells = socket.assigns.cells
+      used_rows = socket.assigns.used_rows
+      frozen = socket.assigns.frozen_rows
+
+      Enum.any?(r_lo..r_hi, fn r ->
+        not Filter.row_visible?(r, filters, cells, used_rows, frozen)
+      end)
     end
   end
 
@@ -2279,11 +2561,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             the columns are clipped (single page), just the column sentence
             shows — no buttons. --%>
       <div
-        :if={@row_offset > 0 or @row_page_end < @rows or @col_truncated}
+        :if={@row_offset > 0 or @row_page_end < @rows or @col_truncated or @filter_active}
         class="sheet-pager"
         data-test-id="sheet-pager"
       >
-        <%= if @row_offset > 0 or @row_page_end < @rows do %>
+        <%= if @row_offset > 0 or @row_page_end < @rows or @filter_active do %>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
@@ -2299,11 +2581,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-click="rows-page"
             phx-value-dir="next"
             phx-target={@myself}
-            disabled={@row_page_end >= @rows}
+            disabled={not @page_next?}
             data-test-id="sheet-pager-next"
           >Next</button>
           <span data-test-id="sheet-pager-text">
-            Showing rows <%= @row_range.first %>–<%= @row_range.last %> of <%= @rows %><%= if @col_truncated do %> · first <%= @cols %> of <%= @used_cols %> columns<% end %>
+            Showing rows <%= @visible_first %>–<%= @visible_last %> of <%= @rows %><%= if @filter_active do %> · <%= @filter_hidden_count %> rows hidden by filter<% end %><%= if @col_truncated do %> · first <%= @cols %> of <%= @used_cols %> columns<% end %>
           </span>
         <% else %>
           <span data-test-id="sheet-pager-text">
@@ -2351,7 +2633,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               rows={@rows}
               rows_total={@rows_total}
               cols_total={@cols_total}
-              row_range={@row_range}
+              visible_rows={@visible_rows}
               cells={@cells}
               cf_styles={@cf_styles}
               spans={@spans}
@@ -2365,6 +2647,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               active={@active}
               editing={@editing}
               menu={@menu}
+              filters={@filters}
+              filter_panel={@filter_panel}
               editable={true}
               myself={@myself}
             />
@@ -2375,7 +2659,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               rows={@rows}
               rows_total={@rows_total}
               cols_total={@cols_total}
-              row_range={@row_range}
+              visible_rows={@visible_rows}
               cells={@cells}
               cf_styles={@cf_styles}
               spans={@spans}
@@ -2389,13 +2673,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               active={Geometry.grid_cursor(@active, @read_only)}
               editing={nil}
               menu={nil}
+              filters={%{}}
+              filter_panel={nil}
               editable={false}
               myself={nil}
             />
           <% end %>
           <%!-- v1: the peer overlay's px geometry sums from row 1, so it is
-                only correct on page 0 — render it there alone (see moduledoc). --%>
-          <.peer_layer :if={@row_offset == 0} cursors={@peer_cursors} sels={@peer_sels} />
+                only correct on page 0 — render it there alone (see moduledoc).
+                It is ALSO suppressed while a filter is active (SF-D8): hidden
+                rows collapse the table, so a peer's row-1-summed Y no longer
+                lands on the cell it names — remapping onto visible geometry is
+                a wave-SF-2 refinement, suppression is the honest v1 bound. --%>
+          <.peer_layer
+            :if={@row_offset == 0 and not @filter_active}
+            cursors={@peer_cursors}
+            sels={@peer_sels}
+          />
         </div>
       </div>
 
@@ -2561,6 +2855,74 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}>Insert right</button>
                 <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}>Delete column</button>
               </div>
+              <%!-- Per-column FILTER funnel (SF-D9). Pure LiveView, mirroring the
+                    CF panel: server-rendered HEEx + phx-click, zero bp-sheet-grid.js.
+                    The funnel fills when the column carries an active criterion; the
+                    popover is this viewer's per-column predicate editor. Filtering is
+                    socket view-state — clicking Apply sends NO op (SF-D2). --%>
+              <button
+                type="button"
+                class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
+                phx-click="filter-open"
+                phx-value-col={c}
+                phx-target={@myself}
+                aria-haspopup="dialog"
+                aria-expanded={to_string(@filter_panel != nil and @filter_panel["col"] == c)}
+                aria-label={
+                  "Filter column " <>
+                    Geometry.col_letters(c) <>
+                    if(Map.has_key?(@filters, c),
+                      do: " (active: " <> filter_summary(@filters[c]) <> ")",
+                      else: ""
+                    )
+                }
+                title="Filter this column"
+                data-active={to_string(Map.has_key?(@filters, c))}
+                data-test-id={"sheet-filter-funnel-#{c}"}
+              ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
+
+              <div
+                :if={@filter_panel && @filter_panel["col"] == c}
+                class="sheet-popover sheet-filter-panel"
+                role="dialog"
+                aria-label={"Filter column " <> Geometry.col_letters(c)}
+                phx-window-keydown="filter-close"
+                phx-key="Escape"
+                phx-target={@myself}
+                data-test-id="sheet-filter-panel"
+              >
+                <div class="sheet-filter-head">
+                  <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
+                  <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
+                </div>
+                <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+                  <input type="hidden" name="col" value={c} />
+                  <label class="sheet-filter-field">
+                    <span>Show rows where</span>
+                    <select name="op" data-test-id="sheet-filter-op">
+                      <option value="nonblank" selected={@filter_panel["op"] == "nonblank"}>is not empty</option>
+                      <option value="blank" selected={@filter_panel["op"] == "blank"}>is empty</option>
+                      <option value="eq" selected={@filter_panel["op"] == "eq"}>is equal to</option>
+                      <option value="gt" selected={@filter_panel["op"] == "gt"}>is greater than</option>
+                      <option value="lt" selected={@filter_panel["op"] == "lt"}>is less than</option>
+                      <option value="between" selected={@filter_panel["op"] == "between"}>is between</option>
+                      <option value="contains" selected={@filter_panel["op"] == "contains"}>contains</option>
+                    </select>
+                  </label>
+                  <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
+                    <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
+                    <input type="text" name="value" value={@filter_panel["value"]} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
+                  </label>
+                  <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
+                    <span>max</span>
+                    <input type="text" name="value2" value={@filter_panel["value2"]} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
+                  </label>
+                  <div class="sheet-filter-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear">Clear</button>
+                    <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply">Apply</button>
+                  </div>
+                </form>
+              </div>
               <div class="sheet-rsz sheet-rsz--col" data-kind="col" data-index={c} data-px={Geometry.col_px(@col_widths, c)}></div>
             <% end %>
           </th>
@@ -2568,7 +2930,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </thead>
       <tbody>
         <tr
-          :for={r <- @row_range}
+          :for={r <- @visible_rows}
           aria-rowindex={r + 1}
           style={"height: #{Geometry.row_px(@row_heights, r)}px;"}
         >

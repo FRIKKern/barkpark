@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias BarkparkWeb.Studio.SheetGrid.Filter
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
   # Render bounds (full virtualization is future work) + layout constants.
@@ -45,9 +46,39 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     # BODY iterates the `row_range` window; the pager walks `row_offset` across
     # the pages, so a tall sheet is fully reachable.
     rows = max(used_rows + 2, 20)
-    offset = clamp_row_offset(socket.assigns[:row_offset] || 0, rows)
-    first = offset * @max_rows + 1
-    last = min(first + @max_rows - 1, rows)
+    cells = Map.get(tab, "cells") || %{}
+    frozen_rows = clamp_frozen(Map.get(tab, "frozen_rows"), rows)
+    frozen_cols = clamp_frozen(Map.get(tab, "frozen_cols"), cols)
+
+    # Per-viewer filter view-state (SF-D2/SF-D7/SF-D8). `filters` is a
+    # `%{col => criterion}` map on THIS socket — never on the document. Empty
+    # (the no-filter default) makes `paginate/7` the byte-identical historical
+    # logical-paging path; a live filter pages over the VISIBLE rows so a
+    # heavily-filtered sheet still fills the 500-row window (paper §4).
+    filters = socket.assigns[:filters] || %{}
+    filter_active = is_map(filters) and map_size(filters) > 0
+
+    %{
+      offset: offset,
+      first: first,
+      last: last,
+      visible_rows: visible_rows,
+      visible_first: visible_first,
+      visible_last: visible_last,
+      page_end: page_end,
+      page_next?: page_next?,
+      hidden_count: hidden_count
+    } =
+      paginate(
+        filter_active,
+        socket.assigns[:row_offset] || 0,
+        rows,
+        filters,
+        cells,
+        used_rows,
+        frozen_rows
+      )
+
     {spans, covered} = merge_maps(tab, cols, rows)
     # Conditional-formatting styles for the LIVE grid (CF-C stage A). Parse the
     # tab's `cond_formats` once through the ONE kernel, then precompute a
@@ -56,7 +87,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     # range costs nothing). Derived HERE with the rest of the grid body so a
     # presence frame never re-evaluates rules (the change-tracking contract).
     rules = CondFormat.parse_rules(Map.get(tab, "cond_formats"))
-    cf_styles = cf_styles(rules, Map.get(tab, "cells") || %{})
+    cf_styles = cf_styles(rules, cells)
     # Page-boundary merge repair: a rowspan anchored ABOVE this window would
     # leave its covered rows a <td> short here (the spanning anchor renders on
     # the prior page), and HTML slot-filling then shifts every cell right of the
@@ -87,14 +118,28 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       cols_total: if(used_cols > @max_cols, do: used_cols, else: cols),
       row_offset: offset,
       row_range: first..last,
-      row_page_end: last,
-      cells: Map.get(tab, "cells") || %{},
+      row_page_end: page_end,
+      # The rows the grid BODY iterates (SF-D8) — the current page's VISIBLE
+      # row indexes (LOGICAL, ascending). With no filter this is exactly
+      # `Enum.to_list(first..last)`, so the rendered body is byte-identical.
+      visible_rows: visible_rows,
+      # Pager display + move/nav bounds: the first/last LOGICAL row shown on
+      # this page (== first/last with no filter).
+      visible_first: visible_first,
+      visible_last: visible_last,
+      # Is a next page reachable? (== `row_page_end < rows` with no filter, so
+      # the pager's Next button renders identically.)
+      page_next?: page_next?,
+      filter_active: filter_active,
+      # DATA rows this viewer's filter hid (0 with no filter) — the pager text.
+      filter_hidden_count: hidden_count,
+      cells: cells,
       spans: spans,
       covered: covered,
       col_widths: Map.get(tab, "col_widths") || %{},
       row_heights: Map.get(tab, "row_heights") || %{},
-      frozen_cols: clamp_frozen(Map.get(tab, "frozen_cols"), cols),
-      frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows),
+      frozen_cols: frozen_cols,
+      frozen_rows: frozen_rows,
       # {c, r} -> composed CF style, consumed by the grid body's `cell_style`.
       cf_styles: cf_styles,
       # The tab's RAW stored rules (with ids), for the toolbar CF panel's list
@@ -103,6 +148,56 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       # stored value the gate would reject anyway.
       cf_rules: cf_rules_list(Map.get(tab, "cond_formats"))
     )
+  end
+
+  # ── row paging (filter-aware, SF-D8) ─────────────────────────────────────
+  #
+  # NO FILTER — the historical logical window, BYTE-IDENTICAL to pre-SF-B:
+  # `offset*500+1 .. min(+499, rows)`, `visible_rows` = that contiguous range
+  # as a list (the body's `:for` renders identical `<tr>`s), no hidden rows.
+  defp paginate(false, requested, rows, _filters, _cells, _used_rows, _frozen_rows) do
+    offset = clamp_row_offset(requested, rows)
+    first = offset * @max_rows + 1
+    last = min(first + @max_rows - 1, rows)
+
+    %{
+      offset: offset,
+      first: first,
+      last: last,
+      visible_rows: Enum.to_list(first..last),
+      visible_first: first,
+      visible_last: last,
+      page_end: last,
+      page_next?: last < rows,
+      hidden_count: 0
+    }
+  end
+
+  # FILTER ACTIVE — page over the VISIBLE rows so the 500-row window always
+  # fills with visible rows (paper §4: a heavily-filtered sheet still fills the
+  # viewport). The whole-height visible list is computed once; `offset` indexes
+  # PAGES of it. The list is never empty — growth-padding rows (row > used_rows)
+  # are always visible — so `List.first/last` are safe.
+  defp paginate(true, requested, rows, filters, cells, used_rows, frozen_rows) do
+    all_visible = Filter.visible_rows(1..rows, filters, cells, used_rows, frozen_rows)
+    visible_count = length(all_visible)
+    last_page = div(max(visible_count - 1, 0), @max_rows)
+    offset = requested |> max(0) |> min(last_page)
+    page = Enum.slice(all_visible, offset * @max_rows, @max_rows)
+    visible_first = List.first(page) || 1
+    visible_last = List.last(page) || visible_first
+
+    %{
+      offset: offset,
+      first: visible_first,
+      last: visible_last,
+      visible_rows: page,
+      visible_first: visible_first,
+      visible_last: visible_last,
+      page_end: visible_last,
+      page_next?: (offset + 1) * @max_rows < visible_count,
+      hidden_count: rows - visible_count
+    }
   end
 
   # Precompute the {c, r} -> CF style map for the live grid over the OCCUPIED
