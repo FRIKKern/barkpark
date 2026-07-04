@@ -1015,6 +1015,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # highlight never bleeds onto the new tab's grid.
        find_hits: MapSet.new(),
        find_query: "",
+       # The filter criteria are likewise keyed to the previous tab's columns —
+       # drop them so rows of the NEW tab never vanish under a filter the
+       # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
+       filters: %{},
+       filter_panel: nil,
        status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
      )
      |> GridData.derive_grid()
@@ -1250,14 +1255,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # assign + `derive_grid` (which recomputes `visible_rows`), then clamp the
   # active cell onto the nearest still-visible row (SF-D8 — a newly-applied
   # filter must never strand the cursor on a hidden row). NO op is sent.
+  #
+  # A VACUOUS criterion (gt/lt/between without a number, eq/contains without a
+  # value) is REFUSED with an inline error, panel kept open: the CF-D5 kernel
+  # would match NOTHING for it, so applying it silently blanks the viewer's
+  # entire data set — the exact "data vanished, no idea why" failure the
+  # fail-open clause in `Filter` exists to prevent.
   def handle_event("filter-apply", params, socket) do
     col = to_int(params["col"])
+    criterion = filter_criterion(params)
 
-    case filter_criterion(params) do
+    case criterion && filter_criterion_error(criterion) do
       nil ->
+        # Unknown op (unreachable from the funnel's own select) — ignore.
         {:noreply, socket}
 
-      criterion ->
+      :ok ->
         filters = Map.put(socket.assigns.filters, col, criterion)
 
         {:noreply,
@@ -1265,6 +1278,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
          |> assign(filters: filters, filter_panel: nil)
          |> GridData.derive_grid()
          |> clamp_active_to_visible()}
+
+      {:error, msg} ->
+        {:noreply,
+         assign(socket, filter_panel: params |> filter_form_state() |> Map.put("error", msg))}
     end
   end
 
@@ -1611,6 +1628,28 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
+  # Refuse a criterion the CF-D5 kernel can never match (see filter-apply):
+  # gt/lt/between demand numbers (a non-number coerces to a string and the
+  # kernel's numeric guard then matches NOTHING), eq/contains demand a value.
+  # Occupancy ops are always valid. Returns :ok | {:error, msg}.
+  defp filter_criterion_error(%{"op" => op} = crit) when op in ["gt", "lt", "between"] do
+    ok? =
+      is_number(Map.get(crit, "value")) and
+        (op != "between" or is_number(Map.get(crit, "value2")))
+
+    cond do
+      ok? -> :ok
+      op == "between" -> {:error, "enter numbers for min and max"}
+      true -> {:error, "enter a number"}
+    end
+  end
+
+  defp filter_criterion_error(%{"op" => op, "value" => v}) when op in ["eq", "contains"] do
+    if v == "", do: {:error, "enter a value"}, else: :ok
+  end
+
+  defp filter_criterion_error(_), do: :ok
+
   # A one-line summary of a column's active criterion, for the funnel's title
   # + aria-label. TOTAL over the stored criterion shape.
   defp filter_summary(%{"op" => "blank"}), do: "is empty"
@@ -1883,11 +1922,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # off-page name-jump bug: without the page step, jumping past the 500-row
   # window left the active cell unrendered.
   defp jump_to(socket, {c, r}) do
-    target_offset = div(max(r - 1, 0), GridData.rows_per_page())
-
     socket =
       socket
-      |> assign(row_offset: target_offset, anchor: nil, editing: nil, menu: nil)
+      |> assign(row_offset: jump_offset(socket, r), anchor: nil, editing: nil, menu: nil)
       |> GridData.derive_grid()
 
     range = socket.assigns.row_range
@@ -1901,6 +1938,33 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       status:
         "#{Sheets.format_ref({c, r})} · showing rows #{range.first}–#{range.last} of #{socket.assigns.rows}"
     )
+  end
+
+  # The row_offset that pages `r` into the rendered window. With no filter the
+  # window is logical, so it's the plain 500-row division. Under a filter
+  # `derive_grid` pages over VISIBLE rows (SF-D8), so the offset must be the
+  # target's position in the whole-height visible list — the logical division
+  # would land jump/find/Ctrl+End on the wrong page of a >1-page filtered
+  # sheet. A hidden target rounds to the nearest visible row at/after it, the
+  # same snap `clamp_visible/2` applies once the page renders.
+  defp jump_offset(socket, r) do
+    filters = socket.assigns[:filters] || %{}
+
+    if map_size(filters) == 0 do
+      div(max(r - 1, 0), GridData.rows_per_page())
+    else
+      all_visible =
+        Filter.visible_rows(
+          1..socket.assigns.rows,
+          filters,
+          socket.assigns.cells,
+          socket.assigns.used_rows,
+          socket.assigns.frozen_rows
+        )
+
+      pos = Enum.find_index(all_visible, &(&1 >= r)) || max(length(all_visible) - 1, 0)
+      div(pos, GridData.rows_per_page())
+    end
   end
 
   # Run a find pass: scan the current tab's SPARSE cells, jump to the next/prev
@@ -2911,12 +2975,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   </label>
                   <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
                     <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
-                    <input type="text" name="value" value={@filter_panel["value"]} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
+                    <input type="text" name="value" value={@filter_panel["value"]} inputmode={if @filter_panel["op"] in ["gt", "lt", "between"], do: "decimal"} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
                   </label>
                   <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
                     <span>max</span>
-                    <input type="text" name="value2" value={@filter_panel["value2"]} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
+                    <input type="text" name="value2" value={@filter_panel["value2"]} inputmode="decimal" autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
                   </label>
+                  <%!-- A vacuous criterion (no number / no value) is refused with
+                        the reason inline — applying it would silently hide every
+                        data row (see filter-apply). Cleared on any form change. --%>
+                  <p :if={@filter_panel["error"]} class="sheet-filter-error" role="alert" data-test-id="sheet-filter-error"><%= @filter_panel["error"] %></p>
                   <div class="sheet-filter-actions">
                     <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear">Clear</button>
                     <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply">Apply</button>
