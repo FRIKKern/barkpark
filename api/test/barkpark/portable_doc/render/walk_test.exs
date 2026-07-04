@@ -43,11 +43,16 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ "border-radius"
     end
 
-    test "@article chip mirrors the editor CSS (0.08em 0.35em / 3px / 0.92em)" do
+    test "@article chip is a BARE <code> — the .bp-paper-surface code rule owns the chip" do
+      # Stage 2: article inline code drops ALL inline styling; the surface
+      # element rule (font/size/bg/padding/radius, single-sourced from --bp-*
+      # code tokens) styles it identically in View and Edit by construction.
       html = Walk.render_body(%{"kind" => "PdInlineCode", "value" => "x"}, @width, @article)
-      assert html =~ "padding:0.08em 0.35em"
-      assert html =~ "border-radius:3px"
-      assert html =~ "font-size:0.92em"
+      assert html == "<code>x</code>"
+      refute html =~ "style="
+      # And it still escapes its value (no markup injection through the chip).
+      esc = Walk.render_body(%{"kind" => "PdInlineCode", "value" => "a & <b>"}, @width, @article)
+      assert esc == "<code>a &amp; &lt;b&gt;</code>"
     end
   end
 
@@ -89,13 +94,16 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ "text-decoration:underline"
     end
 
-    test "article palette uses the editor's soft border-bottom, not an underline" do
+    test "article link drops the inline decoration/border — the .bp-paper-surface a rule owns it" do
       node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["go"]}
       html = Walk.render_body(node, @width, @article)
-      # Parity with root.html.heex:2334-2337 (.bp-paper-surface a).
-      assert html =~ "text-decoration:none"
-      assert html =~ "border-bottom:1px solid var(--paper-accent-soft"
-      refute html =~ "text-decoration:underline"
+      # Stage 2: no inline text-decoration or border-bottom at all; the surface
+      # element rule paints the soft-border at-rest look in View and Edit alike.
+      refute html =~ "text-decoration"
+      refute html =~ "border-bottom"
+      # The accent link colour stays inline (the same --paper-accent token the
+      # CSS rule resolves — data-adjacent, no drift).
+      assert html == ~s|<a href="https://example.com" style="color:var(--paper-accent, #a23925)">go</a>|
     end
 
     test "javascript: href is sanitised by safe_url (returns # sentinel)" do
@@ -467,18 +475,48 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   end
 
   describe "render_body/3 — PdHeading (article only)" do
-    test "emits <h2> for level 2 with article font" do
+    test "emits a BARE <h2> for level 2 — the .bp-paper-surface h2 rule owns typography" do
+      # Stage 2: article headings carry NO inline style; the surface element
+      # rule (size/line-height/weight/margin, single-sourced from --bp-* tokens)
+      # renders them identically in View and Edit by construction.
       node = %{"kind" => "PdHeading", "level" => 2, "children" => ["Title"]}
       html = Walk.render_body(node, @width, @article)
-      assert html =~ "<h2 style="
-      assert html =~ "font-size:24px"
-      assert html =~ "Title</h2>"
+      assert html == "<h2>Title</h2>"
+      # Negative: the level-sized inline rule is gone (no style attr at all).
+      refute html =~ ~r/<h2[^>]*style=/
+      refute html =~ "font-size"
     end
 
-    test "clamps unknown level to h2" do
+    test "level 1 / 3 also emit bare tags" do
+      assert Walk.render_body(%{"kind" => "PdHeading", "level" => 1, "children" => ["A"]}, @width, @article) ==
+               "<h1>A</h1>"
+
+      assert Walk.render_body(%{"kind" => "PdHeading", "level" => 3, "children" => ["C"]}, @width, @article) ==
+               "<h3>C</h3>"
+    end
+
+    test "clamps unknown level to a bare h2" do
       node = %{"kind" => "PdHeading", "level" => 99, "children" => ["H?"]}
       html = Walk.render_body(node, @width, @article)
-      assert html =~ "<h2 style="
+      assert html == "<h2>H?</h2>"
+    end
+
+    test "escapes heading text and recurses child marks (bare tag, marks stay inline)" do
+      node = %{
+        "kind" => "PdHeading",
+        "level" => 2,
+        "children" => [
+          "A < B ",
+          %{"kind" => "PdText", "color" => "#ff0000", "children" => ["red"]}
+        ]
+      }
+
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ "A &lt; B "
+      # POSITIVE control: a user-set colour mark on an inline child still rides
+      # inline (author DATA), even though the heading frame itself is bare.
+      assert html =~ ~s(<span style="color:#ff0000">red</span>)
+      refute html =~ ~r/<h2[^>]*style=/
     end
   end
 
@@ -627,7 +665,10 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   end
 
   describe "render_body/3 — PdList/PdListItem (article)" do
-    test "unordered list spacing aligns to the Edit pane surface CSS" do
+    test "unordered list is a BARE <ul>/<li> — the surface ul/li rules own spacing" do
+      # Stage 2: article lists carry NO inline structure; the .bp-paper-surface
+      # ul/ol (margin + --bp-list-indent), the VIEW-only bottom-margin, and the
+      # li rule (--bp-li-gap) style them identically in View and Edit.
       node = %{
         "kind" => "PdList",
         "children" => [
@@ -637,14 +678,15 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
 
       html = Walk.render_body(node, @width, @article)
 
-      assert html =~ "<ul"
-      assert html =~ "margin:0 0 24px"
-      assert html =~ "padding-left:24px"
-      assert html =~ "line-height:1.7"
-      assert html =~ ~s(<li style="margin:4pt 0 0">)
+      assert html == "<ul><li><span>x</span></li></ul>"
+      # Negative: no structural inline survives on the list or its item.
+      refute html =~ "margin"
+      refute html =~ "padding-left"
+      refute html =~ "line-height"
+      refute html =~ ~r/<(ul|ol|li)[^>]*style=/
     end
 
-    test "ordered list emits <ol> with the same spacing" do
+    test "ordered list emits a bare <ol>" do
       node = %{
         "kind" => "PdList",
         "ordered" => true,
@@ -655,11 +697,26 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
 
       html = Walk.render_body(node, @width, @article)
 
-      assert html =~ "<ol"
-      assert html =~ "margin:0 0 24px"
-      assert html =~ "padding-left:24px"
-      assert html =~ "line-height:1.7"
-      assert html =~ ~s(<li style="margin:4pt 0 0">)
+      assert html == "<ol><li><span>x</span></li></ol>"
+      refute html =~ ~r/<(ol|li)[^>]*style=/
+    end
+
+    test "author marks inside a list item still ride inline (bare frame, data inline)" do
+      # POSITIVE control: a bold+coloured inline child keeps its inline style
+      # even though the <ul>/<li> frame is bare — proves DATA is not stripped.
+      node = %{
+        "kind" => "PdList",
+        "children" => [
+          %{
+            "kind" => "PdListItem",
+            "children" => [%{"kind" => "PdText", "weight" => "bold", "children" => ["hot"]}]
+          }
+        ]
+      }
+
+      html = Walk.render_body(node, @width, @article)
+      assert html =~ ~s(<span style="font-weight:bold">hot</span>)
+      refute html =~ ~r/<(ul|li)[^>]*style=/
     end
   end
 end

@@ -12,7 +12,35 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   NO logic change). This is the WALK recursive tree (`walk` ↔ `render_children`
   ↔ per-kind renderers); it never calls compose_block / compose_inline. It
   depends only on `Render.Util` (escape / safe_url / tone) and the mono-font
-  constant. Output is byte-identical to the pre-split engine.
+  constant.
+
+  ## Theme-vs-data contract (Stage 2 — identical by construction)
+
+  In `:article` mode the prose core emits **bare semantic elements** — `<h1>`
+  `<h2>` `<h3>`, `<p>`, `<ul>`/`<ol>`/`<li>`, `<a>`, `<code>`, and the container
+  `<div>` — carrying NO structural `style=`. Their typography, spacing, ink, and
+  chrome are owned by the ONE canonical `.bp-paper-surface` element stylesheet
+  (`Barkpark.PortableDoc.Render.Stylesheet`, single-sourced from the `--bp-*` /
+  `--paper-*` tokens). View and Edit therefore resolve the SAME selectors in the
+  SAME cascade — parity is a property of the DOM, not hand-matched CSS.
+
+  The crisp line between what stays inline and what moves to the stylesheet:
+
+    * **DATA (stays inline — it is content, must survive a stylesheet-less sink
+      like email or a standalone export):** author PdText marks (user-set color,
+      weight, italic, underline/strike decoration), PdBox geometry, PdSheet
+      `col_widths` + per-cell `b`/`i`/`bg`/`al`, PdImage width/height, PdHr
+      thickness, PdContainer `maxWidth`.
+    * **THEME (moves to `Render.Stylesheet` — it is presentation, resolved from
+      tokens):** heading typography, paragraph/list margins + indent, list
+      line-height, link at-rest decoration + border, inline-code chip
+      (font/size/bg/padding/radius), container ink/bg/font-family.
+
+  `:email` (the default palette) is **frozen** — every `:email` clause emits the
+  exact bytes it always has (Outlook strips stylesheets; inline is the only
+  correct emission there), locked by the byte-identical assertions in the tests.
+  A permanent ratchet tripwire (Wave-1 rails slice) asserts article output
+  carries no `style=` outside the DATA allowlist above.
   """
 
   import Barkpark.PortableDoc.Render.Util,
@@ -70,15 +98,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdText"} = n, width, pal), do: text(n, width, pal)
   def walk(%{"kind" => "PdLink"} = n, width, pal), do: link(n, width, pal)
 
-  # Article chip mirrors the editor's own CSS byte-for-byte: root.html.heex
-  # `.bp-paper-surface code` (:2340-2343) and `.bp-paper-editor-body code`
-  # (:2912-2915) both declare 0.92em / 0.08em 0.35em padding / 3px radius —
-  # so View↔Edit no longer jump on a mode toggle, and standalone `/papers`
-  # pages get the rounded chip even where the surface CSS doesn't reach.
-  # Palette-gated so the generic clause below keeps email output byte-identical.
-  def walk(%{"kind" => "PdInlineCode"} = n, _width, %{style: :article} = pal) do
-    ~s(<code style="background:#{pal.code_bg};padding:0.08em 0.35em;border-radius:3px;font-family:#{@font_mono};font-size:0.92em">) <>
-      escape_html(Map.get(n, "value", "")) <> "</code>"
+  # Article inline code is a BARE `<code>` — the `.bp-paper-surface code`
+  # element rule (font/size/bg/padding/radius, single-sourced from the `--bp-*`
+  # code tokens) owns the rounded chip in both View and Edit by construction.
+  # See the theme-vs-data contract in the moduledoc. Palette-gated so the
+  # generic clause below keeps email output byte-identical (Outlook needs inline).
+  def walk(%{"kind" => "PdInlineCode"} = n, _width, %{style: :article}) do
+    "<code>" <> escape_html(Map.get(n, "value", "")) <> "</code>"
   end
 
   def walk(%{"kind" => "PdInlineCode"} = n, _width, pal) do
@@ -128,6 +154,20 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(_, _width, _pal), do: ""
 
   # ── per-kind renderers ──────────────────────────────────────────────────────
+
+  # Article container carries only GEOMETRY: `max-width` is author DATA (the
+  # PdContainer's own maxWidth), `margin`/`padding` are the box's layout. Ink,
+  # background, and font-family move to the `.bp-paper-surface` root (its
+  # `--paper-*` tokens own them in both View and Edit) — see the moduledoc
+  # theme-vs-data contract. `:email` keeps the self-styled div byte-for-byte.
+  defp container(n, width, %{style: :article} = pal) do
+    # Trap: clamp container width with min(maxWidth, width) — see the :email
+    # clause below for the nullish (`n.maxWidth ?? width`) rationale.
+    w = min(Map.get(n, "maxWidth", width), width)
+    inner = render_children(Map.get(n, "children", []), w, pal)
+
+    ~s(<div style="max-width:#{w}px;margin:0 auto;padding:24px">) <> inner <> "</div>"
+  end
 
   defp container(n, width, pal) do
     # Trap: clamp container width with min(maxWidth, width).
@@ -284,23 +324,35 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
-  # Real semantic heading (article mode only — the compose clause emits this
-  # kind exclusively under `:article`). Renders `<h1>` / `<h2>` / `<h3>` by
-  # clamped level with the level-sized article rule inline. Children mix raw
-  # strings (escaped) and child nodes (recursed), same contract as PdText.
+  # Real semantic heading (the compose clause emits PdHeading exclusively under
+  # `:article`). Article mode emits a BARE `<h1>`/`<h2>`/`<h3>` by clamped level:
+  # the `.bp-paper-surface h1/h2/h3` element rules (font/size/line-height/weight/
+  # margin, single-sourced from the `--bp-*` heading tokens) own its typography
+  # in both View and Edit by construction — see the moduledoc theme-vs-data
+  # contract. Children mix raw strings (escaped) and child nodes (recursed),
+  # same contract as PdText.
+  defp heading(n, width, %{style: :article} = pal) do
+    level = heading_level(Map.get(n, "level"))
+    "<h#{level}>#{heading_inner(n, width, pal)}</h#{level}>"
+  end
+
+  # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
+  # palette (email / a raw hand-built tree) keeps the level-sized inline rule so
+  # it is never unstyled off-surface. `:email` compose never emits PdHeading
+  # (headings render as bold PdText spans), so this stays byte-frozen for email.
   defp heading(n, width, pal) do
     level = heading_level(Map.get(n, "level"))
-
-    inner =
-      Map.get(n, "children", [])
-      |> Enum.map(fn
-        k when is_binary(k) -> escape_html(k)
-        k -> walk(k, width, pal)
-      end)
-      |> Enum.join("")
-
     style = heading_style(level, pal) |> Enum.join(";")
-    ~s(<h#{level} style="#{style}">#{inner}</h#{level}>)
+    ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
+  end
+
+  defp heading_inner(n, width, pal) do
+    Map.get(n, "children", [])
+    |> Enum.map(fn
+      k when is_binary(k) -> escape_html(k)
+      k -> walk(k, width, pal)
+    end)
+    |> Enum.join("")
   end
 
   # Clamp a heading level to 1..3; default to 2 when absent/out of range.
@@ -371,18 +423,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp apply_text_role(out, inner, _n, _pal), do: {out, inner}
 
-  # Heading declarations by clamped level (article palette).
-  #
-  # Three values align to the Edit pane's `.bp-paper-surface h1, h2, h3`
-  # rules (root.html.heex ~:2067-2069) so View ↔ Edit stays byte-aligned:
-  #   • font-family: serif (set in article_palette/0; was sans-serif system-ui)
-  #   • font-weight: 600 across all levels (was 700/700/600)
-  #   • margin: 0 — the user controls vertical rhythm via block-level
-  #     spacing, not via heading-internal margin. Baking margin into the
-  #     heading itself made the end result hard to author (the desk editor
-  #     rule swallowed user-set gaps). Cross-surface implication: standalone
-  #     /papers/<slug> and the email backend lose the heading shoulders too,
-  #     which is what we want for a uniform block-driven look.
+  # Heading declarations by clamped level — the NON-ARTICLE fallback only
+  # (article headings are bare `<h#>` styled by `.bp-paper-surface`; see the
+  # heading/3 article clause and the moduledoc theme-vs-data contract). Kept so
+  # a stylesheet-less palette still emits a level-sized, self-styled heading.
   defp heading_style(1, pal) do
     [
       "font-family:#{pal.font_heading}",
@@ -427,23 +471,19 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    # Article links match the editor's designed at-rest treatment — no baseline
-    # underline, a soft border-bottom instead (parity: root.html.heex:2334-2337,
-    # `.bp-paper-surface a { text-decoration:none; border-bottom:1px solid
-    # var(--paper-accent-soft) }`). The rgba fallback is the light-theme
-    # --paper-accent-soft token (root.html.heex:2230/:2266) so the standalone
-    # /papers reader paints the same tone when the CSS var doesn't resolve.
-    # Email/default keeps the real underline — the correct convention there.
+    # Article links drop their inline at-rest treatment — the `.bp-paper-surface
+    # a` element rule (`text-decoration:none; border-bottom:1px solid
+    # var(--paper-accent-soft)`) owns it in both View and Edit by construction
+    # (moduledoc theme-vs-data contract). The accent link colour stays inline
+    # (the same `--paper-accent` token the CSS rule resolves, so no drift).
+    # Email/default keeps the real underline — the correct convention off-surface.
     deco =
       case pal do
-        %{style: :article} ->
-          "text-decoration:none;border-bottom:1px solid var(--paper-accent-soft, rgba(162,57,37,0.10))"
-
-        _ ->
-          "text-decoration:underline"
+        %{style: :article} -> ""
+        _ -> ";text-decoration:underline"
       end
 
-    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color};#{deco}">#{inner}</a>)
+    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color}#{deco}">#{inner}</a>)
   end
 
   # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`
@@ -1162,29 +1202,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp tone_label("neutral"), do: "Neutral"
   defp tone_label(_), do: "Info"
 
-  # Semantic `<ul>` / `<ol>` for article mode. Email mode never reaches these
-  # renderers — its list compose clause still emits the flex-row PdBox scaffold
-  # with literal "• " / "1. " prefix spans (byte-stable Outlook target).
-  #
-  # The spacing values align to the Edit pane's list rules so View ↔ Edit stays
-  # byte-aligned (same precedent as heading_style/2 above):
-  #   • `.bp-paper-surface ul, ol { margin: 0 0 24px; padding-left: 24px; }`
-  #     (root.html.heex ~:2338) and `.bp-paper-editor-body` ul/ol (~:2880-2882)
-  #   • `.bp-paper-surface li { margin: 4pt 0 0; }` (~:2339) and the editor-body
-  #     li rule (~:2880-2882)
-  #   • line-height 1.7 — the surface inherits 1.70 (~:2288)
-  # font-family/color stay inline: the standalone /papers reader needs them.
+  # BARE semantic `<ul>` / `<ol>` / `<li>` for article mode. The
+  # `.bp-paper-surface ul, ol` rule (margin + `--bp-list-indent`), the VIEW-only
+  # list bottom-margin, the `.bp-paper-surface li` rule (`--bp-li-gap`), and the
+  # surface root (serif font, ink, `--bp-body-lh` line-height, inherited) own
+  # all structure in both View and Edit by construction — see the moduledoc
+  # theme-vs-data contract. Email mode never reaches these renderers: its list
+  # compose clause emits the flex-row PdBox scaffold with literal "• " / "1. "
+  # prefix spans (byte-stable Outlook target).
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
-
-    ~s(<#{tag} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
-      inner <> "</#{tag}>"
+    "<#{tag}>" <> inner <> "</#{tag}>"
   end
 
   defp list_item(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
-    ~s(<li style="margin:4pt 0 0">) <> inner <> "</li>"
+    "<li>" <> inner <> "</li>"
   end
 
   # ── shared helpers ──────────────────────────────────────────────────────────

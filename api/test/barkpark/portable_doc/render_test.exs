@@ -4,6 +4,15 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
   alias Barkpark.PortableDoc.Render
 
+  describe "body_html_render_version/0 — cache cutover" do
+    test "is 2 (Stage 2: article prose emits bare semantic elements)" do
+      # Bumped 1→2 in the same slice that first made article emission bare — old
+      # cached v1 HTML (self-styled inline) stays renderable; the stamp lets
+      # `mix barkpark.rehydrate_body_html` detect and refresh the drift.
+      assert Render.body_html_render_version() == 2
+    end
+  end
+
   describe "render_html/2 doctype wrapping" do
     test "wraps the body in a full document by default" do
       html = Render.render_html(%{"kind" => "PdHr"})
@@ -596,14 +605,20 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Accent terracotta is unreachable in the email palette. Article palette
       # now emits it via `var(--paper-accent, #a23925)` so the theme tokens
       # (root.html.heex `.bp-paper-surface`) can flip it for dark mode while
-      # the fallback hex stays byte-identical for non-themed surfaces.
+      # the fallback hex stays byte-identical for non-themed surfaces. (Carried
+      # by the PdButton child — buttons are wave-2, still self-styled.)
       assert html =~ "#a23925"
-      # Serif body stack on the article container.
-      assert html =~
+      # Stage 2: the article container is bare of ink/bg/font — the
+      # `.bp-paper-surface` root owns the serif family (single-sourced from
+      # `--paper-font-serif`). No serif stack rides the container inline anymore.
+      refute html =~
                "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
 
-      # Default article width budget (clamped maxWidth defaults to palette width).
+      # Default article width budget stays inline — maxWidth is author DATA
+      # (clamped maxWidth defaults to the palette width).
       assert html =~ "max-width:680px"
+      # …and the container carries ONLY geometry now (no colour/background/font).
+      assert html =~ ~s(<div style="max-width:680px;margin:0 auto;padding:24px">)
       # Parchment page background on the doctype body — same hex, now wrapped
       # in `var(--paper-bg-deep, …)` so themed hosts can override.
       assert html =~ ~s|<body style="background:var(--paper-bg-deep, #f5f2e9);|
@@ -618,27 +633,22 @@ defmodule Barkpark.PortableDoc.RenderTest do
                ~s(<span style="font-weight:bold">Title</span>)
     end
 
-    test "heading level 1/2/3 produce distinct article sizes" do
+    test "heading level 1/2/3 emit distinct BARE tags — sizing lives in the surface CSS" do
       h = fn level ->
         block = %{"type" => "heading", "level" => level, "text" => "H"}
         Render.render_block(block, %{style: :article})
       end
 
-      assert h.(1) =~ "font-size:32px"
-      assert h.(2) =~ "font-size:24px"
-      assert h.(3) =~ "font-size:20px"
-      # Distinct from one another.
-      refute h.(1) =~ "font-size:24px"
-      refute h.(2) =~ "font-size:32px"
-      # All heading levels now use weight 600 — matches the Edit pane's
-      # `.bp-paper-surface h1, h2, h3 { font-weight: 600 }` (root.html.heex
-      # ~:2065), so a paper renders identically in View and Edit modes.
-      assert h.(1) =~ "font-weight:600"
-      assert h.(2) =~ "font-weight:600"
-      assert h.(3) =~ "font-weight:600"
-      # And the family is now serif throughout (was sans-serif system-ui).
-      assert h.(1) =~ "font-family:'Iowan Old Style'"
-      assert h.(2) =~ "font-family:'Iowan Old Style'"
+      # Stage 2: the level shows in the TAG, not an inline font-size. Sizing,
+      # weight, and family are single-sourced from the `--bp-*` heading tokens
+      # via `.bp-paper-surface h1/h2/h3` — so View and Edit render identically
+      # by construction. The frame carries no inline style at all.
+      assert h.(1) == "<h1>H</h1>"
+      assert h.(2) == "<h2>H</h2>"
+      assert h.(3) == "<h3>H</h3>"
+      refute h.(1) =~ "font-size"
+      refute h.(1) =~ "font-weight"
+      refute h.(1) =~ "font-family"
     end
 
     test "eyebrow renders an uppercase accent kicker in article mode" do
@@ -852,10 +862,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert h.(3) =~ ~r/<h3[ >]/
       assert h.(3) =~ "</h3>"
 
-      # The level-sized rule still rides on the tag (sizing preserved).
-      assert h.(1) =~ "font-size:32px"
-      assert h.(2) =~ "font-size:24px"
-      assert h.(3) =~ "font-size:20px"
+      # Stage 2: the level-sized rule moved OFF the tag into the
+      # `.bp-paper-surface h1/h2/h3` element rules — the tag is bare, sizing is
+      # single-sourced from the `--bp-*` tokens (View ≡ Edit by construction).
+      refute h.(1) =~ ~r/<h1[^>]*style=/
+      refute h.(1) =~ "font-size"
 
       # No stray styled <span> heading anymore.
       refute h.(1) =~ "<span"
