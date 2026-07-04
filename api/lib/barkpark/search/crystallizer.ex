@@ -34,9 +34,16 @@ defmodule Barkpark.Search.Crystallizer do
         end)
       end)
 
+    # Week/month aggregates re-crystallize the LAST COMPLETED period for a
+    # trailing @backfill_days window, not just on the exact boundary day. On the
+    # boundary (Monday / the 1st) this is identical to the old single-shot
+    # behaviour; on the following days it idempotently re-upserts the same
+    # completed period so a missed cron run on the boundary day self-heals
+    # instead of leaving a permanent weekly/monthly hole — the same rationale the
+    # day backfill window already relies on.
     week_stats =
-      if Date.day_of_week(today) == 1 do
-        week_start = Date.add(today, -7)
+      if Date.day_of_week(today) <= @backfill_days do
+        week_start = Date.add(Date.beginning_of_week(today), -7)
 
         Enum.map(pairs, fn {surface, scope} ->
           {{surface, scope}, crystallize_period(surface, scope, :week, week_start)}
@@ -46,7 +53,7 @@ defmodule Barkpark.Search.Crystallizer do
       end
 
     month_stats =
-      if today.day == 1 do
+      if today.day <= @backfill_days do
         month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
 
         Enum.map(pairs, fn {surface, scope} ->

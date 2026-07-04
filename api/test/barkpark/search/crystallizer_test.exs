@@ -169,6 +169,55 @@ defmodule Barkpark.Search.CrystallizerTest do
     assert hd(rows).search_count == 1
   end
 
+  test "crystallize_due self-heals a missed WEEK boundary within the backfill window" do
+    # Wednesday (day_of_week 3): inside @backfill_days but NOT Monday, so the
+    # old single-shot `day_of_week == 1` gate produced no week crystal at all —
+    # a permanent weekly hole whenever the Monday cron run was missed.
+    today = ~D[2026-06-03]
+    week_start = Date.add(Date.beginning_of_week(today), -7)
+    at = DateTime.new!(Date.add(week_start, 2), ~T[09:00:00.000000], "Etc/UTC")
+
+    insert_event("weekheal", "weekheal", %{}, false, "actor-1", at)
+
+    Crystallizer.crystallize_due(today)
+
+    crystal =
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
+        period: "week",
+        period_start: week_start,
+        query_normalized: "weekheal",
+        filter_fingerprint: "q:weekheal"
+      )
+
+    assert crystal.search_count == 1
+  end
+
+  test "crystallize_due self-heals a missed MONTH boundary within the backfill window" do
+    # 2nd of the month (day 2): inside @backfill_days but NOT the 1st, so the
+    # old single-shot `today.day == 1` gate produced no month crystal at all.
+    today = ~D[2026-07-02]
+    month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
+    at = DateTime.new!(Date.add(month_start, 14), ~T[09:00:00.000000], "Etc/UTC")
+
+    insert_event("monthheal", "monthheal", %{}, false, "actor-1", at)
+
+    Crystallizer.crystallize_due(today)
+
+    crystal =
+      Repo.get_by!(Crystal,
+        surface: @surface,
+        scope: @scope,
+        period: "month",
+        period_start: month_start,
+        query_normalized: "monthheal",
+        filter_fingerprint: "q:monthheal"
+      )
+
+    assert crystal.search_count == 1
+  end
+
   defp insert_event(
          query,
          normalized,
