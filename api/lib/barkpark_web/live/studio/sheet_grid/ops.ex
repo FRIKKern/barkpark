@@ -105,13 +105,47 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           end
       end
 
-    tab = remap_tab(socket.assigns.tab, structure)
+    remapped = remap_tab(socket.assigns.tab, structure)
+    clamped = min(remapped, max(length(GridData.tabs(socket)) - 1, 0))
 
     socket
-    |> assign(tab: min(tab, max(length(GridData.tabs(socket)) - 1, 0)))
+    |> assign(tab: clamped)
+    |> clear_editing_if_clamped(clamped, remapped)
     |> remap_selection(structure)
     |> refresh_find_hits()
   end
+
+  # When the tab CLAMP OVERRIDES the remapped intention (clamped != remapped —
+  # the tab list shrank UNDER this viewer, so remap_tab pointed past the new end
+  # and the clamp pulled it back onto a DIFFERENT tab; this also covers the
+  # nil/degenerate structure of a pure rev-gap / epoch refetch onto a shorter
+  # session), the viewer is forcibly shown different content. An edit-in-progress
+  # on the tab they were moved OFF is now stale — its next commit would write the
+  # draft onto the WRONG tab's cell. Clear it, mirroring the active_deleted? clear
+  # above (assign editing: nil + notice + push_presence). When remap_tab FOLLOWED
+  # its logical tab (clamped == remapped — move_tab / duplicate_tab / delete-shift
+  # keep the SAME content under the viewer) the edit stays valid: NO clear. That
+  # equality IS the guard against over-clearing a still-valid edit.
+  #
+  # Known narrower sibling, named + parked for the next tab-ops owner (QR-D2):
+  # delete_tab of the ACTIVE tab where the index STAYS in range shows the
+  # successor tab's content at the same index WITHOUT tripping the clamp —
+  # remap_tab falls through (tab == i, no shift) so clamped == remapped and this
+  # guard misses it. No fix here; it needs its own remap_tab clause.
+  defp clear_editing_if_clamped(socket, clamped, remapped) when clamped != remapped do
+    if socket.assigns.editing != nil do
+      socket
+      |> assign(
+        editing: nil,
+        notice: "the tab you were editing was removed by a collaborator"
+      )
+      |> push_presence(%{editing: nil})
+    else
+      socket
+    end
+  end
+
+  defp clear_editing_if_clamped(socket, _clamped, _remapped), do: socket
 
   # A remote row/col shift on the viewer's CURRENT tab moves the CONTENT under
   # every held coordinate — {active, anchor} (and the open editor, which

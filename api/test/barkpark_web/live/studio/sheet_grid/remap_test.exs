@@ -218,6 +218,106 @@ defmodule BarkparkWeb.Studio.SheetGrid.RemapTest do
     end
   end
 
+  # ── tab-clamp editing clear (unit, via apply_delta) — QR-B / QR-D2 ────────
+
+  describe "refetch tab-clamp clears a stale open editor only when the clamp OVERRIDES the remap" do
+    test "a delete_tab that shrinks the list past the viewer clamps AND clears the open editor" do
+      # There were 2 tabs; a collaborator deletes the ACTIVE trailing tab (index
+      # 1). remap_tab(1, delete_tab tab:1) falls through to 1 (tab == i, no
+      # shift), but the peeked content now has only 1 tab → the clamp pulls it to
+      # 0: clamped(0) != remapped(1), so the viewer is forced onto DIFFERENT
+      # content and the open editor is stale. (No session ⇒ peek is a no-op, so
+      # the shorter content is set directly, exactly what a real peek would return.)
+      {topic, user_id} = track_presence!("B2")
+
+      socket =
+        build_socket(
+          tab: 1,
+          editing: %{prefill: nil},
+          content: %{"tabs" => [%{"name" => "S0", "cells" => %{}}]},
+          presence_topic: topic,
+          user_id: user_id
+        )
+
+      socket = Ops.apply_delta(socket, tab_delta(%{op: "delete_tab", tab: 1}))
+
+      assert socket.assigns.tab == 0
+      assert socket.assigns.editing == nil
+      assert socket.assigns.notice =~ "tab you were editing was removed"
+      # push_presence(%{editing: nil}) fired — the tracked meta cleared too.
+      assert presence_editing(topic, user_id) == nil
+    end
+
+    test "a move_tab that remap-FOLLOWS the logical tab keeps the editor open (over-clear guard)" do
+      # Viewer on tab 0; move_tab 0→1 re-indexes the SAME logical tab to 1. The
+      # content under the viewer is unchanged (2 tabs, no shrink) so the clamp
+      # can't override: clamped == remapped == 1 → the edit stays valid. This is
+      # the guard against a naive "tab changed ⇒ clear" that over-clears.
+      {topic, user_id} = track_presence!("A1")
+
+      socket =
+        build_socket(tab: 0, editing: %{prefill: nil}, presence_topic: topic, user_id: user_id)
+
+      socket = Ops.apply_delta(socket, tab_delta(%{op: "move_tab", from: 0, to: 1}))
+
+      assert socket.assigns.tab == 1
+      assert socket.assigns.editing == %{prefill: nil}
+      assert socket.assigns.notice == nil
+      # No clear ⇒ no presence push: the tracked meta still reads the open edit.
+      assert presence_editing(topic, user_id) == "A1"
+    end
+
+    test "the clamp fires but the editor is already closed — no notice, no presence push" do
+      # Same shrink as the first test, but nothing is being edited. The clamp
+      # still moves the tab, yet editing == nil ⇒ the guard skips the clear
+      # (no phantom notice, no presence push on a viewer that wasn't editing).
+      {topic, user_id} = track_presence!("A1")
+
+      socket =
+        build_socket(
+          tab: 1,
+          editing: nil,
+          content: %{"tabs" => [%{"name" => "S0", "cells" => %{}}]},
+          presence_topic: topic,
+          user_id: user_id
+        )
+
+      socket = Ops.apply_delta(socket, tab_delta(%{op: "delete_tab", tab: 1}))
+
+      assert socket.assigns.tab == 0
+      assert socket.assigns.editing == nil
+      assert socket.assigns.notice == nil
+      # Untouched: no push_presence(%{editing: nil}) was issued.
+      assert presence_editing(topic, user_id) == "A1"
+    end
+
+    test "a nil-structure refetch (session restart with fewer tabs) also clamps + clears" do
+      # A pure rev-gap refetch carries NO :structure key → refetch(_, _, nil).
+      # remap_tab(1, nil) = 1, but the restarted session peeks back only 1 tab →
+      # the clamp pulls to 0: clamped != remapped, so the stale editor clears
+      # even though no tab-reordering op named it.
+      {topic, user_id} = track_presence!("C3")
+
+      socket =
+        build_socket(
+          rev: 1,
+          tab: 1,
+          editing: %{prefill: nil},
+          content: %{"tabs" => [%{"name" => "S0", "cells" => %{}}]},
+          presence_topic: topic,
+          user_id: user_id
+        )
+
+      # rev jumps 1 → 5 with NO :structure key: the pure rev-gap refetch path.
+      socket = Ops.apply_delta(socket, %{rev: 5, tab: 0, changed: %{}})
+
+      assert socket.assigns.tab == 0
+      assert socket.assigns.editing == nil
+      assert socket.assigns.notice =~ "tab you were editing was removed"
+      assert presence_editing(topic, user_id) == nil
+    end
+  end
+
   # ── helpers ───────────────────────────────────────────────────────────────
 
   defp sort_delta(rect, perm, tab \\ 0) do
@@ -238,6 +338,34 @@ defmodule BarkparkWeb.Studio.SheetGrid.RemapTest do
     }
   end
 
+  # A structural delta carrying a tab-reordering structure map (move_tab /
+  # duplicate_tab / delete_tab) — the shape `apply_delta` routes to `refetch/3`.
+  defp tab_delta(structure, tab \\ 0) do
+    %{rev: 1, tab: tab, changed: %{}, structure: structure}
+  end
+
+  # Track this test process on a unique per-sheet presence topic with an open
+  # `editing` meta, mirroring what the hosting StudioLive tracks for an editor.
+  # `push_presence` runs in THIS process (apply_delta is synchronous), so the
+  # tracked pid matches and the meta merge lands on the local tracker ETS
+  # immediately — no cross-node propagation to wait on.
+  defp track_presence!(editing) do
+    topic = "sheets:remap:presence:#{System.unique_integer([:positive])}"
+    user_id = "u-#{System.unique_integer([:positive])}"
+    {:ok, _ref} = BarkparkWeb.Presence.track(self(), topic, user_id, %{editing: editing})
+    {topic, user_id}
+  end
+
+  # The `editing` value currently on the tracked presence meta (:__no_entry__ if
+  # the key is gone). A push_presence(%{editing: nil}) leaves it nil; no push
+  # leaves the original.
+  defp presence_editing(topic, user_id) do
+    case BarkparkWeb.Presence.get_by_key(topic, user_id) do
+      %{metas: [meta | _]} -> Map.get(meta, :editing, :__absent__)
+      _ -> :__no_entry__
+    end
+  end
+
   defp crit, do: %{"op" => "nonblank"}
 
   # A bare SheetGrid component socket with the assigns apply_delta/refetch read.
@@ -252,6 +380,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.RemapTest do
       active: {1, 1},
       anchor: nil,
       editing: nil,
+      notice: nil,
       content: %{
         "tabs" => [
           %{"name" => "S0", "cells" => %{}},
