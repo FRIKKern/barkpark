@@ -243,6 +243,8 @@ const styles = fixture.snapshot.styles;
 
 test("leg F1: pure CF match — B2 earns a CF-only bg, absent from the manual model", () => {
   // B2 = 1200 > 1000 (rule cf-gt), no manual "s" → the entry is purely CF-set.
+  // This deepEqual ALSO pins first-match-wins (CF-D4): B2 matches BOTH cf-gt
+  // (#ff0000, first) and cf-overlap (#00ff00, later) — only cf-gt may land.
   assert.deepEqual(styles["0,1"], { bg: "#ff0000" });
   // The manual-only TS model has NO entry at B2 — CF is a server-side overlay.
   assert.equal(model.styles["0,1"], undefined);
@@ -269,10 +271,12 @@ test("leg F3: head-drop — no head-row CF contribution reaches the snapshot (CF
   // head, but the head band is dropped from the body-indexed styles map, so its
   // colour must appear nowhere and every style key must land in the body grid.
   const bodyRows = fixture.snapshot.rows.length;
+  const bodyCols = fixture.snapshot.head.length;
   for (const [key, s] of Object.entries(styles)) {
     assert.notEqual(s.bg, "#abcdef", `head CF colour leaked into ${key}`);
-    const r = Number(key.split(",")[0]);
+    const [r, c] = key.split(",").map(Number);
     assert.ok(r >= 0 && r < bodyRows, `styles key ${key} is not a body row`);
+    assert.ok(c >= 0 && c < bodyCols, `styles key ${key} is not a body col`);
   }
 });
 
