@@ -246,7 +246,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # loss-free. An already-sorted range (identity permutation) is a true no-op
   # — no rev bump, no undo entry, no broadcast (the move_tab from==to
   # precedent).
-  def apply_one(%{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys}, state) do
+  def apply_one(%{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys} = op, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, rect} <- validate_sort_range(range),
          old_tab = Sheets.get_tab(state.content, tab_idx),
@@ -267,7 +267,12 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
            # with a selection/editor inside the rect can remap_selection its
            # coordinates instead of clobbering with stale ones.
            rect: rect,
-           perm: perm
+           perm: perm,
+           # SF-R×SF-W: the originating user (op's "user" stamp, nil for
+           # anonymous/import) so the remap follows ONLY remote peers' rows —
+           # the initiator keeps their cursor at its ADDRESS (Excel semantics:
+           # when YOU sort, the selection stays put; it does not chase the data).
+           by: Map.get(op, "user")
          }), inverse}
       end
     end
