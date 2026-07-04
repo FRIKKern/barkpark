@@ -1791,7 +1791,33 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def nonempty_flag(nil), do: 0
 
   def nonempty_flag(cell) do
-    if Map.get(cell, "v") not in [nil, ""] or is_binary(Map.get(cell, "f")), do: 1, else: 0
+    cond do
+      # An engine-owned spilled cell (a NON-anchor cell of a dynamic-array
+      # spill) is materialized array OUTPUT, not user content: it carries the
+      # anchor's `"spill"` marker but no formula of its own. It must count 0 so
+      # a spill never (a) consumes the session's cell-cap budget as N user
+      # cells, (b) inflates the persisted non-empty guard, or (c) reads as
+      # occupancy that would spuriously block a re-spill. The ANCHOR carries a
+      # `"spill"` marker too (pointing at itself) but ALSO carries an `"f"` — it
+      # is user-authored and still counts 1 via the second clause. Design §3.3
+      # (B-SP-5). This is THE seam: every counting path (`count_nonempty`,
+      # `tab_nonempty`, and the incremental cell-cap arithmetic in
+      # `apply_cell`/`check_cap`) inherits the exclusion through this one
+      # predicate — a spill is invisible to user-content accounting everywhere.
+      spilled_output?(cell) -> 0
+      Map.get(cell, "v") not in [nil, ""] or is_binary(Map.get(cell, "f")) -> 1
+      true -> 0
+    end
+  end
+
+  # An engine-materialized, anchor-owned spilled cell: it carries a `"spill"`
+  # anchor-ref string AND has no formula of its own. The anchor is deliberately
+  # NOT matched here (it has an `"f"`), so only the distributed (non-anchor)
+  # output cells return true. Locked to S1's marker contract: spilled cells are
+  # `%{"v" => …, "spill" => anchorRef}` with no `"f"`; the anchor keeps its
+  # `"f"` (and its own `"spill"`/`"spill_dims"`).
+  defp spilled_output?(cell) do
+    is_binary(Map.get(cell, "spill")) and not is_binary(Map.get(cell, "f"))
   end
 
   def formula_flag(nil), do: 0

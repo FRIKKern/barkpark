@@ -287,6 +287,7 @@ export const ENGINE_ERRORS: ReadonlySet<string> = new Set([
   "#DIV/0!",
   "#N/A",
   "#NUM!",
+  "#SPILL!",
 ]);
 
 /** True when a cell's computed value is an engine error code — the grid marks

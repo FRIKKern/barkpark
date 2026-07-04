@@ -196,10 +196,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   from a range. Consumed by every aggregate (`SUM`/`COUNTA`/…), by `AND`/`OR`,
   and by `TEXTJOIN` with the same flatten rules those apply to a range today.
 
-  **Implicit intersection.** An array used where a single value is expected —
-  a top-level `=UNIQUE(A1:A5)` alone in a cell, or an arm of arithmetic — is
-  reduced to its top-left element (Excel's legacy `@` semantics), since the
-  engine does not spill.
+  **Spill.** A formula whose TOP-LEVEL result is an array spills into a
+  rows×cols rectangle anchored at the formula cell: the anchor keeps its `f`
+  and gains `"spill" => self` + `"spill_dims"`, each neighbouring cell is an
+  engine-owned marked cell (`v`/`t`/`"spill" => anchor`, no `f`), and a spill
+  obstructed by existing content blocks WHOLE — the anchor becomes `#SPILL!`
+  and nothing else is written (design §3.3). The anchor's own `"v"` is still
+  the array's top-left, so `=A2` reads a spilled value and an array in a
+  NESTED/scalar position (an arm of arithmetic, `SUM(UNIQUE(A1:A5))`) still
+  intersects to its top-left element (Excel's legacy `@` semantics).
 
       iex> cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 2}, "A3" => %{"v" => 5},
       ...>   "B1" => %{"f" => "SUM(UNIQUE(A1:A3))"}}
@@ -246,7 +251,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   ## Errors, cycles, stale
 
-  Six error values, written with `"t" => "e"`:
+  Seven error values, written with `"t" => "e"`:
 
     * `#CYCLE!` — every formula on a reference cycle, and every formula that
       (transitively) depends on one. Dependencies are collected from the full
@@ -262,6 +267,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       float-overflowing arithmetic result (`1e308*1e308`), `SMALL(A1:A2,0)`, a
       `PERCENTILE` fraction outside `0..1`, or an order statistic over no
       numbers.
+    * `#SPILL!` — a dynamic-array formula whose spill rectangle is obstructed
+      by existing content (or would fall off the grid); nothing but the anchor
+      is written.
 
   Errors propagate through references: a formula reading a cell whose value
   is an error yields that error. A literal cell whose `"v"` is one of the
@@ -388,7 +396,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 NUMBERVALUE CLEAN T N ISFORMULA TYPE DATEVALUE TIMEVALUE YEARFRAC)
   @aggregates ~w(SUM AVG AVERAGE MIN MAX COUNT COUNTA)
   @cmp_ops [:eq, :ne, :lt, :le, :gt, :ge]
-  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM!)
+  @error_values ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!)
 
   # 2^1024 — the first magnitude past the float64 range (max double < 2^1024).
   # An integer this big or bigger cannot survive `/`/`*` coercion to float
@@ -941,7 +949,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   grid, PortableDoc's html render) read THIS single list instead of hand-
   copying it, so a new code (e.g. `#NUM!`) lights up every surface at once.
   """
-  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,sheet-err,error_values
+  # @canonical capability:engine-error-vocabulary aka:error-codes,#NUM!,#DIV/0!,#SPILL!,spill,sheet-err,error_values
   @spec error_values() :: [String.t()]
   def error_values, do: @error_values
 
@@ -1115,13 +1123,24 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       }
 
       queue = for {key, 0} <- in_deg, do: key
-      {computed, in_deg} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base)
+      {computed, residual} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base)
+      computed = mark_cycles(computed, residual)
 
+      # Two-phase spill in the cross-tab graph, identical to the fast path: a
+      # spill inside a cross-tab document still distributes and its readers see
+      # the region in phase 2 (spill keys carry the tab index).
       computed =
-        Enum.reduce(in_deg, computed, fn
-          {key, d}, acc when d > 0 -> Map.put(acc, key, err(:cycle))
-          _other, acc -> acc
-        end)
+        if any_array_result?(computed) do
+          spill = unified_spill_map(tabs, parsed, computed)
+          base2 = with_spill(base, spill)
+
+          {computed2, residual2} =
+            topo_unified(queue, computed0, in_deg, out_edges, node_asts, base2)
+
+          mark_cycles(computed2, residual2)
+        else
+          computed
+        end
 
       write_back_unified(content, tabs, parsed, computed)
     end
@@ -1154,6 +1173,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp walk_qualified({:call, _name, args}, own, acc),
     do: Enum.reduce(args, acc, &walk_qualified(&1, own, &2))
+
+  defp walk_qualified({:array_lit, rows}, own, acc),
+    do: Enum.reduce(rows, acc, fn row, a -> Enum.reduce(row, a, &walk_qualified(&1, own, &2)) end)
 
   defp walk_qualified(_literal, _own, acc), do: acc
 
@@ -1194,7 +1216,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       values: base.values,
       occupied: base.occupied,
       formulas: base.formulas,
-      self: {c, r}
+      self: {c, r},
+      spill: Map.get(base, :spill)
     }
 
     computed = Map.put(computed, key, eval(ast, ctx))
@@ -1219,17 +1242,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       |> Enum.map(fn {tab, ti} ->
         case tab do
           %{"cells" => cells} when is_map(cells) ->
-            new_cells =
-              Enum.reduce(Map.get(by_tab, ti, []), cells, fn {key, {_ti, addr, result}}, acc ->
-                case result do
-                  :stale ->
-                    Map.update!(acc, addr, &Map.put(&1, "stale", true))
-
-                  _decisive ->
-                    Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
-                end
-              end)
-
+            {new_cells, _spill} = distribute_tab(cells, Map.get(by_tab, ti, []), computed, ti)
             Map.put(tab, "cells", new_cells)
 
           _ ->
@@ -1239,6 +1252,65 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
     Map.put(content, "tabs", new_tabs)
   end
+
+  # The cross-tab twin of the fast-path spill map: rebuild every tab's spill
+  # region (from the SAME plan write_back_unified writes) into one {tab,col,row}
+  # -keyed value map for phase-2 readers.
+  defp unified_spill_map(tabs, parsed, computed) do
+    by_tab = Enum.group_by(parsed, fn {{t, _c, _r}, _v} -> t end)
+
+    tabs
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {tab, ti}, acc ->
+      case tab do
+        %{"cells" => cells} when is_map(cells) ->
+          {_cells, spill} = distribute_tab(cells, Map.get(by_tab, ti, []), computed, ti)
+          Map.merge(acc, spill)
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # One tab's write-back with spill distribution. `entries` are this tab's parsed
+  # formula cells ({tab,col,row}-keyed). Returns {new_cells, spill_map} — the map
+  # is {tab,col,row}-keyed so it merges into the unified phase-2 spill map.
+  defp distribute_tab(cells, entries, computed, ti) do
+    anchors =
+      for {key, {_ti, addr, _result}} <- entries,
+          spillable_array?(Map.get(computed, key)),
+          do: {local_pos(key), addr, elem(Map.fetch!(computed, key), 1)}
+
+    if anchors == [] and not has_spill_markers?(cells) do
+      # No spill this tab, ever — the legacy byte-identical unified write.
+      new =
+        Enum.reduce(entries, cells, fn {key, {_ti, addr, result}}, acc ->
+          case result do
+            :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
+            _decisive -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+          end
+        end)
+
+      {new, %{}}
+    else
+      anchor_addrs = MapSet.new(anchors, fn {_p, a, _r} -> a end)
+
+      base =
+        entries
+        |> Enum.reduce(strip_engine_spills(cells), fn {key, {_ti, addr, result}}, acc ->
+          cond do
+            MapSet.member?(anchor_addrs, addr) -> acc
+            result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
+            true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+          end
+        end)
+
+      distribute_anchors(base, anchors, fn {c, r} -> {ti, c, r} end)
+    end
+  end
+
+  defp local_pos({_t, c, r}), do: {c, r}
 
   # ── recompute pipeline ──────────────────────────────────────────────────────
 
@@ -1261,7 +1333,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       end
 
     if parsed == %{} do
-      cells
+      # No formulas: a document that once spilled but whose anchor was deleted
+      # still carries engine spill cells — vacate them; otherwise pass through.
+      if has_spill_markers?(cells), do: strip_engine_spills(cells), else: cells
     else
       node_asts =
         for {pos, {_addr, {:ok, ast, points, ranges}}} <- parsed, into: %{} do
@@ -1283,14 +1357,24 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       }
 
       queue = for {pos, 0} <- in_deg, do: pos
-      {computed, in_deg} = topo(queue, computed0, in_deg, out_edges, node_asts, base)
+      {computed, residual} = topo(queue, computed0, in_deg, out_edges, node_asts, base)
+      computed = mark_cycles(computed, residual)
 
-      # Kahn leftovers sit on a cycle or depend on one — both get #CYCLE!.
+      # Two-phase spill (design §3.3): when a formula's top-level result spills,
+      # phase 1 (above) fixes every anchor's array; phase 2 re-evaluates with the
+      # materialised spill map visible via cell_at, so a reader (`=A2`) sees the
+      # spilled value and a range over an anchor reads its top-left, not the whole
+      # array. Bounded — ONLY when array formulas are present; a zero-array
+      # document never enters this branch and stays single-pass byte-identical.
       computed =
-        Enum.reduce(in_deg, computed, fn
-          {pos, d}, acc when d > 0 -> Map.put(acc, pos, err(:cycle))
-          _other, acc -> acc
-        end)
+        if any_array_result?(computed) do
+          {_cells, spill} = spill_distribution(cells, parsed, computed)
+          base2 = with_spill(base, spill)
+          {computed2, residual2} = topo(queue, computed0, in_deg, out_edges, node_asts, base2)
+          mark_cycles(computed2, residual2)
+        else
+          computed
+        end
 
       write_back(cells, parsed, computed)
     end
@@ -1329,7 +1413,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       values: base.values,
       occupied: base.occupied,
       formulas: base.formulas,
-      self: pos
+      self: pos,
+      spill: Map.get(base, :spill)
     }
 
     computed = Map.put(computed, pos, eval(ast, ctx))
@@ -1345,16 +1430,205 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     topo(ready ++ rest, computed, in_deg, out, node_asts, base)
   end
 
-  defp write_back(cells, parsed, computed) do
-    Enum.reduce(parsed, cells, fn {pos, {addr, result}}, acc ->
-      case result do
-        :stale ->
-          Map.update!(acc, addr, &Map.put(&1, "stale", true))
+  # Kahn leftovers sit on a cycle or depend on one — both get #CYCLE!.
+  defp mark_cycles(computed, in_deg) do
+    Enum.reduce(in_deg, computed, fn
+      {key, d}, acc when d > 0 -> Map.put(acc, key, err(:cycle))
+      _other, acc -> acc
+    end)
+  end
 
-        _decisive ->
-          Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+  defp write_back(cells, parsed, computed) do
+    # A document that spills this recompute, or still carries a stale region from
+    # a prior one, takes the distribution path; everything else is byte-identical
+    # to the legacy per-tab write.
+    if any_array_result?(computed) or has_spill_markers?(cells) do
+      {new_cells, _spill} = spill_distribution(cells, parsed, computed)
+      new_cells
+    else
+      Enum.reduce(parsed, cells, fn {pos, {addr, result}}, acc ->
+        case result do
+          :stale ->
+            Map.update!(acc, addr, &Map.put(&1, "stale", true))
+
+          _decisive ->
+            Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+        end
+      end)
+    end
+  end
+
+  # ── spill distribution (dynamic arrays, design §3.3 / one-way-door §4.3) ─────
+  #
+  # A formula whose TOP-LEVEL result is a non-empty {:array, rows} spills into a
+  # rows×cols rectangle anchored at the formula cell. The anchor keeps its `f`
+  # + user style and gains `"spill" => self` + `"spill_dims"`; each non-anchor
+  # spilled cell is a pure engine cell (`v`/`t`/`"spill" => anchor`, NO `f`, NO
+  # style), re-derived every recompute (CT-D3). A spill obstructed by user
+  # content — or overflowing the grid — blocks WHOLE: the anchor becomes
+  # `#SPILL!` (CT-D4) and nothing else is written. output/1 still collapses a
+  # NESTED/empty array to its top-left (scalarize/array_top_left consumers);
+  # this write-back layer owns the top-level spill decision alone.
+
+  defp spillable_array?({:array, [row | _]}) when is_list(row) and row != [], do: true
+  defp spillable_array?(_), do: false
+
+  defp any_array_result?(computed), do: Enum.any?(computed, fn {_k, v} -> spillable_array?(v) end)
+
+  # Phase-2 base: expose the materialised spill map to cell_at AND fold the
+  # spilled positions into the occupied set so a RANGE aggregate over a spill
+  # region visits the engine-written cells (they were never in the stored
+  # occupied set). Both keyed to match the ambient ctx (fast: {c,r}; unified:
+  # {tab,c,r}).
+  defp with_spill(base, spill) do
+    base
+    |> Map.put(:spill, spill)
+    |> Map.put(:occupied, merge_spill_occupied(base.occupied, spill))
+  end
+
+  defp merge_spill_occupied(%MapSet{} = occ, spill),
+    do: MapSet.union(occ, MapSet.new(Map.keys(spill)))
+
+  defp merge_spill_occupied(occ, spill) when is_map(occ) do
+    Enum.reduce(Map.keys(spill), occ, fn {t, c, r}, acc ->
+      Map.update(acc, t, MapSet.new([{c, r}]), &MapSet.put(&1, {c, r}))
+    end)
+  end
+
+  # Any cell still carrying a `"spill"` marker (anchor or engine-written). A
+  # document that has EVER spilled takes the distribution path so a stale region
+  # vacates even when nothing spills now (anchor deleted / edited to a scalar).
+  defp has_spill_markers?(cells) do
+    Enum.any?(cells, fn {_addr, cell} -> is_map(cell) and Map.has_key?(cell, "spill") end)
+  end
+
+  # Drop every engine-written non-anchor spill cell and strip stale
+  # `"spill"`/`"spill_dims"` off surviving formula cells — the region is rebuilt
+  # from scratch each recompute (design §3.3: engine-owned, never individually
+  # undoable), so an old region can never linger past its anchor.
+  defp strip_engine_spills(cells) do
+    Enum.reduce(cells, %{}, fn {addr, cell}, acc ->
+      cond do
+        not is_map(cell) ->
+          Map.put(acc, addr, cell)
+
+        Map.has_key?(cell, "spill") and not Map.has_key?(cell, "f") ->
+          acc
+
+        Map.has_key?(cell, "spill") ->
+          Map.put(acc, addr, cell |> Map.delete("spill") |> Map.delete("spill_dims"))
+
+        true ->
+          Map.put(acc, addr, cell)
       end
     end)
+  end
+
+  # Positions holding USER content (a literal value or a formula) in the stripped
+  # map — the collision set. Engine spill cells are already gone, so a target
+  # owned by THIS anchor last recompute reads empty here (writable, per §3.3).
+  defp user_occupied(base) do
+    for {addr, cell} <- base,
+        is_map(cell),
+        user_content?(cell),
+        {:ok, pos} <- [Sheets.parse_ref(addr)],
+        into: MapSet.new(),
+        do: pos
+  end
+
+  defp user_content?(cell), do: Map.has_key?(cell, "f") or Map.get(cell, "v") not in [nil, ""]
+
+  defp array_dims([first | _] = rows), do: {length(rows), length(first)}
+  defp array_dims([]), do: {0, 0}
+
+  # Fast-path (single-tab) spill write-back: strip prior regions, write the
+  # scalar/stale results, distribute array anchors. Returns {new_cells,
+  # spill_map} — the {col,row}-keyed map feeds phase-2 readers via cell_at.
+  defp spill_distribution(cells, parsed, computed) do
+    anchors =
+      for {pos, {addr, _result}} <- parsed,
+          spillable_array?(Map.get(computed, pos)),
+          do: {pos, addr, elem(Map.fetch!(computed, pos), 1)}
+
+    anchor_addrs = MapSet.new(anchors, fn {_pos, addr, _rows} -> addr end)
+
+    base =
+      parsed
+      |> Enum.reduce(strip_engine_spills(cells), fn {pos, {addr, result}}, acc ->
+        cond do
+          MapSet.member?(anchor_addrs, addr) -> acc
+          result == :stale -> Map.update!(acc, addr, &Map.put(&1, "stale", true))
+          true -> Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, pos)))
+        end
+      end)
+
+    distribute_anchors(base, anchors, & &1)
+  end
+
+  # The shared distribution core. `anchors` :: [{ {c,r}, addr, rows }] in tab-
+  # local coordinates; `key_fun` maps a local pos onto the spill-map key ({c,r}
+  # fast, {tab,c,r} unified). Anchors are processed in a stable row-major order
+  # and a `claimed` set makes two anchors racing for one empty cell first-wins.
+  defp distribute_anchors(base, anchors, key_fun) do
+    occupied = user_occupied(base)
+    anchors = Enum.sort_by(anchors, fn {{c, r}, _a, _rows} -> {r, c} end)
+
+    {cells, spill, _claimed} =
+      Enum.reduce(anchors, {base, %{}, MapSet.new()}, fn {{ac, ar} = apos, addr, rows},
+                                                         {cacc, sacc, claimed} ->
+        {nr, nc} = array_dims(rows)
+
+        blocked? =
+          ac + nc - 1 > @max_col or ar + nr - 1 > @max_row or
+            Enum.any?(0..(nr - 1), fn i ->
+              Enum.any?(0..(nc - 1), fn j ->
+                t = {ac + j, ar + i}
+                t != apos and (MapSet.member?(occupied, t) or MapSet.member?(claimed, t))
+              end)
+            end)
+
+        if blocked? do
+          {Map.update!(cacc, addr, &spill_error_cell/1),
+           Map.put(sacc, key_fun.(apos), err(:spill)), claimed}
+        else
+          topleft = rows |> hd() |> hd()
+
+          rows
+          |> Enum.with_index()
+          |> Enum.reduce({cacc, sacc, claimed}, fn {row, i}, outer ->
+            row
+            |> Enum.with_index()
+            |> Enum.reduce(outer, fn {val, j}, {c2, s2, cl2} ->
+              tpos = {ac + j, ar + i}
+              taddr = Sheets.format_ref(tpos)
+              anchor? = i == 0 and j == 0
+
+              cell =
+                if anchor? do
+                  c2
+                  |> Map.fetch!(addr)
+                  |> write_value(topleft)
+                  |> Map.put("spill", addr)
+                  |> Map.put("spill_dims", [nr, nc])
+                else
+                  %{} |> write_value(val) |> Map.put("spill", addr)
+                end
+
+              {Map.put(c2, taddr, cell),
+               Map.put(s2, key_fun.(tpos), if(anchor?, do: topleft, else: val)),
+               MapSet.put(cl2, tpos)}
+            end)
+          end)
+        end
+      end)
+
+    {cells, spill}
+  end
+
+  # A blocked anchor keeps its `f`/style, shows `#SPILL!`, and sheds any stale
+  # region markers (nothing else is written — Excel's block-whole rule).
+  defp spill_error_cell(cell) do
+    cell |> write_value(err(:spill)) |> Map.delete("spill") |> Map.delete("spill_dims")
   end
 
   defp write_value(cell, value) do
@@ -1508,6 +1782,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp resolve_node({:call, name, args}, ni),
     do: {:call, name, Enum.map(args, &resolve_node(&1, ni))}
 
+  defp resolve_node({:array_lit, rows}, ni),
+    do: {:array_lit, Enum.map(rows, fn row -> Enum.map(row, &resolve_node(&1, ni)) end)}
+
   defp resolve_node(node, _ni), do: node
 
   defp resolve_tab_name!(name, ni) do
@@ -1527,6 +1804,10 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp walk({:call, name, args}, {ps, rs, fs}) do
     Enum.reduce(args, {ps, rs, [name | fs]}, &walk/2)
+  end
+
+  defp walk({:array_lit, rows}, acc) do
+    Enum.reduce(rows, acc, fn row, a -> Enum.reduce(row, a, &walk/2) end)
   end
 
   defp walk(_literal, acc), do: acc
@@ -1555,6 +1836,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp tokenize(<<",", rest::binary>>, acc), do: tokenize(rest, [:comma | acc])
   defp tokenize(<<":", rest::binary>>, acc), do: tokenize(rest, [:colon | acc])
   defp tokenize(<<"!", rest::binary>>, acc), do: tokenize(rest, [:bang | acc])
+  # Array-literal delimiters (`={1,2;3,4}`): `{`/`}` bracket the literal, `;`
+  # separates rows and `,` (the existing :comma) separates columns. Outside a
+  # `{…}` the parser rejects them → #REF!, exactly as before they lexed.
+  defp tokenize(<<"{", rest::binary>>, acc), do: tokenize(rest, [:lbrace | acc])
+  defp tokenize(<<"}", rest::binary>>, acc), do: tokenize(rest, [:rbrace | acc])
+  defp tokenize(<<";", rest::binary>>, acc), do: tokenize(rest, [:semi | acc])
 
   # A single-quoted tab name (Excel): `'My Sheet'!A1`, `'Q1 2026'!A1`, with
   # `''` escaping a literal apostrophe. Meaningful only before `!`; the parser
@@ -1908,7 +2195,29 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # Array literal (`={1;2;3}` col, `={1,2,3}` row, `={1,2;3,4}` grid) — `;` ends
+  # a row, `,` a column (Excel). Elements are scalar expressions; the eval step
+  # rejects a ragged (non-rectangular) literal as #VALUE!. An empty `{}` fails
+  # the grammar (parse_cmp on `}` errors) → #REF!.
+  defp parse_primary([:lbrace | rest]), do: parse_array_lit(rest, [], [])
+
   defp parse_primary(_tokens), do: :error
+
+  defp parse_array_lit(tokens, cur, rows) do
+    case parse_cmp(tokens) do
+      {:ok, el, [:comma | rest]} ->
+        parse_array_lit(rest, [el | cur], rows)
+
+      {:ok, el, [:semi | rest]} ->
+        parse_array_lit(rest, [], [Enum.reverse([el | cur]) | rows])
+
+      {:ok, el, [:rbrace | rest]} ->
+        {:ok, {:array_lit, Enum.reverse([Enum.reverse([el | cur]) | rows])}, rest}
+
+      _ ->
+        :error
+    end
+  end
 
   defp parse_call(name, [:rparen | rest]), do: {:ok, {:call, name, []}, rest}
 
@@ -1962,6 +2271,20 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp eval({:call, name, args}, ctx), do: call(name, args, ctx)
 
+  # An array literal evaluates each scalar element (implicit intersection on any
+  # nested array) into a rows-major {:array, rows} — the same value SORT/UNIQUE/
+  # SEQUENCE produce, so it spills through the identical write-back path. A
+  # ragged literal (rows of unequal width) is #VALUE!; an error element rides
+  # through as that cell's value and propagates from an outer aggregate.
+  defp eval({:array_lit, rows}, ctx) do
+    evaled = Enum.map(rows, fn row -> Enum.map(row, &scalarize(eval(&1, ctx))) end)
+
+    case evaled |> Enum.map(&length/1) |> Enum.uniq() do
+      [_uniform_width] -> {:array, evaled}
+      _ -> err(:value)
+    end
+  end
+
   # Cross-tab read (explicit tab) — hits the named tab's store no matter the
   # ambient ctx.tab. In the unified ctx `computed`/`values` are {tab,col,row}
   # keyed; a bare {col,row} inherits the formula's own tab (ctx.tab).
@@ -1969,17 +2292,22 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp cell_at({c, r}, %{unified: true} = ctx), do: fetch_cell({ctx.tab, c, r}, ctx)
 
   # Fast path — the per-tab store is keyed by {col,row}; byte-for-byte legacy.
-  defp cell_at(pos, ctx) do
-    case Map.fetch(ctx.computed, pos) do
-      {:ok, v} -> v
-      :error -> Map.get(ctx.values, pos, :blank)
-    end
-  end
+  defp cell_at(pos, ctx), do: fetch_cell(pos, ctx)
 
+  # A live spill region (phase 2 of a spill recompute) is visible here: a
+  # reader of a spilled cell (`=A2`) or of an anchor read inside a range sees
+  # the materialised SCALAR value, not the anchor's whole {:array}. Absent a
+  # spill map (phase 1 and every zero-array document) this is the legacy read.
   defp fetch_cell(key, ctx) do
-    case Map.fetch(ctx.computed, key) do
-      {:ok, v} -> v
-      :error -> Map.get(ctx.values, key, :blank)
+    case ctx do
+      %{spill: spill} when is_map(spill) and is_map_key(spill, key) ->
+        Map.fetch!(spill, key)
+
+      _ ->
+        case Map.fetch(ctx.computed, key) do
+          {:ok, v} -> v
+          :error -> Map.get(ctx.values, key, :blank)
+        end
     end
   end
 
@@ -5573,4 +5901,5 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp err(:cycle), do: {:error, "#CYCLE!"}
   defp err(:na), do: {:error, "#N/A"}
   defp err(:num), do: {:error, "#NUM!"}
+  defp err(:spill), do: {:error, "#SPILL!"}
 end

@@ -561,7 +561,12 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "a self-referencing array is still #CYCLE!, not #VALUE!" do
-      cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 9}, "B1" => %{"f" => "SPARKLINE(SORT(A1:B1))"}}
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 9},
+        "B1" => %{"f" => "SPARKLINE(SORT(A1:B1))"}
+      }
+
       out = run(cells)
       assert out["B1"]["v"] == "#CYCLE!"
     end
@@ -2083,6 +2088,7 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
     test "SUM's shape: a required value1 plus a variadic-optional value2" do
       sum = Enum.find(Engine.function_specs(), &(&1.name == "SUM"))
+
       assert sum.args == [
                %{name: "value1", optional: false, variadic: false},
                %{name: "value2", optional: true, variadic: true}
@@ -2683,6 +2689,273 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       edited = put_in(base, ["A2", "v"], 9)
       # A2 is no longer a duplicate of A1 → the unique set grows → recompute.
       assert run(edited)["B1"]["v"] == 16
+    end
+  end
+
+  # ── dynamic-array SPILL (wave 3) ────────────────────────────────────────────
+
+  describe "array literals" do
+    test "={1;2;3} is a column (; = row separator)" do
+      out = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      assert [out["A1"]["v"], out["A2"]["v"], out["A3"]["v"]] == [1, 2, 3]
+    end
+
+    test "={1,2,3} is a row (, = column separator)" do
+      out = run(%{"A1" => %{"f" => "={1,2,3}"}})
+      assert [out["A1"]["v"], out["B1"]["v"], out["C1"]["v"]] == [1, 2, 3]
+    end
+
+    test "={1,2;3,4} is a grid" do
+      out = run(%{"A1" => %{"f" => "={1,2;3,4}"}})
+      assert [out["A1"]["v"], out["B1"]["v"], out["A2"]["v"], out["B2"]["v"]] == [1, 2, 3, 4]
+    end
+
+    test "a ragged literal is #VALUE!" do
+      assert eval!("={1,2;3}") == "#VALUE!"
+    end
+
+    test "composes inside SUM as a column and a row" do
+      assert eval!("=SUM({1;2;3;4})") == 10
+      assert eval!("=SUM({1,2,3})") == 6
+    end
+
+    test "elements may be expressions (unary minus, refs)" do
+      cells = %{"C1" => %{"v" => 11}, "C2" => %{"v" => 22}, "A1" => %{"f" => "={C1;C2;-3}"}}
+      out = run(cells)
+      assert [out["A1"]["v"], out["A2"]["v"], out["A3"]["v"]] == [11, 22, -3]
+    end
+
+    test "an empty literal ={} is #REF! (outside the grammar)" do
+      assert eval!("={}") == "#REF!"
+    end
+  end
+
+  describe "spill distribution" do
+    test "=SORT(range) spills in sorted order" do
+      cells = %{
+        "C1" => %{"v" => 3},
+        "C2" => %{"v" => 1},
+        "C3" => %{"v" => 2},
+        "A1" => %{"f" => "=SORT(C1:C3)"}
+      }
+
+      out = run(cells)
+      assert [out["A1"]["v"], out["A2"]["v"], out["A3"]["v"]] == [1, 2, 3]
+    end
+
+    test "a 2x3 SEQUENCE spills into a rectangle with matching dims" do
+      out = run(%{"A1" => %{"f" => "=SEQUENCE(2,3)"}})
+
+      assert [out["A1"]["v"], out["B1"]["v"], out["C1"]["v"]] == [1, 2, 3]
+      assert [out["A2"]["v"], out["B2"]["v"], out["C2"]["v"]] == [4, 5, 6]
+      assert out["A1"]["spill_dims"] == [2, 3]
+    end
+
+    test "the anchor's own v is the array's top-left" do
+      # This is why the pre-spill `UNIQUE(A1:A4) == 2` intersection tests still
+      # hold: the anchor keeps top-left; the rest spills into neighbours.
+      cells = %{"A1" => %{"v" => 7}, "A2" => %{"v" => 7}, "A3" => %{"v" => 9}}
+      out = run(Map.put(cells, "B1", %{"f" => "=UNIQUE(A1:A3)"}))
+      assert out["B1"]["v"] == 7
+      assert out["B2"]["v"] == 9
+    end
+
+    test "MARKER CONTRACT — anchor: f + spill(self) + spill_dims; non-anchor: v + t + spill(anchor), no f, no style" do
+      out = run(%{"A1" => %{"f" => "={7;8}", "s" => %{"b" => true}}})
+
+      # Anchor keeps its formula and user style, gains the two spill markers.
+      assert out["A1"] == %{
+               "f" => "={7;8}",
+               "s" => %{"b" => true},
+               "v" => 7,
+               "t" => "n",
+               "spill" => "A1",
+               "spill_dims" => [2, 1]
+             }
+
+      # Non-anchor spilled cell is pure engine output — exactly v + t + spill.
+      assert out["A2"] == %{"v" => 8, "t" => "n", "spill" => "A1"}
+      refute Map.has_key?(out["A2"], "f")
+      refute Map.has_key?(out["A2"], "s")
+    end
+  end
+
+  describe "spill collision (#SPILL!)" do
+    test "a value obstructing the region blocks the WHOLE spill; nothing else is written" do
+      out = run(%{"A1" => %{"f" => "={1;2;3}"}, "A2" => %{"v" => 99}})
+
+      assert out["A1"] == %{"f" => "={1;2;3}", "v" => "#SPILL!", "t" => "e"}
+      # nothing else written: the obstruction is untouched, no other cell created.
+      assert out["A2"] == %{"v" => 99}
+      refute Map.has_key?(out, "A3")
+    end
+
+    test "a formula in the region also blocks" do
+      out = run(%{"A1" => %{"f" => "={1;2;3}"}, "A3" => %{"f" => "=5"}})
+      assert out["A1"]["v"] == "#SPILL!"
+      assert out["A3"]["v"] == 5
+      refute Map.has_key?(out, "A2")
+    end
+
+    test "a spill that would fall off the grid edge is #SPILL!" do
+      # A row of two anchored at the last column would need column XFE.
+      out = run(%{"XFD1" => %{"f" => "={1,2}"}})
+      assert out["XFD1"]["v"] == "#SPILL!"
+    end
+
+    test "#SPILL! is in the engine error vocabulary" do
+      assert "#SPILL!" in Engine.error_values()
+    end
+
+    test "two anchors racing for one empty cell resolve row-major first-wins" do
+      # B1 spills DOWN into B1:B2; A2 spills RIGHT into A2:C2. The regions cross
+      # at the (empty) B2. Anchors distribute in a stable {row, col} order, so
+      # B1 (row 1) claims B2 first and A2 (row 2) then blocks — deterministically,
+      # independent of the cells map's iteration order (design §3.3 first-wins).
+      out = run(%{"B1" => %{"f" => "={1;2}"}, "A2" => %{"f" => "={7,8,9}"}})
+
+      assert [out["B1"]["v"], out["B2"]["v"]] == [1, 2]
+      assert out["B2"]["spill"] == "B1"
+      assert out["A2"]["v"] == "#SPILL!"
+      refute Map.has_key?(out, "C2")
+    end
+  end
+
+  describe "spill invalidation" do
+    test "shrinking the array vacates cells outside the new region" do
+      once = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      assert once["A3"]["v"] == 3
+
+      twice = run(Map.put(once, "A1", %{"f" => "={1;2}"}))
+      assert [twice["A1"]["v"], twice["A2"]["v"]] == [1, 2]
+      refute Map.has_key?(twice, "A3")
+    end
+
+    test "re-spilling overwrites the anchor's OWN prior region (no self-collision)" do
+      once = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      twice = run(Map.put(once, "A1", %{"f" => "={4;5;6}"}))
+      assert [twice["A1"]["v"], twice["A2"]["v"], twice["A3"]["v"]] == [4, 5, 6]
+    end
+
+    test "deleting the anchor clears the whole spill region" do
+      once = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      cleared = run(Map.delete(once, "A1"))
+      assert cleared == %{}
+    end
+
+    test "editing the anchor to a scalar clears the region and drops the markers" do
+      once = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      scalar = run(Map.put(once, "A1", %{"f" => "=42"}))
+      assert scalar["A1"] == %{"f" => "=42", "v" => 42, "t" => "n"}
+      refute Map.has_key?(scalar, "A2")
+      refute Map.has_key?(scalar, "A3")
+    end
+
+    test "typing into a spilled cell blocks on the next recompute and vacates the region" do
+      once = run(%{"A1" => %{"f" => "={1;2;3}"}})
+      # The user types 99 into the spilled A2 (session strips the marker).
+      typed = once |> Map.put("A2", %{"v" => 99})
+      out = run(typed)
+      assert out["A1"]["v"] == "#SPILL!"
+      assert out["A2"] == %{"v" => 99}
+      refute Map.has_key?(out, "A3")
+    end
+  end
+
+  describe "spill readers (two-phase recompute)" do
+    test "=A2 reads a spilled value" do
+      out = run(%{"A1" => %{"f" => "={10;20;30}"}, "B1" => %{"f" => "=A2"}})
+      assert out["B1"]["v"] == 20
+    end
+
+    test "a range over the anchor plus its spill reads each cell exactly once" do
+      out = run(%{"A1" => %{"f" => "={1;2;3}"}, "B1" => %{"f" => "=SUM(A1:A3)"}})
+      assert out["B1"]["v"] == 6
+    end
+
+    test "reading a blocked anchor propagates #SPILL!" do
+      out = run(%{"A1" => %{"f" => "={1;2;3}"}, "A2" => %{"v" => 9}, "B1" => %{"f" => "=A1"}})
+      assert out["B1"]["v"] == "#SPILL!"
+    end
+
+    test "a zero-array document is untouched by the spill machinery" do
+      cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 3}, "A3" => %{"f" => "=SUM(A1:A2)"}}
+      assert run(cells)["A3"] == %{"f" => "=SUM(A1:A2)", "t" => "n", "v" => 5}
+    end
+
+    test "REGRESSION LOCK — a scalar/bounded doc recomputes byte-identically, no spill markers" do
+      # The wave's critical regression lock (charter): a document with NO
+      # top-level array result produces the exact same cells map the pre-spill
+      # engine did — literals pass through untouched, formulas get v/t only, and
+      # NO cell anywhere gains a "spill"/"spill_dims" key or takes the two-phase
+      # path. Byte-identity is asserted as full-map equality, not a single cell.
+      # `SUM(UNIQUE(...))` keeps an array present but strictly NESTED (it
+      # scalarizes/aggregates, never reaches the top level), so the doc still has
+      # zero spillable results and must stay on the single-pass path.
+      cells = %{
+        "A1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "A3" => %{"v" => 2},
+        "B1" => %{"f" => "=SUM(A1:A3)"},
+        "B2" => %{"f" => "=A1*2"},
+        "B3" => %{"f" => "=SUM(UNIQUE(A1:A3))"}
+      }
+
+      out = run(cells)
+
+      assert out == %{
+               "A1" => %{"v" => 2},
+               "A2" => %{"v" => 3},
+               "A3" => %{"v" => 2},
+               "B1" => %{"f" => "=SUM(A1:A3)", "v" => 7, "t" => "n"},
+               "B2" => %{"f" => "=A1*2", "v" => 4, "t" => "n"},
+               "B3" => %{"f" => "=SUM(UNIQUE(A1:A3))", "v" => 5, "t" => "n"}
+             }
+
+      refute Enum.any?(out, fn {_a, c} -> is_map(c) and Map.has_key?(c, "spill") end)
+    end
+  end
+
+  describe "spill in a cross-tab document" do
+    test "a spill inside a cross-tab document still distributes" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Sheet1",
+            "cells" => %{
+              "A1" => %{"f" => "={1;2;3}"},
+              "B1" => %{"f" => "=Sheet2!A1"}
+            }
+          },
+          %{"name" => "Sheet2", "cells" => %{"A1" => %{"v" => 100}}}
+        ]
+      }
+
+      s1 =
+        content
+        |> Engine.recompute()
+        |> get_in(["tabs", Access.at(0), "cells"])
+
+      assert [s1["A1"]["v"], s1["A2"]["v"], s1["A3"]["v"]] == [1, 2, 3]
+      assert s1["A2"]["spill"] == "A1"
+      # the cross-tab read still resolves (unified path taken).
+      assert s1["B1"]["v"] == 100
+    end
+
+    test "a cross-tab reader sees a spilled value in the other tab" do
+      content = %{
+        "tabs" => [
+          %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "={10;20;30}"}}},
+          %{"name" => "Sheet2", "cells" => %{"A1" => %{"f" => "=Sheet1!A2"}}}
+        ]
+      }
+
+      s2 =
+        content
+        |> Engine.recompute()
+        |> get_in(["tabs", Access.at(1), "cells"])
+
+      assert s2["A1"]["v"] == 20
     end
   end
 
@@ -3721,7 +3994,9 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "a stale TEXT import flips to live" do
-      out = run(%{"A1" => %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => 99, "t" => "n", "stale" => true}})
+      out =
+        run(%{"A1" => %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => 99, "t" => "n", "stale" => true}})
+
       assert out["A1"] == %{"f" => ~s|TEXT(1234.5,"0.00")|, "v" => "1234.50", "t" => "s"}
     end
   end
