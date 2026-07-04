@@ -789,7 +789,14 @@ defmodule BarkparkWeb.BulldocsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <main class={["bp-paper-shell", @article? && "bp-paper-article"]}>
+    <%!-- `bp-paper-surface` makes the reader main a SINK of the canonical
+          paper-surface source (bulldocs.html.heex embeds it) so View↔Edit
+          parity is by construction. It is gated on `@article?` on purpose: the
+          shared `.bp-paper-surface` element rules must NOT reach legacy
+          non-article papers (which keep the dark chrome above) — those emit
+          bare `<h1>/<p>/…` the surface rules would restyle. The parchment
+          reader skin re-skins the `--paper-*` tokens on this same element. --%>
+    <main class={["bp-paper-shell", @article? && "bp-paper-surface", @article? && "bp-paper-article"]}>
       <%!-- Sentinel: rendered once at mount, OUTSIDE the streamed/re-assigned
             container. It survives a handle_info DOM diff but would be torn
             down by a remount/navigate — the surviving-sentinel proof of

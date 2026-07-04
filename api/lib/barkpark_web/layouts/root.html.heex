@@ -2230,100 +2230,14 @@
        --fg / --bg tokens. Self-hosted Source Serif 4 (@font-face above).
        ═══════════════════════════════════════════════════════════════════ */
 
-    html[data-theme="light"] .bp-paper-surface,
-    html[data-theme="light"] .bp-paper-body {
-      /* A3: warm paper chrome tone — matches the original editor canvas
-         (warmer/greyer than pure white), never #fff. */
-      --paper-bg:         #fefdf9;
-      --paper-bg-deep:    #f5f2e9;
-      --paper-ink:        #1f1a14;
-      --paper-ink-soft:   #5b524a;
-      --paper-ink-faint:  #8a8278;
-      --paper-rule:       rgba(31, 26, 20, 0.08);
-      --paper-edit-hover: rgba(31, 26, 20, 0.10);
-      --paper-accent:     #a23925;
-      --paper-accent-soft: rgba(162, 57, 37, 0.10);
-      --paper-chrome-bg:  #fefdf9;
-      --paper-chrome-border: rgba(31, 26, 20, 0.12);
-    }
-    html[data-theme="dark"] .bp-paper-surface,
-    html[data-theme="dark"] .bp-paper-body {
-      --paper-bg:         #1b1815;
-      --paper-bg-deep:    #221e1a;
-      --paper-ink:        #ece6dc;
-      --paper-ink-soft:   #b8ad9e;
-      --paper-ink-faint:  #7f7568;
-      --paper-rule:       rgba(236, 230, 220, 0.10);
-      --paper-edit-hover: rgba(236, 230, 220, 0.12);
-      --paper-accent:     #d97a5f;
-      --paper-accent-soft: rgba(217, 122, 95, 0.14);
-      --paper-chrome-bg:  #221e1a;
-      --paper-chrome-border: rgba(236, 230, 220, 0.14);
-    }
-    /* Fallback so a pre-paint load with no data-theme still gets warm paper. */
+    <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
+
     /* lvw-t10 edit-through: a valueref span in the STUDIO paper surface is
        clickable (opens the shared-value inspector via BarkparkValuerefInspect).
        Scoped to .bp-paper-shell so the public reader keeps plain text. */
     .bp-paper-shell [data-valueref] {
       cursor: pointer;
       border-bottom: 1px dotted var(--paper-ink-faint, #8a8278);
-    }
-
-    .bp-paper-surface, .bp-paper-body {
-      --paper-bg:         #fefdf9;
-      --paper-bg-deep:    #f5f2e9;
-      --paper-ink:        #1f1a14;
-      --paper-ink-soft:   #5b524a;
-      --paper-ink-faint:  #8a8278;
-      --paper-rule:       rgba(31, 26, 20, 0.08);
-      --paper-edit-hover: rgba(31, 26, 20, 0.10);
-      --paper-accent:     #a23925;
-      --paper-accent-soft: rgba(162, 57, 37, 0.10);
-      --paper-chrome-bg:  #fefdf9;
-      /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
-         actually renders in the macOS system serif (Iowan Old Style). We mirror
-         that rendered face here; self-hosted Source Serif 4 stays in the stack as
-         a cross-platform fallback (still @font-face'd above). */
-      --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
-      --paper-font-mono: ui-monospace, Menlo, monospace;
-      /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
-      --paper-chrome-border: rgba(31, 26, 20, 0.12);
-    }
-
-    /* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
-       These NUMBERS are the ONE source for BOTH the VIEW (`.bp-paper-surface
-       h1/p/li/...`) and EDIT (`.bp-paper-editor-body h1/p/li/...`) rules below.
-       Both panes descend from `.bp-paper-surface` (the Edit body lives inside
-       `<main class="bp-paper-shell bp-paper-surface">`), so both INHERIT these
-       — the two rule sets no longer have to be hand-matched byte-for-byte.
-       Byte-aligned with the standalone bundle (api/assets/paper-editor/src/
-       styles.css `:root`) and with render.ex heading_style/2 INLINE values
-       (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View inline wins, so these mirror
-       it). Changing a value here moves View AND Edit together — the point.
-       NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
-       deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
-       re-introduces double-spacing; see styles.css :84). */
-    .bp-paper-surface, .bp-paper-body {
-      --bp-body-size: 18px;
-      --bp-body-lh: 1.70;
-      --bp-body-tracking: 0.005em;
-      --bp-h1-size: 32px;   --bp-h1-lh: 1.1;   --bp-h1-tracking: -0.02em;
-      --bp-h2-size: 24px;   --bp-h2-lh: 1.2;
-      --bp-h3-size: 20px;   --bp-h3-lh: 1.25;
-      --bp-heading-weight: 600;
-      --bp-para-margin-top: 12pt;
-      --bp-li-gap: 4pt;
-      --bp-list-indent: 24px;
-      --bp-code-size: 0.92em;
-      --bp-code-pad: 0.08em 0.35em;
-      --bp-code-radius: 3px;
-      --bp-pre-size: 14px;
-      --bp-pre-lh: 1.5;
-      --bp-pre-pad: 14px 16px;
-      --bp-pre-margin: 0 0 22px;
-      --bp-pre-radius: 4px;
-      --bp-img-margin: 0 0 22px;
-      --bp-img-radius: 3px;
     }
 
     /* The page — a single centered serif column on warm paper. The
@@ -2358,51 +2272,6 @@
     .bp-paper-body {
       padding: 0; max-width: none;
       background: var(--paper-bg);
-    }
-
-    /* ── Block typography (ported from paper.css). These apply to BOTH the
-       View-mode read-only stream rows and the Edit-mode block list, so a
-       paper reads as clean prose in either mode. */
-    .bp-paper-surface h1, .bp-paper-surface h2, .bp-paper-surface h3,
-    .bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
-      font-family: var(--paper-font-serif);
-      font-weight: var(--bp-heading-weight); color: var(--paper-ink);
-    }
-    /* Heading margins are intentionally ZERO. The user controls vertical
-       rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
-       margin into the heading itself fights the block model and makes the
-       end result hard to author.
-
-       line-height + letter-spacing values match render.ex `heading_style/2`
-       INLINE values (level1: 1.1 / -0.02em, level2: 1.2, level3: 1.25). The
-       inline wins on the View pane, so the Edit pane CSS must mirror it to
-       keep View ↔ Edit byte-aligned. (Parity audit caught the previous
-       1.3 / -0.01em CSS as visible drift against the inline.) */
-    .bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0; }
-    .bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 0; }
-    .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 0; }
-    .bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
-    .bp-paper-surface a  {
-      color: var(--paper-accent); text-decoration: none;
-      border-bottom: 1px solid var(--paper-accent-soft);
-    }
-    /* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
-    .bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
-    .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
-    .bp-paper-surface ul li { list-style: disc; }
-    .bp-paper-surface ol li { list-style: decimal; }
-    .bp-paper-surface code {
-      font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
-      background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
-    }
-    .bp-paper-surface pre {
-      font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh);
-      background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
-      border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
-    }
-    .bp-paper-surface img {
-      display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
-      border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
     }
 
     /* ── Inline live-value (valueref) stale markers — lvw-t2, wire §6c ─────
