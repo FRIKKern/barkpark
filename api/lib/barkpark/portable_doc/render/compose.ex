@@ -668,6 +668,49 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.roadmap_html(b)}
   end
 
+  def compose_block(%{"type" => "notes"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
+  end
+
+  # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
+  # any child blocks, with an optional keybind `footer`. Reusable frame; put a
+  # task-list inside it and you get the `bp tasks` board look in a paper.
+  def compose_block(%{"type" => "terminal"} = b, style) do
+    title = b |> Map.get("title", "") |> stringish() |> Util.escape_html()
+    footer = b |> Map.get("footer", "") |> stringish()
+    body = b |> container_children() |> render_blocks(style)
+
+    live =
+      if Map.get(b, "live") in [true, "true", "live"],
+        do: ~s|<span class="bp-term__live">live</span>|,
+        else: ""
+
+    foot =
+      if footer == "",
+        do: "",
+        else: ~s|<div class="bp-term__foot">#{Util.escape_html(footer)}</div>|
+
+    html =
+      ~s|<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">#{title}</span>#{live}</div><div class="bp-term__body">#{body}</div>#{foot}</div>|
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
+  # Columns — a responsive multi-column layout. `columns` is a list of columns,
+  # each a list of blocks; stacks to one column on narrow viewports.
+  def compose_block(%{"type" => "columns"} = b, style) do
+    cols = Map.get(b, "columns") || []
+    n = max(length(List.wrap(cols)), 1)
+
+    inner =
+      cols
+      |> List.wrap()
+      |> Enum.map(fn col -> ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), style)}</div>| end)
+      |> Enum.join("")
+
+    %{"kind" => "_raw", "html" => ~s|<div class="bp-cols" style="--bp-cols:#{n}">#{inner}</div>|}
+  end
+
   def compose_block(%{"type" => "status-legend"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.status_legend_html(b)}
   end
@@ -806,6 +849,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # This is the ONE compose helper that recurses through walk — it composes the
   # child block then renders it to a body fragment via `Render.Walk.render_body`
   # (the `doctype: false` body twin of `render_html`).
+  # Render a list of child blocks to a concatenated HTML fragment — the same
+  # compose→walk bridge `figure_html/3` uses, for container blocks (terminal /
+  # columns) that hold arbitrary other blocks.
+  defp render_blocks(blocks, style) when is_list(blocks) do
+    blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join("")
+  end
+
+  defp render_blocks(_, _), do: ""
+
+  defp block_to_html(child, style) when is_map(child) do
+    composed = compose_block(child, style)
+    pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
+    Walk.render_body(composed, Map.fetch!(pal, :width), pal)
+  end
+
+  defp block_to_html(_, _), do: ""
+
+  # Children of a container block: `children` (preferred) or `blocks`.
+  defp container_children(b), do: Map.get(b, "children") || Map.get(b, "blocks") || []
+
   defp figure_html(child, caption, style) do
     child_html =
       case child do

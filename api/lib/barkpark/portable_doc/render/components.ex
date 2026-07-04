@@ -249,6 +249,36 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   @doc """
+  Render a `notes` block: an annotated list — a short label chip beside a line
+  of prose (an optional bold `lead` + `text`). The "what upgraded / why it
+  matters" column that rides beside a demo. `items: [%{label, lead, text}]`.
+  """
+  def notes_html(block) when is_map(block) do
+    items = block |> get("items") |> as_list()
+
+    case items do
+      [] ->
+        ""
+
+      _ ->
+        rows =
+          items
+          |> Enum.map(fn it ->
+            label = it |> get("label") |> stringish() |> escape_html()
+            text = it |> get("text") |> stringish() |> escape_html()
+            lead = it |> get("lead") |> stringish() |> String.trim()
+            lead_html = if lead == "", do: "", else: ~s|<b>#{escape_html(lead)}</b> |
+            ~s|<div class="bp-note"><span class="bp-note__k">#{label}</span><div class="bp-note__d">#{lead_html}#{text}</div></div>|
+          end)
+          |> Enum.join("")
+
+        ~s|<div class="bp-notes">#{rows}</div>|
+    end
+  end
+
+  def notes_html(_), do: ""
+
+  @doc """
   Render a `status-legend` block: the shared glyph/colour vocabulary key — the
   six lifecycle states with their glyph and a one-line meaning. Static (the
   vocabulary is the vocabulary); useful atop a plan so a reader learns the marks.

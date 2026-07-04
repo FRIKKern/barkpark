@@ -275,3 +275,100 @@ defmodule Barkpark.PortableDoc.Render.ComponentsLegendTest do
     assert html =~ "something is required first"
   end
 end
+
+defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
+  # notes (pure) + terminal/columns (container blocks that compose children).
+  use ExUnit.Case, async: true
+
+  alias Barkpark.PortableDoc.Render.{Components, Compose, Walk}
+
+  defp render(block), do: block |> Compose.compose_block(:article) |> Walk.render_body(72, %{style: :article})
+
+  describe "notes" do
+    test "renders label chip + optional bold lead + text" do
+      html = Components.notes_html(%{"items" => [%{"label" => "alive", "lead" => "Momentum up top:", "text" => "always feel progress."}]})
+      assert html =~ ~s(<span class="bp-note__k">alive</span>)
+      assert html =~ "<b>Momentum up top:</b>"
+      assert html =~ "always feel progress."
+    end
+
+    test "empty + non-map + hostile input" do
+      assert Components.notes_html(%{"items" => []}) == ""
+      assert Components.notes_html("x") == ""
+      html = Components.notes_html(%{"items" => [%{"label" => "<b>x</b>", "text" => "<script>alert(1)</script>"}]})
+      refute html =~ "<script>"
+      refute html =~ "<b>x</b>"
+      assert html =~ "&lt;script&gt;"
+    end
+  end
+
+  describe "terminal chrome" do
+    test "renders title, live dot, keybind footer, and wraps child blocks" do
+      html =
+        render(%{
+          "type" => "terminal",
+          "title" => "bp tasks — guerrilla",
+          "live" => true,
+          "footer" => "j/k move · c claim",
+          "children" => [%{"type" => "task-list", "snapshot" => [%{"title" => "resolver", "status" => "ready"}]}]
+        })
+
+      assert html =~ ~s(<span class="bp-term__title">bp tasks — guerrilla</span>)
+      assert html =~ "bp-term__live"
+      assert html =~ ~s(<div class="bp-term__foot">j/k move · c claim</div>)
+      # the nested task-list actually rendered inside the frame
+      assert html =~ "bp-term__body"
+      assert html =~ "bp-tasks"
+      assert html =~ "resolver"
+    end
+
+    test "no live / no footer omits them; title escaped" do
+      html = render(%{"type" => "terminal", "title" => "<x>", "children" => []})
+      refute html =~ "bp-term__live"
+      refute html =~ "bp-term__foot"
+      assert html =~ "&lt;x&gt;"
+    end
+  end
+
+  describe "columns" do
+    test "lays out N columns, each rendering its child blocks" do
+      html =
+        render(%{
+          "type" => "columns",
+          "columns" => [
+            [%{"type" => "heading", "level" => 2, "text" => "Left"}],
+            [%{"type" => "status-legend"}, %{"type" => "notes", "items" => [%{"label" => "k", "text" => "v"}]}]
+          ]
+        })
+
+      assert html =~ ~s(style="--bp-cols:2")
+      assert html =~ "Left"
+      assert html =~ "bp-legend"
+      assert html =~ "bp-note__k"
+      # two column wrappers
+      assert length(String.split(html, ~s(class="bp-cols__c"))) == 3
+    end
+  end
+
+  test "the whole page: columns > terminal > task-list, + legend + notes composes" do
+    page = %{
+      "type" => "columns",
+      "columns" => [
+        [%{"type" => "terminal", "title" => "board", "live" => true, "footer" => "c claim",
+           "children" => [%{"type" => "task-list", "snapshot" => [
+             %{"title" => "a", "status" => "done", "phase" => "W1"},
+             %{"title" => "b", "status" => "blocked", "phase" => "W1", "blocked_by" => "a"}
+           ]}]}],
+        [%{"type" => "heading", "level" => 2, "text" => "What upgraded"},
+         %{"type" => "status-legend"},
+         %{"type" => "notes", "items" => [%{"label" => "alive", "text" => "momentum"}]}]
+      ]
+    }
+
+    html = page |> Compose.compose_block(:article) |> Walk.render_body(72, %{style: :article})
+    for m <- ~w(bp-cols bp-term bp-term__live bp-term__foot bp-tasks bp-momentum bp-g--blocked bp-legend bp-note__k) do
+      assert html =~ m, "page missing #{m}"
+    end
+    assert html =~ "What upgraded"
+  end
+end

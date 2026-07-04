@@ -453,3 +453,36 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-legend__r:first-child { border-top: none; }
 .bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
 .bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
+
+/* ── notes: annotated label-chip list (the "what upgraded" column) ── */
+.bp-paper-surface .bp-notes { display: flex; flex-direction: column; gap: 0.9rem; margin: 1.4rem 0; }
+.bp-paper-surface .bp-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; }
+.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.bp-paper-surface .bp-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; }
+.bp-paper-surface .bp-note__d b { color: var(--paper-ink); font-weight: 600; }
+@media (max-width: 520px) { .bp-paper-surface .bp-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-paper-surface .bp-note__k { justify-self: start; } }
+
+/* ── terminal chrome — the bp tasks board look ── */
+.bp-paper-surface .bp-term {
+  --st-info: #2563eb; --st-ok: #0d9488;
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 18px 44px -24px rgba(0,0,0,0.28);
+}
+.bp-paper-surface .bp-term__bar { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--paper-rule); background: color-mix(in srgb, var(--paper-ink) 4%, transparent); }
+.bp-paper-surface .bp-term__dots { display: inline-flex; gap: 6px; }
+.bp-paper-surface .bp-term__dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--paper-ink-faint); opacity: 0.55; }
+.bp-paper-surface .bp-term__dots i:nth-child(1) { background: #ef4444; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(2) { background: #f59e0b; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(3) { background: #22c55e; opacity: 0.85; }
+.bp-paper-surface .bp-term__title { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
+.bp-paper-surface .bp-term__live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 22%, transparent); }
+.bp-paper-surface .bp-term__body { padding: 0.5rem 0.4rem; }
+.bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
+.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); }
+
+/* ── columns — responsive multi-column layout ── */
+.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+@media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-cols__c { min-width: 0; }
+.bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
