@@ -718,13 +718,46 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert Session.peek("sg-filter-fill", @dataset) == {:error, :no_session}
   end
 
-  test "the funnel is editable-only (absent in View mode)", %{conn: conn} do
-    create_sheet!("sg-filter-view", one_tab(%{"A1" => %{"v" => 1}}))
+  # SF-AM4 amends SF-D9's editable-only line: the funnel is a READ affordance,
+  # so it carries into View mode (and the /sheets reader). The view-mode
+  # sheet_table now threads the REAL filters/filter_panel/myself, so filtering
+  # still works — but SORT (an edit mutation, SF-AM2d) never appears in View.
+  test "the funnel carries into View mode and still filters; no sort affordance shows",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-filter-view",
+      one_tab(%{"A1" => %{"v" => 5}, "A2" => %{"v" => 1}, "A3" => %{"v" => 9}})
+    )
+
     {view, target, html} = open!(conn, "sg-filter-view")
     assert html =~ ~s(data-test-id="sheet-filter-funnel-1")
 
-    render_hook(target, "toggle-mode", %{})
-    refute render(view) =~ ~s(data-test-id="sheet-filter-funnel-1")
+    # Flip to View mode — the toolbar (and its sort buttons) and the column ▾
+    # menu (and its sort items) vanish, but the funnel stays.
+    html = render_hook(target, "toggle-mode", %{})
+    assert html =~ ~s(data-test-id="sheet-filter-funnel-1")
+    refute html =~ ~s(data-test-id="sheet-sort-asc")
+    refute html =~ ~s(data-test-id="sheet-sort-desc")
+    refute html =~ "Sort A→Z"
+    refute html =~ ~s(data-test-id="sheet-toolbar")
+
+    # The funnel's phx-target survives (myself is threaded, not nil): opening
+    # and applying a filter hides rows for this viewer.
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "gt", "value" => "3"})
+
+    # A1 (5) and A3 (9) pass gt 3; A2 (1) is hidden.
+    assert html =~ ~s(data-ref="A1")
+    assert html =~ ~s(data-ref="A3")
+    refute html =~ ~s(data-ref="A2")
+    assert html =~ "rows hidden by filter"
+
+    # Pure view-state (SF-D2): no session ever started.
+    assert Session.peek("sg-filter-view", @dataset) == {:error, :no_session}
   end
 
   # The criteria map is keyed by COLUMN of the tab it was set on — switching

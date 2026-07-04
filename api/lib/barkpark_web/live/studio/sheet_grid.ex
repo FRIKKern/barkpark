@@ -782,6 +782,61 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, send_ops(socket, [op])}
   end
 
+  # Sort the current selection A→Z / Z→A (SF-AM2). Sort is an EDIT mutation:
+  # the read_only guard clause fails closed even on a forged event, and
+  # send_ops' read-only drop is the last wall (SF-AM2d). A WHOLE-COLUMN
+  # selection (rows span the rendered window, the head-click shape) expands to
+  # the USED DATA RECT — all occupied columns × occupied rows, r1 just below
+  # the frozen head band; any OTHER selection sorts IN PLACE with r1 clamped
+  # below the band. The key is the ACTIVE cell's column (Excel's sort-by-
+  # active-column). All clipping is here — the caller-clips-below-the-frozen-
+  # band contract (SF-D5); the op never re-clips.
+  def handle_event("sort-selection", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("sort-selection", %{"dir" => dir}, socket)
+      when dir in ["asc", "desc"] do
+    {c1, c2, r1, r2} = Geometry.selection_rect(socket.assigns.active, socket.assigns.anchor)
+    {_cols, row_lo, row_hi} = move_bounds(socket)
+    {active_col, _active_row} = socket.assigns.active
+    top = frozen_top(socket)
+
+    socket =
+      if r1 <= row_lo and r2 >= row_hi do
+        # Whole-column: the used data rect, keyed by the active column clamped
+        # into the occupied columns (SF-AM2a).
+        uc = max(socket.assigns.used_cols, 1)
+        ur = max(socket.assigns.used_rows, 1)
+        dispatch_sort(socket, 1, top, uc, ur, clamp_col(active_col, 1, uc) - 1, dir)
+      else
+        # In place: the selection rect, r1 clamped below the frozen band, keyed
+        # by the active column clamped into the rect (SF-AM2b).
+        dispatch_sort(socket, c1, max(r1, top), c2, r2, clamp_col(active_col, c1, c2) - 1, dir)
+      end
+
+    {:noreply, socket}
+  end
+
+  # Column ▾ menu "Sort A→Z / Z→A" (SF-AM2, the wish's "clicking a column
+  # header selects+offers to sort"). SELECTS the whole rendered column (so the
+  # user sees B:B highlighted) AND dispatches the used-data-rect sort keyed by
+  # that column in one action. Same triple gate + guards as sort-selection.
+  def handle_event("sort-column", _params, %{assigns: %{read_only: true}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("sort-column", %{"col" => col, "dir" => dir}, socket)
+      when dir in ["asc", "desc"] do
+    {cols, row_lo, row_hi} = move_bounds(socket)
+    c = clamp_col(to_int(col), 1, cols)
+    # Reuse head-click's whole-column {active, anchor} so the selection shows.
+    socket = assign(socket, active: {c, row_lo}, anchor: {c, row_hi}, editing: nil, menu: nil)
+
+    uc = max(socket.assigns.used_cols, 1)
+    ur = max(socket.assigns.used_rows, 1)
+    socket = dispatch_sort(socket, 1, frozen_top(socket), uc, ur, clamp_col(c, 1, uc) - 1, dir)
+    {:noreply, socket}
+  end
+
   # Structured paste (current clients): the hook parses the clipboard TSV
   # quote-aware CLIENT-side and pushes an already-split `rows` grid, so an Excel
   # cell holding an embedded newline lands as ONE cell instead of shattering
@@ -1378,6 +1433,43 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp note_own_refs(socket, refs),
     do: assign(socket, own_refs: MapSet.union(socket.assigns.own_refs, MapSet.new(refs)))
+
+  # Dispatch ONE `sort_range` op over the already-clipped rect (SF-AM2/SF-D3).
+  # The rect corners are 1-based ({c1,r1} top-left, {c2,r2} bottom-right); the
+  # key col is 0-based absolute (the op's contract, structure.ex). REFUSES with
+  # a notice — never dispatches — when this viewer has an active filter (hidden
+  # rows silently moving is the SF-D8 corruption class) or the rect has < 2
+  # rows (nothing to reorder). Engine refusals (sort_merge_overlap /
+  # sort_frozen_overlap) surface their message through send_ops' notice path.
+  defp dispatch_sort(socket, c1, r1, c2, r2, key_col, dir) do
+    cond do
+      map_size(socket.assigns.filters) > 0 ->
+        assign(socket, notice: "Clear the column filters before sorting")
+
+      r2 - r1 + 1 < 2 ->
+        assign(socket, notice: "Nothing to sort")
+
+      true ->
+        range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
+        keys = [%{"col" => key_col, "dir" => dir}]
+
+        op = %{
+          "op" => "sort_range",
+          "tab" => socket.assigns.tab,
+          "range" => range,
+          "keys" => keys
+        }
+
+        send_ops(socket, [op])
+    end
+  end
+
+  # The first sortable row: just below the frozen head band (SF-D5's
+  # EXCLUDE-BY-REFUSAL made an EXCLUDE-BY-CLIP at the caller).
+  defp frozen_top(socket), do: socket.assigns.frozen_rows + 1
+
+  # Clamp a 1-based column into [lo, hi] (both 1-based).
+  defp clamp_col(c, lo, hi), do: c |> max(lo) |> min(hi)
 
   # One set_cell_meta per occupied, non-covered cell in the selection rect;
   # `meta_fun.(cell)` yields the "fmt"/"s" keys to merge onto the op.
@@ -2375,6 +2467,37 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
         </button>
 
+        <%!-- Sort the current selection (SF-AM2). A whole-column selection (the
+              head-click shape: rows span the rendered window) expands to the
+              used data rect; any other selection sorts in place — both keyed by
+              the active cell's column. EDIT-ONLY, triple-gated: rendered only
+              inside the @editable toolbar, a read_only guard on the event, and
+              send_ops' read-only drop as the last wall (SF-AM2d). --%>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="sort-selection"
+          phx-value-dir="asc"
+          phx-target={@myself}
+          aria-label="Sort ascending"
+          title="Sort the selection A→Z"
+          data-test-id="sheet-sort-asc"
+        >
+          A→Z
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          phx-click="sort-selection"
+          phx-value-dir="desc"
+          phx-target={@myself}
+          aria-label="Sort descending"
+          title="Sort the selection Z→A"
+          data-test-id="sheet-sort-desc"
+        >
+          Z→A
+        </button>
+
         <%!-- Text-to-columns: a phx-change select (mirroring the number-format
               select) that splits the selected single column on a fixed delimiter
               into the adjacent columns, all-or-nothing. --%>
@@ -2737,10 +2860,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               active={Geometry.grid_cursor(@active, @read_only)}
               editing={nil}
               menu={nil}
-              filters={%{}}
-              filter_panel={nil}
+              filters={@filters}
+              filter_panel={@filter_panel}
               editable={false}
-              myself={nil}
+              myself={@myself}
             />
           <% end %>
           <%!-- v1: the peer overlay's px geometry sums from row 1, so it is
@@ -2918,15 +3041,27 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="before" phx-target={@myself}>Insert left</button>
                 <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}>Insert right</button>
                 <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}>Delete column</button>
+                <%!-- "Clicking a column header selects+offers to sort" (the wish).
+                      SELECTS the column then dispatches the used-data-rect sort.
+                      Sort is an EDIT mutation, so these menu items live INSIDE the
+                      @editable block and NEVER render in a read-only view (SF-AM2d,
+                      SF-AM4). --%>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="asc" phx-target={@myself} data-test-id={"sheet-sort-col-asc-#{c}"}>Sort A→Z</button>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="desc" phx-target={@myself} data-test-id={"sheet-sort-col-desc-#{c}"}>Sort Z→A</button>
               </div>
-              <%!-- Per-column FILTER funnel (SF-D9). Pure LiveView, mirroring the
-                    CF panel: server-rendered HEEx + phx-click, zero bp-sheet-grid.js.
-                    The funnel fills when the column carries an active criterion; the
-                    popover is this viewer's per-column predicate editor. Filtering is
-                    socket view-state — clicking Apply sends NO op (SF-D2). --%>
-              <button
-                type="button"
-                class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
+            <% end %>
+            <%!-- Per-column FILTER funnel (SF-D9 + SF-AM4). Pure LiveView,
+                  mirroring the CF panel: server-rendered HEEx + phx-click, zero
+                  bp-sheet-grid.js. The funnel fills when the column carries an
+                  active criterion; the popover is this viewer's per-column
+                  predicate editor. Filtering is socket view-state — clicking
+                  Apply sends NO op (SF-D2). The funnel is a READ affordance
+                  (SF-AM4): it renders in ALL modes including the read_only
+                  /sheets reader, OUTSIDE the @editable block above — readers can
+                  filter but the sort menu items stay edit-only. --%>
+            <button
+              type="button"
+              class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
                 phx-click="filter-open"
                 phx-value-col={c}
                 phx-target={@myself}
@@ -2991,6 +3126,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   </div>
                 </form>
               </div>
+            <%!-- Column resize is an EDIT affordance — back inside @editable. --%>
+            <%= if @editable do %>
               <div class="sheet-rsz sheet-rsz--col" data-kind="col" data-index={c} data-px={Geometry.col_px(@col_widths, c)}></div>
             <% end %>
           </th>

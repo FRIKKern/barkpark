@@ -362,6 +362,75 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert render(view) =~ ~s(data-v="immutable")
   end
 
+  # SF-AM4: the per-column filter funnel is a READ affordance, so the reader
+  # carries it too — a viewer can filter their own view while the published
+  # document (and every other viewer) is untouched. SORT never appears: it is
+  # an edit mutation (SF-AM2d) with no affordance in any read-only render.
+  test "the reader carries the funnel and filters this socket's rows; the doc is untouched",
+       %{conn: conn} do
+    create_draft!(
+      "rdr-filter",
+      one_tab(%{"A1" => %{"v" => 5}, "A2" => %{"v" => 1}, "A3" => %{"v" => 9}})
+    )
+
+    publish!("rdr-filter")
+
+    {:ok, view, html} = live(conn, "/sheets/rdr-filter")
+    target = with_target(view, "#sheet-reader-rdr-filter")
+
+    # The funnel is present; NO sort control is (buttons live in the editable
+    # toolbar, the sort items in the editable column ▾ menu — both stripped).
+    assert html =~ ~s(data-test-id="sheet-filter-funnel-1")
+    refute html =~ ~s(data-test-id="sheet-sort-asc")
+    refute html =~ ~s(data-test-id="sheet-sort-desc")
+    refute html =~ "sort-selection"
+    refute html =~ "sort-column"
+    refute html =~ "Sort A→Z"
+
+    # Filtering hides rows for THIS socket.
+    render_click(target, "filter-open", %{"col" => "1"})
+
+    html =
+      view
+      |> element(~s([data-test-id="sheet-filter-form"]))
+      |> render_submit(%{"col" => "1", "op" => "gt", "value" => "3"})
+
+    # A1 (5) and A3 (9) pass gt 3; A2 (1) is hidden for this viewer.
+    assert html =~ ~s(data-ref="A1")
+    assert html =~ ~s(data-ref="A3")
+    refute html =~ ~s(data-ref="A2")
+    assert html =~ "rows hidden by filter"
+
+    # Pure view-state (SF-D2): NO session started, so the stored document is
+    # untouched — a cold reload sees every row, including the "hidden" one.
+    assert Session.whereis("rdr-filter", @dataset) == nil
+    {:ok, _view2, html2} = live(conn, "/sheets/rdr-filter")
+    assert html2 =~ ~s(data-ref="A2")
+  end
+
+  test "a forged sort event is dropped read-only — no session, published order holds",
+       %{conn: conn} do
+    create_draft!(
+      "rdr-sort-forge",
+      one_tab(%{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}})
+    )
+
+    publish!("rdr-sort-forge")
+
+    {:ok, view, _html} = live(conn, "/sheets/rdr-sort-forge")
+    target = with_target(view, "#sheet-reader-rdr-sort-forge")
+
+    # A crafted client could still push these despite the stripped markup: the
+    # read_only guard clause no-ops them, and send_ops would drop them anyway.
+    render_hook(target, "sort-selection", %{"dir" => "asc"})
+    render_hook(target, "sort-column", %{"col" => "1", "dir" => "asc"})
+
+    # No session started (a sort op would have), so nothing was permuted — the
+    # published top row still shows the original unsorted value 3, not 1.
+    assert Session.whereis("rdr-sort-forge", @dataset) == nil
+    assert view |> element(~s(td[data-ref="A1"])) |> render() =~ ~s(data-v="3")
+  end
+
   test "the reader renders a checkbox glyph but a forged cell-toggle never mutates it",
        %{conn: conn} do
     create_draft!("rdr-cb", one_tab(%{"A1" => %{"v" => true, "fmt" => "checkbox"}}))
