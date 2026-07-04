@@ -767,6 +767,247 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
     end
   end
 
+  # ── cross-tab refs: local scan (rewrite_formula / rebase_formula) ────────────
+
+  describe "rewrite_formula — tab-qualified refs are recognized (not mis-shifted)" do
+    test "a qualified ref passes through untouched on an insert; the bare ref shifts" do
+      # Before cross-tab support the scanner mis-read `Sheet2` (a ref-shaped
+      # word) as a cell ref and shifted it. Now `Sheet2!A5` is a single unit,
+      # left for the cross-tab sweep; only the bare A5 (this tab's own) shifts.
+      assert Structure.rewrite_formula("A5+Sheet2!A5", :row, {:insert, 3, 1}) ==
+               "A6+Sheet2!A5"
+    end
+
+    test "a qualified ref passes through untouched on a delete too" do
+      assert Structure.rewrite_formula("Sheet2!A5", :row, {:delete, 4, 3}) == "Sheet2!A5"
+    end
+
+    test "a quoted-name qualified ref is left intact (byte-identical)" do
+      assert Structure.rewrite_formula("'My Sheet'!A5:B9", :col, {:insert, 2, 1}) ==
+               "'My Sheet'!A5:B9"
+    end
+
+    test "a '' escape inside a quoted name round-trips verbatim" do
+      assert Structure.rewrite_formula("'a''b'!A1", :row, {:insert, 1, 1}) == "'a''b'!A1"
+    end
+  end
+
+  describe "rebase_formula — a cross-tab relative ref rebases its cell part, keeps the name" do
+    test "relative cell part shifts, qualifier stays" do
+      assert Structure.rebase_formula("Sheet2!A1", 1, 1) == "Sheet2!B2"
+    end
+
+    test "$-anchors on the cell part are honored; name untouched" do
+      assert Structure.rebase_formula("Sheet2!$A$1", 5, 7) == "Sheet2!$A$1"
+      assert Structure.rebase_formula("'My Sheet'!A1:B2", 1, 1) == "'My Sheet'!B2:C3"
+    end
+
+    test "a cross-tab range corner pushed out of bounds collapses the token to #REF!" do
+      assert Structure.rebase_formula("Sheet2!A1", 0, -1) == "#REF!"
+    end
+  end
+
+  # ── shift_cross_tab_refs/4 (B-CT-5) ─────────────────────────────────────────
+
+  describe "shift_cross_tab_refs — row/col insert & delete" do
+    test "insert rows on tab i shifts Name_i! refs in OTHER tabs; bare refs stay" do
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet2!A5+A5"}}},
+        %{"name" => "Sheet2", "cells" => %{"B1" => %{"v" => 1}}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 3, 1})
+
+      # Sheet2!A5 → Sheet2!A6 (targets the mutated tab); bare A5 (Sheet1's own,
+      # the local op's job) untouched by the sweep.
+      assert fof(out, 0, "A1") == "Sheet2!A6+A5"
+      # Sheet2 carries no formula → returned unchanged.
+      assert Enum.at(out, 1) == Enum.at(tabs, 1)
+    end
+
+    test "a self-qualified ref in the mutated tab itself shifts (sweep includes tab i)" do
+      tabs = [
+        %{"name" => "Sheet2", "cells" => %{"C1" => %{"f" => "Sheet2!A5"}}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 0, :row, {:insert, 3, 1})
+      assert fof(out, 0, "C1") == "Sheet2!A6"
+    end
+
+    test "delete rows through the referenced axis makes the qualified ref #REF!" do
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:delete, 4, 3})
+      assert fof(out, 0, "A1") == "#REF!"
+    end
+
+    test "a partially covered qualified range clips" do
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A2:A10)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:delete, 1, 3})
+      assert fof(out, 0, "A1") == "SUM(Sheet2!A1:A7)"
+    end
+
+    test "insert/delete columns shift the column letter of a qualified ref" do
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet2!B1"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      ins = Structure.shift_cross_tab_refs(tabs, 1, :col, {:insert, 2, 1})
+      assert fof(ins, 0, "A1") == "Sheet2!C1"
+
+      del = Structure.shift_cross_tab_refs(tabs, 1, :col, {:delete, 2, 1})
+      assert fof(del, 0, "A1") == "#REF!"
+    end
+
+    test "refs to OTHER tabs pass through byte-for-byte" do
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet3!A5+Sheet2!A5"}}},
+        %{"name" => "Sheet2", "cells" => %{}},
+        %{"name" => "Sheet3", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 3, 1})
+      # Only the Sheet2 ref shifts; Sheet3's is untouched.
+      assert fof(out, 0, "A1") == "Sheet3!A5+Sheet2!A6"
+    end
+
+    test "a quoted-name tab is matched and shifted" do
+      tabs = [
+        %{"name" => "Data", "cells" => %{"A1" => %{"f" => "'My Sheet'!A5"}}},
+        %{"name" => "My Sheet", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 3, 1})
+      assert fof(out, 0, "A1") == "'My Sheet'!A6"
+    end
+
+    test "a tab without a name leaves every formula untouched (total)" do
+      tabs = [%{"cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}, %{"cells" => %{}}]
+      assert Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 3, 1}) == tabs
+    end
+  end
+
+  # ── rename_refs/3 (CT-D1) ───────────────────────────────────────────────────
+
+  describe "rename_refs — Excel rename-rewrite across all tabs" do
+    test "every OldName! qualifier (incl. ranges + self-refs) becomes NewName!; cell part stays" do
+      tabs = [
+        %{
+          "name" => "Sheet1",
+          "cells" => %{
+            "A1" => %{"f" => "Sheet2!A5+B2"},
+            "A2" => %{"f" => "SUM(Sheet2!A1:A3)"}
+          }
+        },
+        %{"name" => "Sheet2", "cells" => %{"D1" => %{"f" => "Sheet2!A1"}}}
+      ]
+
+      out = Structure.rename_refs(tabs, "Sheet2", "Data")
+
+      assert fof(out, 0, "A1") == "Data!A5+B2"
+      assert fof(out, 0, "A2") == "SUM(Data!A1:A3)"
+      assert fof(out, 1, "D1") == "Data!A1"
+    end
+
+    test "a bare ref and refs to other tabs are untouched" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "A5+Sheet3!A1"}}}]
+      out = Structure.rename_refs(tabs, "Sheet2", "Data")
+      assert fof(out, 0, "A1") == "A5+Sheet3!A1"
+    end
+
+    test "re-quotes when the new name gains a space" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}]
+      out = Structure.rename_refs(tabs, "Sheet2", "Q1 2026")
+      assert fof(out, 0, "A1") == "'Q1 2026'!A5"
+    end
+
+    test "re-quotes a bare→spaced rename and drops quotes on a spaced→bare rename" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "Data!A5"}}}]
+      assert fof(Structure.rename_refs(tabs, "Data", "My Data"), 0, "A1") == "'My Data'!A5"
+
+      tabs2 = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "'My Data'!A5"}}}]
+      assert fof(Structure.rename_refs(tabs2, "My Data", "Data"), 0, "A1") == "Data!A5"
+    end
+
+    test "a name that becomes ref-shaped is quoted (kept unambiguous)" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}]
+      out = Structure.rename_refs(tabs, "Sheet2", "Q1")
+      assert fof(out, 0, "A1") == "'Q1'!A5"
+    end
+
+    test "an apostrophe in the new name is doubled" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}]
+      out = Structure.rename_refs(tabs, "Sheet2", "Bob's")
+      assert fof(out, 0, "A1") == "'Bob''s'!A5"
+    end
+
+    test "match is case-insensitive (Excel); a quoted old name is matched" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}}]
+      assert fof(Structure.rename_refs(tabs, "SHEET2", "Data"), 0, "A1") == "Data!A5"
+
+      tabs2 = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "'My Sheet'!A5"}}}]
+      assert fof(Structure.rename_refs(tabs2, "my sheet", "Data"), 0, "A1") == "Data!A5"
+    end
+  end
+
+  # ── delete_tab_refs/2 (CT-D1) ───────────────────────────────────────────────
+
+  describe "delete_tab_refs — refs to a deleted tab become #REF!" do
+    test "single refs and ranges to the deleted tab go to #REF!; others stay" do
+      tabs = [
+        %{
+          "name" => "Sheet1",
+          "cells" => %{
+            "A1" => %{"f" => "Sheet2!A5"},
+            "A2" => %{"f" => "SUM(Sheet2!A1:A3)+B1"},
+            "A3" => %{"f" => "Sheet3!A1"}
+          }
+        }
+      ]
+
+      out = Structure.delete_tab_refs(tabs, "Sheet2")
+
+      assert fof(out, 0, "A1") == "#REF!"
+      assert fof(out, 0, "A2") == "SUM(#REF!)+B1"
+      assert fof(out, 0, "A3") == "Sheet3!A1"
+    end
+
+    test "a quoted deleted-tab name matches (case-insensitive)" do
+      tabs = [%{"name" => "S", "cells" => %{"A1" => %{"f" => "'My Sheet'!A5+A1"}}}]
+      out = Structure.delete_tab_refs(tabs, "MY SHEET")
+      assert fof(out, 0, "A1") == "#REF!+A1"
+    end
+  end
+
+  # ── move_tab: names are position-stable → NO ref rewrite (CT-D1) ─────────────
+
+  describe "move_tab needs no ref rewrite" do
+    test "reordering the tabs list leaves every cross-tab ref byte-identical" do
+      # move_tab has no Structure entry by design: name-based refs survive a
+      # reorder untouched (the CT-D1 win over index-based refs). Reordering the
+      # list is the whole op; formula strings do not change.
+      tabs = [
+        %{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet2!A5"}}},
+        %{"name" => "Sheet2", "cells" => %{"B1" => %{"f" => "Sheet1!C3"}}}
+      ]
+
+      reordered = Enum.reverse(tabs)
+      assert fof(reordered, 0, "B1") == "Sheet1!C3"
+      assert fof(reordered, 1, "A1") == "Sheet2!A5"
+    end
+  end
+
+  # Fetch the formula string of cell `addr` in the tab at `idx`.
+  defp fof(tabs, idx, addr), do: tabs |> Enum.at(idx) |> get_in(["cells", addr, "f"])
+
   # Build a tab from an addr => cell map.
   defp tab_with(cells), do: %{"cells" => cells}
 
