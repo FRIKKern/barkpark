@@ -2,47 +2,47 @@ barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                                     
 3 active · 7 ready · 4 blocked · 41 done · 2 stale
 
 NOW
- ◶ Debounce the refetch loop
+ ● Debounce the refetch loop
    pelle · 1m30s · Cloud GUI epic
 
- ◶ Wire the SSE live bridge
-   opus-3 · 4m00s · ▰▰▱ 2/3 · Cloud GUI epic
+ ● Wire the SSE live bridge
+   opus-3 · 4m00s · 2/3 · Cloud GUI epic
 
-── Cloud GUI epic ───────────────────────────────────────────────────────────────────── 7/12 ▰▰▰▰▱▱▱
-   ◶ Debounce the refetch loop  perf                                                       pelle  1m
-   ◶ Wire the SSE live bridge  live sse                                          ▰▰▱ 2/3  opus-3  4m
-     ☑ Reconnect after a dropped stream
-     ☑ Debounce the refetch to 750ms
-     ☐ Connection dot is honest (live/polling/offline)
-     labels live sse
-     deps 2 dependent
-     P1 · updated 4m
-  ▶☐ Reconcile the #979 role seam  theme                                                          P2
-   ☐ Add empty-state goldens                                                                      P3
-   ◐ Cut over the canvas default                                                          blocked ·2
+── Cloud GUI epic ───────────────────────────────────────────────────────────────────────────── 7/10
+  ▎○ Reconcile the #979 role seam                                                                 P2
+     ✓ Extract the shared statusRole vocabulary
+     ○ Reconcile onto the landed #979 seam
+     P2 · updated 20m
+   ○ Add empty-state goldens                                                                      P3
+   ◐ Cut over the canvas default                                                             blocked
   +7 done
 
-── Search & Media epic ───────────────────────────────────────────────────────────────── 8/8 ▰▰▰▰▰▰▰
+── Search & Media epic ───────────────────────────────────────────────────────────────────────── 8/8
 
-── sheets-parity ~ ───────────────────────────────────────────────────────────────────── 3/7 ▰▰▰▱▱▱▱
-   ☐ ⧉ Add the SUM() spreadsheet function  build                                                  P2
-   ☐ ⧉ Add a SUM function to the grid  build                                                      P3
-   ☐ Implement VLOOKUP across sheets                                                          P2  6d
-   ☐ Pivot tables in the Studio grid  grid                                                       11d
+── sheets-parity ~ ───────────────────────────────────────────────────────────────────────────── 3/7
+   ○ Add the SUM() spreadsheet function                                                           P2
+   ○ Add a SUM function to the grid                                                               P3
+   ○ Implement VLOOKUP across sheets                                                              6d
+   ○ Pivot tables in the Studio grid                                                             11d
   +3 done
 
-── living-values ~ ───────────────────────────────────────────────────────────────────── 0/2 ▱▱▱▱▱▱▱
-   ☐ Wire the valueref resolver  build                                                            P1
-   ☐ Build the living-values demo dataset
+── living-values ~ ───────────────────────────────────────────────────────────────────────────── 0/2
+   ○ Wire the valueref resolver                                                                   P1
+   ○ Build the living-values demo dataset
 
 ── (no epic) ───────────────────────────────────────────────────────────────────────────────────────
-   ☐ Fix the timeago clock-skew clamp                                                             P3
-   ☐ Inline cell editing for the grid  +sheets-parity?
+   ○ Fix the timeago clock-skew clamp                                                             P3
+   ○ Inline cell editing for the grid
+
+
+
+
+
+
+
 
 
 
 ────────────────────────────────────────────────────────────────────────────────────────────────────
-✻ working… · 2 in flight
 ✓ closed 'sse-reconnect' · 2m
-◴ claimed 'debounce-refetch' · 5m
-jk move · enter expand · c claim · x close · t tag · o studio
+jk move · enter open · c claim · x close · o studio

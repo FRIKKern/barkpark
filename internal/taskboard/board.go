@@ -113,6 +113,16 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	}
 	sortByUpdatedDesc(board.Now)
 
+	// NOW de-dup (charter D14/decision 6): a claimed task renders ONLY in the NOW
+	// band, never again as a row inside its epic / cluster / orphan pile. nowSet is
+	// the exclusion index; a NOW task that is a leaf drops out of the spine
+	// entirely (it lives in the pinned band), and a NOW task that heads a subtree
+	// still keeps its epic HEADER (the header is structure, not a duplicate row).
+	nowSet := make(map[string]bool, len(board.Now))
+	for _, t := range board.Now {
+		nowSet[t.DocID] = true
+	}
+
 	// Group every task under its epic root (walk the parent chain to the top /
 	// to a dangling pointer). rootOrder preserves first-seen order so the later
 	// stable sort is deterministic regardless of map iteration.
@@ -130,6 +140,9 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 		members := groups[rootID]
 		root := byID[rootID]
 
+		// children is the FULL descendant set (everything but the root). The
+		// NOW-pinned claims stay in here through epic ranking + dormancy; they are
+		// stripped for display by dedupNowFromEpics after sortEpics below.
 		children := make([]Task, 0, len(members))
 		for _, m := range members {
 			if m.DocID != rootID {
@@ -138,15 +151,20 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 		}
 
 		// A goal always headlines; a non-goal root only earns a section when it
-		// actually heads a subtree. Everything else is a loose leaf.
+		// actually heads a subtree. Everything else is a loose leaf — unless the
+		// leaf is itself a NOW claim, which renders only in the pinned band.
 		if root.Kind != kindGoal && len(children) == 0 {
-			board.Orphans = append(board.Orphans, root)
+			if !nowSet[root.DocID] {
+				board.Orphans = append(board.Orphans, root)
+			}
 			continue
 		}
 		board.Epics = append(board.Epics, buildEpic(root, children, now))
 	}
 
 	sortEpics(board.Epics, repo)
+	// Strip the NOW-pinned claims from the ranked epics' displayed children (D14).
+	dedupNowFromEpics(board.Epics, nowSet)
 	board.Orphans, board.OrphansFolded = foldStaleOrphans(board.Orphans, now)
 	orderChildren(board.Orphans, now)
 
@@ -510,7 +528,10 @@ func rootOf(t Task, byID map[string]Task) string {
 
 // buildEpic folds stale terminal children, orders the survivors, and marks
 // dormancy from the freshest member (root or ANY child, including folded ones —
-// a just-closed child still counts as recent movement).
+// a just-closed child still counts as recent movement). The NOW-pinned claims
+// are still in epic.Children at this stage so ranking (epicFreshest) and
+// dormancy see their freshness; dedupNowFromEpics strips them for display AFTER
+// the epics are ranked.
 func buildEpic(root Task, children []Task, now time.Time) Epic {
 	epic := Epic{Root: root}
 
@@ -534,6 +555,28 @@ func buildEpic(root Task, children []Task, now time.Time) Epic {
 	epic.Dormant = now.Sub(freshest) > dormantAfter
 
 	return epic
+}
+
+// dedupNowFromEpics removes the NOW-pinned claims from every epic's displayed
+// children (charter D14 — a claimed task renders ONLY in the pinned band). It
+// runs AFTER sortEpics so epic ranking and dormancy still saw the claims'
+// freshness; the survivors keep their band order. A claimed child leaves the
+// spine but stays counted nowhere in epicProgress (it is neither folded-done nor
+// a kept row), so the header digits track the not-in-flight work — the running
+// tasks are shown live in NOW above.
+func dedupNowFromEpics(epics []Epic, nowSet map[string]bool) {
+	if len(nowSet) == 0 {
+		return
+	}
+	for i := range epics {
+		kept := epics[i].Children[:0]
+		for _, c := range epics[i].Children {
+			if !nowSet[c.DocID] {
+				kept = append(kept, c)
+			}
+		}
+		epics[i].Children = kept
+	}
 }
 
 // orderChildren sorts within an epic/cluster/orphan list:

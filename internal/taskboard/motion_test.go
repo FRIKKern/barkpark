@@ -63,52 +63,6 @@ func TestLiveElapsedTicksEverySecond(t *testing.T) {
 	}
 }
 
-func TestWorkingVerbCycle(t *testing.T) {
-	// Each verb holds ~3 frames (frame/3), so frames 0,1,2 share a verb and
-	// frame 3 advances. Frame 4 is "herding" — the value the motion goldens pin.
-	if got := WorkingVerb(4); got != "herding" {
-		t.Errorf("WorkingVerb(4) = %q, want %q", got, "herding")
-	}
-	for f := 0; f < 3; f++ {
-		if WorkingVerb(f) != WorkingVerb(0) {
-			t.Errorf("frame %d changed verb before the 3-frame hold", f)
-		}
-	}
-	if WorkingVerb(3) == WorkingVerb(2) {
-		t.Errorf("verb did not advance at frame 3")
-	}
-	// It wraps cleanly over the list and never panics on a large frame.
-	period := 3 * len(workingVerbs)
-	if WorkingVerb(period) != WorkingVerb(0) {
-		t.Errorf("verb did not wrap after a full period of %d frames", period)
-	}
-	if WorkingVerb(-5) != workingVerbs[0] {
-		t.Errorf("a negative frame should clamp to the first verb")
-	}
-}
-
-// TestWorkingVerbDeterministic proves the verb is a pure function of the frame:
-// the same frame always yields the same word (byte-stable goldens depend on it).
-func TestWorkingVerbDeterministic(t *testing.T) {
-	for f := 0; f < 100; f++ {
-		if WorkingVerb(f) != WorkingVerb(f) {
-			t.Fatalf("WorkingVerb(%d) is not deterministic", f)
-		}
-	}
-	// Every verb it can ever emit is lowercase and free of an exclamation
-	// (restraint is a decision, not a coincidence).
-	for _, v := range workingVerbs {
-		for _, r := range v {
-			if r >= 'A' && r <= 'Z' {
-				t.Errorf("verb %q has an uppercase letter", v)
-			}
-			if r == '!' {
-				t.Errorf("verb %q carries an exclamation", v)
-			}
-		}
-	}
-}
-
 // TestFlashStyleLadder proves the one-shot ladder on the style PROPERTIES (not
 // rendered bytes — the test runner's color profile drops ANSI, which would make
 // a byte assertion vacuous): level 2 is bold in the info hue, level 1 is a faint

@@ -81,45 +81,36 @@ func lastCols(s string, cols int) string {
 	return string(rs[i:])
 }
 
-// spinnerFrames is the in_progress heartbeat: a single dark quadrant rotating
-// clockwise (upper-left → upper-right → lower-right → lower-left). Every glyph
-// is display-width 1 (verified) so the fixed 2-col gutter never shifts as the
-// frame advances, and frame%4==0 is a deterministic static glyph — at rest
-// (Frame 0, no ticks scheduled) an in_progress row paints ◴ and never moves.
-// The cycle is deliberately NOT the ◐ half-circle set: ◐ is blocked's glyph, so
-// a rotating quadrant keeps "working" visually distinct from "blocked".
-var spinnerFrames = [...]string{"◴", "◷", "◶", "◵"}
-
-// StatusGlyph is the 2-col gutter's status mark, checklist-shaped at every level
-// (charter decision 18): ☐ waiting (ready/open), ✓ done, ◐ blocked, and a live
-// spinner for in_progress cycled from the heartbeat frame. Selection is a
-// separate marker (SelectionMarker) rendered in the column before it. Styling
-// (the role tint / dim recede) is applied by callers, as before. Motionless
-// contexts (the ticker, any non-live render) pass frame 0 for the static glyph.
-func StatusGlyph(lifecycle string, frame int) string {
+// StatusGlyph is the 2-col gutter's status mark — ONE steady 4-glyph vocabulary
+// (the calm-board subtraction, charter D14): ● in_progress, ◐ blocked,
+// ○ ready|open, ✓ done|closed. There is no animation: liveness is carried by the
+// NOW band's ticking claim age and the flash-on-change emphasis, never a spinning
+// glyph, so a resting row is dead still. Selection is a separate marker
+// (SelectionMarker) rendered in the column before it; styling (the role tint /
+// dim recede) is applied by callers, as before. An unknown lifecycle degrades to
+// the neutral "·" dot.
+func StatusGlyph(lifecycle string) string {
 	switch lifecycle {
 	case "in_progress":
-		if frame < 0 {
-			frame = 0
-		}
-		return spinnerFrames[frame%len(spinnerFrames)]
+		return "●"
 	case "blocked":
 		return "◐"
 	case "done", "closed":
 		return "✓"
 	case "ready", "open":
-		return "☐"
+		return "○"
 	default:
 		return "·"
 	}
 }
 
-// SelectionMarker is the cursor's ▶ in the gutter's leading column (the
-// "ready-marker": it points at the row you'd act on). A space keeps every
-// non-selected row's glyph column-aligned.
+// SelectionMarker is the cursor's ▎ left bar in the gutter's leading column — a
+// calm vertical rule beside the row you'd act on (the calm-board subtraction
+// retired the louder ▶ arrow). A space keeps every non-selected row's glyph
+// column-aligned.
 func SelectionMarker(selected bool) string {
 	if selected {
-		return "▶"
+		return "▎"
 	}
 	return " "
 }
@@ -193,20 +184,15 @@ func scaleFill(met, total, cells int) int {
 	return filled
 }
 
-// EpicBar is the fixed-width progress bar in an epic header ("▰▰▰▰▱▱▱").
-func EpicBar(done, total int) string {
-	const cells = 7
-	if total <= 0 {
-		return strings.Repeat("▱", cells)
+// criteriaFraction is the calm-board criteria token: the bare "met/total" digits
+// ("2/3"), no ▰▱ bar (the subtraction pass retired the meter's cells; digits
+// carry the same information without a second glyph vocabulary). Empty for a nil
+// or zero-total Criteria, so a task with no criteria costs no token.
+func criteriaFraction(c *Criteria) string {
+	if c == nil || c.Total <= 0 {
+		return ""
 	}
-	if done < 0 {
-		done = 0
-	}
-	if done > total {
-		done = total
-	}
-	filled := scaleFill(done, total, cells)
-	return strings.Repeat("▰", filled) + strings.Repeat("▱", cells-filled)
+	return fmt.Sprintf("%d/%d", c.Met, c.Total)
 }
 
 // epicProgress returns (done, total) for an epic: folded-done are all done,
@@ -224,9 +210,11 @@ func epicProgress(e Epic) (done, total int) {
 
 // EpicHeader is the rule-style section header:
 //
-//	── Cloud GUI epic ───────────── 7/12 ▰▰▰▰▱▱▱
+//	── Cloud GUI epic ───────────────────────────── 7/12
 //
-// A Dormant epic renders exactly the same header line (its children are folded
+// The calm-board subtraction retired the ▰▱ progress bar; the dim "7/12" digits
+// carry the same completion at a glance without a second glyph vocabulary. A
+// Dormant epic renders exactly the same header line (its children are folded
 // away by the caller), so an idle goal collapses to one glanceable rule.
 func EpicHeader(e Epic, width int) string {
 	if width < 8 {
@@ -243,9 +231,7 @@ func EpicHeader(e Epic, width int) string {
 		}
 		return left + strings.Repeat("─", mid)
 	}
-	frac := fmt.Sprintf("%d/%d", done, total)
-	bar := EpicBar(done, total)
-	right := frac + " " + bar
+	right := fmt.Sprintf("%d/%d", done, total)
 	rightW := disp(right)
 
 	const lead = "── "
@@ -279,59 +265,53 @@ func titleStyleFor(lifecycle string) lipgloss.Style {
 	}
 }
 
-// rowMeta is the right-aligned, state-specific meta for a collapsed task row.
-// It returns the plain text plus the styled text (same display width) so the
-// caller can right-align on the plain width and print the styled version.
+// rowMeta is the ONE dim right-aligned token a collapsed spine row wears (the
+// calm-board subtraction, charter D14): criteria meters, twin glyphs and
+// suggested chips all left the list — they reappear in the detail view where a
+// reader asked for them. It returns the plain text plus the styled text (same
+// display width) so the caller can right-align on the plain width and print the
+// styled version. One token per state:
+//
+//   - in_progress: "worker age" (claim-age tinted by the lease), or the stale
+//     day-age when the row is in_progress but unclaimed (no lease to alarm it);
+//   - blocked:     "blocked" (warn), or the stale day-age once it has rotted;
+//   - ready/open:  the stale day-age when stale, else the priority;
+//   - done/closed: the resolved age.
 func rowMeta(t Task, now time.Time) (plain, styled string) {
-	var parts []string  // plain
-	var sparts []string // styled, index-aligned with parts
-	add := func(p, s string) {
-		if p == "" {
-			return
-		}
-		parts = append(parts, p)
-		sparts = append(sparts, s)
-	}
-
-	if m := Meter(t.Criteria); m != "" {
-		add(m, dimStyle.Render(m))
-	}
-
 	switch t.Lifecycle {
 	case "in_progress":
 		if t.Claim != nil && t.Claim.Worker != "" {
-			add(t.Claim.Worker, dimStyle.Render(t.Claim.Worker))
+			worker := t.Claim.Worker
 			if age := AgeBadge(t.Claim.ClaimedAt, now); age != "" {
 				st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
-				add(age, st.Render(age))
+				return worker + " " + age, dimStyle.Render(worker) + " " + st.Render(age)
 			}
-		} else if p, s := staleBadge(t, now); p != "" {
-			// An UNCLAIMED in_progress row has no claim-age tint to alarm it —
-			// day-scale staleness must still be impossible to miss.
-			add(p, s)
+			return worker, dimStyle.Render(worker)
 		}
+		// An UNCLAIMED in_progress row has no claim-age tint — day-scale
+		// staleness must still be impossible to miss.
+		return staleBadge(t, now)
 	case "blocked":
-		tok := "blocked"
-		if t.DependencyCount > 0 {
-			tok = fmt.Sprintf("blocked ·%d", t.DependencyCount)
-		}
-		add(tok, warnStyle.Render(tok))
 		if p, s := staleBadge(t, now); p != "" {
-			add(p, s)
+			return p, s
 		}
+		return "blocked", warnStyle.Render("blocked")
 	case "ready", "open":
-		if t.Priority != "" {
-			add(t.Priority, dimStyle.Render(t.Priority))
-		}
 		if p, s := staleBadge(t, now); p != "" {
-			add(p, s)
+			return p, s
 		}
+		if t.Priority != "" {
+			return t.Priority, dimStyle.Render(t.Priority)
+		}
+		return "", ""
 	case "done", "closed":
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
-			add(age, dimStyle.Render(age))
+			return age, dimStyle.Render(age)
 		}
+		return "", ""
+	default:
+		return staleBadge(t, now)
 	}
-	return strings.Join(parts, "  "), strings.Join(sparts, "  ")
 }
 
 // staleBadge returns the day-scale age token (plain, styled) for a non-terminal
@@ -354,67 +334,44 @@ func staleBadge(t Task, now time.Time) (plain, styled string) {
 // only the glyph + title (the graceful sub-60-col degrade).
 const dropMetaBelow = 52
 
-// TaskRow renders one task. Collapsed = a single line
+// TaskRow renders one task. Collapsed = a single calm line
 //
-//	indent + ▸glyph + [⧉] + title  ·chips·  …right-meta
+//	indent + ▎glyph + title              …right-meta
 //
-// expanded = that line plus hanging-indent detail lines. Everything is
-// width-safe. sectionTag is the tag of the section the row sits under (the
-// enclosing derived-cluster key; "" in epics/NOW/orphans): a chip equal to it
-// is suppressed so a row never restates its own section. Column priority when
-// the pane is tight: title (never below 8 cols) > chips > right-meta. Meta
-// sheds first, then chips; below dropMetaBelow the row is glyph+title only.
-// frame is the heartbeat index threaded down to the status glyph (an
-// in_progress row spins with it); the caller passes st.Frame (0 at rest).
-func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag string, frame int, now time.Time) []string {
+// expanded = that line plus a minimal hanging-indent detail stub. The calm-board
+// subtraction stripped the list to its essence: ONE status glyph in the gutter,
+// a monochrome-dim title, and ONE dim right-meta token — chips, twin ⧉ glyphs and
+// criteria meters all moved to the detail view. Everything is width-safe; when
+// tight the meta sheds first (title never clips below 8 cols), and below
+// dropMetaBelow the row is glyph + title only.
+func TaskRow(t Task, selected, expanded bool, indent, width int, now time.Time) []string {
 	role := RoleFor(t, now)
 	marker := SelectionMarker(selected)
-	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle, frame))
+	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
 	// Gutter is a fixed 2 display columns: selection marker + status glyph.
 	gutter := marker + glyph
 	lead := strings.Repeat(" ", indent) + gutter + " "
 	leadW := indent + 2 + 1
 	tStyle := titleStyleFor(t.Lifecycle)
 
-	// Twin marker (decision 14): a warn-tinted ⧉ layered before the title of any
-	// suspected near-duplicate. Two display columns (glyph + space) charged
-	// against the title budget — it never disturbs the fixed gutter.
-	twin, twinW := "", 0
-	if t.TwinOf != "" {
-		twin = warnStyle.Render("⧉") + " "
-		twinW = 2
-	}
-
 	var line string
 	if width < dropMetaBelow {
-		// Narrow degrade: glyph + [twin] + title only (no chips, no meta).
-		line = lead + twin + tStyle.Render(truncate(t.Title, width-leadW-twinW))
+		// Narrow degrade: glyph + title only (no meta).
+		line = lead + tStyle.Render(truncate(t.Title, width-leadW))
 	} else {
 		metaPlain, metaStyled := rowMeta(t, now)
 		metaW := disp(metaPlain)
 
 		// Reserve the right-meta first — it sheds first when the row is tight.
-		titleBudget := width - leadW - twinW
+		titleBudget := width - leadW
 		if metaPlain != "" && titleBudget-metaW-2 >= 8 {
 			titleBudget -= metaW + 2 // 2 = min gap before meta
 		} else {
 			metaPlain, metaStyled, metaW = "", "", 0
 		}
 
-		// Title takes its natural width (up to the budget); chips get the
-		// leftover, after a 2-space gap — so a long title squeezes chips out
-		// before it clips itself.
 		title := truncate(t.Title, titleBudget)
-		chipBudget := titleBudget - disp(title) - 2
-		chips := ""
-		if chipBudget >= chipMinBudget {
-			chips = Chips(t.Labels, t.Suggested, sectionTag, chipBudget)
-		}
-
-		left := lead + twin + tStyle.Render(title)
-		if chips != "" {
-			left += "  " + chips
-		}
+		left := lead + tStyle.Render(title)
 		if metaPlain == "" {
 			line = left
 		} else {
@@ -433,45 +390,20 @@ func TaskRow(t Task, selected, expanded bool, indent, width int, sectionTag stri
 	return out
 }
 
-// expandedDetail is the hanging-indent body shown under an expanded row.
+// expandedDetail is the MINIMAL hanging-indent stub shown under an expanded row
+// (charter D23): the subtraction pass shrank inline expand to a criteria stub +
+// one dim meta line so `enter` stays alive until the navigation shell replaces
+// the whole mechanism with a real detail frame next wave. Labels, twin naming and
+// dependency prose all moved to that frame — here a thin task stays thin.
 func expandedDetail(t Task, indent, width int, now time.Time) []string {
 	hang := strings.Repeat(" ", indent+3) // align under the title column
 	var lines []string
-	emit := func(s string) {
-		if s == "" {
-			return
-		}
-		lines = append(lines, dimStyle.Render(truncate(hang+s, width)))
-	}
 
-	// The criteria line is a real ☐/☑ checklist (decision 18): watching an agent
-	// tick a box is the board's checklists-that-fill-themselves moment. It
-	// returns pre-styled lines (met ok-tinted, unmet dim) and falls back to the
-	// compact "criteria ▰▰▱ 2/3" meter when only the counter survived, so it is
-	// appended directly rather than through the dim-wrapping emit.
+	// The criteria stub is a real ○/✓ checklist — watching an agent tick a box is
+	// the board's checklists-that-fill-themselves moment. It returns pre-styled
+	// lines (met ok-tinted, unmet dim), so it is appended directly.
 	lines = append(lines, CriteriaChecklist(t.CriteriaItems, t.Criteria, indent, width)...)
-	if len(t.Labels) > 0 {
-		// The detail line has room, so EVERY label paints (ChipsAll — the
-		// expanded view is the one place the full tag set must be visible) with
-		// its identity hue true (no outer dim wrapper), so the same tag reads
-		// the same color here as on the collapsed row.
-		if chips := ChipsAll(t.Labels, "", "", width-len(hang)-len("labels ")); chips != "" {
-			lines = append(lines, truncate(hang+dimStyle.Render("labels ")+chips, width))
-		}
-	}
-	if t.TwinOf != "" {
-		// Name the twin partner (decision 14) in words: BuildBoard precomputes the
-		// partner title onto the Task, so the expanded row reads "twin ⧉ 'Add a SUM
-		// function'" instead of an opaque doc id. Fall back to the doc id only when
-		// the title is unknown (empty-titled partner), so it never renders blank.
-		partner := t.TwinTitle
-		if partner == "" {
-			partner = t.TwinOf
-		}
-		emit(fmt.Sprintf("twin ⧉ '%s'", partner))
-	}
-	deps := depSummary(t)
-	emit(deps)
+
 	if t.Priority != "" || !t.UpdatedAt.IsZero() {
 		bc := t.Priority
 		if age := AgeBadge(t.UpdatedAt, now); age != "" {
@@ -480,23 +412,11 @@ func expandedDetail(t Task, indent, width int, now time.Time) []string {
 			}
 			bc += "updated " + age
 		}
-		emit(bc)
+		if bc != "" {
+			lines = append(lines, dimStyle.Render(truncate(hang+bc, width)))
+		}
 	}
 	return lines
-}
-
-func depSummary(t Task) string {
-	var b []string
-	if t.DependencyCount > 0 {
-		b = append(b, fmt.Sprintf("%d blocking", t.DependencyCount))
-	}
-	if t.DependentCount > 0 {
-		b = append(b, fmt.Sprintf("%d dependent", t.DependentCount))
-	}
-	if len(b) == 0 {
-		return ""
-	}
-	return "deps " + strings.Join(b, " · ")
 }
 
 // criteriaCap is how many checklist lines CriteriaChecklist keeps when it
@@ -506,8 +426,8 @@ func depSummary(t Task) string {
 // unfolded checklist is criteriaCap+1 lines.
 const criteriaCap = 8
 
-// CriteriaChecklist renders acceptance criteria as a real ☐/☑ checklist — one
-// hanging-indent line per criterion, a met item ok-tinted (its ☑ reads as work
+// CriteriaChecklist renders acceptance criteria as a real ○/✓ checklist — one
+// hanging-indent line per criterion, a met item ok-tinted (its ✓ reads as work
 // that has LANDED, the fleet's checklists-that-fill-themselves moment) and an
 // unmet item dim. It is the expanded-detail upgrade of the compact Meter: when
 // the decoded item list is present it paints the text; when only the {met,total}
@@ -534,9 +454,9 @@ func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []
 	}
 	lines := make([]string, 0, len(shown)+1)
 	for _, it := range shown {
-		glyph, style := "☐", dimStyle
+		glyph, style := "○", dimStyle
 		if it.Met {
-			glyph, style = "☑", okStyle
+			glyph, style = "✓", okStyle
 		}
 		line := hang + glyph
 		if it.Criterion != "" {
@@ -552,26 +472,20 @@ func CriteriaChecklist(items []CriterionItem, c *Criteria, indent, width int) []
 
 // NowCard is a pinned two-line claim card:
 //
-//	◴ Wire the SSE live bridge
-//	   opus-3 · 4m · ▰▰▱ 2/3 · Cloud GUI epic
+//	● Wire the SSE live bridge
+//	   opus-3 · 4m · 2/3 · Cloud GUI epic
 //
 // breadcrumb is the parent epic's title (the caller resolves ParentID).
 // NOW cards are cursor rows (the first indexes in the shell's visibleRows), so
-// like TaskRow they carry a leading selection-marker column: ▶ when the cursor
-// is on this card, a space otherwise (keeps every card's glyph aligned).
-func NowCard(t Task, breadcrumb string, selected bool, width, frame int, now time.Time) []string {
+// like TaskRow they carry a leading selection-marker column: ▎ when the cursor
+// is on this card, a space otherwise (keeps every card's glyph aligned). The
+// calm-board subtraction retired the animated glyph, the ▰▱ meter (digits stay)
+// and the twin ⧉ marker (it lives in the detail view now).
+func NowCard(t Task, breadcrumb string, selected bool, width int, now time.Time) []string {
 	role := RoleFor(t, now)
-	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle, frame))
-	// Twin marker (decision 14), same ⧉ TaskRow wears: a claim on a suspected
-	// near-duplicate is the board's loudest "two of us are doing the same work"
-	// moment, so the pinned card may not hide it.
-	twin, twinW := "", 0
-	if t.TwinOf != "" {
-		twin = warnStyle.Render("⧉") + " "
-		twinW = 2
-	}
-	title := truncate(t.Title, width-3-twinW)
-	line1 := SelectionMarker(selected) + glyph + " " + twin + titleStyle.Render(title)
+	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
+	title := truncate(t.Title, width-3)
+	line1 := SelectionMarker(selected) + glyph + " " + titleStyle.Render(title)
 
 	var sparts []string
 	add := func(p, s string) {
@@ -587,8 +501,8 @@ func NowCard(t Task, breadcrumb string, selected bool, width, frame int, now tim
 			add(age, st.Render(age))
 		}
 	}
-	if m := Meter(t.Criteria); m != "" {
-		add(m, dimStyle.Render(m))
+	if f := criteriaFraction(t.Criteria); f != "" {
+		add(f, dimStyle.Render(f))
 	}
 	if breadcrumb != "" {
 		add(breadcrumb, dimStyle.Render(breadcrumb))

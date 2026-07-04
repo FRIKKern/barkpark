@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/semrole"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 )
 
 // TestRoleForParityWithSemrole locks the board's lifecycle→role mapping to the
@@ -109,57 +107,6 @@ func TestStaleRole(t *testing.T) {
 	}
 }
 
-// TestChipHuesEmitAndNeverMasqueradeAsState forces a truecolor profile (tests
-// run without a TTY, so lipgloss otherwise emits no ANSI and this whole class
-// of bug hides) and proves, at the byte level, that (1) every chip slot
-// actually emits a colored sequence, (2) the six hues are mutually distinct,
-// and (3) no chip hue equals any of the four ROLE hues — identity color must
-// never be readable as ok/info/warn/danger state.
-func TestChipHuesEmitAndNeverMasqueradeAsState(t *testing.T) {
-	oldp := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
-
-	roles := map[string]string{
-		"ok":      okStyle.Render("x"),
-		"info":    infoStyle.Render("x"),
-		"warn":    warnStyle.Render("x"),
-		"danger":  dangerStyle.Render("x"),
-		"neutral": neutralStyle.Render("x"),
-		"dim":     dimStyle.Render("x"),
-	}
-	seen := map[string]int{}
-	for i := 0; i < chipSlotCount; i++ {
-		seq := chipStyle(i).Render("x")
-		if seq == "x" {
-			t.Errorf("chip slot %d emits no color under truecolor", i)
-		}
-		if prev, dup := seen[seq]; dup {
-			t.Errorf("chip slots %d and %d share one hue — tags would falsely read as related", prev, i)
-		}
-		seen[seq] = i
-		for role, rseq := range roles {
-			if seq == rseq {
-				t.Errorf("chip slot %d renders identically to the %s role — identity masquerades as state", i, role)
-			}
-		}
-	}
-}
-
-// TestChipStyleBounds proves the defensive modulo: an out-of-range slot (a raw
-// hash handed in instead of a chipSlot result) wraps into the palette rather
-// than panicking, and every in-range slot resolves to a distinct-index style.
-func TestChipStyleBounds(t *testing.T) {
-	if chipStyle(chipSlotCount).GetForeground() != chipStyle(0).GetForeground() {
-		t.Errorf("chipStyle(%d) should wrap to slot 0", chipSlotCount)
-	}
-	if chipStyle(-1).GetForeground() != chipStyle(chipSlotCount-1).GetForeground() {
-		t.Errorf("chipStyle(-1) should wrap to the last slot")
-	}
-	// All chipSlotCount hues are configured (no zero-value gap).
-	for i := 0; i < chipSlotCount; i++ {
-		if chipStyle(i).GetForeground() == nil {
-			t.Errorf("chip slot %d has no configured hue", i)
-		}
-	}
-}
+// The chip-hue tests were retired with the hash-to-hue engine (charter D22):
+// labels are dim monochrome text now, so there is no per-tag palette left to
+// prove distinct or clear of the role hues.

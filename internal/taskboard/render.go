@@ -38,7 +38,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		height = 8
 	}
 
-	bottom := renderTicker(b.Events, len(b.Now), st.Frame, isSyncing(st), width, now)
+	bottom := renderTicker(b.Events, width, now)
 	// The action strip sits directly above the footer, and only when there is
 	// something to say — an empty strip costs no line, so an idle board is byte
 	// -identical to before this slice (the goldens stay green).
@@ -241,7 +241,7 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		}
 		// flashTitle lights line-1's title if this claim just changed; NowCard's
 		// existing ansi-aware truncation carries the emphasis through width-safely.
-		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, st.Frame, now)
+		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, now)
 		// The NOW band is the ONE place real work runs, so its claim age ticks in
 		// SECONDS (decision 19). NowCard builds line-1 (glyph, twin, title); render
 		// rebuilds line-2 so its age reads LiveElapsed instead of the coarse
@@ -301,12 +301,11 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
-// nowCardMeta rebuilds a NOW card's second line (worker · elapsed · meter ·
+// nowCardMeta rebuilds a NOW card's second line (worker · elapsed · criteria ·
 // breadcrumb) so the claim age reads LiveElapsed's ticking seconds instead of
 // NowCard's coarse AgeBadge (decision 19). It mirrors NowCard's line-2 structure
 // exactly — same order, same " · " join, same width clamp, same claimRole lease
-// tint — differing ONLY in the age token, because the frozen NowCard (owned by a
-// sibling slice this wave) cannot itself be taught the seconds vocabulary here.
+// tint, same calm criteria digits — differing ONLY in the age token.
 func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 	var sparts []string
 	add := func(p, s string) {
@@ -322,8 +321,8 @@ func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 			add(el, st.Render(el))
 		}
 	}
-	if m := Meter(t.Criteria); m != "" {
-		add(m, dimStyle.Render(m))
+	if f := criteriaFraction(t.Criteria); f != "" {
+		add(f, dimStyle.Render(f))
 	}
 	if breadcrumb != "" {
 		add(breadcrumb, dimStyle.Render(breadcrumb))
@@ -353,10 +352,10 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 	cursorLine = -1
 	selIdx := len(b.Now) // NOW cards own the first indexes (renderNowBand marks them)
 	emit := func(s string) { lines = append(lines, s) }
-	// emitTask paints one navigable task row. sectionTag is the enclosing cluster
-	// key ("" in epics/orphans) so TaskRow can suppress the chip that would merely
-	// re-name the section the row already sits in.
-	emitTask := func(t Task, sectionTag string) {
+	// emitTask paints one navigable task row. The calm-board subtraction stripped
+	// the row to gutter-glyph + title + one meta token, so it no longer needs the
+	// enclosing section tag (chips are gone).
+	emitTask := func(t Task) {
 		selected := selIdx == st.Cursor
 		if selected {
 			cursorLine = len(lines)
@@ -364,7 +363,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		expanded := st.Expanded[t.DocID]
 		// Light the title if this row's task just changed (one-shot flash); the
 		// DocID is unchanged, so the expanded lookup above still resolves.
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, expanded, childIndent, width, sectionTag, st.Frame, now) {
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, expanded, childIndent, width, now) {
 			emit(ln)
 		}
 		selIdx++
@@ -395,7 +394,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			continue
 		}
 		for _, c := range e.Children {
-			emitTask(c, "")
+			emitTask(c)
 		}
 		if e.DoneFolded > 0 {
 			emit(dimStyle.Render(fmt.Sprintf("  +%d done", e.DoneFolded)))
@@ -415,7 +414,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			continue
 		}
 		for _, m := range cl.Tasks {
-			emitTask(m, cl.Key)
+			emitTask(m)
 		}
 		if cl.DoneFolded > 0 {
 			emit(dimStyle.Render(fmt.Sprintf("  +%d done", cl.DoneFolded)))
@@ -435,7 +434,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 		emit(EpicHeader(Epic{Root: Task{Title: title}}, width))
 		for _, o := range b.Orphans {
-			emitTask(o, "")
+			emitTask(o)
 		}
 		if b.OrphansFolded > 0 {
 			emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
@@ -455,37 +454,38 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 }
 
 // headerLine renders an epic header, swapping the rule's leading dash for the
-// selection marker when the cursor sits on it (headers are navigable rows —
-// enter/h/l fold them, so the selection must be visible there). ▶ and ─ are
+// ▎ selection marker when the cursor sits on it (headers are navigable rows —
+// enter/h/l fold them, so the selection must be visible there). ▎ and ─ are
 // both one column, so the swap never disturbs the width budget.
 func headerLine(e Epic, selected bool, width int) string {
 	h := EpicHeader(e, width)
 	if selected && strings.HasPrefix(h, "─") {
-		h = "▶" + strings.TrimPrefix(h, "─")
+		h = "▎" + strings.TrimPrefix(h, "─")
 	}
 	return h
 }
 
 // clusterHeaderLine renders a derived cluster's section header — the same
-// rule-style line an epic wears, but the title is the cluster key in its chip
-// hue (chipStyle(chipSlot(Key))) with the taxonomy prefix stripped, trailed by a
-// dim "~" that marks the grouping as DERIVED (inferred from a tag, not authored
-// structure). It carries the done/total progress rail over the cluster's members
-// (reusing the epicProgress shape) and swaps its leading dash for the selection
-// marker when the cursor sits on it (cluster headers are navigable — enter/h/l
-// fold them). The final truncate is the width safety net at any pane size.
+// rule-style line an epic wears, but the title is the cluster key rendered
+// MONOCHROME-DIM (the calm-board subtraction retired the per-tag chip hue — a
+// label is identity, not state), with its taxonomy prefix stripped and trailed by
+// a dim "~" that marks the grouping as DERIVED (inferred from a tag, not authored
+// structure). It carries the dim done/total DIGITS over the cluster's members
+// (the ▰▱ bar is gone, like every other section) and swaps its leading dash for
+// the ▎ selection marker when the cursor sits on it (cluster headers are
+// navigable — enter/h/l fold them). The final truncate is the width safety net.
 func clusterHeaderLine(c Cluster, selected bool, width int) string {
-	name := chipText(c.Key)
+	name := clusterDisplayName(c.Key)
 	if width < 8 {
 		return truncate(name, width)
 	}
-	styledName := chipStyle(chipSlot(c.Key)).Render(name) + " " + dimStyle.Render("~")
+	styledName := dimStyle.Render(name + " ~")
 
 	head := "── "
 	if selected {
-		head = "▶─ "
+		head = "▎─ "
 	}
-	leadW := disp(head) + disp(styledName) + 1 // head + name + "~" + trailing space
+	leadW := disp(head) + disp(styledName) + 1 // head + "name ~" + trailing space
 
 	done, total := epicProgress(Epic{Children: c.Tasks, DoneFolded: c.DoneFolded})
 	if total == 0 {
@@ -495,13 +495,26 @@ func clusterHeaderLine(c Cluster, selected bool, width int) string {
 		}
 		return truncate(head+styledName+" "+strings.Repeat("─", mid), width)
 	}
-	right := fmt.Sprintf("%d/%d", done, total) + " " + EpicBar(done, total)
+	right := fmt.Sprintf("%d/%d", done, total)
 	const minDashes = 3
 	mid := width - leadW - 1 - disp(right)
 	if mid < minDashes {
 		mid = minDashes
 	}
 	return truncate(head+styledName+" "+strings.Repeat("─", mid)+" "+right, width)
+}
+
+// clusterDisplayName is a cluster key's display form: one proj:/area: taxonomy
+// prefix stripped ("proj:sheets-parity" → "sheets-parity"); a plain-label key is
+// shown verbatim. It replaces chips.go's chipText now that the hash-to-hue chip
+// engine is retired.
+func clusterDisplayName(key string) string {
+	for _, p := range []string{labelProjPrefix, labelAreaPrefix} {
+		if strings.HasPrefix(key, p) && len(key) > len(p) {
+			return key[len(p):]
+		}
+	}
+	return key
 }
 
 // isSyncing is the honest first-paint state: we are polling for the very first
@@ -573,64 +586,26 @@ func windowSpine(lines []string, cursorLine, avail, width int) []string {
 
 // ── Ticker + footer (pinned bottom) ──────────────────────────────────────────
 
-// renderTicker draws the fixed event tail: a rule, then up to three content
-// lines. In flight (unexpired claims) or while syncing, ONE restrained working
-// line heads the tail (decision 19) and it CONSUMES one of the three content
-// lines rather than growing the cap — the ticker never exceeds four lines, so
-// with a full event tail an in-flight ticker is exactly as tall as a still one
-// (with fewer than three events it may claim one line back for the head: real
-// work landing is allowed to cost a line, chrome is not). At rest (inFlight 0,
-// not syncing) no working line is emitted and the output is byte-identical to
-// before this slice: stillness is the honest signal, never a dimmed placeholder.
-func renderTicker(events []Event, inFlight, frame int, syncing bool, width int, now time.Time) []string {
+// renderTicker draws the fixed event tail: a rule, then ONE dim last-event line
+// (the calm-board subtraction, charter D14 — the three-line ticker and its
+// verb-cycling working line are retired; the queue breathes through the NOW
+// band's ticking claims and flash-on-change, not a personality line). At rest
+// with no events it reads the honest quiet "no recent activity"; otherwise it
+// shows the single freshest event. Always exactly two lines tall.
+func renderTicker(events []Event, width int, now time.Time) []string {
 	lines := []string{dimStyle.Render(strings.Repeat("─", width))}
-	const contentLines = 3
-	avail := contentLines
-	if inFlight > 0 || syncing {
-		lines = append(lines, workingLine(inFlight, frame, width))
-		avail--
-	}
 	if len(events) == 0 {
-		if len(lines) == 1 { // still AND empty → the honest quiet ticker (unchanged)
-			return append(lines, dimStyle.Render("no recent activity"))
-		}
-		return lines // the working head is already the whole tail
+		return append(lines, dimStyle.Render("no recent activity"))
 	}
-	n := len(events)
-	if n > avail {
-		n = avail
-	}
-	for _, e := range events[:n] {
-		lines = append(lines, dimStyle.Render(truncate(eventSentence(e, now), width)))
-	}
-	return lines
-}
-
-// workingLine is the ticker's in-flight narration (decision 19): an info-tinted
-// ✻ leading a restrained lowercase gerund that cycles with the heartbeat frame,
-// then the count of claims in flight. Personality lives ONLY here, and only
-// while real work runs. With no claims yet (a first sync in progress) it reads
-// "✻ syncing…" — honest that nothing is claimed, we are just fetching. Dim so it
-// sits calm under the rule; width-safe via the ansi-aware truncate.
-func workingLine(inFlight, frame, width int) string {
-	star := infoStyle.Render("✻")
-	var body string
-	if inFlight > 0 {
-		body = fmt.Sprintf(" %s… · %d in flight", WorkingVerb(frame), inFlight)
-	} else {
-		body = " syncing…"
-	}
-	return truncate(star+dimStyle.Render(body), width)
+	return append(lines, dimStyle.Render(truncate(eventSentence(events[0], now), width)))
 }
 
 func eventSentence(e Event, now time.Time) string {
 	verb := strings.TrimPrefix(e.Mutation, "task.")
 	// The ticker glyph borrows the RESULTING lifecycle's StatusGlyph, so the tail
-	// reads in the same board-wide checklist grammar as the spine: closed→done ✓,
-	// created→open ☐, blocked→◐, claimed→in_progress. The ticker is a motionless
-	// context — a dim tail of PAST events — so it passes frame 0 (decision 18):
-	// the in_progress spinner never animates here, it renders its static glyph.
-	glyph := StatusGlyph(eventLifecycle(verb), 0)
+	// reads in the same board-wide status grammar as the spine: closed→done ✓,
+	// created→open ○, blocked→◐, claimed→in_progress ●.
+	glyph := StatusGlyph(eventLifecycle(verb))
 	s := fmt.Sprintf("%s %s '%s'", glyph, verb, e.DocID)
 	if age := AgeBadge(e.At, now); age != "" {
 		s += " · " + age
@@ -655,14 +630,15 @@ func eventLifecycle(verb string) string {
 	}
 }
 
-// renderFooter is the one hint line. The full wording is 61 cols — one over the
-// 60-col charter minimum — so a tight pane drops the word "move" (jk next to the
-// other single-key verbs still reads as motion) rather than blind-truncating the
-// LAST verb off the end; the trailing truncate stays as the sub-60 safety net.
+// renderFooter is the one hint line (the calm-board subtraction dropped the `t`
+// tag verb — the derived-tag suggestion left the list with the chips). A tight
+// pane drops the word "move" (jk next to the other single-key verbs still reads
+// as motion) rather than blind-truncating the LAST verb off the end; the trailing
+// truncate stays as the sub-60 safety net.
 func renderFooter(width int) string {
-	hint := "jk move · enter expand · c claim · x close · t tag · o studio"
+	hint := "jk move · enter open · c claim · x close · o studio"
 	if disp(hint) > width {
-		hint = "jk · enter expand · c claim · x close · t tag · o studio"
+		hint = "jk · enter open · c claim · x close · o studio"
 	}
 	return dimStyle.Render(truncate(hint, width))
 }

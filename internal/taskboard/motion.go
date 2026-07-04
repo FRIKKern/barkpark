@@ -50,31 +50,11 @@ func LiveElapsed(claimedAt, now time.Time) string {
 	return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
 }
 
-// workingVerbs is WorkingVerb's small, curated, lowercase gerund list. Restrained
-// by design (decision 19): personality is confined to the ticker's one waiting
-// line, never an exclamation, never a data line. reticulating is the one wink.
-var workingVerbs = []string{
-	"working",
-	"herding",
-	"fetching",
-	"closing",
-	"shipping",
-	"gathering",
-	"tending",
-	"reticulating",
-}
-
-// WorkingVerb is the ticker head's gerund, cycled from the heartbeat frame so it
-// changes about every three seconds at the 1s tick cadence — each verb holds
-// frame/3 (decision 19). It is a pure function of the frame index, so a motion
-// golden at a fixed Frame is byte-stable (WorkingVerb(4) is always "herding").
-// A negative frame clamps to the first verb.
-func WorkingVerb(frame int) string {
-	if frame < 0 {
-		frame = 0
-	}
-	return workingVerbs[(frame/3)%len(workingVerbs)]
-}
+// The ticker's cycling working-verb line was retired by the calm-board
+// subtraction (charter D14): the queue breathes through the NOW band's ticking
+// claim age and flash-on-change, not a personality line. WorkingVerb and its
+// gerund list are gone; LiveElapsed and flashStyle — real, information-carrying
+// motion — stay.
 
 // flashStyle is the one-shot flash emphasis for a row whose task just changed
 // (decision 17). It tints the FOREGROUND only — never a background block —
