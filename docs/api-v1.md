@@ -3,13 +3,13 @@
 
 ## 1. Overview
 
-Frozen contract for all `/v1` endpoints: breaking changes to the shapes below bump the prefix to `/v2`; additive changes (new optional fields, error codes, mutation kinds) stay in v1.
+Frozen contract for all `/v1` endpoints: breaking changes to the shapes below bump the prefix to `/v2`; additive changes stay in v1.
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
-A **Workspace** is the tenancy boundary — every token binds to exactly one, every content read/write is workspace-scoped. Workspaces contain **Projects**, Projects contain **Datasets**, a Dataset holds **Documents** (§3). Content endpoints live under the scoped prefix `/w/:workspace_slug/p/:project_slug/v1/data/...` (`:dataset` is a string segment).
+A **Workspace** is the tenancy boundary — every token binds to exactly one, every content read/write is workspace-scoped. Workspaces contain **Projects**, Projects contain **Datasets**, a Dataset holds **Documents** (§3). Content endpoints live under the scoped prefix `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*`, `/v1/schemas/*`, other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`; the scoped prefix is canonical.
+**Flat alias — applies to every endpoint below.** Old flat paths (`/v1/data/:dataset/*` and other unprefixed `/v1/*` content routes) still work, resolving to `Default`/`Default`; the scoped prefix is canonical.
 
 ## 2. Base URL & Authentication
 
@@ -90,7 +90,7 @@ Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,acti
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Apply a batch of mutations atomically (one DB transaction). Body: `{ "mutations": [ <mutation>, ... ] }`. Any failure rolls back the entire batch.
+Apply a batch of mutations atomically (one DB transaction — any failure rolls back the batch). Body: `{ "mutations": [ <mutation>, ... ] }`.
 
 **Write gate.** Requires the `write` permission (read-only token → `403`, even on its own workspace); tenancy checked first (§2).
 
@@ -148,15 +148,15 @@ A **`bptk_` key IS an identity**: an operator mints one per outsider, who files/
 
 **Auth.** A `bptk_` key is refused by every non-ticket route — it projects tier `"none"` from `/v1/capabilities`. **Paused** → `403` `key paused` (reversible, thread kept); **revoked** → `401` (indistinguishable from no token); **rotate** = new secret, same identity row (history kept).
 
-**Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign ticket/asset → `404`. **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls (file · list · read).
+**Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign ticket/asset → `404`. **Write rate limits** (per key, per class; reads exempt): create **10/hr**, message **60/hr**, attachment **30/hr**; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** plus a `quickstart` card of curls.
 
-## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [token]
+## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [admin]
 
-Applies a batch of session ops; the op grammar is owned by the `Barkpark.Plugins.Sheets.Session` moduledoc — this is the contract summary.
+Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200 response's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), recompute refreshes values after the move, undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col:<0-based absolute index inside the rect>, dir:"asc"|"desc"}]}` — a PURE row permutation of the rect: formulas move VERBATIM (refs never rewritten; Excel semantics), recompute refreshes values, undo is the exact inverse permutation. Refusals: `sort_merge_overlap` / `sort_frozen_overlap` (rect must sit below the frozen band) / `invalid_sort_keys`.
 
-**Filtering** is per-viewer view-state in Studio + the `/sheets` reader — readers can filter; sorting is an edit mutation for editors only. There is deliberately NO filter wire endpoint; adding one would be a design regression, not a gap.
+**Filtering** is per-viewer view-state in Studio + the `/sheets` reader — readers can filter; sorting is an edit mutation for editors only. There is deliberately NO filter wire endpoint; adding one is a design regression, not a gap.
 
 ## 9. Error Codes
 
