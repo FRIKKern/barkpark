@@ -2733,14 +2733,48 @@
   // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
   // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
   // the call site, so escaping is unchanged).
+  // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
+  // born-failed GitHub-push family — a push conjures a deployment the builder
+  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
+  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
+  // side maps the raw machine reason to human copy at the JSON boundary, so the
+  // client usually already RECEIVES the human string — match a substring
+  // present in BOTH the raw form ("github push builds …", pinned by charter D3)
+  // and the humanized form ("… can't be built yet …") → idempotent: raw→human
+  // and human→human land on one output. Matched case-insensitively with the
+  // apostrophe normalized (U+2019 → ') so a byte-level drift in the server copy
+  // degrades only the re-mapping (their words show), never the classification.
+  function isGithubPushBlocked(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    var lc = reason.toLowerCase().replace(/\u2019/g, "'");
+    return lc.indexOf("github push builds") !== -1 ||
+      lc.indexOf("can't be built yet") !== -1 ||
+      lc.indexOf("cannot be built yet") !== -1;
+  }
+
+  // Map a raw internal builder failure_reason (from builder.go) to human copy,
+  // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
+  // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
+  // the call site, so escaping is unchanged).
   function failureCopy(reason) {
     if (!reason) return reason;
+    if (isGithubPushBlocked(reason))
+      return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
     if (reason.indexOf("artifact_url is empty") !== -1 ||
         reason.indexOf("unsupported artifact scheme") !== -1)
       return "The build source couldn't be fetched.";
     return reason;
+  }
+
+  // dwb-webhook-deploy / D11: BLOCKED-vs-CRASHED tone. A born-failed GitHub-push
+  // deploy is a capability that isn't enabled yet — not a crash. Classify the
+  // reason family so the render sites can paint it in a calm amber/informational
+  // tone instead of crash-red. Total: null/unknown → crashed.
+  function failureTone(reason) {
+    return isGithubPushBlocked(reason) ? "blocked" : "crashed";
   }
 
   // gh-6: one branch-preview row — its branch, a click-through to the preview
@@ -2755,7 +2789,7 @@
       : '<span class="dim">pending routing</span>';
     var when = d.became_live_at || d.updated_at || d.inserted_at;
     var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + branch + " &rarr; " + link + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
@@ -2804,7 +2838,7 @@
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
     var when = d.became_live_at || d.updated_at || d.inserted_at;
     var fail = (st === "failed" && d.failure_reason)
-      ? '<div class="deploy-fail">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+      ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
         '<div class="deploy-ref">' + ref + "</div>" +
         '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
@@ -3900,9 +3934,17 @@
   // renders it forward-compat: it shows as an upcoming pending step until the
   // gate lands, and an UNKNOWN step name (any future addition) renders
   // generically (label = the raw name), never crashing.
-  var SERVER_STEP_ORDER = ["create", "secure", "configure", "content", "verify", "ready"];
+  // dwb-17/D10: "freshen" is the go-live freshness rung — the provisioner
+  // fetch+compares against origin/main at the top of the chain and rebuilds
+  // when the box is behind, so a fresh instance never boots stale code. It
+  // slots between `create` and `secure` (freshen must precede migrate). It
+  // rides the exact "verify" forward-compat contract: the server may not emit
+  // it on every provision (only when it actually rebuilds), so it renders as an
+  // upcoming pending step until a `started` event lands — never a crash.
+  var SERVER_STEP_ORDER = ["create", "freshen", "secure", "configure", "content", "verify", "ready"];
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
+    freshen: "Updating to the latest Barkpark",
     secure: "Securing your domain",
     configure: "Configuring Barkpark",
     content: "Installing your content",
@@ -3911,7 +3953,7 @@
   };
   // Compact gerunds for the fleet-row chip ("configuring · 1m 42s").
   var SERVER_STEP_SHORT = {
-    create: "creating", secure: "securing", configure: "configuring",
+    create: "creating", freshen: "updating", secure: "securing", configure: "configuring",
     content: "installing", verify: "verifying", ready: "finishing"
   };
 
@@ -5143,7 +5185,7 @@
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
     globalThis.__bpTestHook({
       esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
-      failureCopy: failureCopy, liveEventTypes: Object.keys(TYPE_ACTIONS),
+      failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
       serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,

@@ -109,10 +109,11 @@ test("liveEventTypes (TYPE_ACTIONS keys) sorted equals the shared fixture", () =
 // invisible in the GUI (newStepStatuses drops unlabeled steps); a step missing
 // server-side is 422-swallowed. This pins the SPA side of that contract.
 
-test("provision step order carries the golden-path verify gate before ready", () => {
+test("provision step order carries the freshen rung and the golden-path verify gate before ready", () => {
   // Spread into a host-realm array — the vm sandbox's Array prototype differs.
+  // dwb-17/D10: "freshen" slots between create and secure (freshen precedes migrate).
   assert.deepEqual([...hooks.serverStepOrder], [
-    "create", "secure", "configure", "content", "verify", "ready",
+    "create", "freshen", "secure", "configure", "content", "verify", "ready",
   ]);
 });
 
@@ -434,6 +435,53 @@ test("failureCopy passes an unrecognized reason through unchanged", () => {
   assert.equal(hooks.failureCopy(""), "");
 });
 
+// ── dwb-webhook-deploy-artifact-gap: the born-failed GitHub-push copy + tone ──
+// The CP marks a GitHub push deployment born-failed (the builder can't run it
+// until the gh-1 App integration lands). FailureCopy.humanize maps the raw
+// machine reason to human copy at the JSON boundary, so the client usually
+// already receives the human string — the mapping must be IDEMPOTENT.
+
+const GH_HUMAN =
+  "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
+
+test("failureCopy: raw github-push reason → the exact server-humanized copy", () => {
+  assert.equal(
+    hooks.failureCopy(
+      "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy",
+    ),
+    GH_HUMAN,
+  );
+});
+
+test("failureCopy: the humanized github-push copy maps to itself (idempotent)", () => {
+  // The server humanizes at the JSON boundary, so the client typically receives
+  // the already-human string; re-running failureCopy must not double-map it.
+  assert.equal(hooks.failureCopy(GH_HUMAN), GH_HUMAN);
+});
+
+test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) still classifies", () => {
+  // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
+  // curly apostrophe, casing, or can't→cannot, the client must still recognize
+  // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
+  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  assert.equal(hooks.failureCopy(curly), GH_HUMAN);
+  assert.equal(hooks.failureTone(curly), "blocked");
+  assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");
+  assert.equal(hooks.failureTone("This commit cannot be built yet."), "blocked");
+});
+
+test("failureTone: github-push family is 'blocked' (raw + humanized), everything else 'crashed'", () => {
+  assert.equal(
+    hooks.failureTone("github push builds require the GitHub App integration (not yet available)"),
+    "blocked",
+  );
+  assert.equal(hooks.failureTone(GH_HUMAN), "blocked"); // matches the humanized twin too
+  assert.equal(hooks.failureTone("artifact_url is empty (P6 bp deploy must populate it)"), "crashed");
+  assert.equal(hooks.failureTone("some brand new builder error"), "crashed");
+  assert.equal(hooks.failureTone(null), "crashed"); // total over junk
+  assert.equal(hooks.failureTone(""), "crashed");
+});
+
 // ── launchEntitled: the client mirror of the server's Billing.entitled?/1 ────
 // billing.ex entitled?/1 gates the launch form. The client must agree case-for-
 // case so a paying customer (incl. a past_due one in grace) is never shown
@@ -575,12 +623,14 @@ test("fmtDur: A4 hour arm (≥60m) reads '2h 1m'", () => {
 
 // ── provisionSteps: the table test over every fixture the slice must handle ──
 
-test("provisionSteps: empty (legacy row) → all six known steps pending, elapsed null", () => {
+test("provisionSteps: empty (legacy row) → all seven known steps pending, elapsed null", () => {
   const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
-  assert.equal(rows.length, 6);
-  // D45 order: the gate probes BETWEEN content and ready, so it displays there.
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
-  assert.equal(rows[4].label, "Testing login & Studio"); // D45 label
+  assert.equal(rows.length, 7);
+  // dwb-17/D10 + D45 order: freshen sits between create and secure; the verify
+  // gate probes BETWEEN content and ready, so it displays there.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[1].label, "Updating to the latest Barkpark"); // dwb-17 freshen label
+  assert.equal(rows[5].label, "Testing login & Studio"); // D45 label
   for (const r of rows) {
     assert.equal(r.role, "pending");
     assert.equal(r.elapsedMs, null);
@@ -588,8 +638,8 @@ test("provisionSteps: empty (legacy row) → all six known steps pending, elapse
     assert.deepEqual([...r.probes], []);
   }
   // Total over junk: null bp never throws.
-  assert.equal(hooks.provisionSteps(null, NOW).length, 6);
-  assert.equal(hooks.provisionSteps(undefined).length, 6);
+  assert.equal(hooks.provisionSteps(null, NOW).length, 7);
+  assert.equal(hooks.provisionSteps(undefined).length, 7);
 });
 
 test("provisionSteps: partial (mid-configure) — done/done/active/pending…", () => {
@@ -602,12 +652,14 @@ test("provisionSteps: partial (mid-configure) — done/done/active/pending…", 
   ] };
   const rows = hooks.provisionSteps(bp, NOW);
   assert.deepEqual(norm(rows[0]), { step: "create", label: "Creating your server", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
-  assert.deepEqual(norm(rows[1]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
-  assert.deepEqual(norm(rows[2]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
-  assert.equal(rows[3].role, "pending"); // content
-  assert.equal(rows[3].elapsedMs, null);
-  assert.equal(rows[4].role, "pending"); // verify still upcoming
-  assert.equal(rows[5].role, "pending"); // ready last
+  assert.equal(rows[1].step, "freshen"); // dwb-17: unstarted freshen renders pending
+  assert.equal(rows[1].role, "pending");
+  assert.deepEqual(norm(rows[2]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
+  assert.deepEqual(norm(rows[3]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
+  assert.equal(rows[4].role, "pending"); // content
+  assert.equal(rows[4].elapsedMs, null);
+  assert.equal(rows[5].role, "pending"); // verify still upcoming
+  assert.equal(rows[6].role, "pending"); // ready last
 });
 
 test("provisionSteps: verify with probe lines → checklist under the step", () => {
@@ -616,7 +668,7 @@ test("provisionSteps: verify with probe lines → checklist under the step", () 
     { step: "verify", status: "progress", at: T(6), detail: "verify.login: 200 in 120ms" },
     { step: "verify", status: "progress", at: T(7), detail: "verify.query: 200 in 42ms" },
   ] };
-  const verify = hooks.provisionSteps(bp, NOW)[4];
+  const verify = hooks.provisionSteps(bp, NOW)[5]; // dwb-17: freshen shifted verify to index 5
   assert.equal(verify.role, "active");
   assert.equal(verify.caption, "Probing the golden path");   // the started narration
   assert.deepEqual([...verify.probes], ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"]);
@@ -639,8 +691,8 @@ test("provisionSteps: an UNKNOWN step name renders generically (label = raw name
     { step: "teardown", status: "started", at: T(0), detail: "cleaning up" },
   ] };
   const rows = hooks.provisionSteps(bp, NOW);
-  assert.equal(rows.length, 7); // six known + the appended unknown
-  const t = rows[6];
+  assert.equal(rows.length, 8); // seven known + the appended unknown
+  const t = rows[7];
   assert.equal(t.step, "teardown");
   assert.equal(t.label, "teardown"); // forward-compat: raw name, never undefined
   assert.equal(t.role, "active");
@@ -657,8 +709,9 @@ test("provisionSteps: absent / garbled timestamps → null elapsed, never NaN", 
   assert.equal(rows[0].role, "ok");
   assert.equal(rows[0].elapsedMs, null);
   assert.ok(!Number.isNaN(rows[0].elapsedMs));
-  assert.equal(rows[1].role, "active");
-  assert.equal(rows[1].elapsedMs, null); // active but no start stamp
+  assert.equal(rows[1].role, "pending"); // dwb-17: freshen, unstarted
+  assert.equal(rows[2].role, "active");  // secure, shifted by the freshen rung
+  assert.equal(rows[2].elapsedMs, null); // active but no start stamp
 });
 
 // ── provisionChip (Mount 3): current step label + total elapsed ─────────────

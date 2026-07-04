@@ -874,6 +874,18 @@ select.form-input {
 .deploy-ref .mono { font-family: var(--mono); }
 .deploy-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
 .deploy-fail { font-size: 12px; color: var(--destructive); margin-top: 4px; }
+/* dwb-webhook-deploy / D11: BLOCKED tone — a born-failed GitHub-push deploy is a
+   capability that isn't enabled yet, not a crash. Calm amber/informational, NOT
+   error-red. Warn tokens are theme-invariant (status hues are shared across
+   themes) and --warn-strong text on a --warn tint is the same pattern .dep-building
+   uses in both themes, so no [data-theme] override is needed. Pill stays "Failed". */
+.deploy-fail--blocked {
+  color: var(--warn-strong);
+  background: var(--warn-soft);
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+}
 /* dwb-19: the "last step before it broke" caption on the failed /new screen. */
 .new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; }
 
