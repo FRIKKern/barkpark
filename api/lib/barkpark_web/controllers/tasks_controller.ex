@@ -80,41 +80,11 @@ defmodule BarkparkWeb.TasksController do
     worker = params["worker"]
     limit = params["limit"] |> Params.parse_int(10) |> min(100) |> max(1)
 
-    in_progress =
-      from(d in Document,
-        where: d.type == "task",
-        where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
-        order_by: [desc: d.updated_at],
-        limit: 100
-      )
-      |> Params.maybe_filter_workspace(Keyword.get(scope, :workspace_id))
-      |> Params.maybe_filter_project(Keyword.get(scope, :project_id))
-      |> Params.maybe_filter_claim_worker(worker)
-      |> Repo.all()
+    %{in_progress: in_progress, recent_events: events, counts: lifecycle_counts} =
+      Tasks.prime([worker: worker, limit: limit] ++ scope)
 
     ready = Tasks.ready([limit: limit] ++ scope)
     counts = Params.batch_edge_counts(in_progress ++ ready)
-
-    events =
-      from(e in Barkpark.Content.MutationEvent,
-        where: e.type == "task" and like(e.mutation, "task.%"),
-        order_by: [desc: e.inserted_at],
-        limit: ^limit,
-        select: %{event: e.mutation, doc_id: e.doc_id, at: e.inserted_at}
-      )
-      |> Params.maybe_filter_event_workspace(Keyword.get(scope, :workspace_id))
-      |> Repo.all()
-
-    lifecycle_counts =
-      from(d in Document,
-        where: d.type == "task",
-        group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
-        select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
-      )
-      |> Params.maybe_filter_workspace(Keyword.get(scope, :workspace_id))
-      |> Params.maybe_filter_project(Keyword.get(scope, :project_id))
-      |> Repo.all()
-      |> Map.new()
 
     json(conn, %{
       ok: true,

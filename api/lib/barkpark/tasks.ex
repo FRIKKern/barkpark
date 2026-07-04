@@ -75,6 +75,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
+  alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Validation
 
@@ -257,6 +258,16 @@ defmodule Barkpark.Tasks do
   """
   @spec ready(keyword()) :: [Document.t()]
   defdelegate ready(opts \\ []), to: Queue
+
+  @doc """
+  One-call agent-rehydration reads for `GET /v1/tasks/prime`: `in_progress`
+  live claims (worker-narrowed when `:worker` is given), the last `:limit`
+  task `mutation_events` as lean rows, and lifecycle_status counts — all
+  tenancy-scoped. The `ready` head rides `ready/1` separately.
+  See `Barkpark.Tasks.Prime.prime/1`.
+  """
+  @spec prime(keyword()) :: Prime.result()
+  defdelegate prime(opts), to: Prime
 
   @doc """
   Claim ONE ready task atomically — W7-04 full primitives.
