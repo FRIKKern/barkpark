@@ -91,6 +91,11 @@
     .btn-ghost { border-color: transparent; color: var(--fg-dim, var(--fg)); }
     .btn-ghost:hover { background: var(--bg-alt); color: var(--fg); }
     .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+    /* The filter panel's Apply. Accent-on-paper both ways: the dark-red light
+       accent carries near-white ink, the lighter dark-mode accent carries
+       near-black — var(--paper-bg) is the right ink in both schemes. */
+    .btn-primary { background: var(--paper-accent); border-color: var(--paper-accent); color: var(--paper-bg); }
+    .btn-primary:hover { background: var(--paper-accent); filter: brightness(1.12); }
     /* Transient per-op rejection alert (role="alert"): the amber notice band,
        ported from root.html.heex. The parchment base is LIGHT, so the dark
        amber leads and prefers-color-scheme swaps in the light-on-dark pair
@@ -181,6 +186,57 @@
     .sheet-tab:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
     .sheet-tab.is-active { border-color: var(--paper-accent); color: var(--fg); }
 
+    /* ── Per-column FILTER funnel + editor (SF-AM4) ────────────────────────
+       COHESION MIRROR: the funnel is a READ affordance, so the reader carries
+       it too — this is the .sheet-popover / .sheet-filter-* SUBSET ported from
+       the Studio block in root.html.heex (SF-B), retargeted onto the parchment
+       tokens. Edit BOTH when touching a shared funnel rule. NO sort affordance
+       is ported — sort is edit-only (SF-AM2d) and never renders here. */
+    .sheet-popover {
+      position: absolute; z-index: 9;
+      min-width: 200px; max-width: 380px; max-height: 240px; overflow-y: auto;
+      padding: 4px; font-size: 12px;
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    }
+    .sheet-filter-funnel {
+      display: inline-flex; align-items: center; justify-content: center;
+      padding: 2px; margin-left: 1px; border: 0; border-radius: 3px;
+      background: transparent; color: var(--fg-dim, var(--fg));
+      cursor: pointer; opacity: 0; line-height: 0;
+    }
+    th:hover > .sheet-filter-funnel,
+    th:focus-within > .sheet-filter-funnel,
+    .sheet-filter-funnel:focus-visible,
+    .sheet-filter-funnel.sheet-funnel-active { opacity: 0.85; }
+    .sheet-filter-funnel.sheet-funnel-active { color: var(--paper-accent); opacity: 1; }
+    .sheet-filter-funnel:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: 1px; }
+    .sheet-filter-panel {
+      top: calc(100% + 2px); left: 0; width: 220px; max-width: 92vw;
+      padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+      z-index: 12; cursor: default; font-weight: 400;
+      /* the reader body font is serif; the funnel chrome stays UI sans. */
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .sheet-filter-head { display: flex; align-items: center; justify-content: space-between; }
+    .sheet-filter-title { font-weight: 600; font-size: 12px; color: var(--fg); }
+    .sheet-filter-form { display: flex; flex-direction: column; gap: 7px; }
+    .sheet-filter-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
+    .sheet-filter-field > input[type="text"], .sheet-filter-field > select {
+      padding: 4px 6px; font-size: 12px; color: var(--fg);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    }
+    .sheet-filter-field > input:focus-visible, .sheet-filter-field > select:focus-visible {
+      outline: 2px solid var(--ring, #3b82f6); outline-offset: -1px;
+    }
+    /* Light parchment base; the dark seal keys on prefers-color-scheme (the
+       Studio twin keys the same swap on data-theme). */
+    .sheet-filter-error { margin: 0; font-size: 11px; color: #dc2626; }
+    @media (prefers-color-scheme: dark) {
+      .sheet-filter-error { color: #f87171; }
+    }
+    .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
+
     /* ── Print: unclip the grid, drop chrome, repeat column heads per page ─── */
     @media print {
       body { background: #fff; }
@@ -193,6 +249,10 @@
          thead stays a table-header-group so column letters repeat per page. */
       .sheet-corner, .sheet-colhead { position: static; }
       .bp-sheet-byline { display: none; }
+      /* Screen-only filter chrome: an ACTIVE funnel is opacity-1 and would
+         otherwise print as a glyph in the header; an open panel would overlap
+         cells. The filtered VIEW itself prints (hidden rows aren't in the DOM). */
+      .sheet-filter-funnel, .sheet-popover { display: none; }
     }
 
     /* ── Mobile: reclaim horizontal padding, unclip the grid height ────────── */
