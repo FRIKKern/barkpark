@@ -267,7 +267,7 @@ func paperDrivenRow(t Task, selected bool, width int, now time.Time) string {
 		title = t.DocID
 	}
 	role := RoleFor(t, now)
-	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle, 0))
+	glyph := roleStyle(role).Render(StatusGlyph(t.Lifecycle))
 	left := sel + " " + glyph + " " + titleStyleFor(t.Lifecycle).Render(title)
 
 	age := AgeBadge(t.UpdatedAt, now)

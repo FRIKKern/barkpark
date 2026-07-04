@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -38,6 +39,40 @@ var glyphAllowlist = map[rune]string{
 	'↓': "scroll-down affordance",
 }
 
+// readingGlyphAllowlist is the SECOND closed set, for the reading frames only
+// (detail_*/paper_* goldens — wave-5 integration decision, charter checklist
+// item 3): prose typeset through mdlite/pdrender legitimately carries a richer
+// typographic vocabulary than the board's status grid. It is a superset of the
+// board list plus the documented reading runes — still CLOSED; a new rune in a
+// reading golden fails CI exactly like vocabulary creep on the board. Do NOT
+// fold these into glyphAllowlist: the board stays tight on purpose.
+var readingGlyphExtras = map[rune]string{
+	'—': "em dash in prose / hybrid timestamp separator",
+	'•': "mdlite bullet",
+	'→': "status-timeline arrow",
+	'↳': "evidence hook under a criterion",
+	'═': "detail header rule",
+	'▌': "pdrender quote/callout bar (thick)",
+	'▍': "pdrender quote/callout bar (thin)",
+	'▸': "detail section marker",
+	'⧉': "twin-task marker",
+}
+
+func allowedGlyphs(golden string) map[rune]string {
+	base := filepath.Base(golden)
+	reading := strings.HasPrefix(base, "detail_") || strings.HasPrefix(base, "paper_")
+	out := map[rune]string{}
+	for r, why := range glyphAllowlist {
+		out[r] = why
+	}
+	if reading {
+		for r, why := range readingGlyphExtras {
+			out[r] = why
+		}
+	}
+	return out
+}
+
 // TestGoldenGlyphBudget inventories every non-ASCII rune in EVERY golden under
 // testdata — board, motion, still and first-paint frames alike, the whole
 // rendered surface — and asserts it is in the allowlist. Regenerating any
@@ -56,12 +91,13 @@ func TestGoldenGlyphBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", name, err)
 		}
+		allowed := allowedGlyphs(name)
 		offenders := map[rune]int{}
 		for _, r := range string(raw) {
 			if r < 0x80 { // ASCII (incl. ~, digits, letters, spaces) is always fine
 				continue
 			}
-			if _, ok := glyphAllowlist[r]; !ok {
+			if _, ok := allowed[r]; !ok {
 				offenders[r]++
 			}
 		}

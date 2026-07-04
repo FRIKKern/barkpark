@@ -409,7 +409,7 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
 	if len(items) == 0 && !hasCounter {
 		return
 	}
-	met, total := criteriaFraction(d)
+	met, total := detailCriteriaFraction(d)
 	b.blank()
 	b.add(dimStyle.Render(fmt.Sprintf("criteria %d/%d", met, total)))
 	for i, it := range items {
@@ -438,9 +438,9 @@ func (b *detailBuilder) emitCriteria(d TaskDetail, width int) {
 	}
 }
 
-// criteriaFraction prefers the wire's counter and falls back to counting the
+// detailCriteriaFraction prefers the wire's counter and falls back to counting the
 // decoded items, so the header never contradicts the meter the board showed.
-func criteriaFraction(d TaskDetail) (met, total int) {
+func detailCriteriaFraction(d TaskDetail) (met, total int) {
 	if d.Criteria != nil && d.Criteria.Total > 0 {
 		return d.Criteria.Met, d.Criteria.Total
 	}

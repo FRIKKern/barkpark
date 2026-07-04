@@ -11,5 +11,5 @@ it inline.
 ▌ go test ./internal/taskboard/...                                    
 
 Tasks driven by this paper (2)
-▎ ◴ Wire the driven-tasks rail                                                2h
-  ☐ Golden the paper frame at 80                                              1d
+▎ ● Wire the driven-tasks rail                                                2h
+  ○ Golden the paper frame at 80                                              1d
