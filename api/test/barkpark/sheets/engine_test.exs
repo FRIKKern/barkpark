@@ -2882,6 +2882,38 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       cells = %{"A1" => %{"v" => 2}, "A2" => %{"v" => 3}, "A3" => %{"f" => "=SUM(A1:A2)"}}
       assert run(cells)["A3"] == %{"f" => "=SUM(A1:A2)", "t" => "n", "v" => 5}
     end
+
+    test "REGRESSION LOCK — a scalar/bounded doc recomputes byte-identically, no spill markers" do
+      # The wave's critical regression lock (charter): a document with NO
+      # top-level array result produces the exact same cells map the pre-spill
+      # engine did — literals pass through untouched, formulas get v/t only, and
+      # NO cell anywhere gains a "spill"/"spill_dims" key or takes the two-phase
+      # path. Byte-identity is asserted as full-map equality, not a single cell.
+      # `SUM(UNIQUE(...))` keeps an array present but strictly NESTED (it
+      # scalarizes/aggregates, never reaches the top level), so the doc still has
+      # zero spillable results and must stay on the single-pass path.
+      cells = %{
+        "A1" => %{"v" => 2},
+        "A2" => %{"v" => 3},
+        "A3" => %{"v" => 2},
+        "B1" => %{"f" => "=SUM(A1:A3)"},
+        "B2" => %{"f" => "=A1*2"},
+        "B3" => %{"f" => "=SUM(UNIQUE(A1:A3))"}
+      }
+
+      out = run(cells)
+
+      assert out == %{
+               "A1" => %{"v" => 2},
+               "A2" => %{"v" => 3},
+               "A3" => %{"v" => 2},
+               "B1" => %{"f" => "=SUM(A1:A3)", "v" => 7, "t" => "n"},
+               "B2" => %{"f" => "=A1*2", "v" => 4, "t" => "n"},
+               "B3" => %{"f" => "=SUM(UNIQUE(A1:A3))", "v" => 5, "t" => "n"}
+             }
+
+      refute Enum.any?(out, fn {_a, c} -> is_map(c) and Map.has_key?(c, "spill") end)
+    end
   end
 
   describe "spill in a cross-tab document" do
