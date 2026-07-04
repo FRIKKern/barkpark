@@ -85,8 +85,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       [book] = books
 
       # Mirrors the shape produced by Barkpark.Plugins.OnixEdit.register_schemas/1
-      # at api/lib/barkpark/plugins/onixedit.ex:65-79 (visibility default
-      # "private" per D2; fields = the v2 composite/arrayOf/codelist tree).
+      # (visibility default "private" per D2; fields = the v2
+      # composite/arrayOf/codelist tree).
       assert book.name == "book"
       assert is_binary(book.title)
       assert book.visibility == "private"
@@ -192,7 +192,7 @@ defmodule Barkpark.Plugins.BootstrapTest do
   describe "GET /v1/schemas/production — conn integration" do
     setup do
       # /v1/schemas/* sits behind the :require_admin pipeline
-      # (router.ex:136-142). Mirror schema_envelope_test setup style.
+      # (router.ex `pipeline :require_admin`). Mirror schema_envelope_test setup style.
       Barkpark.Auth.create_token(
         @admin_token,
         "dev-bootstrap-test",
@@ -218,8 +218,7 @@ defmodule Barkpark.Plugins.BootstrapTest do
       assert book,
              "book schema missing from /v1/schemas/production response: #{inspect(Enum.map(body["schemas"], & &1["name"]))}"
 
-      # Shape per Content.serialize_schema_for_sdk/1
-      # (api/lib/barkpark/content.ex around line 754) — what real Studio/TUI
+      # Shape per Content.serialize_schema_for_sdk/1 — what real Studio/TUI
       # clients consume.
       assert book["visibility"] == "private"
       assert is_list(book["fields"])

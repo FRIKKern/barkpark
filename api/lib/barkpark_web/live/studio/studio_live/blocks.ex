@@ -42,7 +42,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   # diagram (barkpark-woxx): a Mermaid `source` textarea + an optional `caption`
   # input → the flat {source, caption} shape Render.compose_block/2 reads
-  # (render.ex:348). Plain strings, no inline wrapping — the source is raw
+  # (its `"diagram"` clause in `compose.ex`). Plain strings, no inline wrapping — the source is raw
   # Mermaid text and the caption is a short figure label.
   def build_block_patch(%{"type" => "diagram"}, params) do
     %{"source" => params["source"] || "", "caption" => params["caption"] || ""}
@@ -233,7 +233,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   # ── visual blocks ──
   # diagram (barkpark-woxx): a Mermaid block. `source` is raw Mermaid text,
   # `caption` an optional figure label — the exact flat shape
-  # Render.compose_block/2 reads (render.ex:348). Empty defaults are valid: an
+  # Render.compose_block/2 reads (its `"diagram"` clause in `compose.ex`).
+  # Empty defaults are valid: an
   # empty `source` renders an empty `<pre class="mermaid">`.
   def default_block("diagram", id),
     do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}

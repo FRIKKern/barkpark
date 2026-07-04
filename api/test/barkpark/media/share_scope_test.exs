@@ -15,9 +15,9 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
       token to the wrong (B) tenant.
     * `Share.revoke` flipped A's `shareLink.enabled` to false.
 
-  The controller (`media_collections_controller.ex:80,90`) also dropped
-  `scope_opts(conn)` — the sibling reads (`Collections.get` at 36/47,
-  `add_member`/`remove_member` at 149/161) thread it. The fix threads the
+  The controller's `share/2` and `revoke_share/2` actions also dropped
+  `scope_opts(conn)` — the sibling reads (`Collections.get`,
+  `add_member`/`remove_member`) thread it. The fix threads the
   caller's scope end-to-end: controller → `Share.create/revoke` →
   `Collections.get(collection_id, dataset, opts)`, which already applies the
   scope envelope (the proven sibling path).

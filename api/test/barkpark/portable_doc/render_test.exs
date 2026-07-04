@@ -130,7 +130,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
     test "wikilink / blockref / tag inline nodes compose + render (no raise, graceful)" do
       # Internal-link infra: compose_inline must produce PdWikilink/PdBlockref/
-      # PdTag (NOT hit the inline.ex:88 or walk.ex:62 catch-all raise), and the
+      # PdTag (NOT fall through to the unknown-type catch-all in
+      # `Inline.compose_inline/2` or `Walk`'s unknown-kind clause, which now
+      # DEGRADE rather than raise), and the
       # walk degrades gracefully on an UNRESOLVED target (raw label/anchor/name).
       wikilink =
         Render.Inline.compose_inline(

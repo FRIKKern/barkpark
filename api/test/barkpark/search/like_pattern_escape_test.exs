@@ -2,8 +2,8 @@ defmodule Barkpark.Search.LikePatternEscapeTest do
   @moduledoc """
   Pure string->string guard for the ILIKE wildcard-escape helpers. Backslash is
   PostgreSQL's default ESCAPE char, so it MUST be escaped first (before `%`/`_`),
-  in lockstep with the canonical `Barkpark.Content.Query.escape_like/1`
-  (content/query.ex:564-570). No DB — these are pure functions.
+  in lockstep with the canonical `Barkpark.Content.Query.escape_like/1`.
+  No DB — these are pure functions.
   """
   use ExUnit.Case, async: true
 

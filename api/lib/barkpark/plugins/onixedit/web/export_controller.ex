@@ -14,9 +14,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   to `Barkpark.Plugins.OnixEdit.Export.to_iodata/1` for the XSD-gated
   render.
 
-  Goal `barkpark-G3` s5 — relocated from the host's
-  `lib/barkpark_web/controllers/onixedit_export_controller.ex`
-  (module `BarkparkWeb.OnixeditExportController`) into the plugin
+  Goal `barkpark-G3` s5 — relocated from the host's now-deleted
+  `BarkparkWeb.OnixeditExportController` module into the plugin
   namespace. The URL pattern is preserved exactly — the inlined host
   scope at `/v1/plugins/onixedit` was deleted in the same change.
   """

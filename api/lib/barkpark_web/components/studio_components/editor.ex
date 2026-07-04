@@ -20,8 +20,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   @doc """
   Sanity-style document chrome header for the editor pane. Emits the
   legacy `<div class="pane-header editor-header">` markup so it can
-  replace StudioLive's hand-rolled header at studio_live.ex:1107
-  byte-identically. The component was originally also consumed by the
+  replace StudioLive's former hand-rolled header byte-identically
+  (it is emitted from `studio_editor_shell/1` today). The component was originally also consumed by the
   plugin BookView / BookEditor LVs (removed in Goal `barkpark-zdy`);
   StudioLive is the sole caller today. The corresponding CSS lives in
   `root.html.heex` (hoisted from StudioLive's inline `<style>`).
@@ -168,8 +168,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   Renders one schema field row: the `<.editor_field>` wrapper plus the
   v1/v2 fork that dispatches to either `FieldInputs.input/1` (v1 leaf
   controls) or `PluginAdapter.render/2` (v2 composite/arrayOf/codelist/
-  localizedText). Output is byte-identical to the inline markup at the
-  former `studio_live.ex:1157-1168` call site.
+  localizedText). Output is byte-identical to the field-row markup
+  StudioLive formerly rendered inline; the live call site is now
+  `studio_editor_shell/1`.
 
   The plain `<input type="text" name="doc[title]">` for the title row is
   NOT a schema field and stays inline inside `studio_editor_shell/1`.
@@ -252,13 +253,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   defp self_titled?(type), do: type in ~w(arrayOf composite localizedText)
 
   @doc """
-  StudioLive editor column extracted from `studio_live.ex:1106-1181`.
+  StudioLive editor column, extracted from StudioLive's former
+  monolithic render; its live call site is now `studio_live_shell/1`.
   Renders the `<.document_header>` (Task #9) + form-with-fields when an
   `editor_doc` is loaded, or `<.empty_editor>` (Task #9) otherwise.
   Schema fields delegate to `<.studio_field_renderer>` (which itself
   wraps `FieldInputs.input/1` per Task #10 byte-identity contract).
 
-  The TODO at studio_live.ex:1099-1103 (hand-rolled editor column)
+  The TODO in `studio_live_shell/1` (hand-rolled editor column)
   is preserved verbatim — WI2 does NOT absorb that debt; it requires a
   `<.pane_column>` API change (design plan archived).
 

@@ -208,7 +208,8 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   end
 
   @doc """
-  Presence-nav overlay (top-right) extracted from `studio_live.ex:947-984`.
+  Presence-nav overlay (top-right), formerly inline in StudioLive, now
+  rendered from `layouts/studio.html.heex`.
   Renders one avatar+tooltip per other user plus the self pill. The
   outer wrapper preserves the LV hook contract:
 

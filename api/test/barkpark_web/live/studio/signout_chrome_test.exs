@@ -34,7 +34,7 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
   test "POST /logout via the button form clears session", %{conn: conn} do
     # Seed a logged-in session by going through the real login flow so
     # CSRF token state is established naturally — mirrors the recycle()
-    # pattern from session_controller_test.exs:101-120.
+    # pattern from SessionControllerTest's "POST /logout" describe block.
     logged_in = post(conn, "/login", %{"token" => @admin_token})
     assert get_session(logged_in, "api_token") == @admin_token
 

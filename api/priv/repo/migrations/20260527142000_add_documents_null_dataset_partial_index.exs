@@ -8,12 +8,12 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsNullDatasetPartialIndex do
 
   ## The gap m9b4 left
 
-  `Barkpark.Content.scope_to_dataset/3` (content.ex ~1607) builds an OR scope:
+  `Barkpark.Content.Query.scope_to_dataset/3` builds an OR scope:
 
       d.dataset_id == ^id
       or (is_nil(d.dataset_id) and d.dataset == ^dataset)   # the LEGACY arm
 
-  woven into `list_documents/3`'s envelope (content.ex ~110-112):
+  woven into `Barkpark.Content.Query.list_documents/3`'s envelope:
 
       where d.type == ^type
       and  (<the OR above>)

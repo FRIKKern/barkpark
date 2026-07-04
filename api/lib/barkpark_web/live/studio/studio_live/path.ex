@@ -9,7 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
 
   The ArrayField component emits `phx-value-path` on every reorder button.
   The string has the shape `doc[a][b].c[d]` — top-level uses bracket form
-  (from adapter.ex line 72: `"doc[<name>]"`), composite descents use dot
+  (from `Studio.Plugins.Adapter.render/2`: `"doc[<name>]"`), composite descents use dot
   form (from composite_field.ex `child_path`: `"<parent>.<child>"`),
   and array rows append `[<idx>]`. We strip the `doc[` envelope, then
   tokenize on `]` / `.` / `[` to recover the key list.

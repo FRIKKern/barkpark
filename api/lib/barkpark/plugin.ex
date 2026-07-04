@@ -129,8 +129,9 @@ defmodule Barkpark.Plugin do
       end
 
   By default the macro reads `plugin.json` from the parent directory of the
-  using module's source file (e.g. `priv/plugins/hello/plugin.json` when the
-  module lives at `priv/plugins/hello/lib/hello.ex`). Pass
+  using module's source file (e.g. for a plugin named `<name>`, a
+  `priv/plugins/<name>/plugin.json` manifest beside a
+  `priv/plugins/<name>/lib/<name>.ex` module). Pass
   `manifest_path: "..."` to override.
 
   ## Resolver callbacks (Goal barkpark-cjs)

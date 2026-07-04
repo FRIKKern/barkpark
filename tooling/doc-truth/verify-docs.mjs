@@ -546,6 +546,13 @@ function matchPath(raw) {
   // `bp:ds:{_all|...}`, `api/lib/barkpark/plugins/<name>.ex`). A real path never
   // contains these characters.
   if (/[*?{}|<>]/.test(tok)) return null;
+  // A Go qualified symbol (`internal/bootstrap.WebhookName`,
+  // `internal/template.TestRealManifests`) is `pkg/sub.ExportedName` — its final
+  // segment's ".Name" is an exported identifier, NOT a file extension. Elixir
+  // module refs contain no slash, so a slashed `lowercasePkg.CapitalizedName`
+  // token is a Go pkg.Symbol reference, never a repo file path.
+  const lastSeg = tok.slice(tok.lastIndexOf("/") + 1);
+  if (/^[a-z][A-Za-z0-9_]*\.[A-Z][A-Za-z0-9_]*$/.test(lastSeg)) return null;
   const ext = extname(tok);
   const endsKnown = KNOWN_EXT.has(ext);
   const startsTop = TOP_DIRS.some((d) => tok.startsWith(d));
