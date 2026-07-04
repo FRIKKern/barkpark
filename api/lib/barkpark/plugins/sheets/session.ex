@@ -216,7 +216,9 @@ defmodule Barkpark.Plugins.Sheets.Session do
   ALSO carries `rect: {c1, r1, c2, r2}` and `perm: [new-position, …]` (the
   applied old-row-offset → new-position permutation, SF-AM3) so a collaborator
   with a selection/editor inside the sorted rect remaps its coordinates
-  instead of clobbering with stale ones.
+  instead of clobbering with stale ones, plus `by: user_id | nil` (the op's
+  `"user"` stamp) — the row-follow remap applies to REMOTE peers only, so the
+  initiator keeps their cursor at its ADDRESS (SF-R×SF-W).
 
   ## Persistence
 

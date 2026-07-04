@@ -116,6 +116,39 @@ defmodule BarkparkWeb.Studio.SheetGrid.RemapTest do
       assert Sheets.format_ref(socket.assigns.active) == "A3"
     end
 
+    # SF-R×SF-W regression: the row-follow remap is for REMOTE peers only. When
+    # THIS viewer initiated the sort (`by` == its user_id) the cursor stays at
+    # its ADDRESS — SF-W's sort-column set the column-top anchor before dispatch,
+    # and Excel semantics keep the initiator's cursor put. A peer (`by` != its
+    # user_id) still follows its row. Regression for the red-main interaction
+    # where the initiator's B1 wrongly chased its data down to B3.
+    test "the sort's ORIGINATOR keeps their address; a remote PEER follows their row" do
+      # rect A1:A3, perm [2,0,1]: old row1→3. Anchor B1-style: active {1,1}.
+      # Originator: by == user_id → active unchanged (stays A1).
+      me =
+        build_socket(active: {1, 1}, anchor: {1, 1}, user_id: "me")
+        |> Ops.apply_delta(sort_delta({1, 1, 1, 3}, [2, 0, 1], 0, "me"))
+
+      assert me.assigns.active == {1, 1}
+      assert me.assigns.anchor == {1, 1}
+      assert Sheets.format_ref(me.assigns.active) == "A1"
+
+      # Remote peer: by != user_id → active follows its row down to A3.
+      peer =
+        build_socket(active: {1, 1}, anchor: {1, 1}, user_id: "me")
+        |> Ops.apply_delta(sort_delta({1, 1, 1, 3}, [2, 0, 1], 0, "someone-else"))
+
+      assert peer.assigns.active == {1, 3}
+      assert Sheets.format_ref(peer.assigns.active) == "A3"
+
+      # A blank `by` (anonymous/import sort) is treated as remote → follows.
+      anon =
+        build_socket(active: {1, 1}, anchor: {1, 1}, user_id: "me")
+        |> Ops.apply_delta(sort_delta({1, 1, 1, 3}, [2, 0, 1]))
+
+      assert anon.assigns.active == {1, 3}
+    end
+
     test "a nil anchor stays nil" do
       socket = build_socket(active: {2, 1}, anchor: nil)
       socket = Ops.apply_delta(socket, sort_delta({1, 1, 2, 3}, [1, 0, 2]))
@@ -220,13 +253,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.RemapTest do
 
   # ── helpers ───────────────────────────────────────────────────────────────
 
-  defp sort_delta(rect, perm, tab \\ 0) do
-    %{
-      rev: 1,
-      tab: tab,
-      changed: %{},
-      structure: %{op: "sort_range", at: nil, count: nil, tab: tab, rect: rect, perm: perm}
-    }
+  defp sort_delta(rect, perm, tab \\ 0, by \\ nil) do
+    structure = %{op: "sort_range", at: nil, count: nil, tab: tab, rect: rect, perm: perm}
+    structure = if by, do: Map.put(structure, :by, by), else: structure
+    %{rev: 1, tab: tab, changed: %{}, structure: structure}
   end
 
   defp col_delta(op, at, count, tab \\ 0) do
