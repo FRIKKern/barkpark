@@ -700,6 +700,68 @@ func (c *Client) Get(typeName, id string) (Doc, bool) {
 	return doc, true
 }
 
+// PaperDoc fetches ONE paper document by slug and returns the raw JSON of the
+// response envelope's "result" object — the paper itself (title, blocks,
+// body_html, _rev, …), ready for the caller to decode.
+//
+// It reuses Get's scopedURL + authGet path and the same {"result":{…}} unwrap:
+// the doc-show endpoint (QueryController.show) wraps every document in the v1
+// envelope, so the bare document is peeled out of "result" here (a flat/legacy
+// body with no "result" object is returned verbatim). A non-empty perspective
+// is appended as ?perspective=<p> so a caller can read drafts/raw; an empty
+// perspective leaves the server default (published). This is the charter-D13e
+// direct read — never paper_cmd.go's fetch-all-then-match.
+//
+// GET /v1/data/doc/:dataset/paper/:slug
+func (c *Client) PaperDoc(dataset, slug, perspective string) ([]byte, error) {
+	endpoint := c.scopedURL("/v1/data/doc/" + url.PathEscape(dataset) + "/paper/" + url.PathEscape(slug))
+	if perspective != "" {
+		params := url.Values{}
+		params.Set("perspective", perspective)
+		endpoint += "?" + params.Encode()
+	}
+
+	resp, err := c.authGet(endpoint)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("paper %s: status %d: %s", slug, resp.StatusCode, bodyPreview(body))
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("paper %s: read body: %w", slug, err)
+	}
+	if int64(len(body)) > maxDocBytes {
+		return nil, fmt.Errorf("paper %s: body exceeds %d bytes", slug, maxDocBytes)
+	}
+
+	var wrapped struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if json.Unmarshal(body, &wrapped) == nil {
+		if r := bytes.TrimSpace(wrapped.Result); len(r) > 0 && bytes.HasPrefix(r, []byte("{")) {
+			return wrapped.Result, nil
+		}
+	}
+	// No "result" wrapper (a flat/legacy document body) — hand it back verbatim.
+	return body, nil
+}
+
+// bodyPreview trims an error-body to a short single-line preview so a non-2xx
+// status surfaces the server's reason without dumping a whole HTML error page.
+func bodyPreview(body []byte) string {
+	s := strings.TrimSpace(string(body))
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
 // Upsert creates or updates a document via the API.
 //
 // The scoped /v1/data API has no per-type document POST — upsert is expressed
