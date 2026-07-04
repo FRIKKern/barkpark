@@ -57,6 +57,22 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   @pt_per_px 0.75
   @hex_color ~r/^#[0-9a-fA-F]{6}$/
 
+  # Determinism (QR-C). An xlsx binary has TWO wall-clock stamps that make two
+  # exports of identical content differ byte-for-byte across a clock tick:
+  #   1. docProps/core.xml `dcterms:created`/`modified` — elixlsx stamps these
+  #      from `workbook.datetime` (Writer.get_docProps_core_xml), which defaults
+  #      to `now`. `%Workbook{datetime:}` is the SUPPORTED override, so we pin it.
+  #   2. the ZIP DOS mod time/date in every local + central directory header —
+  #      stamped by `:zip.create` from the wall clock at 2s resolution, with no
+  #      elixlsx knob. We patch it out of the finished binary (see below).
+  # Both fixed → identical content exports to identical bytes, by construction.
+  @export_timestamp "2020-01-01T00:00:00Z"
+
+  # The 4 bytes a DOS-time + DOS-date field carries, little-endian, time then
+  # date: time 0x0000 = 00:00:00; date 0x0021 = 1980-01-01 (year 0 since 1980,
+  # month 1, day 1) — the minimum legal DOS date, so every unzip accepts it.
+  @dos_datetime <<0x00, 0x00, 0x21, 0x00>>
+
   # Barkpark-engine function spellings that Excel does not recognize → the
   # Excel name. `AVG` is a Barkpark alias for `AVERAGE`; exported verbatim it
   # becomes `#NAME?` the moment Excel recalculates. `AVERAGE` is also in the
@@ -91,12 +107,126 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
         tabs -> tabs |> Enum.zip(export_names(tabs)) |> Enum.map(&build_sheet/1)
       end
 
-    case Elixlsx.write_to_memory(%Workbook{sheets: sheets}, filename) do
-      {:ok, {_name, binary}} -> {:ok, binary}
+    case Elixlsx.write_to_memory(%Workbook{sheets: sheets, datetime: @export_timestamp}, filename) do
+      {:ok, {_name, binary}} -> {:ok, patch_zip_mtimes(binary)}
       {:error, reason} -> {:error, "xlsx encode failed: #{inspect(reason)}"}
     end
   rescue
     e -> {:error, "xlsx encode failed: #{Exception.message(e)}"}
+  end
+
+  # ── deterministic ZIP mod-times (QR-C) ──────────────────────────────────────
+
+  # Byte-surgical patch of the DOS mod time/date that `:zip.create` stamps from
+  # the wall clock into every local-file and central-directory header. We walk
+  # the central directory from the EOCD, and for each entry overwrite the CDH's
+  # 4-byte time/date field (offset 12) and — via the CDH's stored relative
+  # offset — the member's LFH time/date field (offset 10) with `@dos_datetime`.
+  # No re-compression, no reordering: provably 4 bytes per header changed.
+  #
+  # FAIL-OPEN by contract: any structural surprise (bad signature, ZIP64,
+  # out-of-bounds offset) returns the UNPATCHED binary — an export must never
+  # break over a cosmetic timestamp. The determinism tests are the tripwire
+  # that keeps this honest (they'd go red the instant the walk silently no-ops).
+  defp patch_zip_mtimes(binary) when is_binary(binary) do
+    with {:ok, cd_offset, count} <- read_eocd(binary),
+         {:ok, header_offsets} <- walk_central_dir(binary, cd_offset, count) do
+      header_offsets
+      |> Enum.flat_map(fn {cdh_off, lfh_off} -> [cdh_off + 12, lfh_off + 10] end)
+      |> apply_dos_patches(binary)
+    else
+      _ -> binary
+    end
+  rescue
+    _ -> binary
+  end
+
+  defp patch_zip_mtimes(binary), do: binary
+
+  # Scan from the tail for the End Of Central Directory signature (0x06054b50,
+  # little-endian `50 4B 05 06`). Bounded to the last 64KB+22 (the max EOCD +
+  # comment). Fails open on ZIP64 (a locator before the EOCD, or the 0xFFFF /
+  # 0xFFFFFFFF sentinels) — sheet exports never approach the 4GB/65535-entry
+  # limits, so a ZIP64 sighting means "not our shape", not "patch harder".
+  defp read_eocd(binary) do
+    size = byte_size(binary)
+    scan_eocd(binary, size, max(size - 22, 0), max(size - 22 - 0xFFFF, 0))
+  end
+
+  defp scan_eocd(binary, size, pos, floor) when pos >= floor do
+    case binary do
+      <<_::binary-size(pos), 0x50, 0x4B, 0x05, 0x06, _disk::little-16, _cd_disk::little-16,
+        _entries_disk::little-16, total_entries::little-16, _cd_size::little-32,
+        cd_offset::little-32, _comment_len::little-16, _::binary>> ->
+        cond do
+          total_entries == 0xFFFF -> :error
+          cd_offset == 0xFFFFFFFF -> :error
+          zip64_locator?(binary, pos) -> :error
+          cd_offset > size -> :error
+          true -> {:ok, cd_offset, total_entries}
+        end
+
+      _ ->
+        scan_eocd(binary, size, pos - 1, floor)
+    end
+  end
+
+  defp scan_eocd(_binary, _size, _pos, _floor), do: :error
+
+  # A ZIP64 EOCD locator (0x07064b50) sits in the 20 bytes immediately before a
+  # ZIP64 archive's EOCD. Its presence means the offsets we just read may be
+  # 0xFFFFFFFF sentinels — refuse and fail open.
+  defp zip64_locator?(binary, pos) when pos >= 20 do
+    loc = pos - 20
+    match?(<<_::binary-size(loc), 0x50, 0x4B, 0x06, 0x07, _::binary>>, binary)
+  end
+
+  defp zip64_locator?(_binary, _pos), do: false
+
+  # Walk exactly `count` central-directory headers from `offset`, collecting
+  # `{cdh_offset, lfh_offset}` per entry. Any signature mismatch (CDH or the
+  # LFH the CDH points at) returns :error → the caller fails open.
+  defp walk_central_dir(binary, offset, count), do: walk_cdh(binary, offset, count, [])
+
+  defp walk_cdh(_binary, _offset, 0, acc), do: {:ok, Enum.reverse(acc)}
+
+  defp walk_cdh(binary, offset, remaining, acc) when remaining > 0 do
+    case binary do
+      <<_::binary-size(offset), 0x50, 0x4B, 0x01, 0x02, _::binary-size(24), fname_len::little-16,
+        extra_len::little-16, comment_len::little-16, _::binary-size(8), lfh_offset::little-32,
+        _::binary>> ->
+        if lfh_signature?(binary, lfh_offset) do
+          next = offset + 46 + fname_len + extra_len + comment_len
+          walk_cdh(binary, next, remaining - 1, [{offset, lfh_offset} | acc])
+        else
+          :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp walk_cdh(_binary, _offset, _remaining, _acc), do: :error
+
+  defp lfh_signature?(binary, offset) when is_integer(offset) and offset >= 0 do
+    match?(<<_::binary-size(offset), 0x50, 0x4B, 0x03, 0x04, _::binary>>, binary)
+  end
+
+  defp lfh_signature?(_binary, _offset), do: false
+
+  # Overwrite each 4-byte window at the given offsets with @dos_datetime, in one
+  # left-to-right splice (offsets are sorted; the windows never overlap — CDH
+  # and LFH headers are ≥ 30 bytes apart).
+  defp apply_dos_patches(offsets, binary) do
+    {chunks, last} =
+      offsets
+      |> Enum.sort()
+      |> Enum.reduce({[], 0}, fn off, {acc, pos} ->
+        {[acc, :binary.part(binary, pos, off - pos), @dos_datetime], off + 4}
+      end)
+
+    IO.iodata_to_binary([chunks, :binary.part(binary, last, byte_size(binary) - last)])
   end
 
   defp build_sheet({tab, name}) when is_map(tab) do

@@ -471,4 +471,115 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert c(export_import(content), "A1")["s"]["bg"] == "#123456"
     end
   end
+
+  # PART QR-C — deterministic export timestamps. The xlsx binary carries two
+  # wall-clock stamps (docProps/core.xml dates at 1s resolution; the ZIP DOS
+  # mod-time in every header at 2s resolution) that made "export twice, compare"
+  # tests flake across a clock tick. Both are now pinned, so identical content
+  # exports to identical bytes. These probes assert the FIXED values directly —
+  # they fail deterministically on the old wall-clock code, not just when two
+  # exports happen to straddle a tick.
+  describe "deterministic export timestamps (QR-C)" do
+    # The pinned constants (mirror of the export module's private attributes).
+    @fixed_core_timestamp "2020-01-01T00:00:00Z"
+    # DOS time 0x0000 (00:00:00) + date 0x0021 (1980-01-01), little-endian.
+    @fixed_dos_datetime <<0x00, 0x00, 0x21, 0x00>>
+
+    defp export!(content) do
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      binary
+    end
+
+    defp sample_content do
+      %{
+        "tabs" => [
+          %{
+            "name" => "Det",
+            "cells" => %{
+              "A1" => %{"v" => "Header", "s" => %{"b" => true, "bg" => "#eeeeee"}},
+              "B1" => %{"v" => 42},
+              "C1" => %{"f" => "SUM(A1:B1)", "v" => 30, "t" => "n"}
+            }
+          },
+          %{"name" => "Two", "cells" => %{"A1" => %{"v" => 7}}}
+        ]
+      }
+    end
+
+    test "(a) docProps/core.xml carries the fixed timestamp, not the wall clock" do
+      {:ok, entries} = :zip.extract(export!(sample_content()), [:memory])
+
+      {_name, core_xml} =
+        Enum.find(entries, fn {name, _} -> List.to_string(name) == "docProps/core.xml" end)
+
+      # :zip.extract returns file CONTENT as a binary (names stay charlists).
+      assert core_xml =~ @fixed_core_timestamp
+      # dcterms:created AND dcterms:modified both pinned — no current-year stamp.
+      refute core_xml =~ "#{Date.utc_today().year}"
+    end
+
+    test "(b) every LFH and CDH mod time/date field equals the fixed DOS constant" do
+      datetimes = zip_header_datetimes(export!(sample_content()))
+
+      # A real multi-member workbook: worksheets, workbook.xml, styles, rels,
+      # content types, docProps — so this is a meaningful sample, not one entry.
+      assert length(datetimes) >= 2 * 6
+
+      for dt <- datetimes, do: assert(dt == @fixed_dos_datetime)
+    end
+
+    test "(c) exporting identical content twice is byte-identical (umbrella pin)" do
+      content = sample_content()
+      assert export!(content) == export!(content)
+    end
+
+    test "the exported binary is still a valid, re-importable xlsx after patching" do
+      # The byte surgery must not corrupt the ZIP — :zip.extract + a real import
+      # round-trip is the loud tripwire (mirrors xlsx_roundtrip_test.exs).
+      imported = import!(export!(sample_content()))
+      assert [%{"name" => "Det"}, %{"name" => "Two"}] = imported["tabs"]
+      assert get_in(imported, ["tabs", Access.at(0), "cells", "B1"]) == %{"v" => 42}
+    end
+
+    # Structural ZIP walk: from the EOCD, follow the central directory and, for
+    # each entry, read the CDH mod time/date (offset 12) and the member's LFH
+    # mod time/date (offset 10, via the CDH's relative-offset field at 42).
+    # Independent of the production walk, so it can catch a bug in it.
+    defp zip_header_datetimes(binary) do
+      {cd_offset, count} = read_eocd!(binary)
+      collect_cdh(binary, cd_offset, count, [])
+    end
+
+    defp read_eocd!(binary) do
+      # Last occurrence of the EOCD signature (no comment in elixlsx output, so
+      # it is the final 22 bytes, but scan to be safe).
+      pos = last_index(binary, <<0x50, 0x4B, 0x05, 0x06>>)
+
+      <<_::binary-size(pos), 0x50, 0x4B, 0x05, 0x06, _::binary-size(6), total_entries::little-16,
+        _cd_size::little-32, cd_offset::little-32, _::binary>> = binary
+
+      {cd_offset, total_entries}
+    end
+
+    defp collect_cdh(_binary, _offset, 0, acc), do: Enum.reverse(acc)
+
+    defp collect_cdh(binary, offset, remaining, acc) do
+      <<_::binary-size(offset), 0x50, 0x4B, 0x01, 0x02, _::binary-size(8), cdh_dt::binary-size(4),
+        _::binary-size(12), fname_len::little-16, extra_len::little-16, comment_len::little-16,
+        _::binary-size(8), lfh_offset::little-32, _::binary>> = binary
+
+      <<_::binary-size(lfh_offset), 0x50, 0x4B, 0x03, 0x04, _::binary-size(6),
+        lfh_dt::binary-size(4), _::binary>> = binary
+
+      next = offset + 46 + fname_len + extra_len + comment_len
+      collect_cdh(binary, next, remaining - 1, [lfh_dt, cdh_dt | acc])
+    end
+
+    defp last_index(binary, needle) do
+      binary
+      |> :binary.matches(needle)
+      |> List.last()
+      |> elem(0)
+    end
+  end
 end
