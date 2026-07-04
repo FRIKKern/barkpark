@@ -366,7 +366,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # canvas mounts those pickers (bp-media-picker / bp-reference-picker) as control-atom
   # node-views; each WC fetches its own data over HTTP scoped by a dataset (+ a bearer
   # token for media uploads). We carry the SAME scope the per-block picker render uses
-  # (paper_editor.ex:820/831/832 — dataset + data-token={@api_token_raw}) on the canvas
+  # (the `field-image` / `field-reference` clauses of `paper_block_fields/1` —
+  # `dataset` + `data-token={@api_token_raw}`) on the canvas
   # HOST element via data-dataset / data-token, so a picker inside the run fetches /
   # uploads exactly as it does in the per-block path. A run with NO picker carries them
   # harmlessly (the canvas reads them only when mounting a picker node-view).

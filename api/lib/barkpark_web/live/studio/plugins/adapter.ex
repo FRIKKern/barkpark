@@ -121,7 +121,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   def render(assigns, _other) do
     # Defensive: if a caller invokes us on a non-v2 field, render nothing.
     # StudioLive will use `render_input/2` for v1 fields via the dispatch
-    # check at the call site (see studio_live.ex line ~1139).
+    # check at the call site (see the `v2?/1` fork in
+    # `StudioComponents.Editor.studio_field_renderer/1`).
     ~H""
   end
 

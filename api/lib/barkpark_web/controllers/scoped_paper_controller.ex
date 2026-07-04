@@ -48,7 +48,8 @@ defmodule BarkparkWeb.ScopedPaperController do
           # Empty string when nothing links → the template omits the section.
           #
           # NOTE: this dead-render controller is currently RETIRED from routing
-          # (router.ex ~:975 mounts BulldocsLive for the scoped reader too); the
+          # (router.ex mounts BulldocsLive at the scoped
+          # `live("/papers/:slug", BulldocsLive, :index)` reader too); the
           # live section is wired in `BarkparkWeb.BulldocsLive`. The assign is
           # kept here so the controller + its template stay self-consistent if it
           # is ever re-routed.

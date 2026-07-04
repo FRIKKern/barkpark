@@ -12,8 +12,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   import BarkparkWeb.Icons
 
   @doc """
-  Image-picker modal extracted from the legacy inline block at
-  `studio_live.ex:1184-1215`. Renders the overlay + media-grid card when
+  Image-picker modal, formerly a legacy inline block in StudioLive, now
+  aggregated by `studio_modals/1`. Renders the overlay + media-grid card when
   `image_picker_field` is non-nil. All `phx-*` events bubble to the
   parent LV's `handle_event/3` (StudioLive owns: close-image-picker,
   validate-upload, upload-image, select-media).
@@ -289,8 +289,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
-  Reference-picker modal extracted from the legacy inline block at
-  `studio_live.ex:1218-1240`. Shares the `.image-picker` overlay styling
+  Reference-picker modal, formerly a legacy inline block in StudioLive, now
+  aggregated by `studio_modals/1`. Shares the `.image-picker` overlay styling
   (deliberate — same modal chrome). Caller pre-filters candidates via
   `ref_search` so this component is data-only.
 
@@ -348,7 +348,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
-  History modal extracted from `studio_live.ex:1243-1268`. Renders the
+  History modal, formerly inline in StudioLive, now aggregated by
+  `studio_modals/1`. Renders the
   list of past revisions with restore buttons. The `format_history_time/1`
   helper migrates from StudioLive into this module (private).
 
@@ -400,7 +401,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
-  Delete-confirmation modal extracted from `studio_live.ex:1271-1307`.
+  Delete-confirmation modal, formerly inline in StudioLive, now aggregated
+  by `studio_modals/1`.
   Two visual states: clean delete (no incoming references) and
   disconnect+delete (refs exist; lists each one).
 
@@ -514,7 +516,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
-  Profile-edit modal extracted from `studio_live.ex:986-1025`. Shown
+  Profile-edit modal, formerly inline in StudioLive, now aggregated by
+  `studio_modals/1`. Shown
   when `show_profile` is true. Form `phx-change="preview-profile"` lets
   StudioLive preview the new color/name before commit; `phx-submit="save-profile"`
   persists.
