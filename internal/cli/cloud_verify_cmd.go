@@ -175,16 +175,22 @@ func renderVerifyResult(out *writer, ref string, res cloudclient.VerifyResult) {
 		}
 	}
 
-	if res.OK && failed == 0 {
+	switch {
+	case res.OK && failed == 0:
 		out.outf("Golden path verified — %d of %d probes passed (%s)", total, total, ref)
-	} else {
+	case failed == 0:
+		// Defensive: the server derives ok FROM the probes, so a not-ok verdict
+		// over all-green rows is a contract break — say so rather than print the
+		// nonsense "0 of N probes failed" while exiting non-zero.
+		out.outf("verification not ok (%s) — yet every probe passed; run with -o json to inspect the envelope", ref)
+	default:
 		out.outf("%d of %d probes failed (%s)", failed, total, ref)
 	}
 	if !res.Reachable {
 		out.outf("the instance never answered — a failed verification, not a CLI error; check the box is running")
 	}
 	if strings.TrimSpace(res.VerifiedAt) != "" {
-		out.outf("verified at %s", res.VerifiedAt)
+		out.outf("verified at %s", sanitizeCell(res.VerifiedAt))
 	}
 
 	if total == 0 {
@@ -233,12 +239,13 @@ func renderVerifyProbes(out *writer, probes []cloudclient.VerifyProbe) {
 }
 
 // verifyProbeLabel resolves a probe name to its human label. An unknown
-// (future) probe name passes through verbatim — honest, never dropped.
+// (future) probe name passes through — honest, never dropped — but scrubbed of
+// control bytes like every other server-authored cell (the statusDash rule).
 func verifyProbeLabel(name string) string {
 	if l, ok := verifyProbeLabels[name]; ok {
 		return l
 	}
-	return name
+	return sanitizeCell(name)
 }
 
 // verifyProbeToken maps a probe outcome onto a statusRole token so the STATUS

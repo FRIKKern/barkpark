@@ -400,13 +400,29 @@ var verifyErrorCodes = map[string]bool{
 	"decrypt_failed": true,
 }
 
+// VerifyTimeout is the wall-clock cap for a VerifyInstance call. The route is
+// SYNCHRONOUS: the control plane probes the live box inline (up to 6 upstream
+// requests, each with its own 5s connect + 5s recv bound — ~60s absolute worst
+// case against a hung box), so the shared 30s DefaultTimeout that fits every
+// quick control-plane call could cut this one off mid-run and turn the exact
+// scenario verify exists for — a sick box — into a transport error instead of
+// the honest failed verification the server was about to deliver.
+const VerifyTimeout = 90 * time.Second
+
 // VerifyInstance re-runs the golden-path verify suite against a managed
 // instance via POST /v1/barkparks/:id/verify (Bearer). The control plane
 // probes the live box with the STORED admin token — the token never reaches
 // this client. A 200 is a completed run (pass or fail — read result.OK); a
 // contract refusal surfaces as *VerifyError; anything else via cloudError.
 func (c *Client) VerifyInstance(ctx context.Context, id string) (VerifyResult, error) {
-	status, raw, err := c.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
+	// Give the synchronous suite headroom past DefaultTimeout (see
+	// VerifyTimeout). An injected HTTP client (tests) is honored untouched;
+	// only the lazily-built fallback is widened, and only for this call.
+	vc := *c
+	if vc.HTTP == nil {
+		vc.HTTP = &http.Client{Timeout: VerifyTimeout}
+	}
+	status, raw, err := vc.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
 	if err != nil {
 		return VerifyResult{}, err
 	}

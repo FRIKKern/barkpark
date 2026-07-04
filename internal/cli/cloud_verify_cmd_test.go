@@ -335,3 +335,35 @@ func TestRunCloudVerifyHelp(t *testing.T) {
 		t.Fatalf("help must name the command:\n%s", stdout)
 	}
 }
+
+// TestRunCloudVerifyVerdictProbeMismatch: a contract-breaking envelope — the
+// server says not-ok over all-green probes — names the mismatch instead of
+// printing "0 of N probes failed", still exits non-zero, and an UNKNOWN future
+// probe name passes through with its control bytes scrubbed (never dropped,
+// never a terminal-escape vector).
+func TestRunCloudVerifyVerdictProbeMismatch(t *testing.T) {
+	// The unknown probe's name smuggles a JSON-escaped ESC — decoded, it would
+	// start an ANSI red span if the cell were rendered unscrubbed.
+	mismatch := `{"ok":false,"reachable":true,"verified_at":"2026-07-04T10:00:00Z","probes":[` +
+		`{"name":"verify.dns\u001b[31m","ok":true,"reachable":true,"status":200,"latency_ms":8,"evidence":"resolved"}]}`
+	newVerifyServer(t, 200, mismatch)
+
+	stdout, _, code := runVerify(t, "table", false, testInstanceID)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d (the verdict is not ok)", code, exitGeneric)
+	}
+	if !strings.Contains(stdout, "verification not ok") || !strings.Contains(stdout, "every probe passed") {
+		t.Fatalf("want the honest verdict/probe-mismatch line:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "0 of 1 probes failed") {
+		t.Fatalf("must not print the nonsense zero-failed verdict:\n%s", stdout)
+	}
+	// Post-scrub the name survives minus the ESC byte itself — proof the cell
+	// was rendered AND sanitized, not dropped.
+	if !strings.Contains(stdout, "verify.dns[31m") {
+		t.Fatalf("an unknown probe name must pass through scrubbed:\n%q", stdout)
+	}
+	if strings.Contains(stdout, "\x1b") {
+		t.Fatalf("server-authored probe names must carry no escape bytes:\n%q", stdout)
+	}
+}
