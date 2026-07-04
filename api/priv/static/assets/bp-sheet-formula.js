@@ -469,6 +469,84 @@
     return out;
   }
 
+  // ── (h) rebaseFormula ─────────────────────────────────────────────────────
+  // The copy/paste twin of the F4 grammar: shift every RELATIVE ref/range in a
+  // formula by (dcol, drow) — the pure-JS mirror of structure.ex
+  // rebase_formula/3 (Sheets/Excel copy semantics). `$`-anchored components are
+  // pinned: `$A$1` never moves, `$A1` shifts only its row, `A$1` only its
+  // column. A cell (or either range corner) that lands outside the grid
+  // collapses to the literal `#REF!`, exactly as the server does. String
+  // literals and fn names are their own tokens, so they pass through untouched.
+  // Bounds match structure.ex @grid_max_col / @grid_max_row.
+  var REBASE_MAX_COL = 16384;
+  var REBASE_MAX_ROW = 1048576;
+  var RE_COLWORD = /^\$?[A-Za-z]{1,3}$/;
+  var RE_ROWWORD = /^\$?[0-9]+$/;
+
+  function rebaseCellWord(text, dcol, drow) {
+    var c = parseCell(text);
+    if (!c) return text; // not a cell — leave verbatim (server: parse :error)
+    var ncol = c.colAbs ? c.col : c.col + dcol;
+    var nrow = c.rowAbs ? c.row : c.row + drow;
+    if (ncol >= 1 && ncol <= REBASE_MAX_COL && nrow >= 1 && nrow <= REBASE_MAX_ROW) {
+      return fmtCell({ colAbs: c.colAbs, col: ncol, rowAbs: c.rowAbs, row: nrow });
+    }
+    return "#REF!";
+  }
+  // A whole-column word (`A`, `$A`) shifts on the column axis only; a `$`-
+  // anchored column is immovable (mirrors rebase_col_word). Uppercased output.
+  function rebaseColWord(word, dcol) {
+    if (word.charAt(0) === "$") return word; // absolute column — pinned
+    var m = /^([A-Za-z]{1,3})$/.exec(word);
+    if (!m) return word;
+    var col = colToNum(m[1]) + dcol;
+    return col >= 1 && col <= REBASE_MAX_COL ? numToCol(col) : "#REF!";
+  }
+  // A whole-row word (`3`); a `$`-prefixed row word is left verbatim, mirroring
+  // the server's parse_row_word (Integer.parse rejects `$3`, so it never moves).
+  function rebaseRowWord(word, drow) {
+    var m = /^([0-9]+)$/.exec(word);
+    if (!m) return word;
+    var row = parseInt(m[1], 10) + drow;
+    return row >= 1 && row <= REBASE_MAX_ROW ? String(row) : "#REF!";
+  }
+  function rebaseRefToken(text, dcol, drow) {
+    var parts = text.split(":");
+    if (parts.length === 1) return rebaseCellWord(text, dcol, drow);
+    var a = parts[0], b = parts[1];
+    // cell:cell — per-corner shift; either corner off-grid kills the range.
+    if (parseCell(a) && parseCell(b)) {
+      var r1 = rebaseCellWord(a, dcol, drow);
+      var r2 = rebaseCellWord(b, dcol, drow);
+      return r1 === "#REF!" || r2 === "#REF!" ? "#REF!" : r1 + ":" + r2;
+    }
+    // whole-column range (B:B / $B:$D) — column axis only.
+    if (RE_COLWORD.test(a) && RE_COLWORD.test(b)) {
+      var c1 = rebaseColWord(a, dcol);
+      var c2 = rebaseColWord(b, dcol);
+      return c1 === "#REF!" || c2 === "#REF!" ? "#REF!" : c1 + ":" + c2;
+    }
+    // whole-row range (3:3) — row axis only.
+    if (RE_ROWWORD.test(a) && RE_ROWWORD.test(b)) {
+      var w1 = rebaseRowWord(a, drow);
+      var w2 = rebaseRowWord(b, drow);
+      return w1 === "#REF!" || w2 === "#REF!" ? "#REF!" : w1 + ":" + w2;
+    }
+    return text;
+  }
+  function rebaseFormula(value, dcol, drow) {
+    var s = String(value == null ? "" : value);
+    var dc = dcol | 0;
+    var dr = drow | 0;
+    var toks = tokenize(s);
+    var out = "";
+    for (var i = 0; i < toks.length; i++) {
+      var t = toks[i];
+      out += t.type === "ref" ? rebaseRefToken(t.text, dc, dr) : t.text;
+    }
+    return out;
+  }
+
   var API = {
     tokenize: tokenize,
     caretContext: caretContext,
@@ -477,6 +555,7 @@
     cycleDollar: cycleDollar,
     refColorIndex: refColorIndex,
     normalizeFormula: normalizeFormula,
+    rebaseFormula: rebaseFormula,
   };
 
   if (typeof window !== "undefined") window.BarkparkSheetFormula = API;

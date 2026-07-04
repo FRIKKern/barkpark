@@ -2288,6 +2288,174 @@ check("QR-D: cell mousedown-drag with an open non-formula draft commits ONCE on 
   ]);
 });
 
+// ── formula clipboard (S-CLIP / QL-D5): copy carries the formula, paste rebases ─
+//
+// On copy the OS clipboard still gets the computed VALUES (Excel interop), but
+// the hook stashes an in-app formula clipboard keyed by that exact TSV. On paste
+// of OUR OWN copy (clipboard text === the stashed signature) the {rows} grid is
+// rebuilt from the copied formulas, rebased by the delta from the copy origin to
+// the paste anchor (active cell), honoring $ anchors via the kernel's
+// rebaseFormula. A FOREIGN clipboard (any other text) falls through to today's
+// quote-aware VALUE paste, BYTE-IDENTICAL — the regression lock.
+
+// A copy event with a fake clipboard that records what the hook writes.
+function copyEvent() {
+  const store = {};
+  return {
+    target: { matches: () => false },
+    clipboardData: { setData: (type, val) => { store[type] = val; } },
+    _data: store,
+    prevented: false,
+    preventDefault() { this.prevented = true; },
+  };
+}
+
+// A selected cell <td .sheet-sel> carrying data-r/c/v and an optional data-f
+// (the stored formula sans leading '=', S-GRID's QL-D6 stamp).
+function selCell({ r, c, v, f }) {
+  const cell = { dataset: { r, c, v } };
+  if (f != null) cell.dataset.f = f;
+  return cell;
+}
+
+// Copy `sel` (setting the active cell to `activeRef`), then return the hook so a
+// follow-up paste can be dispatched. Asserts the OS clipboard got the values.
+function copySelection(h, sel, activeRef) {
+  h.el._sel = sel;
+  if (activeRef) h.el._active = { dataset: { ref: activeRef } };
+  const ce = copyEvent();
+  h.el.dispatch("copy", ce);
+  return ce;
+}
+
+check("copy a formula cell, paste one row down → the paste carries the REBASED formula", () => {
+  const h = mountHook();
+  // '=A1+1' lives at B2 (r2,c2); its computed value is 2.
+  copySelection(h, [selCell({ r: "2", c: "2", v: "2", f: "A1+1" })], "B2");
+  // paste anchor is B3 (r3,c2) → delta (0,+1); the OS clipboard text is "2".
+  h.el._active = { dataset: { ref: "B3" } };
+  h.el.dispatch("paste", pasteEvent("2"));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["=A2+1"]] } },
+  ]);
+});
+
+check("SEAM ROBUSTNESS: a data-f stamped WITH a leading '=' does not double-prefix (==A2)", () => {
+  const h = mountHook();
+  // The engine's canonical `f` drops the '=' but "tolerates it on read", so a
+  // real stamp MAY carry one. Capture must normalize to sans-'=' so the paste
+  // re-prefix yields exactly one '=' — never '==A2+1'.
+  copySelection(h, [selCell({ r: "2", c: "2", v: "2", f: "=A1+1" })], "B2");
+  assert.deepEqual(plain(h._formulaClip.formulas), [["A1+1"]]); // stored canonical
+  h.el._active = { dataset: { ref: "B3" } };
+  h.el.dispatch("paste", pasteEvent("2"));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["=A2+1"]] } },
+  ]);
+});
+
+check("$-anchored refs do NOT shift; a horizontal+vertical delta rebases relatives only", () => {
+  const h = mountHook();
+  copySelection(h, [selCell({ r: "2", c: "2", v: "9", f: "$A$1+A1" })], "B2");
+  // paste at D5 (r5,c4) → delta (+2,+3): $A$1 pinned, A1 → C4.
+  h.el._active = { dataset: { ref: "D5" } };
+  h.el.dispatch("paste", pasteEvent("9"));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["=$A$1+C4"]] } },
+  ]);
+});
+
+check("a copied cell with NO formula falls back to its TSV value (mixed block)", () => {
+  const h = mountHook();
+  // B2 is a formula (=A1+1, value 5); C2 is a literal text 'hello'.
+  copySelection(
+    h,
+    [
+      selCell({ r: "2", c: "2", v: "5", f: "A1+1" }),
+      selCell({ r: "2", c: "3", v: "hello" }),
+    ],
+    "B2",
+  );
+  const sig = h._formulaClip.sig; // "5\thello"
+  h.el._active = { dataset: { ref: "B3" } }; // delta (0,+1)
+  h.el.dispatch("paste", pasteEvent(sig));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["=A2+1", "hello"]] } },
+  ]);
+});
+
+check("REGRESSION LOCK: a FOREIGN clipboard (text ≠ our sig) pastes VALUES exactly as today", () => {
+  const h = mountHook();
+  // We DID copy (formula clip is armed)…
+  copySelection(h, [selCell({ r: "2", c: "2", v: "5", f: "A1+1" })], "B2");
+  h.el._active = { dataset: { ref: "B3" } };
+  // …but the paste text is a foreign, quote-aware TSV block, NOT our signature.
+  h.el.dispatch("paste", pasteEvent('a\t"x\ny"\nc\td\n'));
+  // Byte-identical to the pre-feature quote-aware value path (the #882 wall).
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["a", "x\ny"], ["c", "d"]] } },
+  ]);
+});
+
+check("with NO prior in-app copy, every paste is the plain value path (formula clip null)", () => {
+  const h = mountHook();
+  assert.equal(h._formulaClip, null);
+  h.el.dispatch("paste", pasteEvent("p\tq\nr\ts"));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["p", "q"], ["r", "s"]] } },
+  ]);
+});
+
+check("the formula paste path still honors the paste-too-large preflight", () => {
+  const h = mountHook();
+  h._pasteCellCap = 2; // 3 copied formula cells exceed the cap
+  copySelection(
+    h,
+    [
+      selCell({ r: "2", c: "2", v: "1", f: "A1" }),
+      selCell({ r: "2", c: "3", v: "2", f: "B1" }),
+      selCell({ r: "2", c: "4", v: "3", f: "C1" }),
+    ],
+    "B2",
+  );
+  const sig = h._formulaClip.sig; // "1\t2\t3"
+  h.el._active = { dataset: { ref: "B5" } };
+  h.el.dispatch("paste", pasteEvent(sig));
+  assert.deepEqual(h._pushed, [{ event: "paste-too-large", payload: { cells: 3 } }]);
+  assert.equal(h._pushed.filter((p) => p.event === "paste").length, 0);
+});
+
+check("_onCopy still writes computed VALUES to the OS clipboard AND arms the formula clip", () => {
+  const h = mountHook();
+  const ce = copySelection(
+    h,
+    [
+      selCell({ r: "3", c: "2", v: "7", f: "A1*2" }),
+      selCell({ r: "3", c: "3", v: "flat" }),
+    ],
+    "B3",
+  );
+  assert.equal(ce.prevented, true);
+  assert.equal(ce._data["text/plain"], "7\tflat"); // OS clipboard = values (interop)
+  // Origin is the selection's top-left; formulas grid parallels the TSV.
+  assert.deepEqual(plain(h._formulaClip.origin), { col: 2, row: 3 });
+  assert.deepEqual(plain(h._formulaClip.formulas), [["A1*2", null]]);
+  assert.equal(h._formulaClip.sig, "7\tflat");
+});
+
+check("copy with an empty selection clears the formula clip (a later stray paste is safe)", () => {
+  const h = mountHook();
+  copySelection(h, [selCell({ r: "2", c: "2", v: "1", f: "A1" })], "B2"); // arm it
+  assert.ok(h._formulaClip);
+  h.el._sel = []; // selection cleared
+  h.el.dispatch("copy", copyEvent()); // _selectionTsv null → returns before capture… but be explicit
+  // _onCopy returns early on a null TSV, so the OLD clip could linger; verify a
+  // paste of the STALE signature does NOT misfire as a formula paste (values only).
+  h.el._active = { dataset: { ref: "B9" } };
+  h.el.dispatch("paste", pasteEvent("zzz-not-our-sig"));
+  assert.deepEqual(h._pushed, [{ event: "paste", payload: { rows: [["zzz-not-our-sig"]] } }]);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
