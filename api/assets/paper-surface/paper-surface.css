@@ -297,13 +297,21 @@ html[data-theme="dark"] .bp-paper-body {
    TASK LIST — the Barkpark task design language (bp-task-design-language-spec)
    Shared vocabulary with the `bp tasks` TUI: white ladder + colour-for-meaning.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Status palette tokens — ONE source, theme-aware in BOTH directions:
+   the OS default (prefers-color-scheme) AND the explicit light/dark toggle
+   (html[data-theme] stamped by the viewer, which WINS over the media query).
+   Defined at the surface so every task component inherits — no per-block copy,
+   nothing drifts, and the toggle actually moves the status colours. ── */
+.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+
 .bp-paper-surface .bp-tasks {
-  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   margin: 1.6rem 0;
-}
-@media (prefers-color-scheme: dark) {
-  .bp-paper-surface .bp-tasks { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
 }
 .bp-paper-surface .bp-tasks--empty {
   font-family: var(--paper-font-mono); color: var(--paper-ink-faint); font-size: 0.85rem;
@@ -372,12 +380,8 @@ html[data-theme="dark"] .bp-paper-body {
 
 /* ── task detail — the "open a task and SEE it" card ── */
 .bp-paper-surface .bp-tdetail {
-  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
-}
-@media (prefers-color-scheme: dark) {
-  .bp-paper-surface .bp-tdetail { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
 }
 .bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
@@ -400,11 +404,9 @@ html[data-theme="dark"] .bp-paper-body {
 
 /* ── task board (kanban) ── */
 .bp-paper-surface .bp-board {
-  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
   display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
-@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-board { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; } }
 .bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
 .bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
 .bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
@@ -420,11 +422,9 @@ html[data-theme="dark"] .bp-paper-body {
 
 /* ── roadmap (author-dated phase/task bars) ── */
 .bp-paper-surface .bp-roadmap {
-  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 14px 16px; margin: 1.6rem 0;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
 }
-@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-roadmap { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; } }
 .bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
 .bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); }
 .bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
@@ -444,11 +444,9 @@ html[data-theme="dark"] .bp-paper-body {
 
 /* ── status legend — the shared vocabulary key ── */
 .bp-paper-surface .bp-legend {
-  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; margin: 1.4rem 0;
 }
-@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-legend { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; } }
 .bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
 .bp-paper-surface .bp-legend__r:first-child { border-top: none; }
 .bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
@@ -464,7 +462,6 @@ html[data-theme="dark"] .bp-paper-body {
 
 /* ── terminal chrome — the bp tasks board look ── */
 .bp-paper-surface .bp-term {
-  --st-info: #2563eb; --st-ok: #0d9488;
   background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0;
   box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 18px 44px -24px rgba(0,0,0,0.28);
 }
