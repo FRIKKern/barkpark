@@ -79,6 +79,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   def paper_block(frame, socket) do
     cond do
+      # Our OWN paper write echoing back — the handle_event that applied it
+      # already re-read the confirmed state (`paper_ops/2`), so a broadcast-driven
+      # `refetch_paper` is redundant AND, in tests, a DB reload that outlives the
+      # event and races sandbox teardown (`client exited`). Mirrors `doc_updated/2`.
+      frame[:sender] == self() ->
+        {:noreply, socket}
+
       socket.assigns[:editor_view] != :paper ->
         {:noreply, socket}
 
@@ -102,6 +109,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
         {:noreply, socket}
     end
+  end
+
+  def paper_updated(%{sender: sender}, socket) when sender == self() do
+    # Our own whole-paper write echoing back — no self-refresh (see paper_block/2).
+    {:noreply, socket}
   end
 
   def paper_updated(%{html: html} = msg, socket) do
@@ -154,10 +166,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
     end
   end
 
-  def document_changed(%{type: type}, socket) do
+  def document_changed(%{type: type} = msg, socket) do
     viewing_type = socket.assigns[:editor_type] || Enum.at(socket.assigns.nav_path, 0)
 
     cond do
+      # Our OWN write — the handle_event that performed it already refreshed our
+      # state, so a broadcast-driven `rebuild_panes` (a fresh DB reload) is both
+      # redundant AND, in tests, an in-flight query that outlives the test that
+      # spawned it: when the LiveView is torn down mid-reload the shared Ecto
+      # sandbox connection reports `client exited`, poisoning the pool for
+      # unrelated tests' setup. Mirrors the `sender == self()` guard in
+      # `doc_updated/2` (the sibling broadcast on the same mutation).
+      msg[:sender] == self() ->
+        {:noreply, socket}
+
       viewing_type != type ->
         {:noreply, socket}
 
