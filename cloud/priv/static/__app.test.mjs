@@ -459,6 +459,17 @@ test("failureCopy: the humanized github-push copy maps to itself (idempotent)", 
   assert.equal(hooks.failureCopy(GH_HUMAN), GH_HUMAN);
 });
 
+test("failureCopy/failureTone: byte-drifted server copy (case, U+2019, cannot) still classifies", () => {
+  // The Elixir FailureCopy twin owns the wire string; if its copy drifts by a
+  // curly apostrophe, casing, or can't→cannot, the client must still recognize
+  // the family (re-mapping to canonical copy is the bonus; the tone is the contract).
+  const curly = "GitHub pushes are recorded but can’t be built yet — automatic builds are coming.";
+  assert.equal(hooks.failureCopy(curly), GH_HUMAN);
+  assert.equal(hooks.failureTone(curly), "blocked");
+  assert.equal(hooks.failureTone("GitHub Push Builds require the GitHub App integration"), "blocked");
+  assert.equal(hooks.failureTone("This commit cannot be built yet."), "blocked");
+});
+
 test("failureTone: github-push family is 'blocked' (raw + humanized), everything else 'crashed'", () => {
   assert.equal(
     hooks.failureTone("github push builds require the GitHub App integration (not yet available)"),

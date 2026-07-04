@@ -2733,17 +2733,33 @@
   // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
   // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
   // the call site, so escaping is unchanged).
+  // dwb-webhook-deploy-artifact-gap (interim): the ONE predicate for the
+  // born-failed GitHub-push family — a push conjures a deployment the builder
+  // can't run yet (needs the gh-1 App integration), so the CP marks it born-
+  // failed. Shared by failureCopy (what to say) and failureTone (how to paint
+  // it) so the two can never drift apart. FailureCopy.humanize on the Elixir
+  // side maps the raw machine reason to human copy at the JSON boundary, so the
+  // client usually already RECEIVES the human string — match a substring
+  // present in BOTH the raw form ("github push builds …", pinned by charter D3)
+  // and the humanized form ("… can't be built yet …") → idempotent: raw→human
+  // and human→human land on one output. Matched case-insensitively with the
+  // apostrophe normalized (U+2019 → ') so a byte-level drift in the server copy
+  // degrades only the re-mapping (their words show), never the classification.
+  function isGithubPushBlocked(reason) {
+    if (!reason || typeof reason !== "string") return false;
+    var lc = reason.toLowerCase().replace(/\u2019/g, "'");
+    return lc.indexOf("github push builds") !== -1 ||
+      lc.indexOf("can't be built yet") !== -1 ||
+      lc.indexOf("cannot be built yet") !== -1;
+  }
+
+  // Map a raw internal builder failure_reason (from builder.go) to human copy,
+  // the deploy-side twin of friendly()/ERRORS for API errors. Substring match on
+  // the RAW reason; unrecognized reasons pass through verbatim (still esc'd at
+  // the call site, so escaping is unchanged).
   function failureCopy(reason) {
     if (!reason) return reason;
-    // dwb-webhook-deploy-artifact-gap (interim): a GitHub push conjures a
-    // deployment the builder can't run yet (needs the gh-1 App integration), so
-    // the CP marks it born-failed. FailureCopy.humanize on the Elixir side maps
-    // the raw machine reason to this exact copy at the JSON boundary — so the
-    // client usually already RECEIVES the human string. Match a substring present
-    // in BOTH the raw ("github push builds") and the humanized ("can't be built
-    // yet") form → idempotent: raw→human and human→human land on one output.
-    if (reason.indexOf("github push builds") !== -1 ||
-        reason.indexOf("can't be built yet") !== -1)
+    if (isGithubPushBlocked(reason))
       return "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming.";
     if (reason.indexOf("no build source") !== -1)
       return "This site has no build source yet. Connect a repo or run bp deploy.";
@@ -2755,15 +2771,10 @@
 
   // dwb-webhook-deploy / D11: BLOCKED-vs-CRASHED tone. A born-failed GitHub-push
   // deploy is a capability that isn't enabled yet — not a crash. Classify the
-  // reason family (matching both the raw machine reason and its humanized twin,
-  // same substrings as failureCopy) so the render sites can paint it in a calm
-  // amber/informational tone instead of crash-red. Total: null/unknown → crashed.
+  // reason family so the render sites can paint it in a calm amber/informational
+  // tone instead of crash-red. Total: null/unknown → crashed.
   function failureTone(reason) {
-    if (reason &&
-        (reason.indexOf("github push builds") !== -1 ||
-         reason.indexOf("can't be built yet") !== -1))
-      return "blocked";
-    return "crashed";
+    return isGithubPushBlocked(reason) ? "blocked" : "crashed";
   }
 
   // gh-6: one branch-preview row — its branch, a click-through to the preview
