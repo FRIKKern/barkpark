@@ -26,10 +26,16 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   concat `&`, parentheses, and function calls. Precedence follows Excel:
   unary minus binds tighter than `^` (`-2^2` is `4`), `^` is left-associative
   (`2^3^2` is `64`), then `* /`, then `+ -`, then `&`, then comparisons.
-  Refs resolve within the cell's OWN tab — cross-tab references are out of
-  scope (no `Tab!A1` syntax; `!` fails the grammar, yielding `#REF!`). The
-  grid is bounded at column XFD (16,384) and row 1,048,576 (the Excel
-  limits); a ref beyond either bound is `#REF!`.
+  Refs resolve within the cell's OWN tab by default, and a `Tab!A1`
+  qualifier reaches another tab: `Sheet2!A1`, `SUM(Sheet2!A1:A3)`, and the
+  quoted `'My Sheet'!A1` (with `''` escaping a literal apostrophe). A tab
+  name that resolves to the formula's own tab is same-tab; an UNKNOWN tab
+  name is `#REF!`; a range whose two corners name different tabs is `#REF!`.
+  A document with any cross-tab reference recomputes as ONE unified
+  `{tab, col, row}` dependency graph (so a `Sheet1!A1 → Sheet2!A1 →
+  Sheet1!A1` loop is `#CYCLE!` on both cells); a document with none keeps the
+  per-tab fast path byte-for-byte. The grid is bounded at column XFD (16,384)
+  and row 1,048,576 (the Excel limits); a ref beyond either bound is `#REF!`.
 
   ## Functions
 
@@ -947,16 +953,283 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   """
   @spec recompute(term()) :: term()
   def recompute(%{"tabs" => tabs} = content) when is_list(tabs) do
-    Map.put(content, "tabs", Enum.map(tabs, &recompute_tab/1))
+    name_index = tab_name_index(tabs)
+
+    if needs_unified?(tabs, name_index) do
+      # Any cross-tab reference forces ONE unified {tab,col,row} graph over
+      # every formula cell of every tab (CT-D4); cross-tab cycles fall out as
+      # ordinary Kahn leftovers. See recompute_unified/3.
+      recompute_unified(content, tabs, name_index)
+    else
+      # Zero cross-tab references → the per-tab fast path, byte-for-byte the
+      # legacy behaviour (each tab recomputed in isolation).
+      Map.put(content, "tabs", Enum.map(tabs, &recompute_tab/1))
+    end
   end
 
   def recompute(content), do: content
+
+  @doc false
+  # Would recompute/1 take the unified cross-tab path? The regression lock in
+  # engine_test.exs asserts this is FALSE for a zero-cross-tab document (the
+  # fast path is provably taken). Not part of the public surface.
+  @spec uses_cross_tab?(term()) :: boolean()
+  def uses_cross_tab?(%{"tabs" => tabs}) when is_list(tabs),
+    do: needs_unified?(tabs, tab_name_index(tabs))
+
+  def uses_cross_tab?(_), do: false
 
   defp recompute_tab(%{"cells" => cells} = tab) when is_map(cells) and map_size(cells) > 0 do
     Map.put(tab, "cells", recompute_cells(cells))
   end
 
   defp recompute_tab(tab), do: tab
+
+  # ── cross-tab routing ───────────────────────────────────────────────────────
+
+  # Map every tab's (downcased) name to its 0-based index. Tab names are the
+  # source of truth for cross-tab qualifiers (CT-D1, Excel-style); the internal
+  # coordinate is the integer index. Excel sheet names are case-insensitive and
+  # unique, so first-wins on a (degenerate) duplicate.
+  defp tab_name_index(tabs) do
+    tabs
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {tab, idx}, acc ->
+      case tab do
+        %{"name" => name} when is_binary(name) and name != "" ->
+          Map.put_new(acc, String.downcase(name), idx)
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  # A document needs the unified path iff some formula carries a `!` qualifier
+  # that RESOLVES to a real tab (self OR other). The cheap `String.contains?`
+  # guard keeps the common (no-`!`) document off the tokenizer entirely, so the
+  # fast path pays only a substring scan per formula. An unresolvable `Foo!A1`
+  # never triggers unified — the fast path degrades it to #REF! on its own.
+  defp needs_unified?(tabs, name_index) do
+    Enum.any?(tabs, fn tab ->
+      case tab do
+        %{"cells" => cells} when is_map(cells) ->
+          Enum.any?(cells, fn
+            {_addr, %{"f" => f}} when is_binary(f) ->
+              String.contains?(f, "!") and formula_qualified?(f, name_index)
+
+            _ ->
+              false
+          end)
+
+        _ ->
+          false
+      end
+    end)
+  end
+
+  # Does this formula tokenize to a tab-name qualifier that resolves in the
+  # name index? (Detection only — the real parse happens in recompute_unified.)
+  defp formula_qualified?(f, name_index) do
+    src =
+      case String.trim(f) do
+        "=" <> rest -> rest
+        other -> other
+      end
+
+    case tokenize(src, []) do
+      {:ok, tokens} ->
+        Enum.any?(tokens, fn
+          {:tabname, name} -> Map.has_key?(name_index, String.downcase(name))
+          _ -> false
+        end)
+
+      _ ->
+        false
+    end
+  end
+
+  # ── unified (cross-tab) recompute ───────────────────────────────────────────
+  #
+  # One {tab,col,row}-keyed dependency graph over every formula cell of every
+  # tab. Node coordinate is the integer tab index; a bare ref carries its own
+  # tab, a `Sheet2!A1` ref carries the resolved index. A single Kahn pass orders
+  # cross-tab edges and detects cross-tab cycles as residual-in-degree leftovers
+  # (no new cycle algorithm — the per-tab rule generalises for free).
+
+  defp recompute_unified(content, tabs, name_index) do
+    # Gather, across ALL tabs: per-tab occupied sets, a global {tab,col,row}
+    # value map (literals), and the parsed formula nodes.
+    {occupied, values, parsed} =
+      tabs
+      |> Enum.with_index()
+      |> Enum.reduce({%{}, %{}, %{}}, fn {tab, ti}, {occ, vals, par} ->
+        case tab do
+          %{"cells" => cells} when is_map(cells) and map_size(cells) > 0 ->
+            entries =
+              for {addr, cell} <- cells, is_map(cell), reduce: [] do
+                acc ->
+                  case Sheets.parse_ref(addr) do
+                    {:ok, {c, r}} -> [{addr, {c, r}, cell} | acc]
+                    :error -> acc
+                  end
+              end
+
+            occ_t = MapSet.new(entries, fn {_addr, cr, _cell} -> cr end)
+
+            vals_t =
+              Map.new(entries, fn {_addr, {c, r}, cell} -> {{ti, c, r}, literal_value(cell)} end)
+
+            par_t =
+              for {addr, {c, r}, %{"f" => f}} <- entries, is_binary(f), into: %{} do
+                {{ti, c, r}, {ti, addr, parse_formula(f, name_index)}}
+              end
+
+            {Map.put(occ, ti, occ_t), Map.merge(vals, vals_t), Map.merge(par, par_t)}
+
+          _ ->
+            {Map.put(occ, ti, MapSet.new()), vals, par}
+        end
+      end)
+
+    if parsed == %{} do
+      content
+    else
+      node_asts =
+        for {key, {ti, _addr, {:ok, ast, _pts, _rgs}}} <- parsed, into: %{} do
+          {pts, rgs} = walk_qualified(ast, ti, {[], []})
+          {key, {ast, pts, rgs}}
+        end
+
+      node_set = node_asts |> Map.keys() |> MapSet.new()
+      {in_deg, out_edges} = build_graph_unified(node_asts, node_set)
+
+      computed0 =
+        for {key, {_ti, _addr, :invalid}} <- parsed, into: %{}, do: {key, err(:ref)}
+
+      base = %{
+        unified: true,
+        values: values,
+        occupied: occupied,
+        formulas: parsed |> Map.keys() |> MapSet.new()
+      }
+
+      queue = for {key, 0} <- in_deg, do: key
+      {computed, in_deg} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base)
+
+      computed =
+        Enum.reduce(in_deg, computed, fn
+          {key, d}, acc when d > 0 -> Map.put(acc, key, err(:cycle))
+          _other, acc -> acc
+        end)
+
+      write_back_unified(content, tabs, parsed, computed)
+    end
+  end
+
+  # Collect a resolved AST's precedent nodes as {tab,col,row} triples — a bare
+  # ref/range inherits `own` tab; a qualified one already carries its index.
+  defp walk_qualified({:ref, {t, c, r}}, _own, {ps, rs}), do: {[{t, c, r} | ps], rs}
+  defp walk_qualified({:ref, {c, r}}, own, {ps, rs}), do: {[{own, c, r} | ps], rs}
+
+  defp walk_qualified({:range, {t, c1, r1}, {t, c2, r2}}, _own, {ps, rs}),
+    do: {ps, [{{t, c1, r1}, {t, c2, r2}} | rs]}
+
+  defp walk_qualified({:range, {c1, r1}, {c2, r2}}, own, {ps, rs}),
+    do: {ps, [{{own, c1, r1}, {own, c2, r2}} | rs]}
+
+  defp walk_qualified({:neg, x}, own, acc), do: walk_qualified(x, own, acc)
+
+  defp walk_qualified({:binop, _op, l, r}, own, acc),
+    do: walk_qualified(r, own, walk_qualified(l, own, acc))
+
+  defp walk_qualified({:call, _name, args}, own, acc),
+    do: Enum.reduce(args, acc, &walk_qualified(&1, own, &2))
+
+  defp walk_qualified(_literal, _own, acc), do: acc
+
+  defp build_graph_unified(node_asts, node_set) do
+    Enum.reduce(node_asts, {%{}, %{}}, fn {key, {_ast, pts, rgs}}, {in_deg, out} ->
+      deps =
+        pts
+        |> Enum.filter(&MapSet.member?(node_set, &1))
+        |> Kernel.++(range_node_deps_unified(rgs, node_set))
+        |> Enum.uniq()
+
+      in_deg = Map.put(in_deg, key, length(deps))
+      out = Enum.reduce(deps, out, fn dep, o -> Map.update(o, dep, [key], &[key | &1]) end)
+      {in_deg, out}
+    end)
+  end
+
+  # Range deps intersect the formula set of the range's OWN tab (bounded by the
+  # formula count, never the rectangle) — the per-tab guarantee, tab-qualified.
+  defp range_node_deps_unified(ranges, node_set) do
+    Enum.flat_map(ranges, fn {{t, c1, r1}, {t, c2, r2}} ->
+      Enum.filter(node_set, fn {tt, c, r} ->
+        tt == t and c >= c1 and c <= c2 and r >= r1 and r <= r2
+      end)
+    end)
+  end
+
+  defp topo_unified([], computed, in_deg, _out, _node_asts, _base), do: {computed, in_deg}
+
+  defp topo_unified([key | rest], computed, in_deg, out, node_asts, base) do
+    {tab, c, r} = key
+    {ast, _pts, _rgs} = Map.fetch!(node_asts, key)
+
+    ctx = %{
+      unified: true,
+      tab: tab,
+      computed: computed,
+      values: base.values,
+      occupied: base.occupied,
+      formulas: base.formulas,
+      self: {c, r}
+    }
+
+    computed = Map.put(computed, key, eval(ast, ctx))
+
+    {ready, in_deg} =
+      out
+      |> Map.get(key, [])
+      |> Enum.reduce({[], in_deg}, fn dep, {ready, ind} ->
+        ind = Map.update!(ind, dep, &(&1 - 1))
+        if ind[dep] == 0, do: {[dep | ready], ind}, else: {ready, ind}
+      end)
+
+    topo_unified(ready ++ rest, computed, in_deg, out, node_asts, base)
+  end
+
+  defp write_back_unified(content, tabs, parsed, computed) do
+    by_tab = Enum.group_by(parsed, fn {{t, _c, _r}, _v} -> t end)
+
+    new_tabs =
+      tabs
+      |> Enum.with_index()
+      |> Enum.map(fn {tab, ti} ->
+        case tab do
+          %{"cells" => cells} when is_map(cells) ->
+            new_cells =
+              Enum.reduce(Map.get(by_tab, ti, []), cells, fn {key, {_ti, addr, result}}, acc ->
+                case result do
+                  :stale ->
+                    Map.update!(acc, addr, &Map.put(&1, "stale", true))
+
+                  _decisive ->
+                    Map.update!(acc, addr, &write_value(&1, Map.fetch!(computed, key)))
+                end
+              end)
+
+            Map.put(tab, "cells", new_cells)
+
+          _ ->
+            tab
+        end
+      end)
+
+    Map.put(content, "tabs", new_tabs)
+  end
 
   # ── recompute pipeline ──────────────────────────────────────────────────────
 
@@ -1163,7 +1436,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   #
   # parse_formula/1 → {:ok, ast, points, ranges} | :stale | :invalid
 
-  defp parse_formula(f) do
+  # The fast path parses with an EMPTY name index: a formula with no `!` is
+  # unchanged, and any `!` qualifier is unresolvable → :invalid → #REF! (the
+  # fast path only ever sees unknown-tab qualifiers; a resolvable one routes to
+  # recompute_unified before we get here).
+  defp parse_formula(f), do: parse_formula(f, %{})
+
+  defp parse_formula(f, name_index) do
     src =
       case String.trim(f) do
         "=" <> rest -> rest
@@ -1171,7 +1450,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       end
 
     with {:ok, tokens} <- tokenize(src, []),
-         {:ok, ast} <- parse(tokens) do
+         {:ok, ast0} <- parse(tokens),
+         {:ok, ast} <- resolve_tabs(ast0, name_index) do
       {points, ranges, fns} = walk(ast, {[], [], []})
 
       if Enum.all?(fns, &(&1 in @functions)) do
@@ -1181,6 +1461,43 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       end
     else
       _ -> :invalid
+    end
+  end
+
+  # Resolve tab-name qualifiers (CT-D1). A `{:qref, name, {c,r}}` /
+  # `{:qrange, name, p1, p2}` node names a tab in the formula STRING; here the
+  # name becomes an integer index and the node becomes a plain 3-tuple ref/
+  # range. An unknown name fails the whole formula (→ :invalid → #REF!). A name
+  # that resolves to the formula's own tab is kept as a 3-tuple too — in the
+  # unified graph a self-index reads the same tab, and a self-cycle
+  # (`=Sheet1!A1` in A1) is a #CYCLE! like any other, matching Excel.
+  defp resolve_tabs(ast, name_index) do
+    {:ok, resolve_node(ast, name_index)}
+  catch
+    :unknown_tab -> :error
+  end
+
+  defp resolve_node({:qref, name, {c, r}}, ni), do: {:ref, {resolve_tab_name!(name, ni), c, r}}
+
+  defp resolve_node({:qrange, name, {c1, r1}, {c2, r2}}, ni) do
+    idx = resolve_tab_name!(name, ni)
+    {:range, {idx, min(c1, c2), min(r1, r2)}, {idx, max(c1, c2), max(r1, r2)}}
+  end
+
+  defp resolve_node({:neg, x}, ni), do: {:neg, resolve_node(x, ni)}
+
+  defp resolve_node({:binop, op, l, r}, ni),
+    do: {:binop, op, resolve_node(l, ni), resolve_node(r, ni)}
+
+  defp resolve_node({:call, name, args}, ni),
+    do: {:call, name, Enum.map(args, &resolve_node(&1, ni))}
+
+  defp resolve_node(node, _ni), do: node
+
+  defp resolve_tab_name!(name, ni) do
+    case Map.fetch(ni, String.downcase(name)) do
+      {:ok, idx} -> idx
+      :error -> throw(:unknown_tab)
     end
   end
 
@@ -1218,6 +1535,17 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp tokenize(<<")", rest::binary>>, acc), do: tokenize(rest, [:rparen | acc])
   defp tokenize(<<",", rest::binary>>, acc), do: tokenize(rest, [:comma | acc])
   defp tokenize(<<":", rest::binary>>, acc), do: tokenize(rest, [:colon | acc])
+  defp tokenize(<<"!", rest::binary>>, acc), do: tokenize(rest, [:bang | acc])
+
+  # A single-quoted tab name (Excel): `'My Sheet'!A1`, `'Q1 2026'!A1`, with
+  # `''` escaping a literal apostrophe. Meaningful only before `!`; the parser
+  # rejects a `{:tabname}` not followed by `:bang`.
+  defp tokenize(<<?', rest::binary>>, acc) do
+    case lex_quoted_name(rest, "") do
+      {:ok, name, rest2} -> tokenize(rest2, [{:tabname, name} | acc])
+      :error -> :error
+    end
+  end
 
   defp tokenize(<<?", rest::binary>>, acc) do
     case lex_string(rest, "") do
@@ -1254,6 +1582,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp lex_string(<<?", rest::binary>>, acc), do: {:ok, {:str, acc}, rest}
   defp lex_string(<<c::utf8, rest::binary>>, acc), do: lex_string(rest, acc <> <<c::utf8>>)
   defp lex_string(<<>>, _acc), do: :error
+
+  # `''` inside a quoted tab name is a literal apostrophe; a lone `'` closes it.
+  defp lex_quoted_name(<<?', ?', rest::binary>>, acc), do: lex_quoted_name(rest, acc <> "'")
+  defp lex_quoted_name(<<?', rest::binary>>, acc), do: {:ok, acc, rest}
+
+  defp lex_quoted_name(<<c::utf8, rest::binary>>, acc),
+    do: lex_quoted_name(rest, acc <> <<c::utf8>>)
+
+  defp lex_quoted_name(<<>>, _acc), do: :error
 
   defp lex_number(bin) do
     {int, rest} = take_digits(bin, "")
@@ -1308,6 +1645,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     up = String.upcase(word)
 
     cond do
+      # A bare word immediately followed by `!` is a tab-name qualifier
+      # (`Sheet2!A1`). Bare names must match `[A-Za-z_][A-Za-z0-9_]*` and NOT be
+      # ref-shaped — a ref-shaped name (`A1!B2`) must be quoted (`'A1'!B2`), so
+      # an unquoted one fails the grammar (→ :invalid → #REF!).
+      next_is_bang?(rest) and bare_tab_name?(word) -> {:ok, {:tabname, word}, rest}
+      next_is_bang?(rest) -> :error
       function_name?(word) and next_is_lparen?(rest) -> {:ok, {:ident, up}, rest}
       ref_like?(word) -> ref_token(word, rest)
       up in ["TRUE", "FALSE"] -> {:ok, {:bool, up == "TRUE"}, rest}
@@ -1319,9 +1662,27 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp function_name?(word), do: Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, word)
   defp ref_like?(word), do: Regex.match?(~r/^\$?[A-Za-z]+\$?[0-9]+$/, word)
 
+  # A bare tab name matches the identifier shape and is NOT a VALID in-bounds
+  # cell reference (Excel). `Sheet2` reads as column "SHEET" (far past XFD) so
+  # it is not a real ref → legal bare name; `A1`/`Q1` ARE real refs → must be
+  # quoted (`'A1'!B2`). This is why the default `Sheet1`/`Sheet2` names work
+  # unquoted while a sheet literally named `A1` does not.
+  defp bare_tab_name?(word), do: function_name?(word) and not valid_ref?(word)
+
+  defp valid_ref?(word) do
+    ref_like?(word) and
+      match?(
+        {:ok, {c, r}} when c <= @max_col and r <= @max_row,
+        Sheets.parse_ref(String.replace(word, "$", ""))
+      )
+  end
+
   defp next_is_lparen?(<<?\s, rest::binary>>), do: next_is_lparen?(rest)
   defp next_is_lparen?(<<?(, _::binary>>), do: true
   defp next_is_lparen?(_), do: false
+
+  defp next_is_bang?(<<?!, _::binary>>), do: true
+  defp next_is_bang?(_), do: false
 
   defp ref_token(word, rest) do
     case Sheets.parse_ref(String.replace(word, "$", "")) do
@@ -1439,6 +1800,19 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp parse_primary([{:str, s} | rest]), do: {:ok, {:str, s}, rest}
   defp parse_primary([{:bool, b} | rest]), do: {:ok, {:bool, b}, rest}
 
+  # Tab-qualified range (`Sheet2!A1:B5`) — ONE qualifier spans the whole range;
+  # the tab name resolves to an index in resolve_tabs. A range whose two corners
+  # name DIFFERENT tabs (`Sheet2!A1:Sheet3!B5`) never matches this clause: the
+  # leftover `:colon` after the first qref fails the parse → #REF! (Excel).
+  defp parse_primary([{:tabname, name}, :bang, {:ref, {c1, r1}}, :colon, {:ref, {c2, r2}} | rest]) do
+    {:ok, {:qrange, name, {c1, r1}, {c2, r2}}, rest}
+  end
+
+  # Tab-qualified single ref (`Sheet2!A1`).
+  defp parse_primary([{:tabname, name}, :bang, {:ref, pos} | rest]) do
+    {:ok, {:qref, name, pos}, rest}
+  end
+
   defp parse_primary([{:ref, {c1, r1}}, :colon, {:ref, {c2, r2}} | rest]) do
     {:ok, {:range, {min(c1, c2), min(r1, r2)}, {max(c1, c2), max(r1, r2)}}, rest}
   end
@@ -1504,12 +1878,34 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp eval({:call, name, args}, ctx), do: call(name, args, ctx)
 
+  # Cross-tab read (explicit tab) — hits the named tab's store no matter the
+  # ambient ctx.tab. In the unified ctx `computed`/`values` are {tab,col,row}
+  # keyed; a bare {col,row} inherits the formula's own tab (ctx.tab).
+  defp cell_at({t, c, r}, %{unified: true} = ctx), do: fetch_cell({t, c, r}, ctx)
+  defp cell_at({c, r}, %{unified: true} = ctx), do: fetch_cell({ctx.tab, c, r}, ctx)
+
+  # Fast path — the per-tab store is keyed by {col,row}; byte-for-byte legacy.
   defp cell_at(pos, ctx) do
     case Map.fetch(ctx.computed, pos) do
       {:ok, v} -> v
       :error -> Map.get(ctx.values, pos, :blank)
     end
   end
+
+  defp fetch_cell(key, ctx) do
+    case Map.fetch(ctx.computed, key) do
+      {:ok, v} -> v
+      :error -> Map.get(ctx.values, key, :blank)
+    end
+  end
+
+  # ISFORMULA's precedent test. The formula set is {col,row} keyed on the fast
+  # path and {tab,col,row} keyed in the unified ctx; a same-tab {col,row} probe
+  # inherits the ambient tab.
+  defp formula_member?({c, r}, %{unified: true, tab: t} = ctx),
+    do: MapSet.member?(ctx.formulas, {t, c, r})
+
+  defp formula_member?(p1, ctx), do: MapSet.member?(ctx.formulas, p1)
 
   defp eval_number(ast, ctx) do
     case scalarize(eval(ast, ctx)) do
@@ -3223,7 +3619,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # its top-left; a non-reference argument is #VALUE!.
   defp call("ISFORMULA", [arg], ctx) do
     case as_range(arg) do
-      {:ok, p1, _p2} -> MapSet.member?(ctx.formulas, p1)
+      {:ok, p1, _p2} -> formula_member?(p1, ctx)
       :error -> err(:value)
     end
   end
@@ -3744,6 +4140,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   end
 
   defp range_values(p1, p2, ctx) do
+    {p1, p2, ctx} = localize_range(p1, p2, ctx)
+
     occupied_positions(p1, p2, ctx)
     |> Enum.map(&cell_at(&1, ctx))
     |> Enum.reject(&(&1 == :blank))
@@ -3755,6 +4153,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # a bare list of numbers is returned. A scalar arg is a 1-cell series (a blank
   # scalar -> []); a non-numeric scalar is #VALUE! like a strict aggregate.
   defp sparkline_series({:range, p1, p2}, ctx) do
+    {p1, p2, ctx} = localize_range(p1, p2, ctx)
     cells = Enum.map(occupied_positions(p1, p2, ctx), fn pos -> {pos, cell_at(pos, ctx)} end)
 
     case Enum.find(cells, fn {_pos, v} -> match?({:error, _}, v) end) do
@@ -3864,6 +4263,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # million-cell walk; unwritten interior cells come back as :blank. Row-major
   # list of rows.
   defp range_grid(p1, p2, ctx) do
+    {p1, p2, ctx} = localize_range(p1, p2, ctx)
+
     case occupied_positions(p1, p2, ctx) do
       [] ->
         []
@@ -3900,6 +4301,20 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # Occupied cell positions inside a rectangle — iterate min(rectangle,
   # occupied set), never the full (possibly million-cell) area.
+  # Unified ctx: occupied is a %{tab => MapSet {col,row}} map; read the ambient
+  # tab's set. Corners here are always 2-tuples (localize_range peeled the tab
+  # and re-based ctx.tab already), so the result stays {col,row}.
+  defp occupied_positions({c1, r1}, {c2, r2}, %{unified: true} = ctx) do
+    occ = Map.get(ctx.occupied, ctx.tab, MapSet.new())
+    area = (c2 - c1 + 1) * (r2 - r1 + 1)
+
+    if area <= MapSet.size(occ) do
+      for c <- c1..c2, r <- r1..r2, MapSet.member?(occ, {c, r}), do: {c, r}
+    else
+      Enum.filter(occ, fn {c, r} -> c >= c1 and c <= c2 and r >= r1 and r <= r2 end)
+    end
+  end
+
   defp occupied_positions({c1, r1}, {c2, r2}, ctx) do
     area = (c2 - c1 + 1) * (r2 - r1 + 1)
 
@@ -3910,12 +4325,25 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     end
   end
 
+  # Peel the tab off a range's corners. A cross-tab range ({tab,col,row}
+  # corners) returns {col,row} corners plus a ctx re-based to that tab, so the
+  # downstream 2-tuple machinery (occupied_positions, cell_at, range_grid) runs
+  # unchanged against the target tab. A same-tab range passes through untouched;
+  # the 3-tuple clause only ever fires inside the unified ctx (which has :tab).
+  defp localize_range({t, c1, r1}, {t, c2, r2}, ctx), do: {{c1, r1}, {c2, r2}, %{ctx | tab: t}}
+  defp localize_range(p1, p2, ctx), do: {p1, p2, ctx}
+
   defp rect_area({c1, r1}, {c2, r2}), do: (c2 - c1 + 1) * (r2 - r1 + 1)
 
   # A range or single-ref AST node as a rectangle; anything else is not a
   # range (the caller maps it to #VALUE!).
-  defp as_range({:range, p1, p2}), do: {:ok, p1, p2}
-  defp as_range({:ref, pos}), do: {:ok, pos, pos}
+  defp as_range({:range, {c1, r1}, {c2, r2}}), do: {:ok, {c1, r1}, {c2, r2}}
+  defp as_range({:ref, {c, r}}), do: {:ok, {c, r}, {c, r}}
+  # A cross-tab range/ref (3-tuple corners) is not consumable by the as_range
+  # family in wave 1 — fail closed so the caller returns a clean error, never a
+  # crash. Cross-tab aggregation flows through range_values/range_grid, which
+  # localize the tab; the as_range consumers (VLOOKUP/INDEX/SUMIF/…) gain
+  # cross-tab support in a later slice.
   defp as_range(_other), do: :error
 
   # ── lookup helpers ──────────────────────────────────────────────────────

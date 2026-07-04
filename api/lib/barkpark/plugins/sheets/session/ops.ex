@@ -126,13 +126,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          {:ok, new_tab} <- structural_shift(op, old_tab, at, count) do
       inverse = shift_inverse(op, tab_idx, old_tab, at, count)
 
-      {:ok,
-       apply_structural(state, tab_idx, new_tab, true, %{
-         op: op,
-         at: at,
-         count: count,
-         tab: tab_idx
-       }), inverse}
+      state =
+        apply_structural(state, tab_idx, new_tab, true, %{
+          op: op,
+          at: at,
+          count: count,
+          tab: tab_idx
+        })
+
+      # CT (design §3.2, B-CT-5): a row/col insert/delete on this tab shifts
+      # cross-tab refs to it living in OTHER tabs' formulas (via X2's
+      # `Structure.shift_cross_tab_refs/4`, keyed by the tab INDEX). The shifted
+      # OTHER tabs inherit the documented lossy-undo contract (the own-tab
+      # inverse restores only its own tab).
+      axis = if op in ["insert_rows", "delete_rows"], do: :row, else: :col
+      kind = if op in ["insert_rows", "insert_cols"], do: :insert, else: :delete
+      state = apply_cross_tab_shift(state, tab_idx, axis, {kind, at, count})
+
+      {:ok, state, inverse}
     end
   end
 
@@ -278,21 +289,32 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Rename a tab. CROSS-TAB (CT / wave-1): because refs are NAME-based
+  # (design decision 1), a rename rewrites every `OldName!`/`'Old Name'!`
+  # qualifier across ALL OTHER tabs to the new name — that sweep is owned by
+  # `Structure.rename_refs/3` (X2), wired here behind a `function_exported?`
+  # guard so this slice compiles + gates BEFORE X2 merges (no-op until then;
+  # the own-tab rename always works). The named SILENT-CORRUPTION hazard
+  # (design §6): the sweep touches OTHER users' tabs, so the inverse MUST
+  # capture the PRE-rewrite cells of every rewritten tab — the
+  # `{:rename_restore, …}` multi-tab capture — or undo cannot restore the
+  # rewritten refs. When no tab depends on this one, the capture is empty and
+  # the inverse degrades to the plain `{:structural, rename}` (byte-identical
+  # to the pre-CT behavior).
   def apply_one(%{"op" => "rename_tab", "tab" => tab, "name" => name}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, name} <- validate_tab_name(name) do
-      old_tab = Sheets.get_tab(state.content, tab_idx)
-      prior_name = Map.get(old_tab, "name") || "Sheet #{tab_idx + 1}"
-      inverse = {:structural, %{"op" => "rename_tab", "tab" => tab_idx, "name" => prior_name}}
-      new_tab = Map.put(old_tab, "name", name)
+      prior_name = tab_name(state.content, tab_idx)
+      captured = capture_cross_tab_cells(state, tab_idx)
 
-      {:ok,
-       apply_structural(state, tab_idx, new_tab, false, %{
-         op: "rename_tab",
-         at: nil,
-         count: nil,
-         tab: tab_idx
-       }), inverse}
+      inverse =
+        if map_size(captured) == 0 do
+          {:structural, %{"op" => "rename_tab", "tab" => tab_idx, "name" => prior_name}}
+        else
+          {:rename_restore, tab_idx, prior_name, captured}
+        end
+
+      {:ok, rename_apply(state, tab_idx, name, %{}), inverse}
     end
   end
 
@@ -322,6 +344,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       else
         old_tab = Enum.at(tabs, tab_idx)
         old_cells = Map.get(old_tab, "cells") || %{}
+        deleted_name = tab_name(state.content, tab_idx)
         changed = Map.new(old_cells, fn {addr, _cell} -> {addr, nil} end)
         content = Map.put(state.content, "tabs", List.delete_at(tabs, tab_idx))
 
@@ -332,6 +355,15 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
             count: nil,
             tab: tab_idx
           })
+
+        # CT (design §3.2): rewrite every `Name!` ref to the deleted tab, across
+        # all OTHER tabs, to the literal `#REF!` (Excel). Guarded/no-op until
+        # X2's `Structure.delete_tab_refs/2`; when live those rewrites inherit
+        # the DOCUMENTED lossy-undo contract (like delete-shift `#REF!`s — only
+        # rename captures a lossless multi-tab inverse), and the delete_tab
+        # structure delta already drives a client refetch.
+        state =
+          commit_cross_tab_content(state, state.content, delete_cross_tab_refs(state.content, deleted_name))
 
         # Every stack index AFTER the deleted slot slides down by one —
         # the mirror of duplicate_tab's insert shift. Entries pinned to the
@@ -512,6 +544,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #   * {:structural_restore, op_map, cells}   — insert_* + the deleted
   #     span's captured cells (the inverse of a delete_*)
   #   * {:tab_restore, idx, tab}               — re-insert a deleted tab
+  #   * {:rename_restore, tab, name, captured} — rename `tab` back to `name`
+  #     AND overlay `captured` (%{dep_tab_idx => %{ref => pre-rewrite cell}}) —
+  #     the lossless multi-tab inverse of a rename that rewrote cross-tab refs
+  #     (design §6). Applying it re-captures the current cells for the redo
+  #     counter, so undo/redo ride the same machine.
   #   * {:remove_merges, tab_idx, canonicals}  — drop exactly these merge
   #     ranges (the inverse of merge_cells; no-op for any already gone)
   #   * {:add_merges, tab_idx, canonicals}     — re-add these merge ranges,
@@ -615,6 +652,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # tab move/delete with a pending sort undo). The rect/perm are row-space and
   # do not shift under a tab permutation.
   defp remap_entry({:permute, tab, rect, perm}, fun), do: {:permute, fun.(tab), rect, perm}
+
+  # A rename_restore pins the renamed tab index AND every dependent-tab index in
+  # its multi-tab capture — a tab move/delete permutes them all (the #843
+  # all-inverse-shapes remap contract; a missing clause crashes undo after a
+  # reorder with a pending rename undo).
+  defp remap_entry({:rename_restore, tab, name, captured}, fun) do
+    {:rename_restore, fun.(tab), name, Map.new(captured, fn {t, cells} -> {fun.(t), cells} end)}
+  end
 
   # A stacked move_tab inverse pins "from"/"to", not "tab". `fun.(from)` is
   # exact — "from" tracks the IDENTITY of the tab to move back, and the
@@ -846,6 +891,21 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          rect: rect,
          perm: perm
        }), counter}
+    end
+  end
+
+  # Undo/redo of a rename that rewrote cross-tab refs — the lossless multi-tab
+  # inverse (design §6). Rename `tab` back to `prior_name` (which re-runs the
+  # guarded X2 sweep) and overlay the captured PRE-rewrite cells of every
+  # dependent tab, restoring every ref the forward rename rewrote. The counter
+  # re-captures the CURRENT cells at those addresses + the current name, so redo
+  # re-applies exactly — undo and redo are the same machine run either way.
+  defp apply_entry({:rename_restore, tab, prior_name, captured}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      cur_name = tab_name(state.content, tab_idx)
+      redo_captured = recapture_cells(state, captured)
+      counter = {:rename_restore, tab_idx, cur_name, redo_captured}
+      {:ok, rename_apply(state, tab_idx, prior_name, captured), counter}
     end
   end
 
@@ -1275,7 +1335,14 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       # (Map.put_new keeps the earliest), so the coalesced flush still diffs
       # against the pre-batch state and its `changed` carries every recomputed
       # dependent — the wire contract stays byte-identical in structure.
-      %{state | dirty_tabs: Map.put_new(state.dirty_tabs, tab_idx, old_cells)}
+      #
+      # CT (design §3.2, B-CT-3): an edit to tab j also dirties every tab that
+      # references j by name (`mark_dependents_dirty/3`, via the precedent
+      # index). flush_pending then whole-doc-recomputes and broadcasts each
+      # dependent's delta. A zero-cross-tab document adds no dependents, so the
+      # dirty set — and the per-tab fast path — stays byte-identical.
+      dirty = Map.put_new(state.dirty_tabs, tab_idx, old_cells)
+      %{state | dirty_tabs: mark_dependents_dirty(state, tab_idx, dirty)}
     else
       changed = diff_cells(old_cells, Map.get(new_tab, "cells") || %{})
       broadcast_delta(state, tab_idx, changed)
@@ -1297,6 +1364,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def flush_pending(%{dirty_tabs: dirty} = state) when map_size(dirty) == 0, do: state
 
   def flush_pending(state) do
+    # Refresh the precedent index from the batch's CURRENT formulas BEFORE
+    # choosing the path, so a cross-tab formula ADDED earlier in this batch
+    # still routes to the whole-doc recompute. Recompute changes only values,
+    # never formula text, so this index also holds for the next batch. Cheap: a
+    # formula-text scan over the (few) formula cells.
+    state = %{state | cross_tab_index: build_cross_tab_index(state.content)}
+
+    if whole_doc_recompute?(state) do
+      flush_whole_doc(state)
+    else
+      flush_per_tab(state)
+    end
+  end
+
+  # The per-tab fast path (byte-identical to the pre-CT flush): recompute each
+  # dirty formula-bearing tab once, diff, broadcast. Taken whenever no dirty tab
+  # participates in a cross-tab dependency — the overwhelmingly common case.
+  defp flush_per_tab(state) do
     Enum.reduce(state.dirty_tabs, %{state | dirty_tabs: %{}}, fn {tab_idx, pre_cells}, st ->
       tabs = Map.get(st.content, "tabs")
       tab = Enum.at(tabs, tab_idx)
@@ -1306,6 +1391,27 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       broadcast_delta(st, tab_idx, changed)
       st
     end)
+  end
+
+  # CT-D4 — whole-document recompute: when any dirty tab participates in a
+  # cross-tab dependency, ONE unified `Engine.recompute/1` over the whole
+  # content resolves cross-tab reads AND cross-tab cycles (a `{tab,col,row}`
+  # Kahn graph, X1), then one per-tab delta is broadcast for EACH dirty tab
+  # (the touched tab plus every dependent `mark_dependents_dirty/3` added).
+  # `Engine.recompute/1` is the SAME unified path the persist pipeline already
+  # calls — before X1 lands it just leaves cross-tab refs `#REF!`; this slice
+  # wires the SESSION propagation X1's eval then lights up.
+  defp flush_whole_doc(state) do
+    recomputed = Engine.recompute(state.content)
+    tabs = Map.get(recomputed, "tabs") || []
+    st = %{state | content: recomputed, dirty_tabs: %{}}
+
+    Enum.each(state.dirty_tabs, fn {tab_idx, pre_cells} ->
+      new_cells = Map.get(Enum.at(tabs, tab_idx) || %{}, "cells") || %{}
+      broadcast_delta(st, tab_idx, diff_cells(pre_cells, new_cells))
+    end)
+
+    st
   end
 
   # Structural ops rewrite a whole tab: swap the rewritten tab in,
@@ -1331,7 +1437,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         dirty?: true,
         ops_since_flush: state.ops_since_flush + 1,
         nonempty: count_nonempty(content),
-        formula_counts: count_formulas(content)
+        formula_counts: count_formulas(content),
+        # A structural op can add/remove/reorder tabs or rewrite formulas — any
+        # of which shifts the tab-index-keyed precedent index. Rebuild it (CT).
+        cross_tab_index: build_cross_tab_index(content)
     }
 
     broadcast_delta(state, tab_idx, changed, structure)
@@ -1378,6 +1487,299 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       Session.topic(state.slug, state.dataset, state.workspace_id),
       {:sheets_op, payload}
     )
+  end
+
+  # ── cross-tab dependency (CT / wave-1) ───────────────────────────────────
+  #
+  # X1 generalizes a formula ref from `{col,row}` to `{tab,col,row}`: a formula
+  # in one tab may read `Sheet2!A1`, so editing Sheet2 must recompute — and
+  # re-broadcast — the DEPENDENT tab. That BREAKS this module's founding
+  # assumption "formulas are tab-local, other tabs can't change".
+  #
+  # The session keeps a tab-granular PRECEDENT INDEX in state:
+  #   cross_tab_index :: %{target_tab_idx => MapSet(dependent_tab_idx)}
+  # "tab d depends on tab t" iff a formula in d references t BY NAME (d != t; a
+  # same-tab self-name-ref like `Sheet1!A1` inside Sheet1 stays on the per-tab
+  # fast path). Rebuilt cheaply — a formula-text scan — whenever formulas or the
+  # tab layout change (every flush, every structural finalize). It is a pure
+  # session-side scan with NO dependency on the engine, so propagation is
+  # correct even before X1 merges (X1 makes the REF resolve; this makes the
+  # SESSION dirty + broadcast the dependent).
+
+  @doc """
+  Build the cross-tab precedent index for `content`:
+  `%{target_tab_idx => MapSet(dependent_tab_idx)}`. Public — the session seeds
+  it in `init/1`; the op machinery rebuilds it after formula/layout changes.
+  Self-name-refs (`d == t`) are excluded so a same-tab qualified ref keeps the
+  per-tab fast path.
+  """
+  def build_cross_tab_index(content) do
+    tabs = Map.get(content, "tabs") || []
+    name_index = tab_name_index(tabs)
+
+    for {tab, dep_idx} <- Enum.with_index(tabs),
+        is_map(tab),
+        {_addr, cell} <- Map.get(tab, "cells") || %{},
+        is_map(cell),
+        f = Map.get(cell, "f"),
+        is_binary(f),
+        target_name <- formula_tab_refs(f),
+        target_idx = Map.get(name_index, String.downcase(target_name)),
+        is_integer(target_idx),
+        target_idx != dep_idx,
+        reduce: %{} do
+      acc -> Map.update(acc, target_idx, MapSet.new([dep_idx]), &MapSet.put(&1, dep_idx))
+    end
+  end
+
+  # name (downcased) => index. Excel tab names are unique + case-insensitive for
+  # lookup; a stray duplicate resolves to the last-listed tab (harmless — the
+  # gate keeps names unique).
+  defp tab_name_index(tabs) do
+    for {tab, idx} <- Enum.with_index(tabs), is_map(tab), into: %{} do
+      {String.downcase(Map.get(tab, "name") || "Sheet #{idx + 1}"), idx}
+    end
+  end
+
+  # Every tab-qualifier NAME in a formula — the `Name!` / `'Quoted Name'!`
+  # prefix of a cross-tab ref. `!` has no other meaning in the grammar (the
+  # pre-X1 lexer rejects it), so every `!` here is a cross-tab qualifier. A
+  # quoted name un-escapes `''` → `'` (Excel convention). Regex.scan returns a
+  # 3-group list for a bare match (`[full, "", bare]`) and a 2-group list for a
+  # quoted one (`[full, quoted]`) — both handled below.
+  @tab_ref_regex ~r/(?:'((?:[^']|'')*)'|([A-Za-z_][A-Za-z0-9_]*))!/
+  defp formula_tab_refs(f) do
+    # Cheap prefilter (this runs per formula on every flush — the hot path): a
+    # cross-tab qualifier ALWAYS contains `!`, so a formula with no `!` — the
+    # overwhelming majority — skips the regex entirely. `:binary.match/2` is the
+    # fastest substring test; semantically identical to running the scan.
+    if :binary.match(f, "!") == :nomatch do
+      []
+    else
+      formula_tab_refs_scan(f)
+    end
+  end
+
+  defp formula_tab_refs_scan(f) do
+    @tab_ref_regex
+    |> Regex.scan(f)
+    |> Enum.map(fn
+      [_full, "", bare] -> bare
+      [_full, quoted, _bare] -> String.replace(quoted, "''", "'")
+      [_full, quoted] -> String.replace(quoted, "''", "'")
+    end)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp cross_tab_dependents(state, tab_idx) do
+    case Map.get(state.cross_tab_index, tab_idx) do
+      nil -> []
+      set -> MapSet.to_list(set)
+    end
+  end
+
+  # On a deferred cell op to `tab_idx`, add each dependent tab to the dirty set,
+  # capturing its pre-batch cells (Map.put_new keeps the earliest). The
+  # dependent's cells are untouched until flush, so the current cells ARE the
+  # pre-batch cells.
+  defp mark_dependents_dirty(state, tab_idx, dirty) do
+    Enum.reduce(cross_tab_dependents(state, tab_idx), dirty, fn dep_idx, acc ->
+      Map.put_new(acc, dep_idx, tab_cells(state.content, dep_idx))
+    end)
+  end
+
+  # Whole-doc recompute is required iff a dirty tab either has dependents (its
+  # edit changes another tab) or is itself a dependent (its formulas read
+  # another tab). Both are captured by "the dirty set intersects the union of
+  # every target and dependent index". Empty index ⇒ never (fast path).
+  defp whole_doc_recompute?(state) do
+    participants = cross_tab_participants(state.cross_tab_index)
+
+    participants != MapSet.new() and
+      Enum.any?(Map.keys(state.dirty_tabs), &MapSet.member?(participants, &1))
+  end
+
+  defp cross_tab_participants(index) do
+    Enum.reduce(index, MapSet.new(), fn {target, deps}, acc ->
+      acc |> MapSet.put(target) |> MapSet.union(deps)
+    end)
+  end
+
+  # The multi-tab undo capture: for every tab that depends on `tab_idx`, the
+  # SUBSET of its cells whose formula references `tab_idx` by name — surgical,
+  # not the whole tab, so undo never clobbers unrelated edits a collaborator
+  # made to the dependent tab between the rename and the undo. Empty when no tab
+  # depends on `tab_idx`.
+  defp capture_cross_tab_cells(state, tab_idx) do
+    name_index = tab_name_index(Map.get(state.content, "tabs") || [])
+
+    for dep_idx <- cross_tab_dependents(state, tab_idx),
+        cells = cross_tab_cells(tab_cells(state.content, dep_idx), tab_idx, name_index),
+        map_size(cells) > 0,
+        into: %{} do
+      {dep_idx, cells}
+    end
+  end
+
+  defp cross_tab_cells(cells, target_idx, name_index) do
+    for {ref, cell} <- cells,
+        is_map(cell),
+        f = Map.get(cell, "f"),
+        is_binary(f),
+        references_tab?(f, target_idx, name_index),
+        into: %{} do
+      {ref, cell}
+    end
+  end
+
+  defp references_tab?(f, target_idx, name_index) do
+    Enum.any?(formula_tab_refs(f), &(Map.get(name_index, String.downcase(&1)) == target_idx))
+  end
+
+  # Re-capture the CURRENT cells at the addresses a prior multi-tab capture
+  # holds — the redo counter for a `{:rename_restore, …}` undo.
+  defp recapture_cells(state, captured) do
+    for {dep_idx, cells} <- captured, into: %{} do
+      {dep_idx, Map.take(tab_cells(state.content, dep_idx), Map.keys(cells))}
+    end
+  end
+
+  # Rename tab `tab_idx` to `new_name`: rename the own tab, run X2's guarded
+  # cross-tab sweep over OTHER tabs, overlay any `overlay` captured cells (the
+  # undo-restore path; empty on the forward op), then finalize + broadcast the
+  # rename structure delta plus one cell delta per changed dependent tab. Shared
+  # by the forward `rename_tab` op and the `{:rename_restore, …}` inverse.
+  defp rename_apply(state, tab_idx, new_name, overlay) do
+    prior_name = tab_name(state.content, tab_idx)
+    before = state.content
+    renamed = Map.put(Sheets.get_tab(before, tab_idx) || %{}, "name", new_name)
+
+    after_content =
+      before
+      |> put_tab(tab_idx, renamed)
+      |> rename_cross_tab_refs(prior_name, new_name)
+      |> overlay_captured_content(overlay)
+
+    dep_idxs = Enum.uniq(cross_tab_dependents(state, tab_idx) ++ Map.keys(overlay))
+    finalize_rename(state, before, after_content, tab_idx, dep_idxs)
+  end
+
+  defp finalize_rename(state, before, after_content, tab_idx, dep_idxs) do
+    state = %{
+      state
+      | content: after_content,
+        rev: state.rev + 1,
+        dirty?: true,
+        ops_since_flush: state.ops_since_flush + 1,
+        nonempty: count_nonempty(after_content),
+        formula_counts: count_formulas(after_content),
+        cross_tab_index: build_cross_tab_index(after_content)
+    }
+
+    broadcast_delta(state, tab_idx, %{}, %{op: "rename_tab", at: nil, count: nil, tab: tab_idx})
+
+    Enum.each(dep_idxs, fn dep_idx ->
+      changed = diff_cells(tab_cells(before, dep_idx), tab_cells(after_content, dep_idx))
+      if map_size(changed) > 0, do: broadcast_delta(state, dep_idx, changed)
+    end)
+
+    state
+  end
+
+  defp overlay_captured_content(content, overlay) when map_size(overlay) == 0, do: content
+
+  defp overlay_captured_content(content, overlay) do
+    Enum.reduce(overlay, content, fn {dep_idx, cells}, acc ->
+      dep_tab = Sheets.get_tab(acc, dep_idx) || %{}
+      merged = Map.merge(Map.get(dep_tab, "cells") || %{}, cells)
+      put_tab(acc, dep_idx, Map.put(dep_tab, "cells", merged))
+    end)
+  end
+
+  # ── X2 Structure integration seams (guarded until X2 merges) ─────────────
+  #
+  # Cross-tab formula-text rewrites are owned by
+  # `Barkpark.Plugins.Sheets.Structure` (X2) under the single-writer rule — this
+  # module never rewrites formula text itself. Each call is guarded on
+  # `function_exported?/3` so X3 compiles + gates on origin/main BEFORE X2
+  # lands; every seam is a NO-OP until then (own-tab work always happens; only
+  # the cross-tab ref rewrite waits on X2). The ASSUMED contracts below are the
+  # integration points the merging agent rebases if a signature differs.
+
+  # `Structure.rename_refs(tabs, old_name, new_name) :: tabs` (X2) — rewrite
+  # every `OldName!`/`'Old Name'!` qualifier across ALL tabs to the new name.
+  # X2 operates on the `tabs` list (its module boundary); this session adapter
+  # peels tabs off content and puts the rewritten list back (integration seam).
+  defp rename_cross_tab_refs(content, old_name, new_name) do
+    if old_name != new_name and function_exported?(Structure, :rename_refs, 3) do
+      tabs = Map.get(content, "tabs") || []
+      Map.put(content, "tabs", apply(Structure, :rename_refs, [tabs, old_name, new_name]))
+    else
+      content
+    end
+  end
+
+  # `Structure.delete_tab_refs(tabs, deleted_name) :: tabs` (X2) — rewrite every
+  # ref to the deleted tab, across all tabs, to the literal `#REF!`. Same
+  # content↔tabs adapter as rename above.
+  defp delete_cross_tab_refs(content, deleted_name) do
+    if function_exported?(Structure, :delete_tab_refs, 2) do
+      tabs = Map.get(content, "tabs") || []
+      Map.put(content, "tabs", apply(Structure, :delete_tab_refs, [tabs, deleted_name]))
+    else
+      content
+    end
+  end
+
+  # `Structure.shift_cross_tab_refs(tabs, target_index, axis, {kind, at, count})
+  # :: tabs` (X2) — shift cross-tab refs to the tab at `target_index` (row/col
+  # insert/delete) living in OTHER tabs' formulas; a deleted axis → `#REF!`.
+  # Session adapter: peel tabs off content, call X2 with the tab INDEX + change
+  # tuple, put the rewritten list back (the X2 seam — content↔tabs + /4 shape).
+  defp apply_cross_tab_shift(state, target_index, axis, {_kind, _at, _count} = change) do
+    if function_exported?(Structure, :shift_cross_tab_refs, 4) do
+      before = state.content
+      tabs = Map.get(before, "tabs") || []
+      new_tabs = apply(Structure, :shift_cross_tab_refs, [tabs, target_index, axis, change])
+      commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
+    else
+      state
+    end
+  end
+
+  # Commit an X2 cross-tab content transform: when it changed anything, swap the
+  # content in, recount the caches + precedent index, and broadcast one per-tab
+  # cell delta for every tab whose cells moved. Does NOT bump rev — the primary
+  # op already did. A no-op transform (the guarded seams today) returns the
+  # state untouched, so existing behavior is byte-identical.
+  defp commit_cross_tab_content(state, before, after_content) when before == after_content,
+    do: state
+
+  defp commit_cross_tab_content(state, before, after_content) do
+    state = %{
+      state
+      | content: after_content,
+        nonempty: count_nonempty(after_content),
+        formula_counts: count_formulas(after_content),
+        cross_tab_index: build_cross_tab_index(after_content)
+    }
+
+    for {tab, idx} <- Enum.with_index(Map.get(after_content, "tabs") || []) do
+      changed = diff_cells(tab_cells(before, idx), Map.get(tab, "cells") || %{})
+      if map_size(changed) > 0, do: broadcast_delta(state, idx, changed)
+    end
+
+    state
+  end
+
+  defp tab_cells(content, idx), do: Map.get(Sheets.get_tab(content, idx) || %{}, "cells") || %{}
+
+  defp tab_name(content, idx),
+    do: Map.get(Sheets.get_tab(content, idx) || %{}, "name") || "Sheet #{idx + 1}"
+
+  defp put_tab(content, idx, tab) do
+    tabs = Map.get(content, "tabs") || []
+    Map.put(content, "tabs", List.replace_at(tabs, idx, tab))
   end
 
   # ── counters ─────────────────────────────────────────────────────────────

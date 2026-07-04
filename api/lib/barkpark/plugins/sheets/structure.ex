@@ -51,6 +51,27 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   everything that is not a ref (operators, numbers, whitespace, malformed
   words the engine would reject anyway) passes through untouched.
 
+  ## Cross-tab references (CT-D1 — B-CT-5)
+
+  Formulas may reference other tabs by NAME: `Sheet2!A1`, `SUM(Sheet2!A1:B5)`,
+  `'My Sheet'!A1` (a name with a space/punctuation/leading digit or a
+  ref-shaped name quotes as `'…'`, a literal apostrophe doubled `''` — Excel).
+  The scanner recognizes these as single units, so the per-tab
+  `rewrite_formula/3` leaves a qualified ref UNTOUCHED on an insert/delete (a
+  bare `Sheet3` word is no longer mis-shifted as a ref). Three pure,
+  whole-document sweeps carry the cross-tab structural rewrite the Session
+  wires around the per-tab op:
+
+    * `shift_cross_tab_refs/4` — after a row/col insert/delete on tab `i`,
+      shift every OTHER (and self-qualified) formula's `Name_i!` ref/range;
+      deleted axis → literal `#REF!`, partial range clips. Same shift/clip
+      arithmetic as the local pass — only token recognition is new.
+    * `rename_refs/3` — rewrite every `OldName!`/`'Old Name'!` qualifier to the
+      new (re-quoted) name across all tabs.
+    * `delete_tab_refs/2` — rewrite every ref to a deleted tab to `#REF!`.
+
+  `move_tab` needs NO rewrite — name-based refs are position-stable (CT-D1).
+
   ## Sort (SF-A — a pure row permutation)
 
   `sort_rows/3` reorders WHOLE rows within a rectangular range and nothing
@@ -186,7 +207,7 @@ defmodule Barkpark.Plugins.Sheets.Structure do
         ) ::
           String.t()
   def rewrite_formula(f, axis, change) when is_binary(f) and axis in [:row, :col] do
-    scan(f, axis, change, []) |> IO.iodata_to_binary()
+    scan(f, {:local, axis, change}, []) |> IO.iodata_to_binary()
   end
 
   @doc """
@@ -200,8 +221,97 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   """
   @spec rebase_formula(String.t(), integer(), integer()) :: String.t()
   def rebase_formula(f, dcol, drow) when is_binary(f) and is_integer(dcol) and is_integer(drow) do
-    scan(f, :col, {:rebase, dcol, drow}, []) |> IO.iodata_to_binary()
+    scan(f, {:local, :col, {:rebase, dcol, drow}}, []) |> IO.iodata_to_binary()
   end
+
+  # ── cross-tab references (CT-D1 — B-CT-5) ──────────────────────────────────
+  #
+  # A cross-tab ref is NAME-based and lives in the formula string, e.g.
+  # `Sheet2!A1`, `Sheet2!A1:B5`, `'My Sheet'!A1` (a name with a space/
+  # punctuation/leading digit or a ref-shaped name quotes as `'…'`, a literal
+  # apostrophe doubled — Excel). These pure sweeps are the cross-tab
+  # counterpart of the per-tab `insert_rows`/… ops (which rewrite ONLY the
+  # mutated tab's OWN bare refs). The Session serializes and wires them.
+
+  @doc """
+  Shift cross-tab references after a structural row/column insert or delete on
+  the tab at `target_index`. The per-tab op (`insert_rows`/`delete_rows`/…)
+  rewrites that tab's OWN bare refs; this sweeps EVERY tab's formulas (the
+  mutated tab included, to catch self-qualified `ThisTab!A1` refs) and shifts
+  ONLY the qualified refs/ranges whose tab name matches the mutated tab's name.
+  Bare refs and refs to other tabs pass through byte-for-byte. A qualified ref
+  whose referenced axis is deleted collapses to the literal `#REF!` (the
+  per-tab dead-ref spelling); a partially covered qualified range clips. Pure —
+  reuses the same shift/clip arithmetic as `rewrite_formula/3`; only token
+  recognition (the tab qualifier) is new.
+  """
+  @spec shift_cross_tab_refs(
+          [map()],
+          non_neg_integer(),
+          :row | :col,
+          {:insert | :delete, pos_integer(), pos_integer()}
+        ) :: [map()]
+  def shift_cross_tab_refs(tabs, target_index, axis, {kind, _at, _count} = change)
+      when is_list(tabs) and is_integer(target_index) and axis in [:row, :col] and
+             kind in [:insert, :delete] do
+    case tab_name(Enum.at(tabs, target_index)) do
+      name when is_binary(name) and name != "" ->
+        Enum.map(tabs, &rewrite_tab_formulas(&1, {:sweep, name, axis, change}))
+
+      _ ->
+        tabs
+    end
+  end
+
+  @doc """
+  Rename every cross-tab qualifier `OldName!` / `'Old Name'!` to `new_name`
+  across ALL tabs' formulas (Excel's rename-rewrite — CT-D1). The referenced
+  cell/range is untouched; only the tab qualifier changes, re-quoted when
+  `new_name` needs it (a space, punctuation, a leading digit or a ref-shaped
+  name → `'…'`, a literal apostrophe doubled). Name matching is
+  case-insensitive (Excel). Pure — `move_tab` has NO counterpart here because
+  name-based refs are position-stable.
+  """
+  @spec rename_refs([map()], String.t(), String.t()) :: [map()]
+  def rename_refs(tabs, old_name, new_name)
+      when is_list(tabs) and is_binary(old_name) and is_binary(new_name) do
+    Enum.map(tabs, &rewrite_tab_formulas(&1, {:rename, old_name, new_name}))
+  end
+
+  @doc """
+  Rewrite every cross-tab reference to the deleted tab `deleted_name` to the
+  literal `#REF!` across ALL tabs' formulas (Excel — CT-D1). The Session
+  captures `deleted_name` before dropping the tab. Name matching is
+  case-insensitive. Pure.
+  """
+  @spec delete_tab_refs([map()], String.t()) :: [map()]
+  def delete_tab_refs(tabs, deleted_name) when is_list(tabs) and is_binary(deleted_name) do
+    Enum.map(tabs, &rewrite_tab_formulas(&1, {:deltab, deleted_name}))
+  end
+
+  defp tab_name(tab) when is_map(tab), do: Map.get(tab, "name")
+  defp tab_name(_), do: nil
+
+  defp rewrite_tab_formulas(tab, op) when is_map(tab) do
+    case Map.get(tab, "cells") do
+      cells when is_map(cells) ->
+        Map.put(
+          tab,
+          "cells",
+          Map.new(cells, fn {addr, cell} -> {addr, rewrite_cell_formula(cell, op)} end)
+        )
+
+      _ ->
+        tab
+    end
+  end
+
+  defp rewrite_tab_formulas(tab, _op), do: tab
+
+  defp rewrite_cell_formula(%{"f" => f} = cell, op) when is_binary(f),
+    do: Map.put(cell, "f", scan(f, op, []) |> IO.iodata_to_binary())
+
+  defp rewrite_cell_formula(cell, _op), do: cell
 
   # ── sort (SF-A) ────────────────────────────────────────────────────────────
 
@@ -884,41 +994,208 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   # ── formula scanner ──────────────────────────────────────────────────────
   #
-  # Mirrors the engine's lexer surface: string literals with "" escaping,
-  # word charset [A-Za-z0-9_$], a ref-shaped word followed by "(" is a
-  # function name. Emits iodata; everything not rewritten stays verbatim.
+  # Mirrors the engine's lexer surface: double-quoted string literals with ""
+  # escaping, single-quoted tab-name qualifiers with '' escaping, the `!` tab
+  # separator, word charset [A-Za-z0-9_$], a ref-shaped word followed by "(" is
+  # a function name. Emits iodata; everything not rewritten stays verbatim.
+  #
+  # `op` selects what each recognized ref/range becomes:
+  #   {:local, axis, change}       — the mutated tab's OWN rewrite
+  #        (rewrite_formula / rebase_formula): a BARE ref shifts/rebases; a
+  #        tab-QUALIFIED ref passes through untouched on an insert/delete (the
+  #        cross-tab sweep owns those) and rebases its cell part on a copy/fill.
+  #   {:sweep, name, axis, change} — a structural insert/delete on the tab
+  #        `name`: shift ONLY qualified refs to that tab; bare refs and refs to
+  #        other tabs pass through.
+  #   {:rename, old, new}          — rewrite the qualifier of every ref to `old`
+  #        into `new` (re-quoted as needed); the cell part is verbatim.
+  #   {:deltab, name}              — a ref to the deleted tab `name` becomes the
+  #        literal #REF!; everything else is verbatim.
 
-  defp scan(<<>>, _axis, _change, out), do: Enum.reverse(out)
+  defp scan(<<>>, _op, out), do: Enum.reverse(out)
 
-  defp scan(<<?", rest::binary>>, axis, change, out) do
+  defp scan(<<?", rest::binary>>, op, out) do
     {lit, rest2} = take_string(rest, ["\""])
-    scan(rest2, axis, change, [lit | out])
+    scan(rest2, op, [lit | out])
   end
 
-  defp scan(<<c, _::binary>> = bin, axis, change, out)
+  # A single quote opens a quoted tab-name qualifier (`'My Sheet'!A1`). If it
+  # does not form a complete qualified ref, the quote is emitted verbatim and
+  # scanning resumes after it (fail-soft — byte-identical to the old pass).
+  defp scan(<<?', rest::binary>>, op, out) do
+    case take_quoted_qualifier(rest) do
+      {name, qsrc, ref_spec, rest2} ->
+        scan(rest2, op, [handle_qualified(op, name, qsrc, ref_spec) | out])
+
+      :none ->
+        scan(rest, op, ["'" | out])
+    end
+  end
+
+  defp scan(<<c, _::binary>> = bin, op, out)
        when c in ?a..?z or c in ?A..?Z or c == ?_ or c == ?$ do
     {word, rest} = take_word(bin, "")
 
-    cond do
-      not ref_like?(word) ->
-        scan(rest, axis, change, [word | out])
+    case take_qualified_tail(rest) do
+      # A bare tab name immediately followed by `!ref` / `!ref:ref`.
+      {ref_spec, rest2} ->
+        scan(rest2, op, [handle_qualified(op, word, word, ref_spec) | out])
 
-      next_is_lparen?(rest) ->
-        scan(rest, axis, change, [word | out])
+      :none ->
+        cond do
+          not ref_like?(word) ->
+            scan(rest, op, [word | out])
 
-      true ->
-        case take_range_tail(rest) do
-          {:range, sep, word2, rest2} ->
-            scan(rest2, axis, change, [rewrite_range(word, sep, word2, axis, change) | out])
+          next_is_lparen?(rest) ->
+            scan(rest, op, [word | out])
 
-          :single ->
-            scan(rest, axis, change, [rewrite_ref(word, axis, change) | out])
+          true ->
+            case take_range_tail(rest) do
+              {:range, sep, word2, rest2} ->
+                scan(rest2, op, [bare_range(op, word, sep, word2) | out])
+
+              :single ->
+                scan(rest, op, [bare_ref(op, word) | out])
+            end
         end
     end
   end
 
-  defp scan(<<c::utf8, rest::binary>>, axis, change, out),
-    do: scan(rest, axis, change, [<<c::utf8>> | out])
+  defp scan(<<c::utf8, rest::binary>>, op, out),
+    do: scan(rest, op, [<<c::utf8>> | out])
+
+  # A bare (unqualified) ref/range only shifts under a {:local, …} op; under
+  # the cross-tab ops it is another tab's business — pass it through verbatim.
+  defp bare_ref({:local, axis, change}, word), do: rewrite_ref(word, axis, change)
+  defp bare_ref(_op, word), do: word
+
+  defp bare_range({:local, axis, change}, w1, sep, w2),
+    do: rewrite_range(w1, sep, w2, axis, change)
+
+  defp bare_range(_op, w1, sep, w2), do: [w1, sep, w2]
+
+  # `!ref` / `!ref:ref` tail immediately after a (bare or quoted) tab name.
+  # Returns the ref spec + the remaining input, or :none when what follows is
+  # not a valid reference (leave the name as an ordinary word).
+  defp take_qualified_tail(<<?!, rest::binary>>) do
+    {word, rest2} = take_word(rest, "")
+
+    if word != "" and ref_like?(word) and not next_is_lparen?(rest2) do
+      case take_range_tail(rest2) do
+        # A range whose second corner is ITSELF a qualifier (`Sheet2!A1:Sheet3!B2`)
+        # is a two-tab range — not the single-tab range this scanner shifts (the
+        # design makes two-tab ranges `#REF!` at eval; formula text is stored
+        # verbatim under CT-D1, so such a string can reach Structure). Qualify
+        # only the FIRST corner and hand the `:` + second qualifier back to the
+        # scanner: each side then shifts under its own tab. Without this, the
+        # bare second corner (`Sheet3`) parses as a ref and mis-shifts (e.g. a
+        # row op turns `Sheet3` into `SHEET4`), corrupting the stored formula.
+        {:range, _sep, _word2, <<?!, _::binary>>} -> {{:single, word}, rest2}
+        {:range, sep, word2, rest3} -> {{:range, word, sep, word2}, rest3}
+        :single -> {{:single, word}, rest2}
+      end
+    else
+      :none
+    end
+  end
+
+  defp take_qualified_tail(_), do: :none
+
+  # A `'…'!ref` qualifier: parse the quoted name body ('' → literal '), require
+  # a `!ref`/`!ref:ref` tail. Returns {decoded_name, original_qualifier_source,
+  # ref_spec, rest} or :none.
+  defp take_quoted_qualifier(bin) do
+    case take_quoted_body(bin, "") do
+      {:ok, raw, rest} ->
+        case take_qualified_tail(rest) do
+          {ref_spec, rest2} ->
+            {String.replace(raw, "''", "'"), "'" <> raw <> "'", ref_spec, rest2}
+
+          :none ->
+            :none
+        end
+
+      :error ->
+        :none
+    end
+  end
+
+  # Quoted-name body up to the closing quote; `''` is an escaped apostrophe.
+  # `raw` keeps the source spelling verbatim (doubled quotes intact) so an
+  # untouched qualifier re-emits byte-identically. An unterminated body fails.
+  defp take_quoted_body(<<?', ?', rest::binary>>, raw),
+    do: take_quoted_body(rest, <<raw::binary, "''">>)
+
+  defp take_quoted_body(<<?', rest::binary>>, raw), do: {:ok, raw, rest}
+
+  defp take_quoted_body(<<c::utf8, rest::binary>>, raw),
+    do: take_quoted_body(rest, <<raw::binary, c::utf8>>)
+
+  defp take_quoted_body(<<>>, _raw), do: :error
+
+  # Transform one qualified ref/range per the active op. `qsrc` is the original
+  # qualifier source (bare word or `'…'`), `name` its decoded form.
+  defp handle_qualified({:local, _axis, {:rebase, dc, dr}}, _name, qsrc, ref_spec),
+    do: qualified_transform(qsrc, ref_spec, :col, {:rebase, dc, dr})
+
+  defp handle_qualified({:local, _axis, _insert_or_delete}, _name, qsrc, ref_spec),
+    do: qualified_emit(qsrc, ref_spec)
+
+  defp handle_qualified({:sweep, target, axis, change}, name, qsrc, ref_spec) do
+    if names_match?(name, target),
+      do: qualified_transform(qsrc, ref_spec, axis, change),
+      else: qualified_emit(qsrc, ref_spec)
+  end
+
+  defp handle_qualified({:rename, old, new}, name, qsrc, ref_spec) do
+    if names_match?(name, old),
+      do: qualified_emit(emit_qualifier(new), ref_spec),
+      else: qualified_emit(qsrc, ref_spec)
+  end
+
+  defp handle_qualified({:deltab, del}, name, qsrc, ref_spec) do
+    if names_match?(name, del),
+      do: "#REF!",
+      else: qualified_emit(qsrc, ref_spec)
+  end
+
+  # Re-emit a qualified ref verbatim (only the qualifier text `qual` varies —
+  # the referenced cell/range keeps its exact source spelling).
+  defp qualified_emit(qual, {:single, w}), do: [qual, "!", w]
+  defp qualified_emit(qual, {:range, w1, sep, w2}), do: [qual, "!", w1, sep, w2]
+
+  # Shift/rebase a qualified ref's cell part, keeping the qualifier; a dead ref
+  # or fully-deleted range collapses the WHOLE token to the literal #REF!.
+  defp qualified_transform(qual, {:single, w}, axis, change) do
+    case rewrite_ref(w, axis, change) do
+      "#REF!" -> "#REF!"
+      ref -> [qual, "!", ref]
+    end
+  end
+
+  defp qualified_transform(qual, {:range, w1, sep, w2}, axis, change) do
+    case rewrite_range(w1, sep, w2, axis, change) do
+      "#REF!" -> "#REF!"
+      part -> [qual, "!", part]
+    end
+  end
+
+  # Sheet names match case-insensitively (Excel).
+  defp names_match?(a, b) when is_binary(a) and is_binary(b),
+    do: String.downcase(a) == String.downcase(b)
+
+  defp names_match?(_a, _b), do: false
+
+  # Canonical qualifier text for a tab name: bare when it is a simple,
+  # non-ref-shaped identifier; otherwise `'…'` with any apostrophe doubled.
+  defp emit_qualifier(name) do
+    if name_needs_quote?(name),
+      do: "'" <> String.replace(name, "'", "''") <> "'",
+      else: name
+  end
+
+  defp name_needs_quote?(name),
+    do: not (Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, name) and not ref_like?(name))
 
   # String literal body, verbatim (quotes and "" escapes included); an
   # unterminated literal runs to the end — the engine rejects it anyway.

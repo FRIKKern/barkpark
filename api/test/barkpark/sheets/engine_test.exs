@@ -4161,4 +4161,314 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert out["A1"] == %{"f" => "MROUND(10,3)", "v" => 9, "t" => "n"}
     end
   end
+
+  # ── cross-tab references (wave 1: {tab,col,row} coordinate + `!` grammar) ────
+
+  # Recompute a multi-tab content map. `tabs` is a list of {name, cells} pairs.
+  defp run_tabs(tabs) do
+    %{"tabs" => Enum.map(tabs, fn {name, cells} -> %{"name" => name, "cells" => cells} end)}
+    |> Engine.recompute()
+  end
+
+  # The recomputed cells of a named tab.
+  defp tab_cells(content, name) do
+    content["tabs"] |> Enum.find(&(&1["name"] == name)) |> Map.get("cells")
+  end
+
+  defp vt(cell), do: Map.take(cell, ["v", "t"])
+
+  describe "cross-tab references" do
+    test "=Sheet2!A1 reads another tab's cell" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => 42, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"] == %{"f" => "Sheet2!A1", "v" => 42, "t" => "n"}
+    end
+
+    test "=SUM(Sheet2!A1:A3) sums another tab's range" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"Z1" => %{"f" => "SUM(Sheet2!A1:A3)"}}},
+          {"Sheet2",
+           %{
+             "A1" => %{"v" => 1, "t" => "n"},
+             "A2" => %{"v" => 2, "t" => "n"},
+             "A3" => %{"v" => 3, "t" => "n"}
+           }}
+        ])
+
+      assert tab_cells(out, "Sheet1")["Z1"]["v"] == 6
+    end
+
+    test "a two-tab reference cycle yields #CYCLE! on both cells" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"f" => "Sheet1!A1"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["A1"]) == %{"v" => "#CYCLE!", "t" => "e"}
+      assert vt(tab_cells(out, "Sheet2")["A1"]) == %{"v" => "#CYCLE!", "t" => "e"}
+    end
+
+    test "an unknown tab name yields #REF!" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Nope!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => 42, "t" => "n"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["B1"]) == %{"v" => "#REF!", "t" => "e"}
+    end
+
+    test "an unknown tab is #REF! even in an otherwise cross-tab document" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}, "B1" => %{"f" => "Nope!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => 7, "t" => "n"}}}
+        ])
+
+      s1 = tab_cells(out, "Sheet1")
+      assert s1["A1"]["v"] == 7
+      assert vt(s1["B1"]) == %{"v" => "#REF!", "t" => "e"}
+    end
+
+    test "a self-tab name resolves same-tab (routes through the unified path)" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Sheet1",
+            "cells" => %{"A1" => %{"v" => 10, "t" => "n"}, "B1" => %{"f" => "Sheet1!A1"}}
+          }
+        ]
+      }
+
+      # A resolvable qualifier — even a self-reference — takes the unified path.
+      assert Engine.uses_cross_tab?(content)
+      out = Engine.recompute(content)
+      assert get_in(out, ["tabs", Access.at(0), "cells", "B1", "v"]) == 10
+    end
+
+    test "=Sheet1!A1 in A1 (a self-name loop) is #CYCLE!" do
+      content = %{"tabs" => [%{"name" => "Sheet1", "cells" => %{"A1" => %{"f" => "Sheet1!A1"}}}]}
+      out = Engine.recompute(content)
+      assert get_in(out, ["tabs", Access.at(0), "cells", "A1", "v"]) == "#CYCLE!"
+    end
+
+    test "editing the referenced cell recomputes the dependent cell" do
+      doc = fn v ->
+        [
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => v, "t" => "n"}}}
+        ]
+      end
+
+      assert tab_cells(run_tabs(doc.(5)), "Sheet1")["B1"]["v"] == 5
+      assert tab_cells(run_tabs(doc.(9)), "Sheet1")["B1"]["v"] == 9
+    end
+
+    test "a cross-tab ref composes inside arithmetic" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1 * 2 + 1"}}},
+          {"Sheet2", %{"A1" => %{"v" => 4, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 9
+    end
+
+    test "a quoted tab name with a space resolves" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "'My Sheet'!A1"}}},
+          {"My Sheet", %{"A1" => %{"v" => 99, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 99
+    end
+
+    test "'' escapes a literal apostrophe in a quoted tab name" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "'O''Brien'!A1"}}},
+          {"O'Brien", %{"A1" => %{"v" => 3, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 3
+    end
+
+    test "tab names resolve case-insensitively (Excel)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "SHEET2!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => 8, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 8
+    end
+
+    test "a range spanning two different tabs is #REF!" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"Z1" => %{"f" => "SUM(Sheet2!A1:Sheet3!B2)"}}},
+          {"Sheet2", %{"A1" => %{"v" => 1, "t" => "n"}}},
+          {"Sheet3", %{"B2" => %{"v" => 2, "t" => "n"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["Z1"]) == %{"v" => "#REF!", "t" => "e"}
+    end
+
+    test "a cross-tab reference across three tabs orders correctly (unified topo)" do
+      # Sheet3.A1 = 100; Sheet2.A1 = Sheet3!A1 + 1; Sheet1.A1 = Sheet2!A1 * 2.
+      out =
+        run_tabs([
+          {"Sheet1", %{"A1" => %{"f" => "Sheet2!A1 * 2"}}},
+          {"Sheet2", %{"A1" => %{"f" => "Sheet3!A1 + 1"}}},
+          {"Sheet3", %{"A1" => %{"v" => 100, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet2")["A1"]["v"] == 101
+      assert tab_cells(out, "Sheet1")["A1"]["v"] == 202
+    end
+
+    test "as_range consumers fail closed (never crash) on a cross-tab range" do
+      # VLOOKUP's table argument reaching another tab is not wired in wave 1 —
+      # it must yield a clean error, not raise inside recompute.
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "VLOOKUP(1, Sheet2!A1:B3, 2)"}}},
+          {"Sheet2",
+           %{
+             "A1" => %{"v" => 1, "t" => "n"},
+             "B1" => %{"v" => 9, "t" => "n"}
+           }}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["t"] == "e"
+    end
+
+    # ── hardening locks (behaviour X2/X3 must preserve) ──────────────────────
+
+    test "a same-tab range and a cross-tab ref coexist in one formula" do
+      # Exercises the ctx.tab rebasing: SUM(A1:A2) must read the FORMULA's own
+      # tab (localize_range is a no-op, ctx.tab stays), while Sheet2!A1 reaches
+      # the named tab — both inside one eval on the unified path.
+      out =
+        run_tabs([
+          {"Sheet1",
+           %{
+             "A1" => %{"v" => 1, "t" => "n"},
+             "A2" => %{"v" => 2, "t" => "n"},
+             "B1" => %{"f" => "SUM(A1:A2)+Sheet2!A1"}
+           }},
+          {"Sheet2", %{"A1" => %{"v" => 10, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 13
+    end
+
+    test "an error in the referenced cell propagates across the tab boundary" do
+      # The dependent must evaluate AFTER the erroring precedent (unified topo
+      # order) and pass the error code through unchanged.
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"f" => "1/0"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["B1"]) == %{"v" => "#DIV/0!", "t" => "e"}
+    end
+
+    test "a cross-tab ref preserves the source cell's type (text)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => "hello", "t" => "s"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["B1"]) == %{"v" => "hello", "t" => "s"}
+    end
+
+    test "a cross-tab ref to a blank cell reads as an empty (zero in arithmetic)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!Z9+5"}}},
+          {"Sheet2", %{"A1" => %{"v" => 1, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 5
+    end
+  end
+
+  describe "cross-tab routing discriminator (CT-D4)" do
+    test "REGRESSION LOCK: a zero-cross-tab multi-tab document takes the per-tab fast path, byte-identical" do
+      s1 = %{
+        "A1" => %{"v" => 1, "t" => "n"},
+        "A2" => %{"v" => 2, "t" => "n"},
+        "A3" => %{"f" => "SUM(A1:A2)"},
+        "A4" => %{"f" => "A3*10"}
+      }
+
+      s2 = %{
+        "B1" => %{"v" => 5, "t" => "n"},
+        "B2" => %{"f" => "B1+1"},
+        "B3" => %{"f" => "B9"}
+      }
+
+      content = %{
+        "tabs" => [%{"name" => "Sheet1", "cells" => s1}, %{"name" => "Sheet2", "cells" => s2}]
+      }
+
+      # (a) branch discriminator: the unified path is NOT taken.
+      refute Engine.uses_cross_tab?(content)
+
+      out = Engine.recompute(content)
+
+      # (b) byte-identical to the LEGACY per-tab semantics: the whole-document
+      # output for each tab equals that tab recomputed in isolation (which IS
+      # the fast path `Enum.map(tabs, &recompute_tab/1)`).
+      for tab <- content["tabs"] do
+        isolated = %{"tabs" => [tab]} |> Engine.recompute() |> get_in(["tabs", Access.at(0)])
+        whole = out["tabs"] |> Enum.find(&(&1["name"] == tab["name"]))
+        assert whole == isolated
+      end
+
+      assert tab_cells(out, "Sheet1")["A3"]["v"] == 3
+      assert tab_cells(out, "Sheet1")["A4"]["v"] == 30
+      assert tab_cells(out, "Sheet2")["B2"]["v"] == 6
+    end
+
+    test "an unresolvable !-formula alone does NOT trip the unified path" do
+      content = %{
+        "tabs" => [
+          %{"name" => "Sheet1", "cells" => %{"B1" => %{"f" => "Nope!A1"}}},
+          %{"name" => "Sheet2", "cells" => %{"A1" => %{"v" => 1, "t" => "n"}}}
+        ]
+      }
+
+      # `Nope` resolves nowhere → fast path → the formula degrades to #REF!.
+      refute Engine.uses_cross_tab?(content)
+      out = Engine.recompute(content)
+      assert get_in(out, ["tabs", Access.at(0), "cells", "B1", "v"]) == "#REF!"
+    end
+
+    test "a resolvable cross-tab reference DOES trip the unified path" do
+      content = %{
+        "tabs" => [
+          %{"name" => "Sheet1", "cells" => %{"B1" => %{"f" => "Sheet2!A1"}}},
+          %{"name" => "Sheet2", "cells" => %{"A1" => %{"v" => 1, "t" => "n"}}}
+        ]
+      }
+
+      assert Engine.uses_cross_tab?(content)
+    end
+
+    test "a non-tabs content passes uses_cross_tab? without raising" do
+      refute Engine.uses_cross_tab?(%{"locale" => "nb-NO"})
+      refute Engine.uses_cross_tab?(nil)
+    end
+  end
 end
