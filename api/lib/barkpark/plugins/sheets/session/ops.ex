@@ -234,6 +234,38 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def apply_one(%{"op" => "set_cond_format", "tab" => _tab}, _state),
     do: {:error, "invalid_cond_format", "\"rules\" must be a list"}
 
+  # Sort a range's rows in place (SF-A) — a PURE row permutation that moves
+  # every cell map VERBATIM (`f` never rewritten, SF-D1). Validate the range
+  # like a merge range (A1:B2 within grid bounds), then hand the whole tab to
+  # the kernel, which runs the comparator + the merge/frozen/keys guards.
+  # Apply through `apply_structural` with recompute TRUE (the insert/delete
+  # precedent — recompute refreshes `v` for the verbatim-moved formulas). The
+  # inverse is the NEW 5th inverse shape `{:permute, tab_idx, rect, perm}`
+  # (SF-D6): undo re-applies the inverse permutation over the same rect,
+  # loss-free. An already-sorted range (identity permutation) is a true no-op
+  # — no rev bump, no undo entry, no broadcast (the move_tab from==to
+  # precedent).
+  def apply_one(%{"op" => "sort_range", "tab" => tab, "range" => range, "keys" => keys}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, rect} <- validate_sort_range(range),
+         old_tab = Sheets.get_tab(state.content, tab_idx),
+         {:ok, new_tab, perm} <- Structure.sort_rows(old_tab, rect, keys) do
+      if identity_perm?(perm) do
+        {:ok, state, nil}
+      else
+        inverse = {:permute, tab_idx, rect, Structure.invert_perm(perm)}
+
+        {:ok,
+         apply_structural(state, tab_idx, new_tab, true, %{
+           op: "sort_range",
+           at: nil,
+           count: nil,
+           tab: tab_idx
+         }), inverse}
+      end
+    end
+  end
+
   def apply_one(%{"op" => "rename_tab", "tab" => tab, "name" => name}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, name} <- validate_tab_name(name) do
@@ -451,6 +483,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
        "set_cond_format (\"tab\"+\"rules\"), " <>
+       "sort_range (\"tab\"+\"range\"+\"keys\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
        "move_tab (\"from\"+\"to\"), duplicate_tab (\"tab\"), " <>
        "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
@@ -471,6 +504,9 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #     ranges (the inverse of merge_cells; no-op for any already gone)
   #   * {:add_merges, tab_idx, canonicals}     — re-add these merge ranges,
   #     SKIPPING any that now overlap (the inverse of unmerge_cells)
+  #   * {:permute, tab_idx, rect, perm}        — re-apply a row permutation
+  #     over the rect (the inverse of sort_range; SF-D6). Applying it yields
+  #     its own inverse for the opposite stack — verbatim moves both ways.
   #   * {:merges, tab_idx, merges}             — LEGACY whole-list snapshot,
   #     tolerated on read for any in-flight stack entry but no longer PRODUCED
   #     (it clobbered other users' merges and resurrected pre-shift coords)
@@ -562,6 +598,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp remap_entry({:remove_merges, tab, list}, fun), do: {:remove_merges, fun.(tab), list}
   defp remap_entry({:add_merges, tab, list}, fun), do: {:add_merges, fun.(tab), list}
   defp remap_entry({:merges, tab, prior}, fun), do: {:merges, fun.(tab), prior}
+  # A sort undo pins an ABSOLUTE tab index like every other shape — the #843
+  # all-inverse-shapes remap contract (a missing clause crashes undo after a
+  # tab move/delete with a pending sort undo). The rect/perm are row-space and
+  # do not shift under a tab permutation.
+  defp remap_entry({:permute, tab, rect, perm}, fun), do: {:permute, fun.(tab), rect, perm}
 
   # A stacked move_tab inverse pins "from"/"to", not "tab". `fun.(from)` is
   # exact — "from" tracks the IDENTITY of the tab to move back, and the
@@ -769,6 +810,27 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
      }), counter}
   end
 
+  # Re-apply a stored row permutation over the rect (the inverse of a
+  # sort_range; SF-D6). `permute_rows` moves cells verbatim and hands back the
+  # perm that undoes THIS application — the counter for the opposite stack, so
+  # undo and redo ride the same machine. Recompute TRUE settles moved
+  # formulas' `v`, mirroring the forward sort op.
+  defp apply_entry({:permute, tab, rect, perm}, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      {:ok, new_tab, inverse_perm} = Structure.permute_rows(old_tab, rect, perm)
+      counter = {:permute, tab_idx, rect, inverse_perm}
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, true, %{
+         op: "sort_range",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), counter}
+    end
+  end
+
   # insert_* invert to plain deletes; delete_* invert to inserts carrying
   # the deleted span's cells (keyed by their original refs).
   defp shift_inverse(op, tab_idx, _old_tab, at, count)
@@ -856,6 +918,28 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       {:error, "invalid_name", "name must be a non-blank string, got #{inspect(name)}"}
     end
   end
+
+  # Parse + bounds-check a sort range the same way merges do (any corner
+  # order, within the grid bounds) — the merge/frozen/keys guards run in the
+  # kernel. Returns the normalized 1-based rect.
+  defp validate_sort_range(range) do
+    case parse_range_corners(range) do
+      {:ok, {_c1, _r1, c2, r2} = rect} ->
+        if c2 > @grid_max_col or r2 > @grid_max_row do
+          {:error, "sort_out_of_bounds",
+           "sort range #{inspect(range)} is beyond the grid bounds (column #{@grid_max_col}/XFD, row #{@grid_max_row})"}
+        else
+          {:ok, rect}
+        end
+
+      :error ->
+        {:error, "invalid_range", "range must be an A1:B2-style pair, got #{inspect(range)}"}
+    end
+  end
+
+  # True when the sort left every row where it was — the caller records no
+  # undo entry and skips the broadcast (an already-sorted range is a no-op).
+  defp identity_perm?(perm), do: perm == Enum.to_list(0..(length(perm) - 1)//1)
 
   defp fetch_tab(content, tab) when is_integer(tab) and tab >= 0 do
     case Sheets.get_tab(content, tab) do

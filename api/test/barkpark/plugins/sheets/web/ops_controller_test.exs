@@ -145,4 +145,55 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
     assert body["applied"] == 1
     assert body["errors"] == []
   end
+
+  # ── 6. sort_range rides the existing endpoint (SF-A) ──────────────────────
+
+  test "sort_range happy path + a refusal both ride POST /ops", %{conn: conn} do
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => "sort-wire",
+          "content" => %{
+            "tabs" => [%{"name" => "S", "cells" => %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}}}]
+          }
+        },
+        @dataset
+      )
+
+    happy = %{
+      "op" => "sort_range",
+      "tab" => 0,
+      "range" => "A1:A2",
+      "keys" => [%{"col" => 0, "dir" => "asc"}]
+    }
+
+    body =
+      conn
+      |> authed()
+      |> post(ops_url("sort-wire", @dataset), Jason.encode!(%{"ops" => [happy]}))
+      |> json_response(200)
+
+    assert body["ok"] == true
+    assert body["applied"] == 1
+    assert body["errors"] == []
+
+    # A refusal surfaces per-op in the errors list (the op is applied
+    # individually — the endpoint itself still returns 200).
+    bad = %{
+      "op" => "sort_range",
+      "tab" => 0,
+      "range" => "A1:A2",
+      "keys" => [%{"col" => 0, "dir" => "up"}]
+    }
+
+    body2 =
+      build_conn()
+      |> authed()
+      |> post(ops_url("sort-wire", @dataset), Jason.encode!(%{"ops" => [bad]}))
+      |> json_response(200)
+
+    assert body2["applied"] == 0
+    assert [%{"code" => "invalid_sort_keys"}] = body2["errors"]
+  end
 end

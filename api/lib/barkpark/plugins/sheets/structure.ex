@@ -50,9 +50,57 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   its `$` markers, an untouched ref keeps its exact original text, and
   everything that is not a ref (operators, numbers, whitespace, malformed
   words the engine would reject anyway) passes through untouched.
+
+  ## Sort (SF-A — a pure row permutation)
+
+  `sort_rows/3` reorders WHOLE rows within a rectangular range and nothing
+  else. It is a pure permutation of the rect's row-slices: for every row in
+  the rect, the cells in the rect's columns move together to their new row;
+  cells OUTSIDE the rect (even on the same rows) never move. Every moved
+  cell map travels BYTE-IDENTICAL — `v`/`f`/`fmt`/`s`/`t` untouched and the
+  formula string `f` is NEVER rewritten. This is Excel semantics (SF-D1): a
+  sorted `=A1` that lands on row 5 still reads `=A1`, pointing wherever `A1`
+  now is. The Session recomputes the tab afterwards (the insert/delete
+  precedent), which refreshes each moved formula's `v`.
+
+  The comparator (SF-D4) reads the stored computed `v` (never the display
+  string, never the formula text). Ascending total ladder, each tier fully
+  preceding the next:
+
+      1. numbers (numeric order)
+      2. text (case-insensitive — `String.downcase`)
+      3. FALSE
+      4. TRUE
+      5. errors (all errors compare EQUAL to one another)
+      6. blanks — ALWAYS last, in BOTH directions
+
+  A descending key reverses tiers 1..5 only; blanks stay last. The sort is
+  STABLE — equal keys keep their original relative order. Error
+  classification reads the single-sourced value vocabulary inline
+  (`is_binary(v) and (t == "e" or v in Engine.error_values())`); it does NOT
+  call into `CondFormat`. This cross-type total order is a DELIBERATE
+  divergence from the engine, which returns `#VALUE!` on a cross-type
+  comparison — do NOT "fix" it into engine parity; a mixed-type column needs
+  a deterministic order and this is it.
+
+  Guards (SF-D5): a merge intersecting the rect refuses with
+  `sort_merge_overlap`; a rect intersecting the frozen head band
+  (`frozen_rows`) refuses with `sort_frozen_overlap`; malformed keys (not a
+  list, a `col` outside the rect, a `dir` other than `asc`/`desc`) refuse
+  with `invalid_sort_keys`. These are SESSION-OP string codes (the
+  `merge_degenerate` convention), NOT `Engine.error_values` entries
+  (SF-AM1). `row_heights` do NOT travel with sorted rows; `merges` and
+  `cond_formats` are geography-anchored and stay put.
+
+  `permute_rows/3` re-applies an EXPLICIT permutation over a rect and
+  returns its own inverse — the undo/redo applier for the `{:permute, …}`
+  inverse entry (SF-D6). `sort_rows/3` returns `perm` (old-row-index → new
+  position); `invert_perm/1` produces the inverse the undo entry stores.
+  Because sort only permutes rows, undo is loss-free and tab-identity-stable.
   """
 
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
+  alias Barkpark.Plugins.Sheets.Engine
 
   # Excel grid bounds — deliberately duplicated (the established
   # convention: Engine, the plugin gate and the Session each keep their
@@ -153,6 +201,272 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   @spec rebase_formula(String.t(), integer(), integer()) :: String.t()
   def rebase_formula(f, dcol, drow) when is_binary(f) and is_integer(dcol) and is_integer(drow) do
     scan(f, :col, {:rebase, dcol, drow}, []) |> IO.iodata_to_binary()
+  end
+
+  # ── sort (SF-A) ────────────────────────────────────────────────────────────
+
+  @type rect :: {pos_integer(), pos_integer(), pos_integer(), pos_integer()}
+  @type sort_key :: %{required(String.t()) => term()}
+
+  @doc """
+  Sort the rows of `rect` in `tab` by `keys`, a PURE row permutation — see
+  the moduledoc for the full contract (verbatim moves, the comparator
+  ladder, the guards). `rect` is a 1-based `{c1, r1, c2, r2}` tuple
+  (normalized, `c1 <= c2` / `r1 <= r2`); `keys` is a list of
+  `%{"col" => absolute-0-based-col, "dir" => "asc" | "desc"}` evaluated
+  left-to-right (multi-key). Returns `{:ok, new_tab, perm}` where `perm` is
+  a list of the same length as the rect's rows mapping each old
+  row-offset to its new position, or `{:error, code, message}` for a
+  merge/frozen/keys guard refusal. An already-sorted rect returns the
+  identity `perm` (the caller records no undo entry).
+  """
+  @spec sort_rows(map(), rect(), term()) :: {:ok, map(), [non_neg_integer()]} | error()
+  def sort_rows(tab, {c1, r1, c2, r2} = rect, keys)
+      when is_map(tab) and is_integer(c1) and is_integer(r1) and is_integer(c2) and
+             is_integer(r2) and c1 <= c2 and r1 <= r2 do
+    with :ok <- guard_merge(tab, rect),
+         :ok <- guard_frozen(tab, rect),
+         {:ok, keys} <- validate_keys(keys, rect) do
+      perm = compute_perm(tab, rect, keys)
+      {:ok, do_permute(tab, rect, perm), perm}
+    end
+  end
+
+  @doc """
+  Re-apply an EXPLICIT row permutation `perm` over `rect` in `tab` (the
+  undo/redo applier for a stored sort). Returns `{:ok, new_tab, inverse}`
+  where `inverse` re-applied over the same rect restores `tab` — verbatim
+  moves both ways. Total: no guard re-run, a cell that has since moved out
+  of the rect simply stays put (the merges lossy-undo contract).
+  """
+  @spec permute_rows(map(), rect(), [non_neg_integer()]) ::
+          {:ok, map(), [non_neg_integer()]}
+  def permute_rows(tab, rect, perm) when is_map(tab) and is_list(perm) do
+    {:ok, do_permute(tab, rect, perm), invert_perm(perm)}
+  end
+
+  @doc """
+  Invert a row permutation: given `perm` (old-offset → new-position),
+  produce the list `inv` (new-position → old-offset) such that applying one
+  after the other is the identity.
+  """
+  @spec invert_perm([non_neg_integer()]) :: [non_neg_integer()]
+  def invert_perm(perm) when is_list(perm) do
+    n = length(perm)
+    m = perm |> Enum.with_index() |> Map.new(fn {new, old} -> {new, old} end)
+    for i <- 0..(n - 1)//1, do: Map.fetch!(m, i)
+  end
+
+  # A merge intersecting the rect refuses the sort — a merged region can't be
+  # split by a row permutation (SF-D5).
+  defp guard_merge(tab, rect) do
+    merges = Map.get(tab, "merges") || []
+
+    if Enum.any?(merges, &merge_intersects?(&1, rect)) do
+      {:error, "sort_merge_overlap",
+       "the sort range intersects a merged region — unmerge it before sorting"}
+    else
+      :ok
+    end
+  end
+
+  defp merge_intersects?(merge, {c1, r1, c2, r2}) when is_binary(merge) do
+    case parse_rect(merge) do
+      {:ok, {mc1, mr1, mc2, mr2}} -> not (mc2 < c1 or mc1 > c2 or mr2 < r1 or mr1 > r2)
+      # An unparseable stored merge can only arrive via a malformed import the
+      # before_save gate already rejects — treat it as disjoint.
+      :error -> false
+    end
+  end
+
+  defp merge_intersects?(_merge, _rect), do: false
+
+  defp parse_rect(range) do
+    with [a, b] <- String.split(range, ":"),
+         {:ok, {ca, ra}} <- Sheets.parse_ref(a),
+         {:ok, {cb, rb}} <- Sheets.parse_ref(b) do
+      {:ok, {min(ca, cb), min(ra, rb), max(ca, cb), max(ra, rb)}}
+    else
+      _ -> :error
+    end
+  end
+
+  # A rect reaching into the frozen head band refuses — callers pass rects
+  # that start BELOW the band (EXCLUDE-BY-REFUSAL, SF-D5).
+  defp guard_frozen(tab, {_c1, r1, _c2, _r2}) do
+    frozen = frozen_rows_count(Map.get(tab, "frozen_rows"))
+
+    if frozen > 0 and r1 <= frozen do
+      {:error, "sort_frozen_overlap",
+       "the sort range intersects the #{frozen} frozen header row(s) — start the range below them"}
+    else
+      :ok
+    end
+  end
+
+  defp frozen_rows_count(n) when is_integer(n) and n >= 0, do: n
+
+  defp frozen_rows_count(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} when n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp frozen_rows_count(_), do: 0
+
+  # keys must be a list; every key a %{"col","dir"} with an absolute 0-based
+  # col inside the rect and dir in asc/desc. An empty list is valid — it
+  # yields the identity permutation (a stable no-op).
+  defp validate_keys(keys, {c1, _r1, c2, _r2}) when is_list(keys) do
+    if Enum.all?(keys, &valid_key?(&1, c1, c2)) do
+      {:ok, keys}
+    else
+      {:error, "invalid_sort_keys",
+       "keys must be a list of %{\"col\" => 0-based-col-inside-the-range, \"dir\" => \"asc\"|\"desc\"}"}
+    end
+  end
+
+  defp validate_keys(_keys, _rect),
+    do:
+      {:error, "invalid_sort_keys",
+       "keys must be a list of %{\"col\" => 0-based-col-inside-the-range, \"dir\" => \"asc\"|\"desc\"}"}
+
+  defp valid_key?(%{"col" => col, "dir" => dir}, c1, c2)
+       when is_integer(col) and (dir == "asc" or dir == "desc"),
+       do: col >= c1 - 1 and col <= c2 - 1
+
+  defp valid_key?(_key, _c1, _c2), do: false
+
+  # Build the permutation: precompute each row-offset's rank per key (O(1)
+  # tuple lookup), stably sort the offsets, then re-key offset → position.
+  defp compute_perm(tab, {_c1, r1, _c2, r2}, keys) do
+    n = r2 - r1 + 1
+    cells = Map.get(tab, "cells") || %{}
+    key_cols = Enum.map(keys, fn %{"col" => col, "dir" => dir} -> {col + 1, dir} end)
+    dirs = Enum.map(key_cols, fn {_col1, dir} -> dir end)
+
+    ranks =
+      for i <- 0..(n - 1)//1 do
+        Enum.map(key_cols, fn {col1, _dir} ->
+          rank_cell(Map.get(cells, Sheets.format_ref({col1, r1 + i})))
+        end)
+      end
+      |> List.to_tuple()
+
+    order =
+      0..(n - 1)//1
+      |> Enum.to_list()
+      |> Enum.sort(fn a, b -> compare_ranks(elem(ranks, a), elem(ranks, b), dirs) != :gt end)
+
+    order_to_perm(order)
+  end
+
+  # order[new] = old  →  perm[old] = new
+  defp order_to_perm(order) do
+    m = order |> Enum.with_index() |> Map.new(fn {old, new} -> {old, new} end)
+    for i <- 0..(map_size(m) - 1)//1, do: Map.fetch!(m, i)
+  end
+
+  # Multi-key: first non-:eq key decides; all-:eq keeps original order (the
+  # stable sort does the rest).
+  defp compare_ranks(ranks_a, ranks_b, dirs) do
+    [ranks_a, ranks_b, dirs]
+    |> Enum.zip()
+    |> Enum.reduce_while(:eq, fn {a, b, dir}, _acc ->
+      case key_cmp(a, b, dir) do
+        :eq -> {:cont, :eq}
+        cmp -> {:halt, cmp}
+      end
+    end)
+  end
+
+  # Blanks are ALWAYS last (both directions); everything else runs the
+  # ascending ladder, flipped for a descending key.
+  defp key_cmp(:blank, :blank, _dir), do: :eq
+  defp key_cmp(:blank, _b, _dir), do: :gt
+  defp key_cmp(_a, :blank, _dir), do: :lt
+
+  defp key_cmp(a, b, "desc"), do: flip(ladder_cmp(a, b))
+  defp key_cmp(a, b, _asc), do: ladder_cmp(a, b)
+
+  defp ladder_cmp(a, b) do
+    ta = tier(a)
+    tb = tier(b)
+
+    cond do
+      ta < tb -> :lt
+      ta > tb -> :gt
+      true -> within_tier(a, b)
+    end
+  end
+
+  defp tier({:num, _}), do: 1
+  defp tier({:text, _}), do: 2
+  defp tier(:false_), do: 3
+  defp tier(:true_), do: 4
+  defp tier(:error), do: 5
+
+  defp within_tier({:num, x}, {:num, y}), do: scalar_cmp(x, y)
+  defp within_tier({:text, x}, {:text, y}), do: scalar_cmp(x, y)
+  # FALSE vs FALSE, TRUE vs TRUE, error vs error — same tier, all equal.
+  defp within_tier(_a, _b), do: :eq
+
+  defp scalar_cmp(x, y) do
+    cond do
+      x < y -> :lt
+      x > y -> :gt
+      true -> :eq
+    end
+  end
+
+  defp flip(:lt), do: :gt
+  defp flip(:gt), do: :lt
+  defp flip(:eq), do: :eq
+
+  # Classify a cell's computed value into a comparator rank (SF-D4). Error is
+  # tested FIRST (the CF-D5 predicate expression, single-sourced inline);
+  # then blank; then the value type. Cells store JSON scalars only.
+  defp rank_cell(nil), do: :blank
+
+  defp rank_cell(cell) when is_map(cell) do
+    v = Map.get(cell, "v")
+    t = Map.get(cell, "t")
+
+    cond do
+      is_binary(v) and (t == "e" or v in Engine.error_values()) -> :error
+      is_nil(v) or v == "" -> :blank
+      is_number(v) -> {:num, v}
+      v == false -> :false_
+      v == true -> :true_
+      is_binary(v) -> {:text, String.downcase(v)}
+      true -> :blank
+    end
+  end
+
+  defp rank_cell(_cell), do: :blank
+
+  # Apply an explicit permutation to the rect's row-slices. Only cells inside
+  # the rect (cols c1..c2, rows r1..r2) re-key; every other cell stays. `perm`
+  # is a bijection on the rect's rows, so moved cells never collide with each
+  # other or with the untouched cells outside the region. The cell MAP value
+  # is carried verbatim — v/f/fmt/s/t byte-identical, f never rewritten.
+  defp do_permute(tab, {c1, r1, c2, r2}, perm) do
+    perm_tup = List.to_tuple(perm)
+    cells = Map.get(tab, "cells") || %{}
+
+    new_cells =
+      Map.new(cells, fn {addr, cell} ->
+        case Sheets.parse_ref(addr) do
+          {:ok, {col, row}} when col >= c1 and col <= c2 and row >= r1 and row <= r2 ->
+            {Sheets.format_ref({col, r1 + elem(perm_tup, row - r1)}), cell}
+
+          _ ->
+            {addr, cell}
+        end
+      end)
+
+    Map.put(tab, "cells", new_cells)
   end
 
   # ── axis ops ─────────────────────────────────────────────────────────────

@@ -493,6 +493,298 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
     end
   end
 
+  # ── sort_rows: comparator ladder (SF-D4) ────────────────────────────────────
+
+  describe "sort_rows — comparator total ladder" do
+    test "ascending: numbers < text < FALSE < TRUE < errors < blanks" do
+      # rows 1..6, one of each value class, scrambled.
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => true},
+          # A2 blank (no cell)
+          "A3" => %{"v" => 5},
+          "A4" => %{"v" => "#REF!", "t" => "e"},
+          "A5" => %{"v" => "Hello"},
+          "A6" => %{"v" => false}
+        })
+
+      {:ok, out, _perm} = Structure.sort_rows(tab, {1, 1, 1, 6}, [key(0, "asc")])
+      assert col_vals(out, "A", 1, 6) == [5, "Hello", false, true, "#REF!", :blank]
+    end
+
+    test "descending reverses tiers 1..5 but blanks STAY last" do
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => true},
+          "A3" => %{"v" => 5},
+          "A4" => %{"v" => "#REF!", "t" => "e"},
+          "A5" => %{"v" => "Hello"},
+          "A6" => %{"v" => false}
+        })
+
+      {:ok, out, _perm} = Structure.sort_rows(tab, {1, 1, 1, 6}, [key(0, "desc")])
+      assert col_vals(out, "A", 1, 6) == ["#REF!", true, false, "Hello", 5, :blank]
+    end
+
+    test "text compares case-insensitively" do
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => "banana"},
+          "A2" => %{"v" => "Apple"},
+          "A3" => %{"v" => "cherry"}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 1, 3}, [key(0, "asc")])
+      assert col_vals(out, "A", 1, 3) == ["Apple", "banana", "cherry"]
+    end
+
+    test "all errors compare EQUAL (a t=e string and an error_values string tie)" do
+      # Two distinct error strings, distinguishable payload in column B — equal
+      # keys must keep original order (not a tautological refute).
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => "#DIV/0!", "t" => "e"},
+          "B1" => %{"v" => "first"},
+          "A2" => %{"v" => "#VALUE!"},
+          "B2" => %{"v" => "second"}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 2, 2}, [key(0, "asc")])
+      assert col_vals(out, "B", 1, 2) == ["first", "second"]
+    end
+
+    test "blanks are last in BOTH directions" do
+      tab = tab_with(%{"A2" => %{"v" => 2}, "A4" => %{"v" => 1}})
+      # rows 1 and 3 are blank
+      {:ok, asc, _} = Structure.sort_rows(tab, {1, 1, 1, 4}, [key(0, "asc")])
+      assert col_vals(asc, "A", 1, 4) == [1, 2, :blank, :blank]
+
+      {:ok, desc, _} = Structure.sort_rows(tab, {1, 1, 1, 4}, [key(0, "desc")])
+      assert col_vals(desc, "A", 1, 4) == [2, 1, :blank, :blank]
+    end
+
+    test "1 and 1.0 tie (numeric ==), stability keeps their order" do
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => 1},
+          "B1" => %{"v" => "int"},
+          "A2" => %{"v" => 1.0},
+          "B2" => %{"v" => "float"}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 2, 2}, [key(0, "asc")])
+      assert col_vals(out, "B", 1, 2) == ["int", "float"]
+    end
+  end
+
+  # ── sort_rows: stability + multi-key ────────────────────────────────────────
+
+  describe "sort_rows — stability and multi-key" do
+    test "STABLE: equal keys retain original order (distinguishable payload)" do
+      # Keys 2,1,1,2 — the two 1's and the two 2's must keep their relative
+      # order (b before c, a before d), proving stability non-tautologically.
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => 2},
+          "B1" => %{"v" => "a"},
+          "A2" => %{"v" => 1},
+          "B2" => %{"v" => "b"},
+          "A3" => %{"v" => 1},
+          "B3" => %{"v" => "c"},
+          "A4" => %{"v" => 2},
+          "B4" => %{"v" => "d"}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 2, 4}, [key(0, "asc")])
+      assert col_vals(out, "A", 1, 4) == [1, 1, 2, 2]
+      assert col_vals(out, "B", 1, 4) == ["b", "c", "a", "d"]
+    end
+
+    test "multi-key: col 0 asc, then col 1 asc — evaluated left to right" do
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => 1},
+          "B1" => %{"v" => 20},
+          "A2" => %{"v" => 1},
+          "B2" => %{"v" => 10},
+          "A3" => %{"v" => 2},
+          "B3" => %{"v" => 5},
+          "A4" => %{"v" => 2},
+          "B4" => %{"v" => 15}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 2, 4}, [key(0, "asc"), key(1, "asc")])
+      assert col_vals(out, "A", 1, 4) == [1, 1, 2, 2]
+      assert col_vals(out, "B", 1, 4) == [10, 20, 5, 15]
+    end
+
+    test "empty keys list is a stable no-op (identity permutation)" do
+      tab = tab_with(%{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}})
+      {:ok, out, perm} = Structure.sort_rows(tab, {1, 1, 1, 3}, [])
+      assert perm == [0, 1, 2]
+      assert out["cells"] == tab["cells"]
+    end
+
+    test "an already-sorted range returns the identity permutation" do
+      tab = tab_with(%{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}, "A3" => %{"v" => 3}})
+      {:ok, _out, perm} = Structure.sort_rows(tab, {1, 1, 1, 3}, [key(0, "asc")])
+      assert perm == [0, 1, 2]
+    end
+  end
+
+  # ── sort_rows: verbatim moves (SF-D1) ───────────────────────────────────────
+
+  describe "sort_rows — verbatim cell moves" do
+    test "a moved formula cell travels BYTE-IDENTICAL (f never rewritten)" do
+      moved = %{"f" => "A1*10", "v" => 999, "t" => "n", "fmt" => "0.00", "s" => %{"b" => true}}
+
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => 3},
+          "B1" => moved,
+          "A2" => %{"v" => 1},
+          "B2" => %{"v" => "x"},
+          "A3" => %{"v" => 2},
+          "B3" => %{"v" => "y"}
+        })
+
+      # Row 1 (A=3) sorts to the LAST position (row 3); its B cell rides along.
+      {:ok, out, perm} = Structure.sort_rows(tab, {1, 1, 2, 3}, [key(0, "asc")])
+      assert perm == [2, 0, 1]
+      assert out["cells"]["B3"] == moved
+      assert out["cells"]["B3"]["f"] == "A1*10"
+    end
+
+    test "cells OUTSIDE the rect never move (different column or row)" do
+      tab =
+        tab_with(%{
+          "A1" => %{"v" => 2},
+          "A2" => %{"v" => 1},
+          # C1 is outside the A:B rect columns; A5 is outside the rows.
+          "C1" => %{"v" => "keep-col"},
+          "A5" => %{"v" => "keep-row"}
+        })
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 2, 2}, [key(0, "asc")])
+      assert out["cells"]["C1"] == %{"v" => "keep-col"}
+      assert out["cells"]["A5"] == %{"v" => "keep-row"}
+      # The rect rows did swap.
+      assert col_vals(out, "A", 1, 2) == [1, 2]
+    end
+
+    test "row_heights do NOT travel; merges and cond_formats stay put" do
+      tab =
+        %{
+          "cells" => %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}},
+          "row_heights" => %{"1" => 40, "2" => 60},
+          "merges" => ["D1:E2"],
+          "cond_formats" => [cf("r", "A1")]
+        }
+
+      {:ok, out, _} = Structure.sort_rows(tab, {1, 1, 1, 2}, [key(0, "asc")])
+      assert out["row_heights"] == %{"1" => 40, "2" => 60}
+      assert out["merges"] == ["D1:E2"]
+      assert out["cond_formats"] == [cf("r", "A1")]
+    end
+  end
+
+  # ── sort_rows: guards (SF-D5) ────────────────────────────────────────────────
+
+  describe "sort_rows — refusals" do
+    test "a merge intersecting the rect refuses with sort_merge_overlap" do
+      tab = %{"cells" => %{"A1" => %{"v" => 1}}, "merges" => ["A1:B2"]}
+
+      assert {:error, "sort_merge_overlap", _} =
+               Structure.sort_rows(tab, {1, 1, 3, 3}, [key(0, "asc")])
+    end
+
+    test "a merge fully outside the rect does NOT refuse" do
+      tab = %{"cells" => %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}}, "merges" => ["D4:E5"]}
+      assert {:ok, _, _} = Structure.sort_rows(tab, {1, 1, 1, 2}, [key(0, "asc")])
+    end
+
+    test "a rect reaching the frozen head band refuses with sort_frozen_overlap" do
+      tab = %{"cells" => %{"A1" => %{"v" => 1}}, "frozen_rows" => 1}
+
+      assert {:error, "sort_frozen_overlap", _} =
+               Structure.sort_rows(tab, {1, 1, 1, 3}, [key(0, "asc")])
+    end
+
+    test "a rect starting BELOW the frozen band is allowed" do
+      tab = %{"cells" => %{"A2" => %{"v" => 2}, "A3" => %{"v" => 1}}, "frozen_rows" => 1}
+      assert {:ok, _, _} = Structure.sort_rows(tab, {1, 2, 1, 3}, [key(0, "asc")])
+    end
+
+    test "a numeric-STRING frozen_rows (xlsx import) is honored" do
+      tab = %{"cells" => %{"A1" => %{"v" => 1}}, "frozen_rows" => "2"}
+
+      assert {:error, "sort_frozen_overlap", _} =
+               Structure.sort_rows(tab, {1, 1, 1, 4}, [key(0, "asc")])
+    end
+
+    test "non-list keys refuse with invalid_sort_keys" do
+      tab = tab_with(%{"A1" => %{"v" => 1}})
+      assert {:error, "invalid_sort_keys", _} = Structure.sort_rows(tab, {1, 1, 1, 2}, "nope")
+    end
+
+    test "a col OUTSIDE the rect refuses with invalid_sort_keys" do
+      tab = tab_with(%{"A1" => %{"v" => 1}})
+      # rect is A:A (0-based col 0 only); col 5 is out of range.
+      assert {:error, "invalid_sort_keys", _} =
+               Structure.sort_rows(tab, {1, 1, 1, 2}, [key(5, "asc")])
+    end
+
+    test "a bad dir refuses with invalid_sort_keys" do
+      tab = tab_with(%{"A1" => %{"v" => 1}})
+
+      assert {:error, "invalid_sort_keys", _} =
+               Structure.sort_rows(tab, {1, 1, 1, 2}, [key(0, "up")])
+    end
+  end
+
+  # ── permute_rows + invert_perm (SF-D6) ──────────────────────────────────────
+
+  describe "permute_rows / invert_perm" do
+    test "invert_perm is a true inverse (identity, and double-invert)" do
+      assert Structure.invert_perm([2, 0, 1]) == [1, 2, 0]
+      assert Structure.invert_perm([0, 1, 2]) == [0, 1, 2]
+      assert Structure.invert_perm([]) == []
+      p = [3, 0, 2, 1]
+      assert Structure.invert_perm(Structure.invert_perm(p)) == p
+    end
+
+    test "permute_rows re-applies a perm and hands back its inverse; round-trips to original" do
+      tab = tab_with(%{"A1" => %{"v" => "x"}, "A2" => %{"v" => "y"}, "A3" => %{"v" => "z"}})
+      rect = {1, 1, 1, 3}
+
+      {:ok, sorted, perm} = Structure.sort_rows(tab, rect, [key(0, "desc")])
+      inverse = Structure.invert_perm(perm)
+
+      {:ok, restored, forward} = Structure.permute_rows(sorted, rect, inverse)
+      assert restored["cells"] == tab["cells"]
+      # The inverse of the inverse is the forward sort perm.
+      assert forward == perm
+    end
+  end
+
+  # Build a tab from an addr => cell map.
+  defp tab_with(cells), do: %{"cells" => cells}
+
+  # A sort key over an absolute 0-based column.
+  defp key(col, dir), do: %{"col" => col, "dir" => dir}
+
+  # Column values top-to-bottom over r1..r2; a missing cell reads as :blank.
+  defp col_vals(tab, col, r1, r2) do
+    cells = tab["cells"]
+
+    for r <- r1..r2 do
+      case Map.get(cells, "#{col}#{r}") do
+        nil -> :blank
+        cell -> Map.get(cell, "v")
+      end
+    end
+  end
+
   # A minimal well-formed CF rule with the given id + range.
   defp cf(id, range) do
     %{

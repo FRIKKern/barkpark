@@ -93,6 +93,21 @@ defmodule Barkpark.Plugins.Sheets.Session do
       an invalid list is rejected whole (`invalid_cond_format`). No recompute
       (rules change render style, never a cell value); the inverse restores the
       prior list.
+    * `%{"op" => "sort_range", "tab" => i, "range" => "A2:D50",
+      "keys" => [%{"col" => 0, "dir" => "asc"}, …]}` — sorts the range's rows
+      in place (SF-A): a PURE row permutation that moves every cell map
+      VERBATIM — `f` is NEVER rewritten, so a sorted `=A1` still reads `=A1`
+      (Excel semantics, SF-D1). `keys` are absolute 0-based column indexes
+      inside the range, evaluated left-to-right (multi-key); the comparator
+      reads the computed `v` on the total ladder num < text(ci) < FALSE <
+      TRUE < errors(equal) < blanks(last, both directions) — a DELIBERATE
+      cross-type divergence from the engine (SF-D4). A merge intersecting the
+      range refuses (`sort_merge_overlap`), a range reaching the frozen head
+      band refuses (`sort_frozen_overlap`), malformed keys refuse
+      (`invalid_sort_keys`), a range past the grid bounds refuses
+      (`sort_out_of_bounds`). The tab RECOMPUTES afterwards (the insert/delete
+      precedent) so moved formulas refresh; an already-sorted range is a
+      no-op. The inverse is the exact inverse permutation.
 
   Validation per op: the ref must be A1-style within the Excel grid bounds,
   the tab index must exist, and a `set_cell` that would push the sheet past
@@ -116,6 +131,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
   `delete_tab` the captured tab; `move_tab`/`duplicate_tab` their inverse
   (a mirrored `move_tab` / a `delete_tab` of the inserted slot);
   `set_cond_format` the prior `cond_formats` list (a structural set_cond_format);
+  `sort_range` the EXACT inverse row permutation (`{:permute, …}` — verbatim
+  moves both ways, loss-free);
   `merge_cells` a GRANULAR remove of just the range it added and `unmerge_cells`
   a granular re-add of just the ranges it dropped (skipping any a later op has
   re-covered — a re-added merge may land at pre-shift coordinates, the same
