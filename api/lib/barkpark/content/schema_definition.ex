@@ -87,6 +87,14 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> unique_constraint([:name, :dataset_id],
       name: :schema_definitions_name_dataset_id_index
     )
+    # Companion to the (name, dataset_id) index: rows with a NULL dataset_id are
+    # NOT protected by that index (Postgres treats each NULL as distinct), so a
+    # PARTIAL unique index on (name, dataset) WHERE dataset_id IS NULL backstops
+    # the flat-deployment case (no project → no dataset_id). Map its violation
+    # to a changeset error instead of a raised Ecto.ConstraintError.
+    |> unique_constraint([:name, :dataset],
+      name: :schema_definitions_name_dataset_null_dataset_id_index
+    )
   end
 
   # ─────────────────────────────────────────────────────────────────────────────

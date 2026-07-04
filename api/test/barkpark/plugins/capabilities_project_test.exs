@@ -32,7 +32,9 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
         cmd("schema.apply", "schema", "admin"),
         cmd("webhook.create", "webhook", "write"),
         cmd("workspace.ls", "workspace", "read"),
-        cmd("workspace.create", "workspace", "write"),
+        # workspace.create is READ-tier: POST /api/workspaces is behind
+        # RequireToken only (any authenticated token may self-serve a workspace).
+        cmd("workspace.create", "workspace", "read"),
         cmd("workspace.project-create", "workspace", "scoped_admin"),
         cmd("bulldocs.publish", "bulldocs", "ingest")
       ]
@@ -114,7 +116,7 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
       assert "doc.mutate" in ids(admin)
       assert "schema.apply" in ids(admin)
       assert "webhook.create" in ids(admin)
-      # workspace.create (write-tier) is visible to admin (rank >= write).
+      # workspace.create (read-tier) is visible to admin (rank >= read).
       assert "workspace.create" in ids(admin)
       # contract rule #2: scoped_admin is visible to an authenticated caller,
       # never blanket client-side denied.
@@ -130,18 +132,30 @@ defmodule Barkpark.Plugins.CapabilitiesProjectTest do
       assert "doc.ls" in ids(read)
       # scoped_admin is NOT blanket-hidden from an authenticated (>= read) token.
       assert "workspace.project-create" in ids(read)
+      # workspace.create is read-tier (RequireToken-only route) — a read-only
+      # token CAN see and invoke it.
+      assert "workspace.create" in ids(read)
 
-      # workspace.create is write-tier — NOT visible to a read-only token.
-      refute "workspace.create" in ids(read)
+      # write/admin/ingest verbs stay hidden from a read-only token.
       refute "doc.mutate" in ids(read)
       refute "schema.apply" in ids(read)
       refute "bulldocs.publish" in ids(read)
     end
 
-    test "write tier sees workspace.create but anon does not" do
+    test "write-tier verb (doc.mutate) is visible to write but not anon" do
       write = Capabilities.project(superset(), "write")
       anon = Capabilities.project(superset(), "none")
 
+      assert "doc.mutate" in ids(write)
+      refute "doc.mutate" in ids(anon)
+    end
+
+    test "read-tier workspace.create is visible from read up, hidden from anon" do
+      read = Capabilities.project(superset(), "read")
+      write = Capabilities.project(superset(), "write")
+      anon = Capabilities.project(superset(), "none")
+
+      assert "workspace.create" in ids(read)
       assert "workspace.create" in ids(write)
       refute "workspace.create" in ids(anon)
     end
