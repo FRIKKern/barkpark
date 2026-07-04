@@ -249,6 +249,73 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   @doc """
+  Render a `cards` block: a responsive grid of titled cards (title + body, with
+  an optional `tone` accent stripe) — the rule-card / feature-card grid.
+  `items: [%{title, text, tone}]` where tone ∈ info|ok|warn|danger.
+  """
+  def cards_html(block) when is_map(block) do
+    items = block |> get("items") |> as_list()
+
+    case items do
+      [] ->
+        ""
+
+      _ ->
+        cards =
+          items
+          |> Enum.map(fn it ->
+            title = it |> get("title") |> stringish() |> escape_html()
+            text = it |> get("text") |> stringish() |> escape_html()
+            tone = it |> get("tone") |> stringish()
+            tone_cls = if tone in ~w(info ok warn danger), do: " bp-card--#{tone}", else: ""
+            title_html = if title == "", do: "", else: ~s|<div class="bp-card__t">#{title}</div>|
+            text_html = if text == "", do: "", else: ~s|<div class="bp-card__d">#{text}</div>|
+            ~s|<div class="bp-card#{tone_cls}">#{title_html}#{text_html}</div>|
+          end)
+          |> Enum.join("")
+
+        ~s|<div class="bp-cards">#{cards}</div>|
+    end
+  end
+
+  def cards_html(_), do: ""
+
+  @doc """
+  Render a `pipeline` block: a horizontal flow of labelled nodes joined by
+  arrows — `source → emit → gate`. `nodes: [%{kind, title, detail, files,
+  source}]`; a `source: true` node gets the accent border. Scrolls on narrow.
+  """
+  def pipeline_html(block) when is_map(block) do
+    nodes = block |> get("nodes") |> as_list()
+
+    case nodes do
+      [] ->
+        ""
+
+      _ ->
+        cells =
+          nodes
+          |> Enum.map(fn n ->
+            k = n |> get("kind") |> stringish() |> escape_html()
+            t = n |> get("title") |> stringish() |> escape_html()
+            d = n |> get("detail") |> stringish() |> escape_html()
+            f = n |> get("files") |> stringish() |> escape_html()
+            src = if truthy(get(n, "source")), do: " bp-pnode--src", else: ""
+            k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
+            t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
+            d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
+            f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
+            ~s|<div class="bp-pnode#{src}">#{k_html}#{t_html}#{d_html}#{f_html}</div>|
+          end)
+          |> Enum.join(~s|<span class="bp-pipe__arr">→</span>|)
+
+        ~s|<div class="bp-pipe-scroll"><div class="bp-pipe">#{cells}</div></div>|
+    end
+  end
+
+  def pipeline_html(_), do: ""
+
+  @doc """
   Render a `notes` block: an annotated list — a short label chip beside a line
   of prose (an optional bold `lead` + `text`). The "what upgraded / why it
   matters" column that rides beside a demo. `items: [%{label, lead, text}]`.

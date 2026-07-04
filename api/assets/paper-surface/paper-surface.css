@@ -483,3 +483,24 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 @media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
 .bp-paper-surface .bp-cols__c { min-width: 0; }
 .bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
+
+/* ── cards: titled rule/feature card grid ── */
+.bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
+.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-card--info { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-card--ok { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
+.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+
+/* ── pipeline: source → emit → gate flow ── */
+.bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }
+.bp-paper-surface .bp-pipe { display: flex; align-items: stretch; gap: 8px; min-width: min-content; }
+.bp-paper-surface .bp-pnode { flex: 1 1 0; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-pnode--src { border-color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-faint); font-size: 1.1rem; flex: none; }

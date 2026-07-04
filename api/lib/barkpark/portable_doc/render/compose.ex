@@ -672,6 +672,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
   end
 
+  def compose_block(%{"type" => "cards"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.cards_html(b)}
+  end
+
+  def compose_block(%{"type" => "pipeline"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
+  end
+
   # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
   # any child blocks, with an optional keybind `footer`. Reusable frame; put a
   # task-list inside it and you get the `bp tasks` board look in a paper.

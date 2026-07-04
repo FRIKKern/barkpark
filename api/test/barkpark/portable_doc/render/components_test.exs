@@ -372,3 +372,33 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
     assert html =~ "What upgraded"
   end
 end
+
+defmodule Barkpark.PortableDoc.Render.CardsPipelineTest do
+  use ExUnit.Case, async: true
+  alias Barkpark.PortableDoc.Render.Components
+
+  test "cards render titled tone-accented cards; empty/non-map safe; escaped" do
+    html = Components.cards_html(%{"items" => [%{"title" => "Gate", "text" => "hard stop", "tone" => "danger"}, %{"title" => "x", "text" => "y", "tone" => "bogus"}]})
+    assert html =~ ~s(<div class="bp-card bp-card--danger">)
+    assert html =~ ~s(<div class="bp-card__t">Gate</div>)
+    refute html =~ "bp-card--bogus"
+    assert Components.cards_html(%{"items" => []}) == ""
+    assert Components.cards_html("x") == ""
+    assert Components.cards_html(%{"items" => [%{"title" => "<b>", "text" => "<script>x</script>"}]}) =~ "&lt;script&gt;"
+    refute Components.cards_html(%{"items" => [%{"title" => "<b>", "text" => "<script>x</script>"}]}) =~ "<script>"
+  end
+
+  test "pipeline renders nodes joined by arrows, source-accented, scroll-wrapped; escaped" do
+    html = Components.pipeline_html(%{"nodes" => [
+      %{"kind" => "source", "title" => "manifest", "source" => true},
+      %{"kind" => "gate", "title" => "drift check"}
+    ]})
+    assert html =~ "bp-pipe-scroll"
+    assert html =~ ~s(<div class="bp-pnode bp-pnode--src">)
+    assert html =~ ~s(<span class="bp-pipe__arr">→</span>)
+    assert html =~ "drift check"
+    assert Components.pipeline_html(%{"nodes" => []}) == ""
+    assert Components.pipeline_html(nil) == ""
+    assert Components.pipeline_html(%{"nodes" => [%{"title" => "<x>"}]}) =~ "&lt;x&gt;"
+  end
+end
