@@ -5,12 +5,12 @@ NOW
    nothing ready · all clear
 
 ▎─ Cloud GUI epic ───────────────────────────────────────────── 1 ready · 7 done
+   ○ Reconcile the #979 role seam                                             P2
+   ◐ Cut over the canvas default                                         blocked
+  +7 done
 
 ── (no epic) ─────────────────────────────────────────────────────────── 1 ready
-
-
-
-
+   ○ Fix the timeago clock-skew clamp                                         P3
 
 
 

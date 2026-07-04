@@ -15,22 +15,22 @@ NOW
   +7 done
 
 ── Search & Media epic ────────────────────────────── 8 done
+  +8 done
 
 ── sheets-parity ~ ──────────────────────── 3 ready · 3 done
+   ○ Add the SUM() spreadsheet function                   P2
+   ○ Add a SUM function to the grid                       P3
+   ○ Implement VLOOKUP across sheets                      6d
+   ○ Pivot tables in the Studio grid                     11d
+  +3 done
 
 ── living-values ~ ───────────────────────────────── 1 ready
+   ○ Wire the valueref resolver                           P1
+   ○ Build the living-values demo dataset
 
 ── (no epic) ─────────────────────────────────────── 1 ready
-
-
-
-
-
-
-
-
-
-
+   ○ Fix the timeago clock-skew clamp                     P3
+   ○ Inline cell editing for the grid
 
 
 

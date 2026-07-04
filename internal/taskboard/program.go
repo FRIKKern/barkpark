@@ -736,22 +736,21 @@ func (m Model) activateBoard() Model {
 	}
 	switch r.kind {
 	case rowEpicHeader:
+		// enter toggles the head-capped default against full-expand: if the epic
+		// already shows all its children, collapse it to just the header; else
+		// expand it to the full list. Writing the negation of sectionExpanded
+		// keeps enter a true toggle from any state (head / full / collapsed).
 		if e, found := m.epicByRoot(r.docID); found {
-			m.ui.CollapsedEpics[r.docID] = !m.epicFolded(e)
+			m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, e.Active, len(e.Children))
 			m.clampCursor()
 		}
 	case rowClusterHeader:
-		// A cluster now auto-folds unless Active (wave-7 D32), so flip its
-		// EFFECTIVE state — writing the negation of foldedCluster keeps enter a
-		// true toggle whether the cluster was auto-open or auto-folded.
 		if cl, found := m.clusterByFoldKey(r.docID); found {
-			m.ui.CollapsedEpics[r.docID] = !foldedCluster(m.ui, cl)
+			m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, cl.Active, len(cl.Tasks))
 			m.clampCursor()
 		}
 	case rowOrphanHeader:
-		// The loose bucket folds on its EFFECTIVE state too (auto-fold unless
-		// OrphansActive); flip the negation under orphansFoldKey.
-		m.ui.CollapsedEpics[r.docID] = !foldedOrphans(m.ui, m.board)
+		m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, m.board.OrphansActive, len(m.board.Orphans))
 		m.clampCursor()
 	case rowNow, rowReadyClaim, rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
@@ -767,8 +766,9 @@ func (m Model) activateBoard() Model {
 // fold controls that act ONLY when the cursor is on a SECTION header — exactly
 // what the help text promises ("h / l  fold / unfold"). On any task row it is
 // a deliberate no-op: h/l are the tree's fold controls, not a second expand
-// key. l on a folded-by-default section opens it (the explicit entry overrides
-// the auto-fold, see foldedEpic/foldedCluster/foldedOrphans).
+// key. l writes an explicit expand (entry=false → all children); h writes an
+// explicit collapse (entry=true → header only). Both override the head-capped
+// default (see sectionShown).
 func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	r, ok := m.currentRow()
 	// h/l fold ALL three section-header kinds — epics, derived clusters and the
@@ -805,28 +805,46 @@ func (m Model) clusterByFoldKey(key string) (Cluster, bool) {
 	return Cluster{}, false
 }
 
-// epicFolded delegates to foldedEpic — the shell and the renderer MUST share
-// the one fold rule or the cursor desyncs from the painted rows.
-func (m Model) epicFolded(e Epic) bool {
-	return foldedEpic(m.ui, e)
+// sectionShown is the ONE rule for how many of a section's children are painted,
+// shared by the shell (visibleRows) and the renderer (flattenSpine) so the
+// cursor never desyncs. THREE states from the bool CollapsedEpics entry + the
+// head cap (wave-8, the user's "at least 5 per category"):
+//   - explicit entry == true  → 0 (collapsed to just the header, via h)
+//   - explicit entry == false → all (fully expanded, via l)
+//   - no entry, active section → all (the group you're working opens whole)
+//   - no entry, default        → a HEAD of groupHeadMax (a glanceable few)
+// The remainder folds behind a "+K more" line the renderer emits.
+func sectionShown(st UIState, key string, active bool, n int) int {
+	if v, ok := st.CollapsedEpics[key]; ok {
+		if v {
+			return 0
+		}
+		return n
+	}
+	if active {
+		return n
+	}
+	if n < groupHeadMax {
+		return n
+	}
+	return groupHeadMax
 }
 
-// foldedEpic is the ONE rule for whether an epic's children are hidden: the
-// user's explicit choice (a CollapsedEpics entry, whatever its value) always
-// wins; absent an entry, the board's automatic policy applies. Wave-7 decision
-// 32 INVERTS that policy: fold by default, auto-EXPAND only an ACTIVE epic (one
-// owning a NOW task) — so the board's default is a short scannable list of
-// headers and only the group you are actually working opens. Presence-as-
-// override is what lets enter/l open a folded epic (or fold an auto-open one),
-// and what stops a phantom collapsed value from sticking once the epic's active
-// state changes — only a deliberate fold keeps a de-activated epic closed.
-// Package-level (not a Model method) because the renderer's flattenSpine applies
-// the SAME rule to the same UIState.
-func foldedEpic(st UIState, e Epic) bool {
-	if v, ok := st.CollapsedEpics[e.Root.DocID]; ok {
-		return v
-	}
-	return !e.Active
+// sectionExpanded reports whether a section currently shows ALL its children —
+// the toggle predicate enter/h/l flip against (writing the negation keeps enter
+// a true toggle whether the section was auto-open, head-capped, or collapsed).
+func sectionExpanded(st UIState, key string, active bool, n int) bool {
+	return sectionShown(st, key, active, n) >= n
+}
+
+func epicShown(st UIState, e Epic) int {
+	return sectionShown(st, e.Root.DocID, e.Active, len(e.Children))
+}
+func clusterShown(st UIState, c Cluster) int {
+	return sectionShown(st, clusterFoldKey(c.Key), c.Active, len(c.Tasks))
+}
+func orphansShown(st UIState, b Board) int {
+	return sectionShown(st, orphansFoldKey, b.OrphansActive, len(b.Orphans))
 }
 
 // clusterFoldKey namespaces a cluster's fold state inside the shared
@@ -837,30 +855,6 @@ func clusterFoldKey(key string) string { return "cluster:" + key }
 // CollapsedEpics map — a fixed sentinel that can never collide with an epic root
 // id or a cluster key (wave-7 decision 33).
 const orphansFoldKey = "orphans:(no epic)"
-
-// foldedCluster is the ONE rule for whether a derived cluster's members are
-// hidden. Wave-7 decision 32 gives a cluster the SAME auto-fold as an epic:
-// folded by default, auto-expanded only when Active (owns a NOW task). An
-// explicit user fold/unfold (its namespaced fold key) still overrides. Package-
-// level so the renderer's flattenSpine applies the SAME rule to the same UIState.
-func foldedCluster(st UIState, c Cluster) bool {
-	if v, ok := st.CollapsedEpics[clusterFoldKey(c.Key)]; ok {
-		return v
-	}
-	return !c.Active
-}
-
-// foldedOrphans is the ONE rule for whether the loose "(no epic)" bucket's rows
-// are hidden (wave-7 decision 33): the loose pile — the flat-queue live shape's
-// bulk — folds behind its navigable header by default and auto-expands only when
-// OrphansActive (it owns a NOW task). An explicit user fold/unfold under
-// orphansFoldKey overrides. Package-level so flattenSpine shares the rule.
-func foldedOrphans(st UIState, b Board) bool {
-	if v, ok := st.CollapsedEpics[orphansFoldKey]; ok {
-		return v
-	}
-	return !b.OrphansActive
-}
 
 // showReadyHead gates the claim-forward READY TO CLAIM band (wave-7 decision
 // 35): it replaces the pinned NOW cards exactly when nothing is claimed and
@@ -913,7 +907,7 @@ func (m *Model) clampCursor() {
 //
 //  1. the pinned band: the READY TO CLAIM head (showReadyHead: empty NOW + ready
 //     work — wave-7 D35) OR the NOW cards (unexpired claims), never both
-//  2. each epic: its header, then — unless folded (foldedEpic: an explicit
+//  2. each epic: its header, then a HEAD of its children (epicShown: an explicit
 //     CollapsedEpics entry wins, else auto-fold unless Active — wave-7 D32) — its
 //     policy-ordered children (done-folded children are a render count, already
 //     absent from Epic.Children)
@@ -941,33 +935,33 @@ func (m Model) visibleRows() []row {
 			rows = append(rows, row{kind: rowNow, docID: t.DocID})
 		}
 	}
+	// Each section shows a HEAD of its children by default (sectionShown), the
+	// rest folding behind a "+K more" render line. Only the shown children are
+	// cursor stops — the "+K more"/"+N done" lines are display-only, so the
+	// renderer MUST cap its children at the SAME sectionShown count or the cursor
+	// desyncs from the painted rows.
 	for _, e := range m.board.Epics {
 		rows = append(rows, row{kind: rowEpicHeader, docID: e.Root.DocID})
-		if m.epicFolded(e) {
-			continue
-		}
-		for _, c := range e.Children {
-			rows = append(rows, row{kind: rowChild, docID: c.DocID})
+		shown := epicShown(m.ui, e)
+		for i := 0; i < shown; i++ {
+			rows = append(rows, row{kind: rowChild, docID: e.Children[i].DocID})
 		}
 	}
 	for _, cl := range m.board.Clusters {
 		rows = append(rows, row{kind: rowClusterHeader, docID: clusterFoldKey(cl.Key)})
-		if foldedCluster(m.ui, cl) {
-			continue
-		}
-		for _, mem := range cl.Tasks {
-			rows = append(rows, row{kind: rowClusterMember, docID: mem.DocID})
+		shown := clusterShown(m.ui, cl)
+		for i := 0; i < shown; i++ {
+			rows = append(rows, row{kind: rowClusterMember, docID: cl.Tasks[i].DocID})
 		}
 	}
-	// The loose bucket is now a navigable header that folds like every other
-	// section (wave-7 D33). It appears whenever there are loose rows to show OR a
-	// folded-done tally to name; folded, only its header is a stop.
+	// The loose bucket is a navigable header that head-caps like every other
+	// section. It appears whenever there are loose rows to show OR a folded-done
+	// tally to name.
 	if len(m.board.Orphans) > 0 || m.board.OrphansFolded > 0 {
 		rows = append(rows, row{kind: rowOrphanHeader, docID: orphansFoldKey})
-		if !foldedOrphans(m.ui, m.board) {
-			for _, t := range m.board.Orphans {
-				rows = append(rows, row{kind: rowOrphan, docID: t.DocID})
-			}
+		shown := orphansShown(m.ui, m.board)
+		for i := 0; i < shown; i++ {
+			rows = append(rows, row{kind: rowOrphan, docID: m.board.Orphans[i].DocID})
 		}
 	}
 	return rows

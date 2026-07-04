@@ -73,6 +73,13 @@ const (
 // tail and inside their (folded-by-default) sections.
 const readyHeadMax = 5
 
+// groupHeadMax is how many children a category (epic / cluster / loose bucket)
+// shows by DEFAULT before folding the rest behind a "+K more" line. The user's
+// direction (2026-07-04): "we want to see at least 5 tasks per category" — a
+// collapsed-to-header default hid too much, so every section now shows a
+// glanceable head of its top children and expands (l / enter) to the full list.
+const groupHeadMax = 5
+
 // anyInNow reports whether any task in the slice is a NOW-pinned claim — the
 // shared "does this section own active work" test behind Epic/Cluster.Active and
 // Board.OrphansActive (wave-7 decision 32). It runs against the SAME nowSet the

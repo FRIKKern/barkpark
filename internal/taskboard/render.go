@@ -439,20 +439,30 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		selIdx++
 	}
 
+	// moreLine folds the remainder of a head-capped section behind one dim line.
+	// hiddenChildren = children not shown (the head cap); doneFolded = terminal
+	// rows already dropped by the 24h rule. When a section is head-capped we name
+	// the total remainder ("+K more") so the user knows l/enter reveals it; when
+	// fully expanded only the terminal "+N done" tally remains.
+	moreLine := func(shown, total, doneFolded int) {
+		hidden := total - shown
+		if hidden > 0 {
+			emit(dimStyle.Render(fmt.Sprintf("  +%d more", hidden+doneFolded)))
+		} else if doneFolded > 0 {
+			emit(dimStyle.Render(fmt.Sprintf("  +%d done", doneFolded)))
+		}
+	}
+
 	for ei, e := range b.Epics {
 		if ei > 0 {
 			emit("")
 		}
 		emitHeader(e)
-		if foldedEpic(st, e) {
-			continue
+		shown := epicShown(st, e)
+		for i := 0; i < shown; i++ {
+			emitTask(e.Children[i])
 		}
-		for _, c := range e.Children {
-			emitTask(c)
-		}
-		if e.DoneFolded > 0 {
-			emit(dimStyle.Render(fmt.Sprintf("  +%d done", e.DoneFolded)))
-		}
+		moreLine(shown, len(e.Children), e.DoneFolded)
 	}
 
 	// Derived relatedness clusters ride the same seam AFTER the authored epics —
@@ -464,15 +474,11 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			emit("")
 		}
 		emitClusterHeader(cl)
-		if foldedCluster(st, cl) {
-			continue
+		shown := clusterShown(st, cl)
+		for i := 0; i < shown; i++ {
+			emitTask(cl.Tasks[i])
 		}
-		for _, m := range cl.Tasks {
-			emitTask(m)
-		}
-		if cl.DoneFolded > 0 {
-			emit(dimStyle.Render(fmt.Sprintf("  +%d done", cl.DoneFolded)))
-		}
+		moreLine(shown, len(cl.Tasks), cl.DoneFolded)
 	}
 
 	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
@@ -488,14 +494,11 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		}
 		emit(orphanHeaderLine(b, selected, width))
 		selIdx++
-		if !foldedOrphans(st, b) {
-			for _, o := range b.Orphans {
-				emitTask(o)
-			}
-			if b.OrphansFolded > 0 {
-				emit(dimStyle.Render(fmt.Sprintf("  +%d done", b.OrphansFolded)))
-			}
+		shown := orphansShown(st, b)
+		for i := 0; i < shown; i++ {
+			emitTask(b.Orphans[i])
 		}
+		moreLine(shown, len(b.Orphans), b.OrphansFolded)
 	}
 
 	if len(lines) == 0 {

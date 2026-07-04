@@ -6,9 +6,9 @@ NOW
    opus-3 · 4m30s · 1/3 · Motion epic
 
 ── Motion epic ──────────────────────────────────────────────────────────────────── 2 ready · 2 done
-
-
-
+   ○ Reticulate the splines                                                                       P2
+   ○ A settled unchanged row                                                                      P3
+  +2 done
 
 
 

@@ -10,25 +10,25 @@ READY TO CLAIM
    +2 more ready
 
 ── Aesthetic unification epic ───────────────────────────────────────────────────── 3 ready · 1 done
+   ○ Unify the button token scale                                                                 P2
+   ○ Fold form-error copy into --text                                                             P3
+   ○ Repair the union-merge seams                                                                 P4
+  +1 done
 
 ── DWB reliability epic ─────────────────────────────────────────────────────────── 2 ready · 1 done
+   ○ Retry the dead-worker sweep                                                                  P1
+   ○ Redeploy on a broken promise                                                                 P2
+  +1 done
 
 ── Sheets formula UX epic ───────────────────────────────────────────────────────── 1 ready · 1 done
+   ○ Add the SUM() spreadsheet function                                                           P2
+   ◐ Pivot tables in the grid                                                                blocked
+  +1 done
 
 ── (no epic) ────────────────────────────────────────────────────────────────────── 1 ready · 1 done
-
-
-
-
-
-
-
-
-
-
-
-
-
+   ○ Fix the timeago clock-skew clamp                                                             P3
+   ○ Inline cell editing for the grid
+  +1 done
 
 
 
