@@ -20,14 +20,14 @@ import (
 type spineKind int
 
 const (
-	spineSep          spineKind = iota // blank separator (display-only)
-	spineEpicHeader                    // authored-epic section header (selectable)
-	spineClusterHeader                 // derived-cluster section header (selectable)
-	spineOrphanHeader                  // the loose "(no epic)" header (selectable)
-	spineTask                          // a task row — epic child / cluster member / orphan (selectable)
-	spineMore                          // "+K more" / "+N done" fold line (display-only)
-	spinePhaseBand                     // a phase sub-band label (display-only)
-	spineEmpty                         // the syncing / all-clear fallback (display-only)
+	spineSep           spineKind = iota // blank separator (display-only)
+	spineEpicHeader                     // authored-epic section header (selectable)
+	spineClusterHeader                  // derived-cluster section header (selectable)
+	spineOrphanHeader                   // the loose "(no epic)" header (selectable)
+	spineTask                           // a task row — epic child / cluster member / orphan (selectable)
+	spineMore                           // "+K more" / "+N done" fold line (display-only)
+	spinePhaseBand                      // a phase sub-band label (display-only)
+	spineEmpty                          // the syncing / all-clear fallback (display-only)
 )
 
 // spineHeader carries a section (or phase-band) header's render inputs.

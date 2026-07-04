@@ -813,6 +813,7 @@ func (m Model) clusterByFoldKey(key string) (Cluster, bool) {
 //   - explicit entry == false → all (fully expanded, via l)
 //   - no entry, active section → all (the group you're working opens whole)
 //   - no entry, default        → a HEAD of groupHeadMax (a glanceable few)
+//
 // The remainder folds behind a "+K more" line the renderer emits.
 func sectionShown(st UIState, key string, active bool, n int) int {
 	if v, ok := st.CollapsedEpics[key]; ok {

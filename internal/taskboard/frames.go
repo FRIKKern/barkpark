@@ -12,10 +12,10 @@ type TaskDetail struct {
 	Task // the board row (identity, lifecycle, claim, criteria, twins)
 
 	Description    string
-	Design         string    // content.design ("" when absent)
-	DesignDoc      string    // content.design_doc — a paper slug ("" when absent)
-	Papers         []string  // content.papers — paper slugs
-	Evidence       []string  // per-criterion evidence, index-aligned with Task.CriteriaItems ("" when absent)
+	Design         string   // content.design ("" when absent)
+	DesignDoc      string   // content.design_doc — a paper slug ("" when absent)
+	Papers         []string // content.papers — paper slugs
+	Evidence       []string // per-criterion evidence, index-aligned with Task.CriteriaItems ("" when absent)
 	BlockedReason  string
 	CloseReason    string
 	ResolutionNote string

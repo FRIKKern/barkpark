@@ -182,7 +182,7 @@ func TestApplySnapshotForwardMergeIgnoresStaleRow(t2 *testing.T) {
 	// a backstop/reconcile fetch happened to stamp with a later wall clock).
 	clk.add(time.Second)
 	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{
-		Tasks: []Task{Task{DocID: "x", Title: "x", Lifecycle: lifeReady, UpdatedAt: tOld}},
+		Tasks:     []Task{Task{DocID: "x", Title: "x", Lifecycle: lifeReady, UpdatedAt: tOld}},
 		FetchedAt: clk.now()}})
 
 	// The board must STILL show the row claimed — the stale snapshot cannot revert it.
