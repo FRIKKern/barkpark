@@ -1389,5 +1389,23 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
           sort_op("A1:A2", [%{"col" => 0, "dir" => "up"}])
         ])
     end
+
+    test "a range past the grid bounds refuses with sort_out_of_bounds" do
+      create_sheet("sort-bounds", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      # Row 1_048_577 is one past the Excel grid; column XFE one past XFD.
+      {:ok, %{applied: 0, errors: [%{code: "sort_out_of_bounds"}]}} =
+        Session.apply_ops("sort-bounds", @dataset, [sort_op("A1:A1048577", [asc(0)])])
+
+      {:ok, %{applied: 0, errors: [%{code: "sort_out_of_bounds"}]}} =
+        Session.apply_ops("sort-bounds", @dataset, [sort_op("A1:XFE2", [asc(0)])])
+    end
+
+    test "a non-range string refuses with invalid_range" do
+      create_sheet("sort-badrange", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      {:ok, %{applied: 0, errors: [%{code: "invalid_range"}]}} =
+        Session.apply_ops("sort-badrange", @dataset, [sort_op("banana", [asc(0)])])
+    end
   end
 end
