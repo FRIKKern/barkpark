@@ -99,9 +99,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
   # atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
   # NOT editable text (run-convert.js CANVAS_READONLY_ATOM_TYPES). `sheet` (a cached
-  # value-grid embed edited in its OWN surface; compose.ex:302 renders its `snapshot`
-  # read-only) and `embed` (a note transclusion ![[note]] resolved at VIEW render;
-  # compose.ex:367 / walk.ex:421) are both pulled INTO the canvas as read-only atoms
+  # value-grid embed edited in its OWN surface; `Render.Compose.compose_block/2`'s
+  # `sheet` clause composes its `snapshot` read-only) and `embed` (a note
+  # transclusion ![[note]] whose target is resolved at VIEW render —
+  # `Render.Compose.compose_block/2`'s `embed` clause emits the `PdEmbed` node,
+  # `Render.Walk`'s `PdEmbed` clause injects the pre-resolved HTML) are both pulled
+  # INTO the canvas as read-only atoms
   # carrying the WHOLE block VERBATIM. UNLIKE the field control-atom (whose value is
   # edited → a patch), these NEVER emit a value/content patch — nothing is edited in
   # the editor — but they ARE canvas-eligible (no split) and DO participate in

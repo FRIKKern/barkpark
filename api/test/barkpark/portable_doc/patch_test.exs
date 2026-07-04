@@ -1,17 +1,19 @@
 defmodule Barkpark.PortableDoc.PatchTest do
-  # Pure, in-process port of the portable-doc DocPatchOp core — no DB.
+  # Conformance suite for the standalone Elixir patch engine — pure, no DB.
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Patch
 
-  # Self-contained: golden fixtures are copied INTO the barkpark test tree so
-  # the suite never reads across repos by absolute path (would break in CI /
-  # other clones). Source of truth: fixtures/doc-patch-op/ at the monorepo root.
+  # The golden fixtures under `api/test/support/fixtures/doc-patch-op/` ARE the
+  # source of truth for the block-tree op semantics — the same fixtures the
+  # `Barkpark.PortableDoc.Patch` @moduledoc pins the engine to. This suite is
+  # self-contained: it reads only that in-tree dir (no cross-repo absolute path,
+  # so it never breaks in CI / fresh clones).
   @fixtures_dir Path.join(__DIR__, "../../support/fixtures/doc-patch-op")
 
   describe "conformance — golden fixtures reproduce `after` from `before` + `op`" do
-    # One generated test per fixture file. The contract's conformance rule:
-    # deepEqual(applyDocPatch(before, op), after).
+    # One generated test per fixture file. The op contract's conformance rule:
+    # apply_patch(before, op) == after.
     for path <- Path.wildcard(Path.join(@fixtures_dir, "*.json")) do
       name = Path.basename(path, ".json")
 
