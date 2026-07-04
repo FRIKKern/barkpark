@@ -12,7 +12,7 @@ import type { WebhookEventKind } from './webhook'
 /** YYYY-MM-DD template literal. Runtime check in createClient validates pattern. */
 export type ApiVersion = `${number}-${number}-${number}`
 
-/** Phoenix perspectives (ADR-004 §Decision). */
+/** Phoenix perspectives — the view a read resolves against (published docs, drafts, or raw). */
 export type Perspective = 'published' | 'drafts' | 'raw'
 
 /** Options for `client.exportDataset()` (`GET /v1/data/export/:dataset`). */
@@ -60,7 +60,7 @@ export type FilterOp =
  *
  * This API is internal to @barkpark/core and may change without notice.
  * Use the public client API. These types describe transport internals and
- * may change. (Observability hook surfaces — ADR-010.)
+ * may change. (Observability hook surfaces.)
  */
 export interface RequestContext {
   method: string
@@ -109,7 +109,7 @@ export interface BarkparkClientConfig extends BarkparkHooks {
   useCdn?: boolean // reserved — guard rejects useCdn:true + perspective:'drafts'
   perspective?: Perspective // default 'published'
   timeoutMs?: number // reads: 30000, writes: 60000 (defaults applied inside transport)
-  requestTagPrefix?: string // X-Barkpark-Request-Tag: <prefix>-<uuid> for observability (ADR-010); default 'bp', set '' to disable
+  requestTagPrefix?: string // X-Barkpark-Request-Tag: <prefix>-<uuid> for observability; default 'bp', set '' to disable
   fetch?: typeof globalThis.fetch // user override (MSW, tracing)
 }
 

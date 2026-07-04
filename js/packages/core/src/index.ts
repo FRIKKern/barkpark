@@ -2,8 +2,7 @@
 // Copyright 2026 Barkpark contributors
 
 // Public API surface of `@barkpark/core`. Every name here becomes a permanent
-// contract — add only symbols with documented intent. See ADR-002 through
-// ADR-011 for the contracts backing each export.
+// contract — add only symbols with documented intent.
 
 import type {
   BarkparkClient,
@@ -103,7 +102,7 @@ export type { FilterExpression, BuilderState } from './filter-builder'
 
 // --- Errors — export class AND note: every class has a `code` literal equal
 // to its class name, for cross-bundle matching when `instanceof` is unreliable
-// (ADR-009 §code taxonomy).
+// (the code-literal taxonomy — see errors.ts).
 export {
   BarkparkError,
   BarkparkAPIError,

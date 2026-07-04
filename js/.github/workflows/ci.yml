@@ -122,7 +122,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm size
-      # +2% regression gate (ADR-001, masterplan) — size-limit's built-in
+      # +2% bundle-size regression gate — size-limit's built-in
       # compare uses the previous build artifact; CI fails on diff > 2%.
 
   changeset-check:

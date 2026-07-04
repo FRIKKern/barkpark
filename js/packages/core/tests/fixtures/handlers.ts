@@ -1,8 +1,7 @@
 // Test-only MSW 2.x handlers. Runtime-agnostic (uses HttpResponse + http from 'msw').
-// Handlers simulate Phoenix /v1 behavior documented in w6.3-phoenix-contract.md.
-// Shapes verified against:
+// Handlers simulate the Phoenix /v1 behavior of the meta, query, mutate, listen and
+// error-envelope endpoints. Shapes verified against:
 //   - packages/core/src/types.ts (MetaResponse, ReadEnvelope, MutateEnvelope, ListenEvent)
-//   - scratchpad/w6.3-phoenix-contract.md (§meta, §query, §mutate, §listen, §error envelope)
 import { http, HttpResponse, delay } from 'msw'
 import type {
   MetaResponse,

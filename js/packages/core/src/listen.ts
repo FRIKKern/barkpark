@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// SSE live-stream transport. ADR-005 + w6.3-phoenix-contract.md §listen.
+// SSE live-stream transport for GET /v1/data/listen/:dataset.
 // - Returns a ListenHandle<T>: AsyncIterable + .unsubscribe().
 // - Edge runtimes throw BarkparkEdgeRuntimeError SYNCHRONOUSLY (not lazily).
 // - Uses fetch() + ReadableStream reader for custom headers (Bearer, Last-Event-ID);
 //   EventSource is unavailable because it does not support Authorization.
 // - Reconnects with exponential backoff + Last-Event-ID on network drops.
-// - Yields ListenEvent<T> as defined in types.ts:117-126.
+// - Yields ListenEvent<T> (the interface declared in types.ts).
 
 import type {
   BarkparkClientConfig,
@@ -79,8 +79,6 @@ export interface ListenOptions {
  * edge runtimes where streaming fetch is unavailable — poll via `client.docs()` instead.
  *
  * Prefer `client.listen(type, filter)` in app code.
- *
- * @see ADR-005 §SSE transport.
  */
 export function createListenHandle<T = BarkparkDocument>(
   config: BarkparkClientConfig,

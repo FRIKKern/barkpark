@@ -23,7 +23,7 @@ function client(extra: Record<string, unknown>, fetch: unknown) {
   } as never)
 }
 
-describe('X-Barkpark-Request-Tag (ADR-010 observability)', () => {
+describe('X-Barkpark-Request-Tag (observability)', () => {
   it('defaults to a bp-prefixed tag on every request', async () => {
     const { seen, fetch } = captureFetch()
     await client({}, fetch).doc('post', 'p1')
