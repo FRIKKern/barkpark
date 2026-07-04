@@ -14,7 +14,8 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media.Storage.{Access, Checkout, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
-  alias BarkparkWeb.{SearchIntel, V1.MediaSearchParams}
+  alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.SearchIntel
 
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]

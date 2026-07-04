@@ -1,4 +1,4 @@
-defmodule BarkparkWeb.V1.MediaSearchParams do
+defmodule Barkpark.Media.Delivery.SearchParams do
   @moduledoc false
 
   @default_limit 50
