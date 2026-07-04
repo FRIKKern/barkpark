@@ -1302,6 +1302,37 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.host == "198.51.100.9"
     end
 
+    test "dwb (charter D9): the update-status kick is fire-and-forget — succeed 200s and flips the box live regardless of the probe's fate" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      # The worker reports {ip, admin_token}, so the post-succeed kick fires an
+      # isu-6 self-update probe at the just-provisioned box. The kick is a raw
+      # `spawn` (deliberately NOT Task.start — see kick_update_status_refresh/1:
+      # $callers propagation would let the probe borrow this test's Ecto.Sandbox
+      # connection and race teardown), so under async tests the spawned probe
+      # dies cleanly on sandbox ownership before any HTTP. What THIS test proves
+      # is the route contract: the kick can NEVER block or fail the 200,
+      # whatever the probe's fate. refresh_update_status itself is covered by
+      # registry_update_status_test.exs.
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/succeed",
+          %{ip: "198.51.100.9", admin_token: "bp_admin_unreachable-probe"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      # The synchronous succeed work is unaffected: the box is flipped live.
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "up"
+      assert reloaded.host == "198.51.100.9"
+    end
+
     test "unknown job id → 404" do
       conn =
         call(

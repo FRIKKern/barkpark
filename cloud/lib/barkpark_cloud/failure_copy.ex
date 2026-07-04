@@ -59,6 +59,15 @@ defmodule BarkparkCloud.FailureCopy do
     down = String.downcase(reason)
 
     cond do
+      # dwb-webhook fail-fast interim: a GitHub push was recorded as a
+      # born-`failed` deployment because source builds need the GitHub App
+      # integration (gh-1, human-gated). Blocked-tone, names the workaround.
+      # Checked FIRST — the raw reason is a known exact string; its output does
+      # not re-match any clause (no "github push builds" token), so a second
+      # client-side `failureCopy()` pass is idempotent.
+      String.contains?(down, "github push builds") ->
+        "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
+
       String.contains?(reason, "no build source") ->
         "This site has no build source yet. Connect a repo or run bp deploy."
 

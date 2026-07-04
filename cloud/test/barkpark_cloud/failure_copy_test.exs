@@ -91,6 +91,19 @@ defmodule BarkparkCloud.FailureCopyTest do
     end
   end
 
+  test "dwb-webhook fail-fast: github-push born-failed reason → blocked-tone human copy naming the workaround" do
+    raw =
+      "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+
+    human =
+      "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
+
+    assert FailureCopy.humanize(raw) == human
+    # Idempotent under the client failureCopy() second pass (its output does not
+    # re-match the "github push builds" token or any other class).
+    assert FailureCopy.humanize(human) == human
+  end
+
   test "unrecognized reason passes through unchanged (graceful fallback)" do
     assert FailureCopy.humanize("some brand new worker error") == "some brand new worker error"
     assert FailureCopy.humanize("docker load: no such image") == "docker load: no such image"
