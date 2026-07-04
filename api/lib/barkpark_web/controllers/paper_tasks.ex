@@ -66,12 +66,19 @@ defmodule BarkparkWeb.PaperTasks do
   def section_html(_), do: ""
 
   # One task: title + lifecycle + progress header, then the claim rows.
+  #
+  # `list-style:none` is declared per-<li> (here and in criterion_html/1), not
+  # only on the parent <ul>: the canonical paper-surface stylesheet's
+  # `.bp-paper-surface ul li { list-style: disc }` targets the li DIRECTLY,
+  # which beats the list-style the <ul>'s inline style would only pass down by
+  # inheritance — without it every task/claim row grows a stray disc marker on
+  # article papers (the reader <main> carries `bp-paper-surface` since Stage 2).
   defp task_html(%{doc_id: doc_id} = task) when is_binary(doc_id) and doc_id != "" do
     title_html = Util.escape_html(title_or_id(Map.get(task, :title), doc_id))
     status_html = status_chip(Map.get(task, :lifecycle_status))
     progress_html = progress_chip(Map.get(task, :criteria_progress))
 
-    ~s(<li style="margin:0 0 1.4rem">) <>
+    ~s(<li style="list-style:none;margin:0 0 1.4rem">) <>
       ~s(<div style="font-weight:600;color:#{@ink}">) <>
       title_html <>
       status_html <>
@@ -108,7 +115,7 @@ defmodule BarkparkWeb.PaperTasks do
   # claim: muted ○, no evidence line. A row with no criterion text still
   # renders its marker — an unnamed claim is visible, not hidden.
   defp criterion_html(%{met: true} = row) do
-    ~s(<li style="margin:0.2rem 0;color:#{@ink}">) <>
+    ~s(<li style="list-style:none;margin:0.2rem 0;color:#{@ink}">) <>
       ~s(<span style="color:#{@accent};font-weight:600">✓</span> ) <>
       Util.escape_html(criterion_text(row)) <>
       evidence_html(Map.get(row, :evidence)) <>
@@ -116,7 +123,7 @@ defmodule BarkparkWeb.PaperTasks do
   end
 
   defp criterion_html(%{} = row) do
-    ~s(<li style="margin:0.2rem 0;color:#{@muted}">) <>
+    ~s(<li style="list-style:none;margin:0.2rem 0;color:#{@muted}">) <>
       ~s(<span>○</span> ) <>
       Util.escape_html(criterion_text(row)) <>
       ~s(</li>)

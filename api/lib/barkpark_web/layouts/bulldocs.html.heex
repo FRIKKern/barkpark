@@ -16,6 +16,15 @@
            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
     .bp-paper-shell { max-width: 820px; margin: 0 auto; padding: 32px 24px 96px; }
 
+    <%!-- The ONE canonical paper-surface source (paper-surface.css via
+          Barkpark.PortableDoc.Render.Stylesheet) — the SAME bytes Studio embeds.
+          It provides the `--paper-*`/`--bp-*` tokens + `.bp-paper-surface`
+          element rules. It is embedded BEFORE the reader skin below so the
+          parchment `--paper-*` overrides (later + more specific) win. Surface
+          CHROME (page bg/width/padding) is NOT in this source — the reader owns
+          its own 820/720px shell above, so nothing here clobbers it. --%>
+    <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
+
     /* Article chrome — applied only when BulldocsLive marks the doc as
        `content["style"] == "article"` (the LiveView stamps the
        `.bp-paper-article` class on its <main>). Warm parchment page, a
@@ -23,32 +32,54 @@
        inline-styled article blocks sit on a proper page, not bare white
        full-width. Non-article papers keep the dark chrome above, untouched.
 
-       The `--paper-*` tokens mirror root.html.heex's Studio palette: light
-       defaults match the historical parchment look; the
-       `prefers-color-scheme: dark` block flips them to warm-dark with light
-       ink so the inline-styled `var(--paper-*, hex)` block HTML emitted by
-       render.ex stays readable in dark mode. Without these tokens the inline
-       hex fallback would paint dark ink on whatever the host browser's dark
-       theme picked — the visibility bug. */
-    body:has(.bp-paper-article) {
+       READER SKIN: token overrides layered over the canonical paper-surface
+       source (embedded above). These `--paper-*` values are the historical
+       parchment reader look. They are set on the <body> AND on the reader
+       <main> (`.bp-paper-shell.bp-paper-article`, which now also carries
+       `bp-paper-surface`) so they WIN over the shared source's fallback
+       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline
+       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on
+       the reader instead of parchment (ink #1a1a1a vs #1f1a14, rule #e6e2d8,
+       etc.). Dark-mode note: the shared source keys dark on
+       `html[data-theme="dark"]`, which the reader NEVER stamps — so the shared
+       dark tokens never match here, and the `prefers-color-scheme: dark` block
+       below (also carried onto <main>) is what owns reader dark mode, flipping
+       the palette to warm-dark with light ink so the inline `var(--paper-*)`
+       HTML stays readable. Without the <main>-scoped override the shared light
+       fallback would paint dark ink on the browser's dark theme — the
+       visibility bug. */
+    body:has(.bp-paper-article),
+    body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
       --paper-bg:         #fefdf9;
       --paper-bg-deep:    #f5f2e9;
       --paper-ink:        #1a1a1a;
       --paper-ink-soft:   #6a6a6a;
       --paper-rule:       #e6e2d8;
       --paper-accent:     #a23925;
+      /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
+         read it). Light value matches the shared source's fallback; the dark
+         block below MUST re-skin it — otherwise dark-mode link borders resolve
+         to this light rgba and vanish against the dark page. */
+      --paper-accent-soft: rgba(162, 57, 37, 0.10);
+    }
+    body:has(.bp-paper-article) {
       background: var(--paper-bg-deep);
       color: var(--paper-ink);
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
     }
     @media (prefers-color-scheme: dark) {
-      body:has(.bp-paper-article) {
+      body:has(.bp-paper-article),
+      body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {
         --paper-bg:         #1b1815;
         --paper-bg-deep:    #221e1a;
         --paper-ink:        #ece6dc;
         --paper-ink-soft:   #b8ad9e;
         --paper-rule:       rgba(236, 230, 220, 0.14);
         --paper-accent:     #d97a5f;
+        /* Warm-dark link border (same value as Studio's html[data-theme=dark]
+           block in paper-surface.css) — without it links keep the light-theme
+           rgba(162,57,37,0.10) border, invisible on the dark page. */
+        --paper-accent-soft: rgba(217, 122, 95, 0.14);
       }
     }
     .bp-paper-shell.bp-paper-article {
@@ -259,6 +290,13 @@
     }
     .bp-paper-article .bp-goal-rail-title {
       margin: 0 0 0.75rem;
+      /* `inherit` re-takes the rail's sans stack: the shared paper-surface
+         `.bp-paper-surface h1..h6 { font-family: var(--paper-font-serif) }`
+         rule hits this <h2> DIRECTLY and would beat the sans the rail
+         container only passes down by inheritance. Same story for
+         line-height (shared `h2 { line-height: 1.2 }` vs the shell's 1.65). */
+      font-family: inherit;
+      line-height: inherit;
       font-size: 0.72rem;
       font-weight: 600;
       letter-spacing: 0.08em;
@@ -274,6 +312,13 @@
       margin: 0;
       background: none;
       font-size: 0.8rem;
+      /* Neutralize the shared `.bp-paper-surface pre` code-block chrome
+         (border/padding/radius) — the rail's gitGraph is a naked 240px
+         diagram, not a code block; without these it grows a parchment
+         inset box. Reader-chrome override per charter Decision 5. */
+      border: 0;
+      border-radius: 0;
+      padding: 0;
     }
     .bp-paper-article .bp-goal-rail-events {
       list-style: none;
@@ -365,6 +410,9 @@
     .bp-paper-article .bp-diff-title {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      /* Pin against the shared `.bp-paper-surface h2 { line-height: 1.2 }`
+         element rule (this <h2> sits inside the surface <main>). */
+      line-height: inherit;
       font-size: 0.85rem;
       font-weight: 600;
       letter-spacing: 0.04em;
@@ -407,6 +455,14 @@
       line-height: 1.5;
       white-space: pre-wrap;
       word-break: break-word;
+      /* Neutralize the shared `.bp-paper-surface pre` code-block chrome —
+         this diff is a naked aside inside the (always-light) modal panel;
+         the shared parchment box would even resolve DARK here in dark mode
+         (the tokens are main-scoped). Reader-chrome override, Decision 5. */
+      background: none;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
     }
     .bp-paper-article .bp-diff-line {
       display: block;

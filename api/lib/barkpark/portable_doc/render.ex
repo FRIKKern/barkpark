@@ -39,7 +39,13 @@ defmodule Barkpark.PortableDoc.Render do
   # whose frozen `content["body_html"]` was written by an OLDER renderer is
   # detectable as stale (its `content["body_html_sv"]` lags this) and can be
   # rehydrated by `mix barkpark.rehydrate_body_html`.
-  @body_html_render_version 1
+  #
+  # v2: article prose emits bare semantic elements styled by Render.Stylesheet —
+  # deploy step: run mix barkpark.rehydrate_body_html on guerrilla + prod after
+  # the Stage-2 emit waves merge; prerequisite for deleting the root.html.heex
+  # de-inline overrides. Old cached v1 HTML stays self-styled (inline) and keeps
+  # rendering; block_ops stamps body_html_sv on every fresh render.
+  @body_html_render_version 2
 
   @doc """
   The current body_html render-version. Stamped onto `content["body_html_sv"]`
