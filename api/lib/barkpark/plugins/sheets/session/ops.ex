@@ -1549,6 +1549,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # quoted one (`[full, quoted]`) — both handled below.
   @tab_ref_regex ~r/(?:'((?:[^']|'')*)'|([A-Za-z_][A-Za-z0-9_]*))!/
   defp formula_tab_refs(f) do
+    # Cheap prefilter (this runs per formula on every flush — the hot path): a
+    # cross-tab qualifier ALWAYS contains `!`, so a formula with no `!` — the
+    # overwhelming majority — skips the regex entirely. `:binary.match/2` is the
+    # fastest substring test; semantically identical to running the scan.
+    if :binary.match(f, "!") == :nomatch do
+      []
+    else
+      formula_tab_refs_scan(f)
+    end
+  end
+
+  defp formula_tab_refs_scan(f) do
     @tab_ref_regex
     |> Regex.scan(f)
     |> Enum.map(fn
