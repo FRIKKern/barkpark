@@ -42,9 +42,9 @@ defmodule Barkpark.Repo.Migrations.CreateContentEdges do
 
   ## Weight is layout-only
 
-  `weight` is a Cytoscape layout hint (edge thickness / spring length),
-  consumed ONLY by the Studio graph renderer. Ranking is topology
-  (distance, fan-in, inserted_at) and NEVER reads `weight`.
+  `weight` is a layout hint (edge thickness / spring length) consumed ONLY by
+  the Studio Canvas2D graph renderer's force sim (bp-graph.js). Ranking is
+  topology (distance, fan-in, inserted_at) and NEVER reads `weight`.
 
   ## Tenancy / cascade
 
@@ -78,7 +78,7 @@ defmodule Barkpark.Repo.Migrations.CreateContentEdges do
 
       add :kind, :string, null: false
 
-      # LAYOUT-ONLY (Cytoscape edge thickness / spring) — never read by ranking.
+      # LAYOUT-ONLY (Canvas2D force-sim edge thickness / spring) — never read by ranking.
       add :weight, :float, null: true
       add :plugin_source, :string, null: true
 

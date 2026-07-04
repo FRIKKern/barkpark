@@ -75,7 +75,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # RESERVED literal `"graph"` segment — the per-doc blast-radius action (Goal
   # ges/graph-edge-seam, FIX 2). The graph pane roots on ANY content doc, so it
   # is NOT a schema/structure node: a `graph/<doc_id>` nav path opens the
-  # Cytoscape `view: :graph` editor for `<doc_id>` regardless of its type. This
+  # Canvas2D `view: :graph` editor for `<doc_id>` regardless of its type. This
   # clause runs BEFORE the structure `Enum.find` below — which would otherwise
   # return nil (no node has `type_name == "graph"`) and drop the pane to nil,
   # leaving the whole GraphView half of Phase 5 unreachable. The 'View blast
@@ -318,7 +318,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
                   nil
               end
 
-            # A `graph` doc opens as the blast-radius Cytoscape pane (Goal
+            # A `graph` doc opens as the blast-radius Canvas2D pane (Goal
             # ges/graph-edge-seam, Phase 5). Same draft-first doc resolution as
             # the generic branch, but the editor map carries `view: :graph` plus
             # the traversed node/edge payload (reverse direction — the
