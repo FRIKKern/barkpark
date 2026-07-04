@@ -342,6 +342,91 @@ func (c *Client) GetCredentials(ctx context.Context, id string) (Credentials, er
 	return out, nil
 }
 
+// VerifyProbe is one probe row of the on-demand verify envelope
+// (POST /v1/barkparks/:id/verify, charter D53) — the golden-path suite the
+// provisioner ran before it ever declared the box ready, re-issued on demand.
+// The probe vocabulary (names/labels/pass-rules) is pinned by the shared
+// fixture cloud/priv/static/__fixtures__/verify_probes.json; Status is a
+// pointer because an unreachable probe honestly has NO status (JSON null),
+// not a zero.
+type VerifyProbe struct {
+	Name      string `json:"name"`
+	OK        bool   `json:"ok"`
+	Reachable bool   `json:"reachable"`
+	Status    *int   `json:"status"`
+	LatencyMS int    `json:"latency_ms"`
+	Evidence  string `json:"evidence"`
+}
+
+// VerifyResult is a COMPLETED verify run: the suite executed and every probe
+// reported. OK is the VERDICT (all probes passed), not transport success — an
+// unreachable box arrives here as ok:false/reachable:false with three
+// fully-populated failed probes, never as a Go error. Raw is the envelope
+// BYTES verbatim so `-o json` re-emits the contract without reshaping (D4).
+type VerifyResult struct {
+	Raw        []byte        `json:"-"`
+	OK         bool          `json:"ok"`
+	Reachable  bool          `json:"reachable"`
+	VerifiedAt string        `json:"verified_at"`
+	Probes     []VerifyProbe `json:"probes"`
+}
+
+// VerifyError is a verify request the control plane REFUSED to run — one of
+// the route's contract codes: 409 not_live (provisioning / being removed),
+// 404 not_found (wrong team / no such id — the same 404, no existence leak),
+// 404 no_admin_token (a pre-feature row), 500 decrypt_failed (tampered
+// ciphertext). The CLI maps each onto a human sentence; any OTHER failure
+// (401, a gateway page) stays a plain cloudError so auth handling is shared.
+type VerifyError struct {
+	HTTPStatus int
+	Code       string
+	Detail     string
+}
+
+func (e *VerifyError) Error() string {
+	if e.Detail != "" {
+		return e.Code + ": " + e.Detail
+	}
+	return e.Code
+}
+
+// verifyErrorCodes is the closed set of refusal codes the verify route emits
+// (mirrors run_verify/1 in the control-plane router). Anything else falls back
+// to cloudError so e.g. a 401 keeps its "unauthorized:" prefix contract.
+var verifyErrorCodes = map[string]bool{
+	"not_live":       true,
+	"not_found":      true,
+	"no_admin_token": true,
+	"decrypt_failed": true,
+}
+
+// VerifyInstance re-runs the golden-path verify suite against a managed
+// instance via POST /v1/barkparks/:id/verify (Bearer). The control plane
+// probes the live box with the STORED admin token — the token never reaches
+// this client. A 200 is a completed run (pass or fail — read result.OK); a
+// contract refusal surfaces as *VerifyError; anything else via cloudError.
+func (c *Client) VerifyInstance(ctx context.Context, id string) (VerifyResult, error) {
+	status, raw, err := c.do(ctx, "POST", "/v1/barkparks/"+esc(id)+"/verify", true, nil)
+	if err != nil {
+		return VerifyResult{}, err
+	}
+	if !ok(status) {
+		var env struct {
+			Error  string `json:"error"`
+			Detail string `json:"detail"`
+		}
+		if json.Unmarshal(raw, &env) == nil && verifyErrorCodes[env.Error] {
+			return VerifyResult{}, &VerifyError{HTTPStatus: status, Code: env.Error, Detail: env.Detail}
+		}
+		return VerifyResult{}, cloudError(status, raw)
+	}
+	res := VerifyResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return VerifyResult{}, fmt.Errorf("decode verify envelope: %w", err)
+	}
+	return res, nil
+}
+
 // ConnectProvider links a cloud account (kind + plaintext token, optional label)
 // via POST /v1/providers (Bearer). The control plane encrypts the token at rest
 // and returns only the safe metadata. label is sent only when non-empty.

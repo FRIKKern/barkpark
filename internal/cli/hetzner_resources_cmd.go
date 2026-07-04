@@ -569,6 +569,7 @@ func printCloudHelp(out *writer) {
 USAGE
   bp cloud status                       triage your fleet (ranked, bucketed)
   bp cloud open <target>                open a dashboard deep link
+  bp cloud verify <instance>            re-run the golden-path probe suite
   bp cloud <provider> <resource> <verb> drive a provider's API directly
 
 FLEET (control plane — needs 'bp login')
@@ -578,6 +579,8 @@ FLEET (control plane — needs 'bp login')
             → a legacy-stable dashboard hash link       (bp cloud open -h)
   webhook   list · show · create · rm · toggle · rotate · deliveries · replay —
             control an instance's webhooks             (bp cloud webhook -h)
+  verify    re-run the readiness probes (API · login · Studio) against a live
+            box; exit 0 only when all pass             (bp cloud verify -h)
 
 PROVIDERS (the provider's own API, YOUR credentials — no control plane)
   hetzner   Hetzner Cloud (servers, ssh keys, images, …) — bp cloud hetzner -h
