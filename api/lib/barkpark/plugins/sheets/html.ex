@@ -50,7 +50,15 @@ defmodule Barkpark.Plugins.Sheets.Html do
       "snapshot" => Core.snapshot_for(content, index)
     }
 
-    table = Render.render_block(block, %{style: :article})
+    # Stage-2 wave 2: the sheet CHROME (band/cell rules, mono font) is now
+    # class-based (`.bp-paper-surface .bp-sheet__*`), so the standalone export
+    # must place the table INSIDE `.bp-paper-surface` for those rules — inlined
+    # in <head> above — to resolve. The wrapper is scoped to the table alone so
+    # the export's own <h1>/<h2> chrome is untouched. Author DATA (widths,
+    # b/i/bg/al, error mark) still rides inline and works with no stylesheet.
+    table =
+      ~s(<div class="bp-paper-surface">) <>
+        Render.render_block(block, %{style: :article}) <> "</div>"
 
     case heading(tab, index, tab_count) do
       "" -> table

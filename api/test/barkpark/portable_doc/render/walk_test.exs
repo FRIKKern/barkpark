@@ -21,6 +21,24 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       html = Walk.render_body(%{"kind" => "PdHr", "thickness" => 3}, @width, @email)
       assert html =~ "border-top:3px solid"
     end
+
+    # Stage 2 wave 2: the article rule is class-driven (`.bp-hr` owns the
+    # reset/colour/margin); ONLY the author thickness (DATA) rides inline, as
+    # `border-top-width` so it layers over the class's `border-top` shorthand.
+    test "article emits bp-hr with the thickness inline as border-top-width" do
+      assert Walk.render_body(%{"kind" => "PdHr"}, @width, @article) ==
+               ~s(<hr class="bp-hr" style="border-top-width:1px">)
+
+      assert Walk.render_body(%{"kind" => "PdHr", "thickness" => 3}, @width, @article) ==
+               ~s(<hr class="bp-hr" style="border-top-width:3px">)
+    end
+
+    test "article thickness can't break out of the style attribute (own escape path)" do
+      html = Walk.render_body(%{"kind" => "PdHr", "thickness" => ~s(1" onload="x)}, @width, @article)
+
+      assert html =~ "&quot;"
+      refute html =~ ~s(onload=")
+    end
   end
 
   describe "render_body/3 — PdInlineCode" do
