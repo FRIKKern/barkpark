@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-// ADR-009 error taxonomy. Every class carries a `code` literal equal to its
+// Error taxonomy. Every class carries a `code` literal equal to its
 // class name so consumers can match across bundle boundaries (pnpm hoist may
 // produce duplicate copies; `instanceof` is unreliable, `err.code === '...'`
 // is the supported fallback).
@@ -25,8 +25,6 @@ export interface BarkparkErrorOptions {
  * Abstract base for every Barkpark error. Every subclass sets `code` to its class name,
  * so callers can match across bundle boundaries via `err.code === 'BarkparkAuthError'`
  * when `instanceof` is unreliable (pnpm hoist duplicates).
- *
- * @see ADR-009 error taxonomy.
  */
 export abstract class BarkparkError extends Error {
   public readonly code: string

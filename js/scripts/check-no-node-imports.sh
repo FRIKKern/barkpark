@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Enforces ADR-002 L27 + masterplan L169:
-# No `node:` imports allowed in edge-reachable code paths.
+# Edge-safety gate: no `node:` imports allowed in edge-reachable code paths
+# (see the ADR-002 edge-contract row in docs/decisions/deferred.md).
 set -euo pipefail
 DIRS=(
   "packages/core/src"

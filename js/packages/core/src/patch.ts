@@ -24,10 +24,11 @@ interface PatchState {
   ifMatch?: string
 }
 
-// Shared migration hint for the array-mutation ops (insert/append/prepend).
+// Migration hint for the positional array `insert` op, which is not implemented.
+// (Tail/head appends ARE — use patch.append / patch.prepend.)
 const ARRAY_OP_HINT =
-  'Array mutations are not implemented in Barkpark Phase 1A. Read the array, modify it, ' +
-  'and patch.set the whole field — or roll a transaction with createOrReplace.'
+  'Positional array insert is not implemented in Barkpark Phase 1A. Use patch.append / ' +
+  'patch.prepend for tail/head, or read the array, modify it, and patch.set the whole field.'
 
 // System fields Phoenix will not allow in patch.set (content.ex rejects via
 // Ecto changesets; we catch at the client boundary for a faster + clearer error).

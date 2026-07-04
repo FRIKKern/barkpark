@@ -9,8 +9,8 @@ import { formatTagPrefix } from '../tag-prefix'
 /**
  * Structural schema — any object with `.parse(input)` that throws on invalid
  * input. Zod schemas satisfy this shape, so codegen-emitted `z.object(...)`
- * definitions drop in without adapter code. Per ADR-008, zod is an *optional*
- * peer dep, so we avoid a hard type import from 'zod' here.
+ * definitions drop in without adapter code. zod is an *optional* peer dep, so we
+ * avoid a hard type import from 'zod' here.
  */
 export interface ActionSchema {
   parse(input: unknown): unknown

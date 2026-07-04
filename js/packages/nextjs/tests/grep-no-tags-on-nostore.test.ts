@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// ADR-004 L31 / spike-c §4 contract gate.
+// Contract gate for the no-store/next.tags rule (docs/decisions/0003-sync-tags.md).
 // In Next 15.5.15 setting `next.tags` together with `cache: 'no-store'` is silently dropped:
 // the tag never gets registered with the data cache, so revalidateTag() in a webhook handler
 // becomes a no-op for that request lineage. We fail the build if the bundled server output ever

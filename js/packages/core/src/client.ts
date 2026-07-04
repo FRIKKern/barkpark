@@ -218,8 +218,8 @@ function validateConfig(config: BarkparkClientConfig): void {
 }
 
 // Convert the structured ListenFilter array into the flat Record<string,unknown>
-// that listen.ts URL encoder expects. Phase 1A listen supports eq-only matching (see
-// w6.3-phoenix-contract.md §listen) — the `op` is type-pinned to 'eq', and a non-eq
+// that listen.ts URL encoder expects. Phase 1A listen supports eq-only matching —
+// the `op` is type-pinned to 'eq', and a non-eq
 // op (from an untyped JS caller) is still rejected eagerly here as defense-in-depth.
 function filtersToRecord(filter: ListenFilter | undefined): Record<string, unknown> | undefined {
   if (!filter || filter.length === 0) return undefined
