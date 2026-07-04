@@ -13,7 +13,7 @@
 // services and must be free to drift.
 //
 // YAGNI by design (cloud-12b): no retries, no pagination, no websocket, no warm-
-// pool poll. The five methods below are exactly the surface the user-facing `bp`
+// pool poll. The 25 methods below are exactly the surface the user-facing `bp`
 // Cloud commands drive; the real provisioning happens server-side and is
 // reflected back in the returned Barkpark row.
 package cloudclient

@@ -1,9 +1,10 @@
 defmodule Barkpark.PortableDoc.Render.Compose do
   @moduledoc """
   portable-doc block → Pd-tree composition for the PortableDoc render engine —
-  the faithful Elixir port of kernel.ts `composeBlock`. One clause per block
-  type. Trusts the AST has already been validated (the validator is the only
-  gate); it does not re-validate URLs or tone palette membership.
+  one clause per block type. Its cross-runtime twin is the block-composition
+  step of the Go `internal/pdrender` renderer (held in parity by the shared
+  golden fixtures). Trusts the AST has already been validated (the validator is
+  the only gate); it does not re-validate URLs or tone palette membership.
 
   Extracted verbatim from `Barkpark.PortableDoc.Render` (module location only —
   NO logic change). This is the COMPOSE recursive tree (`compose_block` →
@@ -761,8 +762,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp format_datetime(v) when is_binary(v), do: String.replace(v, "T", " ")
   defp format_datetime(v), do: stringish(v)
 
-  # Put `key => value` only when value is not nil (mirrors the conditional
-  # spreads in kernel.ts, e.g. `...(title !== undefined ? {title} : {})`).
+  # Put `key => value` only when value is not nil (the conditional-spread idiom,
+  # e.g. `...(title !== undefined ? {title} : {})`).
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 

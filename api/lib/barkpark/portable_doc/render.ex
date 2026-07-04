@@ -1,8 +1,10 @@
 defmodule Barkpark.PortableDoc.Render do
   @moduledoc """
   Pd-tree → inline-styled HTML string. Pure string emission. NO React, NO JSX,
-  NO Node sidecar — a direct in-process port of the TS `walk()` in
-  `portable-doc/packages/backend-web/src/static/render.ts`.
+  NO Node sidecar — a STANDALONE Elixir renderer. Its real cross-runtime twin is
+  the Go terminal renderer in `internal/pdrender` (ANSI instead of HTML), which
+  walks the same `%{version, blocks[]}` document; the two are held in lock-step
+  by the golden fixtures under `internal/pdrender/testdata/golden/`.
 
   Output sticks to inline styles only (no `<style>` blocks, no class selectors)
   so it stays byte-comparable with the email backend.
@@ -22,7 +24,7 @@ defmodule Barkpark.PortableDoc.Render do
 
     * `Render.Util`     — escape_html / escape_attr / safe_url / tone_palette
     * `Render.Palettes` — email / article palettes + colour / font constants
-    * `Render.Inline`   — compose_inline* (kernel.ts composeInline)
+    * `Render.Inline`   — compose_inline* (inline nodes/marks → Pd-tree)
     * `Render.Forms`    — form / questionnaire block HTML
     * `Render.Figures`  — diagram / asciicast / code / divider `_raw` HTML
     * `Render.Compose`  — compose_block (block → Pd-tree) + field helpers
@@ -159,9 +161,8 @@ defmodule Barkpark.PortableDoc.Render do
   # functions below render a portable-doc *block list* — the AST shape that
   # `Barkpark.PortableDoc.Patch` operates on (`%{"id" => …, "type" => …}`) and
   # that the Papers context stores. They first `compose_block/2` each block into
-  # a Pd-tree (the in-process twin of `composeBlock` in
-  # `portable-doc/packages/primitives/src/kernel.ts`), then walk it — the
-  # exact pairing of `renderBlockHtml` in the TS `backend-web` static renderer.
+  # a Pd-tree (via `Render.Compose.compose_block/2`), then walk it — the same
+  # compose-then-walk pairing the Go `internal/pdrender` twin performs.
 
   @doc """
   Render a single portable-doc block to a bare HTML fragment — no `<!doctype>`,

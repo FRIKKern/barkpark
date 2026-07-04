@@ -1,10 +1,10 @@
 defmodule Barkpark.PortableDoc.Patch do
   @moduledoc """
-  Pure, immutable patch operations over a PortableDoc block tree. A direct
-  in-process port of the TS `applyDocPatch()` in
-  `portable-doc/packages/core/src/patch.ts`, conforming to the shared
-  inter-repo contract (`docs/doc-patch-op-contract.md`) and the golden
-  fixtures in `fixtures/doc-patch-op/`.
+  Pure, immutable patch operations over a PortableDoc block tree. A STANDALONE
+  Elixir patch engine — the single owner of the block-tree op semantics. Its
+  behaviour is pinned by the golden fixtures in
+  `api/test/support/fixtures/doc-patch-op/`, which double as the cross-surface
+  op contract every producer (CLI/SDK/Studio) writes against.
 
   `apply_patch/2` is **pure**: it never mutates its input, performs no Repo
   access, no GenServer, no I/O. It returns either a new document/block list or
@@ -37,7 +37,7 @@ defmodule Barkpark.PortableDoc.Patch do
 
   Ids are resolved against the **entire** tree: `insert-after`, `patch-block`,
   `replace-block`, and `remove-block` recurse into `section` children at any
-  depth, exactly as patch.ts does. `append-block` is top-level only.
+  depth. `append-block` is top-level only.
 
   `move-block` is **top-level only** (the paper editor reorders the top-level
   block list; nested-within-section reorder is not in scope). It is a pure
@@ -45,19 +45,18 @@ defmodule Barkpark.PortableDoc.Patch do
   it never duplicates content. `"after"` names the block the moved block should
   land directly after; `null` (or absent) moves it to the head. Moving a block
   after itself, or after the block it already follows, is an idempotent no-op.
-  Note: `move-block` is a Barkpark-local extension and is **not** part of the
-  shared TS portable-doc contract — the TS `applyDocPatch()` does not know it.
+  Note: `move-block` is a Barkpark-local extension layered on top of the core
+  five ops.
 
   An op MAY also carry an optional `"ifRev"` / `"expectedVersion"` concurrency
-  guard. The canonical patch.ts single-op core does not evaluate these (rev
-  comparison is a batch/runtime concern that builds on top), so this module
-  mirrors that and ignores them — they pass through harmlessly.
+  guard. The single-op core does not evaluate these (rev comparison is a
+  batch/runtime concern that builds on top), so this module ignores them — they
+  pass through harmlessly.
 
   ## Errors
 
   Mutating ops validate before they mutate and surface failures as tagged
-  tuples mirroring patch.ts's `DocPatchError`, consistent with the
-  error-return style elsewhere in this namespace:
+  tuples, consistent with the error-return style elsewhere in this namespace:
 
       {:error, {:block_not_found, target, op}}
       {:error, {:type_mismatch, target, op}}
@@ -154,8 +153,8 @@ defmodule Barkpark.PortableDoc.Patch do
        when is_map(patch) do
     # Track a type mismatch out-of-band: transform_at_id can only signal
     # found / not-found, so the merge fn records the conflict and leaves the
-    # target untouched, and we inspect the flag after the walk — mirroring the
-    # `typeMismatch` closure variable in patch.ts.
+    # target untouched, and we inspect the flag after the walk — a captured
+    # `type_mismatch?` flag threaded out of the closure.
     {result, mismatch?} =
       transform_with_flag(blocks, id, fn target ->
         # `patch.type` present and differing from the target's type is a
@@ -255,8 +254,7 @@ defmodule Barkpark.PortableDoc.Patch do
 
   # ── id resolution & structural transform (recurses sections) ───────────────
 
-  # True when `id` names any block anywhere in `blocks` (recurses sections),
-  # mirroring patch.ts `idExists`.
+  # True when `id` names any block anywhere in `blocks` (recurses sections).
   defp id_exists?(blocks, id) do
     Enum.any?(blocks, fn block ->
       cond do
@@ -276,7 +274,7 @@ defmodule Barkpark.PortableDoc.Patch do
   # Returns `nil` (distinct from `[]`) when `id` was not found at this level or
   # below, so callers can tell "not found" from "found and removed". Untouched
   # subtrees keep their identity; only the branch containing the target is
-  # rebuilt. Mirrors patch.ts `transformAtId`.
+  # rebuilt.
   defp transform_at_id(blocks, id, fun) do
     transform_at_id(blocks, id, fun, [])
   end
@@ -339,7 +337,7 @@ defmodule Barkpark.PortableDoc.Patch do
   # Shallow / replace-by-key merge of `patch` over `target`, then re-pin `id`
   # and `type` so a patch can never mutate the block's identity or kind.
   # Map.merge replaces wholesale per key (arrays/objects are not deep-merged),
-  # matching the contract's shallow-merge rule and the JS spread in patch.ts.
+  # matching the op contract's shallow-merge rule.
   defp merge_block(target, patch) do
     target
     |> Map.merge(patch)
