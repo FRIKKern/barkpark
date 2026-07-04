@@ -300,14 +300,14 @@ export function createDocsBuilder<T = BarkparkDocument>(
 /**
  * Encode BuilderState as a Phoenix-compatible query string.
  *
- * Phoenix parser (api/lib/barkpark_web/controllers/query_controller.ex:178-191
- * + api/lib/barkpark/content.ex:113-158) expects nested-map encoding:
+ * Phoenix parser (normalize_filter_map/1 in query_controller.ex
+ * + Barkpark.Content list-query filters) expects nested-map encoding:
  *
  *   filter[<field>][<op>]=<value>      // specific op
  *   filter[<field>]=<value>            // shorthand: op defaults to 'eq'
  *
  * For `in`, the value is a comma-joined string; Phoenix splits it
- * (normalize_filter_op/1 in query_controller.ex:187-189).
+ * (normalize_filter_op/1 in query_controller.ex).
  *
  * NOTE: multiple filters on the same (field, op) collapse to the last-written
  * value because Phoenix decodes nested params into a map. Callers wanting

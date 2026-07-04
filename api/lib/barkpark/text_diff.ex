@@ -5,8 +5,8 @@ defmodule Barkpark.TextDiff do
   diff modal by computing hunks between two events' html_payloads.
 
   This module is the **rail-shaped wrapper** around the already-vendored
-  `Barkpark.Papers.TextDiff` (which is itself a faithful port of
-  the vendored `lib/text-diff.js`). The wrapper exists because:
+  `Barkpark.Papers.TextDiff` (which is itself a faithful port of the
+  classic JS line-diff algorithm). The wrapper exists because:
 
     * `Papers.TextDiff` lives under the *papers* namespace — the rail is a
       separate consumer at the Beads-task substrate level and shouldn't
