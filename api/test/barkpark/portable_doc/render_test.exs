@@ -272,6 +272,43 @@ defmodule Barkpark.PortableDoc.RenderTest do
       refute html =~ "border-left:4px solid"
     end
 
+    test "article callout tone → modifier class, unknown falls back to info (mirrors Util.tone_palette/1)" do
+      mk = fn tone, extra ->
+        Map.merge(
+          %{"id" => "t", "type" => "callout", "tone" => tone,
+            "content" => [%{"type" => "text", "value" => "x"}]},
+          extra
+        )
+      end
+
+      # Each known tone maps to its own modifier — the class IS the tone now,
+      # so a mis-mapped clause would silently paint the wrong tone tokens.
+      for tone <- ["success", "warning", "danger", "neutral", "info"] do
+        html = Render.render_blocks([mk.(tone, %{})], %{style: :article})
+        assert html =~ ~s(<div class="bp-callout bp-callout--#{tone}">),
+               "tone #{inspect(tone)} did not map to its own modifier class"
+      end
+
+      # Unknown (and absent) tones fall back to info, exactly like
+      # Util.tone_palette/1's catch-all — never an unstyled `bp-callout--`.
+      for tone <- ["sparkle", nil] do
+        html = Render.render_blocks([mk.(tone, %{})], %{style: :article})
+        assert html =~ ~s(<div class="bp-callout bp-callout--info">)
+      end
+
+      # The collapsible article form carries the same tone card classes plus
+      # the summary/body chrome hooks (all resolved by paper-surface.css).
+      html =
+        Render.render_blocks(
+          [mk.("warning", %{"collapsible" => true, "title" => "Heads up"})],
+          %{style: :article}
+        )
+
+      assert html =~ ~s(<details open class="bp-callout bp-callout--warning">)
+      assert html =~ ~s(<summary class="bp-callout__summary">Heads up</summary>)
+      assert html =~ ~s(<div class="bp-callout__body">)
+    end
+
     test "PdButton primary uses brand background" do
       node = %{
         "kind" => "PdButton",

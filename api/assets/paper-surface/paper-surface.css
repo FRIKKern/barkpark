@@ -248,10 +248,17 @@ html[data-theme="dark"] .bp-paper-body {
   font-family: var(--paper-font-mono); font-size: 0.88rem;
 }
 .bp-paper-surface .bp-sheet-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--paper-ink-soft); }
-/* Whole-string URL cell → accent anchor (the old hardcoded #2563eb was wrong in dark). */
-.bp-paper-surface .bp-sheet-link { color: var(--paper-accent); text-decoration: underline; }
+/* Whole-string URL cell → accent anchor (the old hardcoded #2563eb was wrong in dark).
+   `border-bottom: none` cancels the `.bp-paper-surface a` at-rest link border —
+   underline + border would read as a double underline (same reason
+   `.bp-button--primary` declares `border: none` below). */
+.bp-paper-surface .bp-sheet-link { color: var(--paper-accent); text-decoration: underline; border-bottom: none; }
 
-/* Internal-reference + chip frames. */
+/* Internal-reference + chip frames. The chip-shaped anchors (`.bp-tag`,
+   `.bp-blockref`) cancel the element `a` rule's accent-soft bottom border —
+   a chip/micro-ref must own its whole frame; the pre-Stage-2 design had no
+   underline affordance on them. `.bp-wikilink` deliberately KEEPS it: a
+   wikilink is a real link and shares the prose link's at-rest border. */
 .bp-paper-surface .bp-wikilink { color: var(--paper-accent); text-decoration: none; }
 .bp-paper-surface .bp-wikilink--unresolved { text-decoration: underline dotted; }
 .bp-paper-surface .bp-task-chip { white-space: nowrap; }
@@ -261,7 +268,7 @@ html[data-theme="dark"] .bp-paper-body {
 }
 .bp-paper-surface .bp-tag {
   color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
-  border-radius: 3px; font-size: 0.9em; text-decoration: none;
+  border-radius: 3px; font-size: 0.9em; text-decoration: none; border-bottom: none;
 }
 .bp-paper-surface .bp-embed {
   margin: 1em 0; padding: 0.25em 0 0.25em 1em; border-left: 3px solid var(--paper-accent);
@@ -270,7 +277,7 @@ html[data-theme="dark"] .bp-paper-body {
   padding: 0.5em 0.75em; border-left-color: var(--paper-bg-deep);
   color: var(--paper-ink-soft); font-style: italic;
 }
-.bp-paper-surface .bp-blockref { color: var(--paper-ink-soft); font-size: 0.9em; text-decoration: none; }
+.bp-paper-surface .bp-blockref { color: var(--paper-ink-soft); font-size: 0.9em; text-decoration: none; border-bottom: none; }
 
 /* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to
    the accent fill (no border, matching the pre-Stage-2 inline box exactly). */
