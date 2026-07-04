@@ -382,10 +382,12 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
   # name (default "Sheet1").
   defp package(sheet_data, opts \\ []) do
     name = Keyword.get(opts, :name, "Sheet1")
+    sheet_pr = Keyword.get(opts, :sheet_pr, "")
 
     sheet = """
     <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
     <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      #{sheet_pr}
       <sheetData>
         #{sheet_data}
       </sheetData>
@@ -653,6 +655,89 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
       # …and the RULE is gone (not exported as conditionalFormatting — CF-D2).
       refute Map.has_key?(hd(imported["tabs"]), "cond_formats")
     end
+  end
+
+  # ── tab color (QL-D7 — zip post-process round-trip) ─────────────────────────
+
+  describe "tab color" do
+    test "per-tab colors survive export → import (FF alpha stripped, lowercased)" do
+      content = %{
+        "tabs" => [
+          %{"name" => "Red", "color" => "#ff0000", "cells" => %{"A1" => %{"v" => 1}}},
+          %{"name" => "Green", "color" => "#00aa00", "cells" => %{"A1" => %{"v" => 2}}},
+          %{"name" => "Plain", "cells" => %{"A1" => %{"v" => 3}}}
+        ]
+      }
+
+      {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      assert Enum.map(imported["tabs"], &Map.get(&1, "color")) == ["#ff0000", "#00aa00", nil]
+      # the colored worksheet carries the ARGB tabColor; the plain one does not
+      assert sheet_n_xml(binary, 1) =~ ~s(<tabColor rgb="FFFF0000"/>)
+      assert sheet_n_xml(binary, 2) =~ ~s(<tabColor rgb="FF00AA00"/>)
+      refute sheet_n_xml(binary, 3) =~ "tabColor"
+    end
+
+    test "the tabColor rides inside <sheetPr>, before <pageSetUpPr> (schema order)" do
+      content = %{"tabs" => [%{"name" => "R", "color" => "#1a2b3c", "cells" => %{"A1" => %{"v" => 1}}}]}
+      {:ok, binary} = XlsxExport.to_binary(content)
+      xml = sheet_n_xml(binary, 1)
+
+      assert xml =~ ~r{<sheetPr[^>]*><tabColor rgb="FF1A2B3C"/>}
+      # tabColor must precede pageSetUpPr for a schema-valid sheetPr
+      [_, before_page] = Regex.run(~r/(.*)<pageSetUpPr/s, xml)
+      assert before_page =~ "tabColor"
+    end
+
+    test "a color-less doc exports with no <tabColor> and is byte-identical across exports" do
+      content = %{
+        "tabs" => [
+          %{"name" => "A", "cells" => %{"A1" => %{"v" => 1}}},
+          %{"name" => "B", "cells" => %{"A1" => %{"v" => 2}}}
+        ]
+      }
+
+      {:ok, bin1} = XlsxExport.to_binary(content)
+      {:ok, bin2} = XlsxExport.to_binary(content)
+
+      refute sheet_n_xml(bin1, 1) =~ "tabColor"
+      # no-color path skips the whole post-process → still deterministic bytes
+      assert bin1 == bin2
+    end
+
+    test "a themed/indexed tabColor (no rgb) is ignored on import, never crashes" do
+      content =
+        package(
+          ~s(<row r="1"><c r="A1" t="n"><v>1</v></c></row>),
+          name: "Themed",
+          sheet_pr: ~s(<sheetPr><tabColor theme="4" tint="0.4"/></sheetPr>)
+        )
+        |> import!()
+
+      refute Map.has_key?(hd(content["tabs"]), "color")
+      assert cell(content, 0, "A1") == %{"v" => 1}
+    end
+
+    test "an explicit-rgb tabColor from an Excel-authored sheet imports to #rrggbb" do
+      content =
+        package(
+          ~s(<row r="1"><c r="A1" t="n"><v>1</v></c></row>),
+          name: "Colored",
+          sheet_pr: ~s(<sheetPr filterMode="false"><tabColor rgb="FF3366CC"/></sheetPr>)
+        )
+        |> import!()
+
+      assert hd(content["tabs"])["color"] == "#3366cc"
+    end
+  end
+
+  # Raw XML of the Nth worksheet (1-based) out of an exported package.
+  defp sheet_n_xml(binary, n) do
+    {:ok, entries} = :zip.extract(binary, [:memory])
+    target = ~c"xl/worksheets/sheet#{n}.xml"
+    {_name, xml} = Enum.find(entries, fn {name, _} -> name == target end)
+    to_string(xml)
   end
 
   # ── tab-name locks (sanitize + case-insensitive dedupe on export) ───────────

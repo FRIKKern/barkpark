@@ -29,6 +29,8 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       emitted as `<row ht customHeight="1">`; a height set past the last
       occupied cell extends the sheet's row extent so elixlsx still emits it
     * tab `"merges"` → `<mergeCells>`
+    * tab `"color"` (`#rrggbb`) → `<sheetPr><tabColor rgb="FFRRGGBB"/>` via a
+      zip post-process (elixlsx has no tab-color knob — see `apply_tab_colors/2`)
     * cell `"s"` → bold / italic / solid bg fill / horizontal alignment,
       composed with the tab's `"cond_formats"` (CF-D) — a conditional-format
       rule matching a cell has its computed style BAKED into the exported cell
@@ -108,11 +110,94 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
       end
 
     case Elixlsx.write_to_memory(%Workbook{sheets: sheets, datetime: @export_timestamp}, filename) do
-      {:ok, {_name, binary}} -> {:ok, patch_zip_mtimes(binary)}
+      {:ok, {_name, binary}} -> {:ok, binary |> apply_tab_colors(tabs) |> patch_zip_mtimes()}
       {:error, reason} -> {:error, "xlsx encode failed: #{inspect(reason)}"}
     end
   rescue
     e -> {:error, "xlsx encode failed: #{Exception.message(e)}"}
+  end
+
+  # ── tab colors (QL-D7) ──────────────────────────────────────────────────────
+  #
+  # elixlsx has no tab-color knob and emits a static `<sheetPr filterMode="false">`
+  # per worksheet, so a per-tab `"color"` (lowercase `#rrggbb`) is stamped by
+  # post-processing the finished zip: for each colored tab, patch its
+  # `xl/worksheets/sheet<N>.xml` (N = 1-based tab position, elixlsx names sheets
+  # in tab order) to carry a `<tabColor rgb="FFRRGGBB"/>` as the first child of
+  # `<sheetPr>` (ARGB = `FF` + uppercase of the `#rrggbb` hex).
+  #
+  # A no-color document takes the current path BYTE-IDENTICALLY — the whole
+  # unzip/patch/rezip is skipped, and `patch_zip_mtimes` (which runs after) sees
+  # exactly the bytes it did before. The rezip is a pure function of content
+  # (no wall-clock), so `patch_zip_mtimes` still normalizes the fresh DOS times
+  # and colored exports stay deterministic too. Fail-open on any structural
+  # surprise: the unpatched binary is returned rather than break an export.
+  defp apply_tab_colors(binary, tabs) do
+    colored =
+      tabs
+      |> Enum.with_index(1)
+      |> Enum.flat_map(fn {tab, n} ->
+        case tab_color(tab) do
+          nil -> []
+          color -> [{n, to_argb(color)}]
+        end
+      end)
+      |> Map.new()
+
+    if colored == %{}, do: binary, else: rezip_with_colors(binary, colored)
+  end
+
+  defp tab_color(tab) when is_map(tab) do
+    case Map.get(tab, "color") do
+      c when is_binary(c) -> if Regex.match?(@hex_color, c), do: c, else: nil
+      _ -> nil
+    end
+  end
+
+  defp tab_color(_), do: nil
+
+  # `#rrggbb` (lowercase in storage) → ARGB `FFRRGGBB` (uppercase) — the xlsx
+  # tabColor wants a fully-opaque ARGB. Validated by `tab_color/1` upstream.
+  defp to_argb("#" <> hex), do: "FF" <> String.upcase(hex)
+
+  defp rezip_with_colors(binary, colored) do
+    with {:ok, entries} <- :zip.extract(binary, [:memory]) do
+      patched =
+        Enum.map(entries, fn {name, content} ->
+          case worksheet_index(name) do
+            n when is_map_key(colored, n) ->
+              {name, insert_tab_color(to_string(content), Map.fetch!(colored, n))}
+
+            _ ->
+              {name, content}
+          end
+        end)
+
+      case :zip.create(~c"sheet.xlsx", patched, [:memory]) do
+        {:ok, {_name, out}} -> out
+        _ -> binary
+      end
+    else
+      _ -> binary
+    end
+  rescue
+    _ -> binary
+  end
+
+  # `xl/worksheets/sheet<N>.xml` → N (1-based); any other member → nil.
+  defp worksheet_index(name) do
+    case Regex.run(~r{^xl/worksheets/sheet(\d+)\.xml$}, to_string(name)) do
+      [_, n] -> String.to_integer(n)
+      _ -> nil
+    end
+  end
+
+  # Insert `<tabColor rgb="…"/>` as the FIRST child of the worksheet's existing
+  # `<sheetPr …>` (schema order: tabColor precedes pageSetUpPr). elixlsx always
+  # emits the open-tag form, so a self-closing `<sheetPr/>` never occurs here;
+  # if the tag is somehow absent the xml is returned unchanged (fail-open).
+  defp insert_tab_color(xml, argb) do
+    String.replace(xml, ~r/(<sheetPr\b[^>]*>)/, "\\1<tabColor rgb=\"#{argb}\"/>", global: false)
   end
 
   # ── deterministic ZIP mod-times (QR-C) ──────────────────────────────────────

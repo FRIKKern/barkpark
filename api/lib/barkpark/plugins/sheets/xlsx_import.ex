@@ -45,6 +45,9 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       (normalized to lowercase `#rrggbb`) / horizontal alignment
       (left|center|right)
     * frozen panes → `"frozen_rows"` / `"frozen_cols"`
+    * tab color → tab `"color"`: a `<sheetPr><tabColor rgb="AARRGGBB"/>` maps to
+      lowercase `#rrggbb` (the `FF` alpha dropped); only an explicit `rgb=`
+      round-trips — a theme/indexed tabColor is ignored (the v1 cap)
 
   ## Dropped on import (documented, never an error)
 
@@ -185,6 +188,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
           )
           |> put_frozen("frozen_rows", Map.get(sheet_layout, :frozen_rows, 0))
           |> put_frozen("frozen_cols", Map.get(sheet_layout, :frozen_cols, 0))
+          |> put_color(Map.get(sheet_layout, :tab_color))
 
         {:ok, tab, count}
     end
@@ -237,6 +241,11 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
 
   defp put_frozen(map, key, n) when is_integer(n) and n > 0, do: Map.put(map, key, n)
   defp put_frozen(map, _key, _n), do: map
+
+  # The tab's `<sheetPr><tabColor>` color, already normalized to `#rrggbb` by
+  # `parse_tab_color/1` (or nil when absent / theme-indexed).
+  defp put_color(map, color) when is_binary(color), do: Map.put(map, "color", color)
+  defp put_color(map, _color), do: map
 
   # A ref beyond the Excel grid bounds drops like any other unrepresentable
   # feature (see the moduledoc) — `if` without `else` yields nil, the same
@@ -632,8 +641,25 @@ defmodule Barkpark.Plugins.Sheets.XlsxImport do
       row_heights: row_heights,
       merges: merges,
       frozen_rows: frozen_rows,
-      frozen_cols: frozen_cols
+      frozen_cols: frozen_cols,
+      tab_color: parse_tab_color(root)
     }
+  end
+
+  # `<sheetPr><tabColor rgb="AARRGGBB"/>` → `#rrggbb` (drop the alpha, lowercase),
+  # mirroring `fill_bg/1`. Only an explicit `rgb=` round-trips — a theme/indexed
+  # tabColor (no `rgb=`) yields nil and is dropped (the v1 cap, documented). A
+  # non-hex last-6 is rejected so import never emits a color the gate would fail.
+  defp parse_tab_color(root) do
+    with sheet_pr when sheet_pr != nil <- child_named(root, "sheetPr"),
+         tab_color when tab_color != nil <- child_named(sheet_pr, "tabColor"),
+         rgb when is_binary(rgb) and byte_size(rgb) >= 6 <- attr(tab_color, "rgb"),
+         hex = rgb |> String.slice(-6, 6) |> String.downcase(),
+         true <- hex =~ ~r/^[0-9a-f]{6}$/ do
+      "#" <> hex
+    else
+      _ -> nil
+    end
   end
 
   # Joined text of an `<f>` element's character children (a shared master

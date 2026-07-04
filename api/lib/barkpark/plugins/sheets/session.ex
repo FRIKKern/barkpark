@@ -547,10 +547,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # plus the settled state, so the caller can ring-cache the reply before
   # replying to the client.
   defp do_apply_ops(ops, state) do
-    {state, applied, errors} =
+    {state, applied, errors, undo_pairs} =
       ops
       |> Enum.with_index()
-      |> Enum.reduce({state, 0, []}, fn {op, index}, {st, n, errs} ->
+      |> Enum.reduce({state, 0, [], []}, fn {op, index}, {st, n, errs, pairs} ->
         # Coalesced recompute: cell ops defer their per-op recompute+broadcast
         # to a single per-tab flush; any other op (structural, undo/redo) first
         # settles the pending cell edits so it observes — and broadcasts from —
@@ -558,23 +558,30 @@ defmodule Barkpark.Plugins.Sheets.Session do
         st = if Ops.cell_op?(op), do: st, else: Ops.flush_pending(st)
 
         case Ops.apply_one(op, st) do
+          # Per-gesture undo (QL-D4): DON'T record per op here — accumulate the
+          # (op, inverse) pairs (in application order) and push ONE stack entry
+          # per user after the loop (`Ops.record_batch_undo/2`), so a >100-cell
+          # paste undoes as a single group step.
           {:ok, st, inverse} ->
-            {Ops.record_undo(st, op, inverse), n + 1, errs}
+            {st, n + 1, errs, [{op, inverse} | pairs]}
 
           {:error, code, message} ->
-            {st, n, [%{index: index, code: code, message: message} | errs]}
+            {st, n, [%{index: index, code: code, message: message} | errs], pairs}
 
           # A failed undo/redo consumes its dead entry (apply_history pops it
           # and returns the advanced state) but does NOT count as applied and
           # is NOT pushed to the opposite stack. Wire error shape is unchanged.
           {:error, code, message, st} ->
-            {st, n, [%{index: index, code: code, message: message} | errs]}
+            {st, n, [%{index: index, code: code, message: message} | errs], pairs}
         end
       end)
 
     # Settle any tabs the batch's trailing cell ops left dirty: recompute each
     # once and broadcast its coalesced delta BEFORE the persist sees the state.
     state = Ops.flush_pending(state)
+    # One undo entry per user for the whole batch (accumulated in application
+    # order — the reduce prepended, so reverse it back).
+    state = Ops.record_batch_undo(state, Enum.reverse(undo_pairs))
     state = if applied > 0, do: maybe_flush_or_debounce(state), else: state
     reply = %{rev: state.rev, epoch: state.epoch, applied: applied, errors: Enum.reverse(errors)}
     {reply, state}
@@ -624,7 +631,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # recompute, the delta broadcast, and the cached counters — lives in
   # `Barkpark.Plugins.Sheets.Session.Ops`. The GenServer keeps only the
   # callbacks, client API, persistence, and timers; `handle_call/3`
-  # dispatches each op through `Ops.apply_one/2` + `Ops.record_undo/3`.
+  # dispatches each op through `Ops.apply_one/2`, then records the batch's
+  # accumulated inverses as one per-user entry via `Ops.record_batch_undo/2`.
 
   # ── persistence ──────────────────────────────────────────────────────────
 

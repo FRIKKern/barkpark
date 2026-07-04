@@ -28,6 +28,8 @@ defmodule Barkpark.Plugins.Sheets do
       `id`/`range`/`when`/`style` keys, the `gt|lt|eq|between|contains` op
       whitelist with per-op value typing, a required `#rrggbb` `bg`,
       single-rule-per-normalized-range, and `cond_format_cap/0` rules per tab.
+      A present per-tab `color` (QL-D2) must be `#rrggbb` (case-insensitive);
+      absent is fine.
 
     * `register_routes/1` (M5 + M1 + M4) — the conversion API on the
       `:ingest` bucket (shared-secret bearer via `RequireIngestToken`, like
@@ -216,10 +218,35 @@ defmodule Barkpark.Plugins.Sheets do
         _ -> ["tab #{idx}: cond_formats must be a list"]
       end
 
-    cells_errors ++ merges_errors ++ cond_formats_errors
+    color_errors =
+      case Map.get(tab, "color") do
+        nil -> []
+        color when is_binary(color) -> color_format_errors(color, idx)
+        other -> ["tab #{idx}: color must be a #rrggbb string, got #{inspect(other)}"]
+      end
+
+    cells_errors ++ merges_errors ++ cond_formats_errors ++ color_errors
   end
 
   defp tab_errors({_tab, idx}), do: ["tab #{idx}: tab must be a map"]
+
+  # A present tab `"color"` must be `#rrggbb` (case-insensitive) — the strict
+  # gate for QL-D2's per-tab color, beside cells/merges/cond_formats. Absent is
+  # fine (handled by the `nil` clause above); anything malformed halts the save
+  # (409), so a junk color can never reach storage via plain mutate (synthesis
+  # stays lenient and simply drops one that slipped in — the merges precedent).
+  # Routes through the canonical `#rrggbb` sanitizer (CondFormat.valid_bg?/1 —
+  # the sheets-bg-sanitizer capability) rather than a fourth copy of the regex,
+  # so the tab color is accepted on EXACTLY the bytes a cell/CF bg is: `\z`-
+  # anchored, so a stowaway trailing newline (`#ffffff\n`) is rejected here and
+  # can never reach the xlsx `<tabColor>` round-trip.
+  defp color_format_errors(color, idx) do
+    if CondFormat.valid_bg?(color) do
+      []
+    else
+      ["tab #{idx}: invalid color #{inspect(color)} (expected #rrggbb, e.g. #1a2b3c)"]
+    end
+  end
 
   defp cell_errors({addr, cell}, idx) do
     case SheetCore.parse_ref(addr) do

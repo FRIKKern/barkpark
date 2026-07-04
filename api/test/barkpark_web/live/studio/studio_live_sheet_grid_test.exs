@@ -588,6 +588,107 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     refute render(view) =~ ~s(data-test-id="sheet-cf-btn")
   end
 
+  # ── tab color (QL-D2) + data-f stamp (QL-D6) ───────────────────────────────
+
+  test "an editable formula cell carries data-f (the formula sans '='); a literal omits it",
+       %{conn: conn} do
+    create_sheet!("sg-dataf", one_tab(%{"B1" => %{"v" => "text"}}))
+    {view, target, _html} = open!(conn, "sg-dataf")
+
+    # Commit a real formula through the engine so `f` is stored as production
+    # stores it, then assert the td carries data-f (the rebase source) beside
+    # data-v (the computed value) — the two the client clipboard reads.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "=1+2", "move" => "none"})
+
+    html = render(view)
+    [a1_td] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, html)
+    assert a1_td =~ ~s(data-f="1+2")
+    assert a1_td =~ ~s(data-v="3")
+
+    # A literal cell gets no data-f (nil omits the attribute).
+    [b1_td] = Regex.run(~r/<td[^>]*data-ref="B1"[^>]*>/, html)
+    refute b1_td =~ "data-f="
+  end
+
+  test "View mode stamps no data-f (readers stay formula-free, like data-fns)",
+       %{conn: conn} do
+    create_sheet!("sg-dataf-view", one_tab(%{}))
+    {view, target, _html} = open!(conn, "sg-dataf-view")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "=2*3", "move" => "none"})
+    assert render(view) =~ ~s(data-f="2*3")
+
+    # Flip to View mode: `@editable && Cells.formula(cell)` collapses to false,
+    # so no td stamps data-f (mirrors data-fns / data-t gating).
+    html = render_hook(target, "toggle-mode", %{})
+    refute html =~ "data-f="
+  end
+
+  test "a tab carrying a color renders its swatch dot on every host; the picker is editable-only",
+       %{conn: conn} do
+    create_sheet!("sg-tabcolor", [
+      %{"name" => "Red", "color" => "#ef4444", "cells" => %{"A1" => %{"v" => 1}}}
+    ])
+
+    {view, target, html} = open!(conn, "sg-tabcolor")
+
+    # The swatch dot paints the stored color…
+    assert html =~ ~s(data-test-id="sheet-tab-swatch-0")
+    assert html =~ "background: #ef4444"
+    # …and the picker affordance is present in the editable host.
+    assert html =~ ~s(data-test-id="sheet-tab-color-btn")
+
+    # In View mode the swatch persists (readers see the color) but the picker
+    # is gone — the same @editable gate as rename/move.
+    html2 = render_hook(target, "toggle-mode", %{})
+    assert html2 =~ ~s(data-test-id="sheet-tab-swatch-0")
+    assert html2 =~ "background: #ef4444"
+    refute html2 =~ ~s(data-test-id="sheet-tab-color-btn")
+    refute render(view) =~ ~s(data-test-id="sheet-tab-color-picker")
+  end
+
+  test "the tab-color picker toggles open, exposes preset swatches + a clear, and closes on pick",
+       %{conn: conn} do
+    create_sheet!("sg-tabcolor-picker", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, html} = open!(conn, "sg-tabcolor-picker")
+
+    # Closed by default — the toggle shows but the swatch strip does not.
+    assert html =~ ~s(data-test-id="sheet-tab-color-btn")
+    refute html =~ ~s(data-test-id="sheet-tab-color-picker")
+
+    # Open it: the preset strip + a clear affordance appear, each swatch wired
+    # to tab-set-color with its own #rrggbb.
+    html = render_click(target, "tab-color-open", %{})
+    assert html =~ ~s(data-test-id="sheet-tab-color-picker")
+    assert html =~ ~s(data-test-id="sheet-tab-color-3b82f6")
+    assert html =~ ~s(data-test-id="sheet-tab-color-clear")
+    assert html =~ ~s(phx-click="tab-set-color")
+    assert html =~ ~s(phx-value-color="#3b82f6")
+
+    # Firing a pick sends the set_tab_color op — S-SESSION applies it on the
+    # integrated tree; on this base branch the op is unknown and rejected
+    # gracefully (no raise) — and the picker CLOSES either way.
+    html2 = view |> element(~s([data-test-id="sheet-tab-color-3b82f6"])) |> render_click()
+    refute html2 =~ ~s(data-test-id="sheet-tab-color-picker")
+  end
+
+  test "read-only sheets show the swatch dot but never the picker toggle",
+       %{conn: conn} do
+    create_sheet!("sg-tabcolor-ro", [
+      %{"name" => "Blue", "color" => "#3b82f6", "cells" => %{"A1" => %{"v" => 1}}}
+    ])
+
+    {view, target, _html} = open!(conn, "sg-tabcolor-ro")
+    # Flip to the non-editable host (mirrors the /sheets reader's read_only).
+    html = render_hook(target, "toggle-mode", %{})
+
+    assert html =~ ~s(data-test-id="sheet-tab-swatch-0")
+    refute html =~ ~s(data-test-id="sheet-tab-color-btn")
+    refute render(view) =~ ~s(data-test-id="sheet-tab-color-clear")
+  end
+
   test "engine error values render with the error styling", %{conn: conn} do
     create_sheet!("sg-err", one_tab(%{}))
     {view, target, _html} = open!(conn, "sg-err")
