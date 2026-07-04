@@ -4349,6 +4349,58 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
       assert tab_cells(out, "Sheet1")["B1"]["t"] == "e"
     end
+
+    # ── hardening locks (behaviour X2/X3 must preserve) ──────────────────────
+
+    test "a same-tab range and a cross-tab ref coexist in one formula" do
+      # Exercises the ctx.tab rebasing: SUM(A1:A2) must read the FORMULA's own
+      # tab (localize_range is a no-op, ctx.tab stays), while Sheet2!A1 reaches
+      # the named tab — both inside one eval on the unified path.
+      out =
+        run_tabs([
+          {"Sheet1",
+           %{
+             "A1" => %{"v" => 1, "t" => "n"},
+             "A2" => %{"v" => 2, "t" => "n"},
+             "B1" => %{"f" => "SUM(A1:A2)+Sheet2!A1"}
+           }},
+          {"Sheet2", %{"A1" => %{"v" => 10, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 13
+    end
+
+    test "an error in the referenced cell propagates across the tab boundary" do
+      # The dependent must evaluate AFTER the erroring precedent (unified topo
+      # order) and pass the error code through unchanged.
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"f" => "1/0"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["B1"]) == %{"v" => "#DIV/0!", "t" => "e"}
+    end
+
+    test "a cross-tab ref preserves the source cell's type (text)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!A1"}}},
+          {"Sheet2", %{"A1" => %{"v" => "hello", "t" => "s"}}}
+        ])
+
+      assert vt(tab_cells(out, "Sheet1")["B1"]) == %{"v" => "hello", "t" => "s"}
+    end
+
+    test "a cross-tab ref to a blank cell reads as an empty (zero in arithmetic)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"B1" => %{"f" => "Sheet2!Z9+5"}}},
+          {"Sheet2", %{"A1" => %{"v" => 1, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["B1"]["v"] == 5
+    end
   end
 
   describe "cross-tab routing discriminator (CT-D4)" do
