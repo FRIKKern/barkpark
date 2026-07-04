@@ -204,7 +204,7 @@ defmodule Barkpark.Plugins.Tickets do
   @doc """
   The COMPLETE charter route table (Pinned contracts).
 
-  Three HTTP buckets + one Studio LiveView. Referenced modules that this
+  Four HTTP buckets + one Studio LiveView. Referenced modules that this
   worktree does NOT build — `BarkparkWeb.TicketKeysController` (mint, `:api`
   bucket), `BarkparkWeb.TicketsAttachmentsController` (`:ticket_key` bucket),
   `Barkpark.Plugins.Tickets.InboxLive` (`:admin` bucket) — are safe as atoms
@@ -212,6 +212,12 @@ defmodule Barkpark.Plugins.Tickets do
   `:ticket_key` auth value: until the auth slice adds that bucket to the host
   router, `route_in_scope?` silently drops those specs, so declaring them here
   is harmless and lets the table merge in one place.
+
+  The operator ATTACHMENT-DOWNLOAD GET rides a fourth bucket,
+  `:session_token_root` (charter Decision 12): the Studio inbox renders it as a
+  plain `<a href>` navigation, which carries only the browser session cookie (no
+  Bearer), so it authenticates via `OptionalSessionToken` instead of the
+  Bearer-only `:token_root`. Every operator WRITE stays on `:token_root`.
 
   STATIC-BEFORE-CATCHALL (tasks.ex:141 idiom): within each bucket the static
   paths (`/tickets/inbox`, `/tickets/keys`) are declared BEFORE the
@@ -238,8 +244,15 @@ defmodule Barkpark.Plugins.Tickets do
       {:get, "/tickets/inbox", BarkparkWeb.TicketsController, :inbox, auth: :token_root},
       {:get, "/tickets/inbox/:id", BarkparkWeb.TicketsController, :show_operator,
        auth: :token_root},
+      # Attachment DOWNLOAD rides the cookie-aware :session_token_root bucket
+      # (charter Decision 12): the Studio inbox renders this as a plain <a href>,
+      # and a browser operator session carries only the cookie (no Bearer), so a
+      # Bearer-only :token_root route 401'd every click. OptionalSessionToken
+      # resolves the cookie OR a Bearer (API clients unchanged), and the
+      # controller's require_operator/1 still 401s an anonymous caller. GET-only:
+      # the write routes below stay on :token_root (no CSRF header on navigation).
       {:get, "/tickets/inbox/:id/attachments/:asset_id", BarkparkWeb.TicketsAttachmentsController,
-       :show_operator, auth: :token_root},
+       :show_operator, auth: :session_token_root},
       {:post, "/tickets/:id/answer", BarkparkWeb.TicketsController, :answer, auth: :token_root},
       {:post, "/tickets/:id/close", BarkparkWeb.TicketsController, :close, auth: :token_root},
 
