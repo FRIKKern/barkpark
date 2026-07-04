@@ -214,6 +214,22 @@
     if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
   }
 
+  // Pure: given the focusables of the open dialog (DOM order), the currently
+  // active element, and the Tab direction, which element must receive focus to
+  // keep the trap closed? null = focus may move naturally (mid-list). An
+  // active element that is not in the list (focus escaped, or sits on a
+  // non-tabbable node) snaps back to the first focusable. Empty list → null
+  // (the caller pins focus by preventDefault'ing with nowhere to send it).
+  function trapTarget(f, active, shiftKey) {
+    f = f || [];
+    if (f.length === 0) return null;
+    var first = f[0], last = f[f.length - 1];
+    if (f.indexOf(active) === -1) return first;
+    if (shiftKey && active === first) return last;
+    if (!shiftKey && active === last) return first;
+    return null;
+  }
+
   // Keep Tab inside the open dialog. Trapping the whole `.modal-card` includes
   // the close (×) button, so focus can never fall back onto the inert shell.
   function trapModalTab(e) {
@@ -222,11 +238,8 @@
     if (!card) return;
     var f = focusablesIn(card);
     if (f.length === 0) { e.preventDefault(); return; } // zero-focusable modal: pin, don't crash
-    var first = f[0], last = f[f.length - 1];
-    var active = document.activeElement;
-    if (!card.contains(active)) { e.preventDefault(); first.focus(); return; }
-    if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    var target = trapTarget(f, document.activeElement, e.shiftKey);
+    if (target) { e.preventDefault(); target.focus(); }
   }
 
   function wireModal() {
@@ -239,6 +252,189 @@
       if (root.hidden) return;
       if (e.key === "Escape") { closeModal(); return; }
       trapModalTab(e);
+    });
+  }
+
+  // =========================================================== CONFIRM MODAL
+  // The ONE confirm grammar for every risky action, both tiers (charter
+  // decision 5 — the SPA twin of the CLI's hzConfirmDestroy):
+  //   mutate  — title + ONE honest consequence sentence + Confirm/Cancel.
+  //   destroy — consequence LIST + a typed-resource-name input; Confirm stays
+  //             disabled until the typed echo matches exactly. (Built now,
+  //             consumed by the destroy sweeps of later waves.)
+  // The state machine is PURE (exported via __bpTestHook); openConfirmModal()
+  // is the thin DOM wrapper on the openModal primitive, which already owns the
+  // focus trap, Escape-to-dismiss, and restore-focus-on-close.
+  //
+  // Failure contract (decision 25): a failed confirm never dies into a toast —
+  // the modal renders the human sentence inline and the primary button MORPHS
+  // into exactly one recovery action (retry, or refresh-and-close).
+
+  // opts: { tier: "mutate"|"destroy", title, consequence | consequences[],
+  //         resourceName (destroy), confirmLabel }. Total over junk.
+  function confirmModalInit(opts) {
+    opts = opts || {};
+    var tier = opts.tier === "destroy" ? "destroy" : "mutate";
+    var consequences = [];
+    if (Array.isArray(opts.consequences)) {
+      consequences = opts.consequences.map(function (c) { return String(c); });
+    } else if (opts.consequence != null) {
+      consequences = [String(opts.consequence)];
+    }
+    return {
+      tier: tier,
+      title: String(opts.title || "Are you sure?"),
+      consequences: consequences,
+      resourceName: tier === "destroy" ? String(opts.resourceName || "") : null,
+      confirmLabel: String(opts.confirmLabel || "Confirm"),
+      typed: "",
+      phase: "open", // open | busy | error | done | closed
+      error: null,
+    };
+  }
+
+  // Typed-echo gate: mutate is always armed; destroy requires the typed text to
+  // equal the resource name EXACTLY (no trim, no case-folding — the echo is the
+  // proof of attention, same contract as the CLI's typed-name prompt).
+  function confirmModalTypedMatch(state) {
+    if (!state) return false;
+    if (state.tier !== "destroy") return true;
+    return !!state.resourceName && state.typed === state.resourceName;
+  }
+
+  // May the Confirm action fire right now? (error phase stays armed so a
+  // recovery retry can re-enter busy without re-typing the echo.)
+  function confirmModalArmed(state) {
+    return !!state && (state.phase === "open" || state.phase === "error") &&
+      confirmModalTypedMatch(state);
+  }
+
+  // Pure reducer. Events: {type:"type",value} {type:"confirm"} {type:"fail",
+  // message} {type:"succeed"} {type:"dismiss"}. Unknown events / illegal
+  // transitions return the state unchanged — total, never throws.
+  function confirmModalReduce(state, ev) {
+    if (!state || !ev) return state;
+    var next = Object.assign({}, state);
+    if (ev.type === "type") {
+      if (state.phase !== "open" && state.phase !== "error") return state;
+      next.typed = String(ev.value == null ? "" : ev.value);
+      return next;
+    }
+    if (ev.type === "confirm") {
+      if (!confirmModalArmed(state)) return state;
+      next.phase = "busy";
+      next.error = null;
+      return next;
+    }
+    if (ev.type === "fail") {
+      if (state.phase !== "busy") return state;
+      next.phase = "error";
+      next.error = String(ev.message || "That didn't work.");
+      return next;
+    }
+    if (ev.type === "succeed") {
+      if (state.phase !== "busy") return state;
+      next.phase = "done";
+      return next;
+    }
+    if (ev.type === "dismiss") {
+      next.phase = "closed";
+      return next;
+    }
+    return state;
+  }
+
+  // Pure render of the modal body for an initial state. The destroy tier's
+  // Confirm ships disabled (armed only by the typed echo); mutate ships live.
+  function confirmModalHtml(state) {
+    var h = '<h2 class="modal-title" id="modal-title">' + esc(state.title) + "</h2>";
+    if (state.tier === "destroy") {
+      h += '<ul class="cm-consequences">' +
+        state.consequences.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
+        "</ul>" +
+        '<div class="field cm-typed-field">' +
+          '<label class="label" for="cm-typed">Type <span class="cm-name">' + esc(state.resourceName) + "</span> to confirm</label>" +
+          '<input class="form-input" id="cm-typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />' +
+        "</div>";
+    } else if (state.consequences.length) {
+      h += '<p class="modal-sub cm-consequence">' + esc(state.consequences[0]) + "</p>";
+    }
+    h += '<div class="cm-error" id="cm-error" role="alert" hidden>' +
+      '<p class="cm-error-msg" id="cm-error-msg"></p></div>';
+    h += '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+      (state.tier === "destroy"
+        ? '<button class="btn btn-danger" type="button" id="cm-confirm" disabled>' + esc(state.confirmLabel) + "</button>"
+        : '<button class="btn btn-primary" type="button" id="cm-confirm">' + esc(state.confirmLabel) + "</button>") +
+      "</div>";
+    return h;
+  }
+
+  // DOM wrapper. opts additionally takes busyLabel and onConfirm(ctl); ctl is
+  //   ctl.busy(label?)                     — re-enter the working state (retry)
+  //   ctl.succeed()                        — close the modal, focus restored
+  //   ctl.fail(message, recoveryLabel, fn) — inline sentence + ONE recovery
+  // Escape / backdrop / Cancel dismissal stays available in every phase (a
+  // hung request must never imprison the operator); handlers guard on
+  // closeModal having cleared the body.
+  function openConfirmModal(opts) {
+    opts = opts || {};
+    var state = confirmModalInit(opts);
+    openModal(confirmModalHtml(state));
+    var confirmBtn = $("#cm-confirm");
+    if (!confirmBtn) return;
+    var typedInput = $("#cm-typed");
+    var errBox = $("#cm-error");
+    var errMsg = $("#cm-error-msg");
+    var mode = "confirm"; // what the primary button does: confirm | recover
+    var recover = null;
+
+    var ctl = {
+      busy: function (label) {
+        mode = "confirm";
+        recover = null;
+        state = confirmModalReduce(state, { type: "confirm" });
+        hide(errBox);
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = label || opts.busyLabel || "Working…";
+      },
+      succeed: function () {
+        state = confirmModalReduce(state, { type: "succeed" });
+        // The operator may have Escape/Cancel-dismissed while the request was
+        // in flight — and might have opened a DIFFERENT modal since. Only close
+        // when OUR button is still mounted, so a stale settle can never shut an
+        // unrelated dialog.
+        if (confirmBtn.isConnected !== false) closeModal();
+      },
+      fail: function (message, recoveryLabel, onRecover) {
+        state = confirmModalReduce(state, { type: "fail", message: message });
+        if (confirmBtn.isConnected === false) return; // dismissed mid-flight: nothing to morph
+        mode = "recover";
+        recover = onRecover || null;
+        if (errMsg) setText(errMsg, state.error || String(message || ""));
+        show(errBox);
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = recoveryLabel || "Try again";
+        confirmBtn.focus();
+      },
+    };
+
+    if (typedInput) {
+      typedInput.addEventListener("input", function () {
+        state = confirmModalReduce(state, { type: "type", value: typedInput.value });
+        if (mode === "confirm") confirmBtn.disabled = !confirmModalArmed(state);
+      });
+    }
+
+    confirmBtn.addEventListener("click", function () {
+      if (mode === "recover") {
+        var r = recover;
+        recover = null;
+        if (r) r(ctl);
+        return;
+      }
+      if (!confirmModalArmed(state)) return;
+      ctl.busy();
+      if (typeof opts.onConfirm === "function") opts.onConfirm(ctl);
     });
   }
 
@@ -1074,8 +1270,10 @@
   var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "activity"];
   var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens"];
 
-  // Routes are either a tab (#overview …) or a drill-down (#instance/<id>, #site/<id>).
-  var DETAIL_VIEWS = ["instance", "site"];
+  // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
+  // #site/<id>), or the invitation-accept landing (#invitations/accept —
+  // grouped here because, like a drill-down, it is not a nav tab).
+  var DETAIL_VIEWS = ["instance", "site", "invite"];
 
   // C6 (charter D49): the instance drill-down is a sub-tabbed workspace, routed
   // as #instance/<id>/<tab>. A tab REGISTERS here only when its backend is live —
@@ -1101,6 +1299,11 @@
   function legacyRoute(hash) {
     var h = String(hash == null ? "" : hash).replace(/^#/, "");
     if (h === "") return "overview";
+    // The server mints invitation accept links as `/#/invitations/accept?token=…`
+    // (router.ex accept_url/2 — leading slash, token in the fragment's query).
+    // Normalize that minted shape to the canonical slash-less hash body so the
+    // SPA routes EXACTLY what the server hands out, forever.
+    if (h.indexOf("/invitations/accept") === 0) return h.slice(1);
     var MAP = {
       launch: "overview",
       billing: "settings/billing",
@@ -1129,8 +1332,28 @@
     return m[1] === "attention" || m[1] === "inflight" || m[1] === "healthy" ? m[1] : null;
   }
 
+  // Pure: the raw accept token from an invitation hash, or null. Tolerates the
+  // minted leading-slash shape AND the canonical one, extra query params, and a
+  // percent-encoded token (safeDecode never throws). Anything else → null.
+  function parseInviteToken(hash) {
+    var h = String(hash == null ? "" : hash).replace(/^#/, "").replace(/^\//, "");
+    var m = h.match(/^invitations\/accept(?:\?(.*))?$/);
+    if (!m || !m[1]) return null;
+    var parts = m[1].split("&");
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf("token=") === 0) {
+        var v = parts[i].slice(6);
+        return v ? safeDecode(v) : null;
+      }
+    }
+    return null;
+  }
+
   function parseHash() {
     var canon = legacyRoute((location.hash || "").replace(/^#/, ""));
+    if (/^invitations\/accept(\?|$)/.test(canon)) {
+      return { view: "invite", token: parseInviteToken(canon) };
+    }
     var mi = canon.match(/^instance\/(.+)$/);
     if (mi) {
       // The body after "instance/" is "<id>" or "<id>/<tab>". Instance ids are
@@ -1182,9 +1405,12 @@
     if (inst) inst.hidden = r.view !== "instance";
     var site = document.getElementById("view-site");
     if (site) site.hidden = r.view !== "site";
+    var invite = document.getElementById("view-invite");
+    if (invite) invite.hidden = r.view !== "invite";
 
     if (r.view === "instance") { loadInstance(r.id, r.tab); return; }
     if (r.view === "site") { loadSite(r.id); return; }
+    if (r.view === "invite") { setBreadcrumb(null); loadInvite(r.token); return; }
     setBreadcrumb(null);
     if (r.view === "overview") {
       loadOverview();
@@ -2655,6 +2881,7 @@
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       wireDeployConsoles(box);
+      wireDeployActions(box, site, deployments);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
     });
@@ -2695,7 +2922,7 @@
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
     var list = deployments.length
-      ? deployments.map(deployRow).join("")
+      ? deployments.map(function (d) { return deployRow(d, site.current_deployment_id); }).join("")
       : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
     var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
@@ -2831,20 +3058,182 @@
     return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
   }
 
-  function deployRow(d) {
+  // ------------------------------------------- rollback / redeploy (D7 + D25)
+  // Both are ONE control-plane primitive: POST /v1/sites/:id/deployments/
+  // :dep_id/promote → 201 {deployment}. The server mints a FRESH queued
+  // production deployment pinned to the source row's already-built artifact —
+  // promote-by-new-deployment, never a pointer flip — so nothing here mutates
+  // a row in place and the current deployment stays in history.
+
+  // The URL the promote POST drives. Both ids ride through encodeURIComponent
+  // so a hostile/garbled id can never break out of its path segment.
+  function promotePath(siteId, depId) {
+    return "/v1/sites/" + encodeURIComponent(String(siteId)) +
+      "/deployments/" + encodeURIComponent(String(depId)) + "/promote";
+  }
+
+  // The short human handle for a deployment's build source, for confirm copy
+  // and toasts. Prefers the git sha (what the operator recognizes), then the
+  // image tag, then the row id.
+  function deployRefLabel(d) {
+    if (!d) return "";
+    if (d.git_ref) return shortSha(d.git_ref);
+    if (d.image_tag) return shortId(d.image_tag);
+    return shortId(d.id);
+  }
+
+  // Which promote action (if any) a production deployment row offers:
+  //   the CURRENT deployment (site.current_deployment_id) → Redeploy;
+  //   every PRIOR terminal-live deployment              → Roll back to this.
+  // Non-live rows (queued/building/pushing/failed) and branch previews offer
+  // nothing — there is no proven artifact to promote. Pure; null = no action.
+  function promoteActionFor(d, currentId) {
+    if (!d || d.environment === "preview") return null;
+    if ((d.status || "") !== "live") return null;
+    if (currentId != null && String(d.id) === String(currentId)) {
+      return { kind: "redeploy", label: "Redeploy" };
+    }
+    return { kind: "rollback", label: "Roll back to this" };
+  }
+
+  // The mutate-tier confirm copy — one honest consequence sentence per kind
+  // (decision 5). `ref` is the short source handle (esc'd by confirmModalHtml).
+  function promoteConfirmCopy(kind, ref) {
+    if (kind === "redeploy") {
+      return {
+        title: "Redeploy " + ref + "?",
+        consequence: "This creates a new production deployment from the same source (" + ref + "). " +
+          "The current deployment keeps serving until the new one is live.",
+        confirmLabel: "Redeploy",
+        busyLabel: "Redeploying…",
+      };
+    }
+    return {
+      title: "Roll back to " + ref + "?",
+      consequence: "This creates a new production deployment pinned to " + ref + ". " +
+        "The current deployment stays in history.",
+      confirmLabel: "Roll back",
+      busyLabel: "Rolling back…",
+    };
+  }
+
+  // Map a failed promote to a human sentence + which SINGLE recovery action the
+  // modal offers (decision 25 — never a dead end): "retry" re-runs the POST,
+  // "refresh" reloads the deployment list (the state moved under us). Pure.
+  function promoteFailure(status, data) {
+    var err = data && data.error;
+    if (status === 409) {
+      return {
+        message: "A build for this git ref is already in progress — it has to finish (or fail) first.",
+        recovery: "refresh",
+      };
+    }
+    if (status === 404) {
+      return { message: "That deployment isn't on this site any more — this list may be stale.", recovery: "refresh" };
+    }
+    if (status === 422 && err === "not_promotable") {
+      return { message: "Branch previews can't be promoted to production.", recovery: "refresh" };
+    }
+    if (status === 422 && err === "no_build_source") {
+      return {
+        message: "This deployment has no stored artifact and the site has no connected repo, so there's nothing to rebuild from.",
+        recovery: "refresh",
+      };
+    }
+    if (status === 0) {
+      return { message: "Couldn't reach the control plane — check your connection.", recovery: "retry" };
+    }
+    return { message: friendly(data, "The new deployment couldn't be created."), recovery: "retry" };
+  }
+
+  function confirmPromote(site, d, kind) {
+    var copy = promoteConfirmCopy(kind, deployRefLabel(d));
+    openConfirmModal({
+      tier: "mutate",
+      title: copy.title,
+      consequence: copy.consequence,
+      confirmLabel: copy.confirmLabel,
+      busyLabel: copy.busyLabel,
+      onConfirm: function (ctl) { runPromote(site, d, kind, ctl); },
+    });
+  }
+
+  function runPromote(site, d, kind, ctl) {
+    api("POST", promotePath(site.id, d.id), {}).then(function (r) {
+      if (r.status === 201) {
+        ctl.succeed();
+        toast({
+          kind: "success",
+          title: kind === "redeploy" ? "Redeploy started" : "Rollback started",
+          body: "A new production deployment pinned to " + deployRefLabel(d) + " is queued.",
+        });
+        // The live "deployments" SSE tick repaints too; refetch immediately so
+        // the queued row appears without waiting on the broadcast round-trip.
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        return;
+      }
+      var f = promoteFailure(r.status, r.data);
+      if (f.recovery === "retry") {
+        ctl.fail(f.message, "Try again", function (c) {
+          c.busy();
+          runPromote(site, d, kind, c);
+        });
+      } else {
+        ctl.fail(f.message, "Refresh deployments", function () {
+          closeModal();
+          if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        });
+      }
+    });
+  }
+
+  // Wire every promote button in a freshly rendered deployment list. Re-run
+  // after each site render (the list is rebuilt on every live SSE tick).
+  function wireDeployActions(scope, site, deployments) {
+    var byId = {};
+    (deployments || []).forEach(function (d) { byId[String(d.id)] = d; });
+    scope.querySelectorAll(".dep-promote").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var d = byId[btn.getAttribute("data-dep-id")];
+        if (d) confirmPromote(site, d, btn.getAttribute("data-kind"));
+      });
+    });
+  }
+
+  function deployRow(d, currentId) {
     var st = d.status || "queued";
+    // Headline ref: a full 40-char commit sha is noise, not information — show
+    // the 7-char short form (full sha on hover). Only hex-sha-shaped refs are
+    // shortened; anything else (a tag, a hand-set ref) renders verbatim.
+    var isSha = d.git_ref && /^[0-9a-f]{8,64}$/i.test(d.git_ref);
     var ref = d.image_tag ? '<span class="mono">' + esc(shortId(d.image_tag)) + "</span>"
-      : d.git_ref ? '<span class="mono">' + esc(d.git_ref) + "</span>"
+      : d.git_ref ? '<span class="mono"' + (isSha ? ' title="' + esc(d.git_ref) + '"' : "") + ">" +
+          esc(isSha ? shortSha(d.git_ref) : d.git_ref) + "</span>"
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
+    var isCurrent = currentId != null && String(d.id) === String(currentId);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
+    // Git meta the row already carries (D7): branch, sha (when the headline is
+    // an image tag), and WHEN — "live since" once the row went live.
+    var metaBits = [];
+    if (d.branch) metaBits.push(esc(d.branch));
+    if (d.git_ref && d.image_tag) metaBits.push('<span class="mono">' + esc(shortSha(d.git_ref)) + "</span>");
+    metaBits.push(esc((st === "live" && d.became_live_at ? "live since " : "") + fmtWhen(when)));
     var fail = (st === "failed" && d.failure_reason)
       ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var action = promoteActionFor(d, currentId);
+    var actionBtn = action
+      ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
+      : "";
+    var current = isCurrent
+      ? '<span class="dep-current" title="Production traffic is served from this deployment">Current</span>'
+      : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
-        '<div class="deploy-ref">' + ref + "</div>" +
-        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        '<div class="deploy-ref">' + ref + current + "</div>" +
+        '<div class="deploy-meta">' + metaBits.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
-      '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+      '<div class="dep-side">' + actionBtn +
+        '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
 
@@ -3020,6 +3409,254 @@
 
   function railRowHtml(k, htmlV) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + htmlV + "</span></div>"; }
   function shortId(s) { s = String(s || ""); return s.length > 12 ? s.slice(0, 12) : s; }
+
+  // =========================================================== INVITATION ACCEPT
+  // The landing for the accept links router.ex mints
+  // (`/#/invitations/accept?token=…`). Unauthed-capable: a logged-out landing
+  // PARKS the token in sessionStorage, scrubs it from the address bar, rides
+  // the normal login/signup (or OAuth) flow, and the first authed render()
+  // resumes the accept. Endpoints:
+  //   GET  /v1/invitations/:token  (unauthenticated preview; 404 for any
+  //                                 dead/garbage token — no enumeration signal)
+  //   POST /v1/invitations/accept  {token} → 200 {team_id} | 404 | 403 | 422
+  var INVITE_KEY = "bpcloud.invite";
+  function parkedInviteToken() {
+    try { return sessionStorage.getItem(INVITE_KEY); } catch (e) { return null; }
+  }
+  function parkInviteToken(t) {
+    try { sessionStorage.setItem(INVITE_KEY, t); } catch (e) {}
+  }
+  function clearParkedInvite() {
+    try { sessionStorage.removeItem(INVITE_KEY); } catch (e) {}
+  }
+
+  // Pure: what the landing shows BEFORE any accept POST.
+  //   preview 404 / absent        → "invalid"        (revoked / used / garbage)
+  //   preview past its expiry     → "expired"        (landed after the clock ran out)
+  //   already on the invited team → "already_member" (nothing to accept)
+  //   otherwise                   → "confirm"        (the Join screen)
+  function inviteLandingState(previewStatus, preview, me, nowMs) {
+    if (previewStatus === 404 || !preview || !preview.team) return "invalid";
+    if (preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
+    if (me && me.team && me.team.slug && preview.team.slug === me.team.slug) return "already_member";
+    return "confirm";
+  }
+
+  // Pure: the terminal state an accept POST result lands on. The server folds
+  // expired/revoked/used into one 404 (no enumeration signal), so "expired" is
+  // only claimable when OUR earlier preview carried an expires_at that has
+  // since passed — otherwise the honest answer is "invalid" (either/or copy).
+  function inviteTerminalFrom(status, data, preview, nowMs) {
+    if (status === 200) return "joined";
+    if (status === 403) return "wrong_account";
+    if (status === 404) {
+      if (preview && preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
+      return "invalid";
+    }
+    return "error"; // 422 accept_failed / 5xx / anything unexpected → retryable
+  }
+
+  // Pure per-state markup. Calm, second-person, zero jargon; every TERMINAL
+  // state carries exactly ONE next action (a [data-invite-act] button); the
+  // confirm screen additionally offers a quiet "Not now" escape (.invite-skip).
+  function inviteStateHtml(state, ctx) {
+    ctx = ctx || {};
+    var team = ctx.team ? String(ctx.team) : "this team";
+    var teamB = "<b>" + esc(team) + "</b>";
+    function card(ico, title, copyHtml, actionsHtml) {
+      return '<div class="invite-wrap"><div class="invite-card card">' + ico +
+        '<h1 class="invite-title">' + esc(title) + "</h1>" +
+        '<p class="invite-copy">' + copyHtml + "</p>" +
+        '<div class="invite-actions">' + actionsHtml + "</div>" +
+        "</div></div>";
+    }
+    function act(kind, label) {
+      return '<button type="button" class="btn btn-primary invite-action" data-invite-act="' +
+        esc(kind) + '">' + esc(label) + "</button>";
+    }
+    var ICO_OK = '<div class="invite-ico invite-ico--ok" aria-hidden="true">✓</div>';
+    var ICO_INFO = '<div class="invite-ico invite-ico--info" aria-hidden="true">i</div>';
+    var ICO_WARN = '<div class="invite-ico invite-ico--warn" aria-hidden="true">!</div>';
+    var ICO_MAIL = '<div class="invite-ico invite-ico--info" aria-hidden="true">✉</div>';
+
+    if (state === "joined") {
+      return card(ICO_OK, "You're in",
+        "Welcome to " + teamB + ". Everything the team runs is in your dashboard now.",
+        act("overview", "Go to Overview"));
+    }
+    if (state === "already_member") {
+      return card(ICO_INFO, "You're already a member",
+        "You already belong to " + teamB + " — there's nothing left to accept.",
+        act("overview", "Go to Overview"));
+    }
+    if (state === "expired") {
+      return card(ICO_WARN, "This invitation has expired",
+        "Invitations only last a limited time, and this one's time ran out. " +
+          "Ask the person who invited you to send a fresh one.",
+        act("overview", "Go to your dashboard"));
+    }
+    if (state === "wrong_account") {
+      return card(ICO_INFO, "This invitation is for a different email",
+        (ctx.email ? "It was sent to <b>" + esc(String(ctx.email)) + "</b>" : "It was sent to a different address") +
+          (ctx.meEmail ? ", but you're signed in as <b>" + esc(String(ctx.meEmail)) + "</b>." : ".") +
+          " Sign in with the invited address to accept it.",
+        act("switch", "Switch account"));
+    }
+    if (state === "error") {
+      return card(ICO_WARN, "Something went wrong",
+        "We couldn't accept the invitation just now — nothing has changed. Give it another try.",
+        act("retry", "Try again"));
+    }
+    if (state === "confirm") {
+      return card(ICO_MAIL, "Join " + team + "?",
+        "You've been invited to join " + teamB +
+          (ctx.role ? " as " + esc(String(ctx.role)) : "") + "." +
+          (ctx.email ? " This invitation was sent to <b>" + esc(String(ctx.email)) + "</b>." : ""),
+        act("join", "Join " + team) +
+          '<a class="invite-skip" href="#overview">Not now</a>');
+    }
+    // "invalid" + any unknown state: the total fallback.
+    return card(ICO_WARN, "This invitation isn't valid any more",
+      "The link may have been revoked or already used. If you still need access, " +
+        "ask the person who invited you to send a new one.",
+      act("overview", "Go to your dashboard"));
+  }
+
+  function inviteCtx(preview, me) {
+    return {
+      team: preview && preview.team && preview.team.name,
+      role: preview && preview.role,
+      email: preview && preview.email,
+      meEmail: me && me.user && me.user.email,
+    };
+  }
+
+  // The invite view lives OUTSIDE index.html's static sections (it's the one
+  // view reached from a minted link, not the nav) — created lazily next to the
+  // other detail sections so applyRoute's show/hide treats it like any view.
+  function ensureInviteView() {
+    var sec = document.getElementById("view-invite");
+    if (sec) return sec;
+    var ref = document.getElementById("view-site");
+    if (!ref || !ref.parentNode) return null;
+    sec = document.createElement("section");
+    sec.id = "view-invite";
+    sec.className = "view";
+    ref.parentNode.insertBefore(sec, ref.nextSibling);
+    return sec;
+  }
+
+  var inviteLoadSeq = 0;
+
+  function loadInvite(tokenFromHash) {
+    var box = ensureInviteView();
+    if (!box) return;
+    box.hidden = false;
+    // Park the URL token and scrub it from the address bar immediately — the
+    // token is a credential; it must not linger in history or a screenshot.
+    // (?scen etc. survive: only the fragment is rewritten.)
+    var token = tokenFromHash || null;
+    if (token) {
+      parkInviteToken(token);
+      if (typeof history !== "undefined" && history.replaceState) {
+        history.replaceState(null, "", location.pathname + location.search + "#invitations/accept");
+      }
+    } else {
+      token = parkedInviteToken();
+    }
+    if (!token) {
+      renderInviteState(box, "invalid", null, null, null);
+      return;
+    }
+    box.innerHTML = '<div class="loading">Checking your invitation&hellip;</div>';
+    var seq = ++inviteLoadSeq;
+    Promise.all([
+      api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }),
+      api("GET", "/v1/me"),
+    ]).then(function (res) {
+      if (seq !== inviteLoadSeq || currentView() !== "invite") return;
+      var pr = res[0];
+      var me = res[1].ok ? res[1].data : null;
+      var preview = pr.ok ? pr.data : null;
+      var state = inviteLandingState(pr.status, preview, me, Date.now());
+      renderInviteState(box, state, token, preview, me);
+    });
+  }
+
+  function renderInviteState(box, state, token, preview, me) {
+    // A settled outcome consumes the parked token (a reload must not replay
+    // it); wrong_account keeps it — it IS the resume across the account
+    // switch — and error keeps it so a retry/reload can try again.
+    if (state === "joined" || state === "already_member" || state === "expired" || state === "invalid") {
+      clearParkedInvite();
+    }
+    box.innerHTML = inviteStateHtml(state, inviteCtx(preview, me));
+    var skip = box.querySelector(".invite-skip");
+    if (skip) skip.addEventListener("click", function () { clearParkedInvite(); });
+    var btn = box.querySelector("[data-invite-act]");
+    if (!btn) return;
+    var act = btn.getAttribute("data-invite-act");
+    btn.addEventListener("click", function () {
+      if (act === "overview") {
+        clearParkedInvite();
+        location.hash = "#overview";
+        return;
+      }
+      if (act === "switch") {
+        // Keep the parked token: after signing in with the invited address the
+        // authed render() resumes the accept automatically.
+        clearSession();
+        render();
+        return;
+      }
+      if (act === "join" || act === "retry") submitInviteAccept(box, btn, token, preview, me);
+    });
+  }
+
+  function submitInviteAccept(box, btn, token, preview, me) {
+    btn.disabled = true;
+    btn.textContent = "Joining…";
+    api("POST", "/v1/invitations/accept", { token: token }).then(function (r) {
+      if (currentView() !== "invite") return;
+      if (r.status === 200) {
+        clearParkedInvite();
+        // The team roster (and possibly the account's team) changed.
+        meCache = null;
+        loadMe();
+        fleetCache = null;
+        renderInviteState(box, "joined", token, preview, me);
+        return;
+      }
+      renderInviteState(box, inviteTerminalFrom(r.status, r.data, preview, Date.now()), token, preview, me);
+    });
+  }
+
+  // The logged-out companion: a banner on the sign-in card that says what
+  // logging in will do with the parked invitation (and fails honestly when the
+  // link is already dead, instead of making the user log in to find out).
+  function showAuthInviteBanner(token) {
+    var loginCard = $("#login-card");
+    if (!loginCard) return;
+    var slot = document.getElementById("auth-invite");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.id = "auth-invite";
+      slot.className = "auth-invite";
+      loginCard.insertBefore(slot, loginCard.firstChild);
+    }
+    slot.innerHTML = "";
+    api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }).then(function (r) {
+      if (!document.getElementById("auth-invite")) return;
+      if (r.ok && r.data && r.data.team) {
+        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join ' +
+          esc(r.data.team.name) + ".</span> Log in — or create an account — with " +
+          '<span class="auth-invite-email">' + esc(r.data.email) + "</span> to accept.";
+      } else {
+        clearParkedInvite();
+        slot.innerHTML = "That invitation link isn't valid any more — it may have expired or been revoked. You can still log in.";
+      }
+    });
+  }
 
   // =========================================================== LAUNCH
   // Does this subscription entitle the team to launch? Mirrors the server's
@@ -5058,6 +5695,20 @@
         hide($("#reset-card"));
         setAuthMode("login");
         renderOAuthButtons();
+        // An invitation accept link (#/invitations/accept?token=…) landed while
+        // logged out: park the token (sessionStorage), scrub it from the URL,
+        // and say what logging in will do. The first authed render() resumes.
+        var inviteTok = parseInviteToken(location.hash);
+        if (inviteTok) {
+          parkInviteToken(inviteTok);
+          if (typeof history !== "undefined" && history.replaceState) {
+            history.replaceState(null, "", location.pathname + location.search);
+          }
+          showAuthInviteBanner(inviteTok);
+        } else if (parkedInviteToken()) {
+          // e.g. back on the sign-in screen after "Switch account".
+          showAuthInviteBanner(parkedInviteToken());
+        }
         $("#auth-email").focus();
       }
       return;
@@ -5075,6 +5726,18 @@
     // tell success from cancel.
     var checkout = checkoutFlag();
     var fromCheckout = handleCheckoutReturn();
+
+    // Invitation resume: a parked accept token (a logged-out landing that just
+    // came through login / signup / OAuth) outranks whatever hash the
+    // round-trip left behind — the user's intent was "accept this invite".
+    // EXCEPT an explicit drill-down deep link (#site/…, #instance/…): someone
+    // who just opened a specific resource asked for THAT; an undecided invite
+    // stays parked and resumes on the next plain boot instead of hijacking it.
+    var preInviteView = parseHash().view;
+    if (parkedInviteToken() && preInviteView !== "invite" &&
+        preInviteView !== "site" && preInviteView !== "instance") {
+      location.hash = "#invitations/accept";
+    }
 
     // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
     // #site/…) — the old guard reset a site deep-link to #fleet on reload.
@@ -5222,6 +5885,17 @@
       deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
+      // Zero-broken-promises slice (charter D5/D7/D25/D26): the shared confirm
+      // modal (pure state machine + focus-trap seam), the promote grammar
+      // (rollback/redeploy), and the invitation-accept landing.
+      confirmModalInit: confirmModalInit, confirmModalReduce: confirmModalReduce,
+      confirmModalArmed: confirmModalArmed, confirmModalTypedMatch: confirmModalTypedMatch,
+      confirmModalHtml: confirmModalHtml, trapTarget: trapTarget,
+      promotePath: promotePath, promoteActionFor: promoteActionFor,
+      promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
+      deployRefLabel: deployRefLabel, deployRow: deployRow,
+      parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
+      inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
     });
   }
 })();
