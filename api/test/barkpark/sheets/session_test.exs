@@ -1674,7 +1674,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       # recompute is deterministic and preserves the markers (write_value only
       # touches v/t).
       create_sheet("sp-cap", %{
-        "A1" => spill_anchor("=5+1", 6),
+        "A1" => spill_anchor("=SEQUENCE(3)", 1),
         "A2" => spilled(0),
         "A3" => spilled(0)
       })
@@ -1725,7 +1725,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       # restores the prior (marker-bearing) anchor cell and recomputes the tab;
       # the region re-derives from the restored anchor. Spilled cells carry no
       # individual inverse — recompute reconstructs them (design §3.3 undo).
-      anchor = spill_anchor("=5+1", 6)
+      anchor = spill_anchor("=SEQUENCE(3)", 1)
 
       create_sheet("sp-undo", %{
         "A1" => anchor,
@@ -1737,7 +1737,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
       # Boot + settle the reader.
       {:ok, %{applied: 1}} = Session.apply_ops("sp-undo", @dataset, [set_cell("Z1", 0, 0)])
-      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 6, "t" => "n"}
+      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 1, "t" => "n"}
 
       # Edit the anchor to a plain scalar — the formula + markers drop (set_cell
       # carries only fmt/s from the prior cell, never "spill").
@@ -1758,7 +1758,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
         Session.apply_ops("sp-undo", @dataset, [%{"op" => "undo", "user" => "u1"}])
 
       assert peek_cell("sp-undo", "A1") == anchor
-      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 6, "t" => "n"}
+      assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 1, "t" => "n"}
     end
 
     test "duplicate_tab's cap check counts only the source's USER cells, not its spilled region" do
@@ -1778,7 +1778,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
         %{
           "name" => "Arr",
           "cells" => %{
-            "A1" => spill_anchor("=SORT(D1:D3)", 3),
+            "A1" => spill_anchor("=SEQUENCE(3)", 1),
             "A2" => spilled(5),
             "A3" => spilled(9),
             "B1" => %{"v" => "keep"}
