@@ -125,7 +125,6 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          old_tab = Sheets.get_tab(state.content, tab_idx),
          {:ok, new_tab} <- structural_shift(op, old_tab, at, count) do
       inverse = shift_inverse(op, tab_idx, old_tab, at, count)
-      target_name = tab_name(state.content, tab_idx)
 
       state =
         apply_structural(state, tab_idx, new_tab, true, %{
@@ -136,12 +135,13 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
         })
 
       # CT (design §3.2, B-CT-5): a row/col insert/delete on this tab shifts
-      # cross-tab refs to it living in OTHER tabs' formulas. Guarded/no-op until
-      # X2's `Structure.shift_cross_tab_refs/5`; the shifted OTHER tabs inherit
-      # the documented lossy-undo contract (the own-tab inverse restores only
-      # its own tab).
+      # cross-tab refs to it living in OTHER tabs' formulas (via X2's
+      # `Structure.shift_cross_tab_refs/4`, keyed by the tab INDEX). The shifted
+      # OTHER tabs inherit the documented lossy-undo contract (the own-tab
+      # inverse restores only its own tab).
       axis = if op in ["insert_rows", "delete_rows"], do: :row, else: :col
-      state = apply_cross_tab_shift(state, target_name, axis, at, count)
+      kind = if op in ["insert_rows", "insert_cols"], do: :insert, else: :delete
+      state = apply_cross_tab_shift(state, tab_idx, axis, {kind, at, count})
 
       {:ok, state, inverse}
     end
@@ -1706,34 +1706,42 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # the cross-tab ref rewrite waits on X2). The ASSUMED contracts below are the
   # integration points the merging agent rebases if a signature differs.
 
-  # `Structure.rename_refs(content, old_name, new_name) :: content` — rewrite
+  # `Structure.rename_refs(tabs, old_name, new_name) :: tabs` (X2) — rewrite
   # every `OldName!`/`'Old Name'!` qualifier across ALL tabs to the new name.
+  # X2 operates on the `tabs` list (its module boundary); this session adapter
+  # peels tabs off content and puts the rewritten list back (integration seam).
   defp rename_cross_tab_refs(content, old_name, new_name) do
     if old_name != new_name and function_exported?(Structure, :rename_refs, 3) do
-      apply(Structure, :rename_refs, [content, old_name, new_name])
+      tabs = Map.get(content, "tabs") || []
+      Map.put(content, "tabs", apply(Structure, :rename_refs, [tabs, old_name, new_name]))
     else
       content
     end
   end
 
-  # `Structure.delete_tab_refs(content, deleted_name) :: content` — rewrite
-  # every ref to the deleted tab, across all tabs, to the literal `#REF!`.
+  # `Structure.delete_tab_refs(tabs, deleted_name) :: tabs` (X2) — rewrite every
+  # ref to the deleted tab, across all tabs, to the literal `#REF!`. Same
+  # content↔tabs adapter as rename above.
   defp delete_cross_tab_refs(content, deleted_name) do
     if function_exported?(Structure, :delete_tab_refs, 2) do
-      apply(Structure, :delete_tab_refs, [content, deleted_name])
+      tabs = Map.get(content, "tabs") || []
+      Map.put(content, "tabs", apply(Structure, :delete_tab_refs, [tabs, deleted_name]))
     else
       content
     end
   end
 
-  # `Structure.shift_cross_tab_refs(content, target_name, axis, at, count) ::
-  # content` — shift cross-tab refs to `target_name` (row/col insert/delete)
-  # living in OTHER tabs' formulas; a deleted axis → `#REF!`.
-  defp apply_cross_tab_shift(state, target_name, axis, at, count) do
-    if function_exported?(Structure, :shift_cross_tab_refs, 5) do
+  # `Structure.shift_cross_tab_refs(tabs, target_index, axis, {kind, at, count})
+  # :: tabs` (X2) — shift cross-tab refs to the tab at `target_index` (row/col
+  # insert/delete) living in OTHER tabs' formulas; a deleted axis → `#REF!`.
+  # Session adapter: peel tabs off content, call X2 with the tab INDEX + change
+  # tuple, put the rewritten list back (the X2 seam — content↔tabs + /4 shape).
+  defp apply_cross_tab_shift(state, target_index, axis, {_kind, _at, _count} = change) do
+    if function_exported?(Structure, :shift_cross_tab_refs, 4) do
       before = state.content
-      after_content = apply(Structure, :shift_cross_tab_refs, [before, target_name, axis, at, count])
-      commit_cross_tab_content(state, before, after_content)
+      tabs = Map.get(before, "tabs") || []
+      new_tabs = apply(Structure, :shift_cross_tab_refs, [tabs, target_index, axis, change])
+      commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
     else
       state
     end

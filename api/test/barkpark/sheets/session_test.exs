@@ -1493,6 +1493,24 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert drain_recompute_count() == 0
     end
 
+    test "insert_rows on a tab shifts OTHER tabs' cross-tab refs into it (X3→X2 seam)" do
+      create_multi_tab("ct-shift", [
+        ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A5"}}),
+        ct_tab("Sheet2", %{"A5" => %{"v" => 42}})
+      ])
+
+      # Insert 1 row at row 2 of Sheet2 (tab 1): A5 slides to A6, so Sheet1's
+      # cross-tab ref must shift Sheet2!A5 -> Sheet2!A6. This is the X3
+      # apply_cross_tab_shift -> X2 Structure.shift_cross_tab_refs/4 seam; before
+      # the seam was wired it was a silent no-op (guarded on a nonexistent /5).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("ct-shift", @dataset, [
+          %{"op" => "insert_rows", "tab" => 1, "at" => 2, "count" => 1}
+        ])
+
+      assert cross_tab_formula("ct-shift", 0, "A1") == "Sheet2!A6"
+    end
+
     test "rename_tab undo restores the cross-tab refs it rewrote, losslessly" do
       create_multi_tab("ct-rename", [
         ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
