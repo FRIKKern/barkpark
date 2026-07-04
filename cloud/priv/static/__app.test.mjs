@@ -1434,6 +1434,16 @@ test("C8: a verify pass and an unreachable run title honestly", () => {
   assert.equal(hooks.tlvEntryTitle(unreach), "Verification failed — unreachable");
 });
 
+test("C8: a degenerate verify payload titles without inventing a cause", () => {
+  // No probes array (never produced by Verify.run — version-skew/junk safety):
+  // state the failure plainly, never fabricate "unreachable".
+  const junk = hooks.mergeTimeline([EV(1, "verify", 10, {})], [])[0];
+  assert.equal(hooks.tlvEntryTitle(junk), "Verification failed");
+  // ok:true is trusted even without probe detail.
+  const okOnly = hooks.mergeTimeline([EV(2, "verify", 10, { ok: true })], [])[0];
+  assert.equal(hooks.tlvEntryTitle(okOnly), "Verification passed");
+});
+
 test("C8: tlvDetailHtml — verify probes render as readable lines, payloads as escaped JSON", () => {
   const v = hooks.mergeTimeline([EV(1, "verify", 10, { ok: false, probes: [
     { name: "verify.api", ok: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
@@ -1459,6 +1469,18 @@ test("C8: tlvRowHtml — badge + expandable detail honouring the expanded flag",
   // A payload-less entry gets no dead Details button.
   const bare = hooks.mergeTimeline([EV(2, "tls", 10, {})], [])[0];
   assert.doesNotMatch(hooks.tlvRowHtml(bare, false), /data-tlv-toggle/);
+});
+
+test("C8: the verify badge colours by OUTCOME — green pass, red fail (text stays 'verify')", () => {
+  const pass = hooks.mergeTimeline([EV(1, "verify", 10, { ok: true, reachable: true, probes: [] })], [])[0];
+  assert.match(hooks.tlvRowHtml(pass, false), /tlv-badge tlv-badge--verify"/);
+  const fail = hooks.mergeTimeline([EV(2, "verify", 10, { ok: false, reachable: true, probes: [
+    { name: "verify.studio", ok: false, reachable: true, status: 502 },
+  ] })], [])[0];
+  const html = hooks.tlvRowHtml(fail, false);
+  assert.match(html, /tlv-badge tlv-badge--verify-fail/);
+  assert.match(html, />verify</); // the badge still names the SOURCE
+  assert.doesNotMatch(html, /tlv-badge--verify"/); // never the green variant on a failed run
 });
 
 // ── timelineFeedHtml: the D18 degradation + teaching empty state ────────────

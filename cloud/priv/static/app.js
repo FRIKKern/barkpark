@@ -2690,8 +2690,11 @@
       return (entry.actor || "system") + " " + humanAction(entry.type);
     }
     if (entry.source === "verify") {
+      if (p.ok) return "Verification passed";
       var m = probeChipsModel(p);
-      if (m.ok) return "Verification passed";
+      // A degenerate envelope (no probes array — never produced by Verify.run,
+      // total-over-junk safety) states the failure without inventing a cause.
+      if (!m.ran) return "Verification failed";
       if (!m.reachable) return "Verification failed — unreachable";
       var failing = m.chips.filter(function (c) { return c.role === "fail"; }).length;
       return "Verification failed — " + failing + " of " + m.chips.length + " checks";
@@ -2732,11 +2735,16 @@
 
   // Pure: one feed row. `expanded` re-applies the operator's open details
   // across live repaints (an SSE tick must never fold what they were reading).
+  // The verify badge colours by OUTCOME (ok → green, anything else → red):
+  // a green VERIFY chip over "Verification failed" would be the badge lying.
   function tlvRowHtml(entry, expanded) {
     var hasDetail = tlvHasDetail(entry);
+    var badgeMod = entry.source === "verify" && !(entry.payload && entry.payload.ok)
+      ? "verify-fail"
+      : entry.source;
     return '<div class="tlv-row" data-tlv-key="' + esc(entry.key) + '">' +
       '<div class="tlv-head">' +
-        '<span class="tlv-badge tlv-badge--' + esc(entry.source) + '">' + esc(entry.source) + "</span>" +
+        '<span class="tlv-badge tlv-badge--' + esc(badgeMod) + '">' + esc(entry.source) + "</span>" +
         '<span class="tlv-title">' + esc(tlvEntryTitle(entry)) + "</span>" +
         '<span class="tlv-when" title="' + esc(fmtWhen(entry.at)) + '">' + esc(relTime(entry.at)) + "</span>" +
         (hasDetail
@@ -2992,6 +3000,15 @@
     return "";
   }
 
+  // Who owns the #instance-verify slot right now. Re-querying the DOM after an
+  // await is NOT enough on its own: navigating A → B replaces the slot with
+  // B's, and A's still-in-flight response would paint A's chips (and wire
+  // A-targeted actions) into B's overview. verifySeq drops stale GETs; the
+  // owner id gates the long-running POST (an unreachable box holds /verify
+  // open for tens of seconds — plenty of time to click another instance).
+  var verifySeq = 0;
+  var verifyOwnerId = null;
+
   // Derive the chips from the SAME events feed the Timeline reads. A failed
   // events fetch hides the card quietly — the chips are an additive proof, and
   // the Overview must never error because history was unavailable (the next
@@ -2999,10 +3016,13 @@
   function loadInstanceVerify(bp) {
     var box = $("#instance-verify");
     if (!box) return;
+    verifyOwnerId = String(bp.id);
+    var seq = ++verifySeq;
     // limit=200 (the route's max): the per-cycle health beat dominates the
     // stream, and a verify run buried behind a day of beats must not make the
     // card lie "never checked" at the default 50-event window.
     api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=200").then(function (r) {
+      if (seq !== verifySeq) return; // a newer mount owns the slot
       box = $("#instance-verify");
       if (!box) return;
       if (!r.ok) { box.innerHTML = ""; return; }
@@ -3029,6 +3049,10 @@
     btn.disabled = true;
     btn.textContent = "Checking…";
     api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/verify", {}).then(function (r) {
+      // Another instance's overview owns the slot now — this result (and its
+      // wrong-target Check-now/Re-provision wiring) must not paint there. The
+      // run itself isn't lost: the server persisted it as a `verify` event.
+      if (verifyOwnerId !== String(bp.id)) return;
       box = $("#instance-verify");
       if (!box) return; // navigated away mid-check
       if (r.status === 200 && r.data && Array.isArray(r.data.probes)) {

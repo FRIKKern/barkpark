@@ -1826,6 +1826,8 @@ select.form-input {
 }
 .tlv-badge--event { background: var(--info-soft); color: var(--info); border-color: hsl(var(--info-hsl) / 0.28); }
 .tlv-badge--verify { background: var(--ok-soft); color: var(--ok); border-color: hsl(var(--ok-hsl) / 0.28); }
+/* A failed run's badge must not read green — coloured by outcome, not source. */
+.tlv-badge--verify-fail { background: var(--danger-soft); color: var(--danger); border-color: hsl(var(--danger-hsl) / 0.28); }
 .tlv-badge--audit { background: var(--muted-surface); color: var(--muted-text); }
 .tlv-title {
   flex: 1 1 auto;
