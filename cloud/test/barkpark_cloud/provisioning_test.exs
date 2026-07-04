@@ -870,7 +870,8 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert [%{"step" => "freshen", "status" => "started", "detail" => detail}] = job.steps
       assert detail =~ "Updating Barkpark"
 
-      {:ok, _job} = Registry.append_provision_step(job.id, "freshen", "done", "Updated Barkpark to v0.45")
+      {:ok, _job} =
+        Registry.append_provision_step(job.id, "freshen", "done", "Updated Barkpark to v0.45")
 
       # The terminal `done` is a new entry appended after the (progress-updated)
       # `started` — the persisted array survives a page refresh.
