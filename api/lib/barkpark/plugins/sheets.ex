@@ -67,7 +67,9 @@ defmodule Barkpark.Plugins.Sheets do
 
   # Conditional-formatting rule `style.bg` — a #rrggbb color (case-insensitive
   # in, the manual style sanitizer normalizes to lowercase downstream).
-  @cf_hex_re ~r/^#[0-9a-fA-F]{6}$/
+  # `\z`, not `$`: PCRE `$` also matches before a trailing newline, and a
+  # stored bg is emitted into style attributes downstream — no stowaways.
+  @cf_hex_re ~r/^#[0-9a-fA-F]{6}\z/
 
   # Excel's grid bounds — column XFD, row 1_048_576. Enforced at the gate
   # AFTER parse (see bounds_errors/3), not inside `Barkpark.Plugins.Sheets.Core.parse_ref/1`:
@@ -322,7 +324,9 @@ defmodule Barkpark.Plugins.Sheets do
   # Only reject keys OUTSIDE the allowed set — for `when`/`style`, whose
   # optional keys (value2, b, i) are presence-driven by the op/bg checks.
   defp unknown_key_errors(map, allowed, prefix, what) do
-    case MapSet.new(Map.keys(map)) |> MapSet.difference(MapSet.new(allowed)) |> MapSet.to_list() do
+    case MapSet.new(Map.keys(map))
+         |> MapSet.difference(MapSet.new(allowed))
+         |> MapSet.to_list() do
       [] -> []
       unknown -> [prefix <> "#{what} has unknown key(s) #{inspect(unknown)}"]
     end
@@ -357,7 +361,8 @@ defmodule Barkpark.Plugins.Sheets do
   defp cf_when_errors(rule, prefix) do
     case Map.fetch(rule, "when") do
       {:ok, w} when is_map(w) ->
-        unknown_key_errors(w, ["op", "value", "value2"], prefix, "when") ++ cf_op_errors(w, prefix)
+        unknown_key_errors(w, ["op", "value", "value2"], prefix, "when") ++
+          cf_op_errors(w, prefix)
 
       {:ok, _} ->
         [prefix <> "when must be a map"]
@@ -378,7 +383,8 @@ defmodule Barkpark.Plugins.Sheets do
         forbid_value2(op, has_v2, prefix) ++ num_value_error(op, value, prefix)
 
       "between" ->
-        v_err = if is_number(value), do: [], else: [prefix <> "when.value must be a number for between"]
+        v_err =
+          if is_number(value), do: [], else: [prefix <> "when.value must be a number for between"]
 
         v2_err =
           cond do
@@ -448,9 +454,14 @@ defmodule Barkpark.Plugins.Sheets do
 
   defp cf_bool_flag_errors(s, key, prefix) do
     case Map.fetch(s, key) do
-      :error -> []
-      {:ok, true} -> []
-      {:ok, other} -> [prefix <> "style.#{key} must be literal true when present, got #{inspect(other)}"]
+      :error ->
+        []
+
+      {:ok, true} ->
+        []
+
+      {:ok, other} ->
+        [prefix <> "style.#{key} must be literal true when present, got #{inspect(other)}"]
     end
   end
 
@@ -458,7 +469,11 @@ defmodule Barkpark.Plugins.Sheets do
   # rule per range; "B2" == "B2:B2", corners reordered top-left, uppercased).
   defp cond_format_dup_errors(cfs, idx) do
     ids =
-      for rule <- cfs, is_map(rule), {:ok, id} <- [Map.fetch(rule, "id")], is_binary(id), id != "" do
+      for rule <- cfs,
+          is_map(rule),
+          {:ok, id} <- [Map.fetch(rule, "id")],
+          is_binary(id),
+          id != "" do
         id
       end
 

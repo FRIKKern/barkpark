@@ -60,7 +60,10 @@ defmodule Barkpark.Plugins.SheetsCondFormatGateTest do
   end
 
   test "an A1:B2 range (any corner order) and optional b/i true pass" do
-    assert run_rule(%{"range" => "D9:B2", "style" => %{"bg" => "#00FF00", "b" => true, "i" => true}}) ==
+    assert run_rule(%{
+             "range" => "D9:B2",
+             "style" => %{"bg" => "#00FF00", "b" => true, "i" => true}
+           }) ==
              :ok
   end
 
@@ -88,7 +91,9 @@ defmodule Barkpark.Plugins.SheetsCondFormatGateTest do
     assert {:halt, m1} = run_rule(%{"when" => %{"op" => "gt", "value" => 1, "value2" => 2}})
     assert m1 =~ "value2 is not allowed"
     assert {:halt, _} = run_rule(%{"when" => %{"op" => "eq", "value" => 1, "value2" => 2}})
-    assert {:halt, _} = run_rule(%{"when" => %{"op" => "contains", "value" => "a", "value2" => 2}})
+
+    assert {:halt, _} =
+             run_rule(%{"when" => %{"op" => "contains", "value" => "a", "value2" => 2}})
   end
 
   test "between requires value2" do
@@ -97,7 +102,9 @@ defmodule Barkpark.Plugins.SheetsCondFormatGateTest do
   end
 
   test "between requires both value and value2 numeric" do
-    assert {:halt, _} = run_rule(%{"when" => %{"op" => "between", "value" => "x", "value2" => 10}})
+    assert {:halt, _} =
+             run_rule(%{"when" => %{"op" => "between", "value" => "x", "value2" => 10}})
+
     assert {:halt, _} = run_rule(%{"when" => %{"op" => "between", "value" => 1, "value2" => "y"}})
   end
 
@@ -125,6 +132,10 @@ defmodule Barkpark.Plugins.SheetsCondFormatGateTest do
     assert {:halt, _} = run_rule(%{"style" => %{"bg" => 123}})
   end
 
+  test "a bg with a trailing newline is rejected (\\z anchor, not $)" do
+    assert {:halt, _} = run_rule(%{"style" => %{"bg" => "#ff0000\n"}})
+  end
+
   test "b/i must be literal true when present" do
     assert {:halt, _} = run_rule(%{"style" => %{"bg" => "#ff0000", "b" => false}})
     assert {:halt, _} = run_rule(%{"style" => %{"bg" => "#ff0000", "i" => "yes"}})
@@ -148,7 +159,9 @@ defmodule Barkpark.Plugins.SheetsCondFormatGateTest do
   end
 
   test "a missing required key (when) is rejected" do
-    assert {:halt, msg} = run_cfs([%{"id" => "r1", "range" => "B2", "style" => %{"bg" => "#ff0000"}}])
+    assert {:halt, msg} =
+             run_cfs([%{"id" => "r1", "range" => "B2", "style" => %{"bg" => "#ff0000"}}])
+
     assert msg =~ "missing key"
   end
 

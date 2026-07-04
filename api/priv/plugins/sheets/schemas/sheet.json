@@ -62,7 +62,7 @@
             "name": "cond_formats",
             "title": "Conditional formats",
             "type": "json",
-            "description": "Ordered list of conditional-formatting rules, each %{id, range, when:{op, value[, value2]}, style:{bg[, b][, i]}}. `range` is a single A1 cell (\"B2\") or an A1:B2 range (any corner order); `when.op` is one of gt|lt|eq|between|contains (gt/lt: numeric value; between: numeric value+value2 inclusive; eq: number|non-empty string|boolean; contains: non-empty string); `style.bg` is a required #rrggbb color, `b`/`i` optional literal true. Single-rule-per-range: two rules with the same normalized range are rejected at the gate (CF-D4). Evaluated server-side into the snapshot styles map (CF-D1)."
+            "description": "Ordered list of conditional-formatting rules, each %{id, range, when:{op, value[, value2]}, style:{bg[, b][, i]}}. `range` is a single A1 cell (\"B2\") or an A1:B2 range (any corner order); `when.op` is one of gt|lt|eq|between|contains (gt/lt: numeric value; between: numeric value+value2 inclusive; eq: number|non-empty string|boolean; contains: non-empty string); `style.bg` is a required #rrggbb color, `b`/`i` optional literal true. Single-rule-per-range: two rules with the same normalized range are rejected at the gate (CF-D4); ids must be unique per tab; at most 200 rules per tab. Evaluated server-side into the snapshot styles map (CF-D1)."
           }
         ]
       }

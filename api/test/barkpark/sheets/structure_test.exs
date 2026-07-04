@@ -355,16 +355,36 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       tab = %{
         "cells" => %{},
         "cond_formats" => [
-          %{"id" => "a", "range" => "B4:C6", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
-          %{"id" => "b", "range" => "A1", "when" => %{"op" => "lt", "value" => 0}, "style" => %{"bg" => "#00ff00"}}
+          %{
+            "id" => "a",
+            "range" => "B4:C6",
+            "when" => %{"op" => "gt", "value" => 1},
+            "style" => %{"bg" => "#ff0000"}
+          },
+          %{
+            "id" => "b",
+            "range" => "A1",
+            "when" => %{"op" => "lt", "value" => 0},
+            "style" => %{"bg" => "#00ff00"}
+          }
         ]
       }
 
       {:ok, out} = Structure.insert_rows(tab, 2, 2)
 
       assert out["cond_formats"] == [
-               %{"id" => "a", "range" => "B6:C8", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
-               %{"id" => "b", "range" => "A1", "when" => %{"op" => "lt", "value" => 0}, "style" => %{"bg" => "#00ff00"}}
+               %{
+                 "id" => "a",
+                 "range" => "B6:C8",
+                 "when" => %{"op" => "gt", "value" => 1},
+                 "style" => %{"bg" => "#ff0000"}
+               },
+               %{
+                 "id" => "b",
+                 "range" => "A1",
+                 "when" => %{"op" => "lt", "value" => 0},
+                 "style" => %{"bg" => "#00ff00"}
+               }
              ]
     end
 
@@ -398,6 +418,23 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:D10")]}
       {:ok, out} = Structure.delete_rows(tab, 1, 3)
       assert out["cond_formats"] == [cf("a", "B1:D7")]
+    end
+
+    test "two ranges clipping onto the SAME normalized range keep only the first (gate-invariant)" do
+      # B2:B3 and B2:B4 both collapse to "B2" when rows 3-4 go; the save
+      # gate rejects duplicate normalized ranges (CF-D4), so the rebase
+      # must not emit both — first in list order survives.
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B3"), cf("b", "B2:B4")]}
+      {:ok, out} = Structure.delete_rows(tab, 3, 2)
+      assert out["cond_formats"] == [cf("a", "B2")]
+    end
+
+    test "a clipped range colliding with an earlier untouched rule drops (first survives)" do
+      # a clips B2:B5 -> B2, colliding with b's pre-existing "B2" behind it:
+      # a came first, a's clipped form wins; b drops.
+      tab = %{"cells" => %{}, "cond_formats" => [cf("a", "B2:B5"), cf("b", "B2")]}
+      {:ok, out} = Structure.delete_rows(tab, 3, 5)
+      assert out["cond_formats"] == [cf("a", "B2")]
     end
   end
 
@@ -448,10 +485,21 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
       {:ok, out} = Structure.insert_rows(tab, 1, 1)
       assert out["cond_formats"] == [cf("a", "B3")]
     end
+
+    test "identical malformed entries never join the range dedupe — both survive" do
+      tab = %{"cells" => %{}, "cond_formats" => ["not-a-map", "not-a-map"]}
+      {:ok, out} = Structure.insert_rows(tab, 1, 1)
+      assert out["cond_formats"] == ["not-a-map", "not-a-map"]
+    end
   end
 
   # A minimal well-formed CF rule with the given id + range.
   defp cf(id, range) do
-    %{"id" => id, "range" => range, "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}}
+    %{
+      "id" => id,
+      "range" => range,
+      "when" => %{"op" => "gt", "value" => 1},
+      "style" => %{"bg" => "#ff0000"}
+    }
   end
 end

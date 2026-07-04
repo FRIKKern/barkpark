@@ -32,7 +32,9 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     * merges clip the same way — fully-deleted and clipped-to-one-cell
       merges drop; `cond_formats` ranges rebase in the SAME pass, but a
       range clipped to a single cell KEEPS its rule (re-emitted as "B2") —
-      a fully-deleted/pushed-off-grid range drops it (CF-D7);
+      a fully-deleted/pushed-off-grid range drops it, and when two rules
+      clip onto the SAME normalized range only the first in list order
+      survives (the save gate rejects duplicates — CF-D4/D7);
     * `row_heights`/`col_widths` drop in-span keys and re-key the rest;
     * `frozen_rows`/`frozen_cols` shrink by their overlap with the span
       (a string-typed count stays a string — the schema convention).
@@ -304,11 +306,43 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   defp rewrite_cond_formats(tab, axis, change) do
     case Map.get(tab, "cond_formats") do
       cfs when is_list(cfs) ->
-        Map.put(tab, "cond_formats", Enum.flat_map(cfs, &rewrite_cond_format(&1, axis, change)))
+        rewritten =
+          cfs
+          |> Enum.flat_map(&rewrite_cond_format(&1, axis, change))
+          |> dedupe_cond_format_ranges()
+
+        Map.put(tab, "cond_formats", rewritten)
 
       _ ->
         tab
     end
+  end
+
+  # A delete can clip two DISTINCT ranges down to the same normalized range
+  # (B2:B3 and B2:B4 both collapse to "B2" when rows 3-4 go). The gate
+  # rejects duplicate normalized ranges (CF-D4), so leaving both would make
+  # the doc unpersistable — the session's debounced flush would halt on its
+  # own save gate forever. Keep the FIRST rule per normalized range (list
+  # order — the rule first-match-wins eval prefers anyway) and drop later
+  # collisions: one more facet of the documented lossy rebase contract.
+  # Entries whose range does not parse never join the dedupe (totality).
+  # Insert is injective on surviving spans, so this is a no-op there.
+  defp dedupe_cond_format_ranges(cfs) do
+    {out, _seen} =
+      Enum.reduce(cfs, {[], MapSet.new()}, fn rule, {acc, seen} ->
+        with %{"range" => range} when is_binary(range) <- rule,
+             {:ok, corners} <- cf_range_corners(range) do
+          if MapSet.member?(seen, corners) do
+            {acc, seen}
+          else
+            {[rule | acc], MapSet.put(seen, corners)}
+          end
+        else
+          _ -> {[rule | acc], seen}
+        end
+      end)
+
+    Enum.reverse(out)
   end
 
   defp rewrite_cond_format(%{"range" => range} = rule, axis, change) when is_binary(range) do
