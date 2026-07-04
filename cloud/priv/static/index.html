@@ -5,12 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Barkpark Cloud</title>
     <meta name="description" content="Barkpark Cloud — fleet, launch, billing & providers control plane." />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Inter is self-hosted (@font-face in app.css → /fonts/) so the console
+         renders fully offline — no third-party hosts (charter decision 27). -->
     <!-- Pre-paint theme: storage key mirrors `var THEME = "bpcloud.theme"` in app.js -->
     <script>try{var t=localStorage.getItem("bpcloud.theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
     <link rel="stylesheet" href="/app.css" />
@@ -21,7 +17,7 @@
       <div class="auth-center">
         <div class="auth-card card" id="login-card">
           <div class="auth-brand">
-            <span class="wordmark-mark" aria-hidden="true"></span>
+            <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
           </div>
 
@@ -86,7 +82,7 @@
              is opened (see render() → resetTokenFromHash). Hidden otherwise. -->
         <div class="auth-card card" id="reset-card" hidden>
           <div class="auth-brand">
-            <span class="wordmark-mark" aria-hidden="true"></span>
+            <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
           </div>
 
@@ -133,7 +129,7 @@
       <header class="topbar">
         <div class="topbar-left">
           <a class="wordmark" href="#overview">
-            <span class="wordmark-mark" aria-hidden="true"></span>
+            <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
             <span class="wordmark-text">Barkpark <b>Cloud</b></span>
           </a>
           <span class="crumb-sep" aria-hidden="true">/</span>
@@ -336,7 +332,7 @@
     <main id="new-screen" class="new-screen" hidden>
       <header class="new-topbar">
         <a class="wordmark" href="/">
-          <span class="wordmark-mark" aria-hidden="true"></span>
+          <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
           <span class="wordmark-text">Barkpark <b>Cloud</b></span>
         </a>
         <button class="btn btn-ghost btn-sm" id="new-theme-toggle" type="button" aria-label="Switch to dark theme">
