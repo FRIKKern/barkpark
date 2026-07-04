@@ -1,0 +1,79 @@
+═══ rich @ 100 ═══
+Wire the SSE live bridge to the task board pane so every claim tick paints honestly
+● in_progress · P1 · task · fable-3
+
+created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
+
+○ created (Jul 02) → ● claimed by opus-2 → ● reclaimed by fable-3 (Jul 04) → ● worked (Jul 04)
+
+  The board must repaint the moment the queue moves. Events only say that
+  something moved; the refetch says what is true — never incremental event
+  application, so no drift and no ghost rows.
+
+  Approach
+
+  Reuse internal/apiclient's StartSSE and pollOnce seams; the tea shell
+  stays a shell and every layout decision lives in a pure renderer.
+
+  • one dirty bit signals the refetch
+  • one debounce coalesces bursts
+  • one snapshot is the single source of truth
+
+  ▌ GO
+  ▌ select {
+  ▌ case <-dirty:
+  ▌     snap = refetch()
+  ▌ }
+
+design
+  One dirty bit, one debounce, one snapshot. The poll fallback must fire
+  the same code path as real SSE so the two modes cannot drift apart.
+
+criteria 2/3
+  ✓ SSE dirty-bit triggers a debounced full snapshot refetch within 750ms
+    ↳ internal/taskboard/live.go:42
+  ✓ Connection dot renders live/polling/offline honestly
+  ○ A stuck reconnect can never keep reading ConnLive
+
+labels  proj:task-tui · area:live · wave:5
+blocks 2 tasks · blocked by 1
+
+claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:26)
+       lease expires in 1m
+       previously opus-2
+
+code
+  internal/taskboard/live.go
+  internal/apiclient/change.go
+
+twin ⧉ 'Wire the SSE bridge (duplicate filing)'
+
+children 1/3 done
+  ✓ Decode the change feed envelope  1d
+▎ ● Debounce the refetch at 750ms  30m
+  ○ Honest connection dot states  5h
+
+papers
+  ▸ task-tui-wave5-charter
+  ▸ doey-ui-lessons
+
+═══ thin @ 100 ═══
+Sketch the paper rail interaction
+○ open
+
+═══ blocked @ 100 ═══
+Reconcile the #979 statusRole seam
+◐ blocked · P2 · task
+
+created 4d ago (Jun 30, 08:00) · updated 3d ago (Jul 01, 09:00)
+
+  Extract the four role names to a shared internal package and import them
+  from both the CLI tables and the board theme.
+
+labels  proj:task-tui
+blocked by 1
+
+▍ blocked — waiting on the shared-package extraction to land before touching table.go
+
+papers
+▎ ▸ task-tui-wave5-charter
