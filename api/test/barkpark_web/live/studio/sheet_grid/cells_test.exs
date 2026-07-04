@@ -183,6 +183,50 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     end
   end
 
+  # QL-D6: the `data-f` td stamp's only source — the stored formula WITHOUT
+  # the leading "=", or nil for a literal cell. The client formula clipboard
+  # (S-CLIP) reads exactly this off the editable td to rebase formulas through
+  # copy/paste; nil MUST omit the attribute (parallel to data_t/1).
+  describe "formula/1" do
+    test "a formula cell returns the formula sans the leading '='" do
+      assert Cells.formula(%{"f" => "=A1+1", "v" => 2}) == "A1+1"
+    end
+
+    test "a formula stored WITHOUT a leading '=' returns as-is" do
+      assert Cells.formula(%{"f" => "SUM(A1:A5)"}) == "SUM(A1:A5)"
+    end
+
+    test "only the FIRST '=' is stripped (an =A1=B1 comparison keeps its inner =)" do
+      assert Cells.formula(%{"f" => "=A1=B1"}) == "A1=B1"
+    end
+
+    test "a literal cell (no 'f') returns nil" do
+      assert Cells.formula(%{"v" => "text"}) == nil
+      assert Cells.formula(%{"v" => 7, "t" => "n"}) == nil
+    end
+
+    test "nil / empty-map cells return nil" do
+      assert Cells.formula(nil) == nil
+      assert Cells.formula(%{}) == nil
+    end
+
+    test "a blank-or-bare-'=' formula collapses to nil (attribute omitted)" do
+      assert Cells.formula(%{"f" => ""}) == nil
+      assert Cells.formula(%{"f" => "="}) == nil
+    end
+
+    test "a non-binary 'f' is not a formula (nil, never a crash)" do
+      assert Cells.formula(%{"f" => nil}) == nil
+      assert Cells.formula(%{"f" => 42}) == nil
+    end
+
+    test "formula and data_v diverge: the SOURCE vs the computed VALUE" do
+      cell = %{"f" => "=1+2", "v" => 3, "t" => "n"}
+      assert Cells.formula(cell) == "1+2"
+      assert Cells.data_v(cell) == "3"
+    end
+  end
+
   describe "fmt raw/display split" do
     # A fmt cell: the visible display formats, but the formula bar (raw_of)
     # and the TSV clipboard (data_v) both round-trip the RAW value so an edit

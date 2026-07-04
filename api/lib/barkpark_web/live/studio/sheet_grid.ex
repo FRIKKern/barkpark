@@ -152,6 +152,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # (the gate requires bg; an empty selection would reject on submit).
   @cf_default_bg "#fde68a"
 
+  # Per-tab color (QL-D2). The picker offers a saturated preset strip (tab
+  # colors read best more vivid than the pastel CELL-bg swatches, so the list
+  # is inlined at the swatch loop like set-bg). `@tab_color_re` guards what the
+  # swatch/picker will actually render so a legacy/junk stored color (synthesis
+  # is lenient — the gate only fires on write) never lands in an inline `style`
+  # attribute. The write path is the NEW `set_tab_color` session op
+  # (S-SESSION), NOT a raw content patch, so every collaborator sees the same
+  # color through the single-writer session.
+  @tab_color_re ~r/^#[0-9a-fA-F]{6}$/
+
   @impl true
   def mount(socket) do
     {:ok,
@@ -197,6 +207,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        filters: %{},
        filter_panel: nil,
        renaming_tab: nil,
+       # The tab-color picker popover (editable hosts): false = closed. It
+       # colors the ACTIVE tab (@tab), so a tab switch closes it (below).
+       tab_color_open: false,
        mode: :edit,
        read_only: false,
        user_id: nil,
@@ -1074,6 +1087,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        editing: nil,
        menu: nil,
        renaming_tab: nil,
+       # The picker targets the active tab; switching tabs closes it so it
+       # never lingers pointed at a tab the user just left.
+       tab_color_open: false,
        # Matches are keyed to the previous tab's cells — drop them so the
        # highlight never bleeds onto the new tab's grid.
        find_hits: MapSet.new(),
@@ -1142,6 +1158,28 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("tab-delete", %{"tab" => idx}, socket) do
     {:noreply, send_ops(socket, [%{"op" => "delete_tab", "tab" => to_int(idx)}])}
+  end
+
+  # Toggle the tab-color picker popover (editable only — the button that fires
+  # this is inside the `@editable` block, so a read-only host never reaches it).
+  def handle_event("tab-color-open", _params, socket) do
+    {:noreply, assign(socket, tab_color_open: not socket.assigns.tab_color_open)}
+  end
+
+  # Set (or clear, on "") the ACTIVE tab's color via the NEW `set_tab_color`
+  # session op (QL-D2/D3 — S-SESSION owns apply_one). The payload is the
+  # byte-for-byte seam S-SESSION defines: `%{"op" => "set_tab_color", "tab" =>
+  # i, "color" => "#rrggbb" | nil}` — an empty pick collapses to nil, which the
+  # op treats as CLEAR (deletes the key). It is NOT a cell op (no recompute);
+  # the session flushes + broadcasts a structural delta so peers see the color.
+  # The picker closes on pick, mirroring the toolbar's fire-and-close controls.
+  def handle_event("tab-set-color", %{"color" => color}, socket) do
+    color = if color == "", do: nil, else: color
+
+    {:noreply,
+     socket
+     |> assign(tab_color_open: false)
+     |> send_ops([%{"op" => "set_tab_color", "tab" => socket.assigns.tab, "color" => color}])}
   end
 
   # ── events: per-user undo/redo (M4) ──────────────────────────────────────
@@ -2302,6 +2340,27 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
+  # The tab's color IFF it is a well-formed `#rrggbb` — the render-time guard
+  # that keeps a legacy/junk stored color (synthesis is lenient, so one can
+  # survive on a pre-gate document) out of an inline `style` attribute. nil
+  # for an absent, blank, or malformed color (the swatch/picker glyph simply
+  # doesn't paint). Mirrors the gate's regex so what stores is what renders.
+  defp tab_color(%{"color" => c}) when is_binary(c) do
+    if Regex.match?(@tab_color_re, c), do: c, else: nil
+  end
+
+  defp tab_color(_tab), do: nil
+
+  # Tints the picker-toggle glyph with the ACTIVE tab's current color, so the
+  # `●` button previews what's set. nil (no inline style) when the active tab
+  # is uncolored or the color is malformed.
+  defp active_tab_color_style(all_tabs, tab) do
+    case tab_color(Enum.at(all_tabs, tab) || %{}) do
+      nil -> nil
+      c -> "color: #{c};"
+    end
+  end
+
   defp to_int(i) when is_integer(i), do: i
 
   defp to_int(s) when is_binary(s) do
@@ -2923,6 +2982,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-target={@myself}
               data-test-id={"sheet-tab-#{i}"}
             >
+              <%!-- The tab-color swatch (QL-D2): a small colored dot in the
+                    tab's own chrome, rendered on EVERY host (read-only readers
+                    see the color; only the picker below is gated). Fully
+                    inline-styled so it needs no root.html.heex CSS — the pixel
+                    polish rides the parked live-browser pass. --%>
+              <span
+                :if={tab_color(t)}
+                class="sheet-tab-swatch"
+                style={"display: inline-block; width: 8px; height: 8px; border-radius: 9999px; margin-right: 5px; vertical-align: middle; background: #{tab_color(t)};"}
+                data-test-id={"sheet-tab-swatch-#{i}"}
+                aria-hidden="true"
+              ></span>
               <%= Map.get(t, "name") || "Sheet #{i + 1}" %>
             </button>
           <% end %>
@@ -2979,6 +3050,46 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             title="Delete the active tab"
             data-test-id="sheet-tab-delete"
           >&times;</button>
+          <%!-- Tab-color picker (QL-D2): a toggle + a preset swatch strip that
+                mirrors the toolbar set-bg pattern, coloring the ACTIVE tab. The
+                whole affordance is inside the `@editable` block, so a read-only
+                sheet shows the swatch dot above but never the picker (the same
+                gate as rename/move). --%>
+          <span class="sheet-tab-color" style="position: relative; display: inline-flex; align-items: center;">
+            <button
+              type="button"
+              class="sheet-tab-action"
+              style={active_tab_color_style(@all_tabs, @tab)}
+              phx-click="tab-color-open"
+              phx-target={@myself}
+              aria-haspopup="true"
+              aria-expanded={to_string(@tab_color_open)}
+              aria-label="Set this sheet's tab color"
+              title="Tab color"
+              data-test-id="sheet-tab-color-btn"
+            >&#9679;</button>
+            <span
+              :if={@tab_color_open}
+              class="sheet-bg-swatches"
+              role="group"
+              aria-label="Tab color"
+              data-test-id="sheet-tab-color-picker"
+            >
+              <button
+                :for={swatch <- ~w(#ef4444 #f59e0b #eab308 #22c55e #3b82f6 #8b5cf6)}
+                type="button"
+                class="sheet-bg-swatch"
+                style={"background: #{swatch};"}
+                phx-click="tab-set-color"
+                phx-value-color={swatch}
+                phx-target={@myself}
+                title={"Tab color " <> swatch}
+                data-test-id={"sheet-tab-color-" <> String.trim_leading(swatch, "#")}
+              >
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click="tab-set-color" phx-value-color="" phx-target={@myself} title="Clear tab color" data-test-id="sheet-tab-color-clear">⌫</button>
+            </span>
+          </span>
         <% end %>
       </div>
 
@@ -3197,6 +3308,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               data-c={c}
               data-v={Cells.data_v(cell)}
               data-t={Cells.data_t(cell)}
+              data-f={@editable && Cells.formula(cell)}
               colspan={span && elem(span, 0) > 1 && elem(span, 0)}
               rowspan={span && elem(span, 1) > 1 && elem(span, 1)}
               style={Cells.cell_style(c, r, @frozen_cols, @frozen_rows, @col_widths, @row_heights, cell, Map.get(@cf_styles, {c, r}))}
