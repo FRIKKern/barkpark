@@ -1,12 +1,12 @@
 defmodule Barkpark.Papers.TextDiff do
   @moduledoc """
-  Pure line-level diff — a faithful Elixir port of the vendored
-  `lib/text-diff.js` (classic dynamic-programming LCS over the two line
+  Pure line-level diff — a faithful Elixir port of the classic JS
+  line-diff algorithm (dynamic-programming LCS over the two line
   arrays). No `Repo`, no PubSub, no deps; backs the P6.U3 diff modal where
   shift-clicking two goal-path rail nodes opens a line-diff of their event
   `payload_html`.
 
-  ## Semantics (matched to text-diff.js)
+  ## Semantics (matched to the classic JS line-diff algorithm)
 
     * `split_lines/1` splits on `"\\n"` and drops a single trailing empty
       line (so `"a\\nb\\n"` is two lines, not three). `nil`/`""` → `[]`.

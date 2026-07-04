@@ -69,7 +69,7 @@ defmodule BarkparkCloud.MixProject do
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"},
       # oban-substrate: the cloud control plane's background-job + cron engine.
-      # Same major as api/ (api/mix.exs:60 — `{:oban, "~> 2.17"}`) so both apps
+      # Same major as api/mix.exs's `{:oban, "~> 2.17"}` dep so both apps
       # share one Oban mental model. Postgres-backed — it reuses
       # BarkparkCloud.Repo, so no Redis and no new infra/secret. Recurring
       # housekeeping (the stale-provision-job reaper today; health-staleness

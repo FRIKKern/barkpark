@@ -1,6 +1,6 @@
 defmodule BarkparkCloud.Web.StaticAllowlistTest do
   @moduledoc """
-  Pins the Plug.Static `only:` allowlist (router.ex ~line 153) against future
+  Pins the Plug.Static `only:` allowlist in BarkparkCloud.Web.Router against future
   loosening. The SPA is served straight from priv/static, so any file that
   lands there — the `__preview__/` harness (mock.js, scenarios.mjs, serve.mjs),
   a future `/styleguide.html`, a stray fixture — becomes web-reachable the
