@@ -4,8 +4,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
   Plain module (no GenServer) — every function operates on the session's
   in-memory state map. The owning GenServer's `handle_call({:apply_ops, …})`
-  dispatches each wire-shaped op through `apply_one/2`, then records the
-  inverse via `record_undo/3`; the per-user undo/redo machine
+  dispatches each wire-shaped op through `apply_one/2`, accumulates the
+  batch's inverses, and records them as ONE per-user entry via
+  `record_batch_undo/2` (per-gesture undo, QL-D4 — a >100-cell paste is a
+  single `{:group, …}` step); the per-user undo/redo machine
   (`apply_history/3`, `apply_entry/2`) rides the same path.
 
   Validation, cell mutation, structural shifts, recompute, the compact
@@ -209,6 +211,41 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       {:ok,
        apply_structural(state, tab_idx, new_tab, false, %{
          op: "set_frozen",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
+    end
+  end
+
+  # Set (or clear) a tab's color — the per-sheet tab-color swatch (QL-D2/D3).
+  # Stores a lowercase `#rrggbb` under the tab map's `"color"` key, sibling of
+  # `name`/`cells`/`merges`/`cond_formats`; a nil/"" color DELETES the key (no
+  # empty-string colors ever land in the doc). NOT a cell op — no value
+  # changes, so no recompute; it flushes pending like every other structural op
+  # and broadcasts a `set_tab_color` structure delta so peers repaint the tab.
+  # The inverse reuses `{:structural, op_map}` — a set_tab_color back to the
+  # PRIOR color (nil ⇒ the inverse CLEARS the key), self-inverting through
+  # apply_one; `remap_op_tab` already permutes its `"tab"` key on
+  # reorder/delete. `c` is validated `#rrggbb`-or-nil at the op boundary,
+  # byte-for-byte the plugin gate's `color_errors` branch, so the session never
+  # admits a color the before_save gate would 409 on (the merges precedent).
+  def apply_one(%{"op" => "set_tab_color", "tab" => tab} = op, state) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         {:ok, color} <- validate_tab_color(Map.get(op, "color")) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      prior = Map.get(old_tab, "color")
+      inverse = {:structural, %{"op" => "set_tab_color", "tab" => tab_idx, "color" => prior}}
+
+      new_tab =
+        case color do
+          nil -> Map.delete(old_tab, "color")
+          hex -> Map.put(old_tab, "color", hex)
+        end
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_tab_color",
          at: nil,
          count: nil,
          tab: tab_idx
@@ -526,6 +563,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
+       "set_tab_color (\"tab\"+\"color\"), " <>
        "set_cond_format (\"tab\"+\"rules\"), " <>
        "sort_range (\"tab\"+\"range\"+\"keys\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
@@ -559,6 +597,15 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   #   * {:merges, tab_idx, merges}             — LEGACY whole-list snapshot,
   #     tolerated on read for any in-flight stack entry but no longer PRODUCED
   #     (it clobbered other users' merges and resurrected pre-shift coords)
+  #   * {:group, entries}                       — per-gesture compound undo
+  #     (QL-D4): the same-user inverses produced across ONE `apply_ops` batch
+  #     (in application order), pushed as ONE stack entry so a >100-cell paste
+  #     undoes as a single step and `@undo_depth` counts ENTRIES, not cells.
+  #     apply_entry folds the members in REVERSE application order (undoing the
+  #     batch back-to-front) and collects each produced inverse into a redo
+  #     {:group, …} that replays forward. Recorded ONLY for a batch that yielded
+  #     ≥2 inverses for a user; a lone inverse is pushed BARE (byte-identical to
+  #     the pre-group per-op record — the single-edit regression lock).
   #
   # Applying an entry yields its OWN inverse, which lands on the opposite
   # stack — undo and redo are the same machine run in either direction.
@@ -610,6 +657,47 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Per-gesture batch undo (QL-D4). The GenServer accumulates the `(op,
+  # inverse)` pairs a whole `apply_ops` batch produced (in application order)
+  # and hands them here ONCE, instead of calling `record_undo/3` per op inside
+  # the reduce. For each user, this pushes ONE stack entry: `{:group, inverses}`
+  # when the batch yielded ≥2 undoable inverses for that user (so a >100-cell
+  # paste undoes as a single step and `@undo_depth` counts it as one entry), or
+  # the BARE single inverse when exactly 1 — byte-identical to the pre-group
+  # per-op record, the single-edit regression lock. Each recorded user's redo
+  # stack is cleared (mirroring `record_undo/3`'s redo-clear). Pairs with a nil
+  # inverse (undo/redo themselves, no-op ops) or no valid `"user"` (imports,
+  # anonymous wire calls) contribute nothing — the same filter as record_undo.
+  def record_batch_undo(state, pairs) do
+    pairs
+    |> Enum.reduce(%{}, fn {op, inverse}, acc ->
+      case undo_user(op, inverse) do
+        nil -> acc
+        user -> Map.update(acc, user, [inverse], &[inverse | &1])
+      end
+    end)
+    |> Enum.reduce(state, fn {user, inverses_rev}, st ->
+      entry =
+        case Enum.reverse(inverses_rev) do
+          [single] -> single
+          inverses -> {:group, inverses}
+        end
+
+      st |> push_stack(:undo, user, entry) |> put_stack(:redo, user, [])
+    end)
+  end
+
+  # A pair is undoable iff it produced a non-nil inverse AND carries a
+  # non-blank "user" — the exact filter record_undo/3 applies per op.
+  defp undo_user(_op, nil), do: nil
+
+  defp undo_user(op, _inverse) do
+    case Map.get(op, "user") do
+      user when is_binary(user) and user != "" -> user
+      _ -> nil
+    end
+  end
+
   defp push_stack(state, key, user, entry) do
     stacks = Map.fetch!(state, key)
     stack = Enum.take([entry | Map.get(stacks, user, [])], @undo_depth)
@@ -652,6 +740,11 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # tab move/delete with a pending sort undo). The rect/perm are row-space and
   # do not shift under a tab permutation.
   defp remap_entry({:permute, tab, rect, perm}, fun), do: {:permute, fun.(tab), rect, perm}
+  # A group's absolute tab indices live inside its member entries — a tab
+  # move/delete permutes each one (the #843 all-inverse-shapes remap contract;
+  # a missing clause would crash undo after a reorder with a pending group).
+  defp remap_entry({:group, entries}, fun),
+    do: {:group, Enum.map(entries, &remap_entry(&1, fun))}
 
   # A rename_restore pins the renamed tab index AND every dependent-tab index in
   # its multi-tab capture — a tab move/delete permutes them all (the #843
@@ -743,6 +836,36 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   defp apply_entry({:structural, op_map}, state), do: apply_one(op_map, state)
+
+  # Per-gesture compound undo (QL-D4): a `{:group, entries}` holds one batch's
+  # same-user inverses in APPLICATION order (op1..opN). Fold them in REVERSE
+  # application order — undoing the batch back-to-front (opN..op1), exactly as N
+  # sequential single undos would — and collect each member's produced counter
+  # in PRODUCTION order into a redo `{:group, …}`. That order is load-bearing
+  # when a batch touches the same cell twice: redo must replay FORWARD
+  # (op1..opN) or it lands on the wrong intermediate value, and apply_entry
+  # folds a group in reverse, so the redo group must hold the counters in
+  # production order (opN's counter first) for the redo fold to apply op1's
+  # counter first. The result is self-similar — a redo group's own fold rebuilds
+  # the original undo group, so it survives an undo/redo/undo/redo cycle. A
+  # member that no longer applies (its tab vanished under another user) halts
+  # the fold and surfaces as a consumed dead entry — apply_history drops the
+  # whole group and rolls back to the post-pop state, the standard dead-entry
+  # contract.
+  defp apply_entry({:group, entries}, state) do
+    result =
+      Enum.reduce_while(Enum.reverse(entries), {state, []}, fn member, {st, produced} ->
+        case apply_entry(member, st) do
+          {:ok, st, counter} -> {:cont, {st, [counter | produced]}}
+          {:error, _code, _message} = error -> {:halt, error}
+        end
+      end)
+
+    case result do
+      {state, produced} -> {:ok, state, {:group, Enum.reverse(produced)}}
+      {:error, _code, _message} = error -> error
+    end
+  end
 
   defp apply_entry(
          {:structural_restore, %{"op" => op, "tab" => tab, "at" => at, "count" => count},
@@ -986,6 +1109,24 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     case Barkpark.Plugins.Sheets.cond_format_list_errors(rules, tab_idx) do
       [] -> :ok
       errors -> {:error, "invalid_cond_format", Enum.join(errors, "; ")}
+    end
+  end
+
+  # set_tab_color's `"color"`: a `#rrggbb` hex (case-insensitive in, normalized
+  # lowercase) or nil/"" to CLEAR (QL-D2). Reuses `CondFormat.sanitize_bg/1` —
+  # the ONE `#rrggbb` sanitizer (validates AND lowercases, rejects a trailing
+  # newline) — so no fourth copy is written (the parked-hygiene rule) and the
+  # op boundary matches the gate's `color_errors` byte-for-byte.
+  defp validate_tab_color(color) when color in [nil, ""], do: {:ok, nil}
+
+  defp validate_tab_color(color) do
+    case CondFormat.sanitize_bg(color) do
+      nil ->
+        {:error, "invalid_color",
+         "\"color\" must be a #rrggbb hex string or null, got #{inspect(color)}"}
+
+      hex ->
+        {:ok, hex}
     end
   end
 

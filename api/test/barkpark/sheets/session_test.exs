@@ -143,6 +143,17 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
     Enum.map(content["tabs"], &Map.get(&1, "name"))
   end
 
+  defp tab_map(slug, tab \\ 0) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab)])
+  end
+
+  defp tab_color(slug, tab \\ 0), do: Map.get(tab_map(slug, tab), "color")
+
+  # A set_cell op stamped with a collaborator id so it records undo history.
+  defp set_cell_by(user, ref, raw, tab \\ 0),
+    do: set_cell(ref, raw, tab) |> Map.put("user", user)
+
   defp wait_until(fun, timeout \\ 2_000) do
     do_wait_until(fun, System.monotonic_time(:millisecond) + timeout)
   end
@@ -1803,5 +1814,234 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
   defp cross_tab_formula(slug, tab, ref) do
     {:ok, content} = Session.peek(slug, @dataset)
     get_in(content, ["tabs", Access.at(tab), "cells", ref, "f"])
+  end
+
+  # ── per-gesture group undo (QL-D4) ──────────────────────────────────────────
+  #
+  # One `apply_ops` batch pushes ONE undo entry per user: a `{:group, …}` when
+  # the batch yielded ≥2 inverses for that user, a bare inverse when exactly 1.
+  # So a >100-cell paste undoes as a single step and `@undo_depth` counts
+  # ENTRIES, not cells.
+  describe "per-gesture group undo (QL-D4)" do
+    test "a multi-cell paste in one batch undoes and redoes as a single group step" do
+      create_sheet("grp-paste", %{})
+
+      ops = [
+        set_cell_by("u1", "A1", 1),
+        set_cell_by("u1", "A2", 2),
+        set_cell_by("u1", "A3", 3)
+      ]
+
+      {:ok, %{applied: 3, errors: []}} = Session.apply_ops("grp-paste", @dataset, ops)
+      assert peek_cell("grp-paste", "A1") == %{"v" => 1}
+      assert peek_cell("grp-paste", "A2") == %{"v" => 2}
+      assert peek_cell("grp-paste", "A3") == %{"v" => 3}
+
+      # ONE undo reverts all three cells.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-paste", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell("grp-paste", "A1") == nil
+      assert peek_cell("grp-paste", "A2") == nil
+      assert peek_cell("grp-paste", "A3") == nil
+
+      # ONE redo re-applies all three.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-paste", @dataset, [%{"op" => "redo", "user" => "u1"}])
+
+      assert peek_cell("grp-paste", "A1") == %{"v" => 1}
+      assert peek_cell("grp-paste", "A2") == %{"v" => 2}
+      assert peek_cell("grp-paste", "A3") == %{"v" => 3}
+    end
+
+    test "a same-cell double write in one batch: undo blanks it, redo replays FORWARD to the last write" do
+      create_sheet("grp-order", %{})
+
+      # Two writes to the SAME cell in one batch — the order case: redo must
+      # land on the batch's LAST write (2), not an intermediate value.
+      ops = [set_cell_by("u1", "A1", 1), set_cell_by("u1", "A1", 2)]
+      {:ok, %{applied: 2, errors: []}} = Session.apply_ops("grp-order", @dataset, ops)
+      assert peek_cell("grp-order", "A1") == %{"v" => 2}
+
+      {:ok, _} = Session.apply_ops("grp-order", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      assert peek_cell("grp-order", "A1") == nil
+
+      {:ok, _} = Session.apply_ops("grp-order", @dataset, [%{"op" => "redo", "user" => "u1"}])
+      assert peek_cell("grp-order", "A1") == %{"v" => 2}
+    end
+
+    test "a 150-cell paste is ONE entry — it outlives a 100-deep stack and reverts whole" do
+      create_sheet("grp-depth", %{})
+
+      paste = for i <- 1..150, do: set_cell_by("u1", "A#{i}", i)
+      {:ok, %{applied: 150, errors: []}} = Session.apply_ops("grp-depth", @dataset, paste)
+
+      # Five later single edits, each its own batch (⇒ its own stack entry).
+      for c <- 1..5 do
+        {:ok, %{applied: 1}} =
+          Session.apply_ops("grp-depth", @dataset, [set_cell_by("u1", "C#{c}", c)])
+      end
+
+      # Undo the five single edits first.
+      for _ <- 1..5 do
+        {:ok, %{applied: 1}} =
+          Session.apply_ops("grp-depth", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      end
+
+      assert peek_cell("grp-depth", "A1") == %{"v" => 1}
+      assert peek_cell("grp-depth", "A150") == %{"v" => 150}
+
+      # ONE more undo reverts the ENTIRE 150-cell paste. Under per-cell
+      # recording the paste's first 55 cells would have been truncated off the
+      # 100-deep stack and could never revert — this is the QL-D4 fix.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-depth", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert peek_cell("grp-depth", "A1") == nil
+      assert peek_cell("grp-depth", "A75") == nil
+      assert peek_cell("grp-depth", "A150") == nil
+    end
+
+    test "a LONE single edit undoes/redoes byte-identically — no group wrapper (regression lock)" do
+      create_sheet("grp-lone", %{"A1" => %{"v" => "orig"}})
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("grp-lone", @dataset, [set_cell_by("u1", "A1", "edited")])
+
+      assert peek_cell("grp-lone", "A1") == %{"v" => "edited"}
+
+      {:ok, _} = Session.apply_ops("grp-lone", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      assert peek_cell("grp-lone", "A1") == %{"v" => "orig"}
+
+      {:ok, _} = Session.apply_ops("grp-lone", @dataset, [%{"op" => "redo", "user" => "u1"}])
+      assert peek_cell("grp-lone", "A1") == %{"v" => "edited"}
+    end
+
+    test "a mixed-user batch records one entry per user; each undoes only their own cells" do
+      create_sheet("grp-multi", %{})
+
+      ops = [
+        set_cell_by("u1", "A1", 1),
+        set_cell_by("u2", "B1", 2),
+        set_cell_by("u1", "A2", 3)
+      ]
+
+      {:ok, %{applied: 3, errors: []}} = Session.apply_ops("grp-multi", @dataset, ops)
+
+      # u1's undo reverts u1's two cells (their group), leaving u2's cell.
+      {:ok, _} = Session.apply_ops("grp-multi", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      assert peek_cell("grp-multi", "A1") == nil
+      assert peek_cell("grp-multi", "A2") == nil
+      assert peek_cell("grp-multi", "B1") == %{"v" => 2}
+
+      # u2's undo reverts u2's single (bare) inverse.
+      {:ok, _} = Session.apply_ops("grp-multi", @dataset, [%{"op" => "undo", "user" => "u2"}])
+      assert peek_cell("grp-multi", "B1") == nil
+    end
+
+    test "an anonymous batch (no \"user\") records nothing — undo finds an empty stack" do
+      create_sheet("grp-anon", %{})
+
+      {:ok, %{applied: 2, errors: []}} =
+        Session.apply_ops("grp-anon", @dataset, [set_cell("A1", 1), set_cell("A2", 2)])
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "nothing_to_undo"}]}} =
+        Session.apply_ops("grp-anon", @dataset, [%{"op" => "undo", "user" => "u1"}])
+    end
+  end
+
+  # ── set_tab_color op (QL-D2/D3) ─────────────────────────────────────────────
+  #
+  # A per-tab `"color"` (#rrggbb or absent), set live via an undoable, broadcast
+  # session op. The inverse reuses `{:structural, op_map}` (a set_tab_color back
+  # to the prior color; nil ⇒ clears the key).
+  describe "set_tab_color op (QL-D2/D3)" do
+    test "sets a normalized color; undo restores the prior; redo re-applies" do
+      create_multi_tab("tc-set", [
+        %{"name" => "A", "cells" => %{}, "color" => "#0000ff"},
+        %{"name" => "B", "cells" => %{}}
+      ])
+
+      # Case-insensitive in, stored lowercase.
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("tc-set", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "#FF0000", "user" => "u1"}
+        ])
+
+      assert tab_color("tc-set", 0) == "#ff0000"
+
+      {:ok, _} = Session.apply_ops("tc-set", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      assert tab_color("tc-set", 0) == "#0000ff"
+
+      {:ok, _} = Session.apply_ops("tc-set", @dataset, [%{"op" => "redo", "user" => "u1"}])
+      assert tab_color("tc-set", 0) == "#ff0000"
+    end
+
+    test "undo of a first-time set CLEARS the key (no phantom empty color)" do
+      create_sheet("tc-clear", %{})
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("tc-clear", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "#123456", "user" => "u1"}
+        ])
+
+      assert tab_color("tc-clear") == "#123456"
+
+      {:ok, _} = Session.apply_ops("tc-clear", @dataset, [%{"op" => "undo", "user" => "u1"}])
+      refute Map.has_key?(tab_map("tc-clear"), "color")
+    end
+
+    test "an empty-string color clears the key" do
+      create_multi_tab("tc-empty", [%{"name" => "A", "cells" => %{}, "color" => "#abcdef"}])
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("tc-empty", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "", "user" => "u1"}
+        ])
+
+      refute Map.has_key?(tab_map("tc-empty"), "color")
+    end
+
+    test "a junk color is rejected at the op boundary and never lands" do
+      create_sheet("tc-bad", %{})
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "invalid_color"}]}} =
+        Session.apply_ops("tc-bad", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "#gggggg", "user" => "u1"}
+        ])
+
+      refute Map.has_key?(tab_map("tc-bad"), "color")
+
+      # A trailing-newline stowaway is rejected too (sanitize_bg is \z-anchored).
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "invalid_color"}]}} =
+        Session.apply_ops("tc-bad", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "#ff0000\n", "user" => "u1"}
+        ])
+    end
+
+    test "an unknown tab rejects" do
+      create_sheet("tc-notab", %{})
+
+      {:ok, %{applied: 0, errors: [%{index: 0, code: "tab_not_found"}]}} =
+        Session.apply_ops("tc-notab", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 9, "color" => "#ff0000", "user" => "u1"}
+        ])
+    end
+
+    test "broadcasts a set_tab_color structure delta so peers repaint the tab" do
+      doc = create_multi_tab("tc-bcast", [%{"name" => "A", "cells" => %{}}])
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Session.topic("tc-bcast", @dataset, doc.workspace_id)
+      )
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("tc-bcast", @dataset, [
+          %{"op" => "set_tab_color", "tab" => 0, "color" => "#00aa00", "user" => "u1"}
+        ])
+
+      assert_receive {:sheets_op, %{structure: %{op: "set_tab_color", tab: 0}}}, 1_000
+    end
   end
 end
