@@ -12,6 +12,13 @@
 #   diverges from view mode (hyphens/callout/list-marker drift, cycles 57-58).
 #   This tripwire fails when a .bp-canvas-* class exists in one mirror but not the
 #   other, unless the asymmetry is in the documented allowlist.
+#   NOTE: paper-surface.css is deliberately NOT unioned into the heex side —
+#   per its own header, .bp-canvas-* node-view chrome is Studio-shell and stays
+#   in root.html.heex (a canvas rule landing in the portable source is itself
+#   drift this check should surface).
+#   (The old "part 2" single-owner --bp-* sentinel moved to
+#   test/barkpark/portable_doc/render/stylesheet_test.exs, which pins the same
+#   invariant compile-coupled; it is not duplicated here.)
 #
 #   Part 3 — generated paper-surface token layer. The `--paper-*` theme tokens +
 #   `--bp-*` typography tokens in the embedder bundle (styles.css) are GENERATED
@@ -44,9 +51,16 @@ SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 # ── Part 3: generated paper-surface token layer (source → bundle) ────────────
 # Runs first so `--write` regenerates before the lockstep check verifies.
 python3 - "$SURFACE" "$BUNDLE" "$MODE" <<'PY'
-import re, sys, difflib
+import os, re, sys, difflib
 
 surface_path, bundle_path, mode = sys.argv[1:4]
+
+if not os.path.isfile(surface_path):
+    print(f"paper-editor-mirror-check part 3: FAILED — canonical source missing: "
+          f"{surface_path}\n  (paper-surface.css is the ONE source the bundle's "
+          f"token layer is generated from — it must never be deleted/moved without "
+          f"updating this script.)", file=sys.stderr)
+    sys.exit(1)
 
 # Literal font stacks for any host-app-only `var(--font*)` values the source
 # might carry (Studio resolves those through host vars that DO NOT exist in a
@@ -61,10 +75,14 @@ FONT_LITERALS = {
 def strip_comments(s):
     return re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
 
-def parse_decls(body):
-    """Ordered (name, value) custom-property declarations from a rule body.
-    Returns None if the body carries any non-custom-property (→ not a pure
-    token block)."""
+def parse_decls(sel, body):
+    """Ordered (name, value) custom-property declarations from a token-scope
+    rule body. A token scope must be PURE custom properties: a non-custom
+    declaration there is a hard error, never a silent skip — a silently
+    skipped block would mean its tokens NEVER reach the generated bundle
+    section while the check stays green (the exact drift this gate exists to
+    prevent). Element/chrome rules belong under element selectors
+    (`.bp-paper-surface h1`, `.bp-callout`, …), not the bare token scopes."""
     out = []
     for decl in strip_comments(body).split(";"):
         decl = decl.strip()
@@ -73,7 +91,14 @@ def parse_decls(body):
         name, _, value = decl.partition(":")
         name, value = name.strip(), value.strip()
         if not name.startswith("--"):
-            return None
+            print("paper-editor-mirror-check part 3: FAILED — paper-surface.css "
+                  f"token scope `{sel.strip()}` carries a non-custom-property "
+                  f"declaration (`{decl}`).\n"
+                  "  Token scopes (.bp-paper-surface/.bp-paper-body, themed or "
+                  "not) must hold ONLY `--*` custom properties — move element/"
+                  "chrome declarations to an element selector, or the generated "
+                  "bundle section cannot represent this block.", file=sys.stderr)
+            sys.exit(1)
         m = re.fullmatch(r"var\((--font[\w-]*)\)", value)
         if m:
             value = FONT_LITERALS.get(m.group(1), value)
@@ -106,9 +131,7 @@ for m in re.finditer(r"([^{}]*)\{([^{}]*)\}", surface):
     sel, body = m.group(1), m.group(2)
     if not is_token_selector(sel):
         continue
-    decls = parse_decls(body)
-    if decls is None:
-        continue
+    decls = parse_decls(sel, body)
     dark_scope = 'data-theme="dark"' in sel
     bucket, order = (dark, dark_order) if dark_scope else (light, light_order)
     for name, value in decls:
@@ -133,6 +156,12 @@ marker = re.search(
 if not marker:
     print("paper-editor-mirror-check part 3: FAILED — BEGIN/END GENERATED: "
           "paper-surface markers not found in styles.css.", file=sys.stderr)
+    sys.exit(1)
+
+if bundle.count("BEGIN GENERATED: paper-surface") > 1:
+    print("paper-editor-mirror-check part 3: FAILED — multiple 'BEGIN GENERATED: "
+          "paper-surface' markers in styles.css; the generated section must be "
+          "exactly one marked region.", file=sys.stderr)
     sys.exit(1)
 
 current = marker.group(2)
