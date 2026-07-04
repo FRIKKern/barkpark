@@ -81,7 +81,7 @@ type Seams struct {
 	// ProvisionWith swallows its error (logging to stderr) so a step-report failure
 	// — a control-plane blip, a deploy restart — NEVER fails the provision. nil (the
 	// tests that don't assert narration, an old wiring) disables reporting silently.
-	// step ∈ create|secure|configure|content|verify|ready; status ∈
+	// step ∈ create|freshen|secure|configure|content|verify|ready; status ∈
 	// started|progress|done|failed — mirrored by the control plane's
 	// ProvisionJob step vocabulary (cloud/lib/.../registry/provision_job.ex);
 	// a step/status outside it is 422-rejected there, so the two lists MUST

@@ -87,10 +87,17 @@ type sshReadyWaiter interface {
 // degrades to a working baked box; here nobody is waiting, so we can afford to
 // insist on current). It builds the per-host runner (the injected RunnerFor in
 // tests, else the real SSH runner), waits for sshd, then runs the freshen sequence
-// with NO narration (a background refill has no user watching) and no rebuild
-// sub-budget (the whole call is already bounded by the caller's ctx /
-// warmRefillTimeout).
+// with NO narration (a background refill has no user watching) and no per-phase
+// rebuild sub-budget — instead the WHOLE call is bounded here at warmRefillTimeout.
+// That bound is load-bearing for the reconcile grow loop, whose ctx is the
+// worker's LIFETIME context: ssh keepalives only catch a dead connection, so
+// without it a live-but-wedged remote build would pin the single-threaded worker's
+// claim loop forever. (Under defaultWarmRefill the caller's own warmRefillTimeout
+// is already ticking, and the nested bound can only be tighter — never looser.)
 func freshenWarmBox(ctx context.Context, seams Seams, host cloud.Server) error {
+	ctx, cancel := context.WithTimeout(ctx, warmRefillTimeout)
+	defer cancel()
+
 	var runner cloud.StepRunner
 	if seams.RunnerFor != nil {
 		runner = seams.RunnerFor(host.IP)

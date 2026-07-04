@@ -133,6 +133,55 @@ func TestEnsureFresh_RebuildFailureDegrades(t *testing.T) {
 	}
 }
 
+// TestEnsureFresh_RebuildBoundedOnBox proves the rebuild budget is enforced ON THE
+// BOX (remote coreutils `timeout`), not just by the local sub-context — otherwise a
+// local timeout kills the ssh client while the remote deploy-rebuild.sh runs on to
+// swap+restart underneath the already-proceeding go-live chain.
+func TestEnsureFresh_RebuildBoundedOnBox(t *testing.T) {
+	r := &recordingRunner{behind: true}
+	if _, err := EnsureFresh(context.Background(), r, FreshenOpts{RebuildTimeout: 12 * time.Minute}); err != nil {
+		t.Fatalf("EnsureFresh: %v", err)
+	}
+	if len(r.outScripts) != 2 {
+		t.Fatalf("want check + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
+	}
+	if want := "timeout 720 bash scripts/deploy-rebuild.sh"; !strings.Contains(r.outScripts[1], want) {
+		t.Errorf("rebuild script must bound deploy-rebuild.sh remotely with %q; got:\n%s", want, r.outScripts[1])
+	}
+}
+
+// TestEnsureFresh_NoRemoteTimeoutWithoutBudget proves the warm-create shape (no
+// RebuildTimeout — the whole call is bounded by the caller, and a timed-out box is
+// torn down anyway) does NOT wrap the rebuild in a remote `timeout`.
+func TestEnsureFresh_NoRemoteTimeoutWithoutBudget(t *testing.T) {
+	r := &recordingRunner{behind: true}
+	if _, err := EnsureFresh(context.Background(), r, FreshenOpts{}); err != nil {
+		t.Fatalf("EnsureFresh: %v", err)
+	}
+	if len(r.outScripts) != 2 {
+		t.Fatalf("want check + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
+	}
+	if strings.Contains(r.outScripts[1], "timeout ") {
+		t.Errorf("no remote timeout expected without a budget; got:\n%s", r.outScripts[1])
+	}
+	if !strings.Contains(r.outScripts[1], "bash scripts/deploy-rebuild.sh") {
+		t.Errorf("rebuild script must still invoke deploy-rebuild.sh; got:\n%s", r.outScripts[1])
+	}
+}
+
+// TestTailOf pins the error-output bound: the TAIL survives (that is where a build
+// failure lives), an elision marker is prepended, and short output passes through.
+func TestTailOf(t *testing.T) {
+	if got := tailOf("  short  ", 100); got != "short" {
+		t.Errorf("short output must pass through trimmed, got %q", got)
+	}
+	long := strings.Repeat("x", 5000) + "THE-REAL-ERROR"
+	got := tailOf(long, 100)
+	if !strings.HasPrefix(got, "… ") || !strings.HasSuffix(got, "THE-REAL-ERROR") || len(got) > 110 {
+		t.Errorf("tail must be bounded, marked, and keep the end; got %q (len %d)", got, len(got))
+	}
+}
+
 func TestEnsureFresh_SkipWhenNoCapture(t *testing.T) {
 	res, err := EnsureFresh(context.Background(), bareRunner{}, FreshenOpts{})
 	if err != nil {

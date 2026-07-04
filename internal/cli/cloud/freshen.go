@@ -59,34 +59,62 @@ const freshenRepoDir = "/opt/barkpark"
 // parseable KEY=VALUE lines on stdout (fetch chatter is routed to stderr so it
 // never pollutes the parse). `set -e` makes an unreachable fetch a non-zero exit
 // so the caller sees a check failure rather than a stale comparison. Seconds, not
-// minutes — it is run on EVERY go-live.
+// minutes — it is run on EVERY go-live, so the fetch is ALSO bounded on the box
+// (`timeout 90`, generous for weeks of drift): a wedged-but-alive fetch degrades
+// to a loud check-failure instead of silently burning the whole provision budget
+// (ssh keepalives only catch a DEAD connection).
 const freshenCheckScript = `set -e
 cd ` + freshenRepoDir + `
-git fetch origin --tags --prune 1>&2
+timeout 90 git fetch origin --tags --prune 1>&2
 printf 'FRESHEN_HEAD=%s\n' "$(git rev-parse HEAD)"
 printf 'FRESHEN_REMOTE=%s\n' "$(git rev-parse origin/main)"
 printf 'FRESHEN_FROM=%s\n' "$(git describe --tags --always 2>/dev/null || echo unknown)"
 printf 'FRESHEN_TO=%s\n' "$(git describe --tags --always origin/main 2>/dev/null || echo unknown)"`
 
-// freshenRebuildScript is the REBUILD (phase 2), run ONLY when the check found the
-// box behind: fast-forward to origin/main with the post-merge hook SUPPRESSED
-// (the hook path wedges after a failed build — self-update.sh's header documents
-// why), then invoke deploy-rebuild.sh EXPLICITLY. deploy-rebuild.sh builds aside
-// and swaps under a repo-local flock, restarting last, so an interrupted/failed
-// rebuild leaves the baked code serving. `--ff-only` REFUSES a diverged checkout
-// (exit non-zero) rather than rewriting history — a snapshot should never diverge,
-// and if it somehow has, failing is safer than a merge commit.
-const freshenRebuildScript = `set -e
+// freshenRebuildScript renders the REBUILD (phase 2), run ONLY when the check
+// found the box behind: fast-forward to origin/main with the post-merge hook
+// SUPPRESSED (the hook path wedges after a failed build — self-update.sh's header
+// documents why), then invoke deploy-rebuild.sh EXPLICITLY. deploy-rebuild.sh
+// builds aside and swaps under a repo-local flock, restarting last, so an
+// interrupted/failed rebuild leaves the baked code serving. `--ff-only` REFUSES a
+// diverged checkout (exit non-zero) rather than rewriting history — a snapshot
+// should never diverge, and if it somehow has, failing is safer than a merge commit.
+//
+// When budget > 0 the rebuild is ALSO bounded ON THE BOX with coreutils `timeout`
+// (exit 124), not just by the caller's local context. This is load-bearing for the
+// in-chain fail-open path: a local-only timeout kills the ssh CLIENT but the
+// remote deploy-rebuild.sh would run on to COMPLETION — swapping _build/prod and
+// `systemctl restart barkpark` at an unpredictable moment while the go-live chain
+// is already proceeding through secrets-install/migrate/health, which can fail the
+// very go-live the degrade was meant to save. The remote timeout TERMs the script
+// BEFORE its swap/restart lines can run (an orphaned inner `mix compile` may
+// linger, but only writes the aside _build_next — it can never swap or restart).
+// The caller's local context gets a small grace on top (see EnsureFresh) so the
+// remote timeout fires first and its output/exit 124 are captured.
+func freshenRebuildScript(budget time.Duration) string {
+	rebuild := "bash scripts/deploy-rebuild.sh"
+	if budget > 0 {
+		rebuild = fmt.Sprintf("timeout %d %s", int(budget.Seconds()), rebuild)
+	}
+	return `set -e
 cd ` + freshenRepoDir + `
 git -c core.hooksPath=/dev/null merge --ff-only origin/main
-bash scripts/deploy-rebuild.sh`
+` + rebuild
+}
 
-// freshenRebuildBudget bounds the in-chain rebuild sub-context (call site (b),
-// configureHost). A clean Elixir rebuild is many minutes; 12 is generous while
-// still bounding the wait so a wedged build degrades to the baked box rather than
-// pinning the go-live. The warm-create call site (a) does NOT set a sub-budget —
-// it runs under the caller's warmRefillTimeout, where nobody waits.
+// freshenRebuildBudget bounds the in-chain rebuild (call site (b), configureHost)
+// — remotely via `timeout` and locally via a grace-padded sub-context. A clean
+// Elixir rebuild is many minutes; 12 is generous while still bounding the wait so
+// a wedged build degrades to the baked box rather than pinning the go-live. The
+// warm-create call site (a) does NOT set a sub-budget — it runs under
+// warmRefillTimeout (freshenWarmBox bounds it for BOTH warm callers), where nobody
+// waits and a timed-out box is torn down anyway.
 const freshenRebuildBudget = 12 * time.Minute
+
+// freshenLocalGrace is how much longer than the remote `timeout` bound the LOCAL
+// rebuild sub-context waits, so the remote timeout fires first and EnsureFresh
+// captures the box's own output + exit 124 instead of a bare context deadline.
+const freshenLocalGrace = 30 * time.Second
 
 // Degrade captions — the honest, calm copy the freshen step narrates when it
 // proceeds on the baked release rather than failing the go-live. slice 1's
@@ -173,7 +201,7 @@ func EnsureFresh(ctx context.Context, runner StepRunner, opts FreshenOpts) (Fres
 		// Unreachable fetch / git error. NEVER brick a go-live on GitHub flake:
 		// proceed loudly on the baked code.
 		narrate("done", freshenCheckFailedCaption)
-		return FreshenResult{Degraded: true}, fmt.Errorf("freshen: freshness check failed: %w: %s", err, strings.TrimSpace(out))
+		return FreshenResult{Degraded: true}, fmt.Errorf("freshen: freshness check failed: %w: %s", err, tailOf(out, freshenErrOutputMax))
 	}
 	head, remote, from, to := parseFreshenCheck(out)
 	if head == "" || remote == "" {
@@ -193,18 +221,22 @@ func EnsureFresh(ctx context.Context, runner StepRunner, opts FreshenOpts) (Fres
 	res.Behind = true
 	narrate("progress", updatingCaption(from, to))
 
+	// The budget is enforced on the BOX (remote `timeout`, so a timed-out rebuild
+	// can never swap/restart underneath the proceeding chain — see
+	// freshenRebuildScript) with the local sub-context as a grace-padded backstop
+	// for a dead connection.
 	rctx := ctx
 	if opts.RebuildTimeout > 0 {
 		var cancel context.CancelFunc
-		rctx, cancel = context.WithTimeout(ctx, opts.RebuildTimeout)
+		rctx, cancel = context.WithTimeout(ctx, opts.RebuildTimeout+freshenLocalGrace)
 		defer cancel()
 	}
-	if rout, rerr := cmd.RunOutput(rctx, freshenRebuildScript); rerr != nil {
+	if rout, rerr := cmd.RunOutput(rctx, freshenRebuildScript(opts.RebuildTimeout)); rerr != nil {
 		// The rebuild failed or timed out. deploy-rebuild.sh builds ASIDE and swaps
 		// last, so the box is STILL serving the baked code — degrade, don't die.
 		narrate("done", freshenRebuildFailedCaption)
 		res.Degraded = true
-		return res, fmt.Errorf("freshen: rebuild failed: %w: %s", rerr, strings.TrimSpace(rout))
+		return res, fmt.Errorf("freshen: rebuild failed: %w: %s", rerr, tailOf(rout, freshenErrOutputMax))
 	}
 
 	res.Rebuilt = true
@@ -256,4 +288,20 @@ func updatedCaption(from, to string) string {
 func knownVer(v string) bool {
 	v = strings.TrimSpace(v)
 	return v != "" && v != "unknown"
+}
+
+// freshenErrOutputMax bounds how much captured box output a wrapped freshen error
+// carries. A failed deploy-rebuild is a full `mix deps.compile`'s worth of output
+// (potentially hundreds of KB) — the TAIL is where the actual failure lives, and
+// an unbounded error string bloats the worker journal / reconcile error joins.
+const freshenErrOutputMax = 2048
+
+// tailOf returns the last max bytes of s (whitespace-trimmed), prefixing "… " when
+// truncated so a reader knows output was elided.
+func tailOf(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return "… " + s[len(s)-max:]
 }
