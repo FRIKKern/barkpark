@@ -125,3 +125,45 @@ Everything else (Amendment 1's simple/beautiful/deep, the calm subtraction) stil
 policy/opinion retune on the LIVE queue — the slice the roadmap always reserved for "run against
 guerrilla, retune ordering/folding." Loop until the pane, on the REAL corpus, reads compact,
 grouped, and claim-forward — not a flat wall.
+
+---
+
+## AMENDMENT 3 (2026-07-04) — the DETAILED direction: `bp tasks` matches the design-language mockup
+
+**User showed the current calm board (before) beside the target mockup (after) and said: make it look
+like the mockup.** The target is the Barkpark task design language, fully specced in
+`.claude/workflows/bp-task-design-language-spec.md` (the SOURCE OF TRUTH — read it whole) and already
+built + tested on the paper/GUI side (the `task-list` PortableDoc component). This is the TUI catch-up
+the spec §4/§7 scheduled. It deliberately reverses part of the wave-5 subtraction: structure and
+MEANINGFUL color return (spec's "color = state, never decoration" — hue on lifecycle, priority
+severity, and blockers; labels stay dim monochrome).
+
+**The target frame, read from the mockup (portrait, ~60 cols):**
+
+1. **Header** — `barkpark · tasks` left; `⇄ guerrilla ● live` right (drop the branch chrome).
+2. **Momentum header** (spec §0) — `⠿ 1 in flight · ○ 4 ready · ✓ 14 done` with `NN%` right-aligned,
+   and a **progress bar** row under it. Icons + color (done teal). The always-on progress read.
+3. **NOW · N claimed** — the in-flight row with the spinner glyph, colored priority, criteria `2/3`,
+   and the assignee (`me`) in accent.
+4. **Phase bands, not epic/cluster rules** — section headers are a NAME + **dotted leader** + a rollup:
+   `Token spine ·········· W1 · 1/4`, `Studio ····· W2 · 0/3`, `Web · TUI · pdrender ···· W3–4 · 0/4`,
+   `Paper components ···· W5 · 14/24`, `Enforce & cut over ··· W6 · 0/2`. Grouping is by phase
+   (`phase:*` / the W-code), with a `done/total` criteria rollup per phase.
+5. **Rich row** (spec §3) — `glyph  ID · title              PRIORITY  criteria`. The lifecycle glyph
+   (open `○`@50% / ready `○` white / in_progress spinner blue / blocked `!` amber / done `✓` teal),
+   the id·title, a **color-severity priority** (P0/P1 red, P2 amber, P3/P4 dim), and the criteria
+   fraction `0/4`. Done rows recede (dim, teal check). Assignee when claimed.
+6. **Nested subtasks** — arbitrary depth by indent + `↳` guide, each a full rich row
+   (`↳ ✓ collect query targets from blocks`, `↳ ○ inject snapshot into render opts   P3 0/2`).
+7. **Blocker badge on the row** — `! resolver` in amber on a blocked task, so it says WHAT blocks it
+   without opening.
+8. **Folded done** — `+ 2 more done — folded` teal; honest truncation everywhere.
+9. **Footer** — `j/k move · enter open · c claim · x close · N open · N done`.
+
+**Vocabulary is EXACT and shared** (spec §1, §6): the TUI glyph/color set IS the manifest both surfaces
+use — do not invent a TUI-only variant; reconcile with `internal/semrole` and the paper component's
+values so the CI drift gate stays green. Motion (spec §2): the in_progress braille spinner cycles on
+the existing heartbeat (idle board stays byte-stable); done flashes ×3 on the done-transition only.
+NO_COLOR / ASCII / reduced-motion fallbacks per spec §3. The calm subtraction's GOOD parts stay: dim
+monochrome labels, done recedes, honest truncation, one-view-no-toggle-farm. Loop until `bp tasks` on
+the real corpus reads like the mockup.

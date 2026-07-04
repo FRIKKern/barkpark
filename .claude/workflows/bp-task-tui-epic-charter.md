@@ -500,6 +500,114 @@ Ownership amendment (D19): `MarkdownBlocks` is implemented by the DETAIL slice
 output, so a substrate stub would produce fake goldens. `frames.go` itself only
 imports `time`, so this changes no frozen bytes.
 
+### Wave-9 architect decisions (2026-07-04 — the DETAILED-DIRECTION redesign; wish AMENDMENT 3 + the design-language spec)
+
+Source of truth: `.claude/workflows/bp-task-design-language-spec.md` (read whole) and the
+mockup transcribed in `bp-task-tui-wish.md` AMENDMENT 3. The user put the calm board beside the
+mockup and said **make it look like the mockup**. This deliberately reverses PART of the wave-5
+subtraction (D14): structure + MEANINGFUL color come back (spec's "color = state, never
+decoration" — hue on lifecycle, priority-severity, blockers; plain labels stay dim monochrome).
+The subtraction's GOOD parts stay: dim labels, done recedes, honest truncation, one view / no
+toggle-farm. All claims verified against the tree (theme.go/components.go/render.go/board.go/
+program.go/detail_render.go), not trusted from strategists.
+
+36. **Adopt the spec §1 glyph+color vocabulary as the board's canonical set — the paper
+    `task-list` component already ships it; the TUI must MATCH it.** Split `open` (○ dim-white,
+    ~42% foreground — faint backlog) vs `ready` (○ FULL foreground — the unchecked box, claim it);
+    `in_progress` → the animated Braille spinner `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` in blue (replaces the steady ●);
+    `blocked` → `!` amber (replaces ◐); `done` → `✓` **teal glyph, dim title** (recedes, but the
+    check is teal not grey); `cancelled` → `✕` dim. *Why:* Amendment 3 is a direct "match the
+    mockup" order; §1 is the shared manifest both surfaces read; reverses wave-5's steady 4-glyph
+    set on purpose (D14 was the calm pass, this is the scheduled §4/§7 TUI catch-up).
+
+37. **`RoleFor` is UNTOUCHED — the semrole parity test stays green; the spec palette is a
+    GLYPH-RENDERING layer, not a role remap.** in_progress→info, blocked→warn, done→ok,
+    ready/open/cancelled→neutral still holds (`TestRoleForParityWithSemrole` iterates
+    `semrole.TaskLifecycles()` and must not change). The brightness ladder (open 50% / ready 100%)
+    and the teal done-GLYPH are neutral/ok RENDERING refinements inside those roles, NOT new
+    tokens — do not add semrole tokens. Add a dedicated `doneColor` (teal `#0d9488`/`#2dd4bf`)
+    distinct from `okColor` (green, cloud health/"live·up·online") so restyling the done glyph
+    never shifts deploy-table semantics. Refresh the terminal hex to the spec's exact AdaptiveColor
+    values (info `#2563eb`/`#60a5fa`, warn `#d97706`/`#fbbf24`, danger `#dc2626`/`#f87171`, ready =
+    near-foreground `#18181b`/`#e7edf2`, open ≈ dim `~#5f6b78`, cancelled `#a1a1aa`/`#71717a`).
+    *Why:* the one parity gate that actually EXISTS in-repo is semrole; there is no `design/check`
+    hex gate yet (verified — spec §6 is aspirational), so "drift gate green" here = semrole parity +
+    the glyph-budget guard; don't fork semrole, don't collateral-damage the CLI/cloud role hues.
+
+38. **Motion rides the EXISTING heartbeat (`anim.Alive` + `UIState.Frame`) — the spinner frame
+    index is `Frame % 10`, NEVER wall-clock, so an idle board stays byte-stable and goldens hold.**
+    The seam already exists (anim.go schedules a tick only while `Alive()`; Frame is injected like
+    `now`); only the CONSUMPTION is new — in_progress rows on the board (NOW cards, spine rows,
+    detail meta + timeline + children rails) paint the frame'th spinner glyph. `NO_MOTION`/
+    reduced-motion freezes on a single steady `⠿`; the done-flash ×3 rides the EXISTING one-shot
+    flash ladder (`FlashLevel`) fired on the done-transition only (never first paint / cache-primed
+    — `changedDocIDs` + the empty-prev suppression already guarantee this). ASCII escape hatch
+    (config flag / no-Braille font) swaps to `( )` ready · `[~]` wip · `[!]` blocked · `[v]` done ·
+    `[x]` cancelled. *Why:* charter D-heartbeat law; the byte-stable-idle golden invariant is
+    load-bearing — a free-running ticker would break it.
+
+39. **The RICH ROW gets meaningful columns back (spec §3), reversing part of D14's one-token
+    subtraction (Amendment 3 schedules exactly this).** Layout: `▎glyph  ID · title  ……  PRIORITY
+    N/M worker`, plus a `! cause` blocker badge (amber, inline) on blocked rows so a stuck task
+    says WHAT blocks it without opening. Priority is color-SEVERITY (P0/P1 red, P2 amber, P3/P4
+    dim); criteria is the bare `N/M` (tabular); worker rides the row in blue when claimed. Width
+    degrade order (right→left shed): worker → criteria → priority; the `! cause` badge sheds LAST
+    (most load-bearing); below `dropMetaBelow` keep glyph+title only. *Why:* the mockup's row
+    carries state at a glance; the calm monochrome-label + honest-truncation discipline stays.
+
+40. **MOMENTUM HEADER + progress bar (spec §0 — the north-star "feel alive / always feel
+    progress" acceptance test).** Replace the header's plain counts strip (render.go line-2
+    `countsStrip`) with `⟨spinner⟩ N in flight · ○ N ready · ✓ N done   NN%` (icons + color, done
+    teal, `NN%` right-aligned) and a proportional progress-BAR row beneath it (filled = done/total,
+    or overall criteria %). Keep the honest `· N stale` and `showing N of M` notes. The spinner in
+    the header rides the same heartbeat frame (D38). *Why:* it is the mockup's #2 element and the
+    spec's whole-initiative criterion — the always-on progress read.
+
+41. **PHASE BANDS with an HONEST fallback (the GROUPING SHIFT) — never fabricate phases not in
+    the data.** Section headers restyle to the mockup: `NAME ·········· [Wcode · ]done/total` — a
+    dotted leader + a criteria/child ROLLUP, via the ONE shared `renderSectionHeader` (dashes →
+    dots, the rail → a rollup token). Phase grouping derives a phase code from an explicit
+    `phase:*` label OR a W-code parsed from the title (`W1`, `W3–4`, `W5.2`); WHEN present a
+    section splits into ordered phase sub-bands, each a DISPLAY-ONLY (non-cursor) band label with
+    its own rollup; WHEN ABSENT (the guerrilla reality — almost nothing carries phase metadata)
+    the existing epic/cluster/orphan grouping stands, only restyled. The wave-8 head-of-5 per-
+    category cap still applies. *Why:* the mockup groups by phase, the live corpus rarely does —
+    faithful derivation, not invention; phase labels stay display-only so the cursor index space
+    is unchanged (parity guards hold trivially).
+
+42. **ONE SPINE BUILDER — extract `spineRows(b, st) []SpineRow` that both `visibleRows` and
+    `flattenSpine` consume, making cursor-parity STRUCTURAL instead of conventional.** Today the
+    two paths (program.go `visibleRows` → `[]row`, render.go `flattenSpine` → lines) are hand-
+    aligned and kept honest only by the two guards. Nested subtasks + phase labels would amplify
+    that risk. So a single ordered producer emits `SpineRow{Kind, Depth, Ref, Selectable}` encoding
+    the WHOLE order+fold rule (NOW/ready head, section headers, phase band labels, nested tasks,
+    "+K more"/"+N done", separators); `visibleRows` = the `Selectable` subset, `flattenSpine`
+    renders each row (a header/label/more-line is `Selectable:false`, exactly the display-only set
+    today). Nested subtasks (arbitrary depth) walk the direct parent→child tree WITHIN a section
+    (indent + `↳`) for DISPLAY — `rootOf` still does the grouping. *Why:* charter law ("fold+order
+    single-sourced; ONE spine builder both consume"); this is the safe way to add depth.
+
+43. **DETAIL + PAPER frames adopt the same vocabulary; pdrender in-body chips stay READ-ONLY.**
+    `detailGlyph` → the spec set (spinner in_progress, `!` blocked, teal `✓`, `✕` cancelled, ○
+    open/ready split); the detail body already carries the mockup's sections (meta line, hybrid
+    stamps, derived timeline, CRITERIA ✓/○ + `↳` evidence, DEPENDENCIES-in-words, CHILDREN, PAPER
+    `▸`) — align glyphs/colors + make the timeline's in_progress mark the live spinner. pdrender's
+    in-body task-chip glyphs (`walk.ex`/`inline.go`: ◐ in_progress, ⊘ blocked, ● done) CLASH with
+    the new board set but are OFF LIMITS this wave (pdrender read-only) — their unification is the
+    RESERVED cross-surface slice (Elixir walker + pdrender + Studio parity), acknowledged, not
+    touched. *Why:* parity-artifact match; one rendering stack; the cross-surface change is its own
+    gated epic.
+
+44. **Regenerate ALL goldens deliberately (board+detail+paper+compose at 60/80/100) and EXTEND
+    the glyph-budget allowlist consciously — the two cursor-parity guards stay green UNWEAKENED.**
+    The whole vocabulary changed, so regen with `-update -update-paper` and EYEBALL every frame
+    against the mockup before trusting it. Promote to the BOARD allowlist: the 10 spinner frames
+    `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` + the frozen `⠿`, `✕` cancelled, and `↳` (subtasks now nest on the BOARD, not
+    only in reading frames) — each with a note; `!` is ASCII (free). `TestCursorParityShellRender`
+    and `TestCursorParityWithClusters` must hold without weakening — the single `spineRows` source
+    (D42) is what makes that automatic. *Why:* the guard is the anti-creep tripwire; extending it
+    is a deliberate act, and per-slice green is never trusted after a vocabulary change.
+
 ## Roadmap (integration order)
 
 | # | Slice | Size | Wave |
@@ -521,6 +629,7 @@ imports `time`, so this changes no frozen bytes.
 | 16 | Paper frame: pdrender wholesale (DarkTheme, no bridge — D20) + driven-tasks rail (D17) | M | 5 (this wave) |
 | 18 | The subtraction pass: calm board, chip-hue retirement, NOW de-dup, shrunk expand (D14/D22/D23) | L | 5 (this wave) |
 | 17 | Navigation shell: stack + breadcrumb + cursor grammar + adaptive compositor (D11/D12/D18) — onto the calm board | L | 6 (next wave, after subtraction lands) |
+| 21 | The detailed-direction redesign: spec vocabulary (spinner/!/✕/open-ready split/teal done) + momentum header & progress bar + phase bands & rollups + rich row & blocker badge + one spineRows builder (nested ↳) + detail/paper glyph align + full golden regen (D36–D44) | L | 9 (this wave) |
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
@@ -742,3 +851,102 @@ wave-5 vocabulary (● in_progress/◐ blocked/✓ done) — on one paper frame 
 and the driven-rail can show the same task with contradictory glyphs. Unifying is a
 CROSS-SURFACE change (Elixir walker + pdrender + parity tests + Studio HTML) — schedule it
 with the RESERVED pdrender fix (colored-code collapse), NOT as a quiet local edit.
+
+### Wave 2026-07-04d (wave 9 CUT: the detailed-direction redesign — architect decisions D36–D44)
+
+**The wish (Amendment 3):** the user put the calm wave-5/7/8 board beside the design-language
+mockup and said *make it look like the mockup*. This is the TUI catch-up spec §4/§7 scheduled;
+the paper `task-list` component already ships the vocabulary (verified: `components.ex` has the
+Braille-spinner CSS + blue/amber/teal). It deliberately reverses PART of the wave-5 subtraction —
+structure + MEANINGFUL color return — while KEEPING its good parts (dim labels, done recedes,
+honest truncation, one view).
+
+**Verified against the tree before cutting (not trusted from strategists):**
+- The ONLY in-repo cross-surface parity gate is `TestRoleForParityWithSemrole` (iterates
+  `semrole.TaskLifecycles()` against `RoleFor`). There is NO `design/check` hex gate — spec §6 is
+  aspirational. So `RoleFor` stays byte-identical (D37) and "drift-gate green" = semrole parity +
+  the glyph-budget guard, both kept green.
+- Current board vocabulary is the wave-5 CALM set (`StatusGlyph`: ● in_progress / ◐ blocked /
+  ○ ready·open / ✓ done — all steady, `done` rendered DIM via `roleStyle(RoleOK)=dimStyle`). The
+  redesign changes glyphs+colors, NOT the role map.
+- `visibleRows` (program.go, `[]row`) and `flattenSpine` (render.go, lines) are TWO hand-aligned
+  paths held honest only by `TestCursorParity*`. Nested subtasks + phase labels make a single
+  `spineRows` producer mandatory (D42) — extract it so parity is structural.
+- The animation seam is already built: `anim.Alive` gates the heartbeat, `UIState.Frame` is the
+  injected frame index (0 at rest). The spinner is pure CONSUMPTION of `Frame % 10` (D38); the
+  idle board stays byte-stable by construction — do NOT start a free-running ticker.
+- pdrender's in-body task chips (`walk.ex`/`inline.go`: ◐/⊘/●) clash with the new set but are
+  OFF LIMITS (pdrender read-only). Unification stays the RESERVED cross-surface slice.
+
+**The cut — ONE large coupled slice (the whole `internal/taskboard` vocabulary changes at once;
+parallel worktrees WOULD collide on theme/components/render/board/program/detail/goldens).** No
+file-disjoint companion exists: even the ASCII/NO_COLOR fallback and the glyph-budget update touch
+the shared theme/components + the goldens. So a single builder owns it end-to-end, then a perfecter
+pass, then the REQUIRED live guerrilla run. What the next wave inherits if capacity runs out: a
+board that reads like the mockup, and the RESERVED pdrender/walker glyph-unify slice still open.
+
+### Wave 2026-07-05 (wave 9 GREEN + direction integration probe — the redesign matches the mockup)
+
+**Landed (on `loop-epic/tui9-…-p`, ready for lead merge; NOT yet on origin/main):** the single
+coupled slice, 2 commits (`3a60558a` feat + `cad68a5a` polish), **entirely inside
+`internal/taskboard/`** — 38 files, +1117/−582. `origin/main` (`2ebba80f`) is an exact ancestor of
+the branch, so the lead merge is a **fast-forward (zero conflicts)** — no octopus, no symbol
+collision this time (single-builder, single-package cut, unlike wave 5's 4-slice symbol clashes).
+
+**Direction integration probe (throwaway worktree on the `-p` HEAD, gates run with
+`CC=/usr/bin/clang`):**
+- `go build ./...` GREEN · `go vet ./internal/taskboard/...` clean.
+- Full `internal/taskboard` suite GREEN; `-race` CLEAN (0 warnings).
+- Adjacent suites GREEN: `internal/cli`, `internal/cli/cloud`, `internal/apiclient`,
+  `internal/pdrender`.
+- **Both cursor-parity guards hold UNWEAKENED** (`TestCursorParityShellRender`,
+  `TestCursorParityWithClusters`) **plus the new** `TestCursorParityWithPhaseAndNesting` (the polish
+  commit's guard that finally exercises the redesign's nested + phase-band structure — previously
+  untested). `TestRoleForParityWithSemrole` GREEN (RoleFor byte-identical, D37 held).
+  `TestGoldenGlyphBudget` GREEN (allowlist consciously extended: 10 spinner frames + `⠿` + `✕` + `↳`
+  + progress-bar cells, each noted; `!` is ASCII).
+- **LIVE guerrilla render** (read-only `FetchSnapshot`→`BuildBoard`→`Render` at 60/80 cols on the
+  real corpus: 207 tasks, 54 ready / 149 done / 72%, **0 genuinely in_progress**). It reads like the
+  mockup: momentum header `⠸ 0 in flight · ○ 54 ready · ✓ 149 done  72%` + a proportional progress
+  BAR; dotted-leader section headers with `done/total` rollups (`Aesthetic Unification … ··· 14/38`);
+  colored rich rows (glyph · id·title · P-severity priority · N/M criteria); arbitrary-depth `↳`
+  nested subtasks (real on the deploy-button tree); folded done (`+9 done`, `+40 more ready`); honest
+  scroll affordance (`↓ 58 more below`); `▎` selection bar; footer matches. The header spinner
+  renders the live Frame glyph (`⠸`).
+
+**Code-verified D-decisions (not just tests):** D37 `doneColor` teal `#0d9488/#2dd4bf` is a real
+new token DISTINCT from `okColor` `#10b981/#34d399`; D42 there is ONE `spineRows(b,st)` in `spine.go`
+consumed by BOTH `render.go` (flattenSpine) and `program.go` (visibleRows) — parity is now
+STRUCTURAL; D38 spinner rides `Frame%10` with `⠿` freeze under `NO_MOTION` (no wall-clock); the TUI
+status hexes in `theme.go` are BYTE-EQUAL to the spec §1 table (`#60a5fa` blue / `#fbbf24` amber /
+`#2dd4bf` teal / `#f87171` red / `#e7edf2` ready / `#5f6b78` open).
+
+**Honest findings / what "drift gate green" really means here:**
+- There is NO in-repo `design/check` hex gate (spec §6 is aspirational — re-confirmed). The paper
+  `task-list` PortableDoc component the wish cites as "already ships the vocabulary" is NOT in this
+  checkout (it is the aesthetic-unification epic's artifact, built elsewhere). So shared-vocabulary
+  conformance is enforced by: (a) the TUI hexes == spec §1 table exactly, (b) `RoleFor`↔`semrole`
+  parity, (c) the glyph-budget guard — all three GREEN. There is no live cross-file diff to run.
+- **pdrender in-body chips still drift and that is CHARTERED (D43).** `walk.ex task_glyph` (and its
+  `inline.go` twin) still render `○ open / ◐ in_progress / ⊘ blocked / ● done / ✕ cancelled` — the
+  OLD set — so a wikilink chip inside a rendered paper can show a task with a different glyph than the
+  board's new spinner/`!`/teal-`✓`. This is the RESERVED cross-surface slice (Elixir walker +
+  pdrender + Studio parity), acknowledged and untouched this wave.
+- **Empty-title rows render honestly-thin, not as a named gap.** The live `quality` cluster shows
+  `○ ` and `↳ ✓` rows with no title (genuine under-filled corpus tasks). The renderer can't invent a
+  title — correct honesty — but spec §5's "visibly thin with a NAMED gap" is the authoring-quality
+  layer (a different initiative, not this wave's redesign).
+- **Blocker badge is the word, not the cause.** The wire carries only dependency COUNTS, not blocker
+  refs, so the amber badge reads "blocked" — the acknowledged "else the word" fallback in D39. A real
+  `! <cause>` needs the RESERVED per-task blocker-ref enrichment.
+- **NOW band + spinner motion + done-flash could not be visually captured** on the live corpus (0
+  genuinely in_progress — the NOW leak-guard correctly excludes the 119 EXPIRED claims). The header
+  spinner glyph, the motion goldens, and `TestCursorParityWithPhaseAndNesting` cover the mechanism;
+  the animation itself needs a live in_progress task to watch.
+- Harness note: `⇄ —` server name in the probe is a harness artifact (`Chrome` injection is set by
+  the program before first paint; my raw `Render` call used the empty default) — the real `bp tasks`
+  shows `⇄ guerrilla`. Not a bug.
+
+**Lead merge = fast-forward `-p` onto origin/main; nothing to reconcile.** After merge: docs slice
+(tui.md wave-9 delta + the still-open go-1.24.2/1.25.0 drift) + the RESERVED pdrender/walker
+glyph-unify cross-surface slice remain the only open TUI work; the redesign itself is at the bar.
