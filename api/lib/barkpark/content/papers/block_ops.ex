@@ -1064,7 +1064,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
          rev: Map.get(content, "rev"),
          source_doc: Map.get(content, "source_doc"),
          goal_id: Map.get(content, "goal_id"),
-         event_type: Map.get(content, "event_type")
+         event_type: Map.get(content, "event_type"),
+         # The writing process' pid, so a subscriber that is ALSO the writer
+         # (a Studio LiveView editing its own paper) can skip the redundant
+         # self-refetch — see the `sender == self()` guards in
+         # StudioLive lifecycle handlers. Unknown to other consumers (ignored).
+         sender: self()
        }}
 
     # Workspace-scope the topic (barkpark-n56v): stamp the doc's own
@@ -1079,10 +1084,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp broadcast_paper_block(slug, workspace_id, dataset, frame) do
+    # Stamp the writing process' pid so a subscriber that is ALSO the writer
+    # (a Studio LiveView editing its own paper) skips the redundant self-echo
+    # refetch — the initiator already has the confirmed state (and re-reads it
+    # synchronously in `paper_ops/2`). Without this the async self-echo runs a
+    # DB reload that, in tests, outlives the render_hook and races the shared
+    # sandbox teardown (`client exited`). Mirrors the document `sender` guards.
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
       Broadcast.paper_topic(slug, workspace_id, dataset),
-      {:paper_block, frame}
+      {:paper_block, Map.put(frame, :sender, self())}
     )
   end
 
