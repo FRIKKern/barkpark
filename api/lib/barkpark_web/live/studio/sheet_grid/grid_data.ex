@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
 
   import Phoenix.Component, only: [assign: 2]
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
@@ -48,6 +49,14 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     first = offset * @max_rows + 1
     last = min(first + @max_rows - 1, rows)
     {spans, covered} = merge_maps(tab, cols, rows)
+    # Conditional-formatting styles for the LIVE grid (CF-C stage A). Parse the
+    # tab's `cond_formats` once through the ONE kernel, then precompute a
+    # {c, r} -> CF style map over the OCCUPIED cells only (CF-D8: blank cells
+    # never match per CF-D5, so occupied-only is complete AND a hostile huge
+    # range costs nothing). Derived HERE with the rest of the grid body so a
+    # presence frame never re-evaluates rules (the change-tracking contract).
+    rules = CondFormat.parse_rules(Map.get(tab, "cond_formats"))
+    cf_styles = cf_styles(rules, Map.get(tab, "cells") || %{})
     # Page-boundary merge repair: a rowspan anchored ABOVE this window would
     # leave its covered rows a <td> short here (the spanning anchor renders on
     # the prior page), and HTML slot-filling then shifts every cell right of the
@@ -85,9 +94,37 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
       col_widths: Map.get(tab, "col_widths") || %{},
       row_heights: Map.get(tab, "row_heights") || %{},
       frozen_cols: clamp_frozen(Map.get(tab, "frozen_cols"), cols),
-      frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows)
+      frozen_rows: clamp_frozen(Map.get(tab, "frozen_rows"), rows),
+      # {c, r} -> composed CF style, consumed by the grid body's `cell_style`.
+      cf_styles: cf_styles,
+      # The tab's RAW stored rules (with ids), for the toolbar CF panel's list
+      # + edit form — the panel authors the full list the session op replaces.
+      # Always a list so the panel's :for never faults on a malformed (non-list)
+      # stored value the gate would reject anyway.
+      cf_rules: cf_rules_list(Map.get(tab, "cond_formats"))
     )
   end
+
+  # Precompute the {c, r} -> CF style map for the live grid over the OCCUPIED
+  # cells ∩ rule ranges (CF-D8). `CondFormat.style_for/3` supplies the FIRST
+  # matching rule's style (CF-D4); a cell no rule matches earns no entry. Empty
+  # rules short-circuits to an empty map (the byte-identical no-CF default).
+  def cf_styles([], _cells), do: %{}
+
+  def cf_styles(rules, cells) when is_list(rules) and is_map(cells) do
+    for {addr, cell} <- cells,
+        {:ok, {c, r}} <- [Sheets.parse_ref(addr)],
+        style = CondFormat.style_for(rules, {c, r}, cell),
+        not is_nil(style),
+        into: %{} do
+      {{c, r}, style}
+    end
+  end
+
+  def cf_styles(_rules, _cells), do: %{}
+
+  defp cf_rules_list(rules) when is_list(rules), do: rules
+  defp cf_rules_list(_), do: []
 
   # Clamp a requested page index into `[0, last-page]` so a forged, stale, or
   # content-shrank-underneath offset always lands on a real page — the pager

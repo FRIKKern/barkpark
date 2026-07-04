@@ -45,8 +45,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
 
   defp raw_value(%{"v" => true}), do: "TRUE"
   defp raw_value(%{"v" => false}), do: "FALSE"
+
   defp raw_value(%{"v" => v}) when is_number(v),
     do: Barkpark.Plugins.Sheets.Core.number_to_display(v)
+
   defp raw_value(%{"v" => v}) when is_binary(v), do: v
   defp raw_value(_cell), do: ""
 
@@ -67,10 +69,13 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   def display(%{"fmt" => "checkbox"} = cell) when not is_map_key(cell, "v"), do: "☐"
   def display(%{"v" => true}), do: "TRUE"
   def display(%{"v" => false}), do: "FALSE"
+
   def display(%{"v" => v} = cell) when is_number(v),
     do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
+
   def display(%{"v" => v} = cell) when is_binary(v),
     do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
+
   def display(_cell), do: ""
 
   # A cell whose ENTIRE value is an http(s) URL — the grid links it at display
@@ -131,6 +136,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # reads as checked; nil / false / any other value reads as unchecked.
   def aria_checked(%{"v" => true}), do: "true"
   def aria_checked(_cell), do: "false"
+
   # ── find-in-sheet (Ctrl+F) ────────────────────────────────────────────────
   #
   # A pure, server-side scan of the SPARSE `cells` map. The grid body renders
@@ -263,9 +269,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
     end
   end
 
-  # Frozen bands pin via CSS sticky with computed px offsets; cell "s"
-  # styles append last so a cell bg wins over the frozen backdrop.
-  def cell_style(c, r, fc, fr, col_widths, row_heights, cell) do
+  # Frozen bands pin via CSS sticky with computed px offsets; cell "s" styles
+  # (and any conditional-format style) append LAST so a cell bg wins over the
+  # frozen backdrop. `cf` is the precomputed conditional-format style map for
+  # THIS cell (or nil) — `GridData.derive_grid/1` builds it from the tab's
+  # `cond_formats` via the ONE CondFormat kernel (CF-D1, no forked eval). Per
+  # CF-D3 the CF style wins the keys it sets (bg, and b/i when present); the
+  # manual "s" keeps every other key (al). A nil `cf` (the no-rules default)
+  # is BYTE-IDENTICAL to the historical manual-only path.
+  def cell_style(c, r, fc, fr, col_widths, row_heights, cell, cf \\ nil) do
     sticky =
       cond do
         c <= fc and r <= fr ->
@@ -281,13 +293,34 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
           ""
       end
 
-    case sticky <> s_style(cell) do
+    case sticky <> s_style(cell, cf) do
       "" -> nil
       style -> style
     end
   end
 
-  defp s_style(%{"s" => %{} = s}) do
+  # No CF for this cell → the historical manual-"s"-only path, byte-identical.
+  defp s_style(cell, nil), do: s_style(cell)
+
+  # CF present → compose the manual "s" UNDER the CF style (CF-D3: CF wins the
+  # keys it sets) through the ONE kernel, then emit the shared vocabulary.
+  defp s_style(cell, cf) when is_map(cf) do
+    manual =
+      case cell do
+        %{"s" => %{} = s} -> s
+        _ -> nil
+      end
+
+    style_css(Barkpark.Plugins.Sheets.CondFormat.compose(manual, cf))
+  end
+
+  defp s_style(%{"s" => %{} = s}), do: style_css(s)
+  defp s_style(_cell), do: ""
+
+  # Emit the b/i/bg/al inline-style vocabulary from a (manual OR CF-composed)
+  # style map — bg is re-validated against #rrggbb at the render seam, so a
+  # malformed value never reaches a style attribute.
+  defp style_css(s) do
     [
       if(Map.get(s, "b") == true, do: " font-weight: 600;", else: ""),
       if(Map.get(s, "i") == true, do: " font-style: italic;", else: ""),
@@ -299,14 +332,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
           ""
       end,
       case Map.get(s, "al") do
-        al when al in ["left", "center", "right"] -> " text-align: #{al};"
-        _ -> ""
+        al when al in ["left", "center", "right"] ->
+          " text-align: #{al};"
+
+        _ ->
+          ""
       end
     ]
     |> Enum.join()
   end
-
-  defp s_style(_cell), do: ""
 
   # Spreadsheet-default alignment class for cells WITHOUT an explicit s.al:
   # numeric values and number-shaped fmts (currency/percent/…/datetime) read

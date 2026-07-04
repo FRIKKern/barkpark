@@ -84,6 +84,15 @@ defmodule Barkpark.Plugins.Sheets.Session do
       (`merge_overlap`); unmerge drops every merge whose rect intersects the
       range (`no_merge_in_range` when none does). V1 is NON-destructive —
       covered cells keep their data, so an unmerge restores every value.
+    * `%{"op" => "set_cond_format", "tab" => i, "rules" => [rule, …]}` —
+      replaces the tab's WHOLE `cond_formats` list (CF-C). Each rule is
+      `%{"id","range","when"=>%{"op","value",…},"style"=>%{"bg",…}}`; the list
+      is validated with byte-identical strictness to the plugin's before_save
+      gate (`Barkpark.Plugins.Sheets.cond_format_list_errors/2`, CF-D6) so a
+      session-accepted rule can never strand the debounced persist (CF-AM1) —
+      an invalid list is rejected whole (`invalid_cond_format`). No recompute
+      (rules change render style, never a cell value); the inverse restores the
+      prior list.
 
   Validation per op: the ref must be A1-style within the Excel grid bounds,
   the tab index must exist, and a `set_cell` that would push the sheet past
@@ -106,6 +115,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
   prior px; `set_frozen` the prior bands; `rename_tab` the prior name; `add_tab` its `delete_tab`;
   `delete_tab` the captured tab; `move_tab`/`duplicate_tab` their inverse
   (a mirrored `move_tab` / a `delete_tab` of the inserted slot);
+  `set_cond_format` the prior `cond_formats` list (a structural set_cond_format);
   `merge_cells` a GRANULAR remove of just the range it added and `unmerge_cells`
   a granular re-add of just the ranges it dropped (skipping any a later op has
   re-covered — a re-added merge may land at pre-shift coordinates, the same

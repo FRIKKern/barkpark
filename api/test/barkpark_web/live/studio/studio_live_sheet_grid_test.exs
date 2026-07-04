@@ -107,6 +107,11 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     get_in(content, ["tabs", Access.at(tab_idx), "merges"]) || []
   end
 
+  defp peek_cond_formats(slug, tab_idx \\ 0) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab_idx), "cond_formats"]) || []
+  end
+
   defp namebox(view) do
     view |> element(~s([data-test-id="sheet-namebox"])) |> render()
   end
@@ -241,7 +246,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   test "a header click while editing commits the draft, then selects the row/col",
        %{conn: conn} do
     create_sheet!("sg-head-commit", one_tab(%{}))
-    {view, target, _html} = open!(conn, "sg-head-commit")
+    {_view, target, _html} = open!(conn, "sg-head-commit")
 
     render_hook(target, "cell-click", %{"ref" => "B2", "shift" => false})
     render_hook(target, "edit-start", %{})
@@ -412,14 +417,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
     render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
     # Scope to the cell — the percent toolbar button's tooltip also says "25.00%".
-    assert (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
+    assert view |> element(~s(td[data-ref="A1"])) |> render() =~ "25.00%"
 
     view
     |> element(~s(form[phx-change="set-fmt"]))
     |> render_change(%{"fmt" => ""})
 
     assert %{"A1" => %{"v" => 0.25}} = peek_cells("sg-general")
-    refute (view |> element(~s(td[data-ref="A1"])) |> render()) =~ "25.00%"
+    refute view |> element(~s(td[data-ref="A1"])) |> render() =~ "25.00%"
   end
 
   test "clicking B adds font-weight to the active cell's style", %{conn: conn} do
@@ -461,6 +466,126 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     view |> element(~s([data-test-id="sheet-undo-btn"])) |> render_click()
     assert %{"A1" => %{"v" => "head"}} = peek_cells("sg-undo-btn")
     refute render(view) =~ "font-weight: 600"
+  end
+
+  # ── conditional formatting (CF-C) ──────────────────────────────────────────
+
+  test "a stored gt rule paints the matched cell's td and leaves the unmatched plain",
+       %{conn: conn} do
+    create_sheet!("sg-cf-render", [
+      %{
+        "name" => "Data",
+        "cells" => %{"B2" => %{"v" => 250}, "B3" => %{"v" => 5}},
+        "cond_formats" => [
+          %{
+            "id" => "cf-1",
+            "range" => "B2:B3",
+            "when" => %{"op" => "gt", "value" => 100},
+            "style" => %{"bg" => "#ff0000"}
+          }
+        ]
+      }
+    ])
+
+    {view, _target, _html} = open!(conn, "sg-cf-render")
+
+    assert view |> element(~s(td[data-ref="B2"])) |> render() =~ "background: #ff0000"
+    refute view |> element(~s(td[data-ref="B3"])) |> render() =~ "background: #ff0000"
+  end
+
+  test "the Cond. format panel authors a rule that stores AND paints the live grid",
+       %{conn: conn} do
+    create_sheet!("sg-cf-panel", one_tab(%{"A1" => %{"v" => 200}, "A2" => %{"v" => 3}}))
+    {view, target, _html} = open!(conn, "sg-cf-panel")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-cf-btn"])) |> render_click()
+    assert has_element?(view, ~s([data-test-id="sheet-cf-panel"]))
+
+    view
+    |> element(~s([data-test-id="sheet-cf-form"]))
+    |> render_submit(%{
+      "editing" => "",
+      "range" => "A1:A2",
+      "op" => "gt",
+      "value" => "100",
+      "bg" => "#ff0000"
+    })
+
+    # Stored with a server-generated id; the value coerced to a real number.
+    assert [
+             %{
+               "id" => id,
+               "range" => "A1:A2",
+               "when" => %{"op" => "gt", "value" => 100},
+               "style" => %{"bg" => "#ff0000"}
+             }
+           ] = peek_cond_formats("sg-cf-panel")
+
+    assert String.starts_with?(id, "cf-")
+
+    # A1 (200 > 100) paints live; A2 (3) does not.
+    assert view |> element(~s(td[data-ref="A1"])) |> render() =~ "background: #ff0000"
+    refute view |> element(~s(td[data-ref="A2"])) |> render() =~ "background: #ff0000"
+  end
+
+  test "undo/redo round-trips a set_cond_format op", %{conn: conn} do
+    create_sheet!("sg-cf-undo", one_tab(%{"A1" => %{"v" => 200}}))
+    {view, target, _html} = open!(conn, "sg-cf-undo")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-cf-btn"])) |> render_click()
+
+    view
+    |> element(~s([data-test-id="sheet-cf-form"]))
+    |> render_submit(%{
+      "editing" => "",
+      "range" => "A1",
+      "op" => "gt",
+      "value" => "100",
+      "bg" => "#ff0000"
+    })
+
+    assert [%{"range" => "A1"}] = peek_cond_formats("sg-cf-undo")
+
+    render_hook(target, "undo", %{})
+    assert peek_cond_formats("sg-cf-undo") == []
+
+    render_hook(target, "redo", %{})
+    assert [%{"range" => "A1", "style" => %{"bg" => "#ff0000"}}] = peek_cond_formats("sg-cf-undo")
+  end
+
+  test "an invalid rule is rejected with a notice and stores nothing (gate parity)",
+       %{conn: conn} do
+    create_sheet!("sg-cf-bad", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, _html} = open!(conn, "sg-cf-bad")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    view |> element(~s([data-test-id="sheet-cf-btn"])) |> render_click()
+
+    # gt with a non-numeric value fails the CF-D6 gate → rejected whole.
+    html =
+      view
+      |> element(~s([data-test-id="sheet-cf-form"]))
+      |> render_submit(%{
+        "editing" => "",
+        "range" => "A1",
+        "op" => "gt",
+        "value" => "abc",
+        "bg" => "#ff0000"
+      })
+
+    assert peek_cond_formats("sg-cf-bad") == []
+    assert html =~ "rejected"
+  end
+
+  test "the Cond. format button is editable-only (absent in View mode)", %{conn: conn} do
+    create_sheet!("sg-cf-view", one_tab(%{"A1" => %{"v" => 1}}))
+    {view, target, html} = open!(conn, "sg-cf-view")
+    assert html =~ ~s(data-test-id="sheet-cf-btn")
+
+    render_hook(target, "toggle-mode", %{})
+    refute render(view) =~ ~s(data-test-id="sheet-cf-btn")
   end
 
   test "engine error values render with the error styling", %{conn: conn} do

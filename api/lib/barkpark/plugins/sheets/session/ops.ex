@@ -204,6 +204,36 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # Whole-tab conditional-formatting replace (CF-C). The op carries the tab's
+  # FULL new `cond_formats` list; apply_one validates it with byte-identical
+  # strictness to the CF-B before_save gate (via the plugin's public validator)
+  # BEFORE storing — a session-accepted rule the gate would later reject would
+  # strand the debounced persist forever (the CF-AM1 bug class). The inverse is
+  # a structural set_cond_format back to the PRIOR list, so undo/redo ride the
+  # existing structural machinery (no new inverse shape). No recompute: rules
+  # never change a cell VALUE, only its rendered style.
+  def apply_one(%{"op" => "set_cond_format", "tab" => tab, "rules" => rules}, state)
+      when is_list(rules) do
+    with {:ok, tab_idx} <- fetch_tab(state.content, tab),
+         :ok <- validate_cond_formats(rules, tab_idx) do
+      old_tab = Sheets.get_tab(state.content, tab_idx)
+      prior = Map.get(old_tab, "cond_formats") || []
+      inverse = {:structural, %{"op" => "set_cond_format", "tab" => tab_idx, "rules" => prior}}
+      new_tab = Map.put(old_tab, "cond_formats", rules)
+
+      {:ok,
+       apply_structural(state, tab_idx, new_tab, false, %{
+         op: "set_cond_format",
+         at: nil,
+         count: nil,
+         tab: tab_idx
+       }), inverse}
+    end
+  end
+
+  def apply_one(%{"op" => "set_cond_format", "tab" => _tab}, _state),
+    do: {:error, "invalid_cond_format", "\"rules\" must be a list"}
+
   def apply_one(%{"op" => "rename_tab", "tab" => tab, "name" => name}, state) do
     with {:ok, tab_idx} <- fetch_tab(state.content, tab),
          {:ok, name} <- validate_tab_name(name) do
@@ -420,6 +450,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
+       "set_cond_format (\"tab\"+\"rules\"), " <>
        "rename_tab (\"tab\"+\"name\"), add_tab (\"name\"), delete_tab (\"tab\"), " <>
        "move_tab (\"from\"+\"to\"), duplicate_tab (\"tab\"), " <>
        "merge_cells/unmerge_cells (\"tab\"+\"range\") " <>
@@ -803,6 +834,20 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp structural_shift("delete_rows", tab, at, count), do: Structure.delete_rows(tab, at, count)
   defp structural_shift("insert_cols", tab, at, count), do: Structure.insert_cols(tab, at, count)
   defp structural_shift("delete_cols", tab, at, count), do: Structure.delete_cols(tab, at, count)
+
+  # Gate-parity validation for set_cond_format — delegates to the plugin's
+  # PUBLIC before_save validator (`Barkpark.Plugins.Sheets.cond_format_list_errors/2`)
+  # so the session admits EXACTLY the rule lists the persist gate admits (CF-D6,
+  # CF-AM1). This is the one deliberate CORE→plugin reach in this module: unlike
+  # the duplicated grid/merge bounds (kept in sync by hand), the CF gate is far
+  # richer, so the charter mandates ONE validator shared by both sides (no
+  # fourth copy — the parked-hygiene rule). Runtime call only; no compile cycle.
+  defp validate_cond_formats(rules, tab_idx) do
+    case Barkpark.Plugins.Sheets.cond_format_list_errors(rules, tab_idx) do
+      [] -> :ok
+      errors -> {:error, "invalid_cond_format", Enum.join(errors, "; ")}
+    end
+  end
 
   defp validate_tab_name(name) do
     if is_binary(name) and String.trim(name) != "" do

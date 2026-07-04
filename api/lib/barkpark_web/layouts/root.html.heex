@@ -3717,6 +3717,58 @@
       display: flex; align-items: center; gap: 2px;
       padding: 0 4px; border-left: 1px solid var(--border);
     }
+
+    /* ── Conditional-formatting panel (CF-C, Studio-only per arc-1 Decision
+       13 — NOT mirrored to layouts/sheets.html.heex; readers never author
+       rules). Rides the .sheet-popover hairline-and-token family + reuses the
+       .sheet-bg-swatch palette from the style group. */
+    .sheet-cf-group {
+      display: flex; align-items: center; gap: 2px; position: relative;
+      padding: 0 4px; border-left: 1px solid var(--border);
+    }
+    .sheet-cf-panel {
+      top: calc(100% + 4px); left: 0; width: 300px; max-width: 92vw;
+      max-height: 420px; padding: 10px 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .sheet-cf-head { display: flex; align-items: center; justify-content: space-between; }
+    .sheet-cf-title { font-weight: 600; font-size: 12px; color: var(--fg); }
+    .sheet-cf-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+    .sheet-cf-rule {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 4px; border-radius: 4px;
+    }
+    .sheet-cf-rule:hover { background: rgba(127, 127, 127, 0.10); }
+    .sheet-cf-swatch {
+      flex: none; width: 14px; height: 14px; border-radius: 3px;
+      border: 1px solid var(--border);
+    }
+    .sheet-cf-summary {
+      flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--fg);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .sheet-cf-empty { margin: 0; font-size: 11px; font-style: italic; color: var(--fg-dim, var(--fg)); }
+    .sheet-cf-form {
+      display: flex; flex-direction: column; gap: 7px;
+      border-top: 1px solid var(--border); padding-top: 8px;
+    }
+    .sheet-cf-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
+    .sheet-cf-field > input[type="text"], .sheet-cf-field > select {
+      padding: 4px 6px; font-size: 12px; color: var(--fg);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    }
+    .sheet-cf-field > input:focus-visible, .sheet-cf-field > select:focus-visible {
+      outline: 2px solid var(--ring, #3b82f6); outline-offset: -1px;
+    }
+    .sheet-cf-flags { flex-direction: row; gap: 12px; }
+    .sheet-cf-flags label { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+    /* The bg radios are visually the swatch squares; the selected one gets a
+       ring so choice never relies on a checkmark that isn't there (WCAG 1.4.1). */
+    .sheet-cf-swatch-opt { display: inline-flex; cursor: pointer; }
+    .sheet-cf-swatch-opt .sheet-bg-swatch[data-selected="true"] {
+      box-shadow: 0 0 0 2px var(--bg), 0 0 0 3px var(--ring, #3b82f6);
+    }
+    .sheet-cf-actions { display: flex; justify-content: flex-end; }
   </style>
 </head>
 <body>
