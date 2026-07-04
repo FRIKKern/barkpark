@@ -57,6 +57,7 @@ defmodule Barkpark.Plugins.Sheets do
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
 
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: SheetCore
 
   @schemas_dir Path.expand("../../../priv/plugins/sheets/schemas", __DIR__)
@@ -64,12 +65,6 @@ defmodule Barkpark.Plugins.Sheets do
   @cell_cap 50_000
   @merge_area_cap 10_000
   @cond_format_cap 200
-
-  # Conditional-formatting rule `style.bg` — a #rrggbb color (case-insensitive
-  # in, the manual style sanitizer normalizes to lowercase downstream).
-  # `\z`, not `$`: PCRE `$` also matches before a trailing newline, and a
-  # stored bg is emitted into style attributes downstream — no stowaways.
-  @cf_hex_re ~r/^#[0-9a-fA-F]{6}\z/
 
   # Excel's grid bounds — column XFD, row 1_048_576. Enforced at the gate
   # AFTER parse (see bounds_errors/3), not inside `Barkpark.Plugins.Sheets.Core.parse_ref/1`:
@@ -449,15 +444,15 @@ defmodule Barkpark.Plugins.Sheets do
     end
   end
 
+  # The `#rrggbb` validator is single-sourced in CondFormat (arc-2 parked
+  # hygiene) — `valid_bg?/1` is byte-identical in acceptance to the manual
+  # sanitizer, so a gate-accepted bg is exactly one the snapshot keeps.
   defp cf_bg_errors(s, prefix) do
     case Map.fetch(s, "bg") do
-      {:ok, bg} when is_binary(bg) ->
-        if Regex.match?(@cf_hex_re, bg),
+      {:ok, bg} ->
+        if CondFormat.valid_bg?(bg),
           do: [],
           else: [prefix <> "style.bg must be a #rrggbb color, got #{inspect(bg)}"]
-
-      {:ok, bg} ->
-        [prefix <> "style.bg must be a #rrggbb color, got #{inspect(bg)}"]
 
       :error ->
         [prefix <> "style.bg is required"]

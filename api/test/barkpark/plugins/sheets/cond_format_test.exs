@@ -13,6 +13,10 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
 
   alias Barkpark.Plugins.Sheets.CondFormat
 
+  # Executes the `## Examples` in `sanitize_bg/1` / `valid_bg?/1` — the doc'd
+  # single-owner contract stays true by test, not by hand-verification.
+  doctest Barkpark.Plugins.Sheets.CondFormat
+
   @fixture_path Path.expand(
                   "../../../support/fixtures/sheet-cond-format-eval.json",
                   __DIR__
@@ -173,6 +177,46 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
 
       assert r1.style == %{"bg" => "#aaaaaa"}
       assert r2.style == %{"bg" => "#bbbbbb"}
+    end
+
+    test "a bg with a trailing newline drops the rule (`\\z` tightening)" do
+      # The bg sanitizer is `\z`-anchored now: "#ff0000\n" leaks under `$` but
+      # sanitizes to nil here, so the style is empty and the rule is skipped.
+      assert CondFormat.parse_rules([
+               %{
+                 "range" => "A1",
+                 "when" => %{"op" => "gt", "value" => 1},
+                 "style" => %{"bg" => "#ff0000\n"}
+               }
+             ]) == []
+    end
+  end
+
+  # ── sanitize_bg/1 + valid_bg?/1 — the SINGLE `#rrggbb` sanitizer owner ────────
+
+  describe "sanitize_bg/1 and valid_bg?/1" do
+    test "a #rrggbb normalizes to lowercase; case-insensitive in" do
+      assert CondFormat.sanitize_bg("#ff0000") == "#ff0000"
+      assert CondFormat.sanitize_bg("#FF00AA") == "#ff00aa"
+      assert CondFormat.sanitize_bg("#AbCdEf") == "#abcdef"
+    end
+
+    test "a trailing newline is rejected (`\\z`, not `$`)" do
+      assert CondFormat.sanitize_bg("#ff0000\n") == nil
+      refute CondFormat.valid_bg?("#ff0000\n")
+    end
+
+    test "bad shapes and non-binaries return nil / false" do
+      for bad <- ["red", "#fff", "#ffff", "#gggggg", "ff0000", "", nil, 42, %{}] do
+        assert CondFormat.sanitize_bg(bad) == nil
+        refute CondFormat.valid_bg?(bad)
+      end
+    end
+
+    test "valid_bg?/1 acceptance is byte-identical to sanitize_bg/1 returning non-nil" do
+      for v <- ["#ff0000", "#FF00AA", "#ff0000\n", "red", "#fff", nil, true] do
+        assert CondFormat.valid_bg?(v) == (CondFormat.sanitize_bg(v) != nil)
+      end
     end
   end
 
