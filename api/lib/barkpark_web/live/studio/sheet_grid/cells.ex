@@ -29,6 +29,24 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # fmt cell exports "0.25", not "25.00%", so a paste into Excel round-trips.
   def data_v(cell), do: raw_value(cell)
 
+  # The stored formula for a cell WITHOUT the leading "=", or nil for a
+  # literal cell — the `data-f` td stamp's only source. Twin of `data_v`
+  # (the computed value): where `data_v` carries what a paste into Excel
+  # sees, `data-f` carries the rebase-able SOURCE the client formula
+  # clipboard (S-CLIP) reads to carry formulas through copy/paste. Only the
+  # EDITABLE grid stamps it (readers stay formula-free, like `data-fns`), so
+  # the client never round-trips the server for the formula truth. A blank
+  # or absent formula yields nil so LiveView omits the attribute entirely
+  # (parallel to `data_t/1`'s nil-omits-the-attr contract).
+  def formula(%{"f" => f}) when is_binary(f) do
+    case String.trim_leading(f, "=") do
+      "" -> nil
+      stripped -> stripped
+    end
+  end
+
+  def formula(_cell), do: nil
+
   # Value-type marker stamped as `data-t` on each `<td>` — "n" when the cell's
   # computed value is numeric (a plain number OR a formula whose cached "v" is
   # a number), `nil` otherwise so the attribute is simply omitted. This is the

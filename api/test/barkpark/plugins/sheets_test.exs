@@ -112,4 +112,70 @@ defmodule Barkpark.Plugins.SheetsTest do
              "expected capabilities ['schemas', 'routes'] in manifest (M5 conversion API)"
     end
   end
+
+  # Drive the before_save hook directly (no DB): it returns :ok or
+  # {:halt, reason}. This is the strict half of QL-D2 — a present tab
+  # "color" must be #rrggbb (case-insensitive) or the save halts (409),
+  # beside cells/merges/cond_formats; absent is fine. Synthesis stays
+  # lenient (a junk color is dropped, never raises) — tested elsewhere.
+  defp fire_before_save(tab) do
+    [hook] = Sheets.lifecycle_hooks()[:before_save]
+    hook.(%{doc: %{"type" => "sheet", "content" => %{"tabs" => [tab]}}})
+  end
+
+  describe "before_save gate — per-tab color (QL-D2)" do
+    test "a valid lowercase #rrggbb color passes" do
+      assert fire_before_save(%{"name" => "S", "color" => "#1a2b3c"}) == :ok
+    end
+
+    test "an UPPERCASE #RRGGBB color passes (case-insensitive)" do
+      assert fire_before_save(%{"color" => "#AABBCC"}) == :ok
+    end
+
+    test "an absent color passes" do
+      assert fire_before_save(%{"name" => "S", "cells" => %{"A1" => %{"v" => 1}}}) == :ok
+    end
+
+    test "a malformed color (bad hex digit) halts the save" do
+      assert {:halt, msg} = fire_before_save(%{"color" => "#gggggg"})
+      assert msg =~ "invalid color"
+      assert msg =~ "#rrggbb"
+    end
+
+    test "a 3-digit shorthand color halts (only full #rrggbb round-trips)" do
+      assert {:halt, msg} = fire_before_save(%{"color" => "#f00"})
+      assert msg =~ "invalid color"
+    end
+
+    test "a color missing the leading # halts" do
+      assert {:halt, msg} = fire_before_save(%{"color" => "1a2b3c"})
+      assert msg =~ "invalid color"
+    end
+
+    test "a non-string color halts with a shape message" do
+      assert {:halt, msg} = fire_before_save(%{"color" => 123})
+      assert msg =~ "color must be a #rrggbb string"
+    end
+
+    test "the color error carries the tab index and does not spuriously reject a valid sibling tab" do
+      [hook] = Sheets.lifecycle_hooks()[:before_save]
+
+      result =
+        hook.(%{
+          doc: %{
+            "type" => "sheet",
+            "content" => %{
+              "tabs" => [
+                %{"name" => "ok", "color" => "#00aa00"},
+                %{"name" => "bad", "color" => "#zzzzzz"}
+              ]
+            }
+          }
+        })
+
+      assert {:halt, msg} = result
+      assert msg =~ "tab 1"
+      refute msg =~ "tab 0"
+    end
+  end
 end
