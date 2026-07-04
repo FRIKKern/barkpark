@@ -8,11 +8,13 @@ defmodule Barkpark.PortableDoc.Render.ParityFixture do
       surface down to author DATA only.
 
   Both rails MUST walk the identical tree so a divergence caught by one is the
-  same node the other characterises. The tree covers EVERY PdNode kind
-  `Barkpark.PortableDoc.Render.Walk` renders (see `walk/3` clause list) plus the
+  same node the other characterises. The tree covers EVERY `walk/3` clause in
+  `Barkpark.PortableDoc.Render.Walk` — every persisted PdNode kind, the
   resolved/unresolved variants that only light up when the palette carries a
-  `:wikilinks` / `:embeds` / `:values` resolution map — so those maps live here
-  too, next to the tree, and ride `render_opts/1`.
+  `:wikilinks` / `:embeds` / `:values` resolution map (so those maps live here
+  too, next to the tree, and ride `render_opts/1`), the `doc_id` id-pin
+  wikilink fast path, the sheet truncation note, and the four degrade/leaf
+  clauses (`_raw`, bare number, unknown kind, kindless catch-all).
 
   This is test scaffolding only: no lib/ file depends on it, and it emits plain
   string-keyed maps exactly as a persisted paper's Pd-tree would.
@@ -30,7 +32,18 @@ defmodule Barkpark.PortableDoc.Render.ParityFixture do
       priority: 0,
       criteria: %{met: 1, total: 3}
     },
-    "Anchored Note" => %{id: "doc-99", title: "Anchored Note", kind: "paper"}
+    "Anchored Note" => %{id: "doc-99", title: "Anchored Note", kind: "paper"},
+    # Id-pin key shape: a picker-stamped wikilink resolves by `{:id, doc_id}`
+    # BEFORE the title lookup (walk.ex id-pin fast path). Only a task hit needs
+    # the entry — a paper pin renders /papers/<doc_id> even without one.
+    {:id, "t7"} => %{
+      id: "t7",
+      title: "The Ship Task",
+      kind: "task",
+      status: "in_progress",
+      priority: 0,
+      criteria: %{met: 1, total: 3}
+    }
   }
 
   # Resolved-embed target → pre-rendered (already-safe) HTML string.
@@ -82,7 +95,13 @@ defmodule Barkpark.PortableDoc.Render.ParityFixture do
       table(),
       sheet(),
       callouts(),
-      box()
+      box(),
+      # APPEND-ONLY tail (keeps earlier goldens a byte-prefix of later ones,
+      # which makes a regeneration reviewable): id-pin variants, the sheet
+      # truncation note, and the degrade/leaf clauses.
+      pinned_wikilinks(),
+      truncated_sheet(),
+      degrades()
     ])
   end
 
@@ -350,6 +369,54 @@ defmodule Barkpark.PortableDoc.Render.ParityFixture do
     ]
 
     tones ++ collapsibles
+  end
+
+  # ── id-pin wikilink fast path (walk.ex branches on `doc_id` FIRST) ──────────
+  #
+  #   • A paper pin resolves straight to /papers/<doc_id> — no palette entry
+  #     needed — and takes the `alias` label branch of wikilink_label/3.
+  #   • A task pin needs the `{:id, doc_id}` palette hit to render the chip
+  #     (otherwise it would emit a dead /papers/<task-id> anchor).
+  defp pinned_wikilinks do
+    [
+      %{
+        "kind" => "PdWikilink",
+        "doc_id" => "pin-1",
+        "target" => "Some Retitled Paper",
+        "alias" => "the pinned paper",
+        "children" => []
+      },
+      %{
+        "kind" => "PdWikilink",
+        "doc_id" => "t7",
+        "target" => "The Ship Task",
+        "children" => ["the pinned task"]
+      }
+    ]
+  end
+
+  # A snapshot clipped at the position cap appends the muted truncation note
+  # (`walk.ex sheet_truncation_note/3`) — inline margin/font-size/color that the
+  # article allowlist must keep counting until the slice that retires them.
+  defp truncated_sheet do
+    %{
+      "kind" => "PdSheet",
+      "head" => [],
+      "rows" => [["only row shown"]],
+      "truncated" => true
+    }
+  end
+
+  # The four non-persisted walk clauses: `_raw` passthrough (compose's
+  # diagram/figure escape hatch — emitted VERBATIM), the tolerant bare-number
+  # leaf, the unknown-kind degrade div, and the kindless catch-all (emits "").
+  defp degrades do
+    [
+      %{"kind" => "_raw", "html" => ~s(<pre class="mermaid">graph LR</pre>)},
+      2026,
+      %{"kind" => "PdHologram"},
+      %{"not_a_node" => true}
+    ]
   end
 
   defp box do

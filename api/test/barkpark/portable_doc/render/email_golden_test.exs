@@ -110,7 +110,17 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             "<summary",
             # box geometry
             "flex-direction:row",
-            "border:2px solid #a23925"
+            "border:2px solid #a23925",
+            # id-pin wikilink fast path (paper pin + alias label; task pin chips)
+            ~s(href="/papers/pin-1"),
+            ">the pinned paper</a>",
+            # sheet truncation note
+            "Sheet truncated — showing the first 1 rows",
+            # degrade/leaf clauses: _raw verbatim, bare-number leaf (position-
+            # locked between the _raw close and the degrade div), unknown kind
+            ~s(<pre class="mermaid">graph LR</pre>),
+            "</pre>2026<div",
+            ~s(<div class="bp-unknown-block">Unsupported block: PdHologram</div>)
           ] do
         assert String.contains?(golden, needle),
                "golden is missing coverage for: #{inspect(needle)}"
