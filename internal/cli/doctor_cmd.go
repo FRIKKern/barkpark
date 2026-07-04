@@ -193,7 +193,7 @@ func doctorNoTarget(out *writer, msg string, cfg *Config) {
 		out.renderYAML(toGeneric(m))
 		return
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	if len(names) > 0 {
 		out.errf("known Barkparks: %s", joinComma(names))
 	}

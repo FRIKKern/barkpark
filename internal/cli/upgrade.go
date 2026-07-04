@@ -262,7 +262,7 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		case "--check":
 			check = true
 		default:
-			out.errf("barkpark: unknown upgrade flag %q", a)
+			out.userErr("unknown upgrade flag %q", a)
 			out.errf("usage: bp upgrade [--check] [-o json|yaml]")
 			return exitUsage
 		}

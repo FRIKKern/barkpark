@@ -137,7 +137,7 @@ func useUnknown(out *writer, cfg *Config, q string) int {
 		out.renderYAML(toGeneric(m))
 		return exitUsage
 	}
-	out.errf("barkpark: no known server matches %q", q)
+	out.userErr("no known server matches %q", q)
 	if len(names) > 0 {
 		out.errf("known servers: %s", joinComma(names))
 		out.errf("run `bp servers` for details.")
@@ -321,7 +321,7 @@ func useError(out *writer, code, msg string, exit int) int {
 	if renderErrorEnvelope(out, code, msg, "", "") {
 		return exit
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	return exit
 }
 

@@ -357,7 +357,7 @@ func TestRunSeedMutateFailureEnvelope(t *testing.T) {
 }
 
 // TestRunSeedFailureDefaultTextUnchanged pins the default (table) mode: a failure
-// still prints the human "barkpark: …" line to stderr and emits NO JSON envelope
+// still prints the human "bp: …" line to stderr and emits NO JSON envelope
 // on stdout — the -o json parity fix must not alter the text path.
 func TestRunSeedFailureDefaultTextUnchanged(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -375,7 +375,7 @@ func TestRunSeedFailureDefaultTextUnchanged(t *testing.T) {
 	if code != exitNotFound {
 		t.Fatalf("exit = %d, want exitNotFound %d", code, exitNotFound)
 	}
-	if !strings.Contains(se.String(), "barkpark:") {
+	if !strings.Contains(se.String(), "bp:") {
 		t.Errorf("default mode did not print human stderr line: %q", se.String())
 	}
 	if strings.Contains(so.String(), `"ok"`) {

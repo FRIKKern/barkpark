@@ -8,7 +8,7 @@ import (
 
 // The error helpers must reach -o yaml parity with -o json: a scripting consumer
 // that chose yaml should get a parseable `ok: false` envelope on failures, not a
-// human `barkpark:`-prefixed stderr line.
+// human `bp:`-prefixed stderr line.
 
 func TestUseUnknownYAMLEmitsEnvelope(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -22,7 +22,7 @@ func TestUseUnknownYAMLEmitsEnvelope(t *testing.T) {
 	if !strings.Contains(got, "ok: false") {
 		t.Fatalf("yaml stdout missing `ok: false`:\n%s", got)
 	}
-	if strings.Contains(stderr.String(), "barkpark:") {
+	if strings.Contains(stderr.String(), "bp:") {
 		t.Fatalf("yaml path leaked human stderr line:\n%s", stderr.String())
 	}
 }
@@ -39,7 +39,7 @@ func TestUseErrorYAMLEmitsEnvelope(t *testing.T) {
 	if !strings.Contains(got, "ok: false") {
 		t.Fatalf("yaml stdout missing `ok: false`:\n%s", got)
 	}
-	if strings.Contains(stderr.String(), "barkpark:") {
+	if strings.Contains(stderr.String(), "bp:") {
 		t.Fatalf("yaml path leaked human stderr line:\n%s", stderr.String())
 	}
 }
@@ -54,7 +54,7 @@ func TestDoctorNoTargetYAMLEmitsEnvelope(t *testing.T) {
 	if !strings.Contains(got, "ok: false") {
 		t.Fatalf("yaml stdout missing `ok: false`:\n%s", got)
 	}
-	if strings.Contains(stderr.String(), "barkpark:") {
+	if strings.Contains(stderr.String(), "bp:") {
 		t.Fatalf("yaml path leaked human stderr line:\n%s", stderr.String())
 	}
 }

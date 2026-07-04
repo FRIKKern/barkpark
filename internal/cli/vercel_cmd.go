@@ -72,7 +72,7 @@ func runVercel(out *writer, g globals, tail []string) int {
 		usageVercel(out, true)
 		return exitOK
 	default:
-		out.errf("barkpark: unknown vercel subcommand %q", sub)
+		out.userErr("unknown vercel subcommand %q", sub)
 		usageVercel(out, false)
 		return exitUsage
 	}
@@ -94,7 +94,7 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 		if machine {
 			return vercelFail(out, true, "usage", err.Error(), exitUsage)
 		}
-		out.errf("barkpark: %v", err)
+		out.userErr("%v", err)
 		usageVercel(out, false)
 		return exitUsage
 	}
@@ -214,7 +214,7 @@ func vercelUsageError(out *writer, machine bool, msg string) int {
 	if machine {
 		return vercelFail(out, true, "usage", msg, exitUsage)
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	usageVercel(out, false)
 	return exitUsage
 }
@@ -222,7 +222,7 @@ func vercelUsageError(out *writer, machine bool, msg string) int {
 // vercelFail is the single failure seam for the vercel built-in. In machine mode
 // it emits a {ok:false, error:{code,message}} envelope on stdout (matching the
 // migrate/hetzner CLI convention) so a scripted caller sees a parseable failure;
-// in human mode it writes the familiar `barkpark: …` line to stderr.
+// in human mode it writes the familiar `bp: …` line to stderr.
 func vercelFail(out *writer, machine bool, code, msg string, exit int) int {
 	if machine {
 		out.emitStructured(map[string]any{
@@ -231,7 +231,7 @@ func vercelFail(out *writer, machine bool, code, msg string, exit int) int {
 		})
 		return exit
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	return exit
 }
 

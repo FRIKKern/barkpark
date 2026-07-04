@@ -129,6 +129,19 @@ func (w *writer) errf(format string, a ...any) {
 	fmt.Fprintf(w.stderr, format+"\n", a...)
 }
 
+// userErr is the ONE seam for a human-facing CLI error line. It writes to stderr
+// prefixed with the canonical `bp:` brand tag (the binary is `bp`), so the prefix
+// literal lives in exactly one place — a rebrand is a one-line change and the
+// whole CLI stays consistent. Continuation lines (hints, "  code:") deliberately
+// carry NO prefix and stay on plain errf. Commands that carry an error `code` and
+// want -o json|yaml parity route through useError / usageErrf / renderError
+// instead, which emit the structured {ok:false,error:{…}} envelope on stdout;
+// userErr is the human-mode fallback those helpers, and every prefix-only site,
+// funnel through.
+func (w *writer) userErr(format string, a ...any) {
+	w.errf("bp: "+format, a...)
+}
+
 // machineOut reports whether the resolved output shape is a machine-readable one
 // (json or yaml). Commands that interleave human progress with a final result —
 // e.g. the multi-step `vercel quick-setup` provision — use it to decide between

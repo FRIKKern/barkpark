@@ -380,7 +380,7 @@ func agentNoTarget(out *writer, msg string, cfg *Config) int {
 	}) {
 		return exitUsage
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	if len(names) > 0 {
 		out.errf("known Barkparks: %s", joinComma(names))
 	}
@@ -489,7 +489,7 @@ func attachUsageErr(out *writer, msg string) int {
 	}) {
 		return exitUsage
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	out.errf("usage: bp register ssh root@<host> --name <name>")
 	return exitUsage
 }

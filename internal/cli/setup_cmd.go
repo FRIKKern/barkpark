@@ -186,7 +186,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 	if !parsed["target"] {
 		if canRunWizard(jsonOut, g.yes) {
 			if err := setup.RunInteractive(opts); err != nil {
-				out.errf("barkpark: %v", err)
+				out.userErr("%v", err)
 				return exitGeneric
 			}
 			return exitOK
@@ -230,7 +230,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 		// Human dry-run: let the executor print its prose (byte-identical to the
 		// pre-refactor output).
 		if err := setup.Execute(plan, opts); err != nil {
-			out.errf("barkpark: %v", err)
+			out.userErr("%v", err)
 			return exitGeneric
 		}
 		return exitOK
@@ -270,7 +270,7 @@ func RunFirstTimeSetup() (configured bool, exit int) {
 		KnownServers: loadKnownServers(),
 	}
 	if err := setup.RunInteractive(opts); err != nil {
-		out.errf("barkpark: %v", err)
+		out.userErr("%v", err)
 		return false, exitGeneric
 	}
 	// RunInteractive returns nil on both success and a clean abort; a config on
@@ -382,7 +382,7 @@ func setupUsageError(out *writer, jsonOut bool, code, msg string) int {
 		})
 		return exitUsage
 	}
-	out.errf("barkpark: %s", msg)
+	out.userErr("%s", msg)
 	return exitUsage
 }
 
@@ -398,7 +398,7 @@ func setupRunError(out *writer, jsonOut bool, err error) int {
 		})
 		return exitGeneric
 	}
-	out.errf("barkpark: %v", err)
+	out.userErr("%v", err)
 	return exitGeneric
 }
 

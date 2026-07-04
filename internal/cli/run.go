@@ -46,7 +46,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
 		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.errf("barkpark: %v", err)
+			out.userErr("%v", err)
 			usageCommand(out, cmd)
 		}
 		return exitUsage
@@ -56,7 +56,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
 		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.errf("barkpark: %v", err)
+			out.userErr("%v", err)
 			usageCommand(out, cmd)
 		}
 		return exitUsage
@@ -66,7 +66,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	rawURL, err := m.BuildURL(cmd, ctx, argMap)
 	if err != nil {
 		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.errf("barkpark: %v", err)
+			out.userErr("%v", err)
 		}
 		return exitUsage
 	}
@@ -81,7 +81,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
 	if err != nil {
 		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.errf("barkpark: %v", err)
+			out.userErr("%v", err)
 		}
 		return exitUsage
 	}
@@ -126,7 +126,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
-			out.errf("barkpark: request failed: %v", err)
+			out.userErr("request failed: %v", err)
 		}
 		return exitGeneric
 	}
@@ -635,7 +635,7 @@ func renderError(out *writer, ae apiError) {
 	if renderErrorEnvelope(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint()) {
 		return
 	}
-	out.errf("barkpark: %s", ae.errorMessage())
+	out.userErr("%s", ae.errorMessage())
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}
@@ -903,7 +903,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
 		if err != nil {
 			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
-				out.errf("barkpark: request failed: %v", err)
+				out.userErr("request failed: %v", err)
 			}
 			return exitGeneric
 		}
@@ -986,7 +986,7 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 	// hits EOF, the answer is empty, and the caller's "aborted" message never names
 	// the flag that unblocks it. Name --yes here instead.
 	if !(isatty.IsTerminal(os.Stdin.Fd()) && isatty.IsTerminal(os.Stderr.Fd())) {
-		fmt.Fprintf(out.stderr, "barkpark: prod write to %s needs confirmation — re-run with --yes\n", ctx.Server)
+		out.userErr("prod write to %s needs confirmation — re-run with --yes", ctx.Server)
 		return false
 	}
 	fmt.Fprintf(out.stderr, "⚠ PROD: %s %s writes to %s. Continue? [y/N] ", cmd.Noun, cmd.Verb, ctx.Server)

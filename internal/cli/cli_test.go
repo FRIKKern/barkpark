@@ -451,7 +451,7 @@ func TestUsageErrfJSONEnvelope(t *testing.T) {
 	if code != exitUsage {
 		t.Fatalf("exit = %d, want %d", code, exitUsage)
 	}
-	if strings.Contains(se.String(), "barkpark:") {
+	if strings.Contains(se.String(), "bp:") {
 		t.Errorf("json path leaked human stderr line:\n%s", se.String())
 	}
 	if helpRan {
@@ -477,7 +477,7 @@ func TestUsageErrfJSONEnvelope(t *testing.T) {
 	wt.output = "table"
 	helpRan = false
 	_ = usageErrf(wt, func() { helpRan = true }, "unknown command %q", "bogus")
-	if !strings.Contains(se2.String(), "barkpark: unknown command") {
+	if !strings.Contains(se2.String(), "bp: unknown command") {
 		t.Errorf("table mode should print the human line, got:\n%s", se2.String())
 	}
 	if !helpRan {
@@ -618,7 +618,7 @@ func TestRenderError(t *testing.T) {
 	var so, se bytes.Buffer
 	renderError(newWriter(&so, &se), ae)
 	s := se.String()
-	if !strings.Contains(s, "barkpark: not found: post xyz") {
+	if !strings.Contains(s, "bp: not found: post xyz") {
 		t.Errorf("missing message line:\n%s", s)
 	}
 	if !strings.Contains(s, "hint:") {
@@ -645,7 +645,7 @@ func TestRenderError(t *testing.T) {
 	wj := newWriter(&so3, &se3)
 	wj.output = "json"
 	renderError(wj, ae)
-	if strings.Contains(se3.String(), "barkpark:") {
+	if strings.Contains(se3.String(), "bp:") {
 		t.Errorf("json path leaked human stderr line:\n%s", se3.String())
 	}
 	var env struct {
@@ -686,7 +686,7 @@ func TestHandleResponseErrorJSONEnvelope(t *testing.T) {
 	if code != exitNotFound {
 		t.Fatalf("exit = %d, want %d", code, exitNotFound)
 	}
-	if strings.Contains(se.String(), "barkpark:") {
+	if strings.Contains(se.String(), "bp:") {
 		t.Errorf("json path leaked human stderr line:\n%s", se.String())
 	}
 	var env struct {
@@ -710,7 +710,7 @@ func TestHandleResponseErrorJSONEnvelope(t *testing.T) {
 	if so2.Len() != 0 {
 		t.Errorf("table mode must not write stdout:\n%s", so2.String())
 	}
-	if !strings.Contains(se2.String(), "barkpark: not found: post xyz") {
+	if !strings.Contains(se2.String(), "bp: not found: post xyz") {
 		t.Errorf("table mode missing human stderr line:\n%s", se2.String())
 	}
 }

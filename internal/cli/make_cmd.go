@@ -58,20 +58,20 @@ func runMakeSchema(out *writer, g globals, args []string) int {
 	}
 
 	if name == "" {
-		out.errf("barkpark: make schema needs a <name>")
+		out.userErr("make schema needs a <name>")
 		usageMake(out, false)
 		return exitUsage
 	}
 
 	skeleton, err := schemaSkeleton(name)
 	if err != nil {
-		out.errf("barkpark: build skeleton: %v", err)
+		out.userErr("build skeleton: %v", err)
 		return exitGeneric
 	}
 
 	if outFile != "" {
 		if werr := os.WriteFile(outFile, []byte(skeleton+"\n"), 0o644); werr != nil {
-			out.errf("barkpark: write %q: %v", outFile, werr)
+			out.userErr("write %q: %v", outFile, werr)
 			return exitGeneric
 		}
 		out.errf("wrote %s schema skeleton to %s", name, outFile)
