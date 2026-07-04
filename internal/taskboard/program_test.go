@@ -595,6 +595,48 @@ func TestClaimKeyOnReadyRowFiresClaimAndReconciles(t2 *testing.T) {
 	}
 }
 
+// TestClaimKeyOnReadyHeadRowClaimsThatRow is the claim-forward hero wiring
+// (wave-7 D35): with nothing claimed the pinned band IS the READY TO CLAIM head,
+// so the cursor's first stops are rowReadyClaim rows. c on the highlighted head
+// row must claim exactly THAT task — the row resolves through taskByID's ReadyHead
+// lookup even though its home section is folded away. This pins the "does c
+// actually claim the highlighted ready row?" guarantee the amendment asks for.
+func TestClaimKeyOnReadyHeadRowClaimsThatRow(t2 *testing.T) {
+	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
+	m := testModel(Board{
+		ReadyHead:  []Task{readyTask("h1"), readyTask("h2")},
+		ReadyTotal: 2,
+	})
+	// The band is the ready head (empty NOW + ready work), and its rows are the
+	// first cursor stops — so the shell and renderer agree the cursor is on a
+	// claimable head row.
+	if !showReadyHead(m.board) {
+		t2.Fatalf("showReadyHead must hold on an empty-NOW board with ready work")
+	}
+	rows := m.visibleRows()
+	if len(rows) < 2 || rows[0].kind != rowReadyClaim || rows[1].kind != rowReadyClaim {
+		t2.Fatalf("first rows = %+v, want two rowReadyClaim stops", rows)
+	}
+
+	m.ui.Cursor = 1 // the SECOND head row (h2) — not the default top
+	var gotDoc, gotWorker string
+	m.doClaim = func(_ *apiclient.Client, docID, worker string) ActionResult {
+		gotDoc, gotWorker = docID, worker
+		return ActionResult{OK: true, Message: "claimed as opus-9 · epoch 1"}
+	}
+
+	m, cmd := step(t2, m, runes("c"))
+	if cmd == nil {
+		t2.Fatal("c on a ready-head row did not fire a claim command")
+	}
+	if _, ok := cmd().(actionResultMsg); !ok {
+		t2.Fatal("claim command did not produce an actionResultMsg")
+	}
+	if gotDoc != "h2" || gotWorker != "opus-9" {
+		t2.Fatalf("DoClaim got (%q,%q), want (h2,opus-9) — c must claim the HIGHLIGHTED head row", gotDoc, gotWorker)
+	}
+}
+
 // A claim that the server refuses (e.g. a race that returns not_ready) shows the
 // server's honest message verbatim in danger, and fires NO refetch.
 func TestClaimResultFailureRendersHonestMessage(t2 *testing.T) {
