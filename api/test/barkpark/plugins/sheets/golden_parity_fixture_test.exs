@@ -116,4 +116,76 @@ defmodule Barkpark.Plugins.Sheets.GoldenParityFixtureTest do
   test "fmt_vocabulary in the fixture equals the live Fmt.vocabulary/0" do
     assert decode!(@api_path)["fmt_vocabulary"] == Fmt.vocabulary()
   end
+
+  # ── CF coverage locks (CF-E) — the committed snapshot styles map must CARRY
+  # the composed conditional-formatting entries the four fixture rules produce,
+  # and must NOT carry one for the frozen head row. Keys are "bodyRow,col",
+  # 0-based, with the head row (row 1) split off (data_start = 2). ────────────
+
+  # A frozen head + manual-styled cells + the four CF rules make the styles map
+  # the substrate for every CF-D3/CF-D4/CF-AM2 assertion below.
+  defp styles, do: decode!(@api_path)["snapshot"]["styles"]
+
+  test "storability: the committed golden content passes the before_save gate" do
+    # The generator promises "a legitimately storable sheet" — pin it. If a
+    # future fixture edit adds a gate-invalid rule (or cell/merge), the golden
+    # sheet could never exist through the real save path and the whole parity
+    # lock would be certifying a fiction.
+    [hook] = Barkpark.Plugins.Sheets.lifecycle_hooks().before_save
+
+    assert hook.(%{doc: %{"type" => "sheet", "content" => decode!(@api_path)["content"]}}) ==
+             :ok
+  end
+
+  test "CF-D5/CF-D8: a numeric gt rule paints matched occupied cells only" do
+    styles = styles()
+
+    # cf-gt (gt 1000 on B2:B10) fires on B2 (1200 -> "0,1") and B8 (1234.5 ->
+    # "6,1"), each a CF-ONLY entry (no manual "s" on those cells).
+    assert styles["0,1"] == %{"bg" => "#ff0000"}
+    assert styles["6,1"] == %{"bg" => "#ff0000"}
+
+    # B10 (1, below the threshold) is occupied but unmatched -> NO entry, even
+    # though it sits inside the rule's range. This is "matches some, not others".
+    refute Map.has_key?(styles, "8,1")
+  end
+
+  test "CF-D4: overlapping ranges resolve first-match-wins" do
+    styles = styles()
+
+    # B2 and B8 sit in BOTH cf-gt (B2:B10) and cf-overlap (B2:C8); the first rule
+    # in list order supplies the whole contribution — red, never the overlap's
+    # green.
+    assert styles["0,1"]["bg"] == "#ff0000"
+    assert styles["6,1"]["bg"] == "#ff0000"
+
+    # cf-overlap is still live where cf-gt doesn't reach: C7 (1e6 -> "5,2") green.
+    assert styles["5,2"] == %{"bg" => "#00ff00"}
+  end
+
+  test "CF-D3: CF composes OVER a manually-styled cell — CF wins bg, manual keys survive" do
+    # A4 carries a manual style {b, i, bg #e0f0ff, al: right}; cf-compose fires
+    # (contains "ote" over "Note") and wins `bg` while al/b/i survive.
+    assert styles()["2,0"] == %{
+             "al" => "right",
+             "b" => true,
+             "i" => true,
+             "bg" => "#123456"
+           }
+  end
+
+  test "CF-D3/CF-AM2: the snapshot drops CF for a frozen head-row cell" do
+    styles = styles()
+
+    # cf-head (contains "Q" on A1:D1) matches B1/C1 at eval, but the head row is
+    # frozen (frozen_rows: 1) so the snapshot carries NO CF entry for it — the
+    # would-be body keys (row 1 -> -1) never appear, and no key is head-shaped.
+    refute Map.has_key?(styles, "-1,1")
+    refute Map.has_key?(styles, "-1,2")
+
+    for {key, _} <- styles do
+      refute String.starts_with?(key, "-"),
+             "styles carries a negative-row (head) key #{inspect(key)} — head-drop broke"
+    end
+  end
 end

@@ -166,6 +166,52 @@
           "1": 120,
           "2": 64
         },
+        "cond_formats": [
+          {
+            "id": "cf-gt",
+            "range": "B2:B10",
+            "style": {
+              "bg": "#ff0000"
+            },
+            "when": {
+              "op": "gt",
+              "value": 1000
+            }
+          },
+          {
+            "id": "cf-overlap",
+            "range": "B2:C8",
+            "style": {
+              "bg": "#00ff00"
+            },
+            "when": {
+              "op": "gt",
+              "value": 100
+            }
+          },
+          {
+            "id": "cf-compose",
+            "range": "A4",
+            "style": {
+              "bg": "#123456"
+            },
+            "when": {
+              "op": "contains",
+              "value": "ote"
+            }
+          },
+          {
+            "id": "cf-head",
+            "range": "A1:D1",
+            "style": {
+              "bg": "#abcdef"
+            },
+            "when": {
+              "op": "contains",
+              "value": "Q"
+            }
+          }
+        ],
         "frozen_cols": 1,
         "frozen_rows": 1,
         "merges": [
@@ -370,6 +416,9 @@
       "0,0": {
         "b": true
       },
+      "0,1": {
+        "bg": "#ff0000"
+      },
       "0,2": {
         "i": true
       },
@@ -382,8 +431,14 @@
       "2,0": {
         "al": "right",
         "b": true,
-        "bg": "#e0f0ff",
+        "bg": "#123456",
         "i": true
+      },
+      "5,2": {
+        "bg": "#00ff00"
+      },
+      "6,1": {
+        "bg": "#ff0000"
       },
       "8,0": {
         "b": true
