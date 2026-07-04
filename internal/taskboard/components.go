@@ -81,6 +81,21 @@ func lastCols(s string, cols int) string {
 	return string(rs[i:])
 }
 
+// rowTitle is the row's shown title — NEVER blank (charter D-C). An empty title
+// used to paint a bare "○ " / "↳ ✓" line that read as broken; instead it degrades
+// to the short doc-id (dim) when one is present, else a dim "(untitled)". The
+// second return forces the placeholder to render dim so it reads as an ABSENCE,
+// not a real title, whatever the row's lifecycle weight.
+func rowTitle(t Task) (text string, placeholder bool) {
+	if strings.TrimSpace(t.Title) != "" {
+		return t.Title, false
+	}
+	if id := bareID(t.DocID); id != "" {
+		return truncate(id, 16), true
+	}
+	return "(untitled)", true
+}
+
 // StatusGlyph is the 2-col gutter's STEADY status mark — the design-language
 // spec §1 vocabulary (charter D36): a still in_progress representative (frame 0
 // ⠋), `!` blocked, ✓ done|closed, ✕ cancelled, ○ ready|open (open vs ready is a
@@ -227,6 +242,9 @@ func sectionRollup(sc sectionCounts, code string) (plain, styled string) {
 // minDots survive; extreme widths degrade to a lead + title. The final truncate
 // is the width safety net.
 func renderSectionHeader(title, code string, derived, selected bool, sc sectionCounts, width int) string {
+	if strings.TrimSpace(title) == "" {
+		title = "(untitled)" // a section header is never blank (charter D-C)
+	}
 	if width < 8 {
 		return truncate(title, width)
 	}
@@ -435,15 +453,19 @@ func TaskRow(t Task, selected bool, depth, width, frame int, now time.Time) []st
 	}
 	lead := strings.Repeat(" ", pad) + dimStyle.Render(guide) + marker + glyph + " "
 	leadW := indent + 3 // pad + guide(2 or 0) + marker + glyph + space
+	titleText, placeholder := rowTitle(t)
 	tStyle := titleStyleFor(t.Lifecycle)
+	if placeholder {
+		tStyle = dimStyle // an empty title reads as an absence, never a real title
+	}
 
 	if width < dropMetaBelow {
 		// Narrow degrade: glyph + title only (no meta).
-		return []string{lead + tStyle.Render(truncate(t.Title, width-leadW))}
+		return []string{lead + tStyle.Render(truncate(titleText, width-leadW))}
 	}
 	drop, sticky := richRowMeta(t, now)
 	metaStyled, titleBudget := fitRowMeta(drop, sticky, width-leadW)
-	title := truncate(t.Title, titleBudget)
+	title := truncate(titleText, titleBudget)
 	left := lead + tStyle.Render(title)
 	if metaStyled == "" {
 		return []string{left}
@@ -467,8 +489,13 @@ func TaskRow(t Task, selected bool, depth, width, frame int, now time.Time) []st
 // selection-marker column: ▎ when the cursor is on this card, a space otherwise.
 func NowCard(t Task, breadcrumb string, selected bool, width, frame int, now time.Time) []string {
 	glyph := glyphStyleFor(t, now).Render(boardGlyph(t.Lifecycle, frame))
-	title := truncate(t.Title, width-3)
-	line1 := SelectionMarker(selected) + glyph + " " + titleStyle.Render(title)
+	titleText, placeholder := rowTitle(t)
+	tStyle := titleStyle
+	if placeholder {
+		tStyle = dimStyle
+	}
+	title := truncate(titleText, width-3)
+	line1 := SelectionMarker(selected) + glyph + " " + tStyle.Render(title)
 
 	var sparts []string
 	add := func(p, s string) {

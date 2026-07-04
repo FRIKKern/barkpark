@@ -85,24 +85,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 // ── Header ───────────────────────────────────────────────────────────────────
 
 func renderHeader(b Board, st UIState, width int, now time.Time) []string {
-	// Line 1: barkpark · tasks                    ⇄ <server> ● live · 2m
-	// (branch chrome dropped per wish Amendment 3; the conn dot stays honest —
-	// offline/polling render their own dot + word).
-	left := dimStyle.Render("barkpark") + dimStyle.Render(" · ") + boldStyle.Render("tasks")
-
-	glyph, word := connGlyphWord(st.Conn)
-	if isSyncing(st) {
-		// Before the very first snapshot lands we are not "polling" (which
-		// implies we already hold data and are re-checking) — we are doing the
-		// first fetch. Say so honestly, distinct from offline.
-		word = "syncing…"
-	}
-	cs := roleStyle(connRole(st.Conn))
-	right := dimStyle.Render("⇄ "+Chrome.Server) + "  " + cs.Render(glyph) + " " + dimStyle.Render(word)
-	if age := AgeBadge(st.LastSync, now); age != "" {
-		right += dimStyle.Render(" · " + age)
-	}
-	line1 := leftRight(left, right, width)
+	line1 := headerLine1(st, width, now)
 
 	// Line 2: the MOMENTUM header (spec §0, charter D40) — the always-on progress
 	// read: the in_progress spinner + in-flight/ready/done counts (icons + color,
@@ -116,6 +99,95 @@ func renderHeader(b Board, st UIState, width int, now time.Time) []string {
 		lines = append(lines, dimStyle.Render(truncate(note, width)))
 	}
 	return lines
+}
+
+// headerLine1 is the identity strip (wish Amendment 3): `barkpark · tasks` on the
+// left, the connection chip `⇄ <server> ● live · 2m` on the right. Two width
+// rules (charter D-A, the live-corpus fix):
+//
+//  1. The server is reduced to its FIRST DNS LABEL at render time —
+//     "https://guerrilla.barkpark.cloud" → "guerrilla" — so the chip is short and
+//     honest regardless of how the shell resolved Chrome.Server (a full URL,
+//     FQDN, or host:port). Done here, not in the shell, so it is robust.
+//  2. The primary label "tasks" is SACRED — it is NEVER truncated. When the strip
+//     is tight the droppable brand ("barkpark · ") is shed first; only if the
+//     chip still cannot coexist with the whole label does the CHIP clip (never
+//     "tasks"). The old code fed left+right to leftRight, which truncates the
+//     LEFT, so a long FQDN chewed "tasks" down to "tas…".
+func headerLine1(st UIState, width int, now time.Time) string {
+	glyph, word := connGlyphWord(st.Conn)
+	if isSyncing(st) {
+		// Before the very first snapshot lands we are not "polling" (which implies
+		// we already hold data and are re-checking) — we are doing the first fetch.
+		// Say so honestly, distinct from offline.
+		word = "syncing…"
+	}
+	cs := roleStyle(connRole(st.Conn))
+	right := dimStyle.Render("⇄ "+firstDNSLabel(Chrome.Server)) + "  " + cs.Render(glyph) + " " + dimStyle.Render(word)
+	if age := AgeBadge(st.LastSync, now); age != "" {
+		right += dimStyle.Render(" · " + age)
+	}
+
+	label := boldStyle.Render("tasks")
+	brand := dimStyle.Render("barkpark") + dimStyle.Render(" · ")
+	// Prefer brand + label + the full chip.
+	if disp(brand)+disp(label)+disp(right)+1 <= width {
+		return leftRight(brand+label, right, width)
+	}
+	// Shed the brand; keep the sacred label + the full chip.
+	if disp(label)+disp(right)+1 <= width {
+		return leftRight(label, right, width)
+	}
+	// The chip will not coexist with the whole label: clip the chip, never "tasks".
+	rMax := width - disp(label) - 1
+	if rMax < 1 {
+		return truncate(label, width) // absurdly narrow — the final safety net
+	}
+	return leftRight(label, truncate(right, rMax), width)
+}
+
+// firstDNSLabel reduces a server identity to its first DNS label for the header
+// chip: "https://guerrilla.barkpark.cloud" → "guerrilla", "host:4010" → "host".
+// It strips any scheme, path and port, then takes the leftmost label. An IPv4
+// literal (all-numeric labels) is returned WHOLE — a bare "157" first octet would
+// misidentify the host — as is a single-label host (localhost) and the honest
+// "—" placeholder.
+func firstDNSLabel(server string) string {
+	h := strings.TrimSpace(server)
+	if h == "" {
+		return h
+	}
+	if i := strings.Index(h, "://"); i >= 0 {
+		h = h[i+3:]
+	}
+	if i := strings.IndexAny(h, "/?#"); i >= 0 {
+		h = h[:i]
+	}
+	// An IPv6 literal wears colons of its own ([::1]:4000) — leave it whole rather
+	// than butcher it on a port split; only strip a port from a bracket-free host.
+	if !strings.HasPrefix(h, "[") {
+		if i := strings.LastIndex(h, ":"); i >= 0 {
+			h = h[:i]
+		}
+	}
+	if h == "" {
+		return strings.TrimSpace(server)
+	}
+	parts := strings.Split(h, ".")
+	if len(parts) < 2 {
+		return h // single label (localhost) or already bare
+	}
+	allNumeric := true
+	for _, p := range parts {
+		if p == "" || strings.IndexFunc(p, func(r rune) bool { return r < '0' || r > '9' }) >= 0 {
+			allNumeric = false
+			break
+		}
+	}
+	if allNumeric {
+		return h // IPv4 literal — the first octet alone is not the host
+	}
+	return parts[0]
 }
 
 // momentumLine is the spec §0 aggregate: `⟨spinner⟩ N in flight · ○ N ready ·
@@ -458,8 +530,6 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, width, st.Frame, now) {
 				emit(ln)
 			}
-		case spinePhaseBand:
-			emit(phaseBandLine(sr.hdr, width))
 		case spineMore:
 			emit(moreLine(sr.more, width))
 		case spineEmpty:
@@ -478,24 +548,6 @@ func moreLine(m spineMoreInfo, width int) string {
 		return dimStyle.Render(truncate(fmt.Sprintf("  +%d more", m.hidden+m.done), width))
 	}
 	return dimStyle.Render(truncate(fmt.Sprintf("  +%d done", m.done), width))
-}
-
-// phaseBandLine renders a display-only phase sub-band label (charter D41): an
-// indented, dim `  <name> ·········· <code>` that groups the section's phase-
-// coded rows. It carries no cursor index (Selectable:false), so it never shifts
-// the selection space. Only emitted when the section's tasks actually carry
-// phase metadata — never fabricated.
-func phaseBandLine(h spineHeader, width int) string {
-	left := "  " + h.title + " "
-	// Drop a trailing code that just restates the title (e.g. name == "W1" == code).
-	if h.code == "" || h.code == h.title || disp(left)+disp(h.code)+2 >= width {
-		return dimStyle.Render(truncate(strings.TrimRight(left, " "), width))
-	}
-	mid := width - disp(left) - disp(h.code) - 1
-	if mid < 1 {
-		mid = 1
-	}
-	return dimStyle.Render(truncate(left+strings.Repeat("·", mid)+" "+h.code, width))
 }
 
 // clusterDisplayName is a cluster key's display form: one proj:/area: taxonomy

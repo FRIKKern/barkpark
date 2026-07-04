@@ -264,20 +264,17 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 	}
 }
 
-// phaseBoard is the wave-9 fixture: ONE epic whose children form a real nested
-// tree AND carry two distinct phase codes, so the spine emits BOTH new
-// display-only structures the redesign added — phase sub-bands (spinePhaseBand)
-// and arbitrary-depth ↳ rows. The clusterBoard/sampleBoard fixtures are entirely
-// FLAT, so before this fixture no parity guard exercised depth>0 or a phase band.
-// Titles stay == docID so the ▎-marker check still names the acted-on row.
-//
-// nestTasks arranges the children into tree order; the two depth-0 phase codes
-// (W1, W2) open a band each, and the walk descends w1a → w1a1 → w1a2 (depth 2):
+// phaseBoard is the nesting-parity fixture: ONE epic whose children form a real
+// nested tree, so the spine exercises arbitrary-depth ↳ rows — the one non-flat
+// structure on the board (the clusterBoard/sampleBoard fixtures are entirely
+// FLAT). Titles stay == docID so the ▎-marker check still names the acted-on row.
+// The phase: labels survive from the wave-9 fixture but no longer open sub-bands:
+// wave-9b (D-B) removed within-epic phase sub-bands — they rendered as bare
+// orphan "W#" lines on the live corpus and doubled the code the rows already
+// carry. nestTasks walks the children into tree order w1a → w1a1 → w1a2 (depth 2):
 //
 //	pe (header)
-//	  ── W1 band ──
 //	  w1a  (d0)  w1a1 (d1)  w1a2 (d2)
-//	  ── W2 band ──
 //	  w2a  (d0)  w2a1 (d1)
 func phaseBoard() Board {
 	tp := func(id, phase string) Task { x := t(id); x.Labels = []string{labelPhasePrefix + phase}; return x }
@@ -325,12 +322,12 @@ func TestVisibleRowsWithPhaseAndNesting(t2 *testing.T) {
 	}
 }
 
-// TestCursorParityWithPhaseAndNesting is the wave-9 extension of the shell↔render
-// tripwire: on a board carrying phase sub-bands AND arbitrary-depth ↳ rows, the ▎
-// marker in the painted frame must sit on exactly the row visibleRows says the
-// cursor is on — proving the display-only bands/guides never shift the selection
-// index space (charter D42 structural parity). It also asserts the bands actually
-// render, so the guard fails if phase grouping silently stops emitting.
+// TestCursorParityWithPhaseAndNesting is the shell↔render tripwire on a NON-flat
+// board: with arbitrary-depth ↳ rows, the ▎ marker in the painted frame must sit
+// on exactly the row visibleRows says the cursor is on — proving the display-only
+// ↳ guides never shift the selection index space (charter D42 structural parity).
+// (wave-9b removed within-epic phase sub-bands per D-B, so this no longer asserts
+// a band renders — the ↳ nesting is the structure under test.)
 func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
 	m := testModel(phaseBoard())
 	m.ui.Conn = ConnLive
@@ -338,13 +335,8 @@ func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
 	m.now = func() time.Time { return time.Unix(2, 0) }
 	m.width, m.height = 80, 60
 
-	// The phase bands must be present, else this fixture would silently degrade to
-	// a flat list and stop testing the new structure.
-	frame0 := ansi.Strip(m.View())
-	if !strings.Contains(frame0, "W1") || !strings.Contains(frame0, "W2") {
-		t2.Fatalf("phase bands W1/W2 missing — fixture no longer exercises bands:\n%s", frame0)
-	}
 	// The ↳ guide must be present, proving depth>0 rows render nested.
+	frame0 := ansi.Strip(m.View())
 	if !strings.Contains(frame0, "↳") {
 		t2.Fatalf("nesting guide ↳ missing — fixture no longer exercises depth>0:\n%s", frame0)
 	}
