@@ -1292,6 +1292,33 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
     end
   end
 
+  # A qualified full-axis ref must be shifted by the cross-tab SWEEP, never by
+  # the mutated tab's own rewrite_formula — otherwise a column op on the tab that
+  # HOLDS the formula would shift it once locally AND again in the sweep (a
+  # double-shift corruption). rewrite_formula must leave `Sheet2!A:A` verbatim;
+  # only a copy/fill (rebase) touches its axis part (a paste is a local edit).
+  describe "rewrite_formula — a QUALIFIED full-axis ref is invariant under a local insert/delete" do
+    test "a local column insert leaves Sheet2!A:A byte-identical (the sweep owns it)" do
+      assert Structure.rewrite_formula("SUM(Sheet2!A:A)", :col, {:insert, 1, 1}) ==
+               "SUM(Sheet2!A:A)"
+    end
+
+    test "a local column delete never collapses Sheet2!A:A to #REF! (not this tab's business)" do
+      assert Structure.rewrite_formula("SUM(Sheet2!A:A)", :col, {:delete, 1, 1}) ==
+               "SUM(Sheet2!A:A)"
+    end
+
+    test "a local row op leaves a cross-tab full-ROW ref Sheet2!3:3 byte-identical" do
+      assert Structure.rewrite_formula("SUM(Sheet2!3:3)", :row, {:insert, 1, 1}) ==
+               "SUM(Sheet2!3:3)"
+    end
+
+    test "a quoted-name cross-tab full-axis ref is also invariant under a local op" do
+      assert Structure.rewrite_formula("SUM('My Sheet'!A:A)", :col, {:insert, 1, 1}) ==
+               "SUM('My Sheet'!A:A)"
+    end
+  end
+
   # Fetch the formula string of cell `addr` in the tab at `idx`.
   defp fof(tabs, idx, addr), do: tabs |> Enum.at(idx) |> get_in(["cells", addr, "f"])
 
