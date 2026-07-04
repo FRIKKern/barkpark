@@ -23,7 +23,11 @@ defmodule Barkpark.Plugins.Sheets do
       that is not a map, or a ref beyond the Excel grid bounds (column
       XFD/16,384, row 1,048,576), and whose `merges` list carries a
       malformed range, a range covering more than `merge_area_cap/0` cells,
-      or a corner beyond the same grid bounds.
+      or a corner beyond the same grid bounds. The same gate strictly
+      validates each tab's `cond_formats` rule list (CF-D6): exact
+      `id`/`range`/`when`/`style` keys, the `gt|lt|eq|between|contains` op
+      whitelist with per-op value typing, a required `#rrggbb` `bg`,
+      single-rule-per-normalized-range, and `cond_format_cap/0` rules per tab.
 
     * `register_routes/1` (M5 + M1 + M4) — the conversion API on the
       `:ingest` bucket (shared-secret bearer via `RequireIngestToken`, like
@@ -59,6 +63,13 @@ defmodule Barkpark.Plugins.Sheets do
 
   @cell_cap 50_000
   @merge_area_cap 10_000
+  @cond_format_cap 200
+
+  # Conditional-formatting rule `style.bg` — a #rrggbb color (case-insensitive
+  # in, the manual style sanitizer normalizes to lowercase downstream).
+  # `\z`, not `$`: PCRE `$` also matches before a trailing newline, and a
+  # stored bg is emitted into style attributes downstream — no stowaways.
+  @cf_hex_re ~r/^#[0-9a-fA-F]{6}\z/
 
   # Excel's grid bounds — column XFD, row 1_048_576. Enforced at the gate
   # AFTER parse (see bounds_errors/3), not inside `Barkpark.Plugins.Sheets.Core.parse_ref/1`:
@@ -75,6 +86,10 @@ defmodule Barkpark.Plugins.Sheets do
   @doc "Cap on a single merge range's area in cells — enforced on save and import."
   @spec merge_area_cap() :: pos_integer()
   def merge_area_cap, do: @merge_area_cap
+
+  @doc "Cap on conditional-formatting rules per tab — enforced on save."
+  @spec cond_format_cap() :: pos_integer()
+  def cond_format_cap, do: @cond_format_cap
 
   @doc "Largest legal column (XFD, the Excel grid bound) — enforced on save and import."
   @spec grid_max_col() :: pos_integer()
@@ -199,7 +214,14 @@ defmodule Barkpark.Plugins.Sheets do
         _ -> ["tab #{idx}: merges must be a list"]
       end
 
-    cells_errors ++ merges_errors
+    cond_formats_errors =
+      case Map.get(tab, "cond_formats") do
+        nil -> []
+        cfs when is_list(cfs) -> cond_format_list_errors(cfs, idx)
+        _ -> ["tab #{idx}: cond_formats must be a list"]
+      end
+
+    cells_errors ++ merges_errors ++ cond_formats_errors
   end
 
   defp tab_errors({_tab, idx}), do: ["tab #{idx}: tab must be a map"]
@@ -243,6 +265,265 @@ defmodule Barkpark.Plugins.Sheets do
 
   defp merge_errors(merge, idx),
     do: ["tab #{idx}: invalid merge #{inspect(merge)} (expected an A1:B2-style range)"]
+
+  # ── conditional-formatting rules ─────────────────────────────────────────
+  #
+  # Gate strict / synthesis lenient (the merges precedent): validated
+  # locally here beside merge_errors — the CondFormat evaluator parses the
+  # same shape leniently. A rule a server cannot evaluate must not be
+  # stored, so unknown keys anywhere (rule / when / style) are rejected
+  # (CF-D6, SERVER-EVAL integrity).
+  defp cond_format_list_errors(cfs, idx) do
+    cap_errors =
+      if length(cfs) > @cond_format_cap do
+        ["tab #{idx}: cond_formats has #{length(cfs)} rules; the cap is #{@cond_format_cap}"]
+      else
+        []
+      end
+
+    rule_errors = Enum.flat_map(cfs, &cond_format_errors(&1, idx))
+
+    cap_errors ++ rule_errors ++ cond_format_dup_errors(cfs, idx)
+  end
+
+  defp cond_format_errors(rule, idx) when is_map(rule) do
+    prefix = "tab #{idx}: cond_format #{cf_label(rule)}: "
+
+    exact_key_errors(rule, ["id", "range", "when", "style"], prefix, "rule") ++
+      cf_id_errors(rule, prefix) ++
+      cf_range_errors(rule, idx, prefix) ++
+      cf_when_errors(rule, prefix) ++
+      cf_style_errors(rule, prefix)
+  end
+
+  defp cond_format_errors(rule, idx),
+    do: ["tab #{idx}: cond_format #{inspect(rule)}: rule must be a map"]
+
+  defp cf_label(%{"id" => id}) when is_binary(id) and id != "", do: id
+  defp cf_label(rule), do: inspect(rule)
+
+  # Exactly the expected keys — no missing, no unknown. Used at the rule
+  # level where all of id/range/when/style are required (SERVER-EVAL: a key
+  # the evaluator cannot honor must not reach storage).
+  defp exact_key_errors(map, expected, prefix, what) do
+    actual = MapSet.new(Map.keys(map))
+    want = MapSet.new(expected)
+
+    unknown = actual |> MapSet.difference(want) |> MapSet.to_list()
+    missing = want |> MapSet.difference(actual) |> MapSet.to_list()
+
+    unknown_err =
+      if unknown == [], do: [], else: [prefix <> "#{what} has unknown key(s) #{inspect(unknown)}"]
+
+    missing_err =
+      if missing == [], do: [], else: [prefix <> "#{what} is missing key(s) #{inspect(missing)}"]
+
+    unknown_err ++ missing_err
+  end
+
+  # Only reject keys OUTSIDE the allowed set — for `when`/`style`, whose
+  # optional keys (value2, b, i) are presence-driven by the op/bg checks.
+  defp unknown_key_errors(map, allowed, prefix, what) do
+    case MapSet.new(Map.keys(map))
+         |> MapSet.difference(MapSet.new(allowed))
+         |> MapSet.to_list() do
+      [] -> []
+      unknown -> [prefix <> "#{what} has unknown key(s) #{inspect(unknown)}"]
+    end
+  end
+
+  defp cf_id_errors(rule, prefix) do
+    case Map.fetch(rule, "id") do
+      {:ok, id} when is_binary(id) and id != "" -> []
+      {:ok, _} -> [prefix <> "id must be a non-empty string"]
+      :error -> []
+    end
+  end
+
+  # No area cap on the range — CF-D8: eval is occupied-only, so even a
+  # hostile A1:XFD1048576 range costs nothing (blank cells never match).
+  defp cf_range_errors(rule, idx, prefix) do
+    case Map.fetch(rule, "range") do
+      {:ok, range} ->
+        case cf_range_corners(range) do
+          {:ok, {_lc, _lr, hc, hr}} ->
+            bounds_errors("cond_format #{cf_label(rule)} range #{inspect(range)}", {hc, hr}, idx)
+
+          :error ->
+            [prefix <> "range #{inspect(range)} is not a single A1 cell or A1:B2 range"]
+        end
+
+      :error ->
+        []
+    end
+  end
+
+  defp cf_when_errors(rule, prefix) do
+    case Map.fetch(rule, "when") do
+      {:ok, w} when is_map(w) ->
+        unknown_key_errors(w, ["op", "value", "value2"], prefix, "when") ++
+          cf_op_errors(w, prefix)
+
+      {:ok, _} ->
+        [prefix <> "when must be a map"]
+
+      :error ->
+        []
+    end
+  end
+
+  defp cf_op_errors(w, prefix) do
+    op = Map.get(w, "op")
+    value = Map.get(w, "value")
+    has_v2 = Map.has_key?(w, "value2")
+    value2 = Map.get(w, "value2")
+
+    case op do
+      op when op in ["gt", "lt"] ->
+        forbid_value2(op, has_v2, prefix) ++ num_value_error(op, value, prefix)
+
+      "between" ->
+        v_err =
+          if is_number(value), do: [], else: [prefix <> "when.value must be a number for between"]
+
+        v2_err =
+          cond do
+            not has_v2 -> [prefix <> "when.value2 is required for between"]
+            is_number(value2) -> []
+            true -> [prefix <> "when.value2 must be a number for between"]
+          end
+
+        v_err ++ v2_err
+
+      "eq" ->
+        forbid_value2("eq", has_v2, prefix) ++
+          if eq_value?(value),
+            do: [],
+            else: [prefix <> "when.value must be a number, non-empty string, or boolean for eq"]
+
+      "contains" ->
+        forbid_value2("contains", has_v2, prefix) ++
+          if is_binary(value) and value != "",
+            do: [],
+            else: [prefix <> "when.value must be a non-empty string for contains"]
+
+      _ ->
+        [prefix <> "when.op must be one of gt|lt|eq|between|contains, got #{inspect(op)}"]
+    end
+  end
+
+  defp num_value_error(op, value, prefix) do
+    if is_number(value), do: [], else: [prefix <> "when.value must be a number for #{op}"]
+  end
+
+  defp forbid_value2(op, true, prefix), do: [prefix <> "when.value2 is not allowed for #{op}"]
+  defp forbid_value2(_op, false, _prefix), do: []
+
+  defp eq_value?(v), do: is_number(v) or is_boolean(v) or (is_binary(v) and v != "")
+
+  defp cf_style_errors(rule, prefix) do
+    case Map.fetch(rule, "style") do
+      {:ok, s} when is_map(s) ->
+        unknown_key_errors(s, ["bg", "b", "i"], prefix, "style") ++
+          cf_bg_errors(s, prefix) ++
+          cf_bool_flag_errors(s, "b", prefix) ++
+          cf_bool_flag_errors(s, "i", prefix)
+
+      {:ok, _} ->
+        [prefix <> "style must be a map"]
+
+      :error ->
+        []
+    end
+  end
+
+  defp cf_bg_errors(s, prefix) do
+    case Map.fetch(s, "bg") do
+      {:ok, bg} when is_binary(bg) ->
+        if Regex.match?(@cf_hex_re, bg),
+          do: [],
+          else: [prefix <> "style.bg must be a #rrggbb color, got #{inspect(bg)}"]
+
+      {:ok, bg} ->
+        [prefix <> "style.bg must be a #rrggbb color, got #{inspect(bg)}"]
+
+      :error ->
+        [prefix <> "style.bg is required"]
+    end
+  end
+
+  defp cf_bool_flag_errors(s, key, prefix) do
+    case Map.fetch(s, key) do
+      :error ->
+        []
+
+      {:ok, true} ->
+        []
+
+      {:ok, other} ->
+        [prefix <> "style.#{key} must be literal true when present, got #{inspect(other)}"]
+    end
+  end
+
+  # Duplicate id and duplicate NORMALIZED range within a tab (CF-D4: single
+  # rule per range; "B2" == "B2:B2", corners reordered top-left, uppercased).
+  defp cond_format_dup_errors(cfs, idx) do
+    ids =
+      for rule <- cfs,
+          is_map(rule),
+          {:ok, id} <- [Map.fetch(rule, "id")],
+          is_binary(id),
+          id != "" do
+        id
+      end
+
+    id_errors =
+      for id <- Enum.uniq(ids -- Enum.uniq(ids)) do
+        "tab #{idx}: cond_format #{id}: duplicate id"
+      end
+
+    ranges =
+      for rule <- cfs,
+          is_map(rule),
+          {:ok, range} <- [Map.fetch(rule, "range")],
+          {:ok, norm} <- [cf_range_corners(range)] do
+        norm
+      end
+
+    range_errors =
+      for norm <- Enum.uniq(ranges -- Enum.uniq(ranges)) do
+        "tab #{idx}: cond_format range #{inspect(cf_format_range(norm))}: duplicate normalized range"
+      end
+
+    id_errors ++ range_errors
+  end
+
+  # Normalize an A1 cell/range to {lo_col, lo_row, hi_col, hi_row} (corners
+  # reordered top-left, uppercased by parse_ref). Single cell "B2" folds to
+  # the same tuple as "B2:B2".
+  defp cf_range_corners(range) when is_binary(range) do
+    case String.split(range, ":") do
+      [a] -> cf_corner_pair(a, a)
+      [a, b] -> cf_corner_pair(a, b)
+      _ -> :error
+    end
+  end
+
+  defp cf_range_corners(_), do: :error
+
+  defp cf_corner_pair(a, b) do
+    with {:ok, {c1, r1}} <- SheetCore.parse_ref(a),
+         {:ok, {c2, r2}} <- SheetCore.parse_ref(b) do
+      {:ok, {min(c1, c2), min(r1, r2), max(c1, c2), max(r1, r2)}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp cf_format_range({lc, lr, hc, hr}) do
+    tl = SheetCore.format_ref({lc, lr})
+    if lc == hc and lr == hr, do: tl, else: tl <> ":" <> SheetCore.format_ref({hc, hr})
+  end
 
   # The engine already treats a ref beyond XFD/1_048_576 as #REF! — the
   # data layer agrees: nothing addressed off the grid reaches storage.

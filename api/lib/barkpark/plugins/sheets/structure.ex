@@ -30,7 +30,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
     * a range fully inside the span becomes `#REF!`; a partially covered
       range CLIPS (re-emitted as canonical `$`-less corners);
     * merges clip the same way — fully-deleted and clipped-to-one-cell
-      merges drop;
+      merges drop; `cond_formats` ranges rebase in the SAME pass, but a
+      range clipped to a single cell KEEPS its rule (re-emitted as "B2") —
+      a fully-deleted/pushed-off-grid range drops it, and when two rules
+      clip onto the SAME normalized range only the first in list order
+      survives (the save gate rejects duplicates — CF-D4/D7);
     * `row_heights`/`col_widths` drop in-span keys and re-key the rest;
     * `frozen_rows`/`frozen_cols` shrink by their overlap with the span
       (a string-typed count stays a string — the schema convention).
@@ -161,6 +165,7 @@ defmodule Barkpark.Plugins.Sheets.Structure do
        tab
        |> rewrite_cells(axis, change)
        |> rewrite_merges(axis, change)
+       |> rewrite_cond_formats(axis, change)
        |> rekey_sizes(axis, change)
        |> adjust_frozen(axis, change)}
     end
@@ -288,6 +293,110 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   end
 
   defp rewrite_merge(merge, _axis, _change), do: [merge]
+
+  # Conditional-formatting rules rebase in this same axis_op pass, mirroring
+  # rewrite_merge's arithmetic with ONE divergence (CF-D7): a range that
+  # clips down to a single cell KEEPS its rule (a single-cell CF range is
+  # meaningful — re-emit the "B2" single-cell form), where a merge would
+  # drop. Fully-deleted or pushed-past-grid ranges drop the rule. Rules keep
+  # list order and every non-range key verbatim. Malformed entries pass
+  # through untouched (total, never raise). Undo stays the merges lossy
+  # contract — dropped/clipped rules are NOT resurrected, no new inverse
+  # shapes (byte-identical to rewrite_merge's undo story).
+  defp rewrite_cond_formats(tab, axis, change) do
+    case Map.get(tab, "cond_formats") do
+      cfs when is_list(cfs) ->
+        rewritten =
+          cfs
+          |> Enum.flat_map(&rewrite_cond_format(&1, axis, change))
+          |> dedupe_cond_format_ranges()
+
+        Map.put(tab, "cond_formats", rewritten)
+
+      _ ->
+        tab
+    end
+  end
+
+  # A delete can clip two DISTINCT ranges down to the same normalized range
+  # (B2:B3 and B2:B4 both collapse to "B2" when rows 3-4 go). The gate
+  # rejects duplicate normalized ranges (CF-D4), so leaving both would make
+  # the doc unpersistable — the session's debounced flush would halt on its
+  # own save gate forever. Keep the FIRST rule per normalized range (list
+  # order — the rule first-match-wins eval prefers anyway) and drop later
+  # collisions: one more facet of the documented lossy rebase contract.
+  # Entries whose range does not parse never join the dedupe (totality).
+  # Insert is injective on surviving spans, so this is a no-op there.
+  defp dedupe_cond_format_ranges(cfs) do
+    {out, _seen} =
+      Enum.reduce(cfs, {[], MapSet.new()}, fn rule, {acc, seen} ->
+        with %{"range" => range} when is_binary(range) <- rule,
+             {:ok, corners} <- cf_range_corners(range) do
+          if MapSet.member?(seen, corners) do
+            {acc, seen}
+          else
+            {[rule | acc], MapSet.put(seen, corners)}
+          end
+        else
+          _ -> {[rule | acc], seen}
+        end
+      end)
+
+    Enum.reverse(out)
+  end
+
+  defp rewrite_cond_format(%{"range" => range} = rule, axis, change) when is_binary(range) do
+    case cf_range_corners(range) do
+      {:ok, {c1, r1, c2, r2}} ->
+        {lo, hi} = if axis == :row, do: {r1, r2}, else: {c1, c2}
+
+        case shift_span(lo, hi, axis, change) do
+          :dead ->
+            []
+
+          {:ok, {nlo, nhi}} ->
+            {p1, p2} =
+              case axis do
+                :row -> {{c1, nlo}, {c2, nhi}}
+                :col -> {{nlo, r1}, {nhi, r2}}
+              end
+
+            [Map.put(rule, "range", cf_emit_range(p1, p2))]
+        end
+
+      :error ->
+        [rule]
+    end
+  end
+
+  defp rewrite_cond_format(rule, _axis, _change), do: [rule]
+
+  # Normalize a CF range string to {lo_col, lo_row, hi_col, hi_row}; "B2"
+  # folds to the same corners as "B2:B2".
+  defp cf_range_corners(range) do
+    case String.split(range, ":") do
+      [a] -> cf_corner_pair(a, a)
+      [a, b] -> cf_corner_pair(a, b)
+      _ -> :error
+    end
+  end
+
+  defp cf_corner_pair(a, b) do
+    with {:ok, {c1, r1}} <- Sheets.parse_ref(a),
+         {:ok, {c2, r2}} <- Sheets.parse_ref(b) do
+      {:ok, {min(c1, c2), min(r1, r2), max(c1, c2), max(r1, r2)}}
+    else
+      _ -> :error
+    end
+  end
+
+  # A 1×1 result re-emits the single-cell form (the CF divergence); anything
+  # larger stays an A1:B2 range.
+  defp cf_emit_range(p1, p2) do
+    if p1 == p2,
+      do: Sheets.format_ref(p1),
+      else: Sheets.format_ref(p1) <> ":" <> Sheets.format_ref(p2)
+  end
 
   defp rekey_sizes(tab, axis, change) do
     key = if axis == :row, do: "row_heights", else: "col_widths"
