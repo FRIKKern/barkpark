@@ -1,0 +1,237 @@
+{
+  "_meta": {
+    "frozen": "2026-07-04",
+    "sweep": "citation-truth 53-agent confusion/citation sweep",
+    "what": "The mechanically-reproducible citation-truth defects on the PRE-FIX tree. Each entry MUST surface as a high-confidence finding from the named guard (acceptance-code-comments.mjs asserts fail-before). This file is ALSO the never-worse baseline for retired-terms.mjs: a deadTerms finding here is the known backlog (exit 0); anything else is a regression (exit 1).",
+    "guards": {
+      "verify-docs": "tooling/doc-truth/verify-docs.mjs --code (code-comment lineref/path citations)",
+      "retired-terms": "tooling/doc-truth/retired-terms.mjs (context-aware dead-tech denylist)"
+    },
+    "flagships": [
+      "api/lib/barkpark/plugins/capabilities.ex:1527 cites router.ex 716-724 for /v1/auth (bare range, no colon cue)",
+      "js/packages/core/src/listen.ts:10 cites types.ts:117-126 for ListenEvent (real def is line 818; resolved same-package)"
+    ],
+    "counts": {
+      "linerefs": 20,
+      "paths": 2,
+      "deadTerms": 7,
+      "total": 29
+    }
+  },
+  "linerefs": [
+    {
+      "file": "api/lib/barkpark/plugins/capabilities.ex",
+      "line": 1527,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "router.ex /v1/auth/* (public 716-724, gated 727-734)."
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "line": 23,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1107"
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "line": 172,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1157-1168 call site."
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "line": 255,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1106-1181."
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "line": 261,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1099-1103 (hand-rolled editor column)"
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/editor_fields.ex",
+      "line": 211,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:947-984."
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "line": 16,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1184-1215. Renders the overlay + media-grid card when"
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "line": 293,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1218-1240. Shares the .image-picker overlay styling"
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "line": 351,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1243-1268. Renders the"
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "line": 403,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:1271-1307."
+    },
+    {
+      "file": "api/lib/barkpark_web/components/studio_components/modals.ex",
+      "line": 517,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex:986-1025. Shown"
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/plugins/adapter.ex",
+      "line": 124,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "studio_live.ex line ~1139)."
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/blocks.ex",
+      "line": 236,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "render.ex:348). Empty defaults are valid: an"
+    },
+    {
+      "file": "api/priv/repo/migrations/20260527142000_add_documents_null_dataset_partial_index.exs",
+      "line": 11,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "content.ex ~1607) builds an OR scope:"
+    },
+    {
+      "file": "api/test/barkpark/plugins/bootstrap_test.exs",
+      "line": 222,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "api/lib/barkpark/content.ex around line 754) — what real Studio/TUI"
+    },
+    {
+      "file": "api/test/barkpark/search/like_pattern_escape_test.exs",
+      "line": 6,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "content/query.ex:564-570). No DB — these are pure functions."
+    },
+    {
+      "file": "api/test/barkpark_web/live/studio/paper_editor/add_block_test.exs",
+      "line": 47,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "render.ex:348)."
+    },
+    {
+      "file": "api/test/barkpark_web/live/studio/paper_editor/chrome_and_diagram_test.exs",
+      "line": 112,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "render.ex:348 → <pre class=\"mermaid\">) but had"
+    },
+    {
+      "file": "js/packages/core/src/filter-builder.ts",
+      "line": 310,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "query_controller.ex:187-189)."
+    },
+    {
+      "file": "js/packages/core/src/listen.ts",
+      "line": 10,
+      "guard": "verify-docs",
+      "expect": "stale",
+      "cite": "types.ts:117-126."
+    }
+  ],
+  "paths": [
+    {
+      "file": "api/lib/barkpark/plugins/onixedit/web/export_controller.ex",
+      "line": 18,
+      "guard": "verify-docs",
+      "expect": "false",
+      "cite": "lib/barkpark_web/controllers/onixedit_export_controller.ex"
+    },
+    {
+      "file": "api/lib/barkpark/portable_doc/patch.ex",
+      "line": 6,
+      "guard": "verify-docs",
+      "expect": "false",
+      "cite": "docs/doc-patch-op-contract.md"
+    }
+  ],
+  "deadTerms": [
+    {
+      "file": "api/lib/barkpark/plugins/tasks.ex",
+      "line": 32,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "* `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`"
+    },
+    {
+      "file": "api/lib/barkpark/plugins/tasks.ex",
+      "line": 133,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,"
+    },
+    {
+      "file": "api/lib/barkpark_web/controllers/tasks_controller.ex",
+      "line": 4,
+      "term": "bd-shim",
+      "kind": "dead-binary",
+      "guard": "retired-terms",
+      "cite": "bd-compatible shim (`bin/bd-shim`)."
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "line": 479,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "owns the Cytoscape surface; its div carries the CONSTANT id"
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/doc_actions.ex",
+      "line": 210,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# 'View blast radius' — opens the Cytoscape graph pane for THIS doc (Goal"
+    },
+    {
+      "file": "api/lib/barkpark_web/live/studio/studio_live/mount.ex",
+      "line": 66,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# A `graph` doc opens the Cytoscape blast-radius pane"
+    },
+    {
+      "file": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "line": 321,
+      "term": "cytoscape",
+      "kind": "stale-tech-ref",
+      "guard": "retired-terms",
+      "cite": "# A `graph` doc opens as the blast-radius Cytoscape pane (Goal"
+    }
+  ]
+}

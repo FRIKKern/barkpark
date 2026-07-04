@@ -34,6 +34,11 @@ const CORPUS_FIXTURE = join(HERE, "fixtures/audit-2026-06-21-corpus.json");
 const ROUTER = join(ROOT, "api/lib/barkpark_web/router.ex");
 
 // Known repo top-level dirs that anchor a path claim even without an extension.
+// NB `bin/` is intentionally NOT here: `bin/<x>` overwhelmingly denotes a RELEASE
+// binary invocation (`bin/barkpark_cloud eval …`) or a code token (`bin/1`), not a
+// repo file — anchoring it drowns the HIGH lane in noise. The one dead-binary
+// citation this epic cares about (`bin/bd-shim`) is owned by retired-terms.mjs,
+// which knows it as a retired name rather than guessing from the path shape.
 const TOP_DIRS = [
   "api/", "tooling/", "docs/", "js/", "web/", "lib/", "priv/",
   "deploy/", ".github/", "scripts/", "internal/", "docs-site/",
@@ -139,6 +144,14 @@ function resolveBasename(base) {
   for (const p of manifestFiles()) {
     if (basename(p) === base) { hit = p; break; }
   }
+  // Manifest is optional (absent in fresh checkouts / CI shallow trees). Fall
+  // back to the full git-tracked set so lineref resolution — and the bare-range
+  // cue that gates on resolvability — still works with no manifest present.
+  if (!hit) {
+    for (const p of trackedFiles()) {
+      if (basename(p) === base) { hit = p; break; }
+    }
+  }
   _baseResolveCache.set(base, hit);
   return hit;
 }
@@ -232,6 +245,177 @@ export function extractClaims(doc, text) {
   return out;
 }
 
+// ── (a′) code-comment claim extraction ───────────────────────────────────────
+//
+// 27 of the 29 citation-truth defects live in @moduledoc / /// / // doc-comment
+// PROSE that the markdown-only extractor never reads. We pull that prose into
+// synthetic spans of the SAME shape `extractSpans` yields — `{raw, line, fenced,
+// srcLine}` — so `claimsFromSpan` / `verifyClaim` / `reverify` run UNCHANGED.
+// The corpus walk dispatches on extension: markdown → extractSpans, code →
+// extractCommentSpans.
+
+export function langFor(ext) {
+  const e = (ext || "").toLowerCase();
+  if (e === ".ex" || e === ".exs") return "elixir";
+  if (e === ".go") return "go";
+  if (e === ".ts" || e === ".tsx") return "ts";
+  return null;
+}
+
+// A `#` line/trailing comment (Elixir), excluding `#{…}` interpolation and the
+// `?#` char literal. Returns the comment text or null.
+function matchElixirComment(line) {
+  const m = line.match(/(?:^|[^?])#(?!\{)(.*)$/);
+  return m ? m[1] : null;
+}
+
+// A `//` or `///` comment (Go / TS), excluding `://` inside URLs. Returns text.
+function matchSlashComment(line) {
+  const m = line.match(/(?:^|[^:/])\/\/+\s?(.*)$/);
+  return m ? m[1] : null;
+}
+
+// Reduce a source file to its comment/doc PROSE fragments, each stamped with its
+// 1-based source line. Handles Elixir `@moduledoc/@doc/@typedoc` heredocs plus
+// `#` comments; Go/TS `/** */` blocks plus `//` lines.
+function commentFragments(text, lang) {
+  const lines = text.split("\n");
+  const frags = [];
+  if (lang === "elixir") {
+    let inHeredoc = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], ln = i + 1;
+      if (inHeredoc) {
+        if (/^\s*"""/.test(line)) { inHeredoc = false; continue; }
+        frags.push({ text: line, line: ln });
+        continue;
+      }
+      const hd = line.match(/@(?:moduledoc|doc|typedoc|shortdoc)\s+~?[Ss]?"""/);
+      if (hd) {
+        const after = line.slice(line.indexOf('"""') + 3);
+        const close = after.indexOf('"""');
+        if (close >= 0) frags.push({ text: after.slice(0, close), line: ln });
+        else inHeredoc = true;
+        continue;
+      }
+      const cm = matchElixirComment(line);
+      if (cm) frags.push({ text: cm, line: ln });
+    }
+  } else {
+    // go / ts
+    let inBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i], ln = i + 1;
+      if (inBlock) {
+        const end = line.indexOf("*/");
+        const body = (end >= 0 ? line.slice(0, end) : line).replace(/^\s*\*+/, "");
+        frags.push({ text: body, line: ln });
+        if (end >= 0) inBlock = false;
+        continue;
+      }
+      const bs = line.indexOf("/*");
+      const ss = line.indexOf("//");
+      if (bs >= 0 && (ss < 0 || bs < ss)) {
+        const end = line.indexOf("*/", bs + 2);
+        if (end >= 0) frags.push({ text: line.slice(bs + 2, end), line: ln });
+        else { frags.push({ text: line.slice(bs + 2), line: ln }); inBlock = true; }
+        continue;
+      }
+      const cm = matchSlashComment(line);
+      if (cm) frags.push({ text: cm, line: ln });
+    }
+  }
+  return frags;
+}
+
+// Turn one prose fragment into synthetic spans. Mirrors how `extractSpans` emits
+// a span per backtick token: here we emit (1) the WHOLE fragment so a bare
+// `router.ex … 716-724` phrase classifies as a lineref, and (2) one span per
+// whitespace/punctuation-delimited token so a mid-sentence `bin/bd-shim` path or
+// `Module.func` symbol is seen. Comment spans are `fenced:true` to bypass the
+// inline prose-guard (comment prose legitimately carries `…` and aligned spaces).
+function emitProseSpans(fragText, line) {
+  const spans = [];
+  const trimmed = (fragText || "").trim();
+  if (!trimmed) return spans;
+  // (1) LINEREF PHRASES. For each `basename.ext` occurrence, slice from it to the
+  // next filename (so two citations in one comment can't cross-contaminate) and
+  // emit the slice ONLY when it genuinely classifies as a lineref. Pre-checking
+  // with matchLineref is what stops a non-lineref phrase from falling through to
+  // a spurious path/symbol claim (comment prose that merely mentions a file name
+  // is not a citation). Bare `router.ex … 716-724` phrases pass; prose does not.
+  const fileRe = /[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]{1,6}\b/g;
+  const fileHits = [];
+  let fm;
+  while ((fm = fileRe.exec(fragText))) fileHits.push(fm.index);
+  for (let k = 0; k < fileHits.length; k++) {
+    const start = fileHits[k];
+    const end = k + 1 < fileHits.length ? fileHits[k + 1] : fragText.length;
+    const phrase = fragText.slice(start, end).trim();
+    if (phrase && matchLineref(phrase)) {
+      spans.push({ raw: phrase, line, fenced: true, srcLine: fragText, comment: true });
+    }
+  }
+  // (2) BACKTICKED tokens → path / symbol / route candidates. A genuine code or
+  // path citation in doc-comment prose is almost always inside `backticks`; bare
+  // prose that merely READS like a path (an `internal/system` tier, a
+  // `deploy/restart` cycle) is NOT a citation and must never flag. Gating
+  // per-token claims on backticks is what keeps the HIGH lane precise.
+  for (const m of fragText.matchAll(/`([^`]+)`/g)) {
+    const tok = m[1].trim();
+    if (tok && tok !== trimmed) {
+      spans.push({ raw: tok, line, fenced: true, srcLine: fragText, comment: true });
+    }
+  }
+  return spans;
+}
+
+// Synthetic spans over a whole source file's comment prose.
+export function extractCommentSpans(text, lang) {
+  const spans = [];
+  for (const frag of commentFragments(text, lang)) {
+    for (const span of emitProseSpans(frag.text, frag.line)) spans.push(span);
+  }
+  return spans;
+}
+
+// Code-comment claims, deduped (the whole-fragment span and a per-token span can
+// both yield the same lineref). `comment:true` rides on every claim so the
+// confidence discount (symbol/route → low) can be applied downstream.
+export function extractCommentClaims(doc, text, lang) {
+  const out = [];
+  const seen = new Set();
+  for (const span of extractCommentSpans(text, lang)) {
+    for (const claim of claimsFromSpan(doc, span)) {
+      const key = `${claim.type}|${claim.line}|${JSON.stringify(claim.target)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ...claim, comment: true });
+    }
+  }
+  return out;
+}
+
+// Dispatch: markdown docs → prose backtick spans; code files → comment prose.
+function claimsForDoc(relDoc, text) {
+  const lang = langFor(extname(relDoc));
+  if (lang) return extractCommentClaims(relDoc, text, lang);
+  return extractClaims(relDoc, text);
+}
+
+// Comment prose is noisier than a curated markdown backtick span. Keep lineref +
+// path (dead-path) findings at HIGH confidence; push symbol/route leads to the
+// low-confidence human queue (verifyRoute never emits false anyway; verifySymbol
+// is already low, but a discount makes the intent explicit and future-proof).
+function commentDiscount(v) {
+  if (!v || !v.comment) return v;
+  if ((v.status === "false" || v.status === "stale") &&
+      (v.type === "symbol" || v.type === "route")) {
+    return { ...v, confidence: "low" };
+  }
+  return v;
+}
+
 // Classify a span's text into zero or more typed claims. A span can yield more
 // than one claim (e.g. a lineref also looks like a path).
 function claimsFromSpan(doc, span) {
@@ -302,10 +486,29 @@ function matchLineref(raw) {
   const numRe = /(?:[:~]\s*|line\s*~?\s*|[–-])(\d{2,5})/g;
   let nm;
   while ((nm = numRe.exec(raw))) nums.push(parseInt(nm[1], 10));
-  // require an explicit ":" or "line" cue so plain `foo.ex` isn't a lineref
-  const hasCue = /[:~]\s*\d|line\s*~?\s*\d/.test(raw);
-  if (!hasCue || nums.length === 0) return null;
-  return { file: fileTok, base, lines: nums };
+  // BARE-RANGE cue (code-comment prose): a `NNN-NNN` line span written WITHOUT a
+  // `:` or backtick — the flagship code-comment defect is
+  //   `# Paths mirror router.ex /v1/auth/* (public 716-724, gated 727-734).`
+  // Capture BOTH endpoints of every range and treat the range itself as the cue,
+  // but only when the cited basename actually resolves to a real file (so random
+  // prose like `foo.bar 12-34` never classifies) and the token pair is not a
+  // date (`2026-06-21`), which would otherwise read as lines 2026/06.
+  const isDate = /\b\d{4}-\d{2}-\d{2}\b/.test(raw);
+  let rangeCue = false;
+  if (!isDate) {
+    const rangeRe = /(\d{2,5})\s*[-–]\s*(\d{2,5})/g;
+    let rm;
+    while ((rm = rangeRe.exec(raw))) {
+      nums.push(parseInt(rm[1], 10), parseInt(rm[2], 10));
+      rangeCue = true;
+    }
+  }
+  // require an explicit ":" / "line" cue so plain `foo.ex` isn't a lineref;
+  // a bare range counts as a cue ONLY for a resolvable basename.
+  const explicitCue = /[:~]\s*\d|line\s*~?\s*\d/.test(raw);
+  const bareCue = rangeCue && resolveBasename(base) !== null;
+  if ((!explicitCue && !bareCue) || nums.length === 0) return null;
+  return { file: fileTok, base, lines: [...new Set(nums)] };
 }
 
 function matchRoute(raw) {
@@ -323,7 +526,15 @@ function matchRoute(raw) {
 function matchPath(raw) {
   // a single token (no spaces) that contains a slash and either ends in a
   // known extension OR starts with a known top dir.
-  const tok = raw.split(/\s+/)[0].replace(/[`,;]+$/, "");
+  let tok = raw.split(/\s+/)[0].replace(/[`,;]+$/, "");
+  // Interpolated / templated tokens are dynamic, not literal files:
+  // `priv/codelists/onix-issue-#{@issue}.xsd`, `deploy/${SLOT}/env`. Never resolve.
+  if (/#\{|\$\{|<%/.test(tok)) return null;
+  // Strip a trailing URL / JSON-pointer fragment — `foo.json#/$defs/x` and
+  // `guide.md#section` cite a REAL file plus an in-document anchor; the `#…`
+  // is never part of the path and would otherwise read as a phantom missing file.
+  const hashIdx = tok.indexOf("#");
+  if (hashIdx > 0) tok = tok.slice(0, hashIdx);
   if (!tok.includes("/")) return null;
   // must not be a URL or a route
   if (/^https?:\/\//.test(tok) || tok.startsWith("/")) return null;
@@ -522,7 +733,7 @@ function verifyRoute(claim) {
 
 function verifyLineref(claim) {
   const t = claim.target;
-  const rel = resolveBasename(t.base);
+  const rel = resolveBasenameNear(t.base, claim.doc);
   if (!rel) {
     return tag(claim, "unverifiable", "low", `lineref basename does not resolve to a file: ${t.base}`);
   }
@@ -578,11 +789,43 @@ function linerefNeedles(raw, t) {
   for (const m of raw.matchAll(/\b([a-z][a-z0-9_]*_[a-z0-9_]+)\b/g)) {
     if (m[1].length >= 4 && m[1] !== t.base.replace(/\W/g, "_")) needles.add(m[1]);
   }
-  // backtick-style env var names PHX_HOST etc.
-  for (const m of raw.matchAll(/\b([A-Z][A-Z0-9_]{3,})\b/g)) needles.add(m[1]);
+  // env-var / SCREAMING_CASE constant names (PHX_HOST, LAST_EVENT_ID). Require an
+  // underscore or digit so English words written in caps for EMPHASIS (NOT, INTO,
+  // MIRRORS, BEAM) are not mistaken for code anchors — otherwise a prose-only
+  // "anchor" drives a bogus stale lineref.
+  for (const m of raw.matchAll(/\b([A-Z][A-Z0-9]*_[A-Z0-9_]+|[A-Z]{2,}[0-9][A-Z0-9]*)\b/g)) needles.add(m[1]);
+  // CamelCase type/identifier refs — code-comment prose cites these bare (no
+  // dot), e.g. `types.ts:117-126` → the anchor is `ListenEvent`, not a dotted
+  // symbol. Adding needles only ever makes a lineref MORE likely to confirm, so
+  // this cannot manufacture a false stale — it only sharpens a genuine drift.
+  for (const m of raw.matchAll(/\b([A-Z][a-z0-9]+[A-Z][A-Za-z0-9]*)\b/g)) needles.add(m[1]);
+  // route-path segments — a comment that cites `/v1/auth/*` anchors on `auth`;
+  // keep segments of length >= 3 so noise like `v1` / `id` does not leak in.
+  for (const m of raw.matchAll(/\/([a-z][a-z0-9_]{2,})/g)) needles.add(m[1]);
   // drop the bare filename token itself
   const out = [...needles].filter((s) => s !== t.file && s !== t.base);
   return out;
+}
+
+// Resolve a bare basename PREFERRING the citing file's own directory / package
+// before the first global manifest hit. A code file that writes `types.ts` means
+// the `types.ts` sitting NEXT TO IT — and several `types.ts` exist across the js/
+// packages, so a blind manifest lookup would resolve to the wrong one. Falls back
+// to the global (manifest-first) resolver for markdown docs, whose citations are
+// repo-relative rather than package-relative.
+function resolveBasenameNear(base, docPath) {
+  if (docPath) {
+    let dir = dirname(docPath);
+    // walk up from the citing file's dir toward repo root, first same-dir hit wins
+    while (dir && dir !== "." && dir !== "/") {
+      const cand = join(dir, base);
+      if (trackedFiles().has(cand) || existsSync(join(ROOT, cand))) return cand;
+      const up = dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+  }
+  return resolveBasename(base);
 }
 
 let _makeTargets = null;
@@ -651,7 +894,7 @@ function reverify(claim) {
     // Re-resolve the file and re-scan a slightly wider window. If the anchor
     // now lands, the first pass was a near-miss — suppress.
     const t = claim.target;
-    const rel = resolveBasename(t.base);
+    const rel = resolveBasenameNear(t.base, claim.doc);
     if (rel) {
       const lines = fileLines(join(ROOT, rel));
       if (lines) {
@@ -687,9 +930,10 @@ function verifyDoc(relDoc) {
   const text = readFileSync(abs, "utf8");
 
   const verified = [];
-  for (const claim of extractClaims(relDoc, text)) {
+  for (const claim of claimsForDoc(relDoc, text)) {
     let v = verifyClaim(claim);
     if (v.status === "false" || v.status === "stale") v = reverify(v);
+    v = commentDiscount(v);
     verified.push(v);
   }
 
@@ -747,6 +991,33 @@ export function liveCorpus() {
     const d = raw.trim();
     if (!d) continue;
     if (LIVE_EXCLUDE.some((p) => d.startsWith(p) || d.includes("/" + p))) continue;
+    if (existsSync(join(ROOT, d))) present.push(d);
+    else skipped.push(d);
+  }
+  return { present, skipped };
+}
+
+// The CODE-COMMENT corpus: every tracked .ex/.exs/.go/.ts, minus vendored /
+// generated trees. This is what the standing code-comment verifier indexes so a
+// drifted @moduledoc lineref or a resurrected `bin/bd-shim` citation is caught
+// the moment it lands. Graceful empty fallback when git is absent.
+const CODE_EXTS = new Set([".ex", ".exs", ".go", ".ts"]);
+const CODE_EXCLUDE = ["node_modules/", "_build/", "deps/", "vendor/", "priv/static/", ".git/"];
+export function codeCommentCorpus() {
+  let lines;
+  try {
+    lines = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 1 << 27 })
+      .toString()
+      .split("\n");
+  } catch {
+    return { present: [], skipped: [] };
+  }
+  const present = [], skipped = [];
+  for (const raw of lines) {
+    const d = raw.trim();
+    if (!d) continue;
+    if (!CODE_EXTS.has(extname(d))) continue;
+    if (CODE_EXCLUDE.some((p) => d.startsWith(p) || d.includes("/" + p))) continue;
     if (existsSync(join(ROOT, d))) present.push(d);
     else skipped.push(d);
   }
@@ -858,11 +1129,15 @@ function main() {
   const argv = process.argv.slice(2);
   const wantJson = argv.includes("--json");
   const emitRefs = argv.includes("--emit-refs");
+  const wantCode = argv.includes("--code");
   const globs = argv.filter((a) => !a.startsWith("--"));
 
   let docs, skipped;
   if (globs.length) {
     ({ present: docs, skipped } = resolveArgs(globs));
+  } else if (wantCode) {
+    // The standing CODE-COMMENT corpus: every tracked .ex/.exs/.go/.ts.
+    ({ present: docs, skipped } = codeCommentCorpus());
   } else {
     // Standing default is the LIVE tracked tree (verify + --emit-refs).
     // Explicit globs still override. The frozen fixture stays for P1 recall only.

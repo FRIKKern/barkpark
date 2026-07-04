@@ -97,6 +97,70 @@ Two metrics:
   finding for `.github/workflows/js-tests.yml`. Prints `GATE: PASS|FAIL` and
   exits non-zero on failure.
 
+## Code-comment citations (citation-truth epic)
+
+The markdown verifier read only `.md`. A 53-agent citation-truth sweep found that
+**27 of 29** confusion/citation defects lived in `@moduledoc` / `///` / `//`
+**doc-comment prose** it never parsed — drifted linerefs, dead-dependency
+citations, retired-tech assertions. The verifier now reads that prose too, reusing
+the **same** extract → classify → verify → re-verify pipeline.
+
+```bash
+# scan every tracked .ex/.exs/.go/.ts comment/doc prose
+node tooling/doc-truth/verify-docs.mjs --code [--json]
+```
+
+- **`extractCommentSpans(text, lang)`** pulls `@moduledoc`/`@doc` heredocs and
+  `#` runs (Elixir), `//` `///` `/** */` (Go/TS) into synthetic spans of the
+  **same shape** `extractSpans` yields, so `claimsFromSpan` / `verifyClaim` /
+  `reverify` run unchanged. The corpus walk dispatches on extension.
+- **Bare-range linerefs** — a `file.ext … NNN-NNN` span classifies as a lineref
+  *without* a `:`/backtick cue, but only for a **resolvable** basename and never a
+  date. This is what catches the flagship
+  `capabilities.ex:1527 → router.ex … 716-724` (the real `/v1/auth` lines drifted).
+- **Same-package basename resolution** — a code file citing a bare `types.ts`
+  resolves to the `types.ts` next to it before any global hit (several exist),
+  catching `listen.ts:10 → types.ts:117-126` (real `ListenEvent` is line 818).
+- **Precision** — comment prose is noisy, so the HIGH lane is scoped: lineref +
+  explicit **backticked** path stay high; symbol/route drop to the low-confidence
+  queue. Bare prose that merely *reads* like a path (an `internal/system` tier, a
+  `deploy/restart` cycle) is never a claim.
+
+### retired-terms — context-aware dead-tech denylist
+
+```bash
+node tooling/doc-truth/retired-terms.mjs [--json]
+```
+
+The semantic complement: verify-docs catches drifted *citations*, retired-terms
+catches drifted *claims* — prose asserting a gutted technology is current
+(`cytoscape` after the graph pane went Canvas2D; `bin/bd-shim`, the retired beads
+shim, cited as a live `/v1/tasks` binary). **Not a blind grep** — a term is
+allowed when it sits within ~170 chars of a negation/historical word
+(`gutted`, `removed`, `retired`, `NOT`, `historically`, `legacy`, `mirror`,
+`compatible` …), carries an inline `doc-truth-allow` pragma, or lives under an
+allowlisted path (`test/`, `CHANGELOG`, git-history docs, this tool's fixtures).
+So `Canvas2D, NOT Cytoscape`, `Cytoscape is fully gutted`, and the ~15 historical
+bd-shim contract mentions all **pass**, while a planted `# uses Cytoscape to
+render` (a live-use verb bound directly to the term) **flags**. `bin/bd-shim` is
+excused only by a *narrow* death-acknowledgment set — contract words don't make a
+gone binary path OK to cite. Exit is **never-worse** against the frozen corpus.
+
+### The code-comment acceptance test
+
+```bash
+node tooling/doc-truth/acceptance-code-comments.mjs
+```
+
+Four hard gates: **(a)** every one of the 29 frozen defects
+(`fixtures/citation-corpus-2026-07.json`) surfaces fail-before on the pre-fix
+tree, and retired-terms emits nothing novel beyond that baseline; **(b)** the
+clean control (`fixtures/control-clean.ex`) plus `graph_view.ex` / `root.html.heex`
+(canonical historical mentions) emit **zero** false positives; **(c)** a planted
+live-Cytoscape assertion and a planted stale lineref are both caught; **(d)** the
+markdown `acceptance.mjs` (js-tests.yml gate) still passes. Wired into
+`doc-gates.yml`, fail-closed, triggering on `.ex/.go/.ts/.md` changes.
+
 ## P2 — the waterfall (each fact once)
 
 P1 asks *"is each claim TRUE?"*. **P2 asks the orthogonal question: "is the same
