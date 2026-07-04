@@ -83,3 +83,45 @@ A **tall, narrow, always-glanceable** live pane — the user runs it in a portra
 ## Scale directive
 
 Very important goal. Loop wave after wave until perfection — strategists think BOLDLY about what "the best portrait task TUI ever" means (they run on Fable, per user direction, and should be used heavily); the architect owns a dedicated charter at `.claude/workflows/bp-task-tui-epic-charter.md`; builders/perfecters iterate until the direction agent judges it at the bar.
+
+---
+
+## AMENDMENT 2 (2026-07-04) — COMPACT, GROUPED, CLAIM-FORWARD (live-queue feedback)
+
+**User, verbatim, seeing the real guerrilla board:** "I never see anything claimed, and I see all
+these tasks stacked like this? looks so incredibly bad — I wanted them stacked — and I want to see
+what is being worked on — not a lot of irrelevant tasks — unless I expand to see more, I want to
+see the relevant active list, but not all the items." + "We want it to be a lot more compact and
+grouped — it is important that Barkpark is making it very important that we claim tasks — and
+handle it fully — so we can see active ongoing work."
+
+**Ground truth of the live queue (measured 2026-07-04, `/v1/tasks?limit=1000`, 204 docs):**
+`open 66 · done 136 · blocked 1 · in_progress 0`; **119 claims all EXPIRED** (workers dropped the
+lease without closing); 4 epics dominate the opens — aesthetic-unification (35 children), dwb (30),
+sheets-parity (22), lvw (13). So today's board renders every epic FULLY EXPANDED → a ~130-row flat
+wall, and the NOW band is empty ("nothing claimed right now") because nothing is genuinely
+in_progress. This is the exact opposite of the wish.
+
+**The two decisions this amendment demands (implement + retune the opinion — this is legal now,
+the board is live and the user is the authority):**
+
+1. **COMPACT + GROUPED BY DEFAULT.** The board's default is a SHORT, scannable list of GROUP
+   HEADERS (epics + clusters), each collapsed to one line with its progress + a claimable hint —
+   NOT a dump of every open child. Expand (enter/l on a header) reveals the children. This INVERTS
+   today's "expanded unless Dormant" default: epics/clusters now FOLD by default, and auto-EXPAND
+   only when they hold active work (an in_progress/claimed child) — the group you're actually
+   working shows its rows, everything else stays a quiet header. Orphans fold behind a count too
+   (open orphans, not just done). "Unless I expand, I see the relevant active list, not all items."
+
+2. **CLAIM-FORWARD — active work is the hero, claiming is the point.** The pane's whole opinion
+   pushes claim → work → close. NOW (active claimed/in_progress work) stays pinned at top. When
+   NOTHING is claimed (today's reality), the band must NOT dead-end at "nothing claimed" — it
+   surfaces a compact **READY TO CLAIM** head: the top N ready tasks across all epics (priority
+   then freshness), each one keypress `c` to claim, so the user always has an obvious way to start
+   active work and immediately SEE it move into NOW. Barkpark should make claiming feel important
+   and make the claim lifecycle legible (claimed → in_progress → closed), not bury it.
+
+Everything else (Amendment 1's simple/beautiful/deep, the calm subtraction) still holds. This is a
+policy/opinion retune on the LIVE queue — the slice the roadmap always reserved for "run against
+guerrilla, retune ordering/folding." Loop until the pane, on the REAL corpus, reads compact,
+grouped, and claim-forward — not a flat wall.
