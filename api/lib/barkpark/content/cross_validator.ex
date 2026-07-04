@@ -18,16 +18,17 @@ defmodule Barkpark.Content.CrossValidator do
 
   Predicates compose with `all` / `any` and bottom out at single-field maps
   with `field` + `operator` (+ optional `value`). The leaf predicate is
-  evaluated by `BarkparkWeb.Components.Fields.Visibility` — same operator
-  set as field visibility (`eq`, `neq`, `in`, `empty`, `non_empty`,
-  `starts_with`) and the same dotted-path / list-flatten walker.
+  evaluated by `Barkpark.Content.FieldVisibility` — the sealed, single source
+  of truth also used by the Studio field renderer — so the same operator set
+  as field visibility (`eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`)
+  and the same dotted-path / list-flatten walker.
 
   Returns each rule annotated with `"satisfied" => true | false` so callers
   can render mixed satisfied/violating UIs; `violations/2` is the convenience
   filter for the banner case.
   """
 
-  alias BarkparkWeb.Components.Fields.Visibility
+  alias Barkpark.Content.FieldVisibility
 
   @doc """
   Evaluate every cross-validation rule against `doc`. Returns the rules as a
@@ -95,7 +96,7 @@ defmodule Barkpark.Content.CrossValidator do
   defp evaluate(_, _), do: true
 
   # A leaf predicate may itself be a composed `all` / `any` (nested rules),
-  # so recurse through evaluate/2 first. Otherwise feed to Visibility,
+  # so recurse through evaluate/2 first. Otherwise feed to FieldVisibility,
   # which is the single source of truth for operator semantics.
   defp eval_leaf(%{"all" => _} = pred, doc), do: evaluate(pred, doc)
   defp eval_leaf(%{all: _} = pred, doc), do: evaluate(pred, doc)
@@ -103,7 +104,7 @@ defmodule Barkpark.Content.CrossValidator do
   defp eval_leaf(%{any: _} = pred, doc), do: evaluate(pred, doc)
 
   defp eval_leaf(pred, doc) when is_map(pred) do
-    Visibility.visible?(%{"visibleWhen" => pred}, doc)
+    FieldVisibility.visible?(%{"visibleWhen" => pred}, doc)
   end
 
   defp eval_leaf(_, _), do: true
