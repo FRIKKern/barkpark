@@ -1293,3 +1293,343 @@ test("readyHeroHtml escapes the instance name (no markup injection)", () => {
   assert.doesNotMatch(html, /<script>x/);
   assert.match(html, /&lt;script&gt;/);
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Zero-broken-promises slice (charter D5/D7/D25/D26): the shared confirm modal,
+// the promote (rollback/redeploy) grammar, and the invitation-accept landing.
+// ═════════════════════════════════════════════════════════════════════════════
+
+test("the zero-broken-promises helpers are exported", () => {
+  for (const name of [
+    "confirmModalInit", "confirmModalReduce", "confirmModalArmed", "confirmModalTypedMatch",
+    "confirmModalHtml", "trapTarget",
+    "promotePath", "promoteActionFor", "promoteConfirmCopy", "promoteFailure",
+    "deployRefLabel", "deployRow",
+    "parseInviteToken", "inviteLandingState", "inviteTerminalFrom", "inviteStateHtml",
+  ]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+// ── confirmModal: the pure state machine (D5, both tiers) ────────────────────
+
+test("confirmModalInit: mutate is the default tier and ships armed; junk is total", () => {
+  const s = hooks.confirmModalInit({ title: "Deploy?", consequence: "One sentence." });
+  assert.equal(s.tier, "mutate");
+  assert.equal(s.phase, "open");
+  assert.deepEqual([...s.consequences], ["One sentence."]);
+  assert.equal(hooks.confirmModalTypedMatch(s), true);   // mutate: no echo needed
+  assert.equal(hooks.confirmModalArmed(s), true);
+  // Total over junk: no opts at all still yields a coherent open state.
+  const bare = hooks.confirmModalInit();
+  assert.equal(bare.tier, "mutate");
+  assert.equal(hooks.confirmModalArmed(bare), true);
+});
+
+test("confirmModal destroy tier: disarmed until the typed echo matches EXACTLY", () => {
+  let s = hooks.confirmModalInit({
+    tier: "destroy", title: "Delete prod-db?", resourceName: "prod-db",
+    consequences: ["All data is erased.", "This cannot be undone."],
+  });
+  assert.equal(s.tier, "destroy");
+  assert.equal(hooks.confirmModalTypedMatch(s), false);
+  assert.equal(hooks.confirmModalArmed(s), false);
+  // Wrong case / partial / padded → still disarmed (no trim, no case-folding).
+  for (const typed of ["Prod-DB", "prod-d", " prod-db", "prod-db "]) {
+    const t = hooks.confirmModalReduce(s, { type: "type", value: typed });
+    assert.equal(hooks.confirmModalArmed(t), false, JSON.stringify(typed) + " must not arm");
+  }
+  s = hooks.confirmModalReduce(s, { type: "type", value: "prod-db" });
+  assert.equal(hooks.confirmModalTypedMatch(s), true);
+  assert.equal(hooks.confirmModalArmed(s), true);
+  // A destroy modal with NO resource name can never arm (fail closed).
+  const noName = hooks.confirmModalInit({ tier: "destroy" });
+  assert.equal(hooks.confirmModalTypedMatch(hooks.confirmModalReduce(noName, { type: "type", value: "" })), false);
+});
+
+test("confirmModalReduce walks open → busy → error → busy → done; illegal moves are no-ops", () => {
+  let s = hooks.confirmModalInit({ title: "T", consequence: "C" });
+  // fail/succeed outside busy: unchanged.
+  assert.equal(hooks.confirmModalReduce(s, { type: "fail", message: "x" }).phase, "open");
+  assert.equal(hooks.confirmModalReduce(s, { type: "succeed" }).phase, "open");
+  s = hooks.confirmModalReduce(s, { type: "confirm" });
+  assert.equal(s.phase, "busy");
+  // typing while busy is ignored; confirming while busy is ignored.
+  assert.equal(hooks.confirmModalReduce(s, { type: "type", value: "x" }).typed, "");
+  assert.equal(hooks.confirmModalReduce(s, { type: "confirm" }).phase, "busy");
+  s = hooks.confirmModalReduce(s, { type: "fail", message: "nope" });
+  assert.equal(s.phase, "error");
+  assert.equal(s.error, "nope");
+  // error phase stays armed (mutate) → retry can re-enter busy without re-typing.
+  assert.equal(hooks.confirmModalArmed(s), true);
+  s = hooks.confirmModalReduce(s, { type: "confirm" });
+  assert.equal(s.phase, "busy");
+  assert.equal(s.error, null); // a retry clears the stale error
+  s = hooks.confirmModalReduce(s, { type: "succeed" });
+  assert.equal(s.phase, "done");
+  // dismiss is legal from anywhere; unknown events + junk are total no-ops.
+  assert.equal(hooks.confirmModalReduce(s, { type: "dismiss" }).phase, "closed");
+  assert.equal(hooks.confirmModalReduce(s, { type: "wat" }), s);
+  assert.equal(hooks.confirmModalReduce(null, { type: "confirm" }), null);
+  assert.equal(hooks.confirmModalReduce(s, null), s);
+});
+
+test("confirmModalHtml: mutate renders one sentence + live Confirm; destroy renders list + disabled Confirm + echo input", () => {
+  const m = hooks.confirmModalHtml(hooks.confirmModalInit({
+    title: "Roll back?", consequence: "This creates a new deployment.", confirmLabel: "Roll back",
+  }));
+  assert.match(m, /cm-consequence/);
+  assert.match(m, /This creates a new deployment\./);
+  assert.doesNotMatch(m, /cm-typed/);          // no echo input on the mutate tier
+  assert.doesNotMatch(m, /id="cm-confirm" disabled/); // armed from the start
+  assert.match(m, /btn-primary/);
+  assert.match(m, /data-close>Cancel</);       // dismissal is always available
+
+  const d = hooks.confirmModalHtml(hooks.confirmModalInit({
+    tier: "destroy", title: "Delete prod-db?", resourceName: "prod-db",
+    consequences: ["All data is erased.", "Billing stops."], confirmLabel: "Delete",
+  }));
+  assert.match(d, /cm-consequences/);
+  assert.match(d, /<li>All data is erased\.<\/li><li>Billing stops\.<\/li>/);
+  assert.match(d, /id="cm-typed"/);
+  assert.match(d, /id="cm-confirm" disabled/); // disarmed until the echo matches
+  assert.match(d, /btn-danger/);
+});
+
+test("confirmModalHtml escapes hostile titles/consequences/resource names", () => {
+  const html = hooks.confirmModalHtml(hooks.confirmModalInit({
+    tier: "destroy", title: '<img src=x onerror=1>', resourceName: '"><script>',
+    consequences: ["<b>bold</b>"],
+  }));
+  assert.doesNotMatch(html, /<img/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;img src=x onerror=1&gt;/);
+  assert.match(html, /&lt;b&gt;bold&lt;\/b&gt;/);
+});
+
+// ── trapTarget: the pure focus-trap edge logic the modal Tab handler uses ────
+
+test("trapTarget cycles Tab/Shift+Tab at the list edges and snaps escaped focus back", () => {
+  const f = ["a", "b", "c"];
+  assert.equal(hooks.trapTarget(f, "c", false), "a"); // Tab past the end wraps
+  assert.equal(hooks.trapTarget(f, "a", true), "c");  // Shift+Tab past the start wraps
+  assert.equal(hooks.trapTarget(f, "b", false), null); // mid-list: browser moves naturally
+  assert.equal(hooks.trapTarget(f, "b", true), null);
+  assert.equal(hooks.trapTarget(f, "zz", false), "a"); // focus escaped → snap to first
+  assert.equal(hooks.trapTarget([], "a", false), null); // empty: caller pins
+  assert.equal(hooks.trapTarget(null, "a", false), null);
+  assert.equal(hooks.trapTarget(["only"], "only", false), "only"); // single element pins to itself
+  assert.equal(hooks.trapTarget(["only"], "only", true), "only");
+});
+
+// ── promote grammar: URL builder, action ladder, confirm copy, failure map ──
+
+test("promotePath percent-encodes both ids into their path segments", () => {
+  assert.equal(hooks.promotePath("s1", "d1"), "/v1/sites/s1/deployments/d1/promote");
+  assert.equal(
+    hooks.promotePath("a/b", "c d"),
+    "/v1/sites/a%2Fb/deployments/c%20d/promote",
+  );
+});
+
+test("promoteActionFor: current live → Redeploy; prior live → Roll back; everything else → nothing", () => {
+  const cur = { id: "d1", status: "live", environment: "production" };
+  const prior = { id: "d0", status: "live", environment: "production" };
+  assert.equal(hooks.promoteActionFor(cur, "d1").kind, "redeploy");
+  assert.equal(hooks.promoteActionFor(cur, "d1").label, "Redeploy");
+  assert.equal(hooks.promoteActionFor(prior, "d1").kind, "rollback");
+  assert.equal(hooks.promoteActionFor(prior, "d1").label, "Roll back to this");
+  // No current pointer at all → a live row still offers rollback (it IS prior).
+  assert.equal(hooks.promoteActionFor(prior, null).kind, "rollback");
+  // Non-live rows have no proven artifact to promote.
+  for (const st of ["queued", "building", "pushing", "failed"]) {
+    assert.equal(hooks.promoteActionFor({ id: "x", status: st }, "d1"), null, st);
+  }
+  // Branch previews are never promotable (server 422s them too).
+  assert.equal(hooks.promoteActionFor({ id: "p", status: "live", environment: "preview" }, "d1"), null);
+  assert.equal(hooks.promoteActionFor(null, "d1"), null);
+});
+
+test("promoteConfirmCopy: one honest consequence sentence per kind", () => {
+  const rb = hooks.promoteConfirmCopy("rollback", "4e7d0c9");
+  assert.match(rb.title, /Roll back to 4e7d0c9\?/);
+  assert.match(rb.consequence, /new production deployment pinned to 4e7d0c9/);
+  assert.match(rb.consequence, /stays in history/);
+  assert.equal(rb.confirmLabel, "Roll back");
+  const rd = hooks.promoteConfirmCopy("redeploy", "9c1f2ab");
+  assert.match(rd.title, /Redeploy 9c1f2ab\?/);
+  assert.match(rd.consequence, /same source \(9c1f2ab\)/);
+  assert.match(rd.consequence, /keeps serving until the new one is live/);
+  assert.equal(rd.confirmLabel, "Redeploy");
+});
+
+test("promoteFailure maps every server refusal to a human sentence + ONE recovery", () => {
+  const conflict = hooks.promoteFailure(409, { error: "build_in_progress" });
+  assert.match(conflict.message, /already in progress/);
+  assert.equal(conflict.recovery, "refresh");
+  assert.equal(hooks.promoteFailure(404, { error: "not_found" }).recovery, "refresh");
+  assert.match(hooks.promoteFailure(422, { error: "not_promotable" }).message, /previews can't be promoted/);
+  assert.match(hooks.promoteFailure(422, { error: "no_build_source" }).message, /nothing to rebuild from/);
+  // Network/unknown failures are retryable — the modal's one action is Try again.
+  assert.equal(hooks.promoteFailure(0, { error: "network_error" }).recovery, "retry");
+  assert.equal(hooks.promoteFailure(500, {}).recovery, "retry");
+  // Every branch yields a non-empty human sentence.
+  for (const [st, data] of [[409, {}], [404, {}], [422, { error: "not_promotable" }],
+    [422, { error: "no_build_source" }], [0, {}], [500, null]]) {
+    const f = hooks.promoteFailure(st, data);
+    assert.ok(typeof f.message === "string" && f.message.length > 10, st + " message");
+    assert.ok(f.recovery === "retry" || f.recovery === "refresh");
+  }
+});
+
+test("deployRefLabel prefers git sha, then image tag, then row id — always short", () => {
+  assert.equal(hooks.deployRefLabel({ git_ref: "4e7d0c9aa112233445566", image_tag: "site:20" }), "4e7d0c9");
+  assert.equal(hooks.deployRefLabel({ image_tag: "marketing:2026-07-03" }), "marketing:20"); // shortId caps at 12
+  assert.equal(hooks.deployRefLabel({ id: "0123456789abcdef" }), "0123456789ab");
+  assert.equal(hooks.deployRefLabel(null), "");
+});
+
+// ── deployRow: the rendered promise — actions, Current chip, git meta ────────
+
+test("deployRow: the current live row gets Redeploy + the Current chip; a prior live row gets Roll back", () => {
+  const cur = { id: "d2", status: "live", git_ref: "9c1f2ab", branch: "main", became_live_at: "2026-07-03T10:00:00Z" };
+  const prior = { id: "d1", status: "live", git_ref: "4e7d0c9", branch: "main", became_live_at: "2026-07-01T10:00:00Z" };
+  const curHtml = hooks.deployRow(cur, "d2");
+  assert.match(curHtml, /dep-promote/);
+  assert.match(curHtml, /data-kind="redeploy"/);
+  assert.match(curHtml, /dep-current/);
+  assert.match(curHtml, />Redeploy</);
+  const priorHtml = hooks.deployRow(prior, "d2");
+  assert.match(priorHtml, /data-kind="rollback"/);
+  assert.match(priorHtml, />Roll back to this</);
+  assert.doesNotMatch(priorHtml, /dep-current/);
+  // Git meta rides along: branch + live-since phrasing.
+  assert.match(priorHtml, /main/);
+  assert.match(priorHtml, /live since /);
+});
+
+test("deployRow: failed/active rows offer no promote action (and no Current chip without a match)", () => {
+  const failed = { id: "d3", status: "failed", git_ref: "b23aa01", failure_reason: "npm run build exited 1" };
+  const html = hooks.deployRow(failed, "d2");
+  assert.doesNotMatch(html, /dep-promote/);
+  assert.doesNotMatch(html, /dep-current/);
+  assert.match(html, /npm run build exited 1/);
+  const building = { id: "d4", status: "building" };
+  assert.doesNotMatch(hooks.deployRow(building, "d2"), /dep-promote/);
+});
+
+test("deployRow escapes hostile git meta (branch, ref, id)", () => {
+  const evil = {
+    id: 'd5" onclick="x', status: "live",
+    git_ref: "<script>alert(1)</script>", branch: '<img src=x>',
+    became_live_at: "2026-07-03T10:00:00Z",
+  };
+  const html = hooks.deployRow(evil, "other");
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.doesNotMatch(html, /<img src=x>/);
+  assert.match(html, /&lt;script&gt;/);
+});
+
+// ── invitation accept: the minted URL shape parses EXACTLY (router accept_url) ─
+
+test("parseInviteToken accepts the minted shape (#/invitations/accept?token=…) and the canonical one", () => {
+  assert.equal(hooks.parseInviteToken("#/invitations/accept?token=abc123"), "abc123"); // as minted by accept_url/2
+  assert.equal(hooks.parseInviteToken("/invitations/accept?token=abc123"), "abc123");
+  assert.equal(hooks.parseInviteToken("#invitations/accept?token=abc123"), "abc123");
+  assert.equal(hooks.parseInviteToken("invitations/accept?token=abc123"), "abc123");
+});
+
+test("parseInviteToken decodes percent-escapes safely and survives junk", () => {
+  assert.equal(hooks.parseInviteToken("#/invitations/accept?token=a%2Bb%20c"), "a+b c");
+  assert.equal(hooks.parseInviteToken("#/invitations/accept?token=abc%"), "abc%"); // malformed escape: verbatim, no throw
+  assert.equal(hooks.parseInviteToken("#/invitations/accept?foo=1&token=xyz"), "xyz"); // extra params tolerated
+  assert.equal(hooks.parseInviteToken("#/invitations/accept?token="), null);
+  assert.equal(hooks.parseInviteToken("#/invitations/accept"), null);
+  assert.equal(hooks.parseInviteToken("#overview"), null);
+  assert.equal(hooks.parseInviteToken(null), null);
+});
+
+test("legacyRoute normalizes the minted leading-slash invite hash; parseHash routes it with the token", () => {
+  assert.equal(hooks.legacyRoute("/invitations/accept?token=x"), "invitations/accept?token=x");
+  assert.equal(hooks.legacyRoute("#/invitations/accept?token=x"), "invitations/accept?token=x");
+  sandbox.location.hash = "#/invitations/accept?token=tok-1";
+  let r = hooks.parseHash();
+  assert.equal(r.view, "invite");
+  assert.equal(r.token, "tok-1");
+  sandbox.location.hash = "#invitations/accept"; // parked-token resume shape: no token in the URL
+  r = hooks.parseHash();
+  assert.equal(r.view, "invite");
+  assert.equal(r.token, null);
+  sandbox.location.hash = ""; // leave the shared sandbox clean for later tests
+});
+
+// ── invite state classifiers ─────────────────────────────────────────────────
+
+const INV_NOW = Date.parse("2026-07-04T12:00:00Z");
+const INV_FUTURE = "2026-07-10T12:00:00Z";
+const INV_PAST = "2026-07-01T12:00:00Z";
+const livePreview = { team: { name: "Northwind", slug: "northwind" }, email: "ada@acme.com", role: "admin", expires_at: INV_FUTURE };
+const INV_ME = { user: { email: "ada@acme.com" }, team: { name: "Acme Inc", slug: "acme" } };
+
+test("inviteLandingState: 404 → invalid; past expiry → expired; own team → already_member; else confirm", () => {
+  assert.equal(hooks.inviteLandingState(404, null, INV_ME, INV_NOW), "invalid");
+  assert.equal(hooks.inviteLandingState(200, { ...livePreview, expires_at: INV_PAST }, INV_ME, INV_NOW), "expired");
+  assert.equal(hooks.inviteLandingState(200, { ...livePreview, team: { name: "Acme Inc", slug: "acme" } }, INV_ME, INV_NOW), "already_member");
+  assert.equal(hooks.inviteLandingState(200, livePreview, INV_ME, INV_NOW), "confirm");
+  assert.equal(hooks.inviteLandingState(200, livePreview, null, INV_NOW), "confirm"); // me unavailable → still offer the join
+});
+
+test("inviteTerminalFrom: 200→joined, 403→wrong_account, 404 splits expired/invalid by OUR preview, else error", () => {
+  assert.equal(hooks.inviteTerminalFrom(200, { team_id: "t" }, livePreview, INV_NOW), "joined");
+  assert.equal(hooks.inviteTerminalFrom(403, { error: "email_mismatch" }, livePreview, INV_NOW), "wrong_account");
+  // 404 with a preview that expired since landing → honest "expired".
+  assert.equal(hooks.inviteTerminalFrom(404, { error: "invalid_or_expired" }, { ...livePreview, expires_at: INV_PAST }, INV_NOW), "expired");
+  // 404 with a still-live (or absent) preview → the server folded it: "invalid".
+  assert.equal(hooks.inviteTerminalFrom(404, { error: "invalid_or_expired" }, livePreview, INV_NOW), "invalid");
+  assert.equal(hooks.inviteTerminalFrom(404, { error: "invalid_or_expired" }, null, INV_NOW), "invalid");
+  assert.equal(hooks.inviteTerminalFrom(422, { error: "accept_failed" }, livePreview, INV_NOW), "error");
+  assert.equal(hooks.inviteTerminalFrom(0, { error: "network_error" }, livePreview, INV_NOW), "error");
+});
+
+// ── invite terminal renders: calm copy, exactly ONE action each ──────────────
+
+test("every invite terminal state renders exactly one next action", () => {
+  const ctx = { team: "Northwind", role: "admin", email: "ada@acme.com", meEmail: "someone@else.com" };
+  const expectations = {
+    joined: [/You&#39;re in/, /data-invite-act="overview"/, /Go to Overview/],
+    already_member: [/already a member/, /data-invite-act="overview"/],
+    expired: [/has expired/, /data-invite-act="overview"/],
+    invalid: [/isn&#39;t valid any more/, /data-invite-act="overview"/],
+    wrong_account: [/different email/, /data-invite-act="switch"/, /Switch account/],
+    error: [/Something went wrong/, /data-invite-act="retry"/, /Try again/],
+  };
+  for (const [state, patterns] of Object.entries(expectations)) {
+    const html = hooks.inviteStateHtml(state, ctx);
+    const actions = (html.match(/data-invite-act=/g) || []).length;
+    assert.equal(actions, 1, state + " must render exactly one action, got " + actions);
+    for (const p of patterns) assert.match(html, p, state);
+  }
+});
+
+test("the invite confirm screen offers Join (one action) plus a quiet Not-now escape", () => {
+  const html = hooks.inviteStateHtml("confirm", { team: "Northwind", role: "admin", email: "ada@acme.com" });
+  assert.equal((html.match(/data-invite-act=/g) || []).length, 1);
+  assert.match(html, /data-invite-act="join"/);
+  assert.match(html, /Join Northwind/);
+  assert.match(html, /as admin/);
+  assert.match(html, /ada@acme\.com/);
+  assert.match(html, /invite-skip/);
+  assert.match(html, /Not now/);
+});
+
+test("inviteStateHtml is total over unknown states and escapes hostile team names", () => {
+  // Unknown state → the invalid fallback (never a blank screen).
+  assert.match(hooks.inviteStateHtml("wat", {}), /isn&#39;t valid any more/);
+  assert.match(hooks.inviteStateHtml(null, {}), /isn&#39;t valid any more/);
+  const html = hooks.inviteStateHtml("joined", { team: '<script>alert(1)</script>' });
+  assert.doesNotMatch(html, /<script>alert/);
+  assert.match(html, /&lt;script&gt;/);
+  // Missing ctx degrades to calm generic copy, never "undefined".
+  assert.doesNotMatch(hooks.inviteStateHtml("joined", {}), /undefined/);
+  assert.doesNotMatch(hooks.inviteStateHtml("confirm", {}), /undefined/);
+});

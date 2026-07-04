@@ -1792,3 +1792,95 @@ select.form-input {
   .wh-card-head { flex-direction: column; }
   .wh-dataset-input { width: 120px; }
 }
+
+/* ==========================================================================
+   Zero broken promises slice (charter D5/D7/D25/D26) — appended block.
+   Shared confirm modal (mutate + destroy tiers), deploy-row promote actions,
+   and the invitation-accept landing. Uses only the wave-1 token contract.
+   ========================================================================== */
+
+/* -- confirm modal ---------------------------------------------------------
+   Mutate tier reuses .modal-sub for its single consequence sentence; destroy
+   tier gets the consequence LIST + the typed-echo field. */
+.cm-consequence { margin-bottom: 2px; }
+.cm-consequences {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted-text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cm-typed-field { margin-top: 12px; }
+.cm-name { font-family: var(--mono); font-weight: 600; color: var(--text); user-select: none; }
+/* Inline failure surface (D25): the human sentence lives HERE, next to the one
+   recovery action the primary button morphs into — never a dead toast. */
+.cm-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--danger-hsl) / 0.28);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+.cm-error-msg { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+
+/* -- deploy-row promote actions (rollback / redeploy) ---------------------- */
+.dep-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.dep-promote { white-space: nowrap; }
+.dep-current {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--pill);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid hsl(var(--ok-hsl) / 0.28);
+  vertical-align: 1px;
+}
+
+/* -- invitation-accept landing --------------------------------------------- */
+.invite-wrap { display: flex; justify-content: center; padding: 48px 16px; }
+.invite-card { max-width: 460px; width: 100%; text-align: center; padding: 32px 28px; }
+.invite-ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.invite-ico--ok { background: var(--ok-soft); color: var(--ok); }
+.invite-ico--info { background: var(--info-soft); color: var(--info); }
+.invite-ico--warn { background: var(--warn-soft); color: var(--warn-strong); }
+.invite-title { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+.invite-copy { font-size: 14px; color: var(--muted-text); margin: 0 0 20px; line-height: 1.55; }
+.invite-copy b { color: var(--text); font-weight: 600; }
+.invite-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.invite-action { min-width: 200px; }
+.invite-skip { font-size: 13px; color: var(--muted-text); }
+.invite-skip:hover { color: var(--text); }
+
+/* The sign-in card's invitation banner (logged-out landing). :empty hides the
+   slot while the preview fetch is in flight, so no husk flashes. */
+.auth-invite {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-text);
+  background: var(--info-soft);
+  border: 1px solid hsl(var(--info-hsl) / 0.25);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+.auth-invite:empty { display: none; }
+.auth-invite-title { display: block; font-weight: 600; color: var(--text); }
+.auth-invite-email { font-weight: 600; color: var(--text); }
