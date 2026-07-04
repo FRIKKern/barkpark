@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,15 +43,8 @@ import (
 // FetchSnapshot is the IO boundary, so it stamps FetchedAt from the wall clock;
 // the pure BuildBoard downstream takes its "now" as an explicit parameter.
 func FetchSnapshot(c *apiclient.Client) (Snapshot, error) {
-	tasks, err := fetchTaskList(c)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	extras, err := fetchPrime(c)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	return composeSnapshot(tasks, extras, time.Now().UTC()), nil
+	snap, _, err := FetchSnapshotFull(c)
+	return snap, err
 }
 
 // primeReadyLimit is the server's prime clamp maximum, requested as ?limit=. A
@@ -113,14 +108,6 @@ func bodyHint(body []byte) string {
 	return ": " + s
 }
 
-func fetchTaskList(c *apiclient.Client) ([]Task, error) {
-	body, err := getJSON(c, "/v1/tasks?limit=1000")
-	if err != nil {
-		return nil, err
-	}
-	return decodeTaskList(body)
-}
-
 // fetchPrime asks for prime at the clamp maximum — which buys the deepest ready
 // head and event tail one call allows. The ticker only renders a short tail, but
 // the ready overlay wants every claimable row it can get (past the clamp the
@@ -135,17 +122,28 @@ func fetchPrime(c *apiclient.Client) (primeExtras, error) {
 
 // decodeTaskList turns a {"ok":…,"docs":[…]} list body into board Tasks.
 func decodeTaskList(body []byte) ([]Task, error) {
+	tasks, _, err := decodeTaskListFull(body)
+	return tasks, err
+}
+
+// decodeTaskListFull is the one-pass dual decode: each render_doc envelope
+// becomes both its board Task and its TaskDetail reading model, keyed by
+// doc_id. One json.Unmarshal of the body, one walk of the docs.
+func decodeTaskListFull(body []byte) ([]Task, DetailIndex, error) {
 	var env struct {
 		Docs []taskWire `json:"docs"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("decode tasks list: %w", err)
+		return nil, nil, fmt.Errorf("decode tasks list: %w", err)
 	}
 	tasks := make([]Task, 0, len(env.Docs))
+	details := make(DetailIndex, len(env.Docs))
 	for _, w := range env.Docs {
-		tasks = append(tasks, w.toTask())
+		t := w.toTask()
+		tasks = append(tasks, t)
+		details[t.DocID] = w.toDetail(t)
 	}
-	return tasks, nil
+	return tasks, details, nil
 }
 
 // primeExtras is the slice of /v1/tasks/prime the board consumes: the
@@ -208,11 +206,17 @@ type taskWire struct {
 	DependentCount  int             `json:"dependent_count"`
 	InsertedAt      time.Time       `json:"inserted_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
-	// Content is the full render_doc content map. The board only reads
+	// Papers is the top-level surfacing of content.papers (the server lifts it
+	// out; live the two are identical). RawMessage so a malformed value can
+	// never fail the whole list decode — toDetail falls back to it only when
+	// content.papers is absent.
+	Papers json.RawMessage `json:"papers"`
+	// Content is the full render_doc content map. The board reads
 	// content.acceptance_criteria out of it (the checklist text the compact
-	// criteria_progress counter omits), and decodes it permissively so a task
-	// whose content is a non-object, or whose acceptance_criteria is not a list,
-	// degrades to no checklist rather than failing the whole list decode.
+	// criteria_progress counter omits) and toDetail hydrates the whole
+	// TaskDetail reading model from it — all permissively, so a task whose
+	// content is a non-object, or whose fields are oddly shaped, degrades to
+	// zero values rather than failing the whole list decode.
 	Content json.RawMessage `json:"content"`
 }
 
@@ -225,6 +229,13 @@ type claimWire struct {
 	Epoch     int       `json:"epoch"`
 	TsISO     time.Time `json:"ts_iso"`
 	ClaimedAt time.Time `json:"claimed_at"`
+	// PreviousWorker + ExpiredAt are the swept-lease history the detail view
+	// reads (live: a swept claim nulls "worker" and records who held it and
+	// when it lapsed). RawMessage + tolerant coercion so a malformed value
+	// degrades to zero instead of failing the whole list decode — these two
+	// are detail fields and ride the frozen tolerance contract.
+	PreviousWorker json.RawMessage `json:"previous_worker"`
+	ExpiredAt      json.RawMessage `json:"expired_at"`
 }
 
 type criteriaWire struct {
@@ -325,4 +336,197 @@ func coercePriority(raw json.RawMessage) string {
 		return n.String()
 	}
 	return strings.Trim(string(raw), `"`)
+}
+
+// ── TaskDetail hydration (charter D13/D15 — the reading model) ──────────────
+
+// toDetail hydrates the TaskDetail reading model from the SAME envelope
+// toTask consumed — content fields the compact board row drops. Every read is
+// permissive: missing/malformed -> zero value, per the frozen wave-5
+// tolerance contract (a weird content map may thin the detail view, but it
+// never errors and never drops the task).
+func (w taskWire) toDetail(t Task) TaskDetail {
+	d := TaskDetail{Task: t}
+	m := contentMap(w.Content)
+	d.Description = strField(m, "description")
+	d.Design = strField(m, "design")
+	d.DesignDoc = strField(m, "design_doc")
+	d.Papers = strList(m["papers"])
+	if len(d.Papers) == 0 {
+		// The server also lifts papers to the envelope top level (live the two
+		// are identical); the fallback covers a writer that only set one.
+		d.Papers = strList(rawList(w.Papers))
+	}
+	d.Evidence = decodeCriteriaEvidence(w.Content)
+	d.BlockedReason = strField(m, "blocked_reason")
+	d.CloseReason = strField(m, "close_reason")
+	d.ResolutionNote = strField(m, "resolution_note")
+	d.CodeRefs = flattenCodeRefs(m["code_refs"])
+	d.Assignee = strField(m, "assignee")
+	d.LastWorkedAt = timeField(m, "last_worked_at")
+	if w.Claim != nil {
+		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
+		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
+	}
+	return d
+}
+
+// decodeCriteriaEvidence extracts each acceptance_criteria entry's "evidence"
+// string. It walks the SAME list, in the same slot-preserving way, as
+// decodeAcceptanceCriteria — so the result is index-aligned with
+// Task.CriteriaItems by construction (a malformed or evidence-less entry
+// keeps its slot as ""). Nil when the task has no criteria at all.
+func decodeCriteriaEvidence(content json.RawMessage) []string {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return nil
+	}
+	var wrap struct {
+		AcceptanceCriteria []json.RawMessage `json:"acceptance_criteria"`
+	}
+	if err := json.Unmarshal(content, &wrap); err != nil || len(wrap.AcceptanceCriteria) == 0 {
+		return nil
+	}
+	ev := make([]string, len(wrap.AcceptanceCriteria))
+	for i, raw := range wrap.AcceptanceCriteria {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil {
+			ev[i], _ = m["evidence"].(string)
+		}
+	}
+	return ev
+}
+
+// flattenCodeRefs renders content.code_refs into display strings. The wire
+// has no single shape — LIVE-VERIFIED: workers write a MAP (the
+// {branch, commits[], prs[], worktree} convention plus free-form
+// "<name>": "<ref>" keys; PR ids arrive as JSON numbers), and a plain list
+// of strings is tolerated for any older writer. A map flattens to sorted
+// "key: value" lines (list values joined with ", "), empty values are
+// dropped, and anything unrecognizable decodes to nil — never an error.
+func flattenCodeRefs(v any) []string {
+	switch refs := v.(type) {
+	case []any:
+		return strList(refs)
+	case map[string]any:
+		keys := make([]string, 0, len(refs))
+		for k := range refs {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out := make([]string, 0, len(keys))
+		for _, k := range keys {
+			if val := codeRefValue(refs[k]); val != "" {
+				out = append(out, k+": "+val)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	return nil
+}
+
+// codeRefValue coerces one code_refs map value to display text: strings pass
+// through, numbers stringify (PR ids), lists join with ", ". Anything else
+// (nested maps, nulls) -> "" and the key is dropped.
+func codeRefValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case []any:
+		parts := make([]string, 0, len(x))
+		for _, e := range x {
+			if s := codeRefValue(e); s != "" {
+				parts = append(parts, s)
+			}
+		}
+		return strings.Join(parts, ", ")
+	}
+	return ""
+}
+
+// contentMap decodes a render_doc content field into a map, tolerating an
+// absent or non-object content by returning nil (every strField/timeField
+// read of a nil map yields the zero value).
+func contentMap(raw json.RawMessage) map[string]any {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	return m
+}
+
+// strField reads a string content field; any other shape (absent, null,
+// number, object) -> "".
+func strField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+// strList keeps the non-empty string elements of a decoded JSON array;
+// non-array input or an all-junk array -> nil.
+func strList(v any) []string {
+	list, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(list))
+	for _, e := range list {
+		if s, ok := e.(string); ok && s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// timeField parses an RFC3339 string content field; anything else -> zero.
+func timeField(m map[string]any, key string) time.Time {
+	s, _ := m[key].(string)
+	if s == "" {
+		return time.Time{}
+	}
+	ts, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
+}
+
+// rawString tolerantly decodes a RawMessage that should be a JSON string;
+// null/absent/malformed -> "".
+func rawString(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return ""
+}
+
+// rawTime tolerantly decodes a RawMessage that should be an RFC3339 string;
+// null/absent/malformed -> zero time.
+func rawTime(raw json.RawMessage) time.Time {
+	var ts time.Time
+	if json.Unmarshal(raw, &ts) == nil {
+		return ts
+	}
+	return time.Time{}
+}
+
+// rawList tolerantly decodes a RawMessage that should be a JSON array;
+// anything else -> nil.
+func rawList(raw json.RawMessage) []any {
+	var l []any
+	if json.Unmarshal(raw, &l) == nil {
+		return l
+	}
+	return nil
 }
