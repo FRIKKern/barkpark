@@ -186,7 +186,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
   (every shifted cell appears under both its old key, as `nil`, and its
   new key) — its delta therefore also carries
   `structure: %{op: s, at: n | nil, count: n | nil, tab: i}` so clients
-  can re-key locally instead of replaying the map.
+  can re-key locally instead of replaying the map. A `sort_range` structure
+  ALSO carries `rect: {c1, r1, c2, r2}` and `perm: [new-position, …]` (the
+  applied old-row-offset → new-position permutation, SF-AM3) so a collaborator
+  with a selection/editor inside the sorted rect remaps its coordinates
+  instead of clobbering with stale ones.
 
   ## Persistence
 

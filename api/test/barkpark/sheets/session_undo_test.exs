@@ -871,4 +871,23 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
     %{applied: 1, errors: []} = apply!("u-sort-remap", [undo("u")])
     assert peek_cells("u-sort-remap", 0) == %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}}
   end
+
+  # ── bg-tighten regression (SF-1 caveat 4): the op-layer bg validator is now
+  # CondFormat.valid_bg?/1 (`\z`-anchored), so a trailing-newline bg — which the
+  # old `$`-anchored regex admitted — is rejected at the op layer, not stored.
+  test "a set_cell_meta bg with a trailing newline is rejected at the op layer" do
+    create_sheet("u-bg-nl", %{"A1" => %{"v" => "x"}})
+
+    meta = fn bg ->
+      %{"op" => "set_cell_meta", "tab" => 0, "ref" => "A1", "s" => %{"bg" => bg}, "user" => "u"}
+    end
+
+    # The `\z` boundary rejects the newline-suffixed color (old `$` accepted it).
+    %{applied: 0, errors: [%{code: "invalid_style"}]} = apply!("u-bg-nl", [meta.("#ff0000\n")])
+    assert peek_cells("u-bg-nl") == %{"A1" => %{"v" => "x"}}
+
+    # A clean color still applies — the tighten didn't over-reject.
+    %{applied: 1, errors: []} = apply!("u-bg-nl", [meta.("#ff0000")])
+    assert peek_cells("u-bg-nl") == %{"A1" => %{"v" => "x", "s" => %{"bg" => "#ff0000"}}}
+  end
 end

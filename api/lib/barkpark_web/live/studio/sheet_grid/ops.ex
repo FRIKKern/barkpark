@@ -145,7 +145,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
             end
         end
 
-      socket = assign(socket, active: active, anchor: anchor)
+      socket =
+        socket
+        |> assign(active: active, anchor: anchor)
+        |> remap_filters(op, at, count)
 
       if active_deleted? and socket.assigns.editing != nil do
         socket
@@ -163,7 +166,102 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
     end
   end
 
+  # A remote sort_range on the viewer's CURRENT tab moves whole rows WITHIN the
+  # sorted rect (SF-AM3). A held {c, r} inside the rect follows its row: the
+  # perm maps old row-OFFSET (r - r1) → new position, so new_r = r1 + perm[off]
+  # (Structure.sort_rows/3 doc). Cells moved VERBATIM — the open editor targets
+  # `active`, so it follows its remapped cell and its draft still targets the
+  # same content (no editor close, no notice: a sort deletes nothing, unlike a
+  # delete_rows/cols). Positions outside the rect and other-tab sorts are
+  # untouched. Malformed/missing rect|perm (older peer, shape drift) falls
+  # through to the catch-all → today's no-remap, never a crash.
+  defp remap_selection(socket, %{op: "sort_range", tab: tab, rect: {c1, r1, c2, r2}, perm: perm})
+       when is_list(perm) do
+    if tab == socket.assigns.tab do
+      active = sort_pos(socket.assigns.active, c1, r1, c2, r2, perm)
+
+      anchor =
+        case socket.assigns.anchor do
+          nil -> nil
+          pos -> sort_pos(pos, c1, r1, c2, r2, perm)
+        end
+
+      assign(socket, active: active, anchor: anchor)
+    else
+      socket
+    end
+  end
+
   defp remap_selection(socket, _structure), do: socket
+
+  # Follow one {c, r} through a row permutation over the rect. Inside the rect,
+  # the row moves by perm[r - r1]; a defensive out-of-range perm index (shape
+  # drift) leaves the cell put. Outside the rect: untouched.
+  defp sort_pos({c, r} = pos, c1, r1, c2, r2, perm)
+       when c >= c1 and c <= c2 and r >= r1 and r <= r2 do
+    case Enum.at(perm, r - r1) do
+      new_off when is_integer(new_off) -> {c, r1 + new_off}
+      _ -> pos
+    end
+  end
+
+  defp sort_pos(pos, _c1, _r1, _c2, _r2, _perm), do: pos
+
+  # A remote COLUMN insert/delete on the viewer's current tab shifts the
+  # per-viewer filter keys (SF-B `filters` is `%{1-based-col => criterion}`) and
+  # an open funnel panel's column so a criterion keeps following its data. On
+  # insert, keys >= at shift +count; on delete, keys inside the deleted band
+  # (at..at+count-1) DROP their criterion and keys >= at+count shift -count — the
+  # same pivot arithmetic as shift_pos for columns. `visible_rows` re-derives for
+  # free via update/2's derive_grid after apply_delta. Row ops leave the
+  # column-keyed filters untouched.
+  defp remap_filters(socket, "insert_cols", at, count) do
+    filters =
+      Map.new(socket.assigns.filters, fn {col, crit} ->
+        {if(col >= at, do: col + count, else: col), crit}
+      end)
+
+    assign(socket,
+      filters: filters,
+      filter_panel: shift_filter_panel(socket.assigns.filter_panel, at, count)
+    )
+  end
+
+  defp remap_filters(socket, "delete_cols", at, count) do
+    filters =
+      for {col, crit} <- socket.assigns.filters,
+          col < at or col >= at + count,
+          into: %{} do
+        {if(col >= at + count, do: col - count, else: col), crit}
+      end
+
+    assign(socket,
+      filters: filters,
+      filter_panel: clip_filter_panel(socket.assigns.filter_panel, at, count)
+    )
+  end
+
+  # Row ops never touch column-keyed filters.
+  defp remap_filters(socket, _op, _at, _count), do: socket
+
+  # An open funnel panel's "col" (1-based) shifts like a filter key on a column
+  # insert; nil/keyless panels pass through unchanged.
+  defp shift_filter_panel(%{"col" => col} = panel, at, count) when is_integer(col) and col >= at,
+    do: Map.put(panel, "col", col + count)
+
+  defp shift_filter_panel(panel, _at, _count), do: panel
+
+  # On a column delete: a panel open on a deleted column CLOSES (nil); one to the
+  # right of the band shifts -count; anything else passes through.
+  defp clip_filter_panel(%{"col" => col}, at, count)
+       when is_integer(col) and col >= at and col < at + count,
+       do: nil
+
+  defp clip_filter_panel(%{"col" => col} = panel, at, count)
+       when is_integer(col) and col >= at + count,
+       do: Map.put(panel, "col", col - count)
+
+  defp clip_filter_panel(panel, _at, _count), do: panel
 
   # Shift one {c, r} by a row/col structural op: at/after the pivot follows the
   # content (+count on insert, -count past a delete); inside a deleted span

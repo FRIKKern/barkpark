@@ -18,6 +18,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   inverse-entry term shapes.
   """
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Fmt
@@ -260,7 +261,13 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
            op: "sort_range",
            at: nil,
            count: nil,
-           tab: tab_idx
+           tab: tab_idx,
+           # SF-AM3: the broadcast carries the rect sorted + the permutation
+           # ACTUALLY APPLIED (old row-offset → new position) so a collaborator
+           # with a selection/editor inside the rect can remap_selection its
+           # coordinates instead of clobbering with stale ones.
+           rect: rect,
+           perm: perm
          }), inverse}
       end
     end
@@ -826,7 +833,13 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          op: "sort_range",
          at: nil,
          count: nil,
-         tab: tab_idx
+         tab: tab_idx,
+         # SF-AM3/SF-D6: undo and redo frames carry their OWN correct rect +
+         # perm — `perm` is the permutation this application re-applies (the
+         # inverse on undo, the original on redo), so a remote viewer remaps
+         # coherently in either direction.
+         rect: rect,
+         perm: perm
        }), counter}
     end
   end
@@ -1185,7 +1198,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   defp valid_style_pair?("b", v), do: is_boolean(v)
   defp valid_style_pair?("i", v), do: is_boolean(v)
   defp valid_style_pair?("al", v), do: v in ["left", "center", "right"]
-  defp valid_style_pair?("bg", v), do: is_binary(v) and Regex.match?(~r/^#[0-9a-fA-F]{6}$/, v)
+  # SF-1 caveat 4: the `$`-anchored regex accepted a trailing "\n" (`$` matches
+  # before a final newline); `CondFormat.valid_bg?/1` is `\z`-anchored and the
+  # single bg owner since #1090 — reuse it, never write a fourth copy.
+  defp valid_style_pair?("bg", v), do: CondFormat.valid_bg?(v)
   defp valid_style_pair?(_k, _v), do: false
 
   # Cap-aware set_cell: counts non-empty cells (the import predicate — a
