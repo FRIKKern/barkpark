@@ -2806,6 +2806,19 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     test "#SPILL! is in the engine error vocabulary" do
       assert "#SPILL!" in Engine.error_values()
     end
+
+    test "two anchors racing for one empty cell resolve row-major first-wins" do
+      # B1 spills DOWN into B1:B2; A2 spills RIGHT into A2:C2. The regions cross
+      # at the (empty) B2. Anchors distribute in a stable {row, col} order, so
+      # B1 (row 1) claims B2 first and A2 (row 2) then blocks — deterministically,
+      # independent of the cells map's iteration order (design §3.3 first-wins).
+      out = run(%{"B1" => %{"f" => "={1;2}"}, "A2" => %{"f" => "={7,8,9}"}})
+
+      assert [out["B1"]["v"], out["B2"]["v"]] == [1, 2]
+      assert out["B2"]["spill"] == "B1"
+      assert out["A2"]["v"] == "#SPILL!"
+      refute Map.has_key?(out, "C2")
+    end
   end
 
   describe "spill invalidation" do
