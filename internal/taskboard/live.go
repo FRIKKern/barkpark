@@ -178,11 +178,23 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	if r, ok := m.currentRow(); ok {
 		selected = r.docID
 	}
+	// Per-row forward-only merge (SECOND layer, under the FetchedAt guard above).
+	// FetchedAt orders FETCHES by the client wall clock, not DATA freshness, so a
+	// backstop/reconcile fetch that read slightly-stale server rows can pass the
+	// guard yet carry a row OLDER (in server UpdatedAt/Epoch) than what's on
+	// screen. Reconcile per doc id so a displayed row can only move FORWARD: keep
+	// the shown row when the incoming one is stale for it, take the incoming row
+	// otherwise, add new rows, drop rows the snapshot no longer lists. The merged
+	// set feeds build, repo correlation, the flash diff, AND prevTasks/cache — so
+	// a stale-then-fresh sequence neither reverts a row nor spuriously flashes it.
+	merged := mergeForward(m.prevTasks, msg.snap.Tasks)
+	mergedSnap := msg.snap
+	mergedSnap.Tasks = merged
 	// Recompute repo correlation against the fresh task set BEFORE building, so
 	// the "↳ git" badges and epic-rank boost track the tasks as they move. Pure
 	// and cheap; a no-op (empty Mentioned) outside a git repo.
-	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, msg.snap.Tasks)
-	m.board = m.build(msg.snap, m.repo, m.now())
+	m.repo = CorrelateRepo(m.subjects, m.branch, m.repoName, mergedSnap.Tasks)
+	m.board = m.build(mergedSnap, m.repo, m.now())
 
 	// Flash ladder (charter decision 17): motion is a MEASUREMENT. Diff the last
 	// applied snapshot against this one and stamp each changed doc id so the
@@ -202,11 +214,14 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 			m.ui.Flashes = map[string]time.Time{}
 		}
 		landed := m.now()
-		for _, id := range changedDocIDs(m.prevTasks, msg.snap.Tasks) {
+		// Diff against the MERGED set, not the raw snapshot: a row that was kept
+		// because the incoming copy was stale is byte-identical to prevTasks, so it
+		// does not flash — only rows that actually moved forward do.
+		for _, id := range changedDocIDs(m.prevTasks, merged) {
 			m.ui.Flashes[id] = landed
 		}
 	}
-	m.prevTasks = msg.snap.Tasks
+	m.prevTasks = merged
 
 	m.ui.LastSync = msg.snap.FetchedAt
 	m.lastAppliedFetch = msg.snap.FetchedAt
@@ -220,7 +235,7 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// board is cached: the err path and the out-of-order-drop guard above both
 	// return before here, so a stale or failed fetch never overwrites a good
 	// cache. cacheDir=="" (no resolvable config dir) makes this a silent no-op.
-	SaveCachedSnapshot(m.cacheDir, m.cacheKey, msg.snap)
+	SaveCachedSnapshot(m.cacheDir, m.cacheKey, mergedSnap)
 	// ────────────────────────────────────────────────────────────────────────
 	if !msg.keepStrip {
 		// A landed snapshot clears any transient strip AND disarms the close
