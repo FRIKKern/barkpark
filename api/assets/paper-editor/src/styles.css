@@ -42,6 +42,16 @@
   --paper-chrome-border: rgba(31, 26, 20, 0.12);
   --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
   --paper-font-mono: ui-monospace, Menlo, monospace;
+  --bp-tone-info-bg: #eff6ff;
+  --bp-tone-info-fg: #1d4ed8;
+  --bp-tone-success-bg: #ecfdf5;
+  --bp-tone-success-fg: #047857;
+  --bp-tone-warning-bg: #fffbeb;
+  --bp-tone-warning-fg: #92400e;
+  --bp-tone-danger-bg: #fef2f2;
+  --bp-tone-danger-fg: #b91c1c;
+  --bp-tone-neutral-bg: #f3f4f6;
+  --bp-tone-neutral-fg: #374151;
   --bp-body-size: 18px;
   --bp-body-lh: 1.70;
   --bp-body-tracking: 0.005em;
@@ -80,6 +90,16 @@
   --paper-accent-soft: rgba(217, 122, 95, 0.14);
   --paper-chrome-bg: #221e1a;
   --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  --bp-tone-info-bg: #172032;
+  --bp-tone-info-fg: #9db8ff;
+  --bp-tone-success-bg: #12241c;
+  --bp-tone-success-fg: #5fcf9c;
+  --bp-tone-warning-bg: #2a2210;
+  --bp-tone-warning-fg: #e3b661;
+  --bp-tone-danger-bg: #2a1614;
+  --bp-tone-danger-fg: #f08a80;
+  --bp-tone-neutral-bg: #23211e;
+  --bp-tone-neutral-fg: #c9c2b6;
 }
 /* END GENERATED: paper-surface */
 

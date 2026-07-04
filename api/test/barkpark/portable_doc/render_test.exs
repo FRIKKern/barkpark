@@ -275,8 +275,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "article callout tone → modifier class, unknown falls back to info (mirrors Util.tone_palette/1)" do
       mk = fn tone, extra ->
         Map.merge(
-          %{"id" => "t", "type" => "callout", "tone" => tone,
-            "content" => [%{"type" => "text", "value" => "x"}]},
+          %{
+            "id" => "t",
+            "type" => "callout",
+            "tone" => tone,
+            "content" => [%{"type" => "text", "value" => "x"}]
+          },
           extra
         )
       end
@@ -285,6 +289,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # so a mis-mapped clause would silently paint the wrong tone tokens.
       for tone <- ["success", "warning", "danger", "neutral", "info"] do
         html = Render.render_blocks([mk.(tone, %{})], %{style: :article})
+
         assert html =~ ~s(<div class="bp-callout bp-callout--#{tone}">),
                "tone #{inspect(tone)} did not map to its own modifier class"
       end
@@ -642,15 +647,22 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_html(tree, %{style: :article})
 
+      # Wave 2 slice 6: :article render_html is now a self-contained export — the
+      # canonical paper-surface stylesheet is embedded in <head>, so the accent
+      # token (`--paper-accent: #a23925`) and the serif stack legitimately live in
+      # that <style> block (covered by the ":article document wrapper" describe).
+      # These guards are about the BODY carrying no INLINE theme, so scope to it.
+      body = html |> String.split("</head>", parts: 2) |> List.last()
+
       # Stage 2 wave 2: the PdButton child is now CLASS-driven — the accent fill
       # lives in `.bp-paper-surface .bp-button--primary` (single-sourced from
       # `var(--paper-accent)`), so no accent hex rides the button inline anymore.
-      assert html =~ ~s(class="bp-button bp-button--primary")
-      refute html =~ "#a23925"
+      assert body =~ ~s(class="bp-button bp-button--primary")
+      refute body =~ "#a23925"
       # Stage 2: the article container is bare of ink/bg/font — the
       # `.bp-paper-surface` root owns the serif family (single-sourced from
       # `--paper-font-serif`). No serif stack rides the container inline anymore.
-      refute html =~
+      refute body =~
                "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif"
 
       # Default article width budget stays inline — maxWidth is author DATA
@@ -664,7 +676,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # the standalone article document now also embeds the ONE canonical
       # stylesheet in <head> and tags <body class="bp-paper-surface">, so the
       # export styles itself from the single source.
-      assert html =~ ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #f5f2e9);|
+      assert html =~
+               ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #f5f2e9);|
+
       assert html =~ "<style>" <> Barkpark.PortableDoc.Render.Stylesheet.css() <> "</style>"
     end
 

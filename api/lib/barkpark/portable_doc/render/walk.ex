@@ -984,7 +984,9 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               err = sheet_err_style(cell)
 
               align_class =
-                if sheet_explicit_al?(styles, r, c), do: nil, else: sheet_default_align_class(cell)
+                if sheet_explicit_al?(styles, r, c),
+                  do: nil,
+                  else: sheet_default_align_class(cell)
 
               td_class = ["bp-sheet__td", align_class] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
 

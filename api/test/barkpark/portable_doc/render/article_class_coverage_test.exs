@@ -128,10 +128,14 @@ defmodule Barkpark.PortableDoc.Render.ArticleClassCoverageTest do
     test "the fixture actually exercises the article palette (guards a mis-wired render)" do
       html = render()
 
-      # Article-only signal: the serif heading font. If the render silently fell
-      # back to :email this vanishes and the coverage scan would be measuring the
-      # wrong palette — a mis-wired palette must not vacuously pass.
-      assert html =~ "Iowan Old Style"
+      # Article-only signals in the FRAGMENT: the 680px article width budget
+      # (email uses 600) and a `bp-role-*` class (email inlines these roles, only
+      # :article emits the class). Wave 2 moved the serif font to the canonical
+      # stylesheet, so it no longer rides the fragment — width + role class are
+      # the fragment-level article signals now. If the render silently fell back
+      # to :email both vanish — a mis-wired palette must not vacuously pass.
+      assert html =~ "max-width:680px"
+      assert html =~ "bp-role-eyebrow"
       assert MapSet.size(emitted_class_tokens()) > 0
     end
 

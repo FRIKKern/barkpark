@@ -34,7 +34,8 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "article thickness can't break out of the style attribute (own escape path)" do
-      html = Walk.render_body(%{"kind" => "PdHr", "thickness" => ~s(1" onload="x)}, @width, @article)
+      html =
+        Walk.render_body(%{"kind" => "PdHr", "thickness" => ~s(1" onload="x)}, @width, @article)
 
       assert html =~ "&quot;"
       refute html =~ ~s(onload=")
@@ -121,7 +122,8 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       refute html =~ "border-bottom"
       # The accent link colour stays inline (the same --paper-accent token the
       # CSS rule resolves — data-adjacent, no drift).
-      assert html == ~s|<a href="https://example.com" style="color:var(--paper-accent, #a23925)">go</a>|
+      assert html ==
+               ~s|<a href="https://example.com" style="color:var(--paper-accent, #a23925)">go</a>|
     end
 
     test "javascript: href is sanitised by safe_url (returns # sentinel)" do
@@ -506,10 +508,18 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
 
     test "level 1 / 3 also emit bare tags" do
-      assert Walk.render_body(%{"kind" => "PdHeading", "level" => 1, "children" => ["A"]}, @width, @article) ==
+      assert Walk.render_body(
+               %{"kind" => "PdHeading", "level" => 1, "children" => ["A"]},
+               @width,
+               @article
+             ) ==
                "<h1>A</h1>"
 
-      assert Walk.render_body(%{"kind" => "PdHeading", "level" => 3, "children" => ["C"]}, @width, @article) ==
+      assert Walk.render_body(
+               %{"kind" => "PdHeading", "level" => 3, "children" => ["C"]},
+               @width,
+               @article
+             ) ==
                "<h3>C</h3>"
     end
 
