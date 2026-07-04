@@ -67,6 +67,23 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
   #
   # DO NOT add a hyperlink cell here — #882 owns the hyperlink parity lock and
   # will extend this generator itself.
+  #
+  # Conditional-formatting coverage (CF-E, arc 2 — pins the CF snapshot weave in
+  # the committed fixture itself, so every mirror carries composed CF styles):
+  #   cf-gt      numeric `gt 1000` on B2:B10 → matches B2 (1200) and B8 (1234.5),
+  #              NOT B10 (1, below) nor the non-numeric B cells (CF-D5). The
+  #              matched cells earn a CF-only styles entry (no manual "s").
+  #   cf-overlap `gt 100` on B2:C8 OVERLAPS cf-gt on B2/B8 — first-match-wins
+  #              (CF-D4) keeps those red; the rule independently paints C7 (1e6)
+  #              green, proving the lower-priority rule is still live.
+  #   cf-compose `contains "ote"` on A4 (the b/i/bg/al=right manual cell) — CF
+  #              wins `bg` (#123456) while the manual `al`/`b`/`i` survive (CF-D3
+  #              per-key compose over a manually-styled cell).
+  #   cf-head    `contains "Q"` on A1:D1 covers the FROZEN head row — B1/C1 match
+  #              at eval, but the snapshot drops head-row CF (CF-D3/CF-AM2), so
+  #              the styles map carries NO entry for any head cell.
+  # All four rules are CF-B-gate-valid (#rrggbb bg, whitelisted ops, unique ids,
+  # in-bounds ranges) so this fixture is a legitimately storable sheet.
   @content %{
     "tabs" => [
       %{
@@ -76,6 +93,32 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
         "col_widths" => %{"1" => 120, "2" => 64},
         "row_heights" => %{"2" => 40},
         "merges" => ["B3:C3", "B4:C5"],
+        "cond_formats" => [
+          %{
+            "id" => "cf-gt",
+            "range" => "B2:B10",
+            "when" => %{"op" => "gt", "value" => 1000},
+            "style" => %{"bg" => "#ff0000"}
+          },
+          %{
+            "id" => "cf-overlap",
+            "range" => "B2:C8",
+            "when" => %{"op" => "gt", "value" => 100},
+            "style" => %{"bg" => "#00ff00"}
+          },
+          %{
+            "id" => "cf-compose",
+            "range" => "A4",
+            "when" => %{"op" => "contains", "value" => "ote"},
+            "style" => %{"bg" => "#123456"}
+          },
+          %{
+            "id" => "cf-head",
+            "range" => "A1:D1",
+            "when" => %{"op" => "contains", "value" => "Q"},
+            "style" => %{"bg" => "#abcdef"}
+          }
+        ],
         "cells" => %{
           "A1" => %{"v" => "Metric"},
           "B1" => %{"v" => "Q3"},
