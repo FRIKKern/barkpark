@@ -1760,6 +1760,42 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert peek_cell("sp-undo", "A1") == anchor
       assert peek_cell("sp-undo", "D1") == %{"f" => "=A1", "v" => 6, "t" => "n"}
     end
+
+    test "duplicate_tab's cap check counts only the source's USER cells, not its spilled region" do
+      # duplicate_tab pre-checks `tab_nonempty(src_cells)` against the session
+      # total (ops.ex:429) — the ONE cap path that does not route through
+      # check_cap/apply_cell. It inherits the seam through the shared
+      # `nonempty_flag`, so duplicating a spill-bearing sheet budgets only the
+      # user cells (anchor + real data), never the engine-owned spilled cells.
+      put_cfg(cell_cap: 4)
+
+      # Source: anchor A1 (user, 1) + B1 (user, 1) = 2 user cells; A2/A3 are
+      # engine-owned spilled output (0). Under the pre-seam count the source
+      # would read as 4 (the two spilled cells inflating it) and the session
+      # would boot at 4 == cap, so the duplicate (→ 8) would be refused. With the
+      # seam the source counts 2, the session boots at 2, and the copy fits (→ 4).
+      create_multi_tab("sp-dup", [
+        %{
+          "name" => "Arr",
+          "cells" => %{
+            "A1" => spill_anchor("=SORT(D1:D3)", 3),
+            "A2" => spilled(5),
+            "A3" => spilled(9),
+            "B1" => %{"v" => "keep"}
+          }
+        }
+      ])
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sp-dup", @dataset, [%{"op" => "duplicate_tab", "tab" => 0}])
+
+      {:ok, content} = Session.peek("sp-dup", @dataset)
+      assert length(content["tabs"]) == 2
+      # Both tabs together: 2 user cells each, the spilled region excluded → 4.
+      assert Ops.count_nonempty(content) == 4
+      # The copy carried the anchor's marker verbatim (deep-copy of the tab map).
+      assert get_in(content, ["tabs", Access.at(1), "cells", "A1", "spill"]) == "A1"
+    end
   end
 
   defp ct_tab(name, cells), do: %{"name" => name, "cells" => cells}
