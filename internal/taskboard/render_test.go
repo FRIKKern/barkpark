@@ -168,8 +168,8 @@ func TestRenderFlatQueue(t *testing.T) {
 	if strings.Contains(frame, "(no epic)") {
 		t.Errorf("zero-epics board still shows '(no epic)':\n%s", frame)
 	}
-	if !strings.Contains(frame, "── tasks ─") {
-		t.Errorf("zero-epics board is missing the plain 'tasks' queue title:\n%s", frame)
+	if !strings.Contains(frame, "tasks ·") {
+		t.Errorf("zero-epics board is missing the plain 'tasks' queue title (dotted leader):\n%s", frame)
 	}
 	if !strings.Contains(frame, "+55 done") {
 		t.Errorf("55 stale-done orphans did not fold to '+55 done':\n%s", frame)
@@ -730,19 +730,20 @@ func TestRenderStaleAgesAndCount(t *testing.T) {
 	}
 }
 
-// TestNowCardIsCalm proves a pinned NOW card carries the steady ● glyph, its
-// worker and criteria DIGITS (no ▰▱ bar), and no twin ⧉ marker — that density
-// moved to the detail view with the calm-board subtraction.
+// TestNowCardIsCalm proves a pinned NOW card carries the live Braille spinner
+// glyph (frame 0 ⠋ at rest), its worker and criteria DIGITS (no ▰▱ bar), and no
+// twin ⧉ marker — that density moved to the detail view with the calm-board
+// subtraction; the spinner is the design-language in_progress mark (charter D38).
 func TestNowCardIsCalm(t *testing.T) {
 	claimed := Task{
 		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
 		TwinOf: "sum2", Criteria: &Criteria{Met: 2, Total: 3}, UpdatedAt: fixedNow,
 		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
 	}
-	lines := NowCard(claimed, "", false, 80, fixedNow)
+	lines := NowCard(claimed, "", false, 80, 0, fixedNow)
 	l0, l1 := ansi.Strip(lines[0]), ansi.Strip(lines[1])
-	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "● Add the SUM() function") {
-		t.Errorf("NOW card line 1 should be ● + title, got %q", l0)
+	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "⠋ Add the SUM() function") {
+		t.Errorf("NOW card line 1 should be ⠋ spinner + title, got %q", l0)
 	}
 	if strings.Contains(l0, "⧉") {
 		t.Errorf("NOW card should not wear a twin ⧉ marker: %q", l0)

@@ -1,12 +1,12 @@
 ═══ rich @ 80 ═══
 Wire the SSE live bridge to the task board pane so every claim tick paints
 honestly
-● in_progress · P1 · task · fable-3
+⠋ in_progress · P1 · task · fable-3
 
 created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
 
-○ created (Jul 02) → ● claimed by opus-2 → ● reclaimed by fable-3 (Jul 04) →
-  ● worked (Jul 04)
+○ created (Jul 02) → ⠋ claimed by opus-2 → ⠋ reclaimed by fable-3 (Jul 04) →
+  ⠋ worked (Jul 04)
 
   The board must repaint the moment the queue moves. Events only say that
   something moved; the refetch says what is true — never incremental event
@@ -52,7 +52,7 @@ twin ⧉ 'Wire the SSE bridge (duplicate filing)'
 
 children 1/3 done
   ✓ Decode the change feed envelope  1d
-▎ ● Debounce the refetch at 750ms  30m
+▎ ⠋ Debounce the refetch at 750ms  30m
   ○ Honest connection dot states  5h
 
 papers
@@ -65,7 +65,7 @@ Sketch the paper rail interaction
 
 ═══ blocked @ 80 ═══
 Reconcile the #979 statusRole seam
-◐ blocked · P2 · task
+! blocked · P2 · task
 
 created 4d ago (Jun 30, 08:00) · updated 3d ago (Jul 01, 09:00)
 

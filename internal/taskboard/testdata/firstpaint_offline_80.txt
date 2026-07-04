@@ -1,14 +1,14 @@
-barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                           ✗ offline · 3m
-1 active · 1 ready · 1 blocked · 5 done
+barkpark · tasks                                     ⇄ guerrilla  ✗ offline · 3m
+⠋ 1 in flight · ○ 1 ready · ✓ 5 done                                         71%
+████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░
 
 NOW
-▎● SSE reconnect backoff
+▎⠋ SSE reconnect backoff
    opus-3 · 12m · 1/3 · Cloud GUI epic
 
-── Cloud GUI epic ────────────────────────────────────────────────────── 1 ready
+  Cloud GUI epic ··························································· 0/2
    ○ Reconcile the #979 role seam
-   ◐ Ship the offline banner                                             blocked
-
+   ! Ship the offline banner                                             blocked
 
 
 

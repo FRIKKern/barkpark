@@ -36,8 +36,11 @@ func TestHeaderStyledTruncateKeepsContent(t *testing.T) {
 	if w := ansi.StringWidth(line1); w > 60 {
 		t.Errorf("styled header is %d cols (over 60): %q", w, stripped)
 	}
-	if !strings.Contains(stripped, "loop-epic/theme") {
-		t.Errorf("branch text lost to escape-byte truncation: %q", stripped)
+	// The header dropped the branch chrome (wish Amendment 3): line 1 is now
+	// "barkpark · tasks … ⇄ <server> ● live". The styled truncation must keep the
+	// left title and the honest conn state, never let SGR bytes eat the content.
+	if !strings.Contains(stripped, "tasks") {
+		t.Errorf("header title lost to escape-byte truncation: %q", stripped)
 	}
 	if !strings.Contains(stripped, "live") {
 		t.Errorf("conn state lost: %q", stripped)

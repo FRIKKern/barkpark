@@ -1,11 +1,11 @@
-barkpark  ⎇ work/doc-fresh  ⇄ guerrilla                               ◐ syncing…
-0 active · 0 ready · 0 blocked · 0 done
+barkpark · tasks                                         ⇄ guerrilla  ◐ syncing…
+⠋ 0 in flight · ○ 0 ready · ✓ 0 done                                          0%
+░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 
 NOW
    nothing ready · all clear
 
 syncing…
-
 
 
 

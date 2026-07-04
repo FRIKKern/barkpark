@@ -813,6 +813,7 @@ func (m Model) clusterByFoldKey(key string) (Cluster, bool) {
 //   - explicit entry == false → all (fully expanded, via l)
 //   - no entry, active section → all (the group you're working opens whole)
 //   - no entry, default        → a HEAD of groupHeadMax (a glanceable few)
+//
 // The remainder folds behind a "+K more" line the renderer emits.
 func sectionShown(st UIState, key string, active bool, n int) int {
 	if v, ok := st.CollapsedEpics[key]; ok {
@@ -935,33 +936,15 @@ func (m Model) visibleRows() []row {
 			rows = append(rows, row{kind: rowNow, docID: t.DocID})
 		}
 	}
-	// Each section shows a HEAD of its children by default (sectionShown), the
-	// rest folding behind a "+K more" render line. Only the shown children are
-	// cursor stops — the "+K more"/"+N done" lines are display-only, so the
-	// renderer MUST cap its children at the SAME sectionShown count or the cursor
-	// desyncs from the painted rows.
-	for _, e := range m.board.Epics {
-		rows = append(rows, row{kind: rowEpicHeader, docID: e.Root.DocID})
-		shown := epicShown(m.ui, e)
-		for i := 0; i < shown; i++ {
-			rows = append(rows, row{kind: rowChild, docID: e.Children[i].DocID})
-		}
-	}
-	for _, cl := range m.board.Clusters {
-		rows = append(rows, row{kind: rowClusterHeader, docID: clusterFoldKey(cl.Key)})
-		shown := clusterShown(m.ui, cl)
-		for i := 0; i < shown; i++ {
-			rows = append(rows, row{kind: rowClusterMember, docID: cl.Tasks[i].DocID})
-		}
-	}
-	// The loose bucket is a navigable header that head-caps like every other
-	// section. It appears whenever there are loose rows to show OR a folded-done
-	// tally to name.
-	if len(m.board.Orphans) > 0 || m.board.OrphansFolded > 0 {
-		rows = append(rows, row{kind: rowOrphanHeader, docID: orphansFoldKey})
-		shown := orphansShown(m.ui, m.board)
-		for i := 0; i < shown; i++ {
-			rows = append(rows, row{kind: rowOrphan, docID: m.board.Orphans[i].DocID})
+	// The scrolling spine is the SELECTABLE subset of the ONE ordered producer
+	// (spineRows, charter D42) — the SAME list flattenSpine renders. Headers,
+	// nested children, cluster members and orphans consume an index in emission
+	// order; separators, "+K more" folds and phase sub-bands are Selectable:false
+	// and skipped here, so j/k never lands on a line that is not a cursor stop.
+	// Because both paths read this one producer, the cursor can no longer desync.
+	for _, sr := range spineRows(m.board, m.ui) {
+		if sr.Selectable {
+			rows = append(rows, row{kind: sr.RK, docID: sr.Ref})
 		}
 	}
 	return rows
