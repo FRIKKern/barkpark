@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barkpark Cloud — style guide</title>
+    <meta name="description" content="The living spec for the Barkpark Cloud console: tokens, scales and shared components, both themes side by side." />
+    <link rel="stylesheet" href="app.css" />
+    <style>
+      /* Page-local chrome only (--sg-* / .sg-*). Everything demonstrated below
+         comes straight from app.css — if a class or token is missing there,
+         the demo visibly breaks, which is the point. */
+      :root { --sg-gap: 16px; }
+      .sg-wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 80px; }
+      .sg-head { margin-bottom: 8px; }
+      .sg-lede { color: var(--muted-text); max-width: 64ch; margin: 0 0 12px; }
+      .sg-ratify {
+        display: inline-block;
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--warn-strong);
+        background: var(--warn-soft);
+        border: 1px solid hsl(var(--warn-hsl) / 0.3);
+        border-radius: var(--radius-sm);
+        padding: 8px 12px;
+        margin: 0 0 32px;
+      }
+      .sg-section { margin: 0 0 44px; }
+      .sg-section > h2 { margin-bottom: 4px; }
+      .sg-note { color: var(--muted-text); font-size: var(--text-sm); margin: 0 0 14px; max-width: 72ch; }
+      .sg-panes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sg-gap); }
+      @media (max-width: 860px) { .sg-panes { grid-template-columns: 1fr; } }
+      .sg-pane {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 20px;
+        overflow-x: auto;
+      }
+      .sg-pane-label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--dim);
+        margin: 0 0 14px;
+      }
+      .sg-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+      .sg-row:last-child { margin-bottom: 0; }
+      .sg-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+      .sg-swatch { border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+      .sg-swatch-chip { height: 40px; }
+      .sg-swatch-meta { padding: 6px 8px; background: var(--surface); }
+      .sg-swatch-name { font-family: var(--mono); font-size: 11px; color: var(--text); word-break: break-all; }
+      .sg-swatch-val { font-family: var(--mono); font-size: 10px; color: var(--muted-text); word-break: break-all; }
+      .sg-type-row { display: flex; align-items: baseline; gap: 14px; margin-bottom: 10px; }
+      .sg-type-tag { font-family: var(--mono); font-size: 11px; color: var(--muted-text); flex: 0 0 150px; }
+      .sg-space-bar { height: 14px; background: var(--primary); border-radius: 3px; }
+      .sg-elev-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px; }
+      .sg-elev-card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 18px 12px;
+        text-align: center;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--muted-text);
+      }
+      .sg-mark-demo { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+      .sg-mark-big { width: 72px; height: 72px; color: var(--primary); }
+      .sg-kv { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); margin: 2px 0; }
+      .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
+      .sg-modal-demo .modal-card { max-width: 420px; }
+      .sg-forms { max-width: 380px; }
+    </style>
+  </head>
+  <body>
+    <div class="sg-wrap">
+      <header class="sg-head">
+        <h1>Barkpark Cloud style guide</h1>
+      </header>
+      <p class="sg-lede">
+        The living spec for the console. Everything on this page is rendered by the
+        shipped <code>app.css</code> — tokens, scales and shared components, light and
+        dark side by side. The same file the product loads, no copies.
+      </p>
+      <p class="sg-ratify">
+        Sign-off surface: changes to the mark or the brand hues merge only after a
+        human says yes to this page (charter decision 27).
+      </p>
+
+      <section class="sg-section">
+        <h2>The mark</h2>
+        <p class="sg-note">
+          A park evergreen, drawn inline in currentColor so it follows the theme with
+          no extra assets. Shown at wordmark size (18px) and enlarged.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-mark-demo">
+            <a class="wordmark" href="#">
+              <svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
+              <span class="wordmark-text">Barkpark <b>Cloud</b></span>
+            </a>
+            <svg class="sg-mark-big" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Color tokens</h2>
+        <p class="sg-note">
+          Every color the console may use. Resolved values are read live from the
+          loaded stylesheet, per theme. The contrast pairs over these tokens are
+          machine-checked by <code>__css_check.mjs</code> — a value that fails the
+          manifest cannot merge.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-swatches" data-sg-swatches></div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Type scale</h2>
+        <p class="sg-note">Six sizes with paired line-heights. Numbers use tabular figures where they tick.</p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-2xl / --leading-2xl</span><span style="font-size: var(--text-2xl); line-height: var(--leading-2xl); font-weight: 700;">Fleet at a glance</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-xl / --leading-xl</span><span style="font-size: var(--text-xl); line-height: var(--leading-xl); font-weight: 700;">Fleet at a glance</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-lg / --leading-lg</span><span style="font-size: var(--text-lg); line-height: var(--leading-lg); font-weight: 600;">Fleet at a glance</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-base / --leading-base</span><span style="font-size: var(--text-base); line-height: var(--leading-base);">Every instance registered to your team, attention first.</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-sm / --leading-sm</span><span style="font-size: var(--text-sm); line-height: var(--leading-sm);">Every instance registered to your team, attention first.</span></div>
+            <div class="sg-type-row"><span class="sg-type-tag">--text-xs / --leading-xs</span><span style="font-size: var(--text-xs); line-height: var(--leading-xs);">Updated 2 minutes ago &middot; barkpark v1.42</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Space scale</h2>
+        <p class="sg-note">The 4px grid: --space-1 through --space-8.</p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row"><span class="sg-type-tag">--space-1 (4px)</span><span class="sg-space-bar" style="width: var(--space-1);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-2 (8px)</span><span class="sg-space-bar" style="width: var(--space-2);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-3 (12px)</span><span class="sg-space-bar" style="width: var(--space-3);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-4 (16px)</span><span class="sg-space-bar" style="width: var(--space-4);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-5 (20px)</span><span class="sg-space-bar" style="width: var(--space-5);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-6 (24px)</span><span class="sg-space-bar" style="width: var(--space-6);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-7 (28px)</span><span class="sg-space-bar" style="width: var(--space-7);"></span></div>
+            <div class="sg-row"><span class="sg-type-tag">--space-8 (32px)</span><span class="sg-space-bar" style="width: var(--space-8);"></span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Elevation, depth and motion</h2>
+        <p class="sg-note">
+          Four shadow steps; z-order comes from the ladder tokens (tabnav 19, topbar 20,
+          menu 30, modal 50, toast 60) — never a bare number. Motion runs on --dur-1/2/3
+          with one easing; when a visitor asks for reduced motion, the durations collapse
+          to zero and only spinners keep moving.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-elev-grid">
+            <div class="sg-elev-card" style="box-shadow: var(--elev-0);">--elev-0</div>
+            <div class="sg-elev-card" style="box-shadow: var(--elev-1);">--elev-1</div>
+            <div class="sg-elev-card" style="box-shadow: var(--elev-2);">--elev-2</div>
+            <div class="sg-elev-card" style="box-shadow: var(--elev-3);">--elev-3</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Buttons</h2>
+        <p class="sg-note">One primary action per screen; everything else is quiet. Tab through a pane to see the shared focus ring.</p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row">
+              <button class="btn btn-primary" type="button">Launch instance</button>
+              <button class="btn" type="button">Refresh</button>
+              <button class="btn btn-ghost" type="button">Cancel</button>
+              <button class="btn btn-danger" type="button">Remove instance</button>
+            </div>
+            <div class="sg-row">
+              <button class="btn btn-primary btn-sm" type="button">Launch</button>
+              <button class="btn btn-sm" type="button">Small</button>
+              <button class="btn btn-primary" type="button" disabled>Disabled</button>
+              <button class="btn" type="button" disabled>Disabled</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Cards and notices</h2>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="card" style="padding: 18px; margin-bottom: 14px;">
+              <h2 style="margin-bottom: 4px;">A card</h2>
+              <p class="muted" style="margin: 0; font-size: var(--text-sm);">Surface, border, --elev-1. The workhorse container.</p>
+            </div>
+            <div class="notice notice-ok"><span>Everything is healthy.</span></div>
+            <div class="notice notice-warn"><span>An update is available for two instances.</span><button class="btn btn-sm" type="button">Review</button></div>
+            <div class="notice notice-error"><span>We could not reach the agent on summer-lake.</span><button class="btn btn-sm" type="button">Retry</button></div>
+            <p class="form-error" role="presentation">That name is already taken on your team.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Status pills</h2>
+        <p class="sg-note">
+          The status-pill is the single status voice (one per row or header). The dot-badge
+          and the deployment pill are shown as they ship today; decision 24 folds them into
+          statusMeta in the sweep wave.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row">
+              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Running</span><span class="status-pill-detail">v1.42</span></span>
+              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span><span class="status-pill-detail">2m 10s</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Update available</span></span>
+            </div>
+            <div class="sg-row">
+              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Unreachable</span><span class="status-pill-detail">3 checks failed</span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
+            </div>
+            <div class="sg-row">
+              <span class="badge"><span class="dot up"></span>Online</span>
+              <span class="badge"><span class="dot down"></span>Down</span>
+              <span class="badge"><span class="dot warn"></span>Update</span>
+              <span class="badge"><span class="dot unknown"></span>Unknown</span>
+            </div>
+            <div class="sg-row">
+              <span class="dep-pill dep-live">Live</span>
+              <span class="dep-pill dep-building">Building</span>
+              <span class="dep-pill dep-pushing">Pushing</span>
+              <span class="dep-pill dep-queued">Queued</span>
+              <span class="dep-pill dep-failed">Failed</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Forms</h2>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-forms">
+            <div class="field">
+              <label class="label">Instance name</label>
+              <input class="form-input" type="text" placeholder="summer-lake" />
+              <p class="field-hint muted">Lowercase letters, digits and dashes.</p>
+            </div>
+            <div class="field">
+              <label class="label">Region</label>
+              <select class="form-input"><option>Falkenstein (eu-central)</option><option>Helsinki (eu-north)</option></select>
+            </div>
+            <div class="field">
+              <label class="label">API token</label>
+              <div class="input-affix">
+                <input class="form-input" type="password" value="secret" />
+                <button class="affix-btn" type="button" aria-label="Show value">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="check-row">
+              <input type="checkbox" checked />
+              <label>Remember me</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Toasts</h2>
+        <div class="sg-panes" data-sg-clone>
+          <div class="sg-toasts">
+            <div class="toast toast-success"><span class="toast-ico">&#10003;</span><div class="toast-main"><div class="toast-title">Instance launched</div><div class="toast-body">summer-lake is provisioning.</div></div><button class="toast-close" type="button" aria-label="Dismiss">&times;</button></div>
+            <div class="toast toast-error"><span class="toast-ico">!</span><div class="toast-main"><div class="toast-title">Could not save</div><div class="toast-body">The server said no — try again.</div><div class="toast-action"><button class="btn btn-sm" type="button">Retry</button></div></div><button class="toast-close" type="button" aria-label="Dismiss">&times;</button></div>
+            <div class="toast toast-info"><span class="toast-ico">i</span><div class="toast-main"><div class="toast-title">Copied to clipboard</div></div><button class="toast-close" type="button" aria-label="Dismiss">&times;</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Modal</h2>
+        <p class="sg-note">Shown flat (no overlay). In the product it sits on the scrim at --z-modal with a focus trap.</p>
+        <div class="sg-panes sg-modal-demo" data-sg-clone>
+          <div class="modal-card card">
+            <button class="modal-x" type="button" aria-label="Close">&times;</button>
+            <h2 class="modal-title">Remove summer-lake?</h2>
+            <p class="modal-sub">This deletes the server and everything on it. Type the instance name to confirm.</p>
+            <div class="field">
+              <input class="form-input" type="text" placeholder="summer-lake" />
+            </div>
+            <div class="modal-actions">
+              <button class="btn" type="button">Cancel</button>
+              <button class="btn btn-danger" type="button">Remove instance</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      // Duplicate every [data-sg-clone] demo into a light pane and a dark pane.
+      // app.css scopes its dark tokens with [data-theme="dark"], which cascades
+      // from any element — so a wrapper attribute is all a pane needs.
+      (function () {
+        var TOKENS = [
+          "--bg", "--surface", "--muted-surface", "--text", "--muted-text", "--dim",
+          "--primary", "--primary-fg", "--border", "--ring", "--accent",
+          "--ok", "--warn", "--warn-strong", "--danger", "--info",
+          "--ok-soft", "--warn-soft", "--danger-soft", "--info-soft",
+          "--console-bg", "--console-fg", "--console-dim"
+        ];
+
+        document.querySelectorAll("[data-sg-clone]").forEach(function (host) {
+          var demo = host.firstElementChild;
+          host.removeChild(demo);
+          ["light", "dark"].forEach(function (theme) {
+            var pane = document.createElement("div");
+            pane.className = "sg-pane";
+            pane.setAttribute("data-theme", theme);
+            var label = document.createElement("p");
+            label.className = "sg-pane-label";
+            label.textContent = theme;
+            pane.appendChild(label);
+            pane.appendChild(demo.cloneNode(true));
+            host.appendChild(pane);
+          });
+        });
+
+        // Fill the swatch grids with live-resolved token values per pane.
+        document.querySelectorAll("[data-sg-swatches]").forEach(function (grid) {
+          var probe = document.createElement("span");
+          grid.appendChild(probe);
+          TOKENS.forEach(function (name) {
+            var val = getComputedStyle(probe).getPropertyValue(name).trim();
+            var cell = document.createElement("div");
+            cell.className = "sg-swatch";
+            var chip = document.createElement("div");
+            chip.className = "sg-swatch-chip";
+            chip.style.background = val || "transparent";
+            var meta = document.createElement("div");
+            meta.className = "sg-swatch-meta";
+            var n = document.createElement("div");
+            n.className = "sg-swatch-name";
+            n.textContent = name;
+            var v = document.createElement("div");
+            v.className = "sg-swatch-val";
+            v.textContent = val || "(unresolved)";
+            meta.appendChild(n);
+            meta.appendChild(v);
+            cell.appendChild(chip);
+            cell.appendChild(meta);
+            grid.appendChild(cell);
+          });
+          grid.removeChild(probe);
+        });
+      })();
+    </script>
+  </body>
+</html>
