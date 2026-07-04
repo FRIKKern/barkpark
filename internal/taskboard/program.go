@@ -69,10 +69,12 @@ type rowKind int
 
 const (
 	rowNow           rowKind = iota // a NOW-band card (an unexpired claim)
+	rowReadyClaim                   // a READY TO CLAIM head row (empty-NOW claim-forward band)
 	rowEpicHeader                   // an epic section header
 	rowChild                        // a visible child task inside an expanded epic
 	rowClusterHeader                // a derived-cluster section header
 	rowClusterMember                // a task inside an unfolded cluster section
+	rowOrphanHeader                 // the loose "(no epic)" bucket's navigable header
 	rowOrphan                       // a task with no epic, under "(no epic)"
 )
 
@@ -641,9 +643,16 @@ func (m Model) taskUnderCursor() (Task, bool) {
 	return m.taskByID(r.docID)
 }
 
-// taskByID finds a task anywhere on the board (NOW band, epic roots, epic
-// children, orphans) by doc id.
+// taskByID finds a task anywhere on the board (NOW band, READY-TO-CLAIM head,
+// epic roots, epic children, cluster members, orphans) by doc id. The ready head
+// is searched first so a claim-forward row resolves even when its home section is
+// folded away (wave-7 D35 — the head reaches across the whole corpus).
 func (m Model) taskByID(id string) (Task, bool) {
+	for _, t := range m.board.ReadyHead {
+		if t.DocID == id {
+			return t, true
+		}
+	}
 	for _, t := range m.board.Now {
 		if t.DocID == id {
 			return t, true
@@ -709,15 +718,16 @@ func (m Model) currentRow() (row, bool) {
 
 // activateBoard is enter on the row under the cursor (charter D11/D29):
 //
-//   - on an epic header → fold/unfold the epic (flip its EFFECTIVE fold state,
-//     so enter also wakes a dormant, auto-collapsed epic — an auto-fold the
-//     user cannot override would be a dead end).
-//   - on a cluster header → fold/unfold the derived cluster.
-//   - on a task row → PUSH a FrameTask (the navigation-shell descent that
-//     replaced the retired inline-expand toggle). The detail reads out of the
-//     in-hand DetailIndex — no fetch (charter D28).
+//   - on an epic / cluster / orphan header → fold/unfold the section (flip its
+//     EFFECTIVE fold state, so enter opens a folded-by-default section and folds
+//     an auto-opened active one — an auto-fold the user cannot override would be
+//     a dead end).
+//   - on a task row (NOW card, READY-TO-CLAIM head, child, member, orphan) →
+//     PUSH a FrameTask (the navigation-shell descent that replaced the retired
+//     inline-expand toggle). The detail reads out of the in-hand DetailIndex —
+//     no fetch (charter D28).
 //
-// Collapsing an epic can shrink the visible-row list under the cursor, so we
+// Collapsing a section can shrink the visible-row list under the cursor, so we
 // clamp afterward to keep the selection on a real row.
 func (m Model) activateBoard() Model {
 	r, ok := m.currentRow()
@@ -731,12 +741,19 @@ func (m Model) activateBoard() Model {
 			m.clampCursor()
 		}
 	case rowClusterHeader:
-		// A cluster has no Dormant auto-fold, so its effective state IS the map
-		// value (default false); toggling the raw entry under its fold key is the
-		// whole rule (foldedCluster reads the same entry).
-		m.ui.CollapsedEpics[r.docID] = !m.ui.CollapsedEpics[r.docID]
+		// A cluster now auto-folds unless Active (wave-7 D32), so flip its
+		// EFFECTIVE state — writing the negation of foldedCluster keeps enter a
+		// true toggle whether the cluster was auto-open or auto-folded.
+		if cl, found := m.clusterByFoldKey(r.docID); found {
+			m.ui.CollapsedEpics[r.docID] = !foldedCluster(m.ui, cl)
+			m.clampCursor()
+		}
+	case rowOrphanHeader:
+		// The loose bucket folds on its EFFECTIVE state too (auto-fold unless
+		// OrphansActive); flip the negation under orphansFoldKey.
+		m.ui.CollapsedEpics[r.docID] = !foldedOrphans(m.ui, m.board)
 		m.clampCursor()
-	case rowNow, rowChild, rowClusterMember, rowOrphan:
+	case rowNow, rowReadyClaim, rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
 		if t, found := m.taskByID(r.docID); found && t.Title != "" {
 			title = t.Title
@@ -747,17 +764,18 @@ func (m Model) activateBoard() Model {
 }
 
 // setEpicFoldUnderCursor is h (fold) / l (unfold): deterministic, idempotent
-// fold controls that act ONLY when the cursor is on an epic header — exactly
+// fold controls that act ONLY when the cursor is on a SECTION header — exactly
 // what the help text promises ("h / l  fold / unfold"). On any task row it is
 // a deliberate no-op: h/l are the tree's fold controls, not a second expand
-// key. l on a dormant epic wakes it (the explicit entry overrides the
-// auto-fold, see epicFolded).
+// key. l on a folded-by-default section opens it (the explicit entry overrides
+// the auto-fold, see foldedEpic/foldedCluster/foldedOrphans).
 func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	r, ok := m.currentRow()
-	// h/l fold BOTH kinds of section header — epics and derived clusters. A
-	// header row's docID is already the CollapsedEpics key (epic root id, or the
-	// cluster's "cluster:"+Key fold key), so the write is identical for both.
-	if !ok || (r.kind != rowEpicHeader && r.kind != rowClusterHeader) {
+	// h/l fold ALL three section-header kinds — epics, derived clusters and the
+	// loose "(no epic)" bucket. A header row's docID is already the CollapsedEpics
+	// key (epic root id, the cluster's "cluster:"+Key, or orphansFoldKey), so the
+	// write is identical for all three.
+	if !ok || (r.kind != rowEpicHeader && r.kind != rowClusterHeader && r.kind != rowOrphanHeader) {
 		return m
 	}
 	m.ui.CollapsedEpics[r.docID] = folded
@@ -775,6 +793,18 @@ func (m Model) epicByRoot(rootID string) (Epic, bool) {
 	return Epic{}, false
 }
 
+// clusterByFoldKey finds the derived cluster whose namespaced fold key matches —
+// the cluster-header analog of epicByRoot, so enter can flip the cluster's
+// EFFECTIVE fold state (which now depends on Cluster.Active, wave-7 D32).
+func (m Model) clusterByFoldKey(key string) (Cluster, bool) {
+	for _, cl := range m.board.Clusters {
+		if clusterFoldKey(cl.Key) == key {
+			return cl, true
+		}
+	}
+	return Cluster{}, false
+}
+
 // epicFolded delegates to foldedEpic — the shell and the renderer MUST share
 // the one fold rule or the cursor desyncs from the painted rows.
 func (m Model) epicFolded(e Epic) bool {
@@ -783,31 +813,62 @@ func (m Model) epicFolded(e Epic) bool {
 
 // foldedEpic is the ONE rule for whether an epic's children are hidden: the
 // user's explicit choice (a CollapsedEpics entry, whatever its value) always
-// wins; absent an entry, the board's automatic policy applies (Dormant folds).
-// Presence-as-override is what lets enter/l wake a dormant epic, and what
-// stops a phantom collapsed=true from sticking to an epic the user tried to
-// OPEN while it was dormant — when the epic later wakes, only a deliberate
-// fold keeps it closed. Package-level (not a Model method) because the
-// renderer's flattenSpine applies the SAME rule to the same UIState.
+// wins; absent an entry, the board's automatic policy applies. Wave-7 decision
+// 32 INVERTS that policy: fold by default, auto-EXPAND only an ACTIVE epic (one
+// owning a NOW task) — so the board's default is a short scannable list of
+// headers and only the group you are actually working opens. Presence-as-
+// override is what lets enter/l open a folded epic (or fold an auto-open one),
+// and what stops a phantom collapsed value from sticking once the epic's active
+// state changes — only a deliberate fold keeps a de-activated epic closed.
+// Package-level (not a Model method) because the renderer's flattenSpine applies
+// the SAME rule to the same UIState.
 func foldedEpic(st UIState, e Epic) bool {
 	if v, ok := st.CollapsedEpics[e.Root.DocID]; ok {
 		return v
 	}
-	return e.Dormant
+	return !e.Active
 }
 
 // clusterFoldKey namespaces a cluster's fold state inside the shared
 // CollapsedEpics map so a cluster key can never collide with an epic root id.
 func clusterFoldKey(key string) string { return "cluster:" + key }
 
+// orphansFoldKey is the loose "(no epic)" bucket's fold state key in the shared
+// CollapsedEpics map — a fixed sentinel that can never collide with an epic root
+// id or a cluster key (wave-7 decision 33).
+const orphansFoldKey = "orphans:(no epic)"
+
 // foldedCluster is the ONE rule for whether a derived cluster's members are
-// hidden. Unlike an epic there is NO automatic (Dormant) fold — a cluster is
-// inferred from tags, not authored, so it collapses only on the user's explicit
-// choice, recorded under its namespaced fold key. Package-level (not a Model
-// method) because the renderer's flattenSpine applies the SAME rule to the same
-// UIState; any divergence desyncs the cursor from the painted rows.
+// hidden. Wave-7 decision 32 gives a cluster the SAME auto-fold as an epic:
+// folded by default, auto-expanded only when Active (owns a NOW task). An
+// explicit user fold/unfold (its namespaced fold key) still overrides. Package-
+// level so the renderer's flattenSpine applies the SAME rule to the same UIState.
 func foldedCluster(st UIState, c Cluster) bool {
-	return st.CollapsedEpics[clusterFoldKey(c.Key)]
+	if v, ok := st.CollapsedEpics[clusterFoldKey(c.Key)]; ok {
+		return v
+	}
+	return !c.Active
+}
+
+// foldedOrphans is the ONE rule for whether the loose "(no epic)" bucket's rows
+// are hidden (wave-7 decision 33): the loose pile — the flat-queue live shape's
+// bulk — folds behind its navigable header by default and auto-expands only when
+// OrphansActive (it owns a NOW task). An explicit user fold/unfold under
+// orphansFoldKey overrides. Package-level so flattenSpine shares the rule.
+func foldedOrphans(st UIState, b Board) bool {
+	if v, ok := st.CollapsedEpics[orphansFoldKey]; ok {
+		return v
+	}
+	return !b.OrphansActive
+}
+
+// showReadyHead gates the claim-forward READY TO CLAIM band (wave-7 decision
+// 35): it replaces the pinned NOW cards exactly when nothing is claimed and
+// there IS ready work to offer. One predicate feeds BOTH the shell's visibleRows
+// (the ready rows become the first selectable stops) and the renderer's band, so
+// the cursor index space and the painted rows can never diverge.
+func showReadyHead(b Board) bool {
+	return len(b.Now) == 0 && len(b.ReadyHead) > 0
 }
 
 // moveCursor steps the selection by delta, clamped to the current visible-row
@@ -850,22 +911,35 @@ func (m *Model) clampCursor() {
 // into the flattened visible-row list"). The order is the frozen contract
 // between this shell and the render slice:
 //
-//  1. every NOW card (pinned, unexpired claims)
-//  2. each epic: its header, then — unless the epic is folded (epicFolded: an
-//     explicit CollapsedEpics entry wins, else Dormant) — its policy-ordered
-//     children (done-folded children are a render count, not rows, so they are
-//     already absent from Epic.Children)
-//  3. each derived cluster: its header, then — unless folded (foldedCluster:
-//     an explicit "cluster:"+Key entry, no Dormant auto-fold) — its members
-//  4. every orphan under "(no epic)"
+//  1. the pinned band: the READY TO CLAIM head (showReadyHead: empty NOW + ready
+//     work — wave-7 D35) OR the NOW cards (unexpired claims), never both
+//  2. each epic: its header, then — unless folded (foldedEpic: an explicit
+//     CollapsedEpics entry wins, else auto-fold unless Active — wave-7 D32) — its
+//     policy-ordered children (done-folded children are a render count, already
+//     absent from Epic.Children)
+//  3. each derived cluster: its header, then — unless folded (foldedCluster: an
+//     explicit "cluster:"+Key entry, else auto-fold unless Active) — its members
+//  4. the loose "(no epic)" header, then — unless folded (foldedOrphans: an
+//     explicit orphansFoldKey entry, else auto-fold unless OrphansActive — D33) —
+//     its orphan rows
 //
 // Folded rows are deliberately skipped so j/k never lands on a line that is
 // not on screen. The render slice must hide children under the SAME epicFolded
 // / foldedCluster rules or the cursor highlight desyncs.
 func (m Model) visibleRows() []row {
 	var rows []row
-	for _, t := range m.board.Now {
-		rows = append(rows, row{kind: rowNow, docID: t.DocID})
+	// The pinned band's rows are the FIRST selectable stops. When nothing is
+	// claimed but ready work exists, they are the READY TO CLAIM head (wave-7
+	// D35 — c claims, enter opens); otherwise they are the NOW cards. showReadyHead
+	// gates the renderer's band identically, so the index space stays in lockstep.
+	if showReadyHead(m.board) {
+		for _, t := range m.board.ReadyHead {
+			rows = append(rows, row{kind: rowReadyClaim, docID: t.DocID})
+		}
+	} else {
+		for _, t := range m.board.Now {
+			rows = append(rows, row{kind: rowNow, docID: t.DocID})
+		}
 	}
 	for _, e := range m.board.Epics {
 		rows = append(rows, row{kind: rowEpicHeader, docID: e.Root.DocID})
@@ -885,8 +959,16 @@ func (m Model) visibleRows() []row {
 			rows = append(rows, row{kind: rowClusterMember, docID: mem.DocID})
 		}
 	}
-	for _, t := range m.board.Orphans {
-		rows = append(rows, row{kind: rowOrphan, docID: t.DocID})
+	// The loose bucket is now a navigable header that folds like every other
+	// section (wave-7 D33). It appears whenever there are loose rows to show OR a
+	// folded-done tally to name; folded, only its header is a stop.
+	if len(m.board.Orphans) > 0 || m.board.OrphansFolded > 0 {
+		rows = append(rows, row{kind: rowOrphanHeader, docID: orphansFoldKey})
+		if !foldedOrphans(m.ui, m.board) {
+			for _, t := range m.board.Orphans {
+				rows = append(rows, row{kind: rowOrphan, docID: t.DocID})
+			}
+		}
 	}
 	return rows
 }

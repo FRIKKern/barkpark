@@ -3,9 +3,9 @@ barkpark  ⎇ lead/session-stable  … ● live · 2m  Wire the SSE live bridge 
 2 active · 1 ready · 0 blocked · 1 done         ● in_progress · P1 · task · fable-3
                                                 
 NOW                                             created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
-   nothing claimed right now                    
+   nothing ready · all clear                    
                                                 ○ created (Jul 02) → ● claimed by fable-3 (Jul 04)
-── tasks ─────────────────────────────────────  
+── tasks ──────────────────── 1 ready · 1 done  
   ▎● Wire the SSE live bridge to the task boa…    The board must repaint the moment the queue moves.
    ✓ Decode the change feed envelope            
    ● Debounce the refetch at 750ms                • one dirty bit signals the refetch

@@ -15,23 +15,28 @@ import (
 func t(id string) Task { return Task{DocID: id, Title: id} }
 
 // sampleBoard is a fixture exercising every row kind: two NOW cards, three
-// epics (one dormant, so its children are hidden; two normal), and one orphan.
+// epics (two Active → expanded; one inactive → its children hidden by wave-7's
+// fold-by-default), and one loose task under an Active (expanded) "(no epic)"
+// header. Marking e1/e3/orphans Active keeps the structural rows visible so the
+// flatten/cursor tests still walk every kind (the auto-fold itself is proven by
+// the dedicated fold tests).
 //
-// Fresh (nothing collapsed) it flattens to 9 navigable rows:
+// Fresh (nothing collapsed) it flattens to 10 navigable rows:
 //
-//	0 now n1      3 child c1     6 header e3
+//	0 now n1      3 child c1     6 header e3        9 orphan o1
 //	1 now n2      4 child c2     7 child c3
-//	2 header e1   5 header e2    8 orphan o1
-//	                (e2 dormant)
+//	2 header e1   5 header e2    8 orphan header
+//	                (e2 inactive → folded)
 func sampleBoard() Board {
 	return Board{
 		Now: []Task{t("n1"), t("n2")},
 		Epics: []Epic{
-			{Root: t("e1"), Children: []Task{t("c1"), t("c2")}},
-			{Root: t("e2"), Children: []Task{t("cx")}, Dormant: true},
-			{Root: t("e3"), Children: []Task{t("c3")}},
+			{Root: t("e1"), Children: []Task{t("c1"), t("c2")}, Active: true},
+			{Root: t("e2"), Children: []Task{t("cx")}, Dormant: true}, // inactive → folded
+			{Root: t("e3"), Children: []Task{t("c3")}, Active: true},
 		},
-		Orphans: []Task{t("o1")},
+		Orphans:       []Task{t("o1")},
+		OrphansActive: true,
 	}
 }
 
@@ -68,9 +73,10 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
-		{rowEpicHeader, "e2"}, // dormant → no children follow
+		{rowEpicHeader, "e2"}, // inactive → no children follow
 		{rowEpicHeader, "e3"},
 		{rowChild, "c3"},
+		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
 		{rowOrphan, "o1"},
 	}
 	if len(rows) != len(want) {
@@ -112,24 +118,31 @@ func TestCursorParityShellRender(t2 *testing.T) {
 		}
 		// The board's titles equal the doc ids (see t()), and an epic header
 		// row carries its root's title — either way the marked line must name
-		// the row the shell would act on.
-		if !strings.Contains(marked[0], r.docID) {
+		// the row the shell would act on. The orphan header paints "(no epic)",
+		// not its internal fold key, so match that token instead.
+		want := r.docID
+		if r.kind == rowOrphanHeader {
+			want = "(no epic)"
+		}
+		if !strings.Contains(marked[0], want) {
 			t2.Errorf("cursor %d: marked line %q does not carry %q (kind %v)",
-				i, marked[0], r.docID, r.kind)
+				i, marked[0], want, r.kind)
 		}
 	}
 }
 
 // Folded orphans are absent from Board.Orphans by construction, so the flattened
 // visible-row list — and therefore all cursor math — never touches them. The
-// flat board has 3 NOW claims + 42 survivors (the 3 claimed in_progress rows are
-// NOW-only after the D14 de-dup) + 55 folded, so it navigates exactly 45 rows,
-// and G lands on a real survivor, never a folded "dn*" ghost.
+// flat board has 3 NOW claims + a navigable "(no epic)" header + 42 survivors
+// (the 3 claimed in_progress rows are NOW-only after the D14 de-dup) + 55 folded,
+// so it navigates exactly 46 rows. The loose bucket auto-EXPANDS because its
+// in_progress claims make it OrphansActive (wave-7 D32/D33), and G lands on a
+// real survivor, never a folded "dn*" ghost.
 func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 	m := testModel(BuildBoard(loadFlatSnapshot(t2), RepoContext{}, refNow))
 	rows := m.visibleRows()
-	if len(rows) != 45 {
-		t2.Fatalf("flat board visible rows = %d, want 45 (3 NOW + 42 survivors)", len(rows))
+	if len(rows) != 46 {
+		t2.Fatalf("flat board visible rows = %d, want 46 (3 NOW + orphan header + 42 survivors)", len(rows))
 	}
 	for _, r := range rows {
 		if len(r.docID) >= 2 && r.docID[:2] == "dn" {
@@ -137,8 +150,8 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 		}
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 44 {
-		t2.Fatalf("G on the flat board left cursor at %d, want 44 (last of 45 rows)", m.ui.Cursor)
+	if m.ui.Cursor != 45 {
+		t2.Fatalf("G on the flat board left cursor at %d, want 45 (last of 46 rows)", m.ui.Cursor)
 	}
 }
 
@@ -147,20 +160,22 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 // contract must survive. The first cluster's first member is a twin (⧉), so the
 // parity walk also proves the twin glyph never shifts the acted-on row.
 //
-// Fresh (nothing collapsed) it flattens to 14 navigable rows:
+// Fresh (nothing collapsed) it flattens to 15 navigable rows. The clusters are
+// marked Active so their members stay visible (wave-7 folds an inactive cluster
+// to its header); the loose bucket's navigable header sits before o1:
 //
-//	0 now n1        5 header e2 (dormant)   10 clusterMember a2
+//	0 now n1        5 header e2 (inactive)  10 clusterMember a2
 //	1 now n2        6 header e3             11 clusterHeader beta
 //	2 header e1     7 child c3              12 clusterMember b1
-//	3 child c1      8 clusterHeader alpha   13 orphan o1
-//	4 child c2      9 clusterMember a1
+//	3 child c1      8 clusterHeader alpha   13 orphan header
+//	4 child c2      9 clusterMember a1      14 orphan o1
 func clusterBoard() Board {
 	b := sampleBoard()
 	a1 := t("a1")
 	a1.TwinOf = "a2"
 	b.Clusters = []Cluster{
-		{Key: "proj:alpha", Tasks: []Task{a1, t("a2")}},
-		{Key: "proj:beta", Tasks: []Task{t("b1")}},
+		{Key: "proj:alpha", Tasks: []Task{a1, t("a2")}, Active: true},
+		{Key: "proj:beta", Tasks: []Task{t("b1")}, Active: true},
 	}
 	return b
 }
@@ -188,7 +203,8 @@ func TestVisibleRowsWithClusters(t2 *testing.T) {
 		{rowClusterMember, "a2"},
 		{rowClusterHeader, "cluster:proj:beta"},
 		{rowClusterMember, "b1"},
-		{rowOrphan, "o1"}, // orphans last, after the clusters
+		{rowOrphanHeader, orphansFoldKey}, // loose bucket header, then its rows
+		{rowOrphan, "o1"},
 	}
 	if len(rows) != len(want) {
 		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -235,6 +251,9 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 			if r.kind == rowClusterHeader {
 				want = clusterDisplayName(strings.TrimPrefix(r.docID, "cluster:")) // "cluster:proj:alpha" → "alpha"
 			}
+			if r.kind == rowOrphanHeader {
+				want = "(no epic)"
+			}
 			if !strings.Contains(marked[0], want) {
 				t2.Errorf("folded=%v cursor %d: marked line %q does not carry %q (kind %v)",
 					folded, i, marked[0], want, r.kind)
@@ -248,8 +267,8 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 // leave the navigable list entirely, so the cursor never lands on a hidden row.
 func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 	m := testModel(clusterBoard())
-	if got := len(m.visibleRows()); got != 14 {
-		t2.Fatalf("unfolded cluster board = %d rows, want 14", got)
+	if got := len(m.visibleRows()); got != 15 {
+		t2.Fatalf("unfolded cluster board = %d rows, want 15", got)
 	}
 
 	// Put the cursor on the alpha cluster header (index 8) and fold with h.
@@ -259,8 +278,8 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 		t2.Fatalf("h on a cluster header did not record the fold")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 12 { // a1 + a2 (2 members) gone
-		t2.Fatalf("after folding alpha: %d rows, want 12", len(rows))
+	if len(rows) != 13 { // a1 + a2 (2 members) gone
+		t2.Fatalf("after folding alpha: %d rows, want 13", len(rows))
 	}
 	for _, r := range rows {
 		if r.docID == "a1" || r.docID == "a2" {
@@ -276,8 +295,8 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 	// enter on the alpha header (back up two rows) unfolds it again.
 	m.ui.Cursor = 8
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.visibleRows()) != 14 {
-		t2.Fatalf("enter did not unfold alpha: %d rows, want 14", len(m.visibleRows()))
+	if len(m.visibleRows()) != 15 {
+		t2.Fatalf("enter did not unfold alpha: %d rows, want 15", len(m.visibleRows()))
 	}
 }
 
@@ -309,7 +328,7 @@ func TestActVerbsReachClusterMembers(t2 *testing.T) {
 // --- cursor movement ---------------------------------------------------------
 
 func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
-	m := testModel(sampleBoard()) // 9 rows
+	m := testModel(sampleBoard()) // 10 rows
 
 	// k at the top is a no-op (clamps at 0).
 	m, _ = step(t2, m, runes("k"))
@@ -317,12 +336,12 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("k at top moved cursor to %d, want 0", m.ui.Cursor)
 	}
 
-	// j walks down and clamps at the last row (index 8).
+	// j walks down and clamps at the last row (index 9).
 	for i := 0; i < 20; i++ {
 		m, _ = step(t2, m, runes("j"))
 	}
-	if m.ui.Cursor != 8 {
-		t2.Fatalf("j past the bottom left cursor at %d, want 8", m.ui.Cursor)
+	if m.ui.Cursor != 9 {
+		t2.Fatalf("j past the bottom left cursor at %d, want 9", m.ui.Cursor)
 	}
 
 	// G / g jump to bottom / top.
@@ -331,8 +350,8 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("g left cursor at %d, want 0", m.ui.Cursor)
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 8 {
-		t2.Fatalf("G left cursor at %d, want 8", m.ui.Cursor)
+	if m.ui.Cursor != 9 {
+		t2.Fatalf("G left cursor at %d, want 9", m.ui.Cursor)
 	}
 
 	// Arrow keys are equivalent to j/k.
@@ -353,14 +372,14 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.ui.Cursor = 2 // header e1
 
-	// Collapse e1: its two children (c1, c2) drop out → 7 rows.
+	// Collapse e1: its two children (c1, c2) drop out → 8 rows.
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.ui.CollapsedEpics["e1"] {
 		t2.Fatal("enter on epic header did not collapse it")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 7 {
-		t2.Fatalf("after collapsing e1: %d rows, want 7", len(rows))
+	if len(rows) != 8 {
+		t2.Fatalf("after collapsing e1: %d rows, want 8", len(rows))
 	}
 	if rows[3].docID != "e2" { // e1 header now immediately followed by e2 header
 		t2.Fatalf("row 3 after collapse = %q, want e2 header", rows[3].docID)
@@ -371,8 +390,8 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	if m.ui.CollapsedEpics["e1"] {
 		t2.Fatal("second enter did not un-collapse the epic")
 	}
-	if len(m.visibleRows()) != 9 {
-		t2.Fatalf("after un-collapse: %d rows, want 9", len(m.visibleRows()))
+	if len(m.visibleRows()) != 10 {
+		t2.Fatalf("after un-collapse: %d rows, want 10", len(m.visibleRows()))
 	}
 }
 
@@ -402,44 +421,45 @@ func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	}
 }
 
-// A dormant epic auto-folds, but the user's explicit action must be able to
-// wake it — enter (or l) on its header shows the children; enter again folds
-// it back. An auto-collapse the user cannot override would be a dead end.
+// An inactive epic auto-folds (wave-7 fold-by-default), but the user's explicit
+// action must be able to open it — enter (or l) on its header shows the children;
+// enter again folds it back. An auto-collapse the user cannot override would be a
+// dead end.
 func TestEnterWakesDormantEpic(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 5 // header e2 (dormant, child cx hidden) → 9 rows total
+	m.ui.Cursor = 5 // header e2 (inactive, child cx hidden) → 10 rows total
 
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	rows := m.visibleRows()
-	if len(rows) != 10 {
-		t2.Fatalf("enter on a dormant epic did not wake it: %d rows, want 10", len(rows))
+	if len(rows) != 11 {
+		t2.Fatalf("enter on an inactive epic did not open it: %d rows, want 11", len(rows))
 	}
 	if rows[6].kind != rowChild || rows[6].docID != "cx" {
-		t2.Fatalf("row 6 after waking e2 = %+v, want child cx", rows[6])
+		t2.Fatalf("row 6 after opening e2 = %+v, want child cx", rows[6])
 	}
 
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.visibleRows()) != 9 {
-		t2.Fatalf("second enter did not fold the woken epic back: %d rows, want 9", len(m.visibleRows()))
+	if len(m.visibleRows()) != 10 {
+		t2.Fatalf("second enter did not fold the opened epic back: %d rows, want 10", len(m.visibleRows()))
 	}
 }
 
-// Regression: pressing enter on a DORMANT epic means "open it". If that press
-// wrote collapsed=true (the old toggle-the-map bug), the flag would stick and
-// keep the epic closed even after it wakes up (new activity → Dormant=false).
+// Regression: pressing enter on an auto-folded epic means "open it". If that
+// press wrote collapsed=true (the old toggle-the-map bug), the flag would stick
+// and keep the epic closed even after it goes Active (new claim → Active=true).
 func TestWakingDormantEpicLeavesNoPhantomCollapse(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 5                                    // header e2 (dormant)
+	m.ui.Cursor = 5                                    // header e2 (inactive → auto-folded)
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter}) // user opens it
 
-	// The epic wakes up on the next refetch (same board, e2 no longer dormant).
+	// The epic goes Active on the next refetch (same board, e2 now Active).
 	b := sampleBoard()
-	b.Epics[1].Dormant = false
+	b.Epics[1].Active = true
 	m.board = b
 
 	rows := m.visibleRows()
-	if len(rows) != 10 {
-		t2.Fatalf("woken epic renders folded (phantom collapse): %d rows, want 10", len(rows))
+	if len(rows) != 11 {
+		t2.Fatalf("opened epic renders folded (phantom collapse): %d rows, want 11", len(rows))
 	}
 }
 
@@ -474,8 +494,8 @@ func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 		t2.Fatalf("pushed frame = {%v %q}, want {FrameTask n1}", top.Kind, top.Ref)
 	}
 	// The board's own visible-row list is unchanged under the pushed frame.
-	if len(m.visibleRows()) != 9 {
-		t2.Fatalf("pushing a detail frame changed board row count to %d, want 9", len(m.visibleRows()))
+	if len(m.visibleRows()) != 10 {
+		t2.Fatalf("pushing a detail frame changed board row count to %d, want 10", len(m.visibleRows()))
 	}
 	// esc ascends back to the board (stack root).
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEsc})
@@ -521,6 +541,15 @@ func TestWindowResizeStoresDimensions(t2 *testing.T) {
 
 // --- act verbs: claim / close / open ----------------------------------------
 
+// activeOrphans wraps loose tasks in an EXPANDED loose bucket (OrphansActive), so
+// an act-verb test can navigate onto a task row. Under wave-7's fold-by-default
+// the "(no epic)" bucket collapses unless it owns active work, and its header is
+// now a navigable row — so the loose tasks live at cursor 1, 2, … (row 0 is the
+// header). These fixtures want the rows reachable, not the fold behavior.
+func activeOrphans(tasks ...Task) Board {
+	return Board{Orphans: tasks, OrphansActive: true}
+}
+
 // readyTask is a claimable row (the board overlays "ready" onto queue-ready
 // tasks). claimedTask holds a live claim, so it is closable.
 func readyTask(id string) Task { return Task{DocID: id, Title: id, Lifecycle: lifeReady} }
@@ -534,8 +563,8 @@ func claimedTask(id string, epoch int) Task {
 // result flashes an ok strip and fires a reconciling refetch.
 func TestClaimKeyOnReadyRowFiresClaimAndReconciles(t2 *testing.T) {
 	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
-	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
-	m.ui.Cursor = 0
+	m := testModel(activeOrphans(readyTask("r1")))
+	m.ui.Cursor = 1 // r1 (row 0 is the loose-bucket header)
 
 	var gotDoc, gotWorker string
 	m.doClaim = func(_ *apiclient.Client, docID, worker string) ActionResult {
@@ -583,8 +612,8 @@ func TestClaimResultFailureRendersHonestMessage(t2 *testing.T) {
 // c on a NON-ready row never hits the network — it explains why on the strip.
 func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 	fired := false
-	m := testModel(Board{Orphans: []Task{{DocID: "o1", Title: "o1", Lifecycle: lifeOpen}}})
-	m.ui.Cursor = 0
+	m := testModel(activeOrphans(Task{DocID: "o1", Title: "o1", Lifecycle: lifeOpen}))
+	m.ui.Cursor = 1 // o1 (row 0 is the loose-bucket header)
 	m.doClaim = func(*apiclient.Client, string, string) ActionResult {
 		fired = true
 		return ActionResult{}
@@ -694,8 +723,8 @@ func TestCloseGuardDisarmsOnOtherKey(t2 *testing.T) {
 
 // x on a row with no live claim explains instead of arming.
 func TestCloseKeyOnUnclaimedRowExplains(t2 *testing.T) {
-	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
-	m.ui.Cursor = 0
+	m := testModel(activeOrphans(readyTask("r1")))
+	m.ui.Cursor = 1 // r1 (row 0 is the loose-bucket header)
 	m, cmd := step(t2, m, runes("x"))
 	if cmd != nil {
 		t2.Fatal("x on an unclaimed row fired a command")
@@ -710,9 +739,9 @@ func TestCloseKeyOnUnclaimedRowExplains(t2 *testing.T) {
 
 // o surfaces the Studio deep link on the strip AND launches it via openURL.
 func TestOpenKeySurfacesURLAndLaunches(t2 *testing.T) {
-	m := testModel(Board{Orphans: []Task{{DocID: "t1", Title: "t1"}}})
+	m := testModel(activeOrphans(Task{DocID: "t1", Title: "t1"}))
 	m.cfg.BaseURL = "https://guerrilla.test"
-	m.ui.Cursor = 0
+	m.ui.Cursor = 1 // t1 (row 0 is the loose-bucket header)
 
 	old := openURL
 	t2.Cleanup(func() { openURL = old })
@@ -731,9 +760,9 @@ func TestOpenKeySurfacesURLAndLaunches(t2 *testing.T) {
 
 // Even when the browser launch fails, the URL stays on the strip (SSH-friendly).
 func TestOpenKeyShowsURLWhenLaunchFails(t2 *testing.T) {
-	m := testModel(Board{Orphans: []Task{{DocID: "t1", Title: "t1"}}})
+	m := testModel(activeOrphans(Task{DocID: "t1", Title: "t1"}))
 	m.cfg.BaseURL = "https://guerrilla.test"
-	m.ui.Cursor = 0
+	m.ui.Cursor = 1 // t1 (row 0 is the loose-bucket header)
 
 	old := openURL
 	t2.Cleanup(func() { openURL = old })

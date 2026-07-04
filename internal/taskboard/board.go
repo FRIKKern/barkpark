@@ -2,6 +2,7 @@ package taskboard
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -65,6 +66,67 @@ const (
 	suggestThreshold = 0.4
 	twinThreshold    = 0.6
 )
+
+// readyHeadMax is how many ready tasks the claim-forward READY TO CLAIM band
+// offers when nothing is in flight (wave-7 decision 35) — a short, scannable
+// head, not a return to the flat wall. The rest live behind a "+K more ready"
+// tail and inside their (folded-by-default) sections.
+const readyHeadMax = 5
+
+// anyInNow reports whether any task in the slice is a NOW-pinned claim — the
+// shared "does this section own active work" test behind Epic/Cluster.Active and
+// Board.OrphansActive (wave-7 decision 32). It runs against the SAME nowSet the
+// NOW de-dup uses, so a section is Active exactly when it contributes a row to
+// the pinned band.
+func anyInNow(tasks []Task, nowSet map[string]bool) bool {
+	for _, t := range tasks {
+		if nowSet[t.DocID] {
+			return true
+		}
+	}
+	return false
+}
+
+// readyHead selects the top readyHeadMax ready tasks across the whole corpus for
+// the claim-forward band (wave-7 decision 35), ordered priority-ascending
+// (priorityRank: P0/P1 first, absent/non-numeric last) then updated_at desc, and
+// also reports the total ready count. Ready is the ENGINE's readiness overlay
+// (composeSnapshot marks open/blocked rows ready) — the same signal the header's
+// ready tally and `bp task next` use — so the head is exactly what can be claimed.
+func readyHead(tasks []Task) (head []Task, total int) {
+	var ready []Task
+	for _, t := range tasks {
+		if t.Lifecycle == lifeReady {
+			ready = append(ready, t)
+		}
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		ri, rj := priorityRank(ready[i].Priority), priorityRank(ready[j].Priority)
+		if ri != rj {
+			return ri < rj
+		}
+		return ready[i].UpdatedAt.After(ready[j].UpdatedAt)
+	})
+	total = len(ready)
+	if len(ready) > readyHeadMax {
+		ready = ready[:readyHeadMax]
+	}
+	return ready, total
+}
+
+// priorityRank maps a priority string to a sort key: lower ranks first. The live
+// corpus stores a numeric 0–4 string (P0 most urgent); a leading "P"/"p" is
+// tolerated so both "0" and "P0" rank identically. An absent or non-numeric
+// priority sorts LAST (maxInt), so unprioritized ready work never jumps the queue.
+func priorityRank(p string) int {
+	s := strings.TrimSpace(p)
+	s = strings.TrimPrefix(s, "P")
+	s = strings.TrimPrefix(s, "p")
+	if n, err := strconv.Atoi(s); err == nil {
+		return n
+	}
+	return int(^uint(0) >> 1) // maxInt — absent/non-numeric last
+}
 
 // BuildBoard is the ENTIRE zero-config organization policy for the portrait
 // task TUI. It is pure: the same (snapshot, repo, now) always yields the same
@@ -159,7 +221,14 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 			board.Orphans = append(board.Orphans, root)
 			continue
 		}
-		board.Epics = append(board.Epics, buildEpic(root, children, now))
+		epic := buildEpic(root, children, now)
+		// Active (wave-7 decision 32) = the epic owns a NOW task. Computed here,
+		// while the full descendant set + root are in hand and BEFORE
+		// dedupNowFromEpics strips the claims for display, so it sees exactly which
+		// sections contribute to the pinned band. It is the sole auto-fold input:
+		// a folded-by-default epic auto-expands only when its own work is running.
+		epic.Active = nowSet[root.DocID] || anyInNow(children, nowSet)
+		board.Epics = append(board.Epics, epic)
 	}
 
 	sortEpics(board.Epics, repo)
@@ -175,6 +244,14 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	loose := board.Orphans
 	board.Clusters, board.Orphans = deriveClusters(loose, now)
 
+	// Cluster/orphan Active (wave-7 decision 32/33), computed while the NOW tasks
+	// are STILL members (before the de-dup below strips them for display): a
+	// cluster or the loose bucket auto-expands only when its own work is running.
+	for i := range board.Clusters {
+		board.Clusters[i].Active = anyInNow(board.Clusters[i].Tasks, nowSet)
+	}
+	board.OrphansActive = anyInNow(board.Orphans, nowSet)
+
 	// NOW de-dup for the loose pile, mirroring the epic treatment above: the
 	// claims stayed in `loose` through label frequency, cluster membership and
 	// freshest-member ranking — so claiming one member of a minimum-size cluster
@@ -182,6 +259,12 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// DISPLAY only now (charter D14).
 	board.Clusters = dedupNowFromClusters(board.Clusters, nowSet)
 	board.Orphans = stripNow(board.Orphans, nowSet)
+
+	// READY TO CLAIM head (wave-7 decision 35): the top readyHeadMax ready tasks
+	// across the WHOLE corpus, priority-ascending then freshest, plus the total
+	// ready depth. It powers the claim-forward band that replaces the empty-NOW
+	// dead-line, so there is always an obvious next task to claim.
+	board.ReadyHead, board.ReadyTotal = readyHead(s.Tasks)
 
 	// Twin detection: near-duplicate titles within the same group point at each
 	// other so "these two are the same work" is impossible to miss. Groups are

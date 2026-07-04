@@ -879,3 +879,146 @@ func TestBuildCluster_DoneFold(t *testing.T) {
 		t.Fatalf("kept = %v, want [keep recentdone] (open first, recent-terminal tail)", got)
 	}
 }
+
+// ── Wave-7: fold-by-default Active + claim-forward ready head ─────────────────
+
+// mkT is a compact task builder for the wave-7 tests (updated_at = now - ageH).
+func mkT(id, parent, kind, life, pri string, ageH int) Task {
+	return Task{DocID: id, ParentID: parent, Kind: kind, Lifecycle: life,
+		Priority: pri, UpdatedAt: refNow.Add(-time.Duration(ageH) * time.Hour)}
+}
+
+// liveClaim marks a task in_progress with a live claim, so BuildBoard lifts it
+// into NOW and its owning section becomes Active.
+func liveClaim(t Task) Task {
+	t.Lifecycle = lifeInProgress
+	t.Claim = &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
+	return t
+}
+
+// TestBuildBoard_ActiveOnNowOwnership — an epic / cluster / loose bucket is
+// Active exactly when it owns a NOW task (wave-7 D32): the section holding the
+// live claim flags Active; the sibling sections that hold only ready/open work
+// do not. Active is the SOLE auto-fold input (proven in the fold tests).
+func TestBuildBoard_ActiveOnNowOwnership(t *testing.T) {
+	tasks := []Task{
+		mkT("g1", "", kindGoal, lifeOpen, "", 1),
+		liveClaim(mkT("g1c1", "g1", "", lifeOpen, "", 1)), // NOW → g1 Active
+		mkT("g1c2", "g1", "", lifeReady, "2", 2),
+		mkT("g2", "", kindGoal, lifeOpen, "", 3),
+		mkT("g2c1", "g2", "", lifeReady, "1", 1), // no NOW under g2
+		// a derived cluster (>=2 members sharing proj:) that owns a live claim:
+		liveClaim(mkT("cl1", "", "", lifeOpen, "", 1)),
+		mkT("cl2", "", "", lifeReady, "2", 1),
+	}
+	tasks[5].Labels = []string{"proj:live"}
+	tasks[6].Labels = []string{"proj:live"}
+	b := BuildBoard(Snapshot{Tasks: tasks}, RepoContext{}, refNow)
+
+	g1 := findEpic(t, b.Epics, "g1")
+	if !g1.Active {
+		t.Errorf("epic g1 owns a NOW child but is not Active")
+	}
+	g2 := findEpic(t, b.Epics, "g2")
+	if g2.Active {
+		t.Errorf("epic g2 owns no NOW work but is Active")
+	}
+	if len(b.Clusters) != 1 {
+		t.Fatalf("want 1 derived cluster, got %d", len(b.Clusters))
+	}
+	if !b.Clusters[0].Active {
+		t.Errorf("cluster proj:live owns a NOW member but is not Active")
+	}
+}
+
+// TestBuildBoard_OrphansActive — the loose bucket is OrphansActive iff a loose
+// task holds a live claim (wave-7 D33). With the claim present it is Active; with
+// only ready/open loose work it is not.
+func TestBuildBoard_OrphansActive(t *testing.T) {
+	active := BuildBoard(Snapshot{Tasks: []Task{
+		liveClaim(mkT("o1", "", "", lifeOpen, "", 1)),
+		mkT("o2", "", "", lifeReady, "2", 1),
+	}}, RepoContext{}, refNow)
+	if !active.OrphansActive {
+		t.Errorf("loose bucket owns a live claim but OrphansActive is false")
+	}
+	quiet := BuildBoard(Snapshot{Tasks: []Task{
+		mkT("o1", "", "", lifeReady, "1", 1),
+		mkT("o2", "", "", lifeOpen, "", 1),
+	}}, RepoContext{}, refNow)
+	if quiet.OrphansActive {
+		t.Errorf("loose bucket has no NOW work but OrphansActive is true")
+	}
+}
+
+// TestBuildBoard_ReadyHeadOrderAndCap — the claim-forward head is the top
+// readyHeadMax ready tasks across the whole corpus, priority-ascending (P0/P1
+// first; absent last) then freshest, with ReadyTotal counting every ready task
+// (wave-7 D35). in_progress/blocked/done never appear in the head.
+func TestBuildBoard_ReadyHeadOrderAndCap(t *testing.T) {
+	tasks := []Task{
+		mkT("p3a", "", "", lifeReady, "3", 5),
+		mkT("p1", "", "", lifeReady, "1", 9),
+		mkT("p0", "", "", lifeReady, "0", 1),
+		mkT("p2fresh", "", "", lifeReady, "2", 1),
+		mkT("p2stale", "", "", lifeReady, "2", 8),
+		mkT("pNone", "", "", lifeReady, "", 1), // absent priority → last
+		mkT("p3b", "", "", lifeReady, "3", 2),
+		liveClaim(mkT("ip", "", "", lifeOpen, "0", 1)), // in_progress, never in head
+		mkT("blk", "", "", lifeBlocked, "0", 1),        // blocked, never in head
+	}
+	b := BuildBoard(Snapshot{Tasks: tasks}, RepoContext{}, refNow)
+
+	if b.ReadyTotal != 7 {
+		t.Fatalf("ReadyTotal = %d, want 7 (all ready tasks; ip/blk excluded)", b.ReadyTotal)
+	}
+	if len(b.ReadyHead) != readyHeadMax {
+		t.Fatalf("ReadyHead len = %d, want %d (capped)", len(b.ReadyHead), readyHeadMax)
+	}
+	// P0, P1, then the two P2s freshest-first, then the first P3 — priority wins,
+	// recency breaks ties, absent priority (pNone) never reaches the head of 5.
+	want := []string{"p0", "p1", "p2fresh", "p2stale", "p3b"}
+	if got := docIDs(b.ReadyHead); !eq(got, want) {
+		t.Fatalf("ReadyHead = %v, want %v", got, want)
+	}
+	for _, h := range b.ReadyHead {
+		if h.Lifecycle != lifeReady {
+			t.Fatalf("ready head carries a non-ready task %q (%s)", h.DocID, h.Lifecycle)
+		}
+	}
+}
+
+// TestShowReadyHead — the pinned-band gate (wave-7 D35): the READY TO CLAIM head
+// shows only when nothing is claimed AND ready work exists; a non-empty NOW hides
+// it (one hero at a time), and an empty corpus offers neither.
+func TestShowReadyHead(t *testing.T) {
+	ready := BuildBoard(Snapshot{Tasks: []Task{mkT("r", "", "", lifeReady, "1", 1)}}, RepoContext{}, refNow)
+	if !showReadyHead(ready) {
+		t.Errorf("empty NOW + ready work should show the ready head")
+	}
+	claimed := BuildBoard(Snapshot{Tasks: []Task{
+		liveClaim(mkT("c", "", "", lifeOpen, "", 1)),
+		mkT("r", "", "", lifeReady, "1", 1),
+	}}, RepoContext{}, refNow)
+	if showReadyHead(claimed) {
+		t.Errorf("a non-empty NOW must hide the ready head (one hero at a time)")
+	}
+	empty := BuildBoard(Snapshot{Tasks: []Task{mkT("o", "", "", lifeOpen, "", 1)}}, RepoContext{}, refNow)
+	if showReadyHead(empty) {
+		t.Errorf("no ready work → no ready head")
+	}
+}
+
+// TestPriorityRank — numeric priority sorts ascending, a leading P/p is tolerated
+// (the corpus mixes "0" and "P0"), and absent/non-numeric sorts last.
+func TestPriorityRank(t *testing.T) {
+	if priorityRank("0") != 0 || priorityRank("P0") != 0 || priorityRank("p0") != 0 {
+		t.Errorf("P0 forms should all rank 0")
+	}
+	if priorityRank("2") >= priorityRank("3") {
+		t.Errorf("P2 must rank before P3")
+	}
+	if priorityRank("") <= priorityRank("4") || priorityRank("urgent") <= priorityRank("4") {
+		t.Errorf("absent/non-numeric priority must rank LAST")
+	}
+}
