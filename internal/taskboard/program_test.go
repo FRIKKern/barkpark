@@ -15,18 +15,17 @@ import (
 func t(id string) Task { return Task{DocID: id, Title: id} }
 
 // sampleBoard is a fixture exercising every row kind: two NOW cards, three
-// epics (two Active → expanded; one inactive → its children hidden by wave-7's
-// fold-by-default), and one loose task under an Active (expanded) "(no epic)"
-// header. Marking e1/e3/orphans Active keeps the structural rows visible so the
-// flatten/cursor tests still walk every kind (the auto-fold itself is proven by
-// the dedicated fold tests).
+// epics, and one loose task under an Active "(no epic)" header. Under the wave-8
+// head cap every section here is SMALL (< groupHeadMax children), so each shows
+// ALL its children by default — including the inactive epic e2, whose lone child
+// now appears (the head cap only TRIMS sections with groupHeadMax+ children; a
+// dedicated head-cap fixture, bigEpicBoard, proves the trimming/expand cycle).
 //
-// Fresh (nothing collapsed) it flattens to 10 navigable rows:
+// Fresh (nothing collapsed) it flattens to 11 navigable rows:
 //
-//	0 now n1      3 child c1     6 header e3        9 orphan o1
-//	1 now n2      4 child c2     7 child c3
-//	2 header e1   5 header e2    8 orphan header
-//	                (e2 inactive → folded)
+//	0 now n1      3 child c1     6 child cx      9 orphan header
+//	1 now n2      4 child c2     7 header e3    10 orphan o1
+//	2 header e1   5 header e2    8 child c3
 func sampleBoard() Board {
 	return Board{
 		Now: []Task{t("n1"), t("n2")},
@@ -73,7 +72,8 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
-		{rowEpicHeader, "e2"}, // inactive → no children follow
+		{rowEpicHeader, "e2"}, // inactive, but its lone child is under the head cap…
+		{rowChild, "cx"},      // …so it shows by default now (head = min(groupHeadMax, n))
 		{rowEpicHeader, "e3"},
 		{rowChild, "c3"},
 		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
@@ -160,15 +160,16 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 // contract must survive. The first cluster's first member is a twin (⧉), so the
 // parity walk also proves the twin glyph never shifts the acted-on row.
 //
-// Fresh (nothing collapsed) it flattens to 15 navigable rows. The clusters are
-// marked Active so their members stay visible (wave-7 folds an inactive cluster
-// to its header); the loose bucket's navigable header sits before o1:
+// Fresh (nothing collapsed) it flattens to 16 navigable rows. Every section is
+// under the head cap, so all children show — including e2's lone child cx. The
+// loose bucket's navigable header sits before o1:
 //
-//	0 now n1        5 header e2 (inactive)  10 clusterMember a2
-//	1 now n2        6 header e3             11 clusterHeader beta
-//	2 header e1     7 child c3              12 clusterMember b1
-//	3 child c1      8 clusterHeader alpha   13 orphan header
-//	4 child c2      9 clusterMember a1      14 orphan o1
+//	0 now n1        6 child cx              12 clusterHeader beta
+//	1 now n2        7 header e3             13 clusterMember b1
+//	2 header e1     8 child c3              14 orphan header
+//	3 child c1      9 clusterHeader alpha   15 orphan o1
+//	4 child c2     10 clusterMember a1
+//	5 header e2    11 clusterMember a2
 func clusterBoard() Board {
 	b := sampleBoard()
 	a1 := t("a1")
@@ -195,7 +196,8 @@ func TestVisibleRowsWithClusters(t2 *testing.T) {
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
-		{rowEpicHeader, "e2"}, // dormant → no children follow
+		{rowEpicHeader, "e2"}, // inactive, but its lone child is under the head cap…
+		{rowChild, "cx"},      // …so it shows by default now
 		{rowEpicHeader, "e3"},
 		{rowChild, "c3"},
 		{rowClusterHeader, "cluster:proj:alpha"}, // clusters after epics
@@ -267,36 +269,36 @@ func TestCursorParityWithClusters(t2 *testing.T) {
 // leave the navigable list entirely, so the cursor never lands on a hidden row.
 func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 	m := testModel(clusterBoard())
-	if got := len(m.visibleRows()); got != 15 {
-		t2.Fatalf("unfolded cluster board = %d rows, want 15", got)
+	if got := len(m.visibleRows()); got != 16 {
+		t2.Fatalf("unfolded cluster board = %d rows, want 16", got)
 	}
 
-	// Put the cursor on the alpha cluster header (index 8) and fold with h.
-	m.ui.Cursor = 8
+	// Put the cursor on the alpha cluster header (index 9) and fold with h.
+	m.ui.Cursor = 9
 	m, _ = step(t2, m, runes("h"))
 	if !m.ui.CollapsedEpics[clusterHeaderKey("proj:alpha")] {
 		t2.Fatalf("h on a cluster header did not record the fold")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 13 { // a1 + a2 (2 members) gone
-		t2.Fatalf("after folding alpha: %d rows, want 13", len(rows))
+	if len(rows) != 14 { // a1 + a2 (2 members) gone
+		t2.Fatalf("after folding alpha: %d rows, want 14", len(rows))
 	}
 	for _, r := range rows {
 		if r.docID == "a1" || r.docID == "a2" {
 			t2.Fatalf("folded cluster member %q is still navigable", r.docID)
 		}
 	}
-	// j from the alpha header steps straight to the beta header (index 9 now).
+	// j from the alpha header steps straight to the beta header (index 10 now).
 	m, _ = step(t2, m, runes("j"))
 	if r, _ := m.currentRow(); r.kind != rowClusterHeader || r.docID != clusterHeaderKey("proj:beta") {
 		t2.Fatalf("j across the folded cluster landed on {%v %q}, want the beta header", r.kind, r.docID)
 	}
 
-	// enter on the alpha header (back up two rows) unfolds it again.
-	m.ui.Cursor = 8
+	// enter on the alpha header (back up one row) unfolds it again.
+	m.ui.Cursor = 9
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.visibleRows()) != 15 {
-		t2.Fatalf("enter did not unfold alpha: %d rows, want 15", len(m.visibleRows()))
+	if len(m.visibleRows()) != 16 {
+		t2.Fatalf("enter did not unfold alpha: %d rows, want 16", len(m.visibleRows()))
 	}
 }
 
@@ -311,10 +313,11 @@ func TestActVerbsReachClusterMembers(t2 *testing.T) {
 	if got, ok := m.taskByID("a2"); !ok || got.DocID != "a2" {
 		t2.Fatalf("taskByID did not find cluster member a2: %v %+v", ok, got)
 	}
-	// Cursor on b1 (index 12), c fires a claim command (ready row).
-	m.ui.Cursor = 12
+	// Cursor on b1 (index 13 — cx now shows, shifting members down one), c fires
+	// a claim command (ready row).
+	m.ui.Cursor = 13
 	if r, _ := m.currentRow(); r.docID != "b1" {
-		t2.Fatalf("cursor 12 is on %q, want b1", r.docID)
+		t2.Fatalf("cursor 13 is on %q, want b1", r.docID)
 	}
 	m2, cmd := step(t2, m, runes("c"))
 	if cmd == nil {
@@ -328,7 +331,7 @@ func TestActVerbsReachClusterMembers(t2 *testing.T) {
 // --- cursor movement ---------------------------------------------------------
 
 func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
-	m := testModel(sampleBoard()) // 10 rows
+	m := testModel(sampleBoard()) // 11 rows (head cap shows every small section whole)
 
 	// k at the top is a no-op (clamps at 0).
 	m, _ = step(t2, m, runes("k"))
@@ -336,12 +339,12 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("k at top moved cursor to %d, want 0", m.ui.Cursor)
 	}
 
-	// j walks down and clamps at the last row (index 9).
+	// j walks down and clamps at the last row (index 10).
 	for i := 0; i < 20; i++ {
 		m, _ = step(t2, m, runes("j"))
 	}
-	if m.ui.Cursor != 9 {
-		t2.Fatalf("j past the bottom left cursor at %d, want 9", m.ui.Cursor)
+	if m.ui.Cursor != 10 {
+		t2.Fatalf("j past the bottom left cursor at %d, want 10", m.ui.Cursor)
 	}
 
 	// G / g jump to bottom / top.
@@ -350,8 +353,8 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("g left cursor at %d, want 0", m.ui.Cursor)
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 9 {
-		t2.Fatalf("G left cursor at %d, want 9", m.ui.Cursor)
+	if m.ui.Cursor != 10 {
+		t2.Fatalf("G left cursor at %d, want 10", m.ui.Cursor)
 	}
 
 	// Arrow keys are equivalent to j/k.
@@ -372,32 +375,33 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.ui.Cursor = 2 // header e1
 
-	// Collapse e1: its two children (c1, c2) drop out → 8 rows.
+	// e1 is Active, so it shows both children by default; enter collapses it to
+	// just the header, dropping c1 + c2 → 11 rows becomes 9.
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.ui.CollapsedEpics["e1"] {
 		t2.Fatal("enter on epic header did not collapse it")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 8 {
-		t2.Fatalf("after collapsing e1: %d rows, want 8", len(rows))
+	if len(rows) != 9 {
+		t2.Fatalf("after collapsing e1: %d rows, want 9", len(rows))
 	}
 	if rows[3].docID != "e2" { // e1 header now immediately followed by e2 header
 		t2.Fatalf("row 3 after collapse = %q, want e2 header", rows[3].docID)
 	}
 
-	// enter again un-collapses.
+	// enter again expands e1 back to its full child list.
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.ui.CollapsedEpics["e1"] {
 		t2.Fatal("second enter did not un-collapse the epic")
 	}
-	if len(m.visibleRows()) != 10 {
-		t2.Fatalf("after un-collapse: %d rows, want 10", len(m.visibleRows()))
+	if len(m.visibleRows()) != 11 {
+		t2.Fatalf("after un-collapse: %d rows, want 11", len(m.visibleRows()))
 	}
 }
 
 func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 6 // header e3
+	m.ui.Cursor = 7 // header e3 (cx now shows under e2, shifting e3's header down one)
 
 	// h folds; a second h is idempotent (NOT a toggle — the help text promises
 	// "h / l  fold / unfold", so each key always means the same thing).
@@ -421,45 +425,69 @@ func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	}
 }
 
-// An inactive epic auto-folds (wave-7 fold-by-default), but the user's explicit
-// action must be able to open it — enter (or l) on its header shows the children;
-// enter again folds it back. An auto-collapse the user cannot override would be a
-// dead end.
-func TestEnterWakesDormantEpic(t2 *testing.T) {
-	m := testModel(sampleBoard())
-	m.ui.Cursor = 5 // header e2 (inactive, child cx hidden) → 10 rows total
-
-	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	rows := m.visibleRows()
-	if len(rows) != 11 {
-		t2.Fatalf("enter on an inactive epic did not open it: %d rows, want 11", len(rows))
-	}
-	if rows[6].kind != rowChild || rows[6].docID != "cx" {
-		t2.Fatalf("row 6 after opening e2 = %+v, want child cx", rows[6])
-	}
-
-	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.visibleRows()) != 10 {
-		t2.Fatalf("second enter did not fold the opened epic back: %d rows, want 10", len(m.visibleRows()))
+// bigEpicBoard has a single INACTIVE epic carrying more children than the head
+// cap (groupHeadMax = 5), so the head-cap default is meaningful: the section
+// paints only its first groupHeadMax children until the user expands it. It is
+// the fixture the fold/expand-cycle tests need — sampleBoard's sections are all
+// small, so their head == all and never exercise the trimming.
+func bigEpicBoard() Board {
+	return Board{
+		Epics: []Epic{{
+			Root:     t("big"),
+			Children: []Task{t("k1"), t("k2"), t("k3"), t("k4"), t("k5"), t("k6"), t("k7")},
+		}}, // inactive → head-capped to the first 5
 	}
 }
 
-// Regression: pressing enter on an auto-folded epic means "open it". If that
-// press wrote collapsed=true (the old toggle-the-map bug), the flag would stick
-// and keep the epic closed even after it goes Active (new claim → Active=true).
-func TestWakingDormantEpicLeavesNoPhantomCollapse(t2 *testing.T) {
-	m := testModel(sampleBoard())
-	m.ui.Cursor = 5                                    // header e2 (inactive → auto-folded)
-	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter}) // user opens it
+// A section with more children than the head cap shows only a HEAD by default
+// (groupHeadMax rows); the user's explicit enter must expand it to the full list,
+// and enter again collapse it to just the header. This is the wave-8 successor to
+// the retired "wake a dormant epic" behavior — a head the user cannot open would
+// be a dead end. (Repurposed from TestEnterWakesDormantEpic; the auto-fold it
+// tested no longer exists.)
+func TestEnterExpandsHeadCappedEpic(t2 *testing.T) {
+	m := testModel(bigEpicBoard()) // 1 header + 5 head children = 6 rows
+	if got := len(m.visibleRows()); got != 6 {
+		t2.Fatalf("head-capped epic shows %d rows, want 6 (header + 5 of 7 children)", got)
+	}
+	m.ui.Cursor = 0 // the epic header
 
-	// The epic goes Active on the next refetch (same board, e2 now Active).
-	b := sampleBoard()
-	b.Epics[1].Active = true
+	// enter expands the head to the full child list (7 children) → 8 rows.
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	rows := m.visibleRows()
+	if len(rows) != 8 {
+		t2.Fatalf("enter did not expand the head-capped epic: %d rows, want 8", len(rows))
+	}
+	if rows[7].kind != rowChild || rows[7].docID != "k7" {
+		t2.Fatalf("row 7 after expand = %+v, want child k7", rows[7])
+	}
+
+	// enter again collapses the whole section to just its header → 1 row.
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := len(m.visibleRows()); got != 1 {
+		t2.Fatalf("second enter did not collapse the epic to its header: %d rows, want 1", got)
+	}
+}
+
+// Regression: expanding a head-capped epic with enter must write an explicit
+// EXPAND (CollapsedEpics entry=false), never a collapse. If that press wrote
+// entry=true (the old toggle-the-map bug), the flag would stick and keep the
+// epic folded to its header even after it goes Active (new claim → Active=true).
+// (Repurposed from TestWakingDormantEpicLeavesNoPhantomCollapse.)
+func TestExpandedHeadCapEpicHasNoPhantomCollapse(t2 *testing.T) {
+	m := testModel(bigEpicBoard())
+	m.ui.Cursor = 0                                    // the head-capped epic header
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter}) // user expands it to all 7 children
+
+	// The epic goes Active on the next refetch (same board, big now Active).
+	b := bigEpicBoard()
+	b.Epics[0].Active = true
 	m.board = b
 
-	rows := m.visibleRows()
-	if len(rows) != 11 {
-		t2.Fatalf("opened epic renders folded (phantom collapse): %d rows, want 11", len(rows))
+	// It still shows every child — the explicit expand did not become a phantom
+	// collapse (header + 7 children = 8 rows).
+	if got := len(m.visibleRows()); got != 8 {
+		t2.Fatalf("expanded epic renders folded (phantom collapse): %d rows, want 8", got)
 	}
 }
 
@@ -494,8 +522,8 @@ func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 		t2.Fatalf("pushed frame = {%v %q}, want {FrameTask n1}", top.Kind, top.Ref)
 	}
 	// The board's own visible-row list is unchanged under the pushed frame.
-	if len(m.visibleRows()) != 10 {
-		t2.Fatalf("pushing a detail frame changed board row count to %d, want 10", len(m.visibleRows()))
+	if len(m.visibleRows()) != 11 {
+		t2.Fatalf("pushing a detail frame changed board row count to %d, want 11", len(m.visibleRows()))
 	}
 	// esc ascends back to the board (stack root).
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEsc})
@@ -514,18 +542,21 @@ func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 // clampCursor keeps the selection valid when a refetch shrinks the board under it.
 func TestApplySnapshotClampsCursor(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 8 // last row
-	// A refetch that yields a much smaller board.
+	m.ui.Cursor = 8 // on child c3, deep in the 11-row board
+	// A refetch that yields a much smaller board: one loose task under its
+	// navigable "(no epic)" header → 2 rows total.
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
 		return Board{Orphans: []Task{t("only")}}
 	}
 	m.now = func() time.Time { return time.Unix(1000, 0) }
 	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(1000, 0)}})
-	if got := len(m.visibleRows()); got != 1 {
-		t2.Fatalf("post-refetch rows = %d, want 1", got)
+	if got := len(m.visibleRows()); got != 2 {
+		t2.Fatalf("post-refetch rows = %d, want 2 (loose header + one task)", got)
 	}
-	if m.ui.Cursor != 0 {
-		t2.Fatalf("cursor not clamped after shrink: %d, want 0", m.ui.Cursor)
+	// c3 is gone from the new board, so the selection can't follow it; the cursor
+	// clamps down to the last valid row instead of dangling off the end.
+	if m.ui.Cursor != 1 {
+		t2.Fatalf("cursor not clamped after shrink: %d, want 1", m.ui.Cursor)
 	}
 }
 
