@@ -405,7 +405,7 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       asset_id = json_response(created, 201)["attachment"]["asset_id"]
       path = "/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}"
 
-      %{path: path, operator_raw: operator_raw}
+      %{path: path, ticket: ticket, operator_raw: operator_raw}
     end
 
     test "a logged-in Studio SESSION cookie (no Bearer) downloads the bytes → 200 + nosniff",
@@ -418,6 +418,13 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       assert conn.status == 200
       assert response(conn, 200) == @pdf
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+
+      # ApiSecurityHeaders parity: this route used to ride :token_root (which
+      # pipes through :api), so the new pipeline must keep the same
+      # referrer-policy baseline on every response.
+      assert get_resp_header(conn, "referrer-policy") ==
+               ["strict-origin-when-cross-origin"]
+
       # The Bearer header is absent — this is the exact click the Bearer-only
       # :token_root route used to 401.
       assert get_req_header(conn, "authorization") == []
@@ -453,6 +460,21 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       # OptionalSessionToken resolves ONLY api tokens (Auth.verify_token never
       # returns a kind==ticket row), so the key is treated as anonymous and the
       # controller's require_operator/1 fail-closes.
+      assert conn.status == 401
+    end
+
+    test "a session cookie can NEVER drive an operator WRITE → 401 (GET-only bucket tripwire)",
+         %{ticket: ticket, operator_raw: operator_raw} do
+      # The cookie branch is navigation auth with no CSRF header, so the writes
+      # deliberately stay on the Bearer-only :token_root (RequireToken reads
+      # ONLY the Authorization header). This pins that boundary: if anyone ever
+      # swaps :api's OptionalToken for a cookie-aware plug, or moves a write
+      # onto :session_token_root, this cookie-only POST stops 401'ing.
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{"api_token" => operator_raw})
+        |> post("/v1/tickets/#{ticket}/answer", %{"body" => "cookie must not answer"})
+
       assert conn.status == 401
     end
   end

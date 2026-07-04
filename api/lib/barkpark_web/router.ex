@@ -288,9 +288,13 @@ defmodule BarkparkWeb.Router do
 
   # Session-cookie soft-auth for the OPERATOR's ROOT-mounted GET plugin routes
   # (Barkpark Tickets, charter Decision 12). The `:api` pipeline shape — same
-  # AcceptBarkparkVendor / accepts json / ErrorEnvelopeNegotiation / RateLimit /
-  # AssignDefaultScope — but with `:fetch_session` FIRST and
-  # `OptionalSessionToken` in place of `OptionalToken`.
+  # AcceptBarkparkVendor / accepts json / ApiSecurityHeaders /
+  # ErrorEnvelopeNegotiation / RateLimit / AssignDefaultScope — but with
+  # `:fetch_session` FIRST and `OptionalSessionToken` in place of
+  # `OptionalToken`. ApiSecurityHeaders stays: the routes that ride this bucket
+  # used to ride `:token_root` (which pipes through `:api`), so every response —
+  # including the 401/404 error envelopes — keeps the same nosniff +
+  # referrer-policy baseline it always had.
   #
   # WHY IT EXISTS: the Studio inbox timeline renders attachment-download links as
   # plain `<a href>` navigations. A browser Studio session carries only the
@@ -314,6 +318,7 @@ defmodule BarkparkWeb.Router do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
