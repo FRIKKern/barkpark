@@ -23,9 +23,9 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
                {"op":"insert_rows","tab":0,"at":2,"count":3},
                {"op":"clear_cell","tab":0,"ref":"C9"}]}
 
-  Responds `{ok, slug, rev, epoch, applied, errors}` — ops are applied
-  INDIVIDUALLY (not atomically): invalid ops land in `errors` (with their
-  list `index`) while the rest apply; `rev` is the session's applied-op
+  Responds `{ok, slug, rev, epoch, applied, errors, replayed}` — ops are
+  applied INDIVIDUALLY (not atomically): invalid ops land in `errors` (with
+  their list `index`) while the rest apply; `rev` is the session's applied-op
   counter, monotonic WITHIN one session incarnation (an idle-stopped or
   restarted session re-counts from 0 — `epoch` disambiguates incarnations;
   treat a changed `epoch` as "refetch, then trust `rev` again").
@@ -33,6 +33,23 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   when the body carries no `"ops"` list or the list exceeds the per-call
   batch bound (`Session.max_ops_per_call/0` — split and resend), 503 when
   the session died twice in a row (`session_unavailable` — retry shortly).
+
+  ## Exactly-once retry (`request_id`)
+
+  An OPTIONAL top-level `"request_id"` (a non-empty string ≤ 200 bytes) makes
+  the batch idempotent under retry: the FIRST request with a given
+  `request_id` applies and caches its reply; a LATER request with the SAME
+  `request_id` replays that reply with `replayed: true` and applies NOTHING —
+  so a re-sent non-idempotent batch (`insert_rows` after a lost response or a
+  503) never double-applies. Absent `request_id` is byte-identical to the
+  pre-feature behavior (`replayed: false`, every call applies). A present
+  `request_id` of any other shape (empty string, > 200 bytes, non-string) is
+  refused 422 `invalid_request_id` — a CONTROLLER-envelope error (the
+  `batch_too_large` precedent), NOT a session op code. Idempotency-key
+  semantics: the SAME `request_id` with DIFFERENT ops returns the FIRST
+  request's reply. The ring is node-local and cleared by a BEAM restart (the
+  sessions die with it) — see the `Session` moduledoc for the full contract
+  and accepted residuals.
   """
 
   use BarkparkWeb, :controller
@@ -48,17 +65,54 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         _ -> @default_dataset
       end
 
-    case Session.apply_ops(slug, dataset, ops) do
-      {:ok, result} ->
-        json(conn, %{
-          ok: true,
-          slug: slug,
-          rev: result.rev,
-          epoch: result.epoch,
-          applied: result.applied,
-          errors: result.errors
+    with {:ok, request_id} <- fetch_request_id(params),
+         {:ok, result} <- Session.apply_ops(slug, dataset, ops, request_id) do
+      json(conn, %{
+        ok: true,
+        slug: slug,
+        rev: result.rev,
+        epoch: result.epoch,
+        applied: result.applied,
+        errors: result.errors,
+        replayed: Map.get(result, :replayed, false)
+      })
+    else
+      # A present-but-malformed request_id is a controller-envelope 422
+      # (the batch_too_large precedent), NOT a session op code.
+      :invalid_request_id ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{
+            code: "invalid_request_id",
+            message: "request_id must be a non-empty string of at most 200 bytes"
+          }
         })
 
+      other ->
+        apply_ops_error(conn, slug, dataset, other)
+    end
+  end
+
+  def apply_ops(conn, _params) do
+    conn
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{code: "malformed_ops", message: "the body must carry an \"ops\" list"}})
+  end
+
+  # Absent (or JSON null) → nil, byte-identical to the pre-feature path. A
+  # non-empty string ≤ 200 bytes threads through as the idempotency key.
+  # Anything else present → :invalid_request_id (422 at the caller).
+  defp fetch_request_id(params) do
+    case params["request_id"] do
+      nil -> {:ok, nil}
+      rid when is_binary(rid) and rid != "" and byte_size(rid) <= 200 -> {:ok, rid}
+      _ -> :invalid_request_id
+    end
+  end
+
+  defp apply_ops_error(conn, slug, dataset, result) do
+    case result do
       {:error, :not_found} ->
         conn
         |> put_status(:not_found)
@@ -100,11 +154,5 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
           error: %{code: "session_unavailable", message: "the sheet session could not start"}
         })
     end
-  end
-
-  def apply_ops(conn, _params) do
-    conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "malformed_ops", message: "the body must carry an \"ops\" list"}})
   end
 end

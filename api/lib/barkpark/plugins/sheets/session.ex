@@ -120,6 +120,32 @@ defmodule Barkpark.Plugins.Sheets.Session do
   whole, last write wins per cell — structural ops ride the same mailbox,
   so a batch never observes a half-shifted grid.
 
+  ## Idempotency (request_id replay ring)
+
+  `apply_ops/4` takes an OPTIONAL `request_id` (a non-empty string ≤ 200
+  bytes, shape-validated at the controller — `invalid_request_id` 422
+  otherwise). The FIRST batch with a given `request_id` applies normally and
+  caches its reply in `Barkpark.Plugins.Sheets.Session.ReplayRing` (a public
+  named ETS table owned by a tiny GenServer OUTSIDE the sessions); a LATER
+  batch with the SAME `request_id` replays that cached reply verbatim +
+  `replayed: true` and applies NOTHING. That is what makes a retried
+  non-idempotent batch (an `insert_rows` re-sent after a lost response or a
+  503) apply EXACTLY ONCE. The ring lives outside the session on purpose: a
+  503 means the session died twice, so the retry lands on a FRESH session — an
+  in-GenServer guard would be gone exactly when needed. `request_id: nil` (the
+  `apply_ops/3` default) is byte-identical to the pre-ring behavior: every call
+  applies. Same `request_id` with DIFFERENT ops returns the FIRST reply
+  (idempotency-key semantics — the caller owns the key). Accepted residuals,
+  NOT fixed:
+
+    * NODE-LOCAL — the ring is a single-node ETS table (Barkpark is a
+      single-node deploy);
+    * a BEAM restart clears the ring (the sessions die with it, so a fresh
+      empty ring is correct);
+    * the one-statement window between applying the batch and the ring `put`
+      stays at-least-once — a crash there loses the entry and the next retry
+      re-applies.
+
   ## Per-user undo/redo (M4)
 
   Any op may carry an optional `"user"` string — when present, the session
@@ -227,6 +253,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session.Ops
+  alias Barkpark.Plugins.Sheets.Session.ReplayRing
 
   @registry Barkpark.Plugins.Sheets.SessionRegistry
   @supervisor Barkpark.Plugins.Sheets.SessionSupervisor
@@ -251,16 +278,31 @@ defmodule Barkpark.Plugins.Sheets.Session do
   `{:error, :batch_too_large, n}` when `ops` exceeds `max_ops_per_call/0`,
   or `{:error, :session_unavailable}` when the session died twice in a row
   (see `call_session/4`).
+
+  ## Exactly-once retry (`request_id`)
+
+  An OPTIONAL fourth argument `request_id` (a non-empty string, validated at
+  the controller layer) makes the batch idempotent under retry. The FIRST
+  call with a given `request_id` applies the batch and caches its reply in the
+  restart-surviving `ReplayRing`; a LATER call with the SAME `request_id`
+  replays the cached reply verbatim + `replayed: true` and applies NOTHING —
+  so a re-sent `insert_rows` batch (e.g. after a lost response or a 503) never
+  double-applies. `request_id: nil` (the default, and the `apply_ops/3`
+  contract) is byte-identical to the pre-ring behavior: every call applies.
+  Same `request_id` with DIFFERENT ops returns the FIRST reply (idempotency-key
+  semantics — the caller committed to that key). See the moduledoc's
+  "Idempotency (request_id replay ring)" section for the accepted residuals.
   """
-  @spec apply_ops(String.t(), String.t(), [map()]) ::
+  @spec apply_ops(String.t(), String.t(), [map()], String.t() | nil) ::
           {:ok, %{rev: non_neg_integer(), applied: non_neg_integer(), errors: [map()]}}
           | {:error, term()}
           | {:error, :batch_too_large, pos_integer()}
-  def apply_ops(slug, dataset, ops)
-      when is_binary(slug) and is_binary(dataset) and is_list(ops) do
+  def apply_ops(slug, dataset, ops, request_id \\ nil)
+      when is_binary(slug) and is_binary(dataset) and is_list(ops) and
+             (is_nil(request_id) or is_binary(request_id)) do
     case length(ops) do
       n when n > @max_ops_per_call -> {:error, :batch_too_large, n}
-      _ -> call_session(slug, dataset, {:apply_ops, ops})
+      _ -> call_session(slug, dataset, {:apply_ops, ops, request_id})
     end
   end
 
@@ -452,7 +494,41 @@ defmodule Barkpark.Plugins.Sheets.Session do
   end
 
   @impl true
-  def handle_call({:apply_ops, ops}, _from, state) do
+  def handle_call({:apply_ops, ops, request_id}, _from, state) do
+    ring_key = {state.dataset, state.slug}
+
+    case request_id && ReplayRing.lookup(ring_key, request_id) do
+      {:ok, cached} ->
+        # Exactly-once: this request_id already applied on this node. Replay
+        # the cached reply verbatim (+ replayed: true) and apply NOTHING, so a
+        # retried non-idempotent batch (insert_rows) never runs twice.
+        {:reply, {:ok, Map.put(cached, :replayed, true)}, schedule_idle(state)}
+
+      _ ->
+        {reply, state} = do_apply_ops(ops, state)
+        if request_id, do: ReplayRing.put(ring_key, request_id, reply)
+        {:reply, {:ok, reply}, schedule_idle(state)}
+    end
+  end
+
+  # The flush reply carries the persist result — a failed persist must not
+  # read as :ok, or read-your-writes callers (export) silently serve the
+  # stale row. The error branch of persist_result/1 keeps the state dirty
+  # and the debounce retry armed.
+  def handle_call(:flush, _from, state) do
+    {result, state} = persist_result(state)
+    {:reply, result, schedule_idle(state)}
+  end
+
+  def handle_call(:peek, _from, state) do
+    {:reply, {:ok, state.content}, schedule_idle(state)}
+  end
+
+  # The real batch application — unchanged from the pre-ring path. Returns the
+  # reply map (WITHOUT the additive `replayed` flag; the replay path adds it)
+  # plus the settled state, so the caller can ring-cache the reply before
+  # replying to the client.
+  defp do_apply_ops(ops, state) do
     {state, applied, errors} =
       ops
       |> Enum.with_index()
@@ -483,20 +559,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
     state = Ops.flush_pending(state)
     state = if applied > 0, do: maybe_flush_or_debounce(state), else: state
     reply = %{rev: state.rev, epoch: state.epoch, applied: applied, errors: Enum.reverse(errors)}
-    {:reply, {:ok, reply}, schedule_idle(state)}
-  end
-
-  # The flush reply carries the persist result — a failed persist must not
-  # read as :ok, or read-your-writes callers (export) silently serve the
-  # stale row. The error branch of persist_result/1 keeps the state dirty
-  # and the debounce retry armed.
-  def handle_call(:flush, _from, state) do
-    {result, state} = persist_result(state)
-    {:reply, result, schedule_idle(state)}
-  end
-
-  def handle_call(:peek, _from, state) do
-    {:reply, {:ok, state.content}, schedule_idle(state)}
+    {reply, state}
   end
 
   @impl true
