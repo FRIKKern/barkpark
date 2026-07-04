@@ -1,7 +1,7 @@
-defmodule BarkparkWeb.V1.MediaSearchParamsTest do
+defmodule Barkpark.Media.Delivery.SearchParamsTest do
   use ExUnit.Case, async: true
 
-  alias BarkparkWeb.V1.MediaSearchParams
+  alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
 
   test "array/nested query params parse fail-soft to nil instead of crashing" do
     opts =

@@ -11,7 +11,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Collections, Share}
   alias Barkpark.Media.Delivery.AssetResponse
-  alias BarkparkWeb.V1.MediaSearchParams
+  alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
 
   action_fallback BarkparkWeb.FallbackController
 
