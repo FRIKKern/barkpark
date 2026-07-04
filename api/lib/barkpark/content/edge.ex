@@ -25,8 +25,9 @@ defmodule Barkpark.Content.Edge do
 
   ## Weight is layout-only
 
-  `weight` is a Cytoscape layout hint (edge thickness / spring length) consumed
-  ONLY by the Studio graph renderer. Ranking is topology and never reads it.
+  `weight` is a layout hint (edge thickness / spring length) consumed ONLY by
+  the Studio Canvas2D graph renderer's force sim (bp-graph.js). Ranking is
+  topology and never reads it.
 
   ## Direction
 
@@ -66,7 +67,7 @@ defmodule Barkpark.Content.Edge do
     belongs_to :to, Document, foreign_key: :to_id, type: :binary_id
     field :kind, :string
 
-    # LAYOUT-ONLY — Cytoscape edge thickness / spring; never read by ranking.
+    # LAYOUT-ONLY — Canvas2D force-sim edge thickness / spring; never read by ranking.
     field :weight, :float
     field :plugin_source, :string
 

@@ -58,6 +58,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Doc byte budgets (blocking)
         run: bash scripts/check-doc-budgets.sh
 
@@ -66,3 +71,16 @@ jobs:
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh
+
+      # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
+      # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
+      # resurrected dead-dependency citation, or a live-asserted retired technology
+      # is caught automatically. Fail-closed:
+      #   · acceptance-code-comments.mjs — the 29-defect fail-before corpus + the
+      #     never-cry-wolf control + the plant-catch checks (exit 1 on any miss).
+      #   · retired-terms.mjs — never-worse vs the frozen baseline (exit 1 on any
+      #     NOVEL dead-tech / live-assertion beyond the known backlog).
+      - name: Code-comment citation guard (blocking)
+        run: |
+          node tooling/doc-truth/acceptance-code-comments.mjs
+          node tooling/doc-truth/retired-terms.mjs

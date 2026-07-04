@@ -86,8 +86,7 @@ export function signDraftModeToken(opts: {
 }
 
 /**
- * Phase 5 v0.1 — draft-mode route factory (masterplan L167; see ADR-004 via
- * .doey/plans/research/w2-nextjs-contracts.md §5).
+ * Phase 5 v0.1 — draft-mode route factory.
  *
  * Signed URL contract (HMAC over `path + '\n' + expiry`, 10-min TTL):
  *   GET    /api/draft?path=<path>&expiry=<unix_ms>&sign=<hex_hmac>

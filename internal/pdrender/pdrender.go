@@ -19,7 +19,8 @@ import (
 // pdrender owns this type so the package has no apiclient dependency. The
 // caller decodes the JSON map into Attrs; the renderers read type-specific
 // fields out of it. Only `section` populates Children; only `figure`
-// populates Child — mirroring compose_block/2's recursion shape in render.ex.
+// populates Child — mirroring Render.Compose.compose_block/2's recursion shape
+// (compose.ex).
 type Block struct {
 	ID       string
 	Type     string
@@ -127,7 +128,7 @@ type RenderCtx struct {
 	// (composite/arrayOf/codelist/localizedText) as a raw JSON dump instead of
 	// the flat labelled summary. It DEFAULTS to false — the flat summary is
 	// strictly more readable than a JSON blob and the flattening logic already
-	// mirrors render.ex's composite_scalar. The flag exists only as a one-line
+	// mirrors Render.Compose.composite_scalar/1 (compose.ex). The flag exists only as a one-line
 	// opt-out for a caller that wants to honor the TUI's documented "JSON dump"
 	// constraint literally; the summary path is the recommended default.
 	V2AsJSON bool
@@ -161,7 +162,7 @@ type Renderer interface {
 
 // InlineRenderer walks a run of inline nodes into ONE styled string (no
 // wrapping). The block renderer then word-wraps that string to its known
-// width. Mark application mirrors compose_inline/2 in render.ex exactly.
+// width. Mark application mirrors Render.Inline.compose_inline/2 (inline.ex) exactly.
 type InlineRenderer struct {
 	theme Theme
 }

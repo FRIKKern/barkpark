@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.TasksController do
   @moduledoc """
-  W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the
-  bd-compatible shim (`bin/bd-shim`).
+  W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
+  (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
 
   Eleven endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
@@ -20,12 +20,13 @@ defmodule BarkparkWeb.TasksController do
 
   ## Shape contract
 
-  All read responses carry a `doc` (or `docs`) map shaped to mirror what
-  the real `bd show --json` emits closely enough that the shim can pass
-  it through unchanged (`id`, `title`, `status`, `type`, `lifecycle_status`,
-  `kind`, `content`, `priority`, `assignee`, `dependencies`, …). See
-  `render_doc/1`. The shim translates label-flavoured bd args to query
-  params upstream of this controller.
+  All read responses carry a `doc` (or `docs`) map in the bd-compatible
+  shape (`id`, `title`, `status`, `type`, `lifecycle_status`, `kind`,
+  `content`, `priority`, `assignee`, `dependencies`, …) — close enough to
+  what `bd show --json` emitted that the now-retired `bin/bd-shim` passed
+  it through unchanged, translating label-flavoured args to query params
+  upstream of this controller. The `bp task` CLI consumes the same shape
+  today. See `render_doc/1`.
 
   ## Why the doc_id is a URL segment for close but a body field for claim
 
@@ -129,9 +130,9 @@ defmodule BarkparkWeb.TasksController do
   # w7-08c (paper-y1c): list-all endpoint. Returns every task doc in the
   # caller's tenant, optionally narrowed by `kind`, `lifecycle_status`, or
   # `phase_id` (parent match). Everything is a task — goals/phases/events are
-  # gone as types. Used by the bd-shim's `bd list --json` family — replaces
-  # the previous "ready --limit 1000 then client-side filter" path (which lost
-  # in-progress + closed rows).
+  # gone as types. Backs the `bp task` list family (historically the bd-shim's
+  # `bd list --json`) — replaces the previous "ready --limit 1000 then
+  # client-side filter" path (which lost in-progress + closed rows).
   #
   # Why server-side filtering: the shim used to fetch ready and filter
   # client-side, which (a) only saw the ready slice (no in_progress / done /
@@ -209,7 +210,8 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/tasks/:doc_id ──────────────────────────────────────────────
-  # w7-08: dedicated single-task fetch, replacing the bd-shim's listAll() walk.
+  # w7-08: dedicated single-task fetch, replacing the (now-retired) bd-shim's
+  # listAll() walk.
   # Uses the SAME direct scoped query as `find_task_by_doc_id/2` — DO NOT
   # route through `Content.get_document/4` (dataset_id coalescence bug noted
   # in w7-07's report).
@@ -222,8 +224,8 @@ defmodule BarkparkWeb.TasksController do
         counts = Params.batch_edge_counts([doc])
 
         # C2 (task carries its rail): the task's direct child tasks — the rows
-        # whose `content.parent_id` (OR `content.parent`) points at this doc,
-        # in chronological order. Reuses the SAME prefix-agnostic parent filter
+        # whose `content.parent_id` points at this doc, in chronological
+        # order. Reuses the SAME prefix-agnostic parent filter
         # the index's `parent=` slice walks (`maybe_filter_parent_id/2`) plus
         # the tenancy filters, so the matching logic lives in one place. One
         # level only — children render as lightweight summaries (NOT the full
@@ -245,8 +247,8 @@ defmodule BarkparkWeb.TasksController do
   # C2: the direct child tasks of `doc_id` — its rail — ordered chronologically
   # (inserted_at ASC, oldest first), tenancy-scoped to the caller's
   # workspace+project. Mirrors the index's C1 parent slice (lines ~85-101):
-  # the SAME `maybe_filter_parent_id/2` (prefix-agnostic on both `parent_id`
-  # and `parent`, `drafts.` stripped) + the SAME workspace/project filters,
+  # the SAME `maybe_filter_parent_id/2` (prefix-agnostic on `parent_id`,
+  # `drafts.` stripped) + the SAME workspace/project filters,
   # over `type == "task"`. No duplicated matching logic — the filter helpers
   # are shared with `index/2`.
   defp child_tasks(doc_id, conn) do
@@ -639,8 +641,9 @@ defmodule BarkparkWeb.TasksController do
   # then delegates to Tasks.relabel_by_id/3 (advisory-lock + CAS-on-rev +
   # task.relabeled mutation_event). Returns { ok, doc }.
   #
-  # Backs the bd-shim's `bd update <id> --add-label/--remove-label`, which in
-  # turn backs paper-claim-files' `file-claim:<path>` ownership labels.
+  # Backs the `bp task` labels endpoint (historically the bd-shim's
+  # `bd update <id> --add-label/--remove-label`), which in turn backs
+  # paper-claim-files' `file-claim:<path>` ownership labels.
 
   def relabel(conn, %{"doc_id" => doc_id} = params) do
     add = Params.string_list(params["add"])
@@ -695,7 +698,7 @@ defmodule BarkparkWeb.TasksController do
   # Content threads through `resolve_read_dataset_id/2` which, for callers
   # carrying both workspace + project scope, can resolve the requested
   # dataset string to a DIFFERENT workspace's dataset_id (barkpark-sknf
-  # shape). For the bd-shim surface, `doc_id` is unique within
+  # shape). For this tasks surface, `doc_id` is unique within
   # `(workspace, project, type=task)` and the dataset string is incidental,
   # so we filter directly on the workspace + project ids (the hard tenant
   # boundary) and skip the dataset coalescence entirely.

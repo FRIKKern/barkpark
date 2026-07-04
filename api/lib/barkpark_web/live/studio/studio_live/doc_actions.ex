@@ -207,7 +207,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
           }
         }
       end,
-      # 'View blast radius' — opens the Cytoscape graph pane for THIS doc (Goal
+      # 'View blast radius' — opens the Canvas2D graph pane for THIS doc (Goal
       # ges/graph-edge-seam, FIX 2). Fires `view-graph`, which push_patches to
       # the reserved `graph/<doc_id>` nav segment PaneBuilder resolves into a
       # `view: :graph` editor. Without this affordance the GraphView half of

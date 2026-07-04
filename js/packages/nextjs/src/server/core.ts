@@ -162,7 +162,7 @@ async function decodeAndThrow(response: Response, url: string): Promise<never> {
  * Phase 5 v0.1 fetch helper. Branches on `draftMode()`:
  *   - !isEnabled → cache: 'force-cache' + next.tags = [bp:ds:<ds>:_all, ...userTags, ...syncTags]
  *   - isEnabled  → cache: 'no-store'   (NEVER set next.tags — Next 15.5.15 silently ignores tags
- *                  on no-store and breaks the SWR / revalidate contract; spike-c §4 / ADR-004 L31)
+ *                  on no-store and breaks the SWR / revalidate contract; docs/decisions/0003-sync-tags.md)
  *                + perspective=drafts query param + Authorization: Bearer ${serverToken}
  *
  * On draft 401: one auto-reissue attempt (calls cfg.reissuePreviewToken if provided), then retries.
@@ -234,7 +234,8 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
     const init: BuiltRequest['init'] = { method: 'GET', headers }
     if (input.signal !== undefined) init.signal = input.signal
     if (input.isDraft) {
-      // ADR-004 L31 / spike-c §4: MUST NOT set next.tags alongside cache:'no-store'.
+      // MUST NOT set next.tags alongside cache:'no-store': Next 15.5.15 silently
+      // ignores tags on no-store, breaking revalidateTag(). See docs/decisions/0003-sync-tags.md.
       init.cache = 'no-store'
     } else {
       init.cache = 'force-cache'

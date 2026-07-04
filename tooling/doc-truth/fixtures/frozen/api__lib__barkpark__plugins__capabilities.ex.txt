@@ -1,0 +1,90 @@
+        default_output: "json"
+      ),
+      # Expectation reverse view (lvw-t8, living-values §8/§9): the tasks a
+      # paper drives — its design_doc/papers referencers — with per-criterion
+      # met/evidence state. Read-side; published corpus; node-budget bounded.
+      core_cmd(
+        "graph.tasks",
+        "graph",
+        "tasks",
+        "Tasks that cite a document (a paper's driven tasks) with their acceptance-criteria expectation state.",
+        "GET",
+        "/v1/graph/:id/tasks",
+        "read",
+        args: [arg("id", true, "string", "Document id the tasks cite (typically a paper slug).")],
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "graph.orphans",
+        "graph",
+        "orphans",
+        "List documents with zero inbound and zero outbound edges.",
+        "GET",
+        "/v1/graph/orphans",
+        "read",
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "graph.dangling",
+        "graph",
+        "dangling",
+        "List broken references (targets unresolvable under the published lens).",
+        "GET",
+        "/v1/graph/dangling",
+        "read",
+        flags: [flag("dataset", "string", "Dataset to scope to (default production).")],
+        default_output: "json"
+      ),
+      # ── Core user auth (login/sessions/MFA/email flows) ──────────────────
+      # Pre-tenant, global (no scoped_prefix). The 5 public verbs are tier
+      # "none" so an anon caller can discover login; the 5 session-gated verbs
+      # are tier "read" (hidden from anon, shown to any authenticated caller).
+      # writes:false for all — these are auth exchanges, not content mutations
+      # (the manifest `writes` flag drives bp's content --dry-run/confirm path).
+      # Paths mirror router.ex /v1/auth/* (public 716-724, gated 727-734).
+      core_cmd(
+        "auth.register",
+        "auth",
+        "register",
+        "Register a new user account (email + password).",
+        "POST",
+        "/v1/auth/register",
+        "none",
+        args: [
+          arg("email", true, "string", "Account email address."),
+          arg("password", true, "string", "Account password.")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.login",
+        "auth",
+        "login",
+        "Log in and mint a user session token.",
+        "POST",
+        "/v1/auth/login",
+        "none",
+        args: [
+          arg("email", true, "string", "Account email address."),
+          arg("password", true, "string", "Account password.")
+        ],
+        flags: [
+          flag("totp_code", "string", "Six-digit TOTP code (when MFA is enrolled)."),
+          flag("recovery_code", "string", "One-time MFA recovery code (TOTP fallback).")
+        ],
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.verify-email",
+        "auth",
+        "verify-email",
+        "Confirm an email address with a verification token.",
+        "POST",
+        "/v1/auth/verify-email",
+        "none",
+        args: [arg("token", true, "string", "Email verification token.")],
+        default_output: "json"
+      ),
+      core_cmd(

@@ -1,8 +1,10 @@
 defmodule Barkpark.PortableDoc.Render.Inline do
   @moduledoc """
-  Inline-node composition for the PortableDoc render engine — the in-process
-  twin of kernel.ts `composeInline`. Folds ProseMirror-style inline nodes and
-  mark lists into Pd-tree text nodes (`PdText` / `PdInlineCode` / `PdLink`).
+  Inline-node composition for the PortableDoc render engine — folds
+  ProseMirror-style inline nodes and mark lists into Pd-tree text nodes
+  (`PdText` / `PdInlineCode` / `PdLink`). Its cross-runtime twin is the
+  inline-composition step of the Go `internal/pdrender` renderer, held in parity
+  by the shared golden fixtures.
 
   Extracted verbatim from `Barkpark.PortableDoc.Render` (module location only —
   NO logic change). Self-contained: it produces Pd-tree nodes that the Walk
@@ -10,7 +12,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   is byte-identical to the pre-split engine.
   """
 
-  # ── inline walker (kernel.ts composeInline) ────────────────────────────────
+  # ── inline walker (inline node/marks → Pd-tree fold) ───────────────────────
 
   def compose_inline_children(nodes) when is_list(nodes) do
     Enum.map(nodes, &compose_inline(&1, false))

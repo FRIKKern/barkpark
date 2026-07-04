@@ -222,13 +222,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # The formula-function vocabulary for autocomplete (the datalist on the
   # formula bar + the in-cell dropdown), stamped once at mount and static
-  # thereafter. Canonically it flows from `Engine.function_names/0` so every
-  # engine function (incl. wave-5/6 + the stats batch) surfaces with zero
-  # coordination. SPEC-DRIFT FALLBACK: the stats-batch slice lands
-  # `Engine.function_names/0`; until it does, this mirrors the Engine's
-  # supported set so the datalist/dropdown work standalone. Integration
-  # (pick 0 before pick 3) makes the real function authoritative — the
-  # `function_exported?` guard transparently switches over with no merge fixup.
+  # thereafter. Canonically it flows from `Engine.function_names/0` (shipped —
+  # see `Barkpark.Plugins.Sheets.Engine`) so every engine function (incl.
+  # wave-5/6 + the stats batch) surfaces with zero coordination. The inline
+  # literal below is a DEFENSIVE fallback for hosts where the Engine module
+  # isn't loaded; the `function_exported?` guard transparently prefers the
+  # authoritative list.
   defp fn_names do
     if Code.ensure_loaded?(Engine) and function_exported?(Engine, :function_names, 0) do
       Engine.function_names()

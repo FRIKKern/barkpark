@@ -6,7 +6,7 @@
 // Envelope is tolerant — when Phoenix's barkpark_filterresponse=true the body is
 // { result: T, syncTags, ms, etag, schemaHash }; when disabled it is the flat doc T.
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
-// so callers (client.doc) can treat missing as null per ADR-009 / w6.2-impl-spec §Status → class.
+// so callers (client.doc) can treat missing as null (the 404 → null read convention).
 
 import { scopePrefix } from './scope'
 import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
@@ -42,7 +42,7 @@ function stripEtagQuotes(raw: string | null): string | undefined {
  * Fetch a single document by type + id.
  *
  * Returns `{ data: null }` on 404 (callers can treat missing as null) and
- * re-throws every other error per ADR-009. The response's `etag` (= `_rev`,
+ * re-throws every other error. The response's `etag` (= `_rev`,
  * unquoted) is returned when the server included one — callers can pass it
  * back as `ifMatch` on subsequent writes to detect concurrent edits.
  *

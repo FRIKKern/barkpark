@@ -177,8 +177,8 @@ defmodule Barkpark.Tasks.Schema do
         # ── BRIEF — what the claiming agent reads first ─────────────────
         %{"name" => "title", "title" => "Title", "type" => "string", "group" => "brief"},
 
-        # The what/why. The only free-text field bd-shim writes today
-        # (`bd create --description`) — finally declared. `text` not
+        # The what/why. The only free-text field a task create writes
+        # (`bp task create --description`) — finally declared. `text` not
         # richText: agents write markdown strings, a textarea round-trips
         # them verbatim.
         %{

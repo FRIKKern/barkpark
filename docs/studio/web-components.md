@@ -41,4 +41,4 @@ WC contract: `customElements.define`, read initial state from `value` attribute,
 - `api/lib/barkpark_web/components/field_inputs.ex` — `input/1` clause per field type
 - `api/priv/static/assets/bp-rich-text-editor.js` — canonical WC example
 - `api/lib/barkpark_web/layouts/root.html.heex` — script loading order
-- `api/lib/barkpark_web/layouts/root.html.heex` — `BarkparkFieldBridge` hook definition (line 3419)
+- `api/lib/barkpark_web/layouts/root.html.heex` — `Hooks.BarkparkFieldBridge` hook definition (grep the symbol; line numbers drift)

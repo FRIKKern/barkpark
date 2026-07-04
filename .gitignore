@@ -80,3 +80,7 @@ api/.claude/
 # Host-side deploy state (written by deploy/instance-deploy.sh on the server)
 .instance-deploy-last
 .slots/
+
+# doc-truth generated artifacts (byproducts of the standing --code / --emit-refs runs)
+tooling/doc-truth/citation-truth-report.json
+tooling/doc-truth/doc-refs.json

@@ -10,10 +10,10 @@
 //   - Delegate retry to retry.ts; injects one stable Idempotency-Key for
 //     writes that opted in via `retryPolicy: 'on-idempotency-key'`.
 //
-// See ADR-002 (fetch-only transport), ADR-008 (idempotency contract),
-// ADR-009 (error taxonomy), ADR-010 (observability hooks),
-// w6.3-phoenix-contract.md §Error envelope / §Status codes,
-// w6.2-impl-spec.md §Retry policy / §Status → class.
+// Contracts enforced here: fetch-only (no node: built-ins, Edge-safe); one stable
+// Idempotency-Key per opted-in write; the Phoenix error envelope decoded to the typed
+// errors in errors.ts (which owns the status → class mapping); and the
+// X-Barkpark-Request-Tag observability header.
 
 import {
   BarkparkAPIError,
@@ -304,7 +304,7 @@ export async function request<T>(
   if (config.token !== undefined && config.token.length > 0) {
     headers['Authorization'] = `Bearer ${config.token}`
   }
-  // Observability tag (ADR-010) — on by default with the documented 'bp' prefix;
+  // Observability tag — on by default with the documented 'bp' prefix;
   // set `requestTagPrefix: ''` to opt out.
   const tagPrefix = config.requestTagPrefix ?? 'bp'
   if (tagPrefix.length > 0) {

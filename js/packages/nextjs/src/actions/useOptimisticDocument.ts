@@ -101,7 +101,7 @@ export function useOptimisticDocument<T extends { _id: string; _type: string }>(
         // committed once the transition ends without a commit).
         if (inflightRef.current === 1) latestRef.current = committedRef.current
         // Match on the `code` literal so this holds even when pnpm hoist yields
-        // duplicate class copies across bundles (ADR-009 §code taxonomy).
+        // duplicate class copies across bundles (the code-literal taxonomy).
         const isConflict = isBarkparkError(e, 'BarkparkConflictError')
         if (isConflict) {
           const c = e as BarkparkConflictError

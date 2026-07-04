@@ -9,7 +9,7 @@ import { BarkparkEdgeRuntimeError, type BarkparkClient } from '@barkpark/core'
 const DEBOUNCE_MS = 500
 const DEV_FIRST_EVENT_WARN_MS = 5000
 
-/** ADR-005 — three independent edge-runtime detectors. Returns the matched signal name or null. */
+/** Three independent edge-runtime detectors. Returns the matched signal name or null. */
 export function detectEdgeRuntime(): string | null {
   if (typeof (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime !== 'undefined') {
     return 'globalThis.EdgeRuntime'
@@ -51,7 +51,7 @@ export interface BarkparkLiveProps {
  * triggers a debounced `router.refresh()` on each event. Renders nothing.
  *
  * Edge guard: throws synchronously in render AND inside the subscription on detection
- * (ADR-005 — three-layer detector). Pair with `createBarkparkServer().defineLive`
+ * (three-layer detector). Pair with `createBarkparkServer().defineLive`
  * so the client prop is pre-bound, or wrap in {@link BarkparkLiveProvider}.
  *
  * @param props — Optional overrides; the client must be provided here or via provider.
@@ -173,7 +173,7 @@ function getHotApi(): HotApi | undefined {
  * directly (e.g. from a non-React surface) are also protected.
  *
  * Teardown triggers: caller invokes returned fn, `beforeunload` fires, HMR dispose fires.
- * Core's client.listen() owns exponential-backoff reconnect (ADR-005), so this layer
+ * Core's client.listen() owns exponential-backoff reconnect, so this layer
  * only coordinates React/lifecycle teardown.
  */
 export function startLiveSubscription(opts: StartLiveOpts): () => void {

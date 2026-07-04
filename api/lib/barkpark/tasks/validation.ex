@@ -103,8 +103,8 @@ defmodule Barkpark.Tasks.Validation do
     # precedent (top-level shape, NO sub-key enforcement). Sub-key
     # contracts live in the schema field descriptions (agent-facing,
     # serialized in the capabilities manifest). Keeping these loose keeps
-    # every existing writer (bd-shim, engine CAS updates, legacy docs)
-    # green.
+    # every existing writer (the `bp task` CLI, engine CAS updates, legacy
+    # docs) green.
     |> check_optional_string(content, "description")
     |> check_optional_string(content, "design")
     |> check_optional_string(content, "design_doc")

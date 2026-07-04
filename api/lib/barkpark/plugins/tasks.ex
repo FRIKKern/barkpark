@@ -29,8 +29,8 @@ defmodule Barkpark.Plugins.Tasks do
       `tasks_compact` queue declarations stay in config — only the worker
       *scheduling* moves here.
 
-    * `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`
-      translator hits, declared with `auth: :token_root` so the dormant
+    * `register_routes/1` — the eleven `/v1/tasks` endpoints the `bp task` CLI
+      consumes, declared with `auth: :token_root` so the dormant
       host-level `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)`
       wrapper mounts them at `/v1/tasks/*` behind the `[:api, :require_token]`
       pipeline. Replaces the explicit `scope "/v1/tasks"` block that used to live
@@ -130,8 +130,9 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   @doc """
-  The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,
-  order-preserving — the `scope "/v1/tasks"` block this replaces in `router.ex`
+  The eleven `/v1/tasks` endpoints the `bp task` CLI consumes, mirroring —
+  byte-identical, order-preserving — the `scope "/v1/tasks"` block this replaces
+  in `router.ex`
   (C4-3b). Every spec carries `auth: :token_root`, so the dormant host-level
   `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)` wrapper
   mounts them at `/v1/tasks/*` behind the `[:api, :require_token]` pipeline

@@ -42,6 +42,12 @@ const risk = riskRpt.files;
 const deps = rd("tooling/deps/deps-report.json", { totals: {}, skipped: ["all"] });
 // FILEBASE critic (Bloat + Aesthetics) — the tree-mess axis Cody was blind to.
 const aes = rd("tooling/aesthetics/aesthetics-report.json", { bloat: { score: 100, findings: [] }, aesthetics: { score: 100, findings: [] }, summary: {} });
+// CITATION-TRUTH critic — do the code's own citations (moduledoc/comment prose:
+// paths, line-refs, ADRs) still resolve? Fed by the SINGLE findings artifact the
+// doc-truth verifier emits on `--code` (charter Decision 10). Only high-confidence,
+// re-verified findings feed the grade (Decision 11). Local-only artifact: absent →
+// treated as clean (100), same convention as the research-coverage dim.
+const cite = rd("tooling/doc-truth/citation-truth-report.json", { high: 0, low: 0, byType: {} });
 const covT = riskRpt.coverageTotals || {};
 // The batches/record agent cycle writes results/_layering.json + _dup.json; a
 // plain `consistency.mjs scan` does NOT. When those issue files are absent the
@@ -223,6 +229,11 @@ const dims = [
   { name: "Dead code", root: "reach", score: clamp(100 - (crep.deadGoPackages?.length || 0) * 8), note: `${crep.deadGoPackages?.length || 0} dead Go packages`, weight: 0.07 },
   { name: "Contract", root: "wire seams", score: contractScore, note: `${contractGuarded}/${contractTotal} cross-language wire seams guarded (${contractStrong} executable, ${contractWeak} doc-only) · drift breaks the Go CLI / JS SDK${unguardedNote}`, weight: 0.05 },
   { name: "Dependencies", root: "supply chain", score: depScore, note: `${dv.critical || 0} crit · ${dv.high || 0} high · ${dv.moderate || 0} moderate vulns${deps.skipped?.length ? ` · unaudited: ${deps.skipped.join("/")}` : ""}`, weight: 0.05 },
+  // CITATION-TRUTH — do the code's own citations resolve? Fed ONLY by the doc-truth
+  // verifier's high-confidence, re-verified findings (`--code` artifact). Modest
+  // weight (Decision 11): a lead generator with a known pre-gate FP rate shouldn't
+  // swamp the grade, but drift must register — <100 while any confirmed defect stands.
+  { name: "Citation-truth", root: "doc-truth", score: clamp(100 - (cite.high || 0) * 2), note: `${cite.high || 0} high-confidence citation defects (moduledoc/comment paths·linerefs·ADRs via verify-docs --code${Object.keys(cite.byType||{}).length ? `: ${Object.entries(cite.byType).map(([t,n])=>`${n} ${t}`).join(" · ")}` : ""}) · ${cite.low || 0} low-confidence leads queued · 100 = every citation resolves`, weight: 0.05 },
   // FILEBASE critic — the tree-mess axis (tooling/aesthetics). Two dims at 0.05 each:
   // meaningful (8% combined of wsum 1.20 — moves the grade when the tree is messy) but
   // it does NOT swamp the 11 code dims (~0.92 of the weight stays on code quality).

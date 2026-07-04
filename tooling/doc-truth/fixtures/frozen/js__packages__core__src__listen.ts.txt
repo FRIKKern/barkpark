@@ -1,0 +1,54 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Barkpark contributors
+//
+// SSE live-stream transport. ADR-005 + w6.3-phoenix-contract.md §listen.
+// - Returns a ListenHandle<T>: AsyncIterable + .unsubscribe().
+// - Edge runtimes throw BarkparkEdgeRuntimeError SYNCHRONOUSLY (not lazily).
+// - Uses fetch() + ReadableStream reader for custom headers (Bearer, Last-Event-ID);
+//   EventSource is unavailable because it does not support Authorization.
+// - Reconnects with exponential backoff + Last-Event-ID on network drops.
+// - Yields ListenEvent<T> as defined in types.ts:117-126.
+
+import type {
+  BarkparkClientConfig,
+  BarkparkDocument,
+  ListenEvent,
+  ListenHandle,
+  Perspective,
+} from './types'
+import {
+  BarkparkAPIError,
+  BarkparkAuthError,
+  BarkparkEdgeRuntimeError,
+  BarkparkNetworkError,
+  BarkparkValidationError,
+} from './errors'
+import { detectEdgeRuntime } from './util/edge-detect'
+import { scopePrefix } from './scope'
+
+// The server emits `: keepalive\n\n` every 30s (listen_controller.ex). If we see
+// NEITHER data NOR a keepalive for this long, the TCP socket is half-open (no
+// bytes, no FIN) and reader.read() would hang forever — never erroring, never
+// reconnecting. 2.5× the keepalive interval tolerates one delayed/dropped
+// keepalive before we give up on the socket and reconnect. See [idle-timeout-stall].
+const DEFAULT_IDLE_TIMEOUT_MS = 75_000
+
+// Cap the unframed decode buffer. A broken/malicious stream that emits bytes with
+// no frame boundary (\n\n) would grow `buffer` without bound → OOM. 1 MiB is orders
+// of magnitude above any legitimate SSE frame. See [buffer-unbounded].
+const MAX_SSE_BUFFER_BYTES = 1_048_576
+
+// Consecutive clean 200→EOF closes with zero data frames between them = a
+// misconfigured proxy / instantly-terminating LB looping silently. EventSource
+// would retry forever; after this many we escalate to a thrown error so the caller
+// isn't stuck in an invisible loop. Resets on any data frame. See [clean-close-infinite-silent].
+const MAX_CONSECUTIVE_CLEAN_CLOSES = 5
+
+// Reconnect-delay jitter factor: 0.5–1.0×. Full jitter de-synchronizes a fleet's
+// reconnect storm after a server restart (thundering herd) while keeping the delay
+// bounded by its input (the 8s ceiling / 1s floor still hold). See [backoff-jitter].
+function withJitter(ms: number): number {
+  return (ms * (1 + Math.random())) / 2
+}
+
+export interface ListenOptions {
