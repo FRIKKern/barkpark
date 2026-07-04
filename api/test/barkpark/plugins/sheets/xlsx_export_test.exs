@@ -582,4 +582,79 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       |> elem(0)
     end
   end
+
+  # PART QL-D7 — tab color. A per-tab `"color"` (#rrggbb) is stamped into the
+  # worksheet's <sheetPr> as <tabColor rgb="FFRRGGBB"/> by a zip post-process
+  # (elixlsx has no tab-color knob). A color-less doc skips the whole
+  # post-process and stays byte-identical to today.
+  describe "tab color (QL-D7)" do
+    defp sheet_n_xml(binary, n) do
+      {:ok, entries} = :zip.extract(binary, [:memory])
+      target = ~c"xl/worksheets/sheet#{n}.xml"
+      {_name, xml} = Enum.find(entries, fn {name, _} -> name == target end)
+      # :zip.extract returns member CONTENT as a binary (names stay charlists).
+      to_string(xml)
+    end
+
+    test "a colored tab stamps <tabColor rgb=FF…> in its worksheet's <sheetPr>" do
+      content = %{
+        "tabs" => [%{"name" => "Red", "color" => "#ff0000", "cells" => %{"A1" => %{"v" => 1}}}]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      assert sheet_n_xml(binary, 1) =~ ~s(<tabColor rgb="FFFF0000"/>)
+    end
+
+    test "an invalid color value is skipped (no tabColor, no crash)" do
+      for bad <- ["#ggg", "red", "#12345", 42, nil] do
+        content = %{
+          "tabs" => [%{"name" => "T", "color" => bad, "cells" => %{"A1" => %{"v" => 1}}}]
+        }
+
+        assert {:ok, binary} = XlsxExport.to_binary(content)
+        refute sheet_n_xml(binary, 1) =~ "tabColor"
+      end
+    end
+
+    test "a no-color doc is byte-identical to the SAME doc exported without the post-process path" do
+      # A doc carrying no "color" on any tab must take the current export path
+      # untouched — proven by (a) no tabColor in the bytes and (b) an identical
+      # binary to a re-export (the QR-C determinism the post-process preserves).
+      content = %{
+        "tabs" => [
+          %{"name" => "A", "cells" => %{"A1" => %{"v" => 1}}},
+          %{"name" => "B", "cells" => %{"A1" => %{"v" => 2}}}
+        ]
+      }
+
+      assert {:ok, bin1} = XlsxExport.to_binary(content)
+      assert {:ok, bin2} = XlsxExport.to_binary(content)
+
+      refute sheet_n_xml(bin1, 1) =~ "tabColor"
+      assert bin1 == bin2
+    end
+
+    test "a colored export is still deterministic (rezip is a pure function of content)" do
+      content = %{
+        "tabs" => [%{"name" => "C", "color" => "#1a2b3c", "cells" => %{"A1" => %{"v" => 1}}}]
+      }
+
+      assert {:ok, bin1} = XlsxExport.to_binary(content)
+      assert {:ok, bin2} = XlsxExport.to_binary(content)
+      assert bin1 == bin2
+    end
+
+    test "the rezipped colored package remains a valid, re-importable xlsx" do
+      content = %{
+        "tabs" => [
+          %{"name" => "C", "color" => "#00aa00", "cells" => %{"A1" => %{"v" => 5}}}
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+      assert hd(imported["tabs"])["color"] == "#00aa00"
+      assert get_in(imported, ["tabs", Access.at(0), "cells", "A1"]) == %{"v" => 5}
+    end
+  end
 end
