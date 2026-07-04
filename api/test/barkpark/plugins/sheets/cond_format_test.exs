@@ -13,6 +13,10 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
 
   alias Barkpark.Plugins.Sheets.CondFormat
 
+  # Executes the `## Examples` in `sanitize_bg/1` / `valid_bg?/1` — the doc'd
+  # single-owner contract stays true by test, not by hand-verification.
+  doctest Barkpark.Plugins.Sheets.CondFormat
+
   @fixture_path Path.expand(
                   "../../../support/fixtures/sheet-cond-format-eval.json",
                   __DIR__

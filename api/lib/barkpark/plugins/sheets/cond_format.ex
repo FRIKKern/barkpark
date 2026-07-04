@@ -162,6 +162,7 @@ defmodule Barkpark.Plugins.Sheets.CondFormat do
       iex> Barkpark.Plugins.Sheets.CondFormat.sanitize_bg("red")
       nil
   """
+  # @canonical capability:sheets-bg-sanitizer aka:rrggbb,hex-color,bg-sanitizer,put_style_bg,valid_bg
   @spec sanitize_bg(term()) :: String.t() | nil
   def sanitize_bg(bg) when is_binary(bg) do
     down = String.downcase(bg)

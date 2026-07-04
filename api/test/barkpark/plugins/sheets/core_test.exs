@@ -318,7 +318,7 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
 
       snapshot = Core.snapshot_for(%{"tabs" => [%{"cells" => cells}]})
       assert snapshot["styles"]["0,0"] == %{"bg" => "#ff00aa"}
-      # A2's bg leaked out; no other style keys → no entry at all.
+      # A2's newline bg was dropped; no other style keys → no entry at all.
       refute Map.has_key?(snapshot["styles"], "1,0")
     end
   end
