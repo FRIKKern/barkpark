@@ -774,7 +774,7 @@ defmodule Barkpark.Content.Papers do
   their own snapshot, so the transform is in-place).
   """
   @spec resolve_tasks_in_blocks(list(), keyword()) :: list()
-  def resolve_tasks_in_blocks(blocks, scope \\ []) when is_list(blocks) do
+  def resolve_tasks_in_blocks(blocks, scope) when is_list(blocks) do
     Barkpark.PortableDoc.TaskResolver.resolve(blocks, fn query ->
       Barkpark.Tasks.Query.rows_for_query(query, scope)
     end)

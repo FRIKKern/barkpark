@@ -92,6 +92,18 @@ defmodule BarkparkWeb.BulldocsLive do
           dataset
         )
       )
+
+      # Live plans: a paper embedding a task query ALSO listens on its tenant's
+      # document stream, so an embedded board/list/roadmap re-resolves and
+      # re-renders the moment a task moves (the "always feel progress" criterion
+      # on a real plan). Gated on `has_live_task_blocks?` so a plain paper adds
+      # no subscription. Task docs (`type:"task"`) broadcast `:document_changed`
+      # on this workspace-scoped topic (content/broadcast.ex).
+      task_ws = (paper && paper.workspace_id) || reader_scope[:workspace_id]
+
+      if task_ws && has_live_task_blocks?(paper) do
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{task_ws}:#{dataset}")
+      end
     end
 
     rail_events = load_rail_events(paper)
@@ -582,14 +594,16 @@ defmodule BarkparkWeb.BulldocsLive do
   # (and the empty state) keep the raw-HTML container.
   defp assign_block_mode(socket, %{content: %{"blocks" => blocks}} = paper)
        when is_list(blocks) do
+    resolved = with_live_tasks(blocks, paper)
+
     socket
     |> assign(:block_mode, true)
     |> stream(
       :blocks,
       to_stream_items(
-        blocks,
+        resolved,
         paper_article?(paper),
-        reader_resolvers(blocks, socket.assigns[:dataset], paper)
+        reader_resolvers(resolved, socket.assigns[:dataset], paper)
       )
     )
   end
@@ -635,6 +649,53 @@ defmodule BarkparkWeb.BulldocsLive do
       }
     end
   end
+
+  # Live plans (resolve-at-read): a task block carrying a `query` resolves
+  # against the task substrate FRESH on every mount/refetch, so an embedded
+  # board/list/roadmap reflects the real `bp` tasks — not a snapshot frozen at
+  # save. Tenant-scoped (the paper's own workspace/project, fail-closed); a
+  # blank scope resolves nothing. An author-pinned `snapshot` (no `query`) is
+  # left untouched, so offline/plugin-off papers still render.
+  #
+  # Visibility note: this surfaces the paper's-tenant task data (titles /
+  # statuses) to whoever can read the paper — the author opts in by embedding a
+  # query. Cross-tenant leakage is impossible (workspace fail-closed).
+  defp with_live_tasks(blocks, paper) when is_list(blocks) do
+    Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, reader_task_scope(paper))
+  end
+
+  defp with_live_tasks(blocks, _paper), do: blocks
+
+  defp reader_task_scope(paper) do
+    ws_id =
+      (paper && paper.workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    [workspace_id: ws_id, project_id: paper && paper.project_id]
+  end
+
+  @task_block_types ~w(tasks task-list task-board roadmap task-detail)
+
+  # True only when the paper has at least one task block with a live `query`
+  # (recursing into container children) — the gate for the task-mutation
+  # subscription, so a plain paper subscribes to nothing extra.
+  defp has_live_task_blocks?(%{content: %{"blocks" => blocks}}) when is_list(blocks),
+    do: any_live_task?(blocks)
+
+  defp has_live_task_blocks?(_), do: false
+
+  defp any_live_task?(blocks) when is_list(blocks) do
+    Enum.any?(blocks, fn
+      %{"type" => t, "query" => q} when is_map(q) -> t in @task_block_types
+      %{"children" => ch} when is_list(ch) -> any_live_task?(ch)
+      _ -> false
+    end)
+  end
+
+  defp any_live_task?(_), do: false
 
   # Each stream item needs a stable `:id` (the block id) and its rendered
   # fragment. Only top-level blocks are streamed individually; a `section`
@@ -698,6 +759,17 @@ defmodule BarkparkWeb.BulldocsLive do
      |> assign(:rev, msg[:rev] || socket.assigns.rev)}
   end
 
+  # Live-plan push: a task moved in this paper's tenant → re-resolve the
+  # embedded task blocks (resolve-at-read) and re-stream. Only reacts to
+  # `type:"task"` docs and only while in block mode; the paper's own edits ride
+  # the paper topic above. A non-task doc_changed (same tenant stream) is a
+  # no-op — the plan only redraws when work actually moves.
+  def handle_info({:document_changed, %{type: "task"}}, socket) do
+    if socket.assigns[:block_mode], do: {:noreply, refetch(socket)}, else: {:noreply, socket}
+  end
+
+  def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # A gap is any received rev that is not exactly the next one we expect. The
@@ -755,13 +827,15 @@ defmodule BarkparkWeb.BulldocsLive do
 
         case paper_blocks(paper) do
           blocks when is_list(blocks) ->
+            resolved = with_live_tasks(blocks, paper)
+
             socket
             |> stream(
               :blocks,
               to_stream_items(
-                blocks,
+                resolved,
                 article?,
-                reader_resolvers(blocks, socket.assigns[:dataset], paper)
+                reader_resolvers(resolved, socket.assigns[:dataset], paper)
               ),
               reset: true
             )

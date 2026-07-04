@@ -320,7 +320,7 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
 .bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
 .bp-paper-surface .bp-g--progress { color: var(--st-info); }
-/* in_progress: the TUI Braille spinner, pure CSS (no JS) */
+/* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
 .bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
 @keyframes bp-braille {
   0%  { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; }
