@@ -146,6 +146,41 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       refute resp.status == 404,
              "GET /v1/data/analytics/production must not 404 — check the dataset.stats path_template"
     end
+
+    # drafts.loop-low-dataset-noun-orphan: dataset.stats' noun ("dataset") was
+    # used by the verb but NOT declared in core_nouns — an orphan (no summary in
+    # the manifest, a dangling OpenAPI tag). The noun a core verb uses must be a
+    # declared noun.
+    test "the `dataset` noun the verb uses is a declared manifest noun", %{conn: conn} do
+      manifest = capabilities(conn)
+
+      cmd = find_cmd(manifest, "dataset.stats")
+      assert cmd["noun"] == "dataset"
+
+      noun_names = Enum.map(manifest["nouns"], & &1["name"])
+
+      assert "dataset" in noun_names,
+             "manifest advertises verb dataset.stats (noun 'dataset') but declares no 'dataset' noun; " <>
+               "declared nouns: #{inspect(noun_names)}"
+    end
+  end
+
+  describe "workspace.create tier contract" do
+    # drafts.loop-low-workspace-create-tier: POST /api/workspaces sits behind
+    # `[:api, :require_token]` (RequireToken only — no :require_write), so any
+    # authenticated token, including a read-only one, may create a workspace. The
+    # manifest tier must mirror that floor (`read`) or existence-hiding wrongly
+    # strips the verb from a read-tier caller who can actually invoke it.
+    test "workspace.create is auth_tier 'read' (RequireToken-only route)", %{conn: conn} do
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "workspace.create")
+
+      assert cmd != nil, "workspace.create command not found in manifest"
+
+      assert cmd["auth_tier"] == "read",
+             "workspace.create auth_tier should be 'read' (route is RequireToken-only); " <>
+               "got: #{inspect(cmd["auth_tier"])}"
+    end
   end
 
   describe "doc.discard-draft mutation command" do

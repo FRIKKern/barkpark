@@ -435,6 +435,16 @@ defmodule Barkpark.Plugins.Capabilities do
         "summary" => "Tenancy — workspaces and projects.",
         "plugin" => nil
       },
+      # The `dataset.stats` verb (GET /v1/data/analytics/:dataset) is a core
+      # command whose noun is `dataset`; declaring the noun here keeps the
+      # manifest honest (every command's noun resolves to a declared noun — the
+      # invariant `cli_commands_manifest_test` enforces for plugin verbs) and
+      # gives the OpenAPI tag a description instead of a dangling reference.
+      %{
+        "name" => "dataset",
+        "summary" => "Dataset-level content stats and overview.",
+        "plugin" => nil
+      },
       %{"name" => "webhook", "summary" => "Outbound webhook subscriptions.", "plugin" => nil},
       %{
         "name" => "token",
@@ -1156,7 +1166,13 @@ defmodule Barkpark.Plugins.Capabilities do
         "Create a new workspace owned by the caller (+ Default project + production dataset).",
         "POST",
         "/api/workspaces",
-        "write",
+        # Route fact: POST /api/workspaces sits behind `[:api, :require_token]`
+        # (RequireToken only — NO :require_write). Any authenticated token,
+        # including a read-only one, may self-serve a workspace (it becomes the
+        # owner-member). The manifest tier must mirror that floor: `read`, not
+        # `write` — else existence-hiding wrongly strips the verb from a
+        # read-tier caller who can actually invoke it.
+        "read",
         args: [arg("name", true, "string", "Workspace name (slug derived when omitted).")],
         flags: [flag("slug", "string", "Explicit slug (derived from name when absent).")],
         writes: true,

@@ -3870,7 +3870,7 @@
         "tags": [
           "workspace"
         ],
-        "x-barkpark-scope": "write"
+        "x-barkpark-scope": "read"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}": {
@@ -8217,6 +8217,10 @@
     {
       "description": "Tenancy — workspaces and projects.",
       "name": "workspace"
+    },
+    {
+      "description": "Dataset-level content stats and overview.",
+      "name": "dataset"
     },
     {
       "description": "Outbound webhook subscriptions.",
