@@ -35,6 +35,11 @@
 //       pointing at http(s):// or //) in index.html, styleguide.html or
 //       app.css — the console must render fully offline (decision 27).
 //       Plain <a href> navigation links are deliberately allowed.
+//   E8  scoped-theme alias leak: a token declared only in :root whose value
+//       references a token the dark block re-themes. var() substitutes where
+//       the property is DECLARED, so such an alias freezes the LIGHT value in
+//       any subtree that scopes [data-theme="dark"] onto a non-root element
+//       (the styleguide panes). Re-declare the alias in the dark block.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -357,7 +362,8 @@ function parseTokenBlock(re) {
   return map;
 }
 const lightTokens = parseTokenBlock(/:root\s*\{([\s\S]*?)\}/);
-const darkTokens = { ...lightTokens, ...parseTokenBlock(/\[data-theme="dark"\]\s*\{([\s\S]*?)\}/) };
+const darkOverrides = parseTokenBlock(/\[data-theme="dark"\]\s*\{([\s\S]*?)\}/);
+const darkTokens = { ...lightTokens, ...darkOverrides };
 
 /** Substitute var(--x) references until the value is literal. */
 function resolveValue(name, map, seen = new Set()) {
@@ -513,6 +519,26 @@ for (const b of badTokens) {
 
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
+
+// E8 — scoped-theme alias integrity. var() inside a custom property substitutes
+// where the property is DECLARED, so a :root-only alias whose value references
+// a token the dark block re-themes freezes the LIGHT value for any subtree that
+// scopes [data-theme="dark"] onto a non-root element — which the styleguide's
+// side-by-side panes do. Any such alias must be re-declared in the dark block.
+// (Caught live: --destructive rendered the light danger inside the dark panes.)
+for (const [name, value] of Object.entries(lightTokens)) {
+  if (name in darkOverrides) continue;
+  const themedRefs = [...value.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/g)]
+    .map((m) => m[1])
+    .filter((t) => t in darkOverrides);
+  if (themedRefs.length) {
+    errors.push(
+      `E8 app.css  ${name} is declared only in :root but references dark-re-themed ` +
+        `${themedRefs.join(", ")} — re-declare ${name} in the [data-theme="dark"] block ` +
+        `or scoped-dark subtrees (styleguide panes) freeze the light value`,
+    );
+  }
+}
 
 // E6/R4 scan: raw color literals + raw px font-sizes outside the token blocks.
 // Track whether each line sits inside the :root / [data-theme="dark"] token
