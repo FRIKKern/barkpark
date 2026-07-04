@@ -90,7 +90,7 @@ defmodule Barkpark.SheetsParityTest do
           # the scientific-notation fix across A↔B↔C↔D↔F).
           "C7" => %{"v" => 1_000_000.0, "t" => "n"},
           # fmt-class rendering: an imported 0.25 shows "25.00%" and 1234.5
-          # shows "$1,234.50" on EVERY surface (Core.cell_value + Cells.display
+          # shows "$1,234.50" on EVERY surface (Core.display_value + Cells.display
           # both go through Fmt.display). The raw values stay in data-v.
           "A8" => %{"v" => 0.25, "t" => "n", "fmt" => "percent"},
           "B8" => %{"v" => 1234.5, "t" => "n", "fmt" => "currency"}

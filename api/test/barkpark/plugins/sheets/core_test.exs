@@ -8,6 +8,11 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
   alias Barkpark.Plugins.Sheets.Core
   alias Barkpark.Plugins.Sheets.Engine
 
+  # Build a conditional-formatting rule map for the projection tests.
+  defp cf_rule(range, op, value, style) do
+    %{"range" => range, "when" => %{"op" => op, "value" => value}, "style" => style}
+  end
+
   # ── parse_ref/1 ─────────────────────────────────────────────────────────────
 
   describe "parse_ref/1" do
@@ -159,6 +164,139 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
 
       refute Map.has_key?(snapshot, "truncated")
       refute Map.has_key?(snapshot, "total_rows")
+    end
+  end
+
+  # ── snapshot_for/2 conditional-formatting projection (CF-A) ─────────────────
+
+  describe "snapshot_for/2 conditional formatting" do
+    test "a CF-only cell (no manual style) earns a styles entry" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{"A1" => %{"v" => 150}},
+            "cond_formats" => [cf_rule("A1", "gt", 100, %{"bg" => "#ff0000"})]
+          }
+        ]
+      }
+
+      snapshot = Core.snapshot_for(content)
+      assert snapshot["styles"] == %{"0,0" => %{"bg" => "#ff0000"}}
+    end
+
+    test "a rule that does not fire on its cell contributes no styling" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{"A1" => %{"v" => 50}},
+            "cond_formats" => [cf_rule("A1", "gt", 100, %{"bg" => "#ff0000"})]
+          }
+        ]
+      }
+
+      snapshot = Core.snapshot_for(content)
+      refute Map.has_key?(snapshot, "styles")
+    end
+
+    test "CF composes per-key with a manual style (CF bg wins, manual al/b survive)" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{
+              "A1" => %{"v" => 150, "s" => %{"al" => "center", "b" => true, "bg" => "#000000"}}
+            },
+            "cond_formats" => [cf_rule("A1", "gt", 100, %{"bg" => "#ff0000"})]
+          }
+        ]
+      }
+
+      snapshot = Core.snapshot_for(content)
+      assert snapshot["styles"]["0,0"] == %{"al" => "center", "b" => true, "bg" => "#ff0000"}
+    end
+
+    test "a frozen head row gets NO conditional formatting" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{"A1" => %{"v" => 150}, "A2" => %{"v" => 150}},
+            "frozen_rows" => 1,
+            "cond_formats" => [cf_rule("A1:A2", "gt", 100, %{"bg" => "#ff0000"})]
+          }
+        ]
+      }
+
+      snapshot = Core.snapshot_for(content)
+      # only the body cell A2 (body row 0) carries CF; the head cell A1 is dropped
+      assert snapshot["styles"] == %{"0,0" => %{"bg" => "#ff0000"}}
+    end
+
+    test "a rule whose range never meets an occupied cell contributes nothing" do
+      content = %{
+        "tabs" => [
+          %{
+            "cells" => %{"A1" => %{"v" => 150}},
+            "cond_formats" => [cf_rule("Z90:Z100", "gt", 0, %{"bg" => "#ff0000"})]
+          }
+        ]
+      }
+
+      snapshot = Core.snapshot_for(content)
+      refute Map.has_key?(snapshot, "styles")
+    end
+
+    test "malformed cond_formats leaves the snapshot byte-identical to no rules" do
+      cells = %{"A1" => %{"v" => "hello"}, "B2" => %{"v" => 3}}
+      base = Core.snapshot_for(%{"tabs" => [%{"cells" => cells}]})
+
+      garbage = Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => "garbage"}]})
+      assert garbage == base
+
+      bad_rules =
+        Core.snapshot_for(%{
+          "tabs" => [
+            %{
+              "cells" => cells,
+              "cond_formats" => [
+                %{
+                  "range" => "notaref",
+                  "when" => %{"op" => "gt", "value" => 1},
+                  "style" => %{"bg" => "#ff0000"}
+                },
+                %{"range" => "A1", "when" => %{"op" => "bogus"}, "style" => %{"bg" => "#ff0000"}},
+                "junk"
+              ]
+            }
+          ]
+        })
+
+      assert bad_rules == base
+    end
+
+    test "contains evaluates over the fmt DISPLAY string the snapshot itself renders (CF-D5)" do
+      # The projection must hand the FULL raw cell (fmt included) to the
+      # kernel: a percent 0.25 renders "25.00%", and the rule matches THAT
+      # string — never the raw "0.25".
+      cells = %{"A1" => %{"v" => 0.25, "fmt" => "percent"}}
+
+      display_rule = [cf_rule("A1", "contains", "25.00%", %{"bg" => "#ffee00"})]
+
+      snapshot =
+        Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => display_rule}]})
+
+      assert snapshot["rows"] == [["25.00%"]]
+      assert snapshot["styles"] == %{"0,0" => %{"bg" => "#ffee00"}}
+
+      raw_rule = [cf_rule("A1", "contains", "0.25", %{"bg" => "#ffee00"})]
+      raw = Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => raw_rule}]})
+      refute Map.has_key?(raw, "styles")
+    end
+
+    test "an empty cond_formats list leaves the snapshot untouched" do
+      cells = %{"A1" => %{"v" => "x", "s" => %{"b" => true}}}
+      base = Core.snapshot_for(%{"tabs" => [%{"cells" => cells}]})
+      with_empty = Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => []}]})
+      assert with_empty == base
+      assert with_empty["styles"] == %{"0,0" => %{"b" => true}}
     end
   end
 
