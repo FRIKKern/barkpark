@@ -504,7 +504,8 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert length(deps) == 2
       assert Enum.all?(deps, &(&1.status == "failed"))
       # Neither failed row is claimable — a real deploy at this sha is unblocked.
-      assert Registry.find_active_deployment(site.id, "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b") == nil
+      assert Registry.find_active_deployment(site.id, "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b") ==
+               nil
     end
 
     test "dwb-webhook REDELIVER (same delivery id) still dedups against the born-failed row → one row" do
