@@ -50,6 +50,7 @@ const ALLOW_PREFIXES = [
   "fleet-row token-row", // token row: + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
   "dep-pill dep-",     // deployment status pill: + esc(st) (live | failed | building | pushing | queued)
+  "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
   "auth-tab",          // /new auth tabs: + (mode ? " is-active" : "")
