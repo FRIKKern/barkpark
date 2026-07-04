@@ -157,7 +157,10 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
       html = Render.render_html(node, @article_opts)
 
       assert html =~ "<thead>"
-      assert html =~ "text-transform:uppercase"
+      # Stage 2 wave 2: the header band is class-driven (`.bp-sheet__th` owns the
+      # uppercase/muted/rule chrome); no inline theme.
+      assert html =~ ~s(<th class="bp-sheet__th")
+      refute html =~ "text-transform:uppercase"
       assert html =~ "Column"
       assert html =~ "value"
     end
@@ -170,7 +173,10 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
 
       html = Render.render_html(node, @article_opts)
 
-      assert html =~ "font-family:ui-monospace"
+      # Stage 2 wave 2: the mono font is class-driven (`.bp-sheet__td` resolves
+      # `var(--paper-font-mono)`); no inline font-family on the cell.
+      assert html =~ ~s(<td class="bp-sheet__td")
+      refute html =~ "font-family:ui-monospace"
       assert html =~ "data"
     end
   end
@@ -319,8 +325,11 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
       node = %{"kind" => "PdSheet", "rows" => [["42", "TRUE", "x"]]}
       html = Render.render_html(node, @article_opts)
 
-      assert html =~ ~s(class="sheet-al-right")
-      assert html =~ ~s(class="sheet-al-center")
+      # Stage 2 wave 2: the derived-align class now rides alongside the chrome
+      # class in one attribute (`class="bp-sheet__td sheet-al-right"`), so match
+      # the align token as a substring rather than the whole attribute.
+      assert html =~ "sheet-al-right"
+      assert html =~ "sheet-al-center"
     end
 
     test "the head <th> band never gets a default alignment class" do

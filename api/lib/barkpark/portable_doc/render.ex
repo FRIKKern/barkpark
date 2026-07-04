@@ -40,12 +40,15 @@ defmodule Barkpark.PortableDoc.Render do
   # detectable as stale (its `content["body_html_sv"]` lags this) and can be
   # rehydrated by `mix barkpark.rehydrate_body_html`.
   #
-  # v2: article prose emits bare semantic elements styled by Render.Stylesheet —
+  # v2: article prose emits bare semantic elements styled by Render.Stylesheet.
+  # v3: article ROLES/TONES/CHROME (text roles, callout tones, table/sheet band +
+  # cell rules, wikilink/tag/task-chip/embed/blockref/button/hr frames) emit
+  # `bp-*` classes instead of inline THEME styles — the final Stage-2 emit change.
   # deploy step: run mix barkpark.rehydrate_body_html on guerrilla + prod after
-  # the Stage-2 emit waves merge; prerequisite for deleting the root.html.heex
-  # de-inline overrides. Old cached v1 HTML stays self-styled (inline) and keeps
+  # this wave merges; prerequisite for deleting the root.html.heex de-inline
+  # overrides (wave 3). Old cached v1/v2 HTML stays self-styled (inline) and keeps
   # rendering; block_ops stamps body_html_sv on every fresh render.
-  @body_html_render_version 2
+  @body_html_render_version 3
 
   @doc """
   The current body_html render-version. Stamped onto `content["body_html_sv"]`

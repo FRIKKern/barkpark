@@ -2555,9 +2555,10 @@
 
     /* byline — 0.9rem muted serif with hairline bottom rule. The hairline
        (`border-bottom:1px solid var(--paper-rule)`) already comes from the base
-       `.bp-paper-edit-form input/textarea` rule above, which byte-matches the
-       View walk.ex byline role's `border-bottom:1px solid pal.rule`; only the
-       spacing (`margin:0 0 1.4rem`, `padding-bottom:0.6rem`) needs mirroring. */
+       `.bp-paper-edit-form input/textarea` rule above, which mirrors the
+       `.bp-role-byline` rule in paper-surface.css (the View now emits that
+       CLASS, not inline styles); only the spacing (`margin:0 0 1.4rem`,
+       `padding-bottom:0.6rem`) needs mirroring. */
     .bp-paper-edit-block[data-block-type="byline"] input.bp-paper-edit-text,
     .bp-paper-edit-block[data-block-type="byline"] textarea {
       font-size: 0.9rem;
@@ -2583,8 +2584,9 @@
     }
 
     /* pullquote — italic, larger, muted, with terracotta left rule. Margin +
-       padding are a byte-copy of the View walk.ex pullquote role
-       (`margin:1.6rem 0`, `padding:0.2rem 0 0.2rem 1.2rem`). */
+       padding mirror the `.bp-role-pullquote` rule in paper-surface.css
+       (`margin:1.6rem 0`, `padding:0.2rem 0 0.2rem 1.2rem`) — the View now
+       emits that CLASS, not inline styles. */
     .bp-paper-edit-block[data-block-type="pullquote"] textarea.bp-paper-edit-textarea {
       font-style: italic;
       font-size: 1.2rem;
@@ -2600,9 +2602,10 @@
        <select> can change at runtime; CSS can't read its value, so the
        Edit-side card uses the default (info) accent stripe. The actual
        tone-specific colour only shows after save in the View pane.
-       Padding is a byte-copy of the View's `padding:16px`, emitted on
-       both the plain callout div (walk.ex:972) and the collapsible
-       <details> (walk.ex:982). */
+       Padding (`padding:16px`) mirrors the `.bp-callout` rule in
+       paper-surface.css — the View now emits `bp-callout` + a
+       `bp-callout--<tone>` modifier (plain div AND collapsible <details>)
+       rather than inline tone styles. */
     .bp-paper-edit-block[data-block-type="callout"] .bp-paper-edit-form {
       border-left: 4px solid var(--paper-accent);
       background: var(--paper-accent-soft);

@@ -29,12 +29,18 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     * **DATA (stays inline — it is content, must survive a stylesheet-less sink
       like email or a standalone export):** author PdText marks (user-set color,
       weight, italic, underline/strike decoration), PdBox geometry, PdSheet
-      `col_widths` + per-cell `b`/`i`/`bg`/`al`, PdImage width/height, PdHr
-      thickness, PdContainer `maxWidth`.
+      `col_widths` + per-cell `b`/`i`/`bg`/`al` + engine-error red/bold mark,
+      PdImage width/height, PdHr thickness (article emits `border-top-width`),
+      PdContainer `maxWidth`.
     * **THEME (moves to `Render.Stylesheet` — it is presentation, resolved from
       tokens):** heading typography, paragraph/list margins + indent, list
       line-height, link at-rest decoration + border, inline-code chip
-      (font/size/bg/padding/radius), container ink/bg/font-family.
+      (font/size/bg/padding/radius), container ink/bg/font-family, the text
+      ROLES (`bp-role-{eyebrow,byline,ingress,pullquote}`), callout TONES
+      (`bp-callout` + `bp-callout--<tone>`, light + dark tokens), and every
+      component CHROME frame — table/sheet band + cell rules, sheet URL-anchor,
+      wikilink/tag/task-chip/embed/blockref/button/hr — each an article-gated
+      `bp-*` class whose rule lives in `.bp-paper-surface`.
 
   `:email` (the default palette) is **frozen** — every `:email` clause emits the
   exact bytes it always has (Outlook strips stylesheets; inline is the only
@@ -264,19 +270,19 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
     out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
 
-    # Article-only typographic roles. These prepend their own declarations and,
-    # for headings, REPLACE the plain `font-weight:bold` with a level-sized rule.
-    # In email mode (or with no hint) `out` is untouched → byte-identical span.
-    {out, inner} = apply_text_role(out, inner, n, pal)
+    # Article-only typographic roles. These now carry a `bp-role-*` CLASS (the
+    # role typography lives in `.bp-paper-surface`); author marks in `out` are
+    # untouched and still ride inline. In email mode (or with no hint) the class
+    # is nil → byte-identical span.
+    {out, inner, role_class} = apply_text_role(out, inner, n, pal)
 
     out = Enum.reverse(out)
 
-    # Trap: emit NO style= attr when the style list is empty.
-    if out == [] do
-      "<span>#{inner}</span>"
-    else
-      ~s(<span style="#{Enum.join(out, ";")}">#{inner}</span>)
-    end
+    # Trap: emit NO style= attr when the style list is empty; NO class= when no
+    # role. Email always takes the class-less path → byte-identical span.
+    style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
+    class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
+    "<span#{class_attr}#{style_attr}>#{inner}</span>"
   end
 
   # Article-mode paragraph — same role-aware styling as PdText, but emits a
@@ -314,14 +320,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end
 
     out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
-    {out, inner} = apply_text_role(out, inner, n, pal)
+    {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = Enum.reverse(out)
 
-    if out == [] do
-      "<p>#{inner}</p>"
-    else
-      ~s(<p style="#{Enum.join(out, ";")}">#{inner}</p>)
-    end
+    style_attr = if out == [], do: "", else: ~s( style="#{Enum.join(out, ";")}")
+    class_attr = if role_class, do: ~s( class="#{role_class}"), else: ""
+    "<p#{class_attr}#{style_attr}>#{inner}</p>"
   end
 
   # Real semantic heading (the compose clause emits PdHeading exclusively under
@@ -364,64 +368,25 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # ── article typographic roles ──────────────────────────────────────────────
   # Applied only when the compose clause stamped a hint AND the palette is the
-  # article palette. The accumulator `out` is in REVERSE-build order (it gets
-  # `Enum.reverse`d before joining), so we APPEND role declarations here — they
-  # land at the FRONT of the final style string, ahead of weight/italic/deco.
+  # article palette. Stage 2: the role typography moved to the canonical
+  # `.bp-paper-surface .bp-role-*` rules (values lifted verbatim, `pal.*` → the
+  # same `var(--paper-*)` tokens), so View and Edit resolve one source. Here we
+  # only pick the CLASS; `out` (author marks — weight/italic/deco/color) is
+  # returned untouched and still rides inline. The pullquote's `display:block`
+  # and left rule live in the class now; its `font-style:italic` is an author
+  # mark already sitting in `out`. Returns `{out, inner, class | nil}`.
 
-  defp apply_text_role(out, inner, n, %{style: :article} = pal) do
-    cond do
-      Map.get(n, "_role") == "eyebrow" ->
-        {[
-           "font-family:#{pal.font_heading}",
-           "color:#{pal.accent}",
-           "letter-spacing:0.08em",
-           "text-transform:uppercase",
-           "font-weight:600",
-           "font-size:0.78rem"
-           | out
-         ], inner}
-
-      Map.get(n, "_role") == "byline" ->
-        {[
-           "border-bottom:1px solid #{pal.rule}",
-           "padding-bottom:0.6rem",
-           "margin:0 0 1.4rem",
-           "color:#{pal.muted}",
-           "font-family:#{pal.font_heading}",
-           "font-size:0.9rem"
-           | out
-         ], inner}
-
-      Map.get(n, "_role") == "ingress" ->
-        {[
-           "color:#{pal.text}",
-           "line-height:1.5",
-           "font-weight:500",
-           "font-size:1.28rem"
-           | out
-         ], inner}
-
-      Map.get(n, "_role") == "pullquote" ->
-        # `display:block` so the left-border + margins read as a block quote
-        # even though the node walks out as a `<span>`. `italic` is already on
-        # the node (set by compose), so `font-style:italic` is in `out` here.
-        {[
-           "margin:1.6rem 0",
-           "padding:0.2rem 0 0.2rem 1.2rem",
-           "border-left:3px solid #{pal.accent}",
-           "color:#{pal.muted}",
-           "line-height:1.5",
-           "font-size:1.2rem",
-           "display:block"
-           | out
-         ], inner}
-
-      true ->
-        {out, inner}
+  defp apply_text_role(out, inner, n, %{style: :article}) do
+    case Map.get(n, "_role") do
+      "eyebrow" -> {out, inner, "bp-role-eyebrow"}
+      "byline" -> {out, inner, "bp-role-byline"}
+      "ingress" -> {out, inner, "bp-role-ingress"}
+      "pullquote" -> {out, inner, "bp-role-pullquote"}
+      _ -> {out, inner, nil}
     end
   end
 
-  defp apply_text_role(out, inner, _n, _pal), do: {out, inner}
+  defp apply_text_role(out, inner, _n, _pal), do: {out, inner, nil}
 
   # Heading declarations by clamped level — the NON-ARTICLE fallback only
   # (article headings are bare `<h#>` styled by `.bp-paper-surface`; see the
@@ -519,7 +484,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           _ ->
             href = escape_html("/papers/" <> id)
 
-            ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+            wikilink_anchor(href, target, inner, pal)
         end
 
       _ ->
@@ -530,12 +495,33 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           %{id: id} ->
             href = escape_html("/papers/" <> id)
 
-            ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+            wikilink_anchor(href, target, inner, pal)
 
           _ ->
-            ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
+            wikilink_unresolved(target, inner, pal)
         end
     end
+  end
+
+  # Wikilink emission, palette-gated (Stage 2). `:article` carries the
+  # `bp-wikilink` class (the `.bp-paper-surface` rule owns colour + decoration,
+  # so View ≡ Edit); `:email` keeps the inline accent + decoration verbatim
+  # (Outlook has no stylesheet). Values lifted verbatim: article colour is the
+  # same `var(--paper-accent)` the CSS rule resolves.
+  defp wikilink_anchor(href, target, inner, %{style: :article}) do
+    ~s(<a href="#{href}" data-wikilink="#{target}" class="bp-wikilink">#{inner}</a>)
+  end
+
+  defp wikilink_anchor(href, target, inner, pal) do
+    ~s(<a href="#{href}" data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:none">#{inner}</a>)
+  end
+
+  defp wikilink_unresolved(target, inner, %{style: :article}) do
+    ~s(<span data-wikilink="#{target}" class="bp-wikilink bp-wikilink--unresolved">#{inner}</span>)
+  end
+
+  defp wikilink_unresolved(target, inner, pal) do
+    ~s(<span data-wikilink="#{target}" style="color:#{pal.link_color};text-decoration:underline dotted">#{inner}</span>)
   end
 
   # The visible wikilink label: ordered fallback alias → children → target
@@ -568,6 +554,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # attrs for tooling. Everything dynamic is escaped; the chip NEVER raises and
   # NEVER blanks (a blank title falls back to the alias/children/target label).
   defp task_chip(hit, n, target, width, pal) do
+    {status, chip_text, label} = task_chip_parts(hit, n, width, pal)
+    task_chip_html(target, hit, status, chip_text, label, pal)
+  end
+
+  # The status / badge-text / label triple — palette-invariant (the chip content
+  # reads the same in View and email); only the FRAME differs by palette.
+  defp task_chip_parts(hit, n, width, pal) do
     status = if is_binary(hit[:status]) and hit[:status] != "", do: hit[:status]
 
     status_seg =
@@ -599,6 +592,19 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         _ -> wikilink_label(n, width, pal)
       end
 
+    {status, chip_text, label}
+  end
+
+  # Chip FRAME, palette-gated (Stage 2): `:article` carries `bp-task-chip`
+  # (nowrap) + `bp-task-chip__badge` (the pill border/padding/accent), styled by
+  # `.bp-paper-surface`; `:email` keeps the inline pill verbatim.
+  defp task_chip_html(target, hit, status, chip_text, label, %{style: :article}) do
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} class="bp-task-chip">) <>
+      ~s(<span class="bp-task-chip__badge">#{chip_text}</span> ) <>
+      label <> "</span>"
+  end
+
+  defp task_chip_html(target, hit, status, chip_text, label, pal) do
     ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} style="white-space:nowrap">) <>
       ~s(<span style="border:1px solid #{pal.link_color};border-radius:10px;padding:0 6px;color:#{pal.link_color};font-size:0.85em">#{chip_text}</span> ) <>
       label <> "</span>"
@@ -698,6 +704,22 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # broken-embed fallback that links to the would-be paper, mirroring wikilink/3's
   # dotted-span treatment. escape_html escapes quotes too, so it is attr-safe.
   # PURE: walk only injects the pre-rendered string — no Repo, no recursive Render.
+  # Stage 2: `:article` carries the `bp-embed` frame class (the `.bp-paper-surface`
+  # rule owns margin/padding/accent bar) while keeping `paper-embed` as the
+  # data/JS hook; `:email` keeps the inline frame verbatim (no stylesheet off-surface).
+  defp embed(n, %{style: :article} = pal) do
+    raw = Map.get(n, "target", "")
+    target = escape_html(raw)
+
+    case Map.get(Map.get(pal, :embeds, %{}), raw) do
+      html when is_binary(html) ->
+        ~s(<section class="paper-embed bp-embed" data-embed="#{target}">#{html}</section>)
+
+      _ ->
+        ~s(<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="#{target}">↪ #{target}</section>)
+    end
+  end
+
   defp embed(n, pal) do
     raw = Map.get(n, "target", "")
     target = escape_html(raw)
@@ -727,12 +749,30 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     case Map.get(Map.get(pal, :wikilinks, %{}), raw) do
       %{id: id} ->
         href = escape_html("/papers/" <> id <> "#" <> raw_anchor)
-
-        ~s(<a href="#{href}" data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em;text-decoration:none">^#{anchor}</a>)
+        blockref_link(href, target, anchor, pal)
 
       _ ->
-        ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em">^#{anchor}</span>)
+        blockref_span(target, anchor, pal)
     end
+  end
+
+  # Stage 2: `:article` carries `bp-blockref` (the muted micro-link, styled by
+  # `.bp-paper-surface` — the flat `#6b7280` gray becomes the theme-aware
+  # `var(--paper-ink-soft)`); `:email` keeps the inline gray verbatim.
+  defp blockref_link(href, target, anchor, %{style: :article}) do
+    ~s(<a href="#{href}" data-blockref="#{target}" data-anchor="#{anchor}" class="bp-blockref">^#{anchor}</a>)
+  end
+
+  defp blockref_link(href, target, anchor, _pal) do
+    ~s(<a href="#{href}" data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em;text-decoration:none">^#{anchor}</a>)
+  end
+
+  defp blockref_span(target, anchor, %{style: :article}) do
+    ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" class="bp-blockref">^#{anchor}</span>)
+  end
+
+  defp blockref_span(target, anchor, _pal) do
+    ~s(<span data-blockref="#{target}" data-anchor="#{anchor}" style="color:#6b7280;font-size:0.9em">^#{anchor}</span>)
   end
 
   defp tag_node(n, pal) do
@@ -749,7 +789,31 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # visible chip text.
     href = escape_html("/tags/" <> URI.encode(raw, &URI.char_unreserved?/1))
 
+    tag_node_html(href, name, pal)
+  end
+
+  # Stage 2: `:article` carries `bp-tag` (the pill chip, styled by
+  # `.bp-paper-surface`); `:email` keeps the inline chip verbatim.
+  defp tag_node_html(href, name, %{style: :article}) do
+    ~s(<a href="#{href}" data-tag="#{name}" class="bp-tag">##{name}</a>)
+  end
+
+  defp tag_node_html(href, name, pal) do
     ~s(<a href="#{href}" data-tag="#{name}" style="color:#{pal.link_color};background:#{pal.code_bg};padding:1px 6px;border-radius:3px;font-size:0.9em;text-decoration:none">##{name}</a>)
+  end
+
+  # Stage 2: `:article` carries `bp-button` (secondary) / `bp-button--primary`
+  # (the `.bp-paper-surface` rules own the accent fill/border, single-sourced
+  # from `var(--paper-accent)`); `:email` keeps the inline pill verbatim.
+  defp button(n, %{style: :article} = _pal) do
+    label = escape_html(Map.get(n, "label", ""))
+    href = safe_url(Map.get(n, "href", ""))
+
+    if Map.get(n, "priority") == "primary" do
+      ~s(<a href="#{href}" class="bp-button bp-button--primary">#{label}</a>)
+    else
+      ~s(<a href="#{href}" class="bp-button">#{label}</a>)
+    end
   end
 
   defp button(n, pal) do
@@ -761,6 +825,15 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     else
       ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;border:2px solid #{pal.accent};color:#{pal.accent};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
     end
+  end
+
+  # Stage 2: `:article` moves the rule reset/colour/margin to `.bp-hr`; the
+  # author thickness stays inline as `border-top-width` (DATA — it must survive
+  # a stylesheet-less sink). `:email` keeps the full inline rule verbatim.
+  defp hr(n, %{style: :article} = _pal) do
+    t = Map.get(n, "thickness") || 1
+
+    ~s(<hr class="bp-hr" style="border-top-width:#{escape_attr(to_string(t))}px">)
   end
 
   defp hr(n, pal) do
@@ -785,9 +858,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # Article mode styles the header row distinctly: the first row becomes a
   # `<thead>`/`<th>` band — uppercase, muted, with a 2px bottom rule under the
-  # header — and the warm rule colour (`pal.rule` = #e6e2d8) replaces gray on
-  # the body cells. Email/default mode keeps the flat `<td>`-only table,
-  # byte-identical to before.
+  # header — and the warm rule colour replaces gray on the body cells. Stage 2:
+  # the band + cell + collapse chrome is CLASS-driven (`bp-table`,
+  # `bp-table__th`, `bp-table__td` under `.bp-paper-surface`) so View ≡ Edit;
+  # tables carry no author DATA, so nothing stays inline. Email/default mode
+  # keeps the flat inline `<td>`-only table, byte-identical to before.
   defp table(n, width, %{style: :article} = pal) do
     # The header row is OPT-IN via an explicit `head` field on the PdTable.
     # Earlier behaviour silently promoted `rows[0]` to a <thead>, which broke
@@ -808,10 +883,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           head
           |> Enum.map(fn cell ->
             inner = render_children(cell, width, pal)
-
-            ~s(<th style="border-bottom:2px solid #{pal.rule};padding:8px 12px;text-align:left;) <>
-              ~s(text-transform:uppercase;letter-spacing:0.04em;font-size:0.78rem;color:#{pal.muted};) <>
-              ~s(font-family:#{pal.font_heading}">#{inner}</th>)
+            ~s(<th class="bp-table__th">#{inner}</th>)
           end)
           |> Enum.join("")
 
@@ -825,8 +897,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           row
           |> Enum.map(fn cell ->
             inner = render_children(cell, width, pal)
-
-            ~s(<td style="border-bottom:1px solid #{pal.rule};padding:8px 12px;vertical-align:top">#{inner}</td>)
+            ~s(<td class="bp-table__td">#{inner}</td>)
           end)
           |> Enum.join("")
 
@@ -834,7 +905,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
+    ~s(<table role="presentation" class="bp-table">) <>
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
@@ -881,11 +952,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           head
           |> Enum.with_index()
           |> Enum.map(fn {cell, idx} ->
+            # CHROME (band typography/rule) is class-driven; only the author
+            # `col_widths` width stays inline (DATA — sheets_parity reads it here).
             w_style = col_width_style(col_widths, idx)
-
-            ~s(<th style="#{w_style}border-bottom:2px solid #{pal.rule};padding:6px 10px;text-align:left;) <>
-              ~s(text-transform:uppercase;letter-spacing:0.04em;font-size:0.78rem;color:#{pal.muted};) <>
-              ~s(font-family:#{pal.font_heading}">#{escape_html(cell)}</th>)
+            ~s(<th class="bp-sheet__th"#{sheet_inline_style(w_style)}>#{escape_html(cell)}</th>)
           end)
           |> Enum.join("")
 
@@ -903,14 +973,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
             if MapSet.member?(covered, {r, c}) do
               []
             else
+              # CHROME (border/padding/mono-font/size) → `bp-sheet__td`; author
+              # DATA stays inline — col width, per-cell b/i/bg/al, and the engine
+              # error red/bold (all pinned cross-surface by sheets_parity). The
+              # derived default-align CLASS rides in the SAME class attr as the
+              # chrome class (one attribute; explicit `al` still suppresses it).
               w_style = col_width_style(col_widths, c)
               span = sheet_span_attr(anchors, r, c)
-              al = sheet_default_align_attr(styles, r, c, cell)
               extra = sheet_cell_style(styles, r, c)
               err = sheet_err_style(cell)
 
+              align_class =
+                if sheet_explicit_al?(styles, r, c), do: nil, else: sheet_default_align_class(cell)
+
+              td_class = ["bp-sheet__td", align_class] |> Enum.reject(&is_nil/1) |> Enum.join(" ")
+
               [
-                ~s(<td#{span}#{al} style="#{w_style}border-bottom:1px solid #{pal.rule};padding:6px 10px;vertical-align:top;font-family:#{@font_mono};font-size:0.88rem#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
+                ~s(<td#{span} class="#{td_class}"#{sheet_inline_style(w_style <> extra <> err)}>#{sheet_cell_html(cell, pal)}</td>)
               ]
             end
           end)
@@ -921,10 +1000,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     table =
-      ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
+      ~s(<table role="presentation" class="bp-table">) <>
         thead <> "<tbody>#{tbody}</tbody></table>"
 
-    table <> sheet_truncation_note(n, length(body), pal.muted)
+    table <> sheet_truncation_note(n, length(body), pal)
   end
 
   defp sheet(n, _width, pal) do
@@ -969,7 +1048,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
               err = sheet_err_style(cell)
 
               [
-                ~s(<td#{span}#{al} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{sheet_cell_html(cell)}</td>)
+                ~s(<td#{span}#{al} style="#{w_style}border:1px solid #{pal.rule};padding:6px 10px;vertical-align:top#{extra}#{err}">#{sheet_cell_html(cell, pal)}</td>)
               ]
             end
           end)
@@ -982,18 +1061,46 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     table =
       ~s(<table role="presentation" style="border-collapse:collapse;width:100%">#{thead_row}<tbody>#{rows}</tbody></table>)
 
-    table <> sheet_truncation_note(n, length(body), pal.muted)
+    table <> sheet_truncation_note(n, length(body), pal)
   end
 
   # When the snapshot was clipped at the position cap (`"truncated" => true`),
   # append a muted note so a paper never shows silent partial data. `shown` is
-  # the number of body rows actually rendered.
-  defp sheet_truncation_note(n, shown, muted) do
+  # the number of body rows actually rendered. Stage 2: `:article` carries the
+  # `bp-sheet-note` class (styled by `.bp-paper-surface`); `:email` keeps the
+  # inline muted `<p>` verbatim.
+  defp sheet_truncation_note(n, shown, %{style: :article}) do
     if Map.get(n, "truncated") do
-      ~s(<p style="margin:6px 0 0;font-size:0.8rem;color:#{muted}">) <>
+      ~s(<p class="bp-sheet-note">) <>
         escape_html("Sheet truncated — showing the first #{shown} rows") <> "</p>"
     else
       ""
+    end
+  end
+
+  defp sheet_truncation_note(n, shown, pal) do
+    if Map.get(n, "truncated") do
+      ~s(<p style="margin:6px 0 0;font-size:0.8rem;color:#{pal.muted}">) <>
+        escape_html("Sheet truncated — showing the first #{shown} rows") <> "</p>"
+    else
+      ""
+    end
+  end
+
+  # Emit a ` style="…"` attr from a raw DATA fragment (col-width + per-cell
+  # b/i/bg/al + error). The fragment bytes are preserved VERBATIM (the per-cell
+  # style/error fragments are pinned literally by sheets_parity and the html
+  # export tests); we only trim the cosmetic leading `;` that the chrome base
+  # (now a class) used to sit in front of. `""` when there is no DATA.
+  defp sheet_inline_style(raw) do
+    # Collapse the empty declarations the mixed fragment conventions produce (a
+    # `;;` seam where col-width meets a cell style, or a cell style meets the
+    # error mark) and trim the cosmetic leading `;`. Real declarations — and
+    # their trailing `;` — are untouched, so the per-cell DATA bytes pinned by
+    # sheets_parity and the export tests survive verbatim.
+    case raw |> String.replace(";;", ";") |> String.trim_leading(";") do
+      "" -> ""
+      style -> ~s( style="#{style}")
     end
   end
 
@@ -1074,7 +1181,18 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # escaped link text; every other value stays plain escaped text. A `javascript:`
   # / `data:` payload never matches the regex (and `safe_url` would blank it
   # anyway), and "see http://x" stays text. Head `<th>` cells keep `escape_html`.
-  defp sheet_cell_html(cell) when is_binary(cell) do
+  # Stage 2: `:article` carries `bp-sheet-link` (the `.bp-paper-surface` rule
+  # colours it `var(--paper-accent)` — the old hardcoded `#2563eb` was wrong in
+  # dark mode); `:email` keeps the inline blue anchor verbatim.
+  defp sheet_cell_html(cell, %{style: :article}) when is_binary(cell) do
+    if Regex.match?(@sheet_url_re, cell) do
+      ~s(<a href="#{safe_url(cell)}" class="bp-sheet-link" target="_blank" rel="noopener noreferrer nofollow">#{escape_html(cell)}</a>)
+    else
+      escape_html(cell)
+    end
+  end
+
+  defp sheet_cell_html(cell, _pal) when is_binary(cell) do
     if Regex.match?(@sheet_url_re, cell) do
       ~s(<a href="#{safe_url(cell)}" target="_blank" rel="noopener noreferrer nofollow" style="color:#2563eb;text-decoration:underline">#{escape_html(cell)}</a>)
     else
@@ -1082,7 +1200,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
-  defp sheet_cell_html(cell), do: escape_html(cell)
+  defp sheet_cell_html(cell, _pal), do: escape_html(cell)
 
   defp sheet_bg_style(bg) when is_binary(bg) do
     if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background:#{bg};", else: ""
@@ -1157,6 +1275,24 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp col_width_style(_, _), do: ""
 
+  # Stage 2 article callout: the tone card is CLASS-driven — `bp-callout` +
+  # `bp-callout--<tone>` resolve the `--bp-tone-*` light/dark tokens under
+  # `.bp-paper-surface` (View ≡ Edit, and dark mode is a pure token swap). The
+  # tone modifier falls back to `info` for an unknown tone, exactly as
+  # `Util.tone_palette/1` does. `:email` takes the byte-identical inline clause below.
+  defp callout(n, width, %{style: :article} = pal) do
+    tone_mod = callout_tone_class(Map.get(n, "tone"))
+    inner = render_children(Map.get(n, "children", []), width, pal)
+
+    if Map.get(n, "collapsible") == true do
+      collapsible_callout_article(n, tone_mod, inner)
+    else
+      title_html = callout_title_html(n)
+
+      ~s(<div class="bp-callout bp-callout--#{tone_mod}">#{title_html}#{inner}</div>)
+    end
+  end
+
   defp callout(n, width, pal) do
     tone = tone_palette(Map.get(n, "tone"))
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -1166,16 +1302,26 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     if Map.get(n, "collapsible") == true do
       collapsible_callout(n, tone, inner)
     else
-      title_html =
-        case Map.get(n, "title") do
-          nil -> ""
-          "" -> ""
-          title -> "<strong>#{escape_html(title)}</strong> "
-        end
-
-      ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{title_html}#{inner}</div>)
+      ~s(<div style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">#{callout_title_html(n)}#{inner}</div>)
     end
   end
+
+  defp callout_title_html(n) do
+    case Map.get(n, "title") do
+      nil -> ""
+      "" -> ""
+      title -> "<strong>#{escape_html(title)}</strong> "
+    end
+  end
+
+  # Tone → modifier class, mirroring `Util.tone_palette/1`'s clause set (unknown
+  # → info). The five knowns each get a `--bp-tone-<tone>-{bg,fg}` token pair.
+  defp callout_tone_class("success"), do: "success"
+  defp callout_tone_class("warning"), do: "warning"
+  defp callout_tone_class("danger"), do: "danger"
+  defp callout_tone_class("neutral"), do: "neutral"
+  defp callout_tone_class("info"), do: "info"
+  defp callout_tone_class(_), do: "info"
 
   # Zero-JS native fold via <details>/<summary>. `open` reflects !collapsed; the
   # summary is the title, or a tone label so it is never empty.
@@ -1186,6 +1332,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ~s(<details#{open} style="border-left:4px solid #{tone.fg};background:#{tone.bg};padding:16px;color:#{tone.fg}">) <>
       ~s(<summary style="cursor:pointer;font-weight:bold">#{summary}</summary>) <>
       ~s(<div style="margin-top:8px">#{inner}</div></details>)
+  end
+
+  # Article collapsible — same fold, CLASS-driven tone card + summary/body chrome.
+  defp collapsible_callout_article(n, tone_mod, inner) do
+    open = if Map.get(n, "collapsed") == true, do: "", else: " open"
+    summary = escape_html(callout_summary(n))
+
+    ~s(<details#{open} class="bp-callout bp-callout--#{tone_mod}">) <>
+      ~s(<summary class="bp-callout__summary">#{summary}</summary>) <>
+      ~s(<div class="bp-callout__body">#{inner}</div></details>)
   end
 
   defp callout_summary(n) do

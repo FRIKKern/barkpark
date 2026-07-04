@@ -63,6 +63,14 @@ html[data-theme="dark"] .bp-paper-body {
   --paper-accent-soft: rgba(217, 122, 95, 0.14);
   --paper-chrome-bg:  #221e1a;
   --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  /* Callout TONE tokens — DARK companions (authored): deepened bg, lifted fg,
+     consistent with the warm-dark token style above; kept readable-contrast.
+     Light values are lifted verbatim from Util.tone_palette/1 (fallback block). */
+  --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
+  --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
+  --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
+  --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
+  --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
 }
 /* Fallback so a pre-paint load with no data-theme still gets warm paper. */
 .bp-paper-surface, .bp-paper-body {
@@ -84,6 +92,15 @@ html[data-theme="dark"] .bp-paper-body {
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
   --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
+     Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
+     the `bp-callout--info` modifier is the emitted default here too. Dark
+     companions live in the html[data-theme="dark"] block above. */
+  --bp-tone-info-bg:    #eff6ff; --bp-tone-info-fg:    #1d4ed8;
+  --bp-tone-success-bg: #ecfdf5; --bp-tone-success-fg: #047857;
+  --bp-tone-warning-bg: #fffbeb; --bp-tone-warning-fg: #92400e;
+  --bp-tone-danger-bg:  #fef2f2; --bp-tone-danger-fg:  #b91c1c;
+  --bp-tone-neutral-bg: #f3f4f6; --bp-tone-neutral-fg: #374151;
 }
 
 /* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
@@ -166,4 +183,105 @@ html[data-theme="dark"] .bp-paper-body {
   display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
   border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
 }
+
+/* ── Article component classes (Stage 2, wave 2 · charter Decisions 2-4).
+   Emitted by Render.Walk in `:article` mode (roles/tones/chrome now carry
+   `bp-*` classes instead of inline THEME styles). Every value here is lifted
+   VERBATIM from the pre-Stage-2 walk.ex inline declarations, translating the
+   article palette's `pal.*` fields to the SAME tokens the palette resolved
+   (accent → --paper-accent, muted → --paper-ink-soft, rule → --paper-rule,
+   ink → --paper-ink, heading font → --paper-font-serif, code_bg →
+   --paper-bg-deep). View and Edit resolve THESE selectors — parity by
+   construction. Author DATA (marks, geometry, sheet b/i/bg/al + col widths +
+   error mark, hr thickness) stays INLINE on the same element. */
+
+/* Text ROLES (apply_text_role). Author marks (italic/bold/colour) still ride
+   inline on the same span; these own only the role typography. */
+.bp-paper-surface .bp-role-eyebrow {
+  font-family: var(--paper-font-serif); color: var(--paper-accent);
+  letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem;
+}
+.bp-paper-surface .bp-role-byline {
+  border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem;
+}
+.bp-paper-surface .bp-role-ingress {
+  color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem;
+}
+.bp-paper-surface .bp-role-pullquote {
+  display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem;
+  border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft);
+  line-height: 1.5; font-size: 1.2rem;
+}
+
+/* Callout TONES. `bp-callout` is the card; `bp-callout--<tone>` resolves the
+   tone token pair (light + dark, defined above). */
+.bp-paper-surface .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-surface .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+.bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
+.bp-paper-surface .bp-callout__body { margin-top: 8px; }
+
+/* Table CHROME (also the sheet's outer collapse/width). */
+.bp-paper-surface .bp-table { border-collapse: collapse; width: 100%; }
+.bp-paper-surface .bp-table__th {
+  border-bottom: 2px solid var(--paper-rule); padding: 8px 12px; text-align: left;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
+}
+.bp-paper-surface .bp-table__td {
+  border-bottom: 1px solid var(--paper-rule); padding: 8px 12px; vertical-align: top;
+}
+
+/* Sheet CHROME (band + cell rules). Author DATA — col width, per-cell
+   b/i/bg/al, engine-error red/bold — stays INLINE on the <td> (sheets_parity). */
+.bp-paper-surface .bp-sheet__th {
+  border-bottom: 2px solid var(--paper-rule); padding: 6px 10px; text-align: left;
+  text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.78rem;
+  color: var(--paper-ink-soft); font-family: var(--paper-font-serif);
+}
+.bp-paper-surface .bp-sheet__td {
+  border-bottom: 1px solid var(--paper-rule); padding: 6px 10px; vertical-align: top;
+  font-family: var(--paper-font-mono); font-size: 0.88rem;
+}
+.bp-paper-surface .bp-sheet-note { margin: 6px 0 0; font-size: 0.8rem; color: var(--paper-ink-soft); }
+/* Whole-string URL cell → accent anchor (the old hardcoded #2563eb was wrong in dark). */
+.bp-paper-surface .bp-sheet-link { color: var(--paper-accent); text-decoration: underline; }
+
+/* Internal-reference + chip frames. */
+.bp-paper-surface .bp-wikilink { color: var(--paper-accent); text-decoration: none; }
+.bp-paper-surface .bp-wikilink--unresolved { text-decoration: underline dotted; }
+.bp-paper-surface .bp-task-chip { white-space: nowrap; }
+.bp-paper-surface .bp-task-chip__badge {
+  border: 1px solid var(--paper-accent); border-radius: 10px; padding: 0 6px;
+  color: var(--paper-accent); font-size: 0.85em;
+}
+.bp-paper-surface .bp-tag {
+  color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
+  border-radius: 3px; font-size: 0.9em; text-decoration: none;
+}
+.bp-paper-surface .bp-embed {
+  margin: 1em 0; padding: 0.25em 0 0.25em 1em; border-left: 3px solid var(--paper-accent);
+}
+.bp-paper-surface .bp-embed--unresolved {
+  padding: 0.5em 0.75em; border-left-color: var(--paper-bg-deep);
+  color: var(--paper-ink-soft); font-style: italic;
+}
+.bp-paper-surface .bp-blockref { color: var(--paper-ink-soft); font-size: 0.9em; text-decoration: none; }
+
+/* Buttons — `bp-button` is the secondary (outline); `--primary` overrides to
+   the accent fill (no border, matching the pre-Stage-2 inline box exactly). */
+.bp-paper-surface .bp-button {
+  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
+}
+.bp-paper-surface .bp-button--primary {
+  border: none; background: var(--paper-accent); color: #ffffff;
+}
+
+/* Divider rule — the default; author thickness overrides via inline border-top-width. */
+.bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
 
