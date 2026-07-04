@@ -72,6 +72,22 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   `move_tab` needs NO rewrite — name-based refs are position-stable (CT-D1).
 
+  ## Full-axis ranges — `A:A` / `3:3` (B-AA-3, design §3.1 + §6)
+
+  A full-COLUMN range (`A:A`, `$A:$C`) is unbounded on rows; a full-ROW range
+  (`3:3`, `1:5`) is unbounded on columns. The scanner recognizes both as single
+  ref tokens — byte-for-byte the string shapes the engine's lexer accepts: bare
+  column letters with an optional leading `$` for a column axis, plain integers
+  for a row axis, plus the tab-qualified forms `Sheet2!A:A` / `'My Sheet'!3:3`
+  reusing the same qualifier path as a cross-tab cell ref. Each shifts ONLY on
+  the axis it bounds and is INVARIANT on the perpendicular op (Excel): a column
+  insert/delete moves `A:A` (→`B:B`, or literal `#REF!` when its column is
+  deleted, clipping a multi-column range's endpoints) but leaves `3:3` untouched;
+  a row op mirrors it. Only token RECOGNITION is new — the shift/clip arithmetic
+  is the same `shift_index`/`shift_span` a bounded ref uses. There is no stored
+  rectangle (CT-D2): the formula STRING is the truth, so `A:A` re-resolves to the
+  occupied range at every recompute.
+
   ## Sort (SF-A — a pure row permutation)
 
   `sort_rows/3` reorders WHOLE rows within a rectangular range and nothing
@@ -1043,13 +1059,10 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
       :none ->
         cond do
-          not ref_like?(word) ->
+          ref_like?(word) and next_is_lparen?(rest) ->
             scan(rest, op, [word | out])
 
-          next_is_lparen?(rest) ->
-            scan(rest, op, [word | out])
-
-          true ->
+          ref_like?(word) ->
             case take_range_tail(rest) do
               {:range, sep, word2, rest2} ->
                 scan(rest2, op, [bare_range(op, word, sep, word2) | out])
@@ -1057,7 +1070,41 @@ defmodule Barkpark.Plugins.Sheets.Structure do
               :single ->
                 scan(rest, op, [bare_ref(op, word) | out])
             end
+
+          # A full-COLUMN range: `A:A`, `$A:$C` — bare letters, optional `$`, NO
+          # digit (so it can never collide with a `ref_like?` cell ref). Only a
+          # real `col :colon col` tail makes it a range; a lone column word
+          # (`A`, a function name, a defined name) emits verbatim, exactly as the
+          # old `not ref_like?` bail did.
+          col_axis?(word) ->
+            case take_axis_tail(rest, &col_axis?/1) do
+              {sep, word2, rest2} ->
+                scan(rest2, op, [bare_axis(op, :col, word, sep, word2) | out])
+
+              :none ->
+                scan(rest, op, [word | out])
+            end
+
+          true ->
+            scan(rest, op, [word | out])
         end
+    end
+  end
+
+  # A full-ROW range starts with a DIGIT (`3:3`, `1:5`), so it never reaches the
+  # letter clause above. Recognize `num :colon num` as a single row-range token;
+  # anything else (a bare number, `1+2`, `3.5`, `3E10`) falls through
+  # byte-identically to the utf8 catch-all — emit the first char and resume.
+  defp scan(<<c, _::binary>> = bin, op, out) when c in ?0..?9 do
+    {word, rest} = take_word(bin, "")
+
+    with true <- row_axis?(word),
+         {sep, word2, rest2} <- take_axis_tail(rest, &row_axis?/1) do
+      scan(rest2, op, [bare_axis(op, :row, word, sep, word2) | out])
+    else
+      _ ->
+        <<ch::utf8, tail::binary>> = bin
+        scan(tail, op, [<<ch::utf8>> | out])
     end
   end
 
@@ -1074,28 +1121,57 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp bare_range(_op, w1, sep, w2), do: [w1, sep, w2]
 
+  # A bare (unqualified) full-axis range (`A:A` / `3:3`). Shifts only under the
+  # mutated tab's OWN op ({:local, …}) AND only when the range's axis matches the
+  # mutated axis — a full COLUMN is invariant under row ops and a full ROW is
+  # invariant under column ops (Excel). Under a cross-tab sweep/rename/deltab it
+  # is another tab's business — pass through verbatim.
+  defp bare_axis({:local, _mut_axis, {:rebase, dc, dr}}, kind, w1, sep, w2),
+    do: rebase_axis(kind, w1, sep, w2, dc, dr)
+
+  defp bare_axis({:local, mut_axis, change}, kind, w1, sep, w2),
+    do: shift_axis(kind, mut_axis, w1, sep, w2, change)
+
+  defp bare_axis(_op, _kind, w1, sep, w2), do: [w1, sep, w2]
+
   # `!ref` / `!ref:ref` tail immediately after a (bare or quoted) tab name.
   # Returns the ref spec + the remaining input, or :none when what follows is
   # not a valid reference (leave the name as an ordinary word).
   defp take_qualified_tail(<<?!, rest::binary>>) do
     {word, rest2} = take_word(rest, "")
 
-    if word != "" and ref_like?(word) and not next_is_lparen?(rest2) do
-      case take_range_tail(rest2) do
-        # A range whose second corner is ITSELF a qualifier (`Sheet2!A1:Sheet3!B2`)
-        # is a two-tab range — not the single-tab range this scanner shifts (the
-        # design makes two-tab ranges `#REF!` at eval; formula text is stored
-        # verbatim under CT-D1, so such a string can reach Structure). Qualify
-        # only the FIRST corner and hand the `:` + second qualifier back to the
-        # scanner: each side then shifts under its own tab. Without this, the
-        # bare second corner (`Sheet3`) parses as a ref and mis-shifts (e.g. a
-        # row op turns `Sheet3` into `SHEET4`), corrupting the stored formula.
-        {:range, _sep, _word2, <<?!, _::binary>>} -> {{:single, word}, rest2}
-        {:range, sep, word2, rest3} -> {{:range, word, sep, word2}, rest3}
-        :single -> {{:single, word}, rest2}
-      end
-    else
-      :none
+    cond do
+      word != "" and ref_like?(word) and not next_is_lparen?(rest2) ->
+        case take_range_tail(rest2) do
+          # A range whose second corner is ITSELF a qualifier (`Sheet2!A1:Sheet3!B2`)
+          # is a two-tab range — not the single-tab range this scanner shifts (the
+          # design makes two-tab ranges `#REF!` at eval; formula text is stored
+          # verbatim under CT-D1, so such a string can reach Structure). Qualify
+          # only the FIRST corner and hand the `:` + second qualifier back to the
+          # scanner: each side then shifts under its own tab. Without this, the
+          # bare second corner (`Sheet3`) parses as a ref and mis-shifts (e.g. a
+          # row op turns `Sheet3` into `SHEET4`), corrupting the stored formula.
+          {:range, _sep, _word2, <<?!, _::binary>>} -> {{:single, word}, rest2}
+          {:range, sep, word2, rest3} -> {{:range, word, sep, word2}, rest3}
+          :single -> {{:single, word}, rest2}
+        end
+
+      # A tab-qualified full-COLUMN range: `Sheet2!A:A`, `'My Sheet'!$A:$C`.
+      word != "" and col_axis?(word) ->
+        case take_axis_tail(rest2, &col_axis?/1) do
+          {sep, word2, rest3} -> {{:arange, :col, word, sep, word2}, rest3}
+          :none -> :none
+        end
+
+      # A tab-qualified full-ROW range: `Sheet2!3:3`.
+      word != "" and row_axis?(word) ->
+        case take_axis_tail(rest2, &row_axis?/1) do
+          {sep, word2, rest3} -> {{:arange, :row, word, sep, word2}, rest3}
+          :none -> :none
+        end
+
+      true ->
+        :none
     end
   end
 
@@ -1160,9 +1236,11 @@ defmodule Barkpark.Plugins.Sheets.Structure do
   end
 
   # Re-emit a qualified ref verbatim (only the qualifier text `qual` varies —
-  # the referenced cell/range keeps its exact source spelling).
+  # the referenced cell/range keeps its exact source spelling). The full-axis
+  # (`Name!A:A`) part is verbatim too — rename/deltab must never corrupt it.
   defp qualified_emit(qual, {:single, w}), do: [qual, "!", w]
   defp qualified_emit(qual, {:range, w1, sep, w2}), do: [qual, "!", w1, sep, w2]
+  defp qualified_emit(qual, {:arange, _kind, w1, sep, w2}), do: [qual, "!", w1, sep, w2]
 
   # Shift/rebase a qualified ref's cell part, keeping the qualifier; a dead ref
   # or fully-deleted range collapses the WHOLE token to the literal #REF!.
@@ -1175,6 +1253,23 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp qualified_transform(qual, {:range, w1, sep, w2}, axis, change) do
     case rewrite_range(w1, sep, w2, axis, change) do
+      "#REF!" -> "#REF!"
+      part -> [qual, "!", part]
+    end
+  end
+
+  # A qualified full-axis range shifts (or rebases) its axis part under the same
+  # rules as a bare one: a full COLUMN shifts on col ops / is invariant on row
+  # ops, a full ROW mirrors. A fully-deleted axis collapses the WHOLE token to
+  # #REF!; the qualifier is preserved otherwise.
+  defp qualified_transform(qual, {:arange, kind, w1, sep, w2}, mut_axis, change) do
+    part =
+      case change do
+        {:rebase, dc, dr} -> rebase_axis(kind, w1, sep, w2, dc, dr)
+        _ -> shift_axis(kind, mut_axis, w1, sep, w2, change)
+      end
+
+    case part do
       "#REF!" -> "#REF!"
       part -> [qual, "!", part]
     end
@@ -1212,6 +1307,16 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
   defp ref_like?(word), do: Regex.match?(~r/^\$?[A-Za-z]+\$?[0-9]+$/, word)
 
+  # A full-column word — bare letters with an optional leading `$`, NO digit
+  # (`A`, `$A`, `AA`). Disjoint from `ref_like?` (which requires a digit), so a
+  # cell ref like `A1` never lexes as a column word.
+  defp col_axis?(word), do: Regex.match?(~r/^\$?[A-Za-z]+$/, word)
+
+  # A full-row word — bare digits (`3`, `1048576`). The engine grammar spells a
+  # row axis as a plain integer (no `$`); `$3` is left as ordinary text — it is
+  # not corrupted, only not shifted.
+  defp row_axis?(word), do: Regex.match?(~r/^[0-9]+$/, word)
+
   defp next_is_lparen?(<<?\s, rest::binary>>), do: next_is_lparen?(rest)
   defp next_is_lparen?(<<?(, _::binary>>), do: true
   defp next_is_lparen?(_), do: false
@@ -1234,6 +1339,29 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
       _ ->
         :single
+    end
+  end
+
+  # `word ws* : ws* word2` where BOTH sides satisfy `acceptor` (both column
+  # words, or both row words) — a full-axis range. Whitespace is preserved in
+  # the separator (the engine's tokenizer skips it). A second word that is a
+  # call (`A:LOG10(...)`) is NOT a range.
+  defp take_axis_tail(rest, acceptor) do
+    {ws1, r1} = take_ws(rest, "")
+
+    case r1 do
+      <<?:, r2::binary>> ->
+        {ws2, r3} = take_ws(r2, "")
+        {word2, r4} = take_word(r3, "")
+
+        if word2 != "" and acceptor.(word2) and not next_is_lparen?(r4) do
+          {[ws1, ":", ws2], word2, r4}
+        else
+          :none
+        end
+
+      _ ->
+        :none
     end
   end
 
@@ -1315,6 +1443,162 @@ defmodule Barkpark.Plugins.Sheets.Structure do
 
     Sheets.format_ref(p1) <> ":" <> Sheets.format_ref(p2)
   end
+
+  # ── full-axis (A:A / 3:3) shifting ─────────────────────────────────────────
+  #
+  # A full-COLUMN range (`A:A`, `$A:$C`) is unbounded on rows; a full-ROW range
+  # (`3:3`) is unbounded on columns. Each shifts ONLY on the axis it bounds —
+  # `shift_axis/6` returns the argument verbatim on the perpendicular op (the
+  # Excel invariant). The bounded axis reuses the SAME `shift_index`/`shift_span`
+  # arithmetic as a cell ref/range: per-corner shift on inserts and pure-shift
+  # deletes, a clip (re-emitted as canonical `$`-less corners) when exactly one
+  # corner sits inside a deleted span, `#REF!` when the axis is fully deleted.
+
+  defp shift_axis(:col, :col, w1, sep, w2, change), do: rewrite_col_axis(w1, sep, w2, change)
+  defp shift_axis(:row, :row, w1, sep, w2, change), do: rewrite_row_axis(w1, sep, w2, change)
+  defp shift_axis(_kind, _mut_axis, w1, sep, w2, _change), do: [w1, sep, w2]
+
+  defp rewrite_col_axis(w1, sep, w2, change) do
+    with {:ok, c1, _a1} <- parse_col_word(w1),
+         {:ok, c2, _a2} <- parse_col_word(w2) do
+      {lo, hi} = {min(c1, c2), max(c1, c2)}
+
+      case change do
+        {:delete, at, count}
+        when (lo >= at and lo <= at + count - 1) or (hi >= at and hi <= at + count - 1) ->
+          case shift_span(lo, hi, :col, change) do
+            :dead -> "#REF!"
+            {:ok, {nlo, nhi}} -> col_letters(nlo) <> ":" <> col_letters(nhi)
+          end
+
+        _ ->
+          shift_col_corners(w1, sep, w2, change)
+      end
+    else
+      _ -> [w1, sep, w2]
+    end
+  end
+
+  defp shift_col_corners(w1, sep, w2, change) do
+    r1 = rewrite_col_word(w1, change)
+    r2 = rewrite_col_word(w2, change)
+    if r1 == "#REF!" or r2 == "#REF!", do: "#REF!", else: [r1, sep, r2]
+  end
+
+  defp rewrite_col_word(word, change) do
+    case parse_col_word(word) do
+      {:ok, col, abs?} ->
+        case shift_index(col, :col, change) do
+          :unchanged -> word
+          :dead -> "#REF!"
+          {:ok, ncol} -> emit_col_word(ncol, abs?)
+        end
+
+      :error ->
+        word
+    end
+  end
+
+  defp rewrite_row_axis(w1, sep, w2, change) do
+    with {:ok, r1i} <- parse_row_word(w1),
+         {:ok, r2i} <- parse_row_word(w2) do
+      {lo, hi} = {min(r1i, r2i), max(r1i, r2i)}
+
+      case change do
+        {:delete, at, count}
+        when (lo >= at and lo <= at + count - 1) or (hi >= at and hi <= at + count - 1) ->
+          case shift_span(lo, hi, :row, change) do
+            :dead -> "#REF!"
+            {:ok, {nlo, nhi}} -> "#{nlo}:#{nhi}"
+          end
+
+        _ ->
+          shift_row_corners(w1, sep, w2, change)
+      end
+    else
+      _ -> [w1, sep, w2]
+    end
+  end
+
+  defp shift_row_corners(w1, sep, w2, change) do
+    r1 = rewrite_row_word(w1, change)
+    r2 = rewrite_row_word(w2, change)
+    if r1 == "#REF!" or r2 == "#REF!", do: "#REF!", else: [r1, sep, r2]
+  end
+
+  defp rewrite_row_word(word, change) do
+    case parse_row_word(word) do
+      {:ok, row} ->
+        case shift_index(row, :row, change) do
+          :unchanged -> word
+          :dead -> "#REF!"
+          {:ok, nrow} -> Integer.to_string(nrow)
+        end
+
+      :error ->
+        word
+    end
+  end
+
+  # Copy/fill rebase for a full-axis range: a full COLUMN shifts by `dc` (rows
+  # ignored — it is row-unbounded), a full ROW shifts by `dr`. An absolute
+  # (`$`-anchored) column is pinned; a shift out of bounds collapses to #REF!.
+  defp rebase_axis(:col, w1, sep, w2, dc, _dr) do
+    r1 = rebase_col_word(w1, dc)
+    r2 = rebase_col_word(w2, dc)
+    if r1 == "#REF!" or r2 == "#REF!", do: "#REF!", else: [r1, sep, r2]
+  end
+
+  defp rebase_axis(:row, w1, sep, w2, _dc, dr) do
+    r1 = rebase_row_word(w1, dr)
+    r2 = rebase_row_word(w2, dr)
+    if r1 == "#REF!" or r2 == "#REF!", do: "#REF!", else: [r1, sep, r2]
+  end
+
+  defp rebase_col_word(word, dc) do
+    case parse_col_word(word) do
+      {:ok, _col, true} -> word
+      {:ok, col, false} -> if col + dc in 1..@grid_max_col, do: col_letters(col + dc), else: "#REF!"
+      :error -> word
+    end
+  end
+
+  defp rebase_row_word(word, dr) do
+    case parse_row_word(word) do
+      {:ok, row} -> if row + dr in 1..@grid_max_row, do: Integer.to_string(row + dr), else: "#REF!"
+      :error -> word
+    end
+  end
+
+  # A column word (`A`, `$A`) → {:ok, col, absolute?}; a row word → {:ok, row}.
+  # Out-of-bounds words fail so the token re-emits verbatim (never corrupted).
+  defp parse_col_word(word) do
+    {abs?, letters} =
+      case word do
+        <<?$, rest::binary>> -> {true, rest}
+        _ -> {false, word}
+      end
+
+    case Sheets.parse_ref(letters <> "1") do
+      {:ok, {col, 1}} when col <= @grid_max_col -> {:ok, col, abs?}
+      _ -> :error
+    end
+  end
+
+  defp parse_row_word(word) do
+    case Integer.parse(word) do
+      {n, ""} when n >= 1 and n <= @grid_max_row -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp col_letters(col) do
+    [_, letters, _digits] = Regex.run(@split_re, Sheets.format_ref({col, 1}))
+    letters
+  end
+
+  defp emit_col_word(col, true), do: "$" <> col_letters(col)
+  defp emit_col_word(col, false), do: col_letters(col)
 
   defp parse_word(word) do
     with [_, d1, _letters, d2, _digits] <- Regex.run(@ref_re, word),
