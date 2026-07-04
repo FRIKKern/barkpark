@@ -130,10 +130,7 @@ defmodule Barkpark.Plugins.Tickets.CLITest do
       expected =
         Enum.sort([
           "ticket.inbox",
-          "ticket.ls",
           "ticket.show",
-          "ticket.file",
-          "ticket.reply",
           "ticket.answer",
           "ticket.close",
           "ticket-key.mint",
@@ -173,25 +170,15 @@ defmodule Barkpark.Plugins.Tickets.CLITest do
     test "the mutating verbs write; the read verbs don't" do
       by_id = Map.new(CLI.commands(), &{&1.id, &1})
 
-      for id <- ~w(ticket.file ticket.reply ticket.answer ticket.close
+      for id <- ~w(ticket.answer ticket.close
                    ticket-key.mint ticket-key.rotate ticket-key.pause
                    ticket-key.unpause ticket-key.revoke) do
         assert by_id[id].writes, "#{id} must set writes: true"
       end
 
-      for id <- ~w(ticket.inbox ticket.ls ticket.show ticket-key.ls) do
+      for id <- ~w(ticket.inbox ticket.show ticket-key.ls) do
         refute by_id[id].writes, "#{id} must be a read (writes: false)"
       end
-    end
-
-    test "file declares subject + body body-args (the 2-minute first-ticket path)" do
-      file = Enum.find(CLI.commands(), &(&1.id == "ticket.file"))
-      arg_names = Enum.map(file.args, & &1.name)
-      assert "subject" in arg_names
-      assert "body" in arg_names
-      assert Enum.all?(file.args, & &1.required)
-      # POST /v1/tickets has no :placeholders, so both args ride the body.
-      refute String.contains?(file.http.path_template, ":")
     end
 
     test "answer declares the --close bool flag (answer-and-close in one write)" do

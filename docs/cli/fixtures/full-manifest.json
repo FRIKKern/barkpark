@@ -837,32 +837,6 @@
       "writes": false
     },
     {
-      "args": [],
-      "auth_tier": "read",
-      "batch": false,
-      "default_output": "table",
-      "dry_run": false,
-      "flags": [
-        {
-          "default": 50,
-          "name": "limit",
-          "summary": "Max tickets to return.",
-          "type": "int"
-        }
-      ],
-      "http": {
-        "method": "GET",
-        "path_template": "/v1/tickets"
-      },
-      "id": "ticket.ls",
-      "noun": "ticket",
-      "paginated": true,
-      "source": "plugin:tickets",
-      "summary": "List the tickets this key has filed (key-holder's own threads).",
-      "verb": "ls",
-      "writes": false
-    },
-    {
       "args": [
         {
           "name": "id",
@@ -887,70 +861,6 @@
       "summary": "Show one ticket thread (operator detail: subject, status, messages).",
       "verb": "show",
       "writes": false
-    },
-    {
-      "args": [
-        {
-          "name": "subject",
-          "required": true,
-          "summary": "One-line subject.",
-          "type": "string"
-        },
-        {
-          "name": "body",
-          "required": true,
-          "summary": "Ticket body / question.",
-          "type": "string"
-        }
-      ],
-      "auth_tier": "read",
-      "batch": false,
-      "default_output": "minimal",
-      "dry_run": false,
-      "flags": [],
-      "http": {
-        "method": "POST",
-        "path_template": "/v1/tickets"
-      },
-      "id": "ticket.file",
-      "noun": "ticket",
-      "paginated": false,
-      "source": "plugin:tickets",
-      "summary": "File a new ticket (request/question). Runs with a ticket key.",
-      "verb": "file",
-      "writes": true
-    },
-    {
-      "args": [
-        {
-          "name": "id",
-          "required": true,
-          "summary": "Ticket id.",
-          "type": "string"
-        },
-        {
-          "name": "body",
-          "required": true,
-          "summary": "Message body.",
-          "type": "string"
-        }
-      ],
-      "auth_tier": "read",
-      "batch": false,
-      "default_output": "minimal",
-      "dry_run": false,
-      "flags": [],
-      "http": {
-        "method": "POST",
-        "path_template": "/v1/tickets/:id/messages"
-      },
-      "id": "ticket.reply",
-      "noun": "ticket",
-      "paginated": false,
-      "source": "plugin:tickets",
-      "summary": "Append a message to a ticket thread. A key-holder reply auto-reopens an answered ticket.",
-      "verb": "reply",
-      "writes": true
     },
     {
       "args": [

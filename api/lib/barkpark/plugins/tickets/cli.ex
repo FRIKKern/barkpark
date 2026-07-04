@@ -12,14 +12,17 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   `Code.ensure_loaded?(Tickets.CLI)`, so the two slices merge cleanly across
   worktrees even when only one of them has landed.
 
-  ## Two nouns, disjoint paths
+  ## Two nouns, operator verbs only
 
-    * `ticket` — the support conversation. Operator verbs (`inbox`, `show`,
-      `answer`, `close`) ride the `:token_root` bucket (bearer-gated, mounted at
-      `/v1/tickets/inbox*` and `/v1/tickets/:id/{answer,close}`); the key-holder
-      verbs (`ls`, `file`, `reply`) ride the `:ticket_key` bucket (mounted at
-      `/v1/tickets`). Both share the `ticket` noun with disjoint routes — the
-      submitter never sees the operator's inbox, and vice versa.
+    * `ticket` — the support conversation. The manifest advertises OPERATOR verbs
+      only: `inbox`, `show`, `answer`, `close` ride the `:token_root` bucket
+      (bearer-gated, mounted at `/v1/tickets/inbox*` and
+      `/v1/tickets/:id/{answer,close}`). The submitter's leg — file a ticket, list
+      your own threads, reply — rides the `:ticket_key` bucket at `/v1/tickets*`,
+      but is NOT advertised here: no `bp` credential can run it (see "Who `bp`
+      serves" below), so the submitter's tooling is raw curl — the mint handoff
+      card's quickstart, with the full key-holder route table in api-v1.md §8a —
+      never a `bp` verb.
     * `ticket-key` — the named low-trust credential. `mint`/`ls`/`rotate`/`pause`/
       `unpause`/`revoke` are admin-only key management under the
       `/v1/plugins/tickets/keys` surface. Pause is the REVERSIBLE abuse brake
@@ -35,7 +38,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   tier controls existence-hiding visibility only; the SERVER's `RequireTicketKey`
   / `RequireToken` / `RequireAdmin` pipelines are the real boundary.
 
-  ## Who `bp` serves (charter Decision 10)
+  ## Who `bp` serves (charter Decision 10 + 11)
 
   `bp` is the OPERATOR's tool, not the submitter's. `GET /v1/capabilities`
   projects tier `none` for a `bptk_…` bearer, so a key-holder who points `bp` at
@@ -44,12 +47,16 @@ defmodule Barkpark.Plugins.Tickets.CLI do
   curl commands on the mint handoff card (Decision 6), never a `bp` install. An
   operator's full bearer token projects the `read` tier, so the operator is who
   these verbs render for — `inbox`/`show` triage the queue (on the
-  `/v1/tickets/inbox*` operator routes), `answer`/`close` move a ticket. The
-  submitter-side verbs (`ls`/`file`/`reply`) still ride the manifest for shape
-  completeness and to document the curl surface, but a `bptk_…` credential
-  reaches their `:ticket_key` routes only through raw curl — exactly as the
-  handoff card shows, and an operator's bearer is rejected there by
-  `RequireTicketKey`.
+  `/v1/tickets/inbox*` operator routes), `answer`/`close` move a ticket.
+
+  The submitter-side verbs (`ls`/`file`/`reply`) are NOT advertised here (charter
+  Decision 11 — manifest honesty). They were dead for every possible `bp`
+  credential: their `:ticket_key` routes 401 every operator bearer (via
+  `RequireTicketKey`), and the only credential they accept — a `bptk_…` key —
+  projects tier `none`, so a key-holder never saw them either. A verb no `bp`
+  credential can run has no place in the manifest. The HTTP routes stay untouched:
+  the submitter reaches them through the handoff card's raw curl, exactly as
+  api-v1.md §8a documents.
 
   ## The 2-minute handoff card (charter Decision 6)
 
@@ -96,24 +103,6 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         scoped_prefix: nil
       },
       %{
-        id: "ticket.ls",
-        noun: "ticket",
-        verb: "ls",
-        summary: "List the tickets this key has filed (key-holder's own threads).",
-        http: %{method: "GET", path_template: "/v1/tickets"},
-        auth_tier: "read",
-        args: [],
-        flags: [
-          %{name: "limit", type: "int", summary: "Max tickets to return.", default: 50}
-        ],
-        writes: false,
-        batch: false,
-        paginated: true,
-        dry_run: false,
-        default_output: "table",
-        scoped_prefix: nil
-      },
-      %{
         id: "ticket.show",
         noun: "ticket",
         verb: "show",
@@ -129,45 +118,6 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         paginated: false,
         dry_run: false,
         default_output: "table",
-        scoped_prefix: nil
-      },
-      %{
-        id: "ticket.file",
-        noun: "ticket",
-        verb: "file",
-        summary: "File a new ticket (request/question). Runs with a ticket key.",
-        http: %{method: "POST", path_template: "/v1/tickets"},
-        auth_tier: "read",
-        args: [
-          %{name: "subject", required: true, type: "string", summary: "One-line subject."},
-          %{name: "body", required: true, type: "string", summary: "Ticket body / question."}
-        ],
-        flags: [],
-        writes: true,
-        batch: false,
-        paginated: false,
-        dry_run: false,
-        default_output: "minimal",
-        scoped_prefix: nil
-      },
-      %{
-        id: "ticket.reply",
-        noun: "ticket",
-        verb: "reply",
-        summary:
-          "Append a message to a ticket thread. A key-holder reply auto-reopens an answered ticket.",
-        http: %{method: "POST", path_template: "/v1/tickets/:id/messages"},
-        auth_tier: "read",
-        args: [
-          %{name: "id", required: true, type: "string", summary: "Ticket id."},
-          %{name: "body", required: true, type: "string", summary: "Message body."}
-        ],
-        flags: [],
-        writes: true,
-        batch: false,
-        paginated: false,
-        dry_run: false,
-        default_output: "minimal",
         scoped_prefix: nil
       },
       %{

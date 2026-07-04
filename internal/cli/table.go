@@ -60,12 +60,12 @@ func renderTable(out *writer, payload []byte) {
 // valid output, zero information. Add a list command's envelope key here
 // whenever its default_output is "table".
 //
-// The tickets plugin's list verbs — ticket.inbox (operator triage) and
-// ticket.ls (a key's own threads) — both carry their rows under "tickets", and
-// ticket-key.ls carries its named credentials under "keys"; without them those
-// tables collapse into a single crammed cell. ("keys" is safe to claim: the only
-// other "keys" payload, the sites env-set receipt, goes through emitStructured
-// and never reaches this renderer.)
+// The tickets plugin's operator list verb — ticket.inbox (triage) — carries its
+// rows under "tickets" (the submitter's own-threads list is curl-only, not a bp
+// verb; charter Decision 11), and ticket-key.ls carries its named credentials
+// under "keys"; without them those tables collapse into a single crammed cell.
+// ("keys" is safe to claim: the only other "keys" payload, the sites env-set
+// receipt, goes through emitStructured and never reaches this renderer.)
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "revisions",
 	"workspaces", "projects", "schemas", "webhooks", "plugins", "shares", "secrets",
