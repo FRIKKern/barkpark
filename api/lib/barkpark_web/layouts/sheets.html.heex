@@ -91,6 +91,11 @@
     .btn-ghost { border-color: transparent; color: var(--fg-dim, var(--fg)); }
     .btn-ghost:hover { background: var(--bg-alt); color: var(--fg); }
     .btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+    /* The filter panel's Apply. Accent-on-paper both ways: the dark-red light
+       accent carries near-white ink, the lighter dark-mode accent carries
+       near-black — var(--paper-bg) is the right ink in both schemes. */
+    .btn-primary { background: var(--paper-accent); border-color: var(--paper-accent); color: var(--paper-bg); }
+    .btn-primary:hover { background: var(--paper-accent); filter: brightness(1.12); }
     /* Transient per-op rejection alert (role="alert"): the amber notice band,
        ported from root.html.heex. The parchment base is LIGHT, so the dark
        amber leads and prefers-color-scheme swaps in the light-on-dark pair
@@ -244,6 +249,10 @@
          thead stays a table-header-group so column letters repeat per page. */
       .sheet-corner, .sheet-colhead { position: static; }
       .bp-sheet-byline { display: none; }
+      /* Screen-only filter chrome: an ACTIVE funnel is opacity-1 and would
+         otherwise print as a glyph in the header; an open panel would overlap
+         cells. The filtered VIEW itself prints (hidden rows aren't in the DOM). */
+      .sheet-filter-funnel, .sheet-popover { display: none; }
     }
 
     /* ── Mobile: reclaim horizontal padding, unclip the grid height ────────── */

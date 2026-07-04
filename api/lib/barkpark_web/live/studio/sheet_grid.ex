@@ -803,11 +803,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
     socket =
       if r1 <= row_lo and r2 >= row_hi do
-        # Whole-column: the used data rect, keyed by the active column clamped
-        # into the occupied columns (SF-AM2a).
-        uc = max(socket.assigns.used_cols, 1)
+        # Whole-column: the used data rect, keyed by the ACTIVE column
+        # (SF-AM2a). The rect WIDENS to include an active column beyond the
+        # used data (a head-click on an empty rendered column): the blank key
+        # ranks every row :eq, so the stable sort is the identity — a true
+        # no-op (Excel semantics) instead of silently re-keying on the last
+        # occupied column, which would reorder data by a column the user
+        # never picked.
+        uc = max(socket.assigns.used_cols, active_col)
         ur = max(socket.assigns.used_rows, 1)
-        dispatch_sort(socket, 1, top, uc, ur, clamp_col(active_col, 1, uc) - 1, dir)
+        dispatch_sort(socket, 1, top, uc, ur, active_col - 1, dir)
       else
         # In place: the selection rect, r1 clamped below the frozen band, keyed
         # by the active column clamped into the rect (SF-AM2b).
@@ -831,9 +836,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     # Reuse head-click's whole-column {active, anchor} so the selection shows.
     socket = assign(socket, active: {c, row_lo}, anchor: {c, row_hi}, editing: nil, menu: nil)
 
-    uc = max(socket.assigns.used_cols, 1)
+    # Same rect-widening as sort-selection: a menu sort on an empty rendered
+    # column keys on that blank column → identity → true no-op, never a
+    # silent re-key onto the last occupied column.
+    uc = max(socket.assigns.used_cols, c)
     ur = max(socket.assigns.used_rows, 1)
-    socket = dispatch_sort(socket, 1, frozen_top(socket), uc, ur, clamp_col(c, 1, uc) - 1, dir)
+    socket = dispatch_sort(socket, 1, frozen_top(socket), uc, ur, c - 1, dir)
     {:noreply, socket}
   end
 
@@ -3062,70 +3070,70 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <button
               type="button"
               class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
-                phx-click="filter-open"
-                phx-value-col={c}
-                phx-target={@myself}
-                aria-haspopup="dialog"
-                aria-expanded={to_string(@filter_panel != nil and @filter_panel["col"] == c)}
-                aria-label={
-                  "Filter column " <>
-                    Geometry.col_letters(c) <>
-                    if(Map.has_key?(@filters, c),
-                      do: " (active: " <> filter_summary(@filters[c]) <> ")",
-                      else: ""
-                    )
-                }
-                title="Filter this column"
-                data-active={to_string(Map.has_key?(@filters, c))}
-                data-test-id={"sheet-filter-funnel-#{c}"}
-              ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
+              phx-click="filter-open"
+              phx-value-col={c}
+              phx-target={@myself}
+              aria-haspopup="dialog"
+              aria-expanded={to_string(@filter_panel != nil and @filter_panel["col"] == c)}
+              aria-label={
+                "Filter column " <>
+                  Geometry.col_letters(c) <>
+                  if(Map.has_key?(@filters, c),
+                    do: " (active: " <> filter_summary(@filters[c]) <> ")",
+                    else: ""
+                  )
+              }
+              title="Filter this column"
+              data-active={to_string(Map.has_key?(@filters, c))}
+              data-test-id={"sheet-filter-funnel-#{c}"}
+            ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
 
-              <div
-                :if={@filter_panel && @filter_panel["col"] == c}
-                class="sheet-popover sheet-filter-panel"
-                role="dialog"
-                aria-label={"Filter column " <> Geometry.col_letters(c)}
-                phx-window-keydown="filter-close"
-                phx-key="Escape"
-                phx-target={@myself}
-                data-test-id="sheet-filter-panel"
-              >
-                <div class="sheet-filter-head">
-                  <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
-                  <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
-                </div>
-                <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
-                  <input type="hidden" name="col" value={c} />
-                  <label class="sheet-filter-field">
-                    <span>Show rows where</span>
-                    <select name="op" data-test-id="sheet-filter-op">
-                      <option value="nonblank" selected={@filter_panel["op"] == "nonblank"}>is not empty</option>
-                      <option value="blank" selected={@filter_panel["op"] == "blank"}>is empty</option>
-                      <option value="eq" selected={@filter_panel["op"] == "eq"}>is equal to</option>
-                      <option value="gt" selected={@filter_panel["op"] == "gt"}>is greater than</option>
-                      <option value="lt" selected={@filter_panel["op"] == "lt"}>is less than</option>
-                      <option value="between" selected={@filter_panel["op"] == "between"}>is between</option>
-                      <option value="contains" selected={@filter_panel["op"] == "contains"}>contains</option>
-                    </select>
-                  </label>
-                  <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
-                    <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
-                    <input type="text" name="value" value={@filter_panel["value"]} inputmode={if @filter_panel["op"] in ["gt", "lt", "between"], do: "decimal"} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
-                  </label>
-                  <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
-                    <span>max</span>
-                    <input type="text" name="value2" value={@filter_panel["value2"]} inputmode="decimal" autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
-                  </label>
-                  <%!-- A vacuous criterion (no number / no value) is refused with
-                        the reason inline — applying it would silently hide every
-                        data row (see filter-apply). Cleared on any form change. --%>
-                  <p :if={@filter_panel["error"]} class="sheet-filter-error" role="alert" data-test-id="sheet-filter-error"><%= @filter_panel["error"] %></p>
-                  <div class="sheet-filter-actions">
-                    <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear">Clear</button>
-                    <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply">Apply</button>
-                  </div>
-                </form>
+            <div
+              :if={@filter_panel && @filter_panel["col"] == c}
+              class="sheet-popover sheet-filter-panel"
+              role="dialog"
+              aria-label={"Filter column " <> Geometry.col_letters(c)}
+              phx-window-keydown="filter-close"
+              phx-key="Escape"
+              phx-target={@myself}
+              data-test-id="sheet-filter-panel"
+            >
+              <div class="sheet-filter-head">
+                <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
               </div>
+              <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+                <input type="hidden" name="col" value={c} />
+                <label class="sheet-filter-field">
+                  <span>Show rows where</span>
+                  <select name="op" data-test-id="sheet-filter-op">
+                    <option value="nonblank" selected={@filter_panel["op"] == "nonblank"}>is not empty</option>
+                    <option value="blank" selected={@filter_panel["op"] == "blank"}>is empty</option>
+                    <option value="eq" selected={@filter_panel["op"] == "eq"}>is equal to</option>
+                    <option value="gt" selected={@filter_panel["op"] == "gt"}>is greater than</option>
+                    <option value="lt" selected={@filter_panel["op"] == "lt"}>is less than</option>
+                    <option value="between" selected={@filter_panel["op"] == "between"}>is between</option>
+                    <option value="contains" selected={@filter_panel["op"] == "contains"}>contains</option>
+                  </select>
+                </label>
+                <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
+                  <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
+                  <input type="text" name="value" value={@filter_panel["value"]} inputmode={if @filter_panel["op"] in ["gt", "lt", "between"], do: "decimal"} autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value" />
+                </label>
+                <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
+                  <span>max</span>
+                  <input type="text" name="value2" value={@filter_panel["value2"]} inputmode="decimal" autocomplete="off" spellcheck="false" data-test-id="sheet-filter-value2" />
+                </label>
+                <%!-- A vacuous criterion (no number / no value) is refused with
+                      the reason inline — applying it would silently hide every
+                      data row (see filter-apply). Cleared on any form change. --%>
+                <p :if={@filter_panel["error"]} class="sheet-filter-error" role="alert" data-test-id="sheet-filter-error"><%= @filter_panel["error"] %></p>
+                <div class="sheet-filter-actions">
+                  <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear">Clear</button>
+                  <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply">Apply</button>
+                </div>
+              </form>
+            </div>
             <%!-- Column resize is an EDIT affordance — back inside @editable. --%>
             <%= if @editable do %>
               <div class="sheet-rsz sheet-rsz--col" data-kind="col" data-index={c} data-px={Geometry.col_px(@col_widths, c)}></div>

@@ -332,4 +332,49 @@ defmodule BarkparkWeb.Studio.SheetGrid.SortToolbarTest do
     # …and column B is now selected (active cell B1) so the user sees B:B.
     assert namebox(view) =~ ~s(value="B1")
   end
+
+  # ── EMPTY KEY COLUMN — identity, never a silent re-key ───────────────────────
+
+  test "sorting by an empty rendered column is a true no-op — never a silent re-key",
+       %{conn: conn} do
+    # Data lives in A:B (used_cols = 2); the grid renders ≥ 8 columns, so
+    # column E is a real, clickable header with NO data. Keying the sort on it
+    # must NOT fall back to the last occupied column (that would reorder the
+    # user's data by a column they never picked — B here is deliberately in a
+    # DIFFERENT order than A, so a re-key would show): the rect widens to
+    # include the blank key column, every row ranks equal, and the stable sort
+    # is the identity — Excel's semantics, no notice, nothing dirty.
+    create_sheet!(
+      "st-emptykey",
+      one_tab(%{
+        "A1" => %{"v" => 3},
+        "B1" => %{"v" => "c"},
+        "A2" => %{"v" => 1},
+        "B2" => %{"v" => "a"},
+        "A3" => %{"v" => 2},
+        "B3" => %{"v" => "b"}
+      })
+    )
+
+    {view, target, _html} = open!(conn, "st-emptykey")
+
+    # Both wires: the column ▾ menu item on E…
+    html = render_hook(target, "sort-column", %{"col" => "5", "dir" => "asc"})
+    refute html =~ "rejected"
+
+    # …and the head-click + toolbar path keyed by the empty active column.
+    select_column!(target, 5)
+    html = view |> element(~s([data-test-id="sheet-sort-asc"])) |> render_click()
+    refute html =~ "rejected"
+
+    # Byte-identical cells: nothing moved on either path.
+    assert %{
+             "A1" => %{"v" => 3},
+             "B1" => %{"v" => "c"},
+             "A2" => %{"v" => 1},
+             "B2" => %{"v" => "a"},
+             "A3" => %{"v" => 2},
+             "B3" => %{"v" => "b"}
+           } = peek_cells("st-emptykey")
+  end
 end
