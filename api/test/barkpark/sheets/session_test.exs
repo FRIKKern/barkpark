@@ -17,6 +17,7 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
 
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
+  alias Barkpark.Plugins.Sheets.Session.Ops
 
   @dataset "sheets_m1_session_test"
 
@@ -1407,5 +1408,173 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       {:ok, %{applied: 0, errors: [%{code: "invalid_range"}]}} =
         Session.apply_ops("sort-badrange", @dataset, [sort_op("banana", [asc(0)])])
     end
+  end
+
+  # ── cross-tab references (X3 / wave-1) ──────────────────────────────────────
+  #
+  # X3 owns the SESSION half of cross-tab: the precedent index, cross-tab dirty
+  # propagation, the whole-doc recompute path, and the lossless multi-tab rename
+  # undo. The ENGINE half (actually resolving `Sheet2!A1` to a value / a cycle)
+  # is X1 and is gated in engine_test — so these locks assert the session
+  # PROPAGATION (which tab is dirtied + which delta is broadcast + the undo
+  # capture), which is correct BEFORE X1 lands and only gets stronger after.
+  describe "cross-tab references (X3)" do
+    test "build_cross_tab_index maps target tab -> dependent tabs (by name; self-refs excluded)" do
+      content = %{
+        "tabs" => [
+          # Sheet1 (0) reads Sheet2 and 'My Sheet'
+          ct_tab("Sheet1", %{
+            "A1" => %{"f" => "Sheet2!A1"},
+            "B1" => %{"f" => "SUM('My Sheet'!A1:B5)"},
+            "C1" => %{"f" => "Sheet1!A1"}
+          }),
+          ct_tab("Sheet2", %{"A1" => %{"v" => 5}}),
+          ct_tab("My Sheet", %{"A1" => %{"v" => 1}})
+        ]
+      }
+
+      index = Ops.build_cross_tab_index(content)
+
+      # Sheet2 (1) and 'My Sheet' (2) each have Sheet1 (0) as a dependent.
+      assert Map.get(index, 1) == MapSet.new([0])
+      assert Map.get(index, 2) == MapSet.new([0])
+      # A same-tab self-name-ref (Sheet1!A1 inside Sheet1) is NOT an edge —
+      # it stays on the per-tab fast path.
+      refute Map.has_key?(index, 0)
+      # An unknown tab name adds no edge.
+      assert Ops.build_cross_tab_index(%{
+               "tabs" => [ct_tab("Sheet1", %{"A1" => %{"f" => "Ghost!A1"}})]
+             }) == %{}
+    end
+
+    test "editing a referenced tab dirties + broadcasts the dependent tab's delta" do
+      doc =
+        create_multi_tab("ct-prop", [
+          ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
+          ct_tab("Sheet2", %{"A1" => %{"v" => 5}})
+        ])
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic("ct-prop", @dataset, doc.workspace_id))
+
+      # Edit Sheet2!A1 (tab 1). Sheet1 (tab 0) references it by name, so the
+      # session must dirty AND broadcast tab 0 too — the founding "other tabs
+      # can't change" assumption is broken.
+      {:ok, %{rev: 1}} =
+        Session.apply_ops("ct-prop", @dataset, [set_cell("A1", 6, 1)])
+
+      assert_receive {:sheets_op, %{tab: 1, changed: %{"A1" => %{"v" => 6}}}}, 1_000
+      # The dependent tab's delta is the load-bearing assertion (the value it
+      # carries becomes non-empty once X1's cross-tab eval lands).
+      assert_receive {:sheets_op, %{tab: 0}}, 1_000
+    end
+
+    test "a zero-cross-tab edit keeps the per-tab fast path; a cross-tab edit goes whole-doc" do
+      attach_recompute_counter()
+
+      # (a) No cross-tab ref anywhere: editing a formula tab takes the per-tab
+      # path, whose `recompute_tab/1` telemetry fires.
+      create_multi_tab("ct-fast", [
+        ct_tab("Sheet1", %{"A1" => %{"v" => 1}, "B1" => %{"f" => "A1*2"}}),
+        ct_tab("Sheet2", %{"A1" => %{"v" => 9}})
+      ])
+
+      {:ok, %{rev: 1}} = Session.apply_ops("ct-fast", @dataset, [set_cell("A1", 5, 0)])
+      assert drain_recompute_count() >= 1
+
+      # (b) With a cross-tab ref, editing the referenced tab takes the WHOLE-DOC
+      # path — one unified `Engine.recompute/1`, so the per-tab `recompute_tab/1`
+      # telemetry does NOT fire.
+      create_multi_tab("ct-whole", [
+        ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
+        ct_tab("Sheet2", %{"A1" => %{"v" => 5}})
+      ])
+
+      {:ok, %{rev: 1}} = Session.apply_ops("ct-whole", @dataset, [set_cell("A1", 6, 1)])
+      assert drain_recompute_count() == 0
+    end
+
+    test "rename_tab undo restores the cross-tab refs it rewrote, losslessly" do
+      create_multi_tab("ct-rename", [
+        ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
+        ct_tab("Sheet2", %{"A1" => %{"v" => 5}})
+      ])
+
+      # Rename Sheet2 -> Data (the op X2's Structure.rename_refs sweep rides).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("ct-rename", @dataset, [
+          %{"op" => "rename_tab", "tab" => 1, "name" => "Data", "user" => "u1"}
+        ])
+
+      assert Enum.at(tab_names("ct-rename"), 1) == "Data"
+
+      # Simulate X2's sweep having rewritten the dependent ref (an ANONYMOUS op
+      # — no undo entry — so u1's stack still has only the rename). Without this
+      # the guarded seam is a no-op on origin/main; the point is that the undo
+      # CAPTURE restores the prior ref no matter what the sweep did.
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("ct-rename", @dataset, [set_cell("A1", "=Data!A1", 0)])
+
+      assert cross_tab_formula("ct-rename", 0, "A1") == "Data!A1"
+
+      # Undo the rename: it must rename back AND restore Sheet1!A1's PRIOR
+      # formula (`Sheet2!A1`) — the named silent-corruption hazard (design §6).
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("ct-rename", @dataset, [%{"op" => "undo", "user" => "u1"}])
+
+      assert Enum.at(tab_names("ct-rename"), 1) == "Sheet2"
+      assert cross_tab_formula("ct-rename", 0, "A1") == "Sheet2!A1"
+
+      # Redo re-applies both the rename and the rewritten ref (redo re-captures
+      # the current cells) — undo/redo are the same machine run either way.
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("ct-rename", @dataset, [%{"op" => "redo", "user" => "u1"}])
+
+      assert Enum.at(tab_names("ct-rename"), 1) == "Data"
+      assert cross_tab_formula("ct-rename", 0, "A1") == "Data!A1"
+    end
+
+    test "move_tab is a cross-tab ref no-op (names are position-stable)" do
+      create_multi_tab("ct-move", [
+        ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
+        ct_tab("Sheet2", %{"A1" => %{"v" => 5}}),
+        ct_tab("Sheet3", %{"A1" => %{"v" => 9}})
+      ])
+
+      # Move Sheet3 to the front: tabs become [Sheet3, Sheet1, Sheet2].
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("ct-move", @dataset, [%{"op" => "move_tab", "from" => 2, "to" => 0}])
+
+      assert tab_names("ct-move") == ["Sheet3", "Sheet1", "Sheet2"]
+      # Sheet1's formula text is UNCHANGED — a name-based ref does not rewrite on
+      # reorder (design decision 1 / §3.2). Sheet1 now sits at index 1.
+      assert cross_tab_formula("ct-move", 1, "A1") == "Sheet2!A1"
+    end
+
+    test "the replay ring still dedups a cross-tab batch to one rev" do
+      create_multi_tab("ct-ring", [
+        ct_tab("Sheet1", %{"A1" => %{"f" => "Sheet2!A1"}}),
+        ct_tab("Sheet2", %{"A1" => %{"v" => 5}})
+      ])
+
+      {:ok, first} =
+        Session.apply_ops("ct-ring", @dataset, [set_cell("A1", 6, 1)], "req-ct-1")
+
+      refute Map.get(first, :replayed)
+
+      {:ok, second} =
+        Session.apply_ops("ct-ring", @dataset, [set_cell("A1", 6, 1)], "req-ct-1")
+
+      assert second.replayed == true
+      # Exactly-once: the retry replays the cached reply and applies nothing, so
+      # the rev is unchanged — a cross-tab batch dedups like any other.
+      assert second.rev == first.rev
+    end
+  end
+
+  defp ct_tab(name, cells), do: %{"name" => name, "cells" => cells}
+
+  defp cross_tab_formula(slug, tab, ref) do
+    {:ok, content} = Session.peek(slug, @dataset)
+    get_in(content, ["tabs", Access.at(tab), "cells", ref, "f"])
   end
 end

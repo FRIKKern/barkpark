@@ -153,7 +153,10 @@ defmodule Barkpark.Plugins.Sheets.Session do
   entries drop): `set_cell`/`clear_cell` store the prior cell map; `insert_*` store
   the matching `delete_*`; `delete_*` store the matching `insert_*` PLUS the
   deleted span's captured cells; `set_col_width`/`set_row_height` store the
-  prior px; `set_frozen` the prior bands; `rename_tab` the prior name; `add_tab` its `delete_tab`;
+  prior px; `set_frozen` the prior bands; `rename_tab` the prior name — PLUS, when the
+  rename rewrote cross-tab refs in other tabs, a multi-tab capture of their
+  pre-rewrite cells so undo restores every rewritten ref losslessly (the
+  `{:rename_restore, …}` inverse, design §6); `add_tab` its `delete_tab`;
   `delete_tab` the captured tab; `move_tab`/`duplicate_tab` their inverse
   (a mirrored `move_tab` / a `delete_tab` of the inserted slot);
   `set_cond_format` the prior `cond_formats` list (a structural set_cond_format);
@@ -189,10 +192,17 @@ defmodule Barkpark.Plugins.Sheets.Session do
   ## Recompute + delta broadcast
 
   The session recomputes each touched tab through
-  `Barkpark.Plugins.Sheets.Engine` (formulas are tab-local, so other tabs cannot
-  change; tabs holding NO formula cell skip the engine entirely — a
-  per-tab formula count keeps the common bulk-import case O(1) per op,
-  since a full recompute measures ~70–90ms at the 50_000-cell cap). Within
+  `Barkpark.Plugins.Sheets.Engine`. Formulas are USUALLY tab-local — a tab
+  holding NO formula cell skips the engine entirely (a per-tab formula count
+  keeps the common bulk-import case O(1) per op; a full recompute measures
+  ~70–90ms at the 50_000-cell cap). CROSS-TAB refs (wave-1: `=Sheet2!A1`)
+  BREAK the tab-local assumption: an edit to tab `j` must recompute every tab
+  whose formula reads `j` by name. A tab-granular precedent index
+  (`cross_tab_index`, see `Ops.build_cross_tab_index/1`) marks those dependent
+  tabs dirty; when any dirty tab participates in a cross-tab dependency
+  `Ops.flush_pending/1` recomputes the WHOLE document in ONE `Engine.recompute/1`
+  pass (CT-D4) and broadcasts one per-tab delta for each dirty tab. A document
+  with NO cross-tab ref keeps the per-tab fast path byte-for-byte. Within
   an `apply_ops` batch the cell ops (`set_cell`/`clear_cell`/`set_cell_meta`)
   COALESCE: each writes its raw cell immediately but defers the recompute
   and the delta to a single per-tab flush at the batch boundary (and before
@@ -485,6 +495,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
            idle_timer: nil,
            nonempty: Ops.count_nonempty(content),
            formula_counts: Ops.count_formulas(content),
+           # Cross-tab precedent index (CT / wave-1):
+           # %{target_tab_idx => MapSet(dependent_tab_idx)} — "tab d references
+           # tab t by name". Drives cross-tab dirty propagation + the whole-doc
+           # recompute path in `Ops.flush_pending/1`; rebuilt on every settled
+           # formula/layout change. See `Ops.build_cross_tab_index/1`.
+           cross_tab_index: Ops.build_cross_tab_index(content),
            undo: %{},
            redo: %{},
            cfg: config()
