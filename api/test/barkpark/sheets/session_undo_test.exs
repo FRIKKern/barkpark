@@ -805,4 +805,70 @@ defmodule Barkpark.Plugins.Sheets.SessionUndoTest do
   end
 
   defp tab_names(slug), do: Enum.map(peek_all_tabs(slug), & &1["name"])
+
+  # ── sort_range: {:permute, …} inverse (SF-D6) ───────────────────────────────
+
+  test "sort_range undo restores the EXACT prior row order; redo re-sorts" do
+    # Plain value cells (no formulas → no recompute), so the pre-sort map is
+    # exactly what was created.
+    original = %{"A1" => %{"v" => 3}, "A2" => %{"v" => 1}, "A3" => %{"v" => 2}}
+    create_sheet("u-sort", original)
+
+    sort = %{
+      "op" => "sort_range",
+      "tab" => 0,
+      "range" => "A1:A3",
+      "keys" => [%{"col" => 0, "dir" => "asc"}],
+      "user" => "u"
+    }
+
+    %{applied: 1, errors: []} = apply!("u-sort", [sort])
+
+    assert peek_cells("u-sort") == %{
+             "A1" => %{"v" => 1},
+             "A2" => %{"v" => 2},
+             "A3" => %{"v" => 3}
+           }
+
+    # Undo re-applies the EXACT inverse permutation — byte-identical to the
+    # pre-sort cells (verbatim moves both ways, loss-free).
+    %{applied: 1, errors: []} = apply!("u-sort", [undo("u")])
+    assert peek_cells("u-sort") == original
+
+    # Redo re-sorts to the post-op order.
+    %{applied: 1, errors: []} = apply!("u-sort", [redo("u")])
+
+    assert peek_cells("u-sort") == %{
+             "A1" => %{"v" => 1},
+             "A2" => %{"v" => 2},
+             "A3" => %{"v" => 3}
+           }
+  end
+
+  test "sort_range undo survives a later tab delete (remap_entry clause)" do
+    # Two tabs; sort tab 1, then delete tab 0 — the pending sort undo entry
+    # must remap its absolute tab index (or undo crashes, the #843 contract).
+    create_tabs("u-sort-remap", ["T0", "T1"])
+
+    %{applied: 2, errors: []} =
+      apply!("u-sort-remap", [set_cell_on(1, "A1", 2, "u"), set_cell_on(1, "A2", 1, "u")])
+
+    sort = %{
+      "op" => "sort_range",
+      "tab" => 1,
+      "range" => "A1:A2",
+      "keys" => [%{"col" => 0, "dir" => "asc"}],
+      "user" => "u"
+    }
+
+    %{applied: 1, errors: []} = apply!("u-sort-remap", [sort])
+    assert peek_cells("u-sort-remap", 1) == %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}}
+
+    # Delete tab 0: the sorted tab is now index 0; the sort undo entry remaps.
+    %{applied: 1, errors: []} = apply!("u-sort-remap", [delete_tab(0, "someone-else")])
+
+    # Undo the sort on its new index — no crash, exact prior order restored.
+    %{applied: 1, errors: []} = apply!("u-sort-remap", [undo("u")])
+    assert peek_cells("u-sort-remap", 0) == %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}}
+  end
 end

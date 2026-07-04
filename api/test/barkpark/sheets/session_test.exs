@@ -1313,4 +1313,99 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert epoch2 != epoch1
     end
   end
+
+  # ── sort_range op (SF-A) ────────────────────────────────────────────────────
+
+  describe "sort_range op" do
+    defp sort_op(range, keys, extra \\ %{}),
+      do: Map.merge(%{"op" => "sort_range", "tab" => 0, "range" => range, "keys" => keys}, extra)
+
+    defp asc(col), do: %{"col" => col, "dir" => "asc"}
+
+    test "reorders rows and RECOMPUTES verbatim-moved formulas" do
+      # Each B references its own row's A; sorting A:B moves the formula strings
+      # verbatim (=A2 stays =A2) but the recompute refreshes their values.
+      create_sheet("sort-recompute", %{
+        "A1" => %{"v" => 3},
+        "B1" => %{"f" => "A1"},
+        "A2" => %{"v" => 1},
+        "B2" => %{"f" => "A2"},
+        "A3" => %{"v" => 2},
+        "B3" => %{"f" => "A3"}
+      })
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("sort-recompute", @dataset, [sort_op("A1:B3", [asc(0)])])
+
+      # A sorted ascending.
+      assert peek_cell("sort-recompute", "A1")["v"] == 1
+      assert peek_cell("sort-recompute", "A2")["v"] == 2
+      assert peek_cell("sort-recompute", "A3")["v"] == 3
+
+      # The formula strings rode along VERBATIM (old row 2 → new row 1, etc.)
+      # while the recompute settled their values against the NEW neighbours.
+      assert peek_cell("sort-recompute", "B1")["f"] == "A2"
+      assert peek_cell("sort-recompute", "B1")["v"] == 2
+      assert peek_cell("sort-recompute", "B3")["f"] == "A1"
+      assert peek_cell("sort-recompute", "B3")["v"] == 1
+    end
+
+    test "an already-sorted range is a no-op — no rev bump, no undo entry" do
+      create_sheet("sort-noop", %{"A1" => %{"v" => 1}, "A2" => %{"v" => 2}, "A3" => %{"v" => 3}})
+
+      # A real op first so we have a known rev to compare against.
+      {:ok, %{rev: rev1}} = Session.apply_ops("sort-noop", @dataset, [set_cell("D1", "x")])
+
+      {:ok, %{applied: 1, errors: [], rev: rev2}} =
+        Session.apply_ops("sort-noop", @dataset, [
+          sort_op("A1:A3", [asc(0)], %{"user" => "u"})
+        ])
+
+      # Applied (not an error) but the identity permutation bumped nothing.
+      assert rev2 == rev1
+
+      # …and recorded NO undo entry, so the user's stack is empty.
+      {:ok, %{applied: 0, errors: [%{code: "nothing_to_undo"}]}} =
+        Session.apply_ops("sort-noop", @dataset, [%{"op" => "undo", "user" => "u"}])
+    end
+
+    test "a merge intersecting the range refuses with sort_merge_overlap" do
+      create_sheet("sort-merge", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      {:ok, %{applied: 1}} =
+        Session.apply_ops("sort-merge", @dataset, [
+          %{"op" => "merge_cells", "tab" => 0, "range" => "A1:B2"}
+        ])
+
+      {:ok, %{applied: 0, errors: [%{code: "sort_merge_overlap"}]}} =
+        Session.apply_ops("sort-merge", @dataset, [sort_op("A1:C3", [asc(0)])])
+    end
+
+    test "malformed keys refuse with invalid_sort_keys" do
+      create_sheet("sort-keys", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      {:ok, %{applied: 0, errors: [%{code: "invalid_sort_keys"}]}} =
+        Session.apply_ops("sort-keys", @dataset, [
+          sort_op("A1:A2", [%{"col" => 0, "dir" => "up"}])
+        ])
+    end
+
+    test "a range past the grid bounds refuses with sort_out_of_bounds" do
+      create_sheet("sort-bounds", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      # Row 1_048_577 is one past the Excel grid; column XFE one past XFD.
+      {:ok, %{applied: 0, errors: [%{code: "sort_out_of_bounds"}]}} =
+        Session.apply_ops("sort-bounds", @dataset, [sort_op("A1:A1048577", [asc(0)])])
+
+      {:ok, %{applied: 0, errors: [%{code: "sort_out_of_bounds"}]}} =
+        Session.apply_ops("sort-bounds", @dataset, [sort_op("A1:XFE2", [asc(0)])])
+    end
+
+    test "a non-range string refuses with invalid_range" do
+      create_sheet("sort-badrange", %{"A1" => %{"v" => 2}, "A2" => %{"v" => 1}})
+
+      {:ok, %{applied: 0, errors: [%{code: "invalid_range"}]}} =
+        Session.apply_ops("sort-badrange", @dataset, [sort_op("banana", [asc(0)])])
+    end
+  end
 end
