@@ -1,6 +1,11 @@
 <!-- doc-tier: cold | canonical-for: doey-ui-lessons-for-bp-task-tui | budget: 9000tok -->
 # Doey task-UI lessons → Barkpark portrait task TUI
 
+> **Two parts.** Part 1 (below) = the pre-build brief that informed the epic — the task
+> card/list/detail surface. Part 2 (bottom, 2026-07-04, post-wave-6) = the fuller mine of the
+> nav shell, plan reader, and cross-cutting craft, with a retro-compare against what shipped and
+> a ranked borrowable backlog. Read Part 2 first if you're picking the next slice.
+
 Design brief extracted from the **Doey** TUI (Go + Bubble Tea/lipgloss, same stack Barkpark uses). READ-ONLY study — nothing in Doey was modified. All citations are `path:line` into `/Volumes/SATECHI/github/doey`.
 
 Doey's task UI is a **two-pane** layout: a left list panel (`renderLeftPanel`, `tui/internal/model/tasks.go:1213`) and a right detail panel (`renderRightPanel`, `:1282`) with a full `ExpandedCard` (`tui/internal/taskcard/taskcard.go:480`). Barkpark's constraint is **one portrait column** with inline expansion — so the lesson isn't "copy the layout," it's "steal the compression tricks, collapse the two panes into one inline-expand."
@@ -116,3 +121,120 @@ Doey opens detail in the **right pane** (Barkpark will do this **inline**). `Exp
 3. **Doey has tags but under-renders them** (detail-only, uniformly muted, closed-enum coloring). Barkpark's amendment must go further: **card-line chips + deterministic hash-to-color** for an open taxonomy — a primitive Doey lacks.
 4. **Recency temperature + honest truncation are the "instrument" feel:** age color-coded (`ActivityTimeBadge`), noise-filtered timelines, `Timeline (37 of 210)` / `… and N more`. Never silently drop. Extend the temperature into days for staleness.
 5. **Reuse the grouping seam, not the layout.** `groupChildrenUnderParents` + inline boundary headers is the mechanism for epics *and* derived clusters. But **collapse Doey's two panes into inline expand**, add **done/stale folding** (Doey's real gap), and **budget card height for a chip line** before you start.
+
+---
+
+# Part 2 — the fuller mine (2026-07-04, post-wave-6)
+
+Part 1 above studied ONE Doey surface (the task card/list/detail) to inform the epic. It was a
+pre-build brief. Part 2 mines the surfaces Part 1 skipped — the **navigation shell**, the **plan
+reader**, and **cross-cutting craft** — and retro-compares them against what Barkpark actually
+shipped (waves 5–6: calm board + detail + paper reader + `[]Frame` drill-down shell). All three
+were read-only studies of `/Volumes/SATECHI/github/doey` with `path:line` citations; the headline
+is that **Barkpark's shell and reader came out structurally AHEAD of both Doey shells**, so the
+borrowables are a short list of small robustness/ergonomics items, not a redesign.
+
+Doey has **two** shells that teach opposite lessons: `root.go` (a flat 9-tab deck — mostly
+anti-lessons for a portrait pane) and `planview`/`doey-masterplan-tui` (a single-surface
+focus-ring + overlay + live-reload cockpit — where the real robustness ideas live).
+
+## Where Barkpark is already AHEAD (do not regress)
+
+- **A real navigation STACK with a cycle guard + per-frame saved cursor** (`program.go:928-940`).
+  Neither Doey shell can express hierarchical descent — `root.go` is lateral tabs, `masterplan`
+  is one surface with focus rings. Barkpark's task→paper→its-tasks→child descent is net-new.
+- **Frame-kind dispatch** (one discriminant, `topFrame().Kind`) vs Doey's 9-arm `focusIndex`
+  switch *duplicated in five methods* (`root.go`) — a rename touches all five.
+- **Pure `View`/`Compose`** (byte-stable goldens) vs Doey's `SetSize`-inside-`View()` paint-time
+  mutation (`root.go:536-562`).
+- **Heartbeat aliveness BUDGET** (`program.go:342-381`): ticks only while `Alive()`, dead-still at
+  rest → at-rest goldens stable by construction. Doey ticks unconditionally every 1–2s forever.
+- **Hysteresis deadband** on the wide/narrow boundary (`compose.go:22-25`) — a tmux drag never
+  flaps. Doey's `ClassifyWidth` has hard thresholds.
+- **Cache-primed first paint + out-of-order-fetch guard + forward-only per-row merge**
+  (`program.go:246-256`, `live.go`) — never a blank frame, never a reverting row.
+- **ONE render engine shared with the product** (`pdrender` = the same stack Studio uses):
+  task prose, papers, and web Studio render identically. Doey's TUI uses **glamour**, a *different*
+  renderer from its product surface — so its TUI and product can drift. Structural win.
+- **Structured, bidirectional, draft-agnostic linkage** (`DrivenTasks`/`PaperRefs`/`ChildrenOf`
+  on `design_doc`/`papers[]`/`parent_id`). Doey scrapes `- [ ]` checkbox text + `<!-- task_id=N -->`
+  HTML comments out of prose (`plans.go:701-719`) — fragile. Never scrape prose for structure.
+- **LRU-capped render cache** (`paperCacheMax=32`) vs Doey's single-slot cache (re-renders on
+  every back-and-forth). **Honest truncation caps** ("… and N more") vs Doey's uncapped lists.
+
+## Where Doey is AHEAD — the actual borrowables (ranked backlog)
+
+1. **BUG — orphan fold-key eviction.** `UIState.CollapsedEpics` is written (`program.go:730/737/763`)
+   and **never pruned** (grep: zero delete sites — verified). In the leave-open-all-day pane it's
+   built for, the map accumulates dead keys as epics close / clusters churn. Fix = Doey's
+   `evictOrphanExpansions` (`masterplan main.go:128-144`): after each `applySnapshot`, drop every
+   key not in the live set. ~10 lines. **Smallest, clearest — do first.**
+2. **Scroll-position `NN%` on long docs.** Doey renders `viewport.ScrollPercent()` → "73%"
+   right-aligned (`plans.go:910`, `tasks.go:1975`). Barkpark's `readingFooter` shows `↑/↓ more`
+   booleans but no *how-far* sense (`compose.go:182,217`); `windowFrame` already has `top`/`len`/
+   `avail`. Few lines. Closes the one clean long-paper-reading gap.
+3. **Collapsible paper sections / heading-fold.** Doey's planview folds Goal/Context/Deliverables
+   to one-line summaries below a width breakpoint and offers a full-section overlay on enter
+   (`sections.go:120-167`). Barkpark renders the whole paper body flat — a 500-line design doc is a
+   wall of scroll. Fold `pdrender` blocks under a heading stop → a navigable outline. **Biggest
+   effort, biggest "read a long paper" payoff.**
+4. **Reading-content immutability during refetch.** Barkpark's pushed frames read live out of
+   `m.details`/`m.tasks` on *every paint* (`program.go:1006-1027`); a refetch mid-read can shift
+   the body under your eyes. Doey snapshots overlay content at open so live reloads can't disturb
+   it (`masterplan main.go:1164-1167`). Freeze a `FrameTask`'s body (or stops) at push, or
+   consciously decide live-update-while-reading is wanted + guard it.
+5. **Self-write echo suppression.** Doey marks a just-saved path for 200ms so its own mutation's
+   reflection doesn't jump the cursor (`live.go:148-185`). Barkpark fires an optimistic refetch
+   after claim/close; if the acted row changes band the cursor follows — worth the primitive if
+   testing shows a jump.
+6. **Rail rows show TITLE, not bare slug.** Papers rail renders `▸ <slug>` (`detail_render.go:643`);
+   Doey shows a 120-char abstract per research row (`live.go:403`). Show the paper title (cheap
+   snapshot lookup) — big scannability win.
+7. **Named layout-gate predicates.** Doey's breakpoints are named testable functions
+   (`ClassifyWidth`, `ResearchIndexLayout(mode)`); Barkpark's are inline constants in `Compose`.
+   Lift "show band X at width W" into named predicates as the pane grows conditional bands.
+
+## Cross-cutting CRAFT worth stealing (the "reads well vs renders" polish)
+
+- **Graded-grey token TIER, all colors adaptive light/dark.** Doey has THREE dims — `Subtle`
+  (timestamps/meta), `Muted` (secondary), `Separator` (rules) — and every color is
+  `AdaptiveColor{Light,Dark}` (`theme.go:22-23,108-120`). This tiering is *what makes*
+  "monochrome-dim, color only where it means something" actually legible. If Barkpark has a single
+  "dim," this is the highest-value token upgrade + it earns the pane a light-terminal.
+- **Zero-jitter focus: `HiddenBorder` (inactive) same footprint as `RoundedBorder` (active); focus
+  = border-COLOR shift, not a highlight block** (`borders.go:7-22`, `tasks.go:1285`). The single
+  biggest "reads well vs twitches" win for an all-day pane — selection never shifts layout a pixel.
+- **Progressive FADE for done/stale instead of hiding** (`CardStyleForHealth`/`CompletedCardStyle`,
+  `cards.go:797-849`): finished work gets Muted+Faint + a Separator border and optically recedes
+  while staying visible — the calm alternative to folding. Complements Barkpark's stale/done buckets.
+- **Empty state names the ONE next action with the keybind bolded inside the sentence** — "Press
+  **n** to create your first task" (`cards.go:280-285`). **Two-tier help**: persistent one-line
+  short strip → full overlay on `?` (`footer.go:71-86`). **Context-sensitive verbs inline** — show
+  only the acts legal for the selected task's status (`tasks.go:1982-2013`).
+- **Transient 2s action toast that evaporates** (set `statusMsg`, batch `tea.Tick(2s)` clear —
+  `tasks.go:26-31`) — feedback flashes then vanishes, no banner residue.
+- **Faint `│` block-quote column** for descriptions/criteria instead of a bordered box
+  (`cards.go:314-335`) — one dim column, not furniture.
+- **Doey ran its OWN subtraction** — `ThickSeparator`/`ThinSeparator` return `""` (`listframe.go:38`),
+  `StatusBadge` comment says "no background, no solid blocks" (`status.go:46`), header is
+  explicitly "no spinner" (`header.go:32`). Barkpark's calm pass is in good company; follow Doey's
+  *restraint*, not its leftover fill-badge/pill/banner functions (those are the anti-lessons).
+
+## Confirmed ANTI-lessons (Doey craft that fights the one-calm-view constraint)
+
+The horizontal **tab bar** (eats 2 vertical rows of the scarce axis; our one-line breadcrumb is the
+portrait analogue), **9-panel focus-cycling + number-key jumps** (no portrait analogue — we have a
+board + a descent stack), **keeping all sub-views alive+sized at once** (we lazily render frames
+from the in-hand index — correct), **`SetSize` inside `View()`**, background-filled **pill badges /
+phase banners / card grids / chat bubbles**, the **VT terminal emulator** (`emulator.go`, 634 lines,
+zero relevance), and **`[+]/[-]` toggle proliferation**. Barkpark already avoids all of these — the
+subtraction pass was the right call.
+
+## Bottom line
+
+The wish's depth (open a task, read its paper, descend into its tasks) is shipped and, on the
+things that matter structurally, ahead of the Doey exemplar. What remains from Doey is a **ranked
+backlog of small items** (above): one real bug (#1 orphan-key eviction), two long-doc reading
+ergonomics (#2 scroll-%, #3 section fold), two live-refresh robustness guards (#4/#5), a rail
+scannability tweak (#6), and a **craft/polish pass** (graded-grey tiers + zero-jitter focus +
+progressive fade + inline-keybind empty/help). None re-open the navigation spine — it's done.
