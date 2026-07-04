@@ -249,6 +249,40 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   @doc """
+  Render a `status-legend` block: the shared glyph/colour vocabulary key — the
+  six lifecycle states with their glyph and a one-line meaning. Static (the
+  vocabulary is the vocabulary); useful atop a plan so a reader learns the marks.
+  """
+  def status_legend_html(_block) do
+    states = [
+      {"open", "backlog — not ready yet"},
+      {"ready", "unchecked — claim it now"},
+      {"progress", "being worked right now"},
+      {"blocked", "something is required first"},
+      {"done", "complete"},
+      {"cancel", "abandoned or superseded"}
+    ]
+
+    names = %{
+      "open" => "open",
+      "ready" => "ready",
+      "progress" => "in&nbsp;progress",
+      "blocked" => "blocked",
+      "done" => "done",
+      "cancel" => "cancelled"
+    }
+
+    rows =
+      states
+      |> Enum.map(fn {role, meaning} ->
+        ~s|<div class="bp-legend__r">#{glyph_html(role)}<span class="bp-legend__n">#{Map.fetch!(names, role)}</span><span class="bp-legend__d">#{meaning}</span></div>|
+      end)
+      |> Enum.join("")
+
+    ~s|<div class="bp-legend">#{rows}</div>|
+  end
+
+  @doc """
   Render a `task-board` block: a kanban of the snapshot, one column per
   lifecycle bucket (ready · in_progress · blocked · done), each card carrying
   title · priority · criteria. Empty columns are omitted.

@@ -263,3 +263,15 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     assert html =~ "left:0%"
   end
 end
+
+defmodule Barkpark.PortableDoc.Render.ComponentsLegendTest do
+  use ExUnit.Case, async: true
+  alias Barkpark.PortableDoc.Render.Components
+
+  test "status-legend renders all six states with glyph + name + meaning" do
+    html = Components.status_legend_html(%{})
+    for role <- ~w(open ready progress blocked done cancel), do: assert(html =~ "bp-g--#{role}")
+    assert html =~ "in&nbsp;progress"
+    assert html =~ "something is required first"
+  end
+end

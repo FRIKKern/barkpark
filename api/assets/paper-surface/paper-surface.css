@@ -441,3 +441,15 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
 .bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
 .bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+
+/* ── status legend — the shared vocabulary key ── */
+.bp-paper-surface .bp-legend {
+  --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; margin: 1.4rem 0;
+}
+@media (prefers-color-scheme: dark) { .bp-paper-surface .bp-legend { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; } }
+.bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
+.bp-paper-surface .bp-legend__r:first-child { border-top: none; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
+.bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
