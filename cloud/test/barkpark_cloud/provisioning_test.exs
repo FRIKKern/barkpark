@@ -1257,15 +1257,20 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.host == "198.51.100.9"
     end
 
-    test "dwb (charter D9): kicks a best-effort update-status refresh but still 200s when the instance is unreachable" do
+    test "dwb (charter D9): the update-status kick is fire-and-forget — succeed 200s and flips the box live regardless of the probe's fate" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
-      # The worker reports {ip, admin_token}, so the post-succeed kick would try a
-      # real isu-6 self-update probe against the just-provisioned box — which is
-      # not actually reachable in a test. The kick is fire-and-forget (Task.start),
-      # so it must NEVER block or fail this 200.
+      # The worker reports {ip, admin_token}, so the post-succeed kick fires an
+      # isu-6 self-update probe at the just-provisioned box. The kick is a raw
+      # `spawn` (deliberately NOT Task.start — see kick_update_status_refresh/1:
+      # $callers propagation would let the probe borrow this test's Ecto.Sandbox
+      # connection and race teardown), so under async tests the spawned probe
+      # dies cleanly on sandbox ownership before any HTTP. What THIS test proves
+      # is the route contract: the kick can NEVER block or fail the 200,
+      # whatever the probe's fate. refresh_update_status itself is covered by
+      # registry_update_status_test.exs.
       conn =
         call(
           :post,
