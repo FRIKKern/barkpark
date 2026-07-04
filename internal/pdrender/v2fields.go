@@ -11,12 +11,14 @@ import (
 // alongside a structured `value`. The project's TUI constraint says these render
 // as a JSON dump; pdrender HONORS that as an opt-out (ctx.V2AsJSON) but DEFAULTS
 // to the model's flat labelled summary — strictly more readable than a JSON blob,
-// and the flattening logic mirrors render.ex's composite_scalar exactly. Each
+// and the flattening logic mirrors Render.Compose.composite_scalar/1 (compose.ex)
+// exactly. Each
 // renders as a labelled box like the field-* leaf blocks (bold label line via
 // Theme.FieldLabel, then the summary rows).
 
 // compositeScalar flattens a decoded JSON sub-value to ONE display string —
-// the direct port of render.ex's composite_scalar/1: nil → "—", bool → Yes/No,
+// the direct port of Render.Compose.composite_scalar/1
+// (api/lib/barkpark/portable_doc/render/compose.ex): nil → "—", bool → Yes/No,
 // numbers/strings pass through, lists join with ", ", maps render as
 // "k: v, …" (keys sorted for determinism). Recurses for nested containers.
 func compositeScalar(v any) string {
@@ -55,7 +57,7 @@ func compositeScalar(v any) string {
 }
 
 // getInValue reads a value out of a decoded-JSON map by string key — the port of
-// render.ex's get_in_value/2. Missing key / non-map → nil.
+// Render.Compose.get_in_value/2 (compose.ex). Missing key / non-map → nil.
 func getInValue(m any, key string) any {
 	mm, ok := m.(map[string]any)
 	if !ok {

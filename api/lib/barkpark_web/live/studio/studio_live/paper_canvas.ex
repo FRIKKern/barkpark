@@ -60,9 +60,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # atom nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr
   # and is edited by a NON-PM <textarea> island (run-convert.js
   # CANVAS_ATTR_ATOM_TYPES). `code` (S3.3) is the first: its `value` is a plain string
-  # (compose.ex:272 reads only `value`) plus an optional `lang`. `diagram` (S3.4)
-  # MIRRORS it: its `source` is the raw Mermaid text (compose.ex:224 reads `source`)
-  # plus an optional `caption`. Both no longer SPLIT a run. UNLIKE the divider they
+  # (`Render.Compose.compose_block/2`'s `code` clause reads only `value`) plus an
+  # optional `lang`. `diagram` (S3.4) MIRRORS it: its `source` is the raw Mermaid
+  # text (`Render.Compose.compose_block/2`'s `diagram` clause reads `source`) plus
+  # an optional `caption`. Both no longer SPLIT a run. UNLIKE the divider they
   # carry a mutable body and CAN emit a patch-block; UNLIKE the callout they have no
   # inline body. field-* / sheet STILL split until their own increments.
   @canvas_attr_atom_types ~w(code diagram)

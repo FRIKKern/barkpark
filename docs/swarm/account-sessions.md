@@ -36,7 +36,7 @@ Routes (all hang off the existing user-session block in `web/router.ex`):
 
 Parts 4 (self-service deletion) and 5 (verified email change) are **designed but
 NOT built** — they are gated on deps that don't exist yet (a `Billing.cancel/1`
-and a mailer respectively). See the design doc for the full sketch.
+and a mailer respectively). The full design sketch was not carried into the repo.
 
 ## Why
 
@@ -114,4 +114,4 @@ and `node --check` on `app.js`.
   suite, but the migration has not been applied and the tests have not executed.
 - **`mix format` not run** (formatter needs `:ecto` from deps). Code was written to
   the project's existing formatting by hand.
-- Parts 4 + 5 are designed only — see `03-designs/account-sessions.md`.
+- Parts 4 + 5 are designed only — not yet built (gated on `Billing.cancel/1` + a mailer).
