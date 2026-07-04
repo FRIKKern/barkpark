@@ -1138,6 +1138,15 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp walk_qualified({:range, {c1, r1}, {c2, r2}}, own, {ps, rs}),
     do: {ps, [{{own, c1, r1}, {own, c2, r2}} | rs]}
 
+  # Full-axis ranges (4-tuple) in the unified graph: strip the bounds tag. A
+  # cross-tab `Sheet2!A:A` already carries its resolved index in both corners; a
+  # bare `A:A` in a cross-tab document inherits the formula's own tab.
+  defp walk_qualified({:range, {t, c1, r1}, {t, c2, r2}, _b}, _own, {ps, rs}),
+    do: {ps, [{{t, c1, r1}, {t, c2, r2}} | rs]}
+
+  defp walk_qualified({:range, {c1, r1}, {c2, r2}, _b}, own, {ps, rs}),
+    do: {ps, [{{own, c1, r1}, {own, c2, r2}} | rs]}
+
   defp walk_qualified({:neg, x}, own, acc), do: walk_qualified(x, own, acc)
 
   defp walk_qualified({:binop, _op, l, r}, own, acc),
@@ -1484,6 +1493,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     {:range, {idx, min(c1, c2), min(r1, r2)}, {idx, max(c1, c2), max(r1, r2)}}
   end
 
+  # Tab-qualified full-axis range (`Sheet2!A:A` / `Sheet2!3:3`) — attach the
+  # resolved index into both corners and carry the bounds tag forward.
+  defp resolve_node({:qrange, name, {c1, r1}, {c2, r2}, bounds}, ni) do
+    idx = resolve_tab_name!(name, ni)
+    {:range, {idx, min(c1, c2), min(r1, r2)}, {idx, max(c1, c2), max(r1, r2)}, bounds}
+  end
+
   defp resolve_node({:neg, x}, ni), do: {:neg, resolve_node(x, ni)}
 
   defp resolve_node({:binop, op, l, r}, ni),
@@ -1503,6 +1519,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp walk({:ref, pos}, {ps, rs, fs}), do: {[pos | ps], rs, fs}
   defp walk({:range, p1, p2}, {ps, rs, fs}), do: {ps, [{p1, p2} | rs], fs}
+  # Full-axis range (4-tuple): strip the bounds tag → feed the same {p1,p2} dep
+  # so an A:A over its own column self-edges → #CYCLE! for free (no new code).
+  defp walk({:range, p1, p2, _b}, {ps, rs, fs}), do: {ps, [{p1, p2} | rs], fs}
   defp walk({:neg, x}, acc), do: walk(x, acc)
   defp walk({:binop, _op, l, r}, acc), do: walk(r, walk(l, acc))
 
@@ -1654,6 +1673,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       function_name?(word) and next_is_lparen?(rest) -> {:ok, {:ident, up}, rest}
       ref_like?(word) -> ref_token(word, rest)
       up in ["TRUE", "FALSE"] -> {:ok, {:bool, up == "TRUE"}, rest}
+      # A bare letters-only word (`A`, `$A`, `AB`) that resolves to an in-bounds
+      # column becomes a `{:colword}` — the lexeme a full-column range (`A:A`) is
+      # built from. This clause sits BELOW the `SUM(`-style function clause (a
+      # function name like `SUM` is ALSO a valid column, so only the `(`
+      # lookahead separates `SUM(` the function from `SUM` the column) and below
+      # TRUE/FALSE. A bare colword outside a `col:col` parser position has no
+      # primary clause → :error → #REF! (byte-identical to a bare ident today).
+      colword?(word) -> {:ok, {:colword, colword_col(word)}, rest}
       function_name?(word) -> {:ok, {:ident, up}, rest}
       true -> :error
     end
@@ -1661,6 +1688,22 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp function_name?(word), do: Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, word)
   defp ref_like?(word), do: Regex.match?(~r/^\$?[A-Za-z]+\$?[0-9]+$/, word)
+
+  # A letters-only word (optional leading `$`) that resolves to an in-bounds
+  # column — the raw material for a full-column range (`A:A`). Ref-shaped words
+  # carry a trailing digit and are handled by `ref_like?`; a letters-only word
+  # past XFD (a long function name used bare, or `TRUE`) is NOT a colword and
+  # stays an ident/bool. Reuses `Sheets.parse_ref` (no hand-rolled base-26).
+  defp colword?(word), do: colword_col(word) != nil
+
+  defp colword_col(word) do
+    if Regex.match?(~r/^\$?[A-Za-z]+$/, word) do
+      case Sheets.parse_ref(String.replace(word, "$", "") <> "1") do
+        {:ok, {col, _row}} when col <= @max_col -> col
+        _ -> nil
+      end
+    end
+  end
 
   # A bare tab name matches the identifier shape and is NOT a VALID in-bounds
   # cell reference (Excel). `Sheet2` reads as column "SHEET" (far past XFD) so
@@ -1796,6 +1839,19 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp parse_unary([{:op, :add} | rest]), do: parse_unary(rest)
   defp parse_unary(tokens), do: parse_primary(tokens)
 
+  # Full-row range (`3:3`, `2:5`) → a row-bounded 4-tuple range spanning cols
+  # 1..@max_col. This clause MUST sit ABOVE the bare `{:num}` literal clause
+  # below — otherwise `3` in `3:3` is consumed as a literal and the dangling
+  # `:colon` fails the parse. The row form is recognised ONLY in this
+  # num:colon:num position (a bare `{:num}` stays a literal everywhere else) and
+  # is guarded to in-bounds INTEGER rows — floats / out-of-range fall through to
+  # the literal clause, leaving a dangling colon → #REF!.
+  defp parse_primary([{:num, r1}, :colon, {:num, r2} | rest])
+       when is_integer(r1) and is_integer(r2) and r1 >= 1 and r1 <= @max_row and
+              r2 >= 1 and r2 <= @max_row do
+    {:ok, {:range, {1, min(r1, r2)}, {@max_col, max(r1, r2)}, :row}, rest}
+  end
+
   defp parse_primary([{:num, n} | rest]), do: {:ok, {:num, n}, rest}
   defp parse_primary([{:str, s} | rest]), do: {:ok, {:str, s}, rest}
   defp parse_primary([{:bool, b} | rest]), do: {:ok, {:bool, b}, rest}
@@ -1808,9 +1864,34 @@ defmodule Barkpark.Plugins.Sheets.Engine do
     {:ok, {:qrange, name, {c1, r1}, {c2, r2}}, rest}
   end
 
+  # Tab-qualified full-column range (`Sheet2!A:A`) / full-row range
+  # (`Sheet2!3:3`) — the wave-1 `{:tabname},:bang` precedent carrying the wave-2
+  # bounds tag. resolve_tabs attaches the resolved tab index into both corners.
+  defp parse_primary([{:tabname, name}, :bang, {:colword, c1}, :colon, {:colword, c2} | rest]) do
+    {:ok, {:qrange, name, {c1, 1}, {c2, @max_row}, :col}, rest}
+  end
+
+  defp parse_primary([{:tabname, name}, :bang, {:num, r1}, :colon, {:num, r2} | rest])
+       when is_integer(r1) and is_integer(r2) and r1 >= 1 and r1 <= @max_row and
+              r2 >= 1 and r2 <= @max_row do
+    {:ok, {:qrange, name, {1, r1}, {@max_col, r2}, :row}, rest}
+  end
+
   # Tab-qualified single ref (`Sheet2!A1`).
   defp parse_primary([{:tabname, name}, :bang, {:ref, pos} | rest]) do
     {:ok, {:qref, name, pos}, rest}
+  end
+
+  # Full-column range (`A:A`, `$A:$C`) → a col-bounded range spanning rows
+  # 1..@max_row; full-row range (`3:3`, `2:5`) → a row-bounded range spanning
+  # cols 1..@max_col. The `bounds` tag (`:col`/`:row`) rides a 4-tuple range
+  # node so Structure/F4 can tell a full-axis range from a coincidental one; eval
+  # is unchanged because occupied_positions filters the used set (CT-D2 — A:A is
+  # never a stored rect). The row form is recognised ONLY in this num:colon:num
+  # position (a bare `{:num}` stays a literal everywhere else) and is guarded to
+  # in-bounds integer rows — floats / out-of-range fall through to #REF!.
+  defp parse_primary([{:colword, c1}, :colon, {:colword, c2} | rest]) do
+    {:ok, {:range, {min(c1, c2), 1}, {max(c1, c2), @max_row}, :col}, rest}
   end
 
   defp parse_primary([{:ref, {c1, r1}}, :colon, {:ref, {c2, r2}} | rest]) do
@@ -1854,6 +1935,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp eval({:ref, pos}, ctx), do: cell_at(pos, ctx)
   # A range is not a scalar; only aggregate arguments flatten ranges.
   defp eval({:range, _p1, _p2}, _ctx), do: err(:value)
+  # A bare full-axis range (`=A:A` typed straight into a cell, no aggregate) is
+  # #VALUE! too — the same non-scalar rule.
+  defp eval({:range, _p1, _p2, _b}, _ctx), do: err(:value)
 
   defp eval({:neg, x}, ctx) do
     case eval_number(x, ctx) do
@@ -4100,6 +4184,13 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp collect_agg_items([], _ctx, _strict?, acc), do: {:ok, acc}
 
+  # A full-axis range (`SUM(A:A)`, `COUNT(B:B)`, `SUM(3:3)`, `SUM(Sheet2!A:A)`)
+  # aggregates exactly like a bounded one — strip the bounds tag and reuse the
+  # 3-tuple path. This is where the wish's aggregates land (SUM/COUNT/AVERAGE
+  # flow through collect_agg_items, NOT as_range).
+  defp collect_agg_items([{:range, p1, p2, _b} | rest], ctx, strict?, acc),
+    do: collect_agg_items([{:range, p1, p2} | rest], ctx, strict?, acc)
+
   defp collect_agg_items([{:range, p1, p2} | rest], ctx, strict?, acc) do
     vals = range_values(p1, p2, ctx)
 
@@ -4338,6 +4429,11 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # A range or single-ref AST node as a rectangle; anything else is not a
   # range (the caller maps it to #VALUE!).
   defp as_range({:range, {c1, r1}, {c2, r2}}), do: {:ok, {c1, r1}, {c2, r2}}
+  # A same-tab full-axis range (2-tuple corners) is consumable by the as_range
+  # family (VLOOKUP/INDEX/MATCH/…) — strip the bounds tag. A cross-tab full-axis
+  # range (3-tuple corners) does NOT match here and falls to the `:error`
+  # clause, mirroring wave-1's fail-closed cross-tab handling.
+  defp as_range({:range, {c1, r1}, {c2, r2}, _b}), do: {:ok, {c1, r1}, {c2, r2}}
   defp as_range({:ref, {c, r}}), do: {:ok, {c, r}, {c, r}}
   # A cross-tab range/ref (3-tuple corners) is not consumable by the as_range
   # family in wave 1 — fail closed so the caller returns a clean error, never a

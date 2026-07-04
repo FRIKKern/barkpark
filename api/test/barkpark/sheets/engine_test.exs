@@ -306,6 +306,147 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
   end
 
+  # ── full-column / full-row (unbounded) ranges — A:A wave 2, design §3.1 ──────
+  #
+  # `A:A` / `3:3` resolve to the USED RANGE at eval time (CT-D2 — never a stored
+  # rect). Before this slice `ref_like?` required a digit, so `A:A` failed the
+  # parser → :invalid → #REF!; each test below was #REF! (or #VALUE!) before.
+  describe "full-column ranges (A:A)" do
+    @col %{
+      "A1" => %{"v" => 1},
+      "A2" => %{"v" => 2},
+      "A3" => %{"v" => 3}
+    }
+
+    test "=SUM(A:A) sums the whole column's used cells" do
+      # Was #REF! before A:A parsed at all.
+      assert eval!("SUM(A:A)", @col) == 6
+    end
+
+    test "CT-D2: A:A tracks the used range — a cell added below extends the sum" do
+      assert eval!("SUM(A:A)", @col) == 6
+      # No stored rect: a fresh recompute re-scans occupied, so A100 is seen.
+      extended = Map.put(@col, "A100", %{"v" => 4})
+      assert eval!("SUM(A:A)", extended) == 10
+    end
+
+    test "=COUNT(B:B) counts only column B's numbers" do
+      cells = %{
+        "B1" => %{"v" => 10},
+        "B2" => %{"v" => "text"},
+        "B3" => %{"v" => 20},
+        "A1" => %{"v" => 99}
+      }
+
+      assert eval!("COUNT(B:B)", cells) == 2
+    end
+
+    test "=AVERAGE(A:A) averages the used cells" do
+      assert eval!("AVERAGE(A:A)", @col) == 2
+    end
+
+    test "$A:$A is identical to A:A" do
+      assert eval!("SUM($A:$A)", @col) == 6
+    end
+
+    test "a multi-column range A:C spans every used cell in those columns" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "B5" => %{"v" => 2},
+        "C9" => %{"v" => 3},
+        "D1" => %{"v" => 100}
+      }
+
+      assert eval!("SUM(A:C)", cells) == 6
+    end
+
+    test "a blank column sums to 0 (empty used set, not a million-cell walk)" do
+      assert eval!("SUM(A:A)", %{"B1" => %{"v" => 5}}) == 0
+    end
+
+    test "=SUM(A:A) placed IN column A is a self-cycle → #CYCLE!" do
+      cells = Map.put(@col, "A10", %{"f" => "SUM(A:A)"})
+      assert run(cells)["A10"]["v"] == "#CYCLE!"
+    end
+
+    test "=SUM(A:A) placed OUTSIDE column A is not circular" do
+      cells = Map.put(@col, "C1", %{"f" => "SUM(A:A)"})
+      assert run(cells)["C1"]["v"] == 6
+    end
+
+    test "a bare =A:A outside an aggregate is #VALUE!" do
+      assert eval!("A:A", @col) == "#VALUE!"
+    end
+  end
+
+  describe "full-row ranges (3:3)" do
+    @row %{
+      "A3" => %{"v" => 1},
+      "B3" => %{"v" => 2},
+      "C3" => %{"v" => 3},
+      "A1" => %{"v" => 99}
+    }
+
+    test "=SUM(3:3) sums the whole row's used cells" do
+      assert eval!("SUM(3:3)", @row) == 6
+    end
+
+    test "a multi-row range 2:5 spans every used cell in those rows" do
+      cells = %{
+        "A2" => %{"v" => 10},
+        "Z5" => %{"v" => 20},
+        "A1" => %{"v" => 100},
+        "A6" => %{"v" => 100}
+      }
+
+      assert eval!("SUM(2:5)", cells) == 30
+    end
+
+    test "a bare =3:3 outside an aggregate is #VALUE!" do
+      assert eval!("3:3", @row) == "#VALUE!"
+    end
+
+    test "a fractional row range is out of grammar → #REF!" do
+      assert eval!("SUM(3.5:3.5)") == "#REF!"
+    end
+  end
+
+  # Regression lock (design §5 / instruction): a bounded-range doc must recompute
+  # byte-identically — the 3-tuple {:range,p1,p2} clauses are untouched; only new
+  # 4-tuple clauses were added. Any accidental interception by the A:A path
+  # would change this output.
+  describe "bounded-range regression lock" do
+    test "A1:B3-style SUM/COUNT/AVERAGE recompute byte-identically on the fast path" do
+      cells = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 3},
+        "B1" => %{"v" => 4},
+        "B2" => %{"v" => 5},
+        "B3" => %{"v" => 6},
+        "C1" => %{"f" => "SUM(A1:B3)"},
+        "C2" => %{"f" => "COUNT(A1:B3)"},
+        "C3" => %{"f" => "AVERAGE(A1:B3)"}
+      }
+
+      expected = %{
+        "A1" => %{"v" => 1},
+        "A2" => %{"v" => 2},
+        "A3" => %{"v" => 3},
+        "B1" => %{"v" => 4},
+        "B2" => %{"v" => 5},
+        "B3" => %{"v" => 6},
+        "C1" => %{"f" => "SUM(A1:B3)", "v" => 21, "t" => "n"},
+        "C2" => %{"f" => "COUNT(A1:B3)", "v" => 6, "t" => "n"},
+        "C3" => %{"f" => "AVERAGE(A1:B3)", "v" => 3.5, "t" => "n"}
+      }
+
+      assert run(cells) == expected
+      # And the doc provably takes the per-tab fast path, not the unified one.
+      refute Engine.uses_cross_tab?(%{"tabs" => [%{"name" => "T", "cells" => cells}]})
+    end
+  end
+
   describe "SPARKLINE" do
     test "scales a numeric series onto the 8-level block-bar ramp" do
       cells = %{"A1" => %{"v" => 1}, "A2" => %{"v" => 5}, "A3" => %{"v" => 9}}
@@ -4332,6 +4473,57 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
 
       assert tab_cells(out, "Sheet2")["A1"]["v"] == 101
       assert tab_cells(out, "Sheet1")["A1"]["v"] == 202
+    end
+
+    test "=SUM(Sheet2!A:A) aggregates another tab's whole column (A:A × cross-tab)" do
+      # Rides wave 1's {tab,col,row} range: the full-column bounds tag survives
+      # tab resolution and the used-range scan runs against Sheet2.
+      out =
+        run_tabs([
+          {"Sheet1", %{"Z1" => %{"f" => "SUM(Sheet2!A:A)"}}},
+          {"Sheet2",
+           %{
+             "A1" => %{"v" => 1, "t" => "n"},
+             "A2" => %{"v" => 2, "t" => "n"},
+             "A50" => %{"v" => 3, "t" => "n"},
+             "B1" => %{"v" => 100, "t" => "n"}
+           }}
+        ])
+
+      assert tab_cells(out, "Sheet1")["Z1"]["v"] == 6
+    end
+
+    test "=COUNT(Sheet2!2:2) aggregates another tab's whole row (3:3 × cross-tab)" do
+      out =
+        run_tabs([
+          {"Sheet1", %{"Z1" => %{"f" => "COUNT(Sheet2!2:2)"}}},
+          {"Sheet2",
+           %{
+             "A2" => %{"v" => 1, "t" => "n"},
+             "C2" => %{"v" => 2, "t" => "n"},
+             "A1" => %{"v" => 100, "t" => "n"}
+           }}
+        ])
+
+      assert tab_cells(out, "Sheet1")["Z1"]["v"] == 2
+    end
+
+    test "a bare A:A in a cross-tab document reads the formula's OWN tab" do
+      # The doc trips the unified path (Sheet2!A1 elsewhere), so the bare A:A
+      # flows through walk_qualified's 4-tuple own-tab clause.
+      out =
+        run_tabs([
+          {"Sheet1",
+           %{
+             "A1" => %{"v" => 5, "t" => "n"},
+             "A2" => %{"v" => 7, "t" => "n"},
+             "Z1" => %{"f" => "SUM(A:A)"},
+             "Z2" => %{"f" => "Sheet2!A1"}
+           }},
+          {"Sheet2", %{"A1" => %{"v" => 1, "t" => "n"}}}
+        ])
+
+      assert tab_cells(out, "Sheet1")["Z1"]["v"] == 12
     end
 
     test "as_range consumers fail closed (never crash) on a cross-tab range" do
