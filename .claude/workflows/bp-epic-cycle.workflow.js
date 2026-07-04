@@ -10,11 +10,23 @@ export const meta = {
   ],
 }
 
-// args = { wish: string, charter_exists: boolean, lead_notes?: string }
-const WISH = (args && args.wish) || 'Reach peak aesthetics, UX and DX for Barkpark.'
-const CHARTER_PATH = '.claude/workflows/bp-cloud-epic-charter.md'
-const CHARTER_EXISTS = !!(args && args.charter_exists)
-const LEAD_NOTES = (args && args.lead_notes) ? `\n\nLEAD NOTES THIS WAVE:\n${args.lead_notes}` : ''
+// args = { wish, charter_exists, charter_path?, strategist_model?, lead_notes? }
+// GUARD (restored 2026-07-04 after a SECOND worktree revert wiped it — this bug
+// built 2 waves against the wrong (cloud) charter): args can arrive as a JSON
+// STRING; charter_path was hardcoded to cloud so every charter_exists wave read
+// the cloud charter regardless of the intended epic. Parse defensively, refuse
+// to run without an explicit wish, and HONOR charter_path.
+const A = (() => {
+  if (typeof args === 'string') { try { return JSON.parse(args) } catch (e) { throw new Error('epic-cycle args is a non-JSON string') } }
+  return args || {}
+})()
+if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
+const WISH = A.wish
+const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
+const STRAT_MODEL = A.strategist_model || 'opus'
+const JUDGE_MODEL = A.judge_model || 'fable'  // fall back to opus on Fable exhaustion: judge_model:'opus'
+const CHARTER_EXISTS = !!A.charter_exists
+const LEAD_NOTES = A.lead_notes ? `\n\nLEAD NOTES THIS WAVE:\n${A.lead_notes}` : ''
 
 const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serves it, judged holistically, not as a checklist):
 """
@@ -133,7 +145,7 @@ Ground yourself in the real repo first: the Cloud control-plane SPA lives in clo
 
 Return: a concrete vision (what the finished experience looks/feels like), the KEY CHOICES you'd make (with honest risk ratings — medium/high risk is acceptable when the payoff is structural), and 4-8 build slices sized small/medium/large that realize your vision. Slices may be ambitious; each still needs a local gate.
 ${GATES_BLOCK}${LEAD_NOTES}`,
-        { label: `strategy:${s.key}`, phase: 'Strategize', schema: STRATEGY_SCHEMA, model: 'fable' }
+        { label: `strategy:${s.key}`, phase: 'Strategize', schema: STRATEGY_SCHEMA, model: STRAT_MODEL }
       )
     )
   )).filter(Boolean)
@@ -164,7 +176,7 @@ Your job — this is where the IMPORTANT CHOICES get made, and early risk is acc
 2. WRITE the epic charter to ${CHARTER_PATH} (use your Write tool): ## Vision, ## Decisions (each with a one-line why), ## Roadmap (all slices, ordered, sized), ## Wave log (empty). This file is the epic's memory — every future wave reads it. Set charter_written=true only after you actually wrote it.
 3. Cut WAVE 1: up to 5 slices, buildable in parallel by isolated builders (minimize file overlap between slices; if two slices must touch the same region of app.js, merge or sequence them). Bold slices are fine; each needs instructions complete enough to build without more context and exact local gate command(s).
 ${GATES_BLOCK}${LEAD_NOTES}`,
-  { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: 'fable' }
+  { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: JUDGE_MODEL }
 )
 
 const wave = (architect.wave || []).slice(0, 5)
@@ -200,7 +212,7 @@ Steps:
 4. Honest self-review: what could break, what you didn't cover, blind spots.
 5. Only if the gate passes: branch 'loop-epic/${slug(item.title)}-${i}', one clear conventional commit. Do NOT push. Do NOT touch main.
 Constraints: curl localhost only; never mix compile against prod; don't touch other worktrees' WIP.`,
-      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: 'fable', isolation: 'worktree' }
+      { label: `build:${slug(item.title)}`, phase: 'Build', schema: BUILD_SCHEMA, model: 'opus', isolation: 'worktree' }
     ),
   // PERFECT
   (built, item, i) => {
@@ -222,7 +234,7 @@ Steps:
 3. POLISH IN PLACE: fix what you find, tighten what's rough. If it's already right, change nothing.
 4. Re-run the gate (must pass on your final state). Commit polish as follow-up commit(s) on the -p branch.
 5. Report final_branch = the -p branch if you changed anything, else the original branch; and an honest verdict incl. anything the lead must know before merging.`,
-      { label: `perfect:${slug(item.title)}`, phase: 'Perfect', schema: PERFECT_SCHEMA, model: 'fable', isolation: 'worktree' }
+      { label: `perfect:${slug(item.title)}`, phase: 'Perfect', schema: PERFECT_SCHEMA, model: JUDGE_MODEL, isolation: 'worktree' }
     ).then((p) => ({ ...built, perfect: p }))
   }
 )
@@ -247,7 +259,7 @@ PERFECTER VERDICTS: ${green.map((r) => r.perfect ? r.perfect.verdict : '(no perf
 1. Assess honestly: did this wave move the WISH forward, or drift into micro-repair? Is the charter still the right plan?
 2. APPEND a '### Wave <date>' entry to the charter's ## Wave log (use Edit): what landed, what stalled, what the next wave should take.
 3. Return concise markdown: ### ASSESSMENT, ### NEXT WAVE (what the architect should cut next and why), ### RISKS.`,
-  { label: 'direction', phase: 'Direction', model: 'fable' }
+  { label: 'direction', phase: 'Direction', model: JUDGE_MODEL }
 )
 
 return {
