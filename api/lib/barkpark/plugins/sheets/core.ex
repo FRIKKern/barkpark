@@ -313,7 +313,9 @@ defmodule Barkpark.Plugins.Sheets.Core do
   xlsx export keeps the raw `"v"` + numFmt (Sheets.XlsxExport), unaffected.
   """
   @spec display_value(map()) :: String.t()
-  def display_value(%{"v" => v} = cell) when is_binary(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  def display_value(%{"v" => v} = cell) when is_binary(v),
+    do: Fmt.display(v, Map.get(cell, "fmt"))
+
   # Near-ceiling floats overflow Fmt's numeric-class pre-format multiply
   # (percent v*100; currency/fixed/thousands 10^decimals) and Erlang floats
   # RAISE (no Infinity). The ENGINE deliberately maps that raise to #NUM!
@@ -324,7 +326,9 @@ defmodule Barkpark.Plugins.Sheets.Core do
   def display_value(%{"v" => v}) when is_float(v) and abs(v) >= 1.0e300,
     do: number_to_display(v)
 
-  def display_value(%{"v" => v} = cell) when is_number(v), do: Fmt.display(v, Map.get(cell, "fmt"))
+  def display_value(%{"v" => v} = cell) when is_number(v),
+    do: Fmt.display(v, Map.get(cell, "fmt"))
+
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's
   # uppercase; every snapshot surface (paper embeds, csv/md/html exports, the

@@ -84,7 +84,11 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
     test "a well-formed single-cell rule normalizes to a degenerate range" do
       rules =
         CondFormat.parse_rules([
-          %{"range" => "B2", "when" => %{"op" => "gt", "value" => 5}, "style" => %{"bg" => "#ff0000"}}
+          %{
+            "range" => "B2",
+            "when" => %{"op" => "gt", "value" => 5},
+            "style" => %{"bg" => "#ff0000"}
+          }
         ])
 
       assert [%{range: {2, 2, 2, 2}, condition: %{"op" => "gt"}, style: %{"bg" => "#ff0000"}}] =
@@ -94,7 +98,11 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
     test "a range rule normalizes corners top-left regardless of input order" do
       [rule] =
         CondFormat.parse_rules([
-          %{"range" => "D9:B2", "when" => %{"op" => "lt", "value" => 1}, "style" => %{"bg" => "#00FF00"}}
+          %{
+            "range" => "D9:B2",
+            "when" => %{"op" => "lt", "value" => 1},
+            "style" => %{"bg" => "#00FF00"}
+          }
         ])
 
       assert rule.range == {2, 2, 4, 9}
@@ -119,17 +127,29 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
       rules =
         CondFormat.parse_rules([
           # bad range
-          %{"range" => "notaref", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
+          %{
+            "range" => "notaref",
+            "when" => %{"op" => "gt", "value" => 1},
+            "style" => %{"bg" => "#ff0000"}
+          },
           # unknown op
           %{"range" => "A1", "when" => %{"op" => "matches"}, "style" => %{"bg" => "#ff0000"}},
           # style sanitizes to empty (bad bg, no flags)
-          %{"range" => "A1", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "red"}},
+          %{
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 1},
+            "style" => %{"bg" => "red"}
+          },
           # not a map
           "garbage",
           # missing when
           %{"range" => "A1", "style" => %{"bg" => "#ff0000"}},
           # the one good rule
-          %{"range" => "A1", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#abcdef"}}
+          %{
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 1},
+            "style" => %{"bg" => "#abcdef"}
+          }
         ])
 
       assert length(rules) == 1
@@ -139,8 +159,16 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
     test "preserves list order (first-match priority relies on it)" do
       [r1, r2] =
         CondFormat.parse_rules([
-          %{"range" => "A1", "when" => %{"op" => "gt", "value" => 0}, "style" => %{"bg" => "#aaaaaa"}},
-          %{"range" => "A1", "when" => %{"op" => "gt", "value" => 0}, "style" => %{"bg" => "#bbbbbb"}}
+          %{
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 0},
+            "style" => %{"bg" => "#aaaaaa"}
+          },
+          %{
+            "range" => "A1",
+            "when" => %{"op" => "gt", "value" => 0},
+            "style" => %{"bg" => "#bbbbbb"}
+          }
         ])
 
       assert r1.style == %{"bg" => "#aaaaaa"}
@@ -155,15 +183,25 @@ defmodule Barkpark.Plugins.Sheets.CondFormatTest do
       rules =
         CondFormat.parse_rules([
           # rule 1: B1:C3, gt 100 → red
-          %{"range" => "B1:C3", "when" => %{"op" => "gt", "value" => 100}, "style" => %{"bg" => "#ff0000"}},
+          %{
+            "range" => "B1:C3",
+            "when" => %{"op" => "gt", "value" => 100},
+            "style" => %{"bg" => "#ff0000"}
+          },
           # rule 2: A1:C3 (overlaps rule 1), gt 0 → green
-          %{"range" => "A1:C3", "when" => %{"op" => "gt", "value" => 0}, "style" => %{"bg" => "#00ff00"}}
+          %{
+            "range" => "A1:C3",
+            "when" => %{"op" => "gt", "value" => 0},
+            "style" => %{"bg" => "#00ff00"}
+          }
         ])
 
       %{rules: rules}
     end
 
-    test "first rule in list order whose range contains the cell AND matches wins", %{rules: rules} do
+    test "first rule in list order whose range contains the cell AND matches wins", %{
+      rules: rules
+    } do
       # B2 is in both ranges; 150 > 100 so rule 1 (red) fires first
       assert CondFormat.style_for(rules, {2, 2}, %{"v" => 150}) == %{"bg" => "#ff0000"}
     end

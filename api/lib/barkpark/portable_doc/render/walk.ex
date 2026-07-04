@@ -46,7 +46,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # `Cells.default_align_class/1` (cycle-14): numbers and number-fmt values
   # read right-aligned like Sheets/Excel General, booleans/checkboxes center,
   # text inherits the table's left. The snapshot grid is all display STRINGS
-  # (`Core.cell_value/1` already ran), so the value-shape rule re-derives from
+  # (`Core.display_value/1` already ran), so the value-shape rule re-derives from
   # the display shapes that formatter vocabulary can emit: General numbers
   # (incl. the kept exponent forms), `thousands` grouping, `currency` `$`,
   # `percent` `%`, `fixed` decimals — plus the ISO date/datetime strings.

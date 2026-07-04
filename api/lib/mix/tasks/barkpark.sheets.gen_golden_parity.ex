@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Barkpark.Sheets.GenGoldenParity do
           "B1" => %{"v" => "Q3"},
           "C1" => %{"v" => "Q4"},
           # Frozen-head cell WITH a fmt — the head band goes through the same
-          # cell_value/Fmt.display seam as the body, so it must read "50.00%".
+          # display_value/Fmt.display seam as the body, so it must read "50.00%".
           "D1" => %{"v" => 0.5, "t" => "n", "fmt" => "percent"},
           "A2" => %{"v" => "Revenue", "s" => %{"b" => true}},
           "B2" => %{"v" => 1200, "t" => "n", "fmt" => "thousands"},

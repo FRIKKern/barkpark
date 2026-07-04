@@ -202,7 +202,9 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
       content = %{
         "tabs" => [
           %{
-            "cells" => %{"A1" => %{"v" => 150, "s" => %{"al" => "center", "b" => true, "bg" => "#000000"}}},
+            "cells" => %{
+              "A1" => %{"v" => 150, "s" => %{"al" => "center", "b" => true, "bg" => "#000000"}}
+            },
             "cond_formats" => [cf_rule("A1", "gt", 100, %{"bg" => "#ff0000"})]
           }
         ]
@@ -255,7 +257,11 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
             %{
               "cells" => cells,
               "cond_formats" => [
-                %{"range" => "notaref", "when" => %{"op" => "gt", "value" => 1}, "style" => %{"bg" => "#ff0000"}},
+                %{
+                  "range" => "notaref",
+                  "when" => %{"op" => "gt", "value" => 1},
+                  "style" => %{"bg" => "#ff0000"}
+                },
                 %{"range" => "A1", "when" => %{"op" => "bogus"}, "style" => %{"bg" => "#ff0000"}},
                 "junk"
               ]
@@ -264,6 +270,25 @@ defmodule Barkpark.Plugins.Sheets.CoreTest do
         })
 
       assert bad_rules == base
+    end
+
+    test "contains evaluates over the fmt DISPLAY string the snapshot itself renders (CF-D5)" do
+      # The projection must hand the FULL raw cell (fmt included) to the
+      # kernel: a percent 0.25 renders "25.00%", and the rule matches THAT
+      # string — never the raw "0.25".
+      cells = %{"A1" => %{"v" => 0.25, "fmt" => "percent"}}
+
+      display_rule = [cf_rule("A1", "contains", "25.00%", %{"bg" => "#ffee00"})]
+
+      snapshot =
+        Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => display_rule}]})
+
+      assert snapshot["rows"] == [["25.00%"]]
+      assert snapshot["styles"] == %{"0,0" => %{"bg" => "#ffee00"}}
+
+      raw_rule = [cf_rule("A1", "contains", "0.25", %{"bg" => "#ffee00"})]
+      raw = Core.snapshot_for(%{"tabs" => [%{"cells" => cells, "cond_formats" => raw_rule}]})
+      refute Map.has_key?(raw, "styles")
     end
 
     test "an empty cond_formats list leaves the snapshot untouched" do

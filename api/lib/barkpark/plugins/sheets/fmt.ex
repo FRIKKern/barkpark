@@ -123,7 +123,7 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   @doc """
   Render a cell value for DISPLAY under its `fmt` class — the read-surface
   twin of the xlsx `numFmt` written by `num_format/1`. Applied at the two
-  presentation seams (`Core.cell_value/1` for every snapshot surface and
+  presentation seams (`Core.display_value/1` for every snapshot surface and
   `SheetGrid.Cells.display/1` for the Studio grid) so an imported `25%`
   cell shows `"25.00%"` everywhere, not the raw `0.25`.
 

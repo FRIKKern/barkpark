@@ -336,7 +336,7 @@ defmodule Barkpark.Plugins.Sheets.Csv do
 
   # Type inference, in strict order:
   #   1. case-insensitive TRUE/FALSE → boolean (Excel parity; export round-trips
-  #      via Core.cell_value which renders "TRUE"/"FALSE").
+  #      via Core.display_value which renders "TRUE"/"FALSE").
   #   2. a leading zero on a multi-digit run ("007", "00501", "-08") is an
   #      identifier (zip/phone/SKU), NOT a number — keep it verbatim. Real
   #      numbers "0", "0.5", "-0.7" have a non-digit right after the 0, so the

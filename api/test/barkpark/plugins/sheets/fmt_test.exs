@@ -114,7 +114,7 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
     # floats RAISE on overflow. TWO contracts hang off that raise:
     #   1. Fmt.display KEEPS raising — the engine's TEXT maps it to #NUM!
     #      (safe_arith, Excel semantics; locked by engine_test "TEXT bignum").
-    #   2. The RENDER path (Core.snapshot_for → cell_value) must NEVER let one
+    #   2. The RENDER path (Core.snapshot_for → display_value) must NEVER let one
     #      extreme stored cell 500 the whole snapshot/export — it routes such
     #      floats to the overflow-safe General formatter instead.
     test "extreme floats: Fmt.display raises (engine owns #NUM!), snapshots render safely" do
