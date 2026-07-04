@@ -2827,6 +2827,12 @@ defmodule BarkparkCloud.Web.Router do
             broadcast_barkpark_team(job.barkpark_id, "fleet")
             # notifications-email: additive alert (the SSE signal still fires).
             dispatch_barkpark_event(job.barkpark_id, :provision_succeeded)
+            # dwb (charter D9): kick a best-effort isu-6 update-status refresh so a
+            # freshen that degraded to baked code (slice 2) is VISIBLE as
+            # update_state="behind" with a working self-update button from minute
+            # zero. Fire-and-forget — the refresh makes an HTTP call to the
+            # instance and must NEVER block or fail this 200.
+            kick_update_status_refresh(job.barkpark_id)
             json(conn, 200, %{ok: true})
 
           {:error, :not_found} ->
@@ -6082,6 +6088,35 @@ defmodule BarkparkCloud.Web.Router do
 
   defp maybe_dispatch_health_flip(_bp, _prior, _new), do: :ok
 
+  # dwb (charter D9): fire-and-forget an isu-6 update-status refresh for a
+  # now-live barkpark. `refresh_update_status/1` makes an HTTP call to the
+  # instance and best-effort-persists even on transport failure (it never raises),
+  # so this can NEVER block or fail the caller's response.
+  #
+  # Spawned with raw `spawn/1` — deliberately NOT `Task.start`, which propagates
+  # `$callers` and would let the probe BORROW the caller's Ecto.Sandbox connection
+  # under `async: true` tests, then race test teardown (the repo's known
+  # sandbox-ownership cascade). A plain spawn inherits no ownership, so in the test
+  # sandbox the DB read fails cleanly (rescued below, zero noise) while in prod it
+  # checks out a normal pooled connection. A since-deleted barkpark is a no-op.
+  defp kick_update_status_refresh(barkpark_id) do
+    spawn(fn ->
+      try do
+        case Registry.get_barkpark(barkpark_id) do
+          %Barkpark{} = bp -> Registry.refresh_update_status(bp)
+          _ -> :ok
+        end
+      rescue
+        # Best-effort telemetry: any probe failure (including the test sandbox's
+        # no-ownership DBConnection error) must never crash-log. refresh itself
+        # never raises in prod, so this only ever fires under the async test seam.
+        _ -> :ok
+      end
+    end)
+
+    :ok
+  end
+
   # Resolve a site's owning team and push `type` to it. Used by the deployment
   # transition routes (builder/agent principals have no current_team).
   defp broadcast_site_team(site_id, type) do
@@ -6406,6 +6441,19 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # dwb-webhook fail-fast interim: the RAW machine reason stamped on a born-failed
+  # push deployment. Human copy is applied at the serialization boundary
+  # (FailureCopy.humanize / app.js failureCopy) — this stays raw for logs+ops.
+  # When gh-1 (the GitHub App integration) lands, `github_build_available?/1`
+  # flips true and this reason is never written.
+  @github_push_build_reason "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
+
+  # dwb-webhook fail-fast interim: whether a source build for a GitHub push is
+  # available yet. It is NOT — building from a bare commit needs the human-gated
+  # GitHub App (gh-1). gh-1 flips THIS ONE predicate back to true and the enqueue
+  # path (`create_deployment`) resumes; nothing else in the webhook path changes.
+  defp github_build_available?(_site), do: false
+
   # A push to the connected branch → production Deployment. dwb-18: two dedup
   # gates BEFORE minting a row — (1) this exact X-GitHub-Delivery already
   # produced a Deployment (a redelivery of a push we handled, even one now live —
@@ -6413,6 +6461,15 @@ defmodule BarkparkCloud.Web.Router do
   # (2) an active build of this exact commit already exists. Both are DB-
   # backstopped by partial unique indexes; a lost race surfaces as a changeset
   # error that is recovered into a 200 duplicate below.
+  #
+  # dwb-webhook fail-fast interim: a push we CAN'T build from source
+  # (`github_build_available?/1` is false until gh-1) is recorded as a born-`failed`
+  # deployment (Registry.create_failed_deployment/3) instead of a source-less
+  # `queued` zombie the builder never claims. The response is an honest 201 whose
+  # body carries the terminal status + humanized reason so the GitHub delivery log
+  # tells the truth; `find_active_deployment` ignores the failed row so a later
+  # REAL `bp deploy` at the same sha is unblocked, and the `delivery_id` still
+  # dedups redeliveries against it (gate 1).
   defp handle_production_push(conn, site, sha, branch, delivery_id) do
     existing =
       Registry.find_deployment_by_delivery_id(delivery_id) ||
@@ -6428,12 +6485,18 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       nil ->
-        # The artifact_url is left empty — the MVP only records that a push
-        # happened at this sha. A future builder enhancement (P7+) can git-clone
-        # github_repo at this sha and build from source.
+        # The artifact_url is left empty — a push only records that a commit
+        # happened at this sha. Until gh-1, the row is born terminal-`failed`.
         attrs = %{git_ref: sha, artifact_url: nil, delivery_id: delivery_id}
 
-        case Registry.create_deployment(site, attrs) do
+        result =
+          if github_build_available?(site) do
+            Registry.create_deployment(site, attrs)
+          else
+            Registry.create_failed_deployment(site, attrs, @github_push_build_reason)
+          end
+
+        case result do
           {:ok, deployment} ->
             push_event(site.team_id, "deployments")
 
@@ -6442,7 +6505,9 @@ defmodule BarkparkCloud.Web.Router do
               deployment_id: deployment.id,
               sha: sha,
               branch: branch,
-              environment: "production"
+              environment: "production",
+              status: deployment.status,
+              reason: FailureCopy.humanize(deployment.failure_reason)
             })
 
           {:error, %Ecto.Changeset{errors: errs} = cs} ->

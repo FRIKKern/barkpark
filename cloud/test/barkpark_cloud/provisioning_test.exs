@@ -1257,6 +1257,32 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.host == "198.51.100.9"
     end
 
+    test "dwb (charter D9): kicks a best-effort update-status refresh but still 200s when the instance is unreachable" do
+      {_user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      # The worker reports {ip, admin_token}, so the post-succeed kick would try a
+      # real isu-6 self-update probe against the just-provisioned box — which is
+      # not actually reachable in a test. The kick is fire-and-forget (Task.start),
+      # so it must NEVER block or fail this 200.
+      conn =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/succeed",
+          %{ip: "198.51.100.9", admin_token: "bp_admin_unreachable-probe"},
+          @worker_token
+        )
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
+
+      # The synchronous succeed work is unaffected: the box is flipped live.
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "up"
+      assert reloaded.host == "198.51.100.9"
+    end
+
     test "unknown job id → 404" do
       conn =
         call(

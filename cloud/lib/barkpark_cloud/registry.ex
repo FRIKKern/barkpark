@@ -2849,6 +2849,55 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  dwb-webhook fail-fast interim: mint a Deployment that is born TERMINAL-`failed`
+  in ONE transaction — a "this push happened but can't be built yet" tombstone.
+
+  A GitHub push webhook currently has no artifact and no way to build from source
+  (that needs the human-gated GitHub App, gh-1). Enqueuing it as `queued` conjures
+  a zombie: the builder never claims a source-less row, so the console shows it as
+  "running" forever. Instead we record the push HONESTLY as a `failed` row carrying
+  `reason` — the console renders a calm blocked-tone with the `bp deploy` workaround.
+
+  Mechanics (charter D1):
+
+    1. Insert via the normal `Deployment.changeset/2` — `status` is NOT castable
+       there (deployment.ex:147-150 forbids it; `transition_changeset` is the sole
+       status mutator), so the row lands at the schema default `queued`.
+    2. In the SAME transaction, `transition_changeset` it `queued → failed` (a
+       documented-legal edge, deployment.ex:40-44) stamping `failure_reason: reason`.
+
+  Because both writes are one transaction, `claim_next_deployment`'s
+  `FOR UPDATE SKIP LOCKED WHERE status = "queued"` can NEVER observe the interim
+  `queued` row — there is zero claimable window. The `delivery_id` rides through on
+  the insert, so redelivery dedup (`find_deployment_by_delivery_id`, a
+  non-status-scoped partial unique index) keeps pointing at this failed row, while
+  `find_active_deployment/2` (queued/building/pushing only) ignores it so a later
+  REAL deploy at the same sha is never blocked.
+
+  A lost race (a concurrent redelivery won the `delivery_id` / active-ref unique
+  index) rolls the whole transaction back and returns `{:error, %Ecto.Changeset{}}`,
+  which the router recovers into a 200 duplicate — identical to `create_deployment/2`.
+  """
+  @spec create_failed_deployment(Site.t(), map(), String.t()) ::
+          {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
+  def create_failed_deployment(%Site{} = site, attrs, reason) when is_binary(reason) do
+    Repo.transaction(fn ->
+      with {:ok, queued} <-
+             %Deployment{}
+             |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+             |> Repo.insert(),
+           {:ok, failed} <-
+             queued
+             |> Deployment.transition_changeset(%{status: "failed", failure_reason: reason})
+             |> Repo.update() do
+        failed
+      else
+        {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
   Find the newest still-active Deployment for `site_id` at `git_ref`, or `nil`.
 
   Backs webhook redelivery dedup: GitHub redelivers on any non-2xx (and users
