@@ -14,38 +14,44 @@
  * Light is canonical/default (paper.css is light-only). The dark companion is
  * Barkpark-authored, keyed on [data-theme="dark"] the host sets. */
 
-/* ── Token fallback — all 15 --paper-* tokens at light defaults. ──────────
- * The three font tokens that resolve through host-app vars in Studio
- * (--font / --font-mono, which DO NOT EXIST in a bare host) are inlined to
- * literal stacks here. */
+/* The `--paper-*` theme tokens + `--bp-*` typography tokens below are the
+ * paper-surface LAYER, GENERATED from the single source
+ * (api/assets/paper-surface/paper-surface.css) and freshness-gated by
+ * scripts/paper-editor-mirror-check.sh part 3. Only the TOKEN blocks are
+ * generated: they carry the true single-source VALUES (the .bp-paper-editor-body
+ * element rules further down CONSUME them via var(), so those rule values track
+ * automatically and cannot drift). De-scoped for bare hosts — the source's
+ * `.bp-paper-surface` theme scopes collapse to `:root, :host` (tokens inherit
+ * down to the `.bp-paper-editor-body` mount) and `html[data-theme=…]` loses its
+ * `html` ancestor. Light is canonical. Two source-only tokens (--paper-rule-soft,
+ * --paper-font-sans) are intentionally absent — nothing at document root reads
+ * them (the wikilink menu binds its own). To refresh after the source changes,
+ * run `scripts/paper-editor-mirror-check.sh --write`. */
+/* BEGIN GENERATED: paper-surface (from api/assets/paper-surface/paper-surface.css — do not edit by hand; run scripts/paper-editor-mirror-check.sh --write) */
 :root, :host {
-  --paper-bg:            #fefdf9;
-  --paper-bg-deep:       #f5f2e9;
-  --paper-ink:           #1f1a14;
-  --paper-ink-soft:      #5b524a;
-  --paper-ink-faint:     #8a8278;
-  --paper-rule:          rgba(31, 26, 20, 0.08);
-  --paper-rule-soft:     rgba(31, 26, 20, 0.04);
-  --paper-edit-hover:    rgba(31, 26, 20, 0.10);
-  --paper-accent:        #a23925;
-  --paper-accent-soft:   rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:     #fefdf9;
+  --paper-bg: #fefdf9;
+  --paper-bg-deep: #f5f2e9;
+  --paper-ink: #1f1a14;
+  --paper-ink-soft: #5b524a;
+  --paper-ink-faint: #8a8278;
+  --paper-rule: rgba(31, 26, 20, 0.08);
+  --paper-edit-hover: rgba(31, 26, 20, 0.10);
+  --paper-accent: #a23925;
+  --paper-accent-soft: rgba(162, 57, 37, 0.10);
+  --paper-chrome-bg: #fefdf9;
   --paper-chrome-border: rgba(31, 26, 20, 0.12);
-  --paper-font-serif:    "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
-  --paper-font-sans:     -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --paper-font-mono:     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-
-  /* ── Paper TYPOGRAPHY tokens — single-source for the block rules below
-   * (Stage-1, Goal editor-parity). These NUMBERS are byte-aligned with the
-   * Studio inline copy (root.html.heex `.bp-paper-surface` token block) and
-   * with render.ex heading_style/2 inline values (h1 1.1/-0.02em, h2 1.2,
-   * h3 1.25). Theme-invariant (colors carry the dark companion, not these). */
+  --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
+  --paper-font-mono: ui-monospace, Menlo, monospace;
   --bp-body-size: 18px;
   --bp-body-lh: 1.70;
   --bp-body-tracking: 0.005em;
-  --bp-h1-size: 32px;   --bp-h1-lh: 1.1;   --bp-h1-tracking: -0.02em;
-  --bp-h2-size: 24px;   --bp-h2-lh: 1.2;
-  --bp-h3-size: 20px;   --bp-h3-lh: 1.25;
+  --bp-h1-size: 32px;
+  --bp-h1-lh: 1.1;
+  --bp-h1-tracking: -0.02em;
+  --bp-h2-size: 24px;
+  --bp-h2-lh: 1.2;
+  --bp-h3-size: 20px;
+  --bp-h3-lh: 1.25;
   --bp-heading-weight: 600;
   --bp-para-margin-top: 12pt;
   --bp-li-gap: 4pt;
@@ -62,21 +68,20 @@
   --bp-img-radius: 3px;
 }
 
-/* Dark companion — opt in by setting [data-theme="dark"] on the host. */
 :root[data-theme="dark"], :host([data-theme="dark"]) {
-  --paper-bg:            #1b1815;
-  --paper-bg-deep:       #221e1a;
-  --paper-ink:           #ece6dc;
-  --paper-ink-soft:      #b8ad9e;
-  --paper-ink-faint:     #7f7568;
-  --paper-rule:          rgba(236, 230, 220, 0.10);
-  --paper-rule-soft:     rgba(236, 230, 220, 0.05);
-  --paper-edit-hover:    rgba(236, 230, 220, 0.12);
-  --paper-accent:        #d97a5f;
-  --paper-accent-soft:   rgba(217, 122, 95, 0.14);
-  --paper-chrome-bg:     #221e1a;
+  --paper-bg: #1b1815;
+  --paper-bg-deep: #221e1a;
+  --paper-ink: #ece6dc;
+  --paper-ink-soft: #b8ad9e;
+  --paper-ink-faint: #7f7568;
+  --paper-rule: rgba(236, 230, 220, 0.10);
+  --paper-edit-hover: rgba(236, 230, 220, 0.12);
+  --paper-accent: #d97a5f;
+  --paper-accent-soft: rgba(217, 122, 95, 0.14);
+  --paper-chrome-bg: #221e1a;
   --paper-chrome-border: rgba(236, 230, 220, 0.14);
 }
+/* END GENERATED: paper-surface */
 
 /* ── Editor body wrapper (the WC's <div class="bp-paper-editor-body">). ───
  * Carries the serif page typography so the editor reads as warm-paper prose

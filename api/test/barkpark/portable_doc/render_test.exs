@@ -619,9 +619,14 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "max-width:680px"
       # …and the container carries ONLY geometry now (no colour/background/font).
       assert html =~ ~s(<div style="max-width:680px;margin:0 auto;padding:24px">)
-      # Parchment page background on the doctype body — same hex, now wrapped
-      # in `var(--paper-bg-deep, …)` so themed hosts can override.
-      assert html =~ ~s|<body style="background:var(--paper-bg-deep, #f5f2e9);|
+      # Parchment page background on the doctype body — same hex, wrapped in
+      # `var(--paper-bg-deep, …)` so themed hosts can override; the inline bg
+      # stays as the no-CSS fallback. Wave-2 slice 6 (export self-containment):
+      # the standalone article document now also embeds the ONE canonical
+      # stylesheet in <head> and tags <body class="bp-paper-surface">, so the
+      # export styles itself from the single source.
+      assert html =~ ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #f5f2e9);|
+      assert html =~ "<style>" <> Barkpark.PortableDoc.Render.Stylesheet.css() <> "</style>"
     end
 
     test "email/default mode output is unchanged for an existing block" do

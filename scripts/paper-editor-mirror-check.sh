@@ -1,56 +1,189 @@
 #!/usr/bin/env bash
-# paper-editor-mirror-check — guard the paper-editor style mirrors + the ONE
-# canonical paper-surface source.
+# paper-editor-mirror-check — guard the paper-editor style mirrors + the
+# generated paper-surface token layer.
 #
-# (1) The Studio paper editor's node-view chrome (.bp-canvas-*) is styled in TWO
-#     places that must stay in lockstep:
-#       a. api/lib/barkpark_web/layouts/root.html.heex   (Studio inline <style>)
-#          — PLUS the extracted api/assets/paper-surface/paper-surface.css it
-#            embeds (a rule may now legitimately live in either; we union them).
-#       b. api/assets/paper-editor/src/styles.css        (the de-scoped standalone
-#          bundle for embedders)
-#     When a rule lands in one mirror but not the other, edit-mode-at-rest
-#     silently diverges from view mode (this bit us: hyphens/callout/list-marker
-#     drift, cycles 57-58). This tripwire fails CI when a .bp-canvas-* class
-#     exists in one mirror but not the other, unless the asymmetry is allowlisted.
+# TWO invariants, one script:
 #
-# (2) Paper editor parity Stage 2 extracted the portable paper-surface layer
-#     (--paper-*/--bp-* tokens + .bp-paper-surface element rules) into a SINGLE
-#     source, api/assets/paper-surface/paper-surface.css, embedded by root +
-#     bulldocs layouts + the sheet export. We assert that source exists AND that
-#     the --bp-* token block was truly MOVED (lives ONLY in the source, never
-#     duplicated back into root.html.heex).
+#   Part 1/2 — .bp-canvas-* lockstep. The Studio paper editor's node-view chrome
+#   (.bp-canvas-*) is styled in TWO places that must stay in lockstep:
+#     1. api/lib/barkpark_web/layouts/root.html.heex   (Studio inline <style>)
+#     2. api/assets/paper-editor/src/styles.css        (the de-scoped bundle)
+#   When a rule lands in one mirror but not the other, edit-mode-at-rest silently
+#   diverges from view mode (hyphens/callout/list-marker drift, cycles 57-58).
+#   This tripwire fails when a .bp-canvas-* class exists in one mirror but not the
+#   other, unless the asymmetry is in the documented allowlist.
+#
+#   Part 3 — generated paper-surface token layer. The `--paper-*` theme tokens +
+#   `--bp-*` typography tokens in the embedder bundle (styles.css) are GENERATED
+#   from the ONE canonical source (api/assets/paper-surface/paper-surface.css)
+#   via a deterministic de-scoping transform, and live between exact BEGIN/END
+#   GENERATED markers. Default mode regenerates in memory and byte-compares
+#   against the marked section (fails with a --write hint on drift). `--write`
+#   rewrites the marked section in place. This makes the bundle track the source:
+#   a token added/changed in paper-surface.css (e.g. wave-2 --bp-tone-* light+dark
+#   values) can't be silently forgotten in the standalone bundle.
+#
+# Usage:
+#   scripts/paper-editor-mirror-check.sh            # check (CI + the merge gate)
+#   scripts/paper-editor-mirror-check.sh --write    # regenerate the token layer
 set -euo pipefail
+
+MODE="check"
+if [[ "${1:-}" == "--write" ]]; then
+  MODE="write"
+elif [[ -n "${1:-}" ]]; then
+  echo "paper-editor-mirror-check: unknown argument '$1' (expected --write or none)" >&2
+  exit 2
+fi
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HEEX="$ROOT/api/lib/barkpark_web/layouts/root.html.heex"
-SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 BUNDLE="$ROOT/api/assets/paper-editor/src/styles.css"
+SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 
+# ── Part 3: generated paper-surface token layer (source → bundle) ────────────
+# Runs first so `--write` regenerates before the lockstep check verifies.
+python3 - "$SURFACE" "$BUNDLE" "$MODE" <<'PY'
+import re, sys, difflib
+
+surface_path, bundle_path, mode = sys.argv[1:4]
+
+# Literal font stacks for any host-app-only `var(--font*)` values the source
+# might carry (Studio resolves those through host vars that DO NOT exist in a
+# bare host). The source is literal-fonts today, so this is a passthrough guard;
+# it keeps the transform correct if a `var(--font…)` ever lands in the source.
+FONT_LITERALS = {
+    "--paper-font-serif": '"Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, \'Source Serif 4\', serif',
+    "--paper-font-sans": '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+    "--paper-font-mono": 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+}
+
+def strip_comments(s):
+    return re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
+
+def parse_decls(body):
+    """Ordered (name, value) custom-property declarations from a rule body.
+    Returns None if the body carries any non-custom-property (→ not a pure
+    token block)."""
+    out = []
+    for decl in strip_comments(body).split(";"):
+        decl = decl.strip()
+        if not decl:
+            continue
+        name, _, value = decl.partition(":")
+        name, value = name.strip(), value.strip()
+        if not name.startswith("--"):
+            return None
+        m = re.fullmatch(r"var\((--font[\w-]*)\)", value)
+        if m:
+            value = FONT_LITERALS.get(m.group(1), value)
+        out.append((name, value))
+    return out
+
+def is_token_selector(sel):
+    """True for the paper-surface TOKEN scopes only (not element/class rules):
+    every comma-part resolves to `.bp-paper-surface` / `.bp-paper-body`,
+    optionally under an `html[data-theme=…]` ancestor. Element rules
+    (`.bp-paper-surface h1`) and unrelated selectors return False."""
+    sel = strip_comments(sel).strip()
+    if not sel:
+        return False
+    for part in sel.split(","):
+        part = re.sub(r'^html\[data-theme="(?:light|dark)"\]\s+', "", part.strip())
+        if part not in (".bp-paper-surface", ".bp-paper-body"):
+            return False
+    return True
+
+# Strip comments up front: a source comment may legitimately contain literal
+# braces (e.g. the `ul,ol { margin:0 0 24px }` example) that would otherwise
+# fool the flat brace matcher below.
+surface = strip_comments(open(surface_path, encoding="utf-8").read())
+
+light, dark = {}, {}          # name -> value (last write wins)
+light_order, dark_order = [], []
+
+for m in re.finditer(r"([^{}]*)\{([^{}]*)\}", surface):
+    sel, body = m.group(1), m.group(2)
+    if not is_token_selector(sel):
+        continue
+    decls = parse_decls(body)
+    if decls is None:
+        continue
+    dark_scope = 'data-theme="dark"' in sel
+    bucket, order = (dark, dark_order) if dark_scope else (light, light_order)
+    for name, value in decls:
+        if name not in bucket:
+            order.append(name)
+        bucket[name] = value
+
+def emit(selector, order, bucket):
+    lines = [f"  {name}: {bucket[name]};" for name in order]
+    return selector + " {\n" + "\n".join(lines) + "\n}"
+
+generated = emit(":root, :host", light_order, light) + "\n\n" + emit(
+    ':root[data-theme="dark"], :host([data-theme="dark"])', dark_order, dark
+)
+
+bundle = open(bundle_path, encoding="utf-8").read()
+marker = re.search(
+    r"(/\* BEGIN GENERATED: paper-surface[^\n]*\*/\n)(.*?)(\n/\* END GENERATED: paper-surface \*/)",
+    bundle,
+    re.S,
+)
+if not marker:
+    print("paper-editor-mirror-check part 3: FAILED — BEGIN/END GENERATED: "
+          "paper-surface markers not found in styles.css.", file=sys.stderr)
+    sys.exit(1)
+
+current = marker.group(2)
+
+if mode == "write":
+    new_bundle = bundle[: marker.start()] + marker.group(1) + generated + marker.group(3) + bundle[marker.end():]
+    if new_bundle != bundle:
+        open(bundle_path, "w", encoding="utf-8").write(new_bundle)
+        print("paper-editor-mirror-check part 3: WROTE — regenerated the "
+              "paper-surface token layer in styles.css from paper-surface.css.")
+    else:
+        print("paper-editor-mirror-check part 3: up to date — nothing to write.")
+    sys.exit(0)
+
+if current == generated:
+    n = generated.count("--")
+    print(f"paper-editor-mirror-check part 3: PASS — {n} generated paper-surface "
+          f"tokens in styles.css match paper-surface.css.")
+    sys.exit(0)
+
+print("paper-editor-mirror-check part 3: FAILED — the generated paper-surface "
+      "token layer in styles.css is STALE vs paper-surface.css.\n", file=sys.stderr)
+for line in difflib.unified_diff(
+    current.strip("\n").splitlines(), generated.splitlines(),
+    "styles.css (marked)", "regenerated from paper-surface.css", lineterm=""):
+    print("  " + line, file=sys.stderr)
+print("\n  Fix: run  scripts/paper-editor-mirror-check.sh --write  and commit the "
+      "result (the token layer is GENERATED — never hand-edit between the markers).",
+      file=sys.stderr)
+sys.exit(1)
+PY
+
+# ── Part 1/2: .bp-canvas-* lockstep (root.html.heex ↔ styles.css bundle) ─────
 # Intentional one-sided selectors (documented). Keep this list SMALL and justified.
 #   bp-canvas-source — the source-mode <textarea> (canvas/index.js); Studio-only,
 #                      absent from the standalone embedder bundle by design.
 HEEX_ONLY_ALLOW="bp-canvas-source"
 BUNDLE_ONLY_ALLOW=""
 
-# ── (1) .bp-canvas-* two-mirror lockstep ────────────────────────────────────
-# The heex side is the UNION of root.html.heex and the extracted paper-surface
-# source (a canvas rule may live in either after the Stage-2 split).
-python3 - "$HEEX" "$SURFACE" "$BUNDLE" "$HEEX_ONLY_ALLOW" "$BUNDLE_ONLY_ALLOW" <<'PY'
+python3 - "$HEEX" "$BUNDLE" "$HEEX_ONLY_ALLOW" "$BUNDLE_ONLY_ALLOW" <<'PY'
 import re, sys
 
-heex_path, surface_path, bundle_path, heex_allow, bundle_allow = sys.argv[1:6]
+heex_path, bundle_path, heex_allow, bundle_allow = sys.argv[1:5]
 
-def canvas_classes(*paths):
-    out = set()
-    for path in paths:
-        s = open(path, encoding="utf-8").read()
-        s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)   # CSS comments
-        s = re.sub(r"<!--.*?-->", " ", s, flags=re.S)  # HTML comments
-        out |= set(re.findall(r"\.(bp-canvas-[a-z0-9-]+)", s))
-    return out
+def canvas_classes(path):
+    s = open(path, encoding="utf-8").read()
+    s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)   # CSS comments
+    s = re.sub(r"<!--.*?-->", " ", s, flags=re.S)  # HTML comments
+    return set(re.findall(r"\.(bp-canvas-[a-z0-9-]+)", s))
 
-heex = canvas_classes(heex_path, surface_path)
+heex = canvas_classes(heex_path)
 bundle = canvas_classes(bundle_path)
 heex_allow = set(filter(None, heex_allow.split()))
 bundle_allow = set(filter(None, bundle_allow.split()))
@@ -60,58 +193,21 @@ bundle_only = bundle - heex - bundle_allow
 
 if not heex_only and not bundle_only:
     n = len(heex & bundle)
-    print(f"paper-editor-mirror-check: PASS (1/2) — {n} .bp-canvas-* classes in lockstep "
+    print(f"paper-editor-mirror-check: PASS — {n} .bp-canvas-* classes in lockstep "
           f"(+{len(heex_allow)} allowlisted heex-only).")
-else:
-    print("paper-editor-mirror-check: FAILED (1/2) — the paper-editor style mirrors have drifted.\n")
-    if heex_only:
-        print("  In root.html.heex / paper-surface.css but NOT in styles.css bundle:")
-        for c in sorted(heex_only):
-            print(f"    .{c}")
-    if bundle_only:
-        print("  In styles.css bundle but NOT in root.html.heex / paper-surface.css (Studio would not pick this up!):")
-        for c in sorted(bundle_only):
-            print(f"    .{c}")
-    print("\n  Fix: add the missing rule to the other mirror (keep values identical), or — if the")
-    print("  asymmetry is intentional — add the class to HEEX_ONLY_ALLOW / BUNDLE_ONLY_ALLOW in")
-    print("  scripts/paper-editor-mirror-check.sh with a one-line justification.")
-    sys.exit(1)
-PY
+    sys.exit(0)
 
-# ── (2) canonical paper-surface source: exists + single-owner --bp-* tokens ──
-# Sentinel: the --bp-* typography token DEFINITION block (`--bp-h1-size:`) must
-# live ONLY in paper-surface.css. A `var(--bp-h1-size)` REFERENCE (no colon) in
-# root.html.heex is fine — only a duplicate DEFINITION (`--bp-h1-size:`) fails.
-python3 - "$HEEX" "$SURFACE" <<'PY'
-import os, sys
-
-heex_path, surface_path = sys.argv[1:3]
-SENTINEL = "--bp-h1-size:"
-errors = []
-
-if not os.path.isfile(surface_path):
-    errors.append(f"canonical source missing: {surface_path}")
-else:
-    surface = open(surface_path, encoding="utf-8").read()
-    if SENTINEL not in surface:
-        errors.append(f"canonical source {os.path.basename(surface_path)} "
-                      f"does not define the --bp-* tokens (missing '{SENTINEL}').")
-
-heex = open(heex_path, encoding="utf-8").read()
-dup = heex.count(SENTINEL)
-if dup:
-    errors.append(f"root.html.heex still DEFINES the --bp-* tokens "
-                  f"('{SENTINEL}' x{dup}) — they must live ONLY in paper-surface.css "
-                  f"(references `var(--bp-h1-size)` are fine; a definition is not).")
-
-if errors:
-    print("\npaper-editor-mirror-check: FAILED (2/2) — canonical paper-surface source:\n")
-    for e in errors:
-        print(f"    - {e}")
-    print("\n  Fix: keep the --paper-*/--bp-* token blocks + .bp-paper-surface element rules")
-    print("  in api/assets/paper-surface/paper-surface.css ONLY; root.html.heex embeds them")
-    print("  via <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>.")
-    sys.exit(1)
-
-print("paper-editor-mirror-check: PASS (2/2) — paper-surface.css is the single --bp-* owner.")
+print("paper-editor-mirror-check: FAILED — the two paper-editor style mirrors have drifted.\n")
+if heex_only:
+    print("  In root.html.heex but NOT in styles.css bundle:")
+    for c in sorted(heex_only):
+        print(f"    .{c}")
+if bundle_only:
+    print("  In styles.css bundle but NOT in root.html.heex (Studio would not pick this up!):")
+    for c in sorted(bundle_only):
+        print(f"    .{c}")
+print("\n  Fix: add the missing rule to the other mirror (keep values identical), or — if the")
+print("  asymmetry is intentional — add the class to HEEX_ONLY_ALLOW / BUNDLE_ONLY_ALLOW in")
+print("  scripts/paper-editor-mirror-check.sh with a one-line justification.")
+sys.exit(1)
 PY
