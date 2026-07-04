@@ -204,9 +204,12 @@ const EXPECTATIONS = {
     },
   },
   empty: {
-    what: "first-run onboarding on an empty dashboard",
+    what: "first-run onboarding on an empty dashboard (A4 welcome runway)",
     container: "overview-body",
-    includes: ["start-card", "Get started", "data-goto=\"billing\"", "data-goto=\"launch\""],
+    // A4 replaced the start-card checklist with the welcome runway; this
+    // expectation lagged the markup (pre-existing red) — updated to the
+    // shipped welcomeHeroHtml skeleton.
+    includes: ["runway-hero", "Launch your first Barkpark", "runway-sub"],
     excludes: ['class="fleet-row"'],
   },
   "mixed-fleet": {
@@ -226,6 +229,38 @@ const EXPECTATIONS = {
     what: "the setup-failed state with the verbatim error",
     container: "instance-body",
     includes: ["bp-tl-fail", "bp-tl-step--failed", "Setup failed", "Retry setup", "Studio never came up"],
+  },
+  // C8: the tab strip registers Timeline and marks it active on the deep link.
+  // (The feed itself mounts through element-level querySelector, which this
+  // shim keeps inert — the feed's rendering is pinned in __app.test.mjs.)
+  timeline: {
+    what: "the instance workspace routes the Timeline tab",
+    container: "instance-body",
+    includes: ["inst-tabs", '/timeline" aria-current="page"', 'id="instance-tabpanel"', ">Timeline<"],
+  },
+  "timeline-events-only": {
+    what: "the Timeline tab routes for a non-admin too (403 degradation is harness-pinned)",
+    container: "instance-body",
+    includes: ["inst-tabs", '/timeline" aria-current="page"'],
+  },
+  // C8: the golden-path verify card renders from the events feed on Overview.
+  "verify-pass": {
+    what: "verify chips — three green probes + the quiet re-check",
+    container: "instance-verify",
+    includes: ["vf-card", "vf-chip vf-chip--pass", "All checks passed", "Check now"],
+    excludes: ["vf-chip--fail", "Run first check"],
+  },
+  "verify-fail": {
+    what: "verify chips — the failing Studio probe rendered honestly",
+    container: "instance-verify",
+    includes: ["vf-chip vf-chip--fail", "502", "1 of 3 checks failing"],
+    excludes: ["All checks passed"],
+  },
+  "verify-never": {
+    what: "verify chips — never run, the card invites the first check",
+    container: "instance-verify",
+    includes: ["Run first check", "vf-chip vf-chip--unknown", "Never checked"],
+    excludes: ["vf-chip--pass", "vf-chip--fail"],
   },
 };
 

@@ -872,7 +872,8 @@ test("C6: the tab codec + webhook builders + mount seam are exported", () => {
     "mountWebhooksTab"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  assert.deepEqual([...hooks.instanceTabs], ["overview", "webhooks"]);
+  // C8 registered the Timeline tab between Overview and Webhooks.
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks"]);
 });
 
 // ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
@@ -1292,4 +1293,401 @@ test("readyHeroHtml escapes the instance name (no markup injection)", () => {
   const html = hooks.readyHeroHtml({ name: "<script>x</script>", id: "z" }, { studioBtnId: "s" });
   assert.doesNotMatch(html, /<script>x/);
   assert.match(html, /&lt;script&gt;/);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// C8 — instance Timeline tab + golden-path verify chips (D10/D18/D25/D33/D53)
+// ════════════════════════════════════════════════════════════════════════════
+
+test("C8: the timeline + verify pure helpers are exported", () => {
+  for (const name of ["mergeTimeline", "auditMirrorsEvent", "tlvEntryTitle",
+    "tlvRowHtml", "tlvDetailHtml", "timelineFeedHtml", "timelineTabShellHtml",
+    "mountTimelineTab", "latestVerifyOf", "probeChipsModel", "verifySummaryText",
+    "verifyChipHtml", "verifyCardHtml", "verifyNoteHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.ok(Array.isArray(hooks.verifyProbes));
+});
+
+// ── the probe vocabulary is byte-pinned against the shared fixture ──────────
+// __fixtures__/verify_probes.json is asserted by the Elixir Verify suite AND
+// the Go provision gate; the SPA's chip labels must be the same three probes.
+
+test("C8: verifyProbes (name+label) equals the shared verify_probes.json fixture", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/verify_probes.json", import.meta.url), "utf8"),
+  );
+  // Spread the vm-realm array into the host realm before deepEqual (foreign
+  // Array prototype — same trick as the fleetSummary tests above).
+  assert.deepEqual(
+    [...hooks.verifyProbes].map((p) => ({ name: p.name, label: p.label })),
+    fixture.probes.map((p) => ({ name: p.name, label: p.label })),
+  );
+});
+
+// ── tab codec: #instance/<id>/timeline routes; strip renders the tab ────────
+
+test("C8: parseHash selects the registered Timeline tab", () => {
+  sandbox.location.hash = "#instance/9f3c/timeline";
+  assert.deepEqual({ ...hooks.parseHash() }, { view: "instance", id: "9f3c", tab: "timeline" });
+});
+
+test("C8: the tab strip renders Timeline and marks it active on that tab", () => {
+  const html = hooks.instanceTabStripHtml({ id: "abc", name: "Prod" }, "timeline");
+  assert.match(html, /href="#instance\/abc\/timeline"[^>]*aria-current="page"/);
+  assert.match(html, />Timeline</);
+  // Overview + Webhooks still present, not current.
+  assert.match(html, /href="#instance\/abc\/overview"/);
+  assert.match(html, /href="#instance\/abc\/webhooks"/);
+});
+
+test("C8: instanceDetailHtml leaves the Timeline panel blank (filled after mount)", () => {
+  const html = hooks.instanceDetailHtml({ id: "abc", name: "Prod", host: "h", url: "u" }, "timeline");
+  assert.doesNotMatch(html, /id="instance-sites"/);
+  assert.match(html, /id="instance-tabpanel"/);
+});
+
+// ── mergeTimeline: ordering / interleaving / dedup / empty (the table test) ──
+
+const EV = (id, type, secs, payload) => ({
+  id, type, payload: payload || {}, inserted_at: new Date(Date.UTC(2026, 6, 3, 12, 0, secs)).toISOString(),
+});
+const AU = (id, action, secs, over) => Object.assign({
+  id, action, actor: { id: "u1", email: "ada@acme.com" }, target_type: "barkpark",
+  target_id: "bp1", metadata: null, inserted_at: new Date(Date.UTC(2026, 6, 3, 12, 0, secs)).toISOString(),
+}, over || {});
+
+test("C8: mergeTimeline interleaves both feeds newest-first", () => {
+  const merged = hooks.mergeTimeline(
+    [EV(3, "health", 30), EV(1, "status", 10)],       // newest-first, as the API sends
+    [AU("a2", "site.created", 20), AU("a1", "token.minted", 5)],
+  );
+  assert.deepEqual([...merged.map((e) => e.key)], ["e:3", "a:a2", "e:1", "a:a1"]);
+  assert.deepEqual([...merged.map((e) => e.source)], ["event", "audit", "event", "audit"]);
+});
+
+test("C8: equal timestamps order stably — event before audit, then key (repaint-stable)", () => {
+  const events = [EV(2, "health", 10), EV(1, "backup", 10)];
+  const audits = [AU("a1", "site.created", 10)];
+  const once = hooks.mergeTimeline(events, audits).map((e) => e.key);
+  const twice = hooks.mergeTimeline(events, audits).map((e) => e.key);
+  assert.deepEqual([...once], ["e:1", "e:2", "a:a1"]); // events first, key-tiebreak deterministic
+  assert.deepEqual([...once], [...twice]);
+});
+
+test("C8: a verify event rides as source 'verify', other events as 'event'", () => {
+  const merged = hooks.mergeTimeline([EV(2, "verify", 20, { ok: true }), EV(1, "health", 10)], []);
+  assert.equal(merged[0].source, "verify");
+  assert.equal(merged[1].source, "event");
+});
+
+test("C8: dedup — an audit row naming the event via metadata.event_id is dropped", () => {
+  const merged = hooks.mergeTimeline(
+    [EV(7, "status", 10, { transition: "online" })],
+    [AU("a1", "barkpark.go_live", 40, { metadata: { event_id: 7 } }),
+     AU("a2", "site.created", 20)],
+  );
+  assert.deepEqual([...merged.map((e) => e.key)], ["a:a2", "e:7"]);
+});
+
+test("C8: dedup — same-second + action dot-suffix == event type drops the audit mirror", () => {
+  const merged = hooks.mergeTimeline(
+    [EV(9, "verify", 10, { ok: true })],
+    [AU("a1", "barkpark.verify", 10)],
+  );
+  assert.deepEqual([...merged.map((e) => e.key)], ["e:9"]);
+  // A DIFFERENT second (or a non-matching suffix) keeps both rows.
+  assert.equal(hooks.mergeTimeline([EV(9, "verify", 10)], [AU("a1", "barkpark.verify", 11)]).length, 2);
+  assert.equal(hooks.mergeTimeline([EV(9, "status", 10)], [AU("a1", "site.created", 10)]).length, 2);
+});
+
+test("C8: mergeTimeline is total over junk — empty, null, garbled stamps", () => {
+  assert.deepEqual([...hooks.mergeTimeline([], [])], []);
+  assert.deepEqual([...hooks.mergeTimeline(null, undefined)], []);
+  const merged = hooks.mergeTimeline([EV(1, "health", 10), { id: 2, type: "backup", inserted_at: "garbage" }], []);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[1].key, "e:2"); // garbled stamp sinks to the bottom, never NaN-throws
+});
+
+// ── entry titles + detail rendering ─────────────────────────────────────────
+
+test("C8: tlvEntryTitle — audit reads actor+action, status reads the transition, verify the verdict", () => {
+  const m = hooks.mergeTimeline(
+    [EV(1, "status", 10, { transition: "offline", reason: "agent_silent" }),
+     EV(2, "verify", 20, { ok: false, reachable: true, probes: [
+       { name: "verify.api", ok: true, reachable: true, status: 200 },
+       { name: "verify.login", ok: true, reachable: true, status: 401 },
+       { name: "verify.studio", ok: false, reachable: true, status: 502 },
+     ] })],
+    [AU("a1", "token.minted", 5)],
+  );
+  const byKey = Object.fromEntries(m.map((e) => [e.key, hooks.tlvEntryTitle(e)]));
+  assert.equal(byKey["a:a1"], "ada@acme.com minted an API token");
+  assert.equal(byKey["e:1"], "Status → offline");
+  assert.equal(byKey["e:2"], "Verification failed — 1 of 3 checks");
+});
+
+test("C8: a verify pass and an unreachable run title honestly", () => {
+  const pass = hooks.mergeTimeline([EV(1, "verify", 10, { ok: true, reachable: true, probes: [] })], [])[0];
+  assert.equal(hooks.tlvEntryTitle(pass), "Verification passed");
+  const unreach = hooks.mergeTimeline([EV(2, "verify", 10, { ok: false, reachable: false, probes: [] })], [])[0];
+  assert.equal(hooks.tlvEntryTitle(unreach), "Verification failed — unreachable");
+});
+
+test("C8: tlvDetailHtml — verify probes render as readable lines, payloads as escaped JSON", () => {
+  const v = hooks.mergeTimeline([EV(1, "verify", 10, { ok: false, probes: [
+    { name: "verify.api", ok: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
+    { name: "verify.studio", ok: false, reachable: false, evidence: "connect refused" },
+  ] })], [])[0];
+  const detail = hooks.tlvDetailHtml(v);
+  assert.match(detail, /verify\.api: 200 in 44ms — GET \/v1\/capabilities/);
+  assert.match(detail, /verify\.studio: unreachable — connect refused/);
+  const h = hooks.mergeTimeline([EV(2, "health", 10, { note: "<img src=x>" })], [])[0];
+  assert.match(hooks.tlvDetailHtml(h), /&lt;img src=x&gt;/);
+  assert.doesNotMatch(hooks.tlvDetailHtml(h), /<img/);
+});
+
+test("C8: tlvRowHtml — badge + expandable detail honouring the expanded flag", () => {
+  const e = hooks.mergeTimeline([EV(1, "health", 10, { health: "up" })], [])[0];
+  const closed = hooks.tlvRowHtml(e, false);
+  assert.match(closed, /tlv-badge tlv-badge--event/);
+  assert.match(closed, /data-tlv-toggle aria-expanded="false"/);
+  assert.match(closed, /<pre class="tlv-detail" hidden>/);
+  const open = hooks.tlvRowHtml(e, true);
+  assert.match(open, /aria-expanded="true"/);
+  assert.match(open, /<pre class="tlv-detail">/);
+  // A payload-less entry gets no dead Details button.
+  const bare = hooks.mergeTimeline([EV(2, "tls", 10, {})], [])[0];
+  assert.doesNotMatch(hooks.tlvRowHtml(bare, false), /data-tlv-toggle/);
+});
+
+// ── timelineFeedHtml: the D18 degradation + teaching empty state ────────────
+
+test("C8: the empty feed teaches, never apologises", () => {
+  const html = hooks.timelineFeedHtml([], {});
+  assert.match(html, /Events will appear here as this Barkpark works/);
+  assert.match(html, /empty-state/);
+});
+
+test("C8: an audit 403 degrades to ONE quiet line, not an error state", () => {
+  const entries = hooks.mergeTimeline([EV(1, "health", 10)], []);
+  const html = hooks.timelineFeedHtml(entries, { quietLine: "Audit entries are visible to team admins." });
+  assert.match(html, /tlv-quiet/);
+  assert.match(html, /Audit entries are visible to team admins\./);
+  assert.doesNotMatch(html, /notice-error/);
+  assert.doesNotMatch(html, /Couldn/); // no error copy anywhere
+  assert.match(html, /tlv-row/); // the events still render
+});
+
+test("C8: expandedKeys re-open exactly the remembered rows across a repaint", () => {
+  const entries = hooks.mergeTimeline([EV(1, "health", 10, { a: 1 }), EV(2, "backup", 20, { b: 2 })], []);
+  const html = hooks.timelineFeedHtml(entries, { expandedKeys: ["e:2"] });
+  const rows = html.split('data-tlv-key="');
+  assert.match(rows[1], /^e:2/); // newest first
+  assert.match(rows[1], /aria-expanded="true"/);
+  assert.match(rows[2], /^e:1/);
+  assert.match(rows[2], /aria-expanded="false"/);
+});
+
+// ── fake-DOM mount smoke ────────────────────────────────────────────────────
+
+test("C8: mountTimelineTab paints the loading shell synchronously without throwing", () => {
+  const root = fakeNode();
+  hooks.mountTimelineTab(root, { id: "abc", name: "Prod" });
+  assert.match(root.innerHTML, /class="tlv"/);
+  assert.match(root.innerHTML, /Loading timeline/);
+});
+
+// ── latestVerifyOf + probeChipsModel ────────────────────────────────────────
+
+test("C8: latestVerifyOf finds the newest verify in a newest-first payload", () => {
+  const events = [EV(3, "health", 30), EV(2, "verify", 20, { ok: true }), EV(1, "verify", 10, { ok: false })];
+  assert.equal(hooks.latestVerifyOf(events).id, 2);
+  assert.equal(hooks.latestVerifyOf([EV(1, "health", 10)]), null);
+  assert.equal(hooks.latestVerifyOf(null), null);
+});
+
+const PASS_ENVELOPE = {
+  ok: true, reachable: true, verified_at: new Date(Date.now() - 120000).toISOString(),
+  probes: [
+    { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "" },
+    { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 120, evidence: "" },
+    { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 310, evidence: "" },
+  ],
+};
+
+test("C8: probeChipsModel — all-pass maps every fixture probe to a pass chip", () => {
+  const m = hooks.probeChipsModel(PASS_ENVELOPE);
+  assert.equal(m.ran, true);
+  assert.equal(m.ok, true);
+  assert.equal(m.reachable, true);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "pass"]);
+  assert.deepEqual([...m.chips.map((c) => c.label)], ["API answers", "Login responds", "Studio renders"]);
+  assert.equal(m.chips[0].status, 200);
+  assert.equal(m.chips[0].latencyMs, 44);
+});
+
+test("C8: probeChipsModel — one-fail and unreachable are normal results, chips stay three", () => {
+  const oneFail = JSON.parse(JSON.stringify(PASS_ENVELOPE));
+  oneFail.ok = false;
+  oneFail.probes[2] = { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 90, evidence: "502" };
+  const m = hooks.probeChipsModel(oneFail);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["pass", "pass", "fail"]);
+
+  const unreach = {
+    ok: false, reachable: false, verified_at: PASS_ENVELOPE.verified_at,
+    probes: ["verify.api", "verify.login", "verify.studio"].map((n) => (
+      { name: n, ok: false, reachable: false, status: null, latency_ms: 5000, evidence: "connect timeout" }
+    )),
+  };
+  const mu = hooks.probeChipsModel(unreach);
+  assert.equal(mu.reachable, false);
+  assert.equal(mu.chips.length, 3);
+  for (const c of mu.chips) {
+    assert.equal(c.role, "fail");
+    assert.equal(c.unreachable, true);
+  }
+});
+
+test("C8: probeChipsModel(null) is the never-run state — three unknown chips", () => {
+  const m = hooks.probeChipsModel(null);
+  assert.equal(m.ran, false);
+  assert.equal(m.ok, null);
+  assert.equal(m.verifiedAt, null);
+  assert.deepEqual([...m.chips.map((c) => c.role)], ["unknown", "unknown", "unknown"]);
+});
+
+test("C8: verifySummaryText — pass / fail-count / unreachable / never-run", () => {
+  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(PASS_ENVELOPE)), /^All checks passed · checked /);
+  const oneFail = JSON.parse(JSON.stringify(PASS_ENVELOPE));
+  oneFail.ok = false;
+  oneFail.probes[1].ok = false;
+  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(oneFail)), /^1 of 3 checks failing/);
+  const unreach = { ok: false, reachable: false, probes: [] };
+  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(unreach)), /^Unreachable — the box didn't answer/);
+  assert.match(hooks.verifySummaryText(hooks.probeChipsModel(null)), /Never checked/);
+});
+
+// ── verifyCardHtml: never-run invite, honest verdicts, one Check button ─────
+
+test("C8: the never-run card invites the FIRST check (primary button)", () => {
+  const html = hooks.verifyCardHtml(hooks.probeChipsModel(null));
+  assert.match(html, /Run first check/);
+  assert.match(html, /btn-primary/);
+  assert.match(html, /data-vf-run/);
+  assert.match(html, /vf-chip vf-chip--unknown/);
+  assert.match(html, /Never checked/);
+});
+
+test("C8: an all-pass card shows three pass chips + a quiet Check now", () => {
+  const html = hooks.verifyCardHtml(hooks.probeChipsModel(PASS_ENVELOPE));
+  assert.equal((html.match(/vf-chip vf-chip--pass/g) || []).length, 3);
+  assert.match(html, />Check now</);
+  assert.doesNotMatch(html, /btn-primary/); // routine re-check is not the loudest thing on the page
+  assert.match(html, /All checks passed/);
+  assert.match(html, /200 · 44ms/);
+});
+
+test("C8: an unreachable result renders honestly — fail chips + 'unreachable', no error scaffolding", () => {
+  const unreach = {
+    ok: false, reachable: false, verified_at: PASS_ENVELOPE.verified_at,
+    probes: ["verify.api", "verify.login", "verify.studio"].map((n) => (
+      { name: n, ok: false, reachable: false, status: null, latency_ms: 5000, evidence: "t/o" }
+    )),
+  };
+  const html = hooks.verifyCardHtml(hooks.probeChipsModel(unreach));
+  assert.equal((html.match(/vf-chip vf-chip--fail/g) || []).length, 3);
+  assert.match(html, /unreachable/);
+  assert.doesNotMatch(html, /notice-error/);
+  assert.match(html, /data-vf-run/); // re-check stays one click away
+});
+
+test("C8: chips carry a label-in-name aria-label (pass/fail/not-checked in words)", () => {
+  const pass = hooks.verifyChipHtml({ name: "verify.api", label: "API answers", role: "pass", status: 200, latencyMs: 44 });
+  assert.match(pass, /aria-label="API answers — passed"/);
+  const fail = hooks.verifyChipHtml({ name: "verify.studio", label: "Studio renders", role: "fail", status: 502, latencyMs: 9 });
+  assert.match(fail, /aria-label="Studio renders — failed"/);
+  const never = hooks.verifyChipHtml({ name: "verify.login", label: "Login responds", role: "unknown", status: null, latencyMs: null });
+  assert.match(never, /aria-label="Login responds — not checked"/);
+});
+
+// ── verifyNoteHtml: human copy + EXACTLY ONE recovery action (D25) ──────────
+
+test("C8: 409 not_live — copy + exactly one recovery action (View timeline)", () => {
+  const html = hooks.verifyNoteHtml("not_live", { id: "abc" });
+  assert.match(html, /Not live yet/);
+  assert.match(html, /href="#instance\/abc\/timeline"/);
+  const actions = (html.match(/<a |<button /g) || []).length;
+  assert.equal(actions, 1, "exactly one recovery action");
+});
+
+test("C8: 404 no_admin_token — copy + exactly one recovery action (Re-provision)", () => {
+  const html = hooks.verifyNoteHtml("no_admin_token", { id: "abc" });
+  assert.match(html, /No stored credentials/);
+  assert.match(html, /data-vf-reprovision/);
+  const actions = (html.match(/<a |<button /g) || []).length;
+  assert.equal(actions, 1, "exactly one recovery action");
+  // Unknown codes render nothing (total over junk).
+  assert.equal(hooks.verifyNoteHtml("decrypt_failed", { id: "abc" }), "");
+});
+
+// ── async WIRING smoke: the real mount → fetch → merge → paint path ─────────
+// Drives mountTimelineTab against a stubbed fetch (events 200, audit 403) and
+// asserts the painted feed: rows from the events feed, the ONE quiet
+// degradation line, and no error scaffolding. This is the path a non-admin
+// operator actually hits.
+
+test("C8: mountTimelineTab paints events + the quiet 403 line through the real load path", async () => {
+  const tlv = fakeNode();
+  const root = fakeNode();
+  root.querySelector = (sel) => (sel === ".tlv" ? tlv : null);
+
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = (url) => {
+    const p = String(url);
+    const isEvents = p.indexOf("/events") !== -1;
+    const body = isEvents
+      ? { events: [
+          { id: 2, type: "verify", payload: { ok: true, reachable: true, probes: [] }, inserted_at: "2026-07-03T12:00:20Z" },
+          { id: 1, type: "health", payload: { health: "up" }, inserted_at: "2026-07-03T12:00:10Z" },
+        ] }
+      : { error: "forbidden" };
+    return Promise.resolve({
+      ok: isEvents,
+      status: isEvents ? 200 : 403,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(body),
+    });
+  };
+  try {
+    hooks.mountTimelineTab(root, { id: "bp-smoke", name: "Prod" });
+    assert.match(root.innerHTML, /Loading timeline/); // honest synchronous state
+    for (let i = 0; i < 10; i++) await Promise.resolve(); // flush the promise chain
+    assert.match(tlv.innerHTML, /tlv-quiet/);
+    assert.match(tlv.innerHTML, /Audit entries are visible to team admins\./);
+    assert.match(tlv.innerHTML, /tlv-badge--verify/);
+    assert.match(tlv.innerHTML, /Verification passed/);
+    assert.match(tlv.innerHTML, /tlv-badge--event/);
+    assert.doesNotMatch(tlv.innerHTML, /Couldn/); // degraded, never an error state
+  } finally {
+    sandbox.fetch = realFetch;
+  }
+});
+
+test("C8: a failed EVENTS fetch is the error state with one Retry", async () => {
+  const tlv = fakeNode();
+  const root = fakeNode();
+  root.querySelector = (sel) => (sel === ".tlv" ? tlv : null);
+
+  const realFetch = sandbox.fetch;
+  sandbox.fetch = () => Promise.reject(new Error("net down")); // api() → network_error
+  try {
+    hooks.mountTimelineTab(root, { id: "bp-smoke-2", name: "Prod" });
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    assert.match(tlv.innerHTML, /Couldn't load the timeline/);
+    assert.match(tlv.innerHTML, /data-tlv-retry/);
+    assert.equal((tlv.innerHTML.match(/<button/g) || []).length, 1); // exactly one recovery action
+  } finally {
+    sandbox.fetch = realFetch;
+  }
 });

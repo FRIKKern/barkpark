@@ -1079,11 +1079,12 @@
 
   // C6 (charter D49): the instance drill-down is a sub-tabbed workspace, routed
   // as #instance/<id>/<tab>. A tab REGISTERS here only when its backend is live —
-  // this wave that is exactly Overview and Webhooks (the C4/C5 instance-API proxy
-  // spine). #instance/<id> (the legacy-stable hash `bp cloud open` mints, D14)
-  // maps to "overview" forever; an unknown/stale tab suffix degrades to overview
-  // rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "webhooks"];
+  // Overview, Timeline (C8/D10: the merged events+audit incident home over the
+  // existing GET /v1/barkparks/:id/events + /v1/audit routes), and Webhooks (the
+  // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
+  // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
+  // suffix degrades to overview rather than 404ing a bookmark.
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
@@ -1610,12 +1611,14 @@
       // consuming on render would blink the celebration away before it's read.
       var lc = instanceLifecycle(bp);
       if (lc.provisioning || lc.failed) provisioningSeen[bp.id] = true;
-      var showReady = tab !== "webhooks" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
+      var showReady = tab === "overview" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
       var panel = box.querySelector("#instance-tabpanel");
       if (tab === "webhooks") {
         mountWebhooksTab(panel, bp);
+      } else if (tab === "timeline") {
+        mountTimelineTab(panel, bp); // C8: the merged events+audit incident home
       } else if (showReady) {
         // The ready fold owns the timeline slot — wire its Open Studio + dismiss.
         var rs = $("#inst-ready-studio");
@@ -1626,12 +1629,14 @@
           loadInstance(bp.id, tab);
         });
         loadInstanceSites(bp);
+        loadInstanceVerify(bp); // C8: golden-path chips beside the fresh box
       } else {
         // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
         // before (the tab seam only wraps the SAME render in a panel).
         wireInstanceTimeline(box, bp);   // C3: console toggle + Retry
         startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
         loadInstanceSites(bp);
+        loadInstanceVerify(bp);          // C8: golden-path verify chips (host-set boxes)
       }
     });
   }
@@ -1646,15 +1651,15 @@
 
   // The persistent workspace chrome (name + status pill + actions), the
   // instance-level banner, then the tab strip, then the active tab's panel. The
-  // Overview panel is the pre-C6 detail body verbatim; the Webhooks panel is
-  // filled by mountWebhooksTab after the shell paints. opts.ready folds the
-  // timeline slot into the shared ready panel (A4 — the provision→live moment).
+  // Overview panel is the pre-C6 detail body verbatim; the Timeline and Webhooks
+  // panels are filled by their mount fns after the shell paints. opts.ready folds
+  // the timeline slot into the shared ready panel (A4 — the provision→live moment).
   function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
     return instanceHeaderHtml(bp) +
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel">' +
-        (tab === "webhooks" ? "" : instanceOverviewHtml(bp, opts)) +
+        (tab === "overview" ? instanceOverviewHtml(bp, opts) : "") +
       "</div>";
   }
 
@@ -1663,7 +1668,7 @@
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
     tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", webhooks: "Webhooks" };
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
       INSTANCE_TABS.map(function (t) {
         var on = t === tab;
@@ -1768,10 +1773,18 @@
         ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
         : "";
 
+    // C8: the golden-path verify card mounts here for a host-set box (a box
+    // that's still provisioning has its own timeline as the primary surface,
+    // and a box mid-removal must not invite a check that would lie). Filled
+    // async by loadInstanceVerify — an empty slot renders nothing.
+    var verifySlot = hasHost && !lc.removing && !lc.removeFailed
+      ? '<div id="instance-verify"></div>'
+      : "";
+
     // A4/D60: pre-host the timeline is the primary surface — the whole Sites
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
-    return timeline +
+    return timeline + verifySlot +
       '<div class="detail-grid">' +
         '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
           '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
@@ -2571,6 +2584,468 @@
       }
       if (btn) { btn.disabled = false; btn.textContent = "Replay"; }
       toast({ kind: "error", title: "Couldn't replay", body: webhookMutationError(r.data) });
+    });
+  }
+
+  // ============================== TIMELINE TAB + VERIFY CHIPS (C8/D10/D53)
+  // The instance's incident home: GET /v1/barkparks/:id/events (newest-first;
+  // agent events, provisioning steps, and `verify` runs) merged chronologically
+  // with the instance-scoped slice of GET /v1/audit into ONE feed, live-ticking
+  // off the EXISTING `fleet`/`audit` SSE types (D2/D33: the closed vocabulary
+  // gains no new member — verify runs ride the `fleet` nudge the server already
+  // sends). /v1/audit is team-admin-only: a 403 degrades to events-only with one
+  // honest quiet line, never an error state (D18). The verify chips on the
+  // Overview tab derive from the SAME events payload; "Check now" POSTs the
+  // synchronous /verify suite and renders the returned envelope immediately —
+  // an unreachable box is a NORMAL result rendered honestly, not an error.
+
+  // The event-type vocabulary is CLOSED server-side (AgentEvent @types:
+  // health status backup tls content verify); an unknown type renders its raw
+  // name (version-skew safety), never blanks a row.
+  var TLV_EVENT_TITLES = {
+    health: "Health report",
+    status: "Status change",
+    backup: "Backup",
+    tls: "TLS",
+    content: "Content",
+    verify: "Verification",
+  };
+
+  // Pure: epoch ms of an ISO stamp; 0 (sorts oldest, never NaN) on junk.
+  function tlvTs(at) {
+    var t = Date.parse(at);
+    return isNaN(t) ? 0 : t;
+  }
+
+  // Pure: does this audit row MIRROR an instance event already in the feed?
+  // Two sanctioned signals: (a) the audit's metadata names the event outright
+  // (metadata.event_id), or (b) same-second timestamp AND the audit action's
+  // dot-suffix equals the event type (e.g. a future "barkpark.verify" audit
+  // beside the `verify` event). The EVENT wins the dedup — it carries the
+  // richer payload; the audit row is the actor attribution of the same fact.
+  function auditMirrorsEvent(a, events) {
+    if (!a) return false;
+    var evId = a.metadata && a.metadata.event_id != null ? String(a.metadata.event_id) : null;
+    var sec = a.inserted_at ? Math.floor(tlvTs(a.inserted_at) / 1000) : null;
+    var suffix = String(a.action || "").split(".").pop();
+    for (var i = 0; i < events.length; i++) {
+      var e = events[i];
+      if (!e) continue;
+      if (evId !== null && String(e.id) === evId) return true;
+      if (sec !== null && suffix && String(e.type) === suffix &&
+          Math.floor(tlvTs(e.inserted_at) / 1000) === sec) return true;
+    }
+    return false;
+  }
+
+  // Pure: merge the two feeds into one newest-first timeline. Each entry:
+  // { source: "event"|"verify"|"audit", key, at, type, payload, actor }.
+  // Ordering is TOTAL and stable: timestamp desc; at equal timestamps the
+  // instance event outranks its audit attribution (the event is the primary
+  // record); final tiebreak on key so two repaints can never reorder.
+  function mergeTimeline(events, audits) {
+    events = Array.isArray(events) ? events : [];
+    audits = Array.isArray(audits) ? audits : [];
+    var entries = [];
+    events.forEach(function (e) {
+      if (!e) return;
+      entries.push({
+        source: e.type === "verify" ? "verify" : "event",
+        key: "e:" + String(e.id),
+        at: e.inserted_at || null,
+        type: String(e.type || ""),
+        payload: e.payload || null,
+        actor: null,
+      });
+    });
+    audits.forEach(function (a) {
+      if (!a) return;
+      if (auditMirrorsEvent(a, events)) return; // the event already tells it
+      entries.push({
+        source: "audit",
+        key: "a:" + String(a.id),
+        at: a.inserted_at || null,
+        type: String(a.action || ""),
+        payload: a.metadata || null,
+        actor: (a.actor && a.actor.email) || null,
+      });
+    });
+    entries.sort(function (x, y) {
+      var d = tlvTs(y.at) - tlvTs(x.at);
+      if (d) return d;
+      var r = (x.source === "audit" ? 1 : 0) - (y.source === "audit" ? 1 : 0);
+      if (r) return r;
+      return x.key < y.key ? -1 : x.key > y.key ? 1 : 0;
+    });
+    return entries;
+  }
+
+  // Pure: one human title per entry. Audit rows read like the Activity tab
+  // (actor + humanAction); verify rows read the verdict; agent events read
+  // their kind, enriched with the status transition when the payload has one.
+  function tlvEntryTitle(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "audit") {
+      return (entry.actor || "system") + " " + humanAction(entry.type);
+    }
+    if (entry.source === "verify") {
+      var m = probeChipsModel(p);
+      if (m.ok) return "Verification passed";
+      if (!m.reachable) return "Verification failed — unreachable";
+      var failing = m.chips.filter(function (c) { return c.role === "fail"; }).length;
+      return "Verification failed — " + failing + " of " + m.chips.length + " checks";
+    }
+    var base = TLV_EVENT_TITLES[entry.type] || entry.type || "Event";
+    if (entry.type === "status" && p.transition) return "Status → " + String(p.transition);
+    if (entry.type === "health" && p.health) return "Health report — " + String(p.health);
+    return base;
+  }
+
+  // Pure: does the entry carry anything worth an inline expansion?
+  function tlvHasDetail(entry) {
+    var p = entry && entry.payload;
+    return !!(p && typeof p === "object" && Object.keys(p).length);
+  }
+
+  // Pure: the expanded detail body (escaped). Verify runs get a readable
+  // per-probe console (name, status, latency, verbatim evidence); everything
+  // else shows its payload verbatim as pretty JSON — the honest raw record.
+  function tlvDetailHtml(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "verify" && Array.isArray(p.probes)) {
+      return p.probes.map(function (pr) {
+        pr = pr || {};
+        var status = pr.status != null ? String(pr.status) : (pr.reachable === false ? "unreachable" : "—");
+        var lat = pr.latency_ms != null ? " in " + String(pr.latency_ms) + "ms" : "";
+        return esc(String(pr.name || "probe") + ": " + status + lat +
+          (pr.evidence ? " — " + String(pr.evidence) : ""));
+      }).join("\n");
+    }
+    try {
+      return esc(JSON.stringify(p, null, 2));
+    } catch (e) {
+      return esc(String(p));
+    }
+  }
+
+  // Pure: one feed row. `expanded` re-applies the operator's open details
+  // across live repaints (an SSE tick must never fold what they were reading).
+  function tlvRowHtml(entry, expanded) {
+    var hasDetail = tlvHasDetail(entry);
+    return '<div class="tlv-row" data-tlv-key="' + esc(entry.key) + '">' +
+      '<div class="tlv-head">' +
+        '<span class="tlv-badge tlv-badge--' + esc(entry.source) + '">' + esc(entry.source) + "</span>" +
+        '<span class="tlv-title">' + esc(tlvEntryTitle(entry)) + "</span>" +
+        '<span class="tlv-when" title="' + esc(fmtWhen(entry.at)) + '">' + esc(relTime(entry.at)) + "</span>" +
+        (hasDetail
+          ? '<button class="tlv-toggle" type="button" data-tlv-toggle aria-expanded="' +
+            (expanded ? "true" : "false") + '">Details</button>'
+          : "") +
+      "</div>" +
+      (hasDetail
+        ? '<pre class="tlv-detail"' + (expanded ? "" : " hidden") + ">" + tlvDetailHtml(entry) + "</pre>"
+        : "") +
+      "</div>";
+  }
+
+  // Pure: the whole feed. opts.quietLine is the ONE honest degradation line
+  // (audit 403 → "visible to team admins"); opts.expandedKeys re-opens rows.
+  // Empty teaches rather than apologises.
+  function timelineFeedHtml(entries, opts) {
+    opts = opts || {};
+    entries = Array.isArray(entries) ? entries : [];
+    var quiet = opts.quietLine
+      ? '<div class="tlv-quiet">' + esc(opts.quietLine) + "</div>"
+      : "";
+    if (!entries.length) {
+      return quiet + '<div class="empty-state"><h2>Nothing here yet</h2>' +
+        "<p>Events will appear here as this Barkpark works &mdash; health reports, backups, " +
+        "verification runs, and team actions, in order.</p></div>";
+    }
+    var open = opts.expandedKeys || [];
+    return quiet + entries.map(function (e) {
+      return tlvRowHtml(e, open.indexOf(e.key) !== -1);
+    }).join("");
+  }
+
+  function timelineTabShellHtml() {
+    return '<div class="tlv" aria-live="polite"><div class="loading">Loading timeline&hellip;</div></div>';
+  }
+
+  // Expanded-detail memory, keyed "<bp.id>|<entry.key>". Module-level so the
+  // SSE-driven remount (loadInstance repaints the whole workspace) re-opens
+  // exactly what the operator had open. In-memory: a refresh forgets.
+  var tlvExpanded = {};
+  // Last painted feed per instance — an SSE remount paints this instantly
+  // instead of flashing "Loading…" on every live tick.
+  var tlvCache = null;
+  var tlvLoadSeq = 0;
+  var tlvMountedBp = null;
+
+  function mountTimelineTab(root, bp) {
+    if (!root) return;
+    tlvMountedBp = bp;
+    root.innerHTML = timelineTabShellHtml();
+    wireTimelineFeed(root, bp);
+    if (tlvCache && String(tlvCache.id) === String(bp.id)) {
+      paintTimeline(root, bp, tlvCache.entries, tlvCache.quietLine);
+    }
+    loadTimeline(root, bp);
+  }
+
+  // Fetch both feeds in parallel and paint on resolve (never blanks first —
+  // a repaint-in-place, so the live refetch path is flicker-free). The events
+  // fetch failing is the ERROR state (one Retry); the audit fetch failing only
+  // DEGRADES the feed: 403 = not-an-admin (quiet, honest, expected), anything
+  // else = one quiet events-only line. Never an error state for audit (D18).
+  function loadTimeline(root, bp) {
+    var seq = ++tlvLoadSeq;
+    Promise.all([
+      api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=100"),
+      api("GET", "/v1/audit?target_type=barkpark&target_id=" + encodeURIComponent(bp.id) + "&limit=100"),
+    ]).then(function (rs) {
+      if (seq !== tlvLoadSeq) return; // a newer load owns the feed
+      var box = root && root.querySelector ? root.querySelector(".tlv") : null;
+      if (!box) return;
+      var ev = rs[0], au = rs[1];
+      if (!ev.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load the timeline</h2>' +
+          "<p>" + esc(friendly(ev.data, "Check your connection and retry.")) + "</p>" +
+          '<p><button class="btn btn-sm btn-primary" type="button" data-tlv-retry>Retry</button></p></div>';
+        return;
+      }
+      var events = (ev.data && ev.data.events) || [];
+      var audits = [];
+      var quietLine = "";
+      if (au.ok) {
+        audits = (au.data && au.data.events) || [];
+      } else if (au.status === 403) {
+        quietLine = "Audit entries are visible to team admins.";
+      } else {
+        quietLine = "Audit entries couldn't be loaded — showing instance events only.";
+      }
+      var entries = mergeTimeline(events, audits);
+      tlvCache = { id: bp.id, entries: entries, quietLine: quietLine };
+      paintTimeline(root, bp, entries, quietLine);
+    });
+  }
+
+  function paintTimeline(root, bp, entries, quietLine) {
+    var box = root && root.querySelector ? root.querySelector(".tlv") : null;
+    if (!box) return;
+    var open = [];
+    entries.forEach(function (e) {
+      if (tlvExpanded[String(bp.id) + "|" + e.key]) open.push(e.key);
+    });
+    box.innerHTML = timelineFeedHtml(entries, { quietLine: quietLine, expandedKeys: open });
+  }
+
+  // ONE delegated listener per mount (the panel node lives for the tab's whole
+  // life; paints only swap its inner feed) — details toggle + error Retry.
+  function wireTimelineFeed(root, bp) {
+    if (!root || !root.addEventListener) return; // fake-DOM smoke
+    root.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var btn = t.closest("[data-tlv-toggle]");
+      if (btn) {
+        var row = btn.closest("[data-tlv-key]");
+        if (!row) return;
+        var detail = row.querySelector(".tlv-detail");
+        if (!detail) return;
+        var opening = detail.hidden;
+        detail.hidden = !opening;
+        btn.setAttribute("aria-expanded", opening ? "true" : "false");
+        var key = String(bp.id) + "|" + row.getAttribute("data-tlv-key");
+        if (opening) tlvExpanded[key] = true;
+        else delete tlvExpanded[key];
+        return;
+      }
+      if (t.closest("[data-tlv-retry]")) loadTimeline(root, bp);
+    });
+  }
+
+  // SSE hook: an `audit` tick while the Timeline tab is on screen refetches the
+  // feed in place (TYPE_ACTIONS wires this; `fleet` ticks already remount the
+  // whole instance view, which re-lands here through mountTimelineTab).
+  function refreshInstanceTimeline() {
+    var h = parseHash();
+    if (h.view !== "instance" || h.tab !== "timeline") return;
+    if (!tlvMountedBp || String(tlvMountedBp.id) !== String(h.id)) return;
+    var panel = document.getElementById("instance-tabpanel");
+    if (!panel) return;
+    loadTimeline(panel, tlvMountedBp);
+  }
+
+  // ------------------------------------------------ verify chips (Overview)
+  // The probe vocabulary, byte-pinned against __fixtures__/verify_probes.json
+  // (the same fixture the Elixir suite and the Go provision gate assert). The
+  // node harness asserts name+label equality so a vocabulary change reds here.
+  var VERIFY_PROBES = [
+    { name: "verify.api", label: "API answers" },
+    { name: "verify.login", label: "Login responds" },
+    { name: "verify.studio", label: "Studio renders" },
+  ];
+
+  // Pure: the newest `verify` event in a newest-first events payload, or null.
+  function latestVerifyOf(events) {
+    if (!Array.isArray(events)) return null;
+    for (var i = 0; i < events.length; i++) {
+      if (events[i] && events[i].type === "verify") return events[i];
+    }
+    return null;
+  }
+
+  // Pure: chips model from a verify RESULT envelope ({ok, reachable,
+  // verified_at, probes}) — the POST response and the persisted event payload
+  // share this shape — or null for the never-run state. Every probe in the
+  // vocabulary gets a chip even if the envelope omits it (role "unknown"):
+  // three chips always, so the row never shifts.
+  function probeChipsModel(result) {
+    var ran = !!(result && typeof result === "object" && Array.isArray(result.probes));
+    var byName = {};
+    if (ran) {
+      result.probes.forEach(function (p) { if (p && p.name) byName[p.name] = p; });
+    }
+    return {
+      ran: ran,
+      ok: ran ? !!result.ok : null,
+      reachable: ran ? result.reachable !== false : null,
+      verifiedAt: (ran && result.verified_at) || null,
+      chips: VERIFY_PROBES.map(function (v) {
+        var p = byName[v.name];
+        if (!p) return { name: v.name, label: v.label, role: "unknown", status: null, latencyMs: null, unreachable: false };
+        return {
+          name: v.name,
+          label: v.label,
+          role: p.ok ? "pass" : "fail",
+          status: p.status != null ? p.status : null,
+          latencyMs: p.latency_ms != null ? p.latency_ms : null,
+          unreachable: p.reachable === false,
+        };
+      }),
+    };
+  }
+
+  // Pure: the one-line verdict under the chips.
+  function verifySummaryText(model) {
+    if (!model.ran) return "Never checked — run the first one to prove the golden path.";
+    var when = model.verifiedAt ? " · checked " + relTime(model.verifiedAt) : "";
+    if (model.ok) return "All checks passed" + when;
+    if (!model.reachable) return "Unreachable — the box didn't answer any probe" + when;
+    var failing = model.chips.filter(function (c) { return c.role === "fail"; }).length;
+    return failing + " of " + model.chips.length + " checks failing" + when;
+  }
+
+  // Pure: one probe chip. pass/fail carry the semantic role; a chip that never
+  // ran (or an unreachable probe) says so in words, not just colour.
+  function verifyChipHtml(chip) {
+    var glyph = chip.role === "pass" ? "&#10003;" : chip.role === "fail" ? "&#10007;" : "&middot;";
+    var code = chip.role === "unknown" ? ""
+      : chip.unreachable || chip.status == null ? "unreachable"
+      : String(chip.status) + (chip.latencyMs != null ? " · " + chip.latencyMs + "ms" : "");
+    var state = chip.role === "pass" ? "passed" : chip.role === "fail" ? "failed" : "not checked";
+    return '<span class="vf-chip vf-chip--' + esc(chip.role) + '" role="listitem" aria-label="' +
+      esc(chip.label + " — " + state) + '">' +
+      '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
+      esc(chip.label) +
+      (code ? '<span class="vf-chip-code">' + esc(code) + "</span>" : "") +
+      "</span>";
+  }
+
+  // Pure: the whole card. Never-run invites the first check; a completed run
+  // (pass, fail, or unreachable — ALL normal results) renders the verdict.
+  // noteHtml is the 409/404 recovery note (verifyNoteHtml), rendered inline.
+  function verifyCardHtml(model, noteHtml) {
+    // The first-ever check is THE next step for a fresh box (primary); a
+    // re-check on a verified box is routine (quiet).
+    var runBtn = model.ran
+      ? '<button class="btn btn-sm" type="button" data-vf-run>Check now</button>'
+      : '<button class="btn btn-sm btn-primary" type="button" data-vf-run>Run first check</button>';
+    return '<div class="vf-card">' +
+      '<div class="vf-head"><h2>Golden path</h2>' + runBtn + "</div>" +
+      '<div class="vf-chips" role="list" aria-label="Verification checks">' +
+        model.chips.map(verifyChipHtml).join("") +
+      "</div>" +
+      '<div class="vf-meta">' + esc(verifySummaryText(model)) + "</div>" +
+      (noteHtml || "") +
+      "</div>";
+  }
+
+  // Pure: the human copy + EXACTLY ONE recovery action for the two coded
+  // /verify refusals (D25). 409 not_live → watch the Timeline (the check works
+  // once the box is live); 404 no_admin_token → the server's own hint is a
+  // re-provision, and POST /retry is that primitive.
+  function verifyNoteHtml(code, bp) {
+    if (code === "not_live") {
+      return '<div class="vf-note"><b>Not live yet.</b> Verification probes the running box &mdash; ' +
+        "it works once provisioning finishes. " +
+        '<a href="#instance/' + esc(bp.id) + '/timeline">View timeline</a></div>';
+    }
+    if (code === "no_admin_token") {
+      return '<div class="vf-note"><b>No stored credentials.</b> This instance predates verification ' +
+        "&mdash; re-provisioning captures the credentials the check needs. " +
+        '<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button></div>';
+    }
+    return "";
+  }
+
+  // Derive the chips from the SAME events feed the Timeline reads. A failed
+  // events fetch hides the card quietly — the chips are an additive proof, and
+  // the Overview must never error because history was unavailable (the next
+  // fleet SSE tick retries via the normal repaint).
+  function loadInstanceVerify(bp) {
+    var box = $("#instance-verify");
+    if (!box) return;
+    // limit=200 (the route's max): the per-cycle health beat dominates the
+    // stream, and a verify run buried behind a day of beats must not make the
+    // card lie "never checked" at the default 50-event window.
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=200").then(function (r) {
+      box = $("#instance-verify");
+      if (!box) return;
+      if (!r.ok) { box.innerHTML = ""; return; }
+      var latest = latestVerifyOf((r.data && r.data.events) || []);
+      renderVerifyCard(box, bp, probeChipsModel(latest ? latest.payload : null));
+    });
+  }
+
+  function renderVerifyCard(box, bp, model, noteHtml) {
+    box.innerHTML = verifyCardHtml(model, noteHtml);
+    var run = box.querySelector("[data-vf-run]");
+    if (run) run.addEventListener("click", function () { runVerifyNow(box, bp, model, run); });
+    var rp = box.querySelector("[data-vf-reprovision]");
+    if (rp) rp.addEventListener("click", function () { retryInstance(bp, rp); });
+  }
+
+  // POST the synchronous suite. 200 renders the returned envelope IMMEDIATELY
+  // (unreachable is a normal 200 with reachable:false — rendered honestly, not
+  // as an error); 409/404 get their coded recovery notes; anything else is a
+  // toast + a re-enabled button. The server also nudges `fleet`, so the
+  // persisted event repaints the same truth moments later.
+  function runVerifyNow(box, bp, model, btn) {
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/verify", {}).then(function (r) {
+      box = $("#instance-verify");
+      if (!box) return; // navigated away mid-check
+      if (r.status === 200 && r.data && Array.isArray(r.data.probes)) {
+        renderVerifyCard(box, bp, probeChipsModel(r.data));
+        return;
+      }
+      if (r.status === 409) {
+        renderVerifyCard(box, bp, model, verifyNoteHtml("not_live", bp));
+        return;
+      }
+      if (r.status === 404 && r.data && r.data.error === "no_admin_token") {
+        renderVerifyCard(box, bp, model, verifyNoteHtml("no_admin_token", bp));
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = label;
+      toast({ kind: "error", title: "Couldn't run the check", body: friendly(r.data, "Please try again in a moment.") });
     });
   }
 
@@ -3776,8 +4251,10 @@
     },
     audit: function (v) {
       // An audited mutation (delete / go-live / site create / member / token /
-      // subscription) just landed an event; refresh Activity if it's open.
+      // subscription) just landed an event; refresh Activity if it's open, and
+      // the instance Timeline tab (C8) — its feed is half audit entries.
       if (v === "activity") loadActivity();
+      else if (v === "instance") refreshInstanceTimeline();
     },
     github: function (v) {
       // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
@@ -5222,6 +5699,15 @@
       deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
+      // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
+      mergeTimeline: mergeTimeline, auditMirrorsEvent: auditMirrorsEvent,
+      tlvEntryTitle: tlvEntryTitle, tlvRowHtml: tlvRowHtml, tlvDetailHtml: tlvDetailHtml,
+      timelineFeedHtml: timelineFeedHtml, timelineTabShellHtml: timelineTabShellHtml,
+      mountTimelineTab: mountTimelineTab,
+      latestVerifyOf: latestVerifyOf, probeChipsModel: probeChipsModel,
+      verifySummaryText: verifySummaryText, verifyChipHtml: verifyChipHtml,
+      verifyCardHtml: verifyCardHtml, verifyNoteHtml: verifyNoteHtml,
+      verifyProbes: VERIFY_PROBES.map(function (p) { return { name: p.name, label: p.label }; }),
     });
   }
 })();
