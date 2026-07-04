@@ -1035,6 +1035,290 @@ defmodule Barkpark.Plugins.Sheets.StructureTest do
     end
   end
 
+  # ── full-axis (A:A / 3:3) ref shifting (B-AA-3, design §3.1 + §6) ────────────
+
+  describe "rewrite_formula — full-COLUMN A:A on column ops" do
+    test "insert a column LEFT of A rewrites A:A → B:B (the design bar)" do
+      assert Structure.rewrite_formula("SUM(A:A)", :col, {:insert, 1, 1}) == "SUM(B:B)"
+    end
+
+    test "COUNT(B:B) shifts one column right on an insert at B" do
+      assert Structure.rewrite_formula("COUNT(B:B)", :col, {:insert, 2, 1}) == "COUNT(C:C)"
+    end
+
+    test "a full column BEFORE the insert point stays verbatim" do
+      assert Structure.rewrite_formula("SUM(A:A)", :col, {:insert, 2, 1}) == "SUM(A:A)"
+    end
+
+    test "a multi-column range spanning the insert point EXPANDS (per-corner shift)" do
+      assert Structure.rewrite_formula("SUM(A:C)", :col, {:insert, 2, 1}) == "SUM(A:D)"
+    end
+
+    test "deleting column A collapses A:A to the literal #REF!" do
+      assert Structure.rewrite_formula("SUM(A:A)", :col, {:delete, 1, 1}) == "SUM(#REF!)"
+    end
+
+    test "deleting one column of a multi-column range CLIPS the endpoints" do
+      assert Structure.rewrite_formula("SUM(A:C)", :col, {:delete, 1, 1}) == "SUM(A:B)"
+    end
+
+    test "$A:$A shifts like A:A (the engine convention) and keeps its $ markers" do
+      assert Structure.rewrite_formula("SUM($A:$A)", :col, {:insert, 1, 1}) == "SUM($B:$B)"
+    end
+
+    test "whitespace inside the range is preserved on a shift" do
+      assert Structure.rewrite_formula("SUM(A : A)", :col, {:insert, 1, 1}) == "SUM(B : B)"
+    end
+  end
+
+  describe "rewrite_formula — full-COLUMN A:A is INVARIANT under row ops" do
+    test "a row insert leaves A:A byte-identical" do
+      assert Structure.rewrite_formula("SUM(A:A)", :row, {:insert, 1, 1}) == "SUM(A:A)"
+    end
+
+    test "a row delete leaves A:A byte-identical" do
+      assert Structure.rewrite_formula("SUM(A:A)", :row, {:delete, 1, 5}) == "SUM(A:A)"
+    end
+  end
+
+  describe "rewrite_formula — full-ROW 3:3 on row ops (mirror of A:A)" do
+    test "an insert ABOVE row 3 rewrites 3:3 → 4:4" do
+      assert Structure.rewrite_formula("SUM(3:3)", :row, {:insert, 1, 1}) == "SUM(4:4)"
+    end
+
+    test "a full row BELOW the insert point stays verbatim" do
+      assert Structure.rewrite_formula("SUM(9:9)", :row, {:insert, 20, 1}) == "SUM(9:9)"
+    end
+
+    test "a multi-row range spanning the insert point EXPANDS" do
+      assert Structure.rewrite_formula("SUM(3:5)", :row, {:insert, 4, 1}) == "SUM(3:6)"
+    end
+
+    test "deleting row 3 collapses 3:3 to the literal #REF!" do
+      assert Structure.rewrite_formula("SUM(3:3)", :row, {:delete, 3, 1}) == "SUM(#REF!)"
+    end
+
+    test "deleting the head rows of a multi-row range CLIPS it" do
+      assert Structure.rewrite_formula("SUM(1:5)", :row, {:delete, 1, 2}) == "SUM(1:3)"
+    end
+  end
+
+  describe "rewrite_formula — full-ROW 3:3 is INVARIANT under column ops" do
+    test "a column insert leaves 3:3 byte-identical" do
+      assert Structure.rewrite_formula("SUM(3:3)", :col, {:insert, 1, 1}) == "SUM(3:3)"
+    end
+
+    test "a column delete leaves 3:3 byte-identical" do
+      assert Structure.rewrite_formula("SUM(3:3)", :col, {:delete, 1, 5}) == "SUM(3:3)"
+    end
+  end
+
+  describe "rewrite_formula — full-axis coexists with bounded refs (regression guard)" do
+    test "a bounded ref (B3) shifts EXACTLY as today while A:A shifts as a column" do
+      # Column op: A:A → B:B AND B3 → C3 (the digit-ref path is untouched).
+      assert Structure.rewrite_formula("A:A+B3", :col, {:insert, 1, 1}) == "B:B+C3"
+    end
+
+    test "a row op shifts the bounded ref but leaves the full column invariant" do
+      assert Structure.rewrite_formula("A:A+B3", :row, {:insert, 1, 1}) == "A:A+B4"
+    end
+
+    test "a bare number followed by nothing is never mistaken for a row ref" do
+      assert Structure.rewrite_formula("A1+100", :row, {:insert, 1, 1}) == "A2+100"
+      assert Structure.rewrite_formula("1+2", :row, {:insert, 1, 1}) == "1+2"
+    end
+
+    test "a function name (LOG10) is still a function, not a full column" do
+      assert Structure.rewrite_formula("A:A+LOG10(9)", :col, {:insert, 1, 1}) == "B:B+LOG10(9)"
+    end
+
+    test "A:MIN( is a column then a call, not a full-column range" do
+      assert Structure.rewrite_formula("A:MIN(9)", :col, {:insert, 1, 1}) == "A:MIN(9)"
+    end
+  end
+
+  describe "insert_cols/insert_rows through the public op rewrites a cell's full-axis formula" do
+    test "insert_cols shifts both the cell key (B1→C1) and its A:A formula (→B:B)" do
+      {:ok, out} = Structure.insert_cols(tab_with(%{"B1" => %{"f" => "SUM(A:A)"}}), 1, 1)
+      assert out["cells"]["C1"]["f"] == "SUM(B:B)"
+    end
+
+    test "insert_rows leaves a full-COLUMN formula's axis part invariant" do
+      {:ok, out} = Structure.insert_rows(tab_with(%{"A1" => %{"f" => "SUM(A:A)"}}), 1, 1)
+      # A1 shifts to A2 (a row op moves the cell); the A:A axis is row-unbounded.
+      assert out["cells"]["A2"]["f"] == "SUM(A:A)"
+    end
+
+    test "insert_rows shifts a full-ROW formula's axis (3:3 → 4:4)" do
+      {:ok, out} = Structure.insert_rows(tab_with(%{"A1" => %{"f" => "SUM(3:3)"}}), 1, 1)
+      assert out["cells"]["A2"]["f"] == "SUM(4:4)"
+    end
+  end
+
+  describe "shift_cross_tab_refs — cross-tab full-axis (Sheet2!A:A) shifts under the same rules" do
+    test "a column insert on Sheet2 shifts Sheet2!A:A → Sheet2!B:B in another tab" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A:A)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :col, {:insert, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(Sheet2!B:B)"
+    end
+
+    test "a ROW op on Sheet2 leaves Sheet2!A:A invariant (full column)" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A:A)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(Sheet2!A:A)"
+    end
+
+    test "a row op on Sheet2 shifts a cross-tab full-ROW ref (Sheet2!3:3 → 4:4)" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!3:3)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :row, {:insert, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(Sheet2!4:4)"
+    end
+
+    test "the cross-tab full column shifts ONLY when its tab is the mutated one" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet3!A:A)+SUM(Sheet2!A:A)"}}},
+        %{"name" => "Sheet2", "cells" => %{}},
+        %{"name" => "Sheet3", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :col, {:insert, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(Sheet3!A:A)+SUM(Sheet2!B:B)"
+    end
+
+    test "deleting column A on Sheet2 collapses Sheet2!A:A to #REF!" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A:A)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :col, {:delete, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(#REF!)"
+    end
+
+    test "a partially covered cross-tab full column CLIPS" do
+      tabs = [
+        %{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A:C)"}}},
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :col, {:delete, 1, 1})
+      assert fof(out, 0, "A1") == "SUM(Sheet2!A:B)"
+    end
+
+    test "a quoted-name tab qualifier on a full column is matched and shifted" do
+      tabs = [
+        %{"name" => "Data", "cells" => %{"A1" => %{"f" => "SUM('My Sheet'!A:A)"}}},
+        %{"name" => "My Sheet", "cells" => %{}}
+      ]
+
+      out = Structure.shift_cross_tab_refs(tabs, 1, :col, {:insert, 1, 1})
+      assert fof(out, 0, "A1") == "SUM('My Sheet'!B:B)"
+    end
+  end
+
+  describe "rename_refs / delete_tab_refs — a Name!A:A token is NEVER corrupted" do
+    test "rename rewrites the qualifier and keeps the axis part byte-identical" do
+      tabs = [
+        %{
+          "name" => "S1",
+          "cells" => %{
+            "A1" => %{"f" => "SUM(Sheet2!A:A)"},
+            "A2" => %{"f" => "SUM(Sheet2!3:3)"}
+          }
+        },
+        %{"name" => "Sheet2", "cells" => %{}}
+      ]
+
+      out = Structure.rename_refs(tabs, "Sheet2", "Data")
+      assert fof(out, 0, "A1") == "SUM(Data!A:A)"
+      assert fof(out, 0, "A2") == "SUM(Data!3:3)"
+    end
+
+    test "rename re-quotes a spaced new name around a full-axis ref" do
+      tabs = [%{"name" => "S1", "cells" => %{"A1" => %{"f" => "SUM(Sheet2!A:A)"}}}]
+      out = Structure.rename_refs(tabs, "Sheet2", "Q1 2026")
+      assert fof(out, 0, "A1") == "SUM('Q1 2026'!A:A)"
+    end
+
+    test "delete_tab_refs turns a full-axis ref to the deleted tab into #REF!" do
+      tabs = [
+        %{
+          "name" => "S1",
+          "cells" => %{
+            "A1" => %{"f" => "SUM(Sheet2!A:A)"},
+            "A2" => %{"f" => "SUM(Sheet3!A:A)"}
+          }
+        },
+        %{"name" => "Sheet2", "cells" => %{}},
+        %{"name" => "Sheet3", "cells" => %{}}
+      ]
+
+      out = Structure.delete_tab_refs(tabs, "Sheet2")
+      assert fof(out, 0, "A1") == "SUM(#REF!)"
+      # A ref to a surviving tab keeps its full-axis form untouched.
+      assert fof(out, 0, "A2") == "SUM(Sheet3!A:A)"
+    end
+  end
+
+  describe "rebase_formula — copy/fill of a full-axis range" do
+    test "a full column fills RIGHT by dcol; dcol=0 keeps it" do
+      assert Structure.rebase_formula("SUM(A:A)", 1, 0) == "SUM(B:B)"
+      assert Structure.rebase_formula("SUM(A:A)", 0, 5) == "SUM(A:A)"
+    end
+
+    test "an absolute full column ($A:$A) is pinned on a horizontal fill" do
+      assert Structure.rebase_formula("SUM($A:$A)", 1, 0) == "SUM($A:$A)"
+    end
+
+    test "a full row fills DOWN by drow; drow=0 keeps it" do
+      assert Structure.rebase_formula("SUM(3:3)", 0, 2) == "SUM(5:5)"
+      assert Structure.rebase_formula("SUM(3:3)", 4, 0) == "SUM(3:3)"
+    end
+
+    test "a cross-tab full-axis ref rebases its axis part, keeps the qualifier" do
+      assert Structure.rebase_formula("Sheet2!A:A", 1, 0) == "Sheet2!B:B"
+    end
+  end
+
+  # A qualified full-axis ref must be shifted by the cross-tab SWEEP, never by
+  # the mutated tab's own rewrite_formula — otherwise a column op on the tab that
+  # HOLDS the formula would shift it once locally AND again in the sweep (a
+  # double-shift corruption). rewrite_formula must leave `Sheet2!A:A` verbatim;
+  # only a copy/fill (rebase) touches its axis part (a paste is a local edit).
+  describe "rewrite_formula — a QUALIFIED full-axis ref is invariant under a local insert/delete" do
+    test "a local column insert leaves Sheet2!A:A byte-identical (the sweep owns it)" do
+      assert Structure.rewrite_formula("SUM(Sheet2!A:A)", :col, {:insert, 1, 1}) ==
+               "SUM(Sheet2!A:A)"
+    end
+
+    test "a local column delete never collapses Sheet2!A:A to #REF! (not this tab's business)" do
+      assert Structure.rewrite_formula("SUM(Sheet2!A:A)", :col, {:delete, 1, 1}) ==
+               "SUM(Sheet2!A:A)"
+    end
+
+    test "a local row op leaves a cross-tab full-ROW ref Sheet2!3:3 byte-identical" do
+      assert Structure.rewrite_formula("SUM(Sheet2!3:3)", :row, {:insert, 1, 1}) ==
+               "SUM(Sheet2!3:3)"
+    end
+
+    test "a quoted-name cross-tab full-axis ref is also invariant under a local op" do
+      assert Structure.rewrite_formula("SUM('My Sheet'!A:A)", :col, {:insert, 1, 1}) ==
+               "SUM('My Sheet'!A:A)"
+    end
+  end
+
   # Fetch the formula string of cell `addr` in the tab at `idx`.
   defp fof(tabs, idx, addr), do: tabs |> Enum.at(idx) |> get_in(["cells", addr, "f"])
 
