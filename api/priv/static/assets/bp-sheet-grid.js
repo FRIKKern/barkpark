@@ -1604,9 +1604,13 @@
     // `sig` (the exact TSV also on the OS clipboard). `formulas` is a row-major
     // grid parallel to that TSV — walked with the IDENTICAL row/col sort as
     // _selectionTsv, so formulas[i][j] lines up with _tsvParse(sig)[i][j]. Each
-    // cell is the stored `data-f` (the formula sans leading '=', from the QL-D6
-    // S-GRID stamp) or null for a literal. `origin` is the selection's top-left
-    // (min row/col) — the anchor the paste delta is measured from.
+    // cell is the stored `data-f` (the formula body, from the QL-D6 S-GRID
+    // stamp) normalized to canonical sans-'=' form, or null for a literal. The
+    // engine's canonical `f` drops the leading '=' but "tolerates it on read"
+    // (engine.ex §"A formula cell carries…"), so a stamped value MAY still carry
+    // one; we strip exactly one here so the paste's re-prefix never doubles it
+    // (==A2). `origin` is the selection's top-left (min row/col) — the anchor the
+    // paste delta is measured from.
     _captureFormulaClip(sig) {
       const tds = this.el.querySelectorAll("td.sheet-sel");
       if (!tds.length) {
@@ -1623,7 +1627,8 @@
         if (c < minC) minC = c;
         if (!rows.has(r)) rows.set(r, new Map());
         const f = td.dataset ? td.dataset.f : null;
-        rows.get(r).set(c, f != null && f !== "" ? f : null);
+        const body = f != null && f !== "" && f.charAt(0) === "=" ? f.slice(1) : f;
+        rows.get(r).set(c, body != null && body !== "" ? body : null);
       });
       const rKeys = Array.from(rows.keys()).sort((a, b) => a - b);
       const formulas = rKeys.map((r) => {

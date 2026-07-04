@@ -2340,6 +2340,20 @@ check("copy a formula cell, paste one row down → the paste carries the REBASED
   ]);
 });
 
+check("SEAM ROBUSTNESS: a data-f stamped WITH a leading '=' does not double-prefix (==A2)", () => {
+  const h = mountHook();
+  // The engine's canonical `f` drops the '=' but "tolerates it on read", so a
+  // real stamp MAY carry one. Capture must normalize to sans-'=' so the paste
+  // re-prefix yields exactly one '=' — never '==A2+1'.
+  copySelection(h, [selCell({ r: "2", c: "2", v: "2", f: "=A1+1" })], "B2");
+  assert.deepEqual(plain(h._formulaClip.formulas), [["A1+1"]]); // stored canonical
+  h.el._active = { dataset: { ref: "B3" } };
+  h.el.dispatch("paste", pasteEvent("2"));
+  assert.deepEqual(h._pushed, [
+    { event: "paste", payload: { rows: [["=A2+1"]] } },
+  ]);
+});
+
 check("$-anchored refs do NOT shift; a horizontal+vertical delta rebases relatives only", () => {
   const h = mountHook();
   copySelection(h, [selCell({ r: "2", c: "2", v: "9", f: "$A$1+A1" })], "B2");
