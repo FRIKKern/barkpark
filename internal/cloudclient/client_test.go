@@ -3,6 +3,7 @@ package cloudclient
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -783,5 +784,79 @@ func TestErrorFallbackClampsOnRuneBoundary(t *testing.T) {
 	}
 	if !strings.HasSuffix(err.Error(), "…") {
 		t.Fatalf("clamped error must end with the ellipsis marker; got %q", err.Error())
+	}
+}
+
+// TestVerifyInstanceCompletedRun: a 200 verify envelope decodes into a
+// VerifyResult (verdict, probes, null status honored) AND carries the exact
+// response bytes in Raw — the `-o json` verbatim contract starts here.
+func TestVerifyInstanceCompletedRun(t *testing.T) {
+	const envelope = `{"ok":false,"reachable":false,"verified_at":"2026-07-04T10:00:00Z","probes":[` +
+		`{"name":"verify.api","ok":false,"reachable":false,"status":null,"latency_ms":5003,"evidence":"instance unreachable"}]}`
+	var gotMethod, gotPath, gotAuth string
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath, gotAuth = r.Method, r.URL.Path, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, envelope)
+	})
+
+	res, err := c.VerifyInstance(context.Background(), "bp-1")
+	if err != nil {
+		t.Fatalf("VerifyInstance: %v", err)
+	}
+	if gotMethod != "POST" || gotPath != "/v1/barkparks/bp-1/verify" {
+		t.Fatalf("hit %s %s, want POST /v1/barkparks/bp-1/verify", gotMethod, gotPath)
+	}
+	if gotAuth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want the session bearer", gotAuth)
+	}
+	if res.OK || res.Reachable {
+		t.Fatalf("verdict = ok:%v reachable:%v, want both false", res.OK, res.Reachable)
+	}
+	if len(res.Probes) != 1 || res.Probes[0].Status != nil {
+		t.Fatalf("probes = %+v, want one probe with a nil (null) status", res.Probes)
+	}
+	if string(res.Raw) != envelope {
+		t.Fatalf("Raw must be the envelope bytes verbatim:\n got %q\nwant %q", res.Raw, envelope)
+	}
+}
+
+// TestVerifyInstanceContractRefusal: a refusal code from the route's closed set
+// surfaces as a typed *VerifyError carrying code + detail + HTTP status.
+func TestVerifyInstanceContractRefusal(t *testing.T) {
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"error":"not_live"}`)
+	})
+
+	_, err := c.VerifyInstance(context.Background(), "bp-1")
+	var ve *VerifyError
+	if !errors.As(err, &ve) {
+		t.Fatalf("err = %v (%T), want *VerifyError", err, err)
+	}
+	if ve.Code != "not_live" || ve.HTTPStatus != http.StatusConflict {
+		t.Fatalf("VerifyError = %+v, want code not_live / 409", ve)
+	}
+}
+
+// TestVerifyInstance401KeepsUnauthorizedPrefix: a failure OUTSIDE the contract
+// set (an expired session) falls back to cloudError — the "unauthorized:"
+// prefix survives so the CLI's shared auth handling (exit 3) still fires.
+func TestVerifyInstance401KeepsUnauthorizedPrefix(t *testing.T) {
+	c := newFake(t, "sess-stale", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid or expired session"}`)
+	})
+
+	_, err := c.VerifyInstance(context.Background(), "bp-1")
+	if err == nil {
+		t.Fatal("401 must error")
+	}
+	var ve *VerifyError
+	if errors.As(err, &ve) {
+		t.Fatalf("a 401 is NOT a verify contract refusal, got %+v", ve)
+	}
+	if !strings.HasPrefix(err.Error(), "unauthorized:") {
+		t.Fatalf("error = %q, want the unauthorized: prefix", err.Error())
 	}
 }

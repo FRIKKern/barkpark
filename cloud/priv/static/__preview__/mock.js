@@ -18,6 +18,7 @@
 
   var SESSION_KEY = "bpcloud.session";
   var THEME_KEY = "bpcloud.theme";
+  var INVITE_KEY = "bpcloud.invite";
   var SCENARIOS_URL = "/__preview__/scenarios.mjs";
 
   var params = new URLSearchParams(window.location.search || "");
@@ -27,7 +28,9 @@
   // 1) Seed / clear the session synchronously so app.js's first render() lands on
   //    the right screen (logged-out scenario → the sign-in card).
   try {
-    if (scen === "loggedout") {
+    // Any scenario named loggedout* boots signed out (scenarios.mjs can't be
+    // consulted here — the session must be decided synchronously, before app.js).
+    if (scen.indexOf("loggedout") === 0) {
       window.localStorage.removeItem(SESSION_KEY);
       window.sessionStorage.removeItem(SESSION_KEY);
     } else {
@@ -36,6 +39,11 @@
         JSON.stringify({ token: "preview-session-token", team_id: "preview-team" }),
       );
     }
+    // A parked invite token from a previously previewed scenario would hijack
+    // this one's first render (the app's invite-resume is BY DESIGN sticky
+    // across reloads) — scrub it so every scenario boots deterministic. The
+    // invite scenarios re-park from their deepLink's ?token= on landing.
+    window.sessionStorage.removeItem(INVITE_KEY);
   } catch (e) {}
 
   // 2) Pre-seed the theme so the toggle reflects ?theme= on first paint.

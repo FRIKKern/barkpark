@@ -214,6 +214,22 @@
     if (lastFocused && typeof lastFocused.focus === "function") lastFocused.focus();
   }
 
+  // Pure: given the focusables of the open dialog (DOM order), the currently
+  // active element, and the Tab direction, which element must receive focus to
+  // keep the trap closed? null = focus may move naturally (mid-list). An
+  // active element that is not in the list (focus escaped, or sits on a
+  // non-tabbable node) snaps back to the first focusable. Empty list → null
+  // (the caller pins focus by preventDefault'ing with nowhere to send it).
+  function trapTarget(f, active, shiftKey) {
+    f = f || [];
+    if (f.length === 0) return null;
+    var first = f[0], last = f[f.length - 1];
+    if (f.indexOf(active) === -1) return first;
+    if (shiftKey && active === first) return last;
+    if (!shiftKey && active === last) return first;
+    return null;
+  }
+
   // Keep Tab inside the open dialog. Trapping the whole `.modal-card` includes
   // the close (×) button, so focus can never fall back onto the inert shell.
   function trapModalTab(e) {
@@ -222,11 +238,8 @@
     if (!card) return;
     var f = focusablesIn(card);
     if (f.length === 0) { e.preventDefault(); return; } // zero-focusable modal: pin, don't crash
-    var first = f[0], last = f[f.length - 1];
-    var active = document.activeElement;
-    if (!card.contains(active)) { e.preventDefault(); first.focus(); return; }
-    if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
+    var target = trapTarget(f, document.activeElement, e.shiftKey);
+    if (target) { e.preventDefault(); target.focus(); }
   }
 
   function wireModal() {
@@ -239,6 +252,189 @@
       if (root.hidden) return;
       if (e.key === "Escape") { closeModal(); return; }
       trapModalTab(e);
+    });
+  }
+
+  // =========================================================== CONFIRM MODAL
+  // The ONE confirm grammar for every risky action, both tiers (charter
+  // decision 5 — the SPA twin of the CLI's hzConfirmDestroy):
+  //   mutate  — title + ONE honest consequence sentence + Confirm/Cancel.
+  //   destroy — consequence LIST + a typed-resource-name input; Confirm stays
+  //             disabled until the typed echo matches exactly. (Built now,
+  //             consumed by the destroy sweeps of later waves.)
+  // The state machine is PURE (exported via __bpTestHook); openConfirmModal()
+  // is the thin DOM wrapper on the openModal primitive, which already owns the
+  // focus trap, Escape-to-dismiss, and restore-focus-on-close.
+  //
+  // Failure contract (decision 25): a failed confirm never dies into a toast —
+  // the modal renders the human sentence inline and the primary button MORPHS
+  // into exactly one recovery action (retry, or refresh-and-close).
+
+  // opts: { tier: "mutate"|"destroy", title, consequence | consequences[],
+  //         resourceName (destroy), confirmLabel }. Total over junk.
+  function confirmModalInit(opts) {
+    opts = opts || {};
+    var tier = opts.tier === "destroy" ? "destroy" : "mutate";
+    var consequences = [];
+    if (Array.isArray(opts.consequences)) {
+      consequences = opts.consequences.map(function (c) { return String(c); });
+    } else if (opts.consequence != null) {
+      consequences = [String(opts.consequence)];
+    }
+    return {
+      tier: tier,
+      title: String(opts.title || "Are you sure?"),
+      consequences: consequences,
+      resourceName: tier === "destroy" ? String(opts.resourceName || "") : null,
+      confirmLabel: String(opts.confirmLabel || "Confirm"),
+      typed: "",
+      phase: "open", // open | busy | error | done | closed
+      error: null,
+    };
+  }
+
+  // Typed-echo gate: mutate is always armed; destroy requires the typed text to
+  // equal the resource name EXACTLY (no trim, no case-folding — the echo is the
+  // proof of attention, same contract as the CLI's typed-name prompt).
+  function confirmModalTypedMatch(state) {
+    if (!state) return false;
+    if (state.tier !== "destroy") return true;
+    return !!state.resourceName && state.typed === state.resourceName;
+  }
+
+  // May the Confirm action fire right now? (error phase stays armed so a
+  // recovery retry can re-enter busy without re-typing the echo.)
+  function confirmModalArmed(state) {
+    return !!state && (state.phase === "open" || state.phase === "error") &&
+      confirmModalTypedMatch(state);
+  }
+
+  // Pure reducer. Events: {type:"type",value} {type:"confirm"} {type:"fail",
+  // message} {type:"succeed"} {type:"dismiss"}. Unknown events / illegal
+  // transitions return the state unchanged — total, never throws.
+  function confirmModalReduce(state, ev) {
+    if (!state || !ev) return state;
+    var next = Object.assign({}, state);
+    if (ev.type === "type") {
+      if (state.phase !== "open" && state.phase !== "error") return state;
+      next.typed = String(ev.value == null ? "" : ev.value);
+      return next;
+    }
+    if (ev.type === "confirm") {
+      if (!confirmModalArmed(state)) return state;
+      next.phase = "busy";
+      next.error = null;
+      return next;
+    }
+    if (ev.type === "fail") {
+      if (state.phase !== "busy") return state;
+      next.phase = "error";
+      next.error = String(ev.message || "That didn't work.");
+      return next;
+    }
+    if (ev.type === "succeed") {
+      if (state.phase !== "busy") return state;
+      next.phase = "done";
+      return next;
+    }
+    if (ev.type === "dismiss") {
+      next.phase = "closed";
+      return next;
+    }
+    return state;
+  }
+
+  // Pure render of the modal body for an initial state. The destroy tier's
+  // Confirm ships disabled (armed only by the typed echo); mutate ships live.
+  function confirmModalHtml(state) {
+    var h = '<h2 class="modal-title" id="modal-title">' + esc(state.title) + "</h2>";
+    if (state.tier === "destroy") {
+      h += '<ul class="cm-consequences">' +
+        state.consequences.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") +
+        "</ul>" +
+        '<div class="field cm-typed-field">' +
+          '<label class="label" for="cm-typed">Type <span class="cm-name">' + esc(state.resourceName) + "</span> to confirm</label>" +
+          '<input class="form-input" id="cm-typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />' +
+        "</div>";
+    } else if (state.consequences.length) {
+      h += '<p class="modal-sub cm-consequence">' + esc(state.consequences[0]) + "</p>";
+    }
+    h += '<div class="cm-error" id="cm-error" role="alert" hidden>' +
+      '<p class="cm-error-msg" id="cm-error-msg"></p></div>';
+    h += '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+      (state.tier === "destroy"
+        ? '<button class="btn btn-danger" type="button" id="cm-confirm" disabled>' + esc(state.confirmLabel) + "</button>"
+        : '<button class="btn btn-primary" type="button" id="cm-confirm">' + esc(state.confirmLabel) + "</button>") +
+      "</div>";
+    return h;
+  }
+
+  // DOM wrapper. opts additionally takes busyLabel and onConfirm(ctl); ctl is
+  //   ctl.busy(label?)                     — re-enter the working state (retry)
+  //   ctl.succeed()                        — close the modal, focus restored
+  //   ctl.fail(message, recoveryLabel, fn) — inline sentence + ONE recovery
+  // Escape / backdrop / Cancel dismissal stays available in every phase (a
+  // hung request must never imprison the operator); handlers guard on
+  // closeModal having cleared the body.
+  function openConfirmModal(opts) {
+    opts = opts || {};
+    var state = confirmModalInit(opts);
+    openModal(confirmModalHtml(state));
+    var confirmBtn = $("#cm-confirm");
+    if (!confirmBtn) return;
+    var typedInput = $("#cm-typed");
+    var errBox = $("#cm-error");
+    var errMsg = $("#cm-error-msg");
+    var mode = "confirm"; // what the primary button does: confirm | recover
+    var recover = null;
+
+    var ctl = {
+      busy: function (label) {
+        mode = "confirm";
+        recover = null;
+        state = confirmModalReduce(state, { type: "confirm" });
+        hide(errBox);
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = label || opts.busyLabel || "Working…";
+      },
+      succeed: function () {
+        state = confirmModalReduce(state, { type: "succeed" });
+        // The operator may have Escape/Cancel-dismissed while the request was
+        // in flight — and might have opened a DIFFERENT modal since. Only close
+        // when OUR button is still mounted, so a stale settle can never shut an
+        // unrelated dialog.
+        if (confirmBtn.isConnected !== false) closeModal();
+      },
+      fail: function (message, recoveryLabel, onRecover) {
+        state = confirmModalReduce(state, { type: "fail", message: message });
+        if (confirmBtn.isConnected === false) return; // dismissed mid-flight: nothing to morph
+        mode = "recover";
+        recover = onRecover || null;
+        if (errMsg) setText(errMsg, state.error || String(message || ""));
+        show(errBox);
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = recoveryLabel || "Try again";
+        confirmBtn.focus();
+      },
+    };
+
+    if (typedInput) {
+      typedInput.addEventListener("input", function () {
+        state = confirmModalReduce(state, { type: "type", value: typedInput.value });
+        if (mode === "confirm") confirmBtn.disabled = !confirmModalArmed(state);
+      });
+    }
+
+    confirmBtn.addEventListener("click", function () {
+      if (mode === "recover") {
+        var r = recover;
+        recover = null;
+        if (r) r(ctl);
+        return;
+      }
+      if (!confirmModalArmed(state)) return;
+      ctl.busy();
+      if (typeof opts.onConfirm === "function") opts.onConfirm(ctl);
     });
   }
 
@@ -1074,16 +1270,19 @@
   var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "activity"];
   var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens"];
 
-  // Routes are either a tab (#overview …) or a drill-down (#instance/<id>, #site/<id>).
-  var DETAIL_VIEWS = ["instance", "site"];
+  // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
+  // #site/<id>), or the invitation-accept landing (#invitations/accept —
+  // grouped here because, like a drill-down, it is not a nav tab).
+  var DETAIL_VIEWS = ["instance", "site", "invite"];
 
   // C6 (charter D49): the instance drill-down is a sub-tabbed workspace, routed
   // as #instance/<id>/<tab>. A tab REGISTERS here only when its backend is live —
-  // this wave that is exactly Overview and Webhooks (the C4/C5 instance-API proxy
-  // spine). #instance/<id> (the legacy-stable hash `bp cloud open` mints, D14)
-  // maps to "overview" forever; an unknown/stale tab suffix degrades to overview
-  // rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "webhooks"];
+  // Overview, Timeline (C8/D10: the merged events+audit incident home over the
+  // existing GET /v1/barkparks/:id/events + /v1/audit routes), and Webhooks (the
+  // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
+  // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
+  // suffix degrades to overview rather than 404ing a bookmark.
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
@@ -1101,6 +1300,11 @@
   function legacyRoute(hash) {
     var h = String(hash == null ? "" : hash).replace(/^#/, "");
     if (h === "") return "overview";
+    // The server mints invitation accept links as `/#/invitations/accept?token=…`
+    // (router.ex accept_url/2 — leading slash, token in the fragment's query).
+    // Normalize that minted shape to the canonical slash-less hash body so the
+    // SPA routes EXACTLY what the server hands out, forever.
+    if (h.indexOf("/invitations/accept") === 0) return h.slice(1);
     var MAP = {
       launch: "overview",
       billing: "settings/billing",
@@ -1129,8 +1333,28 @@
     return m[1] === "attention" || m[1] === "inflight" || m[1] === "healthy" ? m[1] : null;
   }
 
+  // Pure: the raw accept token from an invitation hash, or null. Tolerates the
+  // minted leading-slash shape AND the canonical one, extra query params, and a
+  // percent-encoded token (safeDecode never throws). Anything else → null.
+  function parseInviteToken(hash) {
+    var h = String(hash == null ? "" : hash).replace(/^#/, "").replace(/^\//, "");
+    var m = h.match(/^invitations\/accept(?:\?(.*))?$/);
+    if (!m || !m[1]) return null;
+    var parts = m[1].split("&");
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].indexOf("token=") === 0) {
+        var v = parts[i].slice(6);
+        return v ? safeDecode(v) : null;
+      }
+    }
+    return null;
+  }
+
   function parseHash() {
     var canon = legacyRoute((location.hash || "").replace(/^#/, ""));
+    if (/^invitations\/accept(\?|$)/.test(canon)) {
+      return { view: "invite", token: parseInviteToken(canon) };
+    }
     var mi = canon.match(/^instance\/(.+)$/);
     if (mi) {
       // The body after "instance/" is "<id>" or "<id>/<tab>". Instance ids are
@@ -1182,9 +1406,12 @@
     if (inst) inst.hidden = r.view !== "instance";
     var site = document.getElementById("view-site");
     if (site) site.hidden = r.view !== "site";
+    var invite = document.getElementById("view-invite");
+    if (invite) invite.hidden = r.view !== "invite";
 
     if (r.view === "instance") { loadInstance(r.id, r.tab); return; }
     if (r.view === "site") { loadSite(r.id); return; }
+    if (r.view === "invite") { setBreadcrumb(null); loadInvite(r.token); return; }
     setBreadcrumb(null);
     if (r.view === "overview") {
       loadOverview();
@@ -1610,12 +1837,14 @@
       // consuming on render would blink the celebration away before it's read.
       var lc = instanceLifecycle(bp);
       if (lc.provisioning || lc.failed) provisioningSeen[bp.id] = true;
-      var showReady = tab !== "webhooks" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
+      var showReady = tab === "overview" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
       var panel = box.querySelector("#instance-tabpanel");
       if (tab === "webhooks") {
         mountWebhooksTab(panel, bp);
+      } else if (tab === "timeline") {
+        mountTimelineTab(panel, bp); // C8: the merged events+audit incident home
       } else if (showReady) {
         // The ready fold owns the timeline slot — wire its Open Studio + dismiss.
         var rs = $("#inst-ready-studio");
@@ -1626,12 +1855,14 @@
           loadInstance(bp.id, tab);
         });
         loadInstanceSites(bp);
+        loadInstanceVerify(bp); // C8: golden-path chips beside the fresh box
       } else {
         // Overview: the C3 provisioning timeline + sites + rail, wired exactly as
         // before (the tab seam only wraps the SAME render in a panel).
         wireInstanceTimeline(box, bp);   // C3: console toggle + Retry
         startInstanceTicker(bp);         // C3: live per-step elapsed (tick, no remount)
         loadInstanceSites(bp);
+        loadInstanceVerify(bp);          // C8: golden-path verify chips (host-set boxes)
       }
     });
   }
@@ -1646,15 +1877,15 @@
 
   // The persistent workspace chrome (name + status pill + actions), the
   // instance-level banner, then the tab strip, then the active tab's panel. The
-  // Overview panel is the pre-C6 detail body verbatim; the Webhooks panel is
-  // filled by mountWebhooksTab after the shell paints. opts.ready folds the
-  // timeline slot into the shared ready panel (A4 — the provision→live moment).
+  // Overview panel is the pre-C6 detail body verbatim; the Timeline and Webhooks
+  // panels are filled by their mount fns after the shell paints. opts.ready folds
+  // the timeline slot into the shared ready panel (A4 — the provision→live moment).
   function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
     return instanceHeaderHtml(bp) +
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel">' +
-        (tab === "webhooks" ? "" : instanceOverviewHtml(bp, opts)) +
+        (tab === "overview" ? instanceOverviewHtml(bp, opts) : "") +
       "</div>";
   }
 
@@ -1663,7 +1894,7 @@
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
     tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", webhooks: "Webhooks" };
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
       INSTANCE_TABS.map(function (t) {
         var on = t === tab;
@@ -1768,10 +1999,18 @@
         ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
         : "";
 
+    // C8: the golden-path verify card mounts here for a host-set box (a box
+    // that's still provisioning has its own timeline as the primary surface,
+    // and a box mid-removal must not invite a check that would lie). Filled
+    // async by loadInstanceVerify — an empty slot renders nothing.
+    var verifySlot = hasHost && !lc.removing && !lc.removeFailed
+      ? '<div id="instance-verify"></div>'
+      : "";
+
     // A4/D60: pre-host the timeline is the primary surface — the whole Sites
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
-    return timeline +
+    return timeline + verifySlot +
       '<div class="detail-grid">' +
         '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
           '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
@@ -2574,6 +2813,492 @@
     });
   }
 
+  // ============================== TIMELINE TAB + VERIFY CHIPS (C8/D10/D53)
+  // The instance's incident home: GET /v1/barkparks/:id/events (newest-first;
+  // agent events, provisioning steps, and `verify` runs) merged chronologically
+  // with the instance-scoped slice of GET /v1/audit into ONE feed, live-ticking
+  // off the EXISTING `fleet`/`audit` SSE types (D2/D33: the closed vocabulary
+  // gains no new member — verify runs ride the `fleet` nudge the server already
+  // sends). /v1/audit is team-admin-only: a 403 degrades to events-only with one
+  // honest quiet line, never an error state (D18). The verify chips on the
+  // Overview tab derive from the SAME events payload; "Check now" POSTs the
+  // synchronous /verify suite and renders the returned envelope immediately —
+  // an unreachable box is a NORMAL result rendered honestly, not an error.
+
+  // The event-type vocabulary is CLOSED server-side (AgentEvent @types:
+  // health status backup tls content verify); an unknown type renders its raw
+  // name (version-skew safety), never blanks a row.
+  var TLV_EVENT_TITLES = {
+    health: "Health report",
+    status: "Status change",
+    backup: "Backup",
+    tls: "TLS",
+    content: "Content",
+    verify: "Verification",
+  };
+
+  // Pure: epoch ms of an ISO stamp; 0 (sorts oldest, never NaN) on junk.
+  function tlvTs(at) {
+    var t = Date.parse(at);
+    return isNaN(t) ? 0 : t;
+  }
+
+  // Pure: does this audit row MIRROR an instance event already in the feed?
+  // Two sanctioned signals: (a) the audit's metadata names the event outright
+  // (metadata.event_id), or (b) same-second timestamp AND the audit action's
+  // dot-suffix equals the event type (e.g. a future "barkpark.verify" audit
+  // beside the `verify` event). The EVENT wins the dedup — it carries the
+  // richer payload; the audit row is the actor attribution of the same fact.
+  function auditMirrorsEvent(a, events) {
+    if (!a) return false;
+    var evId = a.metadata && a.metadata.event_id != null ? String(a.metadata.event_id) : null;
+    var sec = a.inserted_at ? Math.floor(tlvTs(a.inserted_at) / 1000) : null;
+    var suffix = String(a.action || "").split(".").pop();
+    for (var i = 0; i < events.length; i++) {
+      var e = events[i];
+      if (!e) continue;
+      if (evId !== null && String(e.id) === evId) return true;
+      if (sec !== null && suffix && String(e.type) === suffix &&
+          Math.floor(tlvTs(e.inserted_at) / 1000) === sec) return true;
+    }
+    return false;
+  }
+
+  // Pure: merge the two feeds into one newest-first timeline. Each entry:
+  // { source: "event"|"verify"|"audit", key, at, type, payload, actor }.
+  // Ordering is TOTAL and stable: timestamp desc; at equal timestamps the
+  // instance event outranks its audit attribution (the event is the primary
+  // record); final tiebreak on key so two repaints can never reorder.
+  function mergeTimeline(events, audits) {
+    events = Array.isArray(events) ? events : [];
+    audits = Array.isArray(audits) ? audits : [];
+    var entries = [];
+    events.forEach(function (e) {
+      if (!e) return;
+      entries.push({
+        source: e.type === "verify" ? "verify" : "event",
+        key: "e:" + String(e.id),
+        at: e.inserted_at || null,
+        type: String(e.type || ""),
+        payload: e.payload || null,
+        actor: null,
+      });
+    });
+    audits.forEach(function (a) {
+      if (!a) return;
+      if (auditMirrorsEvent(a, events)) return; // the event already tells it
+      entries.push({
+        source: "audit",
+        key: "a:" + String(a.id),
+        at: a.inserted_at || null,
+        type: String(a.action || ""),
+        payload: a.metadata || null,
+        actor: (a.actor && a.actor.email) || null,
+      });
+    });
+    entries.sort(function (x, y) {
+      var d = tlvTs(y.at) - tlvTs(x.at);
+      if (d) return d;
+      var r = (x.source === "audit" ? 1 : 0) - (y.source === "audit" ? 1 : 0);
+      if (r) return r;
+      return x.key < y.key ? -1 : x.key > y.key ? 1 : 0;
+    });
+    return entries;
+  }
+
+  // Pure: one human title per entry. Audit rows read like the Activity tab
+  // (actor + humanAction); verify rows read the verdict; agent events read
+  // their kind, enriched with the status transition when the payload has one.
+  function tlvEntryTitle(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "audit") {
+      return (entry.actor || "system") + " " + humanAction(entry.type);
+    }
+    if (entry.source === "verify") {
+      if (p.ok) return "Verification passed";
+      var m = probeChipsModel(p);
+      // A degenerate envelope (no probes array — never produced by Verify.run,
+      // total-over-junk safety) states the failure without inventing a cause.
+      if (!m.ran) return "Verification failed";
+      if (!m.reachable) return "Verification failed — unreachable";
+      var failing = m.chips.filter(function (c) { return c.role === "fail"; }).length;
+      return "Verification failed — " + failing + " of " + m.chips.length + " checks";
+    }
+    var base = TLV_EVENT_TITLES[entry.type] || entry.type || "Event";
+    if (entry.type === "status" && p.transition) return "Status → " + String(p.transition);
+    if (entry.type === "health" && p.health) return "Health report — " + String(p.health);
+    return base;
+  }
+
+  // Pure: does the entry carry anything worth an inline expansion?
+  function tlvHasDetail(entry) {
+    var p = entry && entry.payload;
+    return !!(p && typeof p === "object" && Object.keys(p).length);
+  }
+
+  // Pure: the expanded detail body (escaped). Verify runs get a readable
+  // per-probe console (name, status, latency, verbatim evidence); everything
+  // else shows its payload verbatim as pretty JSON — the honest raw record.
+  function tlvDetailHtml(entry) {
+    entry = entry || {};
+    var p = entry.payload || {};
+    if (entry.source === "verify" && Array.isArray(p.probes)) {
+      return p.probes.map(function (pr) {
+        pr = pr || {};
+        var status = pr.status != null ? String(pr.status) : (pr.reachable === false ? "unreachable" : "—");
+        var lat = pr.latency_ms != null ? " in " + String(pr.latency_ms) + "ms" : "";
+        return esc(String(pr.name || "probe") + ": " + status + lat +
+          (pr.evidence ? " — " + String(pr.evidence) : ""));
+      }).join("\n");
+    }
+    try {
+      return esc(JSON.stringify(p, null, 2));
+    } catch (e) {
+      return esc(String(p));
+    }
+  }
+
+  // Pure: one feed row. `expanded` re-applies the operator's open details
+  // across live repaints (an SSE tick must never fold what they were reading).
+  // The verify badge colours by OUTCOME (ok → green, anything else → red):
+  // a green VERIFY chip over "Verification failed" would be the badge lying.
+  function tlvRowHtml(entry, expanded) {
+    var hasDetail = tlvHasDetail(entry);
+    var badgeMod = entry.source === "verify" && !(entry.payload && entry.payload.ok)
+      ? "verify-fail"
+      : entry.source;
+    return '<div class="tlv-row" data-tlv-key="' + esc(entry.key) + '">' +
+      '<div class="tlv-head">' +
+        '<span class="tlv-badge tlv-badge--' + esc(badgeMod) + '">' + esc(entry.source) + "</span>" +
+        '<span class="tlv-title">' + esc(tlvEntryTitle(entry)) + "</span>" +
+        '<span class="tlv-when" title="' + esc(fmtWhen(entry.at)) + '">' + esc(relTime(entry.at)) + "</span>" +
+        (hasDetail
+          ? '<button class="tlv-toggle" type="button" data-tlv-toggle aria-expanded="' +
+            (expanded ? "true" : "false") + '">Details</button>'
+          : "") +
+      "</div>" +
+      (hasDetail
+        ? '<pre class="tlv-detail"' + (expanded ? "" : " hidden") + ">" + tlvDetailHtml(entry) + "</pre>"
+        : "") +
+      "</div>";
+  }
+
+  // Pure: the whole feed. opts.quietLine is the ONE honest degradation line
+  // (audit 403 → "visible to team admins"); opts.expandedKeys re-opens rows.
+  // Empty teaches rather than apologises.
+  function timelineFeedHtml(entries, opts) {
+    opts = opts || {};
+    entries = Array.isArray(entries) ? entries : [];
+    var quiet = opts.quietLine
+      ? '<div class="tlv-quiet">' + esc(opts.quietLine) + "</div>"
+      : "";
+    if (!entries.length) {
+      return quiet + '<div class="empty-state"><h2>Nothing here yet</h2>' +
+        "<p>Events will appear here as this Barkpark works &mdash; health reports, backups, " +
+        "verification runs, and team actions, in order.</p></div>";
+    }
+    var open = opts.expandedKeys || [];
+    return quiet + entries.map(function (e) {
+      return tlvRowHtml(e, open.indexOf(e.key) !== -1);
+    }).join("");
+  }
+
+  function timelineTabShellHtml() {
+    return '<div class="tlv" aria-live="polite"><div class="loading">Loading timeline&hellip;</div></div>';
+  }
+
+  // Expanded-detail memory, keyed "<bp.id>|<entry.key>". Module-level so the
+  // SSE-driven remount (loadInstance repaints the whole workspace) re-opens
+  // exactly what the operator had open. In-memory: a refresh forgets.
+  var tlvExpanded = {};
+  // Last painted feed per instance — an SSE remount paints this instantly
+  // instead of flashing "Loading…" on every live tick.
+  var tlvCache = null;
+  var tlvLoadSeq = 0;
+  var tlvMountedBp = null;
+
+  function mountTimelineTab(root, bp) {
+    if (!root) return;
+    tlvMountedBp = bp;
+    root.innerHTML = timelineTabShellHtml();
+    wireTimelineFeed(root, bp);
+    if (tlvCache && String(tlvCache.id) === String(bp.id)) {
+      paintTimeline(root, bp, tlvCache.entries, tlvCache.quietLine);
+    }
+    loadTimeline(root, bp);
+  }
+
+  // Fetch both feeds in parallel and paint on resolve (never blanks first —
+  // a repaint-in-place, so the live refetch path is flicker-free). The events
+  // fetch failing is the ERROR state (one Retry); the audit fetch failing only
+  // DEGRADES the feed: 403 = not-an-admin (quiet, honest, expected), anything
+  // else = one quiet events-only line. Never an error state for audit (D18).
+  function loadTimeline(root, bp) {
+    var seq = ++tlvLoadSeq;
+    Promise.all([
+      api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=100"),
+      api("GET", "/v1/audit?target_type=barkpark&target_id=" + encodeURIComponent(bp.id) + "&limit=100"),
+    ]).then(function (rs) {
+      if (seq !== tlvLoadSeq) return; // a newer load owns the feed
+      var box = root && root.querySelector ? root.querySelector(".tlv") : null;
+      if (!box) return;
+      var ev = rs[0], au = rs[1];
+      if (!ev.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load the timeline</h2>' +
+          "<p>" + esc(friendly(ev.data, "Check your connection and retry.")) + "</p>" +
+          '<p><button class="btn btn-sm btn-primary" type="button" data-tlv-retry>Retry</button></p></div>';
+        return;
+      }
+      var events = (ev.data && ev.data.events) || [];
+      var audits = [];
+      var quietLine = "";
+      if (au.ok) {
+        audits = (au.data && au.data.events) || [];
+      } else if (au.status === 403) {
+        quietLine = "Audit entries are visible to team admins.";
+      } else {
+        quietLine = "Audit entries couldn't be loaded — showing instance events only.";
+      }
+      var entries = mergeTimeline(events, audits);
+      tlvCache = { id: bp.id, entries: entries, quietLine: quietLine };
+      paintTimeline(root, bp, entries, quietLine);
+    });
+  }
+
+  function paintTimeline(root, bp, entries, quietLine) {
+    var box = root && root.querySelector ? root.querySelector(".tlv") : null;
+    if (!box) return;
+    var open = [];
+    entries.forEach(function (e) {
+      if (tlvExpanded[String(bp.id) + "|" + e.key]) open.push(e.key);
+    });
+    box.innerHTML = timelineFeedHtml(entries, { quietLine: quietLine, expandedKeys: open });
+  }
+
+  // ONE delegated listener per mount (the panel node lives for the tab's whole
+  // life; paints only swap its inner feed) — details toggle + error Retry.
+  function wireTimelineFeed(root, bp) {
+    if (!root || !root.addEventListener) return; // fake-DOM smoke
+    root.addEventListener("click", function (e) {
+      var t = e.target;
+      if (!t || !t.closest) return;
+      var btn = t.closest("[data-tlv-toggle]");
+      if (btn) {
+        var row = btn.closest("[data-tlv-key]");
+        if (!row) return;
+        var detail = row.querySelector(".tlv-detail");
+        if (!detail) return;
+        var opening = detail.hidden;
+        detail.hidden = !opening;
+        btn.setAttribute("aria-expanded", opening ? "true" : "false");
+        var key = String(bp.id) + "|" + row.getAttribute("data-tlv-key");
+        if (opening) tlvExpanded[key] = true;
+        else delete tlvExpanded[key];
+        return;
+      }
+      if (t.closest("[data-tlv-retry]")) loadTimeline(root, bp);
+    });
+  }
+
+  // SSE hook: an `audit` tick while the Timeline tab is on screen refetches the
+  // feed in place (TYPE_ACTIONS wires this; `fleet` ticks already remount the
+  // whole instance view, which re-lands here through mountTimelineTab).
+  function refreshInstanceTimeline() {
+    var h = parseHash();
+    if (h.view !== "instance" || h.tab !== "timeline") return;
+    if (!tlvMountedBp || String(tlvMountedBp.id) !== String(h.id)) return;
+    var panel = document.getElementById("instance-tabpanel");
+    if (!panel) return;
+    loadTimeline(panel, tlvMountedBp);
+  }
+
+  // ------------------------------------------------ verify chips (Overview)
+  // The probe vocabulary, byte-pinned against __fixtures__/verify_probes.json
+  // (the same fixture the Elixir suite and the Go provision gate assert). The
+  // node harness asserts name+label equality so a vocabulary change reds here.
+  var VERIFY_PROBES = [
+    { name: "verify.api", label: "API answers" },
+    { name: "verify.login", label: "Login responds" },
+    { name: "verify.studio", label: "Studio renders" },
+  ];
+
+  // Pure: the newest `verify` event in a newest-first events payload, or null.
+  function latestVerifyOf(events) {
+    if (!Array.isArray(events)) return null;
+    for (var i = 0; i < events.length; i++) {
+      if (events[i] && events[i].type === "verify") return events[i];
+    }
+    return null;
+  }
+
+  // Pure: chips model from a verify RESULT envelope ({ok, reachable,
+  // verified_at, probes}) — the POST response and the persisted event payload
+  // share this shape — or null for the never-run state. Every probe in the
+  // vocabulary gets a chip even if the envelope omits it (role "unknown"):
+  // three chips always, so the row never shifts.
+  function probeChipsModel(result) {
+    var ran = !!(result && typeof result === "object" && Array.isArray(result.probes));
+    var byName = {};
+    if (ran) {
+      result.probes.forEach(function (p) { if (p && p.name) byName[p.name] = p; });
+    }
+    return {
+      ran: ran,
+      ok: ran ? !!result.ok : null,
+      reachable: ran ? result.reachable !== false : null,
+      verifiedAt: (ran && result.verified_at) || null,
+      chips: VERIFY_PROBES.map(function (v) {
+        var p = byName[v.name];
+        if (!p) return { name: v.name, label: v.label, role: "unknown", status: null, latencyMs: null, unreachable: false };
+        return {
+          name: v.name,
+          label: v.label,
+          role: p.ok ? "pass" : "fail",
+          status: p.status != null ? p.status : null,
+          latencyMs: p.latency_ms != null ? p.latency_ms : null,
+          unreachable: p.reachable === false,
+        };
+      }),
+    };
+  }
+
+  // Pure: the one-line verdict under the chips.
+  function verifySummaryText(model) {
+    if (!model.ran) return "Never checked — run the first one to prove the golden path.";
+    var when = model.verifiedAt ? " · checked " + relTime(model.verifiedAt) : "";
+    if (model.ok) return "All checks passed" + when;
+    if (!model.reachable) return "Unreachable — the box didn't answer any probe" + when;
+    var failing = model.chips.filter(function (c) { return c.role === "fail"; }).length;
+    return failing + " of " + model.chips.length + " checks failing" + when;
+  }
+
+  // Pure: one probe chip. pass/fail carry the semantic role; a chip that never
+  // ran (or an unreachable probe) says so in words, not just colour.
+  function verifyChipHtml(chip) {
+    var glyph = chip.role === "pass" ? "&#10003;" : chip.role === "fail" ? "&#10007;" : "&middot;";
+    var code = chip.role === "unknown" ? ""
+      : chip.unreachable || chip.status == null ? "unreachable"
+      : String(chip.status) + (chip.latencyMs != null ? " · " + chip.latencyMs + "ms" : "");
+    var state = chip.role === "pass" ? "passed" : chip.role === "fail" ? "failed" : "not checked";
+    return '<span class="vf-chip vf-chip--' + esc(chip.role) + '" role="listitem" aria-label="' +
+      esc(chip.label + " — " + state) + '">' +
+      '<span class="vf-chip-glyph" aria-hidden="true">' + glyph + "</span>" +
+      esc(chip.label) +
+      (code ? '<span class="vf-chip-code">' + esc(code) + "</span>" : "") +
+      "</span>";
+  }
+
+  // Pure: the whole card. Never-run invites the first check; a completed run
+  // (pass, fail, or unreachable — ALL normal results) renders the verdict.
+  // noteHtml is the 409/404 recovery note (verifyNoteHtml), rendered inline.
+  function verifyCardHtml(model, noteHtml) {
+    // The first-ever check is THE next step for a fresh box (primary); a
+    // re-check on a verified box is routine (quiet).
+    var runBtn = model.ran
+      ? '<button class="btn btn-sm" type="button" data-vf-run>Check now</button>'
+      : '<button class="btn btn-sm btn-primary" type="button" data-vf-run>Run first check</button>';
+    return '<div class="vf-card">' +
+      '<div class="vf-head"><h2>Golden path</h2>' + runBtn + "</div>" +
+      '<div class="vf-chips" role="list" aria-label="Verification checks">' +
+        model.chips.map(verifyChipHtml).join("") +
+      "</div>" +
+      '<div class="vf-meta">' + esc(verifySummaryText(model)) + "</div>" +
+      (noteHtml || "") +
+      "</div>";
+  }
+
+  // Pure: the human copy + EXACTLY ONE recovery action for the two coded
+  // /verify refusals (D25). 409 not_live → watch the Timeline (the check works
+  // once the box is live); 404 no_admin_token → the server's own hint is a
+  // re-provision, and POST /retry is that primitive.
+  function verifyNoteHtml(code, bp) {
+    if (code === "not_live") {
+      return '<div class="vf-note"><b>Not live yet.</b> Verification probes the running box &mdash; ' +
+        "it works once provisioning finishes. " +
+        '<a href="#instance/' + esc(bp.id) + '/timeline">View timeline</a></div>';
+    }
+    if (code === "no_admin_token") {
+      return '<div class="vf-note"><b>No stored credentials.</b> This instance predates verification ' +
+        "&mdash; re-provisioning captures the credentials the check needs. " +
+        '<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button></div>';
+    }
+    return "";
+  }
+
+  // Who owns the #instance-verify slot right now. Re-querying the DOM after an
+  // await is NOT enough on its own: navigating A → B replaces the slot with
+  // B's, and A's still-in-flight response would paint A's chips (and wire
+  // A-targeted actions) into B's overview. verifySeq drops stale GETs; the
+  // owner id gates the long-running POST (an unreachable box holds /verify
+  // open for tens of seconds — plenty of time to click another instance).
+  var verifySeq = 0;
+  var verifyOwnerId = null;
+
+  // Derive the chips from the SAME events feed the Timeline reads. A failed
+  // events fetch hides the card quietly — the chips are an additive proof, and
+  // the Overview must never error because history was unavailable (the next
+  // fleet SSE tick retries via the normal repaint).
+  function loadInstanceVerify(bp) {
+    var box = $("#instance-verify");
+    if (!box) return;
+    verifyOwnerId = String(bp.id);
+    var seq = ++verifySeq;
+    // limit=200 (the route's max): the per-cycle health beat dominates the
+    // stream, and a verify run buried behind a day of beats must not make the
+    // card lie "never checked" at the default 50-event window.
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/events?limit=200").then(function (r) {
+      if (seq !== verifySeq) return; // a newer mount owns the slot
+      box = $("#instance-verify");
+      if (!box) return;
+      if (!r.ok) { box.innerHTML = ""; return; }
+      var latest = latestVerifyOf((r.data && r.data.events) || []);
+      renderVerifyCard(box, bp, probeChipsModel(latest ? latest.payload : null));
+    });
+  }
+
+  function renderVerifyCard(box, bp, model, noteHtml) {
+    box.innerHTML = verifyCardHtml(model, noteHtml);
+    var run = box.querySelector("[data-vf-run]");
+    if (run) run.addEventListener("click", function () { runVerifyNow(box, bp, model, run); });
+    var rp = box.querySelector("[data-vf-reprovision]");
+    if (rp) rp.addEventListener("click", function () { retryInstance(bp, rp); });
+  }
+
+  // POST the synchronous suite. 200 renders the returned envelope IMMEDIATELY
+  // (unreachable is a normal 200 with reachable:false — rendered honestly, not
+  // as an error); 409/404 get their coded recovery notes; anything else is a
+  // toast + a re-enabled button. The server also nudges `fleet`, so the
+  // persisted event repaints the same truth moments later.
+  function runVerifyNow(box, bp, model, btn) {
+    var label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/verify", {}).then(function (r) {
+      // Another instance's overview owns the slot now — this result (and its
+      // wrong-target Check-now/Re-provision wiring) must not paint there. The
+      // run itself isn't lost: the server persisted it as a `verify` event.
+      if (verifyOwnerId !== String(bp.id)) return;
+      box = $("#instance-verify");
+      if (!box) return; // navigated away mid-check
+      if (r.status === 200 && r.data && Array.isArray(r.data.probes)) {
+        renderVerifyCard(box, bp, probeChipsModel(r.data));
+        return;
+      }
+      if (r.status === 409) {
+        renderVerifyCard(box, bp, model, verifyNoteHtml("not_live", bp));
+        return;
+      }
+      if (r.status === 404 && r.data && r.data.error === "no_admin_token") {
+        renderVerifyCard(box, bp, model, verifyNoteHtml("no_admin_token", bp));
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = label;
+      toast({ kind: "error", title: "Couldn't run the check", body: friendly(r.data, "Please try again in a moment.") });
+    });
+  }
+
   // =========================================================== SITES (tab)
   // Every site across the fleet, each labelled with its parent instance.
   function loadSites() {
@@ -2655,6 +3380,7 @@
       var d = $("#site-deploy");
       if (d) d.addEventListener("click", function () { confirmDeploy(site, domain); });
       wireDeployConsoles(box);
+      wireDeployActions(box, site, deployments);
       var g = $("#site-github");
       if (g) g.addEventListener("click", function () { openSiteGithub(site, domain); });
     });
@@ -2695,7 +3421,7 @@
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
     var list = deployments.length
-      ? deployments.map(deployRow).join("")
+      ? deployments.map(function (d) { return deployRow(d, site.current_deployment_id); }).join("")
       : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
     var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
@@ -2831,20 +3557,182 @@
     return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
   }
 
-  function deployRow(d) {
+  // ------------------------------------------- rollback / redeploy (D7 + D25)
+  // Both are ONE control-plane primitive: POST /v1/sites/:id/deployments/
+  // :dep_id/promote → 201 {deployment}. The server mints a FRESH queued
+  // production deployment pinned to the source row's already-built artifact —
+  // promote-by-new-deployment, never a pointer flip — so nothing here mutates
+  // a row in place and the current deployment stays in history.
+
+  // The URL the promote POST drives. Both ids ride through encodeURIComponent
+  // so a hostile/garbled id can never break out of its path segment.
+  function promotePath(siteId, depId) {
+    return "/v1/sites/" + encodeURIComponent(String(siteId)) +
+      "/deployments/" + encodeURIComponent(String(depId)) + "/promote";
+  }
+
+  // The short human handle for a deployment's build source, for confirm copy
+  // and toasts. Prefers the git sha (what the operator recognizes), then the
+  // image tag, then the row id.
+  function deployRefLabel(d) {
+    if (!d) return "";
+    if (d.git_ref) return shortSha(d.git_ref);
+    if (d.image_tag) return shortId(d.image_tag);
+    return shortId(d.id);
+  }
+
+  // Which promote action (if any) a production deployment row offers:
+  //   the CURRENT deployment (site.current_deployment_id) → Redeploy;
+  //   every PRIOR terminal-live deployment              → Roll back to this.
+  // Non-live rows (queued/building/pushing/failed) and branch previews offer
+  // nothing — there is no proven artifact to promote. Pure; null = no action.
+  function promoteActionFor(d, currentId) {
+    if (!d || d.environment === "preview") return null;
+    if ((d.status || "") !== "live") return null;
+    if (currentId != null && String(d.id) === String(currentId)) {
+      return { kind: "redeploy", label: "Redeploy" };
+    }
+    return { kind: "rollback", label: "Roll back to this" };
+  }
+
+  // The mutate-tier confirm copy — one honest consequence sentence per kind
+  // (decision 5). `ref` is the short source handle (esc'd by confirmModalHtml).
+  function promoteConfirmCopy(kind, ref) {
+    if (kind === "redeploy") {
+      return {
+        title: "Redeploy " + ref + "?",
+        consequence: "This creates a new production deployment from the same source (" + ref + "). " +
+          "The current deployment keeps serving until the new one is live.",
+        confirmLabel: "Redeploy",
+        busyLabel: "Redeploying…",
+      };
+    }
+    return {
+      title: "Roll back to " + ref + "?",
+      consequence: "This creates a new production deployment pinned to " + ref + ". " +
+        "The current deployment stays in history.",
+      confirmLabel: "Roll back",
+      busyLabel: "Rolling back…",
+    };
+  }
+
+  // Map a failed promote to a human sentence + which SINGLE recovery action the
+  // modal offers (decision 25 — never a dead end): "retry" re-runs the POST,
+  // "refresh" reloads the deployment list (the state moved under us). Pure.
+  function promoteFailure(status, data) {
+    var err = data && data.error;
+    if (status === 409) {
+      return {
+        message: "A build for this git ref is already in progress — it has to finish (or fail) first.",
+        recovery: "refresh",
+      };
+    }
+    if (status === 404) {
+      return { message: "That deployment isn't on this site any more — this list may be stale.", recovery: "refresh" };
+    }
+    if (status === 422 && err === "not_promotable") {
+      return { message: "Branch previews can't be promoted to production.", recovery: "refresh" };
+    }
+    if (status === 422 && err === "no_build_source") {
+      return {
+        message: "This deployment has no stored artifact and the site has no connected repo, so there's nothing to rebuild from.",
+        recovery: "refresh",
+      };
+    }
+    if (status === 0) {
+      return { message: "Couldn't reach the control plane — check your connection.", recovery: "retry" };
+    }
+    return { message: friendly(data, "The new deployment couldn't be created."), recovery: "retry" };
+  }
+
+  function confirmPromote(site, d, kind) {
+    var copy = promoteConfirmCopy(kind, deployRefLabel(d));
+    openConfirmModal({
+      tier: "mutate",
+      title: copy.title,
+      consequence: copy.consequence,
+      confirmLabel: copy.confirmLabel,
+      busyLabel: copy.busyLabel,
+      onConfirm: function (ctl) { runPromote(site, d, kind, ctl); },
+    });
+  }
+
+  function runPromote(site, d, kind, ctl) {
+    api("POST", promotePath(site.id, d.id), {}).then(function (r) {
+      if (r.status === 201) {
+        ctl.succeed();
+        toast({
+          kind: "success",
+          title: kind === "redeploy" ? "Redeploy started" : "Rollback started",
+          body: "A new production deployment pinned to " + deployRefLabel(d) + " is queued.",
+        });
+        // The live "deployments" SSE tick repaints too; refetch immediately so
+        // the queued row appears without waiting on the broadcast round-trip.
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        return;
+      }
+      var f = promoteFailure(r.status, r.data);
+      if (f.recovery === "retry") {
+        ctl.fail(f.message, "Try again", function (c) {
+          c.busy();
+          runPromote(site, d, kind, c);
+        });
+      } else {
+        ctl.fail(f.message, "Refresh deployments", function () {
+          closeModal();
+          if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        });
+      }
+    });
+  }
+
+  // Wire every promote button in a freshly rendered deployment list. Re-run
+  // after each site render (the list is rebuilt on every live SSE tick).
+  function wireDeployActions(scope, site, deployments) {
+    var byId = {};
+    (deployments || []).forEach(function (d) { byId[String(d.id)] = d; });
+    scope.querySelectorAll(".dep-promote").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var d = byId[btn.getAttribute("data-dep-id")];
+        if (d) confirmPromote(site, d, btn.getAttribute("data-kind"));
+      });
+    });
+  }
+
+  function deployRow(d, currentId) {
     var st = d.status || "queued";
+    // Headline ref: a full 40-char commit sha is noise, not information — show
+    // the 7-char short form (full sha on hover). Only hex-sha-shaped refs are
+    // shortened; anything else (a tag, a hand-set ref) renders verbatim.
+    var isSha = d.git_ref && /^[0-9a-f]{8,64}$/i.test(d.git_ref);
     var ref = d.image_tag ? '<span class="mono">' + esc(shortId(d.image_tag)) + "</span>"
-      : d.git_ref ? '<span class="mono">' + esc(d.git_ref) + "</span>"
+      : d.git_ref ? '<span class="mono"' + (isSha ? ' title="' + esc(d.git_ref) + '"' : "") + ">" +
+          esc(isSha ? shortSha(d.git_ref) : d.git_ref) + "</span>"
       : '<span class="dim">' + esc(shortId(d.id)) + "</span>";
+    var isCurrent = currentId != null && String(d.id) === String(currentId);
     var when = d.became_live_at || d.updated_at || d.inserted_at;
+    // Git meta the row already carries (D7): branch, sha (when the headline is
+    // an image tag), and WHEN — "live since" once the row went live.
+    var metaBits = [];
+    if (d.branch) metaBits.push(esc(d.branch));
+    if (d.git_ref && d.image_tag) metaBits.push('<span class="mono">' + esc(shortSha(d.git_ref)) + "</span>");
+    metaBits.push(esc((st === "live" && d.became_live_at ? "live since " : "") + fmtWhen(when)));
     var fail = (st === "failed" && d.failure_reason)
       ? '<div class="deploy-fail' + (failureTone(d.failure_reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' + esc(failureCopy(d.failure_reason)) + "</div>" : "";
+    var action = promoteActionFor(d, currentId);
+    var actionBtn = action
+      ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
+      : "";
+    var current = isCurrent
+      ? '<span class="dep-current" title="Production traffic is served from this deployment">Current</span>'
+      : "";
     var head = '<div class="deploy-head"><div class="deploy-main">' +
-        '<div class="deploy-ref">' + ref + "</div>" +
-        '<div class="deploy-meta">' + esc(fmtWhen(when)) + "</div>" + fail +
+        '<div class="deploy-ref">' + ref + current + "</div>" +
+        '<div class="deploy-meta">' + metaBits.join(" &middot; ") + "</div>" + fail +
         deployDetailHtml(d, st) +
       "</div>" +
-      '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div>";
+      '<div class="dep-side">' + actionBtn +
+        '<span class="dep-pill dep-' + esc(st) + '">' + esc(cap(st)) + "</span></div></div>";
     return '<div class="deploy-row">' + head + deployConsoleHtml(d, deployIsActive(st)) + "</div>";
   }
 
@@ -3020,6 +3908,254 @@
 
   function railRowHtml(k, htmlV) { return '<div class="rail-row"><span class="k">' + esc(k) + '</span><span class="v">' + htmlV + "</span></div>"; }
   function shortId(s) { s = String(s || ""); return s.length > 12 ? s.slice(0, 12) : s; }
+
+  // =========================================================== INVITATION ACCEPT
+  // The landing for the accept links router.ex mints
+  // (`/#/invitations/accept?token=…`). Unauthed-capable: a logged-out landing
+  // PARKS the token in sessionStorage, scrubs it from the address bar, rides
+  // the normal login/signup (or OAuth) flow, and the first authed render()
+  // resumes the accept. Endpoints:
+  //   GET  /v1/invitations/:token  (unauthenticated preview; 404 for any
+  //                                 dead/garbage token — no enumeration signal)
+  //   POST /v1/invitations/accept  {token} → 200 {team_id} | 404 | 403 | 422
+  var INVITE_KEY = "bpcloud.invite";
+  function parkedInviteToken() {
+    try { return sessionStorage.getItem(INVITE_KEY); } catch (e) { return null; }
+  }
+  function parkInviteToken(t) {
+    try { sessionStorage.setItem(INVITE_KEY, t); } catch (e) {}
+  }
+  function clearParkedInvite() {
+    try { sessionStorage.removeItem(INVITE_KEY); } catch (e) {}
+  }
+
+  // Pure: what the landing shows BEFORE any accept POST.
+  //   preview 404 / absent        → "invalid"        (revoked / used / garbage)
+  //   preview past its expiry     → "expired"        (landed after the clock ran out)
+  //   already on the invited team → "already_member" (nothing to accept)
+  //   otherwise                   → "confirm"        (the Join screen)
+  function inviteLandingState(previewStatus, preview, me, nowMs) {
+    if (previewStatus === 404 || !preview || !preview.team) return "invalid";
+    if (preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
+    if (me && me.team && me.team.slug && preview.team.slug === me.team.slug) return "already_member";
+    return "confirm";
+  }
+
+  // Pure: the terminal state an accept POST result lands on. The server folds
+  // expired/revoked/used into one 404 (no enumeration signal), so "expired" is
+  // only claimable when OUR earlier preview carried an expires_at that has
+  // since passed — otherwise the honest answer is "invalid" (either/or copy).
+  function inviteTerminalFrom(status, data, preview, nowMs) {
+    if (status === 200) return "joined";
+    if (status === 403) return "wrong_account";
+    if (status === 404) {
+      if (preview && preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
+      return "invalid";
+    }
+    return "error"; // 422 accept_failed / 5xx / anything unexpected → retryable
+  }
+
+  // Pure per-state markup. Calm, second-person, zero jargon; every TERMINAL
+  // state carries exactly ONE next action (a [data-invite-act] button); the
+  // confirm screen additionally offers a quiet "Not now" escape (.invite-skip).
+  function inviteStateHtml(state, ctx) {
+    ctx = ctx || {};
+    var team = ctx.team ? String(ctx.team) : "this team";
+    var teamB = "<b>" + esc(team) + "</b>";
+    function card(ico, title, copyHtml, actionsHtml) {
+      return '<div class="invite-wrap"><div class="invite-card card">' + ico +
+        '<h1 class="invite-title">' + esc(title) + "</h1>" +
+        '<p class="invite-copy">' + copyHtml + "</p>" +
+        '<div class="invite-actions">' + actionsHtml + "</div>" +
+        "</div></div>";
+    }
+    function act(kind, label) {
+      return '<button type="button" class="btn btn-primary invite-action" data-invite-act="' +
+        esc(kind) + '">' + esc(label) + "</button>";
+    }
+    var ICO_OK = '<div class="invite-ico invite-ico--ok" aria-hidden="true">✓</div>';
+    var ICO_INFO = '<div class="invite-ico invite-ico--info" aria-hidden="true">i</div>';
+    var ICO_WARN = '<div class="invite-ico invite-ico--warn" aria-hidden="true">!</div>';
+    var ICO_MAIL = '<div class="invite-ico invite-ico--info" aria-hidden="true">✉</div>';
+
+    if (state === "joined") {
+      return card(ICO_OK, "You're in",
+        "Welcome to " + teamB + ". Everything the team runs is in your dashboard now.",
+        act("overview", "Go to Overview"));
+    }
+    if (state === "already_member") {
+      return card(ICO_INFO, "You're already a member",
+        "You already belong to " + teamB + " — there's nothing left to accept.",
+        act("overview", "Go to Overview"));
+    }
+    if (state === "expired") {
+      return card(ICO_WARN, "This invitation has expired",
+        "Invitations only last a limited time, and this one's time ran out. " +
+          "Ask the person who invited you to send a fresh one.",
+        act("overview", "Go to your dashboard"));
+    }
+    if (state === "wrong_account") {
+      return card(ICO_INFO, "This invitation is for a different email",
+        (ctx.email ? "It was sent to <b>" + esc(String(ctx.email)) + "</b>" : "It was sent to a different address") +
+          (ctx.meEmail ? ", but you're signed in as <b>" + esc(String(ctx.meEmail)) + "</b>." : ".") +
+          " Sign in with the invited address to accept it.",
+        act("switch", "Switch account"));
+    }
+    if (state === "error") {
+      return card(ICO_WARN, "Something went wrong",
+        "We couldn't accept the invitation just now — nothing has changed. Give it another try.",
+        act("retry", "Try again"));
+    }
+    if (state === "confirm") {
+      return card(ICO_MAIL, "Join " + team + "?",
+        "You've been invited to join " + teamB +
+          (ctx.role ? " as " + esc(String(ctx.role)) : "") + "." +
+          (ctx.email ? " This invitation was sent to <b>" + esc(String(ctx.email)) + "</b>." : ""),
+        act("join", "Join " + team) +
+          '<a class="invite-skip" href="#overview">Not now</a>');
+    }
+    // "invalid" + any unknown state: the total fallback.
+    return card(ICO_WARN, "This invitation isn't valid any more",
+      "The link may have been revoked or already used. If you still need access, " +
+        "ask the person who invited you to send a new one.",
+      act("overview", "Go to your dashboard"));
+  }
+
+  function inviteCtx(preview, me) {
+    return {
+      team: preview && preview.team && preview.team.name,
+      role: preview && preview.role,
+      email: preview && preview.email,
+      meEmail: me && me.user && me.user.email,
+    };
+  }
+
+  // The invite view lives OUTSIDE index.html's static sections (it's the one
+  // view reached from a minted link, not the nav) — created lazily next to the
+  // other detail sections so applyRoute's show/hide treats it like any view.
+  function ensureInviteView() {
+    var sec = document.getElementById("view-invite");
+    if (sec) return sec;
+    var ref = document.getElementById("view-site");
+    if (!ref || !ref.parentNode) return null;
+    sec = document.createElement("section");
+    sec.id = "view-invite";
+    sec.className = "view";
+    ref.parentNode.insertBefore(sec, ref.nextSibling);
+    return sec;
+  }
+
+  var inviteLoadSeq = 0;
+
+  function loadInvite(tokenFromHash) {
+    var box = ensureInviteView();
+    if (!box) return;
+    box.hidden = false;
+    // Park the URL token and scrub it from the address bar immediately — the
+    // token is a credential; it must not linger in history or a screenshot.
+    // (?scen etc. survive: only the fragment is rewritten.)
+    var token = tokenFromHash || null;
+    if (token) {
+      parkInviteToken(token);
+      if (typeof history !== "undefined" && history.replaceState) {
+        history.replaceState(null, "", location.pathname + location.search + "#invitations/accept");
+      }
+    } else {
+      token = parkedInviteToken();
+    }
+    if (!token) {
+      renderInviteState(box, "invalid", null, null, null);
+      return;
+    }
+    box.innerHTML = '<div class="loading">Checking your invitation&hellip;</div>';
+    var seq = ++inviteLoadSeq;
+    Promise.all([
+      api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }),
+      api("GET", "/v1/me"),
+    ]).then(function (res) {
+      if (seq !== inviteLoadSeq || currentView() !== "invite") return;
+      var pr = res[0];
+      var me = res[1].ok ? res[1].data : null;
+      var preview = pr.ok ? pr.data : null;
+      var state = inviteLandingState(pr.status, preview, me, Date.now());
+      renderInviteState(box, state, token, preview, me);
+    });
+  }
+
+  function renderInviteState(box, state, token, preview, me) {
+    // A settled outcome consumes the parked token (a reload must not replay
+    // it); wrong_account keeps it — it IS the resume across the account
+    // switch — and error keeps it so a retry/reload can try again.
+    if (state === "joined" || state === "already_member" || state === "expired" || state === "invalid") {
+      clearParkedInvite();
+    }
+    box.innerHTML = inviteStateHtml(state, inviteCtx(preview, me));
+    var skip = box.querySelector(".invite-skip");
+    if (skip) skip.addEventListener("click", function () { clearParkedInvite(); });
+    var btn = box.querySelector("[data-invite-act]");
+    if (!btn) return;
+    var act = btn.getAttribute("data-invite-act");
+    btn.addEventListener("click", function () {
+      if (act === "overview") {
+        clearParkedInvite();
+        location.hash = "#overview";
+        return;
+      }
+      if (act === "switch") {
+        // Keep the parked token: after signing in with the invited address the
+        // authed render() resumes the accept automatically.
+        clearSession();
+        render();
+        return;
+      }
+      if (act === "join" || act === "retry") submitInviteAccept(box, btn, token, preview, me);
+    });
+  }
+
+  function submitInviteAccept(box, btn, token, preview, me) {
+    btn.disabled = true;
+    btn.textContent = "Joining…";
+    api("POST", "/v1/invitations/accept", { token: token }).then(function (r) {
+      if (currentView() !== "invite") return;
+      if (r.status === 200) {
+        clearParkedInvite();
+        // The team roster (and possibly the account's team) changed.
+        meCache = null;
+        loadMe();
+        fleetCache = null;
+        renderInviteState(box, "joined", token, preview, me);
+        return;
+      }
+      renderInviteState(box, inviteTerminalFrom(r.status, r.data, preview, Date.now()), token, preview, me);
+    });
+  }
+
+  // The logged-out companion: a banner on the sign-in card that says what
+  // logging in will do with the parked invitation (and fails honestly when the
+  // link is already dead, instead of making the user log in to find out).
+  function showAuthInviteBanner(token) {
+    var loginCard = $("#login-card");
+    if (!loginCard) return;
+    var slot = document.getElementById("auth-invite");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.id = "auth-invite";
+      slot.className = "auth-invite";
+      loginCard.insertBefore(slot, loginCard.firstChild);
+    }
+    slot.innerHTML = "";
+    api("GET", "/v1/invitations/" + encodeURIComponent(token), null, { noAuth: true }).then(function (r) {
+      if (!document.getElementById("auth-invite")) return;
+      if (r.ok && r.data && r.data.team) {
+        slot.innerHTML = '<span class="auth-invite-title">You\'ve been invited to join ' +
+          esc(r.data.team.name) + ".</span> Log in — or create an account — with " +
+          '<span class="auth-invite-email">' + esc(r.data.email) + "</span> to accept.";
+      } else {
+        clearParkedInvite();
+        slot.innerHTML = "That invitation link isn't valid any more — it may have expired or been revoked. You can still log in.";
+      }
+    });
+  }
 
   // =========================================================== LAUNCH
   // Does this subscription entitle the team to launch? Mirrors the server's
@@ -3776,8 +4912,10 @@
     },
     audit: function (v) {
       // An audited mutation (delete / go-live / site create / member / token /
-      // subscription) just landed an event; refresh Activity if it's open.
+      // subscription) just landed an event; refresh Activity if it's open, and
+      // the instance Timeline tab (C8) — its feed is half audit entries.
       if (v === "activity") loadActivity();
+      else if (v === "instance") refreshInstanceTimeline();
     },
     github: function (v) {
       // gh-2: a GitHub connect/disconnect landed (possibly in another tab) —
@@ -5058,6 +6196,20 @@
         hide($("#reset-card"));
         setAuthMode("login");
         renderOAuthButtons();
+        // An invitation accept link (#/invitations/accept?token=…) landed while
+        // logged out: park the token (sessionStorage), scrub it from the URL,
+        // and say what logging in will do. The first authed render() resumes.
+        var inviteTok = parseInviteToken(location.hash);
+        if (inviteTok) {
+          parkInviteToken(inviteTok);
+          if (typeof history !== "undefined" && history.replaceState) {
+            history.replaceState(null, "", location.pathname + location.search);
+          }
+          showAuthInviteBanner(inviteTok);
+        } else if (parkedInviteToken()) {
+          // e.g. back on the sign-in screen after "Switch account".
+          showAuthInviteBanner(parkedInviteToken());
+        }
         $("#auth-email").focus();
       }
       return;
@@ -5075,6 +6227,18 @@
     // tell success from cancel.
     var checkout = checkoutFlag();
     var fromCheckout = handleCheckoutReturn();
+
+    // Invitation resume: a parked accept token (a logged-out landing that just
+    // came through login / signup / OAuth) outranks whatever hash the
+    // round-trip left behind — the user's intent was "accept this invite".
+    // EXCEPT an explicit drill-down deep link (#site/…, #instance/…): someone
+    // who just opened a specific resource asked for THAT; an undecided invite
+    // stays parked and resumes on the next plain boot instead of hijacking it.
+    var preInviteView = parseHash().view;
+    if (parkedInviteToken() && preInviteView !== "invite" &&
+        preInviteView !== "site" && preInviteView !== "instance") {
+      location.hash = "#invitations/accept";
+    }
 
     // Validate the route. Accept tab views and BOTH drill-downs (#instance/…,
     // #site/…) — the old guard reset a site deep-link to #fleet on reload.
@@ -5222,6 +6386,26 @@
       deliveryRowHtml: deliveryRowHtml, hookToggleState: hookToggleState,
       webhookErrorHtml: webhookErrorHtml, webhookMutationError: webhookMutationError,
       whPath: whPath, webhooksTabShellHtml: webhooksTabShellHtml, mountWebhooksTab: mountWebhooksTab,
+      // Zero-broken-promises slice (charter D5/D7/D25/D26): the shared confirm
+      // modal (pure state machine + focus-trap seam), the promote grammar
+      // (rollback/redeploy), and the invitation-accept landing.
+      confirmModalInit: confirmModalInit, confirmModalReduce: confirmModalReduce,
+      confirmModalArmed: confirmModalArmed, confirmModalTypedMatch: confirmModalTypedMatch,
+      confirmModalHtml: confirmModalHtml, trapTarget: trapTarget,
+      promotePath: promotePath, promoteActionFor: promoteActionFor,
+      promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
+      deployRefLabel: deployRefLabel, deployRow: deployRow,
+      parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
+      inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
+      // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
+      mergeTimeline: mergeTimeline, auditMirrorsEvent: auditMirrorsEvent,
+      tlvEntryTitle: tlvEntryTitle, tlvRowHtml: tlvRowHtml, tlvDetailHtml: tlvDetailHtml,
+      timelineFeedHtml: timelineFeedHtml, timelineTabShellHtml: timelineTabShellHtml,
+      mountTimelineTab: mountTimelineTab,
+      latestVerifyOf: latestVerifyOf, probeChipsModel: probeChipsModel,
+      verifySummaryText: verifySummaryText, verifyChipHtml: verifyChipHtml,
+      verifyCardHtml: verifyCardHtml, verifyNoteHtml: verifyNoteHtml,
+      verifyProbes: VERIFY_PROBES.map(function (p) { return { name: p.name, label: p.label }; }),
     });
   }
 })();

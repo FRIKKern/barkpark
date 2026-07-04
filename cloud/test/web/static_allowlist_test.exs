@@ -22,7 +22,13 @@ defmodule BarkparkCloud.Web.StaticAllowlistTest do
 
   describe "Plug.Static allowlist" do
     test "the real SPA assets ARE served" do
-      for path <- ["/app.js", "/app.css", "/index.html"] do
+      for path <- [
+            "/app.js",
+            "/app.css",
+            "/index.html",
+            "/styleguide.html",
+            "/fonts/Inter-var.woff2"
+          ] do
         conn = get(path)
         assert conn.status == 200, "expected #{path} to be served (200), got #{conn.status}"
       end
@@ -40,8 +46,10 @@ defmodule BarkparkCloud.Web.StaticAllowlistTest do
       end
     end
 
-    test "an un-allowlisted page (e.g. a future /styleguide.html) is NOT served" do
-      conn = get("/styleguide.html")
+    test "an un-allowlisted file (e.g. the shared fixture) is NOT served" do
+      # /styleguide.html joined the allowlist (charter decision 27 — the living
+      # spec / human sign-off surface); the fixture stays private.
+      conn = get("/__fixtures__/event_types.json")
       assert conn.status == 404
     end
 

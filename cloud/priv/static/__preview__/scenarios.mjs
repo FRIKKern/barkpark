@@ -40,6 +40,10 @@ export const IDS = {
   soloFailed: "5b2c1e00-0000-4000-8000-0000000000b2",
   siteMarketing: "5b2c1e00-0000-4000-8000-0000000000c1",
   siteDocs: "5b2c1e00-0000-4000-8000-0000000000c2",
+  // Rollback/redeploy scenarios (deployment_json rows on the marketing site).
+  depCurrent: "5b2c1e00-0000-4000-8000-0000000000d1",
+  depFailed: "5b2c1e00-0000-4000-8000-0000000000d2",
+  depPrior: "5b2c1e00-0000-4000-8000-0000000000d3",
 };
 
 // Clock anchor = NOW at module load. Offsets are fixed (so relative strings —
@@ -236,6 +240,95 @@ const docsSite = site({
   framework: "astro",
 });
 
+// ── deployments (deployment_json) ───────────────────────────────────────────
+// Envelope from router.ex deployment_json/1: id, site_id, status, git_ref,
+// artifact_url, image_tag, build_log_url, failure_reason, became_live_at,
+// environment, branch, preview_host, preview_url, console, detail,
+// inserted_at, updated_at. Production rows only here (previews have their own
+// endpoint); the rollback scenarios key on `status:"live"` +
+// site.current_deployment_id, exactly as the SPA's promoteActionFor does.
+function deployment(over) {
+  return Object.assign(
+    {
+      id: null,
+      site_id: IDS.siteMarketing,
+      status: "queued",
+      git_ref: null,
+      artifact_url: null,
+      image_tag: null,
+      build_log_url: null,
+      failure_reason: null,
+      became_live_at: null,
+      environment: "production",
+      branch: null,
+      preview_host: null,
+      preview_url: null,
+      console: [],
+      detail: null,
+      inserted_at: tMinus(7200),
+      updated_at: tMinus(7000),
+    },
+    over,
+  );
+}
+
+// Newest first (the endpoint's order): the CURRENT live deploy, a failed
+// attempt, and the PRIOR live deploy — so the site view shows Redeploy on the
+// top row, nothing on the failed one, and "Roll back to this" on the oldest.
+const depCurrent = deployment({
+  id: IDS.depCurrent,
+  status: "live",
+  git_ref: "9c1f2ab84f00d4e2b16a99871c33d05a72e4f810",
+  branch: "main",
+  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-9c1f2ab.tar.gz",
+  became_live_at: tMinus(5400),
+  inserted_at: tMinus(5800),
+  updated_at: tMinus(5400),
+});
+const depFailed = deployment({
+  id: IDS.depFailed,
+  status: "failed",
+  git_ref: "b23aa017c9d8e2f4a6b1305c8d9e0f1a2b3c4d5e",
+  branch: "main",
+  failure_reason: "npm run build exited 1",
+  inserted_at: tMinus(20000),
+  updated_at: tMinus(19800),
+  console: [
+    { line: "cloning acme/marketing @ b23aa01", at: tMinus(20000) },
+    { line: "npm ci — ok (34s)", at: tMinus(19960) },
+    { line: "npm run build — TypeError: window is not defined", at: tMinus(19820) },
+  ],
+});
+const depPrior = deployment({
+  id: IDS.depPrior,
+  status: "live",
+  git_ref: "4e7d0c9b3a5f18e2d6c4b0a9f8e7d6c5b4a39281",
+  branch: "main",
+  artifact_url: "file:///var/lib/barkpark/artifacts/marketing-4e7d0c9.tar.gz",
+  became_live_at: tMinus(90000),
+  inserted_at: tMinus(90400),
+  updated_at: tMinus(90000),
+});
+const rollbackDeployments = [depCurrent, depFailed, depPrior];
+// The marketing site with its production pointer on the newest live row.
+const marketingSiteDeploys = Object.assign({}, marketingSite, {
+  current_deployment_id: IDS.depCurrent,
+});
+
+// ── invitations (GET /v1/invitations/:token preview + POST accept) ──────────
+// Preview envelope from router.ex: {team:{name,slug}, email, role, expires_at}.
+// The accept POST answers 200 {team_id} | 404 invalid_or_expired | 403
+// email_mismatch | 422 accept_failed. `me()` fixtures are on team slug "acme",
+// so a preview on slug "acme" reads as already-a-member and any OTHER slug as
+// a joinable foreign team.
+const tPlus = (secs) => new Date(Date.parse(T) + secs * 1000).toISOString();
+const foreignInvitePreview = {
+  team: { name: "Northwind Trading", slug: "northwind" },
+  email: "ada@acme.com",
+  role: "admin",
+  expires_at: tPlus(6 * 86400),
+};
+
 // ── audit events (audit_json; actions from the closed humanAction vocabulary) ─
 function auditEvent(over) {
   return Object.assign(
@@ -258,6 +351,52 @@ const mixedAudit = [
   auditEvent({ id: "ev_3", action: "subscription.activated", target_type: "subscription", target_id: "sub_1", metadata: { plan: "pro" }, inserted_at: tMinus(80000) }),
   auditEvent({ id: "ev_2", action: "barkpark.deleted", target_type: "barkpark", target_id: "old_box", metadata: { name: "Sandbox" }, inserted_at: tMinus(90000) }),
   auditEvent({ id: "ev_1", action: "token.minted", target_type: "token", target_id: "tok_1", metadata: { name: "CI deploy" }, inserted_at: tMinus(172800) }),
+];
+
+// ── instance events + verify runs (event_json: {id,type,payload,inserted_at};
+//    types from the closed AgentEvent vocabulary: health status backup tls
+//    content verify; verify payload ⇐ Verify.run/1's result envelope) ─────────
+function verifyEnvelope(over) {
+  const base = {
+    ok: true,
+    reachable: true,
+    verified_at: tMinus(120),
+    probes: [
+      { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
+      { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 121, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
+      { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 316, evidence: "GET /studio → 200 (renders)" },
+    ],
+  };
+  return Object.assign(base, over);
+}
+const verifyPass = verifyEnvelope({});
+const verifyOneFail = verifyEnvelope({
+  ok: false,
+  probes: [
+    verifyPass.probes[0],
+    verifyPass.probes[1],
+    { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 5031, evidence: "502 — <html>upstream not ready</html>" },
+  ],
+});
+
+const ev = (id, type, payload, at) => ({ id, type, payload, inserted_at: at });
+// Newest-first, exactly as GET /v1/barkparks/:id/events serves them.
+const liveInstanceEvents = [
+  ev(9, "verify", verifyPass, tMinus(120)),
+  ev(8, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 212, uptime_s: 86000 }, tMinus(300)),
+  ev(7, "backup", { status: "ok", size_mb: 88, took_s: 12 }, tMinus(4100)),
+  ev(6, "health", { health: "up", disk_used_pct: 41, pg_size_mb: 211 }, tMinus(7300)),
+  ev(5, "status", { transition: "online", reason: "agent_report" }, tMinus(80000)),
+  ev(4, "tls", { domain: "production-5b2c1e.barkpark.cloud", status: "issued" }, tMinus(86000)),
+];
+const liveInstanceEventsOneFail = [ev(10, "verify", verifyOneFail, tMinus(60))].concat(liveInstanceEvents.slice(1));
+const liveInstanceEventsNoVerify = liveInstanceEvents.slice(1);
+
+// Audit rows scoped to the live instance — what the Timeline's audit half
+// contributes (actor attribution beside the machine events).
+const liveInstanceAudit = [
+  auditEvent({ id: "ev_b2", action: "site.created", target_type: "site", target_id: IDS.siteDocs, metadata: { name: "Docs" }, inserted_at: tMinus(4000) }),
+  auditEvent({ id: "ev_b1", action: "barkpark.go_live", target_type: "barkpark", target_id: IDS.liveInstance, metadata: { name: "Production" }, inserted_at: tMinus(86400) }),
 ];
 
 // ── me / subscription helpers ────────────────────────────────────────────────
@@ -323,6 +462,17 @@ export const SCENARIOS = {
     deepLink: "#overview",
     data: { me: null, barkparks: [], subscription: null, sites: [], audit: [] },
   },
+  // NOTE: mock.js clears the seeded session for any scenario named loggedout*
+  // (it must decide synchronously, before this module loads) — keep the prefix.
+  "loggedout-invited": {
+    label: "Logged out with an invite link — the sign-in banner announces the parked invitation",
+    authed: false,
+    deepLink: "#/invitations/accept?token=tok-preview-signin",
+    data: {
+      me: null, barkparks: [], subscription: null, sites: [], audit: [],
+      invitation: { preview: foreignInvitePreview },
+    },
+  },
   empty: {
     label: "Fresh team — empty dashboard, first-run onboarding",
     authed: true,
@@ -360,6 +510,110 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── rollback/redeploy (charter D7 + D25) ──────────────────────────────────
+  // The deployment history with promote actions: Redeploy on the current live
+  // row, "Roll back to this" on the prior live row, nothing on the failed one.
+  // Click an action for the mutate-tier confirm (one consequence sentence).
+  rollback: {
+    label: "Site detail — rollback/redeploy actions (click one for the mutate confirm)",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSiteDeploys, docsSite],
+      audit: [],
+      deployments: rollbackDeployments,
+    },
+  },
+  // Same screen, but the promote POST answers 409 build_in_progress — the
+  // confirm renders the human sentence inline + ONE recovery action (never a
+  // dead toast). Click an action, then Confirm, to see the failure state.
+  "promote-failure": {
+    label: "Promote fails honestly — 409 inside the confirm (click an action, then Confirm)",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSiteDeploys, docsSite],
+      audit: [],
+      deployments: rollbackDeployments,
+      promote: {
+        status: 409,
+        body: { error: "build_in_progress", detail: "a build for this git ref is already in progress — wait for it to finish" },
+      },
+    },
+  },
+  // ── invitation accept terminal states (charter D26 / roadmap 12) ──────────
+  // The deepLink carries the token exactly as router.ex accept_url mints it
+  // (hash + query). invite-joined lands on the Join confirm; clicking Join
+  // reaches the "joined" terminal (accept answers 200).
+  "invite-joined": {
+    label: "Invitation — valid: the Join confirm, then You're-in after clicking Join",
+    authed: true,
+    deepLink: "#/invitations/accept?token=tok-preview-valid",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      invitation: {
+        preview: foreignInvitePreview,
+        accept: { status: 200, body: { team_id: "5b2c1e00-0000-4000-8000-00000000e001" } },
+      },
+    },
+  },
+  "invite-expired": {
+    label: "Invitation — expired: calm dead-end with one next action",
+    authed: true,
+    deepLink: "#/invitations/accept?token=tok-preview-expired",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      invitation: {
+        preview: Object.assign({}, foreignInvitePreview, { expires_at: tMinus(3600) }),
+        accept: { status: 404, body: { error: "invalid_or_expired" } },
+      },
+    },
+  },
+  "invite-already-member": {
+    label: "Invitation — already a member: nothing to accept, one next action",
+    authed: true,
+    deepLink: "#/invitations/accept?token=tok-preview-member",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      invitation: {
+        // Same slug as the me() fixture's team → the landing classifies
+        // already_member without ever POSTing.
+        preview: { team: { name: "Acme Inc", slug: "acme" }, email: "ada@acme.com", role: "member", expires_at: tPlus(6 * 86400) },
+        accept: { status: 200, body: { team_id: IDS.team } },
+      },
+    },
+  },
+  "invite-invalid": {
+    label: "Invitation — revoked/used: the preview 404s, honest dead-end",
+    authed: true,
+    deepLink: "#/invitations/accept?token=tok-preview-revoked",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      invitation: { preview: null },
+    },
+  },
   failed: {
     label: "A provision that failed at the verify gate",
     authed: true,
@@ -380,6 +634,73 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── C8: the instance Timeline tab + golden-path verify chips ──────────────
+  timeline: {
+    label: "Instance Timeline — events + audit merged, verify runs inline",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/timeline",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "timeline-events-only": {
+    label: "Timeline as a non-admin — audit 403 degrades to events + one quiet line",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/timeline",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: [],
+      auditDenied: true, // /v1/audit → 403 (team-admin-only)
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "verify-pass": {
+    label: "Verify chips — all three golden-path checks green",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEvents },
+    },
+  },
+  "verify-fail": {
+    label: "Verify chips — Studio probe failing (502), rendered honestly",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsOneFail },
+    },
+  },
+  "verify-never": {
+    label: "Verify chips — never run, the card invites the first check",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSite, docsSite],
+      audit: liveInstanceAudit,
+      instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
+    },
+  },
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -397,14 +718,78 @@ export function route(name, method, path) {
   // OAuth provider list is fetched unauthenticated on the sign-in screen.
   if (p === "/v1/auth/oauth/providers") return { status: 200, body: { providers: [] } };
 
+  // Invitation preview — unauthenticated on the real server too (the accept
+  // landing and the sign-in banner both read it before any login).
+  const invPreview = p.match(/^\/v1\/invitations\/([^/]+)$/);
+  if (invPreview && invPreview[1] !== "accept" && method === "GET") {
+    const inv = d.invitation;
+    return inv && inv.preview
+      ? { status: 200, body: inv.preview }
+      : { status: 404, body: { error: "invalid_or_expired" } };
+  }
+
   // Logged out: no authed reads are modelled.
   if (!scen.authed) return { status: 401, body: { error: "unauthorized" } };
+
+  if (p === "/v1/invitations/accept" && method === "POST") {
+    return (d.invitation && d.invitation.accept) || { status: 404, body: { error: "invalid_or_expired" } };
+  }
+
+  // Promote (rollback/redeploy). Default: 201 with a fresh queued row minted
+  // from the newest fixture deployment; a scenario overrides via d.promote to
+  // exercise the failure path.
+  if (method === "POST" && /^\/v1\/sites\/[^/]+\/deployments\/[^/]+\/promote$/.test(p)) {
+    if (d.promote) return d.promote;
+    const src = (d.deployments || [])[0] || {};
+    return {
+      status: 201,
+      body: {
+        deployment: Object.assign({}, src, {
+          id: "dep-promoted-preview",
+          status: "queued",
+          became_live_at: null,
+          console: [],
+          detail: null,
+        }),
+      },
+    };
+  }
 
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   if (p === "/v1/sites") return { status: 200, body: { sites: d.sites } };
-  if (p === "/v1/audit") return { status: 200, body: { events: d.audit } };
+  // /v1/audit is team-admin-only server-side; auditDenied models the member's
+  // 403 (the Timeline must degrade to events-only, never error).
+  if (p === "/v1/audit") {
+    return d.auditDenied
+      ? { status: 403, body: { error: "forbidden" } }
+      : { status: 200, body: { events: d.audit } };
+  }
+
+  // C8: the instance event history (agent events + verify runs, newest first).
+  const evMatch = p.match(/^\/v1\/barkparks\/([^/]+)\/events$/);
+  if (evMatch) {
+    const list = (d.instanceEvents && d.instanceEvents[evMatch[1]]) || [];
+    return { status: 200, body: { events: list } };
+  }
+  // C8: "Check now" — the synchronous verify suite answers a fresh all-pass
+  // envelope so the preview's button exercises the full render path.
+  if (method === "POST" && /^\/v1\/barkparks\/[^/]+\/verify$/.test(p)) {
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        reachable: true,
+        verified_at: new Date().toISOString(),
+        probes: [
+          { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 38, evidence: "GET /v1/capabilities → 200 (API up)" },
+          { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 102, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
+          { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 288, evidence: "GET /studio → 200 (renders)" },
+        ],
+      },
+    };
+  }
 
   // Single-site drill-down (best-effort, for shots that click a site row).
   const siteMatch = p.match(/^\/v1\/sites\/([^/]+)$/);
@@ -412,7 +797,7 @@ export function route(name, method, path) {
     const s = d.sites.filter((x) => String(x.id) === siteMatch[1])[0];
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
   }
-  if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: [] } };
+  if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: d.deployments || [] } };
   if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: [] } };
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never

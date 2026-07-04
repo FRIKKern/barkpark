@@ -3,6 +3,18 @@
    CSS custom properties, light + dark via [data-theme]. No framework.
    ========================================================================== */
 
+/* Self-hosted Inter (charter decision 27) — the console renders fully offline;
+   no fonts.googleapis.com. One variable woff2 carries weights 100–900 (we use
+   400/500/600/700). Italic is browser-synthesised (used only in tiny captions).
+   Font file: fonts/Inter-var.woff2 (Inter, SIL OFL 1.1 — see fonts/OFL.txt). */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/Inter-var.woff2") format("woff2");
+}
+
 :root {
   --bg: hsl(0 0% 100%);
   --surface: hsl(0 0% 100%);
@@ -10,21 +22,38 @@
   --text: hsl(240 10% 3.9%);
   --muted-text: hsl(240 3.8% 46.1%);
   --dim: hsl(240 4% 45%); /* WCAG 1.4.3: 5.04:1 on white, 4.58:1 on --muted-surface */
-  --primary: hsl(240 5.9% 10%);
+
+  /* Identity (charter decision 27): a deep park evergreen replaces the
+     borrowed shadcn-zinc near-black, and ONE warm amber accent (below)
+     replaces the borrowed preview blue. The focus ring follows the brand.
+     Every colour here is gated by the __css_check.mjs CONTRAST_PAIRS
+     manifest — tune values HERE, never in a component rule. */
+  --primary: hsl(163 46% 22%);
   --primary-fg: hsl(0 0% 100%);
+
+  /* Solid button fills — decoupled from --primary so dark can keep a light
+     sage LINK while buttons carry a deeper fill with LIGHT text (user call,
+     2026-07-04: "buttons should have light text in dark"). In light they
+     resolve to the brand pair; dark re-declares them. Contrast-gated. */
+  --btn-bg: var(--primary);
+  --btn-fg: var(--primary-fg);
+  --btn-danger-bg: var(--danger);
+  --btn-danger-fg: hsl(0 0% 100%);
   --border: hsl(240 5.9% 90%);
-  --ring: hsl(217.2 91.2% 59.8%);
-  --ring-soft: hsl(217.2 91.2% 59.8% / 0.15);
+  --ring: hsl(163 42% 30%);
+  --ring-soft: hsl(163 42% 30% / 0.15);
 
   /* Semantic status roles — the machine-enforced contract (__css_check.mjs).
      One hue per role as raw HSL channels (--X-hsl), the resolved color (--X),
      and a -soft tint matching the --ring-soft house style. Component rules
      consume these — bespoke tint strengths use hsl(var(--X-hsl) / a) so the
-     hue still has exactly one owner. Never a raw status literal in a rule. */
-  --ok-hsl: 142 71% 35%;          /* = the legacy --success hue */
-  --warn-hsl: 38 92% 50%;
-  --danger-hsl: 0 72.2% 50.6%;    /* = the legacy --destructive hue */
-  --info-hsl: 217.2 91.2% 59.8%;  /* = the --ring blue */
+     hue still has exactly one owner. Never a raw status literal in a rule.
+     Lightness is tuned PER THEME to clear the contrast gate: status colours
+     double as text (error lines, pills), so light theme runs them darker. */
+  --ok-hsl: 142 72% 26%;
+  --warn-hsl: 35 92% 38%;
+  --danger-hsl: 0 68% 42%;
+  --info-hsl: 217.2 91.2% 59.8%;  /* the demoted ex-ring blue (DESIGN.md §5) */
   --ok: hsl(var(--ok-hsl));
   --warn: hsl(var(--warn-hsl));
   --danger: hsl(var(--danger-hsl));
@@ -33,15 +62,17 @@
   --warn-soft: hsl(var(--warn-hsl) / 0.15);
   --danger-soft: hsl(var(--danger-hsl) / 0.15);
   --info-soft: hsl(var(--info-hsl) / 0.15);
-  --warn-strong: hsl(38 92% 42%); /* warn as TEXT on a warn tint — darker for contrast */
+  --warn-strong: hsl(35 92% 30%); /* warn as TEXT on a warn tint — darker for contrast */
 
   /* Legacy aliases — existing rules still reference these; they resolve to the
      semantic roles above. New rules use --ok / --danger directly. */
   --success: var(--ok);
   --destructive: var(--danger);
 
-  /* Branch-preview accent (left border on preview deploy rows). */
-  --accent: #6ea8fe;
+  /* THE warm amber accent (decision 27). Today's consumer: the left border on
+     branch-preview deploy rows. Use for "warm highlight", never for status. */
+  --accent-hsl: 30 92% 42%;
+  --accent: hsl(var(--accent-hsl));
 
   /* Build/provision console — a dark terminal in BOTH themes by design. */
   --console-bg: hsl(240 10% 8%);
@@ -53,12 +84,55 @@
   --radius-lg: 12px;
   --pill: 999px;
 
-  --shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --step: 8px;
-  --t: 0.15s ease;
+  /* Type scale (decision 29) — sizes with PAIRED line-heights. Values pin the
+     sizes the SPA already uses; the whole-file migration is the decision-24
+     sweep. Shared primitives below consume these now. */
+  --text-xs: 12px;   --leading-xs: 1.4;
+  --text-sm: 13px;   --leading-sm: 1.45;
+  --text-base: 14px; --leading-base: 1.5;
+  --text-lg: 16px;   --leading-lg: 1.4;
+  --text-xl: 20px;   --leading-xl: 1.3;
+  --text-2xl: 26px;  --leading-2xl: 1.2;
 
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  /* Space scale — the 4px grid (decision 29). --step stays as a legacy alias
+     (= --space-2) until the decision-24 sweep retires it. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --step: 8px;
+
+  /* Motion (decision 29) — durations + easing; the reduced-motion media block
+     at the end of the token area collapses durations to 0. Spinners keep a
+     literal duration on purpose: a loading indicator is state, not decoration. */
+  --dur-1: 0.15s;
+  --dur-2: 0.18s;
+  --dur-3: 0.28s;
+  --ease: ease;
+  --t: var(--dur-1) var(--ease);
+
+  /* Elevation ladder (decision 29). --shadow / --shadow-sm are legacy aliases
+     resolving into the ladder; the dark block re-tunes the --elev-* values and
+     re-declares the aliases (scoped-theme substitution — see the E8 note there). */
+  --elev-0: none;
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --elev-2: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --elev-3: 0 16px 40px rgba(0, 0, 0, 0.14);
+  --shadow: var(--elev-2);
+  --shadow-sm: var(--elev-1);
+
+  /* Z-index ladder (decision 29) — replaces the magic 19/20/30/50/60. */
+  --z-tabnav: 19;
+  --z-topbar: 20;
+  --z-menu: 30;
+  --z-modal: 50;
+  --z-toast: 60;
+
+  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --mono: "SF Mono", "Fira Code", ui-monospace, Menlo, monospace;
 }
 
@@ -69,20 +143,32 @@
   --text: hsl(0 0% 95%);
   --muted-text: hsl(240 5% 64.9%);
   --dim: hsl(240 5% 54%); /* WCAG 1.4.3: 5.37:1 on --bg, 4.52:1 on --muted-surface */
-  --primary: hsl(217.2 91.2% 59.8%);
-  --primary-fg: hsl(0 0% 100%);
-  --border: hsl(240 3.7% 15.9%);
-  --ring: hsl(217.2 91.2% 59.8%);
-  --ring-soft: hsl(217.2 91.2% 59.8% / 0.2);
-  --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
 
-  /* Semantic status roles — same hues as light today (status colors are
-     theme-invariant); tune dark-specific values HERE, never in a rule. The
+  /* Identity, dark (decision 27): a light park sage carries the brand — light
+     enough to read as link text on the near-black bg AND to carry the ink
+     --primary-fg on buttons (no single dark green can do both; a colour
+     needs luminance ≤0.183 for white text but ≥0.189 to be a link here). */
+  --primary: hsl(160 42% 62%);
+  --primary-fg: hsl(163 45% 8%);
+
+  /* Solid button fills, dark: deeper greens/reds than the sage link colour so
+     the label can be WHITE (user call 2026-07-04). Re-declared here rather
+     than aliased (E8: scoped-dark subtrees must not freeze light values). */
+  --btn-bg: hsl(163 45% 30%);
+  --btn-fg: hsl(0 0% 100%);
+  --btn-danger-bg: hsl(0 65% 48%);
+  --btn-danger-fg: hsl(0 0% 100%);
+  --border: hsl(240 3.7% 15.9%);
+  --ring: hsl(160 42% 62%);
+  --ring-soft: hsl(160 42% 62% / 0.2);
+
+  /* Semantic status roles — same HUES as light; lightness is retuned for the
+     dark surfaces (status colours double as text on -soft tints, so dark runs
+     them LIGHTER — including --warn-strong, which flips lighter here). The
      -soft tints go 0.2 like --ring-soft above. */
-  --ok-hsl: 142 71% 35%;
-  --warn-hsl: 38 92% 50%;
-  --danger-hsl: 0 72.2% 50.6%;
+  --ok-hsl: 142 52% 52%;
+  --warn-hsl: 38 94% 56%;
+  --danger-hsl: 0 82% 66%;
   --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl));
   --warn: hsl(var(--warn-hsl));
@@ -92,13 +178,41 @@
   --warn-soft: hsl(var(--warn-hsl) / 0.2);
   --danger-soft: hsl(var(--danger-hsl) / 0.2);
   --info-soft: hsl(var(--info-hsl) / 0.2);
-  --warn-strong: hsl(38 92% 42%);
+  --warn-strong: hsl(40 96% 68%);
 
-  --accent: #6ea8fe;
+  /* Alias re-declarations — REQUIRED, not redundant. var() inside a custom
+     property substitutes where the property is DECLARED, so a :root-only alias
+     freezes the LIGHT value for any subtree that scopes [data-theme="dark"]
+     onto a non-root element (the styleguide's side-by-side panes do exactly
+     that). Gated by E8 in __css_check.mjs. */
+  --success: var(--ok);
+  --destructive: var(--danger);
+
+  --accent-hsl: 33 92% 60%;
+  --accent: hsl(var(--accent-hsl));
+
+  /* Elevation — deeper shadows on the dark surfaces; the --shadow aliases are
+     re-declared below so scoped-dark subtrees pick them up (see E8 note). */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --elev-2: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --elev-3: 0 16px 48px rgba(0, 0, 0, 0.55);
+  --shadow: var(--elev-2);
+  --shadow-sm: var(--elev-1);
 
   --console-bg: hsl(240 10% 8%);
   --console-fg: hsl(0 0% 88%);
   --console-dim: hsl(240 5% 55%);
+}
+
+/* Motion collapses when the user asks for it (decision 29). Only the token
+   durations go to 0 — spinner keyframes keep their literal duration because a
+   progress indicator is state, not decoration. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0s;
+    --dur-2: 0s;
+    --dur-3: 0s;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -108,9 +222,9 @@ html, body { height: 100%; }
 body {
   margin: 0;
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 400;
-  line-height: 1.5;
+  line-height: var(--leading-base);
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
@@ -131,14 +245,14 @@ a:hover { text-decoration: underline; }
 /* ---------------------------------------------------------- wordmark */
 .wordmark { display: inline-flex; align-items: center; gap: 9px; color: var(--text); }
 .wordmark:hover { text-decoration: none; }
+/* The mark is a real inline SVG in the markup (an evergreen — decision 27),
+   drawn in currentColor so it themes for free through this one rule. */
 .wordmark-mark {
   width: 18px;
   height: 18px;
-  border-radius: 5px;
-  background: var(--primary);
-  display: inline-block;
+  display: block;
   flex: 0 0 auto;
-  box-shadow: inset 0 0 0 3px var(--bg), 0 0 0 1px var(--primary);
+  color: var(--primary);
 }
 .wordmark-text { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
 .wordmark-text b { font-weight: 700; }
@@ -152,7 +266,7 @@ a:hover { text-decoration: underline; }
   height: 32px;
   padding: 0 14px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--text);
   background: var(--surface);
@@ -184,29 +298,29 @@ a:hover { text-decoration: underline; }
 }
 
 .btn-primary {
-  background: var(--primary);
-  color: var(--primary-fg);
-  border-color: var(--primary);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-color: var(--btn-bg);
 }
-.btn-primary:hover { background: var(--primary); filter: brightness(1.08); }
+.btn-primary:hover { background: var(--btn-bg); filter: brightness(1.08); }
 
 .btn-ghost { background: transparent; border-color: transparent; color: var(--muted-text); }
 .btn-ghost:hover { background: var(--muted-surface); color: var(--text); }
 
-.btn-sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn-sm { height: 28px; padding: 0 10px; font-size: var(--text-xs); }
 .btn-block { width: 100%; }
 
 /* ---------------------------------------------------------- inputs */
-.label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; color: var(--text); }
-.field { margin-bottom: calc(var(--step) * 2); }
-.field-hint { font-size: 12px; margin: 6px 0 0; }
+.label { display: block; font-size: var(--text-sm); font-weight: 500; margin-bottom: 6px; color: var(--text); }
+.field { margin-bottom: var(--space-4); }
+.field-hint { font-size: var(--text-xs); margin: 6px 0 0; }
 
 .form-input {
   width: 100%;
   height: 36px;
-  padding: 0 12px;
+  padding: 0 var(--space-3);
   font-family: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -290,13 +404,15 @@ select.form-input {
 }
 .notice .btn { margin-left: auto; }
 
-/* destructive action button (e.g. Remove instance) */
+/* destructive action button (e.g. Remove instance) — rides the solid button
+   fill tokens (white label both themes; dark uses a deeper red than the
+   status text colour); the pairing is contrast-gated in __css_check.mjs. */
 .btn-danger {
-  background: var(--destructive);
-  color: #fff;
-  border-color: var(--destructive);
+  background: var(--btn-danger-bg);
+  color: var(--btn-danger-fg);
+  border-color: var(--btn-danger-bg);
 }
-.btn-danger:hover { background: var(--destructive); filter: brightness(1.08); }
+.btn-danger:hover { background: var(--btn-danger-bg); filter: brightness(1.08); }
 
 /* instance/site detail-head inline actions (retry / remove) */
 .detail-actions { display: inline-flex; gap: 8px; margin-left: 8px; }
@@ -310,7 +426,9 @@ select.form-input {
 
 .form-error {
   font-size: 13px;
-  color: var(--destructive);
+  /* Copy rides --text like .notice-error / .cm-error — the tint + border say
+     "error"; red-on-red copy read muddy in dark (user call 2026-07-04). */
+  color: var(--text);
   margin: 0 0 calc(var(--step) * 2);
   padding: 10px 12px;
   background: hsl(var(--danger-hsl) / 0.08);
@@ -384,7 +502,7 @@ select.form-input {
   background: var(--surface);
   position: sticky;
   top: 0;
-  z-index: 20;
+  z-index: var(--z-topbar);
 }
 .topbar-left, .topbar-right { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .crumb-sep { color: var(--border); font-size: 16px; flex: 0 0 auto; }
@@ -434,7 +552,7 @@ select.form-input {
   background: var(--surface);
   position: sticky;
   top: 56px;
-  z-index: 19;
+  z-index: var(--z-tabnav);
   /* overflow VISIBLE so the Settings disclosure can drop below the bar; the
      primary links scroll inside .tabnav-primary instead (charter decision 6). */
   overflow: visible;
@@ -569,16 +687,16 @@ select.form-input {
 .tier-free .tier-price { color: var(--muted-text); }
 
 /* ========================================================== MODAL */
-.modal-root { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 24px; }
+.modal-root { position: fixed; inset: 0; z-index: var(--z-modal); display: grid; place-items: center; padding: var(--space-6); }
 .modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }
 .modal-card {
   position: relative;
   z-index: 1;
   width: 100%;
   max-width: 420px;
-  padding: 24px;
+  padding: var(--space-6);
   box-shadow: var(--shadow);
-  animation: modal-in 0.15s ease;
+  animation: modal-in var(--dur-1) var(--ease);
 }
 @keyframes modal-in {
   from { opacity: 0; transform: translateY(6px) scale(0.99); }
@@ -598,13 +716,13 @@ select.form-input {
   cursor: pointer;
 }
 .modal-x:hover { background: var(--muted-surface); color: var(--text); }
-.modal-title { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
-.modal-sub { font-size: 13px; color: var(--muted-text); margin: 0 0 18px; }
+.modal-title { font-size: var(--text-lg); font-weight: 600; margin: 0 0 4px; }
+.modal-sub { font-size: var(--text-sm); color: var(--muted-text); margin: 0 0 18px; }
 .modal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
 .modal-row:first-of-type { border-top: none; }
 .modal-row .k { font-size: 13px; color: var(--muted-text); }
 .modal-row .v { font-size: 13px; font-weight: 500; font-family: var(--mono); }
-.modal-actions { display: flex; gap: 8px; margin-top: 20px; }
+.modal-actions { display: flex; gap: var(--space-2); margin-top: var(--space-5); }
 .modal-actions .btn { flex: 1; }
 /* Inline action rows (left-aligned, natural-width buttons) — used inside the
    Account & sessions panel so the revoke-all / update-password buttons don't
@@ -623,7 +741,7 @@ select.form-input {
 .session-main { min-width: 0; }
 .session-device { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
 .session-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; font-family: var(--mono); }
-.badge-current { background: var(--success); color: #fff; }
+.badge-current { background: var(--success); color: var(--primary-fg); }
 .pw-form { display: flex; flex-direction: column; gap: 4px; }
 .pw-form .field { margin-bottom: 10px; }
 .pw-form .field span { display: block; font-size: 12px; color: var(--muted-text); margin-bottom: 4px; }
@@ -635,9 +753,9 @@ select.form-input {
 /* ========================================================== TOASTS */
 .toast-stack {
   position: fixed;
-  bottom: 20px;
-  left: 20px;
-  z-index: 60;
+  bottom: var(--space-5);
+  left: var(--space-5);
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -651,7 +769,7 @@ select.form-input {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  animation: toast-in 0.18s ease;
+  animation: toast-in var(--dur-2) var(--ease);
 }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -663,15 +781,15 @@ select.form-input {
   border-radius: var(--pill);
   display: grid; place-items: center;
   font-size: 11px; font-weight: 700;
-  color: #fff;
+  color: var(--primary-fg); /* glyph-on-status, both themes — contrast-gated */
   margin-top: 1px;
 }
 .toast-success .toast-ico { background: var(--success); }
 .toast-error .toast-ico { background: var(--destructive); }
 .toast-info .toast-ico { background: var(--muted-text); }
 .toast-main { min-width: 0; flex: 1; }
-.toast-title { font-size: 13px; font-weight: 600; }
-.toast-body { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
+.toast-title { font-size: var(--text-sm); font-weight: 600; }
+.toast-body { font-size: var(--text-xs); color: var(--muted-text); margin-top: 2px; }
 .toast-action { margin-top: 8px; }
 .toast-close {
   align-self: flex-start;
@@ -1487,7 +1605,7 @@ select.form-input {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  z-index: 30;
+  z-index: var(--z-menu);
 }
 .nav-menu-item {
   padding: 8px 10px;
@@ -1791,4 +1909,219 @@ select.form-input {
 @media (max-width: 620px) {
   .wh-card-head { flex-direction: column; }
   .wh-dataset-input { width: 120px; }
+}
+
+/* ==========================================================================
+   Zero broken promises slice (charter D5/D7/D25/D26) — appended block.
+   Shared confirm modal (mutate + destroy tiers), deploy-row promote actions,
+   and the invitation-accept landing. Uses only the wave-1 token contract.
+   ========================================================================== */
+
+/* -- confirm modal ---------------------------------------------------------
+   Mutate tier reuses .modal-sub for its single consequence sentence; destroy
+   tier gets the consequence LIST + the typed-echo field. */
+.cm-consequence { margin-bottom: 2px; }
+.cm-consequences {
+  margin: 0 0 16px;
+  padding-left: 18px;
+  font-size: 13px;
+  color: var(--muted-text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cm-typed-field { margin-top: 12px; }
+.cm-name { font-family: var(--mono); font-weight: 600; color: var(--text); user-select: none; }
+/* Inline failure surface (D25): the human sentence lives HERE, next to the one
+   recovery action the primary button morphs into — never a dead toast. */
+.cm-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 8px 10px;
+  border: 1px solid hsl(var(--danger-hsl) / 0.28);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+}
+.cm-error-msg { margin: 0; font-size: 13px; line-height: 1.5; color: var(--text); }
+
+/* -- deploy-row promote actions (rollback / redeploy) ---------------------- */
+.dep-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.dep-promote { white-space: nowrap; }
+.dep-current {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--pill);
+  background: var(--ok-soft);
+  color: var(--ok);
+  border: 1px solid hsl(var(--ok-hsl) / 0.28);
+  vertical-align: 1px;
+}
+
+/* -- invitation-accept landing --------------------------------------------- */
+.invite-wrap { display: flex; justify-content: center; padding: 48px 16px; }
+.invite-card { max-width: 460px; width: 100%; text-align: center; padding: 32px 28px; }
+.invite-ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+  font-size: 20px;
+  font-weight: 600;
+}
+.invite-ico--ok { background: var(--ok-soft); color: var(--ok); }
+.invite-ico--info { background: var(--info-soft); color: var(--info); }
+.invite-ico--warn { background: var(--warn-soft); color: var(--warn-strong); }
+.invite-title { font-size: 20px; font-weight: 600; margin: 0 0 8px; }
+.invite-copy { font-size: 14px; color: var(--muted-text); margin: 0 0 20px; line-height: 1.55; }
+.invite-copy b { color: var(--text); font-weight: 600; }
+.invite-actions { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.invite-action { min-width: 200px; }
+.invite-skip { font-size: 13px; color: var(--muted-text); }
+.invite-skip:hover { color: var(--text); }
+
+/* The sign-in card's invitation banner (logged-out landing). :empty hides the
+   slot while the preview fetch is in flight, so no husk flashes. */
+.auth-invite {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-text);
+  background: var(--info-soft);
+  border: 1px solid hsl(var(--info-hsl) / 0.25);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-bottom: 18px;
+}
+.auth-invite:empty { display: none; }
+.auth-invite-title { display: block; font-weight: 600; color: var(--text); }
+.auth-invite-email { font-weight: 600; color: var(--text); }
+/* ============================================================================
+   C8 — instance Timeline tab + golden-path verify chips (charter D10/D53).
+   Appended per slice contract; consumes only the semantic status tokens.
+   ========================================================================== */
+
+/* The merged events+audit feed. */
+.tlv { display: flex; flex-direction: column; gap: 8px; }
+.tlv-quiet {
+  font-size: 12px;
+  color: var(--muted-text);
+  padding: 6px 10px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.tlv-row {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+.tlv-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tlv-badge {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+}
+.tlv-badge--event { background: var(--info-soft); color: var(--info); border-color: hsl(var(--info-hsl) / 0.28); }
+.tlv-badge--verify { background: var(--ok-soft); color: var(--ok); border-color: hsl(var(--ok-hsl) / 0.28); }
+/* A failed run's badge must not read green — coloured by outcome, not source. */
+.tlv-badge--verify-fail { background: var(--danger-soft); color: var(--danger); border-color: hsl(var(--danger-hsl) / 0.28); }
+.tlv-badge--audit { background: var(--muted-surface); color: var(--muted-text); }
+.tlv-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tlv-when { flex: 0 0 auto; font-size: 12px; color: var(--muted-text); }
+.tlv-toggle {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted-text);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color var(--t), border-color var(--t);
+}
+.tlv-toggle:hover { color: var(--text); border-color: var(--ring); }
+.tlv-toggle[aria-expanded="true"] { color: var(--text); }
+.tlv-detail {
+  margin: 8px 0 0;
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--muted-surface);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Golden-path verify card (instance Overview). */
+.vf-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px 16px;
+  margin-bottom: calc(var(--step) * 2);
+}
+.vf-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.vf-head h2 { margin: 0; font-size: 14px; }
+.vf-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.vf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.vf-chip--pass { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
+.vf-chip--fail { background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.28); }
+.vf-chip--unknown { background: var(--muted-surface); color: var(--muted-text); }
+.vf-chip-glyph { flex: 0 0 auto; }
+.vf-chip--pass .vf-chip-glyph { color: var(--ok); }
+.vf-chip--fail .vf-chip-glyph { color: var(--danger); }
+.vf-chip-code { font-family: var(--mono); font-size: 11px; color: var(--muted-text); }
+.vf-meta { margin-top: 10px; font-size: 12px; color: var(--muted-text); }
+.vf-note {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--warn-soft);
+  border: 1px solid hsl(var(--warn-hsl) / 0.3);
+  border-radius: var(--radius-sm);
+}
+
+@media (max-width: 620px) {
+  .tlv-head { flex-wrap: wrap; }
+  .tlv-title { white-space: normal; }
 }
