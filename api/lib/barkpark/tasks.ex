@@ -85,7 +85,8 @@ defmodule Barkpark.Tasks do
   @event_task_closed "task.closed"
   @event_task_mutated "task.mutated"
   # tt5: file-claim label support. Emitted when content.labels changes via
-  # relabel_by_id/3 (the bd-shim's `update --add-label/--remove-label` path).
+  # relabel_by_id/3 (the `bp task` labels path, `POST /v1/tasks/:doc_id/labels`
+  # — historically the retired bd-shim's `update --add-label/--remove-label`).
   @event_task_relabeled "task.relabeled"
   # Phase A: task→paper reference support. Emitted when content.papers changes
   # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
@@ -312,11 +313,12 @@ defmodule Barkpark.Tasks do
   the queue-based `claim/2`.
 
   Why a separate primitive: `claim/2` picks the next ready row (queue semantics
-  — caller doesn't name a row). `bd`'s `bd update <id> --claim` is targeted —
-  caller DOES name a row. The bd-shim cannot translate one to the other
-  without a wasted listAll() roundtrip plus losing semantics (the row the
-  shim picks might not be the row the bd caller named). w7-08 wires this
-  primitive so the shim's `bd update <id> --claim` semantics are preserved.
+  — caller doesn't name a row). A targeted claim names the row instead. This
+  primitive (w7-08) serves callers that name a specific row — historically the
+  now-retired `bin/bd-shim` needed to translate `bd update <id> --claim`
+  (targeted), which the queue-based `claim/2` could not do without a wasted
+  listAll() roundtrip plus losing semantics (the row the queue picks might not
+  be the row the caller named).
 
   Same advisory-lock + CAS-on-rev + epoch bump + durable mutation_event
   pattern as `claim/2`'s `do_claim`, but for ONE specific doc — and with
@@ -421,8 +423,9 @@ defmodule Barkpark.Tasks do
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
   CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
-  bd-shim's `bd update <id> --add-label/--remove-label` translation (which in
-  turn backs paper-claim-files' `file-claim:<path>` ownership labels).
+  `bp task` labels endpoint (`POST /v1/tasks/:doc_id/labels`) — historically the
+  now-retired bd-shim's `bd update <id> --add-label/--remove-label` translation
+  — which in turn backs paper-claim-files' `file-claim:<path>` ownership labels.
 
   `add` and `remove` are lists of exact label strings. The result is a union
   add (dedup-preserving) minus the remove set. Idempotent: re-adding an

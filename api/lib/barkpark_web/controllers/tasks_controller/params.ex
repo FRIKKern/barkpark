@@ -5,7 +5,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # on action control-flow. Every function here is pure-ish: it either parses a
   # raw param into a typed value, coerces a body field, applies a tenancy /
   # filter clause to an Ecto query, or renders a Document into the bd-compatible
-  # shape the shim consumes. No `conn`, no action routing — the controller calls
+  # shape the `bp task` CLI consumes. No `conn`, no action routing — the controller calls
   # these as `Params.<name>(...)`.
 
   import Ecto.Query, only: [from: 2]
@@ -51,10 +51,10 @@ defmodule BarkparkWeb.TasksController.Params do
 
   def maybe_filter_lifecycle(query, nil), do: query
 
-  # Missing content.lifecycle_status defaults to "open" — matches the shim's
-  # render fallback. Otherwise a goal POSTed without an explicit
-  # `lifecycle_status` (the common case) would be invisible to
-  # `bd list --status open`.
+  # Missing content.lifecycle_status defaults to "open" — matching the
+  # `COALESCE(..., 'open')` in the filter clause just below. Otherwise a
+  # task POSTed without an explicit `lifecycle_status` (the common case)
+  # would be invisible to a `status=open` list query.
   def maybe_filter_lifecycle(query, "open") do
     from(d in query,
       where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open"
@@ -89,8 +89,8 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_parent(query, _), do: query
 
   # C1 (task as universal node): `parent=<doc_id>` — keep only docs whose
-  # `content.parent_id` (OR `content.parent`) points at the given doc_id. This
-  # is the same edge the `phase_id` filter walks, but exposed under the generic
+  # `content.parent_id` points at the given doc_id. This is the same edge
+  # the `phase_id` filter walks, but exposed under the generic
   # `parent` param so it reads as "the child tasks of ANY task" — realizing
   # "a goal is just a root task" and "a rail is the chronological child tasks of
   # a task". Mirrors `maybe_filter_parent/2` EXACTLY (prefix-agnostic match on
@@ -119,10 +119,10 @@ defmodule BarkparkWeb.TasksController.Params do
     do: from(d in query, order_by: [desc: d.updated_at])
 
   # tt5: `label=<exact>` — keep only docs whose `content.labels` JSON array
-  # CONTAINS the exact label string. Backs the bd-shim's `bd list --label
-  # file-claim:<path>` (and any arbitrary label) → find every task holding a
-  # given claim. Tenancy-scoped via the same workspace/project filters as the
-  # rest of the pipeline.
+  # CONTAINS the exact label string. Backs the `bp task` label filter
+  # (historically the bd-shim's `bd list --label file-claim:<path>`) and any
+  # arbitrary label → find every task holding a given claim. Tenancy-scoped via
+  # the same workspace/project filters as the rest of the pipeline.
   #
   # Containment uses the scalar-membership form `labels @> to_jsonb(<text>)`,
   # NOT array-vs-array `labels @> '["x"]'::jsonb`. The stored jsonb arrays
@@ -218,10 +218,10 @@ defmodule BarkparkWeb.TasksController.Params do
 
   # ─── Render / shape ─────────────────────────────────────────────────────
 
-  # Render a Document into the bd-compatible shape the shim consumes.
-  # Keep the field set tight enough to translate cleanly into `bd show`
-  # JSON, broad enough that callers like `bd list --json` don't lose
-  # information (priority, assignee, content.kind for filtering).
+  # Render a Document into the bd-compatible shape the `bp task` CLI consumes.
+  # Keep the field set tight enough that it still maps cleanly onto the
+  # bd-compatible `show` JSON shape, broad enough that list callers don't
+  # lose information (priority, assignee, content.kind for filtering).
   def render_doc(%Document{} = doc) do
     content = doc.content || %{}
 
@@ -239,9 +239,9 @@ defmodule BarkparkWeb.TasksController.Params do
       assignee: Map.get(content, "assignee"),
       parent_id: Map.get(content, "parent_id"),
       claim: Map.get(content, "claim"),
-      # tt5: surface content.labels at the top level so the bd-shim's
-      # `.labels[]` (used by `bd show .labels[]` + `bd list --label`) works
-      # end-to-end. The shim reads `doc.labels`; without this it always saw [].
+      # tt5: surface content.labels at the top level so a client's `.labels[]`
+      # (e.g. `bp task show`'s label view + the `label=` list filter) works
+      # end-to-end. Callers read `doc.labels`; without this they always saw [].
       labels: labels_of(content),
       # Phase A: surface content.papers at the top level the same way labels
       # are, so callers can read `doc.papers[]` without digging into content.
@@ -303,7 +303,7 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   # Augment the base render_doc map with the three count fields the
-  # bd-shim's list/ready shapes carry (dependency_count + dependent_count
+  # `bp task` list/ready shapes carry (dependency_count + dependent_count
   # from batch_edge_counts; comment_count fixed at 0 until the comment
   # substrate ships — TODO: wire when comment substrate exists).
   def render_doc_with_counts(%Document{} = doc, counts) do
