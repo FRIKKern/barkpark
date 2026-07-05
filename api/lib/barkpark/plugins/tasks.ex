@@ -29,7 +29,7 @@ defmodule Barkpark.Plugins.Tasks do
       `tasks_compact` queue declarations stay in config — only the worker
       *scheduling* moves here.
 
-    * `register_routes/1` — the eleven `/v1/tasks` endpoints the `bp task` CLI
+    * `register_routes/1` — the twelve `/v1/tasks` endpoints the `bp task` CLI
       consumes, declared with `auth: :token_root` so the dormant
       host-level `scope "/v1", BarkparkWeb do … plugin_routes(scope: :token_root)`
       wrapper mounts them at `/v1/tasks/*` behind the `[:api, :require_token]`
@@ -37,8 +37,8 @@ defmodule Barkpark.Plugins.Tasks do
       in `router.ex` (C4-3b). The `TasksController` itself stays in core; this
       plugin only owns the route declarations.
 
-    * `cli_commands/0` — the seven `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
-      `claim`, `close`, `next`) the `/v1/capabilities` manifest exposes. Five
+    * `cli_commands/0` — the eight `task.*` CLI verbs (`ls`, `ready`, `prime`, `get`,
+      `claim`, `close`, `next`, `move`) the `/v1/capabilities` manifest exposes. Five
       moved verbatim from `Barkpark.Plugins.Capabilities`'s core verb registry;
       `next` (the queue-based atomic claim) was added later. `task` is no
       longer a core noun: the capabilities controller now derives
@@ -159,7 +159,8 @@ defmodule Barkpark.Plugins.Tasks do
        auth: :token_root},
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
-      {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root}
+      {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
+      {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root}
       # NOTE: the content-graph reads (/graph/orphans, /graph/dangling,
       # /graph/:id) are NO LONGER declared here. They moved to CORE
       # (router.ex `scope "/v1" … get("/graph/…")`) because the graph roots on
@@ -177,7 +178,7 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Seven verbs over seven routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
+  Eight verbs over eight routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
   `:api + :require_token`, NOT admin — claim/close are bearer-gated workflow ops,
   not document mutations):
 
@@ -190,6 +191,8 @@ defmodule Barkpark.Plugins.Tasks do
       ready task in priority order). WRITES, minimal receipt. Returns
       `{"ok":false,"reason":"no_ready"}` with HTTP 200 when the queue is empty —
       a valid outcome, not an error.
+    * `move` — `POST /v1/tasks/:doc_id/move` (rail-l3 re-parent). WRITES, minimal
+      receipt.
   """
   @impl Barkpark.Plugin
   def cli_commands do
@@ -412,6 +415,36 @@ defmodule Barkpark.Plugins.Tasks do
               "The rail_rev (rail ETag) you last observed for the claimed task's parent rail. When it differs from the claimed task's current rail_rev the response carries a rail_changed notice — advisory, never a gate."
           }
         ],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.move",
+        noun: "task",
+        verb: "move",
+        summary:
+          "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
+        http: %{method: "POST", path_template: "/v1/tasks/:doc_id/move"},
+        auth_tier: "read",
+        args: [
+          %{
+            name: "doc_id",
+            required: true,
+            type: "string",
+            summary: "Task document id to move."
+          },
+          %{
+            name: "new_parent_id",
+            required: false,
+            type: "string",
+            summary: "Destination parent task id; omit (or null) to move to the root."
+          }
+        ],
+        flags: [],
         writes: true,
         batch: false,
         paginated: false,

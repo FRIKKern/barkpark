@@ -3,7 +3,7 @@ defmodule BarkparkWeb.TasksController do
   W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
   (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
 
-  Eleven endpoints, all bearer-token gated via the existing `:api` +
+  Twelve endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
     * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
@@ -17,6 +17,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/edges`              — `Tasks.add_dep/3`
     * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
+    * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
 
   ## Shape contract
 
@@ -713,6 +714,78 @@ defmodule BarkparkWeb.TasksController do
         not_found(conn, "task not found")
     end
   end
+
+  # ─── POST /v1/tasks/:doc_id/move ────────────────────────────────────────
+  # rail-l3: re-parent a task. Body shape:
+  #   { "new_parent_id": "<doc-id>" }   move under that task's rail
+  #   { "new_parent_id": null } | {}    move to the root (parent_id removed)
+  #
+  # Resolution mirrors every other endpoint (bare-id → drafts. fallback via
+  # find_task_by_doc_id) for BOTH the subject and the new parent. Guards:
+  #   * new parent must exist AND be a task → 409 invalid_parent
+  #     (find_task_by_doc_id already hard-filters type == "task")
+  #   * a move under the task itself or one of its descendants → 409 cycle
+  #   * a no-op move (already that parent) → 200 with the doc unchanged
+  #
+  # Response envelope: { ok, doc } plus `rail_rev` = the DESTINATION rail's
+  # digest (omitted on a move to root) and `from_rail_rev` = the SOURCE rail's
+  # digest (omitted when the task was already at root). Both are read back AFTER
+  # the write — `Tasks.Rail.rev/2` computes on demand, so the membership flip
+  # flips both digests with no bump plumbing.
+  def move(conn, %{"doc_id" => doc_id} = params) do
+    case find_task_by_doc_id(doc_id, conn) do
+      {:ok, task} ->
+        old_parent = task_parent_id(task)
+
+        case resolve_new_parent(Map.get(params, "new_parent_id"), conn) do
+          {:ok, new_parent_doc_id} ->
+            case Tasks.move_by_id(task.id, new_parent_doc_id) do
+              {:ok, %Document{} = doc} ->
+                scope = scope_opts(conn) |> Keyword.put(:dataset, doc.dataset)
+
+                json(
+                  conn,
+                  %{ok: true, doc: Params.render_doc(doc)}
+                  |> maybe_put(:rail_rev, Tasks.rail_rev(new_parent_doc_id, scope))
+                  |> maybe_put(:from_rail_rev, Tasks.rail_rev(old_parent, scope))
+                )
+
+              {:error, reason} ->
+                conn
+                |> put_status(:conflict)
+                |> json(%{ok: false, reason: Params.reason_to_string(reason)})
+            end
+
+          {:error, :invalid_parent} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{ok: false, reason: "invalid_parent"})
+        end
+
+      {:error, :not_found} ->
+        not_found(conn, "task not found")
+    end
+  end
+
+  # Resolve the requested new parent to its canonical (published) doc_id, or nil
+  # for a root move (null / absent / blank). A non-blank id that resolves to no
+  # task → {:error, :invalid_parent} (covers both "no such row" and "not a
+  # task", since find_task_by_doc_id hard-filters type == "task"). We store the
+  # PUBLISHED id (drafts. stripped) so content.parent_id matches the bare-id
+  # convention every other rail reader uses (Tasks.Rail strips drafts. on both
+  # sides anyway, but keeping the stored value canonical avoids a drafts. twin
+  # leaking into the hierarchy pointer).
+  defp resolve_new_parent(nil, _conn), do: {:ok, nil}
+  defp resolve_new_parent("", _conn), do: {:ok, nil}
+
+  defp resolve_new_parent(pid, conn) when is_binary(pid) do
+    case find_task_by_doc_id(pid, conn) do
+      {:ok, %Document{} = parent} -> {:ok, Content.published_id(parent.doc_id)}
+      {:error, :not_found} -> {:error, :invalid_parent}
+    end
+  end
+
+  defp resolve_new_parent(_other, _conn), do: {:error, :invalid_parent}
 
   # ─── Helpers ────────────────────────────────────────────────────────────
 
