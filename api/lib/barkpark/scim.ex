@@ -16,8 +16,8 @@ defmodule Barkpark.Scim do
 
   alias Barkpark.{Accounts, Audit, Repo, Tenancy}
   alias Barkpark.Accounts.User
-  alias Barkpark.Scim.Token
-  alias Barkpark.Tenancy.{Membership, Organization, Workspace}
+  alias Barkpark.Scim.{Group, Token}
+  alias Barkpark.Tenancy.{Membership, Organization, Role, Workspace}
 
   @provision_role "member"
 
@@ -182,6 +182,119 @@ defmodule Barkpark.Scim do
       subject: user.id,
       actor_type: "scim",
       metadata: Map.merge(%{"organization_id" => org.id}, metadata)
+    })
+  end
+
+  # ── Groups (era-w4-scim-groups) ────────────────────────────────────────────
+
+  @doc """
+  Create a SCIM Group in `org` that maps to a Barkpark role. `role_name` must be
+  a known role — a built-in (owner/admin/member) or a custom role defined for
+  the org (or globally). Returns `{:error, :unknown_role}` otherwise.
+  """
+  @spec create_group(Organization.t(), map()) ::
+          {:ok, Group.t()} | {:error, term()}
+  def create_group(%Organization{} = org, attrs) do
+    role_name = attrs["role"] || attrs["displayName"]
+
+    cond do
+      not (is_binary(attrs["displayName"]) and attrs["displayName"] != "") ->
+        {:error, :missing_display_name}
+
+      not known_role?(org, role_name) ->
+        {:error, :unknown_role}
+
+      true ->
+        %Group{}
+        |> Group.changeset(%{
+          organization_id: org.id,
+          display_name: attrs["displayName"],
+          role_name: role_name,
+          external_id: attrs["externalId"]
+        })
+        |> Repo.insert()
+    end
+  end
+
+  @doc "A group in `org` by id, or nil."
+  @spec get_org_group(Organization.t(), binary()) :: Group.t() | nil
+  def get_org_group(%Organization{id: oid}, id) when is_binary(id) do
+    Repo.one(from g in Group, where: g.id == ^id and g.organization_id == ^oid)
+  end
+
+  def get_org_group(_org, _), do: nil
+
+  @doc "Groups in `org`."
+  @spec list_org_groups(Organization.t()) :: [Group.t()]
+  def list_org_groups(%Organization{id: oid}),
+    do:
+      Repo.all(from g in Group, where: g.organization_id == ^oid, order_by: [asc: g.display_name])
+
+  @doc """
+  Add `user_id` to `group`: set that user's membership role (in the org's
+  workspaces) to the group's mapped role. No-op if the user isn't provisioned
+  into the org. Audited.
+  """
+  @spec add_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
+  def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
+    n = set_member_role(org, user_id, group.role_name)
+    audit_group(org, user_id, group, "group_member_added", group.role_name)
+    {:ok, n}
+  end
+
+  @doc """
+  Remove `user_id` from `group`: revert that user's membership role (in the
+  org's workspaces) to the default `member`, revoking the mapped grant. Audited.
+  """
+  @spec remove_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
+  def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
+    n = set_member_role(org, user_id, @provision_role)
+    audit_group(org, user_id, group, "group_member_removed", @provision_role)
+    {:ok, n}
+  end
+
+  # Set the user's role on every membership it holds in the org's workspaces.
+  defp set_member_role(org, user_id, role_name) do
+    ws_ids = workspace_ids(org)
+
+    {n, _} =
+      Repo.update_all(
+        from(m in Membership,
+          where:
+            m.principal_type == "user" and m.principal_id == ^user_id and
+              m.workspace_id in ^ws_ids
+        ),
+        set: [role: role_name, updated_at: DateTime.utc_now()]
+      )
+
+    n
+  end
+
+  # A role name is known if it's a built-in or a Role row that's global or
+  # scoped to one of the org's workspaces (roles are workspace-scoped).
+  defp known_role?(org, role_name) when is_binary(role_name) do
+    ws_ids = workspace_ids(org)
+
+    role_name in Membership.roles() or
+      Repo.exists?(
+        from r in Role,
+          where: r.name == ^role_name and (is_nil(r.workspace_id) or r.workspace_id in ^ws_ids)
+      )
+  end
+
+  defp known_role?(_org, _), do: false
+
+  defp audit_group(org, user_id, group, action, role_name) do
+    Audit.emit(%{
+      category: "membership",
+      action: action,
+      subject: user_id,
+      actor_type: "scim",
+      metadata: %{
+        "organization_id" => org.id,
+        "group" => group.display_name,
+        "role" => role_name
+      }
     })
   end
 end
