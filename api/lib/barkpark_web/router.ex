@@ -912,6 +912,14 @@ defmodule BarkparkWeb.Router do
     get("/:provider/callback", SocialController, :callback)
   end
 
+  # ── Enterprise SSO — SAML 2.0 Service Provider (per-organization) ────────
+  scope "/v1/auth/saml", BarkparkWeb do
+    pipe_through(:sso_browser)
+
+    get("/:org_slug/start", SamlController, :start)
+    post("/:org_slug/acs", SamlController, :acs)
+  end
+
   # ── Core user auth — session-gated ──────────────────────────────────────
   scope "/v1/auth", BarkparkWeb do
     pipe_through([:user_auth, :require_user])
