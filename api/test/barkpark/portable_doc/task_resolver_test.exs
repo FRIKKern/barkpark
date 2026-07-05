@@ -139,6 +139,39 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
     end
   end
 
+  describe "apply_preview/2 — merge a preview entry FOR DISPLAY (pure, D5-safe)" do
+    test "a snapshot entry yields a resolve/2-shaped COPY; the source block is untouched" do
+      block = %{"id" => "b1", "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+      entry = %{"block_id" => "b1", "type" => "task-list", "snapshot" => [%{"title" => "a"}]}
+
+      shown = TaskResolver.apply_preview(block, entry)
+
+      assert shown == %{"id" => "b1", "type" => "task-list", "snapshot" => [%{"title" => "a"}]}
+      # The display copy matches what resolve/2 would have produced in place —
+      # ONE producer shape for the reader and the editor preview (rule 3).
+      assert [shown] == TaskResolver.resolve([block], fn _ -> [%{"title" => "a"}] end)
+      # …and the source block (the save baseline) still carries its raw query.
+      assert block["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(block, "snapshot")
+    end
+
+    test "a task (detail) entry merges the task and drops the query" do
+      block = %{"id" => "d1", "type" => "task-detail", "query" => %{"one" => true}}
+      entry = %{"block_id" => "d1", "type" => "task-detail", "task" => %{"title" => "solo"}}
+
+      assert TaskResolver.apply_preview(block, entry) ==
+               %{"id" => "d1", "type" => "task-detail", "task" => %{"title" => "solo"}}
+    end
+
+    test "an error / nil / unknown entry returns the block unchanged (caller owns the stub note)" do
+      block = %{"id" => "b1", "type" => "task-list", "query" => %{}}
+
+      assert TaskResolver.apply_preview(block, %{"block_id" => "b1", "error" => true}) == block
+      assert TaskResolver.apply_preview(block, nil) == block
+      assert TaskResolver.apply_preview(block, %{}) == block
+    end
+  end
+
   describe "row_from_task/1 — field mapping" do
     test "open with no blockers → ready; open with blockers → open (backlog)" do
       assert TaskResolver.row_from_task(%{"title" => "t", "lifecycle_status" => "open"})["status"] == "ready"

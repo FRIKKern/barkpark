@@ -545,6 +545,105 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
+  describe "task_block_preview (t9) — the boundary widget PAINTS the live rows" do
+    import Phoenix.LiveViewTest
+
+    alias Barkpark.PortableDoc.Render
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    # The flag-ON editor render: canvas runs + boundary widgets. Static
+    # function-component render — no LiveView process, no DB.
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    defp editor_html(blocks, previews) do
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "p1",
+        blocks: blocks,
+        canvas_eligible: true,
+        task_previews: previews
+      )
+    end
+
+    test "a resolved preview renders through the READER'S producer (rule 3), display-only (D5)" do
+      block = task_list("t1")
+
+      entry = %{
+        "block_id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Ship the seam", "status" => "ready"}]
+      }
+
+      html = editor_html([para("p1"), block, para("p2")], %{"t1" => entry})
+
+      # The widget paints the live rows…
+      assert html =~ ~s(data-test-id="paper-task-preview")
+      assert html =~ "Ship the seam"
+
+      # …as the EXACT bytes /papers would emit for the resolved block — one
+      # producer, byte for byte (doctrine rule 3).
+      resolved = TaskResolver.apply_preview(block, entry)
+      assert html =~ Render.render_block(resolved, %{style: :article})
+
+      # D5 in the DOM: the canvas seeds (the save baseline) still carry the raw
+      # prose runs, and no resolved snapshot is ever serialized back into any
+      # data-canvas-blocks / data-block editor state.
+      assert html =~ ~s(data-canvas-blocks)
+      refute html =~ ~s(&quot;snapshot&quot;)
+    end
+
+    test "an error entry degrades to the quiet plugin-off note" do
+      entry = %{"block_id" => "t1", "type" => "task-list", "error" => true}
+      html = editor_html([task_list("t1")], %{"t1" => entry})
+
+      assert html =~ "Live task preview unavailable"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a query block with no entry yet shows the honest loading note" do
+      html = editor_html([task_list("t1")], %{})
+      assert html =~ "Loading live tasks"
+    end
+
+    test "an author-pinned literal snapshot renders directly from its own rows" do
+      pinned = %{
+        "id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Pinned row", "status" => "done"}]
+      }
+
+      html = editor_html([pinned], %{})
+      assert html =~ "Pinned row"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a matchless task-detail preview shows an explicit empty note, not a blank strip" do
+      block = %{"id" => "d1", "type" => "task-detail", "query" => %{"nope" => 1}}
+      entry = %{"block_id" => "d1", "type" => "task-detail", "task" => %{}}
+
+      html = editor_html([block], %{"d1" => entry})
+      assert html =~ "No matching tasks."
+    end
+
+    test "flag OFF: the shipped per-block list stays byte-free of any preview markup" do
+      System.delete_env("BARKPARK_PAPER_CANVAS")
+
+      html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
+      refute html =~ "paper-task-preview"
+    end
+  end
+
   describe "paper_canvas_enabled?/0 (default FALSE)" do
     setup do
       prev = System.get_env("BARKPARK_PAPER_CANVAS")

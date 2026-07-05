@@ -21,7 +21,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
       socket =
         if next_edit_mode or not socket.assigns[:paper_block_mode] do
-          socket
+          # t9: entering Edit — refresh the live task-block previews so the
+          # boundary widgets paint CURRENT rows, not the rows from paper-open.
+          # No-op when the canvas flag is OFF; display-only either way (D5).
+          Shared.push_task_previews(socket)
         else
           stream(
             socket,

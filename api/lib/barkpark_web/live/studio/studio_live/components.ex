@@ -35,6 +35,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:paper_html, :string, default: "")
   attr(:paper_block_mode, :boolean, default: false)
   attr(:paper_edit_mode, :boolean, default: false)
+  # t9 — live task-block previews (block_id ⇒ preview entry), display-only rows
+  # the Edit-mode boundary widgets paint (Shared.push_task_previews fills it).
+  attr(:task_previews, :map, default: %{})
   attr(:shares_admin?, :boolean, default: false)
   attr(:dataset, :string, required: true)
   attr(:api_token_raw, :string, default: "")
@@ -126,6 +129,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   dataset={@dataset}
                   api_token_raw={@api_token_raw}
                   canvas_eligible={true}
+                  task_previews={@task_previews}
                 />
               <% @paper_block_mode -> %>
                 <%!-- Block-backed: each top-level block is its own keyed stream
@@ -453,6 +457,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_html={@paper_html}
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
+          task_previews={@paper_task_previews}
           shares_admin?={@shares_admin?}
           dataset={@dataset}
           streams={@streams}

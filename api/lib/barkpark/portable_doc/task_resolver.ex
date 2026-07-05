@@ -69,6 +69,25 @@ defmodule Barkpark.PortableDoc.TaskResolver do
 
   def preview(_blocks, _fetch), do: []
 
+  @doc """
+  Merge one `preview/2` entry back onto its block FOR DISPLAY — the pure last
+  step a render site uses to paint live rows without ever touching the stored
+  block. Returns a NEW map shaped exactly like `resolve/2`'s output (`snapshot`/
+  `task` present, `query` dropped) so the same component emitters render it —
+  the reader's producer, byte for byte (doctrine rule 3). An `error`/unknown
+  entry (or `nil`) returns the block unchanged; the caller owns the stub note.
+  The input block is never mutated — D5 stays intact by construction.
+  """
+  def apply_preview(block, %{"snapshot" => rows}) when is_map(block) do
+    block |> Map.put("snapshot", rows) |> Map.delete("query")
+  end
+
+  def apply_preview(block, %{"task" => task}) when is_map(block) do
+    block |> Map.put("task", task) |> Map.delete("query")
+  end
+
+  def apply_preview(block, _entry), do: block
+
   defp collect_previews(blocks, fetch) do
     Enum.flat_map(blocks, &preview_block(&1, fetch))
   end

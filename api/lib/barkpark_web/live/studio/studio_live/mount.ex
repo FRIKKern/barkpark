@@ -164,6 +164,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       paper_html: "",
       paper_block_mode: false,
       paper_topic: nil,
+      # t9 — live task-block previews, keyed by block id. Display-only rows
+      # for the canvas boundary widgets (never the save baseline — doctrine
+      # D5); (re)filled by Shared.push_task_previews on open / edit / op.
+      paper_task_previews: %{},
       # ── In-Studio sheet grid editor (Sheets M2) ───────────────────────
       # A type:"sheet" document opens as the collaborative grid editor
       # (`editor_view: :sheet`), not the field form. The LiveView
