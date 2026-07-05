@@ -13,8 +13,6 @@ defmodule Barkpark.PortableDoc.Render.StatusVocab do
   regenerates the CSS tone block and gates every surface against this manifest.
 
   `@external_resource` on the manifest means editing it recompiles this module.
-
-  @canonical capability:status-vocabulary aka:glyph,white-ladder,status-role,task-status doc:design/status-manifest.json
   """
 
   # render/ -> ../../../../../design/status-manifest.json  (repo root)
@@ -32,6 +30,7 @@ defmodule Barkpark.PortableDoc.Render.StatusVocab do
   @spinner_by_role Map.new(@roles, fn r -> {r["role"], r["spinner"] == true} end)
   @role_names Enum.map(@roles, & &1["role"])
 
+  # @canonical capability:status-vocabulary aka:glyph,white-ladder,status-role,task-status doc:design/status-manifest.json
   @doc "Map a stored (or derived) lifecycle status to its ladder role."
   @spec role_for_status(String.t()) :: String.t()
   def role_for_status(status) when is_binary(status),

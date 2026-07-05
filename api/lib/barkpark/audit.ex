@@ -27,7 +27,6 @@ defmodule Barkpark.Audit do
   @lock_prefix "barkpark.audit.chain:"
   @nil_ws_key "\x00global"
 
-  # @canonical capability:audit-emit aka:audit,trail,tamper,security-log
   @doc """
   Append one event to the audit log. Accepts a map with:
 
@@ -42,6 +41,7 @@ defmodule Barkpark.Audit do
   `{:error, term}`. Safe to call inside an enclosing `Repo.transaction` — it
   opens a savepoint, so a failed emit rolls back only itself.
   """
+  # @canonical capability:audit-emit aka:audit,trail,tamper,security-log
   @spec emit(map()) :: {:ok, Event.t()} | {:error, term()}
   def emit(attrs) when is_map(attrs) do
     fields = normalize(attrs)
