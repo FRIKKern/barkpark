@@ -170,6 +170,61 @@ defmodule BarkparkWeb.AuthController do
     })
   end
 
+  @doc """
+  Session management (era-w7): the caller's active sessions — the "your
+  devices" list. Marks which one is CURRENT and whether each is step-up-fresh.
+  """
+  def sessions(conn, _params) do
+    user = conn.assigns.current_user
+    current = conn.assigns.current_user_session
+
+    sessions =
+      user
+      |> Accounts.list_user_sessions()
+      |> Enum.map(fn s ->
+        %{
+          id: s.id,
+          current: s.id == current.id,
+          user_agent: s.user_agent,
+          ip_address: s.ip_address,
+          created_at: s.inserted_at,
+          last_used_at: s.last_used_at,
+          mfa_fresh: UserSession.mfa_fresh?(s),
+          sso: if(s.saml_org_slug, do: "saml")
+        }
+      end)
+
+    json(conn, %{sessions: sessions})
+  end
+
+  @doc """
+  Revoke ONE session by id (self-scoped — another user's session id is 404).
+  Revoking the CURRENT session behaves as logout; the revoked bearer stops
+  working immediately either way. Audited.
+  """
+  def revoke_session(conn, %{"id" => id}) do
+    user = conn.assigns.current_user
+    current = conn.assigns.current_user_session
+
+    case Accounts.revoke_user_session_by_id(user, id) do
+      :ok ->
+        Audit.emit(%{
+          category: "auth",
+          action: "session_revoked",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"session" => id, "current" => id == current.id}
+        })
+
+        conn = if id == current.id, do: clear_session(conn), else: conn
+        json(conn, %{ok: true, current: id == current.id})
+
+      :not_found ->
+        error(conn, 404, "not_found", "no such session")
+    end
+  end
+
   def logout(conn, _params) do
     slo_url =
       case bearer_or_cookie(conn) do
