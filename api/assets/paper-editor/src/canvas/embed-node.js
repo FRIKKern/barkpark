@@ -270,3 +270,132 @@ export const Embed = readOnlyAtomNode({
   chipLabel: embedChipLabel,
   className: "bp-canvas-embed",
 });
+
+// ── pdd-t8: the fleet SERVER-PAINTED read-only atom (`bpFleet`) ────────────────
+//
+// The component-fleet blocks (tasks / task-board / roadmap / cards / pipeline /
+// notes / status-legend / form / asciicast / …) ride the canvas as READ-ONLY atoms
+// — structurally IDENTICAL to sheet/embed (the WHOLE block rides verbatim on
+// bpBlock; ZERO value/content ops; structural-only participation) — but with two
+// differences: (1) ALL fleet kinds share the ONE `bpFleet` node (the specific kind
+// rides bpType, like bpField multiplexes the field-* kinds), and (2) the node-view
+// paints the reader's OWN pushed HTML rather than a client-computed chip.
+//
+// THE ONE-PRODUCER CONTRACT (rule 3 / D8): the editor NEVER hand-renders a fleet
+// block. The node-view emits an EMPTY paint hole (`[data-bp-fleet-body]`, a
+// `.bp-paper-surface` sink so the canonical stylesheet styles it identically to
+// /papers) carrying the block id; the Studio hook (root.html.heex, `bp:block-html`)
+// injects the server-rendered HTML keyed by `data-bp-fleet-id`. Until that HTML
+// arrives the hole shows an honest loading CHIP (the block's human label) — never a
+// blank strip (mirrors the loading/empty/error honesty of task_block_preview/1).
+export const BP_FLEET_NODE_NAME = "bpFleet";
+
+// The human label for the loading chip, derived from the fleet block's kind. A
+// terse, capitalized noun ("Task board", "Cards", …) so the pre-paint fallback
+// reads as an intentional placeholder, not a broken block. Unknown kinds fall back
+// to the raw type so a never-seen fleet kind still shows SOMETHING legible.
+const FLEET_KIND_LABELS = {
+  tasks: "Task list",
+  "task-list": "Task list",
+  "task-detail": "Task detail",
+  "task-board": "Task board",
+  roadmap: "Roadmap",
+  notes: "Notes",
+  cards: "Cards",
+  pipeline: "Pipeline",
+  "status-legend": "Status legend",
+  asciicast: "Terminal cast",
+  form: "Form",
+  questionnaire: "Questionnaire",
+};
+
+export function fleetChipLabel(block) {
+  const type = (block && block.type) || "";
+  return FLEET_KIND_LABELS[type] || (type ? `Block · ${type}` : "Block");
+}
+
+// The `bpFleet` node. Shares the read-only atom SCHEMA (atom, group:"block",
+// selectable, defining, the id/type/bpBlock attrs, the data-bp-type parse anchor)
+// but overrides the NodeView to render a server-paint hole instead of a chip. The
+// schema object loads in pure Node (the NodeView factory references `document`
+// lazily), so __smoke.mjs / __fleet.test.mjs import run-convert.js without a browser.
+export const Fleet = Node.create({
+  name: BP_FLEET_NODE_NAME,
+  group: "block",
+  atom: true,
+  selectable: true,
+  defining: true,
+
+  addAttributes() {
+    return readOnlyAtomAttributes();
+  },
+
+  // Parse ONLY our own data-attributed wrapper (a <div data-bp-fleet='true'>),
+  // reading the whole block off data-bp-block. No bare-tag claim, so we never
+  // contend with sheet/embed (which anchor on their own data-bp-type) or any other
+  // node's parse rule.
+  parseHTML() {
+    return [{ tag: "div[data-bp-fleet='true']" }];
+  },
+
+  // Schema-level fallback render (no node-view mounted — pure-Node round-trip /
+  // non-editable export). All data rides the typed attrs; data-bp-fleet is the
+  // parse anchor.
+  renderHTML({ HTMLAttributes }) {
+    return ["div", mergeAttributes(HTMLAttributes, { "data-bp-fleet": "true" })];
+  },
+
+  // The NodeView: a read-only paint hole. Builds
+  //   <div class="bp-canvas-readonly" data-bp-fleet-id="<id>" data-bp-type="<type>"
+  //        contenteditable="false">
+  //     <div class="bp-paper-surface" data-bp-fleet-body>
+  //       <div class="bp-canvas-readonly-chip">…loading label…</div>
+  //   The Studio hook replaces the hole's contents with the server HTML on
+  //   bp:block-html. contentEditable false + stopEvent/ignoreMutation so PM never
+  //   turns a click (or the hook's own innerHTML write) into a transaction or reads
+  //   it back into the document.
+  addNodeView() {
+    return ({ node }) => {
+      const block = (node.attrs && node.attrs.bpBlock) || {};
+      const bpType = (node.attrs && node.attrs.bpType) || (block && block.type) || "";
+      const bpId = (node.attrs && node.attrs.bpId) || "";
+
+      const dom = document.createElement("div");
+      dom.className = "bp-canvas-readonly bp-canvas-fleet";
+      dom.setAttribute("data-bp-type", bpType);
+      dom.setAttribute("data-bp-fleet-id", bpId);
+      dom.setAttribute("contenteditable", "false");
+      dom.setAttribute("data-test-id", `paper-fleet-${bpType}`);
+
+      const body = document.createElement("div");
+      // The `.bp-paper-surface` sink: the injected reader HTML is styled by the ONE
+      // canonical stylesheet exactly as /papers renders it (D8 — no hand-mirrored
+      // markup, no editor-only CSS).
+      body.className = "bp-paper-surface";
+      body.setAttribute("data-bp-fleet-body", "");
+
+      const chip = document.createElement("div");
+      chip.className = "bp-canvas-readonly-chip";
+      chip.textContent = fleetChipLabel(block);
+      body.appendChild(chip);
+      dom.appendChild(body);
+
+      return {
+        dom,
+        // Re-render the fallback chip when the node's attrs change (echo / undo).
+        // The server HTML (if any) is re-injected by the hook on its own channel,
+        // keyed by the stable data-bp-fleet-id, so we only reset the fallback here.
+        update: (updated) => {
+          if (updated.type.name !== BP_FLEET_NODE_NAME) return false;
+          return true;
+        },
+        // PM must NOT turn a click inside the painted body into a transaction — a
+        // click only ever SELECTS the atom.
+        stopEvent: () => true,
+        // PM must NOT read the body's DOM mutations back into the document — the
+        // hook mutates the paint hole's innerHTML directly and PM must ignore it.
+        ignoreMutation: () => true,
+      };
+    };
+  },
+});

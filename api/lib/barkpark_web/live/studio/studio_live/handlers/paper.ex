@@ -192,7 +192,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   refresh. No-op when the canvas flag is OFF (Shared.push_task_previews gates it).
   """
   def task_preview_refresh(socket) do
-    {:noreply, Shared.push_task_previews(socket)}
+    # pdd-t8: the SAME mount/debounce trigger also (re)paints the fleet-in-canvas
+    # blocks (bp:block-html) so a query edit re-resolves the board AND its canvas
+    # paint in one round-trip. Both are display-only, D5-safe.
+    {:noreply, socket |> Shared.push_task_previews() |> Shared.push_block_renders()}
   end
 
   @doc """
