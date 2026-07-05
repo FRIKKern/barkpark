@@ -44,7 +44,11 @@ const (
 // (board, pushed reading frame, two-pane) is inset identically and the pure
 // renderers stay gutter-blind: content renders at the inner width, then each
 // line is shifted right and one blank row tops the frame (the design artifact's
-// terminal body padding). Below 56 cols the side gutter narrows to 1 to keep
+// terminal body padding). The gutter is ASYMMETRIC on purpose: rows carry their
+// own left indent (section lead + glyph column), so a symmetric inset reads
+// left-heavy — the eye sees indent+gutter on the left but only the gutter to
+// the right of the right-aligned meta. One structural column left, three right
+// balances the perceived whitespace. Below 56 cols both shrink to keep
 // portrait real estate.
 func Compose(m Model) string {
 	width, height := m.width, m.height
@@ -54,15 +58,15 @@ func Compose(m Model) string {
 	if height < 8 {
 		height = 8
 	}
-	g := 2
+	gl, gr := 1, 3
 	if width < 56 {
-		g = 1
+		gl, gr = 1, 2
 	}
-	body := composeAt(m, width-2*g, height-1)
+	body := composeAt(m, width-gl-gr, height-1)
 	lines := strings.Split(body, "\n")
-	pad := strings.Repeat(" ", g)
+	pad := strings.Repeat(" ", gl)
 	var sb strings.Builder
-	sb.Grow(len(body) + len(lines)*(g+1) + 1)
+	sb.Grow(len(body) + len(lines)*(gl+1) + 1)
 	sb.WriteByte('\n')
 	for i, l := range lines {
 		if i > 0 {
