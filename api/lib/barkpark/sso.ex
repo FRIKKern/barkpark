@@ -7,12 +7,30 @@ defmodule Barkpark.Sso do
   """
   import Ecto.Query, warn: false
 
-  alias Barkpark.Repo
+  alias Barkpark.{Accounts, Repo}
   alias Barkpark.Accounts.User
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Workspace
 
   @default_role "member"
+
+  @doc """
+  Find-or-create the SSO-authenticated User by `email`. New accounts get an
+  unusable local password (they sign in via the IdP) and are confirmed (the IdP
+  vouched for the identity). Shared by the OIDC / SAML flows.
+  """
+  @spec find_or_create_user(String.t()) :: User.t()
+  def find_or_create_user(email) when is_binary(email) do
+    case Accounts.get_user_by_email(email) do
+      %User{} = user ->
+        user
+
+      _ ->
+        random = Base.encode16(:crypto.strong_rand_bytes(32))
+        {:ok, user} = Accounts.register_user(%{email: email, password: random})
+        Repo.update!(User.confirm_changeset(user))
+    end
+  end
 
   @doc """
   Provision `user` into every workspace of `org_id` as `role`. Idempotent — an

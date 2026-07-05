@@ -56,6 +56,9 @@ defmodule Barkpark.MixProject do
       {:req, "~> 0.5"},
       # OIDC id_token (JWT/JWS) verification for enterprise SSO (era-w3-oidc-rp).
       {:jose, "~> 1.11"},
+      # SAML 2.0 SP: vetted XML-dsig assertion verification (era-w3-saml).
+      {:esaml, "~> 4.6"},
+      {:x509, "~> 0.9", only: :test},
       {:sweet_xml, "~> 0.7"},
       {:xml_builder, "~> 2.2"},
       {:cloak_ecto, "~> 1.2"},
