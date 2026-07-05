@@ -252,7 +252,7 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	sortEpics(board.Epics, repo)
 	// Strip the NOW-pinned claims from the ranked epics' displayed children (D14).
 	dedupNowFromEpics(board.Epics, nowSet)
-	board.Orphans, board.OrphansFolded = foldStaleOrphans(board.Orphans, now)
+	board.Orphans, board.OrphansFolded, board.OrphansCancelledFolded = foldStaleOrphans(board.Orphans, now)
 	orderChildren(board.Orphans, now)
 
 	// Carve derived clusters out of the loose-orphan pile: labels that relate
@@ -404,6 +404,10 @@ func buildCluster(key string, members []Task, now time.Time) Cluster {
 	c := Cluster{Key: key}
 	kept := make([]Task, 0, len(members))
 	for _, m := range members {
+		if m.Lifecycle == lifeCancelled { // fold away entirely (W10-B)
+			c.CancelledFolded++
+			continue
+		}
 		if isTerminal(m.Lifecycle) && now.Sub(m.UpdatedAt) > doneFoldAfter {
 			c.DoneFolded++
 			continue
@@ -582,22 +586,27 @@ func countStale(tasks []Task, now time.Time) int {
 	return n
 }
 
-// foldStaleOrphans splits the loose-orphan pile into the rows worth showing and
-// a count of terminal rows to hide. The boundary is the SAME exclusive 24h
-// doneFoldAfter epics use for their children, so a done orphan at exactly 24h
-// stays visible and one a second older folds — the two folds behave identically.
-// Non-terminal orphans (open/ready/in_progress/blocked) never fold, however old:
-// unfinished work is never hidden.
-func foldStaleOrphans(orphans []Task, now time.Time) (kept []Task, folded int) {
+// foldStaleOrphans splits the loose-orphan pile into the rows worth showing, a
+// count of DONE/closed rows to hide, and a count of CANCELLED rows to hide. The
+// done boundary is the SAME exclusive 24h doneFoldAfter epics use for their
+// children, so a done orphan at exactly 24h stays visible and one a second older
+// folds. Cancelled orphans fold at ANY age (charter wave-10 W10-B — abandoned
+// work never renders as a row). Non-terminal orphans (open/ready/in_progress/
+// blocked) never fold, however old: unfinished work is never hidden.
+func foldStaleOrphans(orphans []Task, now time.Time) (kept []Task, folded, cancelled int) {
 	kept = make([]Task, 0, len(orphans))
 	for _, o := range orphans {
+		if o.Lifecycle == lifeCancelled { // fold away entirely, at any age (W10-B)
+			cancelled++
+			continue
+		}
 		if isTerminal(o.Lifecycle) && now.Sub(o.UpdatedAt) > doneFoldAfter {
 			folded++
 			continue
 		}
 		kept = append(kept, o)
 	}
-	return kept, folded
+	return kept, folded, cancelled
 }
 
 // rootOf walks parent pointers to the epic root: the first ancestor that is
@@ -634,6 +643,12 @@ func buildEpic(root Task, children []Task, now time.Time) Epic {
 
 	kept := make([]Task, 0, len(children))
 	for _, c := range children {
+		// Cancelled work folds entirely away, at any age (charter wave-10 W10-B) —
+		// it never renders as a row, only as the trailing "· N cancelled" tail.
+		if c.Lifecycle == lifeCancelled {
+			epic.CancelledFolded++
+			continue
+		}
 		if isTerminal(c.Lifecycle) && now.Sub(c.UpdatedAt) > doneFoldAfter {
 			epic.DoneFolded++
 			continue

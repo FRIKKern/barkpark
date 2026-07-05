@@ -209,11 +209,16 @@ func momentumLine(b Board, st UIState, width int) string {
 	return leftRight(leftPart, right, width)
 }
 
-// progressPct is the overall completion percentage — done / (every counted
-// task), rounded. 0 when the corpus is empty (never a divide-by-zero).
+// progressPct is the overall completion percentage — done / (every counted task
+// EXCEPT cancelled), rounded. Cancelled work is abandoned, so it leaves both the
+// numerator and the denominator (charter W10-B: the momentum header excludes
+// cancelled). 0 when the corpus is empty (never a divide-by-zero).
 func progressPct(b Board) int {
 	total := 0
-	for _, v := range b.Counts {
+	for k, v := range b.Counts {
+		if k == lifeCancelled {
+			continue
+		}
 		total += v
 	}
 	if total <= 0 {
@@ -397,7 +402,7 @@ func renderReadyHead(b Board, st UIState, width, maxLines int, now time.Time) []
 
 	for i, t := range b.ReadyHead[:shown] {
 		selected := st.Cursor == i
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, 0, width, st.Frame, now) {
+		for _, ln := range TaskRow(flashTitle(t, st, now), selected, 0, false, width, st.Frame, now) {
 			lines = append(lines, ln)
 		}
 	}
@@ -525,13 +530,20 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		case spineEpicHeader, spineClusterHeader, spineOrphanHeader:
 			selected := markSel()
 			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width))
+		case spinePhaseBand:
+			// A named phase band (W10-A): the SAME dotted-leader grammar as a
+			// section header, indented one level under its epic, display-only (no
+			// selection marker — the cursor never lands on a band).
+			emit(renderSectionHeaderIndent(sr.hdr.title, sr.hdr.code, false, false, childIndent, sr.hdr.counts, width))
 		case spineTask:
 			selected := markSel()
-			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, width, st.Frame, now) {
+			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, sr.Guide, width, st.Frame, now) {
 				emit(ln)
 			}
 		case spineMore:
-			emit(moreLine(sr.more, width))
+			emit(moreLine(sr.more, sr.Depth, width))
+		case spineDeadEpic:
+			emit(deadEpicLine(sr.hdr.title, width))
 		case spineEmpty:
 			emit(dimStyle.Render(truncate(sr.text, width)))
 		}
@@ -539,15 +551,42 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 	return lines, cursorLine
 }
 
-// moreLine folds the remainder of a head-capped section behind one dim line
-// (charter D42): "+K more" names the total hidden remainder (head cap + the 24h
-// done fold) when the section is head-capped, else "+N done" is the terminal
-// tally alone.
-func moreLine(m spineMoreInfo, width int) string {
-	if m.hidden > 0 {
-		return dimStyle.Render(truncate(fmt.Sprintf("  +%d more", m.hidden+m.done), width))
+// deadEpicLine is a cancelled-root epic's tombstone (charter W10-B): one dim
+// header-only line at the bottom of the board, so an abandoned initiative stops
+// occupying prime space. Display-only — never a cursor stop.
+func deadEpicLine(title string, width int) string {
+	if strings.TrimSpace(title) == "" {
+		title = "(untitled)"
 	}
-	return dimStyle.Render(truncate(fmt.Sprintf("  +%d done", m.done), width))
+	return dimStyle.Render(truncate("  "+title+" · cancelled", width))
+}
+
+// moreLine folds the tail of a section behind one dim, depth-aligned line
+// (charter D42 + wave-10 W10-B): "+K more" names the hidden remainder (head cap +
+// the 24h done fold) when head-capped, else "+N done" is the terminal tally; a
+// non-zero cancelled fold always trails as "· M cancelled" (never expandable —
+// abandoned work never renders as a row). Depth indents the line to sit under a
+// phase band's children.
+func moreLine(m spineMoreInfo, depth, width int) string {
+	indent := strings.Repeat(" ", childIndent+depth*2)
+	var parts []string
+	switch {
+	case m.hidden > 0:
+		parts = append(parts, fmt.Sprintf("+%d more", m.hidden+m.done))
+	case m.done > 0:
+		parts = append(parts, fmt.Sprintf("+%d done", m.done))
+	}
+	if m.cancelled > 0 {
+		if len(parts) == 0 {
+			parts = append(parts, fmt.Sprintf("+%d cancelled", m.cancelled))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d cancelled", m.cancelled))
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return dimStyle.Render(truncate(indent+strings.Join(parts, " · "), width))
 }
 
 // clusterDisplayName is a cluster key's display form: one proj:/area: taxonomy

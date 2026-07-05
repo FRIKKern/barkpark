@@ -195,11 +195,12 @@ func TestBuildBoard_RepoBoost(t *testing.T) {
 
 // TestBuildBoard_ChildrenOrderAndFold — within G1, children order
 // in_progress -> ready -> blocked -> open -> recent-terminal (updated desc
-// inside each band); the 25h done row and the 48h cancelled row fold into
-// DoneFolded, while the exactly-24h done row stays visible at the bottom. t1 is a
-// LIVE claim, so the NOW de-dup (charter D14) removes it from the spine children
-// — it renders only in the pinned NOW band — while t8 (in_progress but unclaimed)
-// stays and heads the band.
+// inside each band); the 25h done row folds into DoneFolded and the 48h
+// cancelled row folds into CancelledFolded (charter wave-10 W10-B — cancelled
+// never joins the done tally, at any age), while the exactly-24h done row stays
+// visible at the bottom. t1 is a LIVE claim, so the NOW de-dup (charter D14)
+// removes it from the spine children — it renders only in the pinned NOW band —
+// while t8 (in_progress but unclaimed) stays and heads the band.
 func TestBuildBoard_ChildrenOrderAndFold(t *testing.T) {
 	b := BuildBoard(loadFixtureSnapshot(t), RepoContext{}, refNow)
 	g1 := findEpic(t, b.Epics, "g1")
@@ -208,8 +209,11 @@ func TestBuildBoard_ChildrenOrderAndFold(t *testing.T) {
 	if got := docIDs(g1.Children); !eq(got, wantChildren) {
 		t.Fatalf("G1 children = %v, want %v", got, wantChildren)
 	}
-	if g1.DoneFolded != 2 {
-		t.Fatalf("G1 DoneFolded = %d, want 2 (t6 25h + t16 48h)", g1.DoneFolded)
+	if g1.DoneFolded != 1 {
+		t.Fatalf("G1 DoneFolded = %d, want 1 (t6 25h done)", g1.DoneFolded)
+	}
+	if g1.CancelledFolded != 1 {
+		t.Fatalf("G1 CancelledFolded = %d, want 1 (t16 48h cancelled)", g1.CancelledFolded)
 	}
 	if g1.Dormant {
 		t.Fatalf("G1 dormant, want active (t1 updated 1h ago)")
@@ -410,30 +414,35 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 	}
 }
 
-// TestOrphanFoldBoundary — the loose-orphan fold uses the SAME exclusive 24h
-// boundary as epic children: a done orphan at exactly 24h stays visible, one a
-// second older folds, and a non-terminal orphan never folds however old.
+// TestOrphanFoldBoundary — the loose-orphan DONE fold uses the SAME exclusive
+// 24h boundary as epic children: a done orphan at exactly 24h stays visible, one
+// a second older folds, and a non-terminal orphan never folds however old.
+// Cancelled orphans fold into their OWN bucket at ANY age (charter wave-10
+// W10-B — abandoned work never renders as a row and never joins the done tally).
 func TestOrphanFoldBoundary(t *testing.T) {
 	cases := []struct {
-		name       string
-		life       string
-		age        time.Duration
-		wantFolded int
-		wantKept   int
+		name          string
+		life          string
+		age           time.Duration
+		wantFolded    int
+		wantCancelled int
+		wantKept      int
 	}{
-		{"done exactly 24h stays", lifeDone, 24 * time.Hour, 0, 1},
-		{"done one second past folds", lifeDone, 24*time.Hour + time.Second, 1, 0},
-		{"cancelled two days folds", lifeCancelled, 48 * time.Hour, 1, 0},
-		{"open never folds", lifeOpen, 100 * 24 * time.Hour, 0, 1},
-		{"blocked never folds", lifeBlocked, 100 * 24 * time.Hour, 0, 1},
+		{"done exactly 24h stays", lifeDone, 24 * time.Hour, 0, 0, 1},
+		{"done one second past folds", lifeDone, 24*time.Hour + time.Second, 1, 0, 0},
+		{"cancelled two days folds", lifeCancelled, 48 * time.Hour, 0, 1, 0},
+		{"cancelled fresh (1h) still folds away", lifeCancelled, time.Hour, 0, 1, 0},
+		{"open never folds", lifeOpen, 100 * 24 * time.Hour, 0, 0, 1},
+		{"blocked never folds", lifeBlocked, 100 * 24 * time.Hour, 0, 0, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			o := Task{DocID: "o", Lifecycle: tc.life, UpdatedAt: refNow.Add(-tc.age)}
 			b := BuildBoard(Snapshot{Tasks: []Task{o}}, RepoContext{}, refNow)
-			if b.OrphansFolded != tc.wantFolded || len(b.Orphans) != tc.wantKept {
-				t.Fatalf("life=%s age=%v -> folded=%d kept=%d, want folded=%d kept=%d",
-					tc.life, tc.age, b.OrphansFolded, len(b.Orphans), tc.wantFolded, tc.wantKept)
+			if b.OrphansFolded != tc.wantFolded || b.OrphansCancelledFolded != tc.wantCancelled || len(b.Orphans) != tc.wantKept {
+				t.Fatalf("life=%s age=%v -> folded=%d cancelled=%d kept=%d, want folded=%d cancelled=%d kept=%d",
+					tc.life, tc.age, b.OrphansFolded, b.OrphansCancelledFolded, len(b.Orphans),
+					tc.wantFolded, tc.wantCancelled, tc.wantKept)
 			}
 		})
 	}
