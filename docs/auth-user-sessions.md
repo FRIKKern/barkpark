@@ -70,6 +70,17 @@ fallbacks accepted by `auth.login`'s `recovery_code` when the authenticator is
 unavailable; each code is consumed on use. `mfa_disable` (SDK `client.auth.disableMfa(password)`)
 turns MFA back off — it requires the account password and clears the secret + recovery codes.
 
+### Studio sign-in rides these accounts
+
+`GET /login` signs into Studio with email+password (+ TOTP/recovery second
+step) via `POST /login/account` + `/login/mfa`, minting the same
+`user_session` the API issues; SSO browser callbacks (OIDC/SAML) redirect
+HTML callers into `/studio` on their fresh cookie (API callers keep JSON).
+A user is a first-class Studio principal: workspace access flows from
+user-type memberships through `Tenancy.Auth.authorize/3`, and the flat
+admin surfaces accept a Default-workspace owner/admin. API-token paste and
+login tickets remain as the machine paths.
+
 ### Org-wide required MFA (opt-in overlay)
 
 `organizations.require_mfa` (default false; admin-portal toggle) forces factor

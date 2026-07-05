@@ -27,7 +27,12 @@
       "line": 1527,
       "guard": "verify-docs",
       "expect": "stale",
-      "cite": "router.ex /v1/auth/* (public 716-724, gated 727-734)."
+      "cite": "router.ex /v1/auth/* (public 716-724, gated 727-734).",
+      "target_snapshot": {
+        "rel": "api/lib/barkpark_web/router.ex",
+        "snap": "router-target-2026-07-04.ex",
+        "why": "fail-before verifies against the FROZEN pre-fix router, not the live one — the 'auth' needle scanned +/-5 around ABSOLUTE lines 716/734 had a one-line margin on live main, so any net line-add above 716 slid prose ('the UI auth gate') into a window and false-confirmed the stale citation (bit PR #1163, then studio-user-login)."
+      }
     },
     {
       "file": "js/packages/core/src/listen.ts",

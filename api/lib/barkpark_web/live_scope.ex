@@ -113,6 +113,15 @@ defmodule BarkparkWeb.LiveScope do
 
       _ ->
         cond do
+          # studio-user-login: an account session (:current_user, set by
+          # LiveAuth.:fetch_api_token) is a User principal — same authorize/3
+          # chokepoint, the membership role is the grant. A signed-in user
+          # WITHOUT a membership falls through to the anonymous allowances
+          # below (signed in never grants less than anonymous).
+          match?(%Barkpark.Accounts.User{}, socket.assigns[:current_user]) and
+              Tenancy.Auth.authorize(socket.assigns[:current_user], ws.id, :read) == :ok ->
+            {:ok, :member}
+
           match?(%{id: id} when id == ws.id, Tenancy.get_default_workspace()) ->
             {:ok, :anonymous_default}
 

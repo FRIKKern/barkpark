@@ -42,11 +42,19 @@ defmodule BarkparkWeb.SamlController do
           saml_org_slug: slug
         )
 
-      conn
-      |> configure_session(renew: true)
-      |> put_session("user_session", token)
-      |> put_status(:created)
-      |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+      conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
+
+      # studio-user-login: a BROWSER posting the IdP's auto-submit form
+      # (Accept: text/html) lands IN Studio — the cookie above is its
+      # credential. Non-HTML callers (interop suite, SDKs) keep the JSON
+      # contract byte-identical.
+      if browser?(conn) do
+        conn |> Phoenix.Controller.redirect(to: "/studio")
+      else
+        conn
+        |> put_status(:created)
+        |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+      end
     else
       :no_conn ->
         conn |> put_status(404) |> json(%{error: "no SAML connection for this organization"})
@@ -107,6 +115,14 @@ defmodule BarkparkWeb.SamlController do
 
   def slo(conn, %{"org_slug" => _}),
     do: conn |> put_status(400) |> json(%{error: "SAMLRequest is required"})
+
+  # A browser's form POST / redirect chain advertises text/html; API clients
+  # (interop suite, SDKs) don't. Drives the redirect-vs-JSON fork above.
+  defp browser?(conn) do
+    conn
+    |> Plug.Conn.get_req_header("accept")
+    |> Enum.any?(&String.contains?(&1, "text/html"))
+  end
 
   defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
 

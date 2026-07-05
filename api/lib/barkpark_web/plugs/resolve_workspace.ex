@@ -67,11 +67,21 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
   defp authorize(conn, workspace, opts) do
     token = conn.assigns[:api_token]
+    user = conn.assigns[:current_user]
 
     cond do
       TenancyAuth.authorize(token, workspace.id, :read) == :ok ->
         assign(conn, :current_workspace, workspace)
 
+      # studio-user-login: an account session is a User principal — same
+      # chokepoint, the membership ROLE is the grant. Token keeps precedence
+      # above; this arm only fires for cookie-only browser users.
+      not is_nil(user) and TenancyAuth.authorize(user, workspace.id, :read) == :ok ->
+        assign(conn, :current_workspace, workspace)
+
+      # The Default-workspace public allowance keys on NO TOKEN (P3 posture).
+      # A signed-in user without a Default membership still gets it — being
+      # signed in never grants less than anonymous.
       is_nil(token) and Keyword.get(opts, :allow_anonymous_default, false) and
           default_workspace?(workspace) ->
         conn

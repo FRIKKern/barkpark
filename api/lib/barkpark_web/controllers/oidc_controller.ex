@@ -58,11 +58,18 @@ defmodule BarkparkWeb.OidcController do
                 user_agent: user_agent(conn)
               )
 
-            conn
-            |> configure_session(renew: true)
-            |> put_session("user_session", token)
-            |> put_status(:created)
-            |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+            conn = conn |> configure_session(renew: true) |> put_session("user_session", token)
+
+            # studio-user-login: a browser completing the code flow
+            # (Accept: text/html) lands IN Studio on its new session cookie;
+            # non-HTML callers keep the JSON contract byte-identical.
+            if browser?(conn) do
+              redirect(conn, to: "/studio")
+            else
+              conn
+              |> put_status(:created)
+              |> json(%{ok: true, token: token, user: %{id: user.id, email: user.email}})
+            end
 
           {:error, reason} ->
             conn |> put_status(401) |> json(%{error: "oidc_failed", detail: to_string(reason)})
@@ -78,6 +85,13 @@ defmodule BarkparkWeb.OidcController do
   end
 
   defp callback_uri(slug), do: BarkparkWeb.Endpoint.url() <> "/v1/auth/oidc/#{slug}/callback"
+
+  # A browser's redirect chain advertises text/html; API clients don't.
+  defp browser?(conn) do
+    conn
+    |> Plug.Conn.get_req_header("accept")
+    |> Enum.any?(&String.contains?(&1, "text/html"))
+  end
 
   defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
 

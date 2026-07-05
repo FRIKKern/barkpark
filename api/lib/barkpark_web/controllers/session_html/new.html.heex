@@ -3,7 +3,7 @@
     <div class="card-header" style="display: block;">
       <h2 class="h2">Sign in</h2>
       <p class="text-sm text-muted" style="margin-top: 4px;">
-        Paste your Barkpark API token to access admin tools.
+        Sign in with your account, or paste an API token.
       </p>
     </div>
 
@@ -19,20 +19,33 @@
         </div>
       <% end %>
 
-      <.form :let={_f} for={%{}} as={:session} action={~p"/login"} method="post">
+      <.form :let={_f} for={%{}} as={:account} action={~p"/login/account"} method="post">
         <input type="hidden" name="return_to" value={@return_to} />
 
         <div class="form-group">
-          <label class="form-label" for="session_token">API token</label>
+          <label class="form-label" for="account_email">Email</label>
           <input
-            type="password"
-            name="token"
-            id="session_token"
+            type="email"
+            name="email"
+            id="account_email"
             class="form-input"
-            autocomplete="off"
+            autocomplete="username"
             autofocus
             required
-            placeholder="paste token"
+            placeholder="you@example.com"
+          />
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="account_password">Password</label>
+          <input
+            type="password"
+            name="password"
+            id="account_password"
+            class="form-input"
+            autocomplete="current-password"
+            required
+            placeholder="password"
           />
         </div>
 
@@ -41,6 +54,46 @@
           <a href="/studio" class="btn btn-ghost">Cancel</a>
         </div>
       </.form>
+
+      <details style="margin-top: 20px;" data-token-signin>
+        <summary class="text-sm text-muted" style="cursor: pointer;">
+          Sign in with an API token instead
+        </summary>
+
+        <.form
+          :let={_f}
+          for={%{}}
+          as={:session}
+          action={~p"/login"}
+          method="post"
+          style="margin-top: 12px;"
+        >
+          <input type="hidden" name="return_to" value={@return_to} />
+
+          <div class="form-group">
+            <label class="form-label" for="session_token">API token</label>
+            <input
+              type="password"
+              name="token"
+              id="session_token"
+              class="form-input"
+              autocomplete="off"
+              required
+              placeholder="paste token"
+            />
+          </div>
+
+          <div style="display: flex; gap: 8px; margin-top: 12px;">
+            <button type="submit" class="btn btn-secondary">Sign in with token</button>
+          </div>
+        </.form>
+      </details>
+
+      <p class="text-sm text-muted" style="margin-top: 16px;">
+        Enterprise SSO? Use your organization's sign-in link:
+        <code>/v1/auth/oidc/&lt;org&gt;/start</code> or
+        <code>/v1/auth/saml/&lt;org&gt;/start</code>.
+      </p>
     </div>
   </div>
 </div>

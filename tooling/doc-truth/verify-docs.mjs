@@ -120,6 +120,28 @@ function routerText() {
   return _routerText;
 }
 
+// Frozen-target overrides (doc-gate-frozen-specimen-brittleness): the
+// acceptance harness pins a cited TARGET file (e.g. router.ex) to a frozen
+// snapshot while verifying a frozen fail-before specimen, so the specimen's
+// verdict never depends on the LIVE file's absolute line layout. Without
+// this, any net line-add above the cited window slid unrelated prose into
+// the ±5 needle scan and false-confirmed the frozen stale citation — a
+// blocking doc-gates red for innocent router edits (bit PR #1163 and again
+// on studio-user-login). Keyed by repo-relative path; empty in normal runs.
+const _targetOverrides = new Map();
+
+export function setLinerefTargetOverride(rel, absSnapshotPath) {
+  _targetOverrides.set(rel, absSnapshotPath);
+}
+
+export function clearLinerefTargetOverrides() {
+  _targetOverrides.clear();
+}
+
+function linerefTargetPath(rel) {
+  return _targetOverrides.get(rel) || join(ROOT, rel);
+}
+
 // Cache file reads for lineref verification.
 const _fileLineCache = new Map();
 function fileLines(absPath) {
@@ -744,7 +766,7 @@ function verifyLineref(claim) {
   if (!rel) {
     return tag(claim, "unverifiable", "low", `lineref basename does not resolve to a file: ${t.base}`);
   }
-  const abs = join(ROOT, rel);
+  const abs = linerefTargetPath(rel);
   const lines = fileLines(abs);
   if (!lines) {
     return tag(claim, "unverifiable", "low", `lineref file unreadable: ${rel}`);
@@ -903,7 +925,7 @@ function reverify(claim) {
     const t = claim.target;
     const rel = resolveBasenameNear(t.base, claim.doc);
     if (rel) {
-      const lines = fileLines(join(ROOT, rel));
+      const lines = fileLines(linerefTargetPath(rel));
       if (lines) {
         const needles = linerefNeedles(claim.srcLine || claim.raw, t);
         const WINDOW = 5; // wider on re-check to avoid off-by-a-few false stale
