@@ -279,4 +279,89 @@ defmodule Barkpark.TenancyAuthTest do
       assert hd(memberships).role == "admin"
     end
   end
+
+  describe "authorize/3 with a User principal" do
+    alias Barkpark.Accounts
+
+    defp user(email_prefix) do
+      {:ok, u} =
+        Accounts.register_user(%{
+          email: email_prefix <> "-" <> Ecto.UUID.generate() <> "@example.com",
+          password: "correct horse battery"
+        })
+
+      u
+    end
+
+    defp user_member(ws, role) do
+      u = user("u")
+      {:ok, _} = Auth.create_membership(ws.id, u.id, role, "user")
+      u
+    end
+
+    test "member role → read+write; admin forbidden" do
+      ws = workspace("uws-member")
+      u = user_member(ws, "member")
+
+      assert Auth.authorize(u, ws.id, :read) == :ok
+      assert Auth.authorize(u, ws.id, :write) == :ok
+      assert Auth.authorize(u, ws.id, :admin) == {:error, :forbidden}
+    end
+
+    test "admin role → every action" do
+      ws = workspace("uws-admin")
+      u = user_member(ws, "admin")
+
+      assert Auth.authorize(u, ws.id, :read) == :ok
+      assert Auth.authorize(u, ws.id, :write) == :ok
+      assert Auth.authorize(u, ws.id, :admin) == :ok
+    end
+
+    test "owner role → every action" do
+      ws = workspace("uws-owner")
+      u = user_member(ws, "owner")
+
+      assert Auth.authorize(u, ws.id, :admin) == :ok
+    end
+
+    test "non-member user → forbidden for every action" do
+      ws = workspace("uws-none")
+      u = user("stranger")
+
+      assert Auth.authorize(u, ws.id, :read) == {:error, :forbidden}
+      assert Auth.authorize(u, ws.id, :write) == {:error, :forbidden}
+      assert Auth.authorize(u, ws.id, :admin) == {:error, :forbidden}
+    end
+
+    test "cross-tenant isolation: a member of A is forbidden in B" do
+      ws_a = workspace("uws-a")
+      ws_b = workspace("uws-b")
+      u = user("cross")
+      {:ok, _} = Auth.create_membership(ws_a.id, u.id, "admin", "user")
+
+      assert Auth.authorize(u, ws_a.id, :admin) == :ok
+      assert Auth.authorize(u, ws_b.id, :read) == {:error, :forbidden}
+    end
+
+    test "kind isolation: a user is NOT authorized by a token's membership" do
+      ws = workspace("uws-kind")
+      # A token is an admin member of the workspace…
+      token = raw_token(["admin"])
+      {:ok, _} = Auth.create_membership(ws.id, token.id, "admin")
+      # …but a user with no user-membership row is still denied.
+      u = user("kind")
+
+      assert Auth.authorize(token, ws.id, :admin) == :ok
+      assert Auth.authorize(u, ws.id, :read) == {:error, :forbidden}
+      assert Auth.membership(u, ws.id) == nil
+    end
+
+    test "membership_role/2 and workspace_admin?/2 read the user's role" do
+      ws = workspace("uws-role")
+      u = user_member(ws, "admin")
+
+      assert Auth.membership_role(u, ws.id) == "admin"
+      assert Auth.workspace_admin?(u, ws.id) == true
+    end
+  end
 end
