@@ -296,6 +296,61 @@ defmodule Barkpark.Webhooks.Dispatcher do
   end
 
   @doc """
+  Auth-event bridge (era-w7): fan an emitted audit `event` out to every matching
+  AUDIT subscription, through the SAME signed + retried + dead-lettered delivery
+  path as content webhooks. Dedup keys on the audit event's id, so a re-fire
+  never double-delivers. Called post-commit from `Barkpark.Audit.emit/1`; a
+  no-subscription org pays one indexed query and nothing else.
+  """
+  def dispatch_audit_async(%Barkpark.Audit.Event{} = event) do
+    {webhooks, body} = audit_targets(event)
+    fan_out(webhooks, fn wh -> deliver_audit(wh, body) end)
+  end
+
+  @doc """
+  Deliver one audit payload to `webhook` through the durable state machine —
+  creates a `source_kind: "audit"` delivery row (endpoint-attributed, no content
+  event_id) and runs the signed attempt loop with retries + dead-letter. Returns
+  the same contract as `deliver/3`.
+  """
+  def deliver_audit(webhook, body) do
+    payload = Jason.decode!(body)
+
+    case Webhooks.create_audit_delivery(webhook.id, payload) do
+      {:ok, delivery} -> attempt(webhook, body, nil, delivery, 1)
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  The synchronous core of the audit bridge: the matching subscriptions + the
+  encoded payload for `event`. Split out so selection + payload are unit-testable
+  without the fire-and-forget `fan_out` spawn (which, like every webhook
+  delivery, can't run on the test's sandbox connection).
+  """
+  def audit_targets(%Barkpark.Audit.Event{} = event) do
+    org_id = event.metadata["organization_id"]
+    webhooks = Webhooks.audit_webhooks_for(event.category, event.action, org_id)
+    {webhooks, Jason.encode!(audit_payload(event))}
+  end
+
+  # The delivered payload — the audit event itself, no other tenant's data.
+  defp audit_payload(event) do
+    %{
+      kind: "audit_event",
+      id: event.id,
+      category: event.category,
+      action: event.action,
+      subject: event.subject,
+      actor_type: event.actor_type,
+      actor_id: event.actor_id,
+      organization_id: event.metadata["organization_id"],
+      metadata: event.metadata,
+      occurred_at: event.occurred_at
+    }
+  end
+
+  @doc """
   Re-run delivery for an EXISTING, already-claimed `webhook_deliveries` row —
   the crash-recovery entry point used by `Webhooks.StuckDeliverySweeper`.
 

@@ -27,6 +27,13 @@ defmodule Barkpark.Webhooks.Webhook do
     field :auto_disabled_at, :utc_datetime
     field :disable_reason, :string
 
+    # Auth-event subscription (era-w7). A non-empty `audit_categories` makes this
+    # an AUDIT-event webhook (auth/membership/token/…) rather than a content one;
+    # `audit_actions` optionally narrows within them (empty = all actions).
+    field :audit_categories, {:array, :string}, default: []
+    field :audit_actions, {:array, :string}, default: []
+
+    belongs_to :organization, Barkpark.Tenancy.Organization, type: :binary_id
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
 
@@ -40,6 +47,9 @@ defmodule Barkpark.Webhooks.Webhook do
   end
 
   @valid_events ~w(create update publish unpublish delete discardDraft patch)
+  # Mirrors Barkpark.Audit.Event.categories/0 — kept in sync so a subscription
+  # can't name a category the audit bus never emits.
+  @valid_audit_categories ~w(content_mutation auth membership secret plugin_settings token)
 
   def changeset(webhook, attrs) do
     webhook
@@ -59,12 +69,16 @@ defmodule Barkpark.Webhooks.Webhook do
       :types,
       :secret,
       :active,
+      :audit_categories,
+      :audit_actions,
+      :organization_id,
       :workspace_id,
       :project_id
     ])
     |> validate_required([:name, :url])
     |> validate_change(:url, &validate_outbound_url/2)
     |> validate_subset(:events, @valid_events)
+    |> validate_subset(:audit_categories, @valid_audit_categories)
   end
 
   # Defense-in-depth shape check: require an http(s) URL with a host and no

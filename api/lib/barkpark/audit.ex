@@ -46,21 +46,40 @@ defmodule Barkpark.Audit do
   def emit(attrs) when is_map(attrs) do
     fields = normalize(attrs)
 
-    Repo.transaction(fn ->
-      lock_chain(fields.workspace_id)
-      prev = last_hash(fields.workspace_id)
-      hash = Chain.hash(fields, prev)
+    result =
+      Repo.transaction(fn ->
+        lock_chain(fields.workspace_id)
+        prev = last_hash(fields.workspace_id)
+        hash = Chain.hash(fields, prev)
 
-      attrs =
-        fields
-        |> Map.put(:prev_hash, prev)
-        |> Map.put(:hash, hash)
+        attrs =
+          fields
+          |> Map.put(:prev_hash, prev)
+          |> Map.put(:hash, hash)
 
-      case Repo.insert(Event.insert_changeset(attrs)) do
-        {:ok, event} -> event
-        {:error, changeset} -> Repo.rollback(changeset)
-      end
-    end)
+        case Repo.insert(Event.insert_changeset(attrs)) do
+          {:ok, event} -> event
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
+
+    # POST-COMMIT: bridge to any auth-event webhook subscriptions (era-w7).
+    # Deliberately outside the advisory-locked transaction — a slow endpoint or
+    # a webhook error must never block or roll back the audit chain. Best-effort
+    # + isolated: dispatch spawns its own supervised tasks and can't crash emit.
+    with {:ok, %Event{} = event} <- result do
+      safe_bridge(event)
+    end
+
+    result
+  end
+
+  defp safe_bridge(event) do
+    Barkpark.Webhooks.Dispatcher.dispatch_audit_async(event)
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   @doc """

@@ -16,7 +16,7 @@ defmodule Barkpark.Webhooks.Delivery do
   #     `payload_snapshot` (url / secret / body) and resumes FROM it.
   #     `endpoint_id` / `event_id` are NULL (media endpoints are config-driven via
   #     `:media_webhooks`, not `webhooks` rows).
-  @source_kinds ~w(document media)
+  @source_kinds ~w(document media audit)
 
   schema "webhook_deliveries" do
     field :endpoint_id, Ecto.UUID
@@ -58,8 +58,18 @@ defmodule Barkpark.Webhooks.Delivery do
   # set exactly, so existing document callers are unaffected.
   defp validate_required_for_kind(changeset) do
     case get_field(changeset, :source_kind) do
-      "media" -> validate_required(changeset, [:payload_snapshot])
-      _ -> validate_required(changeset, [:endpoint_id, :event_id])
+      "media" ->
+        validate_required(changeset, [:payload_snapshot])
+
+      # Audit rows target a real webhook (`endpoint_id`) but carry no content
+      # `event_id` (the source lives in `audit_events`, a different table with
+      # its own FK), so they key on the snapshot to stay resumable — like media,
+      # never deduped (the bridge fires once per emit).
+      "audit" ->
+        validate_required(changeset, [:endpoint_id, :payload_snapshot])
+
+      _ ->
+        validate_required(changeset, [:endpoint_id, :event_id])
     end
   end
 end
