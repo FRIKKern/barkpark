@@ -40,6 +40,9 @@ NOW
   Legacy migration cleanup ····················· 2/2
 
   sheets-parity ~ ······························ 1/3
+   ○ SUM/AVG spill range                      P2 1/3
+   ✓ A:A whole-column ref                         2h
+  +1 more
 
   (no epic) ···································· 1/3
    ○ quality lint pass on the loose pile          P3
@@ -48,9 +51,6 @@ NOW
   +3 cancelled
 
   Unified Aesthetic: one design language, every sur…
-
-
-
 
 
 

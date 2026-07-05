@@ -68,6 +68,18 @@ const (
 	focusWindowMax = 12
 )
 
+// Fallback seeding (charter D51 amendment): a section with NO live seeds (no
+// blocked child, no NOW anchor) but touched within focusFallbackHorizon seeds
+// its window from the freshest ready work instead of collapsing to a bare
+// header — wish Amendment 4 wants "the stuff that been recently worked on" as
+// the one list, and a board of header-only lines with zero actionable rows is
+// dead space of another kind. Sections older than the horizon keep the pure
+// big-picture header.
+const (
+	focusFallbackSeeds   = 2
+	focusFallbackHorizon = 48 * time.Hour
+)
+
 // Cluster derivation policy. A loose task's cluster KEY is its first proj: label,
 // else its first area: label, else the most-shared of its remaining labels that
 // at least clusterShareMin loose tasks carry (frequency desc, ties lexically
@@ -283,7 +295,7 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// only (inactive); non-empty => modeFocus shows exactly this neighborhood.
 	for i := range board.Epics {
 		e := &board.Epics[i]
-		e.FocusSet = sectionFocus(e.Children, nowByRoot[e.Root.DocID])
+		e.FocusSet = sectionFocus(e.Children, nowByRoot[e.Root.DocID], e.LastActivity, now)
 	}
 	board.Orphans, board.OrphansFolded, board.OrphansCancelledFolded = foldStaleOrphans(board.Orphans, now, evAt)
 	orderChildren(board.Orphans, now)
@@ -314,9 +326,9 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// header mode, which is correct.
 	for i := range board.Clusters {
 		cl := &board.Clusters[i]
-		cl.FocusSet = sectionFocus(cl.Tasks, nowAnchorsFor(cl.Tasks, board.Now))
+		cl.FocusSet = sectionFocus(cl.Tasks, nowAnchorsFor(cl.Tasks, board.Now), cl.LastActivity, now)
 	}
-	board.OrphansFocusSet = sectionFocus(board.Orphans, nowAnchorsFor(board.Orphans, board.Now))
+	board.OrphansFocusSet = sectionFocus(board.Orphans, nowAnchorsFor(board.Orphans, board.Now), sectionActivity(board.Orphans, evAt), now)
 
 	// Twin detection: near-duplicate titles within the same group point at each
 	// other so "these two are the same work" is impossible to miss. Groups are
@@ -801,9 +813,17 @@ func nowAnchorsFor(kept, now []Task) []Task {
 // it: computeFocus over the kept children + the section's NOW anchors, then add
 // the ≤doneCueMax done-cue ids (they render as the completion cue when the section
 // shows rows, charter D50), then cap at focusWindowMax. Empty result => the
-// section renders header+rollup only (no active/blocked work to focus around).
-func sectionFocus(kept, nowAnchors []Task) map[string]bool {
-	focus := computeFocus(kept, nowAnchors)
+// section renders header+rollup only (no active/blocked work to focus around) —
+// UNLESS the section was touched within focusFallbackHorizon, in which case its
+// freshest ready tasks seed the window instead (D51 amendment: recent sections
+// always surface a next step).
+func sectionFocus(kept, nowAnchors []Task, lastActivity time.Time, now time.Time) map[string]bool {
+	focus := computeFocus(kept, nowAnchors, nil)
+	if len(focus) == 0 && !lastActivity.IsZero() && now.Sub(lastActivity) <= focusFallbackHorizon {
+		if fb := freshestReady(kept, focusFallbackSeeds); len(fb) > 0 {
+			focus = computeFocus(kept, nowAnchors, fb)
+		}
+	}
 	if len(focus) == 0 {
 		return focus
 	}
@@ -813,6 +833,24 @@ func sectionFocus(kept, nowAnchors []Task) map[string]bool {
 		}
 	}
 	return capFocus(kept, focus)
+}
+
+// freshestReady picks the ≤n most recently touched ready tasks from kept — the
+// D51-amendment fallback seeds for a recently-active section with nothing live.
+func freshestReady(kept []Task, n int) []Task {
+	var ready []Task
+	for _, k := range kept {
+		if k.Lifecycle == lifeReady {
+			ready = append(ready, k)
+		}
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		return ready[i].UpdatedAt.After(ready[j].UpdatedAt)
+	})
+	if len(ready) > n {
+		ready = ready[:n]
+	}
+	return ready
 }
 
 // capFocus trims a focus set to focusWindowMax deterministically (charter D51
@@ -845,7 +883,9 @@ func capFocus(kept []Task, focus map[string]bool) map[string]bool {
 // The union across seeds is ONE neighborhood, so two active tasks in one section
 // MERGE into one wider window — more perspective in one eye-catch, never two
 // lists. Empty (no blocked child, no anchor) → the caller picks header mode.
-func computeFocus(kept, nowAnchors []Task) map[string]bool {
+// selfSeeds (the D51-amendment recency fallback) behave like blocked children:
+// each shows itself and pulls its context.
+func computeFocus(kept, nowAnchors, selfSeeds []Task) map[string]bool {
 	focus := map[string]bool{}
 	if len(kept) == 0 {
 		return focus
@@ -863,6 +903,10 @@ func computeFocus(kept, nowAnchors []Task) map[string]bool {
 		}
 	}
 	seeds = append(seeds, nowAnchors...) // NOW anchors seed context, never added themselves
+	for _, s := range selfSeeds {
+		focus[bareID(s.DocID)] = true
+		seeds = append(seeds, s)
+	}
 
 	for _, s := range seeds {
 		// Parents up ≤focusParents, only through kept members.

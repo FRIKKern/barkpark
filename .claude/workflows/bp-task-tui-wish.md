@@ -167,3 +167,39 @@ the existing heartbeat (idle board stays byte-stable); done flashes ×3 on the d
 NO_COLOR / ASCII / reduced-motion fallbacks per spec §3. The calm subtraction's GOOD parts stay: dim
 monochrome labels, done recedes, honest truncation, one-view-no-toggle-farm. Loop until `bp tasks` on
 the real corpus reads like the mockup.
+
+---
+
+## AMENDMENT 4 (2026-07-05) — ONE activity-focused list (kill READY TO CLAIM; recency + focus windows)
+
+User, verbatim: "I dont really want to see 'Ready to claim' on top - i just want 1 list, with the stuff
+that been recently worked on - like just how it is now - but the epic / goals etc is based on recently
+worked on etc - we dont for example want to see stuff like long list finished stuff blocking the view -
+what i want to see is the big picture, and what is being worked on - i dont want too much dead space
+without me expanding - but right now it might just be bad task hygiene - so we need to make our system
+excellent at ensuring best practices - it is important to be able to see what is being worked on, the
+context around it - so for example see 3 siblings, 3 children, maybe 1,2 parents - but if this is within
+proximity of another task that is active or going to be worked on then it should be giving more
+perspective - so we dont make many lists, but try to cover more that is relevant in one eye catch."
+
+Observed failure (screenshot): the auth epic rendered ~25 recent-done ✓ rows as a wall (they were <24h
+old so the "terminal >24h folds" rule let them all through) — finished work FLOODING the view. And the
+READY TO CLAIM head makes a second list that duplicates rows from the sections below.
+
+The retune:
+1. ONE LIST. Kill the READY TO CLAIM band. The board is a single spine of sections; claim-forward
+   stays via the cursor + `c` (and NOW pins live claims as today).
+2. RECENCY RANKS. Sections (epics/clusters) order by last-activity (most recent claim/close/mutation/
+   update among descendants — events + updated_at), most-recent first. The big picture reads top-down
+   as "what this system is working on now → lately → dormant".
+3. DONE RECEDES, ALWAYS. Done rows never flood: at most ~1-2 freshest done rows in an ACTIVE section
+   as a completion cue; everything else folds to "+N done" regardless of age. The done-blink/ticker
+   still celebrates the moment.
+4. FOCUS WINDOWS, not head-of-first-5. Within an active section show the ACTIVE work + its context:
+   ~3 ready siblings, ~3 children, 1-2 parents of the active/claimed tasks; when two active tasks are
+   near each other (shared parent/section), MERGE their windows into one wider neighborhood — more
+   perspective in one eye-catch, never two lists for one story. Sections with no activity collapse to
+   header+rollup (the big-picture line); expand (l/enter) still reveals all.
+5. HYGIENE IS SYSTEMIC. The flood was partly bad task hygiene; the §5/§6 quality tasks (save-gate,
+   completeness score, bp task lint, guided editor) are the enforcement arm — the board must ALSO be
+   robust to bad hygiene (mass closes, stale claims) by policy, not by hoping data is clean.
