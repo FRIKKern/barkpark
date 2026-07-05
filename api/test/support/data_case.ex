@@ -16,6 +16,8 @@ defmodule Barkpark.DataCase do
 
   use ExUnit.CaseTemplate
 
+  require Logger
+
   using do
     quote do
       alias Barkpark.Repo
@@ -56,10 +58,89 @@ defmodule Barkpark.DataCase do
 
   @doc """
   Sets up the sandbox based on the test tags.
+
+  The on_exit drains this test's fire-and-forget tasks BEFORE stopping the
+  sandbox owner. App code spawns async DB work on the global
+  `Barkpark.TaskSupervisor` / `Barkpark.WebhookDeliverySupervisor` (webhook
+  fan-out, media delivery, audit bridge); those tasks inherit this test's
+  sandbox connection through `$callers`. Stopping the owner while such a task
+  is mid-query kills the Postgrex connection ("owner exited" disconnect), and
+  because the pool has no slack (pool_size == max concurrent tests) every
+  killed connection starves whichever test is checking out during the
+  reconnect window — the cross-file flake cluster. Draining is scoped to THIS
+  test's own tasks (matched via `$callers`), so concurrent tests never block
+  on someone else's work.
   """
   def setup_sandbox(tags) do
     pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: not tags[:async])
-    on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(pid) end)
+    test_pid = self()
+
+    on_exit(fn ->
+      drain_owned_tasks(test_pid, tags)
+      Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
+    end)
+  end
+
+  @task_supervisors [Barkpark.TaskSupervisor, Barkpark.WebhookDeliverySupervisor]
+  @drain_deadline_ms 10_000
+
+  @doc """
+  Await (bounded) every task on the global task supervisors whose `$callers`
+  chain includes `test_pid` — work this test's own code fired-and-forgot.
+  Loops because a draining task may spawn more (webhook fan-out spawns
+  per-delivery tasks). On deadline the stragglers are killed so the sandbox
+  owner never stops underneath a live query.
+  """
+  def drain_owned_tasks(test_pid, tags, deadline \\ nil) do
+    deadline = deadline || System.monotonic_time(:millisecond) + @drain_deadline_ms
+
+    case owned_tasks(test_pid) do
+      [] ->
+        :ok
+
+      pids ->
+        if System.monotonic_time(:millisecond) > deadline do
+          Logger.warning(
+            "DataCase drain deadline: killing #{length(pids)} leaked task(s) from " <>
+              "#{inspect(tags[:module])} #{inspect(tags[:test])}"
+          )
+
+          Enum.each(pids, &Process.exit(&1, :kill))
+          await_down(pids)
+        else
+          await_down(pids)
+          drain_owned_tasks(test_pid, tags, deadline)
+        end
+    end
+  end
+
+  defp owned_tasks(test_pid) do
+    for sup <- @task_supervisors,
+        pid <- Task.Supervisor.children(sup),
+        callers = process_callers(pid),
+        test_pid in callers,
+        do: pid
+  end
+
+  # `$callers` is stamped by Task.Supervisor at spawn, so a task fired by the
+  # test (or by one of its tasks, transitively) always carries the test pid.
+  defp process_callers(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} -> Keyword.get(dict, :"$callers", [])
+      nil -> []
+    end
+  end
+
+  defp await_down(pids) do
+    refs = Enum.map(pids, &Process.monitor/1)
+
+    Enum.each(refs, fn ref ->
+      receive do
+        {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+      after
+        @drain_deadline_ms -> Process.demonitor(ref, flush: true)
+      end
+    end)
   end
 
   @doc """
