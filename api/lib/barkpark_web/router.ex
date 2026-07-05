@@ -930,6 +930,9 @@ defmodule BarkparkWeb.Router do
     post("/erase", AuthController, :erase)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
+    # Present a current factor to make this session step-up-fresh (clears a
+    # `mfa_required` 401 before retrying a guarded action).
+    post("/mfa/step-up", AuthController, :mfa_step_up)
     post("/mfa/disable", AuthController, :mfa_disable)
   end
 

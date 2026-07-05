@@ -37,22 +37,23 @@ defmodule BarkparkWeb.Plugs.RequireUserSession do
   end
 
   defp verify(conn, raw, source) do
-    case Accounts.verify_user_session_token(String.trim(raw)) do
-      %Accounts.User{} = user ->
+    case Accounts.verify_user_session(String.trim(raw)) do
+      {%Accounts.User{} = user, session} ->
         conn
         |> maybe_require_csrf(source)
-        |> assign_user(user)
+        |> assign_user(user, session)
 
       nil ->
         unauthorized(conn)
     end
   end
 
-  defp assign_user(%Plug.Conn{halted: true} = conn, _user), do: conn
+  defp assign_user(%Plug.Conn{halted: true} = conn, _user, _session), do: conn
 
-  defp assign_user(conn, user) do
+  defp assign_user(conn, user, session) do
     conn
     |> assign(:current_user, user)
+    |> assign(:current_user_session, session)
     |> assign(:caller_context, CallerContext.from_user(user.id))
   end
 
