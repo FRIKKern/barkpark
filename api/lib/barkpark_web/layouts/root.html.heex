@@ -4234,6 +4234,34 @@
           });
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
+
+        // t9 — LIVE TASK-BLOCK PREVIEW (parallel display channel). The server
+        // resolves every query-carrying task block into id-keyed rows and pushes
+        // `bp:task-preview` {previews:[{block_id, type, snapshot|task|error}, …]}
+        // — SEPARATE from bp:canvas-update (which carries the SAVE baseline). This
+        // channel is DISPLAY ONLY: the previews never enter el.blocks / the diff
+        // baseline, so a save right after a preview emits ZERO ops (doctrine D5).
+        // We hand the previews to the WC's applyTaskPreviews(previews) if it
+        // implements one (progressive: a WC without the method simply ignores the
+        // live rows and keeps its query stub — never a crash). The rows are keyed
+        // by block_id so the WC routes each to the matching task node view.
+        this._onTaskPreview = (payload) => {
+          if (!payload || !Array.isArray(payload.previews)) return;
+          const wc = this.el.querySelector("bp-paper-canvas");
+          if (!wc || typeof wc.applyTaskPreviews !== "function") return;
+          wc.applyTaskPreviews(payload.previews);
+        };
+        this.handleEvent("bp:task-preview", this._onTaskPreview);
+
+        // Request the initial preview once the hook (and its listener above) is
+        // mounted, so the live rows land even if the server's setup-time push
+        // raced ahead of this handler's registration. Guarded to run-0 so a
+        // multi-run paper fires exactly ONE request, not one per wrapper. The
+        // per-block task-query field can push the SAME event with phx-debounce
+        // to drive the ~500ms re-resolve on a query edit.
+        if (this.el.id === "paper-canvas-run-0") {
+          this.pushEvent("task-preview-refresh", {});
+        }
       },
       destroyed() {
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);

@@ -236,6 +236,12 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
 
+  # t9: live task-block preview — the canvas hook requests fresh resolved rows on
+  # mount and ~500ms-debounced after a query edit; we push them on the parallel
+  # bp:task-preview channel (display only, never the save baseline — D5).
+  def handle_event("task-preview-refresh", _params, socket),
+    do: Paper.task_preview_refresh(socket)
+
   # lvw-t2 (D4): accept-baseline control on a drifted valueref in the paper
   # view — an ifRev-guarded, fallback-only patch on the HOSTING paper.
   def handle_event("valueref-accept-baseline", params, socket),

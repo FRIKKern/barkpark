@@ -39,6 +39,84 @@ defmodule Barkpark.PortableDoc.TaskResolver do
 
   def resolve(blocks, _fetch), do: blocks
 
+  @doc """
+  Build the LIVE-TASK PREVIEW channel for `blocks` — the DISPLAY-ONLY twin of
+  `resolve/2`. Where `resolve/2` REPLACES each `query` with a `snapshot` IN PLACE
+  (the reader / `?resolve=tasks` render path, which persists nothing), the Studio
+  editor must NOT do that: the continuous canvas diffs every save against the
+  SOURCE blocks (the unresolved `query` blocks). If a resolved snapshot entered
+  that baseline every save would persist stale rows into the doc and break
+  byte-stability (doctrine D5/D3). So `preview/2` leaves `blocks` UNTOUCHED and
+  returns a SEPARATE, FLAT list of id-keyed preview entries the editor pushes to
+  the task-block node views on a parallel channel:
+
+    * `%{"block_id" => id, "type" => t, "snapshot" => rows}` — a `tasks` /
+      `task-list` / `task-board` / `roadmap` block carrying a live `query`.
+    * `%{"block_id" => id, "type" => "task-detail", "task" => task}` — the first
+      matched row (or `%{}` when none match).
+    * `%{"block_id" => id, "type" => t, "error" => true}` — the fetch RAISED
+      (Tasks plugin off / substrate error): a quiet stub note, never a crash.
+
+  Only query-carrying blocks WITH a stable `id` produce an entry (the id keys the
+  node view; an un-addressable block is skipped). An author-pinned literal
+  `snapshot`/`task` (no `query`) is absent from the result — it already carries
+  its rows, so there is nothing to preview live. The input `blocks` are never
+  returned nor mutated: `preview/2` yields ONLY the previews.
+  """
+  def preview(blocks, fetch) when is_list(blocks) and is_function(fetch, 1) do
+    collect_previews(blocks, fetch)
+  end
+
+  def preview(_blocks, _fetch), do: []
+
+  defp collect_previews(blocks, fetch) do
+    Enum.flat_map(blocks, &preview_block(&1, fetch))
+  end
+
+  defp preview_block(%{"type" => type, "query" => query, "id" => id}, fetch)
+       when type in @snapshot_types and is_map(query) and is_binary(id) and id != "" do
+    [preview_entry(id, type, query, fetch, :snapshot)]
+  end
+
+  defp preview_block(%{"type" => @detail_type, "query" => query, "id" => id}, fetch)
+       when is_map(query) and is_binary(id) and id != "" do
+    [preview_entry(id, @detail_type, query, fetch, :detail)]
+  end
+
+  # A container block (columns/section/…) can nest task blocks in `children`.
+  defp preview_block(%{"children" => children}, fetch) when is_list(children) do
+    collect_previews(children, fetch)
+  end
+
+  defp preview_block(_block, _fetch), do: []
+
+  # Run the block's fetch on a rescue boundary: a raising fetcher (Tasks plugin
+  # off / substrate error) degrades to an `{ error: true }` stub entry so the node
+  # view shows a quiet note instead of the whole preview push crashing.
+  defp preview_entry(id, type, query, fetch, kind) do
+    base = %{"block_id" => id, "type" => type}
+
+    try do
+      rows = query |> fetch.() |> List.wrap()
+
+      case kind do
+        :snapshot ->
+          Map.put(base, "snapshot", rows)
+
+        :detail ->
+          task =
+            case rows do
+              [first | _] -> first
+              [] -> %{}
+            end
+
+          Map.put(base, "task", task)
+      end
+    rescue
+      _ -> Map.put(base, "error", true)
+    end
+  end
+
   defp resolve_block(%{"type" => type, "query" => query} = block, fetch)
        when type in @snapshot_types and is_map(query) do
     rows = query |> fetch.() |> List.wrap()

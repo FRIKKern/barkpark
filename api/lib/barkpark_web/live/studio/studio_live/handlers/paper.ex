@@ -136,6 +136,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_ops(_params, socket), do: {:noreply, socket}
 
   @doc """
+  t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed
+  the live rows the instant the editor opens) and again ~500ms-debounced after an
+  edit that may have changed a task block's `query`. We re-run the resolver under
+  the session scope and push fresh id-keyed rows on the `bp:task-preview` channel.
+
+  Read-only: never writes, never touches the save baseline (D5) — a pure display
+  refresh. No-op when the canvas flag is OFF (Shared.push_task_previews gates it).
+  """
+  def task_preview_refresh(socket) do
+    {:noreply, Shared.push_task_previews(socket)}
+  end
+
+  @doc """
   ACCEPT-BASELINE (lvw-t2, D4 ratified): the walker-emitted control on a
   DRIFTED valueref clicks through to here carrying the node's identity
   (target/field) + its CURRENT pinned fallback. Delegates to

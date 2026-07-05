@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   import Phoenix.LiveView
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.{Projection, Render}
+  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -94,6 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> sync_paper_edit_doc()
             |> push_canvas_echo()
+            |> push_task_previews()
 
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
@@ -102,6 +103,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def paper_ops(socket, _ops), do: socket
+
+  @doc false
+  # t9 — LIVE TASK-BLOCK PREVIEW push. Resolve every query-carrying task block in
+  # the CURRENT editor blocks into id-keyed rows and push them to the task-block
+  # node views on the `bp:task-preview` channel — SEPARATE from the :paper_blocks
+  # stream and the canvas `data-canvas-blocks` seed. D5: DISPLAY ONLY. The blocks
+  # the canvas saves against (paper_top_level_blocks) are NEVER touched, so a save
+  # right after a preview emits ZERO ops (byte-stability, D3). No-op when the
+  # canvas flag is OFF — nothing is mounted to receive it, so the OFF path pushes
+  # nothing and stays byte-identical.
+  def push_task_previews(socket) do
+    if PaperCanvas.paper_canvas_enabled?() do
+      previews = task_previews(paper_top_level_blocks(socket), socket)
+      push_event(socket, "bp:task-preview", %{previews: previews})
+    else
+      socket
+    end
+  end
+
+  @doc false
+  # Build the id-keyed live-task previews for `blocks` under the SESSION's tenant
+  # scope. Fail-closed: `scope_opts` carries the session's workspace/project — a
+  # nil workspace resolves to ZERO rows in the fetcher (Tasks.Query.docs_for_query
+  # → Scope.scope_to_workspace), never a cross-tenant leak. The fetch may RAISE
+  # with the Tasks plugin off; `TaskResolver.preview/2` rescues each fetch into an
+  # `{ error: true }` stub, so this never crashes the LiveView. Returns ONLY the
+  # previews — `blocks` is left unresolved (the save baseline is untouched).
+  def task_previews(blocks, socket) do
+    scope = ScopeHelpers.scope_opts(socket)
+
+    TaskResolver.preview(blocks, fn query ->
+      Barkpark.Tasks.Query.rows_for_query(query, scope)
+    end)
+  end
 
   @doc false
   # Phase-4 S4a: ECHO the server-CONFIRMED blocks back to the <bp-paper-canvas>.
@@ -313,6 +348,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)),
         reset: true
       )
+      # t9: seed the LIVE task-block preview the moment the editor opens, on the
+      # parallel `bp:task-preview` channel — the source `blocks` above stay
+      # unresolved (D5). No-op when the canvas flag is OFF.
+      |> push_task_previews()
     else
       socket
       |> assign(

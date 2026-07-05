@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   """
   use ExUnit.Case, async: false
 
+  alias Barkpark.PortableDoc.TaskResolver
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   defp para(id), do: %{"id" => id, "type" => "paragraph", "content" => []}
@@ -41,6 +42,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
+
+  # t9: a task-list block is NOT canvas-eligible (it renders as a boundary
+  # widget), so it partitions to a `{:block, raw}` — and the raw block the editor
+  # mounts (and later saves) still carries its live `query`, never a snapshot.
+  defp task_list(id), do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+
+  # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
+  # task_previews wires the real Tasks.Query fetcher; here we prove the two-
+  # channel SEPARATION, not the DB).
+  defp task_rows(%{"parent_id" => "epic"}), do: [%{"title" => "a", "status" => "ready"}]
+  defp task_rows(_), do: []
 
   describe "partition_runs/1" do
     test "empty list → []" do
@@ -494,6 +506,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert ord_before == 0
       assert ord_after == 0
       assert PaperCanvas.run_id(ord_before) == PaperCanvas.run_id(ord_after)
+    end
+  end
+
+  describe "live task-block preview (t9) — parallel channel, save-stable (D5)" do
+    test "the block the editor mounts stays a RAW query boundary — no snapshot injected" do
+      blocks = [para("p1"), task_list("t1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1")]},
+               {:block, task_list("t1")},
+               {:run, [para("p2")]}
+             ]
+    end
+
+    test "resolving the preview leaves the mounted/saved blocks BYTE-IDENTICAL → an untouched save emits ZERO ops" do
+      # The exact block list the editor mounts (its save baseline).
+      baseline = [para("p1"), task_list("t1"), para("p2")]
+
+      # Computing the live preview (the parallel display channel) must NOT mutate
+      # the baseline: the previews come out on the side, keyed by block id.
+      previews = TaskResolver.preview(baseline, &task_rows/1)
+
+      assert previews == [
+               %{
+                 "block_id" => "t1",
+                 "type" => "task-list",
+                 "snapshot" => [%{"title" => "a", "status" => "ready"}]
+               }
+             ]
+
+      # The baseline is unchanged — the task block still holds its raw `query`,
+      # no `snapshot` leaked in. run-convert.js keys runToOps on THESE blocks, so
+      # a save with no author edit diffs identical source → an empty op batch.
+      assert baseline == [para("p1"), task_list("t1"), para("p2")]
+      assert Enum.at(baseline, 1)["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(Enum.at(baseline, 1), "snapshot")
     end
   end
 
