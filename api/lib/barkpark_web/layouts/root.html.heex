@@ -2414,6 +2414,15 @@
     .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
     .bp-paper-drag-grip:active { cursor: grabbing; }
     .bp-paper-dragging { opacity: 0.5; }
+    /* pdd-t2: a template-locked block's grip is inert — quiet, no grab cursor
+       (the span carries no draggable/data-drag-grip when locked). */
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip,
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:active {
+      cursor: default; opacity: 0.45;
+    }
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:hover {
+      color: inherit;
+    }
 
     /* Right-click block context menu (singleton, appended to <body>). A fixed
        overlay — ZERO layout impact at rest (`[hidden]` ⇒ display:none). Shares
@@ -2455,6 +2464,13 @@
       height: 1px; margin: 4px 6px;
       background: var(--paper-rule);
     }
+    /* pdd-t2: the calm template note shown when the menu opens on a locked
+       block (its move/delete items disable) — a quiet statement, not an error. */
+    .bp-paper-context-menu__note {
+      padding: 6px 10px; font-size: 12px;
+      color: var(--paper-ink-faint); user-select: none; cursor: default;
+    }
+    .bp-paper-context-menu__note[hidden] { display: none; }
 
     /* Edit forms — inputs read as quiet underlined text on the page, not
        boxed form controls (the page IS the form). */
@@ -4153,6 +4169,12 @@
           const tok = this.el.dataset.canvasToken;
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
+          // pdd-t2: the block AFTER this run in the full document is template-
+          // locked (e.g. the featured image right after the title run). The WC's
+          // filterTransaction reads data-locked-tail LIVE and vetoes any run
+          // GROWTH — a new node here would displace that locked follower.
+          const lockedTail = this.el.dataset.canvasLockedTail;
+          if (lockedTail != null) el.setAttribute("data-locked-tail", lockedTail);
         };
         const wc = this.el.querySelector("bp-paper-canvas");
         seedScope(wc);
@@ -4484,6 +4506,15 @@
       menu.setAttribute("role", "menu");
       menu.setAttribute("aria-label", "Block actions");
       menu.hidden = true;
+      // pdd-t2: the calm template note shown (instead of usable move/delete
+      // items) when the menu opens on a template-locked block. Hidden for
+      // ordinary blocks; static text via textContent (no user content).
+      const note = document.createElement("div");
+      note.className = "bp-paper-context-menu__note";
+      note.setAttribute("role", "presentation");
+      note.textContent = "Part of the document template";
+      note.hidden = true;
+      menu.appendChild(note);
       const items = [
         { action: "move-up", label: "Move up" },
         { action: "move-down", label: "Move down" },
@@ -4521,19 +4552,31 @@
         (hook._body || document).querySelectorAll("[data-edit-block-id]")
       );
       const idx = blocks.indexOf(block);
+      // pdd-t2: a template-locked block can't be moved or deleted; the block
+      // BELOW a locked block can't move UP (that would displace the locked
+      // block — the server would reject it). Same contract as the hover
+      // toolbar: the affordance is disabled, never offered-then-errored.
+      const locked = block.dataset.blockLocked === "true";
+      const prevLocked =
+        idx > 0 && blocks[idx - 1].dataset.blockLocked === "true";
       menu._ctx = {
         pushEvent: (ev, payload) => hook.pushEvent(ev, payload),
         blockId: block.dataset.editBlockId,
-        canUp: idx > 0,
-        canDown: idx >= 0 && idx < blocks.length - 1,
+        canUp: idx > 0 && !locked && !prevLocked,
+        canDown: idx >= 0 && idx < blocks.length - 1 && !locked,
+        canDelete: !locked,
         focusBlock: block,
       };
       menu._ownerEl = hook.el;
 
       const upBtn = menu.querySelector('[data-action="move-up"]');
       const downBtn = menu.querySelector('[data-action="move-down"]');
+      const delBtn = menu.querySelector('[data-action="delete"]');
+      const note = menu.querySelector(".bp-paper-context-menu__note");
       if (upBtn) upBtn.disabled = !menu._ctx.canUp;
       if (downBtn) downBtn.disabled = !menu._ctx.canDown;
+      if (delBtn) delBtn.disabled = !menu._ctx.canDelete;
+      if (note) note.hidden = !locked;
 
       // Show off-screen to measure, then clamp to the viewport (flip left/above
       // when the cursor is near the right/bottom edge).

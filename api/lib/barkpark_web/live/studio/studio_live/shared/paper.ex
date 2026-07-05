@@ -192,17 +192,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def paper_reorder(socket, blocks, idx, "up") when idx > 0 do
     moved = Enum.at(blocks, idx)
-    after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
-    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+    displaced = Enum.at(blocks, idx - 1)
+
+    # pdd-t2: a template-locked block holds its position — both when it is the
+    # MOVED block and when it is the block the swap would DISPLACE. The UI
+    # already hides/disables these controls; this guard keeps a stale click (or
+    # a context-menu race) a calm no-op instead of a rejected op + error flash.
+    if locked_block?(moved) or locked_block?(displaced) do
+      socket
+    else
+      after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
+
+      paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+    end
   end
 
   def paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
-    anchor_id = Map.get(Enum.at(blocks, idx + 1), "id")
-    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => anchor_id})
+    displaced = Enum.at(blocks, idx + 1)
+
+    if locked_block?(moved) or locked_block?(displaced) do
+      socket
+    else
+      anchor_id = Map.get(displaced, "id")
+
+      paper_op(socket, %{
+        "op" => "move-block",
+        "id" => Map.get(moved, "id"),
+        "after" => anchor_id
+      })
+    end
   end
 
   def paper_reorder(socket, _blocks, _idx, _dir), do: socket
+
+  # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
+  defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
 
   @doc false
   def sync_paper_edit_doc(socket) do

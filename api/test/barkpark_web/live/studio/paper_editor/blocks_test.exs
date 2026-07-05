@@ -156,6 +156,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
         "id" => "lk-body",
         "type" => "paragraph",
         "content" => [%{"type" => "text", "value" => "Editable body."}]
+      },
+      %{
+        "id" => "lk-body2",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Second body."}]
       }
     ]
 
@@ -190,6 +195,72 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     assert body =~ ~s(data-test-id="paper-move-up")
     assert body =~ ~s(data-test-id="paper-move-down")
     refute body =~ ~s(data-test-id="paper-locked-note")
+  end
+
+  test "a locked block's grip is inert; the block below the prefix can't move up",
+       %{conn: conn} do
+    slug = seed_locked_paper!()
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{slug}"))
+    edit_html = open_editor(view)
+
+    # The locked title: no drag affordance (no data-drag-grip, not draggable),
+    # a data-block-locked marker (context menu + CSS hook), the template hint.
+    title = block_html(edit_html, "lk-title")
+    refute title =~ ~s(data-drag-grip)
+    refute title =~ ~s(draggable="true")
+    assert title =~ ~s(data-block-locked="true")
+    assert title =~ "Part of the document template"
+
+    # The first UNLOCKED block sits directly below the locked featured image —
+    # moving it up would displace the locked block, so its ▲ is disabled while
+    # ▼ and drag stay live.
+    body = block_html(edit_html, "lk-body")
+    assert body =~ ~s(data-drag-grip)
+    refute body =~ ~s(data-block-locked)
+    [_, up_tag] = Regex.run(~r/(<button[^>]*phx-value-dir="up"[^>]*>)/s, body)
+    assert up_tag =~ "disabled"
+    [_, down_tag] = Regex.run(~r/(<button[^>]*phx-value-dir="down"[^>]*>)/s, body)
+    refute down_tag =~ "disabled"
+  end
+
+  test "locked placement holds against raw events: drag clamps, moves and deletes no-op",
+       %{conn: conn} do
+    slug = seed_locked_paper!()
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{slug}"))
+    open_editor(view)
+
+    ids = fn ->
+      Content.paper_blocks(slug, @dataset) |> Enum.map(& &1["id"])
+    end
+
+    assert ids.() == ["lk-title", "lk-featured", "lk-body", "lk-body2"]
+
+    # 1) A drop at the very front (after-id "") would land the block ABOVE the
+    #    locked prefix — it CLAMPS to directly below the featured image instead
+    #    of erroring: the calm nearest-allowed landing.
+    render_hook(view, "paper-move-block-to", %{"id" => "lk-body2", "after-id" => ""})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
+
+    # 2) A drop between the locked blocks clamps the same way (idempotent here).
+    render_hook(view, "paper-move-block-to", %{"id" => "lk-body2", "after-id" => "lk-title"})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
+
+    # 3) Dragging a LOCKED block anywhere is a calm no-op.
+    render_hook(view, "paper-move-block-to", %{"id" => "lk-title", "after-id" => "lk-body"})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
+
+    # 4) A stale ▲ on the first unlocked block (its button is disabled in the
+    #    DOM) is a calm no-op — it would displace the locked featured image.
+    render_click(view, "paper-move-block", %{"id" => "lk-body2", "dir" => "up"})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
+
+    # 5) A stale delete on a locked block is a calm no-op.
+    render_click(view, "paper-delete-block", %{"id" => "lk-featured"})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body2", "lk-body"]
+
+    # 6) The guards are surgical: unlocked blocks still reorder below the prefix.
+    render_hook(view, "paper-move-block-to", %{"id" => "lk-body", "after-id" => "lk-featured"})
+    assert ids.() == ["lk-title", "lk-featured", "lk-body", "lk-body2"]
   end
 
   test "reordering a block changes the order", %{conn: conn} do

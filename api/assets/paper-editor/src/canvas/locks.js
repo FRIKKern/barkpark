@@ -39,14 +39,38 @@ export function lockedIndexMap(doc) {
   return map;
 }
 
+// Top-level child count of a ProseMirror-shaped doc (real PM docs expose
+// `childCount`; a test fixture may only offer `forEach`).
+function childCount(doc) {
+  if (!doc) return 0;
+  if (typeof doc.childCount === "number") return doc.childCount;
+  let n = 0;
+  if (typeof doc.forEach === "function") doc.forEach(() => n++);
+  return n;
+}
+
 // True when a transaction would DELETE a locked node (its id vanishes) or MOVE it
 // (its index changes). Additive (D3): a doc with NO locked blocks is never vetoed,
 // so papers without a template behave byte-identically. A pure content edit keeps
 // the locked node's id + index, so it passes. A selection-only tx (no doc change)
 // passes immediately.
-export function transactionVetoesLock(tr, state) {
+//
+// `lockedTail` (pdd-t2): the run's host tells the veto that the block DIRECTLY
+// AFTER this run in the full document is template-locked. This matters because
+// the veto is RUN-scoped: in the real Studio layout the locked featured image is
+// a non-canvas boundary block, so the locked title sits ALONE in run 0 and this
+// veto cannot see the featured block a run-growing edit would displace. When
+// lockedTail is set, GROWING the run (Enter at the end of the locked title, a
+// multi-paragraph paste) is vetoed too — any new top-level node in this run
+// pushes the locked follower down in the full doc, which the server invariant
+// (patch.ex check_locked_placement) would reject anyway; vetoing here keeps it a
+// calm local no-op instead of a failed save. Shrinking (a merge/delete inside
+// the run) never displaces a FOLLOWING block and stays allowed.
+export function transactionVetoesLock(tr, state, lockedTail = false) {
   if (!tr || !tr.docChanged) return false;
-  const before = lockedIndexMap(state && state.doc);
+  const stateDoc = state && state.doc;
+  if (lockedTail && childCount(tr.doc) > childCount(stateDoc)) return true;
+  const before = lockedIndexMap(stateDoc);
   if (before.size === 0) return false;
   const after = lockedIndexMap(tr.doc);
   for (const [id, idx] of before) {

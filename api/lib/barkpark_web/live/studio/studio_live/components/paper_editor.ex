@@ -183,10 +183,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               wrapper (it re-renders on each block-list change). --%>
         <%= for segment <- @segments do %>
           <%= case segment do %>
-            <% {:run, run_blocks, run_ordinal} -> %>
+            <% {:run, run_blocks, run_ordinal, locked_tail} -> %>
               <.canvas_run
                 run_blocks={run_blocks}
                 run_ordinal={run_ordinal}
+                locked_tail={locked_tail}
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
               />
@@ -195,6 +196,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 block={block}
                 index={index}
                 last_index={@last_index}
+                prev_locked={
+                  index > 0 and
+                    Map.get(Enum.at(@free_blocks, index - 1) || %{}, "locked") == true
+                }
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
               />
@@ -208,14 +213,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           class="bp-paper-edit-block"
           data-edit-block-id={Map.get(block, "id")}
           data-block-type={Map.get(block, "type")}
+          data-block-locked={Map.get(block, "locked") == true && "true"}
         >
           <div class="bp-paper-edit-toolbar">
+            <%!-- pdd-t2: a locked block's grip is INERT — no draggable, no
+                  data-drag-grip, a template hint instead of "Drag to reorder"
+                  (same contract as edit_block/1 below). --%>
             <span
               class="bp-paper-drag-grip"
-              data-drag-grip
-              draggable="true"
-              title="Drag to reorder"
-              aria-label="Drag to reorder block"
+              data-drag-grip={Map.get(block, "locked") != true}
+              draggable={Map.get(block, "locked") != true && "true"}
+              title={
+                if Map.get(block, "locked") == true,
+                  do: "Part of the document template",
+                  else: "Drag to reorder"
+              }
+              aria-label={
+                if Map.get(block, "locked") == true,
+                  do: "Part of the document template",
+                  else: "Drag to reorder block"
+              }
               data-test-id="paper-drag-grip"
             >⋮⋮</span>
             <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
@@ -223,7 +240,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <%!-- Doctrine template lock (pdd-t2): a locked mandated block can't
                     be moved or deleted, so its ▲▼/× controls are HIDDEN and a calm
                     lock note stands in their place — chrome, never an error. The
-                    server backstops it either way (patch.ex). --%>
+                    server backstops it either way (patch.ex). The block BELOW a
+                    locked block disables ▲ (moving it up would displace the
+                    locked block — an affordance the server would reject). --%>
               <button
                 :if={Map.get(block, "locked") != true}
                 type="button"
@@ -232,7 +251,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="up"
-                disabled={index == 0}
+                disabled={
+                  index == 0 or
+                    Map.get(Enum.at(@free_blocks, index - 1) || %{}, "locked") == true
+                }
                 data-test-id="paper-move-up"
               >▲</button>
               <button
@@ -360,8 +382,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         {:block, block}, i -> {{:block, block, i}, i + 1}
       end)
 
-    out
+    annotate_locked_tails(out)
   end
+
+  # pdd-t2: stamp each `{:run, …}` with whether the segment DIRECTLY AFTER it is
+  # a template-locked boundary block (the locked featured image right after the
+  # title run is THE case — `image` is not canvas-eligible, so the locked title
+  # rides alone in run 0 and the run's transaction veto cannot see the featured
+  # block a run-growing edit would displace). The flag rides to the canvas as
+  # `data-locked-tail`, where locks.js vetoes run GROWTH. Two runs are never
+  # adjacent (runs are maximal), so only the run→block seam needs a look-ahead.
+  defp annotate_locked_tails([{:run, blocks, ordinal} | rest]) do
+    locked_tail =
+      case rest do
+        [{:block, block, _index} | _] -> Map.get(block, "locked") == true
+        _ -> false
+      end
+
+    [{:run, blocks, ordinal, locked_tail} | annotate_locked_tails(rest)]
+  end
+
+  defp annotate_locked_tails([segment | rest]), do: [segment | annotate_locked_tails(rest)]
+  defp annotate_locked_tails([]), do: []
 
   # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
   # phx-update="ignore" wrapper is KEYED BY THE RUN'S ORDINAL (Bug #1a: a STABLE
@@ -375,6 +417,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # push_canvas_echo keys each run by the SAME ordinal so it routes to this wrapper.
   attr(:run_blocks, :list, required: true)
   attr(:run_ordinal, :integer, required: true)
+  # pdd-t2: true when the block DIRECTLY AFTER this run is template-locked (the
+  # featured image boundary after the title run). Rides to the canvas WC as
+  # data-locked-tail via the hook; locks.js then vetoes any run GROWTH (a new
+  # node in this run would displace the locked follower — the server invariant
+  # would reject the resulting insert anyway; the veto keeps it a calm no-op).
+  attr(:locked_tail, :boolean, default: false)
   # The picker FETCH-SCOPE for any field-image / field-reference riding this run. The
   # canvas mounts those pickers (bp-media-picker / bp-reference-picker) as control-atom
   # node-views; each WC fetches its own data over HTTP scoped by a dataset (+ a bearer
@@ -399,6 +447,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-blocks={Jason.encode!(@run_blocks)}
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
+      data-canvas-locked-tail={@locked_tail && "true"}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -414,6 +463,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:block, :map, required: true)
   attr(:index, :integer, required: true)
   attr(:last_index, :integer, required: true)
+  # pdd-t2: whether the block DIRECTLY ABOVE this one is template-locked. Moving
+  # this block up would displace that locked block (the server invariant rejects
+  # it), so the ▲ control disables — the affordance is never offered and then
+  # denied with an error flash.
+  attr(:prev_locked, :boolean, default: false)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
 
@@ -423,14 +477,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       class="bp-paper-edit-block"
       data-edit-block-id={Map.get(@block, "id")}
       data-block-type={Map.get(@block, "type")}
+      data-block-locked={Map.get(@block, "locked") == true && "true"}
     >
       <div class="bp-paper-edit-toolbar">
+        <%!-- pdd-t2: a locked block's grip is INERT — no draggable, no
+              data-drag-grip (the sortable hook cancels any drag not started on
+              a grip), a template hint instead of "Drag to reorder". Kept in the
+              row so the toolbar keeps its shape. --%>
         <span
           class="bp-paper-drag-grip"
-          data-drag-grip
-          draggable="true"
-          title="Drag to reorder"
-          aria-label="Drag to reorder block"
+          data-drag-grip={Map.get(@block, "locked") != true}
+          draggable={Map.get(@block, "locked") != true && "true"}
+          title={
+            if Map.get(@block, "locked") == true,
+              do: "Part of the document template",
+              else: "Drag to reorder"
+          }
+          aria-label={
+            if Map.get(@block, "locked") == true,
+              do: "Part of the document template",
+              else: "Drag to reorder block"
+          }
           data-test-id="paper-drag-grip"
         >⋮⋮</span>
         <span class="bp-paper-edit-kind"><%= Map.get(@block, "type") %></span>
@@ -446,7 +513,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="up"
-            disabled={@index == 0}
+            disabled={@index == 0 or @prev_locked}
             data-test-id="paper-move-up"
           >▲</button>
           <button

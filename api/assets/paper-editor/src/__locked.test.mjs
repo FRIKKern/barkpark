@@ -210,6 +210,43 @@ check("veto PASSES a selection-only transaction (no doc change)", () => {
   assert.equal(transactionVetoesLock(tr, state), false);
 });
 
+// ── 4) lockedTail: run growth displaces the locked FOLLOWER ──────────────────
+//
+// In the real Studio layout the featured image ("image" is not canvas-eligible)
+// is a run BOUNDARY, so the locked title sits ALONE in run 0 and this run-scoped
+// veto cannot see the locked featured block a run-growing edit would displace.
+// The host stamps data-locked-tail on such a run; growth is then vetoed too.
+
+check("lockedTail: growing the run (Enter at the locked title's end) is vetoed", () => {
+  const state = { doc: mkDoc([lockedN("t")]) };
+  const tr = { docChanged: true, doc: mkDoc([lockedN("t"), node("new")]) };
+  assert.equal(transactionVetoesLock(tr, state, true), true);
+});
+
+check("no lockedTail: the same growth passes (nothing locked follows the run)", () => {
+  const state = { doc: mkDoc([lockedN("t")]) };
+  const tr = { docChanged: true, doc: mkDoc([lockedN("t"), node("new")]) };
+  assert.equal(transactionVetoesLock(tr, state), false);
+});
+
+check("lockedTail: an in-place content edit (same node count) still passes", () => {
+  const state = { doc: mkDoc([lockedN("t")]) };
+  const tr = { docChanged: true, doc: mkDoc([lockedN("t")]) };
+  assert.equal(transactionVetoesLock(tr, state, true), false);
+});
+
+check("lockedTail: SHRINKING the run passes (a merge/delete displaces nothing after it)", () => {
+  const state = { doc: mkDoc([lockedN("t"), node("b")]) };
+  const tr = { docChanged: true, doc: mkDoc([lockedN("t")]) };
+  assert.equal(transactionVetoesLock(tr, state, true), false);
+});
+
+check("lockedTail: growth is vetoed even when the run itself holds no locked node", () => {
+  const state = { doc: mkDoc([node("a")]) };
+  const tr = { docChanged: true, doc: mkDoc([node("a"), node("b")]) };
+  assert.equal(transactionVetoesLock(tr, state, true), true);
+});
+
 // ── done ──────────────────────────────────────────────────────────────────────
 if (failures > 0) {
   console.log(`\n${failures} FAILED`);

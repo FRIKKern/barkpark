@@ -541,7 +541,18 @@ class BpPaperCanvas extends HTMLElement {
         // deletes or moves a locked mandated block (returning false from
         // filterTransaction drops the whole tx). Content edits inside a locked
         // block pass. Additive: no-op on papers without locked blocks (D3).
-        filterTransaction: (tr, state) => !transactionVetoesLock(tr, state),
+        // data-locked-tail (stamped by the BarkparkPaperCanvas hook when the
+        // block AFTER this run in the full document is locked — e.g. the
+        // featured image right after the title run) additionally vetoes any
+        // run GROWTH, since a new node here would displace that locked
+        // follower. Read live off the attribute so hook/upgrade ordering can
+        // never race the Editor construction.
+        filterTransaction: (tr, state) =>
+          !transactionVetoesLock(
+            tr,
+            state,
+            this.getAttribute("data-locked-tail") === "true",
+          ),
       },
       onUpdate: () => {
         this._scheduleEmit();

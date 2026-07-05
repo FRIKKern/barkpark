@@ -87,6 +87,54 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     assert {:ok, _} = Patch.apply_patches(blocks, [%{"op" => "remove-block", "id" => "p1"}])
   end
 
+  test "ops: no op may DISPLACE a locked block — inserts into the prefix, moves to head, replace-away" do
+    blocks = Template.template_blocks("t") ++ [%{"id" => "p1", "type" => "paragraph"}]
+    new_block = %{"id" => "n1", "type" => "paragraph"}
+
+    # insert-after the locked title lands BETWEEN title and featured — it would
+    # push the locked featured from index 1 to 2 (the exact op a canvas Enter at
+    # the end of the title run emits). Rejected as a locked-block violation.
+    assert {:error, {:locked_block, "tpl-featured", "insert-after"}} =
+             Patch.apply_patches(blocks, [
+               %{"op" => "insert-after", "afterId" => "tpl-title", "block" => new_block}
+             ])
+
+    # moving an UNLOCKED block to the head displaces the whole locked prefix.
+    assert {:error, {:locked_block, _id, "move-block"}} =
+             Patch.apply_patches(blocks, [%{"op" => "move-block", "id" => "p1", "after" => nil}])
+
+    # replace-block may not swap a locked block for an unlocked one — wholesale
+    # replace would otherwise be a delete (and an unlock) in disguise.
+    assert {:error, {:locked_block, "tpl-title", "replace-block"}} =
+             Patch.apply_patches(blocks, [
+               %{
+                 "op" => "replace-block",
+                 "id" => "tpl-title",
+                 "block" => %{"id" => "tpl-title", "type" => "heading", "text" => "x"}
+               }
+             ])
+
+    # BELOW the locked prefix the doc stays fully mutable: insert directly after
+    # the featured block, and append at the end.
+    assert {:ok, inserted} =
+             Patch.apply_patches(blocks, [
+               %{"op" => "insert-after", "afterId" => "tpl-featured", "block" => new_block}
+             ])
+
+    assert Enum.map(inserted, & &1["id"]) == ["tpl-title", "tpl-featured", "n1", "p1"]
+
+    assert {:ok, _} =
+             Patch.apply_patches(blocks, [%{"op" => "append-block", "block" => new_block}])
+
+    # D3 additive: a lock-free doc keeps head-moves exactly as before.
+    free = [%{"id" => "a", "type" => "paragraph"}, %{"id" => "b", "type" => "paragraph"}]
+
+    assert {:ok, moved} =
+             Patch.apply_patches(free, [%{"op" => "move-block", "id" => "b", "after" => nil}])
+
+    assert Enum.map(moved, & &1["id"]) == ["b", "a"]
+  end
+
   # ── end-to-end through upsert_paper + the before_save gate ──────────────
 
   test "upsert_paper: blank new paper is seeded; title derives; gate blocks a violated save" do
