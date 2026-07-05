@@ -29,17 +29,17 @@
  * run `scripts/paper-editor-mirror-check.sh --write`. */
 /* BEGIN GENERATED: paper-surface (from api/assets/paper-surface/paper-surface.css — do not edit by hand; run scripts/paper-editor-mirror-check.sh --write) */
 :root, :host {
-  --paper-bg: #fefdf9;
-  --paper-bg-deep: #f5f2e9;
-  --paper-ink: #1f1a14;
-  --paper-ink-soft: #5b524a;
-  --paper-ink-faint: #8a8278;
-  --paper-rule: rgba(31, 26, 20, 0.08);
-  --paper-edit-hover: rgba(31, 26, 20, 0.10);
-  --paper-accent: #a23925;
-  --paper-accent-soft: rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg: #fefdf9;
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
   --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
   --paper-font-mono: ui-monospace, Menlo, monospace;
   --bp-tone-info-bg: #eff6ff;
@@ -76,20 +76,24 @@
   --bp-pre-radius: 4px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
+  --st-info: #2563eb;
+  --st-ok: #0d9488;
+  --st-warn: #d97706;
+  --st-danger: #dc2626;
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
-  --paper-bg: #1b1815;
-  --paper-bg-deep: #221e1a;
-  --paper-ink: #ece6dc;
-  --paper-ink-soft: #b8ad9e;
-  --paper-ink-faint: #7f7568;
-  --paper-rule: rgba(236, 230, 220, 0.10);
-  --paper-edit-hover: rgba(236, 230, 220, 0.12);
-  --paper-accent: #d97a5f;
-  --paper-accent-soft: rgba(217, 122, 95, 0.14);
-  --paper-chrome-bg: #221e1a;
-  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  --paper-bg: #0e1614;
+  --paper-bg-deep: #131d19;
+  --paper-ink: #e7ede9;
+  --paper-ink-soft: #9aaaa3;
+  --paper-ink-faint: #6c7a74;
+  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent: #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg: #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
   --bp-tone-info-bg: #172032;
   --bp-tone-info-fg: #9db8ff;
   --bp-tone-success-bg: #12241c;
@@ -100,6 +104,10 @@
   --bp-tone-danger-fg: #f08a80;
   --bp-tone-neutral-bg: #23211e;
   --bp-tone-neutral-fg: #c9c2b6;
+  --st-info: #60a5fa;
+  --st-ok: #2dd4bf;
+  --st-warn: #fbbf24;
+  --st-danger: #f87171;
 }
 /* END GENERATED: paper-surface */
 

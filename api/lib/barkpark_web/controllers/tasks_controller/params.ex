@@ -15,13 +15,17 @@ defmodule BarkparkWeb.TasksController.Params do
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.Criteria
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Tasks.Query, as: TaskQuery
 
   # ─── Query filters (index / prime / lookup) ─────────────────────────────
+  #
+  # The content-jsonb filters (kind / lifecycle / parent / parent_id / label /
+  # dataset / claim / order) live in `Barkpark.Tasks.Query` — ONE owner shared
+  # with the live-plan fetcher so the semantics can't drift. These are thin
+  # delegations. Tenancy (workspace / project / event_workspace) stays here as
+  # a Scope wrapper.
 
-  def maybe_filter_claim_worker(query, nil), do: query
-
-  def maybe_filter_claim_worker(query, worker) when is_binary(worker),
-    do: from(d in query, where: fragment("?->'claim'->>'worker'", d.content) == ^worker)
+  defdelegate maybe_filter_claim_worker(query, worker), to: TaskQuery
 
   # Tenancy: route through the ONE shared, fail-CLOSED helper (a nil
   # workspace_id yields zero rows, never every tenant's events) — the same
@@ -32,91 +36,14 @@ defmodule BarkparkWeb.TasksController.Params do
   def maybe_filter_event_workspace(query, ws_id),
     do: Scope.scope_to_workspace(query, ws_id, nil)
 
-  def maybe_filter_type(query, nil), do: query
-
-  def maybe_filter_type(query, t) when is_binary(t),
-    do: from(d in query, where: d.type == ^t)
-
-  # Fail-soft: an array-style param (?type[]=task) or any non-binary value is
-  # not a filterable scalar — apply no filter rather than 500 with a
-  # FunctionClauseError on the CLI's primary endpoint.
-  def maybe_filter_type(query, _), do: query
-
-  def maybe_filter_kind(query, nil), do: query
-
-  def maybe_filter_kind(query, k) when is_binary(k),
-    do: from(d in query, where: fragment("?->>'kind'", d.content) == ^k)
-
-  def maybe_filter_kind(query, _), do: query
-
-  def maybe_filter_lifecycle(query, nil), do: query
-
-  # Missing content.lifecycle_status defaults to "open" — matching the
-  # `COALESCE(..., 'open')` in the filter clause just below. Otherwise a
-  # task POSTed without an explicit `lifecycle_status` (the common case)
-  # would be invisible to a `status=open` list query.
-  def maybe_filter_lifecycle(query, "open") do
-    from(d in query,
-      where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open"
-    )
-  end
-
-  def maybe_filter_lifecycle(query, s) when is_binary(s),
-    do: from(d in query, where: fragment("?->>'lifecycle_status'", d.content) == ^s)
-
-  def maybe_filter_lifecycle(query, _), do: query
-
-  def maybe_filter_parent(query, nil), do: query
-
-  # phase_id matches `content.parent_id` — the ONE parent pointer (the
-  # legacy `content.parent` arm from the retired goal/phase model matched
-  # a key nothing writes for `type:task` rows; killed with the parent vs
-  # parent_id split — parent_id is a schema `reference` to another task).
-  #
-  # Prefix-agnostic parent↔doc_id matching (#7): the stored parent may be bare
-  # (`phase-448247`) while the caller passes the draft id (`drafts.phase-448247`)
-  # — or vice-versa. Strip a leading `drafts.` from BOTH the stored value and
-  # the param before comparing, so `bd ready --label phase-<n>` finds its
-  # children regardless of which side carries the prefix.
-  def maybe_filter_parent(query, p) when is_binary(p) do
-    from(d in query,
-      where:
-        fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
-          fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
-    )
-  end
-
-  def maybe_filter_parent(query, _), do: query
-
-  # C1 (task as universal node): `parent=<doc_id>` — keep only docs whose
-  # `content.parent_id` points at the given doc_id. This is the same edge
-  # the `phase_id` filter walks, but exposed under the generic
-  # `parent` param so it reads as "the child tasks of ANY task" — realizing
-  # "a goal is just a root task" and "a rail is the chronological child tasks of
-  # a task". Mirrors `maybe_filter_parent/2` EXACTLY (prefix-agnostic match on
-  # `parent_id` — the one parent pointer); the index applies chronological
-  # ordering (inserted_at ASC) when this filter is active so the result reads
-  # as that task's timeline/rail.
-  def maybe_filter_parent_id(query, nil), do: query
-
-  def maybe_filter_parent_id(query, p) when is_binary(p) do
-    from(d in query,
-      where:
-        fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
-          fragment("regexp_replace(?, '^drafts\\.', '')", ^p)
-    )
-  end
-
-  def maybe_filter_parent_id(query, _), do: query
-
-  # When `parent` is given, order chronologically (oldest first) so the slice
-  # reads as the parent task's rail/timeline. Otherwise keep the default
-  # "most recently touched first" ordering.
-  def apply_index_order(query, parent) when is_binary(parent),
-    do: from(d in query, order_by: [asc: d.inserted_at])
-
-  def apply_index_order(query, _),
-    do: from(d in query, order_by: [desc: d.updated_at])
+  # `parent`/`parent_id` are the prefix-agnostic child-of-task edge; `kind` /
+  # `lifecycle` / `label` / `order` behave as documented in `Barkpark.Tasks.Query`.
+  defdelegate maybe_filter_type(query, t), to: TaskQuery
+  defdelegate maybe_filter_kind(query, k), to: TaskQuery
+  defdelegate maybe_filter_lifecycle(query, s), to: TaskQuery
+  defdelegate maybe_filter_parent(query, p), to: TaskQuery
+  defdelegate maybe_filter_parent_id(query, p), to: TaskQuery
+  defdelegate apply_index_order(query, parent), to: TaskQuery
 
   # tt5: `label=<exact>` — keep only docs whose `content.labels` JSON array
   # CONTAINS the exact label string. Backs the `bp task` label filter
@@ -131,16 +58,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # element in the array" test — matches reliably (verified against the live
   # store). `to_jsonb(text)` builds the scalar jsonb operand inside Postgres,
   # so no client-side JSON encoding of the needle is needed.
-  def maybe_filter_label(query, nil), do: query
-  def maybe_filter_label(query, ""), do: query
-
-  def maybe_filter_label(query, label) when is_binary(label) do
-    from(d in query,
-      where: fragment("?->'labels' @> to_jsonb(?::text)", d.content, ^label)
-    )
-  end
-
-  def maybe_filter_label(query, _), do: query
+  defdelegate maybe_filter_label(query, label), to: TaskQuery
 
   # Dataset discriminator (gap #4 fix). Without it a doc_id that collides across
   # DATASETS in one workspace/project resolves by drafts-CASE ordering alone —
@@ -149,9 +67,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # resolve_doc_pk dataset branch and Graph.resolve_pk. v1 graph roots are
   # dataset-scoped to the optional `dataset` param (default: all datasets in
   # scope, published-preferred first row).
-  def maybe_filter_dataset(query, nil), do: query
-  def maybe_filter_dataset(query, ""), do: query
-  def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
+  defdelegate maybe_filter_dataset(query, dataset), to: TaskQuery
 
   # Tenancy boundary: route the workspace clause through the ONE shared,
   # fail-CLOSED helper (`Scope.scope_to_workspace/3`) — the SAME semantic the

@@ -13,7 +13,7 @@
  * Barkpark.PortableDoc.Render.Stylesheet.css/0 (compile-time @external_resource)
  * by three sinks:
  *   - Studio         barkpark_web/layouts/root.html.heex     (<%= raw(css()) %>)
- *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (parchment
+ *   - /papers reader barkpark_web/layouts/bulldocs.html.heex (bp-theme
  *                    `--paper-*` overrides layer AFTER this source)
  *   - sheet export   plugins/sheets/html.ex                  (standalone <head>)
  *
@@ -26,7 +26,7 @@
  * KEPT in root.html.heex (Studio-shell / NOT portable — Decision 4):
  *   surface CHROME (bg/color/font/size/line-height/tracking, max-width, padding,
  *     media-query padding, .bp-paper-body) — the Studio page shell; the reader
- *     owns its own 820/720px parchment shell, so surface chrome is NOT shared.
+ *     owns its own 820/720px bp-theme shell, so surface chrome is NOT shared.
  *   html[data-editor-focus] interplay, .bp-paper-editor-body typography mirror,
  *     the inline-style de-inline override hacks (a later wave deletes them),
  *     .bp-canvas-* node-view chrome, and the valueref stale-marker /
@@ -36,35 +36,35 @@
 /* ── `--paper-*` theme tokens (scoped to `.bp-paper-surface`). */
 html[data-theme="light"] .bp-paper-surface,
 html[data-theme="light"] .bp-paper-body {
-  /* A3: warm paper chrome tone — matches the original editor canvas
-     (warmer/greyer than pure white), never #fff. */
-  --paper-bg:         #fefdf9;
-  --paper-bg-deep:    #f5f2e9;
-  --paper-ink:        #1f1a14;
-  --paper-ink-soft:   #5b524a;
-  --paper-ink-faint:  #8a8278;
-  --paper-rule:       rgba(31, 26, 20, 0.08);
-  --paper-edit-hover: rgba(31, 26, 20, 0.10);
-  --paper-accent:     #a23925;
-  --paper-accent-soft: rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:  #fefdf9;
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  /* Barkpark theme (aesthetic-unification): cool near-white ground, evergreen
+     accent — the bp/Cloud profile, replacing the legacy warm parchment. */
+  --paper-bg:         #f6faf9;
+  --paper-bg-deep:    #eaf1ee;
+  --paper-ink:        #15211d;
+  --paper-ink-soft:   #55635e;
+  --paper-ink-faint:  #82918b;
+  --paper-rule:       rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent:     #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg:  #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
 }
 html[data-theme="dark"] .bp-paper-surface,
 html[data-theme="dark"] .bp-paper-body {
-  --paper-bg:         #1b1815;
-  --paper-bg-deep:    #221e1a;
-  --paper-ink:        #ece6dc;
-  --paper-ink-soft:   #b8ad9e;
-  --paper-ink-faint:  #7f7568;
-  --paper-rule:       rgba(236, 230, 220, 0.10);
-  --paper-edit-hover: rgba(236, 230, 220, 0.12);
-  --paper-accent:     #d97a5f;
-  --paper-accent-soft: rgba(217, 122, 95, 0.14);
-  --paper-chrome-bg:  #221e1a;
-  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  --paper-bg:         #0e1614;
+  --paper-bg-deep:    #131d19;
+  --paper-ink:        #e7ede9;
+  --paper-ink-soft:   #9aaaa3;
+  --paper-ink-faint:  #6c7a74;
+  --paper-rule:       rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent:     #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg:  #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
   /* Callout TONE tokens — DARK companions (authored): deepened bg, lifted fg,
-     consistent with the warm-dark token style above; kept readable-contrast.
+     consistent with the cool bp-dark token style above; kept readable-contrast.
      Light values are lifted verbatim from Util.tone_palette/1 (fallback block). */
   --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
   --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
@@ -72,26 +72,26 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;
   --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
 }
-/* Fallback so a pre-paint load with no data-theme still gets warm paper. */
+/* Fallback so a pre-paint load with no data-theme still gets the light bp theme. */
 .bp-paper-surface, .bp-paper-body {
-  --paper-bg:         #fefdf9;
-  --paper-bg-deep:    #f5f2e9;
-  --paper-ink:        #1f1a14;
-  --paper-ink-soft:   #5b524a;
-  --paper-ink-faint:  #8a8278;
-  --paper-rule:       rgba(31, 26, 20, 0.08);
-  --paper-edit-hover: rgba(31, 26, 20, 0.10);
-  --paper-accent:     #a23925;
-  --paper-accent-soft: rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:  #fefdf9;
+  --paper-bg:         #f6faf9;
+  --paper-bg-deep:    #eaf1ee;
+  --paper-ink:        #15211d;
+  --paper-ink-soft:   #55635e;
+  --paper-ink-faint:  #82918b;
+  --paper-rule:       rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent:     #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg:  #f6faf9;
   /* The ORIGINAL Portable Doc editor ships a placeholder serif woff2, so it
      actually renders in the macOS system serif (Iowan Old Style). We mirror
      that rendered face here; self-hosted Source Serif 4 stays in the stack as
      a cross-platform fallback (still @font-face'd above). */
   --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
   --paper-font-mono: ui-monospace, Menlo, monospace;
-  /* Warm paper chrome tone for the editor canvas (A3) — never pure white. */
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  /* Cool evergreen chrome tone (bp/Cloud profile) — never pure white. */
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
   /* Callout TONE tokens — LIGHT (default). Values lifted VERBATIM from
      Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
      the `bp-callout--info` modifier is the emitted default here too. Dark
@@ -292,3 +292,215 @@ html[data-theme="dark"] .bp-paper-body {
 /* Divider rule — the default; author thickness overrides via inline border-top-width. */
 .bp-paper-surface .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   TASK LIST — the Barkpark task design language (bp-task-design-language-spec)
+   Shared vocabulary with the `bp tasks` TUI: white ladder + colour-for-meaning.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Status palette tokens — ONE source, theme-aware in BOTH directions:
+   the OS default (prefers-color-scheme) AND the explicit light/dark toggle
+   (html[data-theme] stamped by the viewer, which WINS over the media query).
+   Defined at the surface so every task component inherits — no per-block copy,
+   nothing drifts, and the toggle actually moves the status colours. ── */
+.bp-paper-surface, .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body { --st-info: #2563eb; --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; }
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
+
+.bp-paper-surface .bp-tasks {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  margin: 1.6rem 0;
+}
+.bp-paper-surface .bp-tasks--empty {
+  font-family: var(--paper-font-mono); color: var(--paper-ink-faint); font-size: 0.85rem;
+  border: 1px dashed var(--paper-chrome-border); border-radius: 8px; padding: 14px; text-align: center; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-tasks__title { font-family: var(--paper-font-serif); font-weight: 600; font-size: 1.05rem; color: var(--paper-ink); margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-tasks__list { border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; }
+
+/* the glyph ladder — one shared set with the terminal */
+.bp-paper-surface .bp-g { display: inline-flex; align-items: center; justify-content: center; width: 1.35em; flex: none; font-family: var(--paper-font-mono); font-weight: 600; line-height: 1; }
+.bp-paper-surface .bp-g--open    { color: var(--paper-ink); opacity: 0.5; }   /* 50% white — backlog */
+.bp-paper-surface .bp-g--ready   { color: var(--paper-ink); }                 /* full white — unchecked */
+.bp-paper-surface .bp-g--blocked { color: var(--st-warn); font-weight: 800; } /* ! — needs something */
+.bp-paper-surface .bp-g--done    { color: var(--st-ok); }                     /* ✓ — checked */
+.bp-paper-surface .bp-g--cancel  { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-g--progress { color: var(--st-info); }
+/* the in-flight state: the TUI Braille spinner, pure CSS (no JS) */
+.bp-paper-surface .bp-g--progress::before { content: "\2801"; animation: bp-braille 0.9s steps(1) infinite; }
+@keyframes bp-braille {
+  0%  { content: "\280B"; } 10% { content: "\2819"; } 20% { content: "\2839"; } 30% { content: "\2838"; }
+  40% { content: "\283C"; } 50% { content: "\2834"; } 60% { content: "\2826"; } 70% { content: "\2827"; }
+  80% { content: "\2807"; } 90% { content: "\280F"; }
+}
+
+/* rows */
+.bp-paper-surface .bp-trow { display: flex; align-items: center; gap: 0.55rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.86rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-trow:first-child { border-top: none; }
+.bp-paper-surface .bp-trow__arr { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); margin-right: -0.3rem; }
+.bp-paper-surface .bp-trow__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-paper-surface .bp-trow--open .bp-trow__t { opacity: 0.6; }               /* backlog title recedes */
+.bp-paper-surface .bp-trow--done .bp-trow__t { color: var(--paper-ink-soft); } /* done recedes */
+.bp-paper-surface .bp-trow__m { display: flex; align-items: center; gap: 0.6rem; flex: none; }
+.bp-paper-surface .bp-trow__p { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-trow__p[data-p="1"] { color: var(--st-danger); }
+.bp-paper-surface .bp-trow__p[data-p="2"] { color: var(--st-warn); }
+.bp-paper-surface .bp-trow__cn { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-trow__w { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-info); }
+.bp-paper-surface .bp-trow__blk { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--st-warn); }
+
+/* phase headers with rollup */
+.bp-paper-surface .bp-phase { display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.9rem; background: var(--paper-bg-deep); border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-phase:first-child { border-top: none; }
+.bp-paper-surface .bp-phase__nm { font-weight: 600; font-size: 0.8rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-phase__rule { flex: 1; height: 1px; background: var(--paper-chrome-border); }
+.bp-paper-surface .bp-phase__n { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-soft); font-variant-numeric: tabular-nums; }
+
+/* momentum header — always feel progress */
+.bp-paper-surface .bp-momentum { border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 0.7rem 0.9rem; margin-bottom: 0.7rem; }
+.bp-paper-surface .bp-momentum__row { display: flex; align-items: center; gap: 1rem; font-size: 0.78rem; color: var(--paper-ink-soft); flex-wrap: wrap; }
+.bp-paper-surface .bp-momentum__i { display: inline-flex; align-items: center; gap: 0.35rem; }
+.bp-paper-surface .bp-momentum__i b { color: var(--paper-ink); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-momentum__grow { flex: 1; }
+.bp-paper-surface .bp-momentum__pct { font-weight: 800; font-size: 0.95rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-momentum__track { height: 7px; border-radius: 999px; background: var(--paper-bg-deep); overflow: hidden; margin-top: 0.5rem; }
+.bp-paper-surface .bp-momentum__fill { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--st-info), var(--st-ok), var(--st-info)); background-size: 200% 100%; animation: bp-shimmer 3s linear infinite; }
+@keyframes bp-shimmer { to { background-position: 200% 0; } }
+
+/* colour reuse for momentum count labels */
+.bp-paper-surface .bp-g--ready { color: var(--paper-ink); }
+.bp-paper-surface .bp-g--done  { color: var(--st-ok); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-surface .bp-g--progress::before, .bp-paper-surface .bp-momentum__fill { animation: none; }
+  .bp-paper-surface .bp-g--progress::before { content: "\283F"; }
+}
+
+/* ── task detail — the "open a task and SEE it" card ── */
+.bp-paper-surface .bp-tdetail {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
+}
+.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.4rem; }
+.bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tl__seg { display: inline-flex; align-items: center; gap: 0.3rem; }
+.bp-paper-surface .bp-tl__arr { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-tdetail__desc { font-size: 0.9rem; color: var(--paper-ink); line-height: 1.55; margin-top: 0.9rem; }
+.bp-paper-surface .bp-tdetail__lbl { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); font-weight: 700; margin: 1rem 0 0.45rem; }
+.bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; }
+.bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-faint); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
+.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
+.bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); }
+.bp-paper-surface .bp-rail__more { font-size: 0.72rem; color: var(--paper-ink-faint); padding-left: 0.3rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; }
+
+/* ── task board (kanban) ── */
+.bp-paper-surface .bp-board {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.bp-paper-surface .bp-board__col { background: var(--paper-bg-deep); border-radius: 10px; padding: 10px; border-top: 3px solid var(--paper-ink-faint); }
+.bp-paper-surface .bp-board__col--ready { border-top-color: var(--paper-ink); }
+.bp-paper-surface .bp-board__col--progress { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-board__col--blocked { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-board__col--done { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-board__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.bp-paper-surface .bp-board__label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
+.bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
+.bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
+.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; }
+.bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+
+/* ── roadmap (author-dated phase/task bars) ── */
+.bp-paper-surface .bp-roadmap {
+  border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 14px 16px; margin: 1.6rem 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: auto;
+}
+.bp-paper-surface .bp-rm__scale { display: flex; margin-left: 34%; border-bottom: 1px solid var(--paper-rule); padding-bottom: 5px; margin-bottom: 8px; }
+.bp-paper-surface .bp-rm__scale span { flex: 1; font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__lanes { display: flex; flex-direction: column; gap: 6px; }
+.bp-paper-surface .bp-rm__lane { display: flex; align-items: center; gap: 10px; }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__lbl { font-weight: 700; color: var(--paper-ink); }
+.bp-paper-surface .bp-rm__lane--phase .bp-rm__bar { opacity: 0.32; height: 8px; top: 8px; }
+.bp-paper-surface .bp-rm__lbl { width: 34%; flex: none; font-size: 0.78rem; color: var(--paper-ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 10px; }
+.bp-paper-surface .bp-rm__track { position: relative; flex: 1; height: 22px; background: var(--paper-bg-deep); border-radius: 5px; }
+.bp-paper-surface .bp-rm__bar { position: absolute; top: 5px; height: 12px; border-radius: 4px; min-width: 3px; }
+.bp-paper-surface .bp-rm__bar--open { background: var(--paper-ink); opacity: 0.35; }
+.bp-paper-surface .bp-rm__bar--ready { background: var(--paper-ink); opacity: 0.55; }
+.bp-paper-surface .bp-rm__bar--progress { background: var(--st-info); }
+.bp-paper-surface .bp-rm__bar--blocked { background: var(--st-warn); }
+.bp-paper-surface .bp-rm__bar--done { background: var(--st-ok); }
+.bp-paper-surface .bp-rm__bar--cancel { background: var(--paper-ink-faint); }
+.bp-paper-surface .bp-rm__today { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--st-danger); opacity: 0.6; }
+
+/* ── status legend — the shared vocabulary key ── */
+.bp-paper-surface .bp-legend {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  border: 1px solid var(--paper-chrome-border); border-radius: 10px; overflow: hidden; margin: 1.4rem 0;
+}
+.bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
+.bp-paper-surface .bp-legend__r:first-child { border-top: none; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
+.bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
+
+/* ── notes: annotated label-chip list (the "what upgraded" column) ── */
+.bp-paper-surface .bp-notes { display: flex; flex-direction: column; gap: 0.9rem; margin: 1.4rem 0; }
+.bp-paper-surface .bp-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; }
+.bp-paper-surface .bp-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border-radius: 5px; padding: 2px 7px; text-align: center; }
+.bp-paper-surface .bp-note__d { font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; }
+.bp-paper-surface .bp-note__d b { color: var(--paper-ink); font-weight: 600; }
+@media (max-width: 520px) { .bp-paper-surface .bp-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-paper-surface .bp-note__k { justify-self: start; } }
+
+/* ── terminal chrome — the bp tasks board look ── */
+.bp-paper-surface .bp-term {
+  background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; overflow: hidden; margin: 1.6rem 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 18px 44px -24px rgba(0,0,0,0.28);
+}
+.bp-paper-surface .bp-term__bar { display: flex; align-items: center; gap: 0.7rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid var(--paper-rule); background: color-mix(in srgb, var(--paper-ink) 4%, transparent); }
+.bp-paper-surface .bp-term__dots { display: inline-flex; gap: 6px; }
+.bp-paper-surface .bp-term__dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--paper-ink-faint); opacity: 0.55; }
+.bp-paper-surface .bp-term__dots i:nth-child(1) { background: #ef4444; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(2) { background: #f59e0b; opacity: 0.85; }
+.bp-paper-surface .bp-term__dots i:nth-child(3) { background: #22c55e; opacity: 0.85; }
+.bp-paper-surface .bp-term__title { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-term__live { margin-left: auto; font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--st-ok); display: inline-flex; align-items: center; gap: 5px; }
+.bp-paper-surface .bp-term__live::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--st-ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--st-ok) 22%, transparent); }
+.bp-paper-surface .bp-term__body { padding: 0.5rem 0.4rem; }
+.bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
+.bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); }
+
+/* ── columns — responsive multi-column layout ── */
+.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+@media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-cols__c { min-width: 0; }
+.bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
+
+/* ── cards: titled rule/feature card grid ── */
+.bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
+.bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-card--info { border-top-color: var(--st-info); }
+.bp-paper-surface .bp-card--ok { border-top-color: var(--st-ok); }
+.bp-paper-surface .bp-card--warn { border-top-color: var(--st-warn); }
+.bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
+.bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+
+/* ── pipeline: source → emit → gate flow ── */
+.bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }
+.bp-paper-surface .bp-pipe { display: flex; align-items: stretch; gap: 8px; min-width: min-content; }
+.bp-paper-surface .bp-pnode { flex: 1 1 0; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-surface .bp-pnode--src { border-color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-faint); font-size: 1.1rem; flex: none; }

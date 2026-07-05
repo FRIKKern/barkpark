@@ -644,6 +644,87 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Forms.form_html(b, style)}
   end
 
+  # Task list — the upgraded `bp tasks` list as a paper block. Snapshot-driven
+  # (block carries a resolved `snapshot` list, same contract as the sheet embed);
+  # the pure emitter lives in Render.Components. `"tasks"` is the canonical type;
+  # `"task-list"` is an accepted alias.
+  def compose_block(%{"type" => t} = b, _style) when t in ["tasks", "task-list"] do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.tasks_html(b)}
+  end
+
+  # Task detail — the "open a task and SEE it" card: conditional sections (meta,
+  # timeline, criteria+evidence, deps-in-words, children & papers rails). Pure,
+  # snapshot-carried (`task` map on the block).
+  def compose_block(%{"type" => "task-detail"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_detail_html(b)}
+  end
+
+  # Task board (kanban by lifecycle) and roadmap (author-dated phase/task bars).
+  def compose_block(%{"type" => "task-board"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_board_html(b)}
+  end
+
+  def compose_block(%{"type" => "roadmap"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.roadmap_html(b)}
+  end
+
+  def compose_block(%{"type" => "notes"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.notes_html(b)}
+  end
+
+  def compose_block(%{"type" => "cards"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.cards_html(b)}
+  end
+
+  def compose_block(%{"type" => "pipeline"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
+  end
+
+  # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
+  # any child blocks, with an optional keybind `footer`. Reusable frame; put a
+  # task-list inside it and you get the `bp tasks` board look in a paper.
+  def compose_block(%{"type" => "terminal"} = b, style) do
+    title = b |> Map.get("title", "") |> stringish() |> Util.escape_html()
+    footer = b |> Map.get("footer", "") |> stringish()
+    body = b |> container_children() |> render_blocks(style)
+
+    live =
+      if Map.get(b, "live") in [true, "true", "live"],
+        do: ~s|<span class="bp-term__live">live</span>|,
+        else: ""
+
+    foot =
+      if footer == "",
+        do: "",
+        else: ~s|<div class="bp-term__foot">#{Util.escape_html(footer)}</div>|
+
+    html =
+      ~s|<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">#{title}</span>#{live}</div><div class="bp-term__body">#{body}</div>#{foot}</div>|
+
+    %{"kind" => "_raw", "html" => html}
+  end
+
+  # Columns — a responsive multi-column layout. `columns` is a list of columns,
+  # each a list of blocks; stacks to one column on narrow viewports.
+  def compose_block(%{"type" => "columns"} = b, style) do
+    cols = Map.get(b, "columns") || []
+    n = max(length(List.wrap(cols)), 1)
+
+    inner =
+      cols
+      |> List.wrap()
+      |> Enum.map(fn col ->
+        ~s|<div class="bp-cols__c">#{render_blocks(List.wrap(col), style)}</div>|
+      end)
+      |> Enum.join("")
+
+    %{"kind" => "_raw", "html" => ~s|<div class="bp-cols" style="--bp-cols:#{n}">#{inner}</div>|}
+  end
+
+  def compose_block(%{"type" => "status-legend"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.status_legend_html(b)}
+  end
+
   # Unknown / unregistered block type — degrade gracefully instead of crashing
   # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
   # every body_html rebuild 500, public /papers reader). Papers are schemaless,
@@ -778,6 +859,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # This is the ONE compose helper that recurses through walk — it composes the
   # child block then renders it to a body fragment via `Render.Walk.render_body`
   # (the `doctype: false` body twin of `render_html`).
+  # Render a list of child blocks to a concatenated HTML fragment — the same
+  # compose→walk bridge `figure_html/3` uses, for container blocks (terminal /
+  # columns) that hold arbitrary other blocks.
+  defp render_blocks(blocks, style) when is_list(blocks) do
+    blocks |> Enum.map(&block_to_html(&1, style)) |> Enum.join("")
+  end
+
+  defp render_blocks(_, _), do: ""
+
+  defp block_to_html(child, style) when is_map(child) do
+    composed = compose_block(child, style)
+    pal = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
+    Walk.render_body(composed, Map.fetch!(pal, :width), pal)
+  end
+
+  defp block_to_html(_, _), do: ""
+
+  # Children of a container block: `children` (preferred) or `blocks`.
+  defp container_children(b), do: Map.get(b, "children") || Map.get(b, "blocks") || []
+
   defp figure_html(child, caption, style) do
     child_html =
       case child do
