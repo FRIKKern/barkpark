@@ -72,7 +72,18 @@ defmodule Barkpark.DataCase do
   on someone else's work.
   """
   def setup_sandbox(tags) do
-    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: not tags[:async])
+    # A test that legitimately holds its connection longer than DBConnection's
+    # 15s default (e.g. the full EDItEUR/Thema codelist seed under suite load)
+    # can raise the ceiling with `@moduletag ownership_timeout: ms` — otherwise
+    # the ownership monitor force-disconnects mid-query, poisoning a pool
+    # connection exactly like the orphan-task leak this module drains.
+    opts =
+      case tags[:ownership_timeout] do
+        nil -> [shared: not tags[:async]]
+        ms -> [shared: not tags[:async], ownership_timeout: ms]
+      end
+
+    pid = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, opts)
     test_pid = self()
 
     on_exit(fn ->
