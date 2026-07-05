@@ -184,8 +184,9 @@ func TestComposeNarrowDepth0IsBoard(t *testing.T) {
 	withChrome(t)
 	m := composeFixture()
 	m.width, m.height, m.wide = 80, 40, false
-	// Compose = the board frame inside the pane gutter (2 cols at >=56 wide,
-	// one blank top row): the inner render is byte-identical, just inset.
+	// Compose = the board frame inside the pane gutter (1 col left + 3 right
+	// at >=56 wide, one blank top row): the inner render is byte-identical,
+	// just inset.
 	inner := Render(m.board, m.ui, 76, 39, m.now())
 	var want strings.Builder
 	want.WriteByte('\n')
@@ -194,7 +195,7 @@ func TestComposeNarrowDepth0IsBoard(t *testing.T) {
 			want.WriteByte('\n')
 		}
 		if l != "" {
-			want.WriteString("  ")
+			want.WriteString(" ")
 			want.WriteString(l)
 		}
 	}
