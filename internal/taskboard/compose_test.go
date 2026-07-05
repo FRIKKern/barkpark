@@ -68,13 +68,14 @@ func composeFixture() Model {
 	}
 	return Model{
 		board: Board{
-			// The loose bucket holds active in_progress work, so it is OrphansActive
-			// (auto-expanded under wave-7's fold-by-default) — its rows stay visible
+			// The loose bucket holds active work, so it is a focus section (charter
+			// D51 / wave-11) — its FocusSet keeps the subject + its children visible
 			// for the reading-frame and wide-preview tests. Its navigable header is
 			// row 0; the subject task sits at cursor 1.
-			Orphans:       tasks,
-			OrphansActive: true,
-			Counts:        map[string]int{"in_progress": 2, "done": 1},
+			Orphans:         tasks,
+			OrphansActive:   true,
+			OrphansFocusSet: focusOf(composeSubjectID, "sse-decode", "sse-debounce", "sse-conn-dot"),
+			Counts:          map[string]int{"in_progress": 2, "done": 1},
 		},
 		ui:      UIState{Conn: ConnLive, LastSync: at("2026-07-04T17:28:00Z"), CollapsedEpics: map[string]bool{}},
 		details: details,

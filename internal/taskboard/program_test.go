@@ -14,12 +14,23 @@ import (
 
 func t(id string) Task { return Task{DocID: id, Title: id} }
 
+// focusOf builds a FocusSet map from doc ids. The hand-built fixtures set it so a
+// section renders in modeFocus showing exactly these rows (charter D51 / wave-11)
+// — the successor to the old "an Active section shows its children" default. A
+// section with no FocusSet renders header-only (modeHeader), the inactive shape.
+func focusOf(ids ...string) map[string]bool {
+	m := map[string]bool{}
+	for _, id := range ids {
+		m[id] = true
+	}
+	return m
+}
+
 // sampleBoard is a fixture exercising every row kind: two NOW cards, three
-// epics, and one loose task under an Active "(no epic)" header. Under the wave-8
-// head cap every section here is SMALL (< groupHeadMax children), so each shows
-// ALL its children by default — including the inactive epic e2, whose lone child
-// now appears (the head cap only TRIMS sections with groupHeadMax+ children; a
-// dedicated head-cap fixture, bigEpicBoard, proves the trimming/expand cycle).
+// epics, and one loose task under a focused "(no epic)" header. Each section
+// carries a FocusSet over ALL its children (charter D51 / wave-11), so every
+// child renders — the fixture proves the row structure, while bigEpicBoard (no
+// focus → header-only) proves the fold/expand cycle.
 //
 // Fresh (nothing collapsed) it flattens to 11 navigable rows:
 //
@@ -30,12 +41,13 @@ func sampleBoard() Board {
 	return Board{
 		Now: []Task{t("n1"), t("n2")},
 		Epics: []Epic{
-			{Root: t("e1"), Children: []Task{t("c1"), t("c2")}, Active: true},
-			{Root: t("e2"), Children: []Task{t("cx")}, Dormant: true}, // inactive → folded
-			{Root: t("e3"), Children: []Task{t("c3")}, Active: true},
+			{Root: t("e1"), Children: []Task{t("c1"), t("c2")}, Active: true, FocusSet: focusOf("c1", "c2")},
+			{Root: t("e2"), Children: []Task{t("cx")}, FocusSet: focusOf("cx")},
+			{Root: t("e3"), Children: []Task{t("c3")}, Active: true, FocusSet: focusOf("c3")},
 		},
-		Orphans:       []Task{t("o1")},
-		OrphansActive: true,
+		Orphans:         []Task{t("o1")},
+		OrphansActive:   true,
+		OrphansFocusSet: focusOf("o1"),
 	}
 }
 
@@ -72,8 +84,8 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
-		{rowEpicHeader, "e2"}, // inactive, but its lone child is under the head cap…
-		{rowChild, "cx"},      // …so it shows by default now (head = min(groupHeadMax, n))
+		{rowEpicHeader, "e2"}, // not Active, but carries a FocusSet (modeFocus)…
+		{rowChild, "cx"},      // …so its neighborhood child shows (charter D51 / wave-11)
 		{rowEpicHeader, "e3"},
 		{rowChild, "c3"},
 		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
@@ -131,18 +143,25 @@ func TestCursorParityShellRender(t2 *testing.T) {
 	}
 }
 
-// Folded orphans are absent from Board.Orphans by construction, so the flattened
-// visible-row list — and therefore all cursor math — never touches them. The
-// flat board has 3 NOW claims + a navigable "(no epic)" header + 42 survivors
-// (the 3 claimed in_progress rows are NOW-only after the D14 de-dup) + 55 folded,
-// so it navigates exactly 46 rows. The loose bucket auto-EXPANDS because its
-// in_progress claims make it OrphansActive (wave-7 D32/D33), and G lands on a
-// real survivor, never a folded "dn*" ghost.
+// Under wave-11 the loose bucket no longer dumps every survivor: with live claims
+// it renders a FOCUS WINDOW (charter D51) — the neighborhood around the active
+// work, bounded by focusWindowMax — instead of the ~41-row flat wall. Folded
+// orphans are absent from Board.Orphans by construction, and the focus filter
+// narrows the rest, so the navigable list is short: 3 NOW claims + the "(no epic)"
+// header + the focus neighborhood. It must never touch a folded "dn*" ghost, and
+// G must land on a real row.
 func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
-	m := testModel(BuildBoard(loadFlatSnapshot(t2), RepoContext{}, refNow))
+	b := BuildBoard(loadFlatSnapshot(t2), RepoContext{}, refNow)
+	m := testModel(b)
 	rows := m.visibleRows()
-	if len(rows) != 46 {
-		t2.Fatalf("flat board visible rows = %d, want 46 (3 NOW + orphan header + 42 survivors)", len(rows))
+	// The window is far shorter than the full survivor pile but still shows the
+	// pinned claims + the header + a real neighborhood.
+	if len(rows) <= len(b.Now)+1 {
+		t2.Fatalf("flat board visible rows = %d, want more than NOW+header (a focus window)", len(rows))
+	}
+	if len(rows) > len(b.Now)+1+focusWindowMax {
+		t2.Fatalf("flat board visible rows = %d, want <= NOW + header + focusWindowMax (%d) — the wall must not return",
+			len(rows), len(b.Now)+1+focusWindowMax)
 	}
 	for _, r := range rows {
 		if len(r.docID) >= 2 && r.docID[:2] == "dn" {
@@ -150,8 +169,8 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 		}
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 45 {
-		t2.Fatalf("G on the flat board left cursor at %d, want 45 (last of 46 rows)", m.ui.Cursor)
+	if m.ui.Cursor != len(rows)-1 {
+		t2.Fatalf("G on the flat board left cursor at %d, want %d (last row)", m.ui.Cursor, len(rows)-1)
 	}
 }
 
@@ -175,8 +194,8 @@ func clusterBoard() Board {
 	a1 := t("a1")
 	a1.TwinOf = "a2"
 	b.Clusters = []Cluster{
-		{Key: "proj:alpha", Tasks: []Task{a1, t("a2")}, Active: true},
-		{Key: "proj:beta", Tasks: []Task{t("b1")}, Active: true},
+		{Key: "proj:alpha", Tasks: []Task{a1, t("a2")}, Active: true, FocusSet: focusOf("a1", "a2")},
+		{Key: "proj:beta", Tasks: []Task{t("b1")}, Active: true, FocusSet: focusOf("b1")},
 	}
 	return b
 }
@@ -290,6 +309,7 @@ func phaseBoard() Board {
 				tp("w2a", "W2"),
 				tn("w2a1", "w2a"),
 			},
+			FocusSet: focusOf("w1a", "w1a1", "w1a2", "w2a", "w2a1"), // focus over the whole tree
 		}},
 	}
 }
@@ -323,10 +343,11 @@ func TestVisibleRowsWithPhaseAndNesting(t2 *testing.T) {
 }
 
 // bandedBoard exercises the wave-10 NAMED PHASE BANDS (W10-A): an epic whose
-// children carry phase:<n>-<slug> labels — a 7-child "1-spine" band (to force the
-// per-band head cap: 5 shown + "+2 more"), a 2-child "3-web-cli" band whose
-// members span W3/W4 titles (merged "W3–4" code), and one unphased child that
-// renders FIRST. The epic is NOT active, so the default per-band cap applies.
+// children carry phase:<n>-<slug> labels — a 7-child "1-spine" band, a 2-child
+// "3-web-cli" band whose members span W3/W4 titles (merged "W3–4" code), and one
+// unphased child that renders FIRST. FocusSet covers ALL members (charter D51 /
+// wave-11), so the epic is in modeFocus and every band renders in full (wave-11
+// deleted the per-band head cap — expand/focus reveal the whole band).
 func bandedBoard() Board {
 	tp := func(id, title, phase string) Task {
 		return Task{DocID: id, Title: title, Lifecycle: lifeOpen, Labels: []string{labelPhasePrefix + phase}}
@@ -343,13 +364,17 @@ func bandedBoard() Board {
 		tp("wc1", "wc1 W3.1 web bridge", "3-web-cli"),
 		tp("wc2", "wc2 W4.1 cli thread", "3-web-cli"),
 	}
-	return Board{Epics: []Epic{{Root: t("pe"), Children: children}}}
+	ids := make([]string, len(children))
+	for i, c := range children {
+		ids[i] = c.DocID
+	}
+	return Board{Epics: []Epic{{Root: t("pe"), Children: children, Active: true, FocusSet: focusOf(ids...)}}}
 }
 
 // TestBandedVisibleRows pins the selectable index space of a banded epic: the
-// band HEADERS and the per-band "+K more" fold are display-only (Selectable:
-// false), so the navigable list is exactly the epic header + the unphased child +
-// the 5 capped spine children + the 2 web-cli children — never a band line.
+// band HEADERS are display-only (Selectable:false), so the navigable list is
+// exactly the epic header + the unphased child + all 7 spine children + the 2
+// web-cli children — never a band line.
 func TestBandedVisibleRows(t2 *testing.T) {
 	m := testModel(bandedBoard())
 	rows := m.visibleRows()
@@ -359,7 +384,7 @@ func TestBandedVisibleRows(t2 *testing.T) {
 	}{
 		{rowEpicHeader, "pe"},
 		{rowChild, "un"},
-		{rowChild, "sp1"}, {rowChild, "sp2"}, {rowChild, "sp3"}, {rowChild, "sp4"}, {rowChild, "sp5"},
+		{rowChild, "sp1"}, {rowChild, "sp2"}, {rowChild, "sp3"}, {rowChild, "sp4"}, {rowChild, "sp5"}, {rowChild, "sp6"}, {rowChild, "sp7"},
 		{rowChild, "wc1"}, {rowChild, "wc2"},
 	}
 	if len(rows) != len(want) {
@@ -373,8 +398,9 @@ func TestBandedVisibleRows(t2 *testing.T) {
 }
 
 // TestBandedRenderStructure eyeballs the painted band frame: named headers with
-// rollups (incl the merged "W3–4"), the per-band cap fold, the unphased child
-// first, and no cancelled/blank noise.
+// whole-band rollups (incl the merged "W3–4"), the unphased child first, every
+// band member shown (wave-11 dropped the per-band cap), and no cancelled/blank
+// noise.
 func TestBandedRenderStructure(t2 *testing.T) {
 	m := testModel(bandedBoard())
 	m.ui.Conn = ConnLive
@@ -382,14 +408,14 @@ func TestBandedRenderStructure(t2 *testing.T) {
 	m.now = func() time.Time { return time.Unix(2, 0) }
 	m.width, m.height = 80, 60
 	frame := ansi.Strip(m.View())
-	for _, want := range []string{"Spine ", "W1 · 0/7", "Web CLI ", "W3–4 · 0/2", "+2 more", "unphased scaffold"} {
+	for _, want := range []string{"Spine ", "W1 · 0/7", "Web CLI ", "W3–4 · 0/2", "unphased scaffold"} {
 		if !strings.Contains(frame, want) {
 			t2.Errorf("banded frame missing %q\n%s", want, frame)
 		}
 	}
-	// The 6th and 7th spine slices are folded behind "+2 more", never rows.
-	if strings.Contains(frame, "W1.7 spine slice") {
-		t2.Errorf("spine band exceeded its per-band head cap (W1.7 should be folded)\n%s", frame)
+	// Every spine slice now renders (no per-band cap) — W1.7 is a visible row.
+	if !strings.Contains(frame, "W1.7 spine slice") {
+		t2.Errorf("focus/expanded band should show every member incl W1.7\n%s", frame)
 	}
 }
 
@@ -574,11 +600,23 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.ui.Cursor = 2 // header e1
 
-	// e1 is Active, so it shows both children by default; enter collapses it to
-	// just the header, dropping c1 + c2 → 11 rows becomes 9.
+	// e1 is a FOCUS section (its neighborhood happens to be both children). enter
+	// on a focus/header section writes an explicit EXPAND (entry=false) — charter
+	// D51/D54; since focus already shows both children the row count is unchanged
+	// (still 11), but the state is now modeExpanded.
+	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.ui.CollapsedEpics["e1"] {
+		t2.Fatal("enter on a focus header should record an explicit expand (false), not collapse")
+	}
+	if len(m.visibleRows()) != 11 {
+		t2.Fatalf("after expand: %d rows, want 11", len(m.visibleRows()))
+	}
+
+	// enter again collapses the now-expanded section to just its header, dropping
+	// c1 + c2 → 9 rows.
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if !m.ui.CollapsedEpics["e1"] {
-		t2.Fatal("enter on epic header did not collapse it")
+		t2.Fatal("second enter did not collapse the expanded epic")
 	}
 	rows := m.visibleRows()
 	if len(rows) != 9 {
@@ -586,15 +624,6 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	}
 	if rows[3].docID != "e2" { // e1 header now immediately followed by e2 header
 		t2.Fatalf("row 3 after collapse = %q, want e2 header", rows[3].docID)
-	}
-
-	// enter again expands e1 back to its full child list.
-	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if m.ui.CollapsedEpics["e1"] {
-		t2.Fatal("second enter did not un-collapse the epic")
-	}
-	if len(m.visibleRows()) != 11 {
-		t2.Fatalf("after un-collapse: %d rows, want 11", len(m.visibleRows()))
 	}
 }
 
@@ -624,38 +653,36 @@ func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	}
 }
 
-// bigEpicBoard has a single INACTIVE epic carrying more children than the head
-// cap (groupHeadMax = 5), so the head-cap default is meaningful: the section
-// paints only its first groupHeadMax children until the user expands it. It is
-// the fixture the fold/expand-cycle tests need — sampleBoard's sections are all
-// small, so their head == all and never exercise the trimming.
+// bigEpicBoard has a single INACTIVE epic (no FocusSet) carrying 7 children, so
+// under wave-11 it renders header-ONLY by default (modeHeader — the dotted-leader
+// rollup is the big-picture line). It is the fixture the fold/expand-cycle tests
+// need — sampleBoard's sections all carry a focus set so they always show rows.
 func bigEpicBoard() Board {
 	return Board{
 		Epics: []Epic{{
 			Root:     t("big"),
 			Children: []Task{t("k1"), t("k2"), t("k3"), t("k4"), t("k5"), t("k6"), t("k7")},
-		}}, // inactive → head-capped to the first 5
+		}}, // inactive, no focus → header only
 	}
 }
 
-// A section with more children than the head cap shows only a HEAD by default
-// (groupHeadMax rows); the user's explicit enter must expand it to the full list,
-// and enter again collapse it to just the header. This is the wave-8 successor to
-// the retired "wake a dormant epic" behavior — a head the user cannot open would
-// be a dead end. (Repurposed from TestEnterWakesDormantEpic; the auto-fold it
-// tested no longer exists.)
-func TestEnterExpandsHeadCappedEpic(t2 *testing.T) {
-	m := testModel(bigEpicBoard()) // 1 header + 5 head children = 6 rows
-	if got := len(m.visibleRows()); got != 6 {
-		t2.Fatalf("head-capped epic shows %d rows, want 6 (header + 5 of 7 children)", got)
+// An inactive epic renders header-ONLY by default (charter D51 / wave-11); the
+// user's explicit enter expands it to the full child list, and enter again
+// collapses it back to the header. (Repurposed from the wave-8 head-cap test; the
+// head-of-5 default it exercised is gone — an inactive section is now a single
+// big-picture line until the user opens it.)
+func TestEnterExpandsInactiveEpic(t2 *testing.T) {
+	m := testModel(bigEpicBoard()) // header only = 1 row
+	if got := len(m.visibleRows()); got != 1 {
+		t2.Fatalf("inactive epic shows %d rows, want 1 (header only)", got)
 	}
 	m.ui.Cursor = 0 // the epic header
 
-	// enter expands the head to the full child list (7 children) → 8 rows.
+	// enter expands the header to the full child list (7 children) → 8 rows.
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	rows := m.visibleRows()
 	if len(rows) != 8 {
-		t2.Fatalf("enter did not expand the head-capped epic: %d rows, want 8", len(rows))
+		t2.Fatalf("enter did not expand the inactive epic: %d rows, want 8", len(rows))
 	}
 	if rows[7].kind != rowChild || rows[7].docID != "k7" {
 		t2.Fatalf("row 7 after expand = %+v, want child k7", rows[7])
@@ -668,23 +695,25 @@ func TestEnterExpandsHeadCappedEpic(t2 *testing.T) {
 	}
 }
 
-// Regression: expanding a head-capped epic with enter must write an explicit
+// Regression: expanding an inactive epic with enter must write an explicit
 // EXPAND (CollapsedEpics entry=false), never a collapse. If that press wrote
 // entry=true (the old toggle-the-map bug), the flag would stick and keep the
-// epic folded to its header even after it goes Active (new claim → Active=true).
+// epic folded to its header even after it goes Active (new claim → focus set).
 // (Repurposed from TestWakingDormantEpicLeavesNoPhantomCollapse.)
-func TestExpandedHeadCapEpicHasNoPhantomCollapse(t2 *testing.T) {
+func TestExpandedInactiveEpicHasNoPhantomCollapse(t2 *testing.T) {
 	m := testModel(bigEpicBoard())
-	m.ui.Cursor = 0                                    // the head-capped epic header
+	m.ui.Cursor = 0                                    // the inactive epic header
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter}) // user expands it to all 7 children
 
-	// The epic goes Active on the next refetch (same board, big now Active).
+	// The epic goes Active on the next refetch (same board, big now focused).
 	b := bigEpicBoard()
 	b.Epics[0].Active = true
+	b.Epics[0].FocusSet = focusOf("k1")
 	m.board = b
 
-	// It still shows every child — the explicit expand did not become a phantom
-	// collapse (header + 7 children = 8 rows).
+	// It still shows every child — the explicit expand (entry=false, modeExpanded)
+	// wins over the focus default, so it never becomes a phantom collapse
+	// (header + 7 children = 8 rows).
 	if got := len(m.visibleRows()); got != 8 {
 		t2.Fatalf("expanded epic renders folded (phantom collapse): %d rows, want 8", got)
 	}
@@ -745,7 +774,7 @@ func TestApplySnapshotClampsCursor(t2 *testing.T) {
 	// A refetch that yields a much smaller board: one loose task under its
 	// navigable "(no epic)" header → 2 rows total.
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
-		return Board{Orphans: []Task{t("only")}}
+		return Board{Orphans: []Task{t("only")}, OrphansActive: true, OrphansFocusSet: focusOf("only")}
 	}
 	m.now = func() time.Time { return time.Unix(1000, 0) }
 	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(1000, 0)}})
@@ -771,13 +800,16 @@ func TestWindowResizeStoresDimensions(t2 *testing.T) {
 
 // --- act verbs: claim / close / open ----------------------------------------
 
-// activeOrphans wraps loose tasks in an EXPANDED loose bucket (OrphansActive), so
-// an act-verb test can navigate onto a task row. Under wave-7's fold-by-default
-// the "(no epic)" bucket collapses unless it owns active work, and its header is
-// now a navigable row — so the loose tasks live at cursor 1, 2, … (row 0 is the
-// header). These fixtures want the rows reachable, not the fold behavior.
+// activeOrphans wraps loose tasks in a FOCUSED loose bucket (OrphansFocusSet over
+// every task, charter D51 / wave-11), so an act-verb test can navigate onto a
+// task row. Its header is a navigable row — so the loose tasks live at cursor
+// 1, 2, … (row 0 is the header). These fixtures want the rows reachable.
 func activeOrphans(tasks ...Task) Board {
-	return Board{Orphans: tasks, OrphansActive: true}
+	ids := make([]string, len(tasks))
+	for i, tk := range tasks {
+		ids[i] = tk.DocID
+	}
+	return Board{Orphans: tasks, OrphansActive: true, OrphansFocusSet: focusOf(ids...)}
 }
 
 // readyTask is a claimable row (the board overlays "ready" onto queue-ready
@@ -825,30 +857,20 @@ func TestClaimKeyOnReadyRowFiresClaimAndReconciles(t2 *testing.T) {
 	}
 }
 
-// TestClaimKeyOnReadyHeadRowClaimsThatRow is the claim-forward hero wiring
-// (wave-7 D35): with nothing claimed the pinned band IS the READY TO CLAIM head,
-// so the cursor's first stops are rowReadyClaim rows. c on the highlighted head
-// row must claim exactly THAT task — the row resolves through taskByID's ReadyHead
-// lookup even though its home section is folded away. This pins the "does c
-// actually claim the highlighted ready row?" guarantee the amendment asks for.
-func TestClaimKeyOnReadyHeadRowClaimsThatRow(t2 *testing.T) {
+// TestClaimForwardOnSpineReadyRow — claim-forward without a READY TO CLAIM band
+// (charter D52 / wave-11 — ONE list): the cursor lands on a ready row in the
+// spine and c claims exactly THAT task. Here a focused loose bucket surfaces two
+// ready rows; c on the second claims it.
+func TestClaimForwardOnSpineReadyRow(t2 *testing.T) {
 	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
-	m := testModel(Board{
-		ReadyHead:  []Task{readyTask("h1"), readyTask("h2")},
-		ReadyTotal: 2,
-	})
-	// The band is the ready head (empty NOW + ready work), and its rows are the
-	// first cursor stops — so the shell and renderer agree the cursor is on a
-	// claimable head row.
-	if !showReadyHead(m.board) {
-		t2.Fatalf("showReadyHead must hold on an empty-NOW board with ready work")
-	}
+	m := testModel(activeOrphans(readyTask("h1"), readyTask("h2")))
 	rows := m.visibleRows()
-	if len(rows) < 2 || rows[0].kind != rowReadyClaim || rows[1].kind != rowReadyClaim {
-		t2.Fatalf("first rows = %+v, want two rowReadyClaim stops", rows)
+	// row 0 is the loose-bucket header; the two ready rows follow.
+	if len(rows) != 3 || rows[1].docID != "h1" || rows[2].docID != "h2" {
+		t2.Fatalf("rows = %+v, want [header h1 h2]", rows)
 	}
 
-	m.ui.Cursor = 1 // the SECOND head row (h2) — not the default top
+	m.ui.Cursor = 2 // the SECOND ready row (h2) — not the default top
 	var gotDoc, gotWorker string
 	m.doClaim = func(_ *apiclient.Client, docID, worker string) ActionResult {
 		gotDoc, gotWorker = docID, worker
@@ -857,13 +879,13 @@ func TestClaimKeyOnReadyHeadRowClaimsThatRow(t2 *testing.T) {
 
 	m, cmd := step(t2, m, runes("c"))
 	if cmd == nil {
-		t2.Fatal("c on a ready-head row did not fire a claim command")
+		t2.Fatal("c on a ready spine row did not fire a claim command")
 	}
 	if _, ok := cmd().(actionResultMsg); !ok {
 		t2.Fatal("claim command did not produce an actionResultMsg")
 	}
 	if gotDoc != "h2" || gotWorker != "opus-9" {
-		t2.Fatalf("DoClaim got (%q,%q), want (h2,opus-9) — c must claim the HIGHLIGHTED head row", gotDoc, gotWorker)
+		t2.Fatalf("DoClaim got (%q,%q), want (h2,opus-9) — c must claim the HIGHLIGHTED ready row", gotDoc, gotWorker)
 	}
 }
 

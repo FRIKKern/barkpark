@@ -170,8 +170,10 @@ func TestBuildBoard_NowDedup_ClusterStable(t *testing.T) {
 	}
 }
 
-// TestBuildBoard_EpicOrder_NoRepo — with no git context, epics rank purely by
-// freshest member updated desc.
+// TestBuildBoard_EpicOrder_NoRepo — with no git context, epics rank
+// (Active desc, LastActivity desc) — charter D49 / wave-11. g1 and g2 both own a
+// live claim (Active), so they head the list ordered by recency (g2's t9 moved at
+// 11:30, g1's t1 at 11:00); the quiet epics follow by recency (g5, t13, g4, g3).
 func TestBuildBoard_EpicOrder_NoRepo(t *testing.T) {
 	b := BuildBoard(loadFixtureSnapshot(t), RepoContext{}, refNow)
 	got := epicRootIDs(b.Epics)
@@ -195,22 +197,23 @@ func TestBuildBoard_RepoBoost(t *testing.T) {
 
 // TestBuildBoard_ChildrenOrderAndFold — within G1, children order
 // in_progress -> ready -> blocked -> open -> recent-terminal (updated desc
-// inside each band); the 25h done row folds into DoneFolded and the 48h
-// cancelled row folds into CancelledFolded (charter wave-10 W10-B — cancelled
-// never joins the done tally, at any age), while the exactly-24h done row stays
-// visible at the bottom. t1 is a LIVE claim, so the NOW de-dup (charter D14)
-// removes it from the spine children — it renders only in the pinned NOW band —
-// while t8 (in_progress but unclaimed) stays and heads the band.
+// inside each band). G1 has exactly two done children (t5, t6), so both survive
+// as the ≤doneCueMax completion cue at the bottom (charter D50 — age no longer
+// folds a done row; nothing folds until there are more than doneCueMax done). The
+// 48h cancelled row still folds into CancelledFolded (charter wave-10 W10-B). t1
+// is a LIVE claim, so the NOW de-dup (charter D14) removes it from the spine
+// children — it renders only in the pinned NOW band — while t8 (in_progress but
+// unclaimed, worker empty) stays and heads the band.
 func TestBuildBoard_ChildrenOrderAndFold(t *testing.T) {
 	b := BuildBoard(loadFixtureSnapshot(t), RepoContext{}, refNow)
 	g1 := findEpic(t, b.Epics, "g1")
 
-	wantChildren := []string{"t8", "t2", "t3", "t4", "t7", "t5"}
+	wantChildren := []string{"t8", "t2", "t3", "t4", "t7", "t5", "t6"}
 	if got := docIDs(g1.Children); !eq(got, wantChildren) {
 		t.Fatalf("G1 children = %v, want %v", got, wantChildren)
 	}
-	if g1.DoneFolded != 1 {
-		t.Fatalf("G1 DoneFolded = %d, want 1 (t6 25h done)", g1.DoneFolded)
+	if g1.DoneFolded != 0 {
+		t.Fatalf("G1 DoneFolded = %d, want 0 (t5+t6 both fit the 2-row done cue)", g1.DoneFolded)
 	}
 	if g1.CancelledFolded != 1 {
 		t.Fatalf("G1 CancelledFolded = %d, want 1 (t16 48h cancelled)", g1.CancelledFolded)
@@ -307,31 +310,42 @@ func TestBuildBoard_Empty(t *testing.T) {
 	}
 }
 
-// TestFoldBoundary — table-driven exactness of the 24h done-fold: an age of
-// exactly 24h stays visible, one second past it folds.
-func TestFoldBoundary(t *testing.T) {
+// TestDoneCueFold — the terminal fold is AGE-INDEPENDENT (charter D50 / wave-11):
+// a section keeps at most doneCueMax freshest done rows as a completion cue and
+// folds the rest, whether the done rows are minutes or months old. A single done
+// never folds; the 3rd folds even when it is fresh (the mass-close pathology).
+func TestDoneCueFold(t *testing.T) {
 	goal := Task{DocID: "g", Kind: kindGoal, UpdatedAt: refNow}
-	cases := []struct {
-		name       string
-		childAge   time.Duration
-		wantFolded int
-		wantKept   int
-	}{
-		{"exactly 24h stays", 24 * time.Hour, 0, 1},
-		{"one second past folds", 24*time.Hour + time.Second, 1, 0},
-		{"one second under stays", 24*time.Hour - time.Second, 0, 1},
+	mkDone := func(id string, age time.Duration) Task {
+		return Task{DocID: id, ParentID: "g", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-age)}
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			child := Task{DocID: "c", ParentID: "g", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-tc.childAge)}
-			b := BuildBoard(Snapshot{Tasks: []Task{goal, child}}, RepoContext{}, refNow)
-			e := findEpic(t, b.Epics, "g")
-			if e.DoneFolded != tc.wantFolded || len(e.Children) != tc.wantKept {
-				t.Fatalf("age %v -> folded=%d kept=%d, want folded=%d kept=%d",
-					tc.childAge, e.DoneFolded, len(e.Children), tc.wantFolded, tc.wantKept)
-			}
-		})
-	}
+	t.Run("single fresh done stays (1 <= cue)", func(t *testing.T) {
+		b := BuildBoard(Snapshot{Tasks: []Task{goal, mkDone("d", time.Minute)}}, RepoContext{}, refNow)
+		e := findEpic(t, b.Epics, "g")
+		if e.DoneFolded != 0 || len(e.Children) != 1 {
+			t.Fatalf("single done: folded=%d kept=%d, want folded=0 kept=1", e.DoneFolded, len(e.Children))
+		}
+	})
+	t.Run("very old single done still stays (age no longer folds)", func(t *testing.T) {
+		b := BuildBoard(Snapshot{Tasks: []Task{goal, mkDone("d", 100*24*time.Hour)}}, RepoContext{}, refNow)
+		e := findEpic(t, b.Epics, "g")
+		if e.DoneFolded != 0 || len(e.Children) != 1 {
+			t.Fatalf("ancient single done: folded=%d kept=%d, want folded=0 kept=1", e.DoneFolded, len(e.Children))
+		}
+	})
+	t.Run("three fresh done fold to the 2-row cue, age irrelevant", func(t *testing.T) {
+		// All three <24h old — the OLD age gate kept all three; D50 folds one.
+		b := BuildBoard(Snapshot{Tasks: []Task{goal,
+			mkDone("d1", 1*time.Hour), mkDone("d2", 2*time.Hour), mkDone("d3", 3*time.Hour),
+		}}, RepoContext{}, refNow)
+		e := findEpic(t, b.Epics, "g")
+		if e.DoneFolded != 1 || len(e.Children) != doneCueMax {
+			t.Fatalf("three done: folded=%d kept=%d, want folded=1 kept=%d", e.DoneFolded, len(e.Children), doneCueMax)
+		}
+		if got := docIDs(e.Children); !eq(got, []string{"d1", "d2"}) {
+			t.Fatalf("cue = %v, want [d1 d2] (freshest two)", got)
+		}
+	})
 }
 
 // loadFlatSnapshot decodes the flat-queue fixture (live guerrilla shape: ~100
@@ -360,24 +374,24 @@ func loadFlatSnapshot(t *testing.T) Snapshot {
 	return composeSnapshot(tasks, extras, refNow)
 }
 
-// TestBuildBoard_FlatQueue — the wave-2 orphan policy against the live flat
-// shape: no goals means ZERO epics, so the whole board is the loose queue. The
-// 55 stale-done orphans fold to a single count, and the three live claims pin the
-// NOW band. The NOW de-dup (charter D14) keeps those three claimed loose leaves
-// OUT of the orphan pile, so 42 survivors remain (the 3 in_progress were all
-// claimed), band-ordered (ready -> blocked -> open -> recent-terminal).
-// TaskCount == the fetched corpus.
+// TestBuildBoard_FlatQueue — the orphan policy against the live flat shape: no
+// goals means ZERO epics, so the whole board is the loose queue. Under wave-11's
+// age-independent fold (charter D50) ALL done orphans fold except the ≤doneCueMax
+// (2) freshest, so 56 done fold (the 55 stale-done + the 3rd recent-done) and only
+// 2 done survive as the cue. The three live claims pin the NOW band; the NOW
+// de-dup (charter D14) keeps those three claimed loose leaves OUT of the orphan
+// pile, so 41 survivors remain, band-ordered. TaskCount == the fetched corpus.
 func TestBuildBoard_FlatQueue(t *testing.T) {
 	b := BuildBoard(loadFlatSnapshot(t), RepoContext{}, refNow)
 
 	if len(b.Epics) != 0 {
 		t.Fatalf("flat queue produced %d epics, want 0 (no goals)", len(b.Epics))
 	}
-	if b.OrphansFolded != 55 {
-		t.Fatalf("OrphansFolded = %d, want 55 (the stale-done pile)", b.OrphansFolded)
+	if b.OrphansFolded != 56 {
+		t.Fatalf("OrphansFolded = %d, want 56 (all done except the 2 freshest cue)", b.OrphansFolded)
 	}
-	if len(b.Orphans) != 42 {
-		t.Fatalf("visible orphans = %d, want 42 (8 ready + 4 blocked + 27 open + 3 recent done; the 3 claimed in_progress are NOW-only)", len(b.Orphans))
+	if len(b.Orphans) != 41 {
+		t.Fatalf("visible orphans = %d, want 41 (8 ready + 4 blocked + 27 open + 2 done cue; the 3 claimed in_progress are NOW-only)", len(b.Orphans))
 	}
 	if b.TaskCount != 100 {
 		t.Fatalf("TaskCount = %d, want 100 (fetched corpus)", b.TaskCount)
@@ -414,13 +428,13 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 	}
 }
 
-// TestOrphanFoldBoundary — the loose-orphan DONE fold uses the SAME exclusive
-// 24h boundary as epic children: a done orphan at exactly 24h stays visible, one
-// a second older folds, and a non-terminal orphan never folds however old.
-// Cancelled orphans fold into their OWN bucket at ANY age (charter wave-10
-// W10-B — abandoned work never renders as a row and never joins the done tally).
-func TestOrphanFoldBoundary(t *testing.T) {
-	cases := []struct {
+// TestOrphanDoneCue — the loose-orphan DONE fold is age-independent (charter
+// D50): at most doneCueMax freshest done stay as a cue, the rest fold; a single
+// done never folds however old. Cancelled orphans fold into their OWN bucket at
+// ANY age (charter wave-10 W10-B — abandoned work never renders as a row and
+// never joins the done tally). Non-terminal orphans never fold.
+func TestOrphanDoneCue(t *testing.T) {
+	single := []struct {
 		name          string
 		life          string
 		age           time.Duration
@@ -428,14 +442,13 @@ func TestOrphanFoldBoundary(t *testing.T) {
 		wantCancelled int
 		wantKept      int
 	}{
-		{"done exactly 24h stays", lifeDone, 24 * time.Hour, 0, 0, 1},
-		{"done one second past folds", lifeDone, 24*time.Hour + time.Second, 1, 0, 0},
+		{"lone done stays, any age", lifeDone, 100 * 24 * time.Hour, 0, 0, 1},
 		{"cancelled two days folds", lifeCancelled, 48 * time.Hour, 0, 1, 0},
 		{"cancelled fresh (1h) still folds away", lifeCancelled, time.Hour, 0, 1, 0},
 		{"open never folds", lifeOpen, 100 * 24 * time.Hour, 0, 0, 1},
 		{"blocked never folds", lifeBlocked, 100 * 24 * time.Hour, 0, 0, 1},
 	}
-	for _, tc := range cases {
+	for _, tc := range single {
 		t.Run(tc.name, func(t *testing.T) {
 			o := Task{DocID: "o", Lifecycle: tc.life, UpdatedAt: refNow.Add(-tc.age)}
 			b := BuildBoard(Snapshot{Tasks: []Task{o}}, RepoContext{}, refNow)
@@ -446,6 +459,20 @@ func TestOrphanFoldBoundary(t *testing.T) {
 			}
 		})
 	}
+	t.Run("three fresh done fold to the 2-row cue, age irrelevant", func(t *testing.T) {
+		tasks := []Task{
+			{DocID: "d1", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-1 * time.Hour)},
+			{DocID: "d2", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-2 * time.Hour)},
+			{DocID: "d3", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-3 * time.Hour)},
+		}
+		b := BuildBoard(Snapshot{Tasks: tasks}, RepoContext{}, refNow)
+		if b.OrphansFolded != 1 || len(b.Orphans) != doneCueMax {
+			t.Fatalf("three done orphans -> folded=%d kept=%d, want folded=1 kept=%d", b.OrphansFolded, len(b.Orphans), doneCueMax)
+		}
+		if got := docIDs(b.Orphans); !eq(got, []string{"d1", "d2"}) {
+			t.Fatalf("orphan done cue = %v, want [d1 d2] (freshest two)", got)
+		}
+	})
 }
 
 // TestOrphanBandOrder — scrambled loose tasks land band-ordered
@@ -594,13 +621,14 @@ func TestBuildBoard_ClustersLiveShape(t *testing.T) {
 	}
 
 	// Remaining orphans: the two title-untethered opens (updated desc), then the
-	// singleton-proj: onix task, then the ancient stale row. phase:-only ph1 and
-	// singleton on1 never clustered; sug1/st1 carry no cluster key.
-	if got := docIDs(b.Orphans); !eq(got, []string{"sug1", "ph1", "on1", "st1"}) {
-		t.Fatalf("orphans = %v, want [sug1 ph1 on1 st1]", got)
+	// singleton-proj: onix task, the ancient stale row, and finally the lone done
+	// orphan dn1 — kept as the ≤doneCueMax cue (charter D50 folds done by count,
+	// not age, so a single done orphan stays visible at the band-6 tail).
+	if got := docIDs(b.Orphans); !eq(got, []string{"sug1", "ph1", "on1", "st1", "dn1"}) {
+		t.Fatalf("orphans = %v, want [sug1 ph1 on1 st1 dn1]", got)
 	}
-	if b.OrphansFolded != 1 {
-		t.Fatalf("OrphansFolded = %d, want 1 (dn1 done >24h)", b.OrphansFolded)
+	if b.OrphansFolded != 0 {
+		t.Fatalf("OrphansFolded = %d, want 0 (dn1 is the lone done → fits the cue)", b.OrphansFolded)
 	}
 
 	// Twins: the two "Bootstrap job manifest" rows point mutually; the third
@@ -675,7 +703,7 @@ func TestDeriveClusters_MemberThreshold(t *testing.T) {
 	}
 	t.Run("proj two members clusters, singleton stays loose", func(t *testing.T) {
 		loose := []Task{mk("a", "proj:x"), mk("b", "proj:x"), mk("c", "proj:one")}
-		cs, rem := deriveClusters(loose, refNow)
+		cs, rem := deriveClusters(loose, refNow, nil, nil)
 		if got := clusterKeys(cs); !eq(got, []string{"proj:x"}) {
 			t.Fatalf("clusters = %v, want [proj:x]", got)
 		}
@@ -685,7 +713,7 @@ func TestDeriveClusters_MemberThreshold(t *testing.T) {
 	})
 	t.Run("plain fallback needs three carriers", func(t *testing.T) {
 		loose := []Task{mk("a", "deploy-button"), mk("b", "deploy-button"), mk("c", "deploy-button")}
-		cs, rem := deriveClusters(loose, refNow)
+		cs, rem := deriveClusters(loose, refNow, nil, nil)
 		if got := clusterKeys(cs); !eq(got, []string{"deploy-button"}) {
 			t.Fatalf("clusters = %v, want [deploy-button]", got)
 		}
@@ -695,7 +723,7 @@ func TestDeriveClusters_MemberThreshold(t *testing.T) {
 	})
 	t.Run("plain on two never keys", func(t *testing.T) {
 		loose := []Task{mk("a", "twoonly"), mk("b", "twoonly")}
-		cs, rem := deriveClusters(loose, refNow)
+		cs, rem := deriveClusters(loose, refNow, nil, nil)
 		if len(cs) != 0 {
 			t.Fatalf("clusters = %v, want none (label carried by only 2)", clusterKeys(cs))
 		}
@@ -870,22 +898,22 @@ func TestBoardStale_Count(t *testing.T) {
 	}
 }
 
-// TestBuildCluster_DoneFold — buildCluster folds a terminal member older than
-// 24h into DoneFolded and keeps a recent one, mirroring buildEpic. (BuildBoard's
-// upstream foldStaleOrphans normally removes stale terminals first, so this
-// covers the cluster fold directly.)
-func TestBuildCluster_DoneFold(t *testing.T) {
+// TestBuildCluster_DoneCue — buildCluster keeps the ≤doneCueMax FRESHEST done
+// members as a completion cue and folds the rest, AGE-INDEPENDENT (charter D50):
+// three done all <24h old still fold to one cue+tally, mirroring buildEpic.
+func TestBuildCluster_DoneCue(t *testing.T) {
 	members := []Task{
 		{DocID: "keep", Lifecycle: lifeOpen, UpdatedAt: refNow.Add(-time.Hour)},
-		{DocID: "recentdone", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-2 * time.Hour)},
-		{DocID: "olddone", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-25 * time.Hour)},
+		{DocID: "d1", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-1 * time.Hour)},
+		{DocID: "d2", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-2 * time.Hour)},
+		{DocID: "d3", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-3 * time.Hour)}, // 3rd freshest → folds despite being <24h
 	}
-	c := buildCluster("proj:k", members, refNow)
+	c := buildCluster("proj:k", members, refNow, nil, nil)
 	if c.DoneFolded != 1 {
-		t.Fatalf("DoneFolded = %d, want 1 (olddone)", c.DoneFolded)
+		t.Fatalf("DoneFolded = %d, want 1 (only the 2 freshest done survive as the cue)", c.DoneFolded)
 	}
-	if got := docIDs(c.Tasks); !eq(got, []string{"keep", "recentdone"}) {
-		t.Fatalf("kept = %v, want [keep recentdone] (open first, recent-terminal tail)", got)
+	if got := docIDs(c.Tasks); !eq(got, []string{"keep", "d1", "d2"}) {
+		t.Fatalf("kept = %v, want [keep d1 d2] (open first, 2-done cue tail newest-first)", got)
 	}
 }
 
@@ -957,64 +985,6 @@ func TestBuildBoard_OrphansActive(t *testing.T) {
 	}}, RepoContext{}, refNow)
 	if quiet.OrphansActive {
 		t.Errorf("loose bucket has no NOW work but OrphansActive is true")
-	}
-}
-
-// TestBuildBoard_ReadyHeadOrderAndCap — the claim-forward head is the top
-// readyHeadMax ready tasks across the whole corpus, priority-ascending (P0/P1
-// first; absent last) then freshest, with ReadyTotal counting every ready task
-// (wave-7 D35). in_progress/blocked/done never appear in the head.
-func TestBuildBoard_ReadyHeadOrderAndCap(t *testing.T) {
-	tasks := []Task{
-		mkT("p3a", "", "", lifeReady, "3", 5),
-		mkT("p1", "", "", lifeReady, "1", 9),
-		mkT("p0", "", "", lifeReady, "0", 1),
-		mkT("p2fresh", "", "", lifeReady, "2", 1),
-		mkT("p2stale", "", "", lifeReady, "2", 8),
-		mkT("pNone", "", "", lifeReady, "", 1), // absent priority → last
-		mkT("p3b", "", "", lifeReady, "3", 2),
-		liveClaim(mkT("ip", "", "", lifeOpen, "0", 1)), // in_progress, never in head
-		mkT("blk", "", "", lifeBlocked, "0", 1),        // blocked, never in head
-	}
-	b := BuildBoard(Snapshot{Tasks: tasks}, RepoContext{}, refNow)
-
-	if b.ReadyTotal != 7 {
-		t.Fatalf("ReadyTotal = %d, want 7 (all ready tasks; ip/blk excluded)", b.ReadyTotal)
-	}
-	if len(b.ReadyHead) != readyHeadMax {
-		t.Fatalf("ReadyHead len = %d, want %d (capped)", len(b.ReadyHead), readyHeadMax)
-	}
-	// P0, P1, then the two P2s freshest-first, then the first P3 — priority wins,
-	// recency breaks ties, absent priority (pNone) never reaches the head of 5.
-	want := []string{"p0", "p1", "p2fresh", "p2stale", "p3b"}
-	if got := docIDs(b.ReadyHead); !eq(got, want) {
-		t.Fatalf("ReadyHead = %v, want %v", got, want)
-	}
-	for _, h := range b.ReadyHead {
-		if h.Lifecycle != lifeReady {
-			t.Fatalf("ready head carries a non-ready task %q (%s)", h.DocID, h.Lifecycle)
-		}
-	}
-}
-
-// TestShowReadyHead — the pinned-band gate (wave-7 D35): the READY TO CLAIM head
-// shows only when nothing is claimed AND ready work exists; a non-empty NOW hides
-// it (one hero at a time), and an empty corpus offers neither.
-func TestShowReadyHead(t *testing.T) {
-	ready := BuildBoard(Snapshot{Tasks: []Task{mkT("r", "", "", lifeReady, "1", 1)}}, RepoContext{}, refNow)
-	if !showReadyHead(ready) {
-		t.Errorf("empty NOW + ready work should show the ready head")
-	}
-	claimed := BuildBoard(Snapshot{Tasks: []Task{
-		liveClaim(mkT("c", "", "", lifeOpen, "", 1)),
-		mkT("r", "", "", lifeReady, "1", 1),
-	}}, RepoContext{}, refNow)
-	if showReadyHead(claimed) {
-		t.Errorf("a non-empty NOW must hide the ready head (one hero at a time)")
-	}
-	empty := BuildBoard(Snapshot{Tasks: []Task{mkT("o", "", "", lifeOpen, "", 1)}}, RepoContext{}, refNow)
-	if showReadyHead(empty) {
-		t.Errorf("no ready work → no ready head")
 	}
 }
 

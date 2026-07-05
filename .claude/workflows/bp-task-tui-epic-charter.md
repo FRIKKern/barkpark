@@ -664,6 +664,131 @@ root; 9 cancelled nodes total). All claims tree- and live-verified.
     and every uncurated epic/cluster unchanged. *Why:* wave 9 shipped green-but-wrong on the live corpus
     once already (the whole reason livecorpus exists); per-slice green is never trusted without the live eye.
 
+### Wave-11 architect decisions (2026-07-05 — the ACTIVITY-FOCUS retune; wish AMENDMENT 4)
+
+The user put the wave-10 board beside a screenshot where the **auth epic dumped ~25 fresh `✓`
+rows** (they were <24h old, so the age-based "terminal >24h folds" rule let them all through) and
+said (verbatim in AMENDMENT 4): "i just want 1 list, with the stuff that been recently worked on …
+the epic/goals … based on recently worked on … we dont want to see … long list finished stuff
+blocking the view … see 3 siblings, 3 children, maybe 1,2 parents … if this is within proximity of
+another task that is active … it should be giving more perspective … we dont make many lists, but
+try to cover more that is relevant in one eye catch." All claims below were verified against the
+tree (spine.go / board.go / render.go / program.go / types.go), not trusted from strategists, and
+against a read-only guerrilla dump. This is a POLICY retune of the ONE opinionated view — no new
+toggles, no data model beyond fields on Epic/Cluster/Board.
+
+49. **`lastActivity` is the recency clock, and RECENCY RANKS sections (the wish's #2).** Define
+    `lastActivity(task) = max(UpdatedAt, Claim.ClaimedAt when claimed, and every `Event.At` whose
+    `Event.DocID` (bareID-normalized) names the task)` — all three already on the wire
+    (`Snapshot.Events` from prime's `recent_events`, `Claim.ClaimedAt`, `UpdatedAt`); ZERO new
+    fetches. `lastActivity(section) = max over the section's WHOLE member set INCLUDING folded
+    done/cancelled and the NOW-pinned claims` (computed in BuildBoard from the full `groups[root]`
+    slice + an events index, BEFORE any fold strips rows — so a mass-close's recency is not thrown
+    away with the folded rows, the exact bug that would otherwise SINK a just-worked epic once D50
+    folds its closes). Store it on `Epic.LastActivity` / `Cluster.LastActivity` / a Board field for
+    the loose bucket. `sortEpics` key becomes `(active desc, repo-mentioned desc, lastActivity
+    desc)`: **a section owning a live in_progress claim ALWAYS outranks recency alone** (the wish's
+    #1 rule; `active` = the existing `Epic.Active`/`nowSet` test), the repo boost (D7) stays as a
+    subordinate tiebreak, and `epicFreshest`/`clusterFreshest` (kept-children-only `UpdatedAt`) are
+    REPLACED by `LastActivity`. Dormant epics need no special-case — low `lastActivity` sinks them
+    naturally (the wish's "dead/dormant sinks to the bottom"). Tiers stay ordered epics → clusters →
+    orphans → dead-epic tombstones (authored structure before derived; recency orders WITHIN a
+    tier); cross-tier interleave is a deliberately-deferred refinement (bounds this wave's risk).
+    *Why:* the big picture must read top-down as "what this system is working on now → lately →
+    dormant," and events + claim-time are the recency signals `UpdatedAt` alone misses.
+
+50. **DONE NEVER FLOODS — drop the 24h age rule; age no longer grants a done row (the wish's #3,
+    the observed failure).** `buildEpic`/`buildCluster`/`foldStaleOrphans` stop gating done rows on
+    `now.Sub(UpdatedAt) > doneFoldAfter`. New rule: sort a section's terminal-DONE children by
+    `lastActivity` desc, KEEP at most `doneCueMax = 2` freshest as a dim completion cue (they ride
+    the existing `childBand==6` bottom band), fold ALL the rest into `DoneFolded` **regardless of
+    age**. Cancelled is unchanged (W10-B: `CancelledFolded`, any age, never a row). The ≤2 cue rows
+    render only when the section actually shows child rows (active-focus or explicit-expand); a
+    collapsed / inactive section shows none (D51), so the auth epic's ~25 fresh closes collapse to
+    `+23 done` instead of a wall. `doneFoldAfter` / `staleBandAfter` stay for the stale-band demotion
+    of NON-terminal rows (unchanged); only the terminal-fold age gate is deleted. *Why:* finished
+    work is a completion CUE, not the content — two freshest is the celebration, the count is the
+    honesty; this is the single most load-bearing line of the retune.
+
+51. **FOCUS WINDOWS replace the wave-8 head-of-5 (the wish's #4) — active sections show the active
+    work's NEIGHBORHOOD, inactive sections show header+rollup ONLY.** The default view of a section
+    is now a MODE, not a count:
+    - **explicit collapse** (`CollapsedEpics[key]==true`, via `h`) → 0 child rows (header only).
+    - **explicit expand** (`==false`, via `l`/`enter`) → ALL kept children (the head/per-band caps
+      lift — "expand still reveals all"; the permanent `+N done · M cancelled` fold tail stays,
+      folded terminal rows are a count, never un-folded).
+    - **no entry, ACTIVE section** → the FOCUS WINDOW: a `FocusSet map[string]bool` of kept-child
+      doc ids computed in BuildBoard. Seeds = each of the section's NOW tasks (the claims, stripped
+      from `Children` into NOW — used as context ANCHORS) plus every `blocked` kept child. Context
+      per seed, drawn from the section's kept children: its parent chain UP (≤`focusParents = 2`),
+      its `ready` siblings sharing the seed's `ParentID` (≤`focusSiblings = 3`, priority then
+      recency), its direct children (`ParentID==seed`, ≤`focusChildren = 3`). Union across ALL seeds
+      → ONE neighborhood (two active tasks in the same epic MERGE automatically — never two lists for
+      one story, the wish's explicit ask). Add the ≤2 done-cue doc ids. Cap the window at
+      `focusWindowMax ≈ 12` kept-child rows; the remainder is an honest `+N more`. Parents are in the
+      set so `nestTasks` anchors the `↳` tree (context reads "under its parent").
+    - **no entry, INACTIVE section** → 0 child rows; the dotted-leader header with its `done/total`
+      rollup IS the big-picture line (no `+N more` tail — the rollup is the summary). `l`/`enter`
+      reveals all.
+    `sectionShown(st,key,active,n) int` is replaced by a `sectionMode(...) → {collapsed, expanded,
+    focus, header}` selector both spine consumers read; `spineRows.section()` gains the mode +
+    `FocusSet` and, in `focus` mode, FILTERS the kept children to `FocusSet` BEFORE nest+band while
+    computing every band/section rollup over the WHOLE band (charter law: **a phase band appears iff
+    the window picks a row from it; band rollups stay whole-band**). `groupHeadMax` and the per-band
+    head cap are DELETED (the focus window supersedes them). *Why:* "cover more that is relevant in
+    one eye catch" — the neighborhood around live work, not an arbitrary first-5, and calm empty
+    space for everything the user has not opened.
+
+52. **KILL the READY TO CLAIM band — ONE list (the wish's #1).** Delete `renderReadyHead`,
+    `showReadyHead`, the `rowReadyClaim` kind + its branches in `visibleRows`/`flattenSpine`/
+    `activateBoard`, and the `ready_head_*.txt` goldens + their tests. `renderNowBand` renders NOW
+    when there are live claims and an honest calm all-clear otherwise (no second list). `flattenSpine`'s
+    pinned offset is always `len(b.Now)`. Claim-forward SURVIVES exactly as the wish keeps it: the
+    cursor lands on any ready row in the spine and `c` claims it (already wired), the footer still
+    teaches `c claim`, and NOW pins the claim the instant it flips in_progress. The `Board.ReadyHead`/
+    `ReadyTotal` fields + `readyHead()` are removed once the band is gone (no other consumer — the
+    header's ready count is the independent `readyCountLabel`); update the fetch/cache/board tests
+    that referenced them. *Why:* the head duplicated rows from the sections below — a second list for
+    the same tasks, the exact "many lists" the user rejected.
+
+53. **ROBUST TO BAD HYGIENE BY POLICY (the wish's #5), not by hoping the data is clean.** The retune
+    survives the two live-corpus pathologies structurally: (a) a **mass close** (20+ done in a day)
+    folds to `+N done` via D50 (age-independent) and STILL ranks its epic high via D49 (folded rows
+    keep their `lastActivity` in the section max) — the flood is impossible and the recency is
+    preserved; (b) **expired/stale claims** never enter NOW (the load-bearing in_progress-only leak
+    guard in BuildBoard — 119 expired claims correctly excluded on the live corpus, keep it) and
+    never make a section spuriously "active." The §5/§6 authoring-quality tasks (save-gate,
+    completeness score, `bp task lint`, guided editor) are the ENFORCEMENT arm that fixes hygiene at
+    the source; the board's job is to stay legible while the data is messy. *Why:* the user named the
+    flood as "maybe just bad task hygiene" — the board must not depend on good hygiene to read well.
+
+54. **NO NEW TOGGLES; explicit user overrides ALWAYS beat the automatic policy; bands compose with
+    windows.** The one opinionated view stands (calm-board law). The 3-state expand mechanics
+    (`h`/`l`/`enter` writing `CollapsedEpics`) are UNCHANGED and win over the focus/header default in
+    both directions (an explicit expand shows all even in an inactive section; an explicit collapse
+    hides all even in an active one). Phase bands (W10-A), nested `↳` subtasks (W9), the momentum
+    header + progress bar (D40), the NOW band (D14), and the semrole/glyph vocabulary (D36–D39) are
+    all untouched — this wave changes ONLY which rows a section shows and how sections rank. The ONE
+    `spineRows` producer (D42) remains the sole order+fold source both `visibleRows` and
+    `flattenSpine` consume, so cursor-parity stays STRUCTURAL through the window filter. *Why:* the
+    layout is the opinion; the retune sharpens the opinion, it does not add controls.
+
+55. **GUARD the retune on an EXTENDED real-corpus fixture with TEETH, goldens regenerated
+    deliberately.** `livecorpus_test.go` drives the guard through `BuildBoard` (so it exercises the
+    D49–D51 POLICY, not a hand-built Board) from a Snapshot carrying: a **mass-close flood** (20+
+    done <24h in one epic → must fold to `+N done`, zero flood), **two live claims in neighboring
+    subtrees of one epic** (→ prove the windows MERGE into one neighborhood, both parents' context in
+    one section), a **dormant epic** (low recency → sinks near the bottom, header+rollup only), and a
+    **recency spread** across epics (→ prove the top-down recency order). The 52/56/64/72 goldens +
+    new invariant assertions pin it: NO `READY TO CLAIM` substring anywhere, NO active section with
+    >`doneCueMax` done rows, sections in `lastActivity` order, the merged window reads as one
+    neighborhood, and the existing D-A..E / W10 invariants + `tasks`-never-truncated all still hold.
+    Verify the guard has TEETH (revert any one of D49/D50/D51/D52 → a golden or assertion fails).
+    Both cursor-parity guards + `TestCursorParityBandedEpic` + `TestCursorParityWithPhaseAndNesting`
+    stay green UNWEAKENED; the glyph-budget + semrole-parity guards stay green (no new glyphs — the
+    retune adds no vocabulary). *Why:* wave 9 shipped green-but-wrong on the live corpus once; a
+    per-slice green is never trusted without the live eye and a teeth-checked guard.
+
 ## Roadmap (integration order)
 
 | # | Slice | Size | Wave |
@@ -687,6 +812,7 @@ root; 9 cancelled nodes total). All claims tree- and live-verified.
 | 17 | Navigation shell: stack + breadcrumb + cursor grammar + adaptive compositor (D11/D12/D18) — onto the calm board | L | 6 (next wave, after subtraction lands) |
 | 21 | The detailed-direction redesign: spec vocabulary (spinner/!/✕/open-ready split/teal done) + momentum header & progress bar + phase bands & rollups + rich row & blocker badge + one spineRows builder (nested ↳) + detail/paper glyph align + full golden regen (D36–D44) | L | 9 (this wave) |
 | 22 | Sectioning: NAMED phase bands from `phase:<n>-<slug>` (ordered, rollups, merged W-range, per-band cap) + cancelled folds entirely away (done·cancelled tail + dead-epic tombstone) + momentum % excludes cancelled (D45–D48) | M | 10 (this wave) |
+| 23 | Activity-focus retune: recency ranks sections (`lastActivity` = updated∪claim∪events, fold-inclusive) + done never floods (fold-all-but-≤2, drop 24h age rule) + focus windows replace head-of-5 (active=neighborhood, inactive=header+rollup) + kill READY TO CLAIM (one list) + robust-to-bad-hygiene by policy + teeth-checked livecorpus guard (D49–D55) | L | 11 (this wave) |
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
@@ -1052,3 +1178,98 @@ one phase) still bands (named header + rollup) — harmless. The dead-epic tombs
 
 **Next:** docs slice (tui.md wave-9/10 delta + the go-1.24.2/1.25.0 drift) + the RESERVED pdrender/walker
 glyph-unify cross-surface slice remain the open TUI work.
+
+### Wave 2026-07-05c (wave 11 CUT: the activity-focus retune — architect decisions D49–D55)
+
+**The wish (AMENDMENT 4):** the user saw the auth epic dump ~25 fresh `✓` rows (the age-based
+"terminal >24h folds" rule let all the <24h closes through) and the READY TO CLAIM head duplicate
+rows from the sections below. Verdict: ONE list, ranked by recency of activity, done never floods,
+focus windows of active work + its context (3 siblings / 3 children / 1-2 parents, merged when
+actives are near), inactive sections collapse to header+rollup, robust to bad hygiene by policy.
+
+**Verified against the tree before cutting (not trusted from strategists):**
+- `Snapshot.Events` (prime `recent_events` → `{Mutation, DocID, At}`, decoded in fetch.go) is carried
+  to `Board.Events` but NEVER read by ranking — `sortEpics` uses `epicFreshest` = max `UpdatedAt`
+  over KEPT (post-fold) children only, so a mass-close's recency is ALREADY partly lost (folded-done
+  `UpdatedAt` never counts) and events are unused. D49 fixes both: `lastActivity` reads events +
+  claim-time and is computed over the FULL member set before folding.
+- The flood is `buildEpic`/`buildCluster`/`foldStaleOrphans`'s `isTerminal && now.Sub(UpdatedAt) >
+  doneFoldAfter` gate — done <24h renders as a row (childBand 6). D50 deletes the age gate.
+- The READY TO CLAIM band is `renderReadyHead` + `showReadyHead` + `rowReadyClaim`, gating the pinned
+  band when `len(Now)==0 && len(ReadyHead)>0`; `Board.ReadyHead`/`ReadyTotal`/`readyHead()` feed only
+  it (header ready count is the independent `readyCountLabel`). D52 removes the lot.
+- `sectionShown` (program.go) is the ONE shown-count rule; `spineRows.section()` (spine.go) consumes
+  `shown` and does nest+band. The focus window is a SELECTION not a count, so D51 replaces the count
+  with a `sectionMode` + `FocusSet` filter applied inside `section()` before nest+band, rollups still
+  whole-band. `groupHeadMax` / per-band cap are deleted.
+- Cursor-parity is structural through the single `spineRows` producer (D42) — the window is a filter
+  inside it, so `visibleRows` (Selectable subset) and `flattenSpine` stay in lockstep automatically.
+- `livecorpus_test.go` hand-builds a Board (isolating render); D55 drives it through `BuildBoard` so
+  the goldens actually guard the D49–D51 policy, with the flood/merge/dormant/recency fixture.
+
+**The cut — ONE large coupled slice (the whole `internal/taskboard` section policy changes at once:
+board.go ranking+fold, types.go section fields, spine.go window/mode, render.go NOW-band+section
+loops, program.go mode+visibleRows, + full golden regen). No file-disjoint companion exists — the
+window touches every layer of the one spine.** Single builder end-to-end, then a perfecter pass, then
+the REQUIRED read-only guerrilla dump at 56 and 72 (confirm the auth epic's ~25 closes fold to `+N
+done`, sections order by recency, no READY TO CLAIM, active context reads as one neighborhood; NEVER
+mutate live tasks).
+
+**What the next wave inherits if capacity runs out:** an activity-focused board; open TUI work stays
+the docs slice + the RESERVED pdrender/walker glyph-unify cross-surface slice.
+
+**D51-a (lead amendment, same wave):** a section with NO live seeds but touched within 48h
+(focusFallbackHorizon) seeds its focus window from its ≤2 freshest READY tasks (freshestReady →
+computeFocus selfSeeds) instead of collapsing to a bare header. Why: the live corpus proved the pure
+policy renders an all-headers board with zero actionable rows when nothing is in_progress — big
+picture without "what to work on next" is dead space of another kind (Amendment 4 verbatim). Sections
+older than the horizon keep the pure big-picture header. Teeth: disabling the horizon fails 8
+livecorpus assertions.
+
+
+### Wave 11 2026-07-05 (SHIPPED + integration-probed — the activity-focus retune, D49–D55)
+
+**Merged clean** onto origin/main (`b316ee63`) in a throwaway worktree, zero conflicts. All gates
+GREEN unweakened: `CGO_ENABLED=0 go build ./...`, `go vet`, `CC=clang go test` (taskboard + cli +
+cloud + setup), `CC=clang go test -race ./internal/taskboard/...`. Named guards pass: 4×
+CursorParity, RoleForParity (semrole), GlyphBudget (zero allowlist edits), LiveCorpusGolden(w52/56/
+64/72), LiveCorpusInvariants, TestActivityFocus. Deletions verified GONE from src (ReadyHead/
+readyHead/rowReadyClaim/showReadyHead/ReadyTotal/renderReadyHead/doneFoldAfter/epicFreshest/
+clusterFreshest/groupHeadMax/sectionShown/epicShown/clusterShown/orphansShown; the three
+`ready_head_*.txt` fixtures gone) — only surviving refs are comments and the intentionally-kept
+`ReadyHeadClamped` (header ready-count label, D52).
+
+**Teeth INDEPENDENTLY re-verified** (not just trusted): breaking D50 (`doneCueMax` 2→999, fold
+disabled) fails BOTH `TestLiveCorpusGolden` (frame diverges) AND `TestActivityFocus`
+(`auth DoneFolded = 0, want >=18`). One gotcha recorded for the next assessor: `go test` served a
+`(cached)` PASS under a source mutation — always add `-count=1` when teeth-checking, and note the
+D50 assertions live in `TestActivityFocus`, not `TestLiveCorpusInvariants`.
+
+**Live read-only guerrilla dump (56 + 72, 305 tasks / 195 done):** all four confirmations HOLD — the
+auth epic's 27 closes fold to a header line (29/30, no `✓` wall), sections rank recency-desc (auth
+15:58 → parity 15:46 → rail 15:41 → … → dormant cloud-fleet 07-03 sinks last), NO READY TO CLAIM
+band, robust under bad hygiene (no flood). **BUT** the focus-neighborhood eye-catch (point 4) is NOT
+demonstrable on the current live queue: the single live `in_progress` claim
+(`content-writepath-sandbox-flake`) is a childless root orphan (parent="", 0 siblings, 0 ready, 0
+blocked), so `computeFocus` correctly returns empty → header mode, and every epic/cluster is
+`active=false` (the claim is in none of them). The whole live board therefore renders header+rollup
+lines only — correct-by-policy for a low-active board, the wish's "big picture," and proven robust,
+but the neighborhood window is only visible in the golden fixture. **Eyeball once someone claims a
+task that sits INSIDE a populated subtree** (ready siblings/children present) — that is when W11's
+signature behavior lights up.
+
+**Honest tension to watch (not a regression):** with 80 ready tasks and one context-less claim, the
+board shows ~17 collapsed headers + large trailing dead space and ZERO ready rows without expanding.
+This is exactly D51 policy ("no activity → header+rollup; expand reveals all") and claim-forward
+still works (cursor to any ready row after `l`/enter + `c`), but it sits on the knife-edge of the
+wish's "i dont want too much dead space without me expanding." A board that is mostly dormant epics
+now reads as mostly empty. Whether that is "clean big-picture" or "too empty to act on" is a live
+judgment the user should eyeball. The §5/§6 hygiene arm (save-gate, completeness score, `bp task`
+lint, guided editor) is the real fix — a well-tended queue with genuine in_progress work is where
+this design pays off; the board is now robust to bad hygiene but cannot manufacture activity that
+isn't there.
+
+**Next wave inherits:** the RESERVED pdrender/walker in-body glyph-unify cross-surface slice (D43,
+board vs paper-chip clash), the TUI docs slice, real blocker-ref rendering (blocked rows show `!` but
+not the causing task), and the §5/§6 hygiene-enforcement tasks — now the highest-leverage TUI-epic
+work, since the board's correctness is bounded by queue hygiene.

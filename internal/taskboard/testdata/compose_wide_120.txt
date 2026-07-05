@@ -5,7 +5,7 @@
  ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  
                                                  created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
  NOW                                             
-    nothing ready · all clear                    ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
+    nothing claimed · all clear                  ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
                                                  
    tasks ·································· 1/4    The board must repaint the moment the queue moves.
    ▎⠋ Wire the SSE live bridge to the task boa…  
