@@ -22,7 +22,12 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runVerify, verifyDocText } from "./verify-docs.mjs";
+import {
+  runVerify,
+  verifyDocText,
+  setLinerefTargetOverride,
+  clearLinerefTargetOverrides,
+} from "./verify-docs.mjs";
 import { scanText, scanCorpus } from "./retired-terms.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -63,7 +68,19 @@ function main() {
     const snap = frozen[e.file];
     if (!snap) { fails.push(`(a) verify-docs NO SNAPSHOT — ${e.file}`); continue; }
     const content = readFileSync(join(HERE, "fixtures/frozen", snap), "utf8");
+    // A specimen may pin its cited TARGET to a frozen snapshot too
+    // (`target_snapshot` in the corpus) — the fail-before proof then never
+    // depends on the LIVE target's absolute line layout, so innocent edits
+    // to that file can't false-confirm the frozen citation. Cleared right
+    // after: pass-after and the live legs always run against the real tree.
+    if (e.target_snapshot) {
+      setLinerefTargetOverride(
+        e.target_snapshot.rel,
+        join(HERE, "fixtures/frozen", e.target_snapshot.snap),
+      );
+    }
     const rep = verifyDocText(e.file, content);
+    clearLinerefTargetOverrides();
     const caught = rep.findings.some((f) => f.type === type && f.status === wantStatus);
     if (caught) vdHit++;
     else fails.push(`(a) verify-docs MISS (frozen) — ${e.file}:${e.line} (${type}) ${e.cite}`);

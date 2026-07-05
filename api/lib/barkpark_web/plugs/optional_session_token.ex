@@ -44,9 +44,33 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    case token_from_bearer(conn) || token_from_session(conn) || token_from_dev_config() do
-      {:ok, token} -> assign(conn, :api_token, token)
+    conn =
+      case token_from_bearer(conn) || token_from_session(conn) || token_from_dev_config() do
+        {:ok, token} -> assign(conn, :api_token, token)
+        _ -> conn
+      end
+
+    # studio-user-login: an account session (`user_session`, minted by the
+    # /login/account flow or an SSO callback) resolves to :current_user — the
+    # User principal the downstream gates (ResolveWorkspace, LiveScope) accept
+    # via Tenancy.Auth.authorize/3. Soft like the token arm: invalid/absent
+    # passes through anonymous. A token, when present, keeps precedence.
+    case user_from_session(conn) do
+      %Barkpark.Accounts.User{} = user -> assign(conn, :current_user, user)
       _ -> conn
+    end
+  end
+
+  defp user_from_session(conn) do
+    case get_session(conn, "user_session") do
+      raw when is_binary(raw) and raw != "" ->
+        case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
+          {%Barkpark.Accounts.User{} = user, _session} -> user
+          _ -> nil
+        end
+
+      _ ->
+        nil
     end
   end
 

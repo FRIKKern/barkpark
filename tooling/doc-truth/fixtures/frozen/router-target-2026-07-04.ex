@@ -30,21 +30,6 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
-  # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
-  pipeline :scim do
-    plug(:accepts, ["json"])
-    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.RequireScimToken)
-  end
-
-  # SSO browser redirect flows (OIDC, social login) — need a session to carry
-  # state/nonce/PKCE-verifier across the round-trip (era-w3-oidc-rp, era-w2-social).
-  pipeline :sso_browser do
-    plug(:accepts, ["html", "json"])
-    plug(:fetch_session)
-  end
-
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
   # thin — `accepts :json` + the loopback gate. No OptionalToken (no DB lookup
   # per request), no RateLimit (loopback is trusted), no tenancy back-compat
@@ -352,11 +337,11 @@ defmodule BarkparkWeb.Router do
     plug(:fetch_session)
   end
 
-  # Core user-login session gate (distinct from API-token auth): login bearer
-  # or `user_session` cookie → :current_user, then the require_mfa org gate.
+  # Core user-login session gate (distinct from API-token auth). Accepts the
+  # `POST /v1/auth/login` bearer or the signed `user_session` cookie; assigns
+  # :current_user + a :user CallerContext.
   pipeline :require_user do
     plug(BarkparkWeb.Plugs.RequireUserSession)
-    plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
   end
 
   # Browser Studio uploads send `credentials: same-origin` with the session
@@ -423,10 +408,6 @@ defmodule BarkparkWeb.Router do
 
     get("/login", SessionController, :new)
     post("/login", SessionController, :create)
-    # Account sign-in (studio-user-login): email+password against the core
-    # auth system, with the TOTP/recovery second step. Mints `user_session`.
-    post("/login/account", SessionController, :account)
-    post("/login/mfa", SessionController, :mfa)
     post("/logout", SessionController, :delete)
 
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
@@ -484,7 +465,6 @@ defmodule BarkparkWeb.Router do
       on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
-      live("/org-admin", OrgAdminLive)
     end
   end
 
@@ -876,58 +856,6 @@ defmodule BarkparkWeb.Router do
     post("/verify-email", AuthController, :verify_email)
     post("/request-reset", AuthController, :request_reset)
     post("/reset", AuthController, :reset)
-    post("/request-magic-link", AuthController, :request_magic_link)
-    post("/magic-login", AuthController, :magic_login)
-    # Pre-login SSO routing: email → its org's SSO start URL (verified domains).
-    post("/sso/route", SsoRoutingController, :route)
-
-    # Passkey (WebAuthn) sign-in — usernameless login factor.
-    post("/webauthn/login/challenge", WebauthnController, :login_challenge)
-    post("/webauthn/login", WebauthnController, :login)
-  end
-
-  # ── SCIM 2.0 directory sync (per-organization bearer) ───────────────────
-  scope "/scim/v2", BarkparkWeb do
-    pipe_through(:scim)
-
-    post("/Users", ScimUsersController, :create)
-    get("/Users", ScimUsersController, :index)
-    get("/Users/:id", ScimUsersController, :show)
-    patch("/Users/:id", ScimUsersController, :update)
-    put("/Users/:id", ScimUsersController, :replace)
-    delete("/Users/:id", ScimUsersController, :delete)
-
-    post("/Groups", ScimGroupsController, :create)
-    get("/Groups", ScimGroupsController, :index)
-    get("/Groups/:id", ScimGroupsController, :show)
-    patch("/Groups/:id", ScimGroupsController, :update)
-    delete("/Groups/:id", ScimGroupsController, :delete)
-  end
-
-  # ── Enterprise SSO — OIDC relying party (per-organization) ──────────────
-  scope "/v1/auth/oidc", BarkparkWeb do
-    pipe_through(:sso_browser)
-
-    get("/:org_slug/start", OidcController, :start)
-    get("/:org_slug/callback", OidcController, :callback)
-  end
-
-  # ── Social login — Google / GitHub / Microsoft (app-level) ──────────────
-  scope "/v1/auth/social", BarkparkWeb do
-    pipe_through(:sso_browser)
-
-    get("/:provider/start", SocialController, :start)
-    get("/:provider/callback", SocialController, :callback)
-  end
-
-  # ── Enterprise SSO — SAML 2.0 Service Provider (per-organization) ────────
-  scope "/v1/auth/saml", BarkparkWeb do
-    pipe_through(:sso_browser)
-
-    get("/:org_slug/start", SamlController, :start)
-    post("/:org_slug/acs", SamlController, :acs)
-    # IdP-initiated Single Logout (POST binding, signed LogoutRequest).
-    post("/:org_slug/slo", SamlController, :slo)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────
@@ -936,43 +864,9 @@ defmodule BarkparkWeb.Router do
 
     get("/me", AuthController, :me)
     delete("/logout", AuthController, :logout)
-    get("/export", AuthController, :export)
-    post("/erase", AuthController, :erase)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
-    # Present a current factor to make this session step-up-fresh (clears a
-    # `mfa_required` 401 before retrying a guarded action).
-    post("/mfa/step-up", AuthController, :mfa_step_up)
     post("/mfa/disable", AuthController, :mfa_disable)
-    # Session management: the "your devices" list + revoke-one (era-w7).
-    get("/sessions", AuthController, :sessions)
-    delete("/sessions/:id", AuthController, :revoke_session)
-
-    # Passkeys (WebAuthn): enrol, step-up factor, and management.
-    post("/webauthn/register/challenge", WebauthnController, :register_challenge)
-    post("/webauthn/register", WebauthnController, :register)
-    post("/webauthn/step-up/challenge", WebauthnController, :step_up_challenge)
-    post("/webauthn/step-up", WebauthnController, :step_up)
-    get("/webauthn/credentials", WebauthnController, :index)
-    delete("/webauthn/credentials/:id", WebauthnController, :delete)
-  end
-
-  # ── Public status page + machine-readable status ────────────────────────
-  scope "/", BarkparkWeb do
-    pipe_through(:browser)
-    get("/status", StatusController, :index)
-  end
-
-  scope "/", BarkparkWeb do
-    pipe_through(:api)
-    get("/status.json", StatusController, :show_json)
-  end
-
-  # Incident management — admin only.
-  scope "/v1/status", BarkparkWeb do
-    pipe_through([:api, :require_admin])
-    post("/incidents", StatusController, :create_incident)
-    post("/incidents/:id/resolve", StatusController, :resolve_incident)
   end
 
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────

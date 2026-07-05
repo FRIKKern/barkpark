@@ -49,6 +49,8 @@ defmodule BarkparkWeb.LiveAuth do
         _ -> dev_browser_token_fallback()
       end
 
+    socket = assign(socket, :current_user, user_from_session(session))
+
     case raw do
       nil ->
         {:cont,
@@ -73,6 +75,22 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
+  # studio-user-login: resolve the account session (`user_session` cookie,
+  # minted by /login/account or an SSO callback) to its User — the principal
+  # LiveScope's membership gate accepts. nil when absent/invalid.
+  defp user_from_session(session) do
+    case session["user_session"] do
+      raw when is_binary(raw) and raw != "" ->
+        case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
+          {%Barkpark.Accounts.User{} = user, _} -> user
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   # In dev, Studio gets the seeded token automatically so media upload works
   # without a separate /login step. Production always requires POST /login.
   defp dev_browser_token_fallback do
@@ -88,6 +106,23 @@ defmodule BarkparkWeb.LiveAuth do
          {:ok, api_token} <- Auth.verify_token(token),
          true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) do
       {:cont, assign(socket, :api_token, api_token)}
+    else
+      _ -> authorize_user(socket, session, denial_flash)
+    end
+  end
+
+  # studio-user-login: the account-session arm of the admin/ops gates. Users
+  # carry no permissions[] — the grant is the membership ROLE, and the flat
+  # admin surfaces (/studio/settings, /studio/org-admin, /admin/*) operate in
+  # the DEFAULT-workspace context (the tenancy contract's flat posture), so
+  # the bar is an owner/admin-grade role THERE, checked through the same
+  # Tenancy.Auth.authorize/3 chokepoint (:admin action). An org-scoped
+  # self-serve admin surface is the separate follow-up.
+  defp authorize_user(socket, session, denial_flash) do
+    with %Barkpark.Accounts.User{} = user <- user_from_session(session),
+         %{id: ws_id} <- Barkpark.Tenancy.get_default_workspace(),
+         :ok <- Barkpark.Tenancy.Auth.authorize(user, ws_id, :admin) do
+      {:cont, assign(socket, :current_user, user)}
     else
       _ ->
         {:halt,
