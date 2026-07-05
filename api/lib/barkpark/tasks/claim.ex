@@ -19,7 +19,7 @@ defmodule Barkpark.Tasks.Claim do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
-  alias Barkpark.Tasks.{Edges, Queue}
+  alias Barkpark.Tasks.{Edges, Queue, WorkDigest}
 
   @event_task_claimed "task.claimed"
   @ready_lifecycle_statuses ~w(open blocked)
@@ -217,11 +217,21 @@ defmodule Barkpark.Tasks.Claim do
     next_epoch = current_epoch(doc) + 1
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
+    # Work digest over the task's work-defining fields AS READ in this claim
+    # txn (title + content.description + content.acceptance_criteria). Stamped
+    # so close/3 can refuse a silent close if the brief was edited under the
+    # claim — see Barkpark.Tasks.WorkDigest. Both claim paths land here, so both
+    # get the stamp. The per-field companion map is what lets close name WHICH
+    # fields drifted (changed_fields) without storing the field values verbatim.
+    {work_digest, field_digests} = WorkDigest.stamp(doc.title, doc.content)
+
     new_claim =
       %{
         "worker" => worker_id,
         "ts_iso" => ts_iso,
-        "epoch" => next_epoch
+        "epoch" => next_epoch,
+        "work_digest" => work_digest,
+        "work_field_digests" => field_digests
       }
       |> then(fn claim ->
         if resources == [], do: claim, else: Map.put(claim, "resources", resources)

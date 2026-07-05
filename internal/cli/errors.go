@@ -310,6 +310,8 @@ func (e apiError) hint() string {
 		return "re-fetch the doc to get the current _rev, then retry"
 	case "fenced_off", "stale_claim", "claimed_has_worker", "already_claimed", "not_ready":
 		return "your claim epoch is stale — re-claim with `bp task next`"
+	case "doc_changed_since_claim":
+		return "the task's brief changed since you claimed it — re-read with `bp task get <id>`, then close again (or pass --set observed_rev=<rev> for strict rev fencing)"
 	case "rate_limited":
 		return "retry with backoff"
 	case "unauthorized":

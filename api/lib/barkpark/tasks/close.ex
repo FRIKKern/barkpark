@@ -13,6 +13,7 @@ defmodule Barkpark.Tasks.Close do
   alias Barkpark.Content.Document
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.WorkDigest
 
   @closed_lifecycle_statuses ~w(done cancelled blocked)
   @event_task_closed "task.closed"
@@ -80,6 +81,7 @@ defmodule Barkpark.Tasks.Close do
 
               true ->
                 with :ok <- check_fencing(doc, observed_epoch),
+                     :ok <- check_work_digest(doc, observed_rev_opt),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -122,6 +124,39 @@ defmodule Barkpark.Tasks.Close do
       %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
       # No claim lease — nothing to fence against, close cleanly.
       _ -> :ok
+    end
+  end
+
+  # "Edited-under-you becomes a 409, never a silent close." When the caller did
+  # NOT pin an explicit observed_rev AND the claim carries a work_digest, the
+  # doc's current work-defining fields (title/description/acceptance_criteria)
+  # are re-digested inside this close txn and compared to the claim-time stamp.
+  # Drift → {:error, {:doc_changed_since_claim, current_rev, changed_fields}} so
+  # the worker re-reads the changed brief before closing against stale
+  # assumptions. Three deliberate escape hatches keep this narrow:
+  #   * an explicit observed_rev bypasses the digest check (the caller opted
+  #     into today's strict full-rev CAS instead — see do_close_txn),
+  #   * a claim WITHOUT a work_digest (pre-existing/legacy leases) closes
+  #     exactly as before (back-compat), and
+  #   * self-edits to code_refs/labels/last_worked_at never trip it — those
+  #     fields are outside the digest by design (WorkDigest).
+  defp check_work_digest(_doc, observed_rev_opt) when observed_rev_opt != nil, do: :ok
+
+  defp check_work_digest(%Document{content: content} = doc, _no_observed_rev) do
+    case content do
+      %{"claim" => %{"work_digest" => stored} = claim} when is_binary(stored) ->
+        field_digests = Map.get(claim, "work_field_digests", %{})
+        current = WorkDigest.combined(WorkDigest.field_digests(doc.title, content))
+
+        if current == stored do
+          :ok
+        else
+          changed = WorkDigest.changed_fields(field_digests, doc.title, content)
+          {:error, {:doc_changed_since_claim, doc.rev, changed}}
+        end
+
+      _ ->
+        :ok
     end
   end
 

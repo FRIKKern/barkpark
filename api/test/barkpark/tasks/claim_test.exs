@@ -233,4 +233,55 @@ defmodule Barkpark.Tasks.ClaimTest do
                )
     end
   end
+
+  # ─── work-digest stamp (both claim paths) ──────────────────────────────────
+
+  describe "claim stamps content.claim.work_digest" do
+    alias Barkpark.Tasks.WorkDigest
+
+    test "claim_by_id/3 stamps the combined digest + per-field map over the brief",
+         %{scope: scope} do
+      doc_id = uniq("byid-digest")
+
+      task =
+        mk_task!(doc_id, scope, %{
+          "description" => "ship the fence",
+          "acceptance_criteria" => [%{"criterion" => "409 on edit", "met" => false}]
+        })
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-d1", scope)
+
+      claim = claimed.content["claim"]
+      {expected_combined, expected_fields} = WorkDigest.stamp(task.title, task.content)
+
+      assert claim["work_digest"] == expected_combined
+      assert claim["work_field_digests"] == expected_fields
+      # The stamp is derived from the actual brief, so it names all three fields.
+      assert Map.keys(expected_fields) |> Enum.sort() ==
+               ["acceptance_criteria", "description", "title"]
+
+      # Persisted, not just in the returned struct.
+      reloaded = Repo.get!(Document, task.id)
+      assert reloaded.content["claim"]["work_digest"] == expected_combined
+    end
+
+    test "claim/2 (queue path) stamps the same digest the brief hashes to", %{scope: scope} do
+      phase_id = uniq("phase-digest")
+
+      task =
+        mk_task!(uniq("queue-digest"), scope, %{
+          "parent_id" => phase_id,
+          "description" => "queue-claimed brief"
+        })
+
+      assert {:ok, claimed} =
+               Tasks.claim("worker-d2", scope ++ [phase_id: phase_id, dataset: @dataset])
+
+      assert claimed.id == task.id
+
+      {expected_combined, expected_fields} = WorkDigest.stamp(task.title, task.content)
+      assert claimed.content["claim"]["work_digest"] == expected_combined
+      assert claimed.content["claim"]["work_field_digests"] == expected_fields
+    end
+  end
 end

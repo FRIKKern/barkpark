@@ -18,7 +18,11 @@ defmodule BarkparkWeb.TasksControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.{Auth, Content, Repo, Tasks, TenancyFixtures}
+  alias Barkpark.Content.Document
+  alias Barkpark.Tasks.Internal
 
   @token "barkpark-test-tasks-token"
   @dataset "production"
@@ -202,6 +206,40 @@ defmodule BarkparkWeb.TasksControllerTest do
       payload = Jason.decode!(resp.resp_body)
       assert payload["ok"] == false
       assert payload["reason"] == "fenced_off"
+    end
+
+    test "error path: 409 doc_changed_since_claim when the brief changed under the claim",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-changed")
+      doc_id = uniq("changed-a")
+      _task = mk_task!(doc_id, scope, %{"parent_id" => phase, "description" => "v1 brief"})
+
+      claim_body = Jason.encode!(%{worker_id: "worker-1", phase_id: phase})
+      claim_resp = conn |> authed() |> post("/v1/tasks/claim", claim_body)
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      claimed_doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      # A foreign edit rewrites the description AFTER the claim (claim map, and
+      # thus its work_digest, preserved) — the exact "edited under you" race.
+      row = Repo.get_by!(Document, doc_id: claimed_doc_id)
+      new_content = Map.put(row.content, "description", "v2 brief")
+
+      {1, _} =
+        from(d in Document, where: d.id == ^row.id and d.rev == ^row.rev)
+        |> Repo.update_all(set: [content: new_content, rev: Internal.generate_rev()])
+
+      # A default close (no observed_rev) 409s with the current rev + the
+      # single field that drifted.
+      close_body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+      resp = conn |> authed() |> post("/v1/tasks/#{claimed_doc_id}/close", close_body)
+      assert resp.status == 409
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "doc_changed_since_claim"
+      assert payload["changed_fields"] == ["description"]
+      assert payload["current_rev"] == Repo.get_by!(Document, doc_id: claimed_doc_id).rev
     end
 
     # C3b regression — the KEY behaviour to lock. Everything is a task now:

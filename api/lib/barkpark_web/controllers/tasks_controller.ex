@@ -297,6 +297,21 @@ defmodule BarkparkWeb.TasksController do
           # never a gate (close_response below, shipped with lvw-t6).
           json(conn, close_response(doc))
 
+        {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
+          # Edited-under-you fence (rail-awareness L2): the task's work-defining
+          # brief changed while this worker held the claim, and no explicit
+          # observed_rev was pinned. 409 with the current rev + which fields
+          # drifted so the caller re-reads before closing against stale
+          # assumptions (or pins observed_rev for strict rev fencing).
+          conn
+          |> put_status(:conflict)
+          |> json(%{
+            ok: false,
+            reason: "doc_changed_since_claim",
+            current_rev: current_rev,
+            changed_fields: changed_fields
+          })
+
         {:error, reason} ->
           conn
           |> put_status(:conflict)

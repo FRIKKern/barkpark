@@ -47,7 +47,9 @@ defmodule Barkpark.Tasks.Query do
   # `COALESCE(..., 'open')` used across the ready/index paths, so a task POSTed
   # without an explicit status is still visible to a `status=open` query.
   def maybe_filter_lifecycle(query, "open") do
-    from(d in query, where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open")
+    from(d in query,
+      where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) == "open"
+    )
   end
 
   def maybe_filter_lifecycle(query, s) when is_binary(s),
@@ -173,8 +175,13 @@ defmodule Barkpark.Tasks.Query do
     strings = Enum.filter(list, &is_binary/1)
 
     case strings do
-      [] -> query
-      _ -> from(d in query, where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) in ^strings)
+      [] ->
+        query
+
+      _ ->
+        from(d in query,
+          where: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content) in ^strings
+        )
     end
   end
 
