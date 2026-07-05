@@ -1127,6 +1127,43 @@ func knownFourSecrets() Secrets {
 // TestSecretsInstallStep_ShapeAndRedaction asserts the secrets-install step writes
 // the .env idempotently for ALL four keys + restarts Barkpark ONCE, carries each
 // value ONLY via its BP_* env (never in Title/Cmd), and lists all four for output
+// TestProvision_SingleAppRestart pins the single-restart contract end-to-end:
+// across the WHOLE go-live chain (Caddy/TLS steps + secrets-install + migrate +
+// admin-token) the app is restarted exactly ONCE — by secrets-install, which
+// runs after the PHX_HOST/PHX_SCHEME env writes, so the one boot picks up both.
+// A second restart (the pre-#1157-era Caddy-step restart) doubles the configure
+// wall-clock for nothing; this test reds if it ever creeps back.
+func TestProvision_SingleAppRestart(t *testing.T) {
+	spec := acmeSpec()
+	wp, _, _, runner, _ := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+
+	if _, err := wp.Provision(context.Background(), spec); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	restarts := 0
+	for _, argv := range runner.argvs {
+		for _, a := range argv {
+			restarts += strings.Count(a, "systemctl restart barkpark")
+		}
+	}
+	if restarts != 1 {
+		t.Errorf("the go-live chain must restart barkpark exactly once (secrets-install), got %d; cmds:\n%s",
+			restarts, strings.Join(runner.cmds, "\n"))
+	}
+	// The Caddy install probe is baked-image aware: it must short-circuit on an
+	// existing caddy instead of unconditionally paying the apt round.
+	found := false
+	for _, c := range runner.cmds {
+		if strings.Contains(c, "command -v caddy") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no caddy-presence probe in the chain's commands; the baked image pays a full apt round every go-live")
+	}
+}
+
 // redaction.
 func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 	sec := knownFourSecrets()
