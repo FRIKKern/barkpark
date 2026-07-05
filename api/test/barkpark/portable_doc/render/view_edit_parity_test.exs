@@ -48,6 +48,16 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
                __DIR__
              )
 
+  # The bundle's standalone stylesheet — the THIRD copy of the editor
+  # typography. Studio never loads it (`BP_PAPER_EDITOR_NO_INJECT`); embedders
+  # load ONLY it. Its `.bp-paper-editor-body` element rules are a hand-kept
+  # mirror of root.html.heex's ("keep byte-aligned" comments both sides), so
+  # they are the same cross-file drift surface — §5 puts them on the wire too.
+  @bundle_css Path.expand(
+                "../../../../assets/paper-editor/src/styles.css",
+                __DIR__
+              )
+
   # ── CSS micro-parser ───────────────────────────────────────────────────────
   # Scans a stylesheet for every LEAF rule block (`selector { decls }` whose
   # declaration body has no nested braces — i.e. not an `@media` wrapper) and
@@ -95,6 +105,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
   defp view_css, do: strip_comments(Stylesheet.css())
   defp edit_css, do: strip_comments(File.read!(@root_heex))
+  defp bundle_css, do: strip_comments(File.read!(@bundle_css))
 
   # Drop `/* … */` comments so a comment's prose (which contains commas and the
   # word ".bp-paper-surface" in explanations) can't leak into the greedy
@@ -205,12 +216,21 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
            "editor typography references undefined tokens (not in paper-surface.css): #{inspect(MapSet.to_list(dangling))}"
   end
 
-  # ── 4. The intentional divergence, guarded ─────────────────────────────────
+  # ── 4. The intentional declaration-level divergence, guarded ───────────────
   # View lists carry a bottom margin (`.bp-paper-surface ul,ol { margin: 0 0
-  # 24px }`); Edit deliberately OMITS it (block-gap owns inter-block rhythm —
-  # baking it into the element double-spaces). Both must still share the list
-  # indent token. If a future edit adds a `margin` to the editor list rule, this
-  # trips — forcing a conscious call rather than silent double-spacing.
+  # 24px }`); the Edit rule deliberately does NOT redeclare it. That is not a
+  # visual divergence in Studio: the canvas WC mounts in LIGHT DOM
+  # (paper-editor/src/index.js `appendChild`, no shadow root) inside
+  # `<main class="bp-paper-shell bp-paper-surface">` (studio_live/components.ex
+  # doc-beta shell), and `Stylesheet.css/0` is inlined on the same page — so the
+  # View rule ITSELF styles the canvas list. One producer; the margin tracks
+  # View automatically, and with `.bp-paper-editor { gap: 0 }` (no inter-block
+  # gap — rhythm rides element margins, root.html.heex) it IS the canvas list
+  # rhythm. Redeclaring `margin` on the editor rule would sever that tracking
+  # into a silent shadow copy — exactly the drift this file exists to prevent —
+  # so ADDING one trips the wire and forces a conscious call.
+  # (Standalone embeds have no `.bp-paper-surface` ancestor and fall to the UA
+  # default list margin — an embed-only nuance flagged in the parity matrix.)
 
   test "View and Edit lists share the indent token" do
     view = view_css()
@@ -237,10 +257,66 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
     refute Map.has_key?(edit_ul, "margin"),
            """
-           The editor list rule now declares a `margin`. That re-introduces the
-           View-only list bottom-margin into Edit and double-spaces the canvas.
-           If this is intentional, update the divergence note in
-           docs/specs/*-view-edit-parity-matrix.html and this guard.
+           The editor list rule now declares a `margin`. In Studio the canvas
+           list already receives the View margin through the `.bp-paper-surface`
+           cascade (light-DOM WC inside the surface shell) — redeclaring it here
+           severs that single-producer tracking into a shadow copy that will
+           silently drift from View. If this is intentional, update the
+           divergence note in docs/specs/*-view-edit-parity-matrix.html and this
+           guard.
            """
+  end
+
+  # ── 5. The bundle mirror — Studio inline rules ↔ standalone stylesheet ─────
+  # Studio loads ONLY the root.html.heex inline rules (BP_PAPER_EDITOR_NO_INJECT);
+  # embedders load ONLY assets/paper-editor/src/styles.css. Until now "keep it
+  # byte-aligned with the bundle" comments were the sole enforcement between
+  # those two hand-kept copies. Same contract as §2: every shared
+  # (element, property) pair must be byte-identical. Properties one side
+  # declares and the other doesn't are allowed — the bundle base rule carries
+  # standalone-host extras (background/font on the wrapper, a plain `pre` rule)
+  # that Studio inherits from `.bp-paper-surface` instead.
+  @mirror_elements ~w(h1 h2 h3 p li ul ol code img blockquote hr pre.bp-canvas-code)
+
+  test "Studio inline editor rules and the bundle stylesheet stay byte-aligned" do
+    studio = edit_css()
+    bundle = bundle_css()
+
+    mismatches =
+      for element <- @mirror_elements,
+          studio_decls = declarations_for(studio, "bp-paper-editor-body", element),
+          bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element),
+          prop <- Map.keys(studio_decls),
+          Map.has_key?(bundle_decls, prop),
+          studio_decls[prop] != bundle_decls[prop] do
+        "#{element}.#{prop}: Studio=#{inspect(studio_decls[prop])} Bundle=#{inspect(bundle_decls[prop])}"
+      end
+
+    assert mismatches == [],
+           """
+           Studio↔bundle editor-typography drift — the root.html.heex inline
+           mirror and assets/paper-editor/src/styles.css disagree, so the
+           embedded editor no longer looks like the Studio canvas. Align the
+           copies (and rebuild the bundle if styles.css changed — see the
+           wave-1 mechanics note in the pd-doctrine charter). Divergences:
+
+           #{Enum.join(mismatches, "\n")}
+           """
+  end
+
+  test "each mirror element actually shares at least one property (parser sanity)" do
+    studio = edit_css()
+    bundle = bundle_css()
+
+    for element <- @mirror_elements do
+      studio_decls = declarations_for(studio, "bp-paper-editor-body", element)
+      bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element)
+
+      shared =
+        MapSet.intersection(MapSet.new(Map.keys(studio_decls)), MapSet.new(Map.keys(bundle_decls)))
+
+      assert MapSet.size(shared) > 0,
+             "no shared property found for <#{element}> — a selector rename likely broke the mirror parser"
+    end
   end
 end

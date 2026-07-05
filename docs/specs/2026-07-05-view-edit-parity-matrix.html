@@ -124,7 +124,15 @@
   </table>
   </div>
   <p style="font-size:0.85rem;color:var(--soft)">
-    * <strong>list</strong> carries one intentional, documented divergence — see below.
+    * <strong>list</strong> carries one intentional, documented declaration-level
+    divergence — see below.<br>
+    Rows down to <strong>image</strong> (plus the list guards) are enforced
+    <em>mechanically</em> by the CI tripwire; the rows below hold
+    <em>by construction</em> — one shared class or one shared
+    <code>--paper-*/--st-*</code> token source, so values cannot drift — but are
+    not yet in the automated gate. t8/t10 extend the gate over them
+    (inline-styled View blocks vs class-styled Edit blocks need an emit-level
+    diff, not a property diff).
   </p>
 
   <h2>Confirmed divergences</h2>
@@ -132,18 +140,19 @@
     Static diff of the two real sources plus render-output emit checks found
     <strong>zero</strong> unintentional value divergences — the <code>--bp-*</code>
     single-source (shipped Stage 1 #896 + Stage 2) already closed them. One
-    <em>intentional</em> divergence, and two candidates that could not be
-    adversarially confirmed by static analysis (so they were NOT blind-changed,
-    per the workflow's verify-before-close gate and charter D6):
+    <em>intentional</em> declaration-level divergence (resolved below — it is not
+    a visual divergence in Studio), and one out-of-scope chrome candidate left
+    for a separate task (NOT blind-changed, per the workflow's
+    verify-before-close gate and charter D6):
   </p>
   <div class="scroll">
   <table>
     <thead><tr><th>#</th><th>Block</th><th>Property</th><th>View</th><th>Edit</th><th>Disposition</th></tr></thead>
     <tbody>
-      <tr><td>1</td><td>list ul/ol</td><td>margin (bottom)</td><td><code>0 0 24px</code></td><td>(omitted)</td>
-          <td><span class="badge b-info">INTENTIONAL</span> — Edit rhythm is block-gap; baking the bottom gap into the element double-spaces. Now <strong>guarded</strong> (adding a margin to the editor list rule trips the test).</td></tr>
-      <tr><td>2</td><td>list ul/ol (Edit)</td><td>margin (cascade)</td><td>—</td><td>inherits <code>.bp-paper-surface ul</code> 24px?</td>
-          <td><span class="badge b-warn">VERIFY</span> — the editor <code>ul</code> is a descendant of <code>.bp-paper-surface</code>, so the View bottom-margin <em>may</em> cascade in (equal specificity, and the editor rule sets only <code>padding-left</code>). Cannot be confirmed without a computed-style read in a browser; flagged for live verify, not blind-patched.</td></tr>
+      <tr><td>1</td><td>list ul/ol</td><td>margin (bottom)</td><td><code>0 0 24px</code></td><td>(not redeclared)</td>
+          <td><span class="badge b-info">INTENTIONAL</span> — declaration-level only. In Studio the View rule <em>itself</em> styles the canvas list (see #2), so redeclaring the margin on the editor rule would sever that single-producer tracking into a shadow copy. <strong>Guarded</strong>: adding a margin to the editor list rule trips the test.</td></tr>
+      <tr><td>2</td><td>list ul/ol (Edit)</td><td>margin (cascade)</td><td>—</td><td>inherits <code>.bp-paper-surface ul</code> 24px</td>
+          <td><span class="badge b-ok">CONFIRMED — PARITY</span> — statically decided: the canvas WC mounts in <em>light DOM</em> (<code>index.js</code> <code>appendChild</code>, no shadow root) inside <code>&lt;main class="bp-paper-shell bp-paper-surface"&gt;</code> (doc-beta shell), and <code>Stylesheet.css/0</code> is inlined on the same page — so <code>.bp-paper-surface ul&nbsp;{ margin: 0 0 24px }</code> applies to canvas lists, and no editor rule competes (the editor rule sets only <code>padding-left</code>; the global <code>*</code> reset loses on specificity). With <code>.bp-paper-editor { gap: 0 }</code> (rhythm rides element margins) this cascaded margin <em>is</em> the canvas list rhythm — same value, one producer, no patch needed under D6. Residual embed nuance: a <em>standalone</em> host has no <code>.bp-paper-surface</code> ancestor, so embedded lists fall to the UA default margin — noted for t8. A browser computed-style read remains a belt for the human live-polish pass.</td></tr>
       <tr><td>3</td><td>slash menu (chrome)</td><td>n/a</td><td>evergreen bp tokens</td><td>warm parchment palette</td>
           <td><span class="badge b-warn">OUT OF SCOPE</span> — <code>.bp-slash-menu</code> (root.html.heex ~3010) re-binds the legacy warm <code>--paper-*</code> palette (rust <code>#a23925</code>), stale vs the rebranded evergreen surface. It is editor chrome appended to <code>&lt;body&gt;</code>, not block content; a separate polish task, not render-path parity.</td></tr>
     </tbody>
@@ -175,11 +184,22 @@
     rename would empty the diff into a vacuous pass. The intentional list-margin
     divergence is encoded as a guard so re-introducing it into Edit trips the wire.
   </p>
+  <p>
+    The wire also covers the <strong>third copy</strong>: Studio loads only the
+    root.html.heex inline rules (<code>BP_PAPER_EDITOR_NO_INJECT</code>) while
+    embedders load only <code>assets/paper-editor/src/styles.css</code> — two
+    hand-kept mirrors whose sole prior enforcement was "keep byte-aligned"
+    comments. The same shared-pair diff now runs Studio↔bundle across
+    <code>h1…hr</code> + <code>pre.bp-canvas-code</code>, so the embedded editor
+    cannot silently stop looking like the canvas.
+  </p>
   <p style="font-size:0.9rem;color:var(--soft)">
-    Adversarially verified: mutating the editor <code>p</code> margin to a literal
-    <code>20pt 0 0</code> produced the expected failure
+    Adversarially verified, both wires: mutating the editor <code>p</code> margin
+    to a literal <code>20pt 0 0</code> produced the expected View↔Edit failure
     (<code>p.margin: View="var(--bp-para-margin-top) 0 0" Edit="20pt 0 0"</code>);
-    reverting restored green. The gate catches real drift, not noise.
+    mutating the bundle <code>p</code> margin to <code>19pt 0 0</code> produced the
+    expected Studio↔bundle failure. Reverting restored green both times. The gate
+    catches real drift, not noise.
   </p>
 
   <h2>Methodology</h2>
@@ -189,10 +209,12 @@
     (<code>render.ex</code>, <code>render/walk.ex</code>, <code>render/stylesheet.ex</code>)
     and the Edit CSS (<code>root.html.heex .bp-paper-editor-body</code>) →
     <strong>Diff</strong> per element × property → <strong>Verify</strong>
-    (static equality + a live render-output emit check + a mutation test on the
-    tripwire) → <strong>Report</strong> (this document). Basis is static analysis
-    plus render-output — the two candidates needing a browser computed-style read
-    (#2, #3) are explicitly flagged, not closed.
+    (static equality + a live render-output emit check + mutation tests on both
+    tripwires) → <strong>Report</strong> (this document). Basis is static analysis
+    plus render-output. Candidate #2 was subsequently <em>resolved statically</em>
+    (light-DOM mount + surface ancestor + no competing rule — cascade outcome is
+    deterministic); #3 (slash-menu chrome palette) remains flagged for a separate
+    task, not closed.
   </p>
 
   <h2>Re-run</h2>
