@@ -138,7 +138,10 @@ config :barkpark, Oban,
        # undeliverable. Core subsystem (webhooks are not a plugin), so it lives
        # in this static crontab alongside the search workers; its job runs on
        # the existing `default` queue.
-       {"* * * * *", Barkpark.Webhooks.StuckDeliverySweeper}
+       {"* * * * *", Barkpark.Webhooks.StuckDeliverySweeper},
+       # era-w5 — stream the append-only audit log to configured SIEM sinks
+       # (cursor-based tail-shipping; a no-op when no active sink exists).
+       {"* * * * *", Barkpark.Audit.ExportWorker}
        # The W7-05 TTL sweep ({"* * * * *", Barkpark.Tasks.TtlSweeper}) and
        # W7-06 compaction ({"0 */6 * * *", Barkpark.Tasks.Compactor}) cron
        # entries now live in the Tasks plugin's `oban_crontab/0`
