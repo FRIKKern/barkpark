@@ -70,6 +70,19 @@ fallbacks accepted by `auth.login`'s `recovery_code` when the authenticator is
 unavailable; each code is consumed on use. `mfa_disable` (SDK `client.auth.disableMfa(password)`)
 turns MFA back off — it requires the account password and clears the secret + recovery codes.
 
+### Org-wide required MFA (opt-in overlay)
+
+`organizations.require_mfa` (default false; admin-portal toggle) forces factor
+enrolment. **Governing rule: ANY-org-requires → enforce (strictest-wins)** — a
+user is governed by every org reachable via their user-type workspace
+memberships (`Tenancy.org_requires_mfa_for_user?/1`); one requiring org is
+enough, a laxer org grants no bypass, org-less workspaces never govern. A
+governed, factor-less user still logs in (the body adds
+`mfa_enrolment_required: true`) but the session surface answers
+`403 mfa_enrolment_required` except `/me`, `/logout`, and the TOTP/passkey
+enrolment endpoints (`RequireOrgMfaEnrolment` in the `:require_user` pipeline).
+Enrolling any factor opens the gate. Flag unset everywhere → byte-identical.
+
 ## Field encryption (at rest)
 
 `Barkpark.Crypto.FieldCipher` wraps a value in an AES-256-GCM envelope

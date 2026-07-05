@@ -20,6 +20,12 @@ defmodule Barkpark.Tenancy.Organization do
     field :slug, :string
     field :name, :string
 
+    # era-w2-org-require-mfa: when true, every user who is a member (via any
+    # of this org's workspaces) must have an MFA factor enrolled before the
+    # session-auth surface serves them. Opt-in; default false = no behaviour
+    # change. Governing rule across orgs: ANY-org-requires → enforce.
+    field :require_mfa, :boolean, default: false
+
     has_many :workspaces, Barkpark.Tenancy.Workspace
 
     timestamps(type: :utc_datetime_usec)
@@ -29,7 +35,7 @@ defmodule Barkpark.Tenancy.Organization do
 
   def changeset(org, attrs) do
     org
-    |> cast(attrs, [:slug, :name])
+    |> cast(attrs, [:slug, :name, :require_mfa])
     |> validate_required([:slug, :name])
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)

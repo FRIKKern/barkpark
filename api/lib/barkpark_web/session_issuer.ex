@@ -27,7 +27,23 @@ defmodule BarkparkWeb.SessionIssuer do
     |> configure_session(renew: true)
     |> put_session("user_session", token)
     |> put_status(:created)
-    |> json(%{token: token, user: %{id: user.id, email: user.email}})
+    |> json(login_body(token, user))
+  end
+
+  # era-w2-org-require-mfa: when a governing org requires MFA and the user has
+  # no factor, login still SUCCEEDS (the session is how they enrol) but the
+  # body carries `mfa_enrolment_required: true` so clients route straight to
+  # enrolment. The key is ADDITIVE and only present when true — with no org
+  # requiring MFA the response is byte-identical to before.
+  defp login_body(token, user) do
+    body = %{token: token, user: %{id: user.id, email: user.email}}
+
+    if not Accounts.mfa_enrolled?(user) and
+         Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) do
+      Map.put(body, :mfa_enrolment_required, true)
+    else
+      body
+    end
   end
 
   defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()

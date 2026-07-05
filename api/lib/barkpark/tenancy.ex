@@ -66,6 +66,50 @@ defmodule Barkpark.Tenancy do
     |> Repo.update()
   end
 
+  @doc """
+  Set (or clear) an organization's org-wide MFA requirement
+  (era-w2-org-require-mfa). Opt-in: with the flag false everywhere the auth
+  surface is byte-identical to before the feature existed.
+  """
+  @spec set_organization_require_mfa(binary(), boolean()) ::
+          {:ok, Organization.t()} | {:error, Ecto.Changeset.t() | :not_found}
+  def set_organization_require_mfa(organization_id, require?)
+      when is_binary(organization_id) and is_boolean(require?) do
+    with {:ok, _} <- Ecto.UUID.cast(organization_id),
+         %Organization{} = org <- Repo.get(Organization, organization_id) do
+      org
+      |> Ecto.Changeset.change(require_mfa: require?)
+      |> Repo.update()
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  Does any organization GOVERNING this user require MFA enrolment?
+
+  The governing rule (owner-ratified 2026-07-05): **ANY-org-requires →
+  enforce, strictest-wins.** A user is governed by every organization
+  reachable through their workspace memberships (`principal_type: "user"`);
+  if at least one of those orgs sets `require_mfa`, the user must have a
+  factor enrolled before the session-auth surface serves them. A user cannot
+  escape the requirement by also belonging to a laxer org, and no per-request
+  org threading is needed. Workspaces without an organization never govern.
+  """
+  @spec org_requires_mfa_for_user?(binary()) :: boolean()
+  def org_requires_mfa_for_user?(user_id) when is_binary(user_id) do
+    Repo.exists?(
+      from m in Membership,
+        join: w in Workspace,
+        on: w.id == m.workspace_id,
+        join: o in Organization,
+        on: o.id == w.organization_id,
+        where:
+          m.principal_type == "user" and m.principal_id == ^user_id and
+            o.require_mfa == true
+    )
+  end
+
   @default_project_slug "default"
   @default_project_name "Default Project"
   @production_dataset_slug "production"
