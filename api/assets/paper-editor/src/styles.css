@@ -435,4 +435,52 @@ html[data-theme="dark"] .bp-wikilink-menu {
   color: var(--paper-ink-faint, #82918b);
   user-select: none;
   cursor: default;
+
+/* Featured-image placeholder (t13) — the calm evergreen ghost frame an asset-less
+   image picker shows in the canvas. It IS the affordance (rule 5): click / Enter /
+   right-click opens the media picker. All colour rides the --paper-* tokens so it is
+   dark/light safe (light defaults here; the host's [data-theme="dark"] overrides
+   the tokens). */
+.bp-canvas-field-image-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 132px;
+  margin: 0.4em 0;
+  padding: 28px 20px;
+  border: 1.5px dashed var(--paper-accent, #1e5347);
+  border-radius: 10px;
+  background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+  color: var(--paper-accent, #1e5347);
+  cursor: pointer;
+  user-select: none;
+  text-align: center;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+.bp-canvas-field-image-empty:hover {
+  background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+}
+.bp-canvas-field-image-empty:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+}
+.bp-canvas-field-image-empty-icon {
+  width: 30px;
+  height: 30px;
+  opacity: 0.85;
+}
+.bp-canvas-field-image-empty-label {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+}
+.bp-canvas-field-image-empty-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--paper-ink-faint, #82918b);
 }
