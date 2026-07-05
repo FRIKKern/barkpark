@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
-  alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
 
   def paper_toggle_edit(socket) do
     if socket.assigns[:editor_view] == :paper do
@@ -86,6 +86,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def backlinks_toggle(socket) do
     {:noreply, assign(socket, backlinks_open: !socket.assigns[:backlinks_open])}
   end
+
+  # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ────────────────
+  #
+  # All three are PURE assign flips — none call `Shared.paper_op/2` or the block
+  # stream, so a sidebar interaction can never emit a body block op. Nothing in
+  # the sidebar persists yet BY DESIGN: the slug change is validate-only
+  # (uniqueness/rename mutates doc_id — t5's migrate concern), and publish state
+  # is read-only display (papers publish in place; the twin-row doc publish/
+  # unpublish path would fail or strand the paper — see the Publish section
+  # comment in `Components.paper_metadata_sidebar/1`). When a sidebar field DOES
+  # persist, it rides `PaperCanvas.sidebar_meta_op/2`'s `{:doc_field, …}` shape,
+  # NEVER the block pipeline.
+
+  @doc "Collapse / expand the whole metadata sidebar. Pure assign flip."
+  def sidebar_toggle_panel(socket) do
+    {:noreply, assign(socket, sidebar_open: !socket.assigns[:sidebar_open])}
+  end
+
+  @doc """
+  Collapse / expand ONE sidebar section, toggling its key in the
+  `sidebar_collapsed` MapSet. Pure assign — the canvas body is never touched.
+  """
+  def sidebar_toggle_section(%{"section" => key}, socket) when is_binary(key) do
+    next = PaperCanvas.toggle_section(socket.assigns[:sidebar_collapsed], key)
+    {:noreply, assign(socket, sidebar_collapsed: next)}
+  end
+
+  def sidebar_toggle_section(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  Live slug format validation on every keystroke. Assigns the draft value + a
+  `{tone, message}` verdict from `PaperCanvas.slug_feedback/1` — a PURE, DB-free
+  format check. It emits NO block op (Rule 4: a sidebar edit must not touch
+  blocks); persisting a rename is deliberately out of this validate-only path.
+  """
+  def sidebar_slug_change(%{"value" => value}, socket) when is_binary(value) do
+    {:noreply,
+     assign(socket,
+       sidebar_slug_draft: value,
+       sidebar_slug_feedback: PaperCanvas.slug_feedback(value)
+     )}
+  end
+
+  def sidebar_slug_change(_params, socket), do: {:noreply, socket}
 
   @doc """
   Re-run the inbound-reference load for the currently-open paper. Read-only;
