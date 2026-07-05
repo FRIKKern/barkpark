@@ -14,10 +14,11 @@ import (
 // longer drift because they read the SAME ordered list. spineRows covers only
 // the SCROLLING spine (epics → clusters → the loose bucket); the pinned band
 // (NOW cards / READY head) owns the first cursor indices and is produced by
-// render.go's renderNowBand, exactly as before. A header/more-line/separator/
-// phase-band is Selectable:false — the display-only set whose count the cursor
-// never touches — so nested subtasks and phase bands add depth without shifting
-// the index space (the parity guards hold trivially on the phase-less fixtures).
+// render.go's renderNowBand, exactly as before. A separator/phase-band is
+// Selectable:false — display-only, never a cursor stop — while headers, tasks
+// AND "+N more" fold lines (D57) are selectable: the fold line is the
+// affordance for "open and see the rest". Both consumers read this ONE list,
+// so the index space cannot desync.
 
 // spineKind discriminates a spine row for the renderer.
 type spineKind int
@@ -29,7 +30,7 @@ const (
 	spineOrphanHeader                   // the loose "(no epic)" header (selectable)
 	spinePhaseBand                      // a named phase sub-band header inside an epic (display-only, W10-A)
 	spineTask                           // a task row — epic child / cluster member / orphan (selectable)
-	spineMore                           // "+K more" / "+N done · M cancelled" fold line (display-only)
+	spineMore                           // "+K more" / "+N done · M cancelled" fold line (SELECTABLE, D57: enter expands)
 	spineDeadEpic                       // a cancelled-root epic collapsed to one dim tombstone line (display-only, W10-B)
 	spineEmpty                          // the syncing / all-clear fallback (display-only)
 )
@@ -151,7 +152,7 @@ func spineRows(b Board, st UIState) []SpineRow {
 				emitNested(shownBand, 1, shellRK)
 			}
 			if hidden > 0 || doneFolded > 0 || cancelledFolded > 0 {
-				rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
+				rows = append(rows, SpineRow{Kind: spineMore, Ref: foldKey, Selectable: true, RK: rowMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
 			}
 			return
 		}
@@ -159,7 +160,7 @@ func spineRows(b Board, st UIState) []SpineRow {
 		// Flat (non-banded) section — nest the shown set in parent-before-child order.
 		emitNested(shownTasks, 0, shellRK)
 		if hidden > 0 || doneFolded > 0 || cancelledFolded > 0 {
-			rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
+			rows = append(rows, SpineRow{Kind: spineMore, Ref: foldKey, Selectable: true, RK: rowMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
 		}
 	}
 

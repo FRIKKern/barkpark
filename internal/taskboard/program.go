@@ -56,11 +56,14 @@ const (
 	// longer than that means the stream is really gone and the dot honestly
 	// degrades to ConnPolling at the next snapshot.
 	defaultLiveStale = 35 * time.Second
-	// frameCadence is the heartbeat tick interval (charter decision 16): one
-	// frame per second WHILE the board is Alive(). It is a fixed cadence, not a
-	// tunable — the tests drive determinism through the injected clock + an
+	// frameCadence is the heartbeat tick interval (charter decision 16, retimed
+	// 2026-07-05 per user direction "it should feel tempo"): 100ms per frame
+	// WHILE the board is Alive() — a full braille rotation per second (spec §2's
+	// ~80-100ms/frame), instead of the original 1s crawl. Still a fixed cadence,
+	// not a tunable — tests drive determinism through the injected clock + an
 	// explicit Frame, never real wall-clock timing, so there is nothing to shrink.
-	frameCadence = 1 * time.Second
+	// The budget discipline is unchanged: zero ticks at rest (idle byte-stable).
+	frameCadence = 100 * time.Millisecond
 )
 
 // rowKind identifies what a flattened visible row is, which is all the cursor
@@ -75,6 +78,7 @@ const (
 	rowClusterMember                // a task inside an unfolded cluster section
 	rowOrphanHeader                 // the loose "(no epic)" bucket's navigable header
 	rowOrphan                       // a task with no epic, under "(no epic)"
+	rowMore                         // a "+N more/done" fold line — enter/l expands its section (D57)
 )
 
 // row is one navigable line. docID is the task's doc id for task rows; for an
@@ -745,6 +749,13 @@ func (m Model) activateBoard() Model {
 	case rowOrphanHeader:
 		m.ui.CollapsedEpics[r.docID] = sectionExpandedMode(orphansMode(m.ui, m.board))
 		m.clampCursor()
+	case rowMore:
+		// enter on a fold line opens the rest: expand the owning section to its
+		// full list (charter D57 — "+N more" is the affordance for "see it all").
+		// A second enter (the line persists as the done/cancelled tail when fully
+		// expanded) toggles back, mirroring the header.
+		m.ui.CollapsedEpics[r.docID] = m.sectionExpandedByKey(r.docID)
+		m.clampCursor()
 	case rowNow, rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
 		if t, found := m.taskByID(r.docID); found && t.Title != "" {
@@ -768,12 +779,29 @@ func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	// loose "(no epic)" bucket. A header row's docID is already the CollapsedEpics
 	// key (epic root id, the cluster's "cluster:"+Key, or orphansFoldKey), so the
 	// write is identical for all three.
-	if !ok || (r.kind != rowEpicHeader && r.kind != rowClusterHeader && r.kind != rowOrphanHeader) {
+	if !ok || (r.kind != rowEpicHeader && r.kind != rowClusterHeader && r.kind != rowOrphanHeader && r.kind != rowMore) {
 		return m
 	}
 	m.ui.CollapsedEpics[r.docID] = folded
 	m.clampCursor()
 	return m
+}
+
+// sectionExpandedByKey reports whether the section owning this fold key is
+// currently in modeExpanded — the enter-toggle input for header AND fold-line
+// activation (D57). The key grammar is the CollapsedEpics one: epic root id,
+// "cluster:"+Key, or orphansFoldKey.
+func (m Model) sectionExpandedByKey(key string) bool {
+	if e, found := m.epicByRoot(key); found {
+		return sectionExpandedMode(epicMode(m.ui, e))
+	}
+	if cl, found := m.clusterByFoldKey(key); found {
+		return sectionExpandedMode(clusterMode(m.ui, cl))
+	}
+	if key == orphansFoldKey {
+		return sectionExpandedMode(orphansMode(m.ui, m.board))
+	}
+	return false
 }
 
 // epicByRoot finds the epic whose root task has the given doc id.
