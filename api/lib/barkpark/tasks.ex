@@ -76,6 +76,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
   alias Barkpark.Tasks.Prime
+  alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
   alias Barkpark.Tasks.Validation
 
@@ -482,6 +483,24 @@ defmodule Barkpark.Tasks do
   # close/3 + its internals (do_close_txn, check_fencing, apply_close_update,
   # cascade_unblock_dependents!, all_blockers_done?) → Tasks.Close (defdelegated).
   # CAS primitives (current_epoch/insert_mutation_event!/generate_rev) → Tasks.Internal.
+
+  # ─── rail-l1: rail-awareness ETag + blocker probe (→ Barkpark.Tasks.Rail) ──
+
+  @doc """
+  The `rail_rev` ETag for the rail parented by `parent_doc_id` (its child
+  tasks + their `blocks` edges), or `nil` when `parent_doc_id` is nil.
+  Computed on demand — no stored counter. See `Barkpark.Tasks.Rail.rev/2`.
+  """
+  @spec rail_rev(binary() | nil, keyword()) :: String.t() | nil
+  def rail_rev(parent_doc_id, opts \\ []), do: Rail.rev(parent_doc_id, opts)
+
+  @doc """
+  The `doc_id`s of `task_uuid`'s non-`done` outbound `blocks` blockers — the
+  payload of a `blocked_while_claimed` notice. See
+  `Barkpark.Tasks.Rail.unsatisfied_blockers/1`.
+  """
+  @spec unsatisfied_blockers(binary()) :: [String.t()]
+  defdelegate unsatisfied_blockers(task_uuid), to: Rail
 
   @doc "The mutation_events kinds emitted by this module."
   @spec event_kinds() :: %{

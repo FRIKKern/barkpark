@@ -299,6 +299,12 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "Comma-separated resource strings (e.g. file paths) to fence while this claim is live; 409 resource_conflict if another live claim holds any."
+          },
+          %{
+            name: "observed_rail_rev",
+            type: "string",
+            summary:
+              "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
           }
         ],
         writes: true,
@@ -362,6 +368,12 @@ defmodule Barkpark.Plugins.Tasks do
                 "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
+          },
+          %{
+            name: "observed_rail_rev",
+            type: "string",
+            summary:
+              "The rail_rev (rail ETag) you last observed for this task's parent rail. When it differs from the current rail_rev the response carries a rail_changed notice — advisory, never a gate."
           }
         ],
         writes: true,
@@ -392,7 +404,14 @@ defmodule Barkpark.Plugins.Tasks do
             summary: "Restrict the claim to tasks under this phase id."
           }
         ],
-        flags: [],
+        flags: [
+          %{
+            name: "observed_rail_rev",
+            type: "string",
+            summary:
+              "The rail_rev (rail ETag) you last observed for the claimed task's parent rail. When it differs from the claimed task's current rail_rev the response carries a rail_changed notice — advisory, never a gate."
+          }
+        ],
         writes: true,
         batch: false,
         paginated: false,

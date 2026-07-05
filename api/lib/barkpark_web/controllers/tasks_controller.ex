@@ -86,14 +86,21 @@ defmodule BarkparkWeb.TasksController do
     ready = Tasks.ready([limit: limit] ++ scope)
     counts = Params.batch_edge_counts(in_progress ++ ready)
 
-    json(conn, %{
+    # rail-l1: rehydrate the worker's rail-awareness — a rails map keyed by each
+    # distinct parent of its in-progress claims (rail_rev per rail, so a burst
+    # agent can diff after compaction) + blocked_while_claimed notices for any
+    # claim a second actor has since blocked.
+    base = %{
       ok: true,
       worker: worker,
       in_progress: Enum.map(in_progress, &Params.render_doc_with_counts(&1, counts)),
       ready: Enum.map(ready, &Params.render_doc_with_counts(&1, counts)),
       recent_events: events,
-      counts: lifecycle_counts
-    })
+      counts: lifecycle_counts,
+      rails: prime_rails(in_progress, conn)
+    }
+
+    json(conn, maybe_put_notices(base, prime_notices(in_progress)))
   end
 
   # ─── GET /v1/tasks ──────────────────────────────────────────────────────
@@ -166,7 +173,13 @@ defmodule BarkparkWeb.TasksController do
             |> json(%{ok: false, reason: "no_ready"})
 
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            # Queue-claim: the subject is unknown pre-write, so no pre-write
+            # baseline — rail_changed (if observed_rail_rev is passed) compares
+            # against the post-write rev.
+            json(
+              conn,
+              with_rail_extras(%{ok: true, doc: Params.render_doc(doc)}, doc, nil, conn, params)
+            )
 
           {:error, reason} ->
             conn
@@ -250,9 +263,27 @@ defmodule BarkparkWeb.TasksController do
           [resources: params["resources"] || []]
           |> Keyword.merge(scope_opts(conn))
 
+        # Snapshot the rail BEFORE the claim so rail_changed compares
+        # observed_rail_rev against the rail the worker actually saw (not the
+        # rev its own claim produces). nil when the row is absent/parentless.
+        baseline_rev =
+          case find_task_by_doc_id(doc_id, conn) do
+            {:ok, %Document{} = pre} -> pre_write_rail_rev(pre, conn)
+            _ -> nil
+          end
+
         case Tasks.claim_by_id(doc_id, worker_id, opts) do
           {:ok, %Document{} = doc} ->
-            json(conn, %{ok: true, doc: Params.render_doc(doc)})
+            json(
+              conn,
+              with_rail_extras(
+                %{ok: true, doc: Params.render_doc(doc)},
+                doc,
+                baseline_rev,
+                conn,
+                params
+              )
+            )
 
           {:error, :not_found} ->
             not_found(conn, "task not found")
@@ -290,12 +321,19 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
 
+      # Snapshot the rail BEFORE the close (from the already-fetched pre-close
+      # task) so rail_changed reflects only concurrent actors, not this close.
+      baseline_rev = pre_write_rail_rev(task, conn)
+
       case Tasks.close(task.id, worker_id, opts) do
         {:ok, %Document{} = doc} ->
           # Graduated enforcement (living-values §12): unmet criteria are
           # SURFACED as a soft warning on the (already successful) close —
           # never a gate (close_response below, shipped with lvw-t6).
-          json(conn, close_response(doc))
+          # rail-l1: rail_rev + notices ride the same 2xx envelope — advisory,
+          # the close has ALREADY committed even when blocked_while_claimed
+          # fires (L1 notices are informational; refusal is the L4 task).
+          json(conn, with_rail_extras(close_response(doc), doc, baseline_rev, conn, params))
 
         {:error, {:doc_changed_since_claim, current_rev, changed_fields}} ->
           # Edited-under-you fence (rail-awareness L2): the task's work-defining
@@ -735,6 +773,106 @@ defmodule BarkparkWeb.TasksController do
       %Document{} = doc -> {:ok, doc}
     end
   end
+
+  # ─── rail-l1: rail-awareness envelope extras ────────────────────────────
+  # rail_rev + typed notices ride the claim / claim_by_id / close / prime
+  # responses so a BURST-based agent sees rail drift and new blockers on its
+  # next server touch — no polling, no new channel. See Barkpark.Tasks.Rail.
+  #
+  # ADVISORY ONLY at L1: a blocked_while_claimed notice never changes a status
+  # code and NEVER gates a write — a close still commits with an unsatisfied
+  # blocker (refusal / fencing is the separate L4 task). rail_rev is an ETag:
+  # clients compare it `≠`, not `<`.
+
+  # Merge rail_rev (when the subject task has a parent) + notices (when
+  # non-empty) into a subject-task envelope (claim / claim_by_id / close).
+  #
+  # `baseline_rev` is the rail_rev computed BEFORE this request's own write
+  # (nil for queue-claim, whose subject is unknown pre-write). The
+  # rail_changed comparison runs `observed_rail_rev` against `baseline_rev`,
+  # NOT against the post-write rev — so a worker's OWN claim/close never trips
+  # its own rail_changed; only a concurrent actor's edit does. The response's
+  # `rail_rev` FIELD reports the post-write rev — the fresh baseline the worker
+  # carries into its next action (nobody else acting → next baseline == this
+  # field → match → silence).
+  defp with_rail_extras(envelope, %Document{} = task, baseline_rev, conn, params) do
+    parent_id = task_parent_id(task)
+    scope = scope_opts(conn) |> Keyword.put(:dataset, task.dataset)
+    rail_rev = Tasks.rail_rev(parent_id, scope)
+    compare_rev = baseline_rev || rail_rev
+
+    notices =
+      []
+      |> add_blocked_notice(task)
+      |> add_rail_changed_notice(parent_id, compare_rev, rail_rev, params["observed_rail_rev"])
+
+    envelope
+    |> maybe_put(:rail_rev, rail_rev)
+    |> maybe_put_notices(notices)
+  end
+
+  # The rail_rev of `task`'s parent rail as it stands NOW — computed before a
+  # claim/close write so it captures the rail the worker is acting against
+  # (the rail_changed comparison baseline). nil when the task has no parent.
+  defp pre_write_rail_rev(%Document{} = task, conn) do
+    Tasks.rail_rev(task_parent_id(task), scope_opts(conn) |> Keyword.put(:dataset, task.dataset))
+  end
+
+  # prime rehydrates a WORKER: the rails map covers each DISTINCT parent of the
+  # worker's in-progress claims, and notices surface blocked_while_claimed for
+  # any of those claims. No top-level rail_rev in prime — the map is the right
+  # shape when a worker may hold claims across several rails. prime carries no
+  # observed_rail_rev, so no rail_changed notice here.
+  defp prime_rails(in_progress, conn) do
+    scope = scope_opts(conn)
+
+    in_progress
+    |> Enum.map(fn %Document{} = d -> {task_parent_id(d), d.dataset} end)
+    |> Enum.reject(fn {parent_id, _dataset} -> is_nil(parent_id) end)
+    |> Enum.uniq()
+    |> Map.new(fn {parent_id, dataset} ->
+      {parent_id, Tasks.rail_rev(parent_id, Keyword.put(scope, :dataset, dataset))}
+    end)
+  end
+
+  defp prime_notices(in_progress) do
+    Enum.flat_map(in_progress, fn %Document{} = d -> add_blocked_notice([], d) end)
+  end
+
+  defp task_parent_id(%Document{content: content}) do
+    case content && Map.get(content, "parent_id") do
+      p when is_binary(p) and p != "" -> p
+      _ -> nil
+    end
+  end
+
+  defp add_blocked_notice(notices, %Document{} = task) do
+    case Tasks.unsatisfied_blockers(task.id) do
+      [] ->
+        notices
+
+      blockers ->
+        notices ++
+          [%{type: "blocked_while_claimed", task_id: task.doc_id, blockers: blockers}]
+    end
+  end
+
+  # Fires when the caller supplied observed_rail_rev and it differs from the
+  # PRE-write baseline (a concurrent actor moved the rail). Reports the current
+  # (post-write) rail_rev so the worker can refresh its baseline.
+  defp add_rail_changed_notice(notices, parent_id, baseline_rev, current_rev, observed)
+       when is_binary(parent_id) and is_binary(baseline_rev) and is_binary(current_rev) and
+              is_binary(observed) and observed != "" and observed != baseline_rev do
+    notices ++ [%{type: "rail_changed", parent_id: parent_id, rail_rev: current_rev}]
+  end
+
+  defp add_rail_changed_notice(notices, _parent_id, _baseline, _current, _observed), do: notices
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp maybe_put_notices(map, []), do: map
+  defp maybe_put_notices(map, notices), do: Map.put(map, :notices, notices)
 
   defp bad_request(conn, message) do
     conn
