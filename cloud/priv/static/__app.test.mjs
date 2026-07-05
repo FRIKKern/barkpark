@@ -850,6 +850,86 @@ test("markNextStep: flags the first pending after a done; never when a step is a
   assert.ok(cold.every((r) => !r.next));
 });
 
+// ── paceSteps: the min-dwell display shim (satisfying, still honest) ─────────
+
+const paceRow = (step, role, extra = {}) =>
+  ({ step, role, label: step, elapsedMs: null, caption: "", probes: [], ...extra });
+
+test("paceSteps: an instantly-done step dwells as `completing` for the minimum, then reads done", () => {
+  const ledger = {};
+  const t0 = 100000;
+  const truth = [paceRow("content", "ok", { elapsedMs: 600 }), paceRow("verify", "pending")];
+  // First sight at t0: displayed active+completing, later rows held pending.
+  const first = hooks.paceSteps(truth, ledger, t0);
+  assert.equal(first[0].role, "active");
+  assert.equal(first[0].completing, true);
+  assert.equal(ledger.content, t0);
+  // Still dwelling just before the minimum…
+  const mid = hooks.paceSteps(truth, ledger, t0 + hooks.newStepMinDwellMs - 1);
+  assert.equal(mid[0].completing, true);
+  // …and done once the dwell has been served.
+  const after = hooks.paceSteps(truth, ledger, t0 + hooks.newStepMinDwellMs);
+  assert.equal(after[0].role, "ok");
+  assert.equal(after[0].completing, false);
+});
+
+test("paceSteps: rapid multi-done plays ONE at a time — each later step gets its own dwell", () => {
+  const ledger = {};
+  const t0 = 200000;
+  const truth = [paceRow("content", "ok"), paceRow("verify", "ok"), paceRow("ready", "ok")];
+  const first = hooks.paceSteps(truth, ledger, t0);
+  assert.deepEqual([...first.map((r) => r.role)], ["active", "pending", "pending"]);
+  // After content's dwell: verify takes the stage with a FRESH stamp.
+  const second = hooks.paceSteps(truth, ledger, t0 + hooks.newStepMinDwellMs + 100);
+  assert.deepEqual([...second.map((r) => r.role)], ["ok", "active", "pending"]);
+  assert.equal(second[1].completing, true);
+  assert.equal(ledger.verify, t0 + hooks.newStepMinDwellMs + 100);
+  // And the queue drains fully after every dwell has been served.
+  const third = hooks.paceSteps(truth, ledger, t0 + 3 * (hooks.newStepMinDwellMs + 200));
+  assert.deepEqual([...third.map((r) => r.role)], ["ok", "ok", "active"]); // ready dwelling now
+});
+
+test("paceSteps: a step active on screen ≥ the dwell flips to done with no extra wait", () => {
+  const ledger = {};
+  const t0 = 300000;
+  hooks.paceSteps([paceRow("secure", "active")], ledger, t0); // shown active at t0
+  const done = hooks.paceSteps([paceRow("secure", "ok")], ledger, t0 + hooks.newStepMinDwellMs + 500);
+  assert.equal(done[0].role, "ok"); // dwell already served while genuinely active
+});
+
+test("paceSteps: FAILURE snaps to truth — no pacing may delay bad news", () => {
+  const ledger = {};
+  const truth = [paceRow("create", "ok"), paceRow("secure", "failed")];
+  const rows = hooks.paceSteps(truth, ledger, 400000); // fresh ledger: create would dwell
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "failed"]);
+  assert.ok(rows.every((r) => !r.completing));
+});
+
+test("paceSteps: the `next` pulse is suppressed while a paced row holds the stage", () => {
+  const ledger = {};
+  const truth = [paceRow("create", "ok"), paceRow("secure", "pending", { next: true })];
+  const rows = hooks.paceSteps(truth, ledger, 500000);
+  assert.equal(rows[0].role, "active"); // dwelling
+  assert.equal(rows[1].next, false);
+});
+
+test("seedPaceLedger: resume renders finished history instantly (no theatre replay)", () => {
+  const ledger = {};
+  const truth = [paceRow("create", "ok"), paceRow("secure", "ok"), paceRow("configure", "active")];
+  hooks.seedPaceLedger(truth, ledger);
+  const rows = hooks.paceSteps(truth, ledger, 600000);
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "active"]);
+  assert.ok(rows.every((r) => !r.completing));
+});
+
+test("newStepsHtml: a completing row carries the completing class and a visible sweep start", () => {
+  const html = hooks.newStepsHtml([
+    { step: "verify", label: "Testing login & Studio", role: "active", elapsedMs: 500, caption: "", probes: [], completing: true },
+  ]);
+  assert.match(html, /<li class="new-step active completing" data-step="verify">/);
+  assert.match(html, /data-ring="verify" style="--p:(3[4-9]|[4-9][0-9]|100)%"/); // ≥34%: never sweeps from empty
+});
+
 test("provisionSteps: a between-steps gap (create done, nothing active) marks secure `next` end-to-end", () => {
   const rows = hooks.provisionSteps({ provision_steps: [
     { step: "create", status: "started", at: T(0) },
