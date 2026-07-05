@@ -292,10 +292,25 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
   end
 
+  # An image block with NO asset (empty / whitespace-only / missing `src`) is editor
+  # SCAFFOLDING, not content: post-#1161 every new paper seeds a locked
+  # `role: "featured"` image at block 1 (`Content.Papers.Template`) with no src, so a
+  # naive `PdImage` src="" renders a broken empty `<img>` and a fresh paper opens
+  # looking damaged. Doctrine rule 3 (the canvas placeholder is editor chrome; the
+  # public reader shows NOTHING for it): an asset-less image composes to the empty
+  # `_raw` node, which the walker passes through as "" — the block is skipped on the
+  # public /papers render. An image WITH a real `src` is byte-UNCHANGED (D3 additive:
+  # `src`/`alt`/`width`/`height` compose exactly as before).
   def compose_block(%{"type" => "image"} = b, _style) do
-    %{"kind" => "PdImage", "src" => Map.get(b, "src", ""), "alt" => Map.get(b, "alt", "")}
-    |> maybe_put("width", Map.get(b, "width"))
-    |> maybe_put("height", Map.get(b, "height"))
+    case String.trim(stringish(Map.get(b, "src", ""))) do
+      "" ->
+        %{"kind" => "_raw", "html" => ""}
+
+      _src ->
+        %{"kind" => "PdImage", "src" => Map.get(b, "src", ""), "alt" => Map.get(b, "alt", "")}
+        |> maybe_put("width", Map.get(b, "width"))
+        |> maybe_put("height", Map.get(b, "height"))
+    end
   end
 
   # ── sheet embed block ──────────────────────────────────────────────────────

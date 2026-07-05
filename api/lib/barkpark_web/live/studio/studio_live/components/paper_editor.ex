@@ -17,9 +17,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   """
   use BarkparkWeb, :html
 
-  alias Barkpark.PortableDoc.Projection
+  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+
+  # t9 — the task block types whose boundary widget paints a LIVE preview
+  # (mirrors TaskResolver's @snapshot_types + @detail_type).
+  @task_preview_types ~w(tasks task-list task-board roadmap task-detail)
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -82,6 +86,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # at its FALSE default, so the canvas never mounts where its ops can't land —
   # the canvas flag stays gated to the one surface whose persist path is wired.
   attr(:canvas_eligible, :boolean, default: false)
+
+  # t9 — live task-block previews (block_id ⇒ preview entry from
+  # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
+  # paint via task_block_preview/1. The flag-OFF list render never reads it.
+  attr(:task_previews, :map, default: %{})
 
   def paper_block_editor(assigns) do
     # Gate the bound/free split on having descriptors: only the Beta editor (with
@@ -183,10 +192,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               wrapper (it re-renders on each block-list change). --%>
         <%= for segment <- @segments do %>
           <%= case segment do %>
-            <% {:run, run_blocks, run_ordinal} -> %>
+            <% {:run, run_blocks, run_ordinal, locked_tail} -> %>
               <.canvas_run
                 run_blocks={run_blocks}
                 run_ordinal={run_ordinal}
+                locked_tail={locked_tail}
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
               />
@@ -195,8 +205,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 block={block}
                 index={index}
                 last_index={@last_index}
+                prev_locked={
+                  index > 0 and
+                    Map.get(Enum.at(@free_blocks, index - 1) || %{}, "locked") == true
+                }
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
+                task_previews={@task_previews}
               />
           <% end %>
         <% end %>
@@ -208,29 +223,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           class="bp-paper-edit-block"
           data-edit-block-id={Map.get(block, "id")}
           data-block-type={Map.get(block, "type")}
+          data-block-locked={Map.get(block, "locked") == true && "true"}
         >
           <div class="bp-paper-edit-toolbar">
+            <%!-- pdd-t2: a locked block's grip is INERT — no draggable, no
+                  data-drag-grip, a template hint instead of "Drag to reorder"
+                  (same contract as edit_block/1 below). --%>
             <span
               class="bp-paper-drag-grip"
-              data-drag-grip
-              draggable="true"
-              title="Drag to reorder"
-              aria-label="Drag to reorder block"
+              data-drag-grip={Map.get(block, "locked") != true}
+              draggable={Map.get(block, "locked") != true && "true"}
+              title={
+                if Map.get(block, "locked") == true,
+                  do: "Part of the document template",
+                  else: "Drag to reorder"
+              }
+              aria-label={
+                if Map.get(block, "locked") == true,
+                  do: "Part of the document template",
+                  else: "Drag to reorder block"
+              }
               data-test-id="paper-drag-grip"
             >⋮⋮</span>
             <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
             <span class="bp-paper-edit-actions">
+              <%!-- Doctrine template lock (pdd-t2): a locked mandated block can't
+                    be moved or deleted, so its ▲▼/× controls are HIDDEN and a calm
+                    lock note stands in their place — chrome, never an error. The
+                    server backstops it either way (patch.ex). The block BELOW a
+                    locked block disables ▲ (moving it up would displace the
+                    locked block — an affordance the server would reject). --%>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move up"
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="up"
-                disabled={index == 0}
+                disabled={
+                  index == 0 or
+                    Map.get(Enum.at(@free_blocks, index - 1) || %{}, "locked") == true
+                }
                 data-test-id="paper-move-up"
               >▲</button>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move down"
@@ -241,6 +279,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 data-test-id="paper-move-down"
               >▼</button>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-destructive btn-sm"
                 title="Delete block"
@@ -248,6 +287,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 phx-value-id={Map.get(block, "id")}
                 data-test-id="paper-delete-block"
               >×</button>
+              <span
+                :if={Map.get(block, "locked") == true}
+                class="bp-paper-lock-note"
+                title="Part of the document template"
+                data-test-id="paper-locked-note"
+              >🔒 Locked</span>
             </span>
           </div>
           <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
@@ -347,8 +392,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         {:block, block}, i -> {{:block, block, i}, i + 1}
       end)
 
-    out
+    annotate_locked_tails(out)
   end
+
+  # pdd-t2: stamp each `{:run, …}` with whether the segment DIRECTLY AFTER it is
+  # a template-locked boundary block (the locked featured image right after the
+  # title run is THE case — `image` is not canvas-eligible, so the locked title
+  # rides alone in run 0 and the run's transaction veto cannot see the featured
+  # block a run-growing edit would displace). The flag rides to the canvas as
+  # `data-locked-tail`, where locks.js vetoes run GROWTH. Two runs are never
+  # adjacent (runs are maximal), so only the run→block seam needs a look-ahead.
+  defp annotate_locked_tails([{:run, blocks, ordinal} | rest]) do
+    locked_tail =
+      case rest do
+        [{:block, block, _index} | _] -> Map.get(block, "locked") == true
+        _ -> false
+      end
+
+    [{:run, blocks, ordinal, locked_tail} | annotate_locked_tails(rest)]
+  end
+
+  defp annotate_locked_tails([segment | rest]), do: [segment | annotate_locked_tails(rest)]
+  defp annotate_locked_tails([]), do: []
 
   # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
   # phx-update="ignore" wrapper is KEYED BY THE RUN'S ORDINAL (Bug #1a: a STABLE
@@ -362,6 +427,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # push_canvas_echo keys each run by the SAME ordinal so it routes to this wrapper.
   attr(:run_blocks, :list, required: true)
   attr(:run_ordinal, :integer, required: true)
+  # pdd-t2: true when the block DIRECTLY AFTER this run is template-locked (the
+  # featured image boundary after the title run). Rides to the canvas WC as
+  # data-locked-tail via the hook; locks.js then vetoes any run GROWTH (a new
+  # node in this run would displace the locked follower — the server invariant
+  # would reject the resulting insert anyway; the veto keeps it a calm no-op).
+  attr(:locked_tail, :boolean, default: false)
   # The picker FETCH-SCOPE for any field-image / field-reference riding this run. The
   # canvas mounts those pickers (bp-media-picker / bp-reference-picker) as control-atom
   # node-views; each WC fetches its own data over HTTP scoped by a dataset (+ a bearer
@@ -386,6 +457,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-blocks={Jason.encode!(@run_blocks)}
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
+      data-canvas-locked-tail={@locked_tail && "true"}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -401,8 +473,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:block, :map, required: true)
   attr(:index, :integer, required: true)
   attr(:last_index, :integer, required: true)
+  # pdd-t2: whether the block DIRECTLY ABOVE this one is template-locked. Moving
+  # this block up would displace that locked block (the server invariant rejects
+  # it), so the ▲ control disables — the affordance is never offered and then
+  # denied with an error flash.
+  attr(:prev_locked, :boolean, default: false)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  # t9 — the id-keyed live-preview map (paper_block_editor passes it through);
+  # only a task-type block reads its own entry. Default keeps every other call
+  # site (and every non-task block) byte-identical.
+  attr(:task_previews, :map, default: %{})
 
   def edit_block(assigns) do
     ~H"""
@@ -410,29 +491,47 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       class="bp-paper-edit-block"
       data-edit-block-id={Map.get(@block, "id")}
       data-block-type={Map.get(@block, "type")}
+      data-block-locked={Map.get(@block, "locked") == true && "true"}
     >
       <div class="bp-paper-edit-toolbar">
+        <%!-- pdd-t2: a locked block's grip is INERT — no draggable, no
+              data-drag-grip (the sortable hook cancels any drag not started on
+              a grip), a template hint instead of "Drag to reorder". Kept in the
+              row so the toolbar keeps its shape. --%>
         <span
           class="bp-paper-drag-grip"
-          data-drag-grip
-          draggable="true"
-          title="Drag to reorder"
-          aria-label="Drag to reorder block"
+          data-drag-grip={Map.get(@block, "locked") != true}
+          draggable={Map.get(@block, "locked") != true && "true"}
+          title={
+            if Map.get(@block, "locked") == true,
+              do: "Part of the document template",
+              else: "Drag to reorder"
+          }
+          aria-label={
+            if Map.get(@block, "locked") == true,
+              do: "Part of the document template",
+              else: "Drag to reorder block"
+          }
           data-test-id="paper-drag-grip"
         >⋮⋮</span>
         <span class="bp-paper-edit-kind"><%= Map.get(@block, "type") %></span>
         <span class="bp-paper-edit-actions">
+          <%!-- Doctrine template lock (pdd-t2): a locked mandated block hides its
+                ▲▼/× controls and shows a calm lock note instead — same contract as
+                the flag-OFF list render above. --%>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move up"
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="up"
-            disabled={@index == 0}
+            disabled={@index == 0 or @prev_locked}
             data-test-id="paper-move-up"
           >▲</button>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move down"
@@ -443,6 +542,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-move-down"
           >▼</button>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-destructive btn-sm"
             title="Delete block"
@@ -450,11 +550,90 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-value-id={Map.get(@block, "id")}
             data-test-id="paper-delete-block"
           >×</button>
+          <span
+            :if={Map.get(@block, "locked") == true}
+            class="bp-paper-lock-note"
+            title="Part of the document template"
+            data-test-id="paper-locked-note"
+          >🔒 Locked</span>
         </span>
       </div>
+      <.task_block_preview
+        :if={task_preview_block?(@block)}
+        block={@block}
+        preview={Map.get(@task_previews, Map.get(@block, "id"))}
+      />
       <.paper_block_fields block={@block} dataset={@dataset} api_token_raw={@api_token_raw} />
     </div>
     """
+  end
+
+  # ── t9 — live task-block preview (the boundary-widget consumer) ─────────────
+  #
+  # The canvas renders task blocks as boundary widgets (they are non-prose), so
+  # the LIVE preview paints HERE, server-rendered from @paper_task_previews —
+  # the display-only rows Shared.push_task_previews resolves under the session
+  # scope. The HTML producer is `Render.render_block/2` — the SAME emitter the
+  # /papers reader uses (doctrine rule 3: one producer, byte for byte); the
+  # Studio shell is a `.bp-paper-surface` sink, so the canonical paper-surface
+  # stylesheet styles it identically. D5 by construction: the preview merges
+  # rows onto a COPY (TaskResolver.apply_preview/2) — @block itself (the save
+  # baseline / the ops the buttons emit) is never touched.
+  attr(:block, :map, required: true)
+  # This block's preview entry (snapshot/task/error) or nil (still resolving /
+  # un-addressable block).
+  attr(:preview, :any, default: nil)
+
+  def task_block_preview(assigns) do
+    assigns = assign(assigns, :state, task_preview_state(assigns.block, assigns.preview))
+
+    ~H"""
+    <div class="bp-paper-task-preview" data-test-id="paper-task-preview" aria-live="polite">
+      <%= case @state do %>
+        <% {:ok, html} -> %>
+          <%= raw(html) %>
+        <% :empty -> %>
+          <div class="bp-tasks bp-tasks--empty">No matching tasks.</div>
+        <% :error -> %>
+          <div class="bp-tasks bp-tasks--empty">
+            Live task preview unavailable — the Tasks plugin may be off.
+          </div>
+        <% :loading -> %>
+          <div class="bp-tasks bp-tasks--empty">Loading live tasks…</div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp task_preview_block?(block),
+    do: Map.get(block, "type") in @task_preview_types
+
+  # nil/unknown entry on a query block ⇒ still resolving (or the block has no
+  # id to key a preview) — an honest "loading" note, never a fake empty board.
+  # An author-pinned literal (no query) renders from its own rows directly.
+  defp task_preview_state(block, preview) do
+    cond do
+      is_map(preview) and preview["error"] == true ->
+        :error
+
+      is_map(preview) ->
+        block |> TaskResolver.apply_preview(preview) |> rendered_or_empty()
+
+      Map.has_key?(block, "query") ->
+        :loading
+
+      true ->
+        rendered_or_empty(block)
+    end
+  end
+
+  # task_detail_html renders "" for an empty/matchless task — surface that as
+  # an explicit empty note instead of a silent blank strip.
+  defp rendered_or_empty(block) do
+    case Render.render_block(block, %{style: :article}) do
+      html when html in ["", nil] -> :empty
+      html -> if String.trim(html) == "", do: :empty, else: {:ok, html}
+    end
   end
 
   # Live document stats for the Beta editor footer (gap #4): top-level block
@@ -867,6 +1046,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           ></bp-media-picker>
         </div>
 
+      <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
+            `role: "featured"` image (Content.Papers.Template) is a `type:"image"`
+            block with NO src — a canvas run BOUNDARY, so it renders through THIS
+            per-block path on both the flag-ON canvas and the classic editor.
+            Bind the SAME bp-media-picker the field-image picker uses; the bridge
+            (data-field-type="image") patches the block's `src`/`alt` from the
+            WC's parsed meta (a plain URL — never the JSON asset-ref blob the
+            field path stores in `value`). Empty src → the WC's dashed add-card
+            (restyled evergreen for the featured block via root.html.heex) IS the
+            affordance; a chosen asset patches src and the public /papers render
+            picks it up (compose.ex `image` clause). --%>
+      <% "image" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type="image" data-block-role={image_block_role(@block)} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel">
+            <%= if image_block_role(@block) == "featured", do: "Featured image", else: "Image" %>
+          </label>
+          <bp-media-picker
+            value={image_block_src(@block)}
+            dataset={@dataset}
+            data-token={@api_token_raw}
+            data-test-id="paper-block-image-picker"
+          ></bp-media-picker>
+        </div>
+
       <%!-- v2 COMPOSITE field blocks (P2.3). composite / arrayOf / codelist /
             localizedText render as a nested PaperFieldBlock LiveComponent —
             NOT inside phx-update="ignore". These controls emit server-bound
@@ -884,11 +1088,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         />
 
       <% _ -> %>
-        <%!-- image / table and any other type are read-only in the MVP. --%>
+        <%!-- table and any other type are read-only in the MVP. --%>
         <p class="bp-paper-edit-readonly">
           <%= @type %> blocks are not editable yet (view/delete/reorder only).
         </p>
     <% end %>
     """
+  end
+
+  # Tolerant readers for the image block's `src` / `role` (t13). A raw-API
+  # paper can carry a non-string in either key; the reader side degrades
+  # (compose.ex stringish → skip), so the editor must too — a hostile map here
+  # would raise Phoenix.HTML.Safe in the render and take the whole pane down.
+  defp image_block_src(block) do
+    case Map.get(block, "src") do
+      src when is_binary(src) -> src
+      _ -> ""
+    end
+  end
+
+  defp image_block_role(block) do
+    case Map.get(block, "role") do
+      role when is_binary(role) -> role
+      _ -> nil
+    end
   end
 end

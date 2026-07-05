@@ -230,11 +230,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
     do: Paper.paper_block_autosave(params, socket)
 
   def handle_event("backlinks-toggle", _params, socket), do: Paper.backlinks_toggle(socket)
+
+  # t6 — WordPress-style metadata sidebar (doctrine Rule 4/5). Pure assign flips;
+  # none touch body blocks.
+  def handle_event("sidebar-toggle-panel", _params, socket),
+    do: Paper.sidebar_toggle_panel(socket)
+
+  def handle_event("sidebar-toggle-section", params, socket),
+    do: Paper.sidebar_toggle_section(params, socket)
+
+  def handle_event("sidebar-slug-change", params, socket),
+    do: Paper.sidebar_slug_change(params, socket)
+
   def handle_event("backlinks-refresh", _params, socket), do: Paper.backlinks_refresh(socket)
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
 
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  # t9: live task-block preview — the canvas hook requests fresh resolved rows on
+  # mount and ~500ms-debounced after a query edit; we push them on the parallel
+  # bp:task-preview channel (display only, never the save baseline — D5).
+  def handle_event("task-preview-refresh", _params, socket),
+    do: Paper.task_preview_refresh(socket)
 
   # lvw-t2 (D4): accept-baseline control on a drifted valueref in the paper
   # view — an ifRev-guarded, fallback-only patch on the HOSTING paper.

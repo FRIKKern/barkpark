@@ -608,6 +608,67 @@ defmodule Barkpark.PortableDoc.RenderTest do
     end
   end
 
+  # Doctrine rule 3 + t13 (featured-image placeholder): a locked `role: "featured"`
+  # image block seeded with NO asset (post-#1161 template) is editor scaffolding — it
+  # must render NOTHING on the public /papers surface, never a broken empty <img>. An
+  # image WITH a real src stays byte-identical (D3 additive).
+  describe "render_block/1 — asset-less image is skipped on the public render (t13)" do
+    test "an image block with no src composes to empty output" do
+      assert Render.render_block(%{"id" => "f", "type" => "image", "role" => "featured"}) == ""
+    end
+
+    test "an image block with an empty-string src composes to empty output" do
+      assert Render.render_block(%{"id" => "f", "type" => "image", "src" => ""}) == ""
+    end
+
+    test "an image block with a whitespace-only src composes to empty output" do
+      assert Render.render_block(%{"id" => "f", "type" => "image", "src" => "   "}) == ""
+    end
+
+    test "a skipped image does not break the walker mid-list — neighbours still render" do
+      blocks = [
+        %{"id" => "h", "type" => "heading", "text" => "A"},
+        %{"id" => "f", "type" => "image", "role" => "featured"},
+        %{"id" => "p", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "B"}]}
+      ]
+
+      # The asset-less image contributes nothing; the heading + paragraph render in
+      # order with no empty <img> between them.
+      assert Render.render_blocks(blocks) ==
+               ~s(<span style="font-weight:bold">A</span><span>B</span>)
+
+      refute Render.render_blocks(blocks) =~ "<img"
+    end
+
+    test "D3: an image WITH a src is byte-unchanged (renders its <img> exactly as before)" do
+      block = %{
+        "id" => "i",
+        "type" => "image",
+        "src" => "https://img.test/a.png",
+        "alt" => "A pic",
+        "width" => 100,
+        "height" => 50
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<img src="https://img.test/a.png" alt="A pic" style="max-width:100%;height:auto" width="100" height="50">)
+    end
+
+    test "D3: a locked featured image gains its src → renders normally (the bound state)" do
+      block = %{
+        "id" => "tpl-featured",
+        "type" => "image",
+        "role" => "featured",
+        "locked" => true,
+        "src" => "/media/files/2026/07/hero.jpg",
+        "alt" => "Hero"
+      }
+
+      assert Render.render_block(block) ==
+               ~s(<img src="/media/files/2026/07/hero.jpg" alt="Hero" style="max-width:100%;height:auto">)
+    end
+  end
+
   describe "field-image v2 JSON values" do
     test "extracts url from asset reference JSON for preview" do
       block = %{

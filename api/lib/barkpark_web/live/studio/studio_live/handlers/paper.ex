@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
-  alias BarkparkWeb.Studio.StudioLive.{Blocks, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
 
   def paper_toggle_edit(socket) do
     if socket.assigns[:editor_view] == :paper do
@@ -21,7 +21,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
       socket =
         if next_edit_mode or not socket.assigns[:paper_block_mode] do
-          socket
+          # t9: entering Edit — refresh the live task-block previews so the
+          # boundary widgets paint CURRENT rows, not the rows from paper-open.
+          # No-op when the canvas flag is OFF; display-only either way (D5).
+          Shared.push_task_previews(socket)
         else
           stream(
             socket,
@@ -84,6 +87,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     {:noreply, assign(socket, backlinks_open: !socket.assigns[:backlinks_open])}
   end
 
+  # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ────────────────
+  #
+  # All three are PURE assign flips — none call `Shared.paper_op/2` or the block
+  # stream, so a sidebar interaction can never emit a body block op. Nothing in
+  # the sidebar persists yet BY DESIGN: the slug change is validate-only
+  # (uniqueness/rename mutates doc_id — t5's migrate concern), and publish state
+  # is read-only display (papers publish in place; the twin-row doc publish/
+  # unpublish path would fail or strand the paper — see the Publish section
+  # comment in `Components.paper_metadata_sidebar/1`). When a sidebar field DOES
+  # persist, it rides `PaperCanvas.sidebar_meta_op/2`'s `{:doc_field, …}` shape,
+  # NEVER the block pipeline.
+
+  @doc "Collapse / expand the whole metadata sidebar. Pure assign flip."
+  def sidebar_toggle_panel(socket) do
+    {:noreply, assign(socket, sidebar_open: !socket.assigns[:sidebar_open])}
+  end
+
+  @doc """
+  Collapse / expand ONE sidebar section, toggling its key in the
+  `sidebar_collapsed` MapSet. Pure assign — the canvas body is never touched.
+  """
+  def sidebar_toggle_section(%{"section" => key}, socket) when is_binary(key) do
+    next = PaperCanvas.toggle_section(socket.assigns[:sidebar_collapsed], key)
+    {:noreply, assign(socket, sidebar_collapsed: next)}
+  end
+
+  def sidebar_toggle_section(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  Live slug format validation on every keystroke. Assigns the draft value + a
+  `{tone, message}` verdict from `PaperCanvas.slug_feedback/1` — a PURE, DB-free
+  format check. It emits NO block op (Rule 4: a sidebar edit must not touch
+  blocks); persisting a rename is deliberately out of this validate-only path.
+  """
+  def sidebar_slug_change(%{"value" => value}, socket) when is_binary(value) do
+    {:noreply,
+     assign(socket,
+       sidebar_slug_draft: value,
+       sidebar_slug_feedback: PaperCanvas.slug_feedback(value)
+     )}
+  end
+
+  def sidebar_slug_change(_params, socket), do: {:noreply, socket}
+
   @doc """
   Re-run the inbound-reference load for the currently-open paper. Read-only;
   no-ops (preserving the existing lists) when no paper is open.
@@ -134,6 +181,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_ops(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed
+  the live rows the instant the editor opens) and again ~500ms-debounced after an
+  edit that may have changed a task block's `query`. We re-run the resolver under
+  the session scope and push fresh id-keyed rows on the `bp:task-preview` channel.
+
+  Read-only: never writes, never touches the save baseline (D5) — a pure display
+  refresh. No-op when the canvas flag is OFF (Shared.push_task_previews gates it).
+  """
+  def task_preview_refresh(socket) do
+    {:noreply, Shared.push_task_previews(socket)}
+  end
 
   @doc """
   ACCEPT-BASELINE (lvw-t2, D4 ratified): the walker-emitted control on a
@@ -250,7 +310,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_delete_block(%{"id" => id}, socket) do
-    {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
+    # pdd-t2: a template-locked block can't be deleted. The controls are hidden
+    # / disabled, so this only fires from a stale DOM or a crafted event — keep
+    # it a calm no-op rather than a server-rejected op + error flash.
+    if locked_block_id?(socket, id) do
+      {:noreply, socket}
+    else
+      {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
+    end
   end
 
   @doc """
@@ -318,7 +385,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         _ -> nil
       end
 
-    {:noreply, Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+    # pdd-t2: template-locked blocks hold their positions under drag-and-drop.
+    # A locked block is never dragged (its grip is inert) — a stale/crafted
+    # event is a calm no-op. A drop that would land an UNLOCKED block inside
+    # the locked prefix (above the title, or between title and featured) CLAMPS
+    # to directly below the last locked block — the block lands as close as
+    # allowed instead of the move erroring out server-side.
+    blocks = Shared.paper_top_level_blocks(socket)
+    locked_prefix = Enum.take_while(blocks, &(Map.get(&1, "locked") == true))
+
+    cond do
+      locked_block_id?(socket, id) ->
+        {:noreply, socket}
+
+      locked_prefix != [] ->
+        last_locked_id = locked_prefix |> List.last() |> Map.get("id")
+        locked_ids = MapSet.new(locked_prefix, &Map.get(&1, "id"))
+
+        after_id =
+          if after_id == nil or
+               (MapSet.member?(locked_ids, after_id) and after_id != last_locked_id),
+             do: last_locked_id,
+             else: after_id
+
+        {:noreply,
+         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+
+      true ->
+        {:noreply,
+         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+    end
+  end
+
+  # pdd-t2: whether the top-level block `id` is template-locked.
+  defp locked_block_id?(socket, id) do
+    socket
+    |> Shared.paper_top_level_blocks()
+    |> Enum.any?(fn b -> Map.get(b, "id") == id and Map.get(b, "locked") == true end)
   end
 
   @doc """

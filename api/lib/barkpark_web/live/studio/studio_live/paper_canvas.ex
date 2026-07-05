@@ -270,4 +270,136 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
     out
   end
+
+  # ── t6: WordPress-style metadata sidebar (doctrine Rule 4) ───────────────────
+  #
+  # The sidebar is the calm right document panel: everything that FAILS the
+  # article test (status/visibility, slug, context, labels, relations) lives
+  # HERE, never in the body. The title + featured image stay LOCKED body blocks
+  # (t1/t4 derive doc.title from the title block) — this module deliberately
+  # never surfaces either into the sidebar (no duplication).
+  #
+  # These pure helpers are the seam the LiveView handlers + the render component
+  # ride, so the doctrine's two hard invariants are UNIT-testable with no DB:
+  #
+  #   * A sidebar edit is a DOCUMENT-FIELD update, structurally distinct from a
+  #     body block op — `sidebar_meta_op/2` returns a `{:doc_field, …}` tuple,
+  #     NEVER the `%{"op" => …}` block-op shape `Shared.paper_op/2` consumes. A
+  #     sidebar edit therefore CANNOT touch blocks.
+  #   * Slug validation is INSTANT + format-only — `slug_feedback/1` is a pure
+  #     status verdict the change handler assigns without persisting or hitting
+  #     the DB (uniqueness is a save-time concern, not a keystroke one).
+
+  # The fixed, ordered sidebar sections. Each is independently collapsible.
+  @sidebar_sections ~w(publish slug context labels relations)
+
+  @doc "The ordered sidebar section keys (each a collapsible chrome section)."
+  @spec sidebar_sections() :: [String.t()]
+  def sidebar_sections, do: @sidebar_sections
+
+  @doc """
+  A sidebar metadata edit expressed as a DOCUMENT-FIELD op — deliberately NOT a
+  body block op. Returns `{:doc_field, field, value}`; the handler routes it
+  through the document autosave/publish path (`handlers/fields.ex`), never
+  `Shared.paper_op/2`. This tuple shape is the structural proof that a sidebar
+  edit cannot reach a block: it carries none of the `"op"` / `"block"` / `"id"`
+  keys the block-op applier reads.
+  """
+  @spec sidebar_meta_op(String.t(), term()) :: {:doc_field, String.t(), term()}
+  def sidebar_meta_op(field, value) when is_binary(field), do: {:doc_field, field, value}
+
+  # WordPress-style slug: lowercase a–z / 0–9 in hyphen-joined segments — no
+  # leading, trailing, or doubled hyphen, no spaces, no capitals. Empty ⇒ invalid.
+  @slug_re ~r/^[a-z0-9]+(?:-[a-z0-9]+)*$/
+
+  @doc "True when `slug` is a valid WordPress-style slug (format only)."
+  @spec sidebar_slug_valid?(term()) :: boolean()
+  def sidebar_slug_valid?(slug) when is_binary(slug), do: Regex.match?(@slug_re, slug)
+  def sidebar_slug_valid?(_), do: false
+
+  @doc """
+  Instant slug format feedback as `{tone, message}` where `tone` is one of the
+  status-vocabulary atoms `:ok | :warn | :danger`. Pure — no DB, no uniqueness
+  check. This is the keystroke-level format guard the Slug section renders live.
+  """
+  @spec slug_feedback(term()) :: {:ok | :warn | :danger, String.t()}
+  def slug_feedback(slug) when is_binary(slug) do
+    cond do
+      slug == "" -> {:warn, "Slug is required"}
+      sidebar_slug_valid?(slug) -> {:ok, "Looks good"}
+      slug =~ ~r/[A-Z]/ -> {:danger, "Lowercase only — no capitals"}
+      slug =~ ~r/\s/ -> {:danger, "No spaces — use hyphens"}
+      slug =~ ~r/(^-|-$|--)/ -> {:warn, "No leading, trailing, or doubled hyphens"}
+      true -> {:danger, "Only lowercase letters, numbers, and hyphens"}
+    end
+  end
+
+  def slug_feedback(_), do: {:danger, "Only lowercase letters, numbers, and hyphens"}
+
+  @doc """
+  Reader visibility derived from publish status (papers publish to
+  /papers/:slug). "published" ⇒ "Public". Anything else is just "Draft" — NOT
+  "not public": the public reader (`Content.get_paper/3`) fetches by exact
+  doc_id with no status filter, so a non-published row at `doc_id = slug` is
+  still publicly reachable and the stronger claim would lie.
+  """
+  @spec visibility_label(term()) :: String.t()
+  def visibility_label("published"), do: "Public"
+  def visibility_label(_), do: "Draft"
+
+  @doc """
+  Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`,
+  filtered to non-blank strings. `[]` when a paper carries no tags. Pure.
+  """
+  @spec paper_labels(term()) :: [String.t()]
+  def paper_labels(%{content: %{"tags" => tags}}) when is_list(tags),
+    do: Enum.filter(tags, &(is_binary(&1) and String.trim(&1) != ""))
+
+  def paper_labels(_), do: []
+
+  @doc """
+  Outbound relations for the sidebar Relations section: each `field-reference`
+  block that carries a non-blank value, as `%{id: value, label: label}`. Pure —
+  reads the ALREADY-loaded block list, never the DB. `[]` when there are none.
+  """
+  @spec paper_relations(term()) :: [%{id: term(), label: String.t()}]
+  def paper_relations(blocks) when is_list(blocks) do
+    blocks
+    |> Enum.filter(fn b ->
+      is_map(b) and Map.get(b, "type") == "field-reference" and present?(Map.get(b, "value"))
+    end)
+    |> Enum.map(fn b ->
+      %{
+        id: Map.get(b, "value"),
+        ref_type: Map.get(b, "refType"),
+        label: Map.get(b, "label") || Map.get(b, "fieldName") || "Reference"
+      }
+    end)
+  end
+
+  def paper_relations(_), do: []
+
+  defp present?(v) when is_binary(v), do: String.trim(v) != ""
+  defp present?(nil), do: false
+  defp present?(_), do: true
+
+  @doc """
+  True when a sidebar section is EXPANDED, given the `collapsed` set (a MapSet of
+  collapsed section keys). Absent / non-MapSet `collapsed` ⇒ open (the default is
+  every section expanded).
+  """
+  @spec sidebar_section_open?(term(), String.t()) :: boolean()
+  def sidebar_section_open?(%MapSet{} = collapsed, key), do: not MapSet.member?(collapsed, key)
+  def sidebar_section_open?(_collapsed, _key), do: true
+
+  @doc """
+  Flip a section's collapsed state in the `collapsed` MapSet, returning the new
+  set. A nil / non-MapSet input seeds an empty set first, so the first toggle of
+  a section collapses it.
+  """
+  @spec toggle_section(term(), String.t()) :: MapSet.t()
+  def toggle_section(collapsed, key) do
+    set = if match?(%MapSet{}, collapsed), do: collapsed, else: MapSet.new()
+    if MapSet.member?(set, key), do: MapSet.delete(set, key), else: MapSet.put(set, key)
+  end
 end

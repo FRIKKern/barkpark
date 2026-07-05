@@ -203,3 +203,25 @@ The retune:
 5. HYGIENE IS SYSTEMIC. The flood was partly bad task hygiene; the §5/§6 quality tasks (save-gate,
    completeness score, bp task lint, guided editor) are the enforcement arm — the board must ALSO be
    robust to bad hygiene (mass closes, stale claims) by policy, not by hoping data is clean.
+
+---
+
+## AMENDMENT 5 (2026-07-05) — finished epics decay to the bottom (completion ≠ activity)
+
+User, verbatim: "also we want to close epics - like collapse them - if it is not being worked on - we
+should not spend long time showing done epics at top - it will go to bottom after a short while."
+
+Observed: a mass-closed epic (auth, 29/30 done) holds RANK 1 because the closes are fresh — D49
+recency treats fresh-done the same as fresh-work. Wrong: completion should be *seen* briefly (the
+win lands: cues + console + flash), then get out of the way.
+
+The policy (D58, implement after wave 12 merges — same goldens):
+1. WORKABLE = a section with ≥1 non-terminal child (in_progress/ready/blocked/open).
+2. A FINISHED section (nothing workable) keeps its recency rank only for a short GRACE window
+   (~1h since last activity) — you see the completion happen — then it DECAYS below every workable
+   section, rendered as ONE header+rollup line ("29/30", "9/9"): the finished-lately shelf, above
+   the cancelled tombstones at the very bottom.
+3. Collapse follows automatically: a finished section has no ready work, so the focus window (and
+   the D51-a fallback, which only seeds READY tasks) is empty → header-only. Inactive-but-workable
+   sections keep the existing D51/D51-a behavior (header+rollup; recent ones show 2 fresh ready seeds).
+4. Cancelled-root tombstones (W10-B) stay last. Explicit h/l/enter overrides still win (D54).

@@ -168,6 +168,12 @@ import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
 // the source baseline so a surviving block keeps its id and runToOps emits a PATCH
 // (not remove+insert) for an in-place edit. See ./source-realign.js.
 import { realignBlockIds, deepCloneBlocks } from "./source-realign.js";
+// pdd-t2: the PURE doctrine template-lock veto predicate — wired into the editor's
+// filterTransaction below so a locked mandated block (title @0 / featured @1) can
+// never be deleted or moved live (the FELT half of the server backstop). Split into
+// its own DOM-free module so it unit-tests in plain Node (this file can't be
+// imported DOM-free — it calls customElements.define at load).
+import { transactionVetoesLock } from "./locks.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -216,13 +222,28 @@ function normalizeCanvasDoc(doc) {
   const stripNested = (node) => {
     if (node && node.attrs) {
       const a = node.attrs;
-      if (a.bpId == null && a.bpType == null && hasOnlyBpKeys(a)) {
+      if (
+        a.bpId == null &&
+        a.bpType == null &&
+        a.locked == null &&
+        a.role == null &&
+        hasOnlyBpKeys(a)
+      ) {
         // The node gained ONLY the (null) bp stamp — drop the whole attrs bag so
         // it matches an unstamped projection node.
         delete node.attrs;
       } else {
         if (a.bpId == null) delete a.bpId;
         if (a.bpType == null) delete a.bpType;
+        // pdd-t2: BpAttrs declares locked/role GLOBALLY on `paragraph`, so the
+        // paragraph nested inside a list item also gains them as { locked:null,
+        // role:null } in getJSON — but runToTiptap's list projection emits those
+        // inner paragraphs with NO such keys. Strip the null phantoms so a list's
+        // getJSON re-projection matches (else the list looks changed every
+        // keystroke — the SAME presence-gap the bpId/bpType strip closes). Locks
+        // are top-level only, so a nested null is always a phantom.
+        if (a.locked == null) delete a.locked;
+        if (a.role == null) delete a.role;
       }
     }
     if (node && node.content) node.content.forEach(stripNested);
@@ -262,7 +283,9 @@ function normalizeCanvasDoc(doc) {
 // would leave it empty). Guards against nuking a node that also has real attrs
 // (e.g. a heading's level — though headings are top-level and never walked here).
 function hasOnlyBpKeys(attrs) {
-  return Object.keys(attrs).every((k) => k === "bpId" || k === "bpType");
+  return Object.keys(attrs).every(
+    (k) => k === "bpId" || k === "bpType" || k === "locked" || k === "role",
+  );
 }
 
 // The canvas slash menu's item list = SLASH_ITEMS narrowed to the insertable set.
@@ -514,6 +537,22 @@ class BpPaperCanvas extends HTMLElement {
         // menu is open). When ALL popups are closed every keystroke falls through to
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
+        // pdd-t2: the doctrine template-lock veto. Reject any transaction that
+        // deletes or moves a locked mandated block (returning false from
+        // filterTransaction drops the whole tx). Content edits inside a locked
+        // block pass. Additive: no-op on papers without locked blocks (D3).
+        // data-locked-tail (stamped by the BarkparkPaperCanvas hook when the
+        // block AFTER this run in the full document is locked — e.g. the
+        // featured image right after the title run) additionally vetoes any
+        // run GROWTH, since a new node here would displace that locked
+        // follower. Read live off the attribute so hook/upgrade ordering can
+        // never race the Editor construction.
+        filterTransaction: (tr, state) =>
+          !transactionVetoesLock(
+            tr,
+            state,
+            this.getAttribute("data-locked-tail") === "true",
+          ),
       },
       onUpdate: () => {
         this._scheduleEmit();

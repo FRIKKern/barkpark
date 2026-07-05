@@ -846,6 +846,83 @@
     .bp-backlinks-row.is-clickable:hover { background: var(--bg-hover, rgba(127,127,127,0.08)); }
     .bp-backlinks-title { font-size: 13px; font-weight: 500; color: var(--fg); }
     .bp-backlinks-meta { font-size: 11px; color: var(--fg-dim); }
+    /* t6 — WordPress-style metadata sidebar. Status tones mirror the bp
+       manifest (ok/warn/danger/info); scoped locally since --st-* only cascade
+       under .bp-paper-surface. Light + dark, media-query and data-theme. */
+    .bp-doc-sidebar {
+      --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb;
+      display: flex; flex-direction: column;
+      background: var(--bg-card);
+      border-left: 1px solid var(--border-muted);
+      overflow: hidden;
+    }
+    @media (prefers-color-scheme: dark) {
+      .bp-doc-sidebar { --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-info: #60a5fa; }
+    }
+    html[data-theme="light"] .bp-doc-sidebar { --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb; }
+    html[data-theme="dark"] .bp-doc-sidebar { --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-info: #60a5fa; }
+    .bp-doc-sidebar.is-open { flex: 0 0 300px; min-width: 0; }
+    .bp-doc-sidebar.is-collapsed { flex: 0 0 auto; }
+    .bp-doc-sidebar__head {
+      display: flex; align-items: center; gap: 8px;
+      padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
+    }
+    .bp-doc-sidebar__collapse {
+      background: none; border: 0; cursor: pointer;
+      color: var(--fg-dim); display: inline-flex; align-items: center;
+    }
+    .bp-doc-sidebar__collapse:hover { color: var(--fg-muted); }
+    .bp-doc-sidebar__title {
+      font-size: 12px; font-weight: 600; color: var(--fg-muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .bp-doc-sidebar__body { overflow-y: auto; }
+    .bp-doc-sec { border-bottom: 1px solid var(--border-muted); }
+    .bp-doc-sec__h { margin: 0; }
+    .bp-doc-sec__toggle {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      padding: 10px 12px; background: none; border: 0; cursor: pointer;
+      font-size: 11px; font-weight: 600; color: var(--fg-muted); text-align: left;
+      text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .bp-doc-sec__toggle:hover { color: var(--fg); }
+    .bp-doc-sec__toggle:focus-visible { outline: 2px solid var(--st-info); outline-offset: -2px; }
+    .bp-doc-sec__body {
+      padding: 4px 12px 14px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .bp-doc-field {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    .bp-doc-field__label { font-size: 12px; color: var(--fg-dim); }
+    .bp-doc-field__val { font-size: 12px; color: var(--fg); font-weight: 500; }
+    .bp-doc-badge {
+      font-size: 11px; font-weight: 600; padding: 2px 8px;
+      border-radius: 999px; text-transform: capitalize;
+      /* base = the draft treatment, so an unexpected status string still
+         renders as a legible neutral pill; known statuses override below */
+      color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 16%, transparent);
+    }
+    .bp-doc-badge--published { color: var(--st-ok); background: color-mix(in srgb, var(--st-ok) 14%, transparent); }
+    .bp-doc-badge--draft { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 16%, transparent); }
+    .bp-doc-slug { display: flex; flex-direction: column; gap: 4px; margin: 0; }
+    .bp-doc-slug__input {
+      width: 100%; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: 12px;
+    }
+    .bp-doc-slug__fb { margin: 0; font-size: 11px; }
+    .bp-doc-slug__fb--ok { color: var(--st-ok); }
+    .bp-doc-slug__fb--warn { color: var(--st-warn); }
+    .bp-doc-slug__fb--danger { color: var(--st-danger); }
+    .bp-doc-empty { margin: 0; font-size: 12px; color: var(--fg-dim); }
+    .bp-doc-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    .bp-doc-tag {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      background: var(--bg-hover, rgba(127,127,127,0.1)); color: var(--fg-muted);
+    }
+    .bp-doc-rels { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .bp-doc-rel { display: flex; flex-direction: column; gap: 1px; }
+    .bp-doc-rel__label { font-size: 12px; color: var(--fg); font-weight: 500; }
+    .bp-doc-rel__id { font-size: 11px; color: var(--fg-dim); font-family: var(--paper-font-mono, ui-monospace, monospace); }
     .bp-onix-preview {
       display: flex; flex-direction: column;
       background: var(--bg-card);
@@ -2414,6 +2491,15 @@
     .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
     .bp-paper-drag-grip:active { cursor: grabbing; }
     .bp-paper-dragging { opacity: 0.5; }
+    /* pdd-t2: a template-locked block's grip is inert — quiet, no grab cursor
+       (the span carries no draggable/data-drag-grip when locked). */
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip,
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:active {
+      cursor: default; opacity: 0.45;
+    }
+    .bp-paper-edit-block[data-block-locked] .bp-paper-drag-grip:hover {
+      color: inherit;
+    }
 
     /* Right-click block context menu (singleton, appended to <body>). A fixed
        overlay — ZERO layout impact at rest (`[hidden]` ⇒ display:none). Shares
@@ -2455,6 +2541,13 @@
       height: 1px; margin: 4px 6px;
       background: var(--paper-rule);
     }
+    /* pdd-t2: the calm template note shown when the menu opens on a locked
+       block (its move/delete items disable) — a quiet statement, not an error. */
+    .bp-paper-context-menu__note {
+      padding: 6px 10px; font-size: 12px;
+      color: var(--paper-ink-faint); user-select: none; cursor: default;
+    }
+    .bp-paper-context-menu__note[hidden] { display: none; }
 
     /* Edit forms — inputs read as quiet underlined text on the page, not
        boxed form controls (the page IS the form). */
@@ -2790,6 +2883,45 @@
       display: flex; gap: 6px; margin-top: 4px;
     }
 
+    /* IMAGE content blocks (t13) — the seeded locked `role:"featured"` image is
+       a `type:"image"` run BOUNDARY, so its empty state renders here (the
+       per-block path), not in the canvas node-view. Echo the CANVAS ghost frame
+       (.bp-canvas-field-image-empty): calm evergreen dashed frame, doctrine
+       copy via the same font-size:0 + ::before swap the bound-image affordance
+       above uses. The WC's click / drop / keyboard targets keep working. */
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty {
+      flex-direction: column; gap: 6px;
+      min-height: 132px; padding: 28px 20px;
+      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border-radius: 10px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+      color: var(--paper-accent, #1e5347);
+      font-size: 0; /* hide the WC's own copy; ::before/::after carry ours */
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:hover,
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty:focus-visible {
+      border-color: var(--paper-accent, #1e5347);
+      color: var(--paper-accent, #1e5347);
+      background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::before {
+      content: "Add an image";
+      font-size: 14px; font-weight: 600; letter-spacing: 0.005em;
+    }
+    .bp-paper-edit-field[data-field-type="image"][data-block-role="featured"] .bp-mp-empty::before {
+      content: "Add a featured image";
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::after {
+      content: "Drop a file, click to upload, or browse the library";
+      font-size: 12px; font-weight: 500;
+      color: var(--paper-ink-faint, #82918b);
+    }
+    .bp-paper-edit-field[data-field-type="image"] .bp-mp-preview-img {
+      display: block; max-width: 100%; height: auto;
+      border-radius: 3px; border: 1px solid var(--paper-rule, #d9d2c4);
+      background: var(--paper-bg-deep, #efe9dc);
+    }
+
     /* Add-block row — quiet hairline divider, muted control. */
     .bp-paper-add-block {
       display: flex; align-items: center; gap: 8px;
@@ -2993,6 +3125,51 @@
       font-size: 13px;
       font-weight: 500;
       line-height: 1.2;
+    }
+    /* Featured-image placeholder (t13) — the calm evergreen ghost frame an
+       asset-less image picker shows in the canvas. It IS the affordance (rule 5):
+       click / Enter / right-click opens the media picker. Colour rides --paper-*
+       so it is dark/light safe (this mirror MUST stay in lockstep with
+       assets/paper-editor/src/styles.css — paper-editor-mirror-check). */
+    .bp-canvas-field-image-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 132px;
+      margin: 0.4em 0;
+      padding: 28px 20px;
+      border: 1.5px dashed var(--paper-accent, #1e5347);
+      border-radius: 10px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+      color: var(--paper-accent, #1e5347);
+      cursor: pointer;
+      user-select: none;
+      text-align: center;
+      transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+    }
+    .bp-canvas-field-image-empty:hover {
+      background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
+    }
+    .bp-canvas-field-image-empty:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+    }
+    .bp-canvas-field-image-empty-icon {
+      width: 30px;
+      height: 30px;
+      opacity: 0.85;
+    }
+    .bp-canvas-field-image-empty-label {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+    }
+    .bp-canvas-field-image-empty-hint {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--paper-ink-faint, #82918b);
     }
 
     /* ── Curated slash popover (B2) — "1:1 with Portable-Doc". ─────────────
@@ -4153,6 +4330,12 @@
           const tok = this.el.dataset.canvasToken;
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
+          // pdd-t2: the block AFTER this run in the full document is template-
+          // locked (e.g. the featured image right after the title run). The WC's
+          // filterTransaction reads data-locked-tail LIVE and vetoes any run
+          // GROWTH — a new node here would displace that locked follower.
+          const lockedTail = this.el.dataset.canvasLockedTail;
+          if (lockedTail != null) el.setAttribute("data-locked-tail", lockedTail);
         };
         const wc = this.el.querySelector("bp-paper-canvas");
         seedScope(wc);
@@ -4234,6 +4417,39 @@
           });
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
+
+        // t9 — LIVE TASK-BLOCK PREVIEW (parallel display channel). The server
+        // resolves every query-carrying task block into id-keyed rows and pushes
+        // `bp:task-preview` {previews:[{block_id, type, snapshot|task|error}, …]}
+        // — SEPARATE from bp:canvas-update (which carries the SAVE baseline). This
+        // channel is DISPLAY ONLY: the previews never enter el.blocks / the diff
+        // baseline, so a save right after a preview emits ZERO ops (doctrine D5).
+        // TODAY the rows are PAINTED server-side: task blocks are non-prose
+        // boundaries, so `task_block_preview/1` (paper_editor.ex) renders the
+        // same rows from the @paper_task_previews assign via the reader's own
+        // Render producer. This client channel is the forward twin for t8
+        // (fleet-in-canvas): we hand the previews to the WC's
+        // applyTaskPreviews(previews) if it implements one (progressive: a WC
+        // without the method simply ignores the live rows and keeps its query
+        // stub — never a crash). The rows are keyed by block_id so the WC can
+        // route each to the matching task node view once those exist.
+        this._onTaskPreview = (payload) => {
+          if (!payload || !Array.isArray(payload.previews)) return;
+          const wc = this.el.querySelector("bp-paper-canvas");
+          if (!wc || typeof wc.applyTaskPreviews !== "function") return;
+          wc.applyTaskPreviews(payload.previews);
+        };
+        this.handleEvent("bp:task-preview", this._onTaskPreview);
+
+        // Request the initial preview once the hook (and its listener above) is
+        // mounted, so the live rows land even if the server's setup-time push
+        // raced ahead of this handler's registration. Guarded to run-0 so a
+        // multi-run paper fires exactly ONE request, not one per wrapper. The
+        // per-block task-query field can push the SAME event with phx-debounce
+        // to drive the ~500ms re-resolve on a query edit.
+        if (this.el.id === "paper-canvas-run-0") {
+          this.pushEvent("task-preview-refresh", {});
+        }
       },
       destroyed() {
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
@@ -4275,6 +4491,40 @@
           return;
         }
 
+        // IMAGE content blocks (t13 — the locked featured image's picker
+        // binding). Unlike the field-* pickers, whose `value` stores the WC's
+        // serialized value VERBATIM (JSON asset-refs included), an image block
+        // persists a PLAIN URL in `src` (the reader's PdImage contract —
+        // compose.ex `image` clause). Read the WC's parsed meta (url + alt) and
+        // patch {src, alt}; Remove patches src:"" so the public render skips
+        // the block again. `locked`/`role` ride the block untouched — Patch
+        // strips them from every patch-block, and a content patch of a locked
+        // block is allowed by design (that IS how the featured image binds).
+        if (fieldType === "image") {
+          this._onChange = (e) => {
+            const meta = (e.target && e.target.meta) || {};
+            let src = meta.url || "";
+            if (!src) {
+              // Fallback when meta is unavailable: the emitted value is either
+              // a bare URL or the JSON {"url","assetId"} envelope — never
+              // persist the envelope into `src`.
+              const raw = (e.detail && e.detail.value) || "";
+              if (typeof raw === "string" && raw.trim().startsWith("{")) {
+                try { src = JSON.parse(raw).url || ""; } catch (_err) { src = ""; }
+              } else if (typeof raw === "string") {
+                src = raw;
+              }
+            }
+            this.pushEvent("paper-op", {
+              op: "patch-block",
+              id: blockId,
+              patch: { src: src, alt: meta.alt || "" }
+            });
+          };
+          this.el.addEventListener("bp-change", this._onChange);
+          return;
+        }
+
         // LEAF field blocks (P2.1) wrap a native control.
         const control = this.el.querySelector("input, select, textarea");
         if (!control) return;
@@ -4308,9 +4558,10 @@
       destroyed() {
         clearTimeout(this._t);
         const fieldType = this.el.dataset.fieldType;
-        // Picker blocks bind `bp-change` on the wrapper (this.el); leaf blocks
-        // bind input/change on the inner native control.
-        if (fieldType === "field-reference" || fieldType === "field-image") {
+        // Picker blocks (field pickers + image content blocks) bind `bp-change`
+        // on the wrapper (this.el); leaf blocks bind input/change on the inner
+        // native control.
+        if (fieldType === "field-reference" || fieldType === "field-image" || fieldType === "image") {
           if (this._onChange) this.el.removeEventListener("bp-change", this._onChange);
           return;
         }
@@ -4484,6 +4735,15 @@
       menu.setAttribute("role", "menu");
       menu.setAttribute("aria-label", "Block actions");
       menu.hidden = true;
+      // pdd-t2: the calm template note shown (instead of usable move/delete
+      // items) when the menu opens on a template-locked block. Hidden for
+      // ordinary blocks; static text via textContent (no user content).
+      const note = document.createElement("div");
+      note.className = "bp-paper-context-menu__note";
+      note.setAttribute("role", "presentation");
+      note.textContent = "Part of the document template";
+      note.hidden = true;
+      menu.appendChild(note);
       const items = [
         { action: "move-up", label: "Move up" },
         { action: "move-down", label: "Move down" },
@@ -4521,19 +4781,31 @@
         (hook._body || document).querySelectorAll("[data-edit-block-id]")
       );
       const idx = blocks.indexOf(block);
+      // pdd-t2: a template-locked block can't be moved or deleted; the block
+      // BELOW a locked block can't move UP (that would displace the locked
+      // block — the server would reject it). Same contract as the hover
+      // toolbar: the affordance is disabled, never offered-then-errored.
+      const locked = block.dataset.blockLocked === "true";
+      const prevLocked =
+        idx > 0 && blocks[idx - 1].dataset.blockLocked === "true";
       menu._ctx = {
         pushEvent: (ev, payload) => hook.pushEvent(ev, payload),
         blockId: block.dataset.editBlockId,
-        canUp: idx > 0,
-        canDown: idx >= 0 && idx < blocks.length - 1,
+        canUp: idx > 0 && !locked && !prevLocked,
+        canDown: idx >= 0 && idx < blocks.length - 1 && !locked,
+        canDelete: !locked,
         focusBlock: block,
       };
       menu._ownerEl = hook.el;
 
       const upBtn = menu.querySelector('[data-action="move-up"]');
       const downBtn = menu.querySelector('[data-action="move-down"]');
+      const delBtn = menu.querySelector('[data-action="delete"]');
+      const note = menu.querySelector(".bp-paper-context-menu__note");
       if (upBtn) upBtn.disabled = !menu._ctx.canUp;
       if (downBtn) downBtn.disabled = !menu._ctx.canDown;
+      if (delBtn) delBtn.disabled = !menu._ctx.canDelete;
+      if (note) note.hidden = !locked;
 
       // Show off-screen to measure, then clamp to the viewport (flip left/above
       // when the cursor is near the right/bottom edge).

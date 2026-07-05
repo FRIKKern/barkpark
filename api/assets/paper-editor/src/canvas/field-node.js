@@ -176,6 +176,110 @@ export function coercePickerValue(detail) {
   return v == null ? "" : v;
 }
 
+// pdd-t2: the calm lock cue for a template-locked field node-view. Stamps
+// data-bp-locked (a CSS hook for the quiet accent) + a hover title ("Part of the
+// document template") on the frame — chrome around content, NEVER an error flash
+// or shake (doctrine rule 5). No-op for an unlocked field.
+function applyLockCue(dom, node) {
+  if (node && node.attrs && node.attrs.locked === true) {
+    dom.setAttribute("data-bp-locked", "true");
+    dom.setAttribute("title", "Part of the document template");
+  }
+}
+
+// ── the featured-image PLACEHOLDER (t13 — pd-doctrine rule 1 + 5) ──────────────
+//
+// Post-#1161 every new paper seeds a locked `role: "featured"` image with NO asset
+// (Content.Papers.Template). An asset-less image picker on the canvas must NOT look
+// broken/empty — it is the doctrine's affordance: a calm evergreen GHOST FRAME
+// ("Add a featured image") that IS the edit surface (rule 5 — chrome around content,
+// never a mode). The frame is the click/Enter/right-click target that opens the
+// EXISTING media picker; once an asset is chosen the frame gives way to the picker's
+// own preview. These pure helpers hold the DECISION + copy so the pure-Node smoke
+// harness (no DOM) can assert the placeholder logic without mounting a node-view.
+// COPY NOTE: the frame's copy is the GENERIC "Add an image" — a `field-image`
+// node is a schema image FIELD (a cover, a byline portrait, …) whose own label
+// renders directly above the frame; claiming "featured" here would be wrong for
+// every one of them. The seeded featured block is `type:"image"` — a canvas run
+// BOUNDARY that renders through the per-block path (paper_editor.ex `"image"`
+// clause), where its role IS known and the featured copy lives (root.html.heex
+// `[data-block-role="featured"]`). When t2/w3 route `type:"image"` into the
+// canvas, pass its role through here and specialize the copy then.
+export const IMAGE_PLACEHOLDER_LABEL = "Add an image";
+export const IMAGE_PLACEHOLDER_HINT = "Click, or press Enter, to choose from the media library";
+
+// True when a picker's value is ABSENT — null / undefined / empty / whitespace-only.
+// The placeholder shows exactly when this is true for an image picker; the SAME
+// emptiness test the reader uses to skip an asset-less image (compose.ex `image`
+// clause), so the editor placeholder and the public skip agree on "no asset yet".
+export function isEmptyPickerValue(value) {
+  return value == null || String(value).trim() === "";
+}
+
+// The placeholder MODEL for a picker field: whether to show the ghost frame, plus its
+// copy. Only the `field-image` picker gets the image placeholder (a field-reference's
+// empty state is its own typeahead pill, unchanged). The optional `label` is the
+// block's human field label ("Cover", …): the visible copy stays generic (the label
+// already renders above the frame — repeating it would stutter), but the aria-label
+// carries it so a screen reader hears WHICH image field the button fills. PURE +
+// DOM-free so the smoke harness asserts it directly.
+export function imagePlaceholderModel(fieldType, value, label) {
+  const fieldLabel = label == null ? "" : String(label).trim();
+
+  return {
+    show: fieldType === "field-image" && isEmptyPickerValue(value),
+    label: IMAGE_PLACEHOLDER_LABEL,
+    hint: IMAGE_PLACEHOLDER_HINT,
+    ariaLabel:
+      fieldLabel === ""
+        ? IMAGE_PLACEHOLDER_LABEL
+        : IMAGE_PLACEHOLDER_LABEL + " — " + fieldLabel,
+  };
+}
+
+// A calm ghost-frame placeholder element — the featured-image affordance. Built in the
+// node-view (DOM-only). Keyboard reachable (role=button, tabindex 0, aria-label), and
+// wired by the caller so click / Enter / Space / right-click all open the media picker.
+// The `.bp-canvas-field-image-empty*` classes are styled in BOTH style mirrors
+// (styles.css + root.html.heex — the paper-editor-mirror-check lockstep).
+function buildImagePlaceholder(ariaLabel) {
+  const el = document.createElement("div");
+  el.className = "bp-canvas-field-image-empty";
+  el.setAttribute("contenteditable", "false");
+  el.setAttribute("role", "button");
+  el.setAttribute("tabindex", "0");
+  el.setAttribute("aria-label", ariaLabel || IMAGE_PLACEHOLDER_LABEL);
+  el.setAttribute("data-test-id", "paper-featured-image-placeholder");
+
+  // A calm framed-picture glyph (inline SVG, currentColor — themes with the label).
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("class", "bp-canvas-field-image-empty-icon");
+  icon.setAttribute("viewBox", "0 0 24 24");
+  icon.setAttribute("fill", "none");
+  icon.setAttribute("stroke", "currentColor");
+  icon.setAttribute("stroke-width", "1.6");
+  icon.setAttribute("stroke-linecap", "round");
+  icon.setAttribute("stroke-linejoin", "round");
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML =
+    '<rect x="3" y="4" width="18" height="16" rx="2"></rect>' +
+    '<circle cx="8.5" cy="9.5" r="1.5"></circle>' +
+    '<path d="M21 16l-5-5-9 9"></path>';
+
+  const label = document.createElement("div");
+  label.className = "bp-canvas-field-image-empty-label";
+  label.textContent = IMAGE_PLACEHOLDER_LABEL;
+
+  const hint = document.createElement("div");
+  hint.className = "bp-canvas-field-image-empty-hint";
+  hint.textContent = IMAGE_PLACEHOLDER_HINT;
+
+  el.appendChild(icon);
+  el.appendChild(label);
+  el.appendChild(hint);
+  return el;
+}
+
 // The field types whose control commits on `input` (debounced), mirroring
 // BarkparkFieldBlockBridge's `debounced` set. The rest commit on `change`.
 const DEBOUNCED_FIELD_TYPES = new Set([
@@ -345,6 +449,24 @@ export const Field = Node.create({
             ? { "data-field-dataset": attrs.dataset }
             : {},
       },
+      // locked / role — the DOCTRINE template attrs (pdd-t2). A field block could
+      // itself be a mandated template block (a future doc type's forced field), so
+      // it carries the SAME locked/role round-trip the prose title does (BpAttrs).
+      // D3 additive: rendered ONLY when set, so an ordinary field round-trips
+      // byte-identically. locked also drives the calm lock cue on the node-view
+      // (a hover title + a data-bp-locked hook) — chrome, never an error.
+      locked: {
+        default: null,
+        parseHTML: (el) =>
+          el.getAttribute("data-bp-locked") === "true" ? true : null,
+        renderHTML: (attrs) =>
+          attrs.locked === true ? { "data-bp-locked": "true" } : {},
+      },
+      role: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-bp-role"),
+        renderHTML: (attrs) => (attrs.role ? { "data-bp-role": attrs.role } : {}),
+      },
     };
   },
 
@@ -397,6 +519,7 @@ export const Field = Node.create({
       dom.className = "bp-canvas-field";
       dom.setAttribute("data-bp-type", "field");
       dom.setAttribute("data-field-type", fieldType);
+      applyLockCue(dom, node);
 
       // The human label (a non-PM, non-editable caption beside the control).
       const labelEl = document.createElement("label");
@@ -544,6 +667,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   dom.className = "bp-canvas-field bp-canvas-field-picker";
   dom.setAttribute("data-bp-type", "field");
   dom.setAttribute("data-field-type", fieldType);
+  applyLockCue(dom, node);
 
   // The human label (a non-PM, non-editable caption beside the picker) — same as the
   // native variant + the per-block render (paper_editor.ex:816/828).
@@ -584,6 +708,69 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   dom.appendChild(labelEl);
   dom.appendChild(picker);
 
+  // ── the featured-image PLACEHOLDER affordance (t13) ─────────────────────────
+  //
+  // For a `field-image` picker with NO asset, the calm ghost frame IS the edit
+  // surface (rule 5: chrome around content, never a mode). It sits IN FRONT of the
+  // raw WC (whose bare empty card would read as "damaged" on a freshly-seeded paper)
+  // and, on click / Enter / Space / right-click, REVEALS the media picker and opens
+  // its chooser — a progressive reveal, not a mode-switch: the block is always
+  // editable and the placeholder is its affordance. Once an asset lands (value set),
+  // the frame steps aside for the WC's own preview. field-reference keeps its native
+  // typeahead pill (no placeholder).
+  const isImagePicker = fieldType === "field-image";
+  const placeholder = isImagePicker
+    ? buildImagePlaceholder(
+        imagePlaceholderModel(fieldType, value, node.attrs && node.attrs.label).ariaLabel
+      )
+    : null;
+
+  // Once the user reveals the picker we keep it revealed even if an echo re-paints
+  // with a still-empty value, so an in-flight browse is never yanked away.
+  let revealed = false;
+
+  // Open the media picker: reveal the real WC and trigger its chooser. We prefer the
+  // WC's "Browse library" button (the asset browser), falling back to its empty card
+  // (the file dialog), then to focusing the WC — each is best-effort so a WC-internal
+  // change can never throw here.
+  const openPicker = () => {
+    if (!editor.isEditable) return;
+    revealed = true;
+    if (placeholder) placeholder.hidden = true;
+    picker.hidden = false;
+    const trigger =
+      (picker.querySelector && picker.querySelector(".bp-mp-browse")) ||
+      (picker.querySelector && picker.querySelector(".bp-mp-empty"));
+    if (trigger && typeof trigger.click === "function") {
+      // Hand keyboard focus to the revealed control BEFORE clicking it — hiding
+      // the focused placeholder would otherwise drop focus to <body>, stranding
+      // a keyboard user (Escape-out of the asset browser lands back here).
+      if (typeof trigger.focus === "function") trigger.focus();
+      trigger.click();
+    } else if (typeof picker.focus === "function") {
+      picker.focus();
+    }
+  };
+
+  const onPlaceholderKey = (e) => {
+    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+      e.preventDefault();
+      openPicker();
+    }
+  };
+  const onPlaceholderContext = (e) => {
+    // A right-click on the placeholder is a one-entry menu: open the picker.
+    e.preventDefault();
+    openPicker();
+  };
+
+  if (placeholder) {
+    dom.appendChild(placeholder);
+    placeholder.addEventListener("click", openPicker);
+    placeholder.addEventListener("keydown", onPlaceholderKey);
+    placeholder.addEventListener("contextmenu", onPlaceholderContext);
+  }
+
   // Write the COERCED value back to the node's `value` attr. setNodeMarkup changes ONLY
   // the attr (the node stays the same atom in the same place), so onUpdate → run-convert
   // emits a single patch-block carrying { value }. UNLIKE the native types there is NO
@@ -622,7 +809,23 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     const str = v == null ? "" : String(v);
     if (picker.value !== str) picker.value = str;
     labelEl.textContent = (n.attrs && n.attrs.label) || "";
+
+    // Show the ghost frame ONLY for an asset-less image picker that has not yet been
+    // revealed; the moment an asset is present the frame steps aside for the WC.
+    if (placeholder) {
+      const model = imagePlaceholderModel(fieldType, str, n.attrs && n.attrs.label);
+      const showPlaceholder = model.show && !revealed;
+      placeholder.hidden = !showPlaceholder;
+      placeholder.setAttribute("aria-label", model.ariaLabel);
+      picker.hidden = showPlaceholder;
+      // A non-empty value ends any prior reveal, so a later CLEAR shows the frame again.
+      if (!isEmptyPickerValue(str)) revealed = false;
+    }
   };
+
+  // Initialize placeholder/picker visibility from the seed value (the WC seeds its own
+  // value via the attribute above; this only toggles the ghost-frame overlay).
+  paint(node);
 
   return {
     dom,
@@ -643,6 +846,11 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     ignoreMutation: () => true,
     destroy: () => {
       picker.removeEventListener("bp-change", onChange);
+      if (placeholder) {
+        placeholder.removeEventListener("click", openPicker);
+        placeholder.removeEventListener("keydown", onPlaceholderKey);
+        placeholder.removeEventListener("contextmenu", onPlaceholderContext);
+      }
     },
   };
 }

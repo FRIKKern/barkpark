@@ -9,9 +9,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
   No LiveView, no DB — these are the cheap, exhaustive proofs of the partition
   logic the render branch depends on.
-  """
-  use ExUnit.Case, async: false
 
+  t6 adds the WordPress-style metadata sidebar (doctrine Rule 4/5): the pure
+  seam (slug validation, the doc-field op that is NOT a block op, section
+  collapse, label/relation extraction), the rendered panel (via
+  `render_component`), and the "a sidebar edit never touches body blocks"
+  invariant proved on the real handler.
+  """
+  use Barkpark.DataCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.PortableDoc.TaskResolver
+  alias BarkparkWeb.Studio.StudioLive.Components
+  alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: PaperHandler
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   defp para(id), do: %{"id" => id, "type" => "paragraph", "content" => []}
@@ -41,6 +52,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
+
+  # t9: a task-list block is NOT canvas-eligible (it renders as a boundary
+  # widget), so it partitions to a `{:block, raw}` — and the raw block the editor
+  # mounts (and later saves) still carries its live `query`, never a snapshot.
+  defp task_list(id),
+    do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+
+  # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
+  # task_previews wires the real Tasks.Query fetcher; here we prove the two-
+  # channel SEPARATION, not the DB).
+  defp task_rows(%{"parent_id" => "epic"}), do: [%{"title" => "a", "status" => "ready"}]
+  defp task_rows(_), do: []
 
   describe "partition_runs/1" do
     test "empty list → []" do
@@ -497,6 +520,141 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
+  describe "live task-block preview (t9) — parallel channel, save-stable (D5)" do
+    test "the block the editor mounts stays a RAW query boundary — no snapshot injected" do
+      blocks = [para("p1"), task_list("t1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1")]},
+               {:block, task_list("t1")},
+               {:run, [para("p2")]}
+             ]
+    end
+
+    test "resolving the preview leaves the mounted/saved blocks BYTE-IDENTICAL → an untouched save emits ZERO ops" do
+      # The exact block list the editor mounts (its save baseline).
+      baseline = [para("p1"), task_list("t1"), para("p2")]
+
+      # Computing the live preview (the parallel display channel) must NOT mutate
+      # the baseline: the previews come out on the side, keyed by block id.
+      previews = TaskResolver.preview(baseline, &task_rows/1)
+
+      assert previews == [
+               %{
+                 "block_id" => "t1",
+                 "type" => "task-list",
+                 "snapshot" => [%{"title" => "a", "status" => "ready"}]
+               }
+             ]
+
+      # The baseline is unchanged — the task block still holds its raw `query`,
+      # no `snapshot` leaked in. run-convert.js keys runToOps on THESE blocks, so
+      # a save with no author edit diffs identical source → an empty op batch.
+      assert baseline == [para("p1"), task_list("t1"), para("p2")]
+      assert Enum.at(baseline, 1)["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(Enum.at(baseline, 1), "snapshot")
+    end
+  end
+
+  describe "task_block_preview (t9) — the boundary widget PAINTS the live rows" do
+    import Phoenix.LiveViewTest
+
+    alias Barkpark.PortableDoc.Render
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    # The flag-ON editor render: canvas runs + boundary widgets. Static
+    # function-component render — no LiveView process, no DB.
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    defp editor_html(blocks, previews) do
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "p1",
+        blocks: blocks,
+        canvas_eligible: true,
+        task_previews: previews
+      )
+    end
+
+    test "a resolved preview renders through the READER'S producer (rule 3), display-only (D5)" do
+      block = task_list("t1")
+
+      entry = %{
+        "block_id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Ship the seam", "status" => "ready"}]
+      }
+
+      html = editor_html([para("p1"), block, para("p2")], %{"t1" => entry})
+
+      # The widget paints the live rows…
+      assert html =~ ~s(data-test-id="paper-task-preview")
+      assert html =~ "Ship the seam"
+
+      # …as the EXACT bytes /papers would emit for the resolved block — one
+      # producer, byte for byte (doctrine rule 3).
+      resolved = TaskResolver.apply_preview(block, entry)
+      assert html =~ Render.render_block(resolved, %{style: :article})
+
+      # D5 in the DOM: the canvas seeds (the save baseline) still carry the raw
+      # prose runs, and no resolved snapshot is ever serialized back into any
+      # data-canvas-blocks / data-block editor state.
+      assert html =~ ~s(data-canvas-blocks)
+      refute html =~ ~s(&quot;snapshot&quot;)
+    end
+
+    test "an error entry degrades to the quiet plugin-off note" do
+      entry = %{"block_id" => "t1", "type" => "task-list", "error" => true}
+      html = editor_html([task_list("t1")], %{"t1" => entry})
+
+      assert html =~ "Live task preview unavailable"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a query block with no entry yet shows the honest loading note" do
+      html = editor_html([task_list("t1")], %{})
+      assert html =~ "Loading live tasks"
+    end
+
+    test "an author-pinned literal snapshot renders directly from its own rows" do
+      pinned = %{
+        "id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Pinned row", "status" => "done"}]
+      }
+
+      html = editor_html([pinned], %{})
+      assert html =~ "Pinned row"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a matchless task-detail preview shows an explicit empty note, not a blank strip" do
+      block = %{"id" => "d1", "type" => "task-detail", "query" => %{"nope" => 1}}
+      entry = %{"block_id" => "d1", "type" => "task-detail", "task" => %{}}
+
+      html = editor_html([block], %{"d1" => entry})
+      assert html =~ "No matching tasks."
+    end
+
+    test "flag OFF: the shipped per-block list stays byte-free of any preview markup" do
+      System.delete_env("BARKPARK_PAPER_CANVAS")
+
+      html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
+      refute html =~ "paper-task-preview"
+    end
+  end
+
   describe "paper_canvas_enabled?/0 (default FALSE)" do
     setup do
       prev = System.get_env("BARKPARK_PAPER_CANVAS")
@@ -528,6 +686,328 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         System.put_env("BARKPARK_PAPER_CANVAS", v)
         assert PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → true"
       end
+    end
+  end
+
+  # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ─────────────────
+
+  describe "sidebar_slug_valid?/1 + slug_feedback/1 (instant format validation)" do
+    test "valid WordPress-style slugs pass" do
+      for s <- ["post", "my-post", "a1", "hello-world-2026", "x-y-z"] do
+        assert PaperCanvas.sidebar_slug_valid?(s), "expected #{inspect(s)} valid"
+        assert {:ok, "Looks good"} = PaperCanvas.slug_feedback(s)
+      end
+    end
+
+    test "empty slug is a WARN, not a hard error (nothing typed yet)" do
+      refute PaperCanvas.sidebar_slug_valid?("")
+      assert {:warn, msg} = PaperCanvas.slug_feedback("")
+      assert msg =~ "required"
+    end
+
+    test "capitals / spaces are DANGER with a specific message" do
+      refute PaperCanvas.sidebar_slug_valid?("My-Post")
+      assert {:danger, cap} = PaperCanvas.slug_feedback("My-Post")
+      assert cap =~ "Lowercase"
+
+      refute PaperCanvas.sidebar_slug_valid?("my post")
+      assert {:danger, sp} = PaperCanvas.slug_feedback("my post")
+      assert sp =~ "spaces"
+    end
+
+    test "leading / trailing / doubled hyphens are a recoverable WARN" do
+      for s <- ["-post", "post-", "my--post"] do
+        refute PaperCanvas.sidebar_slug_valid?(s)
+        assert {:warn, msg} = PaperCanvas.slug_feedback(s), "expected #{inspect(s)} warn"
+        assert msg =~ "hyphen"
+      end
+    end
+
+    test "other invalid characters are DANGER; non-binary input never raises" do
+      assert {:danger, _} = PaperCanvas.slug_feedback("post!")
+      assert {:danger, _} = PaperCanvas.slug_feedback(nil)
+      refute PaperCanvas.sidebar_slug_valid?(nil)
+    end
+  end
+
+  describe "sidebar_meta_op/2 (a DOC-FIELD op, structurally NOT a block op)" do
+    test "returns a {:doc_field, field, value} tuple — never the block-op map shape" do
+      op = PaperCanvas.sidebar_meta_op("slug", "my-post")
+      assert op == {:doc_field, "slug", "my-post"}
+
+      # A body block op is a MAP carrying an "op" key (patch-block / remove-block /
+      # insert-after / …). A sidebar op is a tuple with none of those keys — so it
+      # can never be mistaken for, or applied as, a block op.
+      refute is_map(op)
+      assert elem(op, 0) == :doc_field
+    end
+  end
+
+  describe "sidebar_section_open?/2 + toggle_section/2 (collapse persists in a MapSet)" do
+    test "sections default to OPEN when the collapsed set is empty / absent" do
+      assert PaperCanvas.sidebar_section_open?(MapSet.new(), "publish")
+      assert PaperCanvas.sidebar_section_open?(nil, "slug")
+    end
+
+    test "toggling a section collapses it, toggling again re-opens it" do
+      c0 = MapSet.new()
+      c1 = PaperCanvas.toggle_section(c0, "labels")
+      refute PaperCanvas.sidebar_section_open?(c1, "labels")
+      # other sections are unaffected
+      assert PaperCanvas.sidebar_section_open?(c1, "publish")
+
+      c2 = PaperCanvas.toggle_section(c1, "labels")
+      assert PaperCanvas.sidebar_section_open?(c2, "labels")
+    end
+
+    test "toggle_section seeds a set from nil (first toggle collapses)" do
+      c1 = PaperCanvas.toggle_section(nil, "context")
+      assert MapSet.member?(c1, "context")
+    end
+
+    test "the five fixed sections are exactly publish/slug/context/labels/relations" do
+      assert PaperCanvas.sidebar_sections() == ~w(publish slug context labels relations)
+    end
+  end
+
+  describe "paper_labels/1 + paper_relations/1 + visibility_label/1 (only non-article metadata)" do
+    test "labels come from content tags; blanks dropped; missing ⇒ []" do
+      paper = %{content: %{"tags" => ["design", "  ", "obsidian", 42]}}
+      assert PaperCanvas.paper_labels(paper) == ["design", "obsidian"]
+      assert PaperCanvas.paper_labels(%{content: %{}}) == []
+      assert PaperCanvas.paper_labels(nil) == []
+    end
+
+    test "relations are field-reference blocks with a non-blank value" do
+      blocks = [
+        %{"id" => "r1", "type" => "field-reference", "value" => "author-1", "label" => "Author"},
+        %{"id" => "r2", "type" => "field-reference", "value" => ""},
+        %{"id" => "p1", "type" => "paragraph"}
+      ]
+
+      assert PaperCanvas.paper_relations(blocks) == [
+               %{id: "author-1", label: "Author", ref_type: nil}
+             ]
+
+      assert PaperCanvas.paper_relations([]) == []
+      assert PaperCanvas.paper_relations(nil) == []
+    end
+
+    test "visibility is derived from publish status (papers publish to /papers/:slug)" do
+      assert PaperCanvas.visibility_label("published") == "Public"
+      # "Draft" only — never "not public": the public reader fetches by exact
+      # doc_id with NO status filter, so a stronger claim could lie.
+      assert PaperCanvas.visibility_label("draft") == "Draft"
+      refute PaperCanvas.visibility_label("draft") =~ "public"
+    end
+  end
+
+  describe "paper_metadata_sidebar/1 render (the calm right document panel)" do
+    defp draft_paper(overrides \\ %{}) do
+      Map.merge(
+        %{
+          doc_id: "my-post",
+          title: "My Post",
+          status: "draft",
+          content: %{"blocks" => [], "tags" => ["design"]}
+        },
+        overrides
+      )
+    end
+
+    defp render_sidebar(assigns) do
+      base = %{
+        paper_doc: draft_paper(),
+        dataset: "production",
+        panel_open: true,
+        collapsed: MapSet.new(),
+        slug_draft: nil,
+        slug_feedback: nil,
+        workspace_label: nil
+      }
+
+      render_component(&Components.paper_metadata_sidebar/1, Map.merge(base, assigns))
+    end
+
+    test "renders all five sections, each with a tabbable aria-expanded toggle" do
+      html = render_sidebar(%{})
+      assert html =~ ~s(data-test-id="paper-metadata-sidebar")
+
+      for key <- ~w(publish slug context labels relations) do
+        assert html =~ ~s(data-test-id="sidebar-section-#{key}"),
+               "expected the #{key} section to render"
+
+        assert html =~ ~s(data-test-id="sidebar-section-toggle-#{key}")
+      end
+
+      # section toggles are real <button>s (Enter/Space toggle) carrying aria-expanded
+      assert html =~ ~s(aria-expanded="true")
+      assert html =~ "phx-value-section="
+    end
+
+    test "a DRAFT paper shows draft status + Draft visibility — and NO publish action" do
+      html = render_sidebar(%{})
+      assert html =~ ~s(data-test-id="sidebar-status")
+      assert html =~ "draft"
+      assert html =~ "Draft"
+    end
+
+    test "a PUBLISHED paper shows Public visibility" do
+      html = render_sidebar(%{paper_doc: draft_paper(%{status: "published"})})
+      assert html =~ "published"
+      assert html =~ "Public"
+    end
+
+    test "the Publish section offers NO publish/unpublish action (papers publish in place)" do
+      # Papers are single-row, published-in-place (`upsert_paper` always writes
+      # doc_id = slug, status "published"); the doc-level publish/unpublish
+      # events assume the drafts-twin model — publish would always fail (no
+      # drafts.<slug> row) and unpublish would DELETE the published row and
+      # strand a twin no paper read-path resolves. Until a paper-aware
+      # lifecycle exists, the section is read-only state — a broken or
+      # destructive button here fails the honest-affordance bar.
+      for status <- ["draft", "published"] do
+        html = render_sidebar(%{paper_doc: draft_paper(%{status: status})})
+        refute html =~ ~s(data-test-id="sidebar-publish")
+        refute html =~ ~s(data-test-id="sidebar-unpublish")
+        refute html =~ ~s(phx-click="publish")
+        refute html =~ ~s(phx-click="unpublish")
+      end
+    end
+
+    test "the slug section shows the current slug + a live format verdict with a tone" do
+      html = render_sidebar(%{})
+      assert html =~ ~s(data-test-id="sidebar-slug-input")
+      assert html =~ ~s(value="my-post")
+      assert html =~ ~s(phx-change="sidebar-slug-change")
+      # a valid slug ⇒ ok tone
+      assert html =~ ~s(data-tone="ok")
+      assert html =~ "Looks good"
+    end
+
+    test "an invalid slug_draft surfaces the danger tone + aria-invalid" do
+      html =
+        render_sidebar(%{
+          slug_draft: "My Post",
+          slug_feedback: PaperCanvas.slug_feedback("My Post")
+        })
+
+      assert html =~ ~s(data-tone="danger")
+      assert html =~ ~s(aria-invalid="true")
+    end
+
+    test "Context is read-only dataset + workspace; the slug NEVER duplicates the title" do
+      html = render_sidebar(%{workspace_label: "Acme"})
+      assert html =~ ~s(data-test-id="sidebar-dataset")
+      assert html =~ "production"
+      assert html =~ "Acme"
+      # doctrine: the title stays a locked body block — it is not surfaced here.
+      refute html =~ ~s(name="title")
+    end
+
+    test "labels + relations render honest empty states when absent" do
+      html = render_sidebar(%{paper_doc: draft_paper(%{content: %{"blocks" => []}})})
+      assert html =~ ~s(data-test-id="sidebar-labels-empty")
+      assert html =~ ~s(data-test-id="sidebar-relations-empty")
+    end
+
+    test "labels + relations render their content when present" do
+      paper =
+        draft_paper(%{
+          content: %{
+            "tags" => ["design", "obsidian"],
+            "blocks" => [
+              %{
+                "id" => "r1",
+                "type" => "field-reference",
+                "value" => "author-1",
+                "label" => "Author"
+              }
+            ]
+          }
+        })
+
+      html = render_sidebar(%{paper_doc: paper})
+      assert html =~ ~s(data-test-id="sidebar-labels")
+      assert html =~ "design"
+      assert html =~ "obsidian"
+      assert html =~ ~s(data-test-id="sidebar-relations")
+      assert html =~ "Author"
+      assert html =~ "author-1"
+    end
+
+    test "a COLLAPSED section hides its body but keeps the toggle (chrome, no reflow)" do
+      html = render_sidebar(%{collapsed: MapSet.new(["labels"])})
+      # toggle still there, now aria-expanded=false; the body id is gone
+      assert html =~ ~s(data-test-id="sidebar-section-toggle-labels")
+      assert html =~ ~s(aria-expanded="false")
+      refute html =~ ~s(id="bp-doc-sec-body-labels")
+    end
+
+    test "a COLLAPSED panel hides the section body entirely (no overlay, no mode)" do
+      html = render_sidebar(%{panel_open: false})
+      assert html =~ "is-collapsed"
+      refute html =~ ~s(id="bp-doc-sidebar-body")
+      refute html =~ ~s(data-test-id="sidebar-section-publish")
+    end
+  end
+
+  describe "a sidebar edit never touches body blocks (doctrine Rule 4)" do
+    # A minimal socket carrying the sidebar assigns + a paper with a KNOWN block
+    # list. The pure-assign handlers never call Content / Shared.paper_op, so no
+    # DB sandbox is involved — and the block list must be byte-identical after.
+    defp sidebar_socket do
+      %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          sidebar_open: true,
+          sidebar_collapsed: MapSet.new(),
+          sidebar_slug_draft: "my-post",
+          sidebar_slug_feedback: {:ok, "Looks good"},
+          paper_block_mode: true,
+          paper_edit_mode: true,
+          paper_doc: %{
+            doc_id: "my-post",
+            status: "draft",
+            content: %{"blocks" => [%{"id" => "b1", "type" => "paragraph"}]}
+          }
+        }
+      }
+    end
+
+    test "a slug change emits NO block op: it only re-assigns the slug draft + verdict" do
+      before = sidebar_socket()
+      before_blocks = before.assigns.paper_doc.content["blocks"]
+
+      {:noreply, after_socket} =
+        PaperHandler.sidebar_slug_change(%{"value" => "My New Slug"}, before)
+
+      # the live verdict updated…
+      assert after_socket.assigns.sidebar_slug_draft == "My New Slug"
+      assert {:danger, _} = after_socket.assigns.sidebar_slug_feedback
+
+      # …and the body blocks are IDENTICAL — the edit never reached the block path.
+      assert after_socket.assigns.paper_doc.content["blocks"] == before_blocks
+      # no stream mutation was staged for :paper_blocks
+      refute Map.has_key?(after_socket.assigns.__changed__, :paper_blocks)
+    end
+
+    test "toggling a section / the panel is a pure assign — blocks untouched" do
+      s0 = sidebar_socket()
+
+      {:noreply, s1} = PaperHandler.sidebar_toggle_section(%{"section" => "labels"}, s0)
+      assert MapSet.member?(s1.assigns.sidebar_collapsed, "labels")
+      assert s1.assigns.paper_doc.content["blocks"] == s0.assigns.paper_doc.content["blocks"]
+
+      {:noreply, s2} = PaperHandler.sidebar_toggle_panel(s1)
+      refute s2.assigns.sidebar_open
+      assert s2.assigns.paper_doc.content["blocks"] == s0.assigns.paper_doc.content["blocks"]
+    end
+
+    test "a malformed slug/section payload is a safe no-op" do
+      s0 = sidebar_socket()
+      assert {:noreply, ^s0} = PaperHandler.sidebar_slug_change(%{}, s0)
+      assert {:noreply, ^s0} = PaperHandler.sidebar_toggle_section(%{}, s0)
     end
   end
 end

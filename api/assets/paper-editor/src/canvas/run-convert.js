@@ -242,6 +242,35 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// ── doctrine template attrs (pdd-t2): locked / role round-trip ───────────────
+//
+// A mandated template block carries `locked: true` + a `role` ("title" |
+// "featured"). These are TOP-LEVEL block keys (see Content.Papers.Template), NOT
+// content — so the canvas must carry them through the blocks ⇄ node ⇄ blocks
+// round-trip for the prose title (an opaque image carries them for free inside
+// its verbatim bpBlock). Both directions are D3-additive: an UNLOCKED block gets
+// NO locked/role key, so it saves byte-identically (the pre-#1161 corpus is
+// untouched). locked/role are NEVER a diff-relevant field (the stable-key
+// change-detectors ignore them) and NEVER ride a patch (patch.ex strips them):
+// they are immutable template identity, seeded at create, carried here for
+// fidelity + so the live node can be recognized as locked.
+
+// Stamp locked/role onto a NODE attrs bag from its source block — only when set.
+function stampTemplateAttrs(attrs, block) {
+  if (block && block.locked === true) attrs.locked = true;
+  if (block && block.role != null) attrs.role = block.role;
+  return attrs;
+}
+
+// Carry locked/role back onto a reconstructed BLOCK from its node attrs — only
+// when set (the inverse of stampTemplateAttrs). BpAttrs' parseHTML yields null
+// for an absent attr, so an unlocked node adds nothing.
+function carryTemplateAttrs(block, attrs) {
+  if (attrs && attrs.locked === true) block.locked = true;
+  if (attrs && attrs.role != null) block.role = attrs.role;
+  return block;
+}
+
 // ── projection: blocks → one doc ───────────────────────────────────────────
 
 // runToTiptap(blocks) → { type:"doc", content:[ node, … ] }
@@ -270,6 +299,12 @@ export function runToTiptap(blocks) {
       // its attrs without clobbering blockToTiptap's own attrs (heading level).
       const node = blockToTiptap(block).content[0];
       const attrs = { ...(node.attrs || {}), bpId, bpType };
+      // Doctrine template attrs (pdd-t2): stamp locked/role so the live PM node
+      // carries them (BpAttrs declares them → they survive getJSON, and the
+      // filterTransaction veto reads node.attrs.locked). D3 additive: ONLY when
+      // present, so an unlocked prose block projects with no locked/role attr and
+      // round-trips byte-identically.
+      stampTemplateAttrs(attrs, block);
       return { ...node, attrs };
     }
 
@@ -674,6 +709,11 @@ function fieldBlockToNode(block, bpId, bpType) {
   // — present and kept; an unset dataset has no key).
   if (block && block.refType != null) attrs.refType = block.refType;
   if (block && block.dataset != null) attrs.dataset = block.dataset;
+  // Doctrine template attrs (pdd-t2): a field block could itself be a mandated
+  // template block (a future doc type's forced field) — carry locked/role so the
+  // round-trip is byte-identical and the node can be recognized as locked. D3:
+  // only when present.
+  stampTemplateAttrs(attrs, block);
   return { type: CANVAS_FIELD_NODE_NAME, attrs };
 }
 
@@ -704,6 +744,9 @@ function fieldNodeToBlock(node, id) {
   // of fieldBlockToNode.
   if (attrs.refType != null) block.refType = attrs.refType;
   if (attrs.dataset != null) block.dataset = attrs.dataset;
+  // Doctrine template attrs (pdd-t2): carry locked/role back — the inverse of
+  // fieldBlockToNode's stamp. D3: only when present.
+  carryTemplateAttrs(block, attrs);
   return block;
 }
 
@@ -1003,12 +1046,30 @@ export function runToOps(prevBlocks, nextDoc) {
 
   const nextIds = new Set(nextSeq.map((e) => e.id));
 
+  // Doctrine template locks (pdd-t2): the ids of template-locked blocks. A locked
+  // block can NEVER be removed or moved by a canvas diff — the server backstops it
+  // (patch.ex:192-274 rejects a locked remove/move, halting the whole atomic batch
+  // and losing co-batched edits) and the editor vetoes it live (filterTransaction).
+  // This is the DIFF-layer guard so a remove/move op for a locked id is never even
+  // EMITTED — belt-and-braces for any path that could still produce a doc missing
+  // or reordering a locked block (e.g. a markdown source-mode round-trip). Locked-
+  // ness is authoritative from the PREV (source) blocks: `locked` is server-seeded
+  // and immutable through patch-block, so the prev run is the truth.
+  const lockedIds = new Set();
+  for (const block of prev) {
+    if (block && block.locked === true && block.id != null) lockedIds.add(block.id);
+  }
+
   const ops = [];
 
   // ── 1) REMOVES — prev id not present in nextSeq (a merge/delete) ───────────
+  //
+  // A LOCKED id is NEVER removed (pdd-t2): even if it went missing from the live
+  // doc (which filterTransaction prevents), emitting remove-block would be rejected
+  // by the server and halt the batch — so we skip it and let the block persist.
   for (const block of prev) {
     const id = block && block.id;
-    if (id != null && !nextIds.has(id)) {
+    if (id != null && !nextIds.has(id) && !lockedIds.has(id)) {
       ops.push({ op: "remove-block", id });
     }
   }
@@ -1056,6 +1117,11 @@ export function runToOps(prevBlocks, nextDoc) {
   // post-move order and we never emit a redundant move.
   for (let i = 0; i < nextSeq.length; i++) {
     const id = nextSeq[i].id;
+    // A LOCKED block holds its position (pdd-t2): never emit a move for it. The
+    // filterTransaction veto keeps a locked node at its fixed index, so `running`
+    // already has it correctly placed; skipping leaves the following entry's
+    // `after` anchor pointing at the (stable) locked id.
+    if (lockedIds.has(id)) continue;
     const after = i === 0 ? null : nextSeq[i - 1].id;
     const curIdx = running.indexOf(id);
     const afterIdx = after == null ? -1 : running.indexOf(after);
@@ -1347,5 +1413,9 @@ function nextNodeToBlock(entry) {
   // buildPatchBlockOp().patch is exactly the mutable-fields map — the body of a
   // new block of this type. Stamp the minted id + type.
   const op = buildPatchBlockOp(nodeToDocEnvelope(node), entry.id, bpType);
-  return { id: entry.id, type: bpType, ...op.patch };
+  const block = { id: entry.id, type: bpType, ...op.patch };
+  // Doctrine template attrs (pdd-t2): carry locked/role from the prose node so a
+  // reconstructed locked title (e.g. the source-mode baseline via docToBlocks)
+  // stays byte-identical. D3: only when present.
+  return carryTemplateAttrs(block, node.attrs);
 }

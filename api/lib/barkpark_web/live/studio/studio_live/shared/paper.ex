@@ -19,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   import Phoenix.LiveView
 
   alias Barkpark.Content
-  alias Barkpark.PortableDoc.{Projection, Render}
+  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -94,6 +94,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             socket
             |> sync_paper_edit_doc()
             |> push_canvas_echo()
+            |> push_task_previews()
 
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
@@ -102,6 +103,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def paper_ops(socket, _ops), do: socket
+
+  @doc false
+  # t9 — LIVE TASK-BLOCK PREVIEW push. Resolve every query-carrying task block in
+  # the CURRENT editor blocks into id-keyed rows and push them to the task-block
+  # node views on the `bp:task-preview` channel — SEPARATE from the :paper_blocks
+  # stream and the canvas `data-canvas-blocks` seed. D5: DISPLAY ONLY. The blocks
+  # the canvas saves against (paper_top_level_blocks) are NEVER touched, so a save
+  # right after a preview emits ZERO ops (byte-stability, D3). No-op when the
+  # canvas flag is OFF — nothing is mounted to receive it, so the OFF path pushes
+  # nothing and stays byte-identical.
+  def push_task_previews(socket) do
+    if PaperCanvas.paper_canvas_enabled?() do
+      previews = task_previews(paper_top_level_blocks(socket), socket)
+
+      socket
+      # The SERVER-RENDERED consumer: task blocks are non-prose, so the beta
+      # canvas renders them as boundary widgets (edit_block/1) OUTSIDE the WC —
+      # this id-keyed assign is what `task_block_preview/1` paints the live rows
+      # from, via the reader's own Render producer (rule 3). Phoenix skips the
+      # assign when the map is unchanged, so a no-op refresh re-renders nothing.
+      |> assign(:paper_task_previews, Map.new(previews, &{&1["block_id"], &1}))
+      # The CLIENT channel twin: the same rows for the canvas hook → the WC's
+      # (future, t8) node views. Both carriers are display-only (D5).
+      |> push_event("bp:task-preview", %{previews: previews})
+    else
+      socket
+    end
+  end
+
+  @doc false
+  # Build the id-keyed live-task previews for `blocks` under the SESSION's tenant
+  # scope. Fail-closed: `scope_opts` carries the session's workspace/project — a
+  # nil workspace resolves to ZERO rows in the fetcher (Tasks.Query.docs_for_query
+  # → Scope.scope_to_workspace), never a cross-tenant leak. The fetch may RAISE
+  # with the Tasks plugin off; `TaskResolver.preview/2` rescues each fetch into an
+  # `{ error: true }` stub, so this never crashes the LiveView. Returns ONLY the
+  # previews — `blocks` is left unresolved (the save baseline is untouched).
+  def task_previews(blocks, socket) do
+    scope = ScopeHelpers.scope_opts(socket)
+
+    TaskResolver.preview(blocks, fn query ->
+      Barkpark.Tasks.Query.rows_for_query(query, scope)
+    end)
+  end
 
   @doc false
   # Phase-4 S4a: ECHO the server-CONFIRMED blocks back to the <bp-paper-canvas>.
@@ -192,17 +237,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def paper_reorder(socket, blocks, idx, "up") when idx > 0 do
     moved = Enum.at(blocks, idx)
-    after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
-    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+    displaced = Enum.at(blocks, idx - 1)
+
+    # pdd-t2: a template-locked block holds its position — both when it is the
+    # MOVED block and when it is the block the swap would DISPLACE. The UI
+    # already hides/disables these controls; this guard keeps a stale click (or
+    # a context-menu race) a calm no-op instead of a rejected op + error flash.
+    if locked_block?(moved) or locked_block?(displaced) do
+      socket
+    else
+      after_id = if idx >= 2, do: Map.get(Enum.at(blocks, idx - 2), "id"), else: nil
+
+      paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => after_id})
+    end
   end
 
   def paper_reorder(socket, blocks, idx, "down") when idx < length(blocks) - 1 do
     moved = Enum.at(blocks, idx)
-    anchor_id = Map.get(Enum.at(blocks, idx + 1), "id")
-    paper_op(socket, %{"op" => "move-block", "id" => Map.get(moved, "id"), "after" => anchor_id})
+    displaced = Enum.at(blocks, idx + 1)
+
+    if locked_block?(moved) or locked_block?(displaced) do
+      socket
+    else
+      anchor_id = Map.get(displaced, "id")
+
+      paper_op(socket, %{
+        "op" => "move-block",
+        "id" => Map.get(moved, "id"),
+        "after" => anchor_id
+      })
+    end
   end
 
   def paper_reorder(socket, _blocks, _idx, _dir), do: socket
+
+  # pdd-t2: whether a block is template-locked (nil-safe for Enum.at misses).
+  defp locked_block?(block), do: is_map(block) and Map.get(block, "locked") == true
 
   @doc false
   def sync_paper_edit_doc(socket) do
@@ -308,11 +378,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: unlinked,
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(paper))
       |> stream(
         :paper_blocks,
         paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)),
         reset: true
       )
+      # t9: seed the LIVE task-block preview the moment the editor opens, on the
+      # parallel `bp:task-preview` channel — the source `blocks` above stay
+      # unresolved (D5). No-op when the canvas flag is OFF.
+      |> push_task_previews()
     else
       socket
       |> assign(
@@ -327,11 +402,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: unlinked,
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(paper))
       |> stream(:paper_blocks, [], reset: true)
     end
   end
 
   def setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  # Default t6 sidebar assigns when a paper opens: panel + every section open,
+  # slug draft seeded from the paper's own id with its live format verdict.
+  defp sidebar_assigns(paper) do
+    slug = (paper && Map.get(paper, :doc_id)) || ""
+
+    [
+      sidebar_open: true,
+      sidebar_collapsed: MapSet.new(),
+      sidebar_slug_draft: slug,
+      sidebar_slug_feedback: PaperCanvas.slug_feedback(slug)
+    ]
+  end
 
   @doc """
   Read-only inbound-reference load for the backlinks panel. Resolves the paper's
@@ -384,18 +473,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def clear_paper_view(socket) do
     if socket.assigns[:editor_view] == :paper do
-      assign(socket,
+      socket
+      |> assign(
         editor_view: :form,
         paper_doc: nil,
         paper_rev: 0,
         paper_html: "",
         paper_block_mode: false,
         paper_edit_mode: false,
+        paper_task_previews: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
         backlinks_unlinked: [],
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(nil))
     else
       assign(socket,
         editor_view: :form,
