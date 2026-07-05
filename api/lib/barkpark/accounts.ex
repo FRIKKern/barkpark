@@ -464,12 +464,14 @@ defmodule Barkpark.Accounts do
   # ── Step-up MFA ──────────────────────────────────────────────────────────────
 
   @doc """
-  True when `user` has an MFA factor armed — i.e. sensitive actions on their
-  sessions should require a recent step-up. Opt-in: a user who never enrolled
-  MFA is not gated, so there is no added friction for the common case.
+  True when `user` has ANY MFA factor armed (TOTP or a passkey) — i.e. sensitive
+  actions on their sessions should require a recent step-up. Opt-in: a user who
+  never enrolled a factor is not gated, so there is no added friction for the
+  common case. Factor-agnostic so a passkey-only user is protected too.
   """
   @spec mfa_enrolled?(User.t()) :: boolean()
-  def mfa_enrolled?(%User{totp_enabled: enabled}), do: enabled == true
+  def mfa_enrolled?(%User{totp_enabled: true}), do: true
+  def mfa_enrolled?(%User{} = user), do: Barkpark.Accounts.Webauthn.has_passkey?(user)
   def mfa_enrolled?(_), do: false
 
   @doc """
