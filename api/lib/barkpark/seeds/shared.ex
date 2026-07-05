@@ -6,12 +6,53 @@ defmodule Barkpark.Seeds.Shared do
   tenancy preamble that lived at the top of `priv/repo/seeds.exs`.
   """
 
+  import Ecto.Query, only: [from: 2]
+
+  alias Barkpark.Repo
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.{Role, RolePermission}
 
   @dataset "production"
 
+  # The global built-in USER roles (era-w1-custom-rbac). MUST mirror
+  # `Barkpark.Tenancy.Auth`'s compiled-in `@builtin_role_actions` fail-safe —
+  # this seed makes them visible as DB rows for custom-role CRUD, while
+  # enforcement never depends on the row existing.
+  @builtin_roles %{
+    "owner" => ~w(read write admin),
+    "admin" => ~w(read write admin),
+    "member" => ~w(read write)
+  }
+
   @doc "The dataset every seed profile writes into."
   def dataset, do: @dataset
+
+  @doc """
+  Idempotently seed the three GLOBAL built-in roles (owner/admin/member) and
+  their granted actions. Get-or-create on `(name) where workspace_id IS NULL`;
+  action rows are `on_conflict: :nothing`. Safe to run repeatedly.
+  """
+  def ensure_builtin_roles do
+    Enum.each(@builtin_roles, fn {name, actions} ->
+      role =
+        case Repo.one(from r in Role, where: r.name == ^name and is_nil(r.workspace_id)) do
+          nil ->
+            {:ok, r} = Repo.insert(Role.changeset(%Role{}, %{name: name, built_in: true}))
+            r
+
+          r ->
+            r
+        end
+
+      Enum.each(actions, fn action ->
+        %RolePermission{}
+        |> RolePermission.changeset(%{role_id: role.id, action: action})
+        |> Repo.insert(on_conflict: :nothing, conflict_target: [:role_id, :action])
+      end)
+    end)
+
+    :ok
+  end
 
   @doc """
   Get-or-create the Default Workspace / Default Project and resolve the

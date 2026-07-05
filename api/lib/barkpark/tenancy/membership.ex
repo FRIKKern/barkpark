@@ -30,12 +30,19 @@ defmodule Barkpark.Tenancy.Membership do
 
   def roles, do: @roles
 
-  def changeset(membership, attrs) do
+  @doc """
+  `valid_roles` is the set of role NAMES accepted for this membership. It
+  defaults to the built-in `@roles` (owner/admin/member); the caller
+  (`Auth.create_membership/4`) widens it with the workspace's custom role names
+  (era-w1-custom-rbac) so a defined custom role is accepted while a typo'd /
+  nonexistent role is still rejected.
+  """
+  def changeset(membership, attrs, valid_roles \\ @roles) do
     membership
     |> cast(attrs, [:workspace_id, :principal_type, :principal_id, :role])
     |> validate_required([:workspace_id, :principal_id, :role])
     |> validate_inclusion(:principal_type, @principal_types)
-    |> validate_inclusion(:role, @roles)
+    |> validate_inclusion(:role, valid_roles)
     |> assoc_constraint(:workspace)
     |> unique_constraint([:workspace_id, :principal_type, :principal_id],
       name: :workspace_memberships_principal_unique_idx,
