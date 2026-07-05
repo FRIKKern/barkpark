@@ -74,11 +74,24 @@ defmodule Barkpark.Tasks.Claim do
           _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["task-resources"])
         end
 
-        with {:ok, doc} <- fetch_task_by_doc_id(doc_id, workspace_id, project_id),
-             :ok <- check_ready_for_targeted_claim(doc),
-             :ok <- check_deps_satisfied(doc),
-             :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-          do_claim(doc, worker_id, resources)
+        case fetch_task_by_doc_id(doc_id, workspace_id, project_id) do
+          {:error, :not_found} = err ->
+            err
+
+          {:ok, doc} ->
+            # rail-l4: a targeted claim on an in_progress task by the SAME
+            # worker that holds it is a lease RENEWAL, not a conflict — the
+            # recovery path after a fence bump. A DIFFERENT worker falls through
+            # to check_ready and still gets :not_ready.
+            if renewal?(doc, worker_id) do
+              do_renew(doc, worker_id)
+            else
+              with :ok <- check_ready_for_targeted_claim(doc),
+                   :ok <- check_deps_satisfied(doc),
+                   :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
+                do_claim(doc, worker_id, resources)
+              end
+            end
         end
       end)
 
@@ -242,6 +255,63 @@ defmodule Barkpark.Tasks.Claim do
       |> Map.put("lifecycle_status", "in_progress")
       |> Map.put("assignee", worker_id)
       |> Map.put("claim", new_claim)
+
+    {rows, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
+      |> Repo.update_all(
+        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+      )
+
+    case rows do
+      1 ->
+        updated = %{doc | content: new_content, rev: new_rev}
+        ev = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
+        {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
+
+      0 ->
+        {:error, :stale_claim}
+    end
+  end
+
+  # rail-l4 renewal predicate: the task is a LIVE claim held by THIS caller.
+  defp renewal?(%Document{content: content}, worker_id) do
+    c = content || %{}
+
+    Map.get(c, "lifecycle_status") == "in_progress" and
+      get_in(c, ["claim", "worker"]) == worker_id
+  end
+
+  # rail-l4 lease RENEWAL — the recovery path. After a fence bump (a blocker
+  # edge or a move landed on this claimed task) the holder is deadlocked: its
+  # old-epoch `close` is `fenced_off`, and a fresh targeted claim would 409
+  # `not_ready`. So a same-worker re-claim renews the lease instead: it bumps
+  # the epoch and refreshes `ts_iso` (a lease keep-alive the TTL sweeper reads),
+  # but DELIBERATELY keeps the ORIGINAL claim's `work_digest` +
+  # `work_field_digests` untouched. Restamping the digest would silently
+  # swallow a foreign brief edit that happened before the renewal — the whole
+  # point of the L2 close-fence is to catch exactly that, so the renewed lease
+  # must still `doc_changed_since_claim` at close if the brief really drifted.
+  # Emits `task.claimed` (a renewal IS a claim) so the L1 envelope carries
+  # rail_rev + notices (a renewal after an edge fence surfaces
+  # blocked_while_claimed in the same response). Resources + worker are left
+  # exactly as the live claim holds them.
+  defp do_renew(%Document{content: content} = doc, worker_id) do
+    observed_rev = doc.rev
+    new_rev = generate_rev()
+    claim = Map.get(content, "claim") || %{}
+    next_epoch = current_epoch(doc) + 1
+    ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    new_claim =
+      claim
+      |> Map.put("epoch", next_epoch)
+      |> Map.put("ts_iso", ts_iso)
+
+    # Keep worker + assignee (already this caller). Only the claim lease moves.
+    new_content =
+      content
+      |> Map.put("claim", new_claim)
+      |> Map.put("assignee", worker_id)
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)

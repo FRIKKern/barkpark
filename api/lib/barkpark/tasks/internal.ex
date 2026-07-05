@@ -30,7 +30,21 @@ defmodule Barkpark.Tasks.Internal do
   # "sync" for a remote-claim-mirror-back requires a seam through tasks.ex and
   # is DEFERRED to P3 — all current callers (in tasks.ex, untouched) use the
   # default.
-  def insert_mutation_event!(%Document{} = doc, kind, previous_rev, source \\ "api") do
+  #
+  # `extra_document` is merged into the `document` map so a typed op can carry
+  # its own payload alongside the Envelope-shaped view — e.g. the rail-l3
+  # `task.reparented` event stamps `%{"reparented" => %{"from" => …, "to" => …}}`
+  # and the rail-l4 allow-and-fence `task.mutated` event stamps
+  # `%{"fenced" => "edge_added", "edge" => …}`. It mirrors how `TtlSweeper`
+  # nests its `"lease_expired"` reap payload. Defaults to `%{}` (no-op merge),
+  # so the claim/close/relabel callers passing arity 3/4 are untouched.
+  def insert_mutation_event!(
+        %Document{} = doc,
+        kind,
+        previous_rev,
+        source \\ "api",
+        extra_document \\ %{}
+      ) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
       dataset: doc.dataset,
@@ -40,14 +54,18 @@ defmodule Barkpark.Tasks.Internal do
       rev: doc.rev,
       previous_rev: previous_rev,
       source: to_string(source),
-      document: %{
-        "doc_id" => doc.doc_id,
-        "type" => doc.type,
-        "title" => doc.title,
-        "status" => doc.status,
-        "content" => doc.content,
-        "rev" => doc.rev
-      },
+      document:
+        Map.merge(
+          %{
+            "doc_id" => doc.doc_id,
+            "type" => doc.type,
+            "title" => doc.title,
+            "status" => doc.status,
+            "content" => doc.content,
+            "rev" => doc.rev
+          },
+          extra_document
+        ),
       workspace_id: doc.workspace_id,
       project_id: doc.project_id,
       dataset_id: doc.dataset_id,

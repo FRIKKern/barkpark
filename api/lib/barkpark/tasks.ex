@@ -74,7 +74,9 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.Fence
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
+  alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Rail
   alias Barkpark.Tasks.Schema
@@ -93,6 +95,10 @@ defmodule Barkpark.Tasks do
   # Phase A: task→paper reference support. Emitted when content.papers changes
   # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
   @event_task_referenced "task.referenced"
+  # rail-l3: task re-parent. Emitted when content.parent_id changes via
+  # move_by_id/2 (the `POST /v1/tasks/:doc_id/move` path); the event's document
+  # map carries `%{"reparented" => %{"from" => <old>, "to" => <new>}}`.
+  @event_task_reparented "task.reparented"
 
   @doc "The five lifecycle-status string values a task document may carry."
   @spec lifecycle_statuses() :: [String.t()]
@@ -172,11 +178,17 @@ defmodule Barkpark.Tasks do
 
   @doc """
   Add a dependency edge: `child` blocks on `parent`. `kind` defaults to
-  `:blocks`. See `Barkpark.Tasks.Edges.add_dep/3`.
+  `:blocks`.
+
+  rail-l4 allow-and-fence: routes through `Barkpark.Tasks.Fence.add_dep/3`, so
+  when the DEPENDENT (`child`) task is `in_progress` the edge-add bumps its
+  claim epoch in the same transaction (the mutating agent is never rejected —
+  the holder is fenced instead). The `{:ok, %Edge{}}` contract is unchanged.
+  See `Barkpark.Tasks.Fence.add_dep/3` (which calls `Edges.add_dep/3`).
   """
   @spec add_dep(binary(), binary(), atom() | String.t()) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks), do: Edges.add_dep(child_id, parent_id, kind)
+  def add_dep(child_id, parent_id, kind \\ :blocks), do: Fence.add_dep(child_id, parent_id, kind)
 
   @doc """
   Remove the `(child_id, parent_id, kind)` edge.
@@ -337,7 +349,11 @@ defmodule Barkpark.Tasks do
   explicit pre-flight checks for the four error modes:
 
     * `:not_found` — no doc with this `doc_id` under the caller's tenancy
-    * `:not_ready` — lifecycle_status not in [`open`, `blocked`]
+    * `:not_ready` — lifecycle_status not in [`open`, `blocked`]. EXCEPTION
+      (rail-l4): an `in_progress` task re-claimed by the SAME worker that holds
+      it is a lease RENEWAL, not `:not_ready` — the recovery path after a fence
+      bump (bump epoch + refresh ts_iso, KEEP the original work_digest). A
+      DIFFERENT worker still gets `:not_ready`.
     * `:blocked_by_unsatisfied_deps` — has outbound `blocks` edges whose
       target's lifecycle_status is not `done`
     * `:stale_claim` — CAS lost (extremely rare under the advisory lock)
@@ -470,6 +486,21 @@ defmodule Barkpark.Tasks do
           {:ok, Document.t()} | {:error, term()}
   defdelegate update_paper_refs_by_id(task_id, add_slugs, remove_slugs), to: Mutations
 
+  @doc """
+  rail-l3: re-parent a task (change `content.parent_id`). `task_uuid` is the
+  `documents.id`; `new_parent_doc_id` is a task's `doc_id` string, or `nil` to
+  move to the root (the `parent_id` key is removed). Advisory-lock + CAS-on-rev
+  guarded, emitting a `task.reparented` mutation_event carrying `{from, to}`.
+
+  Guards: a move under the task itself or any of its descendants → `:cycle`; a
+  move to the parent it already has → an idempotent no-op (`{:ok, doc}`, no
+  write). See `Barkpark.Tasks.Move.move/2`. Parent existence/type is the
+  caller's pre-flight (the controller's `find_task_by_doc_id`).
+  """
+  @spec move_by_id(binary(), binary() | nil) ::
+          {:ok, Document.t()} | {:error, :not_found | :cycle | :stale_claim}
+  defdelegate move_by_id(task_uuid, new_parent_doc_id), to: Move, as: :move
+
   # Fencing applies only to tasks that carry a claim lease. Work-tasks are
   # claimed before close, so they have `content.claim.epoch` and the observed
   # epoch must match (the dead-worker guard).
@@ -508,7 +539,8 @@ defmodule Barkpark.Tasks do
           closed: String.t(),
           mutated: String.t(),
           relabeled: String.t(),
-          referenced: String.t()
+          referenced: String.t(),
+          reparented: String.t()
         }
   def event_kinds do
     %{
@@ -516,7 +548,8 @@ defmodule Barkpark.Tasks do
       closed: @event_task_closed,
       mutated: @event_task_mutated,
       relabeled: @event_task_relabeled,
-      referenced: @event_task_referenced
+      referenced: @event_task_referenced,
+      reparented: @event_task_reparented
     }
   end
 end

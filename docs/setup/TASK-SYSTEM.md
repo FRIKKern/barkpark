@@ -1,17 +1,17 @@
 <!-- doc-tier: human | canonical-for: task-system-guide | budget: 4000tok -->
 # The Task System
 
-Barkpark as your AI's task board: the agent claims work over HTTP, you steer the same queue in the browser Studio, and every change broadcasts to both sides in real time. Tasks are plain `type:task` documents — no second store, no sync. A root task is a **goal**; children nest under it; dependencies form a graph; claims are atomic and fenced so workers can't trample each other.
+Barkpark as your AI's task board: agents claim work over HTTP, you steer the same queue in Studio, and every change broadcasts to both sides live. Tasks are plain `type:task` documents — no second store, no sync. A root task is a **goal**; children nest under it; dependencies form a graph; claims are atomic and fenced.
 
 ## What you get
 
 | Surface | What |
 |---|---|
-| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs (open · in_progress · blocked · closed · all). Editor = four-group dossier: **brief** (description, design notes, `design_doc` reference, checkable criteria), **work** (priority, assignee, estimate, due, labels), **close** (outcome, reason), **system**; soft validations warn. `dependencies`/`claim` render read-only. |
-| **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
-| **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys `/` search, `n` new, `y` duplicate, `D`×2 delete. |
-| **HTTP API** | Eleven bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, **prime** (one-call agent rehydration), queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
-| **Events** | Every task op emits a `mutation_events` row — `task.{claimed,closed,mutated,relabeled,referenced,lease_expired,compacted,compaction_restored}` — SSE at `/v1/data/listen/:dataset`. |
+| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs (open · in_progress · blocked · closed · all). Editor = four-group dossier (**brief**, **work**, **close**, **system**); soft validations warn; `dependencies`/`claim` render read-only. |
+| **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close / move` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
+| **Terminal TUI** | Task lists: `c` claims the highlighted task, `x` closes it (worker id `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys `/` search, `n` new, `y` duplicate, `D`×2 delete. |
+| **HTTP API** | Twelve bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, **prime**, queue claim, targeted claim, close, move (re-parent), fetch-with-children, edges, labels, paper links. |
+| **Events** | Every task op emits a `mutation_events` row — `task.{claimed,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}` — SSE at `/v1/data/listen/:dataset`. |
 
 Lifecycle states: `open · in_progress · blocked · done · cancelled`.
 
@@ -44,7 +44,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Create them through the standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, plus dossier fields (`description`, `design`, `design_doc` slug, `acceptance_criteria`, `estimate`, `due_at`, `outcome`, …); the schema (`GET /v1/schemas/:dataset`, name `task`) is the authoritative field list.
+**3. Create tasks.** Via the standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, plus dossier fields (`description`, `design`, `design_doc` slug, `acceptance_criteria`, `estimate`, `due_at`, `outcome`, …); the schema (`GET /v1/schemas/:dataset`, name `task`) is the authoritative field list.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -81,11 +81,12 @@ bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"P
 The contract, precisely:
 
 - **Claim** flips `lifecycle_status` to `in_progress` + stamps `content.claim = {worker, ts_iso, epoch}`; the epoch bumps on every claim (race loss → 409 `stale_claim`).
-- **Close** requires `worker_id` + `observed_epoch`. Epoch mismatch → 409 `fenced_off` (swept-but-alive worker guard). Optional body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` in the flip's rev-CAS write (criterion text never rewritten; a text/index mismatch → 409, aborting the close). Unmet criteria only warn (see **Criteria progress**), never gate. Default fence: a claim-time **work digest** over title/description/criteria — a brief edited under your claim → 409 `doc_changed_since_claim` (`current_rev`, `changed_fields`); re-read and retry, or pass `observed_rev` to bypass. Self-edits (`code_refs`, `labels`) never trip it.
+- **Close** requires `worker_id` + `observed_epoch`. Epoch mismatch → 409 `fenced_off`. Optional body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` in the flip's rev-CAS write (text never rewritten; index/text mismatch → 409). Unmet criteria only warn (see **Criteria progress**), never gate. Default fence: a claim-time **work digest** over title/description/criteria — a brief edited under your claim → 409 `doc_changed_since_claim` (`current_rev`, `changed_fields`); re-read and retry, or pass `observed_rev` to bypass. Self-edits (`code_refs`, `labels`) never trip it.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **300**), emitting `task.lease_expired`. Finish or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` over `acceptance_criteria` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but still commits. Owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).
-- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + their `blocks` edges; compare `≠`); prime carries `rails: {parent_id → rail_rev}`. Typed `notices` ride the same envelopes: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. Owner: `Barkpark.Tasks.Rail`.
+- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + their `blocks` edges; compare `≠`); prime carries `rails: {parent_id → rail_rev}`. Typed `notices` ride the same envelopes: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch (the mutator is never rejected); the holder's stale-epoch close → `fenced_off`, fixed by a same-worker re-claim = lease **renewal** (bumps epoch, refreshes ts_iso, keeps the original work digest). Owner: `Barkpark.Tasks.Rail`.
+- **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev` (source). Guards: bad parent → 409 `invalid_parent`; self/descendant → `cycle`; same-parent → no-op.
 
 **5. Dependencies, labels, papers.**
 
@@ -119,19 +120,19 @@ Filters: `kind`, `lifecycle_status`, `phase_id`, `parent`, `label`, `type`, `lim
 
 ## Task ↔ code linkage
 
-Tasks carry machine-readable provenance so "what code is this task?" is a field read, not a git-archaeology dig. Two optional content fields:
+Two optional content fields make "what code is this task?" a field read, not a git-archaeology dig:
 
 - **`code_refs`** = `{"prs":[int], "commits":["sha"], "branch":"name", "worktree":"path-or-null"}` — the PRs, merge commits, git branch, and (while in flight) the worktree path for the task's work.
 - **`last_worked_at`** = ISO timestamp of the newest attached code activity (a PR merge / commit date) — distinct from `updated_at`, which any metadata edit bumps.
 
-Stamp at three moments (see [ledger process rule 6](../../.claude/workflows/bp-loop-ledger.md)): at **claim** set `branch` + `worktree`; at **PR-open** append to `prs` + bump `last_worked_at`; at **merge** append the sha to `commits`, bump `last_worked_at`, and **clear `worktree` → null**. Patch flat into content:
+Stamp at three moments (see [ledger rule 6](../../.claude/workflows/bp-loop-ledger.md)): **claim** sets `branch` + `worktree`; **PR-open** appends `prs` + bumps `last_worked_at`; **merge** appends the sha to `commits`, bumps `last_worked_at`, **clears `worktree` → null**. Patch flat into content:
 
 ```bash
 # patch via /v1/data/mutate: {"patch":{"id":"drafts.t1","type":"task",
 #   "set":{"code_refs":{"prs":[941],"branch":"feat/x","worktree":null},"last_worked_at":"2026-07-03T00:00:00Z"}}}
 ```
 
-`set` keys merge flat into `content` (no dotted paths). Honesty rule: leave a field **absent** when unknown — absent means "not yet linked", never fabricate a ref.
+`set` keys merge flat into `content` (no dotted paths). Honesty: leave a field **absent** when unknown ("not yet linked"), never fabricate a ref.
 
 ## Working with your AI in Studio
 
@@ -142,7 +143,7 @@ Open `/studio` → the **Tasks ✅** group. The division of labour:
 | Flip `lifecycle_status` (5-state dropdown), set `priority`, `assignee`, edit titles/descriptions | `claim` / `close` with fencing, add edges, relabel, link papers |
 | Triage: open new tasks, cancel dead ones | Drain the ready queue in priority order |
 
-The terminal TUI edits the flat fields (title, description, lifecycle, priority, …) and carries the claim/close quick actions (`c` / `x`, same fenced endpoints the agent uses); composite fields like `acceptance_criteria` are Studio/API-editable only. `dependencies` and `claim` render read-only in the editor — the form never submits them, so the API stays the single writer for structured values. Everything updates live via PubSub: an agent's claim shows in your pane without a refresh.
+The terminal TUI edits flat fields (title, description, lifecycle, priority, …) and carries the `c`/`x` claim/close actions; composite fields like `acceptance_criteria` are Studio/API-only. `dependencies`/`claim` are read-only in the editor — the API stays the single writer for structured values. Updates are live via PubSub: an agent's claim shows in your pane without a refresh.
 
 ## Goals and phases
 
@@ -153,11 +154,9 @@ Everything is a task. The pattern:
 - **Rail** = a task's chronological children: `GET /v1/tasks?parent=<id>` (oldest first); `GET /v1/tasks/:id` also inlines one level of `children` summaries + `child_count`.
 - Scope a worker to one phase: `POST /v1/tasks/claim` `{"worker_id":…,"phase_id":…}`, or `GET /v1/tasks/ready?phase_id=…`.
 
-Goal → phases → leaf tasks, with `blocks` edges sequencing phases, is a multi-phase project board in a standard Barkpark install.
-
 ### How to organize tasks (the rules — follow these when creating ANY task)
 
-Tasks are first-class in Barkpark; a scattered board is a defect. When you add a task, make it fit the structure:
+A scattered board is a defect. When you add a task, make it fit the structure:
 
 1. **Every task belongs to a goal.** A task either HAS subtasks or IS one — never a floating orphan. If related tasks have no binding parent, create a goal and set their `parent_id` to it; nest that goal under a larger goal (epic) where a bigger mission exists.
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"*, *"Every outbound email is delivered and observable"*. Never name a goal after provenance/process (`loop`, `cleanup`, `misc`) or after a label. A shared tag is a facet; the goal states the shared outcome.
@@ -166,11 +165,11 @@ Tasks are first-class in Barkpark; a scattered board is a defect. When you add a
 5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; a task waiting on a human carries `needs-human`/`decision`. The board reads these to show what stopped a goal.
 
-A well-formed board reads as *missions, and what each is made of* — so anyone sees what is being worked, what is blocked, and why.
+A well-formed board reads as *missions, and what each is made of* — anyone sees what's worked, blocked, and why.
 
 ## Workspaces, projects, datasets — experiment without mess
 
-Spin up an isolated sandbox in one command, fully isolated from your real work (deleting a whole workspace is [deferred](../decisions/deferred.md); today spikes are abandoned in place, never leaked). Any write-tier token may create a workspace — it arrives ready to use:
+Spin up an isolated sandbox in one command (deleting a whole workspace is [deferred](../decisions/deferred.md); today spikes are abandoned in place). Any write-tier token may create a workspace — it arrives ready to use:
 
 ```bash
 bp workspace create Spike
@@ -183,7 +182,7 @@ bp workspace ls                                   # what your token can reach
 # POST /api/workspaces/:slug/projects {"name":…} — see docs/cheatsheets/http-api.md
 ```
 
-Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror under the same prefix. The flat `/v1/tasks/*` surface operates on the server's default (unscoped) scope — under scoped pipelines, task reads and claims are strictly filtered by workspace + project. Membership is the boundary: non-members get 404, never a leak.
+Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes mirror under the same prefix. The flat `/v1/tasks/*` surface operates on the server's default (unscoped) scope — under scoped pipelines, reads and claims are filtered by workspace + project. Membership is the boundary: non-members get 404, never a leak.
 
 ## Troubleshooting
 
@@ -193,10 +192,10 @@ Scoped Studio lives at `/w/:workspace_slug/p/:project_slug/studio`; scoped data 
 | `404` on `/v1/tasks/*` | Plugin disabled — routes only mount when the tasks plugin is registered. |
 | `404 task not found` on an id you just created | Rare — the endpoints resolve bare `t1` to `drafts.t1` automatically. Check that the task plugin is enabled and the token has access. |
 | `400 worker_id is required` | Claim/close need `worker_id` — positional via bp (`bp task claim <id> <worker>`), JSON body via curl. |
-| `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept and re-claimed. Re-claim, then close with the new epoch. |
+| `409 fenced_off` | Your `observed_epoch` is stale — the lease was swept, **or a blocker/move landed on your claimed task** (L4 fence). Renew with `bp task claim <id> <same-worker>`, then close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 doc_changed_since_claim` | The brief was edited under your claim. Re-read (`bp task get <id>`) then close again, or pass `observed_rev` for strict rev fencing. |
-| `409 not_ready` | Targeted claim on a task that is `in_progress`/`done`/`cancelled`. |
+| `409 not_ready` | Targeted claim on a task that is `in_progress`/`done`/`cancelled` (re-claiming your OWN in_progress task is instead a **renewal**, not an error). |
 | `409 blocked_by_unsatisfied_deps` | Targeted claim while a `blocks` edge points at a non-`done` task. |
 | `{"ok":false,"reason":"no_ready"}` | Not an error — the queue is empty (HTTP 200). |
 | Task invisible in Studio but in API | Tenancy: the doc carries a different workspace/project scope than the Studio you're looking at. |

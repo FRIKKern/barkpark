@@ -41,7 +41,8 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/claim",
                  "/v1/tasks/:doc_id",
                  "/v1/tasks/:doc_id/claim",
-                 "/v1/tasks/:doc_id/close"
+                 "/v1/tasks/:doc_id/close",
+                 "/v1/tasks/:doc_id/move"
                ])
 
   defp atomize_for_manifest(cmds) do
@@ -82,7 +83,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the seven task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the eight task verbs, all read-tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -93,12 +94,13 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert "task.claim" in ids
       assert "task.close" in ids
       assert "task.next" in ids
+      assert "task.move" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
-      assert length(cmds) == 7
+      assert length(cmds) == 8
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
       # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
