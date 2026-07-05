@@ -814,9 +814,24 @@ func (c *Client) Delete(typeName, id string) error {
 // (already_claimed / fenced_off), a 404 (not_found) or a 400; the reason
 // string is the contract, not the HTTP status.
 type taskEnvelope struct {
-	OK     bool            `json:"ok"`
-	Reason string          `json:"reason"`
-	Doc    json.RawMessage `json:"doc"`
+	OK      bool            `json:"ok"`
+	Reason  string          `json:"reason"`
+	Doc     json.RawMessage `json:"doc"`
+	Notices []TaskNotice    `json:"notices"`
+}
+
+// TaskNotice is one advisory rail-awareness notice a claim/close 2xx envelope
+// may carry (top-level "notices":[…], omitted when empty). Two shapes ride the
+// one struct — blocked_while_claimed ({type, task_id, blockers}) fires when a
+// blocker lands on a task you hold; rail_changed ({type, parent_id, rail_rev})
+// fires when the parent rail you observed moved. Advisory only: they never fail
+// the request, and a consumer that ignores them loses nothing but the heads-up.
+type TaskNotice struct {
+	Type     string   `json:"type"`
+	TaskID   string   `json:"task_id"`
+	Blockers []string `json:"blockers"`
+	ParentID string   `json:"parent_id"`
+	RailRev  string   `json:"rail_rev"`
 }
 
 // taskPost POSTs a JSON payload to a FLAT /v1/tasks path. The task routes are
@@ -866,10 +881,19 @@ func (c *Client) taskPost(path string, payload map[string]interface{}) (*taskEnv
 // claim's fencing epoch (content.claim.epoch on the returned doc) — the token
 // TaskClose must echo back as observed_epoch.
 func (c *Client) TaskClaim(docID, workerID string) (int, error) {
+	epoch, _, err := c.TaskClaimN(docID, workerID)
+	return epoch, err
+}
+
+// TaskClaimN is TaskClaim plus the envelope's advisory rail-awareness notices
+// (blocked_while_claimed / rail_changed, nil when the server sent none). Callers
+// that want to surface the heads-up (the task board's status strip) use this;
+// TaskClaim stays the epoch-only convenience for callers that don't.
+func (c *Client) TaskClaimN(docID, workerID string) (int, []TaskNotice, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/claim",
 		map[string]interface{}{"worker_id": workerID})
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	var doc struct {
 		Claim struct {
@@ -877,9 +901,9 @@ func (c *Client) TaskClaim(docID, workerID string) (int, error) {
 		} `json:"claim"`
 	}
 	if err := json.Unmarshal(env.Doc, &doc); err != nil || doc.Claim.Epoch <= 0 {
-		return 0, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
+		return 0, nil, fmt.Errorf("claim %s: server returned no fencing epoch", docID)
 	}
-	return doc.Claim.Epoch, nil
+	return doc.Claim.Epoch, env.Notices, nil
 }
 
 // TaskClose closes a claimed task via POST /v1/tasks/:doc_id/close. The server
@@ -887,13 +911,26 @@ func (c *Client) TaskClaim(docID, workerID string) (int, error) {
 // mismatch returns reason "fenced_off"); lifecycle lands on "done" (the server
 // default, sent explicitly).
 func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
-	_, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
+	_, err := c.TaskCloseN(docID, workerID, observedEpoch)
+	return err
+}
+
+// TaskCloseN is TaskClose plus the envelope's advisory rail-awareness notices
+// (nil when the server sent none) — the notice-aware twin the board uses so a
+// clean close can still flag a blocker that landed on a sibling. On a fenced
+// 409 the reason rides the error (fenced_off / doc_changed_since_claim); notices
+// only accompany a 2xx.
+func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, error) {
+	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
 			"worker_id":        workerID,
 			"observed_epoch":   observedEpoch,
 			"lifecycle_status": "done",
 		})
-	return err
+	if err != nil {
+		return nil, err
+	}
+	return env.Notices, nil
 }
 
 // TaskRelabel adds and/or removes content.labels on a task via

@@ -36,9 +36,16 @@ var openURL = func(url string) error {
 // rejected: stale epoch (task moved)"). It NEVER reports OK for a request the
 // server declined; the epoch-CAS fencing is the server's, and this layer only
 // translates its verdict.
+//
+// Role is an OPTIONAL strip-color override: RoleNeutral (the zero value) means
+// "let the reducer pick the default" (RoleOK on success, RoleDanger on failure);
+// a non-zero Role wins. It exists so a landed claim that ALSO carries a
+// rail-awareness notice can paint warn/info instead of the plain green — the
+// notice is the point of the color, not the success.
 type ActionResult struct {
 	OK      bool
 	Message string
+	Role    Role
 }
 
 // DoClaim claims docID for worker over POST /v1/tasks/:doc_id/claim. On success
@@ -47,11 +54,12 @@ type ActionResult struct {
 // claim / resource conflict) or any transport failure comes back as OK:false
 // with the server's reason humanised — never a silent success, never a retry.
 func DoClaim(c *apiclient.Client, docID, worker string) ActionResult {
-	epoch, err := c.TaskClaim(docID, worker)
+	epoch, notices, err := c.TaskClaimN(docID, worker)
 	if err != nil {
 		return ActionResult{OK: false, Message: "claim failed: " + humanizeReason(err)}
 	}
-	return ActionResult{OK: true, Message: fmt.Sprintf("claimed as %s · epoch %d", worker, epoch)}
+	res := ActionResult{OK: true, Message: fmt.Sprintf("claimed as %s · epoch %d", worker, epoch)}
+	return withTopNotice(res, notices)
 }
 
 // DoClose closes docID for worker over POST /v1/tasks/:doc_id/close, fencing on
@@ -60,10 +68,77 @@ func DoClaim(c *apiclient.Client, docID, worker string) ActionResult {
 // stale_claim on a 409 and this reports OK:false with that honest reason; only a
 // clean close reports OK:true.
 func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult {
-	if err := c.TaskClose(docID, worker, epoch); err != nil {
+	notices, err := c.TaskCloseN(docID, worker, epoch)
+	if err != nil {
+		// The two recoverable fence reasons get actionable resync guidance instead
+		// of the bare humanised reason: they tell the worker the concrete next
+		// keypress (c to renew, or enter to re-read) rather than a dead-end refusal.
+		if msg, ok := resyncGuidance(err); ok {
+			return ActionResult{OK: false, Message: msg, Role: RoleDanger}
+		}
 		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
 	}
-	return ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
+	res := ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
+	return withTopNotice(res, notices)
+}
+
+// withTopNotice folds the single most important rail-awareness notice into a
+// SUCCESS result's strip line and colors it: blocked_while_claimed (your held
+// task just gained a blocker) paints warn, rail_changed (the parent rail moved)
+// paints info. Only ONE is shown — the strip is one line — and blocked outranks
+// rail_changed. No known notice leaves the plain green confirmation untouched.
+func withTopNotice(res ActionResult, notices []apiclient.TaskNotice) ActionResult {
+	n, ok := topNotice(notices)
+	if !ok {
+		return res
+	}
+	switch n.Type {
+	case "blocked_while_claimed":
+		res.Message += " · blocked while claimed: " + n.TaskID
+		res.Role = RoleWarn
+	case "rail_changed":
+		res.Message += " · rail changed: " + n.ParentID
+		res.Role = RoleInfo
+	}
+	return res
+}
+
+// topNotice picks the highest-priority notice to surface on the one-line strip:
+// a blocked_while_claimed always outranks a rail_changed (a new blocker on your
+// work is more urgent than a parent-rail move). Returns false when the list
+// holds neither known shape (an unknown future notice is ignored, not guessed).
+func topNotice(notices []apiclient.TaskNotice) (apiclient.TaskNotice, bool) {
+	var rail *apiclient.TaskNotice
+	for i := range notices {
+		switch notices[i].Type {
+		case "blocked_while_claimed":
+			return notices[i], true
+		case "rail_changed":
+			if rail == nil {
+				rail = &notices[i]
+			}
+		}
+	}
+	if rail != nil {
+		return *rail, true
+	}
+	return apiclient.TaskNotice{}, false
+}
+
+// resyncGuidance maps the two close-time fence reasons a fresh re-read recovers
+// to actionable strip copy. fenced_off means the row changed under your claim (a
+// blocker/move landed, or the lease was swept+reclaimed) — a re-claim under your
+// own worker id renews the lease (new epoch), so press c then x again.
+// doc_changed_since_claim means the brief itself changed — reopen to re-read it,
+// then close. Any other reason returns false and falls through to humanizeReason.
+func resyncGuidance(err error) (string, bool) {
+	switch strings.TrimSpace(strings.ToLower(err.Error())) {
+	case "fenced_off":
+		return "fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again", true
+	case "doc_changed_since_claim":
+		return "the brief changed since your claim — reopen the task (enter) to re-read, then close again", true
+	}
+	return "", false
 }
 
 // humanizeReason turns the server's contract reason string (surfaced verbatim by

@@ -308,8 +308,19 @@ func (e apiError) hint() string {
 		return "re-run with -v for field errors; check required/pattern fields"
 	case "rev_mismatch", "precondition_failed", "conflict":
 		return "re-fetch the doc to get the current _rev, then retry"
-	case "fenced_off", "stale_claim", "claimed_has_worker", "already_claimed", "not_ready":
-		return "your claim epoch is stale — re-claim with `bp task next`"
+	case "fenced_off", "stale_claim", "claimed_has_worker", "already_claimed":
+		// fenced_off now covers more than a plain epoch bump: a blocker landing on
+		// (or a move of) your claimed task, or a swept+reclaimed lease, all bump the
+		// epoch. Name the wider cause, and point at the lease-RENEWAL recovery (a
+		// re-claim under YOUR OWN worker id mints a fresh epoch) rather than a
+		// generic `task next`.
+		return "your claim epoch is stale (lease swept or a blocker/move fenced you) — re-claim under your worker id, then retry"
+	case "not_ready":
+		// not_ready is NOT a stale-epoch case: the targeted claim hit a task held by
+		// ANOTHER worker, or one that is done/cancelled/blocked-by-deps. The fix is
+		// not "re-claim to advance the epoch" — it is either wait for the holder, or
+		// (if the holder is YOU) re-claim under your own id to renew the lease.
+		return "the task isn't claimable — someone else holds it or it isn't ready; if YOU hold it, re-claim with your own worker id to renew the lease"
 	case "doc_changed_since_claim":
 		return "the task's brief changed since you claimed it — re-read with `bp task get <id>`, then close again (or pass --set observed_rev=<rev> for strict rev fencing)"
 	case "rate_limited":

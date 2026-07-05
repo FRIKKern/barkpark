@@ -147,8 +147,6 @@ func TestDoClose_Failures(t *testing.T) {
 		resp    string
 		wantMsg string
 	}{
-		{"fenced_off", `{"ok":false,"reason":"fenced_off"}`,
-			"close rejected: stale epoch (task moved)"},
 		{"stale_claim", `{"ok":false,"reason":"stale_claim"}`,
 			"close rejected: claim moved under us (stale)"},
 		{"invalid_lifecycle", `{"ok":false,"reason":"invalid_lifecycle:frobnicate"}`,
@@ -166,6 +164,78 @@ func TestDoClose_Failures(t *testing.T) {
 			}
 			if got.Message != tc.wantMsg {
 				t.Errorf("message = %q, want %q", got.Message, tc.wantMsg)
+			}
+		})
+	}
+}
+
+// TestDoClaim_SurfacesNotice: a clean claim whose 2xx envelope carries a
+// rail-awareness notice folds the top notice into the strip line AND overrides
+// the role — blocked_while_claimed is warn, rail_changed is info, and a
+// blocked_while_claimed outranks a rail_changed when both ride the envelope.
+func TestDoClaim_SurfacesNotice(t *testing.T) {
+	cases := []struct {
+		name     string
+		resp     string
+		wantMsg  string
+		wantRole Role
+	}{
+		{"blocked_while_claimed", `{"ok":true,"doc":{"claim":{"epoch":4}},"notices":[{"type":"blocked_while_claimed","task_id":"t9","blockers":["t3"]}]}`,
+			"claimed as tui-mbp · epoch 4 · blocked while claimed: t9", RoleWarn},
+		{"rail_changed", `{"ok":true,"doc":{"claim":{"epoch":4}},"notices":[{"type":"rail_changed","parent_id":"epic-2","rail_rev":"r7"}]}`,
+			"claimed as tui-mbp · epoch 4 · rail changed: epic-2", RoleInfo},
+		{"blocked outranks rail", `{"ok":true,"doc":{"claim":{"epoch":4}},"notices":[{"type":"rail_changed","parent_id":"epic-2","rail_rev":"r7"},{"type":"blocked_while_claimed","task_id":"t9","blockers":["t3"]}]}`,
+			"claimed as tui-mbp · epoch 4 · blocked while claimed: t9", RoleWarn},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cap capture
+			srv := serve(t, http.StatusOK, tc.resp, &cap)
+			defer srv.Close()
+
+			got := DoClaim(testClient(srv.URL), "t1", "tui-mbp")
+			if !got.OK {
+				t.Fatalf("expected OK, got %+v", got)
+			}
+			if got.Message != tc.wantMsg {
+				t.Errorf("message = %q, want %q", got.Message, tc.wantMsg)
+			}
+			if got.Role != tc.wantRole {
+				t.Errorf("role = %v, want %v", got.Role, tc.wantRole)
+			}
+		})
+	}
+}
+
+// TestDoClose_ResyncGuidance: the two recoverable fence reasons render the
+// actionable next-keypress guidance (press c to renew / reopen to re-read) in
+// danger, not the bare humanised reason — the whole point of the polish.
+func TestDoClose_ResyncGuidance(t *testing.T) {
+	cases := []struct {
+		name    string
+		resp    string
+		wantMsg string
+	}{
+		{"fenced_off", `{"ok":false,"reason":"fenced_off"}`,
+			"fenced off — the task changed under you (blocker/move/sweep); press c to renew, then x again"},
+		{"doc_changed_since_claim", `{"ok":false,"reason":"doc_changed_since_claim"}`,
+			"the brief changed since your claim — reopen the task (enter) to re-read, then close again"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cap capture
+			srv := serve(t, http.StatusConflict, tc.resp, &cap)
+			defer srv.Close()
+
+			got := DoClose(testClient(srv.URL), "t1", "tui-mbp", 4)
+			if got.OK {
+				t.Fatalf("expected failure, got %+v", got)
+			}
+			if got.Message != tc.wantMsg {
+				t.Errorf("message = %q, want %q", got.Message, tc.wantMsg)
+			}
+			if got.Role != RoleDanger {
+				t.Errorf("role = %v, want RoleDanger", got.Role)
 			}
 		})
 	}

@@ -499,13 +499,23 @@ func TestApiErrorHint(t *testing.T) {
 		"not_found", "schema_unknown",
 		"validation_failed", "invalid_op", "type_mismatch", "duplicate_id",
 		"rev_mismatch", "precondition_failed", "conflict",
-		"fenced_off", "stale_claim", "already_claimed", "doc_changed_since_claim",
+		"fenced_off", "stale_claim", "already_claimed", "not_ready", "doc_changed_since_claim",
 		"rate_limited", "unauthorized", "forbidden",
 	}
 	for _, code := range nonEmpty {
 		if h := (apiError{code: code}).hint(); h == "" {
 			t.Errorf("hint(%q) = empty, want a suggestion", code)
 		}
+	}
+
+	// not_ready is split from the stale-epoch bucket: a targeted claim on a task
+	// another worker holds (or one that is done/cancelled/blocked) is not a stale
+	// claim, so its hint must be its own copy — not the fenced_off/stale one.
+	if fenced, notReady := (apiError{code: "fenced_off"}).hint(), (apiError{code: "not_ready"}).hint(); fenced == notReady {
+		t.Errorf("not_ready shares the stale-epoch hint %q — it needs its own copy", notReady)
+	}
+	if h := (apiError{code: "not_ready"}).hint(); !strings.Contains(h, "isn't claimable") {
+		t.Errorf("not_ready hint = %q, want the not-claimable copy", h)
 	}
 
 	empty := []string{"", "internal_error", "halted", "totally_unknown"}
