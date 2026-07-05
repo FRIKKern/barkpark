@@ -39,6 +39,10 @@ defmodule Barkpark.Accounts.User do
     # code from the same/earlier 30s period cannot be replayed.
     field :last_totp_at, :utc_datetime_usec
 
+    # Per-account login lockout (era-w7). Server-managed only — NEVER castable.
+    field :failed_login_count, :integer, default: 0
+    field :locked_until, :utc_datetime_usec
+
     has_many :sessions, Barkpark.Accounts.UserSession
 
     timestamps(type: :utc_datetime_usec)
@@ -91,6 +95,29 @@ defmodule Barkpark.Accounts.User do
     changeset
     |> validate_required([:password])
     |> validate_length(:password, min: @min_password_length, max: @max_password_length)
+    |> validate_not_breached()
+  end
+
+  # Reject a known-breached password (era-w7). Only runs when HIBP is enabled
+  # AND the password already passed the cheap length/required checks — so a
+  # network call never happens for an obviously-invalid password. Fails OPEN
+  # (Hibp.breached? returns false on any HIBP error). k-anonymity: only the
+  # SHA-1 prefix leaves the process. Mirrors unsafe_validate_unique's pattern
+  # (a validation that legitimately performs I/O).
+  defp validate_not_breached(%{valid?: false} = changeset), do: changeset
+
+  defp validate_not_breached(changeset) do
+    password = get_change(changeset, :password)
+
+    if password && Barkpark.Accounts.Hibp.breached?(password) do
+      add_error(
+        changeset,
+        :password,
+        "has appeared in a known data breach — choose a different one"
+      )
+    else
+      changeset
+    end
   end
 
   defp hash_password(changeset) do
