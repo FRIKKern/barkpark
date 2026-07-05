@@ -825,6 +825,17 @@ below tells the same story in context. The D14 de-dup helpers (dedupNowFromEpics
 stripNow) are deleted; NOW anchors now add themselves to the focus window and seed context.
 
 
+**D57 (2026-07-05, user direction):** the "+N more / +N done" fold line is a SELECTABLE cursor stop —
+enter (or l) on it expands its section to the full list; a second enter toggles back, mirroring the
+header. User verbatim: "where we see 11 more etc - we should be able to highlight and open and see
+the rest." Emitted with Ref=fold key + RK=rowMore by the ONE spineRows producer, so cursor-parity
+stays structural; selected state draws the ▎ marker in the indent gutter.
+
+**Heartbeat retimed (decision 16 amendment, 2026-07-05):** frameCadence 1s → 100ms per user direction
+("it should feel tempo") — a full braille rotation per second, matching spec §2's ~80-100ms/frame.
+The aliveness budget is untouched: zero ticks at rest, idle board byte-stable.
+
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)

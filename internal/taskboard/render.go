@@ -493,7 +493,7 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 				emit(ln)
 			}
 		case spineMore:
-			emit(moreLine(sr.more, sr.Depth, width))
+			emit(moreLine(sr.more, sr.Depth, width, markSel()))
 		case spineDeadEpic:
 			emit(deadEpicLine(sr.hdr.title, width))
 		case spineEmpty:
@@ -521,8 +521,11 @@ func deadEpicLine(title string, width int) string {
 // renders as a row). The three are DISTINCT segments, so a focus window over a
 // mass-closed epic reads honestly as e.g. "+6 more · 23 done". Depth indents the
 // line to sit under a phase band's children.
-func moreLine(m spineMoreInfo, depth, width int) string {
+func moreLine(m spineMoreInfo, depth, width int, selected bool) string {
 	indent := strings.Repeat(" ", childIndent+depth*2)
+	if selected && len(indent) > 0 {
+		indent = indent[:len(indent)-1] + SelectionMarker(true)
+	}
 	var parts []string
 	add := func(lead string, n int, unit string) {
 		if n <= 0 {

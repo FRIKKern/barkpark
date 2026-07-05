@@ -159,9 +159,11 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 	if len(rows) <= len(b.Now)+1 {
 		t2.Fatalf("flat board visible rows = %d, want more than NOW+header (a focus window)", len(rows))
 	}
-	if len(rows) > len(b.Now)+1+focusWindowMax {
-		t2.Fatalf("flat board visible rows = %d, want <= NOW + header + focusWindowMax (%d) — the wall must not return",
-			len(rows), len(b.Now)+1+focusWindowMax)
+	// +1 for the "+N more/done" fold line, itself a cursor stop since D57
+	// (enter on it expands the section).
+	if len(rows) > len(b.Now)+1+focusWindowMax+1 {
+		t2.Fatalf("flat board visible rows = %d, want <= NOW + header + focusWindowMax + fold line (%d) — the wall must not return",
+			len(rows), len(b.Now)+1+focusWindowMax+1)
 	}
 	for _, r := range rows {
 		if len(r.docID) >= 2 && r.docID[:2] == "dn" {
@@ -1365,5 +1367,36 @@ func TestInitSchedulesNoFrame(t2 *testing.T) {
 	}
 	if m.frameOn {
 		t2.Fatal("Init marked the heartbeat running")
+	}
+}
+
+// TestEnterOnMoreLineExpandsSection — charter D57: the "+N more" fold line is a
+// cursor stop, and enter on it expands its section to the full list ("open and
+// see the rest"); enter again (on the surviving done-tail line) toggles back.
+func TestEnterOnMoreLineExpandsSection(t *testing.T) {
+	b := BuildBoard(loadFlatSnapshot(t), RepoContext{}, refNow)
+	m := testModel(b)
+	rows := m.visibleRows()
+	moreAt := -1
+	for i, r := range rows {
+		if r.kind == rowMore {
+			moreAt = i
+			break
+		}
+	}
+	if moreAt < 0 {
+		t.Fatalf("flat focus board has no rowMore stop, want the fold line selectable")
+	}
+	before := len(rows)
+	m.ui.Cursor = moreAt
+	m = m.activateBoard()
+	expanded := m.visibleRows()
+	if len(expanded) <= before {
+		t.Fatalf("enter on the fold line: rows %d -> %d, want the section expanded (more rows)", before, len(expanded))
+	}
+	// toggle back from the same section's surviving fold line (if any) or header:
+	key := rows[moreAt].docID
+	if !m.sectionExpandedByKey(key) {
+		t.Fatalf("section %q not in modeExpanded after enter on its fold line", key)
 	}
 }
