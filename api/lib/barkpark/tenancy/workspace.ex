@@ -39,6 +39,10 @@ defmodule Barkpark.Tenancy.Workspace do
     field :slug, :string
     field :name, :string
 
+    # Thin Organization tier (era-w1-org): nullable, additive, not read by any
+    # authorization path — a workspace joins an org when SSO/SCIM is configured.
+    belongs_to :organization, Barkpark.Tenancy.Organization
+
     has_many :projects, Barkpark.Tenancy.Project
     has_many :memberships, Barkpark.Tenancy.Membership
 
@@ -51,7 +55,7 @@ defmodule Barkpark.Tenancy.Workspace do
 
   def changeset(workspace, attrs) do
     workspace
-    |> cast(attrs, [:slug, :name])
+    |> cast(attrs, [:slug, :name, :organization_id])
     |> validate_required([:slug, :name])
     |> validate_length(:slug, min: 1, max: 63)
     |> validate_length(:name, min: 1, max: 255)
@@ -60,5 +64,6 @@ defmodule Barkpark.Tenancy.Workspace do
     )
     |> validate_exclusion(:slug, @reserved_slugs, message: "is reserved")
     |> unique_constraint(:slug)
+    |> foreign_key_constraint(:organization_id)
   end
 end

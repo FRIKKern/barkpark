@@ -465,6 +465,7 @@ defmodule BarkparkWeb.Router do
       on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
+      live("/org-admin", OrgAdminLive)
     end
   end
 
