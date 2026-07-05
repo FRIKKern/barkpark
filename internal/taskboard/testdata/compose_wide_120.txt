@@ -3,15 +3,15 @@
  barkpark · tasks      ⇄ guerrilla  ● live · 2m  Wire the SSE live bridge to the task board pane
  ⠋ 2 in flight · ○ 1 ready · ✓ 1 done       33%  ⠋ in_progress · P1 · task · fable-3
  ███████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  
-                                                 created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
- NOW                                             
-    nothing claimed · all clear                  ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
-                                                 
-   tasks ·································· 1/4    The board must repaint the moment the queue moves.
+   tasks ·································· 1/4  created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
    ▎⠋ Wire the SSE live bridge to the task boa…  
-   ↳  ✓ Decode the change feed envelope            • one dirty bit signals the refetch
-   ↳  ⠋ Debounce the refetch at 750ms              • one snapshot is the single source of truth
-   ↳  ○ Honest connection dot states             
+   ↳  ✓ Decode the change feed envelope          ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
+   ↳  ⠋ Debounce the refetch at 750ms            
+   ↳  ○ Honest connection dot states               The board must repaint the moment the queue moves.
+                                                 
+                                                   • one dirty bit signals the refetch
+                                                   • one snapshot is the single source of truth
+                                                 
                                                  criteria 2/3
                                                    ✓ SSE dirty-bit triggers a debounced refetch
                                                      ↳ internal/taskboard/live.go:42

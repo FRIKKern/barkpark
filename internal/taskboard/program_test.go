@@ -160,10 +160,11 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 		t2.Fatalf("flat board visible rows = %d, want more than NOW+header (a focus window)", len(rows))
 	}
 	// +1 for the "+N more/done" fold line, itself a cursor stop since D57
-	// (enter on it expands the section).
-	if len(rows) > len(b.Now)+1+focusWindowMax+1 {
-		t2.Fatalf("flat board visible rows = %d, want <= NOW + header + focusWindowMax + fold line (%d) — the wall must not return",
-			len(rows), len(b.Now)+1+focusWindowMax+1)
+	// (enter on it expands the section). +len(b.Next) for the pinned NEXT
+	// intent strip, cursor stops above the spine (charter wave-12 D63).
+	if len(rows) > len(b.Now)+len(b.Next)+1+focusWindowMax+1 {
+		t2.Fatalf("flat board visible rows = %d, want <= NOW + NEXT + header + focusWindowMax + fold line (%d) — the wall must not return",
+			len(rows), len(b.Now)+len(b.Next)+1+focusWindowMax+1)
 	}
 	for _, r := range rows {
 		if len(r.docID) >= 2 && r.docID[:2] == "dn" {

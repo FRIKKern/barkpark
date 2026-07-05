@@ -835,6 +835,62 @@ stays structural; selected state draws the ▎ marker in the indent gutter.
 ("it should feel tempo") — a full braille rotation per second, matching spec §2's ~80-100ms/frame.
 The aliveness budget is untouched: zero ticks at rest, idle board byte-stable.
 
+### Wave-12 architect decisions (2026-07-06 — the ACTIVITY BAND, evolved; wish AMENDMENT 5)
+
+RE-CUT: the earlier bottom-console amendments (a fixed activity console / sticky feed / NOW-band
+relocation) are RETRACTED by the final wish — "we dont really want the activity console… make the
+activity part on top really good… cover more intent + what agent is working on stuff." The bottom
+one-line `renderTicker` is UNTOUCHED (it is console enough). Everything stays where it is; the
+pinned TOP band gains WHO + INTENT. All claims verified against the tree (render.go / components.go /
+board.go / program.go / types.go) and against a read-only guerrilla dump.
+
+58. **No console; the pinned TOP band gains WHO + INTENT, inside `Render` only (board frame 0).**
+    Compose reading frames (task detail / paper) get NEITHER — zero `compose.go` change; the reading-
+    frame compose goldens stay byte-identical (only `compose_wide_120`, which embeds the board in its
+    left pane, legitimately reflects the collapsed empty NOW band). *Why:* the wish wants the top part
+    really good, not a new surface.
+
+59. **WHO — NOW collapses to ONE agent-first line per claim (Doey grammar).** `NowCard` returns a
+    single line: `‹marker›‹spinner› ‹worker(blue subject)› ‹title› …… ‹N/M› ‹ticking lease-tinted
+    age›`. The worker LEADS the text (agent-first — "what agent is working on"); the epic breadcrumb
+    is DROPPED (D56 shows the claim in-context in the spine). The 2-line NowCard + its `nowCardMeta`
+    line-2 rebuild are retired. Below `dropMetaBelow` the row sheds to spinner+worker+title. *Why:*
+    Doey's worker_ticker is the exemplar — one tight attributed row per live agent.
+
+60. **INTENT — a tiny NEXT strip under NOW, ≤`nextMax=3` cursor rows.** `renderNextBand` renders
+    directly under NOW with a DIM "NEXT" label (intent is subordinate to active work; NOW's label is
+    bold — the weight encodes active > intent). Resumables FIRST (`↩ resume '<title>' · lease expired
+    <age>` — `↩` amber, meta dim), then the P0-first ready head (`○ Pn title`), then a display-only dim
+    `+N ready` tail (a pointer to the spine, NOT a cursor stop, sheds first under height pressure).
+    This is NEVER the wave-11-killed READY-TO-CLAIM wall (D52) — it is capped, honest intent, and each
+    NEXT row is a real cursor stop `c` claims. `↩` is the ONE new glyph (glyph-budget allowlisted).
+
+61. **`Board.Next []NextItem` + `NextReadyMore int`, BuildBoard-owned `resolveNext()`.** Resumable =
+    a `task.lease_expired` event bareID-joined to a non-terminal, unclaimed, not-since-reclaimed/closed
+    task; deduped by bareID (freshest lease kept). Ready head = ready tasks excluding NOW + resumables,
+    P0-first via the existing `priorityRank`, then recency; concatenated resumables ++ ready head, ≤
+    `nextMax` total; `NextReadyMore` counts only ready candidates that did not fit (resumables are
+    follow-up, never "ready"). `taskByID` also searches `board.Next` (a resumable can be a folded orphan
+    absent from Now/Epics/Clusters/Orphans). Live-proven read-only on guerrilla (a real `drafts.*`
+    resumable + a real P0 ready head + `+80 ready`).
+
+62. **NEXT ready rows use `claimTask`'s ready-gate; NEXT resumable rows claim SERVER-ARBITRATED
+    (bypass the local ready-gate).** A live resumable is `open` and outside prime's clamped ready
+    overlay, so the local gate would wrongly refuse it — but it was provably claimable moments ago and
+    the SERVER is the real arbiter (an honest strip renders on a genuine refusal). The `c` handler routes
+    a `rowNext` resumable straight to `claimCmd`; every other row keeps the ready-gate path. `x`/`o` on a
+    NEXT row use the unchanged handlers (x honestly refuses an unclaimed resumable; o builds the Studio
+    link).
+
+63. **Cursor parity extended to NEXT: `rowNext` pinned at `[len(Now), len(Now)+len(Next))`.**
+    `visibleRows` emits the NEXT rows after NOW and before the spine (height-independent — always
+    `len(Next)` rows; the renderer's fold is purely visual). `flattenSpine`'s pinned offset moves
+    `len(Now) → len(Now)+len(Next)`. The band collapses to NOTHING when NOW+NEXT are both empty (no
+    labels, no blank spacers — the all-clear lives in the momentum header). Under height pressure NEXT
+    sheds (folds to `+N intent`) before the spine drops below `minSpine=4`; NOW is last to shed. The
+    ONE `spineRows` producer is UNTOUCHED (NEXT is a pinned-band row above the spine, not a spineRow).
+    Guarded by `TestNextCursorParity` (a board WITH next rows) alongside the existing parity guards,
+    UNWEAKENED.
 
 ## Wave log
 
