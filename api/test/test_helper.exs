@@ -58,26 +58,4 @@ ExUnit.start(
   ]
 )
 
-# Commit-seed the hot "test" dataset under the migration-seeded Default
-# project BEFORE the sandbox goes manual (we're still in automatic mode here,
-# so this insert COMMITS and is visible to every test's sandbox).
-#
-# Why: `Content.create_document(..., "test")` runs
-# `Tenancy.get_or_create_dataset` — read-first, then an
-# `ON CONFLICT DO NOTHING` insert. In Postgres, that insert against a key
-# SPECULATIVELY inserted by another UNCOMMITTED transaction BLOCKS until that
-# transaction resolves — and a sandbox transaction resolves at its test's END.
-# Dozens of concurrently running files write to dataset "test" under the one
-# committed Default project, so under full-suite load the second writer could
-# stall for the remainder of the first writer's test, blow DBConnection's
-# per-hold :timeout, and get force-disconnected mid-setup (the EnvelopeTest /
-# EventLogTest / FlatWriteScopeLeakTest / OwnerScopedTest flake cluster).
-# With the row committed up front, the read-first path always hits and no
-# test ever speculatively inserts it. ("production" is already
-# migration-seeded; per-test workspaces' datasets can't contend — their
-# parent project rows are test-local.)
-{:ok, _} =
-  Barkpark.Tenancy.get_default_project()
-  |> Barkpark.Tenancy.get_or_create_dataset("test")
-
 Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, :manual)
