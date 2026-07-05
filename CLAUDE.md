@@ -14,6 +14,7 @@ Headless CMS, one content model, many surfaces: **Go TUI + `bp` CLI** (repo root
 5. **NEVER use `force_ssl` without HTTPS.** It causes 301 redirect loops. Currently disabled in prod.exs.
 6. **ALWAYS test after deploy.** At minimum: `curl http://localhost:4000/api/schemas`
 7. **`git pull` IS the deploy** — the `.githooks/post-merge` hook does the clean rebuild + restart (`make deploy` wraps the pull). For a manual recompile use `make rebuild`. Never raw `mix compile`.
+8. **The main checkout stays on `main` — ALWAYS.** Never `git checkout -b` / `git switch` in the primary checkout. Branch work happens in a worktree (`git worktree add <dir> -b <branch>`; agents use EnterWorktree). Many concurrent sessions share this checkout — a switched branch here strands or clobbers their work (uncommitted edits are silently lost on switch). Remove your worktree when the branch merges.
 
 ## Routing table
 
