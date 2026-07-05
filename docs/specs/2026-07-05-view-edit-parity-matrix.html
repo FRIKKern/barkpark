@@ -1,0 +1,213 @@
+<!-- doc-tier: human | canonical-for: view-edit-render-parity-audit | budget: 6000tok -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>View ↔ Edit render-path parity matrix</title>
+<style>
+  :root {
+    --bg: #f6faf9; --card: #ffffff; --ink: #15211d; --soft: #55635e; --faint: #82918b;
+    --rule: rgba(21,33,29,0.12); --accent: #1e5347; --accent-soft: rgba(30,83,71,0.10);
+    --ok: #0d9488; --warn: #d97706; --danger: #dc2626; --info: #2563eb;
+    --mono: ui-monospace, Menlo, monospace;
+    --serif: "Iowan Old Style", Palatino, Georgia, serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1614; --card: #131d19; --ink: #e7ede9; --soft: #9aaaa3; --faint: #6c7a74;
+      --rule: rgba(231,237,233,0.13); --accent: #45b394; --accent-soft: rgba(70,179,148,0.16);
+      --ok: #2dd4bf; --warn: #fbbf24; --danger: #f87171; --info: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg); color: var(--ink); font-family: var(--serif); font-size: 18px;
+         line-height: 1.7; margin: 0; padding: 64px 24px; }
+  main { max-width: 860px; margin: 0 auto; }
+  .eyebrow { font-family: var(--mono); text-transform: uppercase; letter-spacing: 0.08em;
+             font-size: 0.72rem; color: var(--accent); font-weight: 700; }
+  h1 { font-size: 2.1rem; line-height: 1.1; letter-spacing: -0.02em; margin: 0.3rem 0 0.2rem; }
+  h2 { font-size: 1.4rem; margin: 2.4rem 0 0.6rem; padding-top: 1.2rem; border-top: 1px solid var(--rule); }
+  h3 { font-size: 1.1rem; margin: 1.4rem 0 0.4rem; }
+  .byline { color: var(--soft); font-size: 0.95rem; margin-bottom: 1.8rem; }
+  p, li { color: var(--ink); }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--accent-soft);
+         padding: 0.08em 0.35em; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; font-family: -apple-system, sans-serif;
+          font-size: 0.86rem; margin: 1rem 0; }
+  .scroll { overflow-x: auto; }
+  th, td { border-bottom: 1px solid var(--rule); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.72rem; color: var(--soft); }
+  .badge { font-family: var(--mono); font-size: 0.68rem; font-weight: 700; padding: 1px 7px;
+           border-radius: 999px; white-space: nowrap; }
+  .b-ok { color: var(--ok); border: 1px solid var(--ok); }
+  .b-warn { color: var(--warn); border: 1px solid var(--warn); }
+  .b-info { color: var(--info); border: 1px solid var(--info); }
+  .flow { display: flex; gap: 10px; flex-wrap: wrap; margin: 1.2rem 0; font-family: -apple-system, sans-serif; }
+  .node { flex: 1 1 220px; background: var(--card); border: 1px solid var(--rule); border-radius: 10px;
+          padding: 12px 14px; }
+  .node.src { border-color: var(--accent); }
+  .node .k { font-family: var(--mono); font-size: 0.62rem; text-transform: uppercase;
+             letter-spacing: 0.06em; color: var(--accent); }
+  .node .t { font-weight: 700; font-size: 0.92rem; margin-top: 4px; font-family: -apple-system, sans-serif; }
+  .node .d { font-size: 0.8rem; color: var(--soft); margin-top: 5px; font-family: -apple-system, sans-serif; }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft);
+             padding: 12px 16px; margin: 1.2rem 0; border-radius: 2px; }
+  .callout.warn { border-left-color: var(--warn); background: rgba(217,119,6,0.08); }
+  .callout .lbl { font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase;
+                  letter-spacing: 0.06em; font-weight: 700; color: var(--soft); }
+  footer { margin-top: 3rem; padding-top: 1.2rem; border-top: 1px solid var(--rule);
+           color: var(--faint); font-size: 0.8rem; font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">View ↔ Edit parity · pd-doctrine rule 3</div>
+  <h1>View ↔ Edit render-path parity matrix</h1>
+  <div class="byline">Slice au-w5-paper-parity-w3 · render-path unification · 2026-07-05</div>
+
+  <p>
+    The PortableDoc editor renders a document on two surfaces that a user toggles
+    between: the <strong>View</strong> (the public <code>/papers/:slug</code>
+    reader and the Studio View pane) and the <strong>Edit</strong> canvas.
+    Doctrine rule 3 demands they look <em>byte-for-byte identical</em> — same
+    producer. This audit enumerates every block type that emits visible HTML,
+    diffs the View emitters against the Edit CSS, adversarially verifies each
+    candidate divergence, and installs a machine-checkable drift tripwire so the
+    parity can never silently regress (the seed the M3 spine — t8 fleet-in-canvas,
+    t10 parity gate — extends).
+  </p>
+
+  <h2>The two paths, one producer</h2>
+  <div class="flow">
+    <div class="node"><div class="k">View</div><div class="t">render.ex · :article</div>
+      <div class="d">Emits <strong>bare</strong> semantic HTML — <code>&lt;h1&gt;</code>,
+      <code>&lt;p&gt;</code>, <code>&lt;ul&gt;</code> — with no competing inline style
+      (roles/tones/chrome carry <code>bp-*</code> classes).</div></div>
+    <div class="node"><div class="k">Edit</div><div class="t">ProseMirror · .bp-paper-editor-body</div>
+      <div class="d">Emits the <strong>same</strong> semantic tags; typography from the
+      <code>.bp-paper-editor-body &lt;el&gt;</code> rules in <code>root.html.heex</code>.</div></div>
+    <div class="node src"><div class="k">Single source</div><div class="t">paper-surface.css → Stylesheet.css/0</div>
+      <div class="d">The <code>--bp-*</code> typography tokens + the <code>.bp-paper-surface
+      &lt;el&gt;</code> rules. Both surfaces resolve THESE tokens — parity by
+      construction, not hand-matched mirrors.</div></div>
+  </div>
+  <p>
+    Because the article renderer emits bare tags and both surfaces descend from
+    <code>.bp-paper-surface</code> and read the same <code>--bp-*</code> tokens,
+    typography <em>values</em> already cannot drift. The only residual surface is
+    <strong>cross-file</strong>: a property changed on <code>.bp-paper-surface
+    &lt;el&gt;</code> (in the CSS source) without the matching change to
+    <code>.bp-paper-editor-body &lt;el&gt;</code> (in <code>root.html.heex</code>),
+    or vice-versa. That is exactly what the new tripwire closes.
+  </p>
+
+  <h2>Block enumeration &amp; parity mechanism</h2>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>Block(s)</th><th>View emit (:article)</th><th>Edit surface</th><th>Parity via</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>heading L1–L3</td><td>bare <code>&lt;hN&gt;</code></td><td><code>.bp-paper-editor-body hN</code></td><td><code>--bp-hN-size/-lh/-tracking</code>, weight token</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>paragraph</td><td>bare <code>&lt;p&gt;</code></td><td><code>.bp-paper-editor-body p</code></td><td><code>--bp-para-margin-top</code>, <code>hyphens</code></td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>list (ul/ol) + item</td><td>bare <code>&lt;ul&gt;/&lt;li&gt;</code></td><td><code>.bp-paper-editor-body ul/ol/li</code></td><td><code>--bp-list-indent</code>, <code>--bp-li-gap</code></td><td><span class="badge b-ok">PARITY*</span></td></tr>
+      <tr><td>code (inline)</td><td>bare <code>&lt;code&gt;</code></td><td><code>.bp-paper-editor-body code</code></td><td><code>--bp-code-size/-pad/-radius</code></td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>image / figure</td><td>bare <code>&lt;img&gt;</code></td><td><code>.bp-paper-editor-body img</code></td><td><code>--bp-img-margin/-radius</code></td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>callout (5 tones)</td><td><code>.bp-callout .bp-callout--&lt;tone&gt;</code></td><td><code>.bp-canvas-callout</code> (bundle mirror)</td><td><code>--bp-tone-*</code> token pairs; padding 16px both</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>code block</td><td>inline styles → <code>var(--paper-*)</code></td><td><code>pre.bp-canvas-code</code></td><td>padding/margin/border-left/size/lh identical, same tokens</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>divider / hr</td><td>inline → <code>var(--paper-rule)</code></td><td><code>.bp-paper-editor-body hr</code></td><td>same rule token; thickness = author data</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>text roles (eyebrow/byline/ingress/pullquote)</td><td><code>.bp-role-*</code></td><td>inherited via <code>.bp-paper-surface</code> shell</td><td>same class, single source</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>table / sheet</td><td><code>.bp-table*/.bp-sheet*</code></td><td>inherited via surface shell</td><td>same class; cell b/i/bg = author data (inline both)</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>task-list/board/roadmap/detail, terminal, cards, columns, notes, pipeline, legend</td><td><code>.bp-tasks/.bp-board/.bp-rm/…</code></td><td>inherited via surface shell</td><td>status-manifest tokens (<code>--st-*</code>), single source</td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>action / button</td><td><code>.bp-button .bp-button--primary</code></td><td>inherited via surface shell</td><td>same class, <code>--paper-accent</code></td><td><span class="badge b-ok">PARITY</span></td></tr>
+      <tr><td>wikilink / tag / task-chip / embed / blockref</td><td><code>.bp-wikilink/.bp-tag/…</code></td><td>inherited via surface shell</td><td>same class, single source</td><td><span class="badge b-ok">PARITY</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="font-size:0.85rem;color:var(--soft)">
+    * <strong>list</strong> carries one intentional, documented divergence — see below.
+  </p>
+
+  <h2>Confirmed divergences</h2>
+  <p>
+    Static diff of the two real sources plus render-output emit checks found
+    <strong>zero</strong> unintentional value divergences — the <code>--bp-*</code>
+    single-source (shipped Stage 1 #896 + Stage 2) already closed them. One
+    <em>intentional</em> divergence, and two candidates that could not be
+    adversarially confirmed by static analysis (so they were NOT blind-changed,
+    per the workflow's verify-before-close gate and charter D6):
+  </p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>#</th><th>Block</th><th>Property</th><th>View</th><th>Edit</th><th>Disposition</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>list ul/ol</td><td>margin (bottom)</td><td><code>0 0 24px</code></td><td>(omitted)</td>
+          <td><span class="badge b-info">INTENTIONAL</span> — Edit rhythm is block-gap; baking the bottom gap into the element double-spaces. Now <strong>guarded</strong> (adding a margin to the editor list rule trips the test).</td></tr>
+      <tr><td>2</td><td>list ul/ol (Edit)</td><td>margin (cascade)</td><td>—</td><td>inherits <code>.bp-paper-surface ul</code> 24px?</td>
+          <td><span class="badge b-warn">VERIFY</span> — the editor <code>ul</code> is a descendant of <code>.bp-paper-surface</code>, so the View bottom-margin <em>may</em> cascade in (equal specificity, and the editor rule sets only <code>padding-left</code>). Cannot be confirmed without a computed-style read in a browser; flagged for live verify, not blind-patched.</td></tr>
+      <tr><td>3</td><td>slash menu (chrome)</td><td>n/a</td><td>evergreen bp tokens</td><td>warm parchment palette</td>
+          <td><span class="badge b-warn">OUT OF SCOPE</span> — <code>.bp-slash-menu</code> (root.html.heex ~3010) re-binds the legacy warm <code>--paper-*</code> palette (rust <code>#a23925</code>), stale vs the rebranded evergreen surface. It is editor chrome appended to <code>&lt;body&gt;</code>, not block content; a separate polish task, not render-path parity.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="callout warn">
+    <div class="lbl">Deferred — ops-gated</div>
+    The <code>.bp-paper-surface [data-block-id] …[style*="background:#ffffff"]</code>
+    <code>!important</code> de-inline overrides (root.html.heex ~2319–2336) still
+    compensate for <em>old</em> cached <code>body_html</code> (render versions v1/v2,
+    which emitted inline theme colours). render.ex is now at
+    <code>@body_html_render_version 3</code> (bare + <code>bp-*</code> classes), so
+    these overrides become dead weight — but only <strong>after</strong>
+    <code>mix barkpark.rehydrate_body_html</code> runs on guerrilla + prod. Deleting
+    them from a worktree now would paint stale-cache papers unreadable on dark
+    paper. Left in place; delete in a follow-up gated on the rehydrate deploy.
+  </div>
+
+  <h2>Drift tripwire (the parity gate seed)</h2>
+  <p>
+    <code>test/barkpark/portable_doc/render/view_edit_parity_test.exs</code> parses
+    the two live sources — <code>Stylesheet.css/0</code> (View) and
+    <code>root.html.heex</code> (Edit) — and asserts, for every shared
+    <code>(element, property)</code> pair, a byte-identical value; that every
+    <code>--bp-*/--paper-*</code> token the editor typography references is defined
+    in the single source (no dangling token); and that article prose emits bare
+    tags with no inline style. A parser-sanity guard fails loudly if a selector
+    rename would empty the diff into a vacuous pass. The intentional list-margin
+    divergence is encoded as a guard so re-introducing it into Edit trips the wire.
+  </p>
+  <p style="font-size:0.9rem;color:var(--soft)">
+    Adversarially verified: mutating the editor <code>p</code> margin to a literal
+    <code>20pt 0 0</code> produced the expected failure
+    (<code>p.margin: View="var(--bp-para-margin-top) 0 0" Edit="20pt 0 0"</code>);
+    reverting restored green. The gate catches real drift, not noise.
+  </p>
+
+  <h2>Methodology</h2>
+  <p style="font-size:0.9rem;color:var(--soft)">
+    Phases: <strong>Enumerate</strong> the article block types
+    (<code>compose.ex</code>) → <strong>Sources</strong> extract the View emitters
+    (<code>render.ex</code>, <code>render/walk.ex</code>, <code>render/stylesheet.ex</code>)
+    and the Edit CSS (<code>root.html.heex .bp-paper-editor-body</code>) →
+    <strong>Diff</strong> per element × property → <strong>Verify</strong>
+    (static equality + a live render-output emit check + a mutation test on the
+    tripwire) → <strong>Report</strong> (this document). Basis is static analysis
+    plus render-output — the two candidates needing a browser computed-style read
+    (#2, #3) are explicitly flagged, not closed.
+  </p>
+
+  <h2>Re-run</h2>
+  <p style="font-size:0.9rem;color:var(--soft)">
+    The tripwire re-runs every CI cycle via
+    <code>mix test test/barkpark/portable_doc/render/view_edit_parity_test.exs</code>
+    (part of the render suite gate). The full adversarial audit workflow is
+    <code>view-edit-parity</code> (<code>.claude/workflows/view-edit-parity.workflow.js</code>),
+    invoked via the Workflow tool with that name.
+  </p>
+
+  <footer>
+    au-w5-paper-parity-w3 · unblocks pdd-t8 → t10 (parity CI gate) + t12 (no-modes) ·
+    gate: render_test + render/ + synthesis_test + status-manifest-check
+  </footer>
+</main>
+</body>
+</html>
