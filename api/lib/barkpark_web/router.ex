@@ -38,6 +38,13 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireScimToken)
   end
 
+  # OIDC relying-party — a browser redirect flow; needs a session to carry
+  # state/nonce/PKCE-verifier across the round-trip (era-w3-oidc-rp).
+  pipeline :oidc do
+    plug(:accepts, ["html", "json"])
+    plug(:fetch_session)
+  end
+
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
   # thin — `accepts :json` + the loopback gate. No OptionalToken (no DB lookup
   # per request), no RateLimit (loopback is trusted), no tenancy back-compat
@@ -885,6 +892,14 @@ defmodule BarkparkWeb.Router do
     get("/Groups/:id", ScimGroupsController, :show)
     patch("/Groups/:id", ScimGroupsController, :update)
     delete("/Groups/:id", ScimGroupsController, :delete)
+  end
+
+  # ── Enterprise SSO — OIDC relying party (per-organization) ──────────────
+  scope "/v1/auth/oidc", BarkparkWeb do
+    pipe_through(:oidc)
+
+    get("/:org_slug/start", OidcController, :start)
+    get("/:org_slug/callback", OidcController, :callback)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────
