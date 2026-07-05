@@ -18,6 +18,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
 
@@ -95,8 +96,20 @@ defmodule BarkparkWeb.ShareLinkController do
         full = Media.file_path(file.path)
 
         if File.exists?(full) do
+          # PUBLIC anonymous path — the same stored-XSS defense the MediaController
+          # serve edge applies (nosniff + collapse svg/html/xml/js to a
+          # non-executable octet-stream + `attachment`). Ingest neutralizes NEW
+          # uploads and the backfill migration fixed existing rows, but harden the
+          # edge too so no future write path can serve an executable type here.
+          mime = file.mime_type || "application/octet-stream"
+
           conn
-          |> put_resp_content_type(file.mime_type || "application/octet-stream")
+          |> put_resp_content_type(MediaFile.serve_content_type(mime))
+          |> put_resp_header("x-content-type-options", "nosniff")
+          |> put_resp_header(
+            "content-disposition",
+            if(MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline")
+          )
           |> send_file(200, full)
         else
           not_found_json(conn)

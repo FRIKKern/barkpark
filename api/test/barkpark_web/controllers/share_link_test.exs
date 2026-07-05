@@ -97,6 +97,30 @@ defmodule BarkparkWeb.ShareLinkTest do
     |> Repo.insert!()
   end
 
+  # A blob whose STORED mime_type is browser-executable, inserted raw to bypass
+  # the ingest changeset's neutralize step — this is a legacy row (uploaded before
+  # the neutralize changeset existed) that the backfill migration also targets.
+  # Proves the anonymous serve edge neutralizes it even if the stored mime is bad.
+  defp put_dangerous_media!(ws, proj) do
+    name = "evil-#{System.unique_integer([:positive])}.svg"
+    rel = "uploads/share-link-test/#{name}"
+    full = Media.file_path(rel)
+    File.mkdir_p!(Path.dirname(full))
+    File.write!(full, ~s|<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>|)
+    on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
+
+    Repo.insert!(%MediaFile{
+      filename: name,
+      original_name: name,
+      path: rel,
+      mime_type: "image/svg+xml",
+      size: 60,
+      dataset: @dataset,
+      workspace_id: ws.id,
+      project_id: proj.id
+    })
+  end
+
   defp admin(conn),
     do:
       conn
@@ -182,6 +206,33 @@ defmodule BarkparkWeb.ShareLinkTest do
     resp = get(build_conn(), "/s/#{token}")
     assert resp.status == 200
     assert resp.resp_body == "PNG-BYTES"
+
+    # A normal image keeps its honest type + inline, plus the nosniff pin.
+    assert get_resp_header(resp, "x-content-type-options") == ["nosniff"]
+    assert get_resp_header(resp, "content-disposition") == ["inline"]
+    assert [ct] = get_resp_header(resp, "content-type")
+    assert ct =~ "image/png"
+  end
+
+  test "a MEDIA link to a legacy dangerous blob is neutralized (nosniff + attachment)", %{
+    conn: conn,
+    scope_str: scope,
+    ws: ws,
+    proj: proj
+  } do
+    evil = put_dangerous_media!(ws, proj)
+    %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: evil.id})
+
+    resp = get(build_conn(), "/s/#{token}")
+
+    assert resp.status == 200
+    # Served, but as a non-executable download — never inline image/svg+xml on
+    # the API origin (the stored-XSS vector on this anonymous path).
+    assert get_resp_header(resp, "x-content-type-options") == ["nosniff"]
+    assert get_resp_header(resp, "content-disposition") == ["attachment"]
+    assert [ct] = get_resp_header(resp, "content-type")
+    refute ct =~ "image/svg+xml"
+    assert ct =~ "application/octet-stream"
   end
 
   # ── revoke + invalid ──────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   alias Barkpark.Content
   alias Barkpark.Content.Errors
   alias Barkpark.Media
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Tickets.Attachments
 
   action_fallback BarkparkWeb.FallbackController
@@ -199,25 +200,34 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
   # ─────────────────────────────── file streaming ───────────────────────────
 
   # These bytes were uploaded by an outsider-held key, so serve them defensively:
-  # `nosniff` pins the server-derived MIME (no browser content-sniffing), and an
-  # `inline` disposition with the (sanitized) original name keeps images viewable
-  # in Studio while giving downloads an honest filename. Names that don't survive
-  # the ASCII-safe check are served without one rather than risking header games.
+  # `nosniff` pins the server-derived MIME (no browser content-sniffing), dangerous
+  # types (svg/html/xml/js) are collapsed to a non-executable octet-stream and
+  # forced to `attachment` — nosniff alone does NOT stop a browser executing an
+  # *honestly* declared `image/svg+xml`. Safe types keep an `inline` disposition
+  # with the (sanitized) original name so images stay viewable in Studio. Names
+  # that don't survive the ASCII-safe check are served without one rather than
+  # risking header games.
   defp stream_file(conn, file) do
     full = Media.file_path(file.path)
     mime = file.mime_type || MIME.from_path(full)
 
     conn
-    |> put_resp_content_type(mime)
+    |> put_resp_content_type(MediaFile.serve_content_type(mime))
     |> put_resp_header("x-content-type-options", "nosniff")
-    |> put_resp_header("content-disposition", disposition(file))
+    |> put_resp_header("content-disposition", disposition(file, mime))
     |> send_file(200, full)
   end
 
-  defp disposition(file) do
-    case safe_filename(file.original_name || file.filename) do
-      nil -> "inline"
-      name -> ~s(inline; filename="#{name}")
+  # Dangerous types download rather than render; everything else stays inline with
+  # the sanitized original name (or a bare `inline` when the name isn't ASCII-safe).
+  defp disposition(file, mime) do
+    if is_binary(mime) and MediaFile.dangerous_mime?(mime) do
+      "attachment"
+    else
+      case safe_filename(file.original_name || file.filename) do
+        nil -> "inline"
+        name -> ~s(inline; filename="#{name}")
+      end
     end
   end
 
