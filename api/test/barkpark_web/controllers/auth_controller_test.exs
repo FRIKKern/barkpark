@@ -2,12 +2,53 @@ defmodule BarkparkWeb.AuthControllerTest do
   @moduledoc "Phase 1 — the /v1/auth HTTP surface (register, login, MFA, sessions)."
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.Accounts
+  import Ecto.Query, only: [from: 2]
+  alias Barkpark.{Accounts, Audit, Repo}
+  alias Barkpark.Audit.Event
 
   @password "correct-horse-battery"
 
   defp json_conn(conn), do: put_req_header(conn, "content-type", "application/json")
   defp post_json(conn, path, body), do: conn |> json_conn() |> post(path, Jason.encode!(body))
+
+  # A JSON-ready conn carrying `token` as a session bearer.
+  defp authed(token),
+    do: build_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+
+  # Enrol TOTP on `token`'s session (enrol → verify). Returns {secret, recovery_codes}.
+  defp enroll_totp!(token) do
+    enroll =
+      authed(token)
+      |> post("/v1/auth/mfa/enroll", Jason.encode!(%{password: @password}))
+      |> json_response(200)
+
+    secret = Base.decode32!(enroll["secret"], padding: false)
+
+    verify =
+      authed(token)
+      |> post(
+        "/v1/auth/mfa/verify",
+        Jason.encode!(%{secret: enroll["secret"], code: NimbleTOTP.verification_code(secret), password: @password})
+      )
+      |> json_response(200)
+
+    {secret, verify["recovery_codes"]}
+  end
+
+  # Age `token`'s session step-up stamp past the window, so the next guarded
+  # action is challenged. Simulates the freshness window lapsing.
+  defp backdate_step_up!(token) do
+    hash = Accounts.UserSession.hash_token(token)
+    old = DateTime.utc_now() |> DateTime.add(-20 * 60, :second) |> DateTime.truncate(:microsecond)
+
+    {1, _} =
+      Repo.update_all(
+        from(s in Accounts.UserSession, where: s.token_hash == ^hash),
+        set: [mfa_verified_at: old]
+      )
+
+    :ok
+  end
 
   defp register!(conn, email) do
     post_json(conn, "/v1/auth/register", %{email: email, password: @password})
@@ -253,6 +294,76 @@ defmodule BarkparkWeb.AuthControllerTest do
 
       # Login no longer needs a code.
       assert login_token(build_conn(), "mfa@example.com")
+    end
+  end
+
+  describe "step-up MFA (sensitive-action gate)" do
+    setup %{conn: conn} do
+      register!(conn, "mfa@example.com")
+      token = login_token(conn, "mfa@example.com")
+      %{token: token}
+    end
+
+    test "a user WITHOUT MFA is never step-up-challenged (opt-in, zero friction)", %{token: token} do
+      # Not enrolled → the guarded route runs straight to its own password gate,
+      # no 401 mfa_required.
+      assert authed(token)
+             |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+             |> json_response(200)
+    end
+
+    test "an enrolled user's stale session is challenged; step-up (TOTP) clears it", %{token: token} do
+      {secret, _codes} = enroll_totp!(token)
+
+      # Enrolment stamped the session fresh — simulate the window lapsing.
+      backdate_step_up!(token)
+
+      # The guarded action now demands a fresh factor (before the password is even checked).
+      challenge = authed(token) |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+      assert json_response(challenge, 401)["error"]["code"] == "mfa_required"
+
+      # Step up with a live TOTP → session fresh again.
+      step = authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: NimbleTOTP.verification_code(secret)}))
+      assert json_response(step, 200)["factor"] == "totp"
+
+      # The guarded action now succeeds.
+      assert authed(token)
+             |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+             |> json_response(200)
+    end
+
+    test "a recovery code satisfies step-up and is single-use", %{token: token} do
+      {_secret, codes} = enroll_totp!(token)
+      [code | _] = codes
+
+      backdate_step_up!(token)
+      ok = authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: code}))
+      assert json_response(ok, 200)["factor"] == "recovery"
+
+      # Re-using the SAME recovery code fails (consumed) — go stale first.
+      backdate_step_up!(token)
+      reused = authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: code}))
+      assert json_response(reused, 422)["error"]["code"] == "invalid_code"
+    end
+
+    test "enrol, challenge, fail and pass all emit onto the audit chain", %{token: token} do
+      {secret, _codes} = enroll_totp!(token)
+      assert Repo.one(from e in Event, where: e.action == "mfa_enrolled")
+
+      backdate_step_up!(token)
+      # A challenge (401) emits mfa_challenged.
+      authed(token) |> post("/v1/auth/mfa/disable", Jason.encode!(%{password: @password}))
+      assert Repo.one(from e in Event, where: e.action == "mfa_challenged")
+
+      # A bad step-up emits mfa_failed; a good one emits mfa_passed.
+      authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: "000000"}))
+      assert Repo.one(from e in Event, where: e.action == "mfa_failed")
+
+      authed(token) |> post("/v1/auth/mfa/step-up", Jason.encode!(%{code: NimbleTOTP.verification_code(secret)}))
+      assert Repo.one(from e in Event, where: e.action == "mfa_passed")
+
+      # The global (no-workspace) chain stays intact through all these emits.
+      assert :ok == Audit.verify_chain(nil)
     end
   end
 

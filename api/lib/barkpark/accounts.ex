@@ -75,12 +75,17 @@ defmodule Barkpark.Accounts do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
     expires = DateTime.add(now, UserSession.default_validity_days() * 24 * 3600, :second)
 
+    # A login that presented an MFA factor mints an already-fresh session, so a
+    # sensitive action taken right after logging in isn't challenged again.
+    mfa_verified_at = if Keyword.get(opts, :mfa_verified, false), do: now
+
     %UserSession{}
     |> UserSession.changeset(%{
       user_id: user.id,
       token_hash: UserSession.hash_token(plaintext),
       expires_at: expires,
       last_used_at: now,
+      mfa_verified_at: mfa_verified_at,
       ip_address: Keyword.get(opts, :ip_address),
       user_agent: Keyword.get(opts, :user_agent)
     })
@@ -93,7 +98,21 @@ defmodule Barkpark.Accounts do
 
   @doc "Resolve a session-token plaintext to its `%User{}` or nil (refreshes last_used_at)."
   @spec verify_user_session_token(binary()) :: User.t() | nil
-  def verify_user_session_token(plaintext) when is_binary(plaintext) do
+  def verify_user_session_token(plaintext) do
+    case verify_user_session(plaintext) do
+      {%User{} = user, _session} -> user
+      nil -> nil
+    end
+  end
+
+  @doc """
+  Like `verify_user_session_token/1` but returns BOTH the `%User{}` and the
+  live `%UserSession{}` (with `last_used_at` freshly stamped), so callers on
+  the step-up path can read/write the session's `mfa_verified_at`. Returns
+  `nil` for an unknown, revoked, or expired token.
+  """
+  @spec verify_user_session(binary()) :: {User.t(), UserSession.t()} | nil
+  def verify_user_session(plaintext) when is_binary(plaintext) do
     hash = UserSession.hash_token(plaintext)
     now = DateTime.utc_now()
 
@@ -103,18 +122,23 @@ defmodule Barkpark.Accounts do
         where: is_nil(t.expires_at) or t.expires_at > ^now
 
     case Repo.one(query) do
-      %UserSession{user_id: uid} ->
-        from(t in UserSession, where: t.token_hash == ^hash)
-        |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+      %UserSession{user_id: uid} = session ->
+        stamped = DateTime.truncate(now, :microsecond)
 
-        Repo.get(User, uid)
+        from(t in UserSession, where: t.token_hash == ^hash)
+        |> Repo.update_all(set: [last_used_at: stamped])
+
+        case Repo.get(User, uid) do
+          %User{} = user -> {user, %{session | last_used_at: stamped}}
+          nil -> nil
+        end
 
       nil ->
         nil
     end
   end
 
-  def verify_user_session_token(_), do: nil
+  def verify_user_session(_), do: nil
 
   @doc "Revoke a single session by plaintext (idempotent)."
   @spec revoke_user_session_token(binary()) :: :ok
@@ -435,6 +459,52 @@ defmodule Barkpark.Accounts do
     else
       :error
     end
+  end
+
+  # ── Step-up MFA ──────────────────────────────────────────────────────────────
+
+  @doc """
+  True when `user` has an MFA factor armed — i.e. sensitive actions on their
+  sessions should require a recent step-up. Opt-in: a user who never enrolled
+  MFA is not gated, so there is no added friction for the common case.
+  """
+  @spec mfa_enrolled?(User.t()) :: boolean()
+  def mfa_enrolled?(%User{totp_enabled: enabled}), do: enabled == true
+  def mfa_enrolled?(_), do: false
+
+  @doc """
+  Present an MFA factor for a step-up challenge: a live TOTP `code` (consumed,
+  replay-safe) or a one-time recovery code. Returns `{:ok, user, factor}` with
+  `factor` in `:totp | :recovery`, or `:error` when neither matches.
+  """
+  @spec verify_step_up(User.t(), String.t()) ::
+          {:ok, User.t(), :totp | :recovery} | :error
+  def verify_step_up(%User{} = user, code) when is_binary(code) do
+    case verify_totp(user, code) do
+      {:ok, user} ->
+        {:ok, user, :totp}
+
+      :error ->
+        case consume_recovery_code(user, code) do
+          {:ok, user} -> {:ok, user, :recovery}
+          :error -> :error
+        end
+    end
+  end
+
+  def verify_step_up(_, _), do: :error
+
+  @doc """
+  Stamp `mfa_verified_at = now` on a session after a successful step-up, marking
+  it fresh for the step-up window. Returns the updated `%UserSession{}`.
+  """
+  @spec stamp_session_mfa(UserSession.t()) :: {:ok, UserSession.t()} | {:error, term()}
+  def stamp_session_mfa(%UserSession{} = session) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    session
+    |> UserSession.changeset(%{mfa_verified_at: now})
+    |> Repo.update()
   end
 
   defp generate_recovery_codes do

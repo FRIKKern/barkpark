@@ -15,8 +15,16 @@ defmodule BarkparkWeb.AuthController do
   """
   use BarkparkWeb, :controller
 
+  # Step-up MFA: disabling MFA is a sensitive action, so an enrolled user must
+  # have presented a fresh factor on this session (not just the password) —
+  # a hijacked live session can't silently strip MFA. Recovery is preserved: a
+  # one-time recovery code satisfies the step-up, and the token-based password
+  # reset still wipes MFA outright.
+  plug(BarkparkWeb.Plugs.RequireRecentMfa when action in [:mfa_disable])
+
   alias Barkpark.Accounts
-  alias Barkpark.Accounts.UserNotifier
+  alias Barkpark.Accounts.{UserNotifier, UserSession}
+  alias Barkpark.Audit
 
   # ── Registration ───────────────────────────────────────────────────────────
 
@@ -96,10 +104,10 @@ defmodule BarkparkWeb.AuthController do
   defp login_with_mfa(conn, user, code, recovery) do
     cond do
       is_binary(code) and match?({:ok, _}, Accounts.verify_totp(user, code)) ->
-        issue_session(conn, user)
+        issue_session(conn, user, mfa_verified: true)
 
       is_binary(recovery) and match?({:ok, _}, Accounts.consume_recovery_code(user, recovery)) ->
-        issue_session(conn, user)
+        issue_session(conn, user, mfa_verified: true)
 
       true ->
         error(
@@ -299,6 +307,19 @@ defmodule BarkparkWeb.AuthController do
       true ->
         with {:ok, secret} <- decode_secret(secret_b32),
              {:ok, _user, recovery_codes} <- Accounts.enable_totp(user, secret, code) do
+          # The user just proved a live TOTP — mark THIS session fresh so a
+          # sensitive action right after enrolling isn't immediately challenged.
+          maybe_stamp_step_up(conn)
+
+          Audit.emit(%{
+            category: "auth",
+            action: "mfa_enrolled",
+            subject: user.id,
+            actor_type: "user",
+            actor_id: user.id,
+            metadata: %{"factor" => "totp"}
+          })
+
           json(conn, %{ok: true, recovery_codes: recovery_codes})
         else
           _ ->
@@ -328,6 +349,16 @@ defmodule BarkparkWeb.AuthController do
 
     if reauthed?(user, password) do
       {:ok, _user} = Accounts.disable_totp(user)
+
+      Audit.emit(%{
+        category: "auth",
+        action: "mfa_disabled",
+        subject: user.id,
+        actor_type: "user",
+        actor_id: user.id,
+        metadata: %{}
+      })
+
       json(conn, %{ok: true})
     else
       error(conn, 403, "reauth_required", "the current password is required")
@@ -337,13 +368,65 @@ defmodule BarkparkWeb.AuthController do
   def mfa_disable(conn, _),
     do: error(conn, 403, "reauth_required", "the current password is required")
 
+  @doc """
+  Step-up MFA — present a current TOTP or one-time recovery code to mark THIS
+  session fresh for sensitive actions (the step-up window). This is how a client
+  clears a `mfa_required` (401) challenge before retrying the guarded action.
+  Emits an `auth/mfa_passed` or `auth/mfa_failed` audit event either way.
+  """
+  def mfa_step_up(conn, %{"code" => code}) when is_binary(code) do
+    user = conn.assigns.current_user
+    session = conn.assigns.current_user_session
+
+    case Accounts.verify_step_up(user, code) do
+      {:ok, _user, factor} ->
+        {:ok, session} = Accounts.stamp_session_mfa(session)
+
+        Audit.emit(%{
+          category: "auth",
+          action: "mfa_passed",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"factor" => to_string(factor)}
+        })
+
+        json(conn, %{
+          ok: true,
+          factor: factor,
+          fresh_until:
+            DateTime.add(session.mfa_verified_at, UserSession.default_step_up_window(), :second)
+        })
+
+      :error ->
+        Audit.emit(%{
+          category: "auth",
+          action: "mfa_failed",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"context" => "step_up"}
+        })
+
+        error(
+          conn,
+          422,
+          "invalid_code",
+          "the MFA code did not match",
+          "use a current TOTP code or an unused recovery code, then retry"
+        )
+    end
+  end
+
+  def mfa_step_up(conn, _), do: error(conn, 422, "invalid_code", "a code is required")
+
   # ── helpers ──────────────────────────────────────────────────────────────────
 
-  defp issue_session(conn, user) do
+  defp issue_session(conn, user, opts \\ []) do
     {:ok, token} =
-      Accounts.create_user_session_token(user,
-        ip_address: client_ip(conn),
-        user_agent: user_agent(conn)
+      Accounts.create_user_session_token(
+        user,
+        [ip_address: client_ip(conn), user_agent: user_agent(conn)] ++ opts
       )
 
     conn
@@ -358,6 +441,16 @@ defmodule BarkparkWeb.AuthController do
     do: Barkpark.Accounts.User.valid_password?(user, password)
 
   defp reauthed?(_user, _), do: false
+
+  # Mark the current session MFA-fresh after a live factor was proven inline
+  # (enrolment verify). No-op if the session isn't on the conn (bearer flows
+  # without a resolved session record).
+  defp maybe_stamp_step_up(conn) do
+    case conn.assigns[:current_user_session] do
+      %UserSession{} = session -> Accounts.stamp_session_mfa(session)
+      _ -> :noop
+    end
+  end
 
   # MEDIUM-7: the single registration-accepted shape, reused by the fresh-signup
   # and duplicate-email paths so they're byte-identical to the caller.

@@ -28,6 +28,7 @@ defmodule Barkpark.Accounts.UserSession do
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
     field :last_used_at, :utc_datetime_usec
+    field :mfa_verified_at, :utc_datetime_usec
     field :ip_address, :string
     field :user_agent, :string
 
@@ -90,6 +91,26 @@ defmodule Barkpark.Accounts.UserSession do
     is_nil(r) and not expired?(s, now) and not idle_expired?(s, now)
   end
 
+  @doc """
+  Default step-up window (seconds): how long a successful MFA factor keeps a
+  session "fresh" for sensitive actions. 10 minutes — long enough to chain a
+  few admin actions, short enough that a walked-away session goes stale fast.
+  """
+  @spec default_step_up_window() :: pos_integer()
+  def default_step_up_window, do: 600
+
+  @doc """
+  True when the session presented an MFA factor within `window` seconds of
+  `now`. A `nil` `mfa_verified_at` (never stepped up) is never fresh.
+  """
+  @spec mfa_fresh?(t(), pos_integer(), DateTime.t()) :: boolean()
+  def mfa_fresh?(session, window \\ default_step_up_window(), now \\ DateTime.utc_now())
+  def mfa_fresh?(%__MODULE__{mfa_verified_at: nil}, _window, _now), do: false
+
+  def mfa_fresh?(%__MODULE__{mfa_verified_at: at}, window, now) do
+    DateTime.compare(now, DateTime.add(at, window, :second)) == :lt
+  end
+
   @doc false
   def changeset(session, attrs) do
     session
@@ -99,6 +120,7 @@ defmodule Barkpark.Accounts.UserSession do
       :expires_at,
       :revoked_at,
       :last_used_at,
+      :mfa_verified_at,
       :ip_address,
       :user_agent,
       :user_id
