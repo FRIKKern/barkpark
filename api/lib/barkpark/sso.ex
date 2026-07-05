@@ -15,6 +15,25 @@ defmodule Barkpark.Sso do
   @default_role "member"
 
   @doc """
+  Record an SSO/social login on the audit trail. Emits an `auth`/`sso_login`
+  event with the provider and (optional) organization. Called from every SSO
+  callback so "who signed in via which IdP, when" is on the tamper-evident log.
+  """
+  @spec record_login(User.t(), String.t(), binary() | nil) :: :ok
+  def record_login(%User{id: uid}, provider, org_id \\ nil) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "sso_login",
+      subject: uid,
+      actor_type: "user",
+      actor_id: uid,
+      metadata: %{"provider" => provider, "organization_id" => org_id}
+    })
+
+    :ok
+  end
+
+  @doc """
   Find-or-create the SSO-authenticated User by `email`. New accounts get an
   unusable local password (they sign in via the IdP) and are confirmed (the IdP
   vouched for the identity). Shared by the OIDC / SAML flows.

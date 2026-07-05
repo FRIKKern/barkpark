@@ -10,6 +10,7 @@ defmodule BarkparkWeb.SocialController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Accounts
+  alias Barkpark.Sso
   alias Barkpark.Sso.Social
 
   def start(conn, %{"provider" => name}) do
@@ -40,6 +41,8 @@ defmodule BarkparkWeb.SocialController do
       true ->
         case Social.handle_callback(p, code, callback_uri(name)) do
           {:ok, user} ->
+            Sso.record_login(user, "social:#{name}", nil)
+
             {:ok, token} =
               Accounts.create_user_session_token(user,
                 ip_address: client_ip(conn),
