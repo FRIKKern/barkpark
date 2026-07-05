@@ -308,6 +308,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: unlinked,
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(paper))
       |> stream(
         :paper_blocks,
         paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)),
@@ -327,11 +328,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: unlinked,
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(paper))
       |> stream(:paper_blocks, [], reset: true)
     end
   end
 
   def setup_paper_view(socket, _paper), do: clear_paper_view(socket)
+
+  # Default t6 sidebar assigns when a paper opens: panel + every section open,
+  # slug draft seeded from the paper's own id with its live format verdict.
+  defp sidebar_assigns(paper) do
+    slug = (paper && Map.get(paper, :doc_id)) || ""
+
+    [
+      sidebar_open: true,
+      sidebar_collapsed: MapSet.new(),
+      sidebar_slug_draft: slug,
+      sidebar_slug_feedback: PaperCanvas.slug_feedback(slug)
+    ]
+  end
 
   @doc """
   Read-only inbound-reference load for the backlinks panel. Resolves the paper's
@@ -384,7 +399,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   @doc false
   def clear_paper_view(socket) do
     if socket.assigns[:editor_view] == :paper do
-      assign(socket,
+      socket
+      |> assign(
         editor_view: :form,
         paper_doc: nil,
         paper_rev: 0,
@@ -396,6 +412,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: [],
         backlinks_open: true
       )
+      |> assign(sidebar_assigns(nil))
     else
       assign(socket,
         editor_view: :form,

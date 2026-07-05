@@ -20,7 +20,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PaneBuilder
-  alias BarkparkWeb.Studio.StudioLive.{DocActions, Paths}
+  alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
 
   # ── In-Studio live paper view (function component) ──────────────────────────
   #
@@ -43,6 +43,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
   attr(:backlinks_open, :boolean, default: true)
+  # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
+  # call site can lean on the component's own defaults on first paint.
+  attr(:sidebar_open, :boolean, default: true)
+  attr(:sidebar_collapsed, :any, default: nil)
+  attr(:sidebar_slug_draft, :string, default: nil)
+  attr(:sidebar_slug_feedback, :any, default: nil)
+  attr(:workspace_label, :string, default: nil)
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -281,8 +288,237 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </section>
           </div>
         </aside>
+
+        <%!-- t6: the WordPress-style document sidebar. Renders alongside the
+              canvas for every paper; collapsing it (or any section) never
+              reflows or transforms the body — it is chrome around content. --%>
+        <.paper_metadata_sidebar
+          :if={@paper_doc}
+          paper_doc={@paper_doc}
+          dataset={@dataset}
+          workspace_label={@workspace_label}
+          panel_open={@sidebar_open}
+          collapsed={@sidebar_collapsed}
+          slug_draft={@sidebar_slug_draft}
+          slug_feedback={@sidebar_slug_feedback}
+        />
       </div>
     </div>
+    """
+  end
+
+  # ── t6: WordPress-style metadata sidebar (function component) ────────────────
+  #
+  # The calm right document panel (doctrine Rule 4). Sections: Publish
+  # (status/visibility + the publish action), Slug (instant format validation),
+  # Context (dataset/workspace, read-only), Labels, Relations. Only metadata that
+  # FAILS the article test lives here — the title + featured image stay LOCKED
+  # body blocks (t1/t4), never duplicated into the sidebar. Rule 5: no modes, no
+  # overlays; every affordance is inline chrome. Section headers are real
+  # <button>s so Enter/Space toggle them and `aria-expanded` rides each one; the
+  # panel and every section collapse independently without touching the canvas.
+  attr(:paper_doc, :map, required: true)
+  attr(:dataset, :string, required: true)
+  attr(:workspace_label, :string, default: nil)
+  attr(:panel_open, :boolean, default: true)
+  attr(:collapsed, :any, default: nil)
+  attr(:slug_draft, :string, default: nil)
+  attr(:slug_feedback, :any, default: nil)
+
+  def paper_metadata_sidebar(assigns) do
+    paper = assigns.paper_doc
+    status = (paper && Map.get(paper, :status)) || "draft"
+    slug = assigns.slug_draft || (paper && Map.get(paper, :doc_id)) || ""
+    feedback = assigns.slug_feedback || PaperCanvas.slug_feedback(slug)
+
+    blocks =
+      case paper do
+        %{content: %{"blocks" => b}} when is_list(b) -> b
+        _ -> []
+      end
+
+    assigns =
+      assign(assigns,
+        status: status,
+        slug: slug,
+        feedback: feedback,
+        labels: PaperCanvas.paper_labels(paper),
+        relations: PaperCanvas.paper_relations(blocks)
+      )
+
+    ~H"""
+    <aside
+      class={"bp-doc-sidebar " <> if(@panel_open, do: "is-open", else: "is-collapsed")}
+      data-test-id="paper-metadata-sidebar"
+      aria-label="Document metadata"
+    >
+      <div class="bp-doc-sidebar__head">
+        <button
+          type="button"
+          class="bp-doc-sidebar__collapse"
+          phx-click="sidebar-toggle-panel"
+          aria-expanded={to_string(@panel_open)}
+          aria-controls="bp-doc-sidebar-body"
+          title={if @panel_open, do: "Collapse document panel", else: "Expand document panel"}
+          data-test-id="sidebar-toggle-panel"
+        >
+          <.icon name={if @panel_open, do: "chevron-right", else: "chevron-down"} size={16} />
+        </button>
+        <span :if={@panel_open} class="bp-doc-sidebar__title">Document</span>
+      </div>
+
+      <div :if={@panel_open} id="bp-doc-sidebar-body" class="bp-doc-sidebar__body">
+        <.sidebar_section
+          key="publish"
+          title="Publish"
+          open={PaperCanvas.sidebar_section_open?(@collapsed, "publish")}
+        >
+          <div class="bp-doc-field">
+            <span class="bp-doc-field__label">Status</span>
+            <span class={"bp-doc-badge bp-doc-badge--#{@status}"} data-test-id="sidebar-status">
+              {@status}
+            </span>
+          </div>
+          <div class="bp-doc-field">
+            <span class="bp-doc-field__label">Visibility</span>
+            <span class="bp-doc-field__val" data-test-id="sidebar-visibility">
+              {PaperCanvas.visibility_label(@status)}
+            </span>
+          </div>
+          <%= if @status == "published" do %>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm bp-doc-action"
+              phx-click="unpublish"
+              data-test-id="sidebar-unpublish"
+            >
+              <.icon name="eye" size={14} /> Unpublish
+            </button>
+          <% else %>
+            <button
+              type="button"
+              class="btn btn-primary btn-sm bp-doc-action"
+              phx-click="publish"
+              data-test-id="sidebar-publish"
+            >
+              <.icon name="eye" size={14} /> Publish
+            </button>
+          <% end %>
+        </.sidebar_section>
+
+        <.sidebar_section
+          key="slug"
+          title="Slug"
+          open={PaperCanvas.sidebar_section_open?(@collapsed, "slug")}
+        >
+          <% {tone, msg} = @feedback %>
+          <form phx-change="sidebar-slug-change" class="bp-doc-slug">
+            <input
+              type="text"
+              name="value"
+              class="form-input bp-doc-slug__input"
+              value={@slug}
+              phx-debounce="150"
+              spellcheck="false"
+              autocomplete="off"
+              aria-describedby="bp-doc-slug-fb"
+              aria-invalid={to_string(tone == :danger)}
+              data-test-id="sidebar-slug-input"
+            />
+            <p
+              id="bp-doc-slug-fb"
+              class={"bp-doc-slug__fb bp-doc-slug__fb--#{tone}"}
+              role="status"
+              data-tone={to_string(tone)}
+              data-test-id="sidebar-slug-feedback"
+            >
+              {msg}
+            </p>
+          </form>
+        </.sidebar_section>
+
+        <.sidebar_section
+          key="context"
+          title="Context"
+          open={PaperCanvas.sidebar_section_open?(@collapsed, "context")}
+        >
+          <div class="bp-doc-field">
+            <span class="bp-doc-field__label">Dataset</span>
+            <span class="bp-doc-field__val" data-test-id="sidebar-dataset">{@dataset}</span>
+          </div>
+          <div :if={@workspace_label} class="bp-doc-field">
+            <span class="bp-doc-field__label">Workspace</span>
+            <span class="bp-doc-field__val" data-test-id="sidebar-workspace">{@workspace_label}</span>
+          </div>
+        </.sidebar_section>
+
+        <.sidebar_section
+          key="labels"
+          title="Labels"
+          open={PaperCanvas.sidebar_section_open?(@collapsed, "labels")}
+        >
+          <%= if @labels == [] do %>
+            <p class="bp-doc-empty" data-test-id="sidebar-labels-empty">No labels yet.</p>
+          <% else %>
+            <ul class="bp-doc-tags" data-test-id="sidebar-labels">
+              <li :for={label <- @labels} class="bp-doc-tag">
+                <.icon name="tag" size={11} /> {label}
+              </li>
+            </ul>
+          <% end %>
+        </.sidebar_section>
+
+        <.sidebar_section
+          key="relations"
+          title="Relations"
+          open={PaperCanvas.sidebar_section_open?(@collapsed, "relations")}
+        >
+          <%= if @relations == [] do %>
+            <p class="bp-doc-empty" data-test-id="sidebar-relations-empty">No relations.</p>
+          <% else %>
+            <ul class="bp-doc-rels" data-test-id="sidebar-relations">
+              <li :for={rel <- @relations} class="bp-doc-rel">
+                <span class="bp-doc-rel__label">{rel.label}</span>
+                <span class="bp-doc-rel__id">{rel.id}</span>
+              </li>
+            </ul>
+          <% end %>
+        </.sidebar_section>
+      </div>
+    </aside>
+    """
+  end
+
+  # One collapsible chrome section. The <button> header gives Enter/Space toggle
+  # and `aria-expanded` for free; the body renders only when open, so collapsing
+  # removes it from the flow WITHOUT reflowing the canvas (the sidebar is a
+  # fixed-width flex column beside the body).
+  attr(:key, :string, required: true)
+  attr(:title, :string, required: true)
+  attr(:open, :boolean, default: true)
+  slot(:inner_block, required: true)
+
+  defp sidebar_section(assigns) do
+    ~H"""
+    <section class="bp-doc-sec" data-test-id={"sidebar-section-" <> @key}>
+      <h3 class="bp-doc-sec__h">
+        <button
+          type="button"
+          class="bp-doc-sec__toggle"
+          phx-click="sidebar-toggle-section"
+          phx-value-section={@key}
+          aria-expanded={to_string(@open)}
+          aria-controls={"bp-doc-sec-body-" <> @key}
+          data-test-id={"sidebar-section-toggle-" <> @key}
+        >
+          <.icon name={if @open, do: "chevron-down", else: "chevron-right"} size={14} />
+          <span>{@title}</span>
+        </button>
+      </h3>
+      <div :if={@open} id={"bp-doc-sec-body-" <> @key} class="bp-doc-sec__body">
+        {render_slot(@inner_block)}
+      </div>
+    </section>
     """
   end
 
@@ -460,6 +696,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
           backlinks_open={@backlinks_open}
+          sidebar_open={Map.get(assigns, :sidebar_open, true)}
+          sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
+          sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}
+          sidebar_slug_feedback={Map.get(assigns, :sidebar_slug_feedback)}
+          workspace_label={
+            case Map.get(assigns, :current_workspace) do
+              %{name: name} when is_binary(name) and name != "" -> name
+              %{slug: slug} when is_binary(slug) -> slug
+              _ -> nil
+            end
+          }
         />
         <% @editor_view == :sheet and @sheet_doc != nil -> %>
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
