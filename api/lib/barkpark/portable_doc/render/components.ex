@@ -23,6 +23,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  alias Barkpark.PortableDoc.Render.StatusVocab
 
   @doc """
   Render a `tasks` block's snapshot as the upgraded task list: an optional
@@ -172,10 +173,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
           |> Enum.map(fn c ->
             done = truthy(get(c, "met"))
 
-            g =
-              if done,
-                do: ~s|<span class="bp-g bp-g--done">✓</span>|,
-                else: ~s|<span class="bp-g bp-g--ready">○</span>|
+            g = if done, do: glyph_html("done"), else: glyph_html("ready")
 
             txt =
               c
@@ -543,8 +541,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
       ~s|<div class="bp-momentum"><div class="bp-momentum__row">| <>
         ~s|<span class="bp-momentum__i">#{glyph_html("progress")}<b>#{prog}</b> in flight</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--ready">○ <b>#{ready}</b> ready</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--done">✓ <b>#{done}</b> done</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--ready">#{glyph_char("ready")} <b>#{ready}</b> ready</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--done">#{glyph_char("done")} <b>#{done}</b> done</span>| <>
         ~s|<span class="bp-momentum__grow"></span>| <>
         ~s|<span class="bp-momentum__pct">#{pct}%</span></div>| <>
         ~s|<div class="bp-momentum__track"><span class="bp-momentum__fill" style="width:#{pct}%"></span></div></div>|
@@ -614,28 +612,22 @@ defmodule Barkpark.PortableDoc.Render.Components do
       ~s|</div>|
   end
 
-  # ── the shared vocabulary ───────────────────────────────────────────────────
+  # ── the shared vocabulary — DERIVED from design/status-manifest.json ─────────
+  # via Render.StatusVocab (compile-time). There is no second copy of the
+  # status→role or role→glyph map here to drift; edit the manifest, not this.
 
-  defp role_of("in_progress"), do: "progress"
-  defp role_of("blocked"), do: "blocked"
-  defp role_of("done"), do: "done"
-  defp role_of("closed"), do: "done"
-  defp role_of("cancelled"), do: "cancel"
-  defp role_of("ready"), do: "ready"
-  defp role_of(_), do: "open"
+  defp role_of(status), do: StatusVocab.role_for_status(status)
 
-  # in_progress is an empty span whose ::before CSS-animates the Braille spinner
-  defp glyph_html("progress"),
-    do: ~s|<span class="bp-g bp-g--progress" aria-label="in progress"></span>|
+  defp glyph_html(role) do
+    if StatusVocab.spinner?(role) do
+      # a spinner role is an empty span whose ::before CSS-animates the Braille frames
+      ~s|<span class="bp-g bp-g--#{role}" aria-label="in progress"></span>|
+    else
+      ~s|<span class="bp-g bp-g--#{role}">#{glyph_char(role)}</span>|
+    end
+  end
 
-  defp glyph_html(role),
-    do: ~s|<span class="bp-g bp-g--#{role}">#{glyph_char(role)}</span>|
-
-  defp glyph_char("ready"), do: "○"
-  defp glyph_char("blocked"), do: "!"
-  defp glyph_char("done"), do: "✓"
-  defp glyph_char("cancel"), do: "✕"
-  defp glyph_char(_), do: "○"
+  defp glyph_char(role), do: StatusVocab.glyph_for_role(role)
 
   # ── meta cells ──────────────────────────────────────────────────────────────
 

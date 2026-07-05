@@ -26,6 +26,9 @@ on:
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
+      # status vocabulary single-source — the manifest + its drift gate.
+      - "design/status-manifest.json"
+      - "scripts/status-manifest-check.sh"
   pull_request:
     paths:
       - "**/*.md"
@@ -45,6 +48,9 @@ on:
       - "api/assets/paper-surface/paper-surface.css"
       - "api/assets/paper-editor/src/styles.css"
       - "scripts/paper-editor-mirror-check.sh"
+      # status vocabulary single-source — the manifest + its drift gate.
+      - "design/status-manifest.json"
+      - "scripts/status-manifest-check.sh"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -71,6 +77,13 @@ jobs:
 
       - name: Paper-editor style mirror lockstep (blocking)
         run: bash scripts/paper-editor-mirror-check.sh
+
+      # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
+      # is the ONE source of the white ladder; the Elixir emitters read it at
+      # compile time, and the --st-* CSS tone tokens are GENERATED from it. This
+      # gate fails if any surface hand-drifts a tone or a glyph role away from it.
+      - name: Status manifest drift gate (blocking)
+        run: bash scripts/status-manifest-check.sh
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
