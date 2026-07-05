@@ -32,6 +32,7 @@ defmodule Barkpark.Content.Broadcast do
 
   require Logger
 
+  alias Barkpark.Audit
   alias Barkpark.Repo
 
   alias Barkpark.Content.{Document, DraftId, Envelope, MutationEvent, Revision}
@@ -114,6 +115,7 @@ defmodule Barkpark.Content.Broadcast do
       {:ok, doc} ->
         save_revision(doc, type, dataset, action, actor_user_id)
         ev = save_event(doc, type, dataset, action, prev_rev, source)
+        emit_audit(doc, type, dataset, action, actor_user_id, source)
 
         msg = %{
           event_id: ev.id,
@@ -173,6 +175,42 @@ defmodule Barkpark.Content.Broadcast do
       error ->
         error
     end
+  end
+
+  # Append a content-mutation row to the append-only audit log. Atomic with the
+  # mutation when tap_broadcast runs inside the mutate transaction. Defensive:
+  # an audit failure is logged but never breaks a document write (emit opens its
+  # own savepoint, so a failed insert rolls back only itself).
+  defp emit_audit(doc, type, dataset, action, actor_user_id, source) do
+    {actor_type, actor_id} =
+      if actor_user_id, do: {"user", actor_user_id}, else: {nil, nil}
+
+    result =
+      Audit.emit(%{
+        category: "content_mutation",
+        action: "document.#{action}",
+        subject: doc.doc_id,
+        actor_type: actor_type,
+        actor_id: actor_id,
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        metadata: %{
+          "type" => type,
+          "dataset" => dataset,
+          "rev" => doc.rev,
+          "source" => to_string(source)
+        }
+      })
+
+    case result do
+      {:ok, _event} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("audit emit failed for #{doc.doc_id}: #{inspect(reason)}")
+    end
+  rescue
+    e -> Logger.warning("audit emit crashed for #{doc.doc_id}: #{inspect(e)}")
   end
 
   # Defer if we're inside a transaction; broadcast immediately otherwise.
