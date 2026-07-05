@@ -1,0 +1,8 @@
+{
+  "plugin_name": "pulse",
+  "version": "0.1.0",
+  "description": "Pulse — public, anonymous, rate-limited event channels (the Shared Storm substrate). An explicitly-configured channel accepts tiny schema-validated events from anyone (CORS-open on its own routes only), keeps a durable total-ever counter, and serves a cursor-based recent feed cheap enough for every open browser tab to poll. Events are ephemeral (TTL-swept); the counter is forever. Lightning strikes today; guestbooks, reactions, live presence tomorrow.",
+  "capabilities": ["routes", "workers"],
+  "module": "Barkpark.Plugins.Pulse",
+  "nouns": ["pulse"]
+}
