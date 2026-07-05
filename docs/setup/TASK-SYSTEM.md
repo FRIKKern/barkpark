@@ -7,11 +7,11 @@ Barkpark as your AI's task board: the agent claims work over HTTP, you steer the
 
 | Surface | What |
 |---|---|
-| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs (open · in_progress · blocked · closed · all). The editor is a four-group dossier — **brief** (description, design notes, expandable `design_doc` reference, checkable acceptance criteria with met/evidence), **work** (priority, assignee, estimate, due date, labels), **close** (outcome, reason), **system** — plus soft validations (e.g. closing `done` without an outcome warns). `dependencies` and `claim` render read-only. |
+| **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs (open · in_progress · blocked · closed · all). Editor = four-group dossier: **brief** (description, design notes, `design_doc` reference, checkable criteria), **work** (priority, assignee, estimate, due, labels), **close** (outcome, reason), **system**; soft validations warn. `dependencies`/`claim` render read-only. |
 | **`bp` verbs** | `bp task ls / ready / prime / get / next / claim / close` — manifest-driven from `GET /v1/capabilities`, provenance `plugin:tasks`. |
-| **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id from `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Plus the standard desk keys — `/` search, `n` new, `y` duplicate, `D`×2 delete. |
+| **Terminal TUI** | Task lists carry quick actions: `c` claims the highlighted task, `x` closes it (same fenced endpoints; worker id `BARKPARK_WORKER_ID`, default `tui-<hostname>`); desk keys `/` search, `n` new, `y` duplicate, `D`×2 delete. |
 | **HTTP API** | Eleven bearer-token endpoints under `/v1/tasks/*` (read tier, not admin): list, ready-queue, **prime** (one-call agent rehydration), queue claim, targeted claim, close, fetch-with-children, edges, labels, paper links. |
-| **Events** | Every task op emits a `mutation_events` row — `task.claimed / task.closed / task.mutated / task.relabeled / task.referenced / task.lease_expired / task.compacted / task.compaction_restored` — streamed over SSE at `/v1/data/listen/:dataset`. |
+| **Events** | Every task op emits a `mutation_events` row — `task.{claimed,closed,mutated,relabeled,referenced,lease_expired,compacted,compaction_restored}` — SSE at `/v1/data/listen/:dataset`. |
 
 Lifecycle states: `open · in_progress · blocked · done · cancelled`.
 
@@ -81,11 +81,11 @@ bp task close t1 agent-1 1 --set 'criteria:=[{"index":0,"met":true,"evidence":"P
 The contract, precisely:
 
 - **Claim** flips `lifecycle_status` to `in_progress` + stamps `content.claim = {worker, ts_iso, epoch}`; the epoch bumps on every claim (race loss → 409 `stale_claim`).
-- **Close** requires `worker_id` + `observed_epoch`. Epoch mismatch → 409 `fenced_off` (swept-but-alive worker guard). Optional body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` in the flip's rev-CAS write (criterion text never rewritten; a text/index mismatch → 409, aborting the close). Unmet criteria only warn (see **Criteria progress**), never gate. Close also fences by default on a claim-time **work digest** of `title`/`description`/`acceptance_criteria`: a brief edited under your claim → 409 `doc_changed_since_claim` (with `current_rev` + `changed_fields`); re-read and retry, or pass `observed_rev` to bypass. `code_refs`/`labels` edits never trip it.
+- **Close** requires `worker_id` + `observed_epoch`. Epoch mismatch → 409 `fenced_off` (swept-but-alive worker guard). Optional body: `lifecycle_status` (`done`|`cancelled`|`blocked`, default `done`), `observed_rev`, `reason`, and `criteria` — `{index, met, evidence, criterion}` merged into `acceptance_criteria` in the flip's rev-CAS write (criterion text never rewritten; a text/index mismatch → 409, aborting the close). Unmet criteria only warn (see **Criteria progress**), never gate. Default fence: a claim-time **work digest** over title/description/criteria — a brief edited under your claim → 409 `doc_changed_since_claim` (`current_rev`, `changed_fields`); re-read and retry, or pass `observed_rev` to bypass. Self-edits (`code_refs`, `labels`) never trip it.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **300**), emitting `task.lease_expired`. Finish or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` over `acceptance_criteria` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but still commits. Owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).
-- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (on-demand ETag of the subject's parent rail — children + their `blocks` edges — compared `≠`); prime carries `rails: {parent_id → rail_rev}`. All four carry typed `notices` (omit when empty): `blocked_while_claimed` (a blocker filed onto your still-open task) and `rail_changed` (optional body `observed_rail_rev` ≠ pre-write rail). Owner: `Barkpark.Tasks.Rail`.
+- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + their `blocks` edges; compare `≠`); prime carries `rails: {parent_id → rail_rev}`. Typed `notices` ride the same envelopes: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. Owner: `Barkpark.Tasks.Rail`.
 
 **5. Dependencies, labels, papers.**
 
@@ -127,10 +127,8 @@ Tasks carry machine-readable provenance so "what code is this task?" is a field 
 Stamp at three moments (see [ledger process rule 6](../../.claude/workflows/bp-loop-ledger.md)): at **claim** set `branch` + `worktree`; at **PR-open** append to `prs` + bump `last_worked_at`; at **merge** append the sha to `commits`, bump `last_worked_at`, and **clear `worktree` → null**. Patch flat into content:
 
 ```bash
-curl -X POST $API/v1/data/mutate/production -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"mutations":[{"patch":{"id":"drafts.t1",
-    "type":"task","set":{"code_refs":{"prs":[941],"commits":[],"branch":"feat/x",
-    "worktree":null},"last_worked_at":"2026-07-03T00:00:00Z"}}}]}'
+# patch via /v1/data/mutate: {"patch":{"id":"drafts.t1","type":"task",
+#   "set":{"code_refs":{"prs":[941],"branch":"feat/x","worktree":null},"last_worked_at":"2026-07-03T00:00:00Z"}}}
 ```
 
 `set` keys merge flat into `content` (no dotted paths). Honesty rule: leave a field **absent** when unknown — absent means "not yet linked", never fabricate a ref.
