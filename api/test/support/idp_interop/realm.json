@@ -2,6 +2,9 @@
   "realm": "barkpark",
   "enabled": true,
   "sslRequired": "none",
+  "groups": [
+    { "name": "barkpark-admins", "path": "/barkpark-admins" }
+  ],
   "users": [
     {
       "username": "alice",
@@ -10,6 +13,7 @@
       "enabled": true,
       "firstName": "Alice",
       "lastName": "Interop",
+      "groups": ["/barkpark-admins"],
       "credentials": [
         { "type": "password", "value": "interop-pass", "temporary": false }
       ]
@@ -24,7 +28,21 @@
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": false,
       "redirectUris": ["http://localhost:4000/*"],
-      "webOrigins": ["+"]
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "groups",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     },
     {
       "clientId": "http://localhost:4000/saml/keycloak-org/metadata",

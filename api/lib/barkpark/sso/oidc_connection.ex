@@ -20,6 +20,13 @@ defmodule Barkpark.Sso.OidcConnection do
     field :jwks_uri, :string
     field :active, :boolean, default: true
 
+    # Group-claims → role mapping (era-w7). `groups_claim` names the id_token
+    # claim carrying group membership; `group_role_mappings` is the
+    # admin-configured group→role map. Claims can only SELECT among these
+    # mappings — a group name in a token can never name a role directly.
+    field :groups_claim, :string, default: "groups"
+    field :group_role_mappings, :map, default: %{}
+
     belongs_to :organization, Barkpark.Tenancy.Organization
 
     timestamps(type: :utc_datetime_usec)
@@ -35,6 +42,8 @@ defmodule Barkpark.Sso.OidcConnection do
       :authorization_endpoint,
       :token_endpoint,
       :jwks_uri,
+      :groups_claim,
+      :group_role_mappings,
       :active
     ])
     |> validate_required([
@@ -45,6 +54,13 @@ defmodule Barkpark.Sso.OidcConnection do
       :token_endpoint,
       :jwks_uri
     ])
+    |> validate_change(:group_role_mappings, fn :group_role_mappings, map ->
+      if is_map(map) and Enum.all?(map, fn {k, v} -> is_binary(k) and is_binary(v) end) do
+        []
+      else
+        [group_role_mappings: "must be a map of group name → role name"]
+      end
+    end)
     |> assoc_constraint(:organization)
     |> unique_constraint(:organization_id)
   end

@@ -66,4 +66,72 @@ defmodule Barkpark.Sso do
 
     length(ws_ids)
   end
+
+  # Built-in rank for picking ONE role when several mapped groups match.
+  # Custom roles rank below the built-ins and tie-break alphabetically, so the
+  # outcome is deterministic whatever order the IdP lists groups in.
+  @builtin_rank %{"owner" => 3, "admin" => 2, "member" => 1}
+
+  @doc """
+  Resolve the role an OIDC connection's group→role mappings grant for `claims`
+  (era-w7). Reads the connection's `groups_claim` (string or list), intersects
+  with the ADMIN-CONFIGURED `group_role_mappings`, and returns the
+  highest-ranked mapped role — or nil when the claim is absent, empty, or
+  matches no mapping. Claims can only SELECT among configured mappings: an
+  unmapped group name grants nothing, so there is no escalation path from
+  tenant-supplied tokens.
+  """
+  @spec resolve_group_role(struct(), map()) :: String.t() | nil
+  def resolve_group_role(%{groups_claim: claim, group_role_mappings: mappings}, claims)
+      when is_map(mappings) and map_size(mappings) > 0 do
+    groups =
+      case Map.get(claims || %{}, claim || "groups") do
+        list when is_list(list) -> Enum.filter(list, &is_binary/1)
+        one when is_binary(one) -> [one]
+        _ -> []
+      end
+
+    groups
+    |> Enum.flat_map(fn g ->
+      case Map.get(mappings, g) do
+        role when is_binary(role) -> [role]
+        _ -> []
+      end
+    end)
+    |> case do
+      [] -> nil
+      roles -> Enum.max_by(roles, fn r -> {Map.get(@builtin_rank, r, 0), inverse_alpha(r)} end)
+    end
+  end
+
+  def resolve_group_role(_connection, _claims), do: nil
+
+  # max_by prefers the LARGER tuple; for equal ranks we want the alphabetically
+  # FIRST custom role, so compare on the negated codepoints.
+  defp inverse_alpha(s), do: s |> String.to_charlist() |> Enum.map(&(-&1))
+
+  @doc """
+  Authoritative role sync for group-mapped logins: set `role` on the user's
+  EXISTING memberships across the org's workspaces (mirrors SCIM group-sync
+  semantics — the IdP's current groups win, including downgrades). Returns the
+  number of memberships updated. Only called when a mapping actually resolved;
+  an absent groups claim never touches existing roles.
+  """
+  @spec set_org_member_role(binary(), binary(), String.t()) :: non_neg_integer()
+  def set_org_member_role(org_id, user_id, role)
+      when is_binary(org_id) and is_binary(user_id) and is_binary(role) do
+    ws_ids = Repo.all(from w in Workspace, where: w.organization_id == ^org_id, select: w.id)
+
+    {n, _} =
+      Repo.update_all(
+        from(m in Tenancy.Membership,
+          where:
+            m.principal_type == "user" and m.principal_id == ^user_id and
+              m.workspace_id in ^ws_ids and m.role != ^role
+        ),
+        set: [role: role, updated_at: DateTime.utc_now()]
+      )
+
+    n
+  end
 end
