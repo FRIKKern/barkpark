@@ -46,8 +46,20 @@ defmodule Barkpark.Scim do
     })
     |> Repo.insert()
     |> case do
-      {:ok, tok} -> {:ok, {plaintext, tok}}
-      err -> err
+      {:ok, tok} ->
+        # Audit every mint (portal or API) — a token is a standing credential.
+        Audit.emit(%{
+          category: "token",
+          action: "scim_token_minted",
+          subject: tok.id,
+          actor_type: "scim",
+          metadata: %{"organization_id" => organization_id, "label" => label}
+        })
+
+        {:ok, {plaintext, tok}}
+
+      err ->
+        err
     end
   end
 
