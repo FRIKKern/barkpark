@@ -5290,11 +5290,15 @@
     return '<ul class="new-steps">' + rows.map(function (row) {
       var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : "pending";
       if (row.next) cls += " next";
+      // A `completing` row is truth-done but mid-dwell: the tick sweeps its ring
+      // to full instead of tracking elapsed (see newTickProgressClock).
+      if (row.completing) cls += " completing";
       var dot = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
       var expected = SERVER_STEP_EXPECTED_MS[row.step];
       var dotAttrs = ' aria-hidden="true"';
       if (row.role === "active") {
         var pct = Math.round(stepRingProgress(row.elapsedMs, expected) * 100);
+        if (row.completing) pct = Math.max(pct, 34); // sweep starts visibly, never from empty
         dotAttrs = ' aria-hidden="true" data-ring="' + esc(row.step) + '" style="--p:' + pct + '%"';
       }
       var cap = row.caption || (row.next ? "Starting…" : "");
@@ -5750,6 +5754,11 @@
     newState.stepsSig = null;
     newState.consoleSig = null;
     newState.bannerSig = null;
+    // Presentation pacing (min-dwell) state: the shown-active ledger, the
+    // seeded-from-history flag, and the held ready handover.
+    newState.paceLedger = {};
+    newState.paceSeeded = false;
+    newState.readyBp = null;
     // Reflect in the URL so a refresh RESUMES progress (not a fresh launch).
     history.replaceState(null, "", "/new?template=" + encodeURIComponent(newState.slug || "") + "&bp=" + encodeURIComponent(id));
     connectEvents(); // live fleet signals over SSE (auto-reconnects)
@@ -5894,6 +5903,93 @@
     }
   }
 
+  // ── Presentation pacing: a minimum dwell per step ───────────────────────────
+  // The fast tail steps (content ~0.6s, verify ~0.5s, ready ~0.1s) complete
+  // near-instantly server-side, and a checklist that machine-guns three
+  // checkmarks after a long phase reads as fake. paceSteps is a DISPLAY-ONLY
+  // shim over the truth fold: a step that just finished keeps rendering as
+  // active (`completing` — ring sweeping to full) until it has been on screen
+  // at least NEW_STEP_MIN_DWELL_MS, and the steps behind it queue as pending
+  // and play one at a time. The server narration, the chip, the instance
+  // timeline and the failed screen all stay on unpaced truth; ONLY the /new
+  // checklist paces. Honesty guards: a FAILED run snaps straight to truth
+  // (pacing never delays bad news), and a refresh/resume pre-seeds the ledger
+  // (seedPaceLedger) so already-finished history renders done immediately
+  // instead of replaying as theatre.
+  var NEW_STEP_MIN_DWELL_MS = 3000;
+
+  function paceCopy(row) {
+    return {
+      step: row.step, label: row.label, role: row.role, elapsedMs: row.elapsedMs,
+      caption: row.caption, probes: row.probes, next: row.next, completing: false
+    };
+  }
+
+  // ledger maps step name → the epoch-ms the display FIRST showed it active
+  // (stamped here, on first sight). Mutated in place; the caller owns it.
+  function paceSteps(rows, ledger, now) {
+    // Failure snaps to truth — every row, immediately, no dwell anywhere.
+    if (rows.some(function (r) { return r.role === "failed"; })) {
+      return rows.map(paceCopy);
+    }
+    var out = [], holding = false;
+    for (var i = 0; i < rows.length; i++) {
+      var r = paceCopy(rows[i]);
+      if (holding) {
+        // Someone earlier is still on stage — everything later waits its turn.
+        if (r.role === "ok" || r.role === "active") {
+          r.role = "pending";
+          r.caption = "";
+          r.elapsedMs = null;
+        }
+        r.next = false;
+      } else if (r.role === "active") {
+        if (!ledger[r.step]) ledger[r.step] = now;
+        holding = true;
+      } else if (r.role === "ok") {
+        if (!ledger[r.step]) ledger[r.step] = now;
+        if (now - ledger[r.step] < NEW_STEP_MIN_DWELL_MS) {
+          r.role = "active";
+          r.completing = true; // ring sweeps to full, check lands at dwell end
+          holding = true;
+        }
+      }
+      out.push(r);
+    }
+    // While a paced row is on stage, the between-steps `next` pulse is noise.
+    if (holding) out.forEach(function (r) { r.next = false; });
+    return out;
+  }
+
+  // On resume (refresh mid-provision), everything already finished is history,
+  // not news — stamp it as shown-long-ago so it renders done instantly.
+  function seedPaceLedger(rows, ledger) {
+    rows.forEach(function (r) {
+      if (r.role === "ok" || r.role === "failed") ledger[r.step] = ledger[r.step] || -1e15;
+    });
+  }
+
+  // The /new checklist's display rows: the truth fold run through the pacer.
+  // null while the placeholder ("Starting…") is still up.
+  function newDisplayRows() {
+    var serverSteps = newState.serverSteps || [];
+    if (!serverSteps.length) return null;
+    newState.paceLedger = newState.paceLedger || {};
+    return paceSteps(
+      provisionSteps({ provision_steps: serverSteps }, Date.now()),
+      newState.paceLedger,
+      Date.now()
+    );
+  }
+
+  // Drained ⇔ no row is mid-dwell — the gate for handing over to the ready
+  // screen (newRenderReady must not yank the panel away mid-checkmark).
+  function newPacingSettled() {
+    var rows = newDisplayRows();
+    if (!rows) return true;
+    return !rows.some(function (r) { return r.completing; });
+  }
+
   // ── Region signatures: the progress screen patches three regions
   // INDEPENDENTLY, so a change in one never rebuilds (and never restarts the
   // CSS animations of) another. This is the fix for "the animations keep
@@ -5901,20 +5997,20 @@
   // new console line re-mounted the steps list — restarting the active-step
   // spinner and replaying every caption fade. Now:
   //   * steps sig   → the checklist <ul> is replaced only when a step's
-  //     status/caption really changed (that re-mount IS what re-plays the
-  //     dwb-19 caption fade, deliberately);
+  //     DISPLAY state really changed (paced role/caption — a dwell expiring IS
+  //     a display change; that re-mount re-plays the dwb-19 caption fade,
+  //     deliberately);
   //   * console sig → only the console BODY's innerHTML is patched (the panel
   //     shell, its toggle listener and the scroll state survive);
   //   * banner sig  → the connection-lost banner is inserted/removed alone.
   // The elapsed clock + the active step's ring/time tick in place every second
   // via newTickProgressClock — zero DOM rebuilds on a pure clock tick.
   function newStepsSig() {
-    var byStep = newStepStatuses(newState.serverSteps);
-    var detailByStep = newStepDetails(newState.serverSteps);
-    var stepSig = SERVER_STEP_ORDER.map(function (n) {
-      return (byStep[n] || "-") + ":" + (detailByStep[n] || "");
+    var rows = newDisplayRows();
+    if (!rows) return "placeholder";
+    return rows.map(function (r) {
+      return r.step + ":" + r.role + (r.completing ? "*" : "") + ":" + (r.caption || "") + (r.next ? "+n" : "");
     }).join(",");
-    return stepSig + "|" + ((newState.serverSteps && newState.serverSteps.length) ? "s" : "p");
   }
   function newConsoleSig() {
     var dc = newDisplayConsole();
@@ -5932,6 +6028,15 @@
     if (el) el.textContent = newElapsedSeconds(serverSteps) + "s elapsed";
     var dot = document.querySelector("#new-body .new-step-dot[data-ring]");
     if (!dot) return;
+    var li = dot.parentNode;
+    if (li && li.className && li.className.indexOf("completing") !== -1) {
+      // A dwelling (truth-done) step: sweep the ring to full over the dwell —
+      // the satisfying "circle closes, check lands" beat. +34/tick ≈ full in 3s;
+      // the 0.9s --p transition smooths the jumps into a continuous sweep.
+      var cur = parseInt(dot.style.getPropertyValue("--p"), 10) || 0;
+      dot.style.setProperty("--p", Math.min(100, cur + 34) + "%");
+      return;
+    }
     var step = dot.getAttribute("data-ring");
     var rows = provisionSteps({ provision_steps: serverSteps }, Date.now());
     for (var i = 0; i < rows.length; i++) {
@@ -5944,10 +6049,11 @@
     }
   }
 
-  // The steps region's markup: the pre-first-event placeholder, else the fold.
+  // The steps region's markup: the pre-first-event placeholder, else the PACED
+  // display fold (truth via provisionSteps, dwell via paceSteps).
   function newProgressStepsHtml() {
-    var serverSteps = newState.serverSteps || [];
-    if (!serverSteps.length) {
+    var rows = newDisplayRows();
+    if (!rows) {
       // Pre-first-event placeholder: honest "Starting…" (client optimism, bounded
       // to the window before the worker reports its first transition), never a
       // bare spinner.
@@ -5957,9 +6063,7 @@
         '<span class="new-step-spin" aria-hidden="true"></span>' +
         "</li></ul>";
     }
-    // C3: one fold. The /new checklist and the instance-detail timeline both
-    // render from provisionSteps.
-    return newStepsHtml(provisionSteps({ provision_steps: serverSteps }, Date.now()));
+    return newStepsHtml(rows);
   }
 
   function newRenderProgress(force) {
@@ -6015,6 +6119,13 @@
       else if (bannerSig === "ok" && banner) banner.parentNode.removeChild(banner);
     }
     newTickProgressClock();
+    // The box is live but the checklist was mid-dwell when the poll saw it —
+    // hand over to the ready screen the moment the last check lands.
+    if (newState.readyBp && newPacingSettled()) {
+      var readyBp = newState.readyBp;
+      newState.readyBp = null;
+      newRenderReady(readyBp);
+    }
   }
 
   function newCheckStatus(id) {
@@ -6033,7 +6144,21 @@
       newState.serverSteps = bp.provision_steps || [];
       newState.serverConsole = bp.provision_console || [];
       newState.provisionStatus = bp.provision_status || null;
-      if (bp.host) { newRenderReady(bp); }
+      // First server truth after (re)load: everything ALREADY finished is
+      // history — seed the pace ledger so a resume renders it done instantly
+      // instead of replaying each old step's dwell as theatre.
+      if (!newState.paceSeeded) {
+        newState.paceSeeded = true;
+        newState.paceLedger = newState.paceLedger || {};
+        seedPaceLedger(provisionSteps({ provision_steps: newState.serverSteps }, Date.now()), newState.paceLedger);
+      }
+      if (bp.host) {
+        // Hold the ready screen until the paced checklist finishes its last
+        // dwell — yanking the panel away mid-checkmark undoes the pacing.
+        // newRenderProgress's tick hands over the moment pacing settles.
+        if (newPacingSettled()) { newRenderReady(bp); }
+        else { newState.readyBp = bp; newRenderProgress(); }
+      }
       else if (bp.provision_status === "failed") { newRenderFailed(bp); }
       else { newRenderProgress(); } // still provisioning — patch whatever changed
     });
@@ -6498,6 +6623,9 @@
       // set, and the between-steps `next` marker.
       serverStepExpectedMs: SERVER_STEP_EXPECTED_MS, serverStepOptional: SERVER_STEP_OPTIONAL,
       stepRingProgress: stepRingProgress, markNextStep: markNextStep,
+      // Presentation pacing (min-dwell): pure display shim + the resume seed.
+      paceSteps: paceSteps, seedPaceLedger: seedPaceLedger,
+      newStepMinDwellMs: NEW_STEP_MIN_DWELL_MS,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +
