@@ -198,6 +198,22 @@ case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
   plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
 end
 
+# Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
+# env means %{} — every pulse route 404s and nothing on the instance is
+# anonymously writable. Value is a JSON object keyed by channel name; see
+# Barkpark.Pulse @moduledoc for the per-channel keys. Example:
+#   BARKPARK_PULSE_CHANNELS='{"jarl-card":{"fields":{"hue":["int",0,359],
+#     "x":["float",0,1],"y":["float",0,1],"mega":["bool"]}}}'
+with raw when is_binary(raw) and raw != "" <- System.get_env("BARKPARK_PULSE_CHANNELS"),
+     {:ok, channels} when is_map(channels) <- Jason.decode(raw) do
+  config :barkpark, :pulse_channels, channels
+else
+  nil -> :ok
+  "" -> :ok
+  {:error, _} -> IO.warn("BARKPARK_PULSE_CHANNELS is not valid JSON — pulse channels closed")
+  _ -> :ok
+end
+
 # Scoped-sharing registry (P1a/P1c). Enable via the BARKPARK_SHARES env var.
 # Format: "ws/proj/dataset:papers,docs:read;acme/web/staging:media:edit".
 # See Barkpark.Sharing.parse/1 for full syntax.

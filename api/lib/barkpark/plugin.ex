@@ -288,9 +288,11 @@ defmodule Barkpark.Plugin do
 
   @typedoc """
   HTTP verb tag used in the leading position of a controller-style
-  `route_spec()` tuple.
+  `route_spec()` tuple. `:options` exists for CORS preflights on the
+  `:public_api` bucket — the router only matches declared verbs, so a
+  browser-reachable cross-origin POST needs an OPTIONS sibling route.
   """
-  @type http_verb :: :get | :post | :put | :delete | :patch
+  @type http_verb :: :get | :post | :put | :delete | :patch | :options
 
   @typedoc """
   A single Phoenix route a plugin contributes via `register_routes/1`.
@@ -305,7 +307,7 @@ defmodule Barkpark.Plugin do
 
   `opts` is a keyword list. Recognised keys:
 
-    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ticket_key | :ingest | :public_root` —
+    * `auth: :admin | :ops | :public | :none | :api | :token | :token_root | :ticket_key | :ingest | :public_root | :public_api` —
       auth gate. Defaults to `:admin`. Buckets routes into the matching scope
       when the host router's `plugin_routes/1` macro expands:
         - `:admin` — admin scope (LiveAuth.:admin, mounts under `/studio`)
@@ -324,6 +326,9 @@ defmodule Barkpark.Plugin do
           routes under `/v1/plugins`
         - `:public_root` — public LiveView at the host's top-level scope with
           its OWN root layout (see `:root_layout`), no studio chrome
+        - `:public_api` — anonymous CORS-open JSON pipeline (PublicCors, NO
+          auth plug) under `/v1/plugins` — for explicitly-public plugin APIs
+          like Pulse; the plugin owns its own abuse caps
     * `root_layout: {module, atom}` — REQUIRED for `:public_root` LiveView
       routes; the full-document root layout the macro applies via a per-route
       live_session. Ignored for other buckets.

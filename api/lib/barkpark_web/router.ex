@@ -379,6 +379,17 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireIngestToken)
   end
 
+  # Anonymous, CORS-open JSON for the `:public_api` plugin bucket (Pulse /
+  # Shared Storm). NO auth plug by design — safety is the plugin's caps
+  # (schema validation + rate limits), not identity. PublicCors is the ONLY
+  # place the API surface emits CORS headers; the core `/v1/data/*` surface
+  # stays browser-unreachable cross-origin on purpose.
+  pipeline :public_api do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.PublicCors)
+  end
+
   pipeline :require_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireAdmin)
@@ -599,6 +610,20 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     plugin_routes(scope: :token)
+  end
+
+  # ── Plugin-contributed routes — anonymous public JSON (`auth: :public_api`) ─
+  # The CORS-open, no-auth sibling of the buckets above (Pulse / Shared Storm).
+  # `:public_api` pipeline = JSON + security headers + PublicCors (handles the
+  # OPTIONS preflight); NO token plug — the mounted plugin owns its own abuse
+  # caps (per-IP buckets, per-channel ceilings, strict payload validation).
+  # No `BarkparkWeb` scope alias — plugin route specs fully-qualify their
+  # controllers (same rationale as `:token_root`/`:ingest`). Dormant until a
+  # plugin contributes an `auth: :public_api` route.
+  scope "/v1/plugins" do
+    pipe_through(:public_api)
+
+    plugin_routes(scope: :public_api)
   end
 
   # ── Plugin-contributed routes — token-gated, ROOT-mounted (`auth: :token_root`) ─

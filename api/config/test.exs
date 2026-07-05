@@ -80,3 +80,19 @@ config :barkpark, :allow_private_outbound, true
 # process"), which intermittently cascades into unrelated test setups. Tests that
 # need codelist data seed it explicitly, so skip the boot pass here.
 config :barkpark, run_boot_codelist_seeders: false
+
+# Pulse (Shared Storm): one channel fixture so the public-surface tests can
+# exercise ingest/feed/caps end-to-end. Prod channels come from
+# BARKPARK_PULSE_CHANNELS (runtime.exs); default everywhere is %{} = closed.
+config :barkpark, :pulse_channels, %{
+  "test-storm" => %{
+    "fields" => %{
+      "hue" => ["int", 0, 359],
+      "x" => ["float", 0, 1],
+      "y" => ["float", 0, 1],
+      "mega" => ["bool"]
+    },
+    "rate_per_min" => 600,
+    "daily_cap" => 100_000
+  }
+}
