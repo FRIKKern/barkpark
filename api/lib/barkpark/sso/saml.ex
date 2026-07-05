@@ -26,6 +26,13 @@ defmodule Barkpark.Sso.Saml do
     Record.extract(:esaml_subject, from_lib: "esaml/include/esaml.hrl")
   )
 
+  Record.defrecordp(
+    :esaml_logoutreq,
+    Record.extract(:esaml_logoutreq, from_lib: "esaml/include/esaml.hrl")
+  )
+
+  Record.defrecordp(:xmlText, Record.extract(:xmlText, from_lib: "xmerl/include/xmerl.hrl"))
+
   import Ecto.Query, warn: false
   alias Barkpark.Repo
   alias Barkpark.Sso.SamlConnection
@@ -64,10 +71,17 @@ defmodule Barkpark.Sso.Saml do
   @doc """
   Consume a SAML assertion XML string at the ACS: verify the signature against
   the IdP cert fingerprint + validate recipient/audience/conditions (via esaml),
-  then return `{:ok, email}`.
+  then return `{:ok, %{email, name_id, session_index}}`.
+
+  Handles BOTH SP-initiated and IdP-initiated (unsolicited) responses — esaml's
+  signature/recipient/audience/conditions rigor is identical for the two; the
+  only difference is that an unsolicited response has no preceding
+  AuthnRequest. `name_id` + `session_index` are the IdP session handle a later
+  Single Logout names.
   """
   @spec consume(SamlConnection.t(), String.t(), String.t()) ::
-          {:ok, String.t()} | {:error, term()}
+          {:ok, %{email: String.t(), name_id: String.t(), session_index: String.t() | nil}}
+          | {:error, term()}
   def consume(%SamlConnection{} = conn, xml, slug) when is_binary(xml) do
     sp = sp_for(conn, slug)
 
@@ -76,8 +90,16 @@ defmodule Barkpark.Sso.Saml do
     case :esaml_sp.validate_assertion(doc, sp) do
       {:ok, assertion} ->
         case subject_email(assertion) do
-          nil -> {:error, :no_email}
-          email -> {:ok, email}
+          nil ->
+            {:error, :no_email}
+
+          email ->
+            {:ok,
+             %{
+               email: email,
+               name_id: subject_name(assertion),
+               session_index: session_index(assertion)
+             }}
         end
 
       {:error, reason} ->
@@ -85,6 +107,86 @@ defmodule Barkpark.Sso.Saml do
     end
   rescue
     e -> {:error, {:parse_error, Exception.message(e)}}
+  end
+
+  # ── Single Logout (SLO) ─────────────────────────────────────────────────────
+
+  @doc "True when the org's connection has an IdP SLO endpoint configured."
+  @spec slo_available?(SamlConnection.t() | nil) :: boolean()
+  def slo_available?(%SamlConnection{idp_slo_url: url}), do: is_binary(url) and url != ""
+  def slo_available?(_), do: false
+
+  @doc """
+  SP-initiated SLO: the redirect URL that carries our `LogoutRequest` to the
+  IdP's SLO endpoint, naming the IdP session (`name_id` + `session_index`) the
+  Barkpark session was born from.
+  """
+  @spec sp_logout_redirect_url(SamlConnection.t(), String.t(), String.t(), String.t() | nil) ::
+          String.t()
+  def sp_logout_redirect_url(%SamlConnection{} = conn, slug, name_id, session_index) do
+    sp = sp_for(conn, slug)
+    subject = esaml_subject(name: to_charlist(name_id))
+
+    req =
+      :esaml_sp.generate_logout_request(
+        to_charlist(conn.idp_slo_url),
+        to_charlist(session_index || ""),
+        subject,
+        sp
+      )
+
+    :esaml_binding.encode_http_redirect(to_charlist(conn.idp_slo_url), req, :undefined, <<>>)
+    |> to_string()
+  end
+
+  @doc """
+  IdP-initiated SLO: validate the IdP's `LogoutRequest` XML (XML-dsig against
+  the pinned cert, via esaml) and return the `{name_id, session_index}` it
+  names, so the caller can revoke exactly those sessions.
+  """
+  @spec consume_logout_request(SamlConnection.t(), String.t(), String.t()) ::
+          {:ok, %{name_id: String.t(), session_index: String.t() | nil}} | {:error, term()}
+  def consume_logout_request(%SamlConnection{} = conn, xml, slug) when is_binary(xml) do
+    sp = sp_for(conn, slug)
+
+    {doc, _} = :xmerl_scan.string(to_charlist(xml), namespace_conformant: true)
+
+    case :esaml_sp.validate_logout_request(doc, sp) do
+      {:ok, req} ->
+        {:ok,
+         %{
+           name_id: req |> esaml_logoutreq(:name) |> to_string(),
+           # esaml's decoder never parses SessionIndex (it only generates it),
+           # so pull it from the signature-covered doc ourselves. nil = the
+           # IdP wants ALL of the subject's sessions gone (SAML profile).
+           session_index: logout_request_session_index(doc)
+         }}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  rescue
+    e -> {:error, {:parse_error, Exception.message(e)}}
+  end
+
+  defp logout_request_session_index(doc) do
+    ns = [{:namespace, [{~c"samlp", :"urn:oasis:names:tc:SAML:2.0:protocol"}]}]
+
+    case :xmerl_xpath.string(~c"/samlp:LogoutRequest/samlp:SessionIndex/text()", doc, ns) do
+      [text | _] -> text |> xmlText(:value) |> to_string() |> presence()
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The auto-submit HTML that front-channels our signed-status `LogoutResponse`
+  back to the IdP's SLO endpoint (POST binding), completing IdP-initiated SLO.
+  """
+  @spec logout_response_html(SamlConnection.t(), String.t()) :: binary()
+  def logout_response_html(%SamlConnection{} = conn, slug) do
+    sp = sp_for(conn, slug)
+    resp = :esaml_sp.generate_logout_response(to_charlist(conn.idp_slo_url), :success, sp)
+    :esaml_binding.encode_http_post(to_charlist(conn.idp_slo_url), resp, <<>>)
   end
 
   # ── internals ──────────────────────────────────────────────────────────────
@@ -98,21 +200,44 @@ defmodule Barkpark.Sso.Saml do
         consume_uri: to_charlist(acs_uri(slug)),
         trusted_fingerprints: [to_charlist(fp)],
         idp_signs_assertions: true,
-        idp_signs_envelopes: false
+        idp_signs_envelopes: false,
+        # SLO: an inbound LogoutRequest MUST carry a valid XML-dsig from the
+        # pinned IdP cert — an unsigned logout would let anyone kill sessions.
+        idp_signs_logout_requests: true
       )
     )
   end
 
   # NameID if it's an email, else an email-ish SAML attribute.
   defp subject_email(assertion) do
-    subject = esaml_assertion(assertion, :subject)
-    name = subject |> esaml_subject(:name) |> to_string()
+    name = subject_name(assertion)
     attrs = esaml_assertion(assertion, :attributes)
 
     cond do
       String.contains?(name, "@") -> name
       email = attr(attrs, [:email, :emailaddress, :mail]) -> email
       true -> nil
+    end
+  end
+
+  # The raw NameID — the subject handle a LogoutRequest names.
+  defp subject_name(assertion) do
+    assertion |> esaml_assertion(:subject) |> esaml_subject(:name) |> to_string()
+  end
+
+  # The IdP's SessionIndex from the AuthnStatement (esaml surfaces it in the
+  # assertion's authn proplist), or nil when the IdP sent none.
+  defp session_index(assertion) do
+    case :proplists.get_value(:session_index, esaml_assertion(assertion, :authn)) do
+      :undefined -> nil
+      v -> to_string(v)
+    end
+  end
+
+  defp presence(v) do
+    case to_string(v) do
+      "" -> nil
+      s -> s
     end
   end
 

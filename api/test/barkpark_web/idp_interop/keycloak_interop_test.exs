@@ -85,15 +85,7 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
   test "SAML: full redirect → IdP login → ACS handshake against live Keycloak",
        %{conn: conn, org: org} do
-    {:ok, _} =
-      Saml.create_connection(%{
-        organization_id: org.id,
-        idp_entity_id: @realm_url,
-        idp_sso_url: "#{@realm_url}/protocol/saml",
-        # Trust anchor comes from Keycloak's own published descriptor — nothing
-        # hardcoded, exactly how a real operator pastes IdP metadata.
-        idp_cert_pem: fetch_idp_cert!()
-      })
+    create_saml_connection(org)
 
     # 1. Our start step: deflated HTTP-Redirect AuthnRequest to Keycloak.
     start = get(conn, "/v1/auth/saml/#{@slug}/start")
@@ -117,12 +109,78 @@ defmodule BarkparkWeb.KeycloakInteropTest do
     assert is_binary(body["token"])
   end
 
+  test "SAML: IdP-INITIATED login — the Okta-tile flow, no AuthnRequest at all",
+       %{conn: conn, org: org} do
+    create_saml_connection(org)
+
+    # The user starts AT the IdP (Keycloak's IdP-initiated SSO URL for our
+    # client — the same thing clicking an app tile does) and arrives at our
+    # ACS with an unsolicited signed response.
+    {saml_response, _jar} =
+      kc_saml_login_jar("#{@realm_url}/protocol/saml/clients/barkpark")
+
+    acs = post(conn, "/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response})
+
+    body = json_response(acs, 201)
+    assert body["ok"] == true
+    assert body["user"]["email"] == @email
+    assert is_binary(body["token"])
+  end
+
+  test "SAML: SP-initiated SINGLE LOGOUT kills the live Keycloak session",
+       %{conn: conn, org: org} do
+    create_saml_connection(org)
+
+    # 1. SP-initiated login, keeping the IdP browser session (cookie jar).
+    start = get(conn, "/v1/auth/saml/#{@slug}/start")
+    {saml_response, jar} = kc_saml_login_jar(redirected_to(start, 302))
+
+    token =
+      start
+      |> recycle()
+      |> post("/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => saml_response})
+      |> json_response(201)
+      |> Map.fetch!("token")
+
+    # 2. CONTROL — the IdP session is alive: a fresh AuthnRequest with the same
+    #    cookies comes straight back with a SAMLResponse (no login form).
+    start2 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
+    {:ok, sso} = Req.get(start2, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+    assert sso.status == 200 and sso.body =~ "SAMLResponse"
+
+    # 3. Barkpark logout hands back the SP-initiated LogoutRequest URL.
+    logout =
+      build_conn()
+      |> put_req_header("authorization", "Bearer #{token}")
+      |> delete("/v1/auth/logout")
+      |> json_response(200)
+
+    assert logout["slo_url"] =~ @kc
+
+    # 4. The "browser" carries it to Keycloak: the IdP session dies and the
+    #    LogoutResponse form (bound for our /slo endpoint) comes back.
+    {:ok, slo} = Req.get(logout["slo_url"], headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+    jar = jar_merge(jar, slo)
+    assert slo.status == 200 and slo.body =~ "SAMLResponse"
+
+    # 5. PROOF — the same cookies no longer SSO: a fresh AuthnRequest now shows
+    #    the login form instead of an instant SAMLResponse.
+    start3 = build_conn() |> get("/v1/auth/saml/#{@slug}/start") |> redirected_to(302)
+    {:ok, after_slo} = Req.get(start3, headers: [{"cookie", jar_header(jar)}], redirect: false, retry: false)
+    assert after_slo.status == 200
+    refute after_slo.body =~ ~r/name="SAMLResponse"/
+    assert after_slo.body =~ "password"
+  end
+
   # ── browser simulation ───────────────────────────────────────────────────────
+  #
+  # A tiny cookie jar (name → value map) stands in for the browser, so a flow
+  # can span login → logout → re-login against the SAME IdP session.
 
   # Drive Keycloak's login form for an OIDC authorize URL; return {code, state}
   # from the redirect back to our callback.
   defp kc_oidc_login(authorize_url) do
-    {:ok, resp2} = submit_login(authorize_url)
+    {resp2, _jar} = submit_login(authorize_url)
     assert resp2.status == 302, "expected Keycloak to redirect after login, got #{resp2.status}"
 
     location = header!(resp2, "location")
@@ -133,18 +191,25 @@ defmodule BarkparkWeb.KeycloakInteropTest do
   # Drive Keycloak's login form for a SAML redirect-binding URL; return the
   # base64 SAMLResponse from the auto-submit form.
   defp kc_saml_login(redirect_url) do
-    {:ok, resp2} = submit_login(redirect_url)
+    {saml_response, _jar} = kc_saml_login_jar(redirect_url)
+    saml_response
+  end
+
+  # Same, but also return the IdP cookie jar (the "browser" session).
+  defp kc_saml_login_jar(redirect_url) do
+    {resp2, jar} = submit_login(redirect_url)
     assert resp2.status == 200, "expected Keycloak's SAML auto-submit form, got #{resp2.status}"
 
     [_, value] = Regex.run(~r/name="SAMLResponse" value="([^"]+)"/, resp2.body)
-    value
+    {value, jar}
   end
 
   # GET the IdP entry URL, parse the login form, POST credentials with the
-  # IdP's session cookies. Returns the post-login response.
+  # IdP's session cookies. Returns {post-login response, cookie jar}.
   defp submit_login(url) do
     {:ok, resp} = Req.get(url, redirect: false, retry: false)
     assert resp.status == 200, "expected Keycloak login form, got #{resp.status}"
+    jar = jar_merge(%{}, resp)
 
     action =
       ~r/action="([^"]+)"/
@@ -152,22 +217,52 @@ defmodule BarkparkWeb.KeycloakInteropTest do
       |> Enum.at(1)
       |> String.replace("&amp;", "&")
 
-    Req.post(action,
-      form: [username: @username, password: @password],
-      headers: [{"cookie", cookies(resp)}],
-      redirect: false,
-      retry: false
-    )
+    {:ok, resp2} =
+      Req.post(action,
+        form: [username: @username, password: @password],
+        headers: [{"cookie", jar_header(jar)}],
+        redirect: false,
+        retry: false
+      )
+
+    {resp2, jar_merge(jar, resp2)}
   end
 
-  defp cookies(resp) do
+  # Fold a response's set-cookie headers into the jar (an emptied value drops
+  # the cookie — that's how logout clears the identity).
+  defp jar_merge(jar, resp) do
     resp.headers
     |> Map.get("set-cookie", [])
-    |> Enum.map(&(&1 |> String.split(";") |> hd()))
-    |> Enum.join("; ")
+    |> Enum.reduce(jar, fn set, acc ->
+      [pair | _] = String.split(set, ";")
+
+      case String.split(pair, "=", parts: 2) do
+        [name, ""] -> Map.delete(acc, name)
+        [name, value] -> Map.put(acc, name, value)
+        _ -> acc
+      end
+    end)
   end
 
+  defp jar_header(jar), do: Enum.map_join(jar, "; ", fn {k, v} -> "#{k}=#{v}" end)
+
   defp header!(resp, name), do: resp.headers |> Map.fetch!(name) |> hd()
+
+  # The org's SAML connection, trust-anchored on Keycloak's own published
+  # descriptor cert — nothing hardcoded, exactly how a real operator pastes
+  # IdP metadata. The realm's /protocol/saml endpoint doubles as SSO and SLO.
+  defp create_saml_connection(org) do
+    {:ok, c} =
+      Saml.create_connection(%{
+        organization_id: org.id,
+        idp_entity_id: @realm_url,
+        idp_sso_url: "#{@realm_url}/protocol/saml",
+        idp_slo_url: "#{@realm_url}/protocol/saml",
+        idp_cert_pem: fetch_idp_cert!()
+      })
+
+    c
+  end
 
   # Pull the IdP signing cert from Keycloak's published SAML descriptor and
   # wrap it as PEM (64-char lines).

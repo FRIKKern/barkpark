@@ -14,6 +14,9 @@ defmodule Barkpark.Sso.SamlConnection do
   schema "saml_connections" do
     field :idp_entity_id, :string
     field :idp_sso_url, :string
+    # The IdP's Single Logout endpoint. Nullable — without it, SLO is simply
+    # unavailable and Barkpark logout stays local-only.
+    field :idp_slo_url, :string
     field :idp_cert_pem, :string
     field :active, :boolean, default: true
 
@@ -24,7 +27,7 @@ defmodule Barkpark.Sso.SamlConnection do
 
   def changeset(c, attrs) do
     c
-    |> cast(attrs, [:organization_id, :idp_entity_id, :idp_sso_url, :idp_cert_pem, :active])
+    |> cast(attrs, [:organization_id, :idp_entity_id, :idp_sso_url, :idp_slo_url, :idp_cert_pem, :active])
     |> validate_required([:organization_id, :idp_entity_id, :idp_sso_url, :idp_cert_pem])
     |> assoc_constraint(:organization)
     |> unique_constraint(:organization_id)

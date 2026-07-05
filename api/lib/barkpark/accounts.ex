@@ -87,7 +87,10 @@ defmodule Barkpark.Accounts do
       last_used_at: now,
       mfa_verified_at: mfa_verified_at,
       ip_address: Keyword.get(opts, :ip_address),
-      user_agent: Keyword.get(opts, :user_agent)
+      user_agent: Keyword.get(opts, :user_agent),
+      saml_name_id: Keyword.get(opts, :saml_name_id),
+      saml_session_index: Keyword.get(opts, :saml_session_index),
+      saml_org_slug: Keyword.get(opts, :saml_org_slug)
     })
     |> Repo.insert()
     |> case do
@@ -161,6 +164,35 @@ defmodule Barkpark.Accounts do
     |> Repo.update_all(set: [revoked_at: now])
 
     :ok
+  end
+
+  @doc """
+  IdP-initiated Single Logout: revoke the SAML-born sessions an IdP
+  `LogoutRequest` names — matched by NameID within the org's connection, and
+  narrowed to the specific IdP session when a SessionIndex is supplied (an
+  empty/absent index logs out all of that subject's sessions for the org, per
+  the SAML profile). Returns the number revoked.
+  """
+  @spec revoke_saml_sessions(String.t(), String.t(), String.t() | nil) :: non_neg_integer()
+  def revoke_saml_sessions(org_slug, name_id, session_index)
+      when is_binary(org_slug) and is_binary(name_id) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    query =
+      from(t in UserSession,
+        where:
+          t.saml_org_slug == ^org_slug and t.saml_name_id == ^name_id and
+            is_nil(t.revoked_at)
+      )
+
+    query =
+      case session_index do
+        idx when is_binary(idx) and idx != "" -> where(query, [t], t.saml_session_index == ^idx)
+        _ -> query
+      end
+
+    {count, _} = Repo.update_all(query, set: [revoked_at: now])
+    count
   end
 
   # ── Email tokens: verify-email + password-reset ────────────────────────────
