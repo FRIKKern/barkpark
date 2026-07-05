@@ -24,8 +24,54 @@ defmodule Barkpark.Sso.Oidc do
   @doc "Create a per-org OIDC connection."
   @spec create_connection(map()) :: {:ok, OidcConnection.t()} | {:error, Ecto.Changeset.t()}
   def create_connection(attrs) do
-    %OidcConnection{} |> OidcConnection.changeset(attrs) |> Repo.insert()
+    changeset = OidcConnection.changeset(%OidcConnection{}, attrs)
+
+    # Mapping TARGETS must be known roles (built-in, or a custom Role defined
+    # globally / for one of the org's workspaces) — mirrors SCIM's group
+    # validation. Guarded here because the authoritative role sync writes via
+    # update_all, which would otherwise bypass the membership changeset and
+    # persist an unknown role string.
+    with %{valid?: true} <- changeset,
+         :ok <- validate_mapping_roles(changeset) do
+      Repo.insert(changeset)
+    else
+      %Ecto.Changeset{} = cs -> {:error, cs}
+      {:error, _} = err -> err
+    end
   end
+
+  defp validate_mapping_roles(changeset) do
+    mappings = Ecto.Changeset.get_field(changeset, :group_role_mappings) || %{}
+    org_id = Ecto.Changeset.get_field(changeset, :organization_id)
+
+    unknown =
+      mappings
+      |> Map.values()
+      |> Enum.uniq()
+      |> Enum.reject(&known_role?(org_id, &1))
+
+    case unknown do
+      [] -> :ok
+      names -> {:error, {:unknown_role, names}}
+    end
+  end
+
+  defp known_role?(org_id, role_name) when is_binary(role_name) do
+    ws_ids =
+      Repo.all(
+        from w in Barkpark.Tenancy.Workspace,
+          where: w.organization_id == ^org_id,
+          select: w.id
+      )
+
+    role_name in Barkpark.Tenancy.Membership.roles() or
+      Repo.exists?(
+        from r in Barkpark.Tenancy.Role,
+          where: r.name == ^role_name and (is_nil(r.workspace_id) or r.workspace_id in ^ws_ids)
+      )
+  end
+
+  defp known_role?(_org_id, _), do: false
 
   @doc "The active OIDC connection for an org slug, or nil."
   @spec connection_for_org_slug(String.t()) :: OidcConnection.t() | nil
@@ -96,8 +142,20 @@ defmodule Barkpark.Sso.Oidc do
          {:ok, claims} <- verify_id_token(c, id_token),
          :ok <- validate_claims(c, claims, expected_nonce),
          {:ok, user} <- find_or_create_user(claims["email"]) do
-      # JIT: first SSO login gains a membership in the connection's org (era-w3-jit).
-      Barkpark.Sso.jit_provision(c.organization_id, user)
+      # JIT: first SSO login gains a membership in the connection's org
+      # (era-w3-jit). When the id_token's groups resolve through the
+      # admin-configured group→role mappings (era-w7), that role wins — for
+      # new AND existing memberships (authoritative, mirroring SCIM group
+      # sync). An absent/unmapped groups claim leaves existing roles alone.
+      case Barkpark.Sso.resolve_group_role(c, claims) do
+        nil ->
+          Barkpark.Sso.jit_provision(c.organization_id, user)
+
+        role ->
+          Barkpark.Sso.jit_provision(c.organization_id, user, role)
+          Barkpark.Sso.set_org_member_role(c.organization_id, user.id, role)
+      end
+
       {:ok, user, claims}
     else
       {:ok, %{}} -> {:error, :no_id_token}

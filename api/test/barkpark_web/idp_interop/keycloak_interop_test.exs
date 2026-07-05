@@ -16,6 +16,8 @@ defmodule BarkparkWeb.KeycloakInteropTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   @moduletag :idp_interop
 
   alias Barkpark.Tenancy
@@ -81,6 +83,51 @@ defmodule BarkparkWeb.KeycloakInteropTest do
 
     # JIT provisioned + the session token is live.
     assert %Barkpark.Accounts.User{} = Barkpark.Accounts.verify_user_session_token(body["token"])
+  end
+
+  test "OIDC: a REAL groups claim maps through group_role_mappings to a role (era-w7)",
+       %{conn: conn, org: org} do
+    # An org workspace to observe the granted role on.
+    {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "kc-groups-ws", name: "WS"})
+    {:ok, ws} = Barkpark.Tenancy.assign_workspace_to_organization(ws, org.id)
+
+    # alice is in Keycloak group /barkpark-admins; the realm's protocol mapper
+    # emits it in the id_token's "groups" claim; this mapping turns it into
+    # the admin role.
+    {:ok, _} =
+      Oidc.create_connection(%{
+        organization_id: org.id,
+        issuer: @realm_url,
+        client_id: "barkpark-oidc",
+        client_secret: "interop-secret",
+        authorization_endpoint: "#{@realm_url}/protocol/openid-connect/auth",
+        token_endpoint: "#{@realm_url}/protocol/openid-connect/token",
+        jwks_uri: "#{@realm_url}/protocol/openid-connect/certs",
+        group_role_mappings: %{"barkpark-admins" => "admin"}
+      })
+
+    start = get(conn, "/v1/auth/oidc/#{@slug}/start")
+    {code, state} = kc_oidc_login(redirected_to(start, 302))
+
+    body =
+      start
+      |> recycle()
+      |> get("/v1/auth/oidc/#{@slug}/callback", %{"code" => code, "state" => state})
+      |> json_response(201)
+
+    user = Barkpark.Accounts.get_user_by_email(body["user"]["email"])
+
+    role =
+      Barkpark.Repo.one(
+        from(m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws.id and m.principal_type == "user" and
+              m.principal_id == ^user.id,
+          select: m.role
+        )
+      )
+
+    assert role == "admin"
   end
 
   test "SAML: full redirect → IdP login → ACS handshake against live Keycloak",

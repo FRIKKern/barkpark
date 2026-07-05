@@ -171,4 +171,122 @@ defmodule Barkpark.Sso.OidcTest do
       assert url =~ "response_type=code"
     end
   end
+
+  describe "group-claims → role mapping (era-w7)" do
+    # An org with one workspace + an OIDC connection carrying mappings.
+    defp mapped_connection(mappings, extra \\ %{}) do
+      {:ok, org} = Tenancy.create_organization(%{slug: "groupsorg", name: "Groups Org"})
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "groups-ws", name: "WS"})
+      {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, c} =
+        Oidc.create_connection(
+          Map.merge(
+            %{
+              organization_id: org.id,
+              issuer: @issuer,
+              client_id: @client_id,
+              client_secret: "top-secret",
+              authorization_endpoint: @issuer <> "/authorize",
+              token_endpoint: @issuer <> "/token",
+              jwks_uri: @issuer <> "/jwks",
+              group_role_mappings: mappings
+            },
+            extra
+          )
+        )
+
+      {org, ws, c}
+    end
+
+    defp member_role(ws_id, user_id) do
+      Barkpark.Repo.one(
+        from m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+              m.principal_id == ^user_id,
+          select: m.role
+      )
+    end
+
+    test "a mapped group grants its role at JIT" do
+      {_org, ws, c} = mapped_connection(%{"idp-admins" => "admin"})
+      mock_op(claims(%{"groups" => ["idp-admins", "unrelated"]}))
+
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+    end
+
+    test "several mapped groups → the highest-ranked role wins" do
+      {_org, ws, c} = mapped_connection(%{"idp-admins" => "admin", "idp-staff" => "member"})
+      mock_op(claims(%{"groups" => ["idp-staff", "idp-admins"]}))
+
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+    end
+
+    test "the mapping is AUTHORITATIVE: changed groups downgrade on the next login" do
+      {_org, ws, c} = mapped_connection(%{"idp-admins" => "admin", "idp-staff" => "member"})
+
+      mock_op(claims(%{"groups" => ["idp-admins"]}))
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+
+      # Next login: the IdP no longer lists the admin group.
+      mock_op(claims(%{"groups" => ["idp-staff"]}))
+      assert {:ok, ^user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "member"
+    end
+
+    test "an ABSENT groups claim leaves existing roles untouched (and JIT-defaults new users)" do
+      {_org, ws, c} = mapped_connection(%{"idp-admins" => "admin"})
+
+      mock_op(claims(%{"groups" => ["idp-admins"]}))
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+
+      # Same user again, token WITHOUT the claim → role stays admin.
+      mock_op(claims())
+      assert {:ok, ^user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+
+      # A brand-new user without the claim → plain default JIT.
+      mock_op(claims(%{"email" => "plain@groupsorg.com"}))
+      assert {:ok, plain, _} = callback(c)
+      assert member_role(ws.id, plain.id) == "member"
+    end
+
+    test "UNMAPPED groups grant nothing — no escalation path from token contents" do
+      {_org, ws, c} = mapped_connection(%{"idp-admins" => "admin"})
+      # The token claims a group that LOOKS privileged but is not mapped.
+      mock_op(claims(%{"groups" => ["admin", "owner", "superuser"]}))
+
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "member"
+    end
+
+    test "a custom groups_claim name is honoured" do
+      {_org, ws, c} = mapped_connection(%{"eng" => "admin"}, %{groups_claim: "memberOf"})
+      mock_op(claims(%{"memberOf" => ["eng"]}))
+
+      assert {:ok, user, _} = callback(c)
+      assert member_role(ws.id, user.id) == "admin"
+    end
+
+    test "a mapping to an UNKNOWN role is rejected at connection write" do
+      {:ok, org} = Tenancy.create_organization(%{slug: "badmap", name: "Bad Map"})
+
+      assert {:error, {:unknown_role, ["superadmin"]}} =
+               Oidc.create_connection(%{
+                 organization_id: org.id,
+                 issuer: @issuer,
+                 client_id: @client_id,
+                 client_secret: "s",
+                 authorization_endpoint: @issuer <> "/a",
+                 token_endpoint: @issuer <> "/t",
+                 jwks_uri: @issuer <> "/j",
+                 group_role_mappings: %{"g" => "superadmin"}
+               })
+    end
+  end
 end
