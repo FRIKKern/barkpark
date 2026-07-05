@@ -51,7 +51,68 @@ defmodule Barkpark.Accounts do
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
     user = get_user_by_email(email)
-    if User.valid_password?(user, password), do: user, else: nil
+
+    cond do
+      # A locked account fails like any bad credential — NO distinct response,
+      # so the lockout never widens the anti-enumeration oracle. The password
+      # is still verified (constant-time) but the result is discarded.
+      locked?(user) ->
+        _ = User.valid_password?(user, password)
+        nil
+
+      User.valid_password?(user, password) ->
+        reset_failed_logins(user)
+        user
+
+      true ->
+        record_failed_login(user)
+        nil
+    end
+  end
+
+  @doc "Seconds a locked-out account stays locked once the threshold is crossed."
+  def lockout_window_seconds, do: Application.get_env(:barkpark, :login_lockout_seconds, 900)
+
+  @doc "Consecutive failed logins that trip the lockout."
+  def max_failed_logins, do: Application.get_env(:barkpark, :max_failed_logins, 10)
+
+  # nil user (unknown email) is never "locked" — the dummy verify still runs so
+  # timing can't distinguish it.
+  defp locked?(%User{locked_until: until}) when not is_nil(until),
+    do: DateTime.compare(DateTime.utc_now(), until) == :lt
+
+  defp locked?(_), do: false
+
+  # Count a failure; once the threshold is crossed, stamp `locked_until`. No-op
+  # for an unknown email (nothing to protect / would enable user enumeration).
+  defp record_failed_login(%User{} = user) do
+    n = (user.failed_login_count || 0) + 1
+
+    attrs =
+      if n >= max_failed_logins() do
+        %{
+          failed_login_count: n,
+          locked_until: DateTime.add(DateTime.utc_now(), lockout_window_seconds(), :second)
+        }
+      else
+        %{failed_login_count: n}
+      end
+
+    user |> Ecto.Changeset.change(attrs) |> Repo.update()
+    :ok
+  end
+
+  defp record_failed_login(_), do: :ok
+
+  # A successful login clears the counter + any lock.
+  defp reset_failed_logins(%User{failed_login_count: 0, locked_until: nil}), do: :ok
+
+  defp reset_failed_logins(%User{} = user) do
+    user
+    |> Ecto.Changeset.change(%{failed_login_count: 0, locked_until: nil})
+    |> Repo.update()
+
+    :ok
   end
 
   @doc "Change an existing user's password (verify current first), revoking all sessions."
