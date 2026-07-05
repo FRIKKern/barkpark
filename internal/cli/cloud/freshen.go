@@ -121,7 +121,6 @@ const freshenLocalGrace = 30 * time.Second
 // register-time refresh_update_status then renders the box "behind" with a
 // one-click self-update, so a degrade is a VISIBLE, fixable state, never a lie.
 const (
-	freshenCurrentCaption       = "Already up to date"
 	freshenCheckFailedCaption   = "Couldn't check for updates — continuing on the baked release."
 	freshenRebuildFailedCaption = "Couldn't update — continuing on the baked release; you can update from the dashboard."
 )
@@ -163,6 +162,13 @@ type FreshenOpts struct {
 	// red timeline row would misread as breakage — it narrates `done` with a
 	// truthful caption instead. The warm-create call site passes nil (no user is
 	// watching a background pool refill).
+	//
+	// Freshen is a FALLBACK, not a routine phase: warm-pool boxes are freshened
+	// before they enter the pool, so the cheap check passing is the expected case
+	// and narrating it would advertise a heavyweight "Updating…" phase that almost
+	// never does anything. EnsureFresh therefore stays SILENT when the box is
+	// already current, and narrates only when it actually intervenes — a rebuild
+	// (the box was stale) or a degrade (freshness couldn't be verified).
 	Narrate func(status, detail string)
 }
 
@@ -193,32 +199,34 @@ func EnsureFresh(ctx context.Context, runner StepRunner, opts FreshenOpts) (Fres
 		return FreshenResult{Skipped: true}, nil
 	}
 
-	narrate("started", "")
-
-	// Phase 1 — the cheap check, ALWAYS.
+	// Phase 1 — the cheap check, ALWAYS. Deliberately un-narrated: it takes
+	// seconds and passing is the expected case (warm boxes are pre-freshened), so
+	// the freshen step only surfaces on the timeline when it INTERVENES below.
 	out, err := cmd.RunOutput(ctx, freshenCheckScript)
 	if err != nil {
 		// Unreachable fetch / git error. NEVER brick a go-live on GitHub flake:
 		// proceed loudly on the baked code.
+		narrate("started", "")
 		narrate("done", freshenCheckFailedCaption)
 		return FreshenResult{Degraded: true}, fmt.Errorf("freshen: freshness check failed: %w: %s", err, tailOf(out, freshenErrOutputMax))
 	}
 	head, remote, from, to := parseFreshenCheck(out)
 	if head == "" || remote == "" {
+		narrate("started", "")
 		narrate("done", freshenCheckFailedCaption)
 		return FreshenResult{Degraded: true}, fmt.Errorf("freshen: could not parse freshness check output: %q", strings.TrimSpace(out))
 	}
 
 	res := FreshenResult{Checked: true, FromVersion: from, ToVersion: to}
 	if head == remote {
-		// Current — the common case once re-bakes are frequent. No rebuild.
-		narrate("progress", freshenCurrentCaption)
-		narrate("done", freshenCurrentCaption)
+		// Current — the expected case. Silent: no step narration, no rebuild.
 		return res, nil
 	}
 
-	// Phase 2 — behind → rebuild.
+	// Phase 2 — behind → rebuild. This is the desperate-fallback path, and the
+	// only one a watching user should ever see as a first-class step.
 	res.Behind = true
+	narrate("started", "")
 	narrate("progress", updatingCaption(from, to))
 
 	// The budget is enforced on the BOX (remote `timeout`, so a timed-out rebuild

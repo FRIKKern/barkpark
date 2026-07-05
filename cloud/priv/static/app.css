@@ -1278,9 +1278,29 @@ select.form-input {
   color: var(--primary-fg);
 }
 .new-step.done .new-step-dot { background: var(--success); border-color: var(--success); }
-.new-step.active .new-step-dot { border-color: var(--primary); }
+/* The active dot IS the per-phase loading bar: a conic ring filled by --p
+   (stepRingProgress over the phase's expected duration, ticked in place every
+   second). Registered as a <percentage> so the fill animates smoothly between
+   1s ticks; hollowed with a radial mask so it stays a ring, not a pie. */
+@property --p { syntax: "<percentage>"; inherits: false; initial-value: 0%; }
+.new-step.active .new-step-dot {
+  border: 0;
+  background: conic-gradient(var(--primary) var(--p, 0%), var(--ring-soft) 0);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  transition: --p 0.9s linear;
+}
 /* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
 .new-step.failed .new-step-dot { background: var(--destructive); border-color: var(--destructive); }
+/* Between-steps honesty: the `next` row (previous step done, this one about to
+   report — e.g. the SSH boot wait) pulses instead of sitting frozen. */
+.new-step.next .new-step-dot { border-color: var(--primary); animation: new-next-pulse 1.4s ease-in-out infinite; }
+.new-step.next .new-step-label { color: var(--text); }
+.new-step.next .new-step-spin { opacity: 0.55; }
+@keyframes new-next-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--ring-soft); }
+  50% { box-shadow: 0 0 0 4px var(--ring-soft); }
+}
 .new-step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .new-step-label { color: var(--muted-text); }
 .new-step.active .new-step-label { color: var(--text); font-weight: 600; }
@@ -1304,6 +1324,7 @@ select.form-input {
 }
 .new-step-spin {
   width: 14px; height: 14px;
+  flex: 0 0 14px;
   margin-left: auto;
   border: 2px solid var(--ring-soft);
   border-top-color: var(--primary);
@@ -1311,6 +1332,17 @@ select.form-input {
   animation: new-spin 0.7s linear infinite;
 }
 @keyframes new-spin { to { transform: rotate(360deg); } }
+/* Pace column: pending "~30s" (the plan up front), active "12s · ~30s" (live),
+   done the real elapsed. When a spinner follows, the time span carries the
+   auto margin and the spinner sits flush after it. */
+.new-step-time {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.new-step-time + .new-step-spin { margin-left: 10px; }
 
 /* ready step */
 .new-actions { display: flex; flex-direction: column; gap: 10px; margin: 20px 0; }
@@ -1423,6 +1455,11 @@ select.form-input {
 .bp-tl-step--ok .bp-tl-dot { background: var(--ok); border-color: var(--ok); }
 .bp-tl-step--active .bp-tl-dot { border-color: var(--info); }
 .bp-tl-step--failed .bp-tl-dot { background: var(--danger); border-color: var(--danger); }
+/* Between-steps honesty (mirrors .new-step.next): the next step pulses while
+   the worker is between reports, so the timeline never reads frozen. */
+.bp-tl-step--next .bp-tl-dot { border-color: var(--info); animation: new-next-pulse 1.4s ease-in-out infinite; }
+.bp-tl-step--next .bp-tl-label { color: var(--text); }
+.bp-tl-step--next .bp-tl-spin { opacity: 0.55; }
 .bp-tl-body { flex: 1 1 auto; min-width: 0; }
 .bp-tl-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .bp-tl-label { color: var(--muted-text); }

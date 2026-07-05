@@ -5072,14 +5072,20 @@
   // renders it forward-compat: it shows as an upcoming pending step until the
   // gate lands, and an UNKNOWN step name (any future addition) renders
   // generically (label = the raw name), never crashing.
-  // dwb-17/D10: "freshen" is the go-live freshness rung — the provisioner
+  // dwb-17/D10: "freshen" is the go-live freshness FALLBACK — the provisioner
   // fetch+compares against origin/main at the top of the chain and rebuilds
   // when the box is behind, so a fresh instance never boots stale code. It
-  // slots between `create` and `secure` (freshen must precede migrate). It
-  // rides the exact "verify" forward-compat contract: the server may not emit
-  // it on every provision (only when it actually rebuilds), so it renders as an
-  // upcoming pending step until a `started` event lands — never a crash.
+  // slots between `create` and `secure` (freshen must precede migrate). Warm
+  // boxes are freshened BEFORE they enter the pool, so the worker narrates the
+  // step only when it actually intervenes (a stale box rebuilding, or a
+  // freshness check that degraded) — which is why it is OPTIONAL below: never
+  // advertised as a planned/pending phase, appearing in place only when the
+  // server reports it. Unknown future step names still render generically in
+  // first-seen order — never a crash.
   var SERVER_STEP_ORDER = ["create", "freshen", "secure", "configure", "content", "verify", "ready"];
+  // Fallback steps: hidden from the checklist/timeline until the server reports
+  // a first entry for them (a planned step renders pending from the start).
+  var SERVER_STEP_OPTIONAL = { freshen: true };
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
     freshen: "Updating to the latest Barkpark",
@@ -5094,6 +5100,30 @@
     create: "creating", freshen: "updating", secure: "securing", configure: "configuring",
     content: "installing", verify: "verifying", ready: "finishing"
   };
+
+  // Rough expected duration per phase (ms) — UX pacing, not a promise. Tuned to
+  // the warm-pool go-live: create is a pool pop + identity stamp; secure waits
+  // on DNS + the ACME certificate (the long pole); configure runs migrate;
+  // freshen only ever shows on the fallback rebuild path, where a clean Elixir
+  // rebuild is minutes. The active step's dot renders these as a progress ring
+  // via stepRingProgress — asymptotic, so a slower-than-estimate phase keeps
+  // visibly crawling and the ring NEVER reads complete before the server
+  // reports done. Pending rows surface the same numbers as a "~30s" hint, so
+  // the user knows the plan's shape up front.
+  var SERVER_STEP_EXPECTED_MS = {
+    create: 15000, freshen: 300000, secure: 45000, configure: 35000,
+    content: 20000, verify: 15000, ready: 10000
+  };
+
+  // 0..1 ring fill for an active step: linear to 90% across the estimate, then
+  // an exponential crawl toward (never onto) 98% — overdue reads "still
+  // working", never "done but stuck". null/garbled elapsed → 0, never NaN.
+  function stepRingProgress(elapsedMs, expectedMs) {
+    if (elapsedMs == null || isNaN(elapsedMs) || elapsedMs < 0 || !expectedMs) return 0;
+    var r = elapsedMs / expectedMs;
+    if (r <= 1) return 0.9 * r;
+    return 0.9 + 0.08 * (1 - Math.exp(1 - r));
+  }
 
   // ============================================ C3 PROVISION TIMELINE (one fold)
   // Decisions D47 + D51 + D13. The server serialises bp.provision_steps (an array
@@ -5172,8 +5202,26 @@
     };
   }
 
-  // The canonical fold: rows in SERVER_STEP_ORDER (known steps ALWAYS present,
-  // pending if unstarted), then any UNKNOWN steps appended in first-seen order.
+  // Between two steps the worker reports nothing (e.g. the SSH boot wait right
+  // after `create done`), so for a stretch every row is done-or-pending and the
+  // screen reads STUCK. Mark the first pending row after at least one finished
+  // step `next` (role stays "pending" — the chip and the elapsed math are
+  // untouched) so the presentations can show honest motion: "the previous step
+  // finished, this one is about to report".
+  function markNextStep(rows) {
+    var busy = rows.some(function (r) { return r.role === "active" || r.role === "failed"; });
+    if (busy) return rows;
+    var hasDone = false;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].role === "ok") hasDone = true;
+      else if (rows[i].role === "pending" && hasDone) { rows[i].next = true; break; }
+    }
+    return rows;
+  }
+
+  // The canonical fold: rows in SERVER_STEP_ORDER (planned steps ALWAYS
+  // present, pending if unstarted; OPTIONAL fallback steps only once reported),
+  // then any UNKNOWN steps appended in first-seen order.
   function provisionSteps(bp, now) {
     var raw = (bp && bp.provision_steps) || [];
     now = (typeof now === "number") ? now : Date.now();
@@ -5188,7 +5236,9 @@
       byStep[s.step].push(s);
       if (!known[s.step]) { known[s.step] = true; order.push(s.step); }
     }
-    return order.map(function (name) { return buildProvisionRow(name, byStep[name] || [], now); });
+    return markNextStep(order
+      .filter(function (name) { return !(SERVER_STEP_OPTIONAL[name] && !byStep[name]); })
+      .map(function (name) { return buildProvisionRow(name, byStep[name] || [], now); }));
   }
 
   // Total elapsed since the FIRST valid step stamp (null if none) — the chip +
@@ -5229,20 +5279,43 @@
   }
 
   // ── Mount 1 presentation: the /new checklist markup (byte-locked in tests) ──
+  // The active row's dot doubles as the per-phase loading bar: a conic-gradient
+  // ring filled by --p (stepRingProgress over the phase's expected duration),
+  // ticked IN PLACE each second via data-ring — never a rebuild. The time
+  // column narrates pace: pending "~30s" (the plan), active "12s · ~30s" (live,
+  // ticked via data-time), done/failed the real elapsed. A `next` row (see
+  // markNextStep) keeps the pending dot but pulses + spins so the between-steps
+  // window never reads frozen.
   function newStepsHtml(rows) {
     return '<ul class="new-steps">' + rows.map(function (row) {
       var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : "pending";
+      if (row.next) cls += " next";
       var dot = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
-      var capHtml = row.caption
-        ? '<span class="new-step-detail" data-cap="' + esc(row.caption) + '">' + esc(row.caption) + "</span>"
+      var expected = SERVER_STEP_EXPECTED_MS[row.step];
+      var dotAttrs = ' aria-hidden="true"';
+      if (row.role === "active") {
+        var pct = Math.round(stepRingProgress(row.elapsedMs, expected) * 100);
+        dotAttrs = ' aria-hidden="true" data-ring="' + esc(row.step) + '" style="--p:' + pct + '%"';
+      }
+      var cap = row.caption || (row.next ? "Starting…" : "");
+      var capHtml = cap
+        ? '<span class="new-step-detail" data-cap="' + esc(cap) + '">' + esc(cap) + "</span>"
         : "";
-      return '<li class="new-step ' + cls + '">' +
-        '<span class="new-step-dot" aria-hidden="true">' + dot + "</span>" +
+      var time = "";
+      if (row.role === "active") time = fmtDur(row.elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
+      else if (row.role === "pending") time = expected ? "~" + fmtDur(expected) : "";
+      else if (row.elapsedMs != null) time = fmtDur(row.elapsedMs);
+      var timeHtml = time
+        ? '<span class="new-step-time"' + (row.role === "active" ? ' data-time="' + esc(row.step) + '"' : "") + ">" + esc(time) + "</span>"
+        : "";
+      return '<li class="new-step ' + cls + '" data-step="' + esc(row.step) + '">' +
+        '<span class="new-step-dot"' + dotAttrs + ">" + dot + "</span>" +
         '<span class="new-step-body">' +
           '<span class="new-step-label">' + esc(row.label) + "</span>" +
           capHtml +
         "</span>" +
-        (row.role === "active" ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
+        timeHtml +
+        (row.role === "active" || row.next ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
         "</li>";
     }).join("") + "</ul>";
   }
@@ -5255,14 +5328,17 @@
       var mark = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
       var elapsed = '<span class="bp-tl-elapsed" data-step="' + esc(row.step) + '">' +
         (row.elapsedMs != null ? fmtDur(row.elapsedMs) : "") + "</span>";
-      var cap = row.caption ? '<div class="bp-tl-caption">' + esc(row.caption) + "</div>" : "";
+      var capText = row.caption || (row.next ? "Starting…" : "");
+      var cap = capText ? '<div class="bp-tl-caption">' + esc(capText) + "</div>" : "";
       var probes = (row.probes && row.probes.length)
         ? '<ul class="bp-tl-probes">' + row.probes.map(function (p) {
             return '<li class="bp-tl-probe">' + esc(p) + "</li>";
           }).join("") + "</ul>"
         : "";
-      var spin = row.role === "active" ? '<span class="bp-tl-spin" aria-hidden="true"></span>' : "";
-      return '<li class="bp-tl-step bp-tl-step--' + esc(row.role) + '">' +
+      // A `next` row spins too — the between-steps window shows motion here as
+      // well, dimmed by the --next class so it reads "about to", not "running".
+      var spin = (row.role === "active" || row.next) ? '<span class="bp-tl-spin" aria-hidden="true"></span>' : "";
+      return '<li class="bp-tl-step bp-tl-step--' + esc(row.role) + (row.next ? " bp-tl-step--next" : "") + '">' +
           '<span class="bp-tl-dot" aria-hidden="true">' + mark + "</span>" +
           '<div class="bp-tl-body">' +
             '<div class="bp-tl-line"><span class="bp-tl-label">' + esc(row.label) + "</span>" + elapsed + "</div>" +
@@ -5663,15 +5739,17 @@
     // dwb-16: live-console + connection-honesty state. serverConsole holds the
     // worker's redacted narration lines (bp.provision_console); consoleStick keeps
     // the panel pinned to the bottom UNLESS the user scrolled up; lastPollOkAt +
-    // the SSE-error flag drive the "connection lost" banner. progressSig lets the
-    // 1s tick update only the elapsed clock (leaving the console DOM + scroll
-    // untouched) when nothing structural changed.
+    // the SSE-error flag drive the "connection lost" banner. The region sigs
+    // (steps/console/banner) let every later render patch ONLY what changed —
+    // a clock tick never touches the DOM structure (see newRenderProgress).
     newState.serverConsole = newState.serverConsole || [];
     newState.consoleStick = true;
     newState.consoleCollapsed = false;
     newState.provisionStatus = null;
     newState.lastPollOkAt = Date.now();
-    newState.progressSig = null;
+    newState.stepsSig = null;
+    newState.consoleSig = null;
+    newState.bannerSig = null;
     // Reflect in the URL so a refresh RESUMES progress (not a fresh launch).
     history.replaceState(null, "", "/new?template=" + encodeURIComponent(newState.slug || "") + "&bp=" + encodeURIComponent(id));
     connectEvents(); // live fleet signals over SSE (auto-reconnects)
@@ -5752,11 +5830,12 @@
     return p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
   }
 
-  // The dark, monospace, auto-scrolling console panel — VISIBLE BY DEFAULT during
-  // provisioning (that's the point), collapsible. Timestamps per line.
-  function newConsoleHtml() {
+  // The console BODY lines alone — split out so a new line patches just the
+  // body element in place (scroll + toggle listeners survive) instead of
+  // rebuilding the whole panel.
+  function newConsoleBodyHtml() {
     var lines = newDisplayConsole();
-    var body = lines.length
+    return lines.length
       ? lines.map(function (e) {
           var ts = newFmtConsoleTime(e.at);
           return '<div class="new-console-line">' +
@@ -5764,6 +5843,12 @@
             '<span class="new-console-text">' + esc(e.line) + "</span></div>";
         }).join("")
       : '<div class="new-console-line dim">Waiting for the first log line…</div>';
+  }
+
+  // The dark, monospace, auto-scrolling console panel — VISIBLE BY DEFAULT during
+  // provisioning (that's the point), collapsible. Timestamps per line.
+  function newConsoleHtml() {
+    var body = newConsoleBodyHtml();
     var collapsed = !!newState.consoleCollapsed;
     return '<div class="new-console' + (collapsed ? " is-collapsed" : "") + '">' +
         '<button type="button" class="new-console-toggle" id="new-console-toggle" aria-expanded="' + (collapsed ? "false" : "true") + '">' +
@@ -5809,84 +5894,140 @@
     }
   }
 
-  // A stable signature of everything the progress screen shows EXCEPT the elapsed
-  // clock — so the 1s tick can update just the clock (leaving the console DOM +
-  // the user's scroll position alone) and only fully rebuild when something real
-  // changed (a new step, a new console line, the banner, or a collapse toggle).
-  function newProgressSig() {
+  // ── Region signatures: the progress screen patches three regions
+  // INDEPENDENTLY, so a change in one never rebuilds (and never restarts the
+  // CSS animations of) another. This is the fix for "the animations keep
+  // resetting": previously every 4s poll force-rebuilt the whole panel, and any
+  // new console line re-mounted the steps list — restarting the active-step
+  // spinner and replaying every caption fade. Now:
+  //   * steps sig   → the checklist <ul> is replaced only when a step's
+  //     status/caption really changed (that re-mount IS what re-plays the
+  //     dwb-19 caption fade, deliberately);
+  //   * console sig → only the console BODY's innerHTML is patched (the panel
+  //     shell, its toggle listener and the scroll state survive);
+  //   * banner sig  → the connection-lost banner is inserted/removed alone.
+  // The elapsed clock + the active step's ring/time tick in place every second
+  // via newTickProgressClock — zero DOM rebuilds on a pure clock tick.
+  function newStepsSig() {
     var byStep = newStepStatuses(newState.serverSteps);
     var detailByStep = newStepDetails(newState.serverSteps);
-    // dwb-19: fold the live captions into the signature so a caption change (with
-    // no status change) still triggers a rebuild — that's what re-plays the fade.
     var stepSig = SERVER_STEP_ORDER.map(function (n) {
       return (byStep[n] || "-") + ":" + (detailByStep[n] || "");
     }).join(",");
+    return stepSig + "|" + ((newState.serverSteps && newState.serverSteps.length) ? "s" : "p");
+  }
+  function newConsoleSig() {
     var dc = newDisplayConsole();
     var lastAt = dc.length ? (dc[dc.length - 1].at || "client") : "none";
-    return stepSig + "|" + dc.length + "|" + lastAt +
-      "|" + (newState.consoleCollapsed ? "c" : "o") +
-      "|" + (newConnLost() ? "lost" : "ok") +
-      "|" + ((newState.serverSteps && newState.serverSteps.length) ? "s" : "p");
+    return dc.length + "|" + lastAt;
   }
 
-  function newRenderProgress(force) {
-    if (!newState || newState.step !== "progress") return;
+  // The 1s liveness tick, all patched in place: the header elapsed clock, the
+  // active step's ring fill (--p) and its live "12s · ~30s" time. Also advances
+  // the `next`-row decoration when the active step changes purely by TIME
+  // passing is impossible — that's server-driven — so no step DOM is touched.
+  function newTickProgressClock() {
     var serverSteps = newState.serverSteps || [];
-    var elapsed = newElapsedSeconds(serverSteps);
-
-    // Fast path: nothing structural changed, so just refresh the elapsed clock in
-    // place — never re-render the console (that would reset the user's scroll).
-    var sig = newProgressSig();
-    if (!force && sig === newState.progressSig) {
-      var el = document.querySelector("#new-body .new-elapsed");
-      if (el) el.textContent = elapsed + "s elapsed";
+    var el = document.querySelector("#new-body .new-elapsed");
+    if (el) el.textContent = newElapsedSeconds(serverSteps) + "s elapsed";
+    var dot = document.querySelector("#new-body .new-step-dot[data-ring]");
+    if (!dot) return;
+    var step = dot.getAttribute("data-ring");
+    var rows = provisionSteps({ provision_steps: serverSteps }, Date.now());
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].step !== step || rows[i].role !== "active") continue;
+      var expected = SERVER_STEP_EXPECTED_MS[step];
+      dot.style.setProperty("--p", Math.round(stepRingProgress(rows[i].elapsedMs, expected) * 100) + "%");
+      var t = document.querySelector('#new-body .new-step-time[data-time="' + step + '"]');
+      if (t) t.textContent = fmtDur(rows[i].elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
       return;
     }
-    newState.progressSig = sig;
+  }
 
-    // Preserve the user's scroll position across the full rebuild when they've
-    // scrolled up (not stuck to bottom), so a newly-arrived line doesn't yank them.
-    var prevBody = document.querySelector("#new-body .new-console-body");
-    if (prevBody && newState.consoleStick === false) newState.consoleScrollTop = prevBody.scrollTop;
-
-    var title = (newState.template && newState.template.title) || "your Barkpark";
-
-    // Pre-first-event placeholder: honest "Starting…" (client optimism, bounded to
-    // the window before the worker reports its first transition), never a bare spinner.
-    var stepsHtml;
+  // The steps region's markup: the pre-first-event placeholder, else the fold.
+  function newProgressStepsHtml() {
+    var serverSteps = newState.serverSteps || [];
     if (!serverSteps.length) {
-      stepsHtml = '<ul class="new-steps"><li class="new-step active">' +
+      // Pre-first-event placeholder: honest "Starting…" (client optimism, bounded
+      // to the window before the worker reports its first transition), never a
+      // bare spinner.
+      return '<ul class="new-steps"><li class="new-step active">' +
         '<span class="new-step-dot" aria-hidden="true"></span>' +
         '<span class="new-step-label">Starting…</span>' +
         '<span class="new-step-spin" aria-hidden="true"></span>' +
         "</li></ul>";
-    } else {
-      // C3: one fold. The /new checklist and the instance-detail timeline both
-      // render from provisionSteps; newStepsHtml preserves the exact pre-C3
-      // markup (dwb-19 caption re-mount fade + the active-step spinner).
-      stepsHtml = newStepsHtml(provisionSteps({ provision_steps: serverSteps }, Date.now()));
+    }
+    // C3: one fold. The /new checklist and the instance-detail timeline both
+    // render from provisionSteps.
+    return newStepsHtml(provisionSteps({ provision_steps: serverSteps }, Date.now()));
+  }
+
+  function newRenderProgress(force) {
+    if (!newState || newState.step !== "progress") return;
+    var stepsSig = newStepsSig();
+    var consoleSig = newConsoleSig();
+    var bannerSig = newConnLost() ? "lost" : "ok";
+    var mounted = document.querySelector("#new-body .new-progress");
+
+    if (!mounted || force) {
+      // Full mount — the first render (or an explicit rebuild). Everything after
+      // this patches in place.
+      newState.stepsSig = stepsSig;
+      newState.consoleSig = consoleSig;
+      newState.bannerSig = bannerSig;
+      // Preserve the user's console scroll across the rebuild when they've
+      // scrolled up (not stuck to bottom).
+      var prevBody = document.querySelector("#new-body .new-console-body");
+      if (prevBody && newState.consoleStick === false) newState.consoleScrollTop = prevBody.scrollTop;
+      var title = (newState.template && newState.template.title) || "your Barkpark";
+      newSetBody(newPanel(
+        '<div class="new-progress">' +
+          newConnBannerHtml() +
+          "<h2>Setting up " + esc(title) + "</h2>" +
+          '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + newElapsedSeconds(newState.serverSteps || []) + "s elapsed</span></p>" +
+          newProgressStepsHtml() +
+          newConsoleHtml() +
+        "</div>"));
+      newWireConsole();
+      newTickProgressClock();
+      return;
     }
 
-    newSetBody(newPanel(
-      '<div class="new-progress">' +
-        newConnBannerHtml() +
-        "<h2>Setting up " + esc(title) + "</h2>" +
-        '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + elapsed + "s elapsed</span></p>" +
-        stepsHtml +
-        newConsoleHtml() +
-      "</div>"));
-    newWireConsole();
+    if (stepsSig !== newState.stepsSig) {
+      newState.stepsSig = stepsSig;
+      var ul = mounted.querySelector(".new-steps");
+      // The re-mount replays the dwb-19 caption fade for the changed list —
+      // that's the intended "new information" cue.
+      if (ul) ul.outerHTML = newProgressStepsHtml();
+    }
+    if (consoleSig !== newState.consoleSig) {
+      newState.consoleSig = consoleSig;
+      var body = mounted.querySelector(".new-console-body");
+      if (body) {
+        body.innerHTML = newConsoleBodyHtml();
+        if (newState.consoleStick !== false) body.scrollTop = body.scrollHeight;
+      }
+    }
+    if (bannerSig !== newState.bannerSig) {
+      newState.bannerSig = bannerSig;
+      var banner = mounted.querySelector(".new-conn-lost");
+      if (bannerSig === "lost" && !banner) mounted.insertAdjacentHTML("afterbegin", newConnBannerHtml());
+      else if (bannerSig === "ok" && banner) banner.parentNode.removeChild(banner);
+    }
+    newTickProgressClock();
   }
 
   function newCheckStatus(id) {
     api("GET", "/v1/barkparks", null, {}).then(function (r) {
       // dwb-16: a FAILED poll (network error / non-2xx) leaves lastPollOkAt stale
       // so the connection-lost banner can surface if SSE is ALSO down >10s. Never
-      // a silent frozen spinner — re-render so the banner shows/hides honestly.
-      if (!(r.ok && r.data && r.data.barkparks)) { newRenderProgress(true); return; }
+      // a silent frozen spinner — render UNFORCED: the banner-sig patch shows/
+      // hides it honestly, and an unchanged screen is left alone (a forced
+      // rebuild here is what used to restart every animation on each poll).
+      if (!(r.ok && r.data && r.data.barkparks)) { newRenderProgress(); return; }
       newState.lastPollOkAt = Date.now();
       var bp = r.data.barkparks.filter(function (x) { return String(x.id) === String(id); })[0];
-      if (!bp) { newRenderProgress(true); return; }
+      if (!bp) { newRenderProgress(); return; }
       // Stash the SERVER-reported steps + live console so the progress screen
       // renders real, refresh-durable state (not the old client-side timer).
       newState.serverSteps = bp.provision_steps || [];
@@ -5894,7 +6035,7 @@
       newState.provisionStatus = bp.provision_status || null;
       if (bp.host) { newRenderReady(bp); }
       else if (bp.provision_status === "failed") { newRenderFailed(bp); }
-      else { newRenderProgress(true); } // still provisioning — re-render server state now
+      else { newRenderProgress(); } // still provisioning — patch whatever changed
     });
   }
 
@@ -6353,6 +6494,10 @@
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
       serverStepOrder: SERVER_STEP_ORDER, serverStepLabels: SERVER_STEP_LABELS,
+      // Progress-polish: per-phase pacing (ring estimates), the fallback-step
+      // set, and the between-steps `next` marker.
+      serverStepExpectedMs: SERVER_STEP_EXPECTED_MS, serverStepOptional: SERVER_STEP_OPTIONAL,
+      stepRingProgress: stepRingProgress, markNextStep: markNextStep,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +
