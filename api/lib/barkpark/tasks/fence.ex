@@ -64,7 +64,12 @@ defmodule Barkpark.Tasks.Fence do
             {:ok, edge, bundle}
 
           {:error, %Ecto.Changeset{} = cs} ->
-            {:error, cs}
+            # A failed INSERT (e.g. FK violation on a ghost id) leaves the
+            # transaction aborted — returning the changeset as a plain value
+            # would surface as {:error, :rollback} to the caller. Repo.rollback
+            # carries it out explicitly, preserving the bare Edges.add_dep
+            # contract ({:error, %Ecto.Changeset{}}).
+            Repo.rollback(cs)
         end
       end)
 
@@ -73,11 +78,8 @@ defmodule Barkpark.Tasks.Fence do
         :ok = emit_broadcasts(List.wrap(bundle))
         {:ok, edge}
 
-      {:ok, {:error, cs}} ->
+      {:error, %Ecto.Changeset{} = cs} ->
         {:error, cs}
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
