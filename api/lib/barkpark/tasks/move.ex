@@ -28,11 +28,22 @@ defmodule Barkpark.Tasks.Move do
   #     is idempotent: `{:ok, doc}` with NO write, NO event (the rail did not
   #     change, so there is nothing to announce).
   #
+  # ## rail-l4 fence (allow-and-fence)
+  #
+  # Moving an `in_progress` task mutates its world, so the reparent CAS write
+  # ALSO bumps `content.claim.epoch` by 1 (folded into the one UPDATE, not a
+  # second write) and the `task.reparented` event notes `"fenced" =>
+  # "reparented"`. The mover is NEVER rejected; the holder's old-epoch `close`
+  # is now `fenced_off` and it recovers via a same-worker re-claim (renewal,
+  # see `Barkpark.Tasks.Claim`). Only the epoch moves — work_digest/worker/
+  # ts_iso stay as the holder stamped them.
+  #
   import Ecto.Query, only: [from: 2]
 
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      current_epoch: 1,
       insert_mutation_event!: 5,
       task_broadcast: 4,
       emit_broadcasts: 1
@@ -103,11 +114,17 @@ defmodule Barkpark.Tasks.Move do
     observed_rev = doc.rev
     new_rev = generate_rev()
 
-    new_content =
+    reparented =
       case new_parent_doc_id do
         nil -> Map.delete(doc.content, "parent_id")
         pid -> Map.put(doc.content, "parent_id", pid)
       end
+
+    # rail-l4 allow-and-fence: an `in_progress` task's world just changed, so
+    # bump its claim epoch in the SAME CAS write (never a second UPDATE) — the
+    # holder's old-epoch close is now fenced_off and must resync. Only the epoch
+    # moves; work_digest/worker/ts_iso stay as the holder stamped them.
+    {new_content, fenced?} = maybe_fence(reparented, doc)
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
@@ -118,14 +135,41 @@ defmodule Barkpark.Tasks.Move do
     case rows do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
-        extra = %{"reparented" => %{"from" => old_parent, "to" => new_parent_doc_id}}
-        ev = insert_mutation_event!(updated, @event_task_reparented, observed_rev, "api", extra)
+
+        ev =
+          insert_mutation_event!(
+            updated,
+            @event_task_reparented,
+            observed_rev,
+            "api",
+            reparent_payload(old_parent, new_parent_doc_id, fenced?)
+          )
 
         {:ok, updated, [task_broadcast(updated, @event_task_reparented, ev, observed_rev)]}
 
       0 ->
         {:error, :stale_claim}
     end
+  end
+
+  # Fold the fencing epoch bump into the reparent write when the moved task is a
+  # live claim. Returns `{new_content, fenced?}`.
+  defp maybe_fence(content, %Document{} = doc) do
+    case content do
+      %{"lifecycle_status" => "in_progress", "claim" => claim} when is_map(claim) ->
+        bumped = Map.put(claim, "epoch", current_epoch(doc) + 1)
+        {Map.put(content, "claim", bumped), true}
+
+      _ ->
+        {content, false}
+    end
+  end
+
+  # The task.reparented document payload — always {from, to}; when the move also
+  # fenced a live claim, note it so the event stream shows why the epoch moved.
+  defp reparent_payload(old_parent, new_parent_doc_id, fenced?) do
+    base = %{"reparented" => %{"from" => old_parent, "to" => new_parent_doc_id}}
+    if fenced?, do: Map.put(base, "fenced", "reparented"), else: base
   end
 
   # ─── cycle detection ─────────────────────────────────────────────────────

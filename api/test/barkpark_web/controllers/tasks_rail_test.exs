@@ -69,7 +69,7 @@ defmodule BarkparkWeb.TasksRailTest do
   # ─── Acceptance criterion 3: the canonical multi-agent case ──────────────
 
   describe "canonical: a blocker filed onto a claimed task surfaces on prime AND close" do
-    test "blocked_while_claimed rides B's next prime and close; the close still commits",
+    test "blocked_while_claimed rides B's prime; after the L4 edge fence, a renewal + close still surface it",
          %{conn: conn, scope: scope} do
       parent = uniq("epic")
       t5 = mk_task!(uniq("t5"), scope, %{"parent_id" => parent})
@@ -81,6 +81,7 @@ defmodule BarkparkWeb.TasksRailTest do
       assert epoch == 1
 
       # A SECOND actor (agent A) files a blocks edge t5 → t9 (t9 still open).
+      # rail-l4 allow-and-fence: this bumps t5's epoch (t5 is in_progress).
       {:ok, _} = Tasks.add_dep(t5.id, t9.id, :blocks)
 
       # (a) B's prime carries blocked_while_claimed for t5 with t9 in blockers.
@@ -92,17 +93,41 @@ defmodule BarkparkWeb.TasksRailTest do
       assert String.contains?(blocked["task_id"], "t5")
       assert Enum.any?(blocked["blockers"], &String.contains?(&1, "t9"))
 
-      # (b) B's close carries the SAME notice — and STILL COMMITS (advisory).
-      close_body = Jason.encode!(%{worker_id: "B", observed_epoch: epoch})
+      # (b) B's close with the OLD epoch is now FENCED (L4) — the edge landed on
+      # its claimed task, so it must resync first.
+      stale_close = Jason.encode!(%{worker_id: "B", observed_epoch: epoch})
 
-      close =
+      fenced =
         conn
         |> authed()
-        |> post("/v1/tasks/#{t5.doc_id}/close", close_body)
+        |> post("/v1/tasks/#{t5.doc_id}/close", stale_close)
+        |> json_response(409)
+
+      assert fenced["reason"] == "fenced_off"
+
+      # (c) B renews its lease (same-worker re-claim) → 200 with a fresh epoch
+      # AND the blocked_while_claimed notice rides the renewal envelope.
+      renew =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{t5.doc_id}/claim", Jason.encode!(%{worker_id: "B"}))
         |> json_response(200)
 
+      # epoch moved twice: +1 for the L4 edge fence, +1 for this renewal.
+      new_epoch = renew["doc"]["claim"]["epoch"]
+      assert new_epoch == epoch + 2
+      assert notice_of(renew, "blocked_while_claimed")
+
+      # (d) B's close with the NEW epoch commits (blocked status), and the same
+      # notice rides the close envelope.
+      close_body =
+        Jason.encode!(%{worker_id: "B", observed_epoch: new_epoch, lifecycle_status: "blocked"})
+
+      close =
+        conn |> authed() |> post("/v1/tasks/#{t5.doc_id}/close", close_body) |> json_response(200)
+
       assert close["ok"] == true
-      assert close["doc"]["lifecycle_status"] == "done"
+      assert close["doc"]["lifecycle_status"] == "blocked"
 
       blocked2 = notice_of(close, "blocked_while_claimed")
       assert blocked2, "expected a blocked_while_claimed notice on close"

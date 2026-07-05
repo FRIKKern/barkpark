@@ -74,6 +74,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Edge
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.Fence
   alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
@@ -177,11 +178,17 @@ defmodule Barkpark.Tasks do
 
   @doc """
   Add a dependency edge: `child` blocks on `parent`. `kind` defaults to
-  `:blocks`. See `Barkpark.Tasks.Edges.add_dep/3`.
+  `:blocks`.
+
+  rail-l4 allow-and-fence: routes through `Barkpark.Tasks.Fence.add_dep/3`, so
+  when the DEPENDENT (`child`) task is `in_progress` the edge-add bumps its
+  claim epoch in the same transaction (the mutating agent is never rejected —
+  the holder is fenced instead). The `{:ok, %Edge{}}` contract is unchanged.
+  See `Barkpark.Tasks.Fence.add_dep/3` (which calls `Edges.add_dep/3`).
   """
   @spec add_dep(binary(), binary(), atom() | String.t()) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks), do: Edges.add_dep(child_id, parent_id, kind)
+  def add_dep(child_id, parent_id, kind \\ :blocks), do: Fence.add_dep(child_id, parent_id, kind)
 
   @doc """
   Remove the `(child_id, parent_id, kind)` edge.
@@ -342,7 +349,11 @@ defmodule Barkpark.Tasks do
   explicit pre-flight checks for the four error modes:
 
     * `:not_found` — no doc with this `doc_id` under the caller's tenancy
-    * `:not_ready` — lifecycle_status not in [`open`, `blocked`]
+    * `:not_ready` — lifecycle_status not in [`open`, `blocked`]. EXCEPTION
+      (rail-l4): an `in_progress` task re-claimed by the SAME worker that holds
+      it is a lease RENEWAL, not `:not_ready` — the recovery path after a fence
+      bump (bump epoch + refresh ts_iso, KEEP the original work_digest). A
+      DIFFERENT worker still gets `:not_ready`.
     * `:blocked_by_unsatisfied_deps` — has outbound `blocks` edges whose
       target's lifecycle_status is not `done`
     * `:stale_claim` — CAS lost (extremely rare under the advisory lock)
