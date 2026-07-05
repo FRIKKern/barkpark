@@ -75,6 +75,13 @@ config :barkpark_cloud, BarkparkCloud.GitHub,
   webhook_secret: nil,
   app_slug: nil
 
+# Zero-paste Vercel handoff: the in-memory Fake by default (dev/test — no
+# network, no token); runtime.exs selects Real in prod once the platform token
+# is wired. Off (feature_not_configured) is a valid state.
+config :barkpark_cloud, BarkparkCloud.Vercel,
+  client: BarkparkCloud.Vercel.Fake,
+  token: nil
+
 # dwb-17: the provision stale-claim threshold. A `claimed` provision job whose
 # `claimed_at` is older than this is treated as abandoned and re-claimable by the
 # StaleProvisionJobReaper. Raised 12 → 25 min to stay ABOVE the Go worker's

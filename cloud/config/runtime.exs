@@ -166,6 +166,29 @@ if config_env() == :prod do
       app_slug: System.get_env("GITHUB_APP_SLUG")
   end
 
+  # Zero-paste Vercel handoff (task-4e4a53b101a97051, HUMAN-LAST): with
+  # VERCEL_PLATFORM_TOKEN wired, the deploy endpoint platform-deploys templates
+  # (env installed server-side) and mints claim codes. Absent → configured?/0 is
+  # false, the endpoint 503s feature_not_configured, and the SPA falls back to
+  # the classic /new/clone copy-block handoff. VERCEL_TEAM_ID is required only
+  # for a team-scoped token (appended as ?teamId= on every call).
+  vercel_token = System.get_env("VERCEL_PLATFORM_TOKEN")
+
+  if vercel_token && vercel_token != "" do
+    config :barkpark_cloud, BarkparkCloud.Vercel,
+      client: BarkparkCloud.Vercel.Real,
+      token: vercel_token,
+      team_id: System.get_env("VERCEL_TEAM_ID"),
+      http_client: &BarkparkCloud.Billing.HttpClient.request/1
+  else
+    # Token absent → keep the in-memory Fake OUT of prod. Select Real with NO
+    # token so any accidental invocation fails CLOSED (:not_configured) — the
+    # endpoint is already gated OFF by `configured?/0`.
+    config :barkpark_cloud, BarkparkCloud.Vercel,
+      client: BarkparkCloud.Vercel.Real,
+      token: nil
+  end
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,

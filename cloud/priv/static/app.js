@@ -6264,18 +6264,59 @@
     "</div>";
   }
 
+  // ── Zero-paste Vercel handoff (task-4e4a53b101a97051) ──────────────────────
+  // When the control plane has a platform token, the "Deploy to Vercel" button
+  // POSTs /vercel-deploy: WE deploy the template with every env value already
+  // installed server-side, then render the claim link
+  // (vercel.com/claim-deployment?code=…) — the user claims the fully configured
+  // project into their account. Zero pasting; secrets never ride a URL. When
+  // the token is absent (vercel.configured false) the classic /new/clone +
+  // copy-block flow renders instead and keeps working forever.
+
+  // The claim link markup for an already-deployed instance with a FRESH code.
+  // returnUrl brings the user back to this instance after the transfer.
+  function vercelClaimLinkHtml(vercel, bp) {
+    var ret = location.origin + "/#instance/" + ((bp && bp.id) || "");
+    var href = vercel.claim_url + "&returnUrl=" + encodeURIComponent(ret);
+    return '<a class="btn btn-block btn-vercel" id="new-vercel-claim-link" href="' + esc(href) + '" target="_blank" rel="noopener">Claim your deployment on Vercel</a>' +
+      (vercel.deployment_url
+        ? '<p class="new-fineprint dim">Live at <a class="mono" href="' + esc(vercel.deployment_url) + '" target="_blank" rel="noopener">' + esc(vercel.deployment_url) + "</a> — claim it to make it yours.</p>"
+        : "");
+  }
+
+  // The whole one-click area: "" when the feature is off (caller falls back to
+  // the clone-URL flow); a claim link when a fresh code exists; else the deploy
+  // button (which also RE-MINTS a stale code — same POST).
+  function vercelClaimHtml(vercel, bp) {
+    if (!vercel || !vercel.configured) return "";
+    var inner;
+    if (vercel.claim_url) {
+      inner = vercelClaimLinkHtml(vercel, bp);
+    } else {
+      var label = vercel.deployed ? "Get your Vercel claim link" : "Deploy your site to Vercel";
+      inner = '<button class="btn btn-block btn-vercel" id="new-vercel-claim" type="button">' + esc(label) + "</button>" +
+        '<p class="new-fineprint dim">One click — we deploy it with every environment variable already set; you just claim it into your Vercel account.</p>';
+    }
+    return '<div id="new-vercel-area">' + inner + "</div>";
+  }
+
   function newReadyHtml(bp, boot, gh) {
     var tpl = newState.template;
     var clone = vercelCloneUrl(tpl, boot);
     var dotenv = envDotenv(tpl, boot);
+    var oneClick = vercelClaimHtml((boot && boot.vercel) || null, bp);
+    var envFineprint = oneClick
+      ? "Your Vercel deployment already has these set — keep them for local development. Treat them as secret."
+      : "Vercel prefills the keys; paste these values when prompted. Treat them as secret.";
     var envBlock = dotenv
       ? '<div class="new-env"><div class="new-env-head"><span>Environment variables</span>' +
           '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all</button></div>' +
           '<pre class="new-env-body">' + esc(dotenv) + "</pre>" +
-          '<p class="new-fineprint dim">Vercel prefills the keys; paste these values when prompted. Treat them as secret.</p></div>'
+          '<p class="new-fineprint dim">' + esc(envFineprint) + "</p></div>"
       : "";
     var extra = newGithubHtml(tpl, gh) +
-      '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>';
+      (oneClick ||
+        '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>');
     var tail = envBlock +
       '<div class="new-golive"><label class="label" for="new-site-url">Once deployed, tell us your site URL</label>' +
         '<div class="new-golive-row"><input class="form-input" id="new-site-url" type="url" placeholder="https://your-site.vercel.app" />' +
@@ -6297,6 +6338,33 @@
     if (sb) sb.addEventListener("click", function () { newSubmitSiteUrl(bp.id, sb); });
     var gc = $("#new-gh-create");
     if (gc) gc.addEventListener("click", function () { newCreateRepo(bp, boot, gh, gc); });
+    var vc = $("#new-vercel-claim");
+    if (vc) vc.addEventListener("click", function () { newVercelDeploy(bp, vc); });
+  }
+
+  // The one-click deploy: POST /vercel-deploy (idempotent — an existing project
+  // only re-mints the claim code), then swap the area for the claim link in
+  // place. Errors re-arm the button with an honest toast.
+  function newVercelDeploy(bp, btn) {
+    btn.disabled = true;
+    btn.textContent = "Deploying to Vercel…";
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/vercel-deploy", {}).then(function (r) {
+      if (r.ok && r.data && r.data.vercel && r.data.vercel.claim_url) {
+        var area = $("#new-vercel-area");
+        if (area) area.innerHTML = vercelClaimLinkHtml(r.data.vercel, bp);
+        toast({ kind: "success", title: "Deployed to Vercel", body: "Claim it to move it into your account." });
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = "Deploy your site to Vercel";
+      if (r.status === 409) {
+        toast({ kind: "error", title: "Nothing to deploy yet", body: "This instance has no content bootstrap." });
+      } else if (r.status === 422) {
+        toast({ kind: "error", title: "This template isn't deployable", body: "It has no standalone app to deploy." });
+      } else {
+        toast({ kind: "error", title: "Couldn't deploy to Vercel", body: friendly(r.data, "Please try again.") });
+      }
+    });
   }
 
   // A sensible default GitHub repo name from the template — lowercase, only the
@@ -6626,6 +6694,9 @@
       // Presentation pacing (min-dwell): pure display shim + the resume seed.
       paceSteps: paceSteps, seedPaceLedger: seedPaceLedger,
       newStepMinDwellMs: NEW_STEP_MIN_DWELL_MS,
+      // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
+      vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
+      vercelCloneUrl: vercelCloneUrl,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +

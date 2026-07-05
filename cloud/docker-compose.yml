@@ -50,6 +50,12 @@ x-control-plane: &control_plane
     - GOOGLE_OAUTH_CLIENT_SECRET
     # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
     - TRIAL_DAYS
+    # Zero-paste Vercel handoff (task-4e4a53b101a97051): passthrough-only, both
+    # optional — unset means the feature is OFF (503 feature_not_configured) and
+    # the SPA keeps the classic clone-URL flow. Set VERCEL_PLATFORM_TOKEN in
+    # cloud/.env to activate; VERCEL_TEAM_ID only for a team-scoped token.
+    - VERCEL_PLATFORM_TOKEN
+    - VERCEL_TEAM_ID
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own
