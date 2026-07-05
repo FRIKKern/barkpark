@@ -1,5 +1,5 @@
 barkpark · tasks            ⇄ guerrilla  ● live · 1m
-⠋ 1 in flight · ○ 34 ready · ✓ 100 done · 3 sta… 67%
+⠋ 1 in flight · ○ 35 ready · ✓ 100 done · 3 sta… 67%
 ██████████████████████████████████░░░░░░░░░░░░░░░░░░
 
 NOW
@@ -33,6 +33,19 @@ NOW
    ! styleguide + gate                    P2 blocked
    ○ pc-empty-9f2a3b                              P3
 
+  Apply the cloud design profile to every s… ··· 2/9
+   ○ living styleguide scaffold                   P3
+    Spine ································· W1 · 0/2
+     ○ W1.2 · Build per-surface token emitt…  P1 0/4
+     ○ W1.3 · Unify status vocabulary         P1 0/3
+    Studio ································ W2 · 0/2
+     ○ W2.5 · Adopt generated tokens in Studio    P2
+     ○ W2.6 · Sweep Studio literal colors         P2
+    Web CLI ····························· W3–4 · 0/2
+     ○ W3.8 · Bridge web @theme to tokens         P2
+     ○ W4.10 · Thread one canonical hex through…  P3
+  +2 done · 1 cancelled
+
   Cloud fleet lifecycle admin ·················· 9/9
   +9 done
 
@@ -43,28 +56,15 @@ NOW
    ○ SUM/AVG spill range                      P2 1/3
    ○ cross-tab pivot header                       P3
    ✓ A:A whole-column ref                     4/4 2h
+  +1 cancelled
 
   (no epic) ···································· 5/8
    ○ quality lint pass on the loose pile          P3
    ○ orph-empty-4c1d
    ○ revisit the old migration path            P4 9d
-  +5 done
+  +5 done · 2 cancelled
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  Unified Aesthetic: one design language, every sur…
 
 
 ────────────────────────────────────────────────────

@@ -50,6 +50,7 @@ var glyphAllowlist = map[rune]string{
 	'─': "section rule",
 	'▎': "selection bar",
 	'·': "dotted leader / meta separator",
+	'–': "en-dash in a phase-band W-code range (W3–4) — charter wave-10 W10-A",
 	'↳': "nested-subtask guide",
 	'⇄': "server marker",
 	'…': "honest truncation ellipsis",

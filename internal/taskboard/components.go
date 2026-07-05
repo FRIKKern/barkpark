@@ -242,6 +242,15 @@ func sectionRollup(sc sectionCounts, code string) (plain, styled string) {
 // minDots survive; extreme widths degrade to a lead + title. The final truncate
 // is the width safety net.
 func renderSectionHeader(title, code string, derived, selected bool, sc sectionCounts, width int) string {
+	return renderSectionHeaderIndent(title, code, derived, selected, 0, sc, width)
+}
+
+// renderSectionHeaderIndent is renderSectionHeader with a leading indent of
+// `indent` extra columns before the 2-col lead — the seam a NAMED phase band
+// (charter wave-10 W10-A) uses to sit one level under its epic header while
+// reusing the exact same dotted-leader + rollup grammar (no drift possible). An
+// indent of 0 is the ordinary section header.
+func renderSectionHeaderIndent(title, code string, derived, selected bool, indent int, sc sectionCounts, width int) string {
 	if strings.TrimSpace(title) == "" {
 		title = "(untitled)" // a section header is never blank (charter D-C)
 	}
@@ -251,9 +260,10 @@ func renderSectionHeader(title, code string, derived, selected bool, sc sectionC
 	railPlain, railStyled := sectionRollup(sc, code)
 	railW := disp(railPlain)
 
-	lead := "  "
+	pre := strings.Repeat(" ", indent)
+	lead := pre + "  "
 	if selected {
-		lead = "▎ "
+		lead = pre + "▎ "
 	}
 	suffixW := 0
 	if derived {
@@ -440,18 +450,20 @@ const dropMetaBelow = 52
 // `frame` / blocked ! amber / done ✓ teal / cancelled ✕ dim); the title stays
 // monochrome (done recedes, in_progress bolds); the right-meta is color-severity
 // priority + bare criteria + blue worker, with an amber blocker badge that sheds
-// LAST. depth nests the row under its parent with a ↳ guide (arbitrary depth).
-// Everything is width-safe: when tight the meta sheds right→left (title never
-// clips below 8 cols), and below dropMetaBelow the row is glyph + title only.
-func TaskRow(t Task, selected bool, depth, width, frame int, now time.Time) []string {
+// LAST. depth nests the row by `depth` indent levels; `guide` draws the ↳
+// subtask cue (decoupled from depth so a phase band's DIRECT child indents one
+// level WITHOUT a spurious guide — charter wave-10 W10-A). Everything is
+// width-safe: when tight the meta sheds right→left (title never clips below 8
+// cols), and below dropMetaBelow the row is glyph + title only.
+func TaskRow(t Task, selected bool, depth int, guide bool, width, frame int, now time.Time) []string {
 	marker := SelectionMarker(selected)
 	glyph := glyphStyleFor(t, now).Render(boardGlyph(t.Lifecycle, frame))
 	indent := childIndent + depth*2
-	guide, pad := "", indent
-	if depth > 0 {
-		guide, pad = "↳ ", indent-2 // the ↳ guide occupies the deepest 2 indent cols
+	guideStr, pad := "", indent
+	if guide {
+		guideStr, pad = "↳ ", indent-2 // the ↳ guide occupies the deepest 2 indent cols
 	}
-	lead := strings.Repeat(" ", pad) + dimStyle.Render(guide) + marker + glyph + " "
+	lead := strings.Repeat(" ", pad) + dimStyle.Render(guideStr) + marker + glyph + " "
 	leadW := indent + 3 // pad + guide(2 or 0) + marker + glyph + space
 	titleText, placeholder := rowTitle(t)
 	tStyle := titleStyleFor(t.Lifecycle)

@@ -608,6 +608,62 @@ program.go/detail_render.go), not trusted from strategists.
     (D42) is what makes that automatic. *Why:* the guard is the anti-creep tripwire; extending it
     is a deliberate act, and per-slice green is never trusted after a vocabulary change.
 
+### Wave-10 architect decisions (2026-07-05 — NAMED phase bands + cancelled folding; the SECTIONING catch-up)
+
+The user put the wave-9/9b board (rich rows correct) beside the mockup again: the remaining gap is
+SECTIONING. The data was CURATED 2026-07-05 so the mockup is now HONEST — the curated epics carry real
+`phase:<n>-<slug>` labels (verified read-only against guerrilla, not trusted: `aesthetic-unification-epic`
+has 38 direct children — 24 across bands `phase:1-spine`…`phase:6-enforce`, 14 unphased done; the dead
+`unified-aesthetic-goal` is a cancelled ROOT + 7 cancelled children; `task-754439` a cancelled childless
+root; 9 cancelled nodes total). All claims tree- and live-verified.
+
+45. **NAMED phase bands, re-added from the NEW data (W10-A) — this REVERSES wave-9b's D-B removal, and
+    the reversal is honest: the DATA changed, not the principle.** wave-9b (D-B) removed the within-epic
+    sub-bands because the corpus then had bare W-codes only, so they rendered as bare "W6"/"W2" orphan
+    lines that doubled the row-title's own code. The 2026-07-05 curation gives every curated child exactly
+    one `phase:<n>-<slug>` label, so bands are now NAMED (title-cased slug — `phase:5-paper-components` →
+    "Paper Components", acronym allowlist tui/cli/…), ORDERED by `<n>`, and carry a real
+    `Wcode · done/total` rollup. An epic with >=2 phase-labeled children splits into ordered sub-bands
+    under its header (unphased children FIRST, directly under the epic header); the Wcode is DERIVED from
+    the band's children's title prefixes (W1.2/W1.3 → "W1"; a band spanning W3.8+W4.10 → the merged
+    "W3–4" en-dash range), omitted when underivable. Bands are DISPLAY-ONLY (`Selectable:false`) emitted
+    by the ONE `spineRows` producer, so cursor-parity stays STRUCTURAL. The wave-8 head cap moves to
+    PER-BAND (<=5/band; the epic's own cap lifts when bands render, else nothing fits). An epic with NO
+    phase-labeled children renders EXACTLY as before — regression-neutral for the uncurated majority
+    (VERIFIED: not one existing golden changed). *Why:* the mockup groups by phase and the data now
+    honestly does too; NEVER fabricate a phase not in the data (the `phase:<n>-<slug>` regex ignores the
+    structural `phase:goal`/`phase:build`/… sentinels and the bare `phase:W1` form).
+
+46. **The band indent is DECOUPLED from tree depth so a band's direct child never wears a spurious ↳.**
+    `TaskRow` gained an explicit `guide bool` (was `depth>0`): a phase band's direct child indents one
+    level (Depth+1) with `Guide:false`, a real subtask below it keeps `Guide:true`. `renderSectionHeader`
+    grew `renderSectionHeaderIndent(indent…)` — bands reuse the EXACT dotted-leader + rollup grammar one
+    level in, so a band header can never drift from a section header. *Why:* ↳ means "subtask", not
+    "indented"; conflating them would lie about the tree.
+
+47. **CANCELLED work folds away ENTIRELY (W10-B) — never a row, at any age.** `buildEpic`/`buildCluster`/
+    `foldStaleOrphans` route cancelled into a dedicated `CancelledFolded` (Epic/Cluster) /
+    `OrphansCancelledFolded` (Board) count, distinct from `DoneFolded`; the trailing dim line reads
+    "+N done · M cancelled" (or "+M cancelled" alone). A section whose ROOT is cancelled collapses to ONE
+    dim tombstone line at the BOTTOM of the board (after clusters/orphans), so dead epics stop occupying
+    prime space (`spineDeadEpic`, display-only). The momentum % EXCLUDES cancelled from the denominator
+    (abandoned work leaves both numerator and denominator); NOW/READY already exclude it. `✕` stays in the
+    glyph allowlist (the ticker/legend may still name a cancelled event) but NEVER paints a board row.
+    *Why:* the mockup shows no cancelled anywhere; abandoned work is noise, and a live board buried 8 dead
+    ✕ rows mid-screen.
+
+48. **Guard BOTH features on the real-corpus fixture + a live read-only dump; goldens regenerated, never
+    hand-edited.** `livecorpus_test.go` gained a banded epic (3 bands incl a merged "W3–4", unphased-first,
+    a done·cancelled tail), a fully-cancelled tombstone epic, and cluster/orphan cancelled folds; the
+    52/56/64/72 goldens + the invariant assertions (band rollups intact, band names present, ZERO `✕`
+    rows, the cancelled tail survives) pin it. The en-dash `–` was added to the BOARD glyph allowlist
+    (one note: the W3–4 range) — the only new glyph. REQUIRED live dump (read-only, guerrilla, never
+    mutating) confirmed: 6 named bands with rollups inside `aesthetic-unification-epic`
+    ("Spine ··· W1 · 0/4" … "Paper Components ··· W5 · 0/11" + a per-band "+6 more"), the dead
+    `unified-aesthetic-goal` reduced to a dim bottom tombstone, ZERO `✕` rows, 67% (cancelled excluded),
+    and every uncurated epic/cluster unchanged. *Why:* wave 9 shipped green-but-wrong on the live corpus
+    once already (the whole reason livecorpus exists); per-slice green is never trusted without the live eye.
+
 ## Roadmap (integration order)
 
 | # | Slice | Size | Wave |
@@ -630,6 +686,7 @@ program.go/detail_render.go), not trusted from strategists.
 | 18 | The subtraction pass: calm board, chip-hue retirement, NOW de-dup, shrunk expand (D14/D22/D23) | L | 5 (this wave) |
 | 17 | Navigation shell: stack + breadcrumb + cursor grammar + adaptive compositor (D11/D12/D18) — onto the calm board | L | 6 (next wave, after subtraction lands) |
 | 21 | The detailed-direction redesign: spec vocabulary (spinner/!/✕/open-ready split/teal done) + momentum header & progress bar + phase bands & rollups + rich row & blocker badge + one spineRows builder (nested ↳) + detail/paper glyph align + full golden regen (D36–D44) | L | 9 (this wave) |
+| 22 | Sectioning: NAMED phase bands from `phase:<n>-<slug>` (ordered, rollups, merged W-range, per-band cap) + cancelled folds entirely away (done·cancelled tail + dead-epic tombstone) + momentum % excludes cancelled (D45–D48) | M | 10 (this wave) |
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
@@ -950,3 +1007,48 @@ status hexes in `theme.go` are BYTE-EQUAL to the spec §1 table (`#60a5fa` blue 
 **Lead merge = fast-forward `-p` onto origin/main; nothing to reconcile.** After merge: docs slice
 (tui.md wave-9 delta + the still-open go-1.24.2/1.25.0 drift) + the RESERVED pdrender/walker
 glyph-unify cross-surface slice remain the only open TUI work; the redesign itself is at the bar.
+
+### Wave 2026-07-05b (wave 10 GREEN: NAMED phase bands + cancelled folding — the SECTIONING catch-up)
+
+**Landed (on `loop-epic/tui10-phase-bands`, one conventional commit, entirely inside `internal/taskboard/`
+except the charter):** the two features D45–D48. All gates green: `CGO_ENABLED=0 go build ./...`,
+`go vet ./internal/taskboard/...`, `CC=/usr/bin/clang go test ./internal/taskboard/... ./internal/cli/...`,
+`-race` CLEAN. Both cursor-parity guards + `TestCursorParityWithPhaseAndNesting` hold UNWEAKENED, plus a
+NEW `TestCursorParityBandedEpic` on the real `phase:<n>-<slug>` bands (the previous fixture used bare
+W-codes, which no longer band). `TestRoleForParityWithSemrole` + `TestGoldenGlyphBudget` green (one new
+board glyph: the en-dash `–` for the W3–4 range, noted).
+
+**Verified read-only against guerrilla BEFORE building (not trusted from the task):** the curated data is
+real — `aesthetic-unification-epic` has 38 direct children (24 across `phase:1-spine`…`phase:6-enforce`,
+14 unphased done); `unified-aesthetic-goal` is a cancelled root + 7 cancelled children; `task-754439` a
+cancelled childless root; 9 cancelled nodes total. The `parity-page` tasks do NOT chain to a
+`parity-page` epic (their `parent_id` is `parity-page`, the doc is `drafts.parity-page` — a data
+mismatch, READ-ONLY, not ours to fix): they render as a `gui-tui-parity` cluster / orphans, unbanded,
+which is correct (banding is epic-only, >=2 phased children).
+
+**REQUIRED live dump (read-only, never mutated) at 52/56/64/72:** `aesthetic-unification-epic` renders
+6 NAMED bands with rollups — "Spine ··· W1 · 0/4", "Studio ··· W2 · 0/3", "Web ··· W3 · 0/2",
+"CLI ··· W4 · 0/2", "Paper Components ··· W5 · 0/11" (with a per-band "+6 more"), "Enforce ··· W6 · 0/2" —
+the 14 unphased done components render FIRST (capped, "+9 more"); the dead `unified-aesthetic-goal`
+collapses to a dim bottom tombstone; ZERO `✕` rows anywhere; momentum 67% (cancelled excluded, else 65%);
+every uncurated epic ("Enterprise-ready auth", "Time-Boxed Airdrop Grants", …) and the `gui-tui-parity`
+cluster render EXACTLY as before.
+
+**Code-verified decisions (not just tests):** ONE `spineRows` producer emits `spinePhaseBand` /
+`spineDeadEpic` (both `Selectable:false`) so BOTH `visibleRows` and `flattenSpine` read them — parity is
+structural; `phaseBands`/`deriveBandCode`/`titleCaseSlug` live in `spine.go`; `TaskRow` grew an explicit
+`guide bool` (band indent ≠ ↳ nesting); `renderSectionHeaderIndent` is the shared indented header;
+`buildEpic`/`buildCluster`/`foldStaleOrphans` route cancelled into `CancelledFolded` (any age);
+`progressPct` drops the `cancelled` Counts key. Not one PRE-EXISTING golden changed — the phase-less
+majority is regression-neutral by construction.
+
+**Honest scope notes:** the per-band done/cancelled tail is EPIC-LEVEL (buildEpic folds terminal children
+before the phase labels are grouped), so a banded epic's folds surface as one trailing
+"+N done · M cancelled" under all bands rather than attributed to a specific band's mockup line
+("+2 more done — folded" under Paper Components) — honest, and re-attributing would require preserving
+folded children's phase labels (deferred, low value). A single-band epic (>=2 phased children all sharing
+one phase) still bands (named header + rollup) — harmless. The dead-epic tombstone is non-selectable
+(a tombstone is not actionable); if inspecting a cancelled epic ever matters, make it selectable later.
+
+**Next:** docs slice (tui.md wave-9/10 delta + the go-1.24.2/1.25.0 drift) + the RESERVED pdrender/walker
+glyph-unify cross-surface slice remain the open TUI work.

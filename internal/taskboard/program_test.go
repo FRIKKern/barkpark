@@ -322,6 +322,107 @@ func TestVisibleRowsWithPhaseAndNesting(t2 *testing.T) {
 	}
 }
 
+// bandedBoard exercises the wave-10 NAMED PHASE BANDS (W10-A): an epic whose
+// children carry phase:<n>-<slug> labels — a 7-child "1-spine" band (to force the
+// per-band head cap: 5 shown + "+2 more"), a 2-child "3-web-cli" band whose
+// members span W3/W4 titles (merged "W3–4" code), and one unphased child that
+// renders FIRST. The epic is NOT active, so the default per-band cap applies.
+func bandedBoard() Board {
+	tp := func(id, title, phase string) Task {
+		return Task{DocID: id, Title: title, Lifecycle: lifeOpen, Labels: []string{labelPhasePrefix + phase}}
+	}
+	children := []Task{
+		{DocID: "un", Title: "un unphased scaffold", Lifecycle: lifeReady}, // unphased → first
+		tp("sp1", "sp1 W1.1 spine slice", "1-spine"),
+		tp("sp2", "sp2 W1.2 spine slice", "1-spine"),
+		tp("sp3", "sp3 W1.3 spine slice", "1-spine"),
+		tp("sp4", "sp4 W1.4 spine slice", "1-spine"),
+		tp("sp5", "sp5 W1.5 spine slice", "1-spine"),
+		tp("sp6", "sp6 W1.6 spine slice", "1-spine"),
+		tp("sp7", "sp7 W1.7 spine slice", "1-spine"),
+		tp("wc1", "wc1 W3.1 web bridge", "3-web-cli"),
+		tp("wc2", "wc2 W4.1 cli thread", "3-web-cli"),
+	}
+	return Board{Epics: []Epic{{Root: t("pe"), Children: children}}}
+}
+
+// TestBandedVisibleRows pins the selectable index space of a banded epic: the
+// band HEADERS and the per-band "+K more" fold are display-only (Selectable:
+// false), so the navigable list is exactly the epic header + the unphased child +
+// the 5 capped spine children + the 2 web-cli children — never a band line.
+func TestBandedVisibleRows(t2 *testing.T) {
+	m := testModel(bandedBoard())
+	rows := m.visibleRows()
+	want := []struct {
+		kind  rowKind
+		docID string
+	}{
+		{rowEpicHeader, "pe"},
+		{rowChild, "un"},
+		{rowChild, "sp1"}, {rowChild, "sp2"}, {rowChild, "sp3"}, {rowChild, "sp4"}, {rowChild, "sp5"},
+		{rowChild, "wc1"}, {rowChild, "wc2"},
+	}
+	if len(rows) != len(want) {
+		t2.Fatalf("got %d selectable rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].kind != w.kind || rows[i].docID != w.docID {
+			t2.Errorf("row %d = {%v %q}, want {%v %q}", i, rows[i].kind, rows[i].docID, w.kind, w.docID)
+		}
+	}
+}
+
+// TestBandedRenderStructure eyeballs the painted band frame: named headers with
+// rollups (incl the merged "W3–4"), the per-band cap fold, the unphased child
+// first, and no cancelled/blank noise.
+func TestBandedRenderStructure(t2 *testing.T) {
+	m := testModel(bandedBoard())
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 60
+	frame := ansi.Strip(m.View())
+	for _, want := range []string{"Spine ", "W1 · 0/7", "Web CLI ", "W3–4 · 0/2", "+2 more", "unphased scaffold"} {
+		if !strings.Contains(frame, want) {
+			t2.Errorf("banded frame missing %q\n%s", want, frame)
+		}
+	}
+	// The 6th and 7th spine slices are folded behind "+2 more", never rows.
+	if strings.Contains(frame, "W1.7 spine slice") {
+		t2.Errorf("spine band exceeded its per-band head cap (W1.7 should be folded)\n%s", frame)
+	}
+}
+
+// TestCursorParityBandedEpic is the shell↔render tripwire on the NEW named bands:
+// for every cursor index the ▎ marker sits on exactly the row visibleRows says —
+// proving the display-only band headers + fold lines never shift the selection
+// index space (charter wave-10 W10-A structural parity via the one spineRows).
+func TestCursorParityBandedEpic(t2 *testing.T) {
+	m := testModel(bandedBoard())
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 60
+
+	rows := m.visibleRows()
+	for i, r := range rows {
+		m.ui.Cursor = i
+		frame := ansi.Strip(m.View())
+		var marked []string
+		for _, ln := range strings.Split(frame, "\n") {
+			if strings.Contains(ln, "▎") {
+				marked = append(marked, ln)
+			}
+		}
+		if len(marked) != 1 {
+			t2.Fatalf("cursor %d (%v %q): %d ▎-marked lines, want 1\n%s", i, r.kind, r.docID, len(marked), frame)
+		}
+		if !strings.Contains(marked[0], r.docID) && r.docID != "un" {
+			t2.Errorf("cursor %d: marked line %q does not carry %q (kind %v)", i, marked[0], r.docID, r.kind)
+		}
+	}
+}
+
 // TestCursorParityWithPhaseAndNesting is the shell↔render tripwire on a NON-flat
 // board: with arbitrary-depth ↳ rows, the ▎ marker in the painted frame must sit
 // on exactly the row visibleRows says the cursor is on — proving the display-only

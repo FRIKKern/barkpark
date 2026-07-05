@@ -16,16 +16,19 @@ import (
 // live guerrilla corpus because its goldens used CURATED fixtures that already
 // resembled the mockup: the real corpus (many epics, a full-FQDN server, W-code-
 // only "phases", empty titles, narrow portrait) rendered wrong while the tests
-// stayed green. This fixture is DELIBERATELY real-corpus-shaped — 6 epics (one a
-// clean W1/W2/W6 multi-phase decomposition, one with 30+ children, several with
-// names long enough to force ellipsis), a derived cluster, loose orphans, a
+// stayed green. This fixture is DELIBERATELY real-corpus-shaped — 8 epics (one a
+// clean W1/W2/W6 multi-phase decomposition, one with 30+ children, one the
+// wave-10 NAMED-PHASE-BANDS epic (Spine/Studio/Web-CLI with a merged W3–4 range +
+// an unphased-first child + a done·cancelled tail), one a fully-CANCELLED
+// tombstone, several with names long enough to force ellipsis), a derived cluster
+// (with a folded cancelled member), loose orphans (with folded cancelled), a
 // pinned NOW claim, empty-title tasks, and a full-URL server — rendered at the
 // portrait widths where the defects lived (52/56/64/72). It is the regression
-// guard for D-A..D-E: the golden captures the calm mockup look, and the
-// assertions pin the invariants a golden alone would not (server = first DNS
-// label, "tasks" never truncates, no bare phase-band line, no blank row, and the
-// section rollup / momentum % NEVER truncate — meta is reserved before the title
-// ellipsizes).
+// guard for D-A..D-E AND wave-10 W10-A/B: the golden captures the calm mockup
+// look, and the assertions pin the invariants a golden alone would not (server =
+// first DNS label, "tasks" never truncates, no bare phase-band line, no blank
+// row, ZERO ✕ cancelled rows, and the section rollup / momentum % NEVER truncate
+// — meta is reserved before the title ellipsizes).
 
 var corpusFixedNow = time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 
@@ -110,8 +113,44 @@ func corpusBoard() Board {
 		Children: []Task{withCrit(ctask("doey1", "hybrid timestamps everywhere", lifeReady, "3"), 0, 2)},
 	}
 
+	// Epic 7 — the wave-10 NAMED PHASE BANDS (W10-A). Children carry
+	// phase:<n>-<slug> labels forming three ordered bands (Spine / Studio /
+	// Web CLI); the third band's members span W3.x and W4.x titles, so its derived
+	// code MERGES to the "W3–4" range. One unphased ready child exercises the
+	// "unphased first" rule (renders directly under the epic header, before any
+	// band); DoneFolded + CancelledFolded exercise the trailing
+	// "+N done · M cancelled" tail (W10-B). Active → every band shown in full
+	// (stable golden; the per-band head cap is unit-tested separately).
+	ph := func(id, title, life, pri, phase string, met, total int) Task {
+		return withCrit(withLabels(ctask(id, title, life, pri), labelPhasePrefix+phase), met, total)
+	}
+	unified := Epic{
+		Root:   ctask("unified", "Apply the cloud design profile to every surface", lifeOpen, "2"),
+		Active: true,
+		Children: []Task{
+			ctask("u-scaffold", "living styleguide scaffold", lifeReady, "3"), // unphased → first
+			ph("u-w12", "W1.2 · Build per-surface token emitters", lifeOpen, "1", "1-spine", 0, 4),
+			ph("u-w13", "W1.3 · Unify status vocabulary", lifeOpen, "1", "1-spine", 0, 3),
+			ph("u-w25", "W2.5 · Adopt generated tokens in Studio", lifeOpen, "2", "2-studio", 0, 0),
+			ph("u-w26", "W2.6 · Sweep Studio literal colors", lifeOpen, "2", "2-studio", 0, 0),
+			ph("u-w38", "W3.8 · Bridge web @theme to tokens", lifeOpen, "2", "3-web-cli", 0, 0),
+			ph("u-w410", "W4.10 · Thread one canonical hex through Go", lifeOpen, "3", "3-web-cli", 0, 0),
+		},
+		DoneFolded:      2, // the unphased component fleet, long done → folded
+		CancelledFolded: 1, // one abandoned slice → "· 1 cancelled"
+	}
+
+	// A fully-CANCELLED epic (W10-B): the root itself is cancelled, so the whole
+	// section collapses to ONE dim tombstone line at the BOTTOM of the board — its
+	// seven dead children never render as rows.
+	dead := Epic{
+		Root:            ctask("dead-ua", "Unified Aesthetic: one design language, every surface", lifeCancelled, ""),
+		CancelledFolded: 7,
+	}
+
 	// A derived cluster (dim title + "~") and loose orphans, including an empty-
-	// title orphan and a 9-day-stale open row (amber stale badge).
+	// title orphan and a 9-day-stale open row (amber stale badge). The cluster
+	// carries one cancelled member (folded → "· 1 cancelled" tail, W10-B).
 	sheets := Cluster{
 		Key: "proj:sheets-parity",
 		Tasks: []Task{
@@ -119,6 +158,7 @@ func corpusBoard() Board {
 			ctask("sp2", "cross-tab pivot header", lifeOpen, "3"),
 			withCrit(ctask("sp3", "A:A whole-column ref", lifeDone, ""), 4, 4),
 		},
+		CancelledFolded: 1,
 	}
 
 	stale := ctask("orph-stale", "revisit the old migration path", lifeOpen, "4")
@@ -136,13 +176,16 @@ func corpusBoard() Board {
 	claim.Criteria = &Criteria{Met: 1, Total: 2}
 
 	return Board{
-		Now:           []Task{claim},
-		Epics:         []Epic{auth, big, tokens, papers, fleet, doey},
-		Clusters:      []Cluster{sheets},
-		Orphans:       orphans,
-		OrphansFolded: 5,
-		Stale:         3,
-		Counts:        map[string]int{"in_progress": 1, "blocked": 2, "open": 47, "done": 100},
+		Now:                    []Task{claim},
+		Epics:                  []Epic{auth, big, tokens, papers, unified, fleet, doey, dead},
+		Clusters:               []Cluster{sheets},
+		Orphans:                orphans,
+		OrphansFolded:          5,
+		OrphansCancelledFolded: 2, // two abandoned loose tasks → "· 2 cancelled"
+		Stale:                  3,
+		// "cancelled": 10 rides the summed Counts so the momentum % must EXCLUDE it
+		// (W10-B): 100 done / (150 non-cancelled) = 67%, never 100/160 = 63%.
+		Counts: map[string]int{"in_progress": 1, "blocked": 2, "open": 47, "done": 100, "cancelled": 10},
 	}
 }
 
@@ -237,6 +280,33 @@ func TestLiveCorpusInvariants(t *testing.T) {
 			if blankRowRe.MatchString(ln) {
 				t.Errorf("w%d: blank glyph-only row %q (D-C regression)", width, ln)
 			}
+			// W10-B: cancelled work NEVER renders as a row anywhere — not a ✕ glyph,
+			// not a dead epic's children. The only place "cancelled" may appear is a
+			// dim fold tail or the tombstone line (neither carries the ✕ glyph).
+			if strings.ContainsRune(ln, '✕') {
+				t.Errorf("w%d: a ✕ cancelled glyph rendered as a row %q (W10-B regression)", width, ln)
+			}
+		}
+
+		// W10-A: the NAMED phase bands carry an intact `Wcode · done/total` rollup,
+		// including the merged "W3–4" range — and, like the section rollups, it is
+		// reserved before the band NAME ellipsizes (never truncated at these widths).
+		for _, roll := range []string{"W1 · 0/2", "W2 · 0/2", "W3–4 · 0/2"} {
+			if width >= 52 && !strings.Contains(frame, roll) {
+				t.Errorf("w%d: phase-band rollup %q missing or truncated (W10-A regression)\n%s", width, roll, frame)
+			}
+		}
+		// W10-A: the derived band NAMES are present (title-cased slug, acronym
+		// allowlist upper-cases CLI).
+		for _, name := range []string{"Spine ", "Studio ", "Web CLI "} {
+			if width >= 52 && !strings.Contains(frame, name) {
+				t.Errorf("w%d: phase-band name %q missing (W10-A regression)\n%s", width, name, frame)
+			}
+		}
+		// W10-B: the cancelled folds surface as a dim "cancelled" tail (never rows),
+		// and the fully-cancelled epic is a single dim tombstone line.
+		if !strings.Contains(frame, "cancelled") {
+			t.Errorf("w%d: the cancelled fold tail / tombstone vanished (W10-B regression)\n%s", width, frame)
 		}
 
 		// D-D: the section rollup done/total and the momentum % must NEVER be

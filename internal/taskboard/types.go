@@ -80,11 +80,17 @@ type Board struct {
 	Epics    []Epic    // attention-ranked
 	Clusters []Cluster // derived label clusters, freshest-first (after authored epics)
 	Orphans  []Task    // surviving loose tasks, band-ordered
-	// OrphansFolded is the count of terminal (done/closed/cancelled) orphans
-	// older than the fold threshold, hidden into a single "+N done" line the
-	// same way an epic folds its stale children — so a flat queue of long-closed
-	// tasks collapses to a short honest tail instead of burying the live rows.
+	// OrphansFolded is the count of terminal (done/closed) orphans older than the
+	// fold threshold, hidden into a single "+N done" line the same way an epic
+	// folds its stale children — so a flat queue of long-closed tasks collapses to
+	// a short honest tail instead of burying the live rows.
 	OrphansFolded int
+	// OrphansCancelledFolded is the count of CANCELLED loose tasks (charter
+	// wave-10 W10-B). Cancelled work never renders as a row at any age — it folds
+	// entirely into the section's trailing "· N cancelled" tail, so abandoned rows
+	// stop occupying the pane. Distinct from OrphansFolded so the tail reads
+	// "+N done · M cancelled" and the done tally never absorbs abandoned work.
+	OrphansCancelledFolded int
 	// OrphansActive is true when the loose "(no epic)" bucket owns at least one
 	// NOW task (an in_progress live claim). It is the orphan bucket's twin of
 	// Epic.Active / Cluster.Active: the ONE auto-fold input for the orphan header
@@ -121,7 +127,12 @@ type Epic struct {
 	Root       Task
 	Children   []Task // policy-ordered
 	DoneFolded int    // count of done children folded away
-	Dormant    bool   // idle >7d (computed; no longer drives folding, see Active)
+	// CancelledFolded is the count of cancelled children folded entirely away
+	// (charter wave-10 W10-B) — cancelled work never renders as a row, at any
+	// age. When the epic ROOT itself is cancelled the whole section collapses to
+	// one dim tombstone line at the bottom of the board (spineDeadEpic).
+	CancelledFolded int
+	Dormant         bool // idle >7d (computed; no longer drives folding, see Active)
 	// Active is true when the epic owns at least one NOW task (an in_progress
 	// live claim) — the ONE auto-fold input (wave-7 decision 32): an epic folds
 	// to a single header line by DEFAULT and auto-EXPANDS only when it holds the
@@ -138,6 +149,9 @@ type Cluster struct {
 	Key        string // the full tag, e.g. "proj:sheets-parity"
 	Tasks      []Task // band-ordered like epic children
 	DoneFolded int    // terminal members older than 24h, folded to a count
+	// CancelledFolded is the count of cancelled members folded entirely away
+	// (charter wave-10 W10-B), mirroring Epic.CancelledFolded.
+	CancelledFolded int
 	// Active mirrors Epic.Active for a derived cluster: true when the cluster
 	// owns a NOW task, folding the section by default and auto-expanding only the
 	// cluster whose work is actually running (wave-7 decision 32).

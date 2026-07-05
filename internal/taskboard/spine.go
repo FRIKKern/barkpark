@@ -1,7 +1,10 @@
 package taskboard
 
 import (
+	"fmt"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -24,8 +27,10 @@ const (
 	spineEpicHeader                     // authored-epic section header (selectable)
 	spineClusterHeader                  // derived-cluster section header (selectable)
 	spineOrphanHeader                   // the loose "(no epic)" header (selectable)
+	spinePhaseBand                      // a named phase sub-band header inside an epic (display-only, W10-A)
 	spineTask                           // a task row — epic child / cluster member / orphan (selectable)
-	spineMore                           // "+K more" / "+N done" fold line (display-only)
+	spineMore                           // "+K more" / "+N done · M cancelled" fold line (display-only)
+	spineDeadEpic                       // a cancelled-root epic collapsed to one dim tombstone line (display-only, W10-B)
 	spineEmpty                          // the syncing / all-clear fallback (display-only)
 )
 
@@ -46,6 +51,11 @@ type SpineRow struct {
 	Ref        string // task doc id, or a header fold key
 	Selectable bool
 	RK         rowKind // the shell rowKind for a selectable row
+	// Guide draws the ↳ subtask guide on a spineTask row. It is decoupled from
+	// Depth so a phase band's DIRECT child can be indented one level (Depth>0)
+	// WITHOUT a ↳ guide (it is not a subtask), while a real subtask below it wears
+	// the guide (charter wave-10 W10-A: band indent ≠ tree nesting).
+	Guide bool
 
 	task Task          // spineTask
 	hdr  spineHeader   // *Header
@@ -53,7 +63,7 @@ type SpineRow struct {
 	text string        // spineEmpty
 }
 
-type spineMoreInfo struct{ hidden, done int }
+type spineMoreInfo struct{ hidden, done, cancelled int }
 
 // spineRows is the whole spine order+fold rule in one place (charter D42). It
 // mirrors the pre-refactor flattenSpine/visibleRows structure exactly for a flat
@@ -68,60 +78,125 @@ func spineRows(b Board, st UIState) []SpineRow {
 		}
 	}
 
-	// Each section: header (selectable), then its nested+capped children with
-	// optional phase sub-bands, then the "+K more"/"+N done" fold line.
+	// emitNested renders a task subtree in parent-before-child tree order, capped
+	// to `cap` rows (cap<0 = unlimited), each row offset by `depthOffset` indent
+	// levels WITHOUT a spurious ↳ guide on the offset (Guide rides the tree depth
+	// only). The remainder folds behind a depth-aligned "+K more" line.
+	emitNested := func(tasks []Task, depthOffset, cap int, shellRK rowKind) {
+		if len(tasks) == 0 {
+			return
+		}
+		nested := nestTasks(tasks)
+		shown := len(nested)
+		if cap >= 0 && cap < shown {
+			shown = cap
+		}
+		for _, nt := range nested[:shown] {
+			rows = append(rows, SpineRow{
+				Kind: spineTask, Depth: nt.depth + depthOffset, Ref: nt.task.DocID, Selectable: true,
+				RK: shellRK, task: nt.task, Guide: nt.depth > 0,
+			})
+		}
+		if hidden := len(nested) - shown; hidden > 0 {
+			rows = append(rows, SpineRow{Kind: spineMore, Depth: depthOffset, more: spineMoreInfo{hidden: hidden}})
+		}
+	}
+
+	// Each section: header (selectable), then its nested+capped children — with
+	// NAMED phase sub-bands when the section is an epic whose children carry
+	// phase:<n>-<slug> labels (charter wave-10 W10-A) — then the trailing
+	// "+K more"/"+N done · M cancelled" fold line.
 	section := func(rk spineKind, shellRK rowKind, foldKey, title, code string, derived bool,
-		tasks []Task, shown, doneFolded int) {
+		tasks []Task, shown, doneFolded, cancelledFolded int, allowBands bool) {
 		sep()
 		rows = append(rows, SpineRow{
 			Kind: rk, Ref: foldKey, Selectable: true, RK: headerRowKind(rk),
 			hdr: spineHeader{title: title, code: code, derived: derived, counts: countSection(tasks, doneFolded)},
 		})
 		emitted = true
-		// Nest the FULL child set, then cap to the shown head — capping in tree
-		// order shows a coherent top-down slice (charter D42 head-of-5 cap).
-		//
-		// wave-9b (D-B): within-epic phase SUB-BANDS are gone. On the live corpus
-		// they rendered as bare orphan "W6"/"W2"/"W1" lines with no leader/rollup
-		// AND doubled the phase code the rows already carry in their titles
-		// ("W6 · DPA template …"). The mockup groups phases at the SECTION level
-		// (each phase is its own dotted-leader header with a `Wcode · done/total`
-		// rollup — renderSectionHeader already does that via phaseCodeOf(root));
-		// it never nests a sub-band inside an epic. So the epic is ONE clean band
-		// and its rows keep their natural titles — no bare labels, no doubling.
+
+		// W10-A: named phase bands. When an epic's children carry >=2
+		// phase:<n>-<slug> labels, group them into ordered, named sub-bands, each a
+		// display-only dotted-leader header with its own Wcode·done/total rollup.
+		// The wave-8 head cap now applies PER BAND (the epic's own cap lifts, else
+		// nothing would fit). Unphased children go FIRST, directly under the epic
+		// header. wave-9b removed the OLD bare-W-code sub-bands (codes without
+		// names, doubling the row titles); this re-adds NAMED bands from the new
+		// phase labels — the data changed, not the principle: never fabricate a
+		// phase not in the data.
+		var bands []phaseBand
+		var unphased []Task
+		if allowBands && shown > 0 {
+			bands, unphased = phaseBands(tasks)
+		}
+		if len(bands) > 0 {
+			capPerBand := groupHeadMax
+			if shown >= len(tasks) { // fully expanded (active / explicit unfold) → no cap
+				capPerBand = -1
+			}
+			emitNested(unphased, 0, capPerBand, shellRK) // phase-less children first
+			for _, bd := range bands {
+				rows = append(rows, SpineRow{
+					Kind: spinePhaseBand, Depth: 1, Selectable: false,
+					hdr: spineHeader{title: bd.name, code: bd.code, counts: countSection(bd.tasks, 0)},
+				})
+				emitNested(bd.tasks, 1, capPerBand, shellRK)
+			}
+			// The epic's done/cancelled folds happened before banding (buildEpic),
+			// so they surface as one epic-level trailing tally.
+			if doneFolded > 0 || cancelledFolded > 0 {
+				rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{done: doneFolded, cancelled: cancelledFolded}})
+			}
+			return
+		}
+
+		// Flat (non-banded) section — nest the FULL child set, then cap to the
+		// shown head (capping in tree order shows a coherent top-down slice).
 		nested := nestTasks(tasks)
 		if shown > len(nested) {
 			shown = len(nested)
 		}
-		nested = nested[:shown]
-		for _, nt := range nested {
+		for _, nt := range nested[:shown] {
 			rows = append(rows, SpineRow{
 				Kind: spineTask, Depth: nt.depth, Ref: nt.task.DocID, Selectable: true,
-				RK: shellRK, task: nt.task,
+				RK: shellRK, task: nt.task, Guide: nt.depth > 0,
 			})
 		}
-		if hidden := len(tasks) - shown; hidden > 0 {
-			rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded}})
-		} else if doneFolded > 0 {
-			rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{done: doneFolded}})
+		hidden := len(nested) - shown
+		if hidden > 0 || doneFolded > 0 || cancelledFolded > 0 {
+			rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
 		}
 	}
 
+	// W10-B: a cancelled-root epic is a tombstone — it collapses to ONE dim line
+	// at the very BOTTOM of the board (after clusters/orphans), so dead epics stop
+	// occupying prime space. Partition them out of the in-place epic loop here.
+	var deadEpics []Epic
 	for _, e := range b.Epics {
+		if e.Root.Lifecycle == lifeCancelled {
+			deadEpics = append(deadEpics, e)
+			continue
+		}
 		section(spineEpicHeader, rowChild, e.Root.DocID, e.Root.Title, phaseCodeOf(e.Root), false,
-			e.Children, epicShown(st, e), e.DoneFolded)
+			e.Children, epicShown(st, e), e.DoneFolded, e.CancelledFolded, true)
 	}
 	for _, cl := range b.Clusters {
 		section(spineClusterHeader, rowClusterMember, clusterFoldKey(cl.Key),
-			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterShown(st, cl), cl.DoneFolded)
+			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterShown(st, cl), cl.DoneFolded, cl.CancelledFolded, false)
 	}
-	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
+	if len(b.Orphans) > 0 || b.OrphansFolded > 0 || b.OrphansCancelledFolded > 0 {
 		title := "(no epic)"
 		if len(b.Epics) == 0 {
 			title = "tasks"
 		}
 		section(spineOrphanHeader, rowOrphan, orphansFoldKey, title, "", false,
-			b.Orphans, orphansShown(st, b), b.OrphansFolded)
+			b.Orphans, orphansShown(st, b), b.OrphansFolded, b.OrphansCancelledFolded, false)
+	}
+	for _, e := range deadEpics {
+		sep()
+		rows = append(rows, SpineRow{Kind: spineDeadEpic, Ref: e.Root.DocID, Selectable: false,
+			hdr: spineHeader{title: e.Root.Title}})
+		emitted = true
 	}
 
 	if !emitted {
@@ -232,4 +307,151 @@ func phaseCodeOf(t Task) string {
 		return m
 	}
 	return ""
+}
+
+// ── Named phase bands (charter wave-10 W10-A) ────────────────────────────────
+
+// phaseBand is one named phase sub-band inside an epic: the children sharing a
+// phase:<n>-<slug> label, ordered by the leading ordinal.
+type phaseBand struct {
+	order string // the leading ordinal, e.g. "1" (string-sortable, <=7 phases)
+	name  string // title-cased slug — phase:5-paper-components → "Paper Components"
+	code  string // Wcode derived from the children's title prefixes ("" when none)
+	tasks []Task
+}
+
+// phaseNumSlugRe matches a phase:<n>-<slug> label VALUE: a 1-based ordinal, a
+// hyphen, then a kebab slug. It deliberately does NOT match the structural
+// sentinels (phase:goal / phase:build / phase:work …) or the bare W-code phases
+// (phase:W1) — only the wave-10 named form drives banding.
+var phaseNumSlugRe = regexp.MustCompile(`^(\d+)-(.+)$`)
+
+// phaseLabelOf returns a task's phase ordinal + slug when it carries exactly one
+// phase:<n>-<slug> label, else ok=false. The first matching label wins (tasks
+// carry exactly one by the authoring contract).
+func phaseLabelOf(t Task) (ord, slug string, ok bool) {
+	for _, l := range t.Labels {
+		if !strings.HasPrefix(l, labelPhasePrefix) {
+			continue
+		}
+		v := strings.TrimSpace(l[len(labelPhasePrefix):])
+		if m := phaseNumSlugRe.FindStringSubmatch(v); m != nil {
+			return m[1], m[2], true
+		}
+	}
+	return "", "", false
+}
+
+// phaseBands groups an epic's children into ordered, named phase bands from their
+// phase:<n>-<slug> labels (charter W10-A). It bands ONLY when >=2 children carry
+// such a label (else it returns nil bands + every task as unphased, so an epic
+// with no phase metadata renders exactly as before — regression-neutral for the
+// uncurated majority). Bands sort by ordinal (then slug); children keep their
+// input (policy/band) order within a band.
+func phaseBands(tasks []Task) (bands []phaseBand, unphased []Task) {
+	type acc struct {
+		order, slug string
+		tasks       []Task
+	}
+	groups := map[string]*acc{}
+	var order []string
+	phased := 0
+	for _, t := range tasks {
+		ord, slug, ok := phaseLabelOf(t)
+		if !ok {
+			unphased = append(unphased, t)
+			continue
+		}
+		phased++
+		key := ord + "-" + slug
+		g, seen := groups[key]
+		if !seen {
+			g = &acc{order: ord, slug: slug}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.tasks = append(g.tasks, t)
+	}
+	if phased < 2 {
+		return nil, tasks
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := groups[order[i]], groups[order[j]]
+		if a.order != b.order {
+			return a.order < b.order
+		}
+		return a.slug < b.slug
+	})
+	for _, k := range order {
+		g := groups[k]
+		bands = append(bands, phaseBand{
+			order: g.order, name: titleCaseSlug(g.slug), code: deriveBandCode(g.tasks), tasks: g.tasks,
+		})
+	}
+	return bands, unphased
+}
+
+// acronymAllowlist upper-cases known initialisms when title-casing a slug; every
+// other kebab word is plain Title Case (phase:3-web → "Web").
+var acronymAllowlist = map[string]string{
+	"tui": "TUI", "cli": "CLI", "ui": "UI", "api": "API", "sdk": "SDK",
+	"cf": "CF", "dr": "DR", "sso": "SSO", "saml": "SAML", "dpa": "DPA",
+}
+
+// titleCaseSlug renders a phase slug as a band name: split on "-", title-case
+// each kebab word (acronyms upper-cased). phase:5-paper-components → "Paper
+// Components"; phase:1-feel-alive → "Feel Alive".
+func titleCaseSlug(slug string) string {
+	parts := strings.Split(slug, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		if a, ok := acronymAllowlist[strings.ToLower(p)]; ok {
+			parts[i] = a
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+// wMajorRe captures the MAJOR wave number from a title's W-code (W1.2 → 1,
+// W3–4 → 3). Used to derive a band's rollup code from its children's titles.
+var wMajorRe = regexp.MustCompile(`\bW(\d+)`)
+
+// deriveBandCode derives a band's Wcode from its children's title prefixes: one
+// distinct major → "W<n>"; a span → "W<min>–<max>" (en-dash, the mockup's
+// "W3–4"); none derivable → "" (the rollup renders alone). It reads the titles,
+// NOT the phase label, so a band whose members span waves 3 and 4 merges into one
+// honest "W3–4" range.
+func deriveBandCode(tasks []Task) string {
+	lo, hi, found := 0, 0, false
+	for _, t := range tasks {
+		m := wMajorRe.FindStringSubmatch(t.Title)
+		if m == nil {
+			continue
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		if !found {
+			lo, hi, found = n, n, true
+			continue
+		}
+		if n < lo {
+			lo = n
+		}
+		if n > hi {
+			hi = n
+		}
+	}
+	if !found {
+		return ""
+	}
+	if lo == hi {
+		return fmt.Sprintf("W%d", lo)
+	}
+	return fmt.Sprintf("W%d–%d", lo, hi) // en-dash range
 }

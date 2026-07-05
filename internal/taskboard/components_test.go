@@ -218,7 +218,7 @@ func TestTaskRowRightMetaNoGarble(t *testing.T) {
 		Criteria:  &Criteria{Met: 1, Total: 2},
 	}
 	for _, width := range []int{60, 72, 100} {
-		rows := TaskRow(task, false, 0, width, 0, testNow)
+		rows := TaskRow(task, false, 0, false, width, 0, testNow)
 		if len(rows) != 1 {
 			t.Fatalf("collapsed row should be 1 line, got %d", len(rows))
 		}
@@ -241,7 +241,7 @@ func TestTaskRowDegradesBelow60(t *testing.T) {
 		Lifecycle: "in_progress",
 		Claim:     &Claim{Worker: "opus-3", ClaimedAt: testNow.Add(-2 * time.Minute)},
 	}
-	line := ansi.Strip(TaskRow(task, false, 0, 40, 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, 0, false, 40, 0, testNow)[0])
 	if strings.Contains(line, "opus-3") {
 		t.Errorf("below 60 cols meta should be dropped: %q", line)
 	}
@@ -260,7 +260,7 @@ func TestTaskRowUnclaimedInProgressWearsStaleness(t *testing.T) {
 		Lifecycle: "in_progress",
 		UpdatedAt: testNow.Add(-8 * 24 * time.Hour),
 	}
-	line := ansi.Strip(TaskRow(task, false, 0, 80, 0, testNow)[0])
+	line := ansi.Strip(TaskRow(task, false, 0, false, 80, 0, testNow)[0])
 	if !strings.Contains(line, "8d") {
 		t.Errorf("unclaimed stale in_progress row must wear its age badge: %q", line)
 	}
