@@ -1,9 +1,10 @@
 defmodule Barkpark.Accounts.UserEmailToken do
   @moduledoc """
-  A single-use, hashed email token for `"confirm"` (email verification) and
-  `"reset"` (password reset). Only the SHA-256 hash is stored; the plaintext
-  travels in the emailed link. `sent_to` pins the token to the address it was
-  mailed to; `expires_at` bounds validity. Rows are deleted on successful use.
+  A single-use, hashed email token for `"confirm"` (email verification),
+  `"reset"` (password reset), and `"login"` (passwordless magic-link sign-in).
+  Only the SHA-256 hash is stored; the plaintext travels in the emailed link.
+  `sent_to` pins the token to the address it was mailed to; `expires_at` bounds
+  validity. Rows are deleted on successful use.
   """
   use Ecto.Schema
   import Ecto.Changeset
@@ -11,9 +12,9 @@ defmodule Barkpark.Accounts.UserEmailToken do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @contexts ~w(confirm reset)
-  # Confirmation links live a day; reset links are shorter-lived.
-  @validity %{"confirm" => 60 * 60 * 24, "reset" => 60 * 60}
+  @contexts ~w(confirm reset login)
+  # Confirmation links live a day; reset and magic-login links are short-lived.
+  @validity %{"confirm" => 60 * 60 * 24, "reset" => 60 * 60, "login" => 60 * 15}
 
   schema "user_email_tokens" do
     field :token_hash, :string

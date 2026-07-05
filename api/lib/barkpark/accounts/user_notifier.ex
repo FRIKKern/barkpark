@@ -36,6 +36,18 @@ defmodule Barkpark.Accounts.UserNotifier do
     """)
   end
 
+  @doc "Send the passwordless magic-link sign-in link."
+  def deliver_magic_link(email, url) do
+    deliver(email, "Your Barkpark sign-in link", """
+    Sign in to Barkpark by visiting the link below:
+
+    #{url}
+
+    This link is single-use and expires shortly. If you didn't request it,
+    ignore this message — no one can sign in without it.
+    """)
+  end
+
   @doc """
   Notify an existing user that someone tried to register their email again
   (MEDIUM-7 anti-enumeration: the API returns a generic success, the real owner
