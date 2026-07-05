@@ -922,6 +922,8 @@ defmodule BarkparkWeb.Router do
 
     get("/:org_slug/start", SamlController, :start)
     post("/:org_slug/acs", SamlController, :acs)
+    # IdP-initiated Single Logout (POST binding, signed LogoutRequest).
+    post("/:org_slug/slo", SamlController, :slo)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────

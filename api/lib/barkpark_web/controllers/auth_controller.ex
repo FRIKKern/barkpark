@@ -171,14 +171,40 @@ defmodule BarkparkWeb.AuthController do
   end
 
   def logout(conn, _params) do
-    case bearer_or_cookie(conn) do
-      nil -> :noop
-      token -> Accounts.revoke_user_session_token(token)
-    end
+    slo_url =
+      case bearer_or_cookie(conn) do
+        nil ->
+          nil
+
+        token ->
+          # Capture the session's SAML birth context BEFORE revoking, so a
+          # SAML-born logout can hand back the IdP LogoutRequest URL (SLO).
+          slo = saml_slo_url(token)
+          Accounts.revoke_user_session_token(token)
+          slo
+      end
+
+    body = if slo_url, do: %{ok: true, slo_url: slo_url}, else: %{ok: true}
 
     conn
     |> clear_session()
-    |> json(%{ok: true})
+    |> json(body)
+  end
+
+  # SP-initiated Single Logout: when the session was born from a SAML login and
+  # the org's IdP has an SLO endpoint, the redirect URL that carries our
+  # LogoutRequest to the IdP. The client completes the front channel by sending
+  # the browser there. nil for non-SAML sessions or SLO-less connections.
+  defp saml_slo_url(token) do
+    with {_user, session} <- Accounts.verify_user_session(token),
+         %{saml_org_slug: slug, saml_name_id: name_id}
+         when is_binary(slug) and is_binary(name_id) <- session,
+         c <- Barkpark.Sso.Saml.connection_for_org_slug(slug),
+         true <- Barkpark.Sso.Saml.slo_available?(c) do
+      Barkpark.Sso.Saml.sp_logout_redirect_url(c, slug, name_id, session.saml_session_index)
+    else
+      _ -> nil
+    end
   end
 
   # ── Email verification + password reset ─────────────────────────────────────

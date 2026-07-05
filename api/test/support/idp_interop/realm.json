@@ -34,11 +34,13 @@
       "adminUrl": "http://localhost:4000/v1/auth/saml/keycloak-org/acs",
       "attributes": {
         "saml.assertion.signature": "true",
-        "saml.server.signature": "false",
+        "saml.server.signature": "true",
         "saml.client.signature": "false",
         "saml.force.post.binding": "true",
         "saml_name_id_format": "email",
-        "saml.authnstatement": "true"
+        "saml.authnstatement": "true",
+        "saml_idp_initiated_sso_url_name": "barkpark",
+        "saml_single_logout_service_url_post": "http://localhost:4000/v1/auth/saml/keycloak-org/slo"
       }
     }
   ]

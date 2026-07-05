@@ -32,6 +32,13 @@ defmodule Barkpark.Accounts.UserSession do
     field :ip_address, :string
     field :user_agent, :string
 
+    # SAML birth context (nil for non-SAML sessions): lets logout send an
+    # SP-initiated LogoutRequest, and lets an IdP's LogoutRequest find and
+    # revoke exactly the sessions it names.
+    field :saml_name_id, :string
+    field :saml_session_index, :string
+    field :saml_org_slug, :string
+
     belongs_to :user, Barkpark.Accounts.User
 
     timestamps(type: :utc_datetime_usec)
@@ -123,6 +130,9 @@ defmodule Barkpark.Accounts.UserSession do
       :mfa_verified_at,
       :ip_address,
       :user_agent,
+      :saml_name_id,
+      :saml_session_index,
+      :saml_org_slug,
       :user_id
     ])
     |> validate_required([:token_hash, :user_id])
