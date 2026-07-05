@@ -146,3 +146,58 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 
   return out;
 }
+
+// CLAMP the doctrine locked-template PREFIX after a source-mode round-trip.
+//
+// Markdown SOURCE mode (Mod-Shift-m) lets the user edit the raw markdown of a run
+// freely — including the locked title block that opens a doctrine template
+// (Content.Papers.Template: locked title @0, featured image @1). The SERVER already
+// rejects any op that removes / moves / displaces a locked block (the
+// `{:locked_block, id, op}` class in patch.ex) — but without this clamp the CLIENT
+// view DIVERGES until reload: the rich editor would show the user's edited / deleted
+// / reordered title even though the save was vetoed server-side.
+//
+// This is the FELT half of D4 for source mode — the twin of locks.js
+// `transactionVetoesLock` (which vetoes the same displacements at the rich editor's
+// filterTransaction layer). It runs on the already-realigned parsed blocks and
+// reconstructs the list so its leading locked run is EXACTLY the baseline's
+// (verbatim id + content, at the head), while every NON-locked edit the user made in
+// the textarea survives. `runToOps(L0, clamped)` then emits ZERO ops for the locked
+// prefix, so the client view matches what the server will store — no reload needed.
+//
+// Behaviors (all match the server veto):
+//   • title text EDITED in source     → restored verbatim (edit dropped);
+//   • title DELETED in source          → restored verbatim (delete dropped);
+//   • title MOVED below a paragraph     → restored to the head (move dropped);
+//   • a block INSERTED before the title → lands AFTER it (the prefix holds pos 0);
+//   • body edits (non-locked blocks)    → preserved unchanged.
+//
+// Additive (D3): a baseline with NO leading locked block returns `realigned`
+// untouched — a template-free paper's source round-trip stays byte-identical.
+export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
+  const baseline = Array.isArray(baselineBlocks) ? baselineBlocks : [];
+  const realigned = Array.isArray(realignedBlocks) ? realignedBlocks : [];
+
+  // The leading RUN of locked blocks in the baseline — the doctrine template
+  // prefix. A block carries `locked === true` at the top level (the bp-attrs
+  // round-trip; D3-additive, so an unlocked block has no `locked` key at all).
+  const prefix = [];
+  for (const b of baseline) {
+    if (b && b.locked === true) prefix.push(b);
+    else break;
+  }
+  if (prefix.length === 0) return realigned; // no template → nothing to clamp
+
+  // Every id in the locked prefix. realignBlockIds may have DONATED one of these
+  // ids to a user-edited block (an in-place title edit) or LEFT it unconsumed (a
+  // deleted title); either way strip any realigned block reusing a locked id so
+  // the restored prefix is the SOLE carrier of those ids — the runToOps
+  // duplicate-id guard holds (each locked id appears exactly once).
+  const lockedIds = new Set(prefix.map((b) => b && b.id));
+  const tail = realigned.filter((b) => !(b && lockedIds.has(b.id)));
+
+  // Restore the locked prefix VERBATIM from the baseline (deep-cloned so the caller
+  // never shares structure with this._sourceBaselineBlocks), then the user's
+  // non-locked edits in their textarea order.
+  return [...deepCloneBlocks(prefix), ...tail];
+}
