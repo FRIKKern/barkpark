@@ -136,10 +136,16 @@ type FreshenResult struct {
 	Skipped bool
 	// Checked is set when the cheap check ran and parsed.
 	Checked bool
-	// Behind is set when HEAD differed from origin/main (a rebuild was attempted).
+	// Behind is set when HEAD differed from origin/main (a rebuild OR a
+	// fast-forward was attempted).
 	Behind bool
 	// Rebuilt is set when the rebuild ran AND succeeded — the box now serves current.
 	Rebuilt bool
+	// FastForwarded is set when the drift was confined to box-irrelevant paths
+	// (see boxIrrelevantPaths) and the checkout was caught up with a bare
+	// fast-forward — no rebuild, no restart, nothing narrated: the box's SERVED
+	// behavior was already current.
+	FastForwarded bool
 	// Degraded is set when the box proceeds on the BAKED code after a non-fatal
 	// failure (unreachable fetch / unparseable check / failed rebuild). The box
 	// works; it is just behind.
@@ -223,9 +229,28 @@ func EnsureFresh(ctx context.Context, runner StepRunner, opts FreshenOpts) (Fres
 		return res, nil
 	}
 
+	res.Behind = true
+
+	// Phase 1b — path-aware skip. A warm box goes "behind" the moment ANYTHING
+	// merges to main, but a drift confined to areas the box never serves (docs,
+	// the control plane, the web demo, the JS SDK, CI, markdown) does not change
+	// its behavior — paying the multi-minute rebuild for it would torpedo the
+	// warm go-live for nothing. Diff the drift: if every changed path is inert,
+	// catch the checkout up with a bare fast-forward and stop, SILENTLY (the
+	// box already serves current behavior; there is nothing to narrate). Any
+	// failure here — diff error, ff refused — falls through to the full rebuild
+	// path unchanged, so this is a pure fast-path, never a new failure mode.
+	if dout, derr := cmd.RunOutput(ctx, freshenDiffScript); derr == nil {
+		if boxIrrelevantPaths(strings.Split(dout, "\n")) {
+			if _, ferr := cmd.RunOutput(ctx, freshenFFScript); ferr == nil {
+				res.FastForwarded = true
+				return res, nil
+			}
+		}
+	}
+
 	// Phase 2 — behind → rebuild. This is the desperate-fallback path, and the
 	// only one a watching user should ever see as a first-class step.
-	res.Behind = true
 	narrate("started", "")
 	narrate("progress", updatingCaption(from, to))
 
@@ -250,6 +275,59 @@ func EnsureFresh(ctx context.Context, runner StepRunner, opts FreshenOpts) (Fres
 	res.Rebuilt = true
 	narrate("done", updatedCaption(from, to))
 	return res, nil
+}
+
+// freshenDiffScript lists the paths that differ between the box's HEAD and
+// origin/main (the fetch already ran in freshenCheckScript). Cheap — used to
+// decide whether a drift even AFFECTS what the box serves before paying the
+// multi-minute rebuild.
+const freshenDiffScript = `set -e
+cd ` + freshenRepoDir + `
+git diff --name-only HEAD origin/main`
+
+// freshenFFScript fast-forwards the checkout WITHOUT rebuilding — the catch-up
+// for a box-irrelevant drift. Hooks suppressed for the same reason as
+// freshenRebuildScript; --ff-only refuses a diverged snapshot.
+const freshenFFScript = `set -e
+cd ` + freshenRepoDir + `
+git -c core.hooksPath=/dev/null merge --ff-only origin/main`
+
+// boxIrrelevantPrefixes lists the repo areas a provisioned box never serves or
+// executes: the control plane (cloud/), the web demo, the JS SDK, docs, CI
+// config, agent-harness state, and tooling. Markdown anywhere is likewise
+// inert. Everything else — api/ (the Phoenix app the box serves), the Go
+// module (bp + barkpark-agent are built on-box), scripts/, deploy/, root
+// config — is conservatively box-RELEVANT and takes the full rebuild.
+var boxIrrelevantPrefixes = []string{
+	"docs/", "cloud/", "web/", "js/", ".github/", ".claude/", "tooling/",
+}
+
+// boxIrrelevantPaths reports whether EVERY changed path is inert for the box.
+// An empty/blank list (a rename-only or otherwise odd diff against a known
+// head≠remote) answers false — when the diff can't prove irrelevance, rebuild.
+func boxIrrelevantPaths(paths []string) bool {
+	seen := false
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		seen = true
+		if strings.HasSuffix(p, ".md") {
+			continue
+		}
+		inert := false
+		for _, pre := range boxIrrelevantPrefixes {
+			if strings.HasPrefix(p, pre) {
+				inert = true
+				break
+			}
+		}
+		if !inert {
+			return false
+		}
+	}
+	return seen
 }
 
 // parseFreshenCheck pulls the FRESHEN_* KEY=VALUE lines out of the cheap check's
