@@ -112,6 +112,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # shape-flip patch on load). Both are additive + idempotent + recurse
           # into sections; both are render-preserving.
           list
+          |> Papers.Template.maybe_seed(existing, attrs)
           |> ensure_block_ids()
           |> normalize_list_items()
           |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
@@ -119,6 +120,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
         other ->
           other
       end
+
+    # Doctrine (pdd-t4): the row title IS the locked title block's text — one
+    # truth. Additive: papers with no role:"title" block keep their given title.
+    attrs = Papers.Template.derive_title(attrs, blocks)
 
     # Field-encryption CHOKEPOINT (Phase 2). Encrypt bound block values for any
     # schema field marked `encrypted: true` BEFORE they are rendered into the
@@ -130,8 +135,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # content[fieldName]. Byte-identical no-op when the "paper" schema marks
     # nothing encrypted (or this is an HTML-only, block-less write); fail closed
     # (HIGH-3) when a marked block cannot be sealed — REJECT, never persist.
-    with {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
+    # Doctrine gate (pdd-t3) — the DIRECT paper write path bypasses plugin
+    # lifecycle hooks (this writes via Repo, not Content.mutations), so the
+    # template shape is enforced here too; the Bulldocs before_save hook covers
+    # the mutate path. Same halt shape as a plugin veto so every caller
+    # (Studio, ingest, bp) renders it identically.
+    with [] <- Papers.Template.validate(blocks),
+         {:ok, blocks} <- encrypt_paper_blocks(blocks, dataset) do
       write_encrypted_paper(blocks, attrs, existing, dataset, slug, scope_attrs)
+    else
+      errors when is_list(errors) ->
+        {:error, {:halted, "paper template violated: " <> Enum.join(errors, "; ")}}
+
+      other ->
+        other
     end
   end
 
