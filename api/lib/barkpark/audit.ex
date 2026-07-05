@@ -78,6 +78,23 @@ defmodule Barkpark.Audit do
     |> Chain.verify()
   end
 
+  @doc "The most recent audit events across all workspaces (admin activity view)."
+  @spec recent(non_neg_integer()) :: [Event.t()]
+  def recent(limit \\ 20) do
+    Repo.all(from e in Event, order_by: [desc: e.id], limit: ^limit)
+  end
+
+  @doc "Recent audit events attributed to an organization (via metadata), newest first."
+  @spec recent_for_org(binary(), non_neg_integer()) :: [Event.t()]
+  def recent_for_org(org_id, limit \\ 20) when is_binary(org_id) do
+    Repo.all(
+      from e in Event,
+        where: fragment("?->>'organization_id' = ?", e.metadata, ^org_id),
+        order_by: [desc: e.id],
+        limit: ^limit
+    )
+  end
+
   @doc "List events for a workspace, newest first (a simple read surface)."
   @spec list_for_workspace(String.t() | nil, keyword()) :: [Event.t()]
   def list_for_workspace(workspace_id, opts \\ []) do
