@@ -1,0 +1,45 @@
+{
+  "realm": "barkpark",
+  "enabled": true,
+  "sslRequired": "none",
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@interop.example",
+      "emailVerified": true,
+      "enabled": true,
+      "firstName": "Alice",
+      "lastName": "Interop",
+      "credentials": [
+        { "type": "password", "value": "interop-pass", "temporary": false }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "barkpark-oidc",
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "interop-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:4000/*"],
+      "webOrigins": ["+"]
+    },
+    {
+      "clientId": "http://localhost:4000/saml/keycloak-org/metadata",
+      "protocol": "saml",
+      "enabled": true,
+      "redirectUris": ["http://localhost:4000/*"],
+      "adminUrl": "http://localhost:4000/v1/auth/saml/keycloak-org/acs",
+      "attributes": {
+        "saml.assertion.signature": "true",
+        "saml.server.signature": "false",
+        "saml.client.signature": "false",
+        "saml.force.post.binding": "true",
+        "saml_name_id_format": "email",
+        "saml.authnstatement": "true"
+      }
+    }
+  ]
+}
