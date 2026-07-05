@@ -66,6 +66,7 @@ defmodule BarkparkWeb.QueryController do
                 scope_opts(conn)
             )
             |> project_fields(parse_fields(params["fields"]))
+            |> maybe_resolve_tasks(conn, params)
 
           inner =
             %{
@@ -144,12 +145,59 @@ defmodule BarkparkWeb.QueryController do
             scope_opts(conn)
         )
         |> project_fields(parse_fields(params["fields"]))
+        |> maybe_resolve_tasks(conn, params)
         |> hd()
 
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
       respond(conn, rendered, dataset, sync_tags, etag, t0)
     end
+  end
+
+  # ─── ?resolve=tasks — the API resolve seam (p-resolve-seam) ────────────────
+  #
+  # Resolve-at-read for task blocks lived only in the LiveView reader
+  # (BulldocsLive → Papers.resolve_tasks_in_blocks), so every API consumer —
+  # Go pdrender, web portable-doc.tsx, exports — received RAW `query` blocks and
+  # could not render live plans. Opt-in `?resolve=tasks` runs the SAME resolver
+  # over each rendered doc's `blocks` before responding: query-carrying task
+  # blocks become snapshot-carrying ones; author-pinned snapshots and every
+  # other block pass through untouched. Off by default — the wire contract is
+  # byte-identical unless a caller asks.
+  #
+  # Scope mirrors the public reader (BulldocsLive.reader_task_scope): the
+  # request's own workspace/project scope wins; an unscoped caller falls back
+  # to the seeded Default workspace — the exact tenant whose tasks the public
+  # /papers reader already exposes on the same paper. Underneath, the fetcher
+  # (Tasks.Query.rows_for_query → Scope.scope_to_workspace) stays fail-closed:
+  # a nil workspace resolves to zero rows, never to a cross-tenant leak.
+  defp maybe_resolve_tasks(rendered, conn, %{"resolve" => "tasks"}) when is_list(rendered) do
+    scope = api_task_scope(conn)
+
+    Enum.map(rendered, fn doc ->
+      case doc do
+        %{"blocks" => blocks} when is_list(blocks) ->
+          Map.put(doc, "blocks", Barkpark.Content.Papers.resolve_tasks_in_blocks(blocks, scope))
+
+        _ ->
+          doc
+      end
+    end)
+  end
+
+  defp maybe_resolve_tasks(rendered, _conn, _params), do: rendered
+
+  defp api_task_scope(conn) do
+    opts = scope_opts(conn)
+
+    ws_id =
+      Keyword.get(opts, :workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    [workspace_id: ws_id, project_id: Keyword.get(opts, :project_id)]
   end
 
   defp respond(conn, inner, dataset, sync_tags, etag, t0) do
