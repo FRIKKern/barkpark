@@ -29,6 +29,7 @@ defmodule Barkpark.Seeds do
   @doc "Seed one profile (`:demo` or `:clean`) plus the profile-independent tail."
   def run(:demo) do
     scope = Shared.ensure_default_scope()
+    Shared.ensure_builtin_roles()
     Demo.seed(scope)
     register_plugin_schemas()
     # Codelists ride the demo profile only (they serve onixedit, not in the
@@ -41,6 +42,7 @@ defmodule Barkpark.Seeds do
 
   def run(:clean) do
     scope = Shared.ensure_default_scope()
+    Shared.ensure_builtin_roles()
     Clean.seed(scope)
     register_plugin_schemas()
     seed_search_defaults()

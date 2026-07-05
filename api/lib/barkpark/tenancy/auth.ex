@@ -37,7 +37,7 @@ defmodule Barkpark.Tenancy.Auth do
   alias Barkpark.Repo
   alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
-  alias Barkpark.Tenancy.Membership
+  alias Barkpark.Tenancy.{Membership, Role, RolePermission}
 
   @type action :: :read | :write | :admin
   @type principal :: ApiToken.t() | User.t() | binary()
@@ -47,9 +47,16 @@ defmodule Barkpark.Tenancy.Auth do
   @write_perms ~w(write admin)
   @admin_perms ~w(admin)
 
-  # Every valid membership role — a User in any role may read+write content;
-  # admin authority is the narrower `@user_admin_roles` set (below).
-  @roles_all ~w(owner admin member)
+  # Compiled-in action sets for the built-in USER roles — the SOURCE OF TRUTH
+  # for byte-identity AND the fail-safe when no DB `role_permissions` row exists.
+  # MUST equal the pre-data-driven semantics: read/write ← owner/admin/member,
+  # admin ← owner/admin. Because enforcement falls back to this map, a fresh /
+  # unseeded DB (or a lost row) can NEVER silently lock out a built-in role.
+  @builtin_role_actions %{
+    "owner" => ~w(read write admin),
+    "admin" => ~w(read write admin),
+    "member" => ~w(read write)
+  }
 
   # Default role for a NEW membership when no explicit role is passed. A token
   # ADDED to a workspace it did not create is a `member` — write content, but
@@ -82,13 +89,31 @@ defmodule Barkpark.Tenancy.Auth do
       )
       when is_binary(workspace_id) and is_binary(principal_id) and is_binary(role) do
     %Membership{}
-    |> Membership.changeset(%{
-      workspace_id: workspace_id,
-      principal_id: principal_id,
-      role: role,
-      principal_type: principal_type
-    })
+    |> Membership.changeset(
+      %{
+        workspace_id: workspace_id,
+        principal_id: principal_id,
+        role: role,
+        principal_type: principal_type
+      },
+      valid_role_names(workspace_id)
+    )
     |> Repo.insert()
+  end
+
+  # The role names accepted for a membership in this workspace: the built-ins
+  # (owner/admin/member) plus any custom roles defined for the workspace (or
+  # global custom roles). A defined custom role is accepted; a typo'd or
+  # nonexistent role is still rejected by the changeset.
+  defp valid_role_names(workspace_id) do
+    custom =
+      Repo.all(
+        from r in Role,
+          where: r.workspace_id == ^workspace_id or is_nil(r.workspace_id),
+          select: r.name
+      )
+
+    Enum.uniq(Membership.roles() ++ custom)
   end
 
   @doc """
@@ -158,7 +183,7 @@ defmodule Barkpark.Tenancy.Auth do
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
     case membership(user, workspace_id) do
       %Membership{role: role} ->
-        if role_permits?(role, action), do: :ok, else: {:error, :forbidden}
+        if role_permits?(role, workspace_id, action), do: :ok, else: {:error, :forbidden}
 
       nil ->
         {:error, :forbidden}
@@ -167,16 +192,46 @@ defmodule Barkpark.Tenancy.Auth do
 
   def authorize(_token, _workspace_id, _action), do: {:error, :forbidden}
 
-  # Which membership ROLES satisfy each action, for USER principals. `member`
-  # grants content read+write (not admin); `admin`/`owner` add admin authority.
-  # Mirrors the documented role semantics in `create_membership/4`.
-  @user_admin_roles ~w(owner admin)
+  @doc """
+  True when the membership `role` grants `action` in `workspace_id`, for USER
+  principals. The grant is data-driven — a role's action set comes from
+  `role_permissions` (`Barkpark.Tenancy.Role`) — with the compiled-in
+  `@builtin_role_actions` as the fail-safe for the built-in roles, so
+  enforcement never DEPENDS on a seed row and a missing row can't cause a
+  silent lockout. A built-in name always resolves as built-in (a tenant can't
+  redefine `admin` to escalate); a custom role resolves from its DB rows.
+  """
+  @spec role_permits?(String.t(), binary(), action()) :: boolean()
+  def role_permits?(role, workspace_id, action)
+      when is_binary(role) and is_binary(workspace_id) and action in [:read, :write, :admin] do
+    Atom.to_string(action) in granted_actions(role, workspace_id)
+  end
 
-  @spec role_permits?(String.t(), action()) :: boolean()
-  defp role_permits?(role, :read) when is_binary(role), do: role in @roles_all
-  defp role_permits?(role, :write) when is_binary(role), do: role in @roles_all
-  defp role_permits?(role, :admin) when is_binary(role), do: role in @user_admin_roles
-  defp role_permits?(_role, _action), do: false
+  def role_permits?(_role, _workspace_id, _action), do: false
+
+  # Resolution: a built-in name ALWAYS resolves from the compiled-in map — the
+  # DB row for a built-in is purely for Stage-B CRUD visibility and is IGNORED
+  # for enforcement, so a tenant can never redefine `admin`/`member` (via a
+  # workspace- or global-scoped row of the same name) to escalate OR to weaken
+  # the fail-safe. A custom name resolves purely from its DB rows.
+  defp granted_actions(role, workspace_id) do
+    case Map.get(@builtin_role_actions, role) do
+      nil -> db_actions(role, workspace_id)
+      builtin -> builtin
+    end
+  end
+
+  defp db_actions(role, workspace_id) do
+    Repo.all(
+      from rp in RolePermission,
+        join: r in Role,
+        on: rp.role_id == r.id,
+        where:
+          r.name == ^role and
+            (r.workspace_id == ^workspace_id or is_nil(r.workspace_id)),
+        select: rp.action
+    )
+  end
 
   @doc """
   True when the token's permissions satisfy `action`, ignoring membership.
