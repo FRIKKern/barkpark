@@ -675,6 +675,7 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 		if card := quickstartCard(payload); card != "" {
 			out.outf("%s", card)
 			emitWarnings(out, payload)
+			emitNotices(out, payload)
 			return
 		}
 	}
@@ -683,6 +684,7 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	case "minimal":
 		renderMinimal(out, payload)
 		emitWarnings(out, payload)
+		emitNotices(out, payload)
 	case "yaml":
 		var v any
 		if json.Unmarshal(payload, &v) == nil {
@@ -693,6 +695,7 @@ func renderSuccess(out *writer, cmd manifest.Command, respBody []byte) {
 	case "table":
 		renderTable(out, payload)
 		emitWarnings(out, payload)
+		emitNotices(out, payload)
 	default: // json
 		out.renderRaw(payload)
 	}
@@ -730,6 +733,55 @@ func emitWarnings(out *writer, payload []byte) {
 			out.errf("warning: %s", s)
 		}
 	}
+}
+
+// emitNotices prints a top-level {"notices":[…]} typed list to stderr for the
+// human output shapes (minimal/table), mirroring emitWarnings. Rail-awareness
+// (rail-l1): a claim/close/prime 2xx envelope may carry advisory multi-agent
+// notices — blocked_while_claimed (a blocker was filed onto a task you hold) or
+// rail_changed (the parent rail you observed moved). Each renders as
+// "notice: <type> …" with the salient fields. Advisory only: exit code and
+// stdout payload are untouched; json/yaml consumers read the field itself.
+// Shape-keyed, never verb-keyed; malformed or absent notices never crash.
+func emitNotices(out *writer, payload []byte) {
+	var env struct {
+		Notices []map[string]any `json:"notices"`
+	}
+	if json.Unmarshal(payload, &env) != nil {
+		return
+	}
+	for _, n := range env.Notices {
+		typ, _ := n["type"].(string)
+		switch typ {
+		case "":
+			continue
+		case "blocked_while_claimed":
+			task, _ := n["task_id"].(string)
+			out.errf("notice: blocked_while_claimed task=%s blockers=%s", task, joinStrings(n["blockers"]))
+		case "rail_changed":
+			parent, _ := n["parent_id"].(string)
+			rev, _ := n["rail_rev"].(string)
+			out.errf("notice: rail_changed parent=%s rail_rev=%s", parent, rev)
+		default:
+			out.errf("notice: %s", typ)
+		}
+	}
+}
+
+// joinStrings renders a decoded JSON array of strings as a comma-separated
+// list, skipping non-string entries. Returns "" for a non-array value.
+func joinStrings(v any) string {
+	items, ok := v.([]any)
+	if !ok {
+		return ""
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		if s, ok := it.(string); ok {
+			parts = append(parts, s)
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // unwrapResult strips a top-level {"result": X} envelope, returning X's raw

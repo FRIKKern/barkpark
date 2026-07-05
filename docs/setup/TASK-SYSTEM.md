@@ -85,6 +85,7 @@ The contract, precisely:
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **300**), emitting `task.lease_expired`. Finish or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` over `acceptance_criteria` — only `met:true` counts; omitted when absent (never `0/0`). A `done` close with unmet criteria warns but still commits. Owner: `Barkpark.Tasks.Criteria.progress/1` (`@canonical capability:task-criteria-progress`).
+- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (on-demand ETag of the subject's parent rail — children + their `blocks` edges — compared `≠`); prime carries `rails: {parent_id → rail_rev}`. All four carry typed `notices` (omit when empty): `blocked_while_claimed` (a blocker filed onto your still-open task) and `rail_changed` (optional body `observed_rail_rev` ≠ pre-write rail). Owner: `Barkpark.Tasks.Rail`.
 
 **5. Dependencies, labels, papers.**
 

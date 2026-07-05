@@ -1419,6 +1419,73 @@ func TestRenderSuccessWarnings(t *testing.T) {
 	}
 }
 
+// TestRenderSuccessNotices pins the advisory rail-awareness notices surface
+// (rail-l1): a claim/close/prime 2xx envelope carrying a top-level
+// {"notices":[…]} typed list prints each as "notice: <type> …" on STDERR for
+// the human shapes (minimal/table), leaving stdout's receipt and the exit path
+// untouched. json output does NOT duplicate to stderr (the field rides the
+// payload). Shape-keyed, never verb-keyed; malformed/absent notices never crash.
+func TestRenderSuccessNotices(t *testing.T) {
+	payload := `{"ok":true,"doc":{"doc_id":"t5"},"rail_rev":"abcd1234abcd1234",` +
+		`"notices":[{"type":"blocked_while_claimed","task_id":"t5","blockers":["t9","t12"]},` +
+		`{"type":"rail_changed","parent_id":"epic-1","rail_rev":"abcd1234abcd1234"}]}`
+
+	// minimal: receipt on stdout, both notices on stderr.
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "minimal"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := strings.TrimSpace(stdout.String()); got != "t5" {
+		t.Errorf("minimal stdout = %q, want doc receipt untouched", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "notice: blocked_while_claimed task=t5 blockers=t9,t12") {
+		t.Errorf("minimal stderr = %q, want the blocked_while_claimed line", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "notice: rail_changed parent=epic-1 rail_rev=abcd1234abcd1234") {
+		t.Errorf("minimal stderr = %q, want the rail_changed line", got)
+	}
+
+	// table: notices also land on stderr.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := stderr.String(); !strings.Contains(got, "notice: blocked_while_claimed") {
+		t.Errorf("table stderr = %q, want the notice line", got)
+	}
+
+	// json: the field rides the payload; stderr stays clean.
+	stdout.Reset()
+	stderr.Reset()
+	w = newWriter(&stdout, &stderr)
+	w.output = "json"
+	renderSuccess(w, manifest.Command{}, []byte(payload))
+	if got := stderr.String(); got != "" {
+		t.Errorf("json stderr = %q, want empty (no duplication)", got)
+	}
+	if !strings.Contains(stdout.String(), "notices") {
+		t.Errorf("json stdout should carry the notices field, got %q", stdout.String())
+	}
+
+	// No notices key / malformed entries: nothing printed, nothing crashes.
+	for _, p := range []string{
+		`{"ok":true,"doc":{"doc_id":"t"}}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"notices":[]}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"notices":[{"type":""},{"nope":1}]}`,
+		`{"ok":true,"doc":{"doc_id":"t"},"notices":"not-a-list"}`,
+	} {
+		stdout.Reset()
+		stderr.Reset()
+		w = newWriter(&stdout, &stderr)
+		w.output = "minimal"
+		renderSuccess(w, manifest.Command{}, []byte(p))
+		if got := stderr.String(); strings.Contains(got, "notice:") {
+			t.Errorf("payload %s: stderr = %q, want no notice lines", p, got)
+		}
+	}
+}
+
 // TestBuildBodyMediaMultipart asserts media.upload serialises the file as
 // multipart/form-data with a "file" form field, not a JSON body.
 func TestBuildBodyMediaMultipart(t *testing.T) {
