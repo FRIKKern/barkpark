@@ -499,7 +499,7 @@ func TestApiErrorHint(t *testing.T) {
 		"not_found", "schema_unknown",
 		"validation_failed", "invalid_op", "type_mismatch", "duplicate_id",
 		"rev_mismatch", "precondition_failed", "conflict",
-		"fenced_off", "stale_claim", "already_claimed",
+		"fenced_off", "stale_claim", "already_claimed", "doc_changed_since_claim",
 		"rate_limited", "unauthorized", "forbidden",
 	}
 	for _, code := range nonEmpty {
@@ -1313,10 +1313,18 @@ func TestRenderMinimalDocReceipt(t *testing.T) {
 	w := newWriter(&stdout, &stderr)
 	w.output = "minimal"
 
-	// Claim-shaped doc (task next / task claim success): doc_id + epoch.
+	// Claim-shaped doc (task next / task claim success): doc_id + epoch + rev.
+	// The rev is what a close pins to fence its write, so the receipt echoes it.
 	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-992199","rev":7,"claim":{"worker":"agent-1","ts_iso":"2026-06-10T08:00:00Z","epoch":2}}}`))
-	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-992199 epoch=2" {
-		t.Errorf("claim receipt = %q, want \"drafts.task-992199 epoch=2\"", got)
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-992199 epoch=2 rev=7" {
+		t.Errorf("claim receipt = %q, want \"drafts.task-992199 epoch=2 rev=7\"", got)
+	}
+
+	// Real API shape: render_doc emits rev as a hex string at the doc top level.
+	stdout.Reset()
+	renderMinimal(w, []byte(`{"ok":true,"doc":{"doc_id":"drafts.task-3","rev":"a1b2c3","claim":{"worker":"agent-9","epoch":4}}}`))
+	if got := strings.TrimSpace(stdout.String()); got != "drafts.task-3 epoch=4 rev=a1b2c3" {
+		t.Errorf("hex-rev claim receipt = %q, want \"drafts.task-3 epoch=4 rev=a1b2c3\"", got)
 	}
 
 	// Doc without a claim: just the id line.

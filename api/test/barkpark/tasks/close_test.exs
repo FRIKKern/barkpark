@@ -13,9 +13,11 @@ defmodule Barkpark.Tasks.CloseTest do
 
   use Barkpark.DataCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document
-  alias Barkpark.Tasks.Close
+  alias Barkpark.Tasks.{Close, Internal}
 
   @dataset "production"
 
@@ -37,6 +39,20 @@ defmodule Barkpark.Tasks.CloseTest do
   end
 
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  # A raw content edit that PRESERVES the claim (so its work_digest stays put)
+  # but rewrites arbitrary content — the "someone edited the brief while I held
+  # the claim" race the work-digest fence exists for. CAS on the observed rev.
+  defp foreign_patch_content!(task_id, patch) do
+    doc = Repo.get!(Document, task_id)
+    new_content = Map.merge(doc.content, patch)
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
+      |> Repo.update_all(set: [content: new_content, rev: Internal.generate_rev()])
+
+    :ok
+  end
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content = Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
@@ -424,6 +440,120 @@ defmodule Barkpark.Tasks.CloseTest do
                reloaded.content["acceptance_criteria"]
 
       assert reloaded.content["labels"] == ["from-other-proc"]
+    end
+  end
+
+  # ─── (7) work-digest fence: "edited-under-you becomes a 409" ──────────────
+  describe "close/3 — work-digest fence (default path)" do
+    test "(a) a foreign description edit between claim and close → doc_changed_since_claim; re-read then closes",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("fence-desc")
+      task = mk_task!(doc_id, scope, %{"description" => "original brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      # Someone rewrites the brief under the claim.
+      :ok = foreign_patch_content!(task.id, %{"description" => "rewritten brief"})
+
+      # The default close (no observed_rev) refuses — 409 material, not a silent
+      # close against a stale brief. current_rev is the post-edit rev; the
+      # changed set names exactly the field that drifted.
+      assert {:error, {:doc_changed_since_claim, current_rev, changed}} =
+               Close.close(task.id, "w", observed_epoch: epoch, lifecycle_status: "done")
+
+      assert changed == ["description"]
+      assert current_rev == Repo.get!(Document, task.id).rev
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
+
+      # Re-read + close: pinning the current rev bypasses the digest fence
+      # (strict rev CAS) and the close lands.
+      fresh = Repo.get!(Document, task.id)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 observed_rev: fresh.rev,
+                 lifecycle_status: "done"
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+    end
+
+    test "(b) editing content.code_refs / labels between claim and close → close still succeeds",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("fence-selfedit")
+      task = mk_task!(doc_id, scope, %{"description" => "steady brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      # The documented self-edit workflow: labels + code_refs are NOT work-
+      # defining, so re-digesting them yields the same stamp → clean close.
+      assert {:ok, _} = Tasks.relabel_by_id(task.id, ["in-progress"], [])
+      :ok = foreign_patch_content!(task.id, %{"code_refs" => ["lib/foo.ex"]})
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: epoch, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert closed.content["code_refs"] == ["lib/foo.ex"]
+      assert closed.content["labels"] == ["in-progress"]
+    end
+
+    test "(c) a claim WITHOUT a work_digest (legacy lease) closes exactly as before",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("fence-legacy"), scope, %{"description" => "pre-digest brief"})
+
+      # Hand-craft a pre-existing claim map with NO work_digest key (what a
+      # lease stamped before this feature shipped looks like). Then rewrite the
+      # brief — with no stamp to compare against, the fence is inert.
+      legacy_claim = %{"worker" => "w", "ts_iso" => "2026-01-01T00:00:00Z", "epoch" => 7}
+
+      :ok =
+        foreign_patch_content!(task.id, %{
+          "lifecycle_status" => "in_progress",
+          "assignee" => "w",
+          "claim" => legacy_claim,
+          "description" => "brief rewritten after a legacy claim"
+        })
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w", observed_epoch: 7, lifecycle_status: "done")
+
+      assert closed.content["lifecycle_status"] == "done"
+    end
+
+    test "(d) an explicit stale observed_rev still loses the rev CAS (behaviour unchanged)",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      doc_id = uniq("fence-explicit-rev")
+      task = mk_task!(doc_id, scope, %{"description" => "brief"})
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "w", scope)
+      epoch = claimed.content["claim"]["epoch"]
+      stale_rev = claimed.rev
+
+      # A concurrent write bumps the rev after the caller's read.
+      :ok = foreign_patch_content!(task.id, %{"description" => "moved on"})
+
+      # Explicit observed_rev bypasses the digest fence and takes the strict
+      # full-rev CAS — which the stale rev loses, same as it always has.
+      assert {:error, :stale_claim} =
+               Close.close(task.id, "w",
+                 observed_epoch: epoch,
+                 observed_rev: stale_rev,
+                 lifecycle_status: "done"
+               )
+
+      assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
     end
   end
 end

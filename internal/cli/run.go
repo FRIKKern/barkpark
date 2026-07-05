@@ -817,7 +817,9 @@ func renderMinimal(out *writer, payload []byte) {
 
 // docReceiptLine renders the one-line minimal receipt for a single returned
 // doc object: its doc_id (falling back to _id / id), plus the fencing epoch
-// when the doc carries a claim — "<doc_id> epoch=<n>". Returns "" when no id
+// when the doc carries a claim, plus the doc's rev when present — e.g.
+// "<doc_id> epoch=<n> rev=<rev>". The rev is what a close pins to fence its
+// write, so a claim receipt that carries one echoes it. Returns "" when no id
 // is found, so the caller falls through to the generic rev/ids receipt.
 func docReceiptLine(doc map[string]any) string {
 	id := ""
@@ -830,14 +832,38 @@ func docReceiptLine(doc map[string]any) string {
 	if id == "" {
 		return ""
 	}
+	line := id
 	if claim, ok := doc["claim"].(map[string]any); ok {
 		// JSON numbers decode to float64; the epoch is an integer by contract
 		// (content.claim.epoch, bumped on every claim).
 		if e, ok := claim["epoch"].(float64); ok {
-			return fmt.Sprintf("%s epoch=%d", id, int64(e))
+			line += fmt.Sprintf(" epoch=%d", int64(e))
 		}
 	}
-	return id
+	// Rev rides the top-level doc object (render_doc emits "rev"; older/other
+	// shapes may use "_rev"). Shape-keyed only — appended whenever the claim-
+	// style doc carries one, no verb-specific logic.
+	if rev := scalarString(doc["rev"], doc["_rev"]); rev != "" {
+		line += " rev=" + rev
+	}
+	return line
+}
+
+// scalarString returns the first argument that renders as a non-empty scalar
+// (string or JSON number), formatted as a string. Used so a rev decoded as
+// either a hex string or a bare number both print cleanly.
+func scalarString(vals ...any) string {
+	for _, v := range vals {
+		switch t := v.(type) {
+		case string:
+			if t != "" {
+				return t
+			}
+		case float64:
+			return strconv.FormatInt(int64(t), 10)
+		}
+	}
+	return ""
 }
 
 func findRev(v any) string {

@@ -313,7 +313,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write.",
+          "Close a claimed task by id; --set 'criteria:=[…]' marks acceptance criteria met with evidence in the same atomic write. By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim — re-read, then close again (or --set observed_rev=<rev> for strict full-rev CAS instead).",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -359,7 +359,9 @@ defmodule Barkpark.Plugins.Tasks do
                 "\"evidence\":\"PR #123\"}]' flips acceptance_criteria met/evidence atomically " <>
                 "with the close (same rev CAS — no separate racing mutation). Optional " <>
                 "\"criterion\" per entry text-guards against a reordered/edited list (409 " <>
-                "criteria_mismatch). Unmet criteria never block a close (soft warning only)."
+                "criteria_mismatch). Unmet criteria never block a close (soft warning only). " <>
+                "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
+                "work-digest fence (use when you intend to close against the exact rev you read)."
           }
         ],
         writes: true,
