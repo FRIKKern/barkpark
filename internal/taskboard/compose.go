@@ -39,8 +39,44 @@ const (
 // Compose paints the whole frame. It is the one impure-ish shell seam (it reads
 // Model), but it delegates every pixel to pure renderers, so it holds no layout
 // state of its own beyond reading m.wide.
+//
+// The pane gets a breathing gutter here — the ONE assembly seam — so every mode
+// (board, pushed reading frame, two-pane) is inset identically and the pure
+// renderers stay gutter-blind: content renders at the inner width, then each
+// line is shifted right and one blank row tops the frame (the design artifact's
+// terminal body padding). Below 56 cols the side gutter narrows to 1 to keep
+// portrait real estate.
 func Compose(m Model) string {
 	width, height := m.width, m.height
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	g := 2
+	if width < 56 {
+		g = 1
+	}
+	body := composeAt(m, width-2*g, height-1)
+	lines := strings.Split(body, "\n")
+	pad := strings.Repeat(" ", g)
+	var sb strings.Builder
+	sb.Grow(len(body) + len(lines)*(g+1) + 1)
+	sb.WriteByte('\n')
+	for i, l := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+		}
+		if l != "" {
+			sb.WriteString(pad)
+			sb.WriteString(l)
+		}
+	}
+	return sb.String()
+}
+
+func composeAt(m Model, width, height int) string {
 	if width < 20 {
 		width = 20
 	}
