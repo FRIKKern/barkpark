@@ -867,6 +867,8 @@ defmodule BarkparkWeb.Router do
 
     get("/me", AuthController, :me)
     delete("/logout", AuthController, :logout)
+    get("/export", AuthController, :export)
+    post("/erase", AuthController, :erase)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
     post("/mfa/disable", AuthController, :mfa_disable)

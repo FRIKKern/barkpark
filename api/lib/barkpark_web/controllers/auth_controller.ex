@@ -114,6 +114,41 @@ defmodule BarkparkWeb.AuthController do
 
   # ── Session lifecycle ───────────────────────────────────────────────────────
 
+  @doc """
+  GDPR right of access — export the current subject's complete data bundle as
+  machine-readable JSON. Session-gated: a subject can only export their own data.
+  """
+  def export(conn, _params) do
+    user = conn.assigns.current_user
+    json(conn, Barkpark.Accounts.Privacy.export_subject(user))
+  end
+
+  @doc """
+  GDPR right to erasure — pseudonymise the current subject and revoke all access.
+  Sensitive: requires the current password (reauth). The now-erased session is
+  dropped from the response.
+  """
+  def erase(conn, %{"password" => password}) do
+    user = conn.assigns.current_user
+
+    if reauthed?(user, password) do
+      {:ok, summary} = Barkpark.Accounts.Privacy.erase_subject(user)
+
+      conn
+      |> configure_session(drop: true)
+      |> json(%{ok: true, erased: summary})
+    else
+      error(
+        conn,
+        403,
+        "invalid_password",
+        "the current password is required to erase your account"
+      )
+    end
+  end
+
+  def erase(conn, _), do: error(conn, 400, "bad_request", "password is required")
+
   def me(conn, _params) do
     user = conn.assigns.current_user
 
