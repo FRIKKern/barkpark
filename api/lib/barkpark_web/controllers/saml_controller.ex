@@ -27,6 +27,7 @@ defmodule BarkparkWeb.SamlController do
          {:ok, email} <- Saml.consume(c, xml, slug) do
       user = Sso.find_or_create_user(email)
       Sso.jit_provision(c.organization_id, user)
+      Sso.record_login(user, "saml", c.organization_id)
 
       {:ok, token} =
         Accounts.create_user_session_token(user,

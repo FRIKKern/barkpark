@@ -11,6 +11,7 @@ defmodule BarkparkWeb.OidcController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Accounts
+  alias Barkpark.Sso
   alias Barkpark.Sso.Oidc
 
   def start(conn, %{"org_slug" => slug}) do
@@ -49,6 +50,8 @@ defmodule BarkparkWeb.OidcController do
 
         case Oidc.handle_callback(c, code, opts) do
           {:ok, user, _claims} ->
+            Sso.record_login(user, "oidc", c.organization_id)
+
             {:ok, token} =
               Accounts.create_user_session_token(user,
                 ip_address: client_ip(conn),
