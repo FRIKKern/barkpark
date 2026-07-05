@@ -253,4 +253,35 @@ func TestNextRowActionsResolve(t *testing.T) {
 	}
 }
 
+// TestPinnedRowParityUnderHeightPressure — the parity FLOOR (charter D63): a
+// cursor on ANY pinned NOW/NEXT row must keep exactly one ▎ marker at EVERY
+// supported height, even when the band folds. Regression guard for the budget bug
+// where a greedy NOW starved NEXT to zero lines and renderNextBand returned nil,
+// silently orphaning a NEXT cursor stop (0 markers). Both bands now collapse to a
+// single "+N …" catch line under the tightest budget instead of vanishing.
+func TestPinnedRowParityUnderHeightPressure(t *testing.T) {
+	b := BuildBoard(corpusSnapshot(), RepoContext{}, corpusFixedNow)
+	if len(b.Now) == 0 || len(b.Next) == 0 {
+		t.Fatalf("fixture must carry NOW and NEXT rows, got now=%d next=%d", len(b.Now), len(b.Next))
+	}
+	pinned := len(b.Now) + len(b.Next)
+	// Down to the documented height floor of 8, every pinned cursor index keeps its
+	// single marker (the spine may scroll a spine cursor off below ~13, which is the
+	// pre-existing floor behavior — pinned rows never fold out of markability).
+	for h := 13; h <= 30; h++ {
+		for ci := 0; ci < pinned; ci++ {
+			st := corpusUIState()
+			st.Cursor = ci
+			frame := ansi.Strip(Render(b, st, 72, h, corpusFixedNow))
+			if got := strings.Count(frame, "▎"); got != 1 {
+				kind := "NOW"
+				if ci >= len(b.Now) {
+					kind = "NEXT"
+				}
+				t.Fatalf("h=%d cursor=%d (%s row): %d ▎ markers, want exactly 1\n%s", h, ci, kind, got, frame)
+			}
+		}
+	}
+}
+
 var _ tea.Model = Model{}

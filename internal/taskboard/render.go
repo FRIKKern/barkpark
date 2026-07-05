@@ -65,7 +65,20 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		if bandBudget < 2 {
 			bandBudget = 2 // one honest row, whatever the pane size
 		}
-		nowLines := renderNowBand(b, st, width, bandBudget, now)
+		// Reserve NEXT its single collapse line BEFORE NOW spends the budget, so a
+		// greedy NOW can never orphan a NEXT cursor stop (charter D63: NEXT folds to
+		// "+N intent", it never silently vanishes while it owns rows). Under the very
+		// tightest budget both bands collapse to one catch line apiece (1 NOW + 1
+		// NEXT == the clamped floor), so every pinned cursor row stays markable. NOW
+		// keeps the full budget whenever NEXT is empty (unchanged path).
+		nowBudget := bandBudget
+		if len(b.Next) > 0 {
+			nowBudget = bandBudget - 1
+			if nowBudget < 1 {
+				nowBudget = 1
+			}
+		}
+		nowLines := renderNowBand(b, st, width, nowBudget, now)
 		nextBudget := bandBudget - len(nowLines)
 		if nextBudget < 0 {
 			nextBudget = 0
@@ -343,8 +356,17 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 	if len(b.Now) == 0 {
 		return nil
 	}
-	lines := []string{boldStyle.Render("NOW")}
 	n := len(b.Now)
+	// Fully collapsed: only one line fits (the tightest supported panes, where NEXT
+	// has reserved the band's other line). Drop the "NOW" label and fold EVERY claim
+	// into one dim "+N claimed" catch line that still marks a folded NOW-row cursor,
+	// so no claim cursor stop is ever left unmarked (the parity floor).
+	if maxLines < 2 {
+		sel := st.Cursor < n
+		return []string{dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d claimed", n), width))}
+	}
+	lines := []string{boldStyle.Render("NOW")}
 	shown := n
 	if 1+n > maxLines {
 		shown = maxLines - 2 // reserve the header + fold line
@@ -375,11 +397,20 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 // folded cursor rows, NOT a separate stop). A display-only "+N ready" tail points
 // at the spine below and sheds FIRST under height pressure. Empty NEXT => nil.
 func renderNextBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
-	if len(b.Next) == 0 || maxLines < 2 {
+	if len(b.Next) == 0 || maxLines < 1 {
 		return nil
 	}
 	base := len(b.Now)
 	n := len(b.Next)
+	// Fully collapsed: only one line fits (the tightest supported panes). Drop the
+	// "NEXT" label and fold EVERY intent row into one dim "+N intent" catch line that
+	// still marks a folded NEXT-row cursor — the charter D63 guarantee that NEXT
+	// sheds to "+N intent" rather than vanishing while it owns cursor stops.
+	if maxLines < 2 {
+		sel := st.Cursor >= base && st.Cursor < base+n
+		return []string{dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", n), width))}
+	}
 	lines := []string{dimStyle.Render("NEXT")}
 
 	// Rows take priority over the display-only "+N ready" tail. Show as many rows
