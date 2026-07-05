@@ -876,6 +876,10 @@ defmodule BarkparkWeb.Router do
     post("/magic-login", AuthController, :magic_login)
     # Pre-login SSO routing: email → its org's SSO start URL (verified domains).
     post("/sso/route", SsoRoutingController, :route)
+
+    # Passkey (WebAuthn) sign-in — usernameless login factor.
+    post("/webauthn/login/challenge", WebauthnController, :login_challenge)
+    post("/webauthn/login", WebauthnController, :login)
   end
 
   # ── SCIM 2.0 directory sync (per-organization bearer) ───────────────────
@@ -934,6 +938,14 @@ defmodule BarkparkWeb.Router do
     # `mfa_required` 401 before retrying a guarded action).
     post("/mfa/step-up", AuthController, :mfa_step_up)
     post("/mfa/disable", AuthController, :mfa_disable)
+
+    # Passkeys (WebAuthn): enrol, step-up factor, and management.
+    post("/webauthn/register/challenge", WebauthnController, :register_challenge)
+    post("/webauthn/register", WebauthnController, :register)
+    post("/webauthn/step-up/challenge", WebauthnController, :step_up_challenge)
+    post("/webauthn/step-up", WebauthnController, :step_up)
+    get("/webauthn/credentials", WebauthnController, :index)
+    delete("/webauthn/credentials/:id", WebauthnController, :delete)
   end
 
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────

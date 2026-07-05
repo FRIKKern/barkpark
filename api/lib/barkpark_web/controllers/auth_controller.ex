@@ -422,19 +422,8 @@ defmodule BarkparkWeb.AuthController do
 
   # ── helpers ──────────────────────────────────────────────────────────────────
 
-  defp issue_session(conn, user, opts \\ []) do
-    {:ok, token} =
-      Accounts.create_user_session_token(
-        user,
-        [ip_address: client_ip(conn), user_agent: user_agent(conn)] ++ opts
-      )
-
-    conn
-    |> configure_session(renew: true)
-    |> put_session("user_session", token)
-    |> put_status(:created)
-    |> json(%{token: token, user: %{id: user.id, email: user.email}})
-  end
+  defp issue_session(conn, user, opts \\ []),
+    do: BarkparkWeb.SessionIssuer.issue(conn, user, opts)
 
   # Verify the current password for a session-authenticated, sensitive action.
   defp reauthed?(user, password) when is_binary(password),
@@ -513,15 +502,6 @@ defmodule BarkparkWeb.AuthController do
   end
 
   defp build_url(path, token), do: BarkparkWeb.Endpoint.url() <> path <> token
-
-  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
-
-  defp user_agent(conn) do
-    case get_req_header(conn, "user-agent") do
-      [ua | _] -> ua
-      _ -> nil
-    end
-  end
 
   defp error(conn, status, code, message, hint \\ nil) do
     error_map = %{code: code, message: message}

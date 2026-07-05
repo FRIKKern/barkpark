@@ -501,6 +501,14 @@ if config_env() == :prod do
       "https://*.vercel.app"
     ] ++ extra_origins
 
+  # WebAuthn / passkeys: the relying-party id is the public host, and the
+  # expected client origin is scheme://host. Derived from PHX_HOST so passkeys
+  # bind to the real deployment domain (a passkey registered for one rp_id will
+  # not assert against another — this MUST match the browser's origin).
+  config :barkpark, :webauthn,
+    rp_id: host,
+    origin: "#{scheme}://#{host}"
+
   config :barkpark, BarkparkWeb.Endpoint,
     url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: scheme],
     check_origin: check_origin,
