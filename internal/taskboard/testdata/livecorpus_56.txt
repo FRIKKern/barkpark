@@ -4,16 +4,18 @@ barkpark · tasks                ⇄ guerrilla  ● live · 1m
 
 NOW
 ▎⠋ wire the append-only audit sink
-   opus-3 · 5m00s
+   opus-3 · 5m00s · Enterprise-ready auth - one layer, …
 
  ⠋ map SAML group claims to roles
-   fable-1 · 8m00s
+   fable-1 · 8m00s · Enterprise-ready auth - one layer,…
 
-  Enterprise-ready auth - one layer, easy for… ··· 25/30
+  Enterprise-ready auth - one layer, easy for… ··· 25/32
    ○ W1 · Tenant-wide audit event bus                 P1
+  ↳  ⠋ wire the append-only audit sink         P1 opus-3
   ↳  ○ append-only event schema                   P1 0/3
   ↳  ○ retention window policy                    P2 0/2
    ○ W2 · SSO / SAML enterprise connector             P1
+  ↳  ⠋ map SAML group claims to roles         P1 fable-1
   ↳  ○ IdP metadata import                            P2
    ✓ closed connector slice 00                        1h
    ✓ closed connector slice 01                        1h
@@ -51,8 +53,6 @@ NOW
   +3 cancelled
 
   Unified Aesthetic: one design language, every surface…
-
-
 
 
 

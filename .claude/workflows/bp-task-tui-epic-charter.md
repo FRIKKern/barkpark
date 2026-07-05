@@ -817,6 +817,14 @@ toggles, no data model beyond fields on Epic/Cluster/Board.
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
 
+**D56 (2026-07-05, user direction — reverses D14):** a claimed task renders in NOW *and* stays IN
+PLACE in its section — a spinner row heading its neighborhood (childBand 0), worker shown. Why (user,
+verbatim): "What is showing Now should be showing in context of their list - we want to see the list
+below Now be updated to match it - and show whats going on." NOW is the glanceable summary; the list
+below tells the same story in context. The D14 de-dup helpers (dedupNowFromEpics/dedupNowFromClusters/
+stripNow) are deleted; NOW anchors now add themselves to the focus window and seed context.
+
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)
