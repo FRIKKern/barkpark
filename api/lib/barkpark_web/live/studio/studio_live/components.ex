@@ -310,7 +310,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # ── t6: WordPress-style metadata sidebar (function component) ────────────────
   #
   # The calm right document panel (doctrine Rule 4). Sections: Publish
-  # (status/visibility + the publish action), Slug (instant format validation),
+  # (status/visibility — read-only, see the section comment), Slug (instant
+  # format validation),
   # Context (dataset/workspace, read-only), Labels, Relations. Only metadata that
   # FAILS the article test lives here — the title + featured image stay LOCKED
   # body blocks (t1/t4), never duplicated into the sidebar. Rule 5: no modes, no
@@ -362,12 +363,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           title={if @panel_open, do: "Collapse document panel", else: "Expand document panel"}
           data-test-id="sidebar-toggle-panel"
         >
-          <.icon name={if @panel_open, do: "chevron-right", else: "chevron-down"} size={16} />
+          <.icon name={if @panel_open, do: "chevron-down", else: "chevron-right"} size={16} />
         </button>
         <span :if={@panel_open} class="bp-doc-sidebar__title">Document</span>
       </div>
 
       <div :if={@panel_open} id="bp-doc-sidebar-body" class="bp-doc-sidebar__body">
+        <%!-- Publish is READ-ONLY state, deliberately: papers publish IN PLACE
+              (`Content.upsert_paper/1` always writes `doc_id = slug`,
+              `status: "published"` — there is no drafts-twin row), while the
+              doc-level `publish` / `unpublish` events ride the twin-row model
+              (`Handlers.Doc` → `Content.publish_document/4`, which REQUIRES a
+              `drafts.<slug>` row, and `unpublish_document/4`, which DELETES the
+              published row and strands a `drafts.<slug>` twin that
+              `Content.get_paper/3` — exact-id, used by pane_builder AND the
+              public reader — can never resolve again). Wiring those buttons
+              here would make Publish always fail and Unpublish brick the paper.
+              A paper-aware publish action lands with the papers draft model
+              (t5/t7 territory), not this slice. --%>
         <.sidebar_section
           key="publish"
           title="Publish"
@@ -385,25 +398,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               {PaperCanvas.visibility_label(@status)}
             </span>
           </div>
-          <%= if @status == "published" do %>
-            <button
-              type="button"
-              class="btn btn-ghost btn-sm bp-doc-action"
-              phx-click="unpublish"
-              data-test-id="sidebar-unpublish"
-            >
-              <.icon name="eye" size={14} /> Unpublish
-            </button>
-          <% else %>
-            <button
-              type="button"
-              class="btn btn-primary btn-sm bp-doc-action"
-              phx-click="publish"
-              data-test-id="sidebar-publish"
-            >
-              <.icon name="eye" size={14} /> Publish
-            </button>
-          <% end %>
         </.sidebar_section>
 
         <.sidebar_section

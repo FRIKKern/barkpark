@@ -644,7 +644,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "visibility is derived from publish status (papers publish to /papers/:slug)" do
       assert PaperCanvas.visibility_label("published") == "Public"
-      assert PaperCanvas.visibility_label("draft") =~ "not public"
+      # "Draft" only — never "not public": the public reader fetches by exact
+      # doc_id with NO status filter, so a stronger claim could lie.
+      assert PaperCanvas.visibility_label("draft") == "Draft"
+      refute PaperCanvas.visibility_label("draft") =~ "public"
     end
   end
 
@@ -691,22 +694,34 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ "phx-value-section="
     end
 
-    test "a DRAFT paper shows draft status + the evergreen Publish action" do
+    test "a DRAFT paper shows draft status + Draft visibility — and NO publish action" do
       html = render_sidebar(%{})
       assert html =~ ~s(data-test-id="sidebar-status")
       assert html =~ "draft"
-      assert html =~ ~s(data-test-id="sidebar-publish")
-      assert html =~ "btn-primary"
-      assert html =~ "Draft — not public"
-      refute html =~ ~s(data-test-id="sidebar-unpublish")
+      assert html =~ "Draft"
     end
 
-    test "a PUBLISHED paper shows Public visibility + the Unpublish action (round-trip)" do
+    test "a PUBLISHED paper shows Public visibility" do
       html = render_sidebar(%{paper_doc: draft_paper(%{status: "published"})})
       assert html =~ "published"
       assert html =~ "Public"
-      assert html =~ ~s(data-test-id="sidebar-unpublish")
-      refute html =~ ~s(data-test-id="sidebar-publish")
+    end
+
+    test "the Publish section offers NO publish/unpublish action (papers publish in place)" do
+      # Papers are single-row, published-in-place (`upsert_paper` always writes
+      # doc_id = slug, status "published"); the doc-level publish/unpublish
+      # events assume the drafts-twin model — publish would always fail (no
+      # drafts.<slug> row) and unpublish would DELETE the published row and
+      # strand a twin no paper read-path resolves. Until a paper-aware
+      # lifecycle exists, the section is read-only state — a broken or
+      # destructive button here fails the honest-affordance bar.
+      for status <- ["draft", "published"] do
+        html = render_sidebar(%{paper_doc: draft_paper(%{status: status})})
+        refute html =~ ~s(data-test-id="sidebar-publish")
+        refute html =~ ~s(data-test-id="sidebar-unpublish")
+        refute html =~ ~s(phx-click="publish")
+        refute html =~ ~s(phx-click="unpublish")
+      end
     end
 
     test "the slug section shows the current slug + a live format verdict with a tone" do

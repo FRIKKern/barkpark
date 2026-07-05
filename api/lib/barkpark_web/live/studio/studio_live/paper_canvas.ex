@@ -336,10 +336,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
   def slug_feedback(_), do: {:danger, "Only lowercase letters, numbers, and hyphens"}
 
-  @doc "Reader visibility derived from publish status (papers publish to /papers/:slug)."
+  @doc """
+  Reader visibility derived from publish status (papers publish to
+  /papers/:slug). "published" ⇒ "Public". Anything else is just "Draft" — NOT
+  "not public": the public reader (`Content.get_paper/3`) fetches by exact
+  doc_id with no status filter, so a non-published row at `doc_id = slug` is
+  still publicly reachable and the stronger claim would lie.
+  """
   @spec visibility_label(term()) :: String.t()
   def visibility_label("published"), do: "Public"
-  def visibility_label(_), do: "Draft — not public"
+  def visibility_label(_), do: "Draft"
 
   @doc """
   Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`,

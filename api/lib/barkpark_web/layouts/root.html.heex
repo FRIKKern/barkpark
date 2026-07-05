@@ -898,10 +898,12 @@
     .bp-doc-badge {
       font-size: 11px; font-weight: 600; padding: 2px 8px;
       border-radius: 999px; text-transform: capitalize;
+      /* base = the draft treatment, so an unexpected status string still
+         renders as a legible neutral pill; known statuses override below */
+      color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 16%, transparent);
     }
     .bp-doc-badge--published { color: var(--st-ok); background: color-mix(in srgb, var(--st-ok) 14%, transparent); }
     .bp-doc-badge--draft { color: var(--fg-muted); background: color-mix(in srgb, var(--fg-muted) 16%, transparent); }
-    .bp-doc-action { margin-top: 4px; align-self: flex-start; }
     .bp-doc-slug { display: flex; flex-direction: column; gap: 4px; margin: 0; }
     .bp-doc-slug__input {
       width: 100%; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: 12px;

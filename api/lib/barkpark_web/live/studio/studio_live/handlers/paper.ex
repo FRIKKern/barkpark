@@ -87,10 +87,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ────────────────
   #
   # All three are PURE assign flips — none call `Shared.paper_op/2` or the block
-  # stream, so a sidebar interaction can never emit a body block op. Persisting a
-  # metadata edit routes through the document-field path (publish/unpublish for
-  # status; the slug change is validate-only here — uniqueness/rename is a
-  # save-time concern owned by the field handlers), NEVER the block pipeline.
+  # stream, so a sidebar interaction can never emit a body block op. Nothing in
+  # the sidebar persists yet BY DESIGN: the slug change is validate-only
+  # (uniqueness/rename mutates doc_id — t5's migrate concern), and publish state
+  # is read-only display (papers publish in place; the twin-row doc publish/
+  # unpublish path would fail or strand the paper — see the Publish section
+  # comment in `Components.paper_metadata_sidebar/1`). When a sidebar field DOES
+  # persist, it rides `PaperCanvas.sidebar_meta_op/2`'s `{:doc_field, …}` shape,
+  # NEVER the block pipeline.
 
   @doc "Collapse / expand the whole metadata sidebar. Pure assign flip."
   def sidebar_toggle_panel(socket) do
