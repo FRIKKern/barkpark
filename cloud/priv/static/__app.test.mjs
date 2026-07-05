@@ -623,14 +623,15 @@ test("fmtDur: A4 hour arm (≥60m) reads '2h 1m'", () => {
 
 // ── provisionSteps: the table test over every fixture the slice must handle ──
 
-test("provisionSteps: empty (legacy row) → all seven known steps pending, elapsed null", () => {
+test("provisionSteps: empty (legacy row) → the six PLANNED steps pending (freshen is a fallback, hidden until reported)", () => {
   const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
-  assert.equal(rows.length, 7);
-  // dwb-17/D10 + D45 order: freshen sits between create and secure; the verify
-  // gate probes BETWEEN content and ready, so it displays there.
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
-  assert.equal(rows[1].label, "Updating to the latest Barkpark"); // dwb-17 freshen label
-  assert.equal(rows[5].label, "Testing login & Studio"); // D45 label
+  assert.equal(rows.length, 6);
+  // dwb-17/D10 + D45 order: freshen is OPTIONAL (warm boxes are pre-freshened;
+  // the worker narrates it only when it intervenes), so an unreported freshen
+  // never renders as a planned phase. The verify gate probes BETWEEN content
+  // and ready, so it displays there.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[4].label, "Testing login & Studio"); // D45 label
   for (const r of rows) {
     assert.equal(r.role, "pending");
     assert.equal(r.elapsedMs, null);
@@ -638,8 +639,19 @@ test("provisionSteps: empty (legacy row) → all seven known steps pending, elap
     assert.deepEqual([...r.probes], []);
   }
   // Total over junk: null bp never throws.
-  assert.equal(hooks.provisionSteps(null, NOW).length, 7);
-  assert.equal(hooks.provisionSteps(undefined).length, 7);
+  assert.equal(hooks.provisionSteps(null, NOW).length, 6);
+  assert.equal(hooks.provisionSteps(undefined).length, 6);
+});
+
+test("provisionSteps: a REPORTED freshen renders in place between create and secure (the fallback fired)", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+    { step: "freshen", status: "started", at: T(2) },
+  ] }, NOW);
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
+  assert.equal(rows[1].label, "Updating to the latest Barkpark"); // dwb-17 freshen label
+  assert.equal(rows[1].role, "active");
 });
 
 test("provisionSteps: partial (mid-configure) — done/done/active/pending…", () => {
@@ -652,14 +664,13 @@ test("provisionSteps: partial (mid-configure) — done/done/active/pending…", 
   ] };
   const rows = hooks.provisionSteps(bp, NOW);
   assert.deepEqual(norm(rows[0]), { step: "create", label: "Creating your server", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
-  assert.equal(rows[1].step, "freshen"); // dwb-17: unstarted freshen renders pending
-  assert.equal(rows[1].role, "pending");
-  assert.deepEqual(norm(rows[2]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
-  assert.deepEqual(norm(rows[3]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
-  assert.equal(rows[4].role, "pending"); // content
-  assert.equal(rows[4].elapsedMs, null);
-  assert.equal(rows[5].role, "pending"); // verify still upcoming
-  assert.equal(rows[6].role, "pending"); // ready last
+  // Unstarted freshen is HIDDEN (fallback step) — secure follows create directly.
+  assert.deepEqual(norm(rows[1]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
+  assert.deepEqual(norm(rows[2]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
+  assert.equal(rows[3].role, "pending"); // content
+  assert.equal(rows[3].elapsedMs, null);
+  assert.equal(rows[4].role, "pending"); // verify still upcoming
+  assert.equal(rows[5].role, "pending"); // ready last
 });
 
 test("provisionSteps: verify with probe lines → checklist under the step", () => {
@@ -668,7 +679,7 @@ test("provisionSteps: verify with probe lines → checklist under the step", () 
     { step: "verify", status: "progress", at: T(6), detail: "verify.login: 200 in 120ms" },
     { step: "verify", status: "progress", at: T(7), detail: "verify.query: 200 in 42ms" },
   ] };
-  const verify = hooks.provisionSteps(bp, NOW)[5]; // dwb-17: freshen shifted verify to index 5
+  const verify = hooks.provisionSteps(bp, NOW)[4]; // freshen hidden (unreported) → verify at index 4
   assert.equal(verify.role, "active");
   assert.equal(verify.caption, "Probing the golden path");   // the started narration
   assert.deepEqual([...verify.probes], ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"]);
@@ -691,8 +702,8 @@ test("provisionSteps: an UNKNOWN step name renders generically (label = raw name
     { step: "teardown", status: "started", at: T(0), detail: "cleaning up" },
   ] };
   const rows = hooks.provisionSteps(bp, NOW);
-  assert.equal(rows.length, 8); // seven known + the appended unknown
-  const t = rows[7];
+  assert.equal(rows.length, 7); // six planned (freshen unreported → hidden) + the appended unknown
+  const t = rows[6];
   assert.equal(t.step, "teardown");
   assert.equal(t.label, "teardown"); // forward-compat: raw name, never undefined
   assert.equal(t.role, "active");
@@ -709,9 +720,8 @@ test("provisionSteps: absent / garbled timestamps → null elapsed, never NaN", 
   assert.equal(rows[0].role, "ok");
   assert.equal(rows[0].elapsedMs, null);
   assert.ok(!Number.isNaN(rows[0].elapsedMs));
-  assert.equal(rows[1].role, "pending"); // dwb-17: freshen, unstarted
-  assert.equal(rows[2].role, "active");  // secure, shifted by the freshen rung
-  assert.equal(rows[2].elapsedMs, null); // active but no start stamp
+  assert.equal(rows[1].role, "active");  // secure (freshen unreported → hidden)
+  assert.equal(rows[1].elapsedMs, null); // active but no start stamp
 });
 
 // ── provisionChip (Mount 3): current step label + total elapsed ─────────────
@@ -741,37 +751,118 @@ test("provisionChip: active step gerund + total elapsed; failed; and the empty f
 // ── newStepsHtml (Mount 1): the /new checklist markup is byte-locked ────────
 // Guards the "zero visual regression" contract — if the shared builder ever
 // changes the /new step markup, this reds (there is no browser in this harness).
+// Re-pinned for the progress-polish slice: the active dot carries the ring
+// (data-ring + --p), every row a data-step, and the pace column (new-step-time).
 
-test("newStepsHtml: an active step with a caption is byte-identical to the pre-C3 markup", () => {
+test("newStepsHtml: an active step carries the ring dot, the live pace column, the caption and the spinner", () => {
   const html = hooks.newStepsHtml([
     { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [] },
   ]);
+  // stepRingProgress(1000, 15000) = 0.9 * 1/15 → 6%; pace = "1s · ~15s".
   assert.equal(html,
     '<ul class="new-steps">' +
-      '<li class="new-step active">' +
-        '<span class="new-step-dot" aria-hidden="true"></span>' +
+      '<li class="new-step active" data-step="create">' +
+        '<span class="new-step-dot" aria-hidden="true" data-ring="create" style="--p:6%"></span>' +
         '<span class="new-step-body">' +
           '<span class="new-step-label">Creating your server</span>' +
           '<span class="new-step-detail" data-cap="Booting">Booting</span>' +
         "</span>" +
+        '<span class="new-step-time" data-time="create">1s · ~15s</span>' +
         '<span class="new-step-spin" aria-hidden="true"></span>' +
       "</li>" +
     "</ul>");
 });
 
-test("newStepsHtml: a done step is a check with no spinner and no caption", () => {
+test("newStepsHtml: a done step is a check with the real elapsed, no spinner and no caption", () => {
   const html = hooks.newStepsHtml([
     { step: "create", label: "Creating your server", role: "ok", elapsedMs: 1000, caption: "", probes: [] },
   ]);
   assert.equal(html,
     '<ul class="new-steps">' +
-      '<li class="new-step done">' +
+      '<li class="new-step done" data-step="create">' +
         '<span class="new-step-dot" aria-hidden="true">&#10003;</span>' +
         '<span class="new-step-body">' +
           '<span class="new-step-label">Creating your server</span>' +
         "</span>" +
+        '<span class="new-step-time">1s</span>' +
       "</li>" +
     "</ul>");
+});
+
+test("newStepsHtml: a pending step shows the plan hint (~expected); an unknown step shows none", () => {
+  const html = hooks.newStepsHtml([
+    { step: "secure", label: "Securing your domain", role: "pending", elapsedMs: null, caption: "", probes: [] },
+    { step: "mystery", label: "mystery", role: "pending", elapsedMs: null, caption: "", probes: [] },
+  ]);
+  assert.match(html, /<span class="new-step-time">~45s<\/span>/); // secure's estimate
+  assert.doesNotMatch(html, /data-step="mystery"[\s\S]*new-step-time/); // no estimate → no hint
+  assert.doesNotMatch(html, /new-step-spin[\s\S]*data-step="mystery"|data-step="mystery"[^]*new-step-spin/);
+});
+
+test("newStepsHtml: a `next` row pulses — pending class + next, Starting… caption, dimmable spinner", () => {
+  const html = hooks.newStepsHtml([
+    { step: "create", label: "Creating your server", role: "ok", elapsedMs: 2000, caption: "", probes: [] },
+    { step: "secure", label: "Securing your domain", role: "pending", elapsedMs: null, caption: "", probes: [], next: true },
+  ]);
+  assert.match(html, /<li class="new-step pending next" data-step="secure">/);
+  assert.match(html, /data-cap="Starting…">Starting…</); // the between-steps caption
+  // The next row spins (motion), while the done row does not.
+  const nextLi = html.slice(html.indexOf('data-step="secure"'));
+  assert.match(nextLi, /new-step-spin/);
+  const doneLi = html.slice(html.indexOf('data-step="create"'), html.indexOf('data-step="secure"'));
+  assert.doesNotMatch(doneLi, /new-step-spin/);
+});
+
+// ── stepRingProgress: the per-phase ring fill is asymptotic + null-safe ─────
+
+test("stepRingProgress: linear to 90% across the estimate, crawls after, never completes, never NaN", () => {
+  assert.equal(hooks.stepRingProgress(0, 15000), 0);
+  assert.ok(Math.abs(hooks.stepRingProgress(7500, 15000) - 0.45) < 1e-9); // halfway → 45%
+  assert.ok(Math.abs(hooks.stepRingProgress(15000, 15000) - 0.9) < 1e-9); // on-estimate → 90%
+  const overdue = hooks.stepRingProgress(10 * 15000, 15000);
+  assert.ok(overdue > 0.9 && overdue < 0.98, `overdue must crawl in (0.9, 0.98), got ${overdue}`);
+  // Monotone while overdue: still visibly moving.
+  assert.ok(hooks.stepRingProgress(3 * 15000, 15000) < hooks.stepRingProgress(4 * 15000, 15000));
+  // Null-safety: garbled elapsed or missing estimate → 0, never NaN.
+  for (const v of [hooks.stepRingProgress(null, 15000), hooks.stepRingProgress(NaN, 15000),
+    hooks.stepRingProgress(-5, 15000), hooks.stepRingProgress(1000, undefined)]) {
+    assert.equal(v, 0);
+  }
+});
+
+// ── markNextStep: the between-steps decoration ──────────────────────────────
+
+test("markNextStep: flags the first pending after a done; never when a step is active/failed or nothing finished", () => {
+  const row = (step, role) => ({ step, role, label: step, elapsedMs: null, caption: "", probes: [] });
+  // Gap: done + all-pending → the first pending is `next`.
+  const gap = hooks.markNextStep([row("create", "ok"), row("secure", "pending"), row("configure", "pending")]);
+  assert.equal(gap[1].next, true);
+  assert.equal(gap[2].next, undefined);
+  assert.equal(gap[1].role, "pending"); // role untouched — the chip stays honest
+  // A live step → no decoration.
+  const busy = hooks.markNextStep([row("create", "ok"), row("secure", "active"), row("configure", "pending")]);
+  assert.ok(busy.every((r) => !r.next));
+  // A failed run → no decoration (the failure is the signal).
+  const failed = hooks.markNextStep([row("create", "failed"), row("secure", "pending")]);
+  assert.ok(failed.every((r) => !r.next));
+  // Nothing finished yet (pre-first-step) → no decoration.
+  const cold = hooks.markNextStep([row("create", "pending"), row("secure", "pending")]);
+  assert.ok(cold.every((r) => !r.next));
+});
+
+test("provisionSteps: a between-steps gap (create done, nothing active) marks secure `next` end-to-end", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+  ] }, NOW);
+  assert.equal(rows[0].role, "ok");
+  assert.equal(rows[1].step, "secure");
+  assert.equal(rows[1].next, true);
+  // The chip is untouched by the decoration: still the generic fallback label.
+  assert.equal(hooks.provisionChip({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+  ] }, NOW).label, "provisioning");
 });
 
 // ── timelineHtml (Mount 2 presentation) ─────────────────────────────────────
@@ -791,6 +882,18 @@ test("timelineHtml: renders roled steps, per-step elapsed, verify probes, and th
   assert.match(html, /bp-tl-probe">verify\.login: 401 in 182ms/);
   assert.match(html, /bp-tl-fail[\s\S]*SECRET_KEY_BASE was 32 bytes/);
   assert.doesNotMatch(hooks.timelineHtml(rows, { failed: false }), /bp-tl-fail/);
+});
+
+test("timelineHtml: a `next` row gets the --next class, the Starting… caption and a spinner", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "create", status: "started", at: T(0) },
+    { step: "create", status: "done", at: T(2) },
+  ] }, NOW);
+  const html = hooks.timelineHtml(rows, {});
+  assert.match(html, /bp-tl-step--pending bp-tl-step--next/);
+  assert.match(html, /bp-tl-caption">Starting…</);
+  const nextLi = html.slice(html.indexOf("bp-tl-step--next"), html.indexOf("configure"));
+  assert.match(nextLi, /bp-tl-spin/);
 });
 
 test("consoleTail: empty → a calm caption; lines → escaped rows with timestamps", () => {

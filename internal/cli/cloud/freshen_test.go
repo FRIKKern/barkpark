@@ -9,7 +9,9 @@ import (
 )
 
 // narration records (status, detail) freshen transitions for assertions.
-type narration struct{ entries []struct{ status, detail string } }
+type narration struct {
+	entries []struct{ status, detail string }
+}
 
 func (n *narration) narrate(status, detail string) {
 	n.entries = append(n.entries, struct{ status, detail string }{status, detail})
@@ -56,8 +58,10 @@ func TestEnsureFresh_CurrentNoRebuild(t *testing.T) {
 	if r.rebuildRan {
 		t.Error("a current box must NOT rebuild")
 	}
-	if !n.has("done", freshenCurrentCaption) {
-		t.Errorf("no 'Already up to date' narration; got %+v", n.entries)
+	// Freshen is a fallback: a current box narrates NOTHING, so the /new timeline
+	// never advertises an "Updating…" phase that did no work.
+	if len(n.entries) != 0 {
+		t.Errorf("a current box must narrate nothing; got %+v", n.entries)
 	}
 }
 
@@ -223,12 +227,13 @@ func TestProvision_FreshenRunsBeforeMigrate(t *testing.T) {
 	if checkAt >= migrateAt {
 		t.Errorf("freshen (idx %d) must run BEFORE migrate (idx %d); events=%v", checkAt, migrateAt, runner.events)
 	}
-	// A current box narrates the honest no-op and never rebuilds.
+	// A current box never rebuilds — and narrates nothing (freshen is a fallback
+	// step; the timeline only shows it when it actually intervenes).
 	if runner.rebuildRan {
 		t.Error("a current box rebuilt during the in-chain freshen")
 	}
-	if !n.has("done", freshenCurrentCaption) {
-		t.Errorf("freshen did not narrate 'Already up to date'; got %+v", n.entries)
+	if len(n.entries) != 0 {
+		t.Errorf("a current box must narrate no freshen step; got %+v", n.entries)
 	}
 }
 

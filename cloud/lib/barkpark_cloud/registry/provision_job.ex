@@ -45,10 +45,13 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # client-side timer:
   #   * create    — the box is created + its fqdn identity stamped
   #   * freshen    — dwb-17: bring the box's baked snapshot up to origin/main before
-  #     migrate (a working box on the CURRENT release). Narrates "Already up to
-  #     date" or "Updating Barkpark v0.42 → v0.45…"; a freshen that can't rebuild
-  #     degrades to the baked release (rendered `done` with an honest caption, never
-  #     a red `failed` — the box still works, it is just behind).
+  #     migrate (a working box on the CURRENT release). A FALLBACK, not a plan:
+  #     warm boxes are freshened before entering the pool, so the worker narrates
+  #     this step ONLY when it intervenes — "Updating Barkpark v0.42 → v0.45…" on a
+  #     stale box, or a degrade caption when freshness couldn't be verified. A
+  #     current box emits nothing (and the SPA hides the unreported step). A
+  #     freshen that can't rebuild degrades to the baked release (rendered `done`
+  #     with an honest caption, never a red `failed` — the box works, just behind).
   #   * secure    — DNS record + Caddy/TLS on the box
   #   * configure — migrate + admin-token install
   #   * content   — template bootstrap (skipped when the job carries no template)
