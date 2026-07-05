@@ -857,6 +857,8 @@ defmodule BarkparkWeb.Router do
     post("/verify-email", AuthController, :verify_email)
     post("/request-reset", AuthController, :request_reset)
     post("/reset", AuthController, :reset)
+    post("/request-magic-link", AuthController, :request_magic_link)
+    post("/magic-login", AuthController, :magic_login)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────

@@ -168,6 +168,50 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  @doc """
+  Build a single-use magic-link **login** token for the account with `email`.
+
+  Returns `{:ok, plaintext, user}` when the email maps to a user (the caller
+  mails the plaintext in the link), or `:no_user` when it does not. The caller
+  MUST return an identical generic response either way — never leak whether the
+  email exists (anti-enumeration, same discipline as request-reset/register).
+  """
+  @spec build_login_token(term()) ::
+          {:ok, binary(), User.t()} | :no_user | {:error, Ecto.Changeset.t()}
+  def build_login_token(email) when is_binary(email) do
+    case get_user_by_email(email) do
+      %User{} = user ->
+        case build_email_token(user, "login") do
+          {:ok, plaintext} -> {:ok, plaintext, user}
+          {:error, _} = err -> err
+        end
+
+      _ ->
+        :no_user
+    end
+  end
+
+  def build_login_token(_), do: :no_user
+
+  @doc """
+  Consume a magic-link **login** token plaintext, returning the user. Single-use
+  (the row is deleted) and expiry-bounded. Unknown, already-used, and expired
+  tokens are all indistinguishable — every failure returns `:error`, so the
+  consume path is not an existence oracle.
+  """
+  @spec consume_login_token(term()) :: {:ok, User.t()} | :error
+  def consume_login_token(plaintext) when is_binary(plaintext) do
+    with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "login"),
+         %User{} = user <- Repo.get(User, uid),
+         {:ok, user} <- Repo.transaction(fn -> Repo.delete!(tok) && user end) do
+      {:ok, user}
+    else
+      _ -> :error
+    end
+  end
+
+  def consume_login_token(_), do: :error
+
   @doc "Confirm a user's email from a `\"confirm\"` token plaintext. Consumes the token."
   @spec confirm_user(term()) :: {:ok, User.t()} | :error
   def confirm_user(plaintext) when is_binary(plaintext) do

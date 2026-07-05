@@ -166,6 +166,49 @@ defmodule BarkparkWeb.AuthController do
     json(conn, %{ok: true})
   end
 
+  @doc """
+  Passwordless sign-in — request a magic link. Emails a single-use login link
+  if the address maps to a user; ALWAYS returns a generic `{ok: true}` so the
+  response never reveals whether the email is registered (anti-enumeration,
+  identical to request-reset).
+  """
+  def request_magic_link(conn, %{"email" => email}) do
+    case Accounts.build_login_token(email) do
+      {:ok, token, user} ->
+        UserNotifier.deliver_magic_link(user.email, build_url("/auth/magic/", token))
+
+      _ ->
+        :ok
+    end
+
+    json(conn, %{ok: true})
+  end
+
+  def request_magic_link(conn, _), do: error(conn, 400, "bad_request", "email is required")
+
+  @doc """
+  Passwordless sign-in — complete it. Consumes the single-use magic-link token
+  and issues a session. Unknown, already-used, and expired tokens all return
+  the same generic `invalid_token` error (no oracle).
+  """
+  def magic_login(conn, %{"token" => token}) do
+    case Accounts.consume_login_token(token) do
+      {:ok, user} ->
+        issue_session(conn, user)
+
+      :error ->
+        error(
+          conn,
+          401,
+          "invalid_token",
+          "this sign-in link is invalid or has expired",
+          "request a fresh sign-in link and use it promptly"
+        )
+    end
+  end
+
+  def magic_login(conn, _), do: error(conn, 400, "bad_request", "token is required")
+
   def reset(conn, %{"token" => token, "password" => password}) do
     case Accounts.reset_user_password(token, %{password: password}) do
       {:ok, _user} ->
