@@ -250,7 +250,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_delete_block(%{"id" => id}, socket) do
-    {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
+    # pdd-t2: a template-locked block can't be deleted. The controls are hidden
+    # / disabled, so this only fires from a stale DOM or a crafted event — keep
+    # it a calm no-op rather than a server-rejected op + error flash.
+    if locked_block_id?(socket, id) do
+      {:noreply, socket}
+    else
+      {:noreply, Shared.paper_op(socket, %{"op" => "remove-block", "id" => id})}
+    end
   end
 
   @doc """
@@ -318,7 +325,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         _ -> nil
       end
 
-    {:noreply, Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+    # pdd-t2: template-locked blocks hold their positions under drag-and-drop.
+    # A locked block is never dragged (its grip is inert) — a stale/crafted
+    # event is a calm no-op. A drop that would land an UNLOCKED block inside
+    # the locked prefix (above the title, or between title and featured) CLAMPS
+    # to directly below the last locked block — the block lands as close as
+    # allowed instead of the move erroring out server-side.
+    blocks = Shared.paper_top_level_blocks(socket)
+    locked_prefix = Enum.take_while(blocks, &(Map.get(&1, "locked") == true))
+
+    cond do
+      locked_block_id?(socket, id) ->
+        {:noreply, socket}
+
+      locked_prefix != [] ->
+        last_locked_id = locked_prefix |> List.last() |> Map.get("id")
+        locked_ids = MapSet.new(locked_prefix, &Map.get(&1, "id"))
+
+        after_id =
+          if after_id == nil or
+               (MapSet.member?(locked_ids, after_id) and after_id != last_locked_id),
+             do: last_locked_id,
+             else: after_id
+
+        {:noreply,
+         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+
+      true ->
+        {:noreply,
+         Shared.paper_op(socket, %{"op" => "move-block", "id" => id, "after" => after_id})}
+    end
+  end
+
+  # pdd-t2: whether the top-level block `id` is template-locked.
+  defp locked_block_id?(socket, id) do
+    socket
+    |> Shared.paper_top_level_blocks()
+    |> Enum.any?(fn b -> Map.get(b, "id") == id and Map.get(b, "locked") == true end)
   end
 
   @doc """

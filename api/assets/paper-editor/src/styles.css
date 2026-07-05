@@ -405,3 +405,34 @@ html[data-theme="dark"] .bp-wikilink-menu {
   font-weight: 500;
   line-height: 1.2;
 }
+
+/* ── doctrine template locks (pdd-t2): the calm lock cue ──────────────────────
+ * A mandated template block (locked title @0, featured image @1) can't be moved
+ * or deleted (server backstop + the canvas filterTransaction veto). The cue is
+ * DELIBERATELY quiet — doctrine rule 5: chrome around content, never an error.
+ * BpAttrs renders data-bp-locked="true" + a hover title ("Part of the document
+ * template") on the locked node; here we add a faint accent margin-rule that only
+ * warms on hover. No shake, no flash, no color-shift of the content itself — the
+ * text stays fully editable (only placement/deletion is locked). */
+.bp-paper-editor-body [data-bp-locked="true"] {
+  border-inline-start: 2px solid transparent;
+  margin-inline-start: -10px;
+  padding-inline-start: 8px;
+  transition: border-color 120ms ease;
+}
+.bp-paper-editor-body [data-bp-locked="true"]:hover {
+  border-inline-start-color: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+}
+
+/* Legacy per-block editor: the calm lock note that stands in for the hidden
+ * move/delete controls on a locked block (paper_editor.ex). Muted, non-interactive
+ * — a quiet statement of fact, not an error. */
+.bp-paper-lock-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--paper-ink-faint, #82918b);
+  user-select: none;
+  cursor: default;
+}

@@ -61,11 +61,16 @@ defmodule Barkpark.PortableDoc.Patch do
       {:error, {:block_not_found, target, op}}
       {:error, {:type_mismatch, target, op}}
       {:error, {:duplicate_id, target, op}}
+      {:error, {:locked_block, target, op}}
       {:error, {:invalid_op, op_value}}
 
   where `target` is the offending id (or `afterId`), and `op` is the failing
   op's discriminator string. `:invalid_op` is raised for an unknown or
-  malformed op map.
+  malformed op map. `:locked_block` is the doctrine backstop (pdd-t2/t3): an op
+  that would remove, move, displace, or unmake a template-locked block is
+  rejected — both when the op TARGETS the locked block and when its side
+  effect would shift a locked block's top-level position (e.g. an insert-after
+  landing inside the locked prefix).
   """
 
   @type block :: %{required(String.t()) => term()}
@@ -73,7 +78,7 @@ defmodule Barkpark.PortableDoc.Patch do
   @type doc :: %{required(String.t()) => term()}
   @type op :: %{required(String.t()) => term()}
 
-  @type error_code :: :block_not_found | :type_mismatch | :duplicate_id
+  @type error_code :: :block_not_found | :type_mismatch | :duplicate_id | :locked_block
   @type error ::
           {:error, {error_code(), String.t(), String.t()}}
           | {:error, {:invalid_op, term()}}
@@ -92,14 +97,16 @@ defmodule Barkpark.PortableDoc.Patch do
   @spec apply_patch(doc(), op()) :: {:ok, doc()} | error()
   @spec apply_patch(blocks(), op()) :: {:ok, blocks()} | error()
   def apply_patch(%{"blocks" => blocks} = doc, op) when is_list(blocks) do
-    case apply_to_blocks(blocks, op) do
+    case apply_patch(blocks, op) do
       {:ok, new_blocks} -> {:ok, Map.put(doc, "blocks", new_blocks)}
       {:error, _} = err -> err
     end
   end
 
   def apply_patch(blocks, op) when is_list(blocks) do
-    apply_to_blocks(blocks, op)
+    with {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
+      check_locked_placement(blocks, new_blocks, op)
+    end
   end
 
   @doc """
@@ -269,6 +276,49 @@ defmodule Barkpark.PortableDoc.Patch do
   # `id` and `type`, `locked` and `role` cannot be set, changed, or stripped by
   # a content patch. Seeding happens at create (Papers.Template), never via ops.
   defp strip_template_keys(patch) when is_map(patch), do: Map.drop(patch, ["locked", "role"])
+
+  # Doctrine invariant (pdd-t2): locked placement means a template-locked block
+  # HOLDS ITS TOP-LEVEL POSITION under every op — not just the ops that TARGET
+  # it (remove/move, rejected in their own clauses above with op-specific
+  # errors) but any op whose SIDE EFFECT displaces or unmakes it:
+  #
+  #   * insert-after / append into the locked prefix (e.g. inserting after the
+  #     locked title pushes the locked featured from index 1 to 2 — the exact
+  #     op a canvas Enter at the end of the title run would emit);
+  #   * move-block of an UNLOCKED block to the head or in between locked blocks;
+  #   * replace-block swapping a locked block for an unlocked one (or re-keying
+  #     its id) — wholesale replace would otherwise be a delete in disguise.
+  #
+  # Checked once per op against the top-level index map (locks are a top-level
+  # template concept). Additive / D3: a doc with no locked blocks passes in one
+  # scan, so the pre-doctrine corpus is byte-untouched.
+  defp check_locked_placement(before_blocks, after_blocks, op) do
+    before_map = locked_index_map(before_blocks)
+
+    if map_size(before_map) == 0 do
+      {:ok, after_blocks}
+    else
+      after_map = locked_index_map(after_blocks)
+
+      case Enum.find(before_map, fn {id, idx} -> Map.get(after_map, id) != idx end) do
+        nil -> {:ok, after_blocks}
+        {id, _idx} -> {:error, {:locked_block, id, Map.get(op, "op")}}
+      end
+    end
+  end
+
+  # Top-level id → index for every template-locked block.
+  defp locked_index_map(blocks) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.reduce(%{}, fn {block, idx}, acc ->
+      if is_map(block) and Map.get(block, "locked") == true do
+        Map.put(acc, block_id(block), idx)
+      else
+        acc
+      end
+    end)
+  end
 
   # True when the TOP-LEVEL block with `id` is template-locked (locks are a
   # top-level template concept; section children are never seeded locked).
