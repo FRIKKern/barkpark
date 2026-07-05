@@ -2,38 +2,54 @@ defmodule Barkpark.Tenancy.Auth do
   @moduledoc """
   Authorization primitives for the hard Workspace tenant boundary.
 
-  The principal is the API TOKEN — there is NO users/accounts model. A token
-  is bound to a Workspace by a `Barkpark.Tenancy.Membership` row whose
-  `principal_id` is the token id. Authorization combines two facts:
+  A principal is bound to a Workspace by a `Barkpark.Tenancy.Membership` row.
+  There are TWO kinds of principal, discriminated by the membership's
+  `principal_type` column, and BOTH flow through the same `authorize/3`
+  chokepoint:
 
-    1. membership — the token must be a member of the target workspace, and
-    2. permission — the token's `permissions` array must satisfy the action.
+    * **API token** (`principal_type: "api_token"`) — a token bound to a
+      workspace. Authorization combines membership AND the token's
+      `permissions` array (`:read`/`:write`/`:admin`).
+    * **User** (`principal_type: "user"`) — a logged-in account (core-auth:
+      accounts/sessions/MFA, and the principal that SSO/SCIM mint). A user
+      carries no `permissions` array; its GRANT is its membership ROLE, so
+      authorization combines membership AND the role.
 
   `authorize/3` is the single entry point the router and controllers call.
-  The read-path workspace check (query_controller) and the route-level
-  workspace resolution (`/w/:workspace`) are sibling tasks; they call
-  `authorize(token, workspace_id, :read | :write | :admin)` — it is ready for
-  them now.
+  It is total: any non-member, unknown action, or unrecognised principal is
+  denied. Cross-tenant isolation is guaranteed by the membership lookup being
+  keyed on `(principal_id, workspace_id, principal_type)` — a principal with
+  no membership row in a workspace can never be authorized there.
 
-  Action → satisfying permission strings:
+  Action → satisfying grant:
 
-    * `:read`  ← "read", "admin", "public-read"
-    * `:write` ← "write", "admin"
-    * `:admin` ← "admin"
+    * API token permission strings:
+      * `:read`  ← "read", "admin", "public-read"
+      * `:write` ← "write", "admin"
+      * `:admin` ← "admin"
+    * User membership roles:
+      * `:read`  ← "member", "admin", "owner"
+      * `:write` ← "member", "admin", "owner"
+      * `:admin` ← "admin", "owner"
   """
   import Ecto.Query, warn: false
 
   alias Barkpark.Repo
+  alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy.Membership
 
   @type action :: :read | :write | :admin
-  @type principal :: ApiToken.t() | binary()
+  @type principal :: ApiToken.t() | User.t() | binary()
 
-  # Which permission strings satisfy each action.
+  # Which permission strings satisfy each action (API-token principals).
   @read_perms ~w(read admin public-read)
   @write_perms ~w(write admin)
   @admin_perms ~w(admin)
+
+  # Every valid membership role — a User in any role may read+write content;
+  # admin authority is the narrower `@user_admin_roles` set (below).
+  @roles_all ~w(owner admin member)
 
   # Default role for a NEW membership when no explicit role is passed. A token
   # ADDED to a workspace it did not create is a `member` — write content, but
@@ -83,6 +99,21 @@ defmodule Barkpark.Tenancy.Auth do
   def membership(%ApiToken{id: principal_id}, workspace_id),
     do: membership(principal_id, workspace_id)
 
+  # A User principal resolves to a `principal_type: "user"` membership row.
+  # Kept SEPARATE from the raw-binary clause below (which defaults to
+  # "api_token") so a user id can never accidentally match a token's grant —
+  # the principal_type discriminator IS the cross-tenant/cross-kind isolation.
+  def membership(%User{id: principal_id}, workspace_id)
+      when is_binary(principal_id) and is_binary(workspace_id) do
+    Repo.one(
+      from m in Membership,
+        where:
+          m.principal_id == ^principal_id and
+            m.workspace_id == ^workspace_id and
+            m.principal_type == "user"
+    )
+  end
+
   def membership(principal_id, workspace_id)
       when is_binary(principal_id) and is_binary(workspace_id) do
     Repo.one(
@@ -110,7 +141,7 @@ defmodule Barkpark.Tenancy.Auth do
   total — any unknown action or a non-member returns `{:error, :forbidden}`
   rather than raising.
   """
-  @spec authorize(ApiToken.t(), binary(), action()) :: :ok | {:error, :forbidden}
+  @spec authorize(principal(), binary(), action()) :: :ok | {:error, :forbidden}
   def authorize(%ApiToken{} = token, workspace_id, action)
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
     if member?(token, workspace_id) and permits?(token, action) do
@@ -120,7 +151,32 @@ defmodule Barkpark.Tenancy.Auth do
     end
   end
 
+  # User principal: the GRANT is the membership ROLE (users carry no
+  # permissions[] array). A non-member is denied; a member is allowed when its
+  # role satisfies the action. Same chokepoint, same total contract as tokens.
+  def authorize(%User{} = user, workspace_id, action)
+      when is_binary(workspace_id) and action in [:read, :write, :admin] do
+    case membership(user, workspace_id) do
+      %Membership{role: role} ->
+        if role_permits?(role, action), do: :ok, else: {:error, :forbidden}
+
+      nil ->
+        {:error, :forbidden}
+    end
+  end
+
   def authorize(_token, _workspace_id, _action), do: {:error, :forbidden}
+
+  # Which membership ROLES satisfy each action, for USER principals. `member`
+  # grants content read+write (not admin); `admin`/`owner` add admin authority.
+  # Mirrors the documented role semantics in `create_membership/4`.
+  @user_admin_roles ~w(owner admin)
+
+  @spec role_permits?(String.t(), action()) :: boolean()
+  defp role_permits?(role, :read) when is_binary(role), do: role in @roles_all
+  defp role_permits?(role, :write) when is_binary(role), do: role in @roles_all
+  defp role_permits?(role, :admin) when is_binary(role), do: role in @user_admin_roles
+  defp role_permits?(_role, _action), do: false
 
   @doc """
   True when the token's permissions satisfy `action`, ignoring membership.
