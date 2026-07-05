@@ -913,6 +913,40 @@ test("paceSteps: the `next` pulse is suppressed while a paced row holds the stag
   assert.equal(rows[1].next, false);
 });
 
+// ── Zero-paste Vercel handoff: the claim-area builders ───────────────────────
+
+test("vercelClaimHtml: unconfigured → empty (the clone-URL fallback renders instead)", () => {
+  assert.equal(hooks.vercelClaimHtml(null, { id: "b1" }), "");
+  assert.equal(hooks.vercelClaimHtml({ configured: false, deployed: true }, { id: "b1" }), "");
+});
+
+test("vercelClaimHtml: configured + undeployed → the one-click deploy button", () => {
+  const html = hooks.vercelClaimHtml({ configured: true, deployed: false, claim_url: null }, { id: "b1" });
+  assert.match(html, /<div id="new-vercel-area">/);
+  assert.match(html, /id="new-vercel-claim"[^>]*>Deploy your site to Vercel</);
+  assert.match(html, /every environment variable already set/);
+});
+
+test("vercelClaimHtml: deployed but stale code → a re-mint button, never a dead link", () => {
+  const html = hooks.vercelClaimHtml({ configured: true, deployed: true, claim_url: null }, { id: "b1" });
+  assert.match(html, /Get your Vercel claim link/);
+  assert.doesNotMatch(html, /claim-deployment/);
+});
+
+test("vercelClaimLinkHtml: fresh code → claim link with returnUrl back to the instance", () => {
+  const vercel = {
+    configured: true, deployed: true,
+    claim_url: "https://vercel.com/claim-deployment?code=clm_x",
+    deployment_url: "https://my-site-abc.vercel.app",
+  };
+  const html = hooks.vercelClaimHtml(vercel, { id: "bp-9" });
+  assert.match(html, /id="new-vercel-claim-link"/);
+  // esc() entity-encodes the & in the attribute — the browser decodes it back.
+  assert.match(html, /href="https:\/\/vercel\.com\/claim-deployment\?code=clm_x&amp;returnUrl=http%3A%2F%2Flocalhost%2F%23instance%2Fbp-9"/);
+  assert.match(html, /my-site-abc\.vercel\.app/); // the live-deployment line
+  assert.match(html, /target="_blank" rel="noopener"/);
+});
+
 test("seedPaceLedger: resume renders finished history instantly (no theatre replay)", () => {
   const ledger = {};
   const truth = [paceRow("create", "ok"), paceRow("secure", "ok"), paceRow("configure", "active")];

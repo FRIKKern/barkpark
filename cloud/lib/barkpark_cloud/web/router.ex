@@ -122,6 +122,7 @@ defmodule BarkparkCloud.Web.Router do
     Repo,
     Telemetry,
     Usage,
+    Vercel,
     Verify
   }
 
@@ -1573,7 +1574,10 @@ defmodule BarkparkCloud.Web.Router do
                 })
 
               {:ok, boot} ->
-                json(conn, 200, Map.merge(boot, %{url: bp.url}))
+                # `vercel` rides along so the ready screen knows whether the
+                # zero-paste handoff is available / already deployed — same
+                # team-admin custody as the read token this payload carries.
+                json(conn, 200, Map.merge(boot, %{url: bp.url, vercel: Vercel.state(bp)}))
 
               :error ->
                 json(conn, 500, %{error: "decrypt_failed"})
@@ -1583,6 +1587,73 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 404, %{error: "not_found"})
         end
     end
+  end
+
+  # POST /v1/barkparks/:id/vercel-deploy — the zero-paste Vercel handoff
+  # (task-4e4a53b101a97051): platform-deploy the instance's template with its
+  # bootstrap env installed server-side, mint a claim code, and return the
+  # claim/deployment state. Idempotent on the project (a re-click re-mints only
+  # the code). Team-admin-gated (it spends the team's content credentials) and
+  # feature-flagged off with a 503 until the platform token is wired — the SPA
+  # then keeps the classic /new/clone copy-block handoff.
+  post "/v1/barkparks/:id/vercel-deploy" do
+    conn = Auth.require_team_admin(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      not Vercel.configured?() ->
+        json(conn, 503, %{
+          error: "feature_not_configured",
+          detail: "The Vercel platform token is not configured on this control plane."
+        })
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Vercel.deploy_for(bp) do
+              {:ok, state} ->
+                push_event(bp.team_id, "fleet")
+                json(conn, 201, %{ok: true, vercel: state})
+
+              {:error, :no_bootstrap} ->
+                json(conn, 409, %{
+                  error: "no_bootstrap",
+                  detail:
+                    "No content bootstrap is stored for this instance, so there is " <>
+                      "nothing to wire the deployment to."
+                })
+
+              {:error, :not_deployable} ->
+                json(conn, 422, %{
+                  error: "not_deployable",
+                  detail: "This template does not ship a standalone app to deploy."
+                })
+
+              {:error, reason} ->
+                # The client seam failed (Vercel API error / not configured
+                # mid-flight). Surface a SAFE, bounded summary — the error
+                # tuples never carry the token or a request body we built.
+                json(conn, 502, %{error: "vercel_error", detail: vercel_reason(reason)})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # A bounded `inspect` of a Vercel client error for the 502 payload — the
+  # operator-facing summary, truncated so a verbose API body can't balloon the
+  # response. Client error tuples carry no credentials by construction.
+  defp vercel_reason(reason) do
+    reason |> inspect() |> String.slice(0, 300)
   end
 
   ## Instance-API proxy (C4 — charter decisions D46 / D51) — the console's

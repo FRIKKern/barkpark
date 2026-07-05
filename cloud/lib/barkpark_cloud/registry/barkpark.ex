@@ -133,6 +133,17 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :update_latest_release, :string
     field :update_checked_at, :utc_datetime_usec
 
+    # Zero-paste Vercel handoff (task-4e4a53b101a97051): the platform-deployed
+    # project the user claims via vercel.com/claim-deployment. project id + url
+    # are display state; the claim code is ENCRYPTED (it grants project
+    # ownership) with its mint stamp for the 24h-expiry check. Written ONLY
+    # through the narrow `vercel_changeset/2`; NEVER serialized in barkpark_json
+    # (revealed via the team-admin-gated routes, same custody as bootstrap).
+    field :vercel_project_id, :string
+    field :vercel_deploy_url, :string
+    field :vercel_claim_encrypted, :string
+    field :vercel_claim_minted_at, :utc_datetime_usec
+
     belongs_to :team, BarkparkCloud.Accounts.Team
 
     timestamps(type: :utc_datetime_usec)
@@ -410,6 +421,24 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:update_state, @update_states)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the zero-paste Vercel handoff — only the four Vercel
+  columns are castable, so recording a platform deploy can never rename a
+  Barkpark or reassign its Team (the same containment posture as
+  `update_status_changeset/2`). Written only by `BarkparkCloud.Vercel.deploy_for/1`.
+  """
+  def vercel_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [
+      :vercel_project_id,
+      :vercel_deploy_url,
+      :vercel_claim_encrypted,
+      :vercel_claim_minted_at
+    ])
+    |> validate_length(:vercel_project_id, max: 255)
+    |> validate_length(:vercel_deploy_url, max: 255)
   end
 
   @doc """
