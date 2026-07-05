@@ -96,6 +96,8 @@ defmodule Barkpark.Sso.Oidc do
          {:ok, claims} <- verify_id_token(c, id_token),
          :ok <- validate_claims(c, claims, expected_nonce),
          {:ok, user} <- find_or_create_user(claims["email"]) do
+      # JIT: first SSO login gains a membership in the connection's org (era-w3-jit).
+      Barkpark.Sso.jit_provision(c.organization_id, user)
       {:ok, user, claims}
     else
       {:ok, %{}} -> {:error, :no_id_token}

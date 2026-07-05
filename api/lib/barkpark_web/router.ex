@@ -874,6 +874,8 @@ defmodule BarkparkWeb.Router do
     post("/reset", AuthController, :reset)
     post("/request-magic-link", AuthController, :request_magic_link)
     post("/magic-login", AuthController, :magic_login)
+    # Pre-login SSO routing: email → its org's SSO start URL (verified domains).
+    post("/sso/route", SsoRoutingController, :route)
   end
 
   # ── SCIM 2.0 directory sync (per-organization bearer) ───────────────────
