@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestLiveProbe is a manual wire-contract probe (go test -tags liveprobe
@@ -84,12 +85,12 @@ func TestLiveProbe(t *testing.T) {
 	// the real corpus (131 tasks) and tripped this guard on a healthy board.
 	accounted := len(b.Now)
 	for _, e := range b.Epics {
-		accounted += 1 + len(e.Children) + e.DoneFolded
+		accounted += 1 + len(e.Children) + e.DoneFolded + e.CancelledFolded
 	}
 	for _, cl := range b.Clusters {
-		accounted += len(cl.Tasks) + cl.DoneFolded
+		accounted += len(cl.Tasks) + cl.DoneFolded + cl.CancelledFolded
 	}
-	accounted += len(b.Orphans) + b.OrphansFolded
+	accounted += len(b.Orphans) + b.OrphansFolded + b.OrphansCancelledFolded
 	// NOW rows are ALSO counted among their epic/orphan home, so accounted may
 	// exceed the corpus by exactly len(b.Now); it must never be short.
 	if accounted < len(snap.Tasks) {
@@ -232,123 +233,58 @@ func TestLiveProbe(t *testing.T) {
 	widthSafe("html-only", htmlBody, 80)
 	fmt.Printf("reading-frame probe OK: detail + paper + HTML-only states render width-safe\n")
 
-	// ── Wave-8 head-cap / claim-forward guard (the "at least 5 per category"
-	// retune) ─ On the real guerrilla queue the DEFAULT board must paint a HEAD of
-	// at most groupHeadMax children per section (the user's "we want to see at
-	// least 5 tasks per category") — a bigger section trims the rest behind a
-	// "+K more" line, a smaller one shows all it has — with a READY TO CLAIM head
-	// and never a fully flat wall. Assert it on the live corpus, read-only.
-	def := UIState{Conn: ConnLive, LastSync: snap.FetchedAt, CollapsedEpics: map[string]bool{}}
-	defaultRows := 0
-	if showReadyHead(b) {
-		defaultRows += len(b.ReadyHead)
-	} else {
-		defaultRows += len(b.Now)
-	}
-	// checkHead asserts a section's default shown-count obeys the head cap: at most
-	// groupHeadMax, and a small section (< groupHeadMax children) shows all of them.
-	checkHead := func(what string, shown, n int) {
-		if shown > groupHeadMax {
-			t.Errorf("%s shows %d children by default, over the head cap %d", what, shown, groupHeadMax)
-		}
-		if n < groupHeadMax && shown != n {
-			t.Errorf("small %s shows %d of %d children by default, want all", what, shown, n)
-		}
-		if n >= groupHeadMax && shown != groupHeadMax {
-			t.Errorf("%s (%d children) shows %d by default, want the head cap %d", what, n, shown, groupHeadMax)
+	// ── Wave-11 ACTIVITY-FOCUS guard (charter D49–D52) ─ On the real guerrilla
+	// queue the board must be ONE list: recency-ordered sections, active work shown
+	// with a bounded focus window (never the flat wall), done never flooding, and
+	// NO READY TO CLAIM band. Assert it on the live corpus, read-only.
+
+	// D49: epic sections come back recency-desc (Active-first, then LastActivity).
+	for i := 1; i < len(b.Epics); i++ {
+		if b.Epics[i-1].Active == b.Epics[i].Active && b.Epics[i-1].LastActivity.Before(b.Epics[i].LastActivity) {
+			t.Errorf("epics not recency-desc at %d: %q before %q", i, b.Epics[i-1].Root.Title, b.Epics[i].Root.Title)
 		}
 	}
+	// D50: no ACTIVE section keeps more than doneCueMax done rows — done never floods.
 	activeEpics := 0
 	for _, e := range b.Epics {
-		defaultRows++ // the header row is always a stop
 		if e.Active {
 			activeEpics++
 		}
-		shown := epicShown(def, e)
-		checkHead("epic "+e.Root.DocID, shown, len(e.Children))
-		defaultRows += shown
-	}
-	activeClusters := 0
-	for _, cl := range b.Clusters {
-		defaultRows++
-		if cl.Active {
-			activeClusters++
-		}
-		shown := clusterShown(def, cl)
-		checkHead("cluster "+cl.Key, shown, len(cl.Tasks))
-		defaultRows += shown
-	}
-	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
-		defaultRows++ // the loose "(no epic)" header
-		shown := orphansShown(def, b)
-		checkHead("orphan bucket", shown, len(b.Orphans))
-		defaultRows += shown
-	}
-	// A fully-EXPANDED count (every child shown) for the compactness ratio.
-	expandedRows := len(b.Now)
-	for _, e := range b.Epics {
-		expandedRows += 1 + len(e.Children)
-	}
-	for _, cl := range b.Clusters {
-		expandedRows += 1 + len(cl.Tasks)
-	}
-	if len(b.Orphans) > 0 || b.OrphansFolded > 0 {
-		expandedRows += 1 + len(b.Orphans)
-	}
-	fmt.Printf("wave-8: readyHead=%d readyTotal=%d showReadyHead=%v activeEpics=%d/%d activeClusters=%d/%d orphansActive=%v headCap=%d\n",
-		len(b.ReadyHead), b.ReadyTotal, showReadyHead(b), activeEpics, len(b.Epics),
-		activeClusters, len(b.Clusters), b.OrphansActive, groupHeadMax)
-	fmt.Printf("wave-8: DEFAULT visible rows=%d vs fully-expanded=%d (compaction %.0f%%)\n",
-		defaultRows, expandedRows, 100*(1-float64(defaultRows)/float64(max1(expandedRows))))
-	// Claim-forward: with nothing in flight the band must OFFER work, never dead-end.
-	if len(b.Now) == 0 {
-		if !showReadyHead(b) && b.ReadyTotal > 0 {
-			t.Errorf("empty NOW with %d ready tasks did not surface a READY TO CLAIM head", b.ReadyTotal)
-		}
-		if len(b.ReadyHead) > readyHeadMax {
-			t.Errorf("ready head is %d, over the cap %d", len(b.ReadyHead), readyHeadMax)
+		if len(e.FocusSet) > 0 {
+			kept := 0
+			for _, c := range e.Children {
+				if isTerminal(c.Lifecycle) {
+					kept++
+				}
+			}
+			if kept > doneCueMax {
+				t.Errorf("epic %q keeps %d done rows in its window, over the cue %d", e.Root.DocID, kept, doneCueMax)
+			}
 		}
 	}
-	// Head cap DOES still compact whenever a single section is bigger than the cap:
-	// the default must never be a full flat wall when the corpus holds a large,
-	// head-capped section (unlike wave-7 this no longer folds SMALL sections away).
-	biggest := len(b.Orphans)
-	for _, e := range b.Epics {
-		if len(e.Children) > biggest {
-			biggest = len(e.Children)
-		}
-	}
-	for _, cl := range b.Clusters {
-		if len(cl.Tasks) > biggest {
-			biggest = len(cl.Tasks)
-		}
-	}
-	if biggest > groupHeadMax && defaultRows >= expandedRows {
-		t.Errorf("board did not head-cap: default rows %d not shorter than expanded %d despite a %d-child section", defaultRows, expandedRows, biggest)
-	}
-	fmt.Printf("wave-8 guard OK: default board head-caps every category + stays claim-forward on the live corpus\n")
+	fmt.Printf("wave-11: epics=%d activeEpics=%d clusters=%d orphans=%d orphansFolded=%d\n",
+		len(b.Epics), activeEpics, len(b.Clusters), len(b.Orphans), b.OrphansFolded)
 
-	// The pure spine + full frame must survive the real corpus at every
-	// supported width without panicking or overrunning the pane.
+	// The pure spine + full frame must survive the real corpus at every supported
+	// width without panicking or overrunning the pane, AND carry NO READY TO CLAIM
+	// band. Widths 56 + 72 are the REQUIRED read-only live dump (charter D55).
 	st := UIState{Conn: ConnLive, LastSync: snap.FetchedAt}
-	for _, w := range []int{60, 70, 80, 100} {
-		frame := Render(b, st, w, 100, now)
+	for _, w := range []int{56, 60, 70, 72, 80, 100} {
+		frame := ansi.Strip(Render(b, st, w, 120, now))
 		if frame == "" {
 			t.Errorf("empty frame at width %d over live data", w)
+		}
+		if strings.Contains(frame, "READY TO CLAIM") {
+			t.Errorf("width %d: the retired READY TO CLAIM band appeared on the live board", w)
 		}
 		for i, ln := range strings.Split(frame, "\n") {
 			if cw := disp(ln); cw > w {
 				t.Errorf("width %d: line %d is %d cols (over budget): %q", w, i, cw, ln)
 			}
 		}
+		if w == 56 || w == 72 {
+			fmt.Printf("\n═══ LIVE DUMP width %d ═══\n%s\n", w, frame)
+		}
 	}
-	fmt.Printf("live-shape guard OK: %d tasks accounted, NOW invariant held, frames width-safe\n", len(snap.Tasks))
-}
-
-// max1 floors a divisor at 1 so the compaction ratio never divides by zero.
-func max1(n int) int {
-	if n < 1 {
-		return 1
-	}
-	return n
+	fmt.Printf("wave-11 guard OK: %d tasks accounted, NOW invariant held, ONE recency-ordered list, no READY TO CLAIM, frames width-safe\n", len(snap.Tasks))
 }

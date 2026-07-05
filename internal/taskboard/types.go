@@ -98,16 +98,12 @@ type Board struct {
 	// the flat-queue live shape's bulk — collapses to a single header line unless
 	// the work you are actually running lives in it (wave-7 decisions 32/33).
 	OrphansActive bool
-	// ReadyHead is the top readyHeadMax ready tasks across the WHOLE corpus,
-	// ordered priority-ascending (P0/P1 first; non-numeric/absent last) then
-	// updated_at desc. It powers the claim-forward READY TO CLAIM band that
-	// replaces the empty-NOW dead-line: when nothing is claimed the band offers
-	// the next tasks to claim so active work is never a dead end (wave-7 D35).
-	ReadyHead []Task
-	// ReadyTotal is the count of EVERY ready task the board holds, so the READY
-	// TO CLAIM band's "+K more ready" tail is honest about the depth of the queue
-	// behind the shown head.
-	ReadyTotal int
+	// OrphansFocusSet is the loose bucket's focus neighborhood (charter D51 /
+	// wave-11): the kept-orphan doc ids the focus window picks around an active or
+	// blocked loose task — its context — plus the <=2 done-cue ids. Non-empty puts
+	// the loose bucket in modeFocus (it shows this neighborhood, not all rows);
+	// empty means header+rollup only. See computeFocus.
+	OrphansFocusSet map[string]bool
 	// ReadyHeadClamped rides through from the Snapshot: the ready count shown in
 	// the header wears a "+" when the prime ready head hit the server clamp.
 	ReadyHeadClamped bool
@@ -140,6 +136,20 @@ type Epic struct {
 	// nowSet the NOW de-dup uses, so "the active group" is exactly "the group
 	// with a task pinned in NOW". An explicit user fold/unfold still overrides.
 	Active bool
+	// LastActivity is the epic's recency clock (charter D49 / wave-11): the newest
+	// lastActivity across the WHOLE member set (root + every descendant, INCLUDING
+	// the folded done/cancelled and the NOW-pinned claims), computed BEFORE any
+	// fold strips rows — so a mass-close's freshness is not thrown away with the
+	// folded rows. sortEpics ranks by it (after Active, after repo-mention), so the
+	// most-recently-worked epic floats to the top and dormant ones sink.
+	LastActivity time.Time
+	// FocusSet is the epic's focus neighborhood (charter D51 / wave-11): the
+	// kept-child doc ids the focus window picks around the active/blocked work — up
+	// to ~2 parents, ~3 ready siblings, ~3 children per seed, merged across seeds —
+	// plus the <=2 done-cue ids. Non-empty puts the epic in modeFocus (it shows
+	// this neighborhood, not head-of-5); empty means header+rollup only until the
+	// user expands. See computeFocus.
+	FocusSet map[string]bool
 }
 
 // Cluster is a DERIVED relatedness group: loose tasks sharing a cluster key
@@ -156,6 +166,14 @@ type Cluster struct {
 	// owns a NOW task, folding the section by default and auto-expanding only the
 	// cluster whose work is actually running (wave-7 decision 32).
 	Active bool
+	// LastActivity is the cluster's recency clock (charter D49 / wave-11): the
+	// newest lastActivity across its WHOLE pre-fold member set. sortClusters ranks
+	// by it (after Active), mirroring Epic.LastActivity.
+	LastActivity time.Time
+	// FocusSet is the cluster's focus neighborhood (charter D51 / wave-11),
+	// mirroring Epic.FocusSet — the member doc ids the focus window picks plus the
+	// <=2 done-cue ids. Non-empty → modeFocus; empty → header+rollup only.
+	FocusSet map[string]bool
 }
 
 type ConnState int

@@ -156,9 +156,9 @@ func TestRenderShortHeightScrolls(t *testing.T) {
 	}
 }
 
-// TestRenderFlatQueue proves the wave-2 orphan policy in the frame: with zero
-// epics the loose section reads as a plain "── tasks ──" title (never
-// "(no epic)"), the 55 stale-done orphans collapse to a single "+55 done" line,
+// TestRenderFlatQueue proves the orphan policy in the frame: with zero epics the
+// loose section reads as a plain "── tasks ──" title (never "(no epic)"), the done
+// orphans collapse (charter D50 folds all but the ≤2 freshest cue → "+56 done"),
 // no folded row is painted, and the header's ready count comes from the overlaid
 // tasks (8), not the fictional stored count.
 func TestRenderFlatQueue(t *testing.T) {
@@ -171,86 +171,14 @@ func TestRenderFlatQueue(t *testing.T) {
 	if !strings.Contains(frame, "tasks ·") {
 		t.Errorf("zero-epics board is missing the plain 'tasks' queue title (dotted leader):\n%s", frame)
 	}
-	if !strings.Contains(frame, "+55 done") {
-		t.Errorf("55 stale-done orphans did not fold to '+55 done':\n%s", frame)
+	if !strings.Contains(frame, "56 done") {
+		t.Errorf("the done orphans did not fold to a '56 done' tally:\n%s", frame)
 	}
 	if strings.Contains(frame, "dn001") || strings.Contains(frame, "dn055") {
 		t.Errorf("a folded stale-done orphan was painted as a row:\n%s", frame)
 	}
 	if !strings.Contains(frame, "8 ready") {
 		t.Errorf("ready count should be 8 (overlaid tasks), not the stored count:\n%s", frame)
-	}
-}
-
-// readyHeadSnapshot is the wave-7 live shape: 0 in_progress (every past claim
-// expired), a deep ready queue, and several authored epics + a loose pile —
-// exactly the guerrilla board the user saw as "a flat wall". Fed through the real
-// BuildBoard so ReadyHead, the fold-by-default (nothing is Active), and the
-// claim-forward header rails are all mutually consistent with what ships.
-func readyHeadSnapshot() Snapshot {
-	now := fixedNow
-	mk := func(id, parent, title, kind, life, pri string, ageH int) Task {
-		return Task{DocID: id, ParentID: parent, Title: title, Kind: kind,
-			Lifecycle: life, Priority: pri, UpdatedAt: now.Add(-time.Duration(ageH) * time.Hour)}
-	}
-	tasks := []Task{
-		mk("aesthetic", "", "Aesthetic unification epic", "goal", "open", "", 1),
-		mk("ae-1", "aesthetic", "Unify the button token scale", "", "ready", "2", 2),
-		mk("ae-2", "aesthetic", "Fold form-error copy into --text", "", "ready", "3", 3),
-		mk("ae-3", "aesthetic", "Repair the union-merge seams", "", "ready", "4", 5),
-		mk("ae-done", "aesthetic", "Old aesthetic pass", "", "done", "", 200), // folds (>24h)
-		mk("dwb", "", "DWB reliability epic", "goal", "open", "", 4),
-		mk("dwb-1", "dwb", "Retry the dead-worker sweep", "", "ready", "1", 1),
-		mk("dwb-2", "dwb", "Redeploy on a broken promise", "", "ready", "2", 8),
-		mk("dwb-done", "dwb", "Landed reliability fix", "", "done", "", 200),
-		mk("sheets", "", "Sheets formula UX epic", "goal", "open", "", 5),
-		mk("sh-1", "sheets", "Add the SUM() spreadsheet function", "", "ready", "2", 6),
-		mk("sh-blocked", "sheets", "Pivot tables in the grid", "", "blocked", "", 9),
-		mk("sh-done", "sheets", "Shipped spill ranges", "", "done", "", 200),
-		mk("loose-ready", "", "Fix the timeago clock-skew clamp", "", "ready", "3", 2),
-		mk("loose-open", "", "Inline cell editing for the grid", "", "open", "", 5),
-		mk("loose-done", "", "Old closed loose task", "", "done", "", 200), // folds
-	}
-	return Snapshot{Tasks: tasks, Counts: map[string]int{"in_progress": 0, "blocked": 1, "done": 3}}
-}
-
-// TestRenderReadyHeadGolden — the claim-forward frame (wave-7 D35): nothing
-// claimed, so the pinned band becomes READY TO CLAIM (top tasks priority-first),
-// every epic/cluster/loose section folds to a one-line "N ready · M done" header,
-// and the board reads compact + grouped instead of a flat wall.
-func TestRenderReadyHeadGolden(t *testing.T) {
-	old := Chrome
-	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "lead/session-stable", Server: "guerrilla"}
-	t.Cleanup(func() { Chrome = old })
-
-	b := BuildBoard(readyHeadSnapshot(), RepoContext{}, fixedNow)
-	if len(b.Now) != 0 {
-		t.Fatalf("fixture must have an empty NOW to exercise the ready head, got %d", len(b.Now))
-	}
-	if !showReadyHead(b) {
-		t.Fatalf("showReadyHead must hold (empty NOW + ready work), ReadyHead=%d", len(b.ReadyHead))
-	}
-	// dwb-1 is the only P1, so it heads the priority-ordered claim list.
-	if b.ReadyHead[0].DocID != "dwb-1" {
-		t.Errorf("ready head should lead with the P1 task, got %q", b.ReadyHead[0].DocID)
-	}
-	st := UIState{Cursor: 0, Conn: ConnLive, LastSync: fixedNow.Add(-2 * time.Minute)}
-	for _, width := range []int{60, 80, 100} {
-		got := plainFrame(b, st, width, goldenHeight)
-		path := filepath.Join("testdata", "ready_head_"+strconv.Itoa(width)+".txt")
-		if *update {
-			if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
-				t.Fatalf("write golden: %v", err)
-			}
-			continue
-		}
-		want, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("read golden (run with -update): %v", err)
-		}
-		if got != string(want) {
-			t.Errorf("ready-head frame at %d cols diverged from %s\n--- got ---\n%s", width, path, got)
-		}
 	}
 }
 
@@ -317,9 +245,9 @@ func TestRenderTruncationNote(t *testing.T) {
 func TestRenderEmptyBoardIsHonest(t *testing.T) {
 	empty := Board{Counts: map[string]int{}}
 	frame := ansi.Strip(Render(empty, UIState{Conn: ConnOffline}, 80, 30, fixedNow))
-	// Empty NOW with no ready work reads the honest all-clear (wave-7 D35), not a
-	// dead "nothing claimed" line.
-	for _, want := range []string{"NOW", "nothing ready", "All clear", "offline", "jk move"} {
+	// Empty NOW reads the honest all-clear (charter D52 / wave-11 retired the READY
+	// TO CLAIM head — claim-forward is the cursor + c now).
+	for _, want := range []string{"NOW", "nothing claimed", "all clear", "All clear", "offline", "jk move"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("empty frame missing %q:\n%s", want, frame)
 		}
@@ -378,14 +306,14 @@ func TestRenderActionStripKeepsURLTail(t *testing.T) {
 	}
 }
 
-// TestRenderHeadCapRespectsExpandOverride pins the shared head-cap rule on the
-// render side (the renderer and the shell share sectionShown, so what navigates
-// is what paints): with no fold entry a section paints only its HEAD (the first
-// groupHeadMax children), folding the rest behind a "+K more" line; an explicit
-// CollapsedEpics entry (=false) OVERRIDES the head and paints EVERY child.
-// (Repurposed from TestRenderWokenDormantEpicShowsChildren — the wave-7 dormant
-// auto-fold this pinned no longer exists; the head cap is its successor.)
-func TestRenderHeadCapRespectsExpandOverride(t *testing.T) {
+// TestRenderInactiveHeaderOnlyAndExpandOverride pins the shared mode rule on the
+// render side (the renderer and the shell share the ONE spineRows producer, so
+// what navigates is what paints): an INACTIVE section (no FocusSet) with no fold
+// entry paints HEADER-ONLY (charter D51 / wave-11 — the dotted rollup is the
+// big-picture line), while an explicit CollapsedEpics entry (=false) OVERRIDES to
+// modeExpanded and paints EVERY child. (Repurposed from the wave-8 head-cap test;
+// the head-of-5 default it pinned is gone.)
+func TestRenderInactiveHeaderOnlyAndExpandOverride(t *testing.T) {
 	b := Board{Epics: []Epic{{
 		Root: Task{DocID: "big", Title: "Search epic"},
 		Children: []Task{
@@ -397,23 +325,23 @@ func TestRenderHeadCapRespectsExpandOverride(t *testing.T) {
 			{DocID: "k6", Title: "Tail beyond the head"},
 		},
 	}}}
-	// Explicit expand (entry=false): the tail child past the head paints.
+	// Explicit expand (entry=false): every child paints.
 	stOpen := UIState{Conn: ConnLive, LastSync: fixedNow,
 		CollapsedEpics: map[string]bool{"big": false}}
-	if frame := ansi.Strip(Render(b, stOpen, 80, 30, fixedNow)); !strings.Contains(frame, "Tail beyond the head") {
-		t.Errorf("explicitly-expanded epic hides a child past the head:\n%s", frame)
+	fOpen := ansi.Strip(Render(b, stOpen, 80, 30, fixedNow))
+	for _, want := range []string{"Head one", "Head five", "Tail beyond the head"} {
+		if !strings.Contains(fOpen, want) {
+			t.Errorf("explicitly-expanded epic hides %q:\n%s", want, fOpen)
+		}
 	}
-	// Default (no entry): only the head paints; the tail is folded behind "+K more".
-	stHead := UIState{Conn: ConnLive, LastSync: fixedNow}
-	frame := ansi.Strip(Render(b, stHead, 80, 30, fixedNow))
-	if strings.Contains(frame, "Tail beyond the head") {
-		t.Errorf("head-capped epic painted a child past the head:\n%s", frame)
+	// Default (no entry, inactive → no focus): the section paints header-ONLY.
+	stHeader := UIState{Conn: ConnLive, LastSync: fixedNow}
+	frame := ansi.Strip(Render(b, stHeader, 80, 30, fixedNow))
+	if strings.Contains(frame, "Head one") || strings.Contains(frame, "Tail beyond the head") {
+		t.Errorf("inactive epic painted child rows, want header only:\n%s", frame)
 	}
-	if !strings.Contains(frame, "Head five") {
-		t.Errorf("head-capped epic did not paint its head children:\n%s", frame)
-	}
-	if !strings.Contains(frame, "+1 more") {
-		t.Errorf("head-capped epic did not name the folded remainder:\n%s", frame)
+	if !strings.Contains(frame, "Search epic") {
+		t.Errorf("inactive epic dropped its header:\n%s", frame)
 	}
 }
 
@@ -440,6 +368,9 @@ func stillBoard() Board {
 					UpdatedAt: time.Date(2026, 7, 3, 11, 0, 0, 0, time.UTC)},
 			},
 			DoneFolded: 7,
+			// A blocked child (canvas-cutover) makes this a focus section (charter
+			// D51 / wave-11): the neighborhood is the blocked seed + its ready sibling.
+			FocusSet: focusOf("reconcile-979-seam", "canvas-cutover"),
 		}},
 		Orphans: []Task{
 			{DocID: "timeago-clamp", Title: "Fix the timeago clock-skew clamp",
@@ -518,6 +449,9 @@ func motionBoard() Board {
 					ParentID: "motion-epic", Priority: "P3", UpdatedAt: fixedNow.Add(-time.Hour)},
 			},
 			DoneFolded: 2,
+			// Active (owns the NOW claim flash-now) → focus neighborhood over both
+			// ready children (charter D51 / wave-11).
+			FocusSet: focusOf("flash-spine", "calm-row"),
 		}},
 		Counts: map[string]int{"in_progress": 1, "blocked": 0, "done": 2},
 		Events: []Event{
@@ -651,7 +585,10 @@ func wave3Board() Board {
 	return Board{
 		Clusters: []Cluster{{
 			Key:    "proj:sheets-parity",
-			Active: true, // expanded so the members paint (wave-7 folds an inactive cluster)
+			Active: true,
+			// FocusSet over every member so the section renders its members (charter
+			// D51 / wave-11 — a section without a focus set paints header-only).
+			FocusSet: focusOf("sum1", "sum2", "vlookup", "pivot"),
 			Tasks: []Task{
 				{DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "ready",
 					Labels: []string{"proj:sheets-parity", "phase:build"},
@@ -810,6 +747,10 @@ func firstPaintBoard() Board {
 				{DocID: "role-seam", Title: "Reconcile the #979 role seam", Lifecycle: lifeReady, UpdatedAt: fixedNow.Add(-20 * time.Minute)},
 				{DocID: "banner", Title: "Ship the offline banner", Lifecycle: lifeBlocked, DependencyCount: 1, UpdatedAt: fixedNow.Add(-40 * time.Minute)},
 			},
+			// Active (owns the NOW claim) with a focus neighborhood over both children
+			// (charter D51 / wave-11), so the epic renders its context, not header-only.
+			Active:   true,
+			FocusSet: focusOf("role-seam", "banner"),
 		}},
 	}
 }

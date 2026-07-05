@@ -157,7 +157,7 @@ func claimRole(claimedAt, now time.Time) Role {
 // Staleness thresholds — day-scale, distinct from the minute-scale claim lease.
 // A live task that has not MOVED in this long is drifting; the tint warms so an
 // outdated row is impossible to miss. Boundaries are exclusive (a task at exactly
-// the threshold is not yet stale), matching board.go's doneFoldAfter convention.
+// the threshold is not yet stale), matching board.go's staleBandAfter convention.
 const (
 	staleWarnAfter   = 3 * 24 * time.Hour
 	staleDangerAfter = 7 * 24 * time.Hour

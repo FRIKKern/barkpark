@@ -69,7 +69,6 @@ type rowKind int
 
 const (
 	rowNow           rowKind = iota // a NOW-band card (an unexpired claim)
-	rowReadyClaim                   // a READY TO CLAIM head row (empty-NOW claim-forward band)
 	rowEpicHeader                   // an epic section header
 	rowChild                        // a visible child task inside an expanded epic
 	rowClusterHeader                // a derived-cluster section header
@@ -643,16 +642,9 @@ func (m Model) taskUnderCursor() (Task, bool) {
 	return m.taskByID(r.docID)
 }
 
-// taskByID finds a task anywhere on the board (NOW band, READY-TO-CLAIM head,
-// epic roots, epic children, cluster members, orphans) by doc id. The ready head
-// is searched first so a claim-forward row resolves even when its home section is
-// folded away (wave-7 D35 — the head reaches across the whole corpus).
+// taskByID finds a task anywhere on the board (NOW band, epic roots, epic
+// children, cluster members, orphans) by doc id.
 func (m Model) taskByID(id string) (Task, bool) {
-	for _, t := range m.board.ReadyHead {
-		if t.DocID == id {
-			return t, true
-		}
-	}
 	for _, t := range m.board.Now {
 		if t.DocID == id {
 			return t, true
@@ -736,23 +728,24 @@ func (m Model) activateBoard() Model {
 	}
 	switch r.kind {
 	case rowEpicHeader:
-		// enter toggles the head-capped default against full-expand: if the epic
-		// already shows all its children, collapse it to just the header; else
-		// expand it to the full list. Writing the negation of sectionExpanded
-		// keeps enter a true toggle from any state (head / full / collapsed).
+		// enter toggles the focus/header default against full-expand: if the epic
+		// already shows ALL its children (modeExpanded), collapse it to just the
+		// header; else expand it to the full list. Writing (mode == modeExpanded)
+		// keeps enter a true toggle from any state (focus / header / full /
+		// collapsed) — charter D51/D54.
 		if e, found := m.epicByRoot(r.docID); found {
-			m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, e.Active, len(e.Children))
+			m.ui.CollapsedEpics[r.docID] = sectionExpandedMode(epicMode(m.ui, e))
 			m.clampCursor()
 		}
 	case rowClusterHeader:
 		if cl, found := m.clusterByFoldKey(r.docID); found {
-			m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, cl.Active, len(cl.Tasks))
+			m.ui.CollapsedEpics[r.docID] = sectionExpandedMode(clusterMode(m.ui, cl))
 			m.clampCursor()
 		}
 	case rowOrphanHeader:
-		m.ui.CollapsedEpics[r.docID] = sectionExpanded(m.ui, r.docID, m.board.OrphansActive, len(m.board.Orphans))
+		m.ui.CollapsedEpics[r.docID] = sectionExpandedMode(orphansMode(m.ui, m.board))
 		m.clampCursor()
-	case rowNow, rowReadyClaim, rowChild, rowClusterMember, rowOrphan:
+	case rowNow, rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
 		if t, found := m.taskByID(r.docID); found && t.Title != "" {
 			title = t.Title
@@ -767,8 +760,8 @@ func (m Model) activateBoard() Model {
 // what the help text promises ("h / l  fold / unfold"). On any task row it is
 // a deliberate no-op: h/l are the tree's fold controls, not a second expand
 // key. l writes an explicit expand (entry=false → all children); h writes an
-// explicit collapse (entry=true → header only). Both override the head-capped
-// default (see sectionShown).
+// explicit collapse (entry=true → header only). Both override the focus/header
+// default (see sectionModeFor, charter D54).
 func (m Model) setEpicFoldUnderCursor(folded bool) Model {
 	r, ok := m.currentRow()
 	// h/l fold ALL three section-header kinds — epics, derived clusters and the
@@ -805,47 +798,51 @@ func (m Model) clusterByFoldKey(key string) (Cluster, bool) {
 	return Cluster{}, false
 }
 
-// sectionShown is the ONE rule for how many of a section's children are painted,
-// shared by the shell (visibleRows) and the renderer (flattenSpine) so the
-// cursor never desyncs. THREE states from the bool CollapsedEpics entry + the
-// head cap (wave-8, the user's "at least 5 per category"):
-//   - explicit entry == true  → 0 (collapsed to just the header, via h)
-//   - explicit entry == false → all (fully expanded, via l)
-//   - no entry, active section → all (the group you're working opens whole)
-//   - no entry, default        → a HEAD of groupHeadMax (a glanceable few)
-//
-// The remainder folds behind a "+K more" line the renderer emits.
-func sectionShown(st UIState, key string, active bool, n int) int {
+// sectionMode is how a section renders (charter D51 / wave-11): the ONE rule the
+// shell (visibleRows) and the renderer (flattenSpine) both resolve through
+// spineRows, so the cursor never desyncs. It replaces wave-8's head-of-5 count.
+type sectionMode int
+
+const (
+	modeCollapsed sectionMode = iota // explicit h → header only
+	modeExpanded                     // explicit l/enter → ALL kept children
+	modeFocus                        // active neighborhood → the FocusSet rows
+	modeHeader                       // inactive → header + rollup only
+)
+
+// sectionModeFor resolves a section's mode: an explicit CollapsedEpics entry ALWAYS
+// wins (charter D54 — h collapses even an active section, l expands even a dead
+// one); otherwise a non-empty focus set → modeFocus (show the neighborhood), an
+// empty one → modeHeader (just the big-picture rollup line). Active/inactive is no
+// longer a direct input — it flows through the focus set (an active section has
+// blocked children or NOW anchors, so computeFocus returns a non-empty set).
+func sectionModeFor(st UIState, key string, focus map[string]bool) sectionMode {
 	if v, ok := st.CollapsedEpics[key]; ok {
 		if v {
-			return 0
+			return modeCollapsed
 		}
-		return n
+		return modeExpanded
 	}
-	if active {
-		return n
+	if len(focus) > 0 {
+		return modeFocus
 	}
-	if n < groupHeadMax {
-		return n
-	}
-	return groupHeadMax
+	return modeHeader
 }
 
-// sectionExpanded reports whether a section currently shows ALL its children —
-// the toggle predicate enter/h/l flip against (writing the negation keeps enter
-// a true toggle whether the section was auto-open, head-capped, or collapsed).
-func sectionExpanded(st UIState, key string, active bool, n int) bool {
-	return sectionShown(st, key, active, n) >= n
-}
+// sectionExpandedMode reports whether a mode shows ALL kept children — the toggle
+// predicate enter flips against (writing it back means "collapse iff currently
+// fully expanded", so enter opens a focused/header/collapsed section and folds a
+// fully-expanded one).
+func sectionExpandedMode(mode sectionMode) bool { return mode == modeExpanded }
 
-func epicShown(st UIState, e Epic) int {
-	return sectionShown(st, e.Root.DocID, e.Active, len(e.Children))
+func epicMode(st UIState, e Epic) sectionMode {
+	return sectionModeFor(st, e.Root.DocID, e.FocusSet)
 }
-func clusterShown(st UIState, c Cluster) int {
-	return sectionShown(st, clusterFoldKey(c.Key), c.Active, len(c.Tasks))
+func clusterMode(st UIState, c Cluster) sectionMode {
+	return sectionModeFor(st, clusterFoldKey(c.Key), c.FocusSet)
 }
-func orphansShown(st UIState, b Board) int {
-	return sectionShown(st, orphansFoldKey, b.OrphansActive, len(b.Orphans))
+func orphansMode(st UIState, b Board) sectionMode {
+	return sectionModeFor(st, orphansFoldKey, b.OrphansFocusSet)
 }
 
 // clusterFoldKey namespaces a cluster's fold state inside the shared
@@ -856,15 +853,6 @@ func clusterFoldKey(key string) string { return "cluster:" + key }
 // CollapsedEpics map — a fixed sentinel that can never collide with an epic root
 // id or a cluster key (wave-7 decision 33).
 const orphansFoldKey = "orphans:(no epic)"
-
-// showReadyHead gates the claim-forward READY TO CLAIM band (wave-7 decision
-// 35): it replaces the pinned NOW cards exactly when nothing is claimed and
-// there IS ready work to offer. One predicate feeds BOTH the shell's visibleRows
-// (the ready rows become the first selectable stops) and the renderer's band, so
-// the cursor index space and the painted rows can never diverge.
-func showReadyHead(b Board) bool {
-	return len(b.Now) == 0 && len(b.ReadyHead) > 0
-}
 
 // moveCursor steps the selection by delta, clamped to the current visible-row
 // list. It reads the flattened rows fresh each time because a collapse/expand
@@ -906,35 +894,23 @@ func (m *Model) clampCursor() {
 // into the flattened visible-row list"). The order is the frozen contract
 // between this shell and the render slice:
 //
-//  1. the pinned band: the READY TO CLAIM head (showReadyHead: empty NOW + ready
-//     work — wave-7 D35) OR the NOW cards (unexpired claims), never both
-//  2. each epic: its header, then a HEAD of its children (epicShown: an explicit
-//     CollapsedEpics entry wins, else auto-fold unless Active — wave-7 D32) — its
-//     policy-ordered children (done-folded children are a render count, already
-//     absent from Epic.Children)
-//  3. each derived cluster: its header, then — unless folded (foldedCluster: an
-//     explicit "cluster:"+Key entry, else auto-fold unless Active) — its members
-//  4. the loose "(no epic)" header, then — unless folded (foldedOrphans: an
-//     explicit orphansFoldKey entry, else auto-fold unless OrphansActive — D33) —
-//     its orphan rows
+//  1. the pinned NOW cards (unexpired claims — the READY TO CLAIM head is retired,
+//     charter D52 / wave-11)
+//  2. each epic: its header, then — per epicMode (charter D51) — its focus
+//     neighborhood (modeFocus), all children (modeExpanded), or nothing
+//     (modeHeader/modeCollapsed); an explicit CollapsedEpics entry wins (D54)
+//  3. each derived cluster: its header, then its members per clusterMode
+//  4. the loose "(no epic)" header, then its orphan rows per orphansMode
 //
-// Folded rows are deliberately skipped so j/k never lands on a line that is
-// not on screen. The render slice must hide children under the SAME epicFolded
-// / foldedCluster rules or the cursor highlight desyncs.
+// Both this and the renderer's flattenSpine read the SAME spineRows producer, so
+// the focus filter lives inside spineRows and cursor-parity stays structural.
 func (m Model) visibleRows() []row {
 	var rows []row
-	// The pinned band's rows are the FIRST selectable stops. When nothing is
-	// claimed but ready work exists, they are the READY TO CLAIM head (wave-7
-	// D35 — c claims, enter opens); otherwise they are the NOW cards. showReadyHead
-	// gates the renderer's band identically, so the index space stays in lockstep.
-	if showReadyHead(m.board) {
-		for _, t := range m.board.ReadyHead {
-			rows = append(rows, row{kind: rowReadyClaim, docID: t.DocID})
-		}
-	} else {
-		for _, t := range m.board.Now {
-			rows = append(rows, row{kind: rowNow, docID: t.DocID})
-		}
+	// The pinned NOW cards are the FIRST selectable stops (charter D14). The
+	// wave-7 READY TO CLAIM head is retired (charter D52 / wave-11 — ONE list):
+	// claim-forward stays via the cursor landing on any ready row in the spine.
+	for _, t := range m.board.Now {
+		rows = append(rows, row{kind: rowNow, docID: t.DocID})
 	}
 	// The scrolling spine is the SELECTABLE subset of the ONE ordered producer
 	// (spineRows, charter D42) — the SAME list flattenSpine renders. Headers,

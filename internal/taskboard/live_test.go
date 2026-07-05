@@ -112,14 +112,14 @@ func TestApplySnapshotConnStates(t2 *testing.T) {
 func TestApplySnapshotKeepsSelectionOnSameTask(t2 *testing.T) {
 	m := newModel(nil, "", Config{})
 	m.now = func() time.Time { return time.Unix(7000, 0) }
-	m.board = Board{Orphans: []Task{t("a"), t("b"), t("c")}}
-	// Rows: 0 loose-bucket header, 1 a, 2 b, 3 c. The head cap shows all three
-	// loose tasks (n < groupHeadMax), so "c" is the last navigable row.
+	m.board = Board{Orphans: []Task{t("a"), t("b"), t("c")}, OrphansActive: true, OrphansFocusSet: focusOf("a", "b", "c")}
+	// Rows: 0 loose-bucket header, 1 a, 2 b, 3 c. The focused loose bucket shows
+	// all three loose tasks, so "c" is the last navigable row.
 	m.ui.Cursor = 3 // on "c"
 
 	// The refetch reorders: "c" moves to the top of the loose bucket.
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
-		return Board{Orphans: []Task{t("c"), t("a"), t("b")}}
+		return Board{Orphans: []Task{t("c"), t("a"), t("b")}, OrphansActive: true, OrphansFocusSet: focusOf("a", "b", "c")}
 	}
 	m, _ = m.applySnapshot(snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(7000, 0)}})
 	// After the reorder "c" is the first loose task → row 1 (row 0 is the header).

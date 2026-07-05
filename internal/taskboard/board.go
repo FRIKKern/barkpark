@@ -30,12 +30,13 @@ const (
 // children; every other parentless task is an orphan unless it heads a subtree.
 const kindGoal = "goal"
 
-// Attention-policy thresholds. Boundaries are EXCLUSIVE: a done child at
-// exactly 24h stays visible, an epic idle exactly 7d is not yet dormant — the
-// fold/collapse only trips once the age is strictly past the threshold.
+// Attention-policy thresholds. Boundaries are EXCLUSIVE: an epic idle exactly 7d
+// is not yet dormant — the collapse only trips once the age is strictly past the
+// threshold. (Wave-11 D50 dropped the done-fold AGE gate entirely: done never
+// grants a row by being young; it folds regardless of age, keeping only the <=2
+// freshest as a dim completion cue — see buildEpic and doneCueMax.)
 const (
-	doneFoldAfter = 24 * time.Hour
-	dormantAfter  = 7 * 24 * time.Hour
+	dormantAfter = 7 * 24 * time.Hour
 	// staleBandAfter is the age past which a NON-terminal row sinks into the
 	// stale band (below open, above terminal) — a visible "this hasn't moved"
 	// demotion inside the same ordered list, no toggle. Exclusive like the others.
@@ -44,6 +45,27 @@ const (
 	// toward Board.Stale — the header's cold-work tally trips earlier than the
 	// band demotion so the number warns before rows visibly rot.
 	staleCountAfter = 3 * 24 * time.Hour
+)
+
+// doneCueMax is how many of a section's FRESHEST done children survive the
+// terminal fold as a dim completion CUE (charter D50 / wave-11). Age no longer
+// grants a done row: every terminal child beyond this count folds into the
+// "+N done" tally regardless of how young it is, so a mass-close (the auth epic's
+// ~25 fresh ✓ closes) never floods the view. The cue rows ride childBand 6 (the
+// section bottom) and render ONLY when the section shows child rows (focus /
+// explicit expand — a header/inactive section shows none).
+const doneCueMax = 2
+
+// Focus-window sizes (charter D51 / wave-11). Around each active/blocked seed the
+// board shows a bounded neighborhood — its context — instead of a flat head:
+// up to focusParents ancestors, focusSiblings ready siblings, focusChildren
+// direct children. Merged across seeds and capped at focusWindowMax so two active
+// tasks near each other read as ONE wider neighborhood, never two lists.
+const (
+	focusParents   = 2
+	focusSiblings  = 3
+	focusChildren  = 3
+	focusWindowMax = 12
 )
 
 // Cluster derivation policy. A loose task's cluster KEY is its first proj: label,
@@ -67,19 +89,6 @@ const (
 	twinThreshold    = 0.6
 )
 
-// readyHeadMax is how many ready tasks the claim-forward READY TO CLAIM band
-// offers when nothing is in flight (wave-7 decision 35) — a short, scannable
-// head, not a return to the flat wall. The rest live behind a "+K more ready"
-// tail and inside their (folded-by-default) sections.
-const readyHeadMax = 5
-
-// groupHeadMax is how many children a category (epic / cluster / loose bucket)
-// shows by DEFAULT before folding the rest behind a "+K more" line. The user's
-// direction (2026-07-04): "we want to see at least 5 tasks per category" — a
-// collapsed-to-header default hid too much, so every section now shows a
-// glanceable head of its top children and expands (l / enter) to the full list.
-const groupHeadMax = 5
-
 // anyInNow reports whether any task in the slice is a NOW-pinned claim — the
 // shared "does this section own active work" test behind Epic/Cluster.Active and
 // Board.OrphansActive (wave-7 decision 32). It runs against the SAME nowSet the
@@ -94,44 +103,6 @@ func anyInNow(tasks []Task, nowSet map[string]bool) bool {
 	return false
 }
 
-// readyHead selects the top readyHeadMax ready tasks across the whole corpus for
-// the claim-forward band (wave-7 decision 35), ordered priority-ascending
-// (priorityRank: P0/P1 first, absent/non-numeric last) then updated_at desc, and
-// also reports the total ready count. Ready is the ENGINE's readiness overlay
-// (composeSnapshot marks open/blocked rows ready) — the same signal the header's
-// ready tally and `bp task next` use — so the head is exactly what can be claimed.
-func readyHead(tasks []Task) (head []Task, total int) {
-	// A task that is itself a parent (some other task names it as ParentID) is a
-	// goal/epic ROOT — you claim its leaf children, not the whole goal. Exclude
-	// parents from the claim-forward head so `c` never claims an entire epic
-	// (wave-7 polish: the head is where you pick up ACTIONABLE work). bareID
-	// normalizes the drafts. prefix so a bare ParentID matches a prefixed DocID.
-	parents := make(map[string]bool)
-	for _, t := range tasks {
-		if t.ParentID != "" {
-			parents[bareID(t.ParentID)] = true
-		}
-	}
-	var ready []Task
-	for _, t := range tasks {
-		if t.Lifecycle == lifeReady && !parents[bareID(t.DocID)] {
-			ready = append(ready, t)
-		}
-	}
-	sort.SliceStable(ready, func(i, j int) bool {
-		ri, rj := priorityRank(ready[i].Priority), priorityRank(ready[j].Priority)
-		if ri != rj {
-			return ri < rj
-		}
-		return ready[i].UpdatedAt.After(ready[j].UpdatedAt)
-	})
-	total = len(ready)
-	if len(ready) > readyHeadMax {
-		ready = ready[:readyHeadMax]
-	}
-	return ready, total
-}
-
 // priorityRank maps a priority string to a sort key: lower ranks first. The live
 // corpus stores a numeric 0–4 string (P0 most urgent); a leading "P"/"p" is
 // tolerated so both "0" and "P0" rank identically. An absent or non-numeric
@@ -144,6 +115,35 @@ func priorityRank(p string) int {
 		return n
 	}
 	return int(^uint(0) >> 1) // maxInt — absent/non-numeric last
+}
+
+// lastActivity is a task's freshest movement across the three signals the wire
+// already carries (charter D49 / wave-11): updated_at, the claim time, and the
+// newest matching prime event. bareID-normalized so a drafts.* task id matches
+// an event id. This is the atom recency ranking is built on.
+func lastActivity(t Task, evAt map[string]time.Time) time.Time {
+	la := t.UpdatedAt
+	if t.Claim != nil && t.Claim.ClaimedAt.After(la) {
+		la = t.Claim.ClaimedAt
+	}
+	if a, ok := evAt[bareID(t.DocID)]; ok && a.After(la) {
+		la = a
+	}
+	return la
+}
+
+// sectionActivity is the newest lastActivity across a task set (charter D49):
+// the WHOLE member set INCLUDING the folded done/cancelled and the NOW-pinned
+// claims — computed BEFORE any fold strips rows, so a mass-close's recency is not
+// thrown away with the folded rows and a just-worked epic keeps its top rank.
+func sectionActivity(tasks []Task, evAt map[string]time.Time) time.Time {
+	var la time.Time
+	for _, t := range tasks {
+		if a := lastActivity(t, evAt); a.After(la) {
+			la = a
+		}
+	}
+	return la
 }
 
 // BuildBoard is the ENTIRE zero-config organization policy for the portrait
@@ -183,6 +183,17 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	byID := make(map[string]Task, len(s.Tasks))
 	for _, t := range s.Tasks {
 		byID[t.DocID] = t
+	}
+
+	// evAt indexes the freshest prime event per (bareID) task — the third recency
+	// signal lastActivity/sectionActivity fold in (charter D49). Built once here so
+	// the per-section recency clock is a map lookup, not a scan of s.Events.
+	evAt := make(map[string]time.Time, len(s.Events))
+	for _, e := range s.Events {
+		id := bareID(e.DocID)
+		if a, ok := evAt[id]; !ok || e.At.After(a) {
+			evAt[id] = e.At
+		}
 	}
 
 	// NOW band: live claims that are still in_progress, freshest first.
@@ -239,35 +250,53 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 			board.Orphans = append(board.Orphans, root)
 			continue
 		}
-		epic := buildEpic(root, children, now)
+		epic := buildEpic(root, children, now, evAt)
 		// Active (wave-7 decision 32) = the epic owns a NOW task. Computed here,
 		// while the full descendant set + root are in hand and BEFORE
 		// dedupNowFromEpics strips the claims for display, so it sees exactly which
-		// sections contribute to the pinned band. It is the sole auto-fold input:
-		// a folded-by-default epic auto-expands only when its own work is running.
+		// sections contribute to the pinned band. A live claim always outranks
+		// recency (charter D49), so Active is the first sortEpics key.
 		epic.Active = nowSet[root.DocID] || anyInNow(children, nowSet)
+		// LastActivity ranks the section by recency (charter D49): the newest
+		// movement across the WHOLE member set (root + every descendant + claims +
+		// the soon-to-be-folded done), computed HERE where `members` is in hand and
+		// BEFORE buildEpic's fold strips the done rows — so a mass-close keeps the
+		// epic near the top instead of sinking with its folded closes.
+		epic.LastActivity = sectionActivity(members, evAt)
 		board.Epics = append(board.Epics, epic)
+	}
+
+	// nowByRoot maps an epic root -> its live NOW claims, the focus-window anchors
+	// (charter D51): the active work each section's neighborhood is drawn around.
+	nowByRoot := make(map[string][]Task, len(board.Now))
+	for _, t := range board.Now {
+		r := rootOf(t, byID)
+		nowByRoot[r] = append(nowByRoot[r], t)
 	}
 
 	sortEpics(board.Epics, repo)
 	// Strip the NOW-pinned claims from the ranked epics' displayed children (D14).
 	dedupNowFromEpics(board.Epics, nowSet)
-	board.Orphans, board.OrphansFolded, board.OrphansCancelledFolded = foldStaleOrphans(board.Orphans, now)
+	// Focus windows (charter D51): now that each epic's children are FINAL (claims
+	// stripped, done folded to the <=2 cue), compute the neighborhood the board
+	// shows around active/blocked work. Empty set => the epic renders header+rollup
+	// only (inactive); non-empty => modeFocus shows exactly this neighborhood.
+	for i := range board.Epics {
+		e := &board.Epics[i]
+		e.FocusSet = sectionFocus(e.Children, nowByRoot[e.Root.DocID])
+	}
+	board.Orphans, board.OrphansFolded, board.OrphansCancelledFolded = foldStaleOrphans(board.Orphans, now, evAt)
 	orderChildren(board.Orphans, now)
 
 	// Carve derived clusters out of the loose-orphan pile: labels that relate
 	// tasks become named sections so the flat "(no epic)" queue self-organizes.
-	// The freq map is computed against the SAME loose set the keys are resolved
-	// from, so suggestion-eligibility below stays consistent with clustering.
+	// deriveClusters sets each cluster's Active (owns a NOW claim) and LastActivity
+	// (recency clock, charter D49) from the pre-fold members, so sortClusters can
+	// rank by both. The freq map is computed against the SAME loose set the keys
+	// are resolved from, so suggestion-eligibility below stays consistent.
 	loose := board.Orphans
-	board.Clusters, board.Orphans = deriveClusters(loose, now)
+	board.Clusters, board.Orphans = deriveClusters(loose, now, nowSet, evAt)
 
-	// Cluster/orphan Active (wave-7 decision 32/33), computed while the NOW tasks
-	// are STILL members (before the de-dup below strips them for display): a
-	// cluster or the loose bucket auto-expands only when its own work is running.
-	for i := range board.Clusters {
-		board.Clusters[i].Active = anyInNow(board.Clusters[i].Tasks, nowSet)
-	}
 	board.OrphansActive = anyInNow(board.Orphans, nowSet)
 
 	// NOW de-dup for the loose pile, mirroring the epic treatment above: the
@@ -278,11 +307,16 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	board.Clusters = dedupNowFromClusters(board.Clusters, nowSet)
 	board.Orphans = stripNow(board.Orphans, nowSet)
 
-	// READY TO CLAIM head (wave-7 decision 35): the top readyHeadMax ready tasks
-	// across the WHOLE corpus, priority-ascending then freshest, plus the total
-	// ready depth. It powers the claim-forward band that replaces the empty-NOW
-	// dead-line, so there is always an obvious next task to claim.
-	board.ReadyHead, board.ReadyTotal = readyHead(s.Tasks)
+	// Focus windows for the derived clusters + the loose bucket (charter D51),
+	// mirroring the epic treatment: the neighborhood shown around active/blocked
+	// loose work. The NOW anchors are the live claims whose context lives in the
+	// kept member set; a lone-claim cluster with no context yields an empty set →
+	// header mode, which is correct.
+	for i := range board.Clusters {
+		cl := &board.Clusters[i]
+		cl.FocusSet = sectionFocus(cl.Tasks, nowAnchorsFor(cl.Tasks, board.Now))
+	}
+	board.OrphansFocusSet = sectionFocus(board.Orphans, nowAnchorsFor(board.Orphans, board.Now))
 
 	// Twin detection: near-duplicate titles within the same group point at each
 	// other so "these two are the same work" is impossible to miss. Groups are
@@ -358,9 +392,9 @@ func clusterKey(t Task, freq map[string]int) string {
 // deriveClusters splits the loose pile into label-named Clusters (keys with
 // ≥clusterMemberMin members) and the remaining loose tasks (empty-key or
 // lone-keyed), preserving the input order of the survivors. Each cluster folds
-// its stale terminal members (same 24h boundary as epics) and band-orders the
-// rest; clusters come back freshest-member first.
-func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
+// its terminal members to the ≤doneCueMax cue (charter D50) and band-orders the
+// rest; clusters come back Active-first then recency-first (charter D49).
+func deriveClusters(loose []Task, now time.Time, nowSet map[string]bool, evAt map[string]time.Time) ([]Cluster, []Task) {
 	freq := looseLabelFreq(loose)
 
 	keyByDoc := make(map[string]string, len(loose))
@@ -383,7 +417,7 @@ func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
 		if len(groups[k]) < clusterMemberMin {
 			continue
 		}
-		clusters = append(clusters, buildCluster(k, groups[k], now))
+		clusters = append(clusters, buildCluster(k, groups[k], now, nowSet, evAt))
 	}
 	sortClusters(clusters)
 
@@ -398,43 +432,54 @@ func deriveClusters(loose []Task, now time.Time) ([]Cluster, []Task) {
 	return clusters, remaining
 }
 
-// buildCluster folds stale terminal members and band-orders the survivors,
-// mirroring buildEpic's child handling (minus the epic root / dormancy).
-func buildCluster(key string, members []Task, now time.Time) Cluster {
-	c := Cluster{Key: key}
-	kept := make([]Task, 0, len(members))
+// buildCluster folds terminal members to the ≤doneCueMax freshest cue (charter
+// D50, age-independent) and band-orders the survivors, mirroring buildEpic's
+// child handling (minus the epic root / dormancy). Active + LastActivity are set
+// from the PRE-fold members, so sortClusters ranks by both (a live claim outranks
+// recency) and the recency clock survives the terminal fold.
+func buildCluster(key string, members []Task, now time.Time, nowSet map[string]bool, evAt map[string]time.Time) Cluster {
+	c := Cluster{Key: key, Active: anyInNow(members, nowSet), LastActivity: sectionActivity(members, evAt)}
+	var nonTerm, done []Task
 	for _, m := range members {
-		if m.Lifecycle == lifeCancelled { // fold away entirely (W10-B)
+		switch {
+		case m.Lifecycle == lifeCancelled: // fold away entirely (W10-B)
 			c.CancelledFolded++
-			continue
+		case isTerminal(m.Lifecycle):
+			done = append(done, m) // no age gate — folded to the cue below
+		default:
+			nonTerm = append(nonTerm, m)
 		}
-		if isTerminal(m.Lifecycle) && now.Sub(m.UpdatedAt) > doneFoldAfter {
-			c.DoneFolded++
-			continue
-		}
-		kept = append(kept, m)
 	}
-	orderChildren(kept, now)
-	c.Tasks = kept
+	c.Tasks = keepDoneCue(nonTerm, done, evAt, &c.DoneFolded)
+	orderChildren(c.Tasks, now)
 	return c
 }
 
-// sortClusters ranks clusters by freshest member (updated desc), stably.
-func sortClusters(cs []Cluster) {
-	sort.SliceStable(cs, func(i, j int) bool {
-		return clusterFreshest(cs[i]).After(clusterFreshest(cs[j]))
+// keepDoneCue keeps at most doneCueMax freshest done tasks as a dim completion
+// cue and folds the rest into *folded (charter D50). The returned slice is
+// nonTerm + the kept cue; the caller band-orders it (childBand 6 sinks the cue to
+// the bottom). Age is IRRELEVANT — a fresh mass-close folds exactly like an old
+// one, so done never floods.
+func keepDoneCue(nonTerm, done []Task, evAt map[string]time.Time, folded *int) []Task {
+	sort.SliceStable(done, func(i, j int) bool {
+		return lastActivity(done[i], evAt).After(lastActivity(done[j], evAt))
 	})
+	if len(done) > doneCueMax {
+		*folded += len(done) - doneCueMax
+		done = done[:doneCueMax]
+	}
+	return append(nonTerm, done...)
 }
 
-// clusterFreshest is the newest updated_at across a cluster's kept members.
-func clusterFreshest(c Cluster) time.Time {
-	var freshest time.Time
-	for _, t := range c.Tasks {
-		if t.UpdatedAt.After(freshest) {
-			freshest = t.UpdatedAt
+// sortClusters ranks clusters Active-first (a live claim always outranks
+// recency, charter D49) then by LastActivity (newest first), stably.
+func sortClusters(cs []Cluster) {
+	sort.SliceStable(cs, func(i, j int) bool {
+		if cs[i].Active != cs[j].Active {
+			return cs[i].Active
 		}
-	}
-	return freshest
+		return cs[i].LastActivity.After(cs[j].LastActivity)
+	})
 }
 
 // bestClusterSuggestion returns the Key of the cluster whose members' titles an
@@ -587,25 +632,24 @@ func countStale(tasks []Task, now time.Time) int {
 }
 
 // foldStaleOrphans splits the loose-orphan pile into the rows worth showing, a
-// count of DONE/closed rows to hide, and a count of CANCELLED rows to hide. The
-// done boundary is the SAME exclusive 24h doneFoldAfter epics use for their
-// children, so a done orphan at exactly 24h stays visible and one a second older
-// folds. Cancelled orphans fold at ANY age (charter wave-10 W10-B — abandoned
-// work never renders as a row). Non-terminal orphans (open/ready/in_progress/
-// blocked) never fold, however old: unfinished work is never hidden.
-func foldStaleOrphans(orphans []Task, now time.Time) (kept []Task, folded, cancelled int) {
-	kept = make([]Task, 0, len(orphans))
+// count of DONE/closed rows folded to the tally, and a count of CANCELLED rows to
+// hide. Done orphans fold to the ≤doneCueMax freshest cue regardless of age
+// (charter D50 — the age gate is gone; done never floods). Cancelled orphans fold
+// at ANY age (charter wave-10 W10-B). Non-terminal orphans (open/ready/
+// in_progress/blocked) never fold, however old: unfinished work is never hidden.
+func foldStaleOrphans(orphans []Task, now time.Time, evAt map[string]time.Time) (kept []Task, folded, cancelled int) {
+	var nonTerm, done []Task
 	for _, o := range orphans {
-		if o.Lifecycle == lifeCancelled { // fold away entirely, at any age (W10-B)
+		switch {
+		case o.Lifecycle == lifeCancelled: // fold away entirely, at any age (W10-B)
 			cancelled++
-			continue
+		case isTerminal(o.Lifecycle):
+			done = append(done, o) // no age gate — folded to the cue below
+		default:
+			nonTerm = append(nonTerm, o)
 		}
-		if isTerminal(o.Lifecycle) && now.Sub(o.UpdatedAt) > doneFoldAfter {
-			folded++
-			continue
-		}
-		kept = append(kept, o)
 	}
+	kept = keepDoneCue(nonTerm, done, evAt, &folded)
 	return kept, folded, cancelled
 }
 
@@ -632,31 +676,30 @@ func rootOf(t Task, byID map[string]Task) string {
 	}
 }
 
-// buildEpic folds stale terminal children, orders the survivors, and marks
-// dormancy from the freshest member (root or ANY child, including folded ones —
-// a just-closed child still counts as recent movement). The NOW-pinned claims
-// are still in epic.Children at this stage so ranking (epicFreshest) and
-// dormancy see their freshness; dedupNowFromEpics strips them for display AFTER
-// the epics are ranked.
-func buildEpic(root Task, children []Task, now time.Time) Epic {
+// buildEpic folds terminal children to the ≤doneCueMax freshest cue (charter D50
+// — age-independent, so a mass-close never floods), orders the survivors, and
+// marks dormancy from the freshest member (root or ANY child, including folded
+// ones — a just-closed child still counts as recent movement). The NOW-pinned
+// claims are still in epic.Children at this stage so dormancy sees their
+// freshness; dedupNowFromEpics strips them for display AFTER the epics are ranked.
+func buildEpic(root Task, children []Task, now time.Time, evAt map[string]time.Time) Epic {
 	epic := Epic{Root: root}
 
-	kept := make([]Task, 0, len(children))
+	var nonTerm, done []Task
 	for _, c := range children {
-		// Cancelled work folds entirely away, at any age (charter wave-10 W10-B) —
-		// it never renders as a row, only as the trailing "· N cancelled" tail.
-		if c.Lifecycle == lifeCancelled {
+		switch {
+		case c.Lifecycle == lifeCancelled:
+			// Cancelled work folds entirely away, at any age (charter wave-10 W10-B) —
+			// it never renders as a row, only as the trailing "· N cancelled" tail.
 			epic.CancelledFolded++
-			continue
+		case isTerminal(c.Lifecycle):
+			done = append(done, c) // no age gate — folded to the cue below
+		default:
+			nonTerm = append(nonTerm, c)
 		}
-		if isTerminal(c.Lifecycle) && now.Sub(c.UpdatedAt) > doneFoldAfter {
-			epic.DoneFolded++
-			continue
-		}
-		kept = append(kept, c)
 	}
-	orderChildren(kept, now)
-	epic.Children = kept
+	epic.Children = keepDoneCue(nonTerm, done, evAt, &epic.DoneFolded)
+	orderChildren(epic.Children, now)
 
 	freshest := root.UpdatedAt
 	for _, c := range children {
@@ -724,6 +767,162 @@ func stripNow(tasks []Task, nowSet map[string]bool) []Task {
 	return kept
 }
 
+// ── Focus windows (charter D51 / wave-11) ────────────────────────────────────
+
+// nowAnchorsFor returns the NOW claims whose context lives in a section's kept
+// member set (charter D51): a claim relates when its parent is a kept member, it
+// shares a parent with a kept member, or a kept member is its child. These are
+// the focus-window seeds for derived clusters and the loose bucket (epics use
+// nowByRoot directly, where the root membership is exact). A claim with no kept
+// context yields nothing → the section falls to header mode, which is correct.
+func nowAnchorsFor(kept, now []Task) []Task {
+	if len(now) == 0 || len(kept) == 0 {
+		return nil
+	}
+	keptIDs := make(map[string]bool, len(kept))
+	keptParents := make(map[string]bool, len(kept))
+	for _, k := range kept {
+		keptIDs[bareID(k.DocID)] = true
+		if k.ParentID != "" {
+			keptParents[bareID(k.ParentID)] = true
+		}
+	}
+	var out []Task
+	for _, t := range now {
+		pid := bareID(t.ParentID)
+		if keptIDs[pid] || keptParents[pid] || keptIDs[bareID(t.DocID)] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// sectionFocus builds a section's focus neighborhood (charter D51) and finalizes
+// it: computeFocus over the kept children + the section's NOW anchors, then add
+// the ≤doneCueMax done-cue ids (they render as the completion cue when the section
+// shows rows, charter D50), then cap at focusWindowMax. Empty result => the
+// section renders header+rollup only (no active/blocked work to focus around).
+func sectionFocus(kept, nowAnchors []Task) map[string]bool {
+	focus := computeFocus(kept, nowAnchors)
+	if len(focus) == 0 {
+		return focus
+	}
+	for _, k := range kept {
+		if isTerminal(k.Lifecycle) { // the ≤doneCueMax done cue kept by keepDoneCue
+			focus[bareID(k.DocID)] = true
+		}
+	}
+	return capFocus(kept, focus)
+}
+
+// capFocus trims a focus set to focusWindowMax deterministically (charter D51
+// step 5): iterate kept in its band+priority display order and keep the first
+// focusWindowMax members that are in focus, dropping the lowest-priority / oldest
+// extras. The dropped remainder becomes the honest "+N more" the spine computes.
+func capFocus(kept []Task, focus map[string]bool) map[string]bool {
+	if len(focus) <= focusWindowMax {
+		return focus
+	}
+	capped := make(map[string]bool, focusWindowMax)
+	for _, k := range kept {
+		id := bareID(k.DocID)
+		if focus[id] {
+			capped[id] = true
+			if len(capped) >= focusWindowMax {
+				break
+			}
+		}
+	}
+	return capped
+}
+
+// computeFocus builds the focus neighborhood for a section (charter D51). kept =
+// the section's final displayed children; nowAnchors = the section's live claims
+// (pinned in NOW, used only as context anchors). Seeds = every blocked kept child
+// (each shows itself) + the nowAnchors. Per seed, drawn from kept: the parent
+// chain up (≤focusParents), ready siblings sharing the seed's ParentID
+// (≤focusSiblings, priority then recency), and direct children (≤focusChildren).
+// The union across seeds is ONE neighborhood, so two active tasks in one section
+// MERGE into one wider window — more perspective in one eye-catch, never two
+// lists. Empty (no blocked child, no anchor) → the caller picks header mode.
+func computeFocus(kept, nowAnchors []Task) map[string]bool {
+	focus := map[string]bool{}
+	if len(kept) == 0 {
+		return focus
+	}
+	keptByID := make(map[string]Task, len(kept))
+	for _, k := range kept {
+		keptByID[bareID(k.DocID)] = k
+	}
+
+	var seeds []Task
+	for _, k := range kept {
+		if k.Lifecycle == lifeBlocked {
+			focus[bareID(k.DocID)] = true // a blocked kept child is itself shown
+			seeds = append(seeds, k)
+		}
+	}
+	seeds = append(seeds, nowAnchors...) // NOW anchors seed context, never added themselves
+
+	for _, s := range seeds {
+		// Parents up ≤focusParents, only through kept members.
+		p := bareID(s.ParentID)
+		for depth := 0; depth < focusParents; depth++ {
+			par, ok := keptByID[p]
+			if !ok {
+				break
+			}
+			focus[p] = true
+			p = bareID(par.ParentID)
+		}
+
+		// Ready siblings sharing the seed's parent: priority asc, then recency desc.
+		sp := bareID(s.ParentID)
+		sid := bareID(s.DocID)
+		var sibs []Task
+		for _, k := range kept {
+			if bareID(k.ParentID) == sp && k.Lifecycle == lifeReady && bareID(k.DocID) != sid {
+				sibs = append(sibs, k)
+			}
+		}
+		sort.SliceStable(sibs, func(i, j int) bool {
+			ri, rj := priorityRank(sibs[i].Priority), priorityRank(sibs[j].Priority)
+			if ri != rj {
+				return ri < rj
+			}
+			return sibs[i].UpdatedAt.After(sibs[j].UpdatedAt)
+		})
+		for i := 0; i < len(sibs) && i < focusSiblings; i++ {
+			focus[bareID(sibs[i].DocID)] = true
+		}
+
+		// Direct children of the seed (kept is already band-ordered): first ≤focusChildren.
+		added := 0
+		for _, k := range kept {
+			if added >= focusChildren {
+				break
+			}
+			if bareID(k.ParentID) == sid {
+				focus[bareID(k.DocID)] = true
+				added++
+			}
+		}
+	}
+	return focus
+}
+
+// filterToFocus returns the subset of tasks whose bareID is in focus, preserving
+// input order — the row filter modeFocus applies before nesting (charter D51).
+func filterToFocus(tasks []Task, focus map[string]bool) []Task {
+	out := make([]Task, 0, len(tasks))
+	for _, t := range tasks {
+		if focus[bareID(t.DocID)] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // orderChildren sorts within an epic/cluster/orphan list:
 // in_progress -> ready -> blocked -> open -> unknown -> STALE -> recent terminal,
 // newest-updated first inside each band. Stable so equal timestamps keep their
@@ -772,29 +971,24 @@ func isTerminal(lc string) bool {
 	return false
 }
 
-// sortEpics ranks epics by repo relevance first (any member mentioned in this
-// repo's git context floats up), then by freshest member updated desc. Stable
-// so same-tier epics keep their construction order.
+// sortEpics ranks epics by (Active desc, repo-mentioned desc, LastActivity desc)
+// — charter D49. A live claim ALWAYS outranks recency (the wish's #1: active work
+// is the hero); the repo-mention boost is a subordinate tiebreak (D7); recency
+// then orders WITHIN a tier so the most-recently-worked epic tops the list and
+// dormant ones sink naturally (no special dormancy gate). Stable so same-tier
+// epics keep their construction order.
 func sortEpics(epics []Epic, repo RepoContext) {
 	sort.SliceStable(epics, func(i, j int) bool {
+		ai, aj := epics[i].Active, epics[j].Active
+		if ai != aj {
+			return ai
+		}
 		mi, mj := epicMentioned(epics[i], repo), epicMentioned(epics[j], repo)
 		if mi != mj {
 			return mi
 		}
-		return epicFreshest(epics[i]).After(epicFreshest(epics[j]))
+		return epics[i].LastActivity.After(epics[j].LastActivity)
 	})
-}
-
-// epicFreshest is the newest updated_at across the epic root and its kept
-// children — the "freshest child movement" the ranking is built on.
-func epicFreshest(e Epic) time.Time {
-	freshest := e.Root.UpdatedAt
-	for _, c := range e.Children {
-		if c.UpdatedAt.After(freshest) {
-			freshest = c.UpdatedAt
-		}
-	}
-	return freshest
 }
 
 // epicMentioned reports whether the repo's git scan named the epic root or any

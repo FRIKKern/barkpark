@@ -124,7 +124,12 @@
       ],
       "DoneFolded": 7,
       "Dormant": false,
-      "Active": true
+      "Active": true,
+      "FocusSet": {
+        "reconcile-979-seam": true,
+        "empty-state-goldens": true,
+        "canvas-cutover": true
+      }
     },
     {
       "Root": {

@@ -325,18 +325,12 @@ func connGlyphWord(c ConnState) (string, string) {
 // so the card at st.Cursor wears the selection marker; a selection folded into
 // the "+N more" line marks that line instead, never vanishing silently.
 func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
-	// Claim-forward (wave-7 D35): when nothing is claimed but ready work exists,
-	// the band is NOT a dead "nothing claimed" line — it becomes the READY TO
-	// CLAIM head so there is always an obvious next task to move into NOW.
-	if showReadyHead(b) {
-		return renderReadyHead(b, st, width, maxLines, now)
-	}
 	lines := []string{boldStyle.Render("NOW")}
 	if len(b.Now) == 0 {
-		// Both empty: no claims AND nothing ready. An honest all-clear, not a dead
-		// end — there is genuinely nothing to claim. The separator is the board's
-		// calm "·" (the em dash is a reading-frame glyph, not a board one).
-		lines = append(lines, dimStyle.Render("   nothing ready · all clear"))
+		// Nothing claimed. An honest all-clear (charter D52 / wave-11 retired the
+		// READY TO CLAIM head — claim-forward is now the cursor landing on any ready
+		// row + c). The separator is the board's calm "·".
+		lines = append(lines, dimStyle.Render("   nothing claimed · all clear"))
 		return lines
 	}
 	bc := epicTitleByChild(b)
@@ -374,45 +368,6 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 		sel := st.Cursor >= shown && st.Cursor < n
 		lines = append(lines, dimStyle.Render(truncate(
 			SelectionMarker(sel)+fmt.Sprintf("  +%d more claimed", folded), width)))
-	}
-	return lines
-}
-
-// renderReadyHead paints the claim-forward READY TO CLAIM band (wave-7 D35): a
-// label mirroring "NOW", then the top ready tasks as single calm TaskRows (○
-// ready glyph + priority meta — NO new vocabulary), then a dim, display-only
-// "+K more ready" tail naming the depth behind the head. The head rows are the
-// FIRST cursor stops (indexes [0, len(ReadyHead)) — the shell's visibleRows), so
-// the row at st.Cursor wears the ▎ marker; c claims it and enter opens its
-// detail. Over budget it shows as many rows as fit and folds the rest into the
-// tail, marking the tail selected when the cursor is on a folded row (never a
-// silently vanishing selection — the same honesty the NOW fold uses).
-func renderReadyHead(b Board, st UIState, width, maxLines int, now time.Time) []string {
-	lines := []string{boldStyle.Render("READY TO CLAIM")}
-	n := len(b.ReadyHead)
-
-	// Each ready row is one line; reserve the label + the tail line under budget.
-	shown := n
-	if 1+n > maxLines {
-		shown = maxLines - 2 // label + fold/tail line
-		if shown < 0 {
-			shown = 0
-		}
-	}
-
-	for i, t := range b.ReadyHead[:shown] {
-		selected := st.Cursor == i
-		for _, ln := range TaskRow(flashTitle(t, st, now), selected, 0, false, width, st.Frame, now) {
-			lines = append(lines, ln)
-		}
-	}
-
-	// The tail counts every ready task NOT shown — both the budget-folded head
-	// rows and the corpus queue beyond the head — so it is honest about the depth.
-	if more := b.ReadyTotal - shown; more > 0 {
-		sel := st.Cursor >= shown && st.Cursor < n
-		lines = append(lines, dimStyle.Render(truncate(
-			SelectionMarker(sel)+fmt.Sprintf("  +%d more ready", more), width)))
 	}
 	return lines
 }
@@ -507,13 +462,10 @@ func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 // is now impossible: visibleRows filters the SAME producer to its Selectable set.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	// The pinned band owns the first indexes (renderNowBand marks them): the READY
-	// TO CLAIM head when nothing is claimed, else the NOW cards. showReadyHead
-	// gates the band identically, so this offset always matches what was painted.
+	// The pinned NOW cards own the first indexes (renderNowBand marks them). The
+	// READY TO CLAIM head is retired (charter D52 / wave-11), so the spine's first
+	// selectable row always follows the NOW cards.
 	selIdx := len(b.Now)
-	if showReadyHead(b) {
-		selIdx = len(b.ReadyHead)
-	}
 	emit := func(s string) { lines = append(lines, s) }
 	markSel := func() bool {
 		selected := selIdx == st.Cursor
@@ -562,27 +514,29 @@ func deadEpicLine(title string, width int) string {
 }
 
 // moreLine folds the tail of a section behind one dim, depth-aligned line
-// (charter D42 + wave-10 W10-B): "+K more" names the hidden remainder (head cap +
-// the 24h done fold) when head-capped, else "+N done" is the terminal tally; a
-// non-zero cancelled fold always trails as "· M cancelled" (never expandable —
-// abandoned work never renders as a row). Depth indents the line to sit under a
-// phase band's children.
+// (charter D42 + wave-11 D50/D51): "+N more" names the focus-window remainder
+// (non-done kept rows the neighborhood did not pick), "+M done" is the completion
+// tally (folded regardless of age — done never floods), and a non-zero cancelled
+// fold always trails as "· K cancelled" (never expandable — abandoned work never
+// renders as a row). The three are DISTINCT segments, so a focus window over a
+// mass-closed epic reads honestly as e.g. "+6 more · 23 done". Depth indents the
+// line to sit under a phase band's children.
 func moreLine(m spineMoreInfo, depth, width int) string {
 	indent := strings.Repeat(" ", childIndent+depth*2)
 	var parts []string
-	switch {
-	case m.hidden > 0:
-		parts = append(parts, fmt.Sprintf("+%d more", m.hidden+m.done))
-	case m.done > 0:
-		parts = append(parts, fmt.Sprintf("+%d done", m.done))
-	}
-	if m.cancelled > 0 {
+	add := func(lead string, n int, unit string) {
+		if n <= 0 {
+			return
+		}
 		if len(parts) == 0 {
-			parts = append(parts, fmt.Sprintf("+%d cancelled", m.cancelled))
+			parts = append(parts, fmt.Sprintf("%s%d %s", lead, n, unit))
 		} else {
-			parts = append(parts, fmt.Sprintf("%d cancelled", m.cancelled))
+			parts = append(parts, fmt.Sprintf("%d %s", n, unit))
 		}
 	}
+	add("+", m.hidden, "more")
+	add("+", m.done, "done")
+	add("+", m.cancelled, "cancelled")
 	if len(parts) == 0 {
 		return ""
 	}

@@ -78,36 +78,30 @@ func spineRows(b Board, st UIState) []SpineRow {
 		}
 	}
 
-	// emitNested renders a task subtree in parent-before-child tree order, capped
-	// to `cap` rows (cap<0 = unlimited), each row offset by `depthOffset` indent
-	// levels WITHOUT a spurious ↳ guide on the offset (Guide rides the tree depth
-	// only). The remainder folds behind a depth-aligned "+K more" line.
-	emitNested := func(tasks []Task, depthOffset, cap int, shellRK rowKind) {
-		if len(tasks) == 0 {
-			return
-		}
-		nested := nestTasks(tasks)
-		shown := len(nested)
-		if cap >= 0 && cap < shown {
-			shown = cap
-		}
-		for _, nt := range nested[:shown] {
+	// emitNested renders a task subtree in parent-before-child tree order, each row
+	// offset by `depthOffset` indent levels WITHOUT a spurious ↳ guide on the offset
+	// (Guide rides the tree depth only). No cap: the caller has already narrowed the
+	// slice to the focus neighborhood (modeFocus) or is showing all of it
+	// (modeExpanded), and the section-level trailing line owns every fold count.
+	emitNested := func(tasks []Task, depthOffset int, shellRK rowKind) {
+		for _, nt := range nestTasks(tasks) {
 			rows = append(rows, SpineRow{
 				Kind: spineTask, Depth: nt.depth + depthOffset, Ref: nt.task.DocID, Selectable: true,
 				RK: shellRK, task: nt.task, Guide: nt.depth > 0,
 			})
 		}
-		if hidden := len(nested) - shown; hidden > 0 {
-			rows = append(rows, SpineRow{Kind: spineMore, Depth: depthOffset, more: spineMoreInfo{hidden: hidden}})
-		}
 	}
 
-	// Each section: header (selectable), then its nested+capped children — with
-	// NAMED phase sub-bands when the section is an epic whose children carry
-	// phase:<n>-<slug> labels (charter wave-10 W10-A) — then the trailing
-	// "+K more"/"+N done · M cancelled" fold line.
+	// Each section: header (selectable), then — per mode (charter D51 / wave-11) —
+	// its child rows. modeCollapsed/modeHeader emit the header ONLY (the dotted-
+	// leader done/total rollup IS the big-picture summary). modeExpanded shows the
+	// FULL kept set; modeFocus shows only the focus neighborhood. Rollups (the
+	// header count and every phase-band count) ALWAYS run over the WHOLE `tasks` —
+	// a band appears iff the window picks a row from it, but its rollup stays
+	// whole-band. The trailing "+N more · M done · K cancelled" line is honest
+	// about everything the window hid.
 	section := func(rk spineKind, shellRK rowKind, foldKey, title, code string, derived bool,
-		tasks []Task, shown, doneFolded, cancelledFolded int, allowBands bool) {
+		tasks []Task, mode sectionMode, focus map[string]bool, doneFolded, cancelledFolded int, allowBands bool) {
 		sep()
 		rows = append(rows, SpineRow{
 			Kind: rk, Ref: foldKey, Selectable: true, RK: headerRowKind(rk),
@@ -115,54 +109,55 @@ func spineRows(b Board, st UIState) []SpineRow {
 		})
 		emitted = true
 
+		// Header-only modes (charter D51): the rollup line above IS the summary.
+		if mode == modeCollapsed || mode == modeHeader {
+			return
+		}
+
+		// The row set the window shows: the full kept children when expanded, the
+		// focus neighborhood when active. hidden counts the kept rows the window
+		// dropped (0 when expanded), surfaced honestly in the trailing line.
+		show := func(ts []Task) []Task {
+			if mode == modeFocus {
+				return filterToFocus(ts, focus)
+			}
+			return ts
+		}
+		shownTasks := show(tasks)
+		hidden := len(tasks) - len(shownTasks)
+
 		// W10-A: named phase bands. When an epic's children carry >=2
 		// phase:<n>-<slug> labels, group them into ordered, named sub-bands, each a
-		// display-only dotted-leader header with its own Wcode·done/total rollup.
-		// The wave-8 head cap now applies PER BAND (the epic's own cap lifts, else
-		// nothing would fit). Unphased children go FIRST, directly under the epic
-		// header. wave-9b removed the OLD bare-W-code sub-bands (codes without
-		// names, doubling the row titles); this re-adds NAMED bands from the new
-		// phase labels — the data changed, not the principle: never fabricate a
-		// phase not in the data.
+		// display-only dotted-leader header with its own Wcode·done/total rollup
+		// (computed over the WHOLE band). Unphased children go FIRST, directly under
+		// the epic header. In modeFocus a band appears only when the window picked at
+		// least one of its rows; its rollup stays whole-band regardless.
 		var bands []phaseBand
 		var unphased []Task
-		if allowBands && shown > 0 {
+		if allowBands && len(shownTasks) > 0 {
 			bands, unphased = phaseBands(tasks)
 		}
 		if len(bands) > 0 {
-			capPerBand := groupHeadMax
-			if shown >= len(tasks) { // fully expanded (active / explicit unfold) → no cap
-				capPerBand = -1
-			}
-			emitNested(unphased, 0, capPerBand, shellRK) // phase-less children first
+			emitNested(show(unphased), 0, shellRK) // phase-less children first
 			for _, bd := range bands {
+				shownBand := show(bd.tasks)
+				if len(shownBand) == 0 {
+					continue // the window picked nothing from this band — skip its header
+				}
 				rows = append(rows, SpineRow{
 					Kind: spinePhaseBand, Depth: 1, Selectable: false,
 					hdr: spineHeader{title: bd.name, code: bd.code, counts: countSection(bd.tasks, 0)},
 				})
-				emitNested(bd.tasks, 1, capPerBand, shellRK)
+				emitNested(shownBand, 1, shellRK)
 			}
-			// The epic's done/cancelled folds happened before banding (buildEpic),
-			// so they surface as one epic-level trailing tally.
-			if doneFolded > 0 || cancelledFolded > 0 {
-				rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{done: doneFolded, cancelled: cancelledFolded}})
+			if hidden > 0 || doneFolded > 0 || cancelledFolded > 0 {
+				rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
 			}
 			return
 		}
 
-		// Flat (non-banded) section — nest the FULL child set, then cap to the
-		// shown head (capping in tree order shows a coherent top-down slice).
-		nested := nestTasks(tasks)
-		if shown > len(nested) {
-			shown = len(nested)
-		}
-		for _, nt := range nested[:shown] {
-			rows = append(rows, SpineRow{
-				Kind: spineTask, Depth: nt.depth, Ref: nt.task.DocID, Selectable: true,
-				RK: shellRK, task: nt.task, Guide: nt.depth > 0,
-			})
-		}
-		hidden := len(nested) - shown
+		// Flat (non-banded) section — nest the shown set in parent-before-child order.
+		emitNested(shownTasks, 0, shellRK)
 		if hidden > 0 || doneFolded > 0 || cancelledFolded > 0 {
 			rows = append(rows, SpineRow{Kind: spineMore, more: spineMoreInfo{hidden: hidden, done: doneFolded, cancelled: cancelledFolded}})
 		}
@@ -178,11 +173,11 @@ func spineRows(b Board, st UIState) []SpineRow {
 			continue
 		}
 		section(spineEpicHeader, rowChild, e.Root.DocID, e.Root.Title, phaseCodeOf(e.Root), false,
-			e.Children, epicShown(st, e), e.DoneFolded, e.CancelledFolded, true)
+			e.Children, epicMode(st, e), e.FocusSet, e.DoneFolded, e.CancelledFolded, true)
 	}
 	for _, cl := range b.Clusters {
 		section(spineClusterHeader, rowClusterMember, clusterFoldKey(cl.Key),
-			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterShown(st, cl), cl.DoneFolded, cl.CancelledFolded, false)
+			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterMode(st, cl), cl.FocusSet, cl.DoneFolded, cl.CancelledFolded, false)
 	}
 	if len(b.Orphans) > 0 || b.OrphansFolded > 0 || b.OrphansCancelledFolded > 0 {
 		title := "(no epic)"
@@ -190,7 +185,7 @@ func spineRows(b Board, st UIState) []SpineRow {
 			title = "tasks"
 		}
 		section(spineOrphanHeader, rowOrphan, orphansFoldKey, title, "", false,
-			b.Orphans, orphansShown(st, b), b.OrphansFolded, b.OrphansCancelledFolded, false)
+			b.Orphans, orphansMode(st, b), b.OrphansFocusSet, b.OrphansFolded, b.OrphansCancelledFolded, false)
 	}
 	for _, e := range deadEpics {
 		sep()

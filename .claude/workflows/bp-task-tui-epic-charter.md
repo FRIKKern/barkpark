@@ -664,6 +664,46 @@ root; 9 cancelled nodes total). All claims tree- and live-verified.
     and every uncurated epic/cluster unchanged. *Why:* wave 9 shipped green-but-wrong on the live corpus
     once already (the whole reason livecorpus exists); per-slice green is never trusted without the live eye.
 
+### Wave 11 — the ACTIVITY-FOCUS retune (D49–D55, wish AMENDMENT 4)
+
+The user's wish: ONE list; no READY TO CLAIM band; sections ranked by RECENCY of activity; done never floods
+(the observed failure — an epic dumped ~25 fresh ✓ rows because the fold was age-based); around active work a
+FOCUS WINDOW of ~3 ready siblings / ~3 children / 1–2 parents, MERGED when actives are near each other;
+inactive sections collapse to header+rollup; robust to bad hygiene by policy.
+
+49. **RECENCY ranks sections; a live claim always outranks recency.** `lastActivity(t)=max(UpdatedAt,
+    Claim.ClaimedAt, newest matching Event.At)`; `sectionActivity` = the newest over the WHOLE pre-fold
+    member set (so a mass-close keeps its recency). `Epic.LastActivity`/`Cluster.LastActivity` computed in
+    BuildBoard; `sortEpics=(Active desc, mentioned desc, LastActivity desc)`, `sortClusters=(Active,
+    LastActivity)`. Deleted `epicFreshest`/`clusterFreshest`. Dormant sinks naturally (no special gate).
+50. **DONE never floods (drop the 24h age gate; ≤`doneCueMax`=2 cue).** `buildEpic`/`buildCluster`/
+    `foldStaleOrphans` keep at most the 2 FRESHEST done as a dim completion cue and fold ALL else to
+    "+N done" regardless of age (`keepDoneCue`). Deleted `doneFoldAfter`; `staleBandAfter` stays; cancelled
+    unchanged (W10-B). The cue renders ONLY when the section shows child rows.
+51. **FOCUS WINDOWS replace head-of-5.** Per-section `FocusSet` (blocked children + NOW-anchor seeds → ≤2
+    parents, ≤3 ready siblings, ≤3 children, union/merge across seeds, cap `focusWindowMax`=12) computed in
+    BuildBoard (`computeFocus`/`sectionFocus`). `sectionMode{collapsed,expanded,focus,header}` replaces
+    `sectionShown`/`groupHeadMax`; modeFocus filters kept children INSIDE `spineRows.section()` while
+    per-band + section rollups stay whole-band; inactive → header+rollup only.
+52. **KILL the READY TO CLAIM band — ONE list.** Deleted `readyHead`/`readyHeadMax`/`Board.ReadyHead`/
+    `ReadyTotal`/`renderReadyHead`/`rowReadyClaim`/`showReadyHead` + `ready_head_*.txt`. NOW stays pinned;
+    claim-forward is the cursor landing on any ready row + `c`. Empty NOW reads the calm "nothing claimed ·
+    all clear".
+53. **Robustness by policy.** D49 keeps a mass-close's recency in the section max; D50 folds age-independent;
+    the EXISTING in_progress-only NOW guard drops expired claims — so bad hygiene (mass closes, stale claims)
+    never floods or dead-ends the view.
+54. **No new toggles.** The 3-state `h`/`l`/`enter` mechanics writing `CollapsedEpics` are unchanged and WIN
+    over the focus/header default in both directions (explicit expand shows all even in an inactive section;
+    explicit collapse hides all even in an active one).
+55. **Guard = a BuildBoard-driven livecorpus + a live read-only dump.** `livecorpus_test.go` converted from a
+    hand-built Board to a `corpusSnapshot()` Snapshot fed through the REAL BuildBoard: a mass-close flood
+    (25 done <24h → "+23 done", ≤2 cue), two merging claims in neighboring subtrees, a dormant epic
+    (header-only, sinks), recency spread, + the W10 invariants. TEETH-checked (revert each of D49/D50/D51/D52
+    → a golden or assertion fails). REQUIRED read-only guerrilla dump at 56 + 72 confirmed: the auth epic's
+    ✓ wall folds to a "29/30" header line, sections order by recency, NO READY TO CLAIM band, calm big-picture.
+    ONE coupled slice (board/spine/render/program/types/livecorpus); ONE `spineRows` producer keeps
+    cursor-parity structural; the glyph-budget + semrole guards stay green with ZERO allowlist edits.
+
 ## Roadmap (integration order)
 
 | # | Slice | Size | Wave |
@@ -687,6 +727,7 @@ root; 9 cancelled nodes total). All claims tree- and live-verified.
 | 17 | Navigation shell: stack + breadcrumb + cursor grammar + adaptive compositor (D11/D12/D18) — onto the calm board | L | 6 (next wave, after subtraction lands) |
 | 21 | The detailed-direction redesign: spec vocabulary (spinner/!/✕/open-ready split/teal done) + momentum header & progress bar + phase bands & rollups + rich row & blocker badge + one spineRows builder (nested ↳) + detail/paper glyph align + full golden regen (D36–D44) | L | 9 (this wave) |
 | 22 | Sectioning: NAMED phase bands from `phase:<n>-<slug>` (ordered, rollups, merged W-range, per-band cap) + cancelled folds entirely away (done·cancelled tail + dead-epic tombstone) + momentum % excludes cancelled (D45–D48) | M | 10 (this wave) |
+| 23 | Activity-focus retune: recency ranks sections + a live claim outranks it (D49); done never floods (≤2 cue, drop the 24h gate — D50); FOCUS WINDOWS replace head-of-5, merged across near actives (D51); KILL the READY TO CLAIM band — ONE list (D52); robustness by policy + no new toggles (D53/D54); BuildBoard-driven livecorpus guard + teeth + live dump (D55) | L | 11 (this wave) |
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |

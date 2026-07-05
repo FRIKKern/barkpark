@@ -3,7 +3,7 @@ barkpark · tasks                                        ⇄ guerrilla  ● live
 ████████████████████████████████████████████████████████████████████░░░░░░░░░░░░
 
 NOW
-   nothing ready · all clear
+   nothing claimed · all clear
 
 ▎ Cloud GUI epic ··························································· 7/9
    ○ Reconcile the #979 role seam                                             P2
@@ -11,7 +11,7 @@ NOW
   +7 done
 
   (no epic) ································································ 0/1
-   ○ Fix the timeago clock-skew clamp                                         P3
+
 
 
 
