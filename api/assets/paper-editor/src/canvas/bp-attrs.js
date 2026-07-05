@@ -54,6 +54,37 @@ export const BpAttrs = Extension.create({
             renderHTML: (attrs) =>
               attrs.bpType ? { "data-bp-type": attrs.bpType } : {},
           },
+          // locked — the DOCTRINE template lock (pdd-t2). A true value marks a
+          // MANDATED template block (the locked title @0, featured image @1) that
+          // CANNOT be deleted or moved: the server backstops it (patch.ex:192-274)
+          // and the canvas vetoes it live (index.js filterTransaction, which reads
+          // node.attrs.locked). ADDITIVE / D3: rendered ONLY when true, so a normal
+          // (unlocked) block round-trips BYTE-IDENTICALLY with no data-bp-locked
+          // attr — and parseHTML yields null for the absent attr. A true value also
+          // carries a calm hover cue (`title`) — chrome around content, never an
+          // error flash (doctrine rule 5). data-bp-locked survives the
+          // setContent->getJSON round-trip so runToTiptap's stamp is read back.
+          locked: {
+            default: null,
+            parseHTML: (el) =>
+              el.getAttribute("data-bp-locked") === "true" ? true : null,
+            renderHTML: (attrs) =>
+              attrs.locked === true
+                ? {
+                    "data-bp-locked": "true",
+                    title: "Part of the document template",
+                  }
+                : {},
+          },
+          // role — the template ROLE ("title" | "featured" | …). Carried VERBATIM
+          // so a locked block round-trips its role; rendered ONLY when present
+          // (D3 byte-fidelity — an unlocked block has no data-bp-role).
+          role: {
+            default: null,
+            parseHTML: (el) => el.getAttribute("data-bp-role"),
+            renderHTML: (attrs) =>
+              attrs.role ? { "data-bp-role": attrs.role } : {},
+          },
         },
       },
     ];

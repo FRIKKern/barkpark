@@ -220,7 +220,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             >⋮⋮</span>
             <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
             <span class="bp-paper-edit-actions">
+              <%!-- Doctrine template lock (pdd-t2): a locked mandated block can't
+                    be moved or deleted, so its ▲▼/× controls are HIDDEN and a calm
+                    lock note stands in their place — chrome, never an error. The
+                    server backstops it either way (patch.ex). --%>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move up"
@@ -231,6 +236,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 data-test-id="paper-move-up"
               >▲</button>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move down"
@@ -241,6 +247,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 data-test-id="paper-move-down"
               >▼</button>
               <button
+                :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-destructive btn-sm"
                 title="Delete block"
@@ -248,6 +255,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 phx-value-id={Map.get(block, "id")}
                 data-test-id="paper-delete-block"
               >×</button>
+              <span
+                :if={Map.get(block, "locked") == true}
+                class="bp-paper-lock-note"
+                title="Part of the document template"
+                data-test-id="paper-locked-note"
+              >🔒 Locked</span>
             </span>
           </div>
           <.paper_block_fields block={block} dataset={@dataset} api_token_raw={@api_token_raw} />
@@ -422,7 +435,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         >⋮⋮</span>
         <span class="bp-paper-edit-kind"><%= Map.get(@block, "type") %></span>
         <span class="bp-paper-edit-actions">
+          <%!-- Doctrine template lock (pdd-t2): a locked mandated block hides its
+                ▲▼/× controls and shows a calm lock note instead — same contract as
+                the flag-OFF list render above. --%>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move up"
@@ -433,6 +450,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-move-up"
           >▲</button>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move down"
@@ -443,6 +461,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-move-down"
           >▼</button>
           <button
+            :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-destructive btn-sm"
             title="Delete block"
@@ -450,6 +469,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             phx-value-id={Map.get(@block, "id")}
             data-test-id="paper-delete-block"
           >×</button>
+          <span
+            :if={Map.get(@block, "locked") == true}
+            class="bp-paper-lock-note"
+            title="Part of the document template"
+            data-test-id="paper-locked-note"
+          >🔒 Locked</span>
         </span>
       </div>
       <.paper_block_fields block={@block} dataset={@dataset} api_token_raw={@api_token_raw} />

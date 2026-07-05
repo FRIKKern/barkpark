@@ -133,6 +133,65 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     refute render(view) =~ ~s(data-edit-block-id="p-second")
   end
 
+  # ── pdd-t2: doctrine template locks — no delete/move controls for a locked block ──
+
+  # A template-shaped paper: a LOCKED title heading @0 + a LOCKED featured image @1
+  # (the forced initial set, mirroring Content.Papers.Template), then an unlocked
+  # body paragraph. Satisfies the server template gate (title heading at 0,
+  # featured at 1) so upsert_paper accepts it.
+  defp seed_locked_paper! do
+    slug = "2026-05-24-locked-paper"
+
+    blocks = [
+      %{
+        "id" => "lk-title",
+        "type" => "heading",
+        "level" => 1,
+        "role" => "title",
+        "locked" => true,
+        "text" => "Locked Doctrine"
+      },
+      %{"id" => "lk-featured", "type" => "image", "role" => "featured", "locked" => true},
+      %{
+        "id" => "lk-body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Editable body."}]
+      }
+    ]
+
+    {:ok, _paper} =
+      Barkpark.Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+
+    slug
+  end
+
+  test "a locked block renders NO move/delete controls, only a calm lock note",
+       %{conn: conn} do
+    slug = seed_locked_paper!()
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{slug}"))
+    edit_html = open_editor(view)
+
+    # The locked title: none of the ▲ / ▼ / × controls render; the lock note does.
+    title = block_html(edit_html, "lk-title")
+    refute title =~ ~s(data-test-id="paper-delete-block")
+    refute title =~ ~s(data-test-id="paper-move-up")
+    refute title =~ ~s(data-test-id="paper-move-down")
+    assert title =~ ~s(data-test-id="paper-locked-note")
+
+    # The locked featured image is likewise controlless (locked placement).
+    featured = block_html(edit_html, "lk-featured")
+    refute featured =~ ~s(data-test-id="paper-delete-block")
+    refute featured =~ ~s(data-test-id="paper-move-up")
+    assert featured =~ ~s(data-test-id="paper-locked-note")
+
+    # The UNLOCKED body keeps its full control set (the guard is surgical).
+    body = block_html(edit_html, "lk-body")
+    assert body =~ ~s(data-test-id="paper-delete-block")
+    assert body =~ ~s(data-test-id="paper-move-up")
+    assert body =~ ~s(data-test-id="paper-move-down")
+    refute body =~ ~s(data-test-id="paper-locked-note")
+  end
+
   test "reordering a block changes the order", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     open_editor(view)

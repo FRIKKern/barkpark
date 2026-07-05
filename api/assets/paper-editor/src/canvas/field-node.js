@@ -176,6 +176,17 @@ export function coercePickerValue(detail) {
   return v == null ? "" : v;
 }
 
+// pdd-t2: the calm lock cue for a template-locked field node-view. Stamps
+// data-bp-locked (a CSS hook for the quiet accent) + a hover title ("Part of the
+// document template") on the frame — chrome around content, NEVER an error flash
+// or shake (doctrine rule 5). No-op for an unlocked field.
+function applyLockCue(dom, node) {
+  if (node && node.attrs && node.attrs.locked === true) {
+    dom.setAttribute("data-bp-locked", "true");
+    dom.setAttribute("title", "Part of the document template");
+  }
+}
+
 // The field types whose control commits on `input` (debounced), mirroring
 // BarkparkFieldBlockBridge's `debounced` set. The rest commit on `change`.
 const DEBOUNCED_FIELD_TYPES = new Set([
@@ -345,6 +356,24 @@ export const Field = Node.create({
             ? { "data-field-dataset": attrs.dataset }
             : {},
       },
+      // locked / role — the DOCTRINE template attrs (pdd-t2). A field block could
+      // itself be a mandated template block (a future doc type's forced field), so
+      // it carries the SAME locked/role round-trip the prose title does (BpAttrs).
+      // D3 additive: rendered ONLY when set, so an ordinary field round-trips
+      // byte-identically. locked also drives the calm lock cue on the node-view
+      // (a hover title + a data-bp-locked hook) — chrome, never an error.
+      locked: {
+        default: null,
+        parseHTML: (el) =>
+          el.getAttribute("data-bp-locked") === "true" ? true : null,
+        renderHTML: (attrs) =>
+          attrs.locked === true ? { "data-bp-locked": "true" } : {},
+      },
+      role: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-bp-role"),
+        renderHTML: (attrs) => (attrs.role ? { "data-bp-role": attrs.role } : {}),
+      },
     };
   },
 
@@ -397,6 +426,7 @@ export const Field = Node.create({
       dom.className = "bp-canvas-field";
       dom.setAttribute("data-bp-type", "field");
       dom.setAttribute("data-field-type", fieldType);
+      applyLockCue(dom, node);
 
       // The human label (a non-PM, non-editable caption beside the control).
       const labelEl = document.createElement("label");
@@ -544,6 +574,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   dom.className = "bp-canvas-field bp-canvas-field-picker";
   dom.setAttribute("data-bp-type", "field");
   dom.setAttribute("data-field-type", fieldType);
+  applyLockCue(dom, node);
 
   // The human label (a non-PM, non-editable caption beside the picker) — same as the
   // native variant + the per-block render (paper_editor.ex:816/828).
