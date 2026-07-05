@@ -11,7 +11,14 @@ config :barkpark, Barkpark.Repo,
   hostname: "localhost",
   database: "barkpark_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: System.schedulers_online() * 2
+  pool_size: System.schedulers_online() * 2,
+  # Per-hold watchdog. At the 15s default, a legitimately long single hold
+  # under saturated-suite CPU (the EDItEUR/Thema codelist seed's big JSONB
+  # register) gets force-disconnected mid-query — killing a pool connection
+  # and starving concurrent tests' setups (same poisoning as the orphan-task
+  # leak drained by DataCase.setup_sandbox). 45s stays under ExUnit's 60s
+  # test timeout so a truly hung test still fails as a test, not a disconnect.
+  timeout: 45_000
 
 # Mount the test-only /__error_test__/boom route (router.ex) so the RenderErrors
 # integration tests can exercise ErrorJSON/ErrorHTML through the real endpoint.
