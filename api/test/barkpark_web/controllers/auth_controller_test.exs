@@ -297,6 +297,67 @@ defmodule BarkparkWeb.AuthControllerTest do
     end
   end
 
+  describe "session management (era-w7)" do
+    setup %{conn: conn} do
+      register!(conn, "devices@example.com")
+      token_a = login_token(build_conn(), "devices@example.com")
+      token_b = login_token(build_conn(), "devices@example.com")
+      %{token_a: token_a, token_b: token_b}
+    end
+
+    test "lists active sessions with metadata, marking the CURRENT one", %{token_a: a} do
+      body = authed(a) |> get("/v1/auth/sessions") |> json_response(200)
+
+      assert length(body["sessions"]) == 2
+      current = Enum.filter(body["sessions"], & &1["current"])
+      assert length(current) == 1
+
+      s = hd(body["sessions"])
+      assert Map.has_key?(s, "ip_address")
+      assert Map.has_key?(s, "last_used_at")
+      assert Map.has_key?(s, "mfa_fresh")
+    end
+
+    test "revoking ANOTHER session kills it, keeps mine, and audits", %{token_a: a, token_b: b} do
+      sessions = authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+      other = Enum.find(sessions, &(not &1["current"]))
+
+      resp = authed(a) |> delete("/v1/auth/sessions/#{other["id"]}") |> json_response(200)
+      assert resp["current"] == false
+
+      # The other bearer is dead immediately; mine still works.
+      assert authed(b) |> get("/v1/auth/me") |> json_response(401)
+      assert authed(a) |> get("/v1/auth/me") |> json_response(200)
+
+      assert Repo.one(from e in Event, where: e.action == "session_revoked")
+    end
+
+    test "revoking the CURRENT session behaves as logout", %{token_a: a} do
+      sessions = authed(a) |> get("/v1/auth/sessions") |> json_response(200) |> Map.fetch!("sessions")
+      current = Enum.find(sessions, & &1["current"])
+
+      resp = authed(a) |> delete("/v1/auth/sessions/#{current["id"]}") |> json_response(200)
+      assert resp["current"] == true
+      assert authed(a) |> get("/v1/auth/me") |> json_response(401)
+    end
+
+    test "another USER's session id is 404 and their session survives", %{token_a: a} do
+      register!(build_conn(), "other-user@example.com")
+      other_token = login_token(build_conn(), "other-user@example.com")
+
+      other_id =
+        authed(other_token)
+        |> get("/v1/auth/sessions")
+        |> json_response(200)
+        |> Map.fetch!("sessions")
+        |> hd()
+        |> Map.fetch!("id")
+
+      assert authed(a) |> delete("/v1/auth/sessions/#{other_id}") |> json_response(404)
+      assert authed(other_token) |> get("/v1/auth/me") |> json_response(200)
+    end
+  end
+
   describe "step-up MFA (sensitive-action gate)" do
     setup %{conn: conn} do
       register!(conn, "mfa@example.com")

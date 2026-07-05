@@ -167,6 +167,43 @@ defmodule Barkpark.Accounts do
   end
 
   @doc """
+  The user's ACTIVE sessions (not revoked, not expired), newest first — the
+  "your devices" list. Each row carries device metadata (user_agent, ip,
+  created/last-used) for the session-management surface.
+  """
+  @spec list_user_sessions(User.t()) :: [UserSession.t()]
+  def list_user_sessions(%User{id: uid}) do
+    now = DateTime.utc_now()
+
+    Repo.all(
+      from t in UserSession,
+        where: t.user_id == ^uid and is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now,
+        order_by: [desc: t.inserted_at]
+    )
+  end
+
+  @doc """
+  Revoke ONE of `user`'s sessions by its id — self-scoped: a session id
+  belonging to another user is `:not_found` (no cross-user probe). Idempotent
+  on an already-revoked session.
+  """
+  @spec revoke_user_session_by_id(User.t(), binary()) :: :ok | :not_found
+  def revoke_user_session_by_id(%User{id: uid}, session_id) do
+    with {:ok, sid} <- Ecto.UUID.cast(session_id),
+         %UserSession{} = session <- Repo.get_by(UserSession, id: sid, user_id: uid) do
+      if is_nil(session.revoked_at) do
+        now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+        {:ok, _} = session |> UserSession.changeset(%{revoked_at: now}) |> Repo.update()
+      end
+
+      :ok
+    else
+      _ -> :not_found
+    end
+  end
+
+  @doc """
   IdP-initiated Single Logout: revoke the SAML-born sessions an IdP
   `LogoutRequest` names — matched by NameID within the org's connection, and
   narrowed to the specific IdP session when a SessionIndex is supplied (an

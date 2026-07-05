@@ -940,6 +940,9 @@ defmodule BarkparkWeb.Router do
     # `mfa_required` 401 before retrying a guarded action).
     post("/mfa/step-up", AuthController, :mfa_step_up)
     post("/mfa/disable", AuthController, :mfa_disable)
+    # Session management: the "your devices" list + revoke-one (era-w7).
+    get("/sessions", AuthController, :sessions)
+    delete("/sessions/:id", AuthController, :revoke_session)
 
     # Passkeys (WebAuthn): enrol, step-up factor, and management.
     post("/webauthn/register/challenge", WebauthnController, :register_challenge)
