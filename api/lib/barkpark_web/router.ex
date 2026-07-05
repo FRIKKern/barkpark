@@ -352,11 +352,11 @@ defmodule BarkparkWeb.Router do
     plug(:fetch_session)
   end
 
-  # Core user-login session gate (distinct from API-token auth). Accepts the
-  # `POST /v1/auth/login` bearer or the signed `user_session` cookie; assigns
-  # :current_user + a :user CallerContext.
+  # Core user-login session gate (distinct from API-token auth): login bearer
+  # or `user_session` cookie → :current_user, then the require_mfa org gate.
   pipeline :require_user do
     plug(BarkparkWeb.Plugs.RequireUserSession)
+    plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
   end
 
   # Browser Studio uploads send `credentials: same-origin` with the session

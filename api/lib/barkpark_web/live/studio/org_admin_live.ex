@@ -38,6 +38,19 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     end
   end
 
+  # era-w2-org-require-mfa: flip the org-wide MFA requirement. `to` carries
+  # the target state so the click is idempotent against a stale render.
+  @impl true
+  def handle_event("toggle_require_mfa", %{"org" => org_id, "to" => to}, socket) do
+    case Tenancy.set_organization_require_mfa(org_id, to == "true") do
+      {:ok, _org} ->
+        {:noreply, load(socket)}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "could not update the MFA requirement")}
+    end
+  end
+
   defp load(socket) do
     orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
 
@@ -98,6 +111,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
           </div>
           <div data-panel="members"><strong>Members:</strong> {o.members}</div>
           <div data-panel="scim"><strong>SCIM tokens:</strong> {length(o.scim_tokens)}</div>
+          <div data-panel="mfa">
+            <strong>Require MFA:</strong>
+            <span data-require-mfa={to_string(o.org.require_mfa)}>
+              {if o.org.require_mfa, do: "on", else: "off"}
+            </span>
+          </div>
         </div>
 
         <div style="margin-top:12px;">
@@ -109,6 +128,16 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             style="font-size:13px; padding:6px 12px; border:1px solid #ccc; border-radius:6px; cursor:pointer;"
           >
             Mint SCIM token
+          </button>
+          <button
+            type="button"
+            phx-click="toggle_require_mfa"
+            phx-value-org={o.org.id}
+            phx-value-to={to_string(not o.org.require_mfa)}
+            data-toggle-require-mfa={o.org.slug}
+            style="font-size:13px; padding:6px 12px; border:1px solid #ccc; border-radius:6px; cursor:pointer;"
+          >
+            {if o.org.require_mfa, do: "Stop requiring MFA", else: "Require MFA org-wide"}
           </button>
           <p
             :if={@minted[o.org.id]}

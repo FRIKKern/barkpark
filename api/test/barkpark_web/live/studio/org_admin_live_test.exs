@@ -91,6 +91,23 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
     end
   end
 
+  describe "org-wide require-MFA toggle (era-w2-org-require-mfa)" do
+    test "clicking the toggle flips the org flag and the rendered state", %{conn: conn} do
+      {org, _ws} = org_with_ws("mfaco")
+
+      {:ok, view, html} = live(admin_conn(conn), "/studio/org-admin")
+      assert html =~ ~s(data-require-mfa="false")
+
+      html = view |> element(~s([data-toggle-require-mfa="mfaco"])) |> render_click()
+      assert html =~ ~s(data-require-mfa="true")
+      assert Repo.reload!(org).require_mfa == true
+
+      html = view |> element(~s([data-toggle-require-mfa="mfaco"])) |> render_click()
+      assert html =~ ~s(data-require-mfa="false")
+      assert Repo.reload!(org).require_mfa == false
+    end
+  end
+
   describe "audit activity" do
     test "recent audit events are listed", %{conn: conn} do
       org_with_ws("auditco")
