@@ -50,6 +50,28 @@ defmodule Barkpark.Plugins.Bulldocs do
   row.
   """
   @impl Barkpark.Plugin
+  def lifecycle_hooks do
+    %{before_save: [&validate_paper_template/1]}
+  end
+
+  # Doctrine gate (pdd-t3, paper portabledoc-doctrine): a paper that carries
+  # template-locked blocks must keep the template shape — the locked title
+  # heading at block 0, a featured block (when present) at block 1. Papers with
+  # no locked blocks pass untouched (additive enforcement; corpus migration is
+  # pdd-t5). The shape truth lives in Content.Papers.Template.validate/1; the
+  # op-level backstop (remove/move/unlock of a locked block) in PortableDoc.Patch.
+  defp validate_paper_template(%{doc: %{"type" => "paper"} = doc}) do
+    blocks = get_in(doc, ["content", "blocks"])
+
+    case Barkpark.Content.Papers.Template.validate(blocks) do
+      [] -> :ok
+      errors -> {:halt, "paper template violated: " <> Enum.join(errors, "; ")}
+    end
+  end
+
+  defp validate_paper_template(_payload), do: :ok
+
+  @impl Barkpark.Plugin
   def register_schemas(_opts) do
     raw =
       @schemas_dir

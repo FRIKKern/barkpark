@@ -162,13 +162,14 @@ defmodule Barkpark.PortableDoc.Patch do
         # `null` is treated as "absent" — it can never re-key the type.
         case Map.get(patch, "type") do
           nil ->
-            {[merge_block(target, coerce_field_patch(target, patch))], false}
+            {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))], false}
 
           patch_type ->
             if patch_type != Map.get(target, "type") do
               {[target], true}
             else
-              {[merge_block(target, coerce_field_patch(target, patch))], false}
+              {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))],
+               false}
             end
         end
       end)
@@ -188,18 +189,26 @@ defmodule Barkpark.PortableDoc.Patch do
   end
 
   defp apply_to_blocks(blocks, %{"op" => "remove-block", "id" => id}) do
-    case transform_at_id(blocks, id, fn _target -> [] end) do
-      # Idempotent re-send safety for the canvas incremental-diff model: removing a
-      # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
-      # (id gone) is already true, so we return the block list unchanged and let the
-      # atomic batch continue. Without this, a stale remove-block (the canvas can
-      # re-send a batch that crosses an echo in flight, or a leading-block delete can
-      # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
-      # fold and discard the user's real edits riding the same batch. Other not-found
-      # cases (patch-block / insert-after / replace-block of a missing anchor) keep
-      # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
-      nil -> {:ok, blocks}
-      new_blocks -> {:ok, new_blocks}
+    # Doctrine backstop (pdd-t3): a template-locked block cannot be removed —
+    # by ANY client, canvas diff or raw API. Checked before the transform so
+    # the atomic batch halts with a clear error instead of silently unmaking
+    # the guarantee. Op-of-absent stays a no-op below.
+    if locked_at_id?(blocks, id) do
+      {:error, {:locked_block, id, "remove-block"}}
+    else
+      case transform_at_id(blocks, id, fn _target -> [] end) do
+        # Idempotent re-send safety for the canvas incremental-diff model: removing a
+        # block that is ALREADY absent is a NO-OP, not an error. The desired end-state
+        # (id gone) is already true, so we return the block list unchanged and let the
+        # atomic batch continue. Without this, a stale remove-block (the canvas can
+        # re-send a batch that crosses an echo in flight, or a leading-block delete can
+        # arrive twice) would HALT the whole batch via apply_patches/2 / block_ops.ex's
+        # fold and discard the user's real edits riding the same batch. Other not-found
+        # cases (patch-block / insert-after / replace-block of a missing anchor) keep
+        # their hard {:block_not_found} error — only remove/move-of-absent is a no-op.
+        nil -> {:ok, blocks}
+        new_blocks -> {:ok, new_blocks}
+      end
     end
   end
 
@@ -212,6 +221,10 @@ defmodule Barkpark.PortableDoc.Patch do
     after_id = Map.get(op, "after")
 
     cond do
+      # Doctrine backstop (pdd-t3): a template-locked block holds its position.
+      locked_at_id?(blocks, id) ->
+        {:error, {:locked_block, id, "move-block"}}
+
       not Enum.any?(blocks, &(block_id(&1) == id)) ->
         # Idempotent re-send safety for the canvas incremental-diff model (same
         # rationale as remove-block above): moving a block that is ALREADY absent at
@@ -250,6 +263,17 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp apply_to_blocks(_blocks, op) do
     {:error, {:invalid_op, op}}
+  end
+
+  # Doctrine (pdd-t3): template keys are immutable through patch-block — like
+  # `id` and `type`, `locked` and `role` cannot be set, changed, or stripped by
+  # a content patch. Seeding happens at create (Papers.Template), never via ops.
+  defp strip_template_keys(patch) when is_map(patch), do: Map.drop(patch, ["locked", "role"])
+
+  # True when the TOP-LEVEL block with `id` is template-locked (locks are a
+  # top-level template concept; section children are never seeded locked).
+  defp locked_at_id?(blocks, id) do
+    Enum.any?(blocks, fn b -> block_id(b) == id and Map.get(b, "locked") == true end)
   end
 
   # ── id resolution & structural transform (recurses sections) ───────────────
