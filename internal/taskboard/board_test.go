@@ -100,10 +100,9 @@ func TestBuildBoard_Now(t *testing.T) {
 	}
 }
 
-// TestBuildBoard_NowDedup — the D14 de-dup: a claimed task renders ONLY in the
-// NOW band, never again as a row in its epic OR as a loose orphan. The epic
-// header survives (structure), but its claimed child leaves the spine; a claimed
-// loose leaf leaves the orphan pile entirely.
+// TestBuildBoard_NowDedup — charter D56 (reverses D14 on user direction): a
+// claimed task renders in NOW *and* stays in place in its section, heading its
+// neighborhood as a spinner row — the list below NOW tells the same story.
 func TestBuildBoard_NowDedup(t *testing.T) {
 	claim := &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
 	s := Snapshot{Tasks: []Task{
@@ -122,11 +121,11 @@ func TestBuildBoard_NowDedup(t *testing.T) {
 		t.Fatalf("NOW = %v, want both claimed tasks", got)
 	}
 	epic := findEpic(t, b.Epics, "epic")
-	if got := docIDs(epic.Children); !eq(got, []string{"child-ready"}) {
-		t.Fatalf("epic children = %v, want only the ready child (the claimed one is NOW-only)", got)
+	if got := docIDs(epic.Children); !eq(got, []string{"child-claimed", "child-ready"}) {
+		t.Fatalf("epic children = %v, want the claimed child IN PLACE heading the section (D56)", got)
 	}
-	if got := docIDs(b.Orphans); !eq(got, []string{"loose-ready"}) {
-		t.Fatalf("orphans = %v, want only the ready orphan (the claimed one is NOW-only)", got)
+	if got := docIDs(b.Orphans); !eq(got, []string{"loose-claimed", "loose-ready"}) {
+		t.Fatalf("orphans = %v, want the claimed orphan in place first (D56)", got)
 	}
 }
 
@@ -134,10 +133,10 @@ func TestBuildBoard_NowDedup(t *testing.T) {
 // derived clusters too: claiming one member of a minimum-size cluster
 // (clusterMemberMin == 2) must NOT dissolve the section and reshuffle its
 // sibling down into "(no epic)". The claim participates in label frequency,
-// membership and freshest-member ranking, and is stripped from the DISPLAYED
-// members only afterwards. Its fresh claim also still ranks the cluster: the
-// just-claimed sheets cluster must sort ABOVE the older docs cluster even
-// though its one visible row is the stalest task on the board.
+// membership and freshest-member ranking, and (charter D56) STAYS in the
+// displayed members, heading the section as a spinner row. Its fresh claim also
+// still ranks the cluster: the just-claimed sheets cluster sorts ABOVE the
+// older docs cluster.
 func TestBuildBoard_NowDedup_ClusterStable(t *testing.T) {
 	claim := &Claim{Worker: "w", Epoch: 1, ClaimedAt: refNow.Add(-time.Minute)}
 	old := refNow.Add(-3 * 24 * time.Hour)
@@ -162,8 +161,8 @@ func TestBuildBoard_NowDedup_ClusterStable(t *testing.T) {
 	if b.Clusters[0].Key != "proj:sheets" {
 		t.Fatalf("first cluster = %q, want proj:sheets on top (its claim's freshness still ranks it)", b.Clusters[0].Key)
 	}
-	if got := docIDs(b.Clusters[0].Tasks); !eq(got, []string{"sp2"}) {
-		t.Fatalf("sheets members = %v, want only sp2 visible (sp1 is NOW-only)", got)
+	if got := docIDs(b.Clusters[0].Tasks); !eq(got, []string{"sp1", "sp2"}) {
+		t.Fatalf("sheets members = %v, want the claimed sp1 in place first (D56)", got)
 	}
 	if len(b.Orphans) != 0 {
 		t.Fatalf("orphans = %v, want none — sp2 must stay clustered", docIDs(b.Orphans))
@@ -201,14 +200,13 @@ func TestBuildBoard_RepoBoost(t *testing.T) {
 // as the ≤doneCueMax completion cue at the bottom (charter D50 — age no longer
 // folds a done row; nothing folds until there are more than doneCueMax done). The
 // 48h cancelled row still folds into CancelledFolded (charter wave-10 W10-B). t1
-// is a LIVE claim, so the NOW de-dup (charter D14) removes it from the spine
-// children — it renders only in the pinned NOW band — while t8 (in_progress but
-// unclaimed, worker empty) stays and heads the band.
+// is a LIVE claim: charter D56 keeps it IN PLACE (NOW is the summary; the row
+// also heads its section), alongside t8 (in_progress but unclaimed).
 func TestBuildBoard_ChildrenOrderAndFold(t *testing.T) {
 	b := BuildBoard(loadFixtureSnapshot(t), RepoContext{}, refNow)
 	g1 := findEpic(t, b.Epics, "g1")
 
-	wantChildren := []string{"t8", "t2", "t3", "t4", "t7", "t5", "t6"}
+	wantChildren := []string{"t1", "t8", "t2", "t3", "t4", "t7", "t5", "t6"}
 	if got := docIDs(g1.Children); !eq(got, wantChildren) {
 		t.Fatalf("G1 children = %v, want %v", got, wantChildren)
 	}
@@ -390,8 +388,8 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 	if b.OrphansFolded != 56 {
 		t.Fatalf("OrphansFolded = %d, want 56 (all done except the 2 freshest cue)", b.OrphansFolded)
 	}
-	if len(b.Orphans) != 41 {
-		t.Fatalf("visible orphans = %d, want 41 (8 ready + 4 blocked + 27 open + 2 done cue; the 3 claimed in_progress are NOW-only)", len(b.Orphans))
+	if len(b.Orphans) != 44 {
+		t.Fatalf("visible orphans = %d, want 44 (3 in-flight in place [D56] + 8 ready + 4 blocked + 27 open + 2 done cue)", len(b.Orphans))
 	}
 	if b.TaskCount != 100 {
 		t.Fatalf("TaskCount = %d, want 100 (fetched corpus)", b.TaskCount)
@@ -417,11 +415,10 @@ func TestBuildBoard_FlatQueue(t *testing.T) {
 			t.Fatalf("stale-done orphan %s survived the fold", o.DocID)
 		}
 	}
-	// The 3 in_progress rows were all claimed, so the NOW de-dup lifts them into
-	// the pinned band; the top survivor is now the freshest ready row, and the
-	// tail is recent done.
-	if b.Orphans[0].Lifecycle != lifeReady {
-		t.Fatalf("first survivor = %s, want a ready row on top (the in_progress rows are NOW-only)", b.Orphans[0].Lifecycle)
+	// The 3 claimed in_progress rows pin in NOW *and* stay in place (charter
+	// D56), heading the pile at band 0; the tail is recent done.
+	if b.Orphans[0].Lifecycle != lifeInProgress {
+		t.Fatalf("first survivor = %s, want an in_progress row on top (in place, D56)", b.Orphans[0].Lifecycle)
 	}
 	if last := b.Orphans[len(b.Orphans)-1]; last.Lifecycle != lifeDone {
 		t.Fatalf("last survivor = %s, want a recent-done row at the tail", last.Lifecycle)
@@ -608,16 +605,15 @@ func TestBuildBoard_ClustersLiveShape(t *testing.T) {
 		t.Fatalf("clusters = %v, want %v", got, wantClusters)
 	}
 
-	// sheets-parity members are band-ordered: ready(overlaid), open, then the
-	// 9d-stale open sinks to the stale band at the tail. sp1 is a LIVE claim, so
-	// the NOW de-dup (charter D14) keeps it out of the cluster — it renders only in
-	// the pinned NOW band.
+	// sheets-parity members are band-ordered: the live claim sp1 stays IN PLACE
+	// heading the section (charter D56, band 0), then ready(overlaid), open, and
+	// the 9d-stale open sinks to the stale band at the tail.
 	sheets := findCluster(t, b.Clusters, "proj:sheets-parity")
-	if got := docIDs(sheets.Tasks); !eq(got, []string{"sp2", "sp3", "sp4"}) {
-		t.Fatalf("sheets members = %v, want [sp2 sp3 sp4]", got)
+	if got := docIDs(sheets.Tasks); !eq(got, []string{"sp1", "sp2", "sp3", "sp4"}) {
+		t.Fatalf("sheets members = %v, want [sp1 sp2 sp3 sp4] (claim in place, D56)", got)
 	}
-	if childBand(sheets.Tasks[2], refNow) != 5 {
-		t.Fatalf("sp4 (9d open) should be in the stale band (5), got %d", childBand(sheets.Tasks[2], refNow))
+	if childBand(sheets.Tasks[3], refNow) != 5 {
+		t.Fatalf("sp4 (9d open) should be in the stale band (5), got %d", childBand(sheets.Tasks[3], refNow))
 	}
 
 	// Remaining orphans: the two title-untethered opens (updated desc), then the

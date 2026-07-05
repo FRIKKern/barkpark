@@ -288,11 +288,14 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 
 	sortEpics(board.Epics, repo)
 	// Strip the NOW-pinned claims from the ranked epics' displayed children (D14).
-	dedupNowFromEpics(board.Epics, nowSet)
-	// Focus windows (charter D51): now that each epic's children are FINAL (claims
-	// stripped, done folded to the <=2 cue), compute the neighborhood the board
-	// shows around active/blocked work. Empty set => the epic renders header+rollup
-	// only (inactive); non-empty => modeFocus shows exactly this neighborhood.
+	// Claimed tasks STAY in their section (charter D56, reversing D14): NOW is
+	// the glanceable summary band, and the same task ALSO renders in place — a
+	// spinner row heading its neighborhood (childBand 0) — so the list below NOW
+	// tells the story of what is going on where. Focus windows (charter D51):
+	// now that each epic's children are FINAL (done folded to the <=2 cue),
+	// compute the neighborhood the board shows around active/blocked work. Empty
+	// set => the epic renders header+rollup only; non-empty => modeFocus shows
+	// exactly this neighborhood.
 	for i := range board.Epics {
 		e := &board.Epics[i]
 		e.FocusSet = sectionFocus(e.Children, nowByRoot[e.Root.DocID], e.LastActivity, now)
@@ -310,14 +313,6 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	board.Clusters, board.Orphans = deriveClusters(loose, now, nowSet, evAt)
 
 	board.OrphansActive = anyInNow(board.Orphans, nowSet)
-
-	// NOW de-dup for the loose pile, mirroring the epic treatment above: the
-	// claims stayed in `loose` through label frequency, cluster membership and
-	// freshest-member ranking — so claiming one member of a minimum-size cluster
-	// never dissolves the section or drops its rank mid-session — and leave the
-	// DISPLAY only now (charter D14).
-	board.Clusters = dedupNowFromClusters(board.Clusters, nowSet)
-	board.Orphans = stripNow(board.Orphans, nowSet)
 
 	// Focus windows for the derived clusters + the loose bucket (charter D51),
 	// mirroring the epic treatment: the neighborhood shown around active/blocked
@@ -724,61 +719,6 @@ func buildEpic(root Task, children []Task, now time.Time, evAt map[string]time.T
 	return epic
 }
 
-// dedupNowFromEpics removes the NOW-pinned claims from every epic's displayed
-// children (charter D14 — a claimed task renders ONLY in the pinned band). It
-// runs AFTER sortEpics so epic ranking and dormancy still saw the claims'
-// freshness; the survivors keep their band order. A claimed child leaves the
-// spine but stays counted nowhere in epicProgress (it is neither folded-done nor
-// a kept row), so the header digits track the not-in-flight work — the running
-// tasks are shown live in NOW above.
-func dedupNowFromEpics(epics []Epic, nowSet map[string]bool) {
-	if len(nowSet) == 0 {
-		return
-	}
-	for i := range epics {
-		epics[i].Children = stripNow(epics[i].Children, nowSet)
-	}
-}
-
-// dedupNowFromClusters strips the NOW-pinned claims from every derived
-// cluster's displayed members. It runs AFTER deriveClusters, so membership,
-// label frequency and freshest-member ranking all saw the claimed tasks — a
-// claim can never dissolve a minimum-size cluster or demote its rank. A cluster
-// left with nothing to show (no member rows AND no folded-done count) is
-// dropped: unlike an epic, whose authored root still earns a header, a derived
-// section exists only through its visible rows — its claims are all pinned in
-// NOW, and the section re-forms untouched when they resolve.
-func dedupNowFromClusters(clusters []Cluster, nowSet map[string]bool) []Cluster {
-	if len(nowSet) == 0 {
-		return clusters
-	}
-	kept := clusters[:0]
-	for _, c := range clusters {
-		c.Tasks = stripNow(c.Tasks, nowSet)
-		if len(c.Tasks) == 0 && c.DoneFolded == 0 {
-			continue
-		}
-		kept = append(kept, c)
-	}
-	return kept
-}
-
-// stripNow filters the NOW-pinned claims out of one task list, in place,
-// preserving order (charter D14 — a claimed task renders ONLY in the pinned
-// band). With no claims it is the identity.
-func stripNow(tasks []Task, nowSet map[string]bool) []Task {
-	if len(nowSet) == 0 {
-		return tasks
-	}
-	kept := tasks[:0]
-	for _, t := range tasks {
-		if !nowSet[t.DocID] {
-			kept = append(kept, t)
-		}
-	}
-	return kept
-}
-
 // ── Focus windows (charter D51 / wave-11) ────────────────────────────────────
 
 // nowAnchorsFor returns the NOW claims whose context lives in a section's kept
@@ -902,7 +842,10 @@ func computeFocus(kept, nowAnchors, selfSeeds []Task) map[string]bool {
 			seeds = append(seeds, k)
 		}
 	}
-	seeds = append(seeds, nowAnchors...) // NOW anchors seed context, never added themselves
+	for _, a := range nowAnchors { // NOW anchors show themselves in place (D56)…
+		focus[bareID(a.DocID)] = true
+	}
+	seeds = append(seeds, nowAnchors...) // …and seed their context
 	for _, s := range selfSeeds {
 		focus[bareID(s.DocID)] = true
 		seeds = append(seeds, s)
