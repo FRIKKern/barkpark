@@ -38,9 +38,9 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireScimToken)
   end
 
-  # OIDC relying-party — a browser redirect flow; needs a session to carry
-  # state/nonce/PKCE-verifier across the round-trip (era-w3-oidc-rp).
-  pipeline :oidc do
+  # SSO browser redirect flows (OIDC, social login) — need a session to carry
+  # state/nonce/PKCE-verifier across the round-trip (era-w3-oidc-rp, era-w2-social).
+  pipeline :sso_browser do
     plug(:accepts, ["html", "json"])
     plug(:fetch_session)
   end
@@ -896,10 +896,18 @@ defmodule BarkparkWeb.Router do
 
   # ── Enterprise SSO — OIDC relying party (per-organization) ──────────────
   scope "/v1/auth/oidc", BarkparkWeb do
-    pipe_through(:oidc)
+    pipe_through(:sso_browser)
 
     get("/:org_slug/start", OidcController, :start)
     get("/:org_slug/callback", OidcController, :callback)
+  end
+
+  # ── Social login — Google / GitHub / Microsoft (app-level) ──────────────
+  scope "/v1/auth/social", BarkparkWeb do
+    pipe_through(:sso_browser)
+
+    get("/:provider/start", SocialController, :start)
+    get("/:provider/callback", SocialController, :callback)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────
