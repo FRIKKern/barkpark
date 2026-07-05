@@ -153,11 +153,44 @@ defmodule Barkpark.Webhooks do
   def active_webhooks_for(dataset, event, type, opts \\ []) do
     Webhook
     |> where([w], w.dataset == ^dataset and w.active == true)
+    # A webhook with audit_categories set is an AUDIT subscriber, not a content
+    # one — exclude it from content fan-out so the two channels never cross.
+    |> where([w], fragment("? = '{}'", w.audit_categories))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.events, w.events, ^event))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type))
     |> scope(opts)
     |> Repo.all()
   end
+
+  @doc """
+  Active AUDIT-event subscriptions matching an emitted event (era-w7): a
+  non-empty `audit_categories` that CONTAINS the event's category, and (if
+  `audit_actions` is set) that CONTAINS the action. Org scope: a subscription
+  with `organization_id` only matches events attributed to that org (via the
+  event's `metadata["organization_id"]` or a workspace under it); a global
+  (nil-org) subscription sees everything — admin-only by construction.
+  """
+  def audit_webhooks_for(category, action, org_id) when is_binary(category) do
+    Webhook
+    |> where([w], w.active == true)
+    |> where([w], fragment("? <> '{}'", w.audit_categories))
+    |> where([w], fragment("? @> ARRAY[?]::varchar[]", w.audit_categories, ^category))
+    |> where(
+      [w],
+      fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.audit_actions, w.audit_actions, ^action)
+    )
+    |> audit_org_scope(org_id)
+    |> Repo.all()
+  end
+
+  # A subscription scoped to an org only fires for that org's events; a global
+  # subscription (nil organization_id) fires for all. When the event carries no
+  # org, only global subscriptions match.
+  defp audit_org_scope(query, nil),
+    do: where(query, [w], is_nil(w.organization_id))
+
+  defp audit_org_scope(query, org_id),
+    do: where(query, [w], is_nil(w.organization_id) or w.organization_id == ^org_id)
 
   # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
   # Content.Scope: an absent workspace_id returns the query untouched.
@@ -228,6 +261,23 @@ defmodule Barkpark.Webhooks do
     %Delivery{}
     |> Delivery.changeset(%{
       source_kind: "media",
+      status: "pending",
+      attempts: 0,
+      payload_snapshot: payload_snapshot
+    })
+    |> Repo.insert()
+  end
+
+  @doc """
+  Insert a durable AUDIT delivery row (`source_kind: "audit"`) for `endpoint_id`
+  (era-w7). Like media: no content `event_id` FK, never deduped, but it targets
+  a real webhook so retries + dead-letter attribute to it.
+  """
+  def create_audit_delivery(endpoint_id, payload_snapshot) when is_map(payload_snapshot) do
+    %Delivery{}
+    |> Delivery.changeset(%{
+      source_kind: "audit",
+      endpoint_id: endpoint_id,
       status: "pending",
       attempts: 0,
       payload_snapshot: payload_snapshot
