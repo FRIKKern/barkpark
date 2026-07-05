@@ -186,7 +186,15 @@ export function coercePickerValue(detail) {
 // EXISTING media picker; once an asset is chosen the frame gives way to the picker's
 // own preview. These pure helpers hold the DECISION + copy so the pure-Node smoke
 // harness (no DOM) can assert the placeholder logic without mounting a node-view.
-export const IMAGE_PLACEHOLDER_LABEL = "Add a featured image";
+// COPY NOTE: the frame's copy is the GENERIC "Add an image" — a `field-image`
+// node is a schema image FIELD (a cover, a byline portrait, …) whose own label
+// renders directly above the frame; claiming "featured" here would be wrong for
+// every one of them. The seeded featured block is `type:"image"` — a canvas run
+// BOUNDARY that renders through the per-block path (paper_editor.ex `"image"`
+// clause), where its role IS known and the featured copy lives (root.html.heex
+// `[data-block-role="featured"]`). When t2/w3 route `type:"image"` into the
+// canvas, pass its role through here and specialize the copy then.
+export const IMAGE_PLACEHOLDER_LABEL = "Add an image";
 export const IMAGE_PLACEHOLDER_HINT = "Click, or press Enter, to choose from the media library";
 
 // True when a picker's value is ABSENT — null / undefined / empty / whitespace-only.
@@ -198,15 +206,23 @@ export function isEmptyPickerValue(value) {
 }
 
 // The placeholder MODEL for a picker field: whether to show the ghost frame, plus its
-// copy. Only the `field-image` picker gets the featured-image placeholder (a
-// field-reference's empty state is its own typeahead pill, unchanged). PURE + DOM-free
-// so the smoke harness asserts it directly.
-export function imagePlaceholderModel(fieldType, value) {
+// copy. Only the `field-image` picker gets the image placeholder (a field-reference's
+// empty state is its own typeahead pill, unchanged). The optional `label` is the
+// block's human field label ("Cover", …): the visible copy stays generic (the label
+// already renders above the frame — repeating it would stutter), but the aria-label
+// carries it so a screen reader hears WHICH image field the button fills. PURE +
+// DOM-free so the smoke harness asserts it directly.
+export function imagePlaceholderModel(fieldType, value, label) {
+  const fieldLabel = label == null ? "" : String(label).trim();
+
   return {
     show: fieldType === "field-image" && isEmptyPickerValue(value),
     label: IMAGE_PLACEHOLDER_LABEL,
     hint: IMAGE_PLACEHOLDER_HINT,
-    ariaLabel: IMAGE_PLACEHOLDER_LABEL,
+    ariaLabel:
+      fieldLabel === ""
+        ? IMAGE_PLACEHOLDER_LABEL
+        : IMAGE_PLACEHOLDER_LABEL + " — " + fieldLabel,
   };
 }
 
@@ -215,13 +231,13 @@ export function imagePlaceholderModel(fieldType, value) {
 // wired by the caller so click / Enter / Space / right-click all open the media picker.
 // The `.bp-canvas-field-image-empty*` classes are styled in BOTH style mirrors
 // (styles.css + root.html.heex — the paper-editor-mirror-check lockstep).
-function buildImagePlaceholder() {
+function buildImagePlaceholder(ariaLabel) {
   const el = document.createElement("div");
   el.className = "bp-canvas-field-image-empty";
   el.setAttribute("contenteditable", "false");
   el.setAttribute("role", "button");
   el.setAttribute("tabindex", "0");
-  el.setAttribute("aria-label", IMAGE_PLACEHOLDER_LABEL);
+  el.setAttribute("aria-label", ariaLabel || IMAGE_PLACEHOLDER_LABEL);
   el.setAttribute("data-test-id", "paper-featured-image-placeholder");
 
   // A calm framed-picture glyph (inline SVG, currentColor — themes with the label).
@@ -672,7 +688,11 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // the frame steps aside for the WC's own preview. field-reference keeps its native
   // typeahead pill (no placeholder).
   const isImagePicker = fieldType === "field-image";
-  const placeholder = isImagePicker ? buildImagePlaceholder() : null;
+  const placeholder = isImagePicker
+    ? buildImagePlaceholder(
+        imagePlaceholderModel(fieldType, value, node.attrs && node.attrs.label).ariaLabel
+      )
+    : null;
 
   // Once the user reveals the picker we keep it revealed even if an echo re-paints
   // with a still-empty value, so an in-flight browse is never yanked away.
@@ -690,8 +710,15 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     const trigger =
       (picker.querySelector && picker.querySelector(".bp-mp-browse")) ||
       (picker.querySelector && picker.querySelector(".bp-mp-empty"));
-    if (trigger && typeof trigger.click === "function") trigger.click();
-    else if (typeof picker.focus === "function") picker.focus();
+    if (trigger && typeof trigger.click === "function") {
+      // Hand keyboard focus to the revealed control BEFORE clicking it — hiding
+      // the focused placeholder would otherwise drop focus to <body>, stranding
+      // a keyboard user (Escape-out of the asset browser lands back here).
+      if (typeof trigger.focus === "function") trigger.focus();
+      trigger.click();
+    } else if (typeof picker.focus === "function") {
+      picker.focus();
+    }
   };
 
   const onPlaceholderKey = (e) => {
@@ -755,8 +782,10 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     // Show the ghost frame ONLY for an asset-less image picker that has not yet been
     // revealed; the moment an asset is present the frame steps aside for the WC.
     if (placeholder) {
-      const showPlaceholder = imagePlaceholderModel(fieldType, str).show && !revealed;
+      const model = imagePlaceholderModel(fieldType, str, n.attrs && n.attrs.label);
+      const showPlaceholder = model.show && !revealed;
       placeholder.hidden = !showPlaceholder;
+      placeholder.setAttribute("aria-label", model.ariaLabel);
       picker.hidden = showPlaceholder;
       // A non-empty value ends any prior reveal, so a later CLEAR shows the frame again.
       if (!isEmptyPickerValue(str)) revealed = false;

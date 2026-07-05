@@ -75,8 +75,24 @@ check("imagePlaceholderModel: field-reference NEVER shows the image frame", () =
 });
 
 check("imagePlaceholderModel copy is the calm doctrine chrome (not a raw/empty look)", () => {
-  assert.equal(IMAGE_PLACEHOLDER_LABEL, "Add a featured image");
+  // GENERIC copy by design: a field-image node is a schema image FIELD (cover,
+  // portrait, …) — its own label renders above the frame. The "featured" copy
+  // lives where role is known: the per-block path's
+  // [data-block-role="featured"] CSS (root.html.heex).
+  assert.equal(IMAGE_PLACEHOLDER_LABEL, "Add an image");
   assert.ok(/media library/i.test(IMAGE_PLACEHOLDER_HINT), "the hint points at the picker");
+});
+
+check("imagePlaceholderModel: the aria-label carries the FIELD label when present", () => {
+  // The visible copy stays generic, but a screen reader hears WHICH image
+  // field the button fills.
+  assert.equal(
+    imagePlaceholderModel("field-image", "", "Cover").ariaLabel,
+    IMAGE_PLACEHOLDER_LABEL + " — Cover"
+  );
+  // Absent / blank labels degrade to the bare action.
+  assert.equal(imagePlaceholderModel("field-image", "", null).ariaLabel, IMAGE_PLACEHOLDER_LABEL);
+  assert.equal(imagePlaceholderModel("field-image", "", "   ").ariaLabel, IMAGE_PLACEHOLDER_LABEL);
 });
 
 // ── picker-open → selection value flows as the committed patch value (identity) ──

@@ -867,6 +867,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           ></bp-media-picker>
         </div>
 
+      <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
+            `role: "featured"` image (Content.Papers.Template) is a `type:"image"`
+            block with NO src — a canvas run BOUNDARY, so it renders through THIS
+            per-block path on both the flag-ON canvas and the classic editor.
+            Bind the SAME bp-media-picker the field-image picker uses; the bridge
+            (data-field-type="image") patches the block's `src`/`alt` from the
+            WC's parsed meta (a plain URL — never the JSON asset-ref blob the
+            field path stores in `value`). Empty src → the WC's dashed add-card
+            (restyled evergreen for the featured block via root.html.heex) IS the
+            affordance; a chosen asset patches src and the public /papers render
+            picks it up (compose.ex `image` clause). --%>
+      <% "image" -> %>
+        <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
+             data-block-id={@id} data-field-type="image" data-block-role={image_block_role(@block)} class="bp-paper-edit-field">
+          <label class="bp-paper-edit-fieldlabel">
+            <%= if image_block_role(@block) == "featured", do: "Featured image", else: "Image" %>
+          </label>
+          <bp-media-picker
+            value={image_block_src(@block)}
+            dataset={@dataset}
+            data-token={@api_token_raw}
+            data-test-id="paper-block-image-picker"
+          ></bp-media-picker>
+        </div>
+
       <%!-- v2 COMPOSITE field blocks (P2.3). composite / arrayOf / codelist /
             localizedText render as a nested PaperFieldBlock LiveComponent —
             NOT inside phx-update="ignore". These controls emit server-bound
@@ -884,11 +909,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         />
 
       <% _ -> %>
-        <%!-- image / table and any other type are read-only in the MVP. --%>
+        <%!-- table and any other type are read-only in the MVP. --%>
         <p class="bp-paper-edit-readonly">
           <%= @type %> blocks are not editable yet (view/delete/reorder only).
         </p>
     <% end %>
     """
+  end
+
+  # Tolerant readers for the image block's `src` / `role` (t13). A raw-API
+  # paper can carry a non-string in either key; the reader side degrades
+  # (compose.ex stringish → skip), so the editor must too — a hostile map here
+  # would raise Phoenix.HTML.Safe in the render and take the whole pane down.
+  defp image_block_src(block) do
+    case Map.get(block, "src") do
+      src when is_binary(src) -> src
+      _ -> ""
+    end
+  end
+
+  defp image_block_role(block) do
+    case Map.get(block, "role") do
+      role when is_binary(role) -> role
+      _ -> nil
+    end
   end
 end

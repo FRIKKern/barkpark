@@ -280,4 +280,126 @@ defmodule BarkparkWeb.Studio.PaperEditor.FieldBlocksTest do
 
     assert html =~ "ghost-ref"
   end
+
+  # ── IMAGE content blocks — the featured-image picker binding (t13) ──────────
+  #
+  # Post-#1161 every new paper seeds a LOCKED `role: "featured"` `type:"image"`
+  # block with no src (Content.Papers.Template). It is a canvas run BOUNDARY, so
+  # it renders through the per-block path on BOTH the flag-ON canvas and the
+  # classic editor — t13 binds the existing bp-media-picker there (doctrine
+  # rule 1: the forced block is an affordance, never a dead "not editable yet"
+  # row) and the bridge patches the block's `src`/`alt` (a plain URL — the
+  # reader's PdImage contract).
+
+  @featured_slug "2026-07-05-featured-image-paper"
+
+  defp seed_featured_paper! do
+    # The exact template shape Content.Papers.Template seeds on a new paper
+    # (validate/1 requires the locked title at block 0 + featured at block 1).
+    blocks = [
+      %{
+        "id" => "tpl-title",
+        "type" => "heading",
+        "level" => 1,
+        "role" => "title",
+        "locked" => true,
+        "text" => "Doctrine paper"
+      },
+      %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true},
+      %{
+        "id" => "p-body",
+        "type" => "paragraph",
+        "content" => [%{"type" => "text", "value" => "Body."}]
+      }
+    ]
+
+    {:ok, paper} =
+      Content.upsert_paper(%{slug: @featured_slug, dataset: @dataset, blocks: blocks})
+
+    paper
+  end
+
+  test "Edit mode binds the seeded locked featured image to the media picker (t13)",
+       %{conn: conn} do
+    seed_featured_paper!()
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@featured_slug}"))
+
+    edit_html = open_editor(view)
+
+    # The locked featured block mounts the SAME bridge + bp-media-picker the
+    # field-image picker uses, keyed data-field-type="image" (the bridge
+    # patches `src`, not `value`) and carrying its role for the ghost-frame CSS.
+    assert edit_html =~ ~s(id="paper-fld-tpl-featured")
+    assert edit_html =~ ~s(data-block-id="tpl-featured")
+    assert edit_html =~ ~s(data-field-type="image")
+    assert edit_html =~ ~s(data-block-role="featured")
+    assert edit_html =~ ~s(data-test-id="paper-block-image-picker")
+    assert edit_html =~ "Featured image"
+
+    # The forced block is an AFFORDANCE now — never the dead read-only row.
+    refute edit_html =~ "not editable yet"
+  end
+
+  test "a paper-op patch-block binds an asset to the LOCKED featured image (src + alt persist)",
+       %{conn: conn} do
+    seed_featured_paper!()
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@featured_slug}"))
+
+    open_editor(view)
+
+    # The bridge reads the picker WC's parsed meta and patches a PLAIN URL into
+    # `src` (never the JSON asset-ref envelope the field path stores in `value`).
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "tpl-featured",
+      "patch" => %{"src" => "/media/files/2026/07/hero.jpg", "alt" => "Hero"}
+    })
+
+    block =
+      Content.paper_blocks(@featured_slug, @dataset)
+      |> Enum.find(&(&1["id"] == "tpl-featured"))
+
+    assert block["src"] == "/media/files/2026/07/hero.jpg"
+    assert block["alt"] == "Hero"
+    # The template keys survive the content patch untouched — the lock is not
+    # unmade by binding the image (Patch strips locked/role from every patch).
+    assert block["locked"] == true
+    assert block["role"] == "featured"
+  end
+
+  test "Remove clears the featured image back to the skipped empty state (src empties)",
+       %{conn: conn} do
+    seed_featured_paper!()
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@featured_slug}"))
+
+    open_editor(view)
+
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "tpl-featured",
+      "patch" => %{"src" => "/media/files/2026/07/hero.jpg", "alt" => "Hero"}
+    })
+
+    # The WC's Remove emits value "" → the bridge patches src:"" — the public
+    # /papers render skips the block again (compose.ex image clause).
+    render_hook(view, "paper-op", %{
+      "op" => "patch-block",
+      "id" => "tpl-featured",
+      "patch" => %{"src" => "", "alt" => ""}
+    })
+
+    block =
+      Content.paper_blocks(@featured_slug, @dataset)
+      |> Enum.find(&(&1["id"] == "tpl-featured"))
+
+    assert block["src"] == ""
+    assert block["locked"] == true
+    assert Barkpark.PortableDoc.Render.render_block(block) == ""
+  end
 end
