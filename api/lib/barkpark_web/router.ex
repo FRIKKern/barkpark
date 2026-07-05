@@ -879,6 +879,12 @@ defmodule BarkparkWeb.Router do
     patch("/Users/:id", ScimUsersController, :update)
     put("/Users/:id", ScimUsersController, :replace)
     delete("/Users/:id", ScimUsersController, :delete)
+
+    post("/Groups", ScimGroupsController, :create)
+    get("/Groups", ScimGroupsController, :index)
+    get("/Groups/:id", ScimGroupsController, :show)
+    patch("/Groups/:id", ScimGroupsController, :update)
+    delete("/Groups/:id", ScimGroupsController, :delete)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────
