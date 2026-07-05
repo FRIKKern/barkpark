@@ -190,7 +190,14 @@ jobs:
             || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
 
       - name: Test
-        # CI runs the default `mix test`. Phase 7 WI7 added a
+        # CI-BLOCKING GATES ride this default `mix test` — no separate/advisory
+        # job. Among them: the canvas⇄reader render-parity gate
+        # (test/barkpark/portable_doc/render/canvas_reader_parity_gate_test.exs,
+        # pd-doctrine rule 3 / D8) and the View↔Edit tripwire alongside it. A
+        # divergence between the Beta canvas paint and the /papers reader render
+        # fails the merge here.
+        #
+        # Phase 7 WI7 added a
         # `:bokbasen_integration`-tagged end-to-end suite at
         # api/test/barkpark/plugins/onixedit/bokbasen/e2e_test.exs that is
         # excluded by default via api/test/test_helper.exs. CI does NOT run
