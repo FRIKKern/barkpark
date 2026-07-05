@@ -118,6 +118,19 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
       assert get_resp_header(conn, "access-control-allow-origin") == []
       assert get_resp_header(conn, "access-control-allow-methods") == []
     end
+
+    test "unmatched preflight on a /v1/plugins path passes through (plugin buckets own their CORS)" do
+      # The anonymous :public_api bucket (Pulse) answers its own preflights via
+      # PublicCors at the router — the endpoint plug must not swallow them.
+      conn =
+        build_conn(:options, "/v1/plugins/pulse/jarl-card/events")
+        |> put_req_header("origin", "https://frikkern.github.io")
+        |> put_req_header("access-control-request-method", "POST")
+        |> call_plug()
+
+      refute conn.halted
+      assert conn.state == :unset
+    end
   end
 
   describe "per-dataset isolation" do

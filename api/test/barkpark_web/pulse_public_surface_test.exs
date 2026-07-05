@@ -23,10 +23,17 @@ defmodule BarkparkWeb.PulsePublicSurfaceTest do
   end
 
   describe "CORS (:public_api bucket)" do
-    test "OPTIONS preflight on the events route returns 204 + ACAO", %{conn: conn} do
+    test "REAL browser preflight (origin + request-method headers) returns 204 + ACAO", %{
+      conn: conn
+    } do
+      # access-control-request-method is what makes DatasetCors (endpoint
+      # layer) classify this as a preflight — omitting it silently routes
+      # around the plug and vacuously passes. Browsers always send it.
       conn =
         conn
         |> put_req_header("origin", "https://frikkern.github.io")
+        |> put_req_header("access-control-request-method", "POST")
+        |> put_req_header("access-control-request-headers", "content-type")
         |> options("/v1/plugins/pulse/test-storm/events")
 
       assert conn.status == 204

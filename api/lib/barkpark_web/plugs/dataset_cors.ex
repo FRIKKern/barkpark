@@ -88,9 +88,18 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
         send_preflight(conn, origin)
 
       preflight?(conn) ->
-        conn
-        |> send_resp(204, "")
-        |> halt()
+        # Fail-closed for the dataset/credentialed surfaces — EXCEPT plugin
+        # paths: router-level plugin buckets (e.g. `:public_api` + PublicCors,
+        # the anonymous Pulse surface) own their own CORS story, so their
+        # preflights must reach the router. Non-CORS-owning plugin routes have
+        # no OPTIONS route and 404 — browser-equivalent to the bare 204.
+        if plugin_path?(conn) do
+          conn
+        else
+          conn
+          |> send_resp(204, "")
+          |> halt()
+        end
 
       matched? ->
         register_before_send(conn, &add_cors_headers(&1, origin))
@@ -99,6 +108,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
         conn
     end
   end
+
+  defp plugin_path?(%Plug.Conn{path_info: ["v1", "plugins" | _]}), do: true
+  defp plugin_path?(_conn), do: false
 
   defp preflight?(conn) do
     conn.method == "OPTIONS" and get_req_header(conn, "access-control-request-method") != []
