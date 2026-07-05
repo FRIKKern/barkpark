@@ -23,8 +23,6 @@ defmodule Barkpark.Scim do
 
   # ── Tokens ───────────────────────────────────────────────────────────────
 
-  @doc "Mint a SCIM token for `organization_id`. Returns `{plaintext, token}`."
-  @spec mint_token(binary(), String.t() | nil) :: {:ok, {binary(), Token.t()}} | {:error, term()}
   @doc "Active SCIM tokens for an org (metadata only — never the secret)."
   @spec list_tokens(binary()) :: [Token.t()]
   def list_tokens(organization_id) when is_binary(organization_id) do
@@ -35,6 +33,8 @@ defmodule Barkpark.Scim do
     )
   end
 
+  @doc "Mint a SCIM token for `organization_id`. Returns `{plaintext, token}`."
+  @spec mint_token(binary(), String.t() | nil) :: {:ok, {binary(), Token.t()}} | {:error, term()}
   def mint_token(organization_id, label \\ nil) do
     plaintext = "scim_" <> (:crypto.strong_rand_bytes(24) |> Base.url_encode64(padding: false))
 
