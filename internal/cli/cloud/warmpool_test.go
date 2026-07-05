@@ -35,10 +35,14 @@ type recordingRunner struct {
 	// undisturbed. Set `behind` to drive the rebuild path; `checkErr` / `rebuildErr`
 	// to drive the degrade paths.
 	outScripts []string // every RunOutput script, in order
-	rebuildRan bool      // the rebuild script actually ran
-	behind     bool      // cheap check reports HEAD != origin/main → a rebuild is due
-	checkErr   error     // cheap check errors (unreachable fetch)
-	rebuildErr error     // rebuild errors / times out
+	rebuildRan bool     // the rebuild script actually ran
+	behind     bool     // cheap check reports HEAD != origin/main → a rebuild is due
+	checkErr   error    // cheap check errors (unreachable fetch)
+	rebuildErr error    // rebuild errors / times out
+	diffOut    string   // scripted `git diff --name-only` output (path-aware skip)
+	diffErr    error    // diff script errors
+	ffRan      bool     // the bare fast-forward script actually ran
+	ffErr      error    // fast-forward errors (diverged snapshot)
 }
 
 func (r *recordingRunner) Run(_ context.Context, s CaddyStep) error {
@@ -60,6 +64,17 @@ func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, e
 			return "rebuild failed on box", r.rebuildErr
 		}
 		return "rebuilt", nil
+	}
+	if strings.Contains(script, "diff --name-only") {
+		r.events = append(r.events, "out:freshen-diff")
+		return r.diffOut, r.diffErr
+	}
+	if strings.Contains(script, "merge --ff-only") {
+		// The bare fast-forward (freshenFFScript) — the rebuild script's ff line
+		// never reaches here because the deploy-rebuild.sh branch matched above.
+		r.ffRan = true
+		r.events = append(r.events, "out:freshen-ff")
+		return "", r.ffErr
 	}
 	r.events = append(r.events, "out:freshen-check")
 	if r.checkErr != nil {

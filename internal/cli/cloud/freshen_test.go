@@ -137,6 +137,105 @@ func TestEnsureFresh_RebuildFailureDegrades(t *testing.T) {
 	}
 }
 
+// ── Path-aware skip: box-irrelevant drift fast-forwards instead of rebuilding ──
+
+func TestBoxIrrelevantPaths(t *testing.T) {
+	cases := []struct {
+		name  string
+		paths []string
+		want  bool
+	}{
+		{"docs+cloud+web+js+ci+md", []string{"docs/api-v1.md", "cloud/priv/static/app.js", "web/app/page.tsx", "js/sdk/src/index.ts", ".github/workflows/ci.yml", "README.md", "api/CLAUDE.md"}, true},
+		{"api elixir", []string{"docs/x.md", "api/lib/barkpark/content.ex"}, false},
+		{"go module", []string{"internal/cli/cloud/freshen.go"}, false},
+		{"scripts", []string{"scripts/deploy-rebuild.sh"}, false},
+		{"root config", []string{"Makefile"}, false},
+		{"empty diff", []string{}, false},
+		{"blank lines only", []string{"", "  "}, false},
+	}
+	for _, c := range cases {
+		if got := boxIrrelevantPaths(c.paths); got != c.want {
+			t.Errorf("%s: boxIrrelevantPaths(%v) = %v, want %v", c.name, c.paths, got, c.want)
+		}
+	}
+}
+
+func TestEnsureFresh_IrrelevantDriftFastForwards(t *testing.T) {
+	r := &recordingRunner{behind: true, diffOut: "docs/ops/PROD_OPS.md\ncloud/priv/static/app.js\nREADME.md\n"}
+	var n narration
+
+	res, err := EnsureFresh(context.Background(), r, FreshenOpts{Narrate: n.narrate})
+	if err != nil {
+		t.Fatalf("EnsureFresh (irrelevant drift): unexpected error: %v", err)
+	}
+	if !res.Behind || !res.FastForwarded || res.Rebuilt || res.Degraded {
+		t.Errorf("want Behind && FastForwarded && !Rebuilt && !Degraded, got %+v", res)
+	}
+	if !r.ffRan {
+		t.Error("the bare fast-forward must run")
+	}
+	if r.rebuildRan {
+		t.Error("a box-irrelevant drift must NOT rebuild")
+	}
+	// Silent: the box's served behavior was already current — nothing to narrate,
+	// so the /new timeline never shows an "Updating…" step for a docs commit.
+	if len(n.entries) != 0 {
+		t.Errorf("irrelevant drift must narrate nothing; got %+v", n.entries)
+	}
+}
+
+func TestEnsureFresh_RelevantDriftStillRebuilds(t *testing.T) {
+	r := &recordingRunner{behind: true, diffOut: "docs/x.md\napi/lib/barkpark/content.ex\n"}
+	var n narration
+
+	res, err := EnsureFresh(context.Background(), r, FreshenOpts{Narrate: n.narrate})
+	if err != nil {
+		t.Fatalf("EnsureFresh (relevant drift): unexpected error: %v", err)
+	}
+	if !res.Behind || !res.Rebuilt || res.FastForwarded {
+		t.Errorf("want Behind && Rebuilt && !FastForwarded, got %+v", res)
+	}
+	if r.ffRan {
+		t.Error("a relevant drift must not take the bare fast-forward path")
+	}
+	if !n.has("progress", "Updating Barkpark") {
+		t.Errorf("a real update must narrate; got %+v", n.entries)
+	}
+}
+
+// TestEnsureFresh_FFFailureFallsThroughToRebuild pins the pure-fast-path
+// contract: a refused fast-forward (diverged snapshot) is NOT a new failure
+// mode — the chain falls through to the full rebuild exactly as if the skip
+// didn't exist.
+func TestEnsureFresh_FFFailureFallsThroughToRebuild(t *testing.T) {
+	r := &recordingRunner{behind: true, diffOut: "docs/only.md\n", ffErr: errors.New("fatal: not possible to fast-forward")}
+
+	res, err := EnsureFresh(context.Background(), r, FreshenOpts{})
+	if err != nil {
+		t.Fatalf("EnsureFresh (ff refused): unexpected error: %v", err)
+	}
+	if !res.Rebuilt || res.FastForwarded {
+		t.Errorf("a refused ff must fall through to the rebuild, got %+v", res)
+	}
+	if !r.rebuildRan {
+		t.Error("the rebuild must run after a refused fast-forward")
+	}
+}
+
+// TestEnsureFresh_DiffFailureFallsThroughToRebuild: same for a failed diff —
+// when irrelevance can't be proven, rebuild.
+func TestEnsureFresh_DiffFailureFallsThroughToRebuild(t *testing.T) {
+	r := &recordingRunner{behind: true, diffErr: errors.New("git died")}
+
+	res, err := EnsureFresh(context.Background(), r, FreshenOpts{})
+	if err != nil {
+		t.Fatalf("EnsureFresh (diff failed): unexpected error: %v", err)
+	}
+	if !res.Rebuilt || res.FastForwarded {
+		t.Errorf("a failed diff must fall through to the rebuild, got %+v", res)
+	}
+}
+
 // TestEnsureFresh_RebuildBoundedOnBox proves the rebuild budget is enforced ON THE
 // BOX (remote coreutils `timeout`), not just by the local sub-context — otherwise a
 // local timeout kills the ssh client while the remote deploy-rebuild.sh runs on to
@@ -146,11 +245,11 @@ func TestEnsureFresh_RebuildBoundedOnBox(t *testing.T) {
 	if _, err := EnsureFresh(context.Background(), r, FreshenOpts{RebuildTimeout: 12 * time.Minute}); err != nil {
 		t.Fatalf("EnsureFresh: %v", err)
 	}
-	if len(r.outScripts) != 2 {
-		t.Fatalf("want check + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
+	if len(r.outScripts) != 3 {
+		t.Fatalf("want check + diff + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
 	}
-	if want := "timeout 720 bash scripts/deploy-rebuild.sh"; !strings.Contains(r.outScripts[1], want) {
-		t.Errorf("rebuild script must bound deploy-rebuild.sh remotely with %q; got:\n%s", want, r.outScripts[1])
+	if want := "timeout 720 bash scripts/deploy-rebuild.sh"; !strings.Contains(r.outScripts[2], want) {
+		t.Errorf("rebuild script must bound deploy-rebuild.sh remotely with %q; got:\n%s", want, r.outScripts[2])
 	}
 }
 
@@ -162,14 +261,14 @@ func TestEnsureFresh_NoRemoteTimeoutWithoutBudget(t *testing.T) {
 	if _, err := EnsureFresh(context.Background(), r, FreshenOpts{}); err != nil {
 		t.Fatalf("EnsureFresh: %v", err)
 	}
-	if len(r.outScripts) != 2 {
-		t.Fatalf("want check + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
+	if len(r.outScripts) != 3 {
+		t.Fatalf("want check + diff + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
 	}
-	if strings.Contains(r.outScripts[1], "timeout ") {
-		t.Errorf("no remote timeout expected without a budget; got:\n%s", r.outScripts[1])
+	if strings.Contains(r.outScripts[2], "timeout ") {
+		t.Errorf("no remote timeout expected without a budget; got:\n%s", r.outScripts[2])
 	}
-	if !strings.Contains(r.outScripts[1], "bash scripts/deploy-rebuild.sh") {
-		t.Errorf("rebuild script must still invoke deploy-rebuild.sh; got:\n%s", r.outScripts[1])
+	if !strings.Contains(r.outScripts[2], "bash scripts/deploy-rebuild.sh") {
+		t.Errorf("rebuild script must still invoke deploy-rebuild.sh; got:\n%s", r.outScripts[2])
 	}
 }
 
