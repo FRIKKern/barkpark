@@ -84,8 +84,8 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
-		{rowEpicHeader, "e2"}, // inactive, but its lone child is under the head cap…
-		{rowChild, "cx"},      // …so it shows by default now (head = min(groupHeadMax, n))
+		{rowEpicHeader, "e2"}, // not Active, but carries a FocusSet (modeFocus)…
+		{rowChild, "cx"},      // …so its neighborhood child shows (charter D51 / wave-11)
 		{rowEpicHeader, "e3"},
 		{rowChild, "c3"},
 		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
