@@ -20,6 +20,14 @@ type CaddyOpts struct {
 	Name    string // per-server label, e.g. "acme"
 	Domain  string // apex, e.g. "barkpark.cloud"
 	AppPort int    // local app port, e.g. 4000
+	// SkipAppRestart omits the barkpark restart step. The generator's default
+	// (false) restarts the app so PHX_HOST/PHX_SCHEME take effect immediately —
+	// correct for a standalone setup. The go-live chain sets true: its
+	// secrets-install step restarts the app right after (one restart picks up
+	// BOTH the PHX_* pair written here and the per-instance secrets), and no
+	// traffic reaches the box before the health gate anyway. The caller OWNS the
+	// promise that a later restart happens before the box serves.
+	SkipAppRestart bool
 }
 
 // fqdn renders the full public hostname Caddy fronts: "<name>.<domain>".
@@ -91,13 +99,17 @@ func renderCaddyfile(opts CaddyOpts) (string, error) {
 // Title, a copy-pasteable Cmd rendered via shJoin, and the resolved Argv a real
 // run execs (Argv[0] is the binary, the rest its args). The five steps are:
 //
-//  1. install Caddy from the official apt repo (the documented Debian/Ubuntu
-//     install) — keyring + sources.list + apt-get install -y caddy.
+//  1. install Caddy — skipped instantly when the box already has it (the baked
+//     warm-pool image does); a bare box takes the documented Debian/Ubuntu path
+//     (keyring + sources.list + apt-get install -y caddy).
 //  2. write the rendered Caddyfile to /etc/caddy/Caddyfile (reverse_proxy →
 //     localhost:<port>, automatic ACME on <fqdn>).
 //  3. set PHX_HOST=<fqdn> + PHX_SCHEME=https in the app .env idempotently
 //     (grep-then-append/replace, mirroring deploy.sh's BARKPARK_PLUGINS pattern)
 //     — the LiveView-critical pair: a wrong PHX_HOST 403s /live/websocket.
+//     Followed by a barkpark restart to load the pair — UNLESS opts.
+//     SkipAppRestart, where the caller owns a later restart (the go-live chain's
+//     secrets-install restarts once for the PHX_* pair AND the secrets).
 //  4. reload Caddy so it picks up the new site block (enable first so a fresh
 //     box also starts it on boot).
 //  5. close the app port publicly — ufw deny <port>; only :443 is exposed, the
@@ -117,7 +129,7 @@ func CaddySteps(opts CaddyOpts) []step {
 	fqdn := opts.fqdn()
 	caddyfile, _ := renderCaddyfile(opts)
 
-	return []step{
+	steps := []step{
 		caddyInstallStep(),
 		writeFileStep(
 			"write the Caddyfile (reverse_proxy → localhost:"+fmt.Sprintf("%d", opts.AppPort)+", automatic TLS for "+fqdn+")",
@@ -126,10 +138,14 @@ func CaddySteps(opts CaddyOpts) []step {
 		),
 		setEnvVarStep("set PHX_HOST="+fqdn+" in the app env (LiveView check_origin)", "PHX_HOST", fqdn),
 		setEnvVarStep("set PHX_SCHEME=https in the app env (LiveView check_origin)", "PHX_SCHEME", "https"),
-		barkparkRestartStep(),
+	}
+	if !opts.SkipAppRestart {
+		steps = append(steps, barkparkRestartStep())
+	}
+	return append(steps,
 		caddyReloadStep(),
 		ufwDenyAppPortStep(opts.AppPort),
-	}
+	)
 }
 
 // caddyInstallStep installs Caddy from its official apt repository — the
@@ -142,16 +158,22 @@ func caddyInstallStep() step {
 	// prompt over the non-interactive ssh shell (which would hang the step until
 	// the ServerAlive ceiling). Exported once at the head of the script so it
 	// applies to every apt-get below.
-	script := "export DEBIAN_FRONTEND=noninteractive && " + strings.Join([]string{
+	//
+	// `command -v caddy ||` short-circuits the whole apt round when the box
+	// already has Caddy — the baked warm-pool image ships it, so on every managed
+	// go-live this step is a no-op probe instead of a keyring + apt-get update
+	// round trip (seconds per provision, and immune to an apt-mirror hiccup). A
+	// bare-ubuntu box still takes the full documented install path.
+	script := "command -v caddy >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive && " + strings.Join([]string{
 		"apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
 		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list",
 		"apt-get update",
 		"apt-get install -y caddy",
-	}, " && ")
+	}, " && ") + "; }"
 	argv := []string{"bash", "-lc", script}
 	return step{
-		Title: "install Caddy (official apt repo)",
+		Title: "install Caddy (skip when baked; else the official apt repo)",
 		Cmd:   shJoin(argv),
 		Argv:  argv,
 	}

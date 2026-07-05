@@ -692,7 +692,11 @@ func defaultHealthChecker(ctx context.Context, base, token string) (setup.Health
 type defaultCaddySteps struct{}
 
 func (defaultCaddySteps) Steps(name, zone string, appPort int) []CaddyStep {
-	raw := setup.CaddySteps(setup.CaddyOpts{Name: name, Domain: zone, AppPort: appPort})
+	// SkipAppRestart: the go-live chain's secrets-install step (which ALWAYS runs
+	// right after these steps, before migrate and the health gate) restarts the
+	// app exactly once — picking up the PHX_HOST/PHX_SCHEME pair written here AND
+	// the per-instance secrets in one boot instead of two back-to-back restarts.
+	raw := setup.CaddySteps(setup.CaddyOpts{Name: name, Domain: zone, AppPort: appPort, SkipAppRestart: true})
 	out := make([]CaddyStep, len(raw))
 	for i, s := range raw {
 		out[i] = CaddyStep{Title: s.Title, Cmd: s.Cmd, Argv: s.Argv}

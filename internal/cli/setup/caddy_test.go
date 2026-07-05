@@ -135,6 +135,36 @@ func TestCaddySteps_CommandsAndEnv(t *testing.T) {
 
 	// 5. close the public app port — only :443 stays public.
 	mustContainOne(t, steps, "ufw deny 4000")
+
+	// The install step is guarded: a box that already has Caddy (the baked
+	// warm-pool image) skips the whole apt round instead of paying a keyring +
+	// apt-get update round trip on every go-live.
+	if !strings.Contains(steps[0].Cmd, "command -v caddy") {
+		t.Errorf("install step must probe for an existing caddy before the apt path; got:\n%s", steps[0].Cmd)
+	}
+}
+
+// TestCaddySteps_SkipAppRestart pins the go-live single-restart contract: with
+// SkipAppRestart the generator emits NO barkpark restart (the chain's
+// secrets-install restarts once for the PHX_* pair AND the secrets), while every
+// other step — including the caddy reload — survives unchanged.
+func TestCaddySteps_SkipAppRestart(t *testing.T) {
+	opts := acmeOpts()
+	opts.SkipAppRestart = true
+	steps := CaddySteps(opts)
+
+	if len(steps) != 6 {
+		t.Fatalf("caddySteps(SkipAppRestart): want 6 steps (no app restart), got %d", len(steps))
+	}
+	joined := allCmds(steps)
+	if strings.Contains(joined, "systemctl restart barkpark") {
+		t.Errorf("SkipAppRestart must omit the barkpark restart; commands:\n%s", joined)
+	}
+	// The PHX_* env writes and the caddy reload still happen — only the restart moved.
+	mustContainOne(t, steps, "PHX_HOST=acme.barkpark.cloud")
+	mustContainOne(t, steps, "PHX_SCHEME=https")
+	mustContainOne(t, steps, "systemctl reload caddy")
+	mustContainOne(t, steps, "ufw deny 4000")
 }
 
 // fakeStepRunner records each step's Title/Cmd/Argv instead of SSHing — the
