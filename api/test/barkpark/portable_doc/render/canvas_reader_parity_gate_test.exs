@@ -41,12 +41,14 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       the reader render is deterministic and the canvas JS shows only chip
       markup, never the reader's sheet/embed markup.
 
-  §3 is the shared teeth for BOTH: the canvas node-view JS (`src/canvas/*.js` +
-  `convert.js`) contains NONE of the reader fleet markup class literals — a fleet
-  block can appear in the canvas ONLY via the server producer or the verbatim
-  chip, never a second hand-written JS producer. A future wave (t8 generalizes the
-  server paint; a later slice touches the node views) that hand-mirrors `bp-tasks`
-  markup into the JS reds §3; one that forks the server emitter reds §1.
+  §3 is the shared teeth for BOTH: the ENTIRE editor bundle JS
+  (`assets/paper-editor/src/**/*.js` — node views, convert, slash menu, all of
+  it) contains NONE of the reader fleet markup class literals — a fleet block
+  can appear in the canvas ONLY via the server producer or the verbatim chip,
+  never a second hand-written JS producer, in any source file. A future wave
+  (t8 generalizes the server paint; a later slice touches the node views) that
+  hand-mirrors `bp-tasks` markup into the JS reds §3; one that forks the server
+  emitter reds §1.
 
   ## Injected-drift proof (mutation-verified — re-verify after any change)
 
@@ -59,9 +61,9 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
        `_raw` html becomes `"<div…>" <> Components.cards_html(b) <> "</div>"`.
        render_block now diverges from the one emitter: §1 `cards` RED and §2
        `cards` RED. Revert.
-    2. JS hand-mirror — add the string `"bp-tasks"` to
-       `assets/paper-editor/src/canvas/run-convert.js`: §3 RED (and §5's
-       clean-JS precondition RED). Revert.
+    2. JS hand-mirror — add the string `"bp-tasks"` to ANY editor source file
+       (e.g. `assets/paper-editor/src/canvas/run-convert.js` or `src/index.js`):
+       §3 RED (and §5's clean-JS precondition RED). Revert.
 
   NOTE — editing a SHARED emitter (e.g. appending a byte in
   `Components.tasks_html/1`) does NOT red §1: render_block calls that same
@@ -123,25 +125,34 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
          "scale" => ["Q1", "Q2"]
        }, &Components.roadmap_html/1, "bp-roadmap"},
       {"cards",
-       %{"type" => "cards", "items" => [%{"title" => "Card", "text" => "body", "tone" => "info"}]},
-       &Components.cards_html/1, "bp-cards"},
+       %{
+         "type" => "cards",
+         "items" => [%{"title" => "Card", "text" => "body", "tone" => "info"}]
+       }, &Components.cards_html/1, "bp-cards"},
       {"pipeline",
        %{
          "type" => "pipeline",
-         "nodes" => [%{"kind" => "source", "title" => "emit", "source" => true}, %{"kind" => "gate", "title" => "check"}]
+         "nodes" => [
+           %{"kind" => "source", "title" => "emit", "source" => true},
+           %{"kind" => "gate", "title" => "check"}
+         ]
        }, &Components.pipeline_html/1, "bp-pipe"},
       {"notes",
-       %{"type" => "notes", "items" => [%{"label" => "why", "lead" => "Lead", "text" => "matters"}]},
-       &Components.notes_html/1, "bp-notes"},
-      {"status-legend", %{"type" => "status-legend"}, &Components.status_legend_html/1, "bp-legend"},
+       %{
+         "type" => "notes",
+         "items" => [%{"label" => "why", "lead" => "Lead", "text" => "matters"}]
+       }, &Components.notes_html/1, "bp-notes"},
+      {"status-legend", %{"type" => "status-legend"}, &Components.status_legend_html/1,
+       "bp-legend"},
       {"form",
-       %{"type" => "form", "questions" => [%{"id" => "q1", "prompt" => "Ready?", "type" => "text"}]},
-       &Forms.form_html(&1, :article), "bp-form"},
+       %{
+         "type" => "form",
+         "questions" => [%{"id" => "q1", "prompt" => "Ready?", "type" => "text"}]
+       }, &Forms.form_html(&1, :article), "bp-form"},
       {"asciicast",
        %{"type" => "asciicast", "src" => "https://example.com/c.cast", "caption" => "A cast"},
        &Figures.asciicast_html(&1["src"], &1["caption"], :article), "bp-asciicast"},
-      {"diagram",
-       %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
+      {"diagram", %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
        &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""}
     ]
   end
@@ -151,8 +162,12 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   # reader markup below must never appear in the canvas JS (§3/§4).
   defp chip_carry do
     [
-      {"sheet", %{"type" => "sheet", "ref" => "budget", "snapshot" => %{"rows" => [["a", "b"], ["1", "2"]]}},
-       "bp-sheet__td"},
+      {"sheet",
+       %{
+         "type" => "sheet",
+         "ref" => "budget",
+         "snapshot" => %{"rows" => [["a", "b"], ["1", "2"]]}
+       }, "bp-sheet__td"},
       {"embed", %{"type" => "embed", "target" => "Other Note"}, "paper-embed"}
     ]
   end
@@ -196,11 +211,32 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     end
   end
 
+  test "§1 questionnaire is a PURE alias of form — same one producer, byte for byte" do
+    # Like task-list ⇄ tasks (covered in the corpus), `questionnaire` is an
+    # alias of `form` (compose.ex normalizes type + kind before the one Forms
+    # emitter). Assert the OBSERVABLE alias property — the alias renders
+    # byte-identically to the normalized form block — so giving questionnaire
+    # its own producer (an alias fork) reds without this test mirroring
+    # compose's internal normalization steps.
+    questions = [%{"id" => "q1", "prompt" => "Ready?", "type" => "text"}]
+    alias_block = %{"type" => "questionnaire", "questions" => questions}
+    normalized = %{"type" => "form", "kind" => "questionnaire", "questions" => questions}
+
+    alias_html = Render.render_block(alias_block, @article)
+
+    assert alias_html == Render.render_block(normalized, @article),
+           "questionnaire no longer routes through form's one producer — an alias fork has crept in"
+
+    assert String.contains?(alias_html, "bp-form-questionnaire"),
+           "questionnaire lost its kind discriminator class — the alias fixture no longer exercises the form emitter"
+  end
+
   test "§1 render_block(:article) is deterministic — the canvas and reader cannot differ per call" do
     # The canvas and the reader both call render_block(:article) on the SAME
     # source block. Determinism ⇒ identical input yields byte-identical output,
     # so parity holds per-call, not just per-fixture.
-    for {label, block, _emitter, _sig} <- painted_fleet() ++ Enum.map(chip_carry(), fn {l, b, _} -> {l, b, nil, nil} end) do
+    for {label, block, _emitter, _sig} <-
+          painted_fleet() ++ Enum.map(chip_carry(), fn {l, b, _} -> {l, b, nil, nil} end) do
       a = Render.render_block(block, @article)
       b = Render.render_block(block, @article)
       assert a == b, "#{label}: render_block(:article) is non-deterministic"
@@ -232,36 +268,42 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   #
   # The canvas node-view / convert JS carries blocks verbatim (bpBlock) and
   # paints the SERVER html; it must never hand-write fleet markup itself. Assert
-  # NONE of the reader fleet class literals appear anywhere in the canvas JS. A
-  # future node-view that hand-mirrors `<div class="bp-tasks">` (the exact D8
-  # violation) reds here.
+  # NONE of the reader fleet class literals appear anywhere in the EDITOR BUNDLE
+  # JS (`src/**/*.js` — node views, convert, slash menu, everything that ships;
+  # `.mjs` smoke/tests are deliberately out of scope, they never reach the DOM).
+  # A future node-view that hand-mirrors `<div class="bp-tasks">` (the exact D8
+  # violation) reds here — in ANY source file, not just src/canvas/.
 
-  @canvas_js_glob "../../../../assets/paper-editor/src/canvas/*.js"
-  @convert_js "../../../../assets/paper-editor/src/convert.js"
+  @editor_js_glob "../../../../assets/paper-editor/src/**/*.js"
 
-  defp canvas_js_files do
-    (@canvas_js_glob |> Path.expand(__DIR__) |> Path.wildcard()) ++
-      [Path.expand(@convert_js, __DIR__)]
+  defp editor_js_files do
+    @editor_js_glob |> Path.expand(__DIR__) |> Path.wildcard()
   end
 
-  defp canvas_js_blob do
-    canvas_js_files()
+  defp editor_js_blob do
+    editor_js_files()
     |> Enum.map(&File.read!/1)
     |> Enum.join("\n")
   end
 
-  test "§3 the canvas JS scan targets real, non-empty node-view sources (parser sanity)" do
+  test "§3 the editor JS scan targets real, non-empty bundle sources (parser sanity)" do
     # distrust-vacuous-green: if the glob stops matching (a dir move/rename), the
-    # absence assertions below pass vacuously. Anchor to files that MUST exist and
+    # absence assertions below pass vacuously. Anchor to files that MUST exist —
+    # one per directory depth, so a glob that silently drops a depth reds — and
     # to the sanctioned mechanisms they MUST contain.
-    files = canvas_js_files()
+    files = editor_js_files()
     names = Enum.map(files, &Path.basename/1)
 
-    assert "run-convert.js" in names, "run-convert.js not found — the canvas JS scan glob is stale"
-    assert "embed-node.js" in names, "embed-node.js not found — the canvas JS scan glob is stale"
+    assert "run-convert.js" in names,
+           "run-convert.js not found — the editor JS scan glob is stale"
 
-    blob = canvas_js_blob()
-    assert byte_size(blob) > 0, "canvas JS scan read no bytes"
+    assert "embed-node.js" in names, "embed-node.js not found — the editor JS scan glob is stale"
+
+    assert "convert.js" in names,
+           "convert.js (top-level src/) not found — the glob no longer matches depth 0"
+
+    blob = editor_js_blob()
+    assert byte_size(blob) > 0, "editor JS scan read no bytes"
 
     # Positive controls — the verbatim-carry + chip mechanisms this gate assumes.
     assert String.contains?(blob, "bpBlock"),
@@ -272,14 +314,17 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
   end
 
   test "§3 the canvas JS hand-mirrors NO reader fleet markup (server producer is the only path)" do
-    blob = canvas_js_blob()
+    blob = editor_js_blob()
 
     # Reader class literals that identify a HAND-WRITTEN fleet render. The canvas
     # may only carry the block verbatim + paint server html, so none may appear.
+    # The trailing list adds inner/child class families the corpus sigs don't
+    # cover, plus the inline-producer container fleet (terminal → bp-term__,
+    # columns → bp-cols__) whose one producer is compose.ex itself.
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__ bp-term__ bp-cols__)
 
     offenders =
       reader_markup
@@ -308,7 +353,10 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     for {label, block, sig} <- chip_carry() do
       a = Render.render_block(block, @article)
       b = Render.render_block(block, @article)
-      assert a == b, "#{label}: reader render is non-deterministic — verbatim carry cannot guarantee parity"
+
+      assert a == b,
+             "#{label}: reader render is non-deterministic — verbatim carry cannot guarantee parity"
+
       assert byte_size(a) > 0, "#{label}: reader render is empty"
 
       assert String.contains?(a, sig),
@@ -346,10 +394,11 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # Prove §3's contains-check is exact: injecting a reader class into a synthetic
     # blob flips absence → present. (The LIVE recipe in the moduledoc mutates the
     # real JS file; this in-test fork proves the mechanism without touching it.)
-    clean_blob = canvas_js_blob()
-    refute String.contains?(clean_blob, "bp-tasks"), "precondition: live canvas JS must be clean"
+    clean_blob = editor_js_blob()
+    refute String.contains?(clean_blob, "bp-tasks"), "precondition: live editor JS must be clean"
 
     drifted_blob = clean_blob <> "\nconst x = '<div class=\"bp-tasks\">';\n"
+
     assert String.contains?(drifted_blob, "bp-tasks"),
            "the JS scan's contains-check failed to see injected markup — §3 would be toothless"
   end
