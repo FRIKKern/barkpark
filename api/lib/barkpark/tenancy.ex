@@ -14,10 +14,58 @@ defmodule Barkpark.Tenancy do
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership}
+  alias Barkpark.Tenancy.{Workspace, Project, Dataset, Membership, Organization}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @default_slug "default"
+  @default_org_slug "default"
+
+  # ── Organizations (thin tier above Workspace, era-w1-org) ────────────────
+
+  @doc "List all organizations."
+  @spec list_organizations() :: [Organization.t()]
+  def list_organizations, do: Repo.all(from o in Organization, order_by: [asc: o.name])
+
+  @doc "Fetch an Organization by slug, or nil."
+  @spec get_organization_by_slug(String.t()) :: Organization.t() | nil
+  def get_organization_by_slug(slug) when is_binary(slug),
+    do: Repo.get_by(Organization, slug: slug)
+
+  @doc "The seeded default Organization (the migration backfills it), or nil."
+  @spec get_default_organization() :: Organization.t() | nil
+  def get_default_organization, do: get_organization_by_slug(@default_org_slug)
+
+  @doc "Create an Organization from `%{slug, name}`."
+  @spec create_organization(map()) :: {:ok, Organization.t()} | {:error, Ecto.Changeset.t()}
+  def create_organization(attrs) do
+    %Organization{}
+    |> Organization.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc "The Workspaces that belong to `organization_id`."
+  @spec workspaces_for_organization(binary()) :: [Workspace.t()]
+  def workspaces_for_organization(organization_id) when is_binary(organization_id) do
+    Repo.all(
+      from w in Workspace,
+        where: w.organization_id == ^organization_id,
+        order_by: [asc: w.name]
+    )
+  end
+
+  @doc "Attach a Workspace to an Organization (or detach with `nil`)."
+  @spec assign_workspace_to_organization(Workspace.t(), binary() | nil) ::
+          {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
+  def assign_workspace_to_organization(%Workspace{} = workspace, organization_id) do
+    workspace
+    |> Workspace.changeset(%{
+      slug: workspace.slug,
+      name: workspace.name,
+      organization_id: organization_id
+    })
+    |> Repo.update()
+  end
+
   @default_project_slug "default"
   @default_project_name "Default Project"
   @production_dataset_slug "production"
