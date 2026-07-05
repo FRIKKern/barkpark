@@ -600,7 +600,15 @@ func (m Model) handleActionResult(msg actionResultMsg) (Model, tea.Cmd) {
 	// the close guard's only visible face, so disarm with it (armed iff shown).
 	m.pendingClose = ""
 	if msg.res.OK {
-		m.setStrip(msg.res.Message, RoleOK)
+		// A landed claim/close is green by default, but a result carrying a
+		// rail-awareness notice overrides the role (warn for a blocker that landed
+		// on the task you just claimed, info for a rail move) so the heads-up reads
+		// at a glance. RoleNeutral (the zero value) means "no override".
+		role := RoleOK
+		if msg.res.Role != RoleNeutral {
+			role = msg.res.Role
+		}
+		m.setStrip(msg.res.Message, role)
 		// Re-arm the heartbeat here too (guarded): the reconciling refetch will
 		// re-arm from applySnapshot when the new board lands, but arming now keeps
 		// the pane alive through the round-trip if a flash or claim already makes

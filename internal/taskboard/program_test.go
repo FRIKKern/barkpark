@@ -905,6 +905,25 @@ func TestClaimResultFailureRendersHonestMessage(t2 *testing.T) {
 	}
 }
 
+// A landed claim/close whose result carries a rail-awareness role override paints
+// that role (warn for a blocker on the task you just claimed), not the plain
+// green — the notice is the reason for the color. Still fires the reconcile
+// refetch, exactly like an un-noticed success.
+func TestActionResultRoleOverrideLandsOnStrip(t2 *testing.T) {
+	m := testModel(Board{Orphans: []Task{readyTask("r1")}})
+	res := actionResultMsg{res: ActionResult{OK: true, Message: "claimed as w · epoch 4 · blocked while claimed: t9", Role: RoleWarn}}
+	m, cmd := step(t2, m, res)
+	if m.ui.Strip.Role != RoleWarn {
+		t2.Fatalf("strip role = %v, want RoleWarn (the notice override)", m.ui.Strip.Role)
+	}
+	if m.ui.Strip.Message != "claimed as w · epoch 4 · blocked while claimed: t9" {
+		t2.Fatalf("strip message = %q, want the notice folded in", m.ui.Strip.Message)
+	}
+	if cmd == nil {
+		t2.Fatal("a noticed success must still reconcile (refetch)")
+	}
+}
+
 // c on a NON-ready row never hits the network — it explains why on the strip.
 func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 	fired := false
