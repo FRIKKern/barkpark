@@ -371,6 +371,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
     |> Enum.map(fn b ->
       %{
         id: Map.get(b, "value"),
+        ref_type: Map.get(b, "refType"),
         label: Map.get(b, "label") || Map.get(b, "fieldName") || "Reference"
       }
     end)

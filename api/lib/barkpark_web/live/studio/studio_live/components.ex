@@ -348,7 +348,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         slug: slug,
         feedback: feedback,
         labels: PaperCanvas.paper_labels(paper),
-        relations: PaperCanvas.paper_relations(blocks)
+        relations:
+          blocks
+          |> PaperCanvas.paper_relations()
+          |> Enum.map(fn rel ->
+            # The sidebar shows the referenced doc's TITLE, never the raw id
+            # (the id stays as hover detail). Same resolver View mode uses;
+            # a missing doc falls back to the id string, exactly like the body.
+            Map.put(
+              rel,
+              :title,
+              Barkpark.Content.reference_title(rel.id, rel.ref_type, assigns.dataset)
+            )
+          end)
       )
 
     ~H"""
@@ -477,7 +489,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <ul class="bp-doc-rels" data-test-id="sidebar-relations">
               <li :for={rel <- @relations} class="bp-doc-rel">
                 <span class="bp-doc-rel__label">{rel.label}</span>
-                <span class="bp-doc-rel__id">{rel.id}</span>
+                <span class="bp-doc-rel__id" title={rel.id}>{rel.title}</span>
               </li>
             </ul>
           <% end %>

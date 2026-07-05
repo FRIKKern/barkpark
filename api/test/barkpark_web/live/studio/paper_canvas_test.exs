@@ -56,7 +56,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   # t9: a task-list block is NOT canvas-eligible (it renders as a boundary
   # widget), so it partitions to a `{:block, raw}` — and the raw block the editor
   # mounts (and later saves) still carries its live `query`, never a snapshot.
-  defp task_list(id), do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+  defp task_list(id),
+    do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
 
   # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
   # task_previews wires the real Tasks.Query fetcher; here we prove the two-
@@ -784,7 +785,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         %{"id" => "p1", "type" => "paragraph"}
       ]
 
-      assert PaperCanvas.paper_relations(blocks) == [%{id: "author-1", label: "Author"}]
+      assert PaperCanvas.paper_relations(blocks) == [
+               %{id: "author-1", label: "Author", ref_type: nil}
+             ]
+
       assert PaperCanvas.paper_relations([]) == []
       assert PaperCanvas.paper_relations(nil) == []
     end
@@ -882,7 +886,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "an invalid slug_draft surfaces the danger tone + aria-invalid" do
-      html = render_sidebar(%{slug_draft: "My Post", slug_feedback: PaperCanvas.slug_feedback("My Post")})
+      html =
+        render_sidebar(%{
+          slug_draft: "My Post",
+          slug_feedback: PaperCanvas.slug_feedback("My Post")
+        })
+
       assert html =~ ~s(data-tone="danger")
       assert html =~ ~s(aria-invalid="true")
     end
@@ -908,7 +917,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
           content: %{
             "tags" => ["design", "obsidian"],
             "blocks" => [
-              %{"id" => "r1", "type" => "field-reference", "value" => "author-1", "label" => "Author"}
+              %{
+                "id" => "r1",
+                "type" => "field-reference",
+                "value" => "author-1",
+                "label" => "Author"
+              }
             ]
           }
         })
