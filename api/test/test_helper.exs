@@ -52,7 +52,9 @@ ExUnit.start(
     :requires_wi4,
     :flaky,
     :boot_test,
-    :plugin_routes
+    :plugin_routes,
+    # Live IdP interop (needs the Keycloak container) — scripts/idp-interop.sh
+    :idp_interop
   ]
 )
 
