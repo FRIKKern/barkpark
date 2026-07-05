@@ -948,6 +948,24 @@ defmodule BarkparkWeb.Router do
     delete("/webauthn/credentials/:id", WebauthnController, :delete)
   end
 
+  # ── Public status page + machine-readable status ────────────────────────
+  scope "/", BarkparkWeb do
+    pipe_through(:browser)
+    get("/status", StatusController, :index)
+  end
+
+  scope "/", BarkparkWeb do
+    pipe_through(:api)
+    get("/status.json", StatusController, :show_json)
+  end
+
+  # Incident management — admin only.
+  scope "/v1/status", BarkparkWeb do
+    pipe_through([:api, :require_admin])
+    post("/incidents", StatusController, :create_incident)
+    post("/incidents/:id/resolve", StatusController, :resolve_incident)
+  end
+
   # ── Capabilities manifest (CLI/MCP/SDK contract) — optional token ───────
   # The `:api` pipeline runs `OptionalToken`, so the controller resolves the
   # caller's tier (none when anonymous) and projects the manifest through the
