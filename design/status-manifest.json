@@ -1,0 +1,30 @@
+{
+  "$comment": "SINGLE SOURCE for the task status vocabulary — the white ladder. Every surface (Elixir paper emitters, the paper-surface CSS tone tokens, and eventually Go pdrender + web) derives its glyphs, roles, and semantic colours from THIS file. Do not hand-edit a glyph or tone in any surface; edit it here and let the generators + drift gate carry it. scripts/status-manifest-check.sh regenerates the CSS tone block and gates every surface against this manifest.",
+
+  "statuses": {
+    "open": "open",
+    "ready": "ready",
+    "in_progress": "progress",
+    "blocked": "blocked",
+    "done": "done",
+    "closed": "done",
+    "cancelled": "cancel"
+  },
+  "default_role": "open",
+
+  "roles": [
+    { "role": "open",     "glyph": "○", "spinner": false, "meaning": "backlog — not ready yet" },
+    { "role": "ready",    "glyph": "○", "spinner": false, "meaning": "unchecked — claim it now" },
+    { "role": "progress", "glyph": "",  "spinner": true,  "meaning": "in progress" },
+    { "role": "blocked",  "glyph": "!", "spinner": false, "meaning": "something is required first" },
+    { "role": "done",     "glyph": "✓", "spinner": false, "meaning": "complete" },
+    { "role": "cancel",   "glyph": "✕", "spinner": false, "meaning": "abandoned or superseded" }
+  ],
+
+  "tones": {
+    "info":   { "light": "#2563eb", "dark": "#60a5fa" },
+    "ok":     { "light": "#0d9488", "dark": "#2dd4bf" },
+    "warn":   { "light": "#d97706", "dark": "#fbbf24" },
+    "danger": { "light": "#dc2626", "dark": "#f87171" }
+  }
+}
