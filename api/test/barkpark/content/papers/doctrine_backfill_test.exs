@@ -3,13 +3,17 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
   Coverage for the doctrine-template corpus backfill (pdd-t5):
 
     * `plan/1` (pure classifier) — title synthesis via BOTH heuristics (doc.title,
-      first-heading), featured skip-when-no-image / promote-when-image, conformer
-      detection, `Template.validate/1` passes after a plan, idempotence, and the
-      unfixable classes (HTML-only, no derivable title, misplaced title).
+      first-heading), sourced-heading consumption (no duplicate title text, even
+      when the heading is not block 0), featured skip-when-no-image /
+      promote-when-image / never-promote-a-bound-image, conformer detection,
+      `Template.validate/1` passes after a plan, the duplicate-id refusal,
+      idempotence, and the unfixable classes (HTML-only, no derivable title,
+      misplaced title).
     * `run/1` (DB scan + apply) — dry-run default writes nothing; `--apply`
-      backfills a legacy paper and re-runs to a no-op (idempotent); a CONFORMING
-      paper is left BYTE-IDENTICAL (the D3 contract, asserted by serializing
-      content before/after); the scan is tenancy-complete.
+      backfills a legacy paper (refreshing body_html, the projection, and both
+      revs like the real writer) and re-runs to a no-op (idempotent); a
+      CONFORMING paper is left BYTE-IDENTICAL (the D3 contract, asserted by
+      serializing content before/after); the scan is tenancy-complete.
   """
   use Barkpark.DataCase, async: false
 
@@ -19,7 +23,13 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
   # A hand-built paper Document (no DB) for the pure `plan/1` surface.
   defp paper(title, blocks) do
-    %Document{doc_id: "p", type: "paper", dataset: "production", title: title, content: %{"blocks" => blocks}}
+    %Document{
+      doc_id: "p",
+      type: "paper",
+      dataset: "production",
+      title: title,
+      content: %{"blocks" => blocks}
+    }
   end
 
   # ── plan/1 — title synthesis heuristics ───────────────────────────────────
@@ -97,6 +107,37 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       # Title prepended → the original paragraphs are preserved after it.
       assert Enum.map(blocks, & &1["id"]) == ["tpl-title", "p1", "p2"]
     end
+
+    test "consumes the sourced first heading even when it is NOT block 0 (no duplicate title text)" do
+      # A legacy paper often opens with an image before its heading; the heading
+      # the title was synthesized FROM must not survive as a second render of
+      # the same text.
+      doc =
+        paper(nil, [
+          %{"id" => "img", "type" => "image", "src" => "https://c/x.png"},
+          %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Deep Title"},
+          %{"id" => "p1", "type" => "paragraph", "text" => "body"}
+        ])
+
+      assert {:change, blocks, meta} = DoctrineBackfill.plan(doc)
+      assert meta.title_source == :first_heading
+      assert meta.title_text == "Deep Title"
+      # title@0, promoted featured image@1, paragraph — the sourced heading is gone.
+      assert Enum.map(blocks, & &1["id"]) == ["tpl-title", "img", "p1"]
+      assert Enum.count(blocks, &(&1["type"] == "heading")) == 1
+    end
+
+    test "replaces a block-0 heading equal to doc.title modulo surrounding whitespace" do
+      doc =
+        paper("My Title", [
+          %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "  My Title  "},
+          %{"id" => "p1", "type" => "paragraph", "text" => "body"}
+        ])
+
+      assert {:change, [title, p1], _meta} = DoctrineBackfill.plan(doc)
+      assert title["id"] == "tpl-title" and title["text"] == "My Title"
+      assert p1["id"] == "p1"
+    end
   end
 
   # ── plan/1 — featured image ───────────────────────────────────────────────
@@ -146,6 +187,20 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       assert p1["id"] == "p1" and p2["id"] == "p2"
       assert Enum.count([title, featured, p1, p2], &(&1["type"] == "image")) == 1
     end
+
+    test "a field-BOUND image is never promoted to featured (it belongs to its field)" do
+      doc =
+        paper("T", [
+          %{"id" => "p1", "type" => "paragraph", "text" => "x"},
+          %{"id" => "img", "type" => "image", "src" => "https://c/x.png", "fieldName" => "cover"}
+        ])
+
+      assert {:change, blocks, meta} = DoctrineBackfill.plan(doc)
+      assert meta.featured == :skipped
+      refute Enum.any?(blocks, &(&1["role"] == "featured"))
+      # The bound image is untouched, in place.
+      assert Enum.map(blocks, & &1["id"]) == ["tpl-title", "p1", "img"]
+    end
   end
 
   # ── plan/1 — validate passes / conforms / idempotence ─────────────────────
@@ -172,7 +227,10 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       [title_block, _featured] = Template.template_blocks("Conforming")
 
       doc =
-        paper("Conforming", [title_block, %{"id" => "p1", "type" => "paragraph", "text" => "body"}])
+        paper("Conforming", [
+          title_block,
+          %{"id" => "p1", "type" => "paragraph", "text" => "body"}
+        ])
 
       assert DoctrineBackfill.plan(doc) == :conforms
     end
@@ -180,7 +238,13 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
     test "a conforming paper WITH a featured image at index 1 returns :conforms" do
       [title_block, _] = Template.template_blocks("With Featured")
 
-      featured = %{"id" => "f", "type" => "image", "role" => "featured", "locked" => true, "src" => "https://c/x.png"}
+      featured = %{
+        "id" => "f",
+        "type" => "image",
+        "role" => "featured",
+        "locked" => true,
+        "src" => "https://c/x.png"
+      }
 
       doc = paper("With Featured", [title_block, featured, %{"id" => "p", "type" => "paragraph"}])
       assert DoctrineBackfill.plan(doc) == :conforms
@@ -205,7 +269,14 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
   describe "plan/1 unfixable" do
     test "an HTML-only paper (no block list) is unfixable, never crashes" do
-      doc = %Document{doc_id: "h", type: "paper", dataset: "production", title: "T", content: %{"body_html" => "<p>hi</p>"}}
+      doc = %Document{
+        doc_id: "h",
+        type: "paper",
+        dataset: "production",
+        title: "T",
+        content: %{"body_html" => "<p>hi</p>"}
+      }
+
       assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
       assert reason =~ "html-only"
     end
@@ -214,6 +285,13 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       doc = paper(nil, [%{"id" => "p1", "type" => "paragraph", "text" => "body only"}])
       assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
       assert reason =~ "derive a title"
+    end
+
+    test "a block already squatting on the template id is unfixable (duplicate ids never written)" do
+      doc = paper("T", [%{"id" => "tpl-title", "type" => "paragraph", "text" => "x"}])
+
+      assert {:unfixable, reason} = DoctrineBackfill.plan(doc)
+      assert reason =~ "unique"
     end
 
     test "a paper that already has a role:title block but not at block 0 is unfixable (manual review)" do
@@ -264,7 +342,11 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       slug = "doctrine-apply-#{System.unique_integer([:positive])}"
 
       seed_legacy_paper(slug, [
-        %{"id" => "p1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "body"}]}
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "body"}]
+        }
       ])
 
       {:ok, stats} = DoctrineBackfill.run(dry_run: false)
@@ -274,7 +356,9 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       new_blocks = after_content["blocks"]
 
       # Block 0 is the locked doctrine title, and the full gate is clean.
-      assert [%{"type" => "heading", "role" => "title", "locked" => true, "text" => title} | _] = new_blocks
+      assert [%{"type" => "heading", "role" => "title", "locked" => true, "text" => title} | _] =
+               new_blocks
+
       assert Template.validate(new_blocks) == []
       # The re-rendered cache reflects the new title (render parity).
       assert after_content["body_html"] =~ title
@@ -284,7 +368,11 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       slug = "doctrine-featured-#{System.unique_integer([:positive])}"
 
       seed_legacy_paper(slug, [
-        %{"id" => "p1", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "intro"}]},
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "intro"}]
+        },
         %{"id" => "img", "type" => "image", "src" => "https://cdn/hero.png", "alt" => "Hero"}
       ])
 
@@ -297,6 +385,35 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
       assert featured["src"] == "https://cdn/hero.png"
       # Only one image total (moved, not duplicated).
       assert Enum.count(blocks, &(&1["type"] == "image")) == 1
+    end
+
+    test "apply refreshes the projection and bumps both revs like the real writer" do
+      slug = "doctrine-proj-#{System.unique_integer([:positive])}"
+
+      seed_legacy_paper(slug, [
+        %{
+          "id" => "p1",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "body"}]
+        }
+      ])
+
+      before_doc = Content.get_paper(slug)
+
+      {:ok, _} = DoctrineBackfill.run(dry_run: false)
+
+      after_doc = Content.get_paper(slug)
+
+      # The streaming content rev bumped by one, the opaque row rev regenerated —
+      # a changed body must never hide under an unchanged rev.
+      assert after_doc.content["rev"] == before_doc.content["rev"] + 1
+      refute after_doc.rev == before_doc.rev
+
+      # The projected body (content["body"], written by Projection.project like
+      # the real write path) was re-rendered and now carries the synthesized
+      # title — not the stale pre-doctrine structure.
+      assert after_doc.content["body"]["html"] =~ after_doc.title
+      assert [%{"role" => "title"} | _] = after_doc.content["body"]["blocks"]
     end
 
     test "is idempotent — a second --apply writes nothing for the same paper" do
@@ -325,7 +442,14 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
         Content.upsert_paper(%{
           slug: slug,
           style: "article",
-          blocks: [title_block, %{"id" => "body", "type" => "paragraph", "content" => [%{"type" => "text", "value" => "b"}]}]
+          blocks: [
+            title_block,
+            %{
+              "id" => "body",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "b"}]
+            }
+          ]
         })
 
       before = Content.get_paper(slug).content
@@ -350,7 +474,17 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
       {:ok, stats} = DoctrineBackfill.run(dry_run: true)
 
-      for key <- [:scanned, :conforms, :changed_papers, :titles_synthesized, :featured_inserted, :featured_skipped, :dry_run, :changes, :unfixable] do
+      for key <- [
+            :scanned,
+            :conforms,
+            :changed_papers,
+            :titles_synthesized,
+            :featured_inserted,
+            :featured_skipped,
+            :dry_run,
+            :changes,
+            :unfixable
+          ] do
         assert Map.has_key?(stats, key), "stats missing #{key}"
       end
     end

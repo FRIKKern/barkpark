@@ -42,14 +42,17 @@ defmodule Mix.Tasks.Barkpark.Paper.DoctrineBackfill do
   ## What `--apply` does per non-conforming, fixable paper
 
     * Synthesize the locked title block at index 0 (stamped per the template seed
-      shape); text derived from `doc.title`, else the first heading. A block-0
-      heading is REPLACED (no double title).
-    * Promote an existing image asset (an `image` block with a non-blank `src`) to
-      the locked featured block at index 1 — moved, not duplicated. NO asset ⇒ no
-      featured block (assets are never invented; t13's placeholder handles the
-      asset-less featured case).
-    * Re-render `content["body_html"]` from the new blocks so the cache stays
-      honest (render parity). Row scope columns are preserved.
+      shape); text derived from `doc.title`, else the first non-blank heading.
+      No double title: a sourced first heading is CONSUMED; a block-0 heading
+      matching `doc.title` is REPLACED; a differing block-0 heading survives.
+    * Promote an existing image asset (a FREE `image` block with a non-blank
+      `src`; field-bound images stay with their field) to the locked featured
+      block at index 1 — moved, not duplicated. NO asset ⇒ no featured block
+      (assets are never invented; t13's placeholder handles the asset-less
+      featured case).
+    * Re-render `content["body_html"]`, re-project `content["body"]`, and bump
+      both revs from the new blocks so every derived surface stays honest
+      (render parity). Row scope columns and `status` are preserved.
 
   A paper that would still violate `Template.validate/1` after the plan is
   REFUSED (never written) and surfaced as UNFIXABLE. Conforming papers are left

@@ -25,25 +25,37 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
     1. **Synthesize the locked title block at index 0** — stamped exactly per
        `Template.template_blocks/1`'s seed shape (a locked `role: "title"` level-1
        heading). The title text is derived from `doc.title`, else the paper's
-       first heading block (the two synthesis heuristics). When block 0 is already
-       a heading it is REPLACED (dedup — no double title in the render); otherwise
-       the title block is prepended.
+       first non-blank heading block (the two synthesis heuristics). Dedup — no
+       double title in the render: when the text came from the first heading,
+       that heading is CONSUMED (removed, wherever it sits — its text now lives
+       in the title block); when it came from `doc.title` and block 0 is a
+       heading with the same (trimmed) text, that heading is REPLACED. Otherwise
+       the title block is prepended — a differing block-0 heading is real
+       content and survives.
     2. **Insert the featured image block at index 1 — ONLY when the paper already
-       carries an image asset** (an existing `type: "image"` block with a non-blank
-       `src`). That image is promoted to the locked `role: "featured"` block at
-       index 1 (moved, not duplicated). Assets are NEVER invented — an asset-less
-       paper gets NO featured block (t13's placeholder handles the asset-less
-       featured case; `Template.validate/1` requires featured@1 only when a
-       featured block EXISTS).
-    3. **Re-render `content["body_html"]`** from the new block list (with the
-       paper's `style`) so the cached render stays honest — the doctrine's render
+       carries an image asset** (an existing FREE `type: "image"` block with a
+       non-blank `src`; a field-BOUND image belongs to its field and is never
+       promoted). That image is promoted to the locked `role: "featured"` block
+       at index 1 (moved, not duplicated). Assets are NEVER invented — an
+       asset-less paper gets NO featured block (t13's placeholder handles the
+       asset-less featured case; `Template.validate/1` requires featured@1 only
+       when a featured block EXISTS).
+    3. **Persist like the real writer** — re-render `content["body_html"]` from
+       the new block list (with the paper's `style`), re-project
+       `content["body"]`/`content[fieldName]` (`Projection.project/3`, the same
+       call `upsert_paper` makes), and bump both revs (the streaming
+       `content["rev"]` and the opaque row `rev`) so the cached render, the
+       projection, and the version spine all stay honest — the doctrine's render
        parity (canvas = frontend). Unlike `BackfillBlockIds` (whose passes are
-       render-identical), adding a title heading changes the render, so the cache
-       must be refreshed.
+       render-identical), adding a title heading changes the render, so every
+       derived surface must be refreshed.
 
   After `--apply` every TOUCHED paper passes `Template.validate/1`; a paper that
-  would still violate the template after the plan is REFUSED (never written) and
-  surfaced as `unfixable` so the run reports it instead of writing a broken shape.
+  would still violate the template after the plan — or whose planned block ids
+  are not unique (a pre-existing duplicate, or a block already squatting on the
+  template id) — is REFUSED (never written) and surfaced as `unfixable` so the
+  run reports it instead of writing a broken shape. A save the changeset refuses
+  is likewise reported (never counted as changed).
 
   ## Contract
 
@@ -55,8 +67,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       second diff).
     * **Tenancy-complete** — the scan reads EVERY `type: "paper"` document across
       all workspaces / projects / datasets in one Repo pass; each save preserves
-      the row's own scope columns (only `content` + the derived row `title` are
-      cast).
+      the row's own scope columns and `status` (only `content`, the derived row
+      `title`, and a fresh row `rev` are cast).
     * **Never invents assets** — a featured block is added ONLY when a real image
       `src` already exists in the paper.
 
@@ -87,6 +99,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Labels
   alias Barkpark.Content.Papers.Template
+  alias Barkpark.PortableDoc.Projection
   alias Barkpark.PortableDoc.Render
 
   @paper_type "paper"
@@ -163,25 +176,39 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
             %{acc | conforms: acc.conforms + 1}
 
           {:change, new_blocks, meta} ->
-            unless dry_run?, do: persist(doc, new_blocks)
+            case if(dry_run?, do: {:ok, doc}, else: persist(doc, new_blocks)) do
+              {:ok, _} ->
+                entry = %{
+                  slug: doc.doc_id,
+                  dataset: doc.dataset,
+                  title_source: meta.title_source,
+                  title_text: meta.title_text,
+                  featured: meta.featured
+                }
 
-            entry = %{
-              slug: doc.doc_id,
-              dataset: doc.dataset,
-              title_source: meta.title_source,
-              title_text: meta.title_text,
-              featured: meta.featured
-            }
+                %{
+                  acc
+                  | changes: [entry | acc.changes],
+                    titles: acc.titles + 1,
+                    featured_inserted:
+                      acc.featured_inserted + if(meta.featured == :inserted, do: 1, else: 0),
+                    featured_skipped:
+                      acc.featured_skipped + if(meta.featured == :skipped, do: 1, else: 0)
+                }
 
-            %{
-              acc
-              | changes: [entry | acc.changes],
-                titles: acc.titles + 1,
-                featured_inserted:
-                  acc.featured_inserted + if(meta.featured == :inserted, do: 1, else: 0),
-                featured_skipped:
-                  acc.featured_skipped + if(meta.featured == :skipped, do: 1, else: 0)
-            }
+              {:error, changeset} ->
+                # A refused save must NOT be reported as changed — the report
+                # stays honest, the run continues (one bad row never aborts the
+                # rest of an idempotent corpus pass; re-run after fixing it).
+                reason = "persist refused by the changeset: #{inspect(changeset.errors)}"
+
+                Logger.error(
+                  "doctrine_backfill: REFUSED save for #{inspect(doc.doc_id)} (#{doc.dataset}) — #{reason}"
+                )
+
+                entry = %{slug: doc.doc_id, dataset: doc.dataset, reason: reason}
+                %{acc | unfixable: [entry | acc.unfixable]}
+            end
 
           {:unfixable, reason} ->
             entry = %{slug: doc.doc_id, dataset: doc.dataset, reason: reason}
@@ -220,8 +247,9 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       the doctrine-shaped block list (title@0, featured@1 when an asset exists);
       `meta` carries `:title_source`, `:title_text`, `:featured`.
     * `{:unfixable, reason}` — cannot be backfilled automatically (HTML-only, no
-      derivable title, an already-present but misplaced title block, or a plan
-      that would still fail `Template.validate/1`).
+      derivable title, an already-present but misplaced title block, a plan that
+      would still fail `Template.validate/1`, or non-unique block ids after the
+      plan — a pre-existing duplicate or a block squatting on the template id).
 
   This is the SINGLE source of the migration decision — `run/1` calls it per
   paper and only PERSISTS on `{:change, …}`.
@@ -232,7 +260,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
 
     cond do
       not is_list(blocks) ->
-        {:unfixable, "html-only paper (no block list); the doctrine template requires a block document"}
+        {:unfixable,
+         "html-only paper (no block list); the doctrine template requires a block document"}
 
       conforms?(blocks) ->
         :conforms
@@ -266,20 +295,29 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   defp build_change(%Document{} = doc, blocks) do
     case derive_title(doc, blocks) do
       {:ok, title_text, title_source} ->
-        with_title = place_title(blocks, title_text)
+        with_title = place_title(blocks, title_text, title_source)
         {new_blocks, featured} = maybe_place_featured(with_title)
 
-        case Template.validate(new_blocks) do
-          [] ->
+        cond do
+          (errors = Template.validate(new_blocks)) != [] ->
+            {:unfixable, "template still violated after backfill: " <> Enum.join(errors, "; ")}
+
+          not unique_ids?(new_blocks) ->
+            # Same safety net as BackfillBlockIds: NEVER write a duplicate-id
+            # paper (duplicate ids are the canvas-diff corruption). Either the
+            # corpus row already carried a duplicate (run backfill_block_ids
+            # first) or a block squats on the "tpl-title" template id.
+            {:unfixable,
+             "block ids would not be unique after backfill (pre-existing duplicate, or a block already uses the template id) — manual review"}
+
+          true ->
             {:change, new_blocks,
              %{title_source: title_source, title_text: title_text, featured: featured}}
-
-          errors ->
-            {:unfixable, "template still violated after backfill: " <> Enum.join(errors, "; ")}
         end
 
       :error ->
-        {:unfixable, "cannot derive a title (no doc.title and no heading block to synthesize from)"}
+        {:unfixable,
+         "cannot derive a title (no doc.title and no heading block to synthesize from)"}
     end
   end
 
@@ -294,17 +332,37 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
     end
   end
 
-  # Place the canonical seed title block at index 0. When block 0 is ALREADY a
-  # heading whose text IS the derived title, REPLACE it (dedup — a legacy
+  # Place the canonical seed title block at index 0, deduping by TITLE SOURCE.
+  #
+  # `:first_heading` — the title text was synthesized FROM the paper's first
+  # non-blank heading, so that heading is CONSUMED wherever it sits (a legacy
+  # paper often opens with an image or standfirst before its heading); keeping
+  # it would render the same text twice (title block + body heading).
+  defp place_title(blocks, title_text, :first_heading) do
+    title_block = seed_title_block(title_text)
+
+    idx =
+      Enum.find_index(blocks, fn
+        %{"type" => "heading", "text" => text} -> blank_to_nil(text) != nil
+        _ -> false
+      end)
+
+    # `idx` is never nil here: `:first_heading` implies `first_heading_text/1`
+    # found exactly this block.
+    [title_block | List.delete_at(blocks, idx)]
+  end
+
+  # `:doc_title` — the row title wins. When block 0 is ALREADY a heading whose
+  # (trimmed) text IS the derived title, REPLACE it (dedup — a legacy
   # heading-titled paper must not render two identical H1s). Otherwise PREPEND —
-  # never clobber a block-0 heading that is real content (a differing heading, or
-  # a section heading that merely happens to sit first).
-  defp place_title(blocks, title_text) do
-    title_block = Template.template_blocks(title_text) |> hd()
+  # never clobber a block-0 heading that is real content (a differing heading,
+  # or a section heading that merely happens to sit first).
+  defp place_title(blocks, title_text, :doc_title) do
+    title_block = seed_title_block(title_text)
 
     case blocks do
       [%{"type" => "heading", "text" => text} | rest] when is_binary(text) ->
-        if blank_to_nil(text) == title_text do
+        if String.trim(text) == String.trim(title_text) do
           [title_block | rest]
         else
           [title_block | blocks]
@@ -315,9 +373,14 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
     end
   end
 
-  # Promote the first image ASSET (a `type: "image"` block with a non-blank `src`)
-  # to the locked featured block at index 1 — moved, not duplicated. No asset →
-  # no featured block (assets are never invented).
+  defp seed_title_block(title_text), do: Template.template_blocks(title_text) |> hd()
+
+  # Promote the first image ASSET (a FREE `type: "image"` block with a non-blank
+  # `src`) to the locked featured block at index 1 — moved, not duplicated. No
+  # asset → no featured block (assets are never invented). A field-BOUND image
+  # (non-blank `fieldName`) is a field value, not body art — moving it would
+  # entangle the field projection with the locked template, so it never
+  # qualifies.
   defp maybe_place_featured([title | rest]) do
     case pop_first_featured_candidate(rest) do
       {nil, _rest} ->
@@ -337,13 +400,52 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
   end
 
   defp featured_candidate?(%{"type" => "image"} = block) do
-    case Map.get(block, "src") do
-      src when is_binary(src) -> String.trim(src) != ""
-      _ -> false
-    end
+    src_present? =
+      case Map.get(block, "src") do
+        src when is_binary(src) -> String.trim(src) != ""
+        _ -> false
+      end
+
+    bound? =
+      case Map.get(block, "fieldName") do
+        name when is_binary(name) -> String.trim(name) != ""
+        _ -> false
+      end
+
+    src_present? and not bound?
   end
 
   defp featured_candidate?(_), do: false
+
+  # Post-condition guard: every block id (top-level + nested "blocks"
+  # containers) in the planned list is unique. Mirrors BackfillBlockIds'
+  # duplicate-id refusal — a duplicate-id paper is the canvas-diff corruption
+  # both backfills exist to prevent. Id-less blocks don't count (the id
+  # backfill owns filling those).
+  defp unique_ids?(blocks) do
+    ids = flat_ids(blocks)
+    length(ids) == length(Enum.uniq(ids))
+  end
+
+  defp flat_ids(blocks) when is_list(blocks) do
+    Enum.flat_map(blocks, fn block ->
+      id =
+        case is_map(block) && Map.get(block, "id") do
+          v when is_binary(v) and v != "" -> [v]
+          _ -> []
+        end
+
+      nested =
+        case is_map(block) && Map.get(block, "blocks") do
+          children when is_list(children) -> flat_ids(children)
+          _ -> []
+        end
+
+      id ++ nested
+    end)
+  end
+
+  defp flat_ids(_), do: []
 
   defp first_heading_text(blocks) do
     Enum.find_value(blocks, fn
@@ -359,12 +461,25 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
     end)
   end
 
-  # Minimal, scope-preserving save: replace content["blocks"] + re-render the
-  # body_html cache (the doctrine's render parity — a structural change must not
-  # leave a stale cache) + re-derive the row title from the new title block. Only
-  # `content` + `title` are cast, so the row's workspace/project/dataset columns
-  # are preserved. Direct `Repo.update` (no broadcast) — this is an offline
-  # migration, not a live edit.
+  # Scope-preserving save that refreshes EVERY derived surface the real writer
+  # (`write_encrypted_paper` in block_ops.ex) refreshes — this backfill changes
+  # the render, so unlike BackfillBlockIds' metadata-only save it must not leave
+  # any derived copy stale:
+  #
+  #   * `content["body_html"]` + `body_html_sv` — the cached render, re-rendered
+  #     with the paper's own `style` (the doctrine's render parity).
+  #   * `content["body"]` / `content[fieldName]` — `Projection.project/3`, the
+  #     SAME call the write path makes (plain `Labels.render_opts/1`, no style —
+  #     mirroring `maybe_project`). Skipping it would leave the projected body
+  #     showing the pre-doctrine structure.
+  #   * both revs — the streaming `content["rev"]` (+1) and a fresh opaque row
+  #     `rev`, like every real content writer; a changed body under an unchanged
+  #     rev would defeat rev-keyed consumers.
+  #
+  # The row `title` is re-derived from the new title block (pdd-t4: one truth).
+  # Only `content`/`title`/`rev` are cast, so the row's workspace/project/dataset
+  # columns (and `status`) are preserved. Direct `Repo.update` (no broadcast) —
+  # this is an offline migration, not a live edit.
   defp persist(%Document{content: content} = doc, new_blocks) do
     style = get_in(content, ["style"])
     render_opts = Labels.paper_render_opts(doc.dataset, style)
@@ -375,12 +490,29 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
       |> Map.put("blocks", new_blocks)
       |> Map.put("body_html", body_html)
       |> Map.put("body_html_sv", Render.body_html_render_version())
+      |> Map.put("rev", next_content_rev(content))
+      |> Projection.project(new_blocks, Labels.render_opts(doc.dataset))
 
     title = title_block_text(new_blocks) || doc.title
 
     doc
-    |> Document.changeset(%{"content" => new_content, "title" => title})
+    |> Document.changeset(%{"content" => new_content, "title" => title, "rev" => generate_rev()})
     |> Repo.update()
+  end
+
+  # The monotonic integer streaming rev (same rule as block_ops' paper_next_rev).
+  defp next_content_rev(content) do
+    case Map.get(content, "rev") do
+      n when is_integer(n) -> n + 1
+      _ -> 1
+    end
+  end
+
+  # The document's opaque string row `rev` (mutation-spine version) — the same
+  # generator every writer uses, duplicated here like block_ops duplicates it so
+  # this module owns its own row-rev generation.
+  defp generate_rev do
+    :crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)
   end
 
   defp title_block_text([%{"type" => "heading", "role" => @title_role, "text" => text} | _])
