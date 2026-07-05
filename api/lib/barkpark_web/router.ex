@@ -30,6 +30,14 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
+  # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
+  pipeline :scim do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(BarkparkWeb.Plugs.RequireScimToken)
+  end
+
   # Localhost fast-path pipeline (Barkpark Cloud P4 / Move B). Deliberately
   # thin — `accepts :json` + the loopback gate. No OptionalToken (no DB lookup
   # per request), no RateLimit (loopback is trusted), no tenancy back-compat
@@ -859,6 +867,18 @@ defmodule BarkparkWeb.Router do
     post("/reset", AuthController, :reset)
     post("/request-magic-link", AuthController, :request_magic_link)
     post("/magic-login", AuthController, :magic_login)
+  end
+
+  # ── SCIM 2.0 directory sync (per-organization bearer) ───────────────────
+  scope "/scim/v2", BarkparkWeb do
+    pipe_through(:scim)
+
+    post("/Users", ScimUsersController, :create)
+    get("/Users", ScimUsersController, :index)
+    get("/Users/:id", ScimUsersController, :show)
+    patch("/Users/:id", ScimUsersController, :update)
+    put("/Users/:id", ScimUsersController, :replace)
+    delete("/Users/:id", ScimUsersController, :delete)
   end
 
   # ── Core user auth — session-gated ──────────────────────────────────────
