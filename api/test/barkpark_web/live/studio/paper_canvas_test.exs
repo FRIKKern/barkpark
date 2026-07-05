@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   """
   use ExUnit.Case, async: false
 
+  alias Barkpark.PortableDoc.TaskResolver
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   defp para(id), do: %{"id" => id, "type" => "paragraph", "content" => []}
@@ -41,6 +42,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
+
+  # t9: a task-list block is NOT canvas-eligible (it renders as a boundary
+  # widget), so it partitions to a `{:block, raw}` — and the raw block the editor
+  # mounts (and later saves) still carries its live `query`, never a snapshot.
+  defp task_list(id), do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+
+  # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
+  # task_previews wires the real Tasks.Query fetcher; here we prove the two-
+  # channel SEPARATION, not the DB).
+  defp task_rows(%{"parent_id" => "epic"}), do: [%{"title" => "a", "status" => "ready"}]
+  defp task_rows(_), do: []
 
   describe "partition_runs/1" do
     test "empty list → []" do
@@ -494,6 +506,141 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert ord_before == 0
       assert ord_after == 0
       assert PaperCanvas.run_id(ord_before) == PaperCanvas.run_id(ord_after)
+    end
+  end
+
+  describe "live task-block preview (t9) — parallel channel, save-stable (D5)" do
+    test "the block the editor mounts stays a RAW query boundary — no snapshot injected" do
+      blocks = [para("p1"), task_list("t1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1")]},
+               {:block, task_list("t1")},
+               {:run, [para("p2")]}
+             ]
+    end
+
+    test "resolving the preview leaves the mounted/saved blocks BYTE-IDENTICAL → an untouched save emits ZERO ops" do
+      # The exact block list the editor mounts (its save baseline).
+      baseline = [para("p1"), task_list("t1"), para("p2")]
+
+      # Computing the live preview (the parallel display channel) must NOT mutate
+      # the baseline: the previews come out on the side, keyed by block id.
+      previews = TaskResolver.preview(baseline, &task_rows/1)
+
+      assert previews == [
+               %{
+                 "block_id" => "t1",
+                 "type" => "task-list",
+                 "snapshot" => [%{"title" => "a", "status" => "ready"}]
+               }
+             ]
+
+      # The baseline is unchanged — the task block still holds its raw `query`,
+      # no `snapshot` leaked in. run-convert.js keys runToOps on THESE blocks, so
+      # a save with no author edit diffs identical source → an empty op batch.
+      assert baseline == [para("p1"), task_list("t1"), para("p2")]
+      assert Enum.at(baseline, 1)["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(Enum.at(baseline, 1), "snapshot")
+    end
+  end
+
+  describe "task_block_preview (t9) — the boundary widget PAINTS the live rows" do
+    import Phoenix.LiveViewTest
+
+    alias Barkpark.PortableDoc.Render
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    # The flag-ON editor render: canvas runs + boundary widgets. Static
+    # function-component render — no LiveView process, no DB.
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    defp editor_html(blocks, previews) do
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "p1",
+        blocks: blocks,
+        canvas_eligible: true,
+        task_previews: previews
+      )
+    end
+
+    test "a resolved preview renders through the READER'S producer (rule 3), display-only (D5)" do
+      block = task_list("t1")
+
+      entry = %{
+        "block_id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Ship the seam", "status" => "ready"}]
+      }
+
+      html = editor_html([para("p1"), block, para("p2")], %{"t1" => entry})
+
+      # The widget paints the live rows…
+      assert html =~ ~s(data-test-id="paper-task-preview")
+      assert html =~ "Ship the seam"
+
+      # …as the EXACT bytes /papers would emit for the resolved block — one
+      # producer, byte for byte (doctrine rule 3).
+      resolved = TaskResolver.apply_preview(block, entry)
+      assert html =~ Render.render_block(resolved, %{style: :article})
+
+      # D5 in the DOM: the canvas seeds (the save baseline) still carry the raw
+      # prose runs, and no resolved snapshot is ever serialized back into any
+      # data-canvas-blocks / data-block editor state.
+      assert html =~ ~s(data-canvas-blocks)
+      refute html =~ ~s(&quot;snapshot&quot;)
+    end
+
+    test "an error entry degrades to the quiet plugin-off note" do
+      entry = %{"block_id" => "t1", "type" => "task-list", "error" => true}
+      html = editor_html([task_list("t1")], %{"t1" => entry})
+
+      assert html =~ "Live task preview unavailable"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a query block with no entry yet shows the honest loading note" do
+      html = editor_html([task_list("t1")], %{})
+      assert html =~ "Loading live tasks"
+    end
+
+    test "an author-pinned literal snapshot renders directly from its own rows" do
+      pinned = %{
+        "id" => "t1",
+        "type" => "task-list",
+        "snapshot" => [%{"title" => "Pinned row", "status" => "done"}]
+      }
+
+      html = editor_html([pinned], %{})
+      assert html =~ "Pinned row"
+      refute html =~ "Loading live tasks"
+    end
+
+    test "a matchless task-detail preview shows an explicit empty note, not a blank strip" do
+      block = %{"id" => "d1", "type" => "task-detail", "query" => %{"nope" => 1}}
+      entry = %{"block_id" => "d1", "type" => "task-detail", "task" => %{}}
+
+      html = editor_html([block], %{"d1" => entry})
+      assert html =~ "No matching tasks."
+    end
+
+    test "flag OFF: the shipped per-block list stays byte-free of any preview markup" do
+      System.delete_env("BARKPARK_PAPER_CANVAS")
+
+      html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
+      refute html =~ "paper-task-preview"
     end
   end
 

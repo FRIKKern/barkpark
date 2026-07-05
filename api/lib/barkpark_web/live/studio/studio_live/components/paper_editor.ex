@@ -17,9 +17,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   """
   use BarkparkWeb, :html
 
-  alias Barkpark.PortableDoc.Projection
+  alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
+
+  # t9 — the task block types whose boundary widget paints a LIVE preview
+  # (mirrors TaskResolver's @snapshot_types + @detail_type).
+  @task_preview_types ~w(tasks task-list task-board roadmap task-detail)
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -82,6 +86,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # at its FALSE default, so the canvas never mounts where its ops can't land —
   # the canvas flag stays gated to the one surface whose persist path is wired.
   attr(:canvas_eligible, :boolean, default: false)
+
+  # t9 — live task-block previews (block_id ⇒ preview entry from
+  # TaskResolver.preview/2), display-only rows the flag-ON boundary widgets
+  # paint via task_block_preview/1. The flag-OFF list render never reads it.
+  attr(:task_previews, :map, default: %{})
 
   def paper_block_editor(assigns) do
     # Gate the bound/free split on having descriptors: only the Beta editor (with
@@ -202,6 +211,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 }
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
+                task_previews={@task_previews}
               />
           <% end %>
         <% end %>
@@ -470,6 +480,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   attr(:prev_locked, :boolean, default: false)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  # t9 — the id-keyed live-preview map (paper_block_editor passes it through);
+  # only a task-type block reads its own entry. Default keeps every other call
+  # site (and every non-task block) byte-identical.
+  attr(:task_previews, :map, default: %{})
 
   def edit_block(assigns) do
     ~H"""
@@ -544,9 +558,82 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           >🔒 Locked</span>
         </span>
       </div>
+      <.task_block_preview
+        :if={task_preview_block?(@block)}
+        block={@block}
+        preview={Map.get(@task_previews, Map.get(@block, "id"))}
+      />
       <.paper_block_fields block={@block} dataset={@dataset} api_token_raw={@api_token_raw} />
     </div>
     """
+  end
+
+  # ── t9 — live task-block preview (the boundary-widget consumer) ─────────────
+  #
+  # The canvas renders task blocks as boundary widgets (they are non-prose), so
+  # the LIVE preview paints HERE, server-rendered from @paper_task_previews —
+  # the display-only rows Shared.push_task_previews resolves under the session
+  # scope. The HTML producer is `Render.render_block/2` — the SAME emitter the
+  # /papers reader uses (doctrine rule 3: one producer, byte for byte); the
+  # Studio shell is a `.bp-paper-surface` sink, so the canonical paper-surface
+  # stylesheet styles it identically. D5 by construction: the preview merges
+  # rows onto a COPY (TaskResolver.apply_preview/2) — @block itself (the save
+  # baseline / the ops the buttons emit) is never touched.
+  attr(:block, :map, required: true)
+  # This block's preview entry (snapshot/task/error) or nil (still resolving /
+  # un-addressable block).
+  attr(:preview, :any, default: nil)
+
+  def task_block_preview(assigns) do
+    assigns = assign(assigns, :state, task_preview_state(assigns.block, assigns.preview))
+
+    ~H"""
+    <div class="bp-paper-task-preview" data-test-id="paper-task-preview" aria-live="polite">
+      <%= case @state do %>
+        <% {:ok, html} -> %>
+          <%= raw(html) %>
+        <% :empty -> %>
+          <div class="bp-tasks bp-tasks--empty">No matching tasks.</div>
+        <% :error -> %>
+          <div class="bp-tasks bp-tasks--empty">
+            Live task preview unavailable — the Tasks plugin may be off.
+          </div>
+        <% :loading -> %>
+          <div class="bp-tasks bp-tasks--empty">Loading live tasks…</div>
+      <% end %>
+    </div>
+    """
+  end
+
+  defp task_preview_block?(block),
+    do: Map.get(block, "type") in @task_preview_types
+
+  # nil/unknown entry on a query block ⇒ still resolving (or the block has no
+  # id to key a preview) — an honest "loading" note, never a fake empty board.
+  # An author-pinned literal (no query) renders from its own rows directly.
+  defp task_preview_state(block, preview) do
+    cond do
+      is_map(preview) and preview["error"] == true ->
+        :error
+
+      is_map(preview) ->
+        block |> TaskResolver.apply_preview(preview) |> rendered_or_empty()
+
+      Map.has_key?(block, "query") ->
+        :loading
+
+      true ->
+        rendered_or_empty(block)
+    end
+  end
+
+  # task_detail_html renders "" for an empty/matchless task — surface that as
+  # an explicit empty note instead of a silent blank strip.
+  defp rendered_or_empty(block) do
+    case Render.render_block(block, %{style: :article}) do
+      html when html in ["", nil] -> :empty
+      html -> if String.trim(html) == "", do: :empty, else: {:ok, html}
+    end
   end
 
   # Live document stats for the Beta editor footer (gap #4): top-level block

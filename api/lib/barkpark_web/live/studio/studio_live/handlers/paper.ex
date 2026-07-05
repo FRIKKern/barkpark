@@ -21,7 +21,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
       socket =
         if next_edit_mode or not socket.assigns[:paper_block_mode] do
-          socket
+          # t9: entering Edit — refresh the live task-block previews so the
+          # boundary widgets paint CURRENT rows, not the rows from paper-open.
+          # No-op when the canvas flag is OFF; display-only either way (D5).
+          Shared.push_task_previews(socket)
         else
           stream(
             socket,
@@ -134,6 +137,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_ops(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  t9 — LIVE TASK-BLOCK PREVIEW refresh. The canvas hook fires this on mount (seed
+  the live rows the instant the editor opens) and again ~500ms-debounced after an
+  edit that may have changed a task block's `query`. We re-run the resolver under
+  the session scope and push fresh id-keyed rows on the `bp:task-preview` channel.
+
+  Read-only: never writes, never touches the save baseline (D5) — a pure display
+  refresh. No-op when the canvas flag is OFF (Shared.push_task_previews gates it).
+  """
+  def task_preview_refresh(socket) do
+    {:noreply, Shared.push_task_previews(socket)}
+  end
 
   @doc """
   ACCEPT-BASELINE (lvw-t2, D4 ratified): the walker-emitted control on a
