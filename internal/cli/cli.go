@@ -153,6 +153,16 @@ func Execute(args []string) int {
 		if verb == "frontier" {
 			return runTaskFrontier(out, g, ctx, tail)
 		}
+	case "cmux":
+		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
+		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
+		// task frontier`: `cmux` is not a manifest noun, so this intercept shadows
+		// nothing and needs no server/API change. `bp cmux hook <event>` is the
+		// fail-safe Claude Code hook adapter (claim on SessionStart, renew the
+		// lease, close on proven acceptance); `dispatch` spawns the frontier into
+		// agent panes; `install` prints the hook wiring; `status` shows this pane's
+		// worker/task/lease. Everything after the noun rides in rest.
+		return runCmux(out, g, ctx, rest[1:])
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
