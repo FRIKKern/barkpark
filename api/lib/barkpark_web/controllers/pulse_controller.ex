@@ -30,6 +30,14 @@ defmodule BarkparkWeb.PulseController do
          :ok <- check_daily_cap(channel, cfg),
          {:ok, clean} <- Pulse.validate_payload(cfg, Map.drop(params, ["channel"])),
          {:ok, %{id: id, total: total}} <- Pulse.record_event(channel, clean) do
+      # realtime: every subscriber on the channel's topic gets the strike
+      # pushed the moment it lands — polling is only the fallback transport
+      BarkparkWeb.Endpoint.broadcast("pulse:" <> channel, "strike", %{
+        id: id,
+        payload: clean,
+        total: total
+      })
+
       json(conn, %{ok: true, id: id, total: total})
     else
       {:halted, conn} -> conn

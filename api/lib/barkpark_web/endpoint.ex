@@ -28,6 +28,14 @@ defmodule BarkparkWeb.Endpoint do
     websocket: true,
     longpoll: false
 
+  # Anonymous realtime socket for Pulse channels (Shared Storm) — subscribe-only
+  # strike feed; every gate lives at channel join. Same check_origin inheritance
+  # as /socket above (no per-socket override — Past-Mistake-#11): embedding
+  # sites are added via BARKPARK_EXTRA_ORIGINS.
+  socket "/v1/plugins/pulse/socket", BarkparkWeb.PulseSocket,
+    websocket: true,
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),
