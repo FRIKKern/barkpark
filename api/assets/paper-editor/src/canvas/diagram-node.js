@@ -78,7 +78,7 @@
 // never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { DEBOUNCE_MS } from "../contract.js";
+import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 
 // The TipTap node NAME is `bpDiagram`, NOT `diagram`. UNLIKE code (whose name had to
 // dodge the StarterKit inline `code` MARK) there is NO StarterKit collision for
@@ -247,6 +247,14 @@ export const Diagram = Node.create({
 
       // The OPTIONAL caption input — a small non-PM control. Editing it writes the
       // `caption` attr (debounced) exactly like the textarea writes `source`.
+      //
+      // pdd-t18b (rule 6 / D13): a caption RENDERS as a <figcaption> ONLY when set
+      // (Figures.diagram_html emits none for an empty caption), so an empty caption
+      // input showing its "caption" placeholder at rest is chrome absent from the
+      // render. It becomes a HOVER/FOCUS affordance (see syncChrome) — hidden while
+      // idle, revealed on interaction. A SET caption stays visible (figcaption
+      // parity). (The source textarea's raw-Mermaid-vs-rendered-figure divergence is
+      // a separate, deliberate no-live-preview exception recorded in the PR matrix.)
       const captionInput = document.createElement("input");
       captionInput.type = "text";
       captionInput.className = "bp-canvas-diagram-caption";
@@ -260,6 +268,20 @@ export const Diagram = Node.create({
       // so an external attr change (an echo, an undo) reflects. Guard against
       // clobbering the field the user is actively typing in (don't reset its value
       // mid-keystroke) by only writing when the incoming value differs.
+      // pdd-t18b: the resting-chrome gate (mirrors code-node.js). The empty caption
+      // input hides at rest and reveals only while the frame is hovered or focus is
+      // inside it, so an idle diagram atom carries no "caption" ghost chrome.
+      let hovered = false;
+      let focused = false;
+      const syncChrome = () => {
+        const hide = configControlHidden({
+          value: captionInput.value,
+          hovered: hovered && editor.isEditable,
+          focused,
+        });
+        captionInput.style.display = hide ? "none" : "";
+      };
+
       const paint = (n) => {
         const source = (n.attrs && n.attrs.source) || "";
         const caption = (n.attrs && n.attrs.caption) || "";
@@ -269,7 +291,30 @@ export const Diagram = Node.create({
         const editable = editor.isEditable;
         area.readOnly = !editable;
         captionInput.readOnly = !editable;
+        syncChrome();
       };
+
+      // Reveal the config chrome on hover / focus-within; hide it again when idle.
+      const onEnter = () => {
+        hovered = true;
+        syncChrome();
+      };
+      const onLeave = () => {
+        hovered = false;
+        syncChrome();
+      };
+      const onFocusIn = () => {
+        focused = true;
+        syncChrome();
+      };
+      const onFocusOut = () => {
+        focused = false;
+        syncChrome();
+      };
+      dom.addEventListener("mouseenter", onEnter);
+      dom.addEventListener("mouseleave", onLeave);
+      dom.addEventListener("focusin", onFocusIn);
+      dom.addEventListener("focusout", onFocusOut);
 
       paint(node);
 
@@ -317,6 +362,8 @@ export const Diagram = Node.create({
 
       area.addEventListener("input", scheduleWrite);
       captionInput.addEventListener("input", scheduleWrite);
+      // Keep the resting-chrome gate in step as the caption is typed / cleared.
+      captionInput.addEventListener("input", syncChrome);
 
       return {
         dom,
@@ -346,6 +393,11 @@ export const Diagram = Node.create({
           if (writeTimer) clearTimeout(writeTimer);
           area.removeEventListener("input", scheduleWrite);
           captionInput.removeEventListener("input", scheduleWrite);
+          captionInput.removeEventListener("input", syncChrome);
+          dom.removeEventListener("mouseenter", onEnter);
+          dom.removeEventListener("mouseleave", onLeave);
+          dom.removeEventListener("focusin", onFocusIn);
+          dom.removeEventListener("focusout", onFocusOut);
         },
       };
     };
