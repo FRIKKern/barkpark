@@ -1030,7 +1030,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             rows="3"
             data-test-id="paper-field-text"
           ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "code" -> %>
         <form
@@ -1053,7 +1052,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             rows="5"
             data-test-id="paper-field-value"
           ><%= Map.get(@block, "value", "") %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <%!-- diagram (barkpark-woxx): a Mermaid `source` textarea (mirrors the code
             block's value textarea, monospace) + an optional caption input. Both
@@ -1081,7 +1079,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value={Map.get(@block, "caption", "")}
             data-test-id="paper-field-caption"
           />
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <%!-- article-chrome blocks (barkpark-54kh). eyebrow + byline are a single
             text input; ingress + pullquote are a textarea (plain-text MVP, like
@@ -1102,7 +1099,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value={Map.get(@block, "text", "")}
             data-test-id="paper-field-eyebrow"
           />
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "byline" -> %>
         <form
@@ -1120,7 +1116,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value={Enum.join(Map.get(@block, "items", []), " · ")}
             data-test-id="paper-field-byline"
           />
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "ingress" -> %>
         <form
@@ -1136,7 +1131,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             rows="3"
             data-test-id="paper-field-ingress"
           ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "pullquote" -> %>
         <form
@@ -1152,7 +1146,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             rows="3"
             data-test-id="paper-field-pullquote"
           ><%= Blocks.inline_to_text(Map.get(@block, "content", [])) %></textarea>
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "section" -> %>
         <form
@@ -1170,7 +1163,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value={Map.get(@block, "title", "")}
             data-test-id="paper-field-title"
           />
-          <button type="submit" class="btn btn-sm">Save</button>
         </form>
       <% "divider" -> %>
         <p class="bp-paper-edit-readonly">— divider —</p>

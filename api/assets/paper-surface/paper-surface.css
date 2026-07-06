@@ -118,7 +118,7 @@ html[data-theme="dark"] .bp-paper-body {
    re-introduces double-spacing; see styles.css :84). */
 .bp-paper-surface, .bp-paper-body {
   --bp-body-size: 18px;
-  --bp-body-lh: 1.70;
+  --bp-body-lh: 1.65;
   --bp-body-tracking: 0.005em;
   --bp-h1-size: 32px;   --bp-h1-lh: 1.1;   --bp-h1-tracking: -0.02em;
   --bp-h2-size: 24px;   --bp-h2-lh: 1.2;
@@ -157,9 +157,14 @@ html[data-theme="dark"] .bp-paper-body {
    inline wins on the View pane, so the Edit pane CSS must mirror it to
    keep View ↔ Edit byte-aligned. (Parity audit caught the previous
    1.3 / -0.01em CSS as visible drift against the inline.) */
-.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0; }
-.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 0; }
-.bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 0; }
+/* Heading vertical rhythm — TOP-only margins so the flat edit ProseMirror
+   (siblings, margins collapse) and the div-wrapped reader (no collapse) land on
+   the SAME spacing: with zero bottom margins, additive==collapsed. This single
+   source feeds both surfaces; the first heading is clamped to 0 by each surface's
+   :first-child rule. */
+.bp-paper-surface h1 { font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
+.bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
 .bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
 .bp-paper-surface a  {
   color: var(--paper-accent); text-decoration: none;
