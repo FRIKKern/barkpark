@@ -34,6 +34,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # form / asciicast. `diagram` is absent: it rides its editable bpDiagram atom in a
   # canvas run, not a boundary widget. Keep aligned with shared/paper.ex:
   # @fleet_render_types (the canvas-node twin of this boundary paint).
+  #
+  # t12a NOTE — as of the pdd-t12 partition FLIP, a top-level fleet block in the
+  # flag-ON PAPER PANE (canvas_eligible) no longer reaches this boundary widget: it is
+  # now CANVAS-ELIGIBLE (paper_canvas.ex:@canvas_fleet_types), so partition_runs folds
+  # it INTO a `{:run, …}` and it paints IN-CANVAS via the `bpFleet` node-view +
+  # push_block_renders' `bp:block-html` (D8), never through `edit_block` here. The
+  # boundary widget (edit_block → task_block_preview, below) renders ONLY for the
+  # `{:block, …}` boundaries the flag-ON canvas path emits, and after the flip those are
+  # exclusively the nested-structure fields (composite / arrayOf / …), never a fleet
+  # kind — so this fleet paint is now DORMANT in the paper pane. It is deliberately KEPT
+  # (not deleted): the widget + these types stay as retained infra whose contract is
+  # still proven directly, and legacy retirement is a wave-4/human step, out of scope.
   @fleet_preview_types @task_preview_types ++
                          ~w(notes cards pipeline status-legend form questionnaire asciicast)
 
@@ -618,9 +630,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   # pdd-t8: broadened from the task-only set to the FULL non-prose fleet — every
-  # component block now paints the reader's HTML in its boundary widget, not just
-  # the query-carrying task blocks. A static block (cards / pipeline / form / …)
-  # has no query + no preview entry, so task_preview_state renders it directly.
+  # component block paints the reader's HTML in its boundary widget, not just the
+  # query-carrying task blocks. A static block (cards / pipeline / form / …) has no
+  # query + no preview entry, so task_preview_state renders it directly. t12a: this
+  # gate only fires inside `edit_block/1`, which the flag-ON canvas path renders for
+  # `{:block, …}` boundaries only — after the partition flip a fleet block is never
+  # such a boundary in the paper pane (it rides a run + paints via `bpFleet`), so this
+  # predicate is dormant there; retained infra, its painting proven directly.
   defp task_preview_block?(block),
     do: Map.get(block, "type") in @fleet_preview_types
 
