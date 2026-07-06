@@ -67,7 +67,7 @@
 // never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { DEBOUNCE_MS } from "../contract.js";
+import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 
 // The TipTap node NAME is `bpCode`, NOT `code` — `code` is already the StarterKit
 // INLINE code MARK (extension-code: name:'code', parses <code>), which the canvas
@@ -214,10 +214,19 @@ export const Code = Node.create({
 
       // The OPTIONAL language input — a small non-PM control. Editing it writes the
       // `lang` attr (debounced) exactly like the textarea writes `value`.
+      //
+      // pdd-t18b (rule 6 / D13): `lang` is edit-only config the reader NEVER paints
+      // (Figures.code_block_html/1 ignores it). An empty `lang` input left showing
+      // its "lang" placeholder at rest is chrome that won't exist in the render, so
+      // it becomes a HOVER/FOCUS affordance (see syncChrome below) — hidden while
+      // idle, revealed on interaction. A SET lang stays visible (meaningful config).
       const langInput = document.createElement("input");
       langInput.type = "text";
       langInput.className = "bp-canvas-code-lang";
       langInput.placeholder = "lang";
+      // Accessible name that survives the resting-chrome hide (a placeholder is
+      // only a fallback name, and it's invisible while the control is hidden).
+      langInput.setAttribute("aria-label", "code language");
       langInput.setAttribute("contenteditable", "false");
 
       // The EDIT island: a textarea showing the code. Monospace, full-width,
@@ -243,6 +252,24 @@ export const Code = Node.create({
       // so an external attr change (an echo, an undo) reflects. Guard against
       // clobbering the field the user is actively typing in (don't reset its value
       // mid-keystroke) by only writing when the incoming value differs.
+      // pdd-t18b: the resting-chrome gate. The empty `lang` input hides at rest and
+      // reveals only while the frame is hovered or focus is inside it — so an idle
+      // code atom reads byte-identically to the /papers <pre> (no "lang" ghost). The
+      // pure predicate (contract.js) owns the decision; this just toggles display.
+      let hovered = false;
+      let focused = false;
+      const syncChrome = () => {
+        // Both reveal channels are gated on editability: a non-editable editor
+        // (view mode) must not surface an empty readonly config control on
+        // hover OR focus — there is nothing the reveal could let you do.
+        const hide = configControlHidden({
+          value: langInput.value,
+          hovered: hovered && editor.isEditable,
+          focused: focused && editor.isEditable,
+        });
+        langInput.style.display = hide ? "none" : "";
+      };
+
       const paint = (n) => {
         const value = (n.attrs && n.attrs.value) || "";
         const lang = (n.attrs && n.attrs.lang) || "";
@@ -252,7 +279,38 @@ export const Code = Node.create({
         const editable = editor.isEditable;
         area.readOnly = !editable;
         langInput.readOnly = !editable;
+        syncChrome();
       };
+
+      // Reveal the config chrome on hover / focus-within; hide it again when idle.
+      const onEnter = () => {
+        hovered = true;
+        syncChrome();
+      };
+      const onLeave = () => {
+        hovered = false;
+        syncChrome();
+      };
+      const onFocusIn = () => {
+        focused = true;
+        syncChrome();
+      };
+      const onFocusOut = (e) => {
+        // Focus-within guard: focusout fires BEFORE the next element receives
+        // focus, so hiding here would yank display:none onto the langInput in the
+        // middle of a Shift+Tab from the textarea INTO it — the browser's focus
+        // fixup then drops focus to <body> and the control is never reachable by
+        // keyboard. relatedTarget is the element gaining focus; when it is still
+        // inside this atom, focus is only MOVING within, not leaving — keep the
+        // chrome revealed and let the subsequent focusin confirm it.
+        if (e && e.relatedTarget && dom.contains(e.relatedTarget)) return;
+        focused = false;
+        syncChrome();
+      };
+      dom.addEventListener("mouseenter", onEnter);
+      dom.addEventListener("mouseleave", onLeave);
+      dom.addEventListener("focusin", onFocusIn);
+      dom.addEventListener("focusout", onFocusOut);
 
       paint(node);
 
@@ -296,6 +354,10 @@ export const Code = Node.create({
 
       area.addEventListener("input", scheduleWrite);
       langInput.addEventListener("input", scheduleWrite);
+      // Keep the resting-chrome gate in step as the user types a lang (empty→set
+      // must not snap back to hidden while they are focused, and clearing it while
+      // idle must re-hide it once blur+mouseleave settle).
+      langInput.addEventListener("input", syncChrome);
 
       return {
         dom,
@@ -325,6 +387,11 @@ export const Code = Node.create({
           if (writeTimer) clearTimeout(writeTimer);
           area.removeEventListener("input", scheduleWrite);
           langInput.removeEventListener("input", scheduleWrite);
+          langInput.removeEventListener("input", syncChrome);
+          dom.removeEventListener("mouseenter", onEnter);
+          dom.removeEventListener("mouseleave", onLeave);
+          dom.removeEventListener("focusin", onFocusIn);
+          dom.removeEventListener("focusout", onFocusOut);
         },
       };
     };

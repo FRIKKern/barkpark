@@ -165,13 +165,14 @@ defmodule Barkpark.Content.Papers.Proposals do
     end
   end
 
+  # Doctrine backstop (pdd-t20): the drafts twin is a PAPER, so the proposal
+  # fold rides the same op engine + constraint declarations as the published
+  # op paths (`BlockOps`) — an insert-only proposal that breaks a cardinality
+  # or relative-order rule (e.g. a second `role: "featured"`) is vetoed calmly
+  # at the op layer instead of smuggling an invalid shape through the publish
+  # gate. D12's before-valid guard keeps legacy/already-invalid drafts editable.
   defp fold_ops(blocks, ops) do
-    Enum.reduce_while(ops, {:ok, blocks}, fn op, {:ok, acc} ->
-      case Patch.apply_patch(acc, op) do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, _} = err -> {:halt, err}
-      end
-    end)
+    Patch.apply_patches(blocks, ops, constraints: Papers.Template.paper_declarations())
   end
 
   # The `content["proposals"]` sidecar: one entry per proposed block id,

@@ -117,4 +117,73 @@ defmodule Barkpark.PortableDoc.PatchBatchTest do
       assert original == doc()
     end
   end
+
+  # The constraint vocabulary (pdd-t20) is threaded per op through the fold via
+  # apply_patches/3's `opts`. A batch op that breaks a rule halts the fold and
+  # leaves the input UNCHANGED — all-or-nothing, exactly like a locked op.
+  describe "apply_patches/3 — constraint declarations threaded per op" do
+    defp constrained_doc do
+      %{
+        "version" => 1,
+        "blocks" => [
+          %{"id" => "t", "type" => "heading", "role" => "title", "text" => "T"},
+          %{"id" => "f", "type" => "image", "role" => "featured"}
+        ]
+      }
+    end
+
+    defp decls do
+      [
+        %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}]},
+        %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}]}
+      ]
+    end
+
+    test "a batch that stays valid applies cleanly" do
+      ops = [
+        %{"op" => "patch-block", "id" => "t", "patch" => %{"text" => "T2"}},
+        %{"op" => "append-block", "block" => %{"id" => "b", "type" => "paragraph", "text" => "B"}}
+      ]
+
+      assert {:ok, result} = Patch.apply_patches(constrained_doc(), ops, constraints: decls())
+      assert Enum.map(result["blocks"], & &1["id"]) == ["t", "f", "b"]
+      assert Enum.find(result["blocks"], &(&1["id"] == "t"))["text"] == "T2"
+    end
+
+    test "a violating op halts the batch and leaves the input unchanged" do
+      original = constrained_doc()
+
+      ops = [
+        # op 1 — fine
+        %{"op" => "append-block", "block" => %{"id" => "b", "type" => "paragraph"}},
+        # op 2 — a SECOND featured breaks max-1
+        %{
+          "op" => "insert-after",
+          "afterId" => "t",
+          "block" => %{"id" => "f2", "type" => "image", "role" => "featured"}
+        },
+        # op 3 — would succeed, must never run
+        %{"op" => "append-block", "block" => %{"id" => "z", "type" => "paragraph"}}
+      ]
+
+      assert {:error, {:constraint, _msg, "insert-after"}} =
+               Patch.apply_patches(original, ops, constraints: decls())
+
+      # Pure: the caller still holds the original, untouched.
+      assert original == constrained_doc()
+    end
+
+    test "no declarations ⇒ byte-identical to apply_patches/2" do
+      ops = [
+        %{
+          "op" => "insert-after",
+          "afterId" => "t",
+          "block" => %{"id" => "f2", "type" => "image", "role" => "featured"}
+        }
+      ]
+
+      assert Patch.apply_patches(constrained_doc(), ops) ==
+               Patch.apply_patches(constrained_doc(), ops, constraints: [])
+    end
+  end
 end

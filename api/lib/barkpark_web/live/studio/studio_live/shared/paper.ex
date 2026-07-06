@@ -59,6 +59,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> sync_paper_edit_doc()
             |> assign(save_status: "Auto-saved")
 
+          # A constraint veto (pdd-t20) carries a human-readable reason —
+          # surface it so a calmly-rejected edit explains itself.
+          {:error, {:constraint, message, _op}} ->
+            socket
+            |> put_flash(:error, constraint_flash(message))
+            |> assign(save_status: "Save failed")
+
           {:error, _reason} ->
             socket
             |> put_flash(:error, "Edit failed")
@@ -107,6 +114,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> push_task_previews()
             |> push_block_renders()
 
+          # A constraint veto (pdd-t20) carries a human-readable reason —
+          # surface it so a calmly-rejected batch explains itself.
+          {:error, {:constraint, message, _op}} ->
+            put_flash(socket, :error, constraint_flash(message))
+
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
         end
@@ -114,6 +126,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def paper_ops(socket, _ops), do: socket
+
+  # "constraint: at most 1 block of \"featured\" allowed, found 2" →
+  # "Edit rejected — at most 1 block of \"featured\" allowed, found 2".
+  defp constraint_flash(message) when is_binary(message),
+    do: "Edit rejected — " <> String.replace_prefix(message, "constraint: ", "")
+
+  defp constraint_flash(_), do: "Edit failed"
 
   @doc false
   # t9 — LIVE TASK-BLOCK PREVIEW push. Resolve every query-carrying task block in

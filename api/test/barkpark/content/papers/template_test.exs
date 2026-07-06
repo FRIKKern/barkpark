@@ -15,8 +15,11 @@ defmodule Barkpark.Content.Papers.TemplateTest do
 
   test "seed: a NEW paper with an explicit empty block list is born as a document" do
     blocks = Template.maybe_seed([], nil, %{"title" => "My paper"})
-    assert [%{"role" => "title", "locked" => true, "text" => "My paper"}, featured, _p] = blocks
-    assert featured["role"] == "featured" and featured["locked"] == true
+    # Only the required minimum is seeded (D11): the locked title + an empty body
+    # paragraph. The optional featured slot is a ghost affordance, NOT a birth block.
+    assert [%{"role" => "title", "locked" => true, "text" => "My paper"}, body] = blocks
+    assert body["id"] == "tpl-body" and body["type"] == "paragraph"
+    refute Enum.any?(blocks, &(&1["role"] == "featured"))
   end
 
   test "seed: existing docs, nil blocks (HTML-only path) and explicit blocks untouched" do
@@ -29,7 +32,9 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     blocks =
       Template.maybe_seed([%{"type" => "paragraph"}], nil, %{"template" => true, "title" => "T"})
 
-    assert [%{"role" => "title"}, %{"role" => "featured"}, %{"type" => "paragraph"}] = blocks
+    # Optional slots are not injected — only the locked title is prepended.
+    assert [%{"role" => "title"}, %{"type" => "paragraph"}] = blocks
+    refute Enum.any?(blocks, &(&1["role"] == "featured"))
     # idempotent: a title-carrying list is not re-seeded
     assert Template.maybe_seed(blocks, nil, %{"template" => true}) == blocks
   end
@@ -46,14 +51,79 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     assert Template.validate([%{"type" => "paragraph"}]) == []
     assert Template.validate(Template.template_blocks("t")) == []
 
-    # title not at 0 (and featured displaced too — both reported)
-    [title, featured] = Template.template_blocks("t")
+    # a locked featured before the locked title: the title is off block 0 → a
+    # calm, specific order violation.
+    [title] = Template.template_blocks("t")
+    featured = %{"id" => "f", "type" => "image", "role" => "featured", "locked" => true}
     msgs = Template.validate([featured, title])
-    assert Enum.any?(msgs, &(&1 =~ "title block must be block 0"))
+    assert Enum.any?(msgs, &(&1 =~ "block 0"))
 
     # locked doc missing its title block entirely
     assert [msg2] = Template.validate([%{"type" => "paragraph", "locked" => true}])
     assert msg2 =~ "missing"
+  end
+
+  # ── the constraint-vocabulary byte-compat matrix (pdd-t20) ────────────────
+
+  # A locked featured block for the fixtures that need the OLD seeded shape.
+  defp locked_featured(id \\ "tpl-featured") do
+    %{"id" => id, "type" => "image", "role" => "featured", "locked" => true}
+  end
+
+  defp locked_ingress(id \\ "ing") do
+    %{"id" => id, "type" => "paragraph", "role" => "ingress", "locked" => true}
+  end
+
+  describe "validate/1 — the paper declarations, byte-compatibly" do
+    test "legacy no-locked papers are untouched (D3)" do
+      assert Template.validate([%{"type" => "paragraph"}, %{"type" => "image"}]) == []
+    end
+
+    test "the OLD seeded shape (title@0 + featured@1) still validates clean" do
+      [title] = Template.template_blocks("t")
+      assert Template.validate([title, locked_featured()]) == []
+    end
+
+    test "a title-only paper validates clean (the new birth shape)" do
+      assert Template.validate(Template.template_blocks("t")) == []
+    end
+
+    test "featured before title is a calm order error" do
+      [title] = Template.template_blocks("t")
+      msgs = Template.validate([locked_featured(), title])
+      assert msgs != []
+    end
+
+    test "two featured blocks trip the max-1 cardinality error" do
+      [title] = Template.template_blocks("t")
+      msgs = Template.validate([title, locked_featured("f1"), locked_featured("f2")])
+      assert Enum.any?(msgs, &(&1 =~ "at most 1" and &1 =~ "featured"))
+    end
+
+    test "an ingress between the title and featured validates clean" do
+      [title] = Template.template_blocks("t")
+      assert Template.validate([title, locked_ingress(), locked_featured()]) == []
+    end
+
+    test "an ingress AFTER the featured is a relative-order error" do
+      [title] = Template.template_blocks("t")
+      msgs = Template.validate([title, locked_featured(), locked_ingress()])
+      assert Enum.any?(msgs, &(&1 =~ "ingress" and &1 =~ "before" and &1 =~ "featured"))
+    end
+
+    test "a paper that carries a locked block but no title is missing-required" do
+      msgs = Template.validate([%{"type" => "paragraph", "locked" => true}])
+      assert Enum.any?(msgs, &(&1 =~ "required" and &1 =~ "title" and &1 =~ "missing"))
+    end
+
+    test "a role:title block that is NOT a heading is rejected (byte-compat with the old gate)" do
+      # The generic vocabulary has no type axis; the paper rule "the title IS a
+      # heading" (derive_title reads its text; the reader renders the <h1>) must
+      # survive the re-expression — a raw API replace could otherwise swap it.
+      impostor = %{"id" => "t", "type" => "paragraph", "role" => "title", "locked" => true, "text" => "x"}
+      msgs = Template.validate([impostor])
+      assert Enum.any?(msgs, &(&1 =~ "title" and &1 =~ "heading"))
+    end
   end
 
   # ── op backstops (Patch) ─────────────────────────────────────────────────
@@ -88,7 +158,10 @@ defmodule Barkpark.Content.Papers.TemplateTest do
   end
 
   test "ops: no op may DISPLACE a locked block — inserts into the prefix, moves to head, replace-away" do
-    blocks = Template.template_blocks("t") ++ [%{"id" => "p1", "type" => "paragraph"}]
+    # The locked prefix is title + featured; featured is now constructed here (no
+    # longer seeded) so the displacement backstops keep their coverage.
+    featured = %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+    blocks = Template.template_blocks("t") ++ [featured, %{"id" => "p1", "type" => "paragraph"}]
     new_block = %{"id" => "n1", "type" => "paragraph"}
 
     # insert-after the locked title lands BETWEEN title and featured — it would
@@ -224,6 +297,7 @@ defmodule Barkpark.Content.Papers.WriterSeamTest do
   @moduledoc "pdd-t16: the Writer/mutate path gives papers the same birth guarantee as upsert_paper."
   use Barkpark.DataCase, async: false
   alias Barkpark.Content
+  alias Barkpark.Content.Papers.Template
 
   test "create_document type paper with explicit [] blocks is born templated + article + derived title" do
     {:ok, doc} =
@@ -238,8 +312,10 @@ defmodule Barkpark.Content.Papers.WriterSeamTest do
         []
       )
 
-    assert [%{"role" => "title", "text" => "Born via Writer"}, %{"role" => "featured"} | _] =
-             doc.content["blocks"]
+    # Only the locked title is seeded now (D11) — the featured slot is a ghost
+    # affordance, not a birth block.
+    assert [%{"role" => "title", "text" => "Born via Writer"} | _] = doc.content["blocks"]
+    refute Enum.any?(doc.content["blocks"], &(&1["role"] == "featured"))
 
     assert doc.content["style"] == "article"
     assert doc.title == "Born via Writer"
@@ -260,5 +336,48 @@ defmodule Barkpark.Content.Papers.WriterSeamTest do
 
     refute Map.has_key?(doc.content, "blocks")
     refute doc.content["style"] == "article"
+  end
+
+  # ── pdd-t20c: the constraint vocabulary (client_declarations/0 — the JSON wire form) ─────────────
+
+  describe "client_declarations/0 — the wire form the editor consumes" do
+    test "declares title required exactly-1 @top locked" do
+      title = Enum.find(Template.client_declarations(), &(&1["kind"] == "title"))
+
+      assert title["role"] == "title"
+      assert title["presence"] == "required"
+      assert title["count"] == %{"exactly" => 1}
+      assert title["position"] == "top"
+      assert title["locked"] == true
+    end
+
+    test "declares featured optional max-1 after(title) locked" do
+      featured = Enum.find(Template.client_declarations(), &(&1["kind"] == "featured"))
+
+      assert featured["presence"] == "optional"
+      assert featured["count"] == %{"max" => 1}
+      assert featured["position"] == %{"after" => "title"}
+      assert featured["locked"] == true
+    end
+
+    test "declares ingress optional max-1 after(title) before(featured) unlocked" do
+      ingress = Enum.find(Template.client_declarations(), &(&1["kind"] == "ingress"))
+
+      assert ingress["presence"] == "optional"
+      assert ingress["count"] == %{"max" => 1}
+      assert ingress["position"] == %{"after" => "title", "before" => "featured"}
+      assert ingress["locked"] == false
+    end
+
+    test "the declared order is title, ingress, featured (the enforced document order)" do
+      assert Enum.map(Template.client_declarations(), & &1["kind"]) ==
+               ["title", "ingress", "featured"]
+    end
+
+    test "JSON-encodes cleanly for the data-constraints stamp" do
+      json = Jason.encode!(Template.client_declarations())
+      assert {:ok, decoded} = Jason.decode(json)
+      assert length(decoded) == 3
+    end
   end
 end

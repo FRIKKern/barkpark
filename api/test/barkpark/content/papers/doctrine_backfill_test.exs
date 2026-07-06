@@ -224,7 +224,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
 
     test "a paper that already conforms returns :conforms (byte-stable, untouched)" do
       # The exact shape --apply produces: locked title@0 + a body paragraph.
-      [title_block, _featured] = Template.template_blocks("Conforming")
+      [title_block] = Template.template_blocks("Conforming")
 
       doc =
         paper("Conforming", [
@@ -236,7 +236,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
     end
 
     test "a conforming paper WITH a featured image at index 1 returns :conforms" do
-      [title_block, _] = Template.template_blocks("With Featured")
+      [title_block] = Template.template_blocks("With Featured")
 
       featured = %{
         "id" => "f",
@@ -434,7 +434,7 @@ defmodule Barkpark.Content.Papers.DoctrineBackfillTest do
     test "a paper that already conforms is left BYTE-IDENTICAL by --apply" do
       slug = "doctrine-conform-#{System.unique_integer([:positive])}"
 
-      [title_block, _featured] = Template.template_blocks("Already Doctrine")
+      [title_block] = Template.template_blocks("Already Doctrine")
 
       # Seed an ALREADY-conforming paper (title@0 + body). upsert_paper preserves
       # the locked title (single role:title @0) and validates clean.

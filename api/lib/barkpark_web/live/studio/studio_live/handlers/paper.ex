@@ -277,6 +277,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     {:noreply, Shared.paper_op(socket, op)}
   end
 
+  @doc """
+  pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
+  optional declaration (featured / ingress) as a calm ghost in its enforced place;
+  a click sends `paper-materialize-slot` with the slot `kind` + the `after` anchor
+  block id (the locked title). We mint the real block for that kind and insert it
+  DIRECTLY AFTER the anchor via the ONE op path — so it lands in its enforced
+  position and rides the client veto's programmatic-apply exemption. The ghost is
+  only offered when this insert is save-safe (`ghost_slots/1` gates on
+  non-displacement), so the server ACCEPTS it — never a save error (rule 5). An
+  unknown kind / missing anchor is a calm no-op.
+  """
+  def paper_materialize_slot(%{"kind" => kind} = params, socket) do
+    case materialize_slot_block(kind) do
+      nil ->
+        {:noreply, socket}
+
+      block ->
+        op =
+          case params["after"] do
+            after_id when is_binary(after_id) and after_id != "" ->
+              %{"op" => "insert-after", "afterId" => after_id, "block" => block}
+
+            _ ->
+              %{"op" => "append-block", "block" => block}
+          end
+
+        {:noreply, Shared.paper_op(socket, op)}
+    end
+  end
+
+  def paper_materialize_slot(_params, socket), do: {:noreply, socket}
+
+  # The block a ghost slot materializes. Featured is a locked role:featured image
+  # (the seeded featured block, now birthed on demand); ingress is an unlocked
+  # role:ingress paragraph. Both carry the role the reader + template validate key
+  # on. Unknown kinds mint nothing.
+  defp materialize_slot_block("featured") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "image",
+      "role" => "featured",
+      "locked" => true
+    }
+  end
+
+  defp materialize_slot_block("ingress") do
+    %{
+      "id" => Blocks.new_block_id(),
+      "type" => "paragraph",
+      "role" => "ingress",
+      "content" => []
+    }
+  end
+
+  defp materialize_slot_block(_), do: nil
+
   def paper_slash_insert(%{"type" => type, "fieldName" => fname} = params, socket)
       when is_binary(fname) and fname != "" do
     if Shared.expected_field_blocked?(socket, fname) do

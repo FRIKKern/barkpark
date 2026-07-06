@@ -38,8 +38,8 @@ defmodule Barkpark.Content.Papers.DoctrineBackfill do
        promoted). That image is promoted to the locked `role: "featured"` block
        at index 1 (moved, not duplicated). Assets are NEVER invented — an
        asset-less paper gets NO featured block (t13's placeholder handles the
-       asset-less featured case; `Template.validate/1` requires featured@1 only
-       when a featured block EXISTS).
+       asset-less featured case; `Template.validate/1` constrains a featured
+       block — after the title, at most one — only when one EXISTS).
     3. **Persist like the real writer** — re-render `content["body_html"]` from
        the new block list (with the paper's `style`), re-project
        `content["body"]`/`content[fieldName]` (`Projection.project/3`, the same

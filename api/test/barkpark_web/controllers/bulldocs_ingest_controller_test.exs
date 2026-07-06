@@ -221,6 +221,41 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["code"] == "block_not_found"
       assert resp["error"]["op"] == "patch-block"
     end
+
+    test "op breaking the constraint vocabulary → 422 whose message IS the reason (pdd-t20)",
+         %{conn: conn} do
+      # A doctrine paper that already carries its one featured (title @0, featured
+      # @1) is constraint-VALID, so the op-layer veto is what fires here — NOT the
+      # D12 legacy pass-through. Under D11 the featured is no longer auto-seeded, so
+      # it is supplied explicitly; appending a SECOND featured breaks max-1.
+      slug = "ops-constraint-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: slug,
+          blocks: [
+            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
+              "locked" => true, "text" => "T"},
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+          ]
+        })
+
+      conn =
+        auth_post(conn, slug, %{
+          "op" => "append-block",
+          "block" => %{"id" => "f2", "type" => "image", "role" => "featured"}
+        })
+
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "constraint"
+      assert resp["error"]["op"] == "append-block"
+
+      assert resp["error"]["message"] ==
+               "at most 1 \"featured\" block allowed, found 2"
+
+      # Calm veto: the paper is untouched (still just title + featured).
+      assert length(pc(Content.get_paper(slug), "blocks")) == 2
+    end
   end
 
   describe "M2 batch ops endpoint (POST /:slug/ops with {ops: [...]})" do
