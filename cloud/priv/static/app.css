@@ -1318,6 +1318,22 @@ select.form-input {
 }
 .new-step.done .new-step-detail,
 .new-step.failed .new-step-detail { color: var(--dim); }
+/* verify-gate probe checklist under its step (shared rows — both mounts) */
+.new-step-probes { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.new-step-probe {
+  font: 12px/1.4 var(--mono);
+  color: var(--muted-text);
+  padding-left: 14px;
+  position: relative;
+  word-break: break-word;
+}
+.new-step-probe::before {
+  content: "";
+  position: absolute; left: 2px; top: 6px;
+  width: 5px; height: 5px;
+  border-radius: var(--pill);
+  background: var(--info);
+}
 @keyframes new-detail-in {
   from { opacity: 0; transform: translateY(-2px); }
   to { opacity: 1; transform: none; }
@@ -1424,9 +1440,11 @@ select.form-input {
 .new-conn-lost { margin: 0 0 14px; }
 
 /* ========================================================= C3 PROVISION TIMELINE
-   ONE renderer, THREE mounts. The instance-detail mount uses these .bp-timeline
-   classes (the /new mount reuses .new-step*; the fleet chip reuses .fleet-url).
-   Role colours come straight from the --ok/--warn/--danger/--info token
+   ONE component, every mount (unified-provision-view): the instance-detail
+   timeline renders the SAME .new-step rows as the /new progress screen — ring,
+   pace column, captions, probes, next pulse. Only the shell (head + total
+   clock + failure block + console) keeps .bp-timeline classes; the per-row
+   .bp-tl-step family is GONE. Role colours come straight from the token
    contract; the console shell uses the --console-* tokens. Both themes. */
 .bp-timeline {
   margin: 0 0 20px;
@@ -1438,70 +1456,8 @@ select.form-input {
 .bp-tl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .bp-tl-title { font-size: 15px; margin: 0; }
 .bp-tl-total { font-size: 13px; color: var(--muted-text); font-variant-numeric: tabular-nums; }
-.bp-tl-steps { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.bp-tl-step { display: flex; align-items: flex-start; gap: 12px; }
-.bp-tl-dot {
-  width: 20px; height: 20px;
-  flex: 0 0 20px;
-  margin-top: 1px;
-  border-radius: var(--pill);
-  border: 2px solid var(--border);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  color: var(--primary-fg);
-}
-.bp-tl-step--ok .bp-tl-dot { background: var(--ok); border-color: var(--ok); }
-.bp-tl-step--active .bp-tl-dot { border-color: var(--info); }
-.bp-tl-step--failed .bp-tl-dot { background: var(--danger); border-color: var(--danger); }
-/* Between-steps honesty (mirrors .new-step.next): the next step pulses while
-   the worker is between reports, so the timeline never reads frozen. */
-.bp-tl-step--next .bp-tl-dot { border-color: var(--info); animation: new-next-pulse 1.4s ease-in-out infinite; }
-.bp-tl-step--next .bp-tl-label { color: var(--text); }
-.bp-tl-step--next .bp-tl-spin { opacity: 0.55; }
-.bp-tl-body { flex: 1 1 auto; min-width: 0; }
-.bp-tl-line { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.bp-tl-label { color: var(--muted-text); }
-.bp-tl-step--active .bp-tl-label { color: var(--text); font-weight: 600; }
-.bp-tl-step--ok .bp-tl-label { color: var(--text); }
-.bp-tl-step--failed .bp-tl-label { color: var(--danger); font-weight: 600; }
-.bp-tl-elapsed { font-size: 12px; color: var(--dim); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
-.bp-tl-caption {
-  font-size: 12px;
-  color: var(--muted-text);
-  line-height: 1.35;
-  margin-top: 2px;
-  word-break: break-word;
-  animation: new-detail-in 0.28s ease;
-}
-.bp-tl-step--ok .bp-tl-caption,
-.bp-tl-step--failed .bp-tl-caption { color: var(--dim); }
-/* verify-gate probe checklist under the step */
-.bp-tl-probes { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.bp-tl-probe {
-  font: 12px/1.4 var(--mono);
-  color: var(--muted-text);
-  padding-left: 14px;
-  position: relative;
-  word-break: break-word;
-}
-.bp-tl-probe::before {
-  content: "";
-  position: absolute; left: 2px; top: 6px;
-  width: 5px; height: 5px;
-  border-radius: var(--pill);
-  background: var(--info);
-}
-.bp-tl-spin {
-  width: 13px; height: 13px;
-  flex: 0 0 13px;
-  margin-top: 3px;
-  border: 2px solid var(--ring-soft);
-  border-top-color: var(--info);
-  border-radius: var(--pill);
-  animation: new-spin 0.7s linear infinite;
-}
+/* The shared rows sit a touch tighter inside the timeline card than on /new. */
+.bp-timeline .new-steps { margin-top: 16px; }
 .bp-tl-fail {
   margin-top: 16px;
   padding: 10px 12px;

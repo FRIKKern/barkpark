@@ -981,7 +981,7 @@ test("provisionSteps: a between-steps gap (create done, nothing active) marks se
 
 // ── timelineHtml (Mount 2 presentation) ─────────────────────────────────────
 
-test("timelineHtml: renders roled steps, per-step elapsed, verify probes, and the failure block", () => {
+test("timelineHtml: ONE component — the instance timeline renders the SHARED .new-step rows + the failure block", () => {
   const rows = hooks.provisionSteps({ provision_steps: [
     { step: "create", status: "started", at: T(0) },
     { step: "create", status: "failed", at: T(3) },
@@ -989,25 +989,37 @@ test("timelineHtml: renders roled steps, per-step elapsed, verify probes, and th
     { step: "verify", status: "progress", at: T(6), detail: "verify.login: 401 in 182ms" },
   ] }, NOW);
   const html = hooks.timelineHtml(rows, { failed: true, failureDetail: "SECRET_KEY_BASE was 32 bytes" });
-  assert.match(html, /bp-tl-step--failed/);
-  assert.match(html, /bp-tl-step--pending/);
-  assert.match(html, /data-step="create"/);
-  assert.match(html, /class="bp-tl-elapsed" data-step="create">3s</);
-  assert.match(html, /bp-tl-probe">verify\.login: 401 in 182ms/);
+  // The unified rows: same markup family as /new — ring dots, pace column, probes.
+  assert.match(html, /<li class="new-step failed" data-step="create">/);
+  assert.match(html, /<li class="new-step pending" data-step="secure">/);
+  assert.match(html, /new-step-time">3s</); // the failed step's real elapsed
+  assert.match(html, /new-step-probe">verify\.login: 401 in 182ms/);
+  assert.doesNotMatch(html, /bp-tl-step|bp-tl-dot|bp-tl-elapsed/); // the old row family is GONE
+  // The failure block is the timeline-specific extra.
   assert.match(html, /bp-tl-fail[\s\S]*SECRET_KEY_BASE was 32 bytes/);
   assert.doesNotMatch(hooks.timelineHtml(rows, { failed: false }), /bp-tl-fail/);
 });
 
-test("timelineHtml: a `next` row gets the --next class, the Starting… caption and a spinner", () => {
+test("timelineHtml: a `next` row pulses exactly like /new — shared class, Starting… caption, spinner", () => {
   const rows = hooks.provisionSteps({ provision_steps: [
     { step: "create", status: "started", at: T(0) },
     { step: "create", status: "done", at: T(2) },
   ] }, NOW);
   const html = hooks.timelineHtml(rows, {});
-  assert.match(html, /bp-tl-step--pending bp-tl-step--next/);
-  assert.match(html, /bp-tl-caption">Starting…</);
-  const nextLi = html.slice(html.indexOf("bp-tl-step--next"), html.indexOf("configure"));
-  assert.match(nextLi, /bp-tl-spin/);
+  assert.match(html, /<li class="new-step pending next" data-step="secure">/);
+  assert.match(html, /data-cap="Starting…">Starting…</);
+  const nextLi = html.slice(html.indexOf('data-step="secure"'), html.indexOf("configure"));
+  assert.match(nextLi, /new-step-spin/);
+});
+
+test("newStepsHtml: verify probes render as a checklist under their step (both mounts)", () => {
+  const html = hooks.newStepsHtml([
+    { step: "verify", label: "Testing login & Studio", role: "active", elapsedMs: 5000,
+      caption: "Probing the golden path", probes: ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"] },
+  ]);
+  assert.match(html, /new-step-probes/);
+  assert.match(html, /new-step-probe">verify\.login: 200 in 120ms<\/li>/);
+  assert.match(html, /new-step-probe">verify\.query: 200 in 42ms<\/li>/);
 });
 
 test("consoleTail: empty → a calm caption; lines → escaped rows with timestamps", () => {
@@ -1050,7 +1062,7 @@ test("mountInstanceTimeline: mounts the timeline and a re-render does NOT blank 
   const root = fakeNode();
   hooks.mountInstanceTimeline(root, bp, NOW);
   assert.match(root.innerHTML, /class="bp-timeline"/);
-  assert.match(root.innerHTML, /bp-tl-steps/);
+  assert.match(root.innerHTML, /class="new-steps"/); // the SHARED rows component
   assert.match(root.innerHTML, /bp-console/);
   const first = root.innerHTML;
   assert.ok(first.length > 0);
