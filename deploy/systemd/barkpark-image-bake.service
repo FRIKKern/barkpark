@@ -1,0 +1,15 @@
+# barkpark-image-bake.service — one nightly warm-image bake run
+# (snapshot-management; installed + kept current by deploy/cp-deploy.sh).
+# The script is a no-op when the newest bake already matches origin/main or the
+# drift is box-irrelevant; a real bake (boot + rebuild + snapshot + prune) runs
+# well under the hour bound. Manual run: systemctl start barkpark-image-bake.
+[Unit]
+Description=Barkpark warm-image nightly bake (snapshot-management)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/barkpark-provisioner.env
+ExecStart=/usr/local/bin/barkpark-bake-server-image
+TimeoutStartSec=3600

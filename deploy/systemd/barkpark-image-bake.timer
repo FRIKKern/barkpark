@@ -1,0 +1,13 @@
+# barkpark-image-bake.timer — fire the nightly warm-image bake at ~03:37 UTC
+# (quiet hours; the randomized delay avoids a thundering herd if more hosts ever
+# run this). Persistent=true catches up a missed night after a host reboot.
+[Unit]
+Description=Nightly Barkpark warm-image bake
+
+[Timer]
+OnCalendar=*-*-* 03:37:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
