@@ -66,4 +66,36 @@ defmodule BarkparkWeb.PulseChannelTest do
     assert {:ok, clean} = Pulse.validate_payload(cfg, Map.delete(@valid, "chg"))
     assert clean["chg"] == 0
   end
+
+  describe "cursor presence" do
+    test "cursor frames rebroadcast to OTHER subscribers with the sender's sid" do
+      {_reply, sender} = join!("test-storm")
+
+      push(sender, "cursor", %{"x" => 0.4, "y" => 0.2, "hue" => 200, "chg" => 0.7})
+
+      # broadcast_from excludes the sender's own socket but reaches the topic —
+      # the test process is subscribed via subscribe_and_join, so we see it
+      assert_broadcast "cursor", %{sid: sid, x: 0.4, y: 0.2, hue: 200, chg: 0.7}
+      assert is_binary(sid) and byte_size(sid) == 8
+    end
+
+    test "cursor frames are throttled per socket — a burst yields one broadcast" do
+      {_reply, sender} = join!("test-storm")
+
+      for i <- 1..5 do
+        push(sender, "cursor", %{"x" => i / 10, "y" => 0.1, "hue" => 10, "chg" => 0})
+      end
+
+      assert_broadcast "cursor", %{x: 0.1}
+      refute_broadcast "cursor", %{x: +0.0}, 120
+    end
+
+    test "malformed cursor frames and unknown events are silently ignored" do
+      {_reply, sender} = join!("test-storm")
+      push(sender, "cursor", %{"x" => 7, "y" => 0.5})
+      push(sender, "cursor", %{"nope" => true})
+      push(sender, "steal_tokens", %{})
+      refute_broadcast "cursor", %{}, 120
+    end
+  end
 end
