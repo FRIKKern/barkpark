@@ -33,7 +33,7 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
     total = Pulse.total("test-storm")
 
-    {:ok, _view, html} = live(conn, "/studio/pulse")
+    {:ok, _view, html} = live(conn, "/admin/pulse")
     assert html =~ "Lightning Storm"
     assert html =~ "test-storm"
     assert html =~ Integer.to_string(total)
@@ -41,7 +41,7 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
   end
 
   test "a strike broadcast ticks the total live", %{conn: conn} do
-    {:ok, view, _html} = live(conn, "/studio/pulse")
+    {:ok, view, _html} = live(conn, "/admin/pulse")
 
     BarkparkWeb.Endpoint.broadcast("pulse:test-storm", "strike", %{
       id: 999_999,
@@ -54,7 +54,7 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
   test "the plugin contributes a Structure-desk link to the dashboard" do
     items = Barkpark.Plugins.Pulse.desk_items("production")
-    assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/studio/pulse"))
+    assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/admin/pulse"))
   end
 
   test "the Lightning Storm link actually survives into the built desk tree" do
@@ -62,10 +62,10 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
 
     node =
       Enum.find(tree.items, fn n ->
-        n.type == :plugin_link and n.filter == "/studio/pulse"
+        n.type == :plugin_link and n.filter == "/admin/pulse"
       end)
 
     assert %Barkpark.Structure.Node{title: "Lightning Storm"} = node,
-           "the /studio/pulse link must appear in the desk regardless of schema"
+           "the /admin/pulse link must appear in the desk regardless of schema"
   end
 end

@@ -10,7 +10,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
   topic, so a strike anywhere bumps the number here in real time, with a slow
   periodic refresh for the windowed stats and the TTL sweep.
 
-  Mounted at `/studio/pulse` via the plugin's `register_routes/1` (`:admin`
+  Mounted at `/admin/pulse` via the plugin's `register_routes/1` (`:ops`
   bucket) and linked from the Structure desk via `desk_items/1`. Purely
   observational — no writes, no controls.
   """
