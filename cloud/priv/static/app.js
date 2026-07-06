@@ -6560,6 +6560,44 @@
       .map(function (k) { return k + "=" + boot.env[k]; }).join("\n");
   }
 
+  // The {key, value} pairs the Vercel form needs, in template order — only keys
+  // the bootstrap resolved a value for. Powers the per-field "Copy value" rows.
+  function vercelEnvRows(tpl, boot) {
+    if (!boot || !boot.env) return [];
+    var keys = (tpl && tpl.env_keys && tpl.env_keys.length) ? tpl.env_keys : Object.keys(boot.env);
+    return keys.filter(function (k) { return boot.env[k] != null; })
+      .map(function (k) { return { key: k, value: String(boot.env[k]) }; });
+  }
+
+  // ── Guided FALLBACK (no platform token) ────────────────────────────────────
+  // Without a VERCEL_PLATFORM_TOKEN the one-click claim flow is off, so the user
+  // deploys via vercel.com/new/clone — whose form has EMPTY value fields (Vercel
+  // forbids values in the URL; ours are secret anyway). The old fallback put the
+  // Deploy button ABOVE a copy-all block, so people clicked Deploy first, hit the
+  // empty form, and got lost. This makes it a clear guided step: the values come
+  // FIRST, one "Copy value" button per field (matching Vercel's field-by-field
+  // form), and only THEN the Deploy button — framed so the empty fields are
+  // expected. Values aren't shown inline (they carry the read token); the button
+  // copies the real value. "Copy all as .env" serves Vercel's paste-.env box.
+  function vercelFallbackHtml(tpl, boot, clone, dotenv) {
+    var rows = vercelEnvRows(tpl, boot);
+    var n = rows.length;
+    var rowsHtml = rows.map(function (r) {
+      return '<li class="new-env-row"><span class="mono new-env-key">' + esc(r.key) + "</span>" +
+        '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(r.value) +
+        '" aria-label="Copy the ' + esc(r.key) + ' value">Copy value</button></li>';
+    }).join("");
+    return '<div class="new-vercel-guide">' +
+      '<div class="new-env-head"><span>Deploy to Vercel</span>' +
+        (dotenv ? '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all as .env</button>' : "") +
+      "</div>" +
+      '<p class="new-fineprint dim">Vercel will ask for ' + n + " environment variable" + (n === 1 ? "" : "s") +
+        ". Copy each value here and paste it into the matching field on Vercel — or “Copy all as .env” and paste the whole block. Treat them as secret.</p>" +
+      (rowsHtml ? '<ol class="new-env-rows">' + rowsHtml + "</ol>" : "") +
+      '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy to Vercel</a>' +
+    "</div>";
+  }
+
   // The GitHub "Create repo" affordance (gh-3), shown only for a DEPLOYABLE
   // template. Connected → an input + "Create GitHub repo" (creates it in the
   // user's account, pushes the app, then rewires the Vercel clone to that repo).
@@ -6661,19 +6699,28 @@
     var clone = vercelCloneUrl(tpl, boot);
     var dotenv = envDotenv(tpl, boot);
     var oneClick = vercelClaimHtml((boot && boot.vercel) || null, bp);
-    var envFineprint = oneClick
-      ? "Your Vercel deployment already has these set — keep them for local development. Treat them as secret."
-      : "Vercel prefills the keys; paste these values when prompted. Treat them as secret.";
-    var envBlock = dotenv
-      ? '<div class="new-env"><div class="new-env-head"><span>Environment variables</span>' +
-          '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all</button></div>' +
-          '<pre class="new-env-body">' + esc(dotenv) + "</pre>" +
-          '<p class="new-fineprint dim">' + esc(envFineprint) + "</p></div>"
-      : "";
-    var extra = newGithubHtml(tpl, gh) +
-      (oneClick ||
-        '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>');
-    var tail = envBlock +
+
+    // extra sits in the hero's action row; tail below it. With the platform token
+    // (oneClick) the deploy is a single button + the env block is a keep-these
+    // reference. WITHOUT it, the guided fallback carries the Deploy button AFTER
+    // the values, so people copy first and the empty Vercel form is expected.
+    var extra, vercelBlock;
+    if (oneClick) {
+      extra = newGithubHtml(tpl, gh) + oneClick;
+      vercelBlock = dotenv
+        ? '<div class="new-env"><div class="new-env-head"><span>Environment variables</span>' +
+            '<button class="btn btn-ghost btn-sm" type="button" data-copy="' + esc(dotenv) + '">Copy all</button></div>' +
+            '<pre class="new-env-body">' + esc(dotenv) + "</pre>" +
+            '<p class="new-fineprint dim">Your Vercel deployment already has these set — keep them for local development. Treat them as secret.</p></div>'
+        : "";
+    } else {
+      extra = newGithubHtml(tpl, gh);
+      vercelBlock = dotenv
+        ? vercelFallbackHtml(tpl, boot, clone, dotenv)
+        : '<a class="btn btn-block btn-vercel" id="new-vercel" href="' + esc(clone) + '" target="_blank" rel="noopener">Deploy your site to Vercel</a>';
+    }
+
+    var tail = vercelBlock +
       '<div class="new-golive"><label class="label" for="new-site-url">Once deployed, tell us your site URL</label>' +
         '<div class="new-golive-row"><input class="form-input" id="new-site-url" type="url" placeholder="https://your-site.vercel.app" />' +
         '<button class="btn btn-primary" id="new-site-url-btn" type="button">Wire revalidation</button></div>' +
@@ -7084,6 +7131,8 @@
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
       vercelCloneUrl: vercelCloneUrl,
+      // Guided fallback (no platform token): per-field copy + Deploy.
+      vercelFallbackHtml: vercelFallbackHtml, vercelEnvRows: vercelEnvRows,
       deployIsActive: deployIsActive, deployIsPreClaim: deployIsPreClaim,
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +

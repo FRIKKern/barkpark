@@ -962,6 +962,46 @@ test("vercelClaimLinkHtml: fresh code → claim link with returnUrl back to the 
   assert.match(html, /target="_blank" rel="noopener"/);
 });
 
+// ── Guided Vercel fallback (no platform token): per-field copy + Deploy ──────
+
+test("vercelEnvRows: {key,value} pairs in template order, only resolved values", () => {
+  const tpl = { env_keys: ["BARKPARK_API_URL", "BARKPARK_TOKEN", "MISSING"] };
+  const boot = { env: { BARKPARK_TOKEN: "bp_secret", BARKPARK_API_URL: "https://x", MISSING: null } };
+  const rows = hooks.vercelEnvRows(tpl, boot);
+  assert.deepEqual([...rows.map((r) => r.key)], ["BARKPARK_API_URL", "BARKPARK_TOKEN"]);
+  assert.equal(rows[1].value, "bp_secret");
+});
+
+test("vercelFallbackHtml: values FIRST (per-field copy), then the Deploy button", () => {
+  const tpl = { env_keys: ["BARKPARK_API_URL", "BARKPARK_TOKEN"] };
+  const boot = { env: { BARKPARK_API_URL: "https://acme.barkpark.cloud", BARKPARK_TOKEN: "bp_read_secret" } };
+  const dotenv = hooks.vercelCloneUrl ? "BARKPARK_API_URL=https://acme.barkpark.cloud\nBARKPARK_TOKEN=bp_read_secret" : "";
+  const clone = "https://vercel.com/new/clone?env=BARKPARK_API_URL,BARKPARK_TOKEN";
+  const html = hooks.vercelFallbackHtml(tpl, boot, clone, dotenv);
+
+  // A "Copy value" button per field, carrying the real (secret) value to copy…
+  assert.match(html, /data-copy="https:\/\/acme\.barkpark\.cloud"[^>]*>Copy value/);
+  assert.match(html, /data-copy="bp_read_secret"[^>]*>Copy value/);
+  // …the key labels shown, the values NOT rendered inline as text (only in the
+  // copy attribute) — reduces shoulder-surfing of the read token.
+  assert.match(html, /new-env-key">BARKPARK_TOKEN</);
+  assert.doesNotMatch(html, />bp_read_secret</);
+  // Count in the instruction, "Copy all as .env", and the Deploy button LAST.
+  assert.match(html, /Vercel will ask for 2 environment variables/);
+  assert.match(html, /Copy all as \.env/);
+  const rowsIdx = html.indexOf("new-env-rows");
+  const deployIdx = html.indexOf("id=\"new-vercel\"");
+  assert.ok(rowsIdx > -1 && deployIdx > rowsIdx, "the Deploy button must come AFTER the value rows");
+  assert.match(html, /href="https:\/\/vercel\.com\/new\/clone[^"]*" target="_blank" rel="noopener"/);
+});
+
+test("vercelFallbackHtml: singular copy for one variable", () => {
+  const tpl = { env_keys: ["BARKPARK_TOKEN"] };
+  const html = hooks.vercelFallbackHtml(tpl, { env: { BARKPARK_TOKEN: "x" } }, "https://vercel.com/new/clone", "BARKPARK_TOKEN=x");
+  assert.match(html, /ask for 1 environment variable\b/);
+  assert.doesNotMatch(html, /1 environment variables/);
+});
+
 test("seedPaceLedger: resume renders finished history instantly (no theatre replay)", () => {
   const ledger = {};
   const truth = [paceRow("create", "ok"), paceRow("secure", "ok"), paceRow("configure", "active")];
