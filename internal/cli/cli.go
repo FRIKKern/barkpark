@@ -143,6 +143,16 @@ func Execute(args []string) int {
 		// because it is a full-screen interactive TUI, not a manifest JSON verb.
 		// Distinct from the singular `bp task …` manifest noun (help cross-refs both).
 		return runTasksBoard(out, g, ctx, rest[1:])
+	case "task":
+		// `bp task frontier` — the dispatch surface (wave 13): the maximal set of
+		// ready tasks that can run in parallel without their blast radii colliding.
+		// A built-in because it computes the interference model client-side over the
+		// board snapshot; the manifest `task` noun carries no `frontier` verb, so
+		// this intercept shadows nothing. Every OTHER `task` verb falls through to
+		// the manifest dispatch below (no return here).
+		if verb == "frontier" {
+			return runTaskFrontier(out, g, ctx, tail)
+		}
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])

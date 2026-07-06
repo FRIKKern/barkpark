@@ -74,6 +74,10 @@ func syncDetails(details DetailIndex, tasks []Task) {
 // commits against.
 func bareID(id string) string { return strings.TrimPrefix(id, draftsPrefix) }
 
+// BareID is the exported form of bareID for callers outside the package (the
+// CLI's `bp task frontier` renderer) that need the drafts.-stripped id.
+func BareID(id string) string { return bareID(id) }
+
 // ChildrenOf returns the direct children of docID — every task whose
 // parent_id names it, drafts.-prefix-agnostic on both sides — oldest-inserted
 // first, so a goal's sub-task rail reads in authoring order like the server's
