@@ -937,6 +937,26 @@ func (c *Client) TaskClose(docID, workerID string, observedEpoch int) error {
 // clean close can still flag a blocker that landed on a sibling. On a fenced
 // 409 the reason rides the error (fenced_off / doc_changed_since_claim); notices
 // only accompany a 2xx.
+// TaskCloseRevN is TaskCloseN plus an observed_rev strict-CAS guard. When a
+// task's brief legitimately changed since claim — e.g. the worker marked its
+// own acceptance criteria met — the server's work-digest fence
+// (doc_changed_since_claim) rejects a plain close; passing the freshly-observed
+// rev is the sanctioned bypass (Tasks.close/3 :observed_rev). The worker match
+// still prevents theft.
+func (c *Client) TaskCloseRevN(docID, workerID string, observedEpoch int, observedRev string) ([]TaskNotice, error) {
+	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
+		map[string]interface{}{
+			"worker_id":        workerID,
+			"observed_epoch":   observedEpoch,
+			"observed_rev":     observedRev,
+			"lifecycle_status": "done",
+		})
+	if err != nil {
+		return nil, err
+	}
+	return env.Notices, nil
+}
+
 func (c *Client) TaskCloseN(docID, workerID string, observedEpoch int) ([]TaskNotice, error) {
 	env, err := c.taskPost("/v1/tasks/"+url.PathEscape(docID)+"/close",
 		map[string]interface{}{
