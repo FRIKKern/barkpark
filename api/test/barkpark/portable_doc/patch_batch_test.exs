@@ -134,8 +134,8 @@ defmodule Barkpark.PortableDoc.PatchBatchTest do
 
     defp decls do
       [
-        %{kind: "title", presence: :required, count: {:exactly, 1}, position: {:index, 0}},
-        %{kind: "featured", presence: :optional, count: {:max, 1}, position: {:after, "title"}}
+        %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}]},
+        %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}]}
       ]
     end
 

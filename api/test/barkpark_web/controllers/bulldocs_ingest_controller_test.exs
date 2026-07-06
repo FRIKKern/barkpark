@@ -224,11 +224,21 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
 
     test "op breaking the constraint vocabulary → 422 whose message IS the reason (pdd-t20)",
          %{conn: conn} do
-      # An empty block list births the TEMPLATE (title @0, featured @1, ¶) — a
-      # constraint-VALID paper, so the op-layer veto is what fires here, not
-      # the D12 legacy pass-through the paragraph-only setup paper would take.
+      # A doctrine paper that already carries its one featured (title @0, featured
+      # @1) is constraint-VALID, so the op-layer veto is what fires here — NOT the
+      # D12 legacy pass-through. Under D11 the featured is no longer auto-seeded, so
+      # it is supplied explicitly; appending a SECOND featured breaks max-1.
       slug = "ops-constraint-#{System.unique_integer([:positive])}"
-      {:ok, _} = Content.upsert_paper(%{slug: slug, blocks: []})
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: slug,
+          blocks: [
+            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
+              "locked" => true, "text" => "T"},
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+          ]
+        })
 
       conn =
         auth_post(conn, slug, %{
@@ -241,10 +251,10 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["op"] == "append-block"
 
       assert resp["error"]["message"] ==
-               "constraint: at most 1 block of \"featured\" allowed, found 2"
+               "at most 1 \"featured\" block allowed, found 2"
 
-      # Calm veto: the paper is untouched (still title + featured + paragraph).
-      assert length(pc(Content.get_paper(slug), "blocks")) == 3
+      # Calm veto: the paper is untouched (still just title + featured).
+      assert length(pc(Content.get_paper(slug), "blocks")) == 2
     end
   end
 

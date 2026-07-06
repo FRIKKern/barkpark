@@ -42,7 +42,6 @@ defmodule Barkpark.Content.Papers.Template do
   alias Barkpark.PortableDoc.Constraints
 
   @title_role "title"
-  @featured_role "featured"
 
   @doc """
   The paper's structural declarations, in the generic constraint vocabulary. The

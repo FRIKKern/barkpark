@@ -250,11 +250,22 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
 
     test "a proposal breaking the constraint vocabulary rolls the WHOLE write back (pdd-t20)",
          %{conn: conn} do
-      # A TEMPLATE paper (empty block list births title @0 + featured @1 + ¶) is
-      # constraint-VALID, so the op-layer backstop is live on its drafts twin —
-      # an insert-only proposal appending a SECOND featured breaks max-1.
+      # A doctrine paper carrying its one featured (title @0 + featured @1) is
+      # constraint-VALID, so the op-layer backstop is live on its drafts twin — an
+      # insert-only proposal appending a SECOND featured breaks max-1. Under D11 the
+      # featured is no longer auto-seeded, so it is supplied explicitly.
       slug = "lvw-t4-constraint-paper"
-      {:ok, _} = Content.upsert_paper(%{"slug" => slug, "blocks" => []})
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          "slug" => slug,
+          "blocks" => [
+            %{"id" => "tpl-title", "type" => "heading", "level" => 1, "role" => "title",
+              "locked" => true, "text" => "T"},
+            %{"id" => "tpl-featured", "type" => "image", "role" => "featured", "locked" => true}
+          ]
+        })
+
       {_, source} = seed!("lvw-t4-constraint-helper", "lvw-t4-constraint-kpi")
 
       body =
@@ -265,7 +276,7 @@ defmodule BarkparkWeb.BulldocsProposalsTest do
 
       resp = authed(conn) |> post(propose_path(slug), body) |> json_response(422)
       assert resp["error"]["code"] == "constraint"
-      assert resp["error"]["message"] =~ "at most 1 block of \"featured\""
+      assert resp["error"]["message"] =~ "at most 1 \"featured\" block"
 
       # Fail closed: the transaction rolled back the draft seed too.
       assert Repo.all(from d in Document, where: d.doc_id == ^"drafts.#{slug}") == []

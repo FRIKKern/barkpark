@@ -368,8 +368,8 @@ defmodule Barkpark.PortableDoc.PatchTest do
     # title required exactly-1 @0; featured optional max-1 after title.
     defp title_featured_decls do
       [
-        %{kind: "title", presence: :required, count: {:exactly, 1}, position: {:index, 0}},
-        %{kind: "featured", presence: :optional, count: {:max, 1}, position: {:after, "title"}}
+        %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}]},
+        %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}]}
       ]
     end
 
@@ -406,7 +406,7 @@ defmodule Barkpark.PortableDoc.PatchTest do
                )
 
       # Copy pin: the message is the envelope/flash text external producers see.
-      assert msg == "constraint: at most 1 block of \"featured\" allowed, found 2"
+      assert msg == "at most 1 \"featured\" block allowed, found 2"
     end
 
     test "remove-block dropping below a synthetic min-2 is vetoed like a locked op" do
