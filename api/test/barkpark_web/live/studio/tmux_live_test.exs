@@ -64,6 +64,7 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
 
   defp enable_fake_console do
     prev = Application.get_env(:barkpark, :tmux_console)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
 
     Application.put_env(:barkpark, :tmux_console,
       enabled: true,
@@ -73,6 +74,9 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
       command: {"cat", []}
     )
 
+    # enabled? hard-refuses public-demo hosts; the test env defaults it ON, so
+    # turn it off to exercise the enabled path.
+    Application.put_env(:barkpark, :public_demo_studio, false)
     Application.put_env(:barkpark, :fake_pty_recorder, self())
 
     on_exit(fn ->
@@ -80,6 +84,7 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
         do: Application.put_env(:barkpark, :tmux_console, prev),
         else: Application.delete_env(:barkpark, :tmux_console)
 
+      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
       Application.delete_env(:barkpark, :fake_pty_recorder)
     end)
   end
@@ -102,6 +107,17 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
     test "enabled but token lacks admin → redirects", %{conn: conn} do
       enable_fake_console()
       conn = init_test_session(conn, %{"api_token" => @junior_token})
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/tmux")
+    end
+
+    test "public-demo host hard-refuses even an admin", %{conn: conn} do
+      enable_fake_console()
+      # a host that serves Studio to anonymous visitors must never expose a shell
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      refute BarkparkWeb.Studio.TmuxConsole.enabled?()
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/tmux")
     end
   end

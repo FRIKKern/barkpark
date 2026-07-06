@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.Studio.TmuxLive do
   @moduledoc """
-  Dev-only Studio **tmux console** at `/studio/tmux`.
+  Studio **tmux console** at `/studio/tmux` — on by default on every Studio,
+  admin-only.
 
   Renders an `xterm.js` terminal (the `TmuxTerminal` JS hook) wired over the
   LiveView channel to a real PTY running `tmux new-session -A -s
@@ -9,10 +10,10 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   raw terminal bytes survive the JSON transport intact.
 
   Gating lives in `BarkparkWeb.Studio.TmuxConsole` — this mount redirects out
-  unless `TmuxConsole.enabled?/0` (dev-only dep + explicit config flag), and
-  the `:admin_studio` live_session carrying the route already applies the
-  admin `on_mount` gate. See that module's `@moduledoc` for the full
-  fail-closed contract.
+  unless `TmuxConsole.enabled?/0` (which hard-refuses public-demo hosts and
+  honors the per-host opt-out), and the `:admin_studio` live_session carrying
+  the route applies the admin `on_mount` gate. See that module's `@moduledoc`
+  for the full contract.
 
   The PTY is spawned lazily on the hook's first `term-init` so it is created
   at the browser's real geometry. tmux persistence means a LiveView reconnect
@@ -125,7 +126,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
           session: <%= @session_name %>
         </span>
         <span class="text-xs text-dim" style="margin-left: auto;">
-          A live shell on this host — admin + dev only.
+          A live shell on this host — admins only.
         </span>
       </div>
 

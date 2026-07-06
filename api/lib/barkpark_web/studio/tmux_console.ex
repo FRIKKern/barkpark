@@ -1,25 +1,25 @@
 defmodule BarkparkWeb.Studio.TmuxConsole do
   @moduledoc """
-  Gate + PTY seam for the dev-only Studio **tmux console** (`/studio/tmux`).
+  Gate + PTY seam for the Studio **tmux console** (`/studio/tmux`).
 
-  A browser terminal attached to a real `tmux` session on the host Studio
-  runs on — by construction an arbitrary-code-execution surface, so it is
-  gated on THREE independent fail-closed conditions:
+  A browser terminal attached to a real `tmux` session on the host Studio runs
+  on — by construction an arbitrary-code-execution surface. It is **ON by
+  default on every Studio**, held safe by three controls:
 
-    1. **The `expty` dep is `only: [:dev]`.** In prod/test builds the
-       forkpty backend is not compiled at all — `backend/0` is `nil`,
-       `enabled?/0` is false, the nav tab is hidden and the LiveView mount
-       redirects. This is the structural "never reachable on prod" guarantee.
-    2. **An explicit config flag** (`config :barkpark, :tmux_console,
-       enabled: true`) — set ONLY in `config/dev.exs`. There is deliberately
-       no `runtime.exs` env-var that can flip it on in prod.
-    3. **The admin `on_mount` gate** on the `:admin_studio` live_session
-       carrying the route (defence in depth beyond dev-auto-admin).
+    1. **Admin-only.** The `/studio/tmux` route rides the `:admin_studio`
+       live_session, so its `on_mount` requires an admin token / account.
+       Reaching the shell requires an admin credential ON THAT HOST. The nav
+       tab is likewise shown only to admins (`shares_admin?`).
+    2. **Public-demo hard refuse.** `enabled?/0` returns false whenever
+       `public_demo_studio` is on — a host that opens Studio to anonymous
+       visitors must NEVER expose a shell. This is fail-closed and not
+       overridable by the enable flag.
+    3. **Per-host opt-out.** `BARKPARK_TMUX_CONSOLE=0` (runtime.exs) disables
+       it on a given host; `enabled?/0` also requires a compiled PTY backend.
 
-  The PTY backend module is read from config and invoked via `apply/3` — there
-  is intentionally NO static `ExPTY.*` reference anywhere in this tree, so
-  `mix compile --warnings-as-errors` stays green in the prod/test envs where
-  the dep is absent. Tests inject a fake backend the same way.
+  The PTY backend module is read from config and invoked via `apply/3` (no
+  static `ExPTY.*` reference), so the seam stays swappable — tests inject a
+  fake backend the same way.
   """
 
   require Logger
@@ -31,15 +31,25 @@ defmodule BarkparkWeb.Studio.TmuxConsole do
   @max_dim 1000
 
   @doc """
-  True only when the console is both configured on AND a PTY backend is
-  compiled in. Both the nav tab and the LiveView mount gate on this.
+  Whether the console may run on this host. ON by default; requires a compiled
+  PTY backend and the enable flag (default on, opt out via env), and is
+  HARD-REFUSED whenever anonymous Studio is on (`public_demo_studio`). Both the
+  nav tab (admin-only) and the LiveView mount gate on this.
   """
   @spec enabled?() :: boolean()
   def enabled? do
-    Keyword.get(config(), :enabled, false) == true and backend() != nil
+    backend() != nil and flag_on?() and not public_demo?()
   end
 
-  @doc "The configured PTY backend module (e.g. `ExPTY`), or nil in prod/test."
+  # Enable flag defaults ON; only an explicit `enabled: false` (base config or
+  # BARKPARK_TMUX_CONSOLE=0 via runtime.exs) turns it off.
+  defp flag_on?, do: Keyword.get(config(), :enabled, true) != false
+
+  # Fail-closed: a host that serves Studio to anonymous visitors must never
+  # expose a shell, regardless of the enable flag.
+  defp public_demo?, do: Application.get_env(:barkpark, :public_demo_studio, false) == true
+
+  @doc "The configured PTY backend module (e.g. `ExPTY`), or nil if none."
   @spec backend() :: module() | nil
   def backend, do: Keyword.get(config(), :backend)
 
