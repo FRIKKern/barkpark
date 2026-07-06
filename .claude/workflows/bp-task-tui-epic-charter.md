@@ -1348,3 +1348,40 @@ isn't there.
 board vs paper-chip clash), the TUI docs slice, real blocker-ref rendering (blocked rows show `!` but
 not the causing task), and the §5/§6 hygiene-enforcement tasks — now the highest-leverage TUI-epic
 work, since the board's correctness is bounded by queue hygiene.
+
+### Wave 12 2026-07-06 (SHIPPED + integration-probed — the activity band evolved: WHO + INTENT, D58–D63)
+
+Final branch `loop-epic/tui12-activity-band-p` (2008054b) probed clean onto `origin/main` (184f15cb) in
+a throwaway worktree — fast-forward-clean merge, no conflicts. **Gates:** `internal/taskboard` full suite
+GREEN including `-race` (4.4s); `go vet` clean; `TestGoldenGlyphBudget` + the `↩` allowlist entry pass;
+`docs-anchors-check` PASS (12 pre-existing warnings) and `check-doc-budgets` PASS (card count exactly 7).
+The 8 new wave-12 guards all pass: `TestNowCardIsAgentFirst`/`TestNowAgentRowForDormantEpicClaim` (WHO
+grammar), `TestNextResumableFirst`/`TestNextReadyHeadP0First`/`TestNextResumeClaimBypassesGate` (INTENT +
+server-arbitrated resumable claim), `TestNextCursorParity` + the perfecter's `TestPinnedRowParityUnderHeightPressure`
+(the cursor-parity fix at heights 13–16), `TestActivityBandCollapsesWhenIdle` + `TestRenderEmptyBoardIsHonest`.
+The 4 `-race` cgo build failures (cli/hetzner/cmd) are a **pre-existing environment toolchain issue** (clang
+rejects `-E`; reproduces on the untouched base, `CGO_ENABLED=0` builds clean) — wave 12 touches only
+`internal/taskboard`.
+
+**REQUIRED live read-only dump at 56 & 72 (via `-tags liveprobe`, guerrilla, never mutating):** 321 tasks,
+9 epics, 82 ready. The band read HONESTLY: `now=0` in flight at this moment (the 177 "live-claims" are DONE
+tasks retaining a worker — correctly excluded by the NOW in_progress guard), so the WHO band collapsed to
+nothing and INTENT took over — `NEXT` showed the P0-first ready head (User-principal seam · Cloud console ·
+Sheets-parity, all P0) with the honest `+79 ready` tail, dim subordinate label, NO `READY TO CLAIM` wall.
+Every line width-safe at 56/72. **The one honest gap:** because the live queue had zero in_progress claims
+and no fresh resumable in the 100-event window at probe time, the WHO agent-rows and the `↩ resume` path
+were NOT exercised against live data this run — they are covered only by fixtures/goldens (which do carry
+claims + a lease_expired resumable). The band is thus proven truthful and non-decorative (it manufactures
+nothing when there is no activity), but a WHO-live-verification with a real in_progress claim remains a
+fixture-only assurance until the next agent wave populates the queue.
+
+**Verdict: SHIP.** The band delivers the wish ("show all activity going on with the agents") as far as truth
+allows: WHO when agents are live, INTENT (capped, honest) when they are not — one eye-catch, decisively not
+a rebirth of the killed READY wall. The perfecter's cursor-parity fix is real, guarded, and in the merge.
+
+**Next wave inherits (unchanged + one added):** the RESERVED pdrender/walker glyph-unify slice (D43), the
+TUI docs slice, real blocker-ref rendering, the §5/§6 hygiene arm — PLUS the richer-intent enrichments the
+task system could carry but doesn't yet surface: a resumable's `previous_worker` on its NEXT row (noted
+reserved), assignee-planned (claimed-but-not-started) tasks as a distinct WHO-adjacent signal, and
+"deps about to unblock" (a blocked task whose blocker just closed) — all server-data-permitting follow-ups,
+not board bugs.
