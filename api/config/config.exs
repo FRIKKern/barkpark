@@ -63,6 +63,12 @@ config :barkpark, :preview,
 
 config :barkpark, :media_signing_secret, "dev-media-signing-secret-change-in-prod"
 
+# Anonymous browsers entering the Default workspace's STUDIO (the public
+# demo / no-login dev posture) — FAIL-CLOSED base. dev.exs/test.exs turn it
+# on; prod opts in via BARKPARK_PUBLIC_DEMO_STUDIO=1 (runtime.exs). The
+# public PAPER READER is unaffected (published papers stay world-readable).
+config :barkpark, :public_demo_studio, false
+
 config :barkpark, :media_cdn,
   base_url: nil,
   invalidation: [adapter: :noop]

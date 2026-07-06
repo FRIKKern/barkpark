@@ -30,6 +30,16 @@ if config_env() == :prod and System.get_env("BARKPARK_PAPER_CANVAS") in [nil, ""
   System.put_env("BARKPARK_PAPER_CANVAS", "1")
 end
 
+# studio-anonymous-default-lockdown: production Studio requires a login by
+# default — the anonymous Default-workspace demo posture is an explicit
+# opt-in for self-hosters who WANT a public demo box. Published papers stay
+# world-readable regardless (the reader surface doesn't carry this flag).
+if config_env() == :prod do
+  config :barkpark,
+         :public_demo_studio,
+         System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
+end
+
 config :barkpark, BarkparkWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 

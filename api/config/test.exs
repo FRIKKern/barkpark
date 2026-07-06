@@ -97,3 +97,8 @@ config :barkpark, :pulse_channels, %{
     "daily_cap" => 100_000
   }
 }
+
+# The anonymous-Default Studio allowance stays ON in test — the P3/P4
+# contract tests pin the demo posture; the lockdown tests flip it off
+# per-test (async: false) to pin the prod fail-closed behavior.
+config :barkpark, :public_demo_studio, true

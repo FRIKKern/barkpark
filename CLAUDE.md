@@ -54,7 +54,7 @@ Smoke test after any deploy:
 
 ```bash
 curl -s http://89.167.28.206/api/schemas | head -20    # API works
-curl -sL http://89.167.28.206/studio | grep "pane-layout" # Studio renders (302s to the scoped URL)
+curl -sL http://89.167.28.206/studio | grep -E "pane-layout|Sign in" # Studio gated (anonymous → /login unless BARKPARK_PUBLIC_DEMO_STUDIO)
 curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Documents
 ```
 
