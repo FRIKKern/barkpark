@@ -32,27 +32,38 @@ defmodule Barkpark.Seeds.Demo do
         icon: "📄",
         visibility: "public",
         dataset: dataset,
+        # surface (pd-doctrine t7, rule 4): title / excerpt / body / featured image
+        # read as the article → "body"; slug / status / dates / byline relation /
+        # trade flags live in the WP-style right rail → "sidebar".
         fields: [
-          %{name: "title", title: "Title", type: "string"},
-          %{name: "slug", title: "Slug", type: "slug"},
+          %{name: "title", title: "Title", type: "string", surface: "body"},
+          %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
           %{
             name: "status",
             title: "Status",
             type: "select",
-            options: ["draft", "published", "archived"]
+            options: ["draft", "published", "archived"],
+            surface: "sidebar"
           },
-          %{name: "publishedAt", title: "Published At", type: "datetime"},
-          %{name: "excerpt", title: "Excerpt", type: "text", rows: 3},
-          %{name: "body", title: "Body", type: "richText"},
-          %{name: "featuredImage", title: "Featured Image", type: "image"},
+          %{name: "publishedAt", title: "Published At", type: "datetime", surface: "sidebar"},
+          %{name: "excerpt", title: "Excerpt", type: "text", rows: 3, surface: "body"},
+          %{name: "body", title: "Body", type: "richText", surface: "body"},
+          %{name: "featuredImage", title: "Featured Image", type: "image", surface: "body"},
           %{
             name: "featuredAsset",
             title: "Featured Asset",
             type: "reference",
-            refType: "mediaAsset"
+            refType: "mediaAsset",
+            surface: "body"
           },
-          %{name: "author", title: "Author", type: "reference", refType: "author"},
-          %{name: "featured", title: "Featured Post", type: "boolean"}
+          %{
+            name: "author",
+            title: "Author",
+            type: "reference",
+            refType: "author",
+            surface: "sidebar"
+          },
+          %{name: "featured", title: "Featured Post", type: "boolean", surface: "sidebar"}
         ],
         # Explicit Expectation (Exp-P1, barkpark-u7q5). SOFT layout: title → slug →
         # hero → body free-content region. `featuredImage` is the post's hero field
@@ -80,14 +91,28 @@ defmodule Barkpark.Seeds.Demo do
         icon: "📑",
         visibility: "public",
         dataset: dataset,
+        # surface (t7): title / page content / hero read as the article; slug and
+        # SEO metadata live in the sidebar.
         fields: [
-          %{name: "title", title: "Title", type: "string"},
-          %{name: "slug", title: "Slug", type: "slug"},
-          %{name: "body", title: "Page Content", type: "richText"},
-          %{name: "seoTitle", title: "SEO Title", type: "string"},
-          %{name: "seoDescription", title: "SEO Description", type: "text", rows: 2},
-          %{name: "heroImage", title: "Hero Image", type: "image"},
-          %{name: "heroAsset", title: "Hero Asset", type: "reference", refType: "mediaAsset"}
+          %{name: "title", title: "Title", type: "string", surface: "body"},
+          %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
+          %{name: "body", title: "Page Content", type: "richText", surface: "body"},
+          %{name: "seoTitle", title: "SEO Title", type: "string", surface: "sidebar"},
+          %{
+            name: "seoDescription",
+            title: "SEO Description",
+            type: "text",
+            rows: 2,
+            surface: "sidebar"
+          },
+          %{name: "heroImage", title: "Hero Image", type: "image", surface: "body"},
+          %{
+            name: "heroAsset",
+            title: "Hero Asset",
+            type: "reference",
+            refType: "mediaAsset",
+            surface: "body"
+          }
         ]
       },
       %{
@@ -96,17 +121,20 @@ defmodule Barkpark.Seeds.Demo do
         icon: "👤",
         visibility: "public",
         dataset: dataset,
+        # surface (t7): name / bio / avatar are the author's article content; slug,
+        # contact email, and role classification live in the sidebar.
         fields: [
-          %{name: "name", title: "Name", type: "string"},
-          %{name: "slug", title: "Slug", type: "slug"},
-          %{name: "bio", title: "Bio", type: "text", rows: 4},
-          %{name: "avatar", title: "Avatar", type: "image"},
-          %{name: "email", title: "Email", type: "string"},
+          %{name: "name", title: "Name", type: "string", surface: "body"},
+          %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
+          %{name: "bio", title: "Bio", type: "text", rows: 4, surface: "body"},
+          %{name: "avatar", title: "Avatar", type: "image", surface: "body"},
+          %{name: "email", title: "Email", type: "string", surface: "sidebar"},
           %{
             name: "role",
             title: "Role",
             type: "select",
-            options: ["editor", "writer", "contributor", "admin"]
+            options: ["editor", "writer", "contributor", "admin"],
+            surface: "sidebar"
           }
         ]
       },
@@ -116,11 +144,13 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🏷",
         visibility: "public",
         dataset: dataset,
+        # surface (t7): title / description read as article; slug and the color
+        # swatch are sidebar metadata.
         fields: [
-          %{name: "title", title: "Title", type: "string"},
-          %{name: "slug", title: "Slug", type: "slug"},
-          %{name: "description", title: "Description", type: "text", rows: 2},
-          %{name: "color", title: "Color", type: "color"}
+          %{name: "title", title: "Title", type: "string", surface: "body"},
+          %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
+          %{name: "description", title: "Description", type: "text", rows: 2, surface: "body"},
+          %{name: "color", title: "Color", type: "color", surface: "sidebar"}
         ]
       },
       %{
@@ -129,20 +159,23 @@ defmodule Barkpark.Seeds.Demo do
         icon: "💼",
         visibility: "public",
         dataset: dataset,
+        # surface (t7): title / description / cover image read as article; slug,
+        # client + status + start date + featured flag are trade metadata → sidebar.
         fields: [
-          %{name: "title", title: "Title", type: "string"},
-          %{name: "slug", title: "Slug", type: "slug"},
-          %{name: "client", title: "Client", type: "string"},
+          %{name: "title", title: "Title", type: "string", surface: "body"},
+          %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
+          %{name: "client", title: "Client", type: "string", surface: "sidebar"},
           %{
             name: "status",
             title: "Status",
             type: "select",
-            options: ["planning", "active", "completed", "archived"]
+            options: ["planning", "active", "completed", "archived"],
+            surface: "sidebar"
           },
-          %{name: "description", title: "Description", type: "richText"},
-          %{name: "coverImage", title: "Cover Image", type: "image"},
-          %{name: "startDate", title: "Start Date", type: "datetime"},
-          %{name: "featured", title: "Featured", type: "boolean"}
+          %{name: "description", title: "Description", type: "richText", surface: "body"},
+          %{name: "coverImage", title: "Cover Image", type: "image", surface: "body"},
+          %{name: "startDate", title: "Start Date", type: "datetime", surface: "sidebar"},
+          %{name: "featured", title: "Featured", type: "boolean", surface: "sidebar"}
         ]
       },
       %{
@@ -151,11 +184,19 @@ defmodule Barkpark.Seeds.Demo do
         icon: "⚙",
         visibility: "private",
         dataset: dataset,
+        # surface (t7): siteSettings is a config singleton — no article body, so
+        # every field is settings → sidebar.
         fields: [
-          %{name: "title", title: "Site Title", type: "string"},
-          %{name: "description", title: "Site Description", type: "text", rows: 2},
-          %{name: "logo", title: "Logo", type: "image"},
-          %{name: "analyticsId", title: "Analytics ID", type: "string"}
+          %{name: "title", title: "Site Title", type: "string", surface: "sidebar"},
+          %{
+            name: "description",
+            title: "Site Description",
+            type: "text",
+            rows: 2,
+            surface: "sidebar"
+          },
+          %{name: "logo", title: "Logo", type: "image", surface: "sidebar"},
+          %{name: "analyticsId", title: "Analytics ID", type: "string", surface: "sidebar"}
         ]
       },
       %{
@@ -164,8 +205,10 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🧭",
         visibility: "private",
         dataset: dataset,
+        # surface (t7): navigation is a config singleton — its menu-title label is
+        # settings → sidebar.
         fields: [
-          %{name: "title", title: "Menu Title", type: "string"}
+          %{name: "title", title: "Menu Title", type: "string", surface: "sidebar"}
         ]
       },
       %{
@@ -174,10 +217,12 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🎨",
         visibility: "private",
         dataset: dataset,
+        # surface (t7): colors is a config singleton — every swatch is settings →
+        # sidebar.
         fields: [
-          %{name: "primary", title: "Primary", type: "color"},
-          %{name: "secondary", title: "Secondary", type: "color"},
-          %{name: "accent", title: "Accent", type: "color"}
+          %{name: "primary", title: "Primary", type: "color", surface: "sidebar"},
+          %{name: "secondary", title: "Secondary", type: "color", surface: "sidebar"},
+          %{name: "accent", title: "Accent", type: "color", surface: "sidebar"}
         ]
       }
     ]

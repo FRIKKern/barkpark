@@ -62,13 +62,19 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 
 `plugin:<name>:<field>` — reserved for plugin-private fields. `parse/2` rejects these names by default; a plugin module load passes its own name as `:plugin` to opt in. `SchemaDefinition.plugin_reserved_prefix/0` returns `"plugin:"`.
 
+## The sidebar test — per-field `surface` (pd-doctrine t7, rule 4)
+
+Each field MAY carry `surface: "body" | "sidebar"` — the schema-fact codification of the PortableDoc doctrine's rule 4 ("does it read as part of the article?"). `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies/labels, relations/references, dates, trade metadata, settings (the WordPress-style right rail). Parsed by `parse_field/2` onto `Field.surface`; recurses into `composite` subfields and `arrayOf` `of` descriptors. Valid values are EXACTLY those two strings; **absent ⇒ `nil` (unclassified)**, byte-compatible with every existing schema (D3-additive — a schema without `surface` parses and round-trips unchanged, and `surface` never flips `flat?/1`). Any other value ⇒ `{:error, :field_surface_invalid}`. Pure metadata: no editor consumes it this wave (D1 — sidebar-v2 reads it later).
+
+**Audit boundary:** the paper-canvas frame is stamped — the 8 seed schemas (`seeds/demo.ex`) + the `paper` schema (`paper.json`). Non-paper editors (task/ticket Studio forms, sheet grid, ONIX book form, FRT game types) render outside the article/sidebar frame, so their fields stay `surface: nil` (valid, unclassified) pending owner review / sidebar-v2 adoption.
+
 ## TUI constraint (D12)
 
 Go TUI is **read-only** for plugin schemas in v1. Documents whose schema declares any v2 type render as JSON dumps in the TUI. TUI editor menus skip `composite / arrayOf / codelist / localizedText` fields entirely — no inline form. Studio (`/studio`) is the editing surface for v2 schemas.
 
 ## Code anchors
 
-- `api/lib/barkpark/content/schema_definition.ex` — `parse/2`, `flat?/1`, `plugin_custom_prefix/0`, `plugin_reserved_prefix/0`
+- `api/lib/barkpark/content/schema_definition.ex` — `parse/2`, `flat?/1`, `plugin_custom_prefix/0`, `plugin_reserved_prefix/0`; `Field.surface` + `parse_field_surface/1` (the sidebar test)
 - `api/lib/barkpark/content/validation.ex` — `validate/3`, flat_mode dispatch
 - `api/lib/barkpark/content/validation/rules.ex` — `Rules.compile/1`
 - `api/lib/barkpark/content/codelists.ex` — `register/3`, `get/2`, `lookup/3`, `tree/2`
