@@ -97,10 +97,13 @@ exists. Slice branch: `loop-epic/t11-mainline-gap-audit-the-three-pre-loa-2`.
 **The three pre-loaded debt gaps — FIXED in the t11 slice** (gated: paper-editor `npm test` +
 `view_edit_parity_test.exs` + `studio_view_task_resolve_test.exs`):
 - **Source-mode locked-title displacement** → `clampLockedPrefix` (`canvas/source-realign.js`),
-  wired into `_exitSourceMode` (`canvas/index.js`). The source→rich exit now reconstructs the
-  locked template prefix VERBATIM client-side (the felt half of D4, twin of `locks.js`), so a
-  delete/move/re-text of the locked title in markdown source no longer diverges the client from
-  the server veto (`{:locked_block, id, op}`). Additive (D3). Test: `src/__source_locked.test.mjs`.
+  wired into `_exitSourceMode` (`canvas/index.js`). The source→rich exit pins the locked prefix's
+  PLACEMENT + template identity client-side (the felt half of D4, twin of `locks.js`), so a
+  delete/move/retype of the locked title in markdown source no longer diverges the client from
+  the server veto (`{:locked_block, id, op}`). Locks are PLACEMENT locks (rule 2): a same-type
+  CONTENT edit (a retitle) rides through as the patch-block the server accepts — one surface,
+  same behavior as a rich-mode retitle; displaced/id-squatting user content is re-minted, never
+  dropped. Additive (D3). Test: `src/__source_locked.test.mjs` (11 checks).
 - **View-mode task blocks unresolved** → `paper_stream_items/3` (`shared/paper.ex`) now routes
   through `Content.Papers.resolve_tasks_in_blocks/2` — the SAME `/papers` reader producer
   (rule 3), session-tenant-scoped, fail-closed, DISPLAY-ONLY (D5: the save baseline stays the
