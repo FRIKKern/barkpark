@@ -355,14 +355,14 @@ func defaultWarmRefill(ctx context.Context, seams Seams) {
 	// pool only ever holds boxes running today's code.
 	if ferr := freshenWarmBox(rctx, seams, host); ferr != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill freshen %s failed (tearing box down — a stale box must not enter the pool): %v\n", host.Name, ferr)
-		if derr := seams.Provider.Delete(rctx, host.Name); derr != nil {
+		if derr := teardownWarmBox(seams, host.Name); derr != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill stale-box %s delete failed: %v\n", host.Name, derr)
 		}
 		return
 	}
 	if err := seams.WarmClient.Register(rctx, WarmServer{Name: host.Name, IP: host.IP}); err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill register %s failed (tearing box down): %v\n", host.Name, err)
-		if derr := seams.Provider.Delete(rctx, host.Name); derr != nil {
+		if derr := teardownWarmBox(seams, host.Name); derr != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill orphan %s delete failed: %v\n", host.Name, derr)
 		}
 	}
@@ -459,6 +459,19 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 	return created, deleted, nil
 }
 
+// teardownWarmBox deletes a warm box on a FRESH bounded context — NEVER the
+// caller's. The failure-teardown paths run exactly when things are going wrong,
+// including a worker shutdown cancelling the grow mid-freshen (the path that
+// leaked warm-dbebde03: `Delete(ctx)` inherited the dying context and failed
+// with "context canceled"). An unregistered warm box has NO other recovery —
+// the orphan sweep deliberately skips barkpark-warm and no claim-store row
+// points at it — so a failed teardown here is silent, unbounded spend.
+func teardownWarmBox(seams Seams, name string) error {
+	dctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	return seams.Provider.Delete(dctx, name)
+}
+
 // growWarmBox creates + freshens + registers ONE pool box, tearing the box down
 // on any failure so nothing billable leaks untracked. Shared by the reconcile
 // grow loop and the generation recycle.
@@ -471,13 +484,13 @@ func growWarmBox(ctx context.Context, seams Seams) error {
 	// FAIL-CLOSED — tear a box that can't be brought current down rather than
 	// register a stale box.
 	if ferr := freshenWarmBox(ctx, seams, host); ferr != nil {
-		if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
+		if derr := teardownWarmBox(seams, host.Name); derr != nil {
 			return fmt.Errorf("freshen %s (stale-box delete also failed: %v): %v", host.Name, derr, ferr)
 		}
 		return fmt.Errorf("freshen %s (box torn down — stale box kept out of pool): %v", host.Name, ferr)
 	}
 	if rerr := seams.WarmClient.Register(ctx, WarmServer{Name: host.Name, IP: host.IP}); rerr != nil {
-		if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
+		if derr := teardownWarmBox(seams, host.Name); derr != nil {
 			return fmt.Errorf("register %s (orphan delete also failed: %v): %v", host.Name, derr, rerr)
 		}
 		return fmt.Errorf("register %s (box torn down): %v", host.Name, rerr)
