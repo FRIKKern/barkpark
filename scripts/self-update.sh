@@ -4,7 +4,8 @@
 # endpoint POST /v1/admin/self-update (Barkpark.SelfUpdate.Runner).
 #
 #   fetch → fast-forward to origin/$BARKPARK_UPSTREAM_BRANCH (default main)
-#   → scripts/deploy-rebuild.sh (build-aside, swap, restart)
+#   → scripts/deploy-rebuild.sh (simple boxes: build-aside, swap, restart)
+#     OR deploy/instance-deploy.sh (blue/green slot boxes with a .slots marker)
 #
 # The merge is deliberately --ff-only: a diverged local checkout REFUSES the
 # update (exit 2) rather than rewriting anything — resolve by hand.
@@ -49,4 +50,17 @@ git -c core.hooksPath=/dev/null merge --ff-only "origin/$BRANCH" || {
 }
 
 echo "[self-update] merge done — rebuilding..."
+# Blue/green slot boxes (an api-root `.slots` marker — guerrilla-style) are
+# owned by deploy/instance-deploy.sh; deploy-rebuild.sh REFUSES them (exit 3,
+# "each caller guards on .slots"). self-update.sh is that caller: route slot
+# boxes to their zero-downtime deployer so the admin Update button actually
+# applies instead of dead-ending. instance-deploy.sh does its own locked pull
+# + idle-slot build + health-gated Caddy flip; the ff-merge and forced tag
+# fetch above already advanced HEAD and refreshed BuildInfo's tags, so its
+# pull coalesces to a no-op and the rebuilt slot carries the right version.
+if [ -d .slots ]; then
+  echo "[self-update] blue/green slot box — delegating to deploy/instance-deploy.sh"
+  exec bash deploy/instance-deploy.sh
+fi
+
 exec bash scripts/deploy-rebuild.sh
