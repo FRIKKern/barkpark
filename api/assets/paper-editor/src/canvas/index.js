@@ -100,6 +100,12 @@ import { Field } from "./field-node.js";
 // embed reference) with contentEditable false, are selectable so Backspace deletes the
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
+// article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
+// canvas PROSE nodes (NO node-view — chrome-free, the reader emits one styled
+// element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
+// PM derives the contentDOM from the content hole; getJSON round-trips the styled
+// element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
+import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -591,6 +597,18 @@ class BpPaperCanvas extends HTMLElement {
         // ZERO value/content ops, participates only in structural ops. bpFleet parses
         // ONLY its own <div data-bp-fleet='true'>.
         Fleet,
+        // Article-chrome ROLE prose nodes (eyebrow / byline / ingress / pullquote).
+        // Registers the four node types so runToTiptap's { type:"eyebrow"|… } nodes
+        // mount as styled prose (a `<p class="bp-role-*">` matching the reader) and
+        // getJSON() round-trips them (an unregistered type is dropped by PM). Each
+        // parses ONLY its own <p data-bp-type='<role>'> so paragraph keeps the bare
+        // <p>; eyebrow/byline are plain-string surfaces (content:"text*", marks:""),
+        // ingress/pullquote inline surfaces (content:"inline*"). NO node-view — no
+        // chrome to paint. See ./role-nodes.js.
+        Eyebrow,
+        Byline,
+        Ingress,
+        Pullquote,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
