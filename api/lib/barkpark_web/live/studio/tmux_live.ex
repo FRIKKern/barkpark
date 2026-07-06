@@ -134,7 +134,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
         id="tmux-terminal"
         phx-hook="TmuxTerminal"
         phx-update="ignore"
-        data-src="/assets/xterm.bundle.js"
+        data-src="/assets/xterm.bundle.js?v=2"
         style="flex: 1; min-height: 0; padding: 6px 8px; background: #000; overflow: hidden;"
       >
       </div>

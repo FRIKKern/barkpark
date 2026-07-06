@@ -13,6 +13,12 @@
  *
  * xterm.css is embedded below and injected once, honoring the repo's
  * no-CSS-files convention (all styling is inline / JS-injected).
+ *
+ * BUILD NOTE — xterm.bundle.js is @xterm/xterm + @xterm/addon-fit concatenated.
+ * xterm's file ends with a `//# sourceMappingURL=` LINE COMMENT and no trailing
+ * newline, so the two MUST be joined with a separator or the entire fit addon
+ * is swallowed by that comment (→ FitAddon undefined → silent black terminal).
+ * Rebuild with:  { cat xterm.core.js; printf '\n;\n'; cat addon-fit.js; } > xterm.bundle.js
  */
 (function () {
   "use strict";
@@ -105,16 +111,39 @@
       var el = this.el;
       ensureCss();
       ensureXterm(el.dataset.src || "/assets/xterm.bundle.js")
-        .then(function () { hook._init(); })
+        .then(function () {
+          // Surface init failures as text — a thrown error here would
+          // otherwise leave a silent black box (which is exactly how a broken
+          // bundle presented before).
+          try {
+            hook._init();
+          } catch (e) {
+            hook._fail(e && e.message ? e.message : String(e));
+          }
+        })
         .catch(function (e) {
-          el.textContent = "Failed to load terminal: " + e.message;
+          hook._fail("could not load " + (e && e.message ? e.message : String(e)));
         });
+    },
+
+    _fail: function (msg) {
+      this.el.textContent = "tmux terminal failed to start: " + msg;
+      this.el.style.color = "#f87171";
+      this.el.style.font = "13px " + "ui-monospace, monospace";
+      this.el.style.padding = "12px";
     },
 
     _init: function () {
       var hook = this;
       var el = this.el;
+
+      if (typeof window.Terminal !== "function") {
+        throw new Error("xterm.js did not load (window.Terminal missing)");
+      }
       var FitAddonCtor = (window.FitAddon && window.FitAddon.FitAddon) || window.FitAddon;
+      if (typeof FitAddonCtor !== "function") {
+        throw new Error("xterm fit addon did not load (window.FitAddon missing)");
+      }
 
       var mono = (getComputedStyle(document.documentElement)
         .getPropertyValue("--font-mono") || "").trim();
