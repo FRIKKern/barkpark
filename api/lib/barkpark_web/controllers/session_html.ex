@@ -179,6 +179,10 @@ defmodule BarkparkWeb.SessionHTML do
       .bp-auth-foot a { color: var(--primary); text-decoration: none; font-weight: 500; }
       .bp-auth-foot a:hover { text-decoration: underline; }
 
+      .bp-auth-alt { margin: 14px 0 0; text-align: center; font-size: 13px; color: var(--fg-muted); }
+      .bp-auth-alt a { color: var(--primary); text-decoration: none; font-weight: 500; }
+      .bp-auth-alt a:hover { text-decoration: underline; }
+
       .bp-auth details { margin-top: 16px; }
       .bp-auth details summary {
         cursor: pointer;

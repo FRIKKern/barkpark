@@ -89,6 +89,15 @@ Browser password-reset rides the same email tokens as the JSON flow:
 `GET|POST /login/reset` ("Forgot password?", anti-enumeration — always the
 same confirmation) and `GET|POST /auth/reset/:token` (the emailed link's
 landing page; render never consumes the token, only submit verifies it).
+Magic-link (passwordless) is the same shape: `GET|POST /login/magic`
+(request, anti-enumeration) + `GET /auth/magic/:token` (consume →
+`user_session`). Both browser landings (`/auth/reset`, `/auth/magic`) are
+the emailed URLs the JSON flow already sent but which 404'd in a browser.
+Magic-link consume routes through the **same second-factor step as password
+login** (`complete_sign_in/3`): a TOTP-armed user gets `/login/mfa`, an
+org-governed factor-less user is blocked — magic-link is never a 2FA bypass
+(the JSON `/magic-login` still issues directly; the browser surface is the
+hardened one).
 On a cloud-managed instance, `BARKPARK_CLOUD_URL` (→ `:cloud_login_url`)
 puts a **Log in with Barkpark Cloud** button on `/login`: it deep-links to
 `<cloud>/#/instance-login?url=<own-origin>`; the cloud SPA matches the

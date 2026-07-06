@@ -9,6 +9,9 @@ defmodule BarkparkWeb.SessionPagesTest do
     * Browser password-reset: the "Forgot password?" page (anti-enumeration
       twin of POST /v1/auth/request-reset) and the landing page for the
       emailed `/auth/reset/<token>` link, which 404'd in a browser before.
+    * Browser magic-link: the request page + the `/auth/magic/<token>` landing
+      (also dead in a browser before), which routes a TOTP-armed user through
+      the same second step as password login.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -19,6 +22,23 @@ defmodule BarkparkWeb.SessionPagesTest do
   defp register!(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     user
+  end
+
+  defp enroll_totp!(user) do
+    secret = NimbleTOTP.secret()
+
+    {:ok, user, _codes} =
+      Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+    {user, secret}
+  end
+
+  # The plaintext a browser would carry in the emailed /auth/magic/<token> URL
+  # (only the hash is stored, so we mint it through Accounts, same as the JSON
+  # magic-link suite).
+  defp magic_token(email) do
+    {:ok, token, _user} = Accounts.build_login_token(email)
+    token
   end
 
   defp with_cloud_url(url) do
@@ -41,6 +61,8 @@ defmodule BarkparkWeb.SessionPagesTest do
       assert html =~ "bp-auth-card"
       assert html =~ ~s(action="/login/account")
       assert html =~ "Forgot password?"
+      # The passwordless entry point is on the page.
+      assert html =~ ~s(href="/login/magic")
       # Token paste stays available behind the fold.
       assert html =~ "Sign in with an API token instead"
     end
@@ -141,6 +163,70 @@ defmodule BarkparkWeb.SessionPagesTest do
       conn = post(conn, "/auth/reset/not-a-real-token", %{"password" => "a-brand-new-password"})
       assert redirected_to(conn) == "/login/reset"
 
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "invalid or has expired"
+    end
+  end
+
+  describe "magic-link request page" do
+    test "renders the request form", %{conn: conn} do
+      html = conn |> get("/login/magic") |> html_response(200)
+      assert html =~ "Email me a sign-in link"
+      assert html =~ ~s(action="/login/magic")
+    end
+
+    test "unknown email gets the SAME confirmation as a known one (no enumeration)",
+         %{conn: conn} do
+      register!("magicknown@example.com")
+
+      known =
+        conn |> post("/login/magic", %{"email" => "magicknown@example.com"}) |> html_response(200)
+
+      unknown =
+        conn |> post("/login/magic", %{"email" => "ghost@example.com"}) |> html_response(200)
+
+      assert known =~ "Check your email"
+      assert unknown =~ "Check your email"
+    end
+  end
+
+  describe "emailed magic link landing" do
+    test "a valid token mints a user_session and lands on /studio", %{conn: conn} do
+      register!("magicin@example.com")
+      token = magic_token("magicin@example.com")
+
+      conn = get(conn, "/auth/magic/#{token}")
+      assert redirected_to(conn) == "/studio"
+      assert is_binary(get_session(conn, "user_session"))
+    end
+
+    test "the token is single-use — a second landing fails generically", %{conn: conn} do
+      register!("magiconce@example.com")
+      token = magic_token("magiconce@example.com")
+
+      assert redirected_to(get(conn, "/auth/magic/#{token}")) == "/studio"
+
+      conn = get(conn, "/auth/magic/#{token}")
+      assert redirected_to(conn) == "/login/magic"
+      assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "invalid or has expired"
+    end
+
+    test "a TOTP-armed user is routed through the second step, NOT signed in outright",
+         %{conn: conn} do
+      user = register!("magicmfa@example.com")
+      enroll_totp!(user)
+      token = magic_token("magicmfa@example.com")
+
+      conn = get(conn, "/auth/magic/#{token}")
+      # The MFA step, not a session — magic-link must not bypass 2FA.
+      assert html_response(conn, 200) =~ "Two-step verification"
+      refute get_session(conn, "user_session")
+      assert get_session(conn, "studio_mfa_user") == user.id
+    end
+
+    test "an invalid token redirects to the request page with the generic error",
+         %{conn: conn} do
+      conn = get(conn, "/auth/magic/not-a-real-token")
+      assert redirected_to(conn) == "/login/magic"
       assert Phoenix.Flash.get(conn.assigns.flash, :error) =~ "invalid or has expired"
     end
   end

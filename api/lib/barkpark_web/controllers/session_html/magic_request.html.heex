@@ -1,0 +1,45 @@
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
+
+    <%= if @sent do %>
+      <h1 class="bp-auth-title">Check your email</h1>
+      <p class="bp-auth-sub">
+        If that address has an account, a sign-in link is on its way. The link is
+        single-use and expires soon — open it promptly, from this device if you can.
+      </p>
+      <a class="bp-auth-btn bp-auth-btn-quiet" href={~p"/login"}>Back to sign in</a>
+    <% else %>
+      <h1 class="bp-auth-title">Email me a sign-in link</h1>
+      <p class="bp-auth-sub">
+        No password needed — enter your account email and we'll send you a link
+        that signs you in.
+      </p>
+
+      <.auth_flash flash={@flash} />
+
+      <.form :let={_f} for={%{}} as={:magic} action={~p"/login/magic"} method="post">
+        <div class="form-group">
+          <label class="form-label" for="magic_email">Email</label>
+          <input
+            type="email"
+            name="email"
+            id="magic_email"
+            class="form-input"
+            autocomplete="username"
+            autofocus
+            required
+            placeholder="you@example.com"
+          />
+        </div>
+
+        <button type="submit" class="bp-auth-btn">Email me a link</button>
+      </.form>
+
+      <p class="bp-auth-foot">
+        Rather use your password? <a href={~p"/login"}>Back to sign in</a>
+      </p>
+    <% end %>
+  </div>
+</div>
