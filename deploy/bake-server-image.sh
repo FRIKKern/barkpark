@@ -176,14 +176,32 @@ for i in $(seq 1 36); do
   sleep 5
 done
 
-IMAGE_ID="$(hcloud server create-image "$BOX_NAME" --type snapshot \
+# `hcloud server create-image` supports NO -o flag (unlike list/describe) — it
+# prints "Image <id> created from server <name>"; parse the id from stdout, with
+# a list-by-selector fallback (the just-created snapshot is the newest labeled
+# one in any status) so a wording change can't strand a finished bake.
+CREATE_OUT="$(hcloud server create-image "$BOX_NAME" --type snapshot \
   --description "barkpark-server-$(date -u +%Y-%m-%d)-${HEAD_SHA:0:8}" \
-  --label role=warm-image --label "commit=$HEAD_SHA" -o 'format={{.ID}}')"
+  --label role=warm-image --label "commit=$HEAD_SHA")"
+IMAGE_ID="$(printf '%s' "$CREATE_OUT" | grep -oiE 'image [0-9]+' | grep -oE '[0-9]+' | head -1)"
+if [ -z "$IMAGE_ID" ]; then
+  IMAGE_ID="$(hcloud image list --type snapshot --selector role=warm-image -o json | py '
+import json, sys
+imgs = json.load(sys.stdin)
+imgs.sort(key=lambda i: i.get("created", ""), reverse=True)
+print(imgs[0]["id"] if imgs else "")
+')"
+fi
+[ -n "$IMAGE_ID" ] || { log "FATAL: could not determine the created snapshot id (output: $CREATE_OUT)"; exit 1; }
 log "snapshot $IMAGE_ID creating — waiting for available"
 for i in $(seq 1 120); do
-  STATUS="$(hcloud image describe "$IMAGE_ID" -o 'format={{.Status}}')"
+  # Poll via `image list -o json` (proven flag surface) rather than describe.
+  STATUS="$(hcloud image list --type snapshot --selector role=warm-image -o json | py "
+import json, sys
+print(next((i.get('status','') for i in json.load(sys.stdin) if str(i.get('id')) == '$IMAGE_ID'), ''))
+")"
   [ "$STATUS" = "available" ] && break
-  [ "$i" = 120 ] && { log "FATAL: snapshot $IMAGE_ID never became available"; exit 1; }
+  [ "$i" = 120 ] && { log "FATAL: snapshot $IMAGE_ID never became available (last status: $STATUS)"; exit 1; }
   sleep 15
 done
 log "snapshot $IMAGE_ID available (commit $HEAD_SHA) — the provisioner picks it up within a minute"
