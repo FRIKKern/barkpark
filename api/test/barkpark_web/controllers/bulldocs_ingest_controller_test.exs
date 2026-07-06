@@ -221,6 +221,31 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert resp["error"]["code"] == "block_not_found"
       assert resp["error"]["op"] == "patch-block"
     end
+
+    test "op breaking the constraint vocabulary → 422 whose message IS the reason (pdd-t20)",
+         %{conn: conn} do
+      # An empty block list births the TEMPLATE (title @0, featured @1, ¶) — a
+      # constraint-VALID paper, so the op-layer veto is what fires here, not
+      # the D12 legacy pass-through the paragraph-only setup paper would take.
+      slug = "ops-constraint-#{System.unique_integer([:positive])}"
+      {:ok, _} = Content.upsert_paper(%{slug: slug, blocks: []})
+
+      conn =
+        auth_post(conn, slug, %{
+          "op" => "append-block",
+          "block" => %{"id" => "f2", "type" => "image", "role" => "featured"}
+        })
+
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "constraint"
+      assert resp["error"]["op"] == "append-block"
+
+      assert resp["error"]["message"] ==
+               "constraint: at most 1 block of \"featured\" allowed, found 2"
+
+      # Calm veto: the paper is untouched (still title + featured + paragraph).
+      assert length(pc(Content.get_paper(slug), "blocks")) == 3
+    end
   end
 
   describe "M2 batch ops endpoint (POST /:slug/ops with {ops: [...]})" do

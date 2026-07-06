@@ -816,6 +816,7 @@ toggles, no data model beyond fields on Epic/Cluster/Board.
 | 13 | RESERVED: server-side one-call board endpoint — only if payload/N+1 proves it live | M | — |
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
+| 24 | Dispatch frontier: `area:`-aware interference model + greedy MWIS `Frontier` fn + `bp task frontier` verb + TUI IndependentReady switch (D67–D74) | L | 13 (this wave, CUT) |
 
 **D56 (2026-07-05, user direction — reverses D14):** a claimed task renders in NOW *and* stays IN
 PLACE in its section — a spinner row heading its neighborhood (childBand 0), worker shown. Why (user,
@@ -917,6 +918,110 @@ Board.IndependentReady counts distinct ready neighborhoods — the label reads "
 the honest "how many agents could run right now" capacity. The FULL blast-radius/dispatch model
 (labels/papers/deps as interference signals, a frontier verb, 50-agent ambition) is chartered as the
 NEXT WAVE, not squeezed in here.
+
+### Wave-13 architect decisions (2026-07-06 — the DISPATCH FRONTIER; wish "figure out how many we can take on at once … 50 agents when they don't impact each other … careful but ambitious")
+
+Full design: `/Users/pelle/.claude/jobs/c06ba8c5/tmp/dispatch-frontier-design.md` (→ Publish as paper
+`dispatch-frontier`). All coverage numbers below verified READ-ONLY against guerrilla 2026-07-06 (332
+tasks: open 87 / done 232 / cancelled 12 / blocked 1; 58 leaf-ready workable). This wave deepens
+D65/D66 from "one pick per root" into a real `area:`-aware interference model + a dispatch verb.
+
+67. **The blast-radius KEY is the CODE SURFACE (`area:`), with proj/root as the conservative
+    fallback — NOT root alone.** VERIFIED shape: `proj:` (93% of open) ≈ `design_doc` (26%, 1:1 with
+    root) ≈ root — all three encode "same epic," NONE encodes "same surface." Two different epics both
+    rewriting Studio carry different root/proj/paper AND zero dep edge, so every reliably-carried
+    signal calls them independent and they are not. `neighborhoodKey(t) = proj else design_doc else
+    rootOf` (proj FIRST so `proj:loop`'s two roots — `schema-workspace-safety-goal` +
+    `security-hardening-goal`, verified — MERGE into one blast radius; strictly more careful than
+    D66). `interferes(a,b)`: HARD if a `blocks` edge either direction, OR (both carry `area:` and their
+    area sets OVERLAP), OR (≥1 lacks `area:` and same `neighborhoodKey`); NONE if both carry `area:`
+    and areas are DISJOINT (this is what lets two tasks in ONE epic touching different surfaces run in
+    parallel — the road to "50"); UNKNOWN for metadata-thin strangers. *Why:* real merge-collision is
+    surface overlap; the model must key on it, using the epic as the safe proxy only when the surface
+    is unknown.
+
+68. **STRANGERS default = independent-but-FLAGGED (`unproven`), with a careful dial — not
+    blanket-conflict.** A stranger with no `area:` cannot tell us its surface class, so a
+    "strangers-of-the-same-class conflict" rule would be GUESSING conflict (collapses the frontier to
+    ~1) exactly as dishonestly as guessing safety. Correct move: dispatch the independent set, REPORT
+    the `unproven` flag + a `bp task lint` nudge, and expose `--proven-only` (careful: emit only
+    `isolated` picks, solo the rest) beside the ambitious default. The correctness invariant is
+    absolute regardless of dial: **the model NEVER calls two tasks sharing a HARD signal (root/proj/
+    paper/dep/area-overlap) independent.** The only residual risk — two metadata-thin strangers
+    secretly sharing a surface — is precisely what the `area:` convention (D69) exists to erase.
+
+69. **THE MISSING CONVENTION: a ~12-entry closed `area:` vocabulary (area:api/studio/web/tui/cli/sdk/
+    pdrender/sheets/onix/docs/infra), the code-surface key — 3% covered today (only cloud-console).**
+    It is the ENABLER of intra-epic parallelism, not just a safety net: with `area:` on both tasks,
+    interference is precise (overlap-only), so same-epic disjoint-surface tasks parallelize. Rides the
+    §5/§6 hygiene arm: `bp task lint` nudges a workable leaf that carries no `area:`; the guided editor
+    offers the closed picker. HONEST partial-adoption degradation is the contract: both have area →
+    precise; either lacks → conservative neighborhood proxy (missing metadata always buys LESS
+    parallelism, never more); two area-less strangers → independent+`unproven`. BONUS derivation: an
+    epic's `phase:<n>-<slug>` bands already NAME surfaces (aesthetic-unification's studio/web/cli/
+    paper-components) — derive a provisional `~area:` from the band slug, marked provisional in the
+    blast-radius listing, so the biggest offender becomes partly-parallelizable before one label is
+    hand-authored.
+
+70. **THE FRONTIER ALGORITHM: greedy maximal-weight independent set over the interference graph,
+    D65-scored as the selection preference, deterministic.** `Frontier(snapshot, detailIndex, now,
+    opts) []Pick`: candidates = ready leaves (same derivation BuildBoard uses); score via
+    resolveNext's EXISTING scorer (one scoring truth); sort `(score desc, doc_id asc)`; walk, admit a
+    candidate iff it does not `interferes` with any already-admitted pick; cap at `--max N` (default
+    unbounded → the honest full capacity). Each pick carries dominant reason (D65), a blast-radius
+    listing (its neighborhoodKey + area set incl `~`derived + the candidates it DISPLACED), and a risk
+    class (D71). Greedy (exact MWIS is NP-hard) is safe here because the graph is tiny/near-disjoint,
+    deterministic, and never admits a conflicting pair. *Why:* the wish wants the LARGEST honest
+    frontier; greedy-by-curation-score gives ambition, the predicate gives correctness.
+
+71. **RISK CLASS per pick — where CAREFUL bites.** `isolated` (has area:, provably disjoint — batch
+    freely; the only class `--proven-only` emits); `neighborhood` (no area:, sole rep of its
+    neighborhood — safe by proxy, can't fan out within its epic until area: lands; carries the lint
+    nudge); `unproven` (no area:, coexists with other area-less strangers — independent by assumption,
+    counted in the footer tally); `shared-surface`→`solo:true` (area set ≥3 = a broad epic, OR area
+    overlaps a higher-scored pick → the loser is DROPPED and listed under the winner's displaced set).
+    Careful bites at four points: (1) an area overlap always drops the lower-scored pick; (2) a missing
+    area: caps its whole neighborhood to ONE pick; (3) `--proven-only` collapses to the isolated set;
+    (4) the ambitious default still emits unproven picks but NEVER hides the flag, so "50 agents" only
+    prints when 50 spots are genuinely non-interfering. WORKED EXAMPLE (live): the 58 leaf-ready →
+    **15 independent neighborhoods** (honest current capacity is ~15, not 50 — the tool says 15);
+    `proj:design-system` (aesthetic-unification, 24 children, rewrites the token manifest across ALL
+    surfaces) is the mega blast radius — once `~area:` derives from its bands it goes SOLO and
+    `cloud-console`/`gui-tui-parity`/`pd-doctrine` (all touching Studio/pdrender) drop as displaced.
+
+72. **SURFACES — ONE model, two surfaces (no drift), one reserved.** (a) `bp task frontier
+    [-o json|table] [--max N] [--proven-only]`: client-side builtin, intercepted in internal/cli
+    before manifest dispatch (the manifest `task` noun has ls/ready/prime/get/claim/close/next/move
+    and NO `frontier` — verified, so the intercept shadows nothing); table = row-per-pick + capacity/
+    proven-tally footer, json = full Pick array for an orchestrator. (b) TUI `Board.IndependentReady`
+    switches to `len(Frontier(...))` — the SAME Go function feeds the "NEXT · N independent" label and
+    the CLI verb, so they can never diverge. (c) RESERVED design-only, DO NOT BUILD: `bp task next
+    --frontier` — atomically claim the top-k picks from distinct neighborhoods via the existing
+    epoch-CAS claim endpoint, 409-skip + back-fill; deferred because it couples dispatch to mutation
+    and wants the orchestrator loop's retry/lease policy (out of scope).
+
+73. **OUT OF SCOPE (verified) + the dep-edge-target finding.** Server/API changes: NONE. Dep-edge
+    TARGETS ARE readable via the EXISTING `GET /v1/graph/:id` (verified: returns `edges[{kind:blocks/
+    parent/design_doc, from_id, to_id}]` + `nodes` to resolve uuid→doc_id, per connected component) —
+    but slice 1 does NOT need it: every `blocks` edge in the live corpus is WITHIN a root tree (all
+    airdrop-epic-internal), so the ready-gate + one-pick-per-neighborhood already cover within-tree
+    deps; `graph.show` is a SLICE-2 precision enrichment (fold a cross-neighborhood block edge into
+    HARD, should one ever appear), still a pure read. Also out: Studio UI; actually orchestrating
+    agents (the epic-loop layer's job — this initiative gives it `Frontier` to act on); authoring the
+    `area:` labels (the §5 hygiene arm + a Publish-phase seeding task, not code here). The model must
+    ship working at 3% `area:` coverage and improve as labels land.
+
+74. **SLICE PLAN.** SLICE 1 (buildable NOW — no server work, no missing data): pure `frontier.go`
+    (`neighborhoodKey`/`areasOf`/`interferes`/`Frontier`/`Pick`, reusing resolveNext's scorer +
+    rootOfBare over the already-fetched snapshot) + `independentReady = len(Frontier(...))` + the
+    `bp task frontier` builtin; table-driven interference truth + a frontier fixture (proj:loop merges,
+    area-overlap drops loser, area-disjoint same-root both admit, deterministic, --max/--proven-only) +
+    a read-only livecorpus assertion (15 neighborhoods, aesthetic-unification SOLO under band-derived
+    areas). SLICE 2: `bp task lint` area-missing nudge + guided-editor picker; optional `graph.show`
+    cross-neighborhood block precision. SLICE 3 (Publish + ongoing): seed `area:` labels on the live
+    epics, watch `unproven` shrink. SLICE 4 (RESERVED): `bp task next --frontier`. Guards stay green
+    UNWEAKENED (cursor-parity structural via the single spineRows producer; NEXT/glyph-budget/semrole
+    parity untouched — the frontier adds a function + a verb, not board vocabulary).
 
 
 ## Wave log
@@ -1412,3 +1517,60 @@ task system could carry but doesn't yet surface: a resumable's `previous_worker`
 reserved), assignee-planned (claimed-but-not-started) tasks as a distinct WHO-adjacent signal, and
 "deps about to unblock" (a blocked task whose blocker just closed) — all server-data-permitting follow-ups,
 not board bugs.
+
+### Wave 13 2026-07-06 (CUT: the DISPATCH FRONTIER — D67–D74; design + charter, NOT yet built)
+
+**The wish:** "figure out how many tasks we can take on at once … base next on all the different spots
+not impacting each other … 50 agents when they don't impact each other … careful but ambitious." Deepens
+D65/D66's "one pick per root" into a real `area:`-aware interference model + a dispatch verb.
+
+**Verified READ-ONLY against guerrilla 2026-07-06 (332 tasks; NEVER mutated):**
+- Coverage: parent/root 84% (0 dangling), `proj:` 93% of open, `phase:` 81%, `design_doc` 26%,
+  **`area:` only 3% (THE GAP — only cloud-console)**. `proj:` ≈ `design_doc` ≈ root (all "same epic,"
+  none "same surface"); `proj:loop` is the ONE cross-root merge (schema-safety + security-hardening).
+- **Dep-edge TARGETS ARE readable via the EXISTING `GET /v1/graph/:id`** (edges `{kind:blocks/parent/
+  design_doc, from_id, to_id}` + nodes to resolve uuid→doc_id, per component). Every `blocks` edge in
+  the corpus is WITHIN a root tree → slice 1 does NOT need it (ready-gate + neighborhood covers it);
+  `graph.show` is a slice-2 precision enrichment. No server change in scope.
+- **Worked frontier (live):** 58 leaf-ready → **15 independent neighborhoods** (honest capacity ~15,
+  NOT 50 — the tool must say 15). `proj:design-system` (aesthetic-unification, 24 children, all
+  surfaces) is the mega blast radius that goes SOLO once `~area:` derives from its phase bands.
+
+**The model:** blast-radius key = code surface (`area:`), with proj/root as the conservative proxy when
+area is absent; `interferes` = HARD (blocks-edge | same-neighborhood-when-area-absent | area-overlap),
+NONE (both-area & disjoint — the intra-epic-parallel unlock, the road to 50), UNKNOWN (strangers →
+independent+`unproven`, with a `--proven-only` careful dial). Correctness invariant: never call two tasks
+sharing a HARD signal independent. `Frontier` = greedy MWIS, D65-scored, per-pick reason + blast-radius
+listing + risk class (isolated/neighborhood/unproven/shared-surface-solo). One Go fn, two surfaces
+(`bp task frontier` verb + TUI `IndependentReady`), no drift.
+
+**Design:** `/Users/pelle/.claude/jobs/c06ba8c5/tmp/dispatch-frontier-design.md` (interference model +
+`area:` convention + algorithm + worked live examples + surfaces + slice plan + paper outline + the §5
+task tree written out for the Publisher to transcribe). Paper to publish: `dispatch-frontier`.
+
+**SLICE 1 is buildable NOW** (no server work, no missing data): pure `frontier.go` over the
+already-fetched snapshot (reuse resolveNext's scorer + rootOfBare) + `bp task frontier` builtin +
+`IndependentReady = len(Frontier(...))`; table-driven interference truth + a livecorpus assertion. All
+existing guards stay green unweakened (cursor-parity structural; NEXT/glyph-budget/semrole untouched —
+adds a function + a verb, not board vocabulary).
+
+**DIRECTION — slice-1 VERIFIED + integration-probed 2026-07-06 (branch `feat/dispatch-frontier-v1` @ e0680fd8, NOT merged):**
+- *Artifacts (read-only vs guerrilla):* paper `dispatch-frontier` renders HTTP 200; task tree is §5-clean
+  — goal `dispatch-frontier-goal` (P1, no parent) `child_count=8` with all 8 children listed; every child
+  `parent_id=dispatch-frontier-goal`, `design_doc=dispatch-frontier` (under `content.*`), verb-first title,
+  why/approach/out-of-scope description (374–646 chars), 2–6 acceptance criteria `{criterion,evidence:"",met:false}`,
+  priority ladder P1(goal)/P1·P1·P1(slice-1)/P2·P2·P2(convention)/P3(graph)/P4(reserved). ALL 9 published+open,
+  **ZERO draft dups** (scanned 343 tasks — no `drafts.df-*`/`drafts.dispatch-*`). Nothing mutated.
+- *Integration probe:* clean merge onto `origin/main` (`f30556a5` already in origin/main → only frontier files,
+  no `bake-server-image.sh` noise). Gates GREEN: `CGO_ENABLED=0 go build ./...` ✓ · `go vet ./internal/{taskboard,cli}/...` ✓ ·
+  `CC=/usr/bin/clang go test ./internal/taskboard/... ./internal/cli/...` ✓ · `go test -race ./internal/taskboard/...` ✓.
+- *Live verb (read-only):* `bp task frontier` → 22 independent · 3 proven · 19 unproven. Table renders the full spec
+  (glyph·id·title·score·P·reason·[risk]·area + footer + indented ↳ displaced lines); `-o json` full Pick array;
+  `--max N` truncates; `--proven-only` collapses to the 3-pick safe floor (all `proven:true`, all `risk:isolated`).
+- *Honesty confirmed:* the model dogfoods — the 3 proven picks ARE the area-labelled dispatch tasks
+  (df-cli-frontier-verb/cli, df-frontier-fn/tui, df-area-vocabulary/docs). The documented FALSE-INDEPENDENT #1 is
+  LIVE and honest: T1 `df-frontier-fn`(area:tui) and T3 `df-cli-frontier-verb`(area:cli) BOTH admit despite T3's
+  "Deps: T1" — precisely the cross-neighborhood dep-edge lie that slice-2 `graph.show` closes. Flagged, not hidden.
+- *Nits (non-blocking):* (1) JSON top-level `independent` stays 22 under `--proven-only` while `picks` is 3 — a
+  scripter reading `.independent` gets the full-frontier count, not the returned set; trust `len(.picks)`. (2) piped
+  (non-TTY) default emits JSON not table — conventional but undocumented. Neither is a model-correctness defect.

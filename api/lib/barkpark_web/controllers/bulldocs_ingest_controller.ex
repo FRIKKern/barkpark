@@ -237,6 +237,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
             |> put_status(:not_found)
             |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
 
+          # Constraint-vocabulary veto (pdd-t20): the middle element IS the
+          # human-readable violation, not a block id — surface it verbatim.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
           {:error, {code, target, op_kind}} ->
             conn
             |> put_status(:unprocessable_entity)
@@ -292,6 +299,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> put_status(:not_found)
             |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
 
           {:error, {code, target, op_kind}} ->
             conn
@@ -396,6 +409,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
             conn
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_proposal", message: message}})
+
+          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
 
           {:error, {code, target, op_kind}} ->
             conn

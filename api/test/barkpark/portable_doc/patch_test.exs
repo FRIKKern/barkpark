@@ -355,6 +355,117 @@ defmodule Barkpark.PortableDoc.PatchTest do
     end
   end
 
+  # ── the constraint-vocabulary op-layer backstop (pdd-t20) ──────────────────
+  #
+  # The `:constraints` opt threads a `Barkpark.PortableDoc.Constraints`
+  # declaration list; an op whose RESULT breaks a cardinality / relative-order
+  # rule is rejected `{:constraint, message, op}` — the calm sibling of
+  # `{:locked_block, …}`. These docs use UNLOCKED role-carrying blocks so the
+  # constraint path is what fires (a locked block would be caught first by the
+  # placement check). D12: the veto is guarded on the doc being VALID before the
+  # op; with no declarations the engine is byte-identical.
+  describe "constraint backstop — cardinality + relative order (fail-before)" do
+    # title required exactly-1 @0; featured optional max-1 after title.
+    defp title_featured_decls do
+      [
+        %{kind: "title", presence: :required, count: {:exactly, 1}, position: {:index, 0}},
+        %{kind: "featured", presence: :optional, count: {:max, 1}, position: {:after, "title"}}
+      ]
+    end
+
+    defp title_featured_doc do
+      doc_with([
+        %{"id" => "t", "type" => "heading", "role" => "title", "text" => "T"},
+        %{"id" => "f", "type" => "image", "role" => "featured"}
+      ])
+    end
+
+    test "move-block putting featured before title is vetoed calmly" do
+      # move featured to the head → featured@0, title@1: title leaves index 0 and
+      # featured no longer sits after title. Valid before, invalid after ⇒ reject.
+      assert {:error, {:constraint, msg, "move-block"}} =
+               Patch.apply_patch(
+                 title_featured_doc(),
+                 %{"op" => "move-block", "id" => "f", "after" => nil},
+                 constraints: title_featured_decls()
+               )
+
+      assert is_binary(msg)
+    end
+
+    test "insert-after adding a SECOND role:featured breaks max-1 ⇒ rejected" do
+      assert {:error, {:constraint, msg, "insert-after"}} =
+               Patch.apply_patch(
+                 title_featured_doc(),
+                 %{
+                   "op" => "insert-after",
+                   "afterId" => "t",
+                   "block" => %{"id" => "f2", "type" => "image", "role" => "featured"}
+                 },
+                 constraints: title_featured_decls()
+               )
+
+      # Copy pin: the message is the envelope/flash text external producers see.
+      assert msg == "constraint: at most 1 block of \"featured\" allowed, found 2"
+    end
+
+    test "remove-block dropping below a synthetic min-2 is vetoed like a locked op" do
+      # The wish's exact case: a remove breaking min-N is rejected calmly.
+      doc =
+        doc_with([
+          %{"id" => "x1", "type" => "paragraph", "role" => "x"},
+          %{"id" => "x2", "type" => "paragraph", "role" => "x"}
+        ])
+
+      assert {:error, {:constraint, _msg, "remove-block"}} =
+               Patch.apply_patch(
+                 doc,
+                 %{"op" => "remove-block", "id" => "x2"},
+                 constraints: [%{kind: "x", count: {:min, 2}}]
+               )
+    end
+
+    test "a valid op on a valid doc still succeeds with declarations present" do
+      # Positive control: patching the title's text keeps the shape valid.
+      assert {:ok, %{"blocks" => [title | _]}} =
+               Patch.apply_patch(
+                 title_featured_doc(),
+                 %{"op" => "patch-block", "id" => "t", "patch" => %{"text" => "T2"}},
+                 constraints: title_featured_decls()
+               )
+
+      assert title["text"] == "T2"
+    end
+
+    test "an ALREADY-invalid doc + an unrelated op is ACCEPTED (D12 before-valid guard)" do
+      # A legacy paper with a featured but no title violates the declarations
+      # BEFORE the op. An unrelated patch must NOT be punished for that.
+      legacy =
+        doc_with([%{"id" => "f", "type" => "image", "role" => "featured", "alt" => "old"}])
+
+      assert {:ok, %{"blocks" => [block]}} =
+               Patch.apply_patch(
+                 legacy,
+                 %{"op" => "patch-block", "id" => "f", "patch" => %{"alt" => "new"}},
+                 constraints: title_featured_decls()
+               )
+
+      assert block["alt"] == "new"
+    end
+
+    test "with NO declarations, a would-be-violating op is byte-identical to today" do
+      # Same move that the constraint path vetoes above — with no declarations it
+      # applies exactly as the pre-vocabulary engine did.
+      op = %{"op" => "move-block", "id" => "f", "after" => nil}
+
+      assert Patch.apply_patch(title_featured_doc(), op) ==
+               Patch.apply_patch(title_featured_doc(), op, constraints: [])
+
+      assert {:ok, %{"blocks" => blocks}} = Patch.apply_patch(title_featured_doc(), op)
+      assert Enum.map(blocks, & &1["id"]) == ["f", "t"]
+    end
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   defp doc_with(blocks), do: %{"version" => 1, "blocks" => blocks}
