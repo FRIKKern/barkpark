@@ -45,7 +45,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
-  attr(:backlinks_open, :boolean, default: true)
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
@@ -675,7 +674,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
-          backlinks_open={@backlinks_open}
           sidebar_open={Map.get(assigns, :sidebar_open, true)}
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}

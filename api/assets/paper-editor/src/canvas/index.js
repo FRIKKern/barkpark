@@ -1547,11 +1547,14 @@ class BpPaperCanvas extends HTMLElement {
         // edit. L0 = this._sourceBaselineBlocks (captured from the LIVE doc on enter).
         const L0 = this._sourceBaselineBlocks;
         // Realign parsed ids onto the baseline, then CLAMP the locked template
-        // prefix (D4's felt half for source mode): a source-mode edit that
-        // deleted / moved / re-texted the locked title is reconstructed away so
-        // the client view can't diverge from the server (which vetoes the same
-        // op with {:locked_block, id, op}). Additive — a template-free run is
-        // returned untouched, so a lock-free paper stays byte-identical (D3).
+        // prefix (D4's felt half for source mode): a source-mode DELETE / MOVE /
+        // retype of the locked title is reconstructed away so the client view
+        // can't diverge from the server (which vetoes the same op with
+        // {:locked_block, id, op}) — while a same-type CONTENT edit (a retitle)
+        // rides through as the patch-block the server accepts, exactly like a
+        // rich-mode retitle (locks are placement locks, not content locks).
+        // Additive — a template-free run is returned untouched, so a lock-free
+        // paper stays byte-identical (D3).
         const L1 = clampLockedPrefix(
           L0,
           realignBlockIds(L0, markdownToBlocks(md)),

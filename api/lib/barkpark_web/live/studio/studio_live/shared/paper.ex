@@ -375,8 +375,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
-        backlinks_unlinked: unlinked,
-        backlinks_open: true
+        backlinks_unlinked: unlinked
       )
       |> assign(sidebar_assigns(paper))
       |> stream(
@@ -399,8 +398,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
-        backlinks_unlinked: unlinked,
-        backlinks_open: true
+        backlinks_unlinked: unlinked
       )
       |> assign(sidebar_assigns(paper))
       |> stream(:paper_blocks, [], reset: true)
@@ -484,8 +482,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_task_previews: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
-        backlinks_unlinked: [],
-        backlinks_open: true
+        backlinks_unlinked: []
       )
       |> assign(sidebar_assigns(nil))
     else
@@ -493,8 +490,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         editor_view: :form,
         backlinks_used_by: [],
         backlinks_linked: [],
-        backlinks_unlinked: [],
-        backlinks_open: true
+        backlinks_unlinked: []
       )
     end
   end

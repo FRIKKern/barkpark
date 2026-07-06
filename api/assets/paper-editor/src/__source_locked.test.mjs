@@ -3,9 +3,14 @@
 // a run freely — including the locked title that opens a doctrine template. The
 // SERVER already vetoes any op that removes/moves/displaces a locked block
 // ({:locked_block, id, op} in patch.ex), but WITHOUT the clamp the client rich
-// editor would show the user's edited/deleted/moved title until reload (the "view
+// editor would show the user's deleted/moved title until reload (the "view
 // diverges" debt wave 1 pre-loaded into t11). `clampLockedPrefix` is the felt half
 // of D4 for source mode — the pure twin of locks.js `transactionVetoesLock`.
+//
+// Locks are PLACEMENT locks (doctrine rule 2): the server ACCEPTS a patch-block on
+// a locked block (it strips only `locked`/`role`), and the rich editor passes a
+// pure content edit too. So the clamp pins placement + template identity while a
+// same-type CONTENT edit (a retitle) rides through — one consistent surface.
 //
 // These are all pure-Node (no DOM / TipTap): the clamp operates on block arrays,
 // and the round-trip drives the real markdown + realign + runToOps converters.
@@ -58,60 +63,95 @@ function sourceEdit(mutateMd) {
   return clampLockedPrefix(L0, realignBlockIds(L0, markdownToBlocks(md)));
 }
 
-// The head block of `blocks` IS the locked title, verbatim (id + role + locked +
-// text), and it carries a `locked === true` flag the live veto can re-read.
-function assertTitleRestored(blocks) {
+// The head block of `blocks` IS the locked title: id + role + locked at position 0
+// (the template identity the md round-trip drops), with `text` — the baseline's
+// unless the check expects a ridden-through content edit.
+function assertTitlePinned(blocks, expectedText = "Doctrine") {
   const head = blocks[0];
   assert.equal(head.id, "tpl-title", "locked title id at the head");
   assert.equal(head.locked, true, "locked flag restored (md round-trip drops it)");
   assert.equal(head.role, "title", "role restored");
-  assert.equal(head.text, "Doctrine", "title text is the baseline's, not the edit");
+  assert.equal(head.type, "heading", "template type pinned");
+  assert.equal(head.text, expectedText, "title text");
 }
 
-// ── the four divergences the server vetoes, clamped client-side ──────────────
+// ── placement divergences the server vetoes, clamped client-side ─────────────
 
-check("EDIT the locked title in source → restored verbatim, body edit kept", () => {
-  const out = sourceEdit((md) => md.replace("# Doctrine", "# Hacked"));
-  assertTitleRestored(out);
+check("EDIT the locked title in source → the retitle RIDES THROUGH, placement pinned", () => {
+  // Locks are placement locks: the server accepts patch-block {text} on a locked
+  // block (strip_template_keys drops only locked/role) and the rich editor allows
+  // the same retitle — source mode must not silently revert it.
+  const out = sourceEdit((md) => md.replace("# Doctrine", "# Renamed"));
+  assertTitlePinned(out, "Renamed");
 });
 
 check("EDIT a body block in source → body edit survives, title untouched", () => {
   const out = sourceEdit((md) => md.replace("Body.", "Body edited."));
-  assertTitleRestored(out);
+  assertTitlePinned(out);
   const bodyOut = out.find((b) => b.id === "tpl-body");
   assert.ok(bodyOut, "body block survives by id");
   assert.equal(bodyOut.content[0].value, "Body edited.", "the body edit is kept");
 });
 
-check("DELETE the locked title in source → restored at the head", () => {
+check("DELETE the locked title in source → restored verbatim at the head", () => {
   const out = sourceEdit((md) => md.replace("# Doctrine\n\n", ""));
-  assertTitleRestored(out);
+  assertTitlePinned(out);
 });
 
-check("MOVE the locked title below the body → restored to the head", () => {
+check("MOVE the locked title below the body → pinned back to the head", () => {
   const out = sourceEdit(() => "Body.\n\n# Doctrine");
-  assertTitleRestored(out);
+  assertTitlePinned(out);
 });
 
 check("INSERT a block before the title → the locked prefix holds position 0", () => {
   const out = sourceEdit((md) => "New para\n\n" + md);
-  assertTitleRestored(out);
+  assertTitlePinned(out);
   // the inserted paragraph lands AFTER the locked title
   assert.equal(out[1].content[0].value, "New para");
 });
 
-// ── no locked-block op ever leaves the client (matches the server veto) ──────
+check("DELETE the title + type a NEW paragraph at the top → BOTH survive", () => {
+  // The new paragraph positionally inherits the locked id in realignBlockIds
+  // (type mismatch) — it is user content, never the locked block: it must be
+  // re-minted and kept, and the locked title restored verbatim. Silent data
+  // loss here is worse than any veto.
+  const out = sourceEdit(() => "My new intro.\n\nBody.");
+  assertTitlePinned(out);
+  const intro = out.find(
+    (b) => b.type === "paragraph" && b.content?.[0]?.value === "My new intro.",
+  );
+  assert.ok(intro, "the user's new paragraph survives");
+  assert.notEqual(intro.id, "tpl-title", "under its own id, not the locked one");
+  assert.equal(out[1], intro, "…directly after the restored locked prefix");
+});
 
-check("runToOps after clamp emits NO op touching the locked title id", () => {
-  const clamped = sourceEdit((md) => md.replace("# Doctrine", "# Hacked"));
+check("RETYPE the title to a paragraph → title restored, user text kept as content", () => {
+  const out = sourceEdit((md) => md.replace("# Doctrine", "Doctrine, but prose"));
+  assertTitlePinned(out);
+  const kept = out.find((b) => b.content?.[0]?.value === "Doctrine, but prose");
+  assert.ok(kept, "the retyped text survives as an ordinary block");
+  assert.notEqual(kept.id, "tpl-title", "under a fresh id");
+});
+
+// ── the emitted ops match what the server accepts (no veto round-trip) ───────
+
+check("runToOps after a retitle emits EXACTLY one patch-block, no remove/move", () => {
+  const clamped = sourceEdit((md) => md.replace("# Doctrine", "# Renamed"));
   const ops = runToOps(L0, runToTiptap(clamped));
-  const touchesTitle = ops.some((op) => op.id === "tpl-title");
-  assert.equal(touchesTitle, false, "the locked title id never appears in an op");
-  // and no remove/move op at all (nothing was displaced)
+  const titleOps = ops.filter((op) => op.id === "tpl-title");
+  assert.equal(titleOps.length, 1, "one op for the locked title");
+  assert.equal(titleOps[0].op, "patch-block", "…and it is a patch (server-accepted)");
+  assert.equal(titleOps[0].patch.text, "Renamed", "…carrying the retitle");
   const displacing = ops.filter((op) =>
     ["remove-block", "move-block"].includes(op.op),
   );
   assert.deepEqual(displacing, [], "no remove/move op emitted for the locked run");
+});
+
+check("runToOps after a pure displacement emits NO op touching the locked id", () => {
+  const clamped = sourceEdit(() => "Body.\n\n# Doctrine"); // move only, text same
+  const ops = runToOps(L0, runToTiptap(clamped));
+  assert.deepEqual(ops, [], "a clamped-away displacement is a zero-op exit");
 });
 
 // ── D3: additive — a template-free run is byte-identical ─────────────────────

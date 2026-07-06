@@ -151,26 +151,33 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 //
 // Markdown SOURCE mode (Mod-Shift-m) lets the user edit the raw markdown of a run
 // freely — including the locked title block that opens a doctrine template
-// (Content.Papers.Template: locked title @0, featured image @1). The SERVER already
-// rejects any op that removes / moves / displaces a locked block (the
-// `{:locked_block, id, op}` class in patch.ex) — but without this clamp the CLIENT
-// view DIVERGES until reload: the rich editor would show the user's edited / deleted
-// / reordered title even though the save was vetoed server-side.
+// (Content.Papers.Template: locked title @0, featured image @1). The SERVER rejects
+// any op that removes / moves / displaces a locked block (the `{:locked_block, id,
+// op}` class in patch.ex) — but without this clamp the CLIENT view DIVERGES until
+// reload: the rich editor would show the user's deleted / reordered title even
+// though the save was vetoed server-side.
 //
 // This is the FELT half of D4 for source mode — the twin of locks.js
 // `transactionVetoesLock` (which vetoes the same displacements at the rich editor's
-// filterTransaction layer). It runs on the already-realigned parsed blocks and
-// reconstructs the list so its leading locked run is EXACTLY the baseline's
-// (verbatim id + content, at the head), while every NON-locked edit the user made in
-// the textarea survives. `runToOps(L0, clamped)` then emits ZERO ops for the locked
-// prefix, so the client view matches what the server will store — no reload needed.
+// filterTransaction layer). Locks are PLACEMENT locks (doctrine rule 2): the server
+// strips only `locked`/`role` from a patch-block and ACCEPTS a content edit, and the
+// rich editor passes a pure content edit too ("A pure content edit keeps the locked
+// node's id + index, so it passes"). The clamp therefore pins the locked run's
+// PLACEMENT + template identity (id / type / locked / role, at the head) while a
+// same-type CONTENT edit rides through as the exact patch-block the server accepts —
+// a source-mode retitle behaves like a rich-mode retitle, one surface (rule 5).
 //
-// Behaviors (all match the server veto):
-//   • title text EDITED in source     → restored verbatim (edit dropped);
-//   • title DELETED in source          → restored verbatim (delete dropped);
-//   • title MOVED below a paragraph     → restored to the head (move dropped);
-//   • a block INSERTED before the title → lands AFTER it (the prefix holds pos 0);
-//   • body edits (non-locked blocks)    → preserved unchanged.
+// Behaviors:
+//   • title text EDITED in source       → edit KEPT (server-accepted patch-block);
+//     the template identity (id/type/locked/role) and head position are restored,
+//     so the md round-trip dropping `locked` never blinds the live veto;
+//   • title DELETED in source            → restored verbatim (delete dropped);
+//   • title MOVED below a paragraph       → pinned back to the head (move dropped);
+//   • a block INSERTED before the title   → lands AFTER it (the prefix holds pos 0);
+//   • title RETYPED to another block kind → the locked block is restored verbatim
+//     (the server would veto the swap) and the user's block SURVIVES in place under
+//     a fresh id — never silent data loss;
+//   • body edits (non-locked blocks)      → preserved unchanged.
 //
 // Additive (D3): a baseline with NO leading locked block returns `realigned`
 // untouched — a template-free paper's source round-trip stays byte-identical.
@@ -188,16 +195,76 @@ export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
   }
   if (prefix.length === 0) return realigned; // no template → nothing to clamp
 
-  // Every id in the locked prefix. realignBlockIds may have DONATED one of these
-  // ids to a user-edited block (an in-place title edit) or LEFT it unconsumed (a
-  // deleted title); either way strip any realigned block reusing a locked id so
-  // the restored prefix is the SOLE carrier of those ids — the runToOps
-  // duplicate-id guard holds (each locked id appears exactly once).
-  const lockedIds = new Set(prefix.map((b) => b && b.id));
-  const tail = realigned.filter((b) => !(b && lockedIds.has(b.id)));
+  // realignBlockIds may have DONATED a locked id to a parsed block: the in-place
+  // content edit of that locked block (same type — its TAKER), or, when the user
+  // deleted the locked block and typed something new in its slot, an unrelated
+  // block that merely inherited the id positionally (type mismatch). Split the
+  // realigned list: same-type takers fold into the restored prefix (content edit
+  // kept); a type-mismatched id-squatter is USER CONTENT — re-mint its id and keep
+  // it in place (runToOps inserts it; the restored prefix stays the sole carrier
+  // of each locked id, so the duplicate-id guard holds).
+  const baseById = new Map(prefix.map((b) => [b.id, b]));
+  const takers = new Map();
+  let tail = [];
+  for (const b of realigned) {
+    if (!(b && baseById.has(b.id))) {
+      tail.push(b);
+    } else if (b.type === baseById.get(b.id).type && !takers.has(b.id)) {
+      takers.set(b.id, b);
+    } else {
+      tail.push({ ...b, id: mintClampId() });
+    }
+  }
 
-  // Restore the locked prefix VERBATIM from the baseline (deep-cloned so the caller
-  // never shares structure with this._sourceBaselineBlocks), then the user's
-  // non-locked edits in their textarea order.
-  return [...deepCloneBlocks(prefix), ...tail];
+  // A PURE MOVE of a locked block leaves its byte-identical copy in the tail
+  // under a freshly MINTED id (realignBlockIds anchors the other survivors, so
+  // the displaced copy gets no baseline id). Restoring the prefix without
+  // dropping that copy would DUPLICATE the block (one restored + one inserted).
+  // For each locked block with no taker, drop the first minted tail block whose
+  // per-block markdown signature is byte-identical — that IS the moved copy. A
+  // same-text block the user already had in the body keeps its baseline id and
+  // is never touched.
+  const baselineIds = new Set(baseline.map((b) => b && b.id));
+  const sig = (b) => blocksToMarkdown([b]);
+  for (const base of prefix) {
+    if (takers.has(base.id)) continue;
+    const baseSig = sig(base);
+    const copyAt = tail.findIndex(
+      (b) => b && !baselineIds.has(b.id) && sig(b) === baseSig,
+    );
+    if (copyAt !== -1) tail = tail.slice(0, copyAt).concat(tail.slice(copyAt + 1));
+  }
+
+  // Rebuild the locked prefix AT THE HEAD (deep-cloned so the caller never shares
+  // structure with this._sourceBaselineBlocks). A taker's content edit overlays the
+  // baseline block; the template identity keys are then re-stamped from the
+  // baseline — the md round-trip drops `locked`/`role` for natural blocks, and the
+  // server strips them from patches anyway, so the baseline is their one truth.
+  const head = prefix.map((base) => {
+    const taker = takers.get(base.id);
+    const [cleanBase] = deepCloneBlocks([base]);
+    if (!taker) return cleanBase; // deleted (or untouched-sentinel) → verbatim
+    const [cleanTaker] = deepCloneBlocks([taker]);
+    const merged = { ...cleanBase, ...cleanTaker, id: base.id, type: base.type };
+    merged.locked = true;
+    if (base.role != null) merged.role = base.role;
+    else delete merged.role;
+    return merged;
+  });
+
+  return [...head, ...tail];
+}
+
+// Mint an id for a block that positionally inherited a LOCKED id in source mode
+// (its slot's block was locked; the user's replacement is ordinary content). The
+// "s-" prefix marks a source-clamp mint (parallels markdown.js "m-" and
+// run-convert.js "c-"); high-entropy nonce so it never collides with a server id.
+let clampMintCounter = 0;
+function mintClampId() {
+  clampMintCounter += 1;
+  const nonce =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID().slice(0, 8)
+      : Math.random().toString(36).slice(2, 10);
+  return "s-" + clampMintCounter.toString(36) + "-" + nonce;
 }
