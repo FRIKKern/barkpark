@@ -1,0 +1,99 @@
+name: reland-check
+
+# Task-obsession layer 3 (CI half): does this PR touch files a recently-closed
+# task already landed? Reads each closed task's content.landed.files (written at
+# close by the land-digest close path) and flags overlap with the PR's changed
+# files. ADVISORY ONLY — emits a ::warning:: + job summary, never blocks: reverts
+# and follow-ups legitimately touch the same files.
+#
+# Dampers (see tooling/task-obsession/reland_check.py): hot files (frequency-
+# derived + a seed list) carry no signal and are excluded; a finding against a
+# task the PR's own task DEPENDS ON is suppressed (best-effort — needs a read
+# token to fetch edges; without one, dependency findings are shown, still
+# advisory). Ledger unreachable → no findings (never blocks on infra).
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reland-check-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  reland-check:
+    name: Re-land advisory (already-landed overlap)
+    runs-on: ubuntu-latest
+    continue-on-error: true # advisory — report, never block
+    steps:
+      - name: Checkout (full history for the base diff)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          git diff --name-only "${BASE_SHA}...HEAD" > /tmp/changed.txt || git diff --name-only "$BASE_SHA" HEAD > /tmp/changed.txt
+          echo "Changed files: $(wc -l < /tmp/changed.txt)"
+
+      - name: Extract the PR's task id (for self/edge suppression)
+        id: ref
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          task_id="$(printf '%s' "${PR_BODY:-}" \
+            | grep -ioE '^[[:space:]]*task:[[:space:]]*[a-z0-9][a-z0-9._/-]*' \
+            | head -1 | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//')"
+          echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch the ledger + run the re-land check
+        id: check
+        env:
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          LEDGER_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+          PR_TASK: ${{ steps.ref.outputs.task_id }}
+        run: |
+          set -uo pipefail
+          # Public query — no token needed to list task docs + their land digests.
+          if ! curl -sS -m 20 -o /tmp/tasks.json \
+              "${LEDGER_BASE%/}/v1/data/query/production/task?perspective=published&limit=1000"; then
+            echo "::notice title=Re-land check skipped::Ledger unreachable; not evaluating overlap (advisory)."
+            echo "findings=0" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+
+          # Best-effort dependency-edge suppression: needs a read token.
+          deps=()
+          if [ -n "${LEDGER_TOKEN:-}" ] && [ -n "${PR_TASK:-}" ]; then
+            if curl -sS -m 20 -H "Authorization: Bearer ${LEDGER_TOKEN}" -o /tmp/edges.json \
+                "${LEDGER_BASE%/}/v1/tasks/${PR_TASK}/edges" 2>/dev/null; then
+              while IFS= read -r dep; do
+                [ -n "$dep" ] && deps+=(--dep "$dep")
+              done < <(python3 -c "import json;[print(e) for e in (lambda d:[x.get('to_id') or x.get('doc_id') for x in (d.get('dependencies') or d.get('edges') or [])])(json.load(open('/tmp/edges.json'))) if e]" 2>/dev/null || true)
+            fi
+          fi
+
+          args=(--files /tmp/changed.txt --tasks /tmp/tasks.json --out /tmp/findings.json)
+          [ -n "${PR_TASK:-}" ] && args+=(--pr-task "$PR_TASK")
+          python3 tooling/task-obsession/reland_check.py "${args[@]}" "${deps[@]}" 2>/tmp/reland.err || true
+          n="$(sed -n 's/^RELAND_FINDINGS=//p' /tmp/reland.err | head -1)"
+          echo "findings=${n:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: Post the advisory (non-blocking)
+        if: steps.check.outputs.findings != '0' && steps.check.outputs.findings != ''
+        run: |
+          set -uo pipefail
+          {
+            echo "## ⚠️ Re-land advisory"
+            echo ""
+            echo "This PR changes files that recently-closed tasks already landed. This is **advisory** — reverts and follow-ups legitimately touch the same files. If this is intentional, add a \`blocks\` dependency edge to the prior task to silence it."
+            echo ""
+            python3 -c 'import json; d=json.load(open("/tmp/findings.json")); [print("- task **%s** already landed: %s" % (f["task"], ", ".join("`%s`" % x for x in f["overlap"]))) for f in d["findings"]]'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Re-land advisory::${{ steps.check.outputs.findings }} recently-closed task(s) already landed files this PR changes. Advisory only — see the job summary."

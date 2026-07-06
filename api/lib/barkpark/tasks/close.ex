@@ -25,6 +25,11 @@ defmodule Barkpark.Tasks.Close do
     observed_rev_opt = Keyword.get(opts, :observed_rev)
     reason = Keyword.get(opts, :reason)
     criteria = Keyword.get(opts, :criteria, [])
+    # Land digest (task-obsession layer 3): what this task actually changed —
+    # `%{"prs" => [...], "files" => [...], "capability_slugs" => [...]}`. Written
+    # to content.landed atomically with the close, so closed tasks become a
+    # queryable ledger of touched surfaces (the CI re-land check reads it).
+    landed = Keyword.get(opts, :landed)
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
@@ -38,7 +43,8 @@ defmodule Barkpark.Tasks.Close do
           observed_rev_opt,
           new_status,
           reason,
-          criteria
+          criteria,
+          landed
         )
     end
   end
@@ -50,7 +56,8 @@ defmodule Barkpark.Tasks.Close do
          observed_rev_opt,
          new_status,
          reason,
-         criteria
+         criteria,
+         landed
        ) do
     result =
       Repo.transaction(fn ->
@@ -89,7 +96,8 @@ defmodule Barkpark.Tasks.Close do
                          observed_rev,
                          new_status,
                          reason,
-                         criteria
+                         criteria,
+                         landed
                        ) do
                   ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
                   unblocked = cascade_unblock_dependents!(updated)
@@ -166,7 +174,8 @@ defmodule Barkpark.Tasks.Close do
          observed_rev,
          new_status,
          reason,
-         criteria
+         criteria,
+         landed
        ) do
     new_rev = generate_rev()
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
@@ -197,6 +206,11 @@ defmodule Barkpark.Tasks.Close do
         r when is_binary(r) and r != "" -> Map.put(new_content, "close_reason", r)
         _ -> new_content
       end
+
+    # Land digest rides the same close CAS as close_reason. Only a non-empty map
+    # writes; a blank/absent digest never clobbers an existing one (a re-close or
+    # a CI backfill can add it later without erasing a prior write).
+    new_content = merge_landed(new_content, landed)
 
     # Expectation close-out (living-values §8/§9 — "task proves paper"):
     # acceptance-criteria met/evidence updates ride the SAME rev-CAS write as
@@ -255,6 +269,40 @@ defmodule Barkpark.Tasks.Close do
   end
 
   defp merge_criteria(_content, _other), do: {:error, :invalid_criteria}
+
+  # Land digest merge. UNION into any existing digest so a re-close or a CI
+  # backfill accumulates rather than clobbers. A nil/empty/malformed payload
+  # leaves content untouched (never erases a prior digest).
+  @landed_keys ~w(prs files capability_slugs)
+  defp merge_landed(content, landed) when is_map(landed) and map_size(landed) > 0 do
+    existing =
+      case Map.get(content, "landed") do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
+
+    merged =
+      Enum.reduce(@landed_keys, existing, fn key, acc ->
+        case normalize_landed_list(Map.get(landed, key) || Map.get(landed, safe_atom(key))) do
+          [] -> acc
+          incoming -> Map.put(acc, key, Enum.uniq((Map.get(acc, key) || []) ++ incoming))
+        end
+      end)
+
+    if map_size(merged) == 0, do: content, else: Map.put(content, "landed", merged)
+  end
+
+  defp merge_landed(content, _), do: content
+
+  defp normalize_landed_list(nil), do: []
+  defp normalize_landed_list(list) when is_list(list), do: Enum.reject(list, &is_nil/1)
+  defp normalize_landed_list(scalar), do: [scalar]
+
+  defp safe_atom(k) do
+    String.to_existing_atom(k)
+  rescue
+    ArgumentError -> :__missing__
+  end
 
   defp apply_criteria_update(list, %{"index" => index} = update)
        when is_integer(index) and index >= 0 do

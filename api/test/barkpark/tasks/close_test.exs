@@ -210,6 +210,61 @@ defmodule Barkpark.Tasks.CloseTest do
     end
   end
 
+  describe "close/3 — :landed option (land digest, task-obsession L3)" do
+    test "a landed map is written to content.landed atomically with the close", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("landed"), scope)
+
+      assert {:ok, closed} =
+               Close.close(task.id, "w",
+                 observed_epoch: 0,
+                 lifecycle_status: "done",
+                 landed: %{
+                   "prs" => [1210],
+                   "files" => ["api/lib/barkpark/tasks/dedup.ex"],
+                   "capability_slugs" => []
+                 }
+               )
+
+      assert closed.content["lifecycle_status"] == "done"
+      assert closed.content["landed"]["prs"] == [1210]
+      assert closed.content["landed"]["files"] == ["api/lib/barkpark/tasks/dedup.ex"]
+      # Empty lists are dropped, not stored as empty keys.
+      refute Map.has_key?(closed.content["landed"], "capability_slugs")
+    end
+
+    test "a nil/absent landed digest does not write the key", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("no-landed"), scope)
+
+      {:ok, closed} =
+        Close.close(task.id, "w", observed_epoch: 0, lifecycle_status: "done")
+
+      refute Map.has_key?(closed.content, "landed")
+    end
+
+    test "landed UNIONS into an existing digest (backfill accumulates)", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      task = mk_task!(uniq("landed-union"), scope)
+      # Seed a prior digest on the still-open task (as a CI backfill might).
+      foreign_patch_content!(task.id, %{"landed" => %{"files" => ["a.ex"], "prs" => [10]}})
+
+      {:ok, closed} =
+        Close.close(task.id, "w",
+          observed_epoch: 0,
+          lifecycle_status: "done",
+          landed: %{"files" => ["a.ex", "b.ex"], "capability_slugs" => ["dedup"]}
+        )
+
+      assert Enum.sort(closed.content["landed"]["files"]) == ["a.ex", "b.ex"]
+      assert closed.content["landed"]["prs"] == [10]
+      assert closed.content["landed"]["capability_slugs"] == ["dedup"]
+    end
+  end
+
   # ─── (6) Already-terminal guard ──────────────────────────────────────────
 
   describe "close/3 — already-terminal guard" do
