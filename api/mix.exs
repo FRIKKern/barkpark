@@ -88,7 +88,12 @@ defmodule Barkpark.MixProject do
       {:bypass, "~> 2.1", only: :test},
       # Sheets plugin — xlsx import + export (pure-Elixir, no NIFs)
       {:xlsx_reader, "~> 0.8"},
-      {:elixlsx, "~> 0.6"}
+      {:elixlsx, "~> 0.6"},
+      # Studio tmux console (dev-only): forkpty(3) bindings for a real PTY.
+      # `only: [:dev]` is a HARD structural guarantee the terminal never
+      # exists in prod/test builds — the console's `enabled?/0` gate also
+      # requires the config-set backend, so a missing dep fails closed.
+      {:expty, "~> 0.2.1", only: [:dev]}
     ] ++ image_dep()
   end
 

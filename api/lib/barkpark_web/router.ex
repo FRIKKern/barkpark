@@ -514,6 +514,10 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
       live("/org-admin", OrgAdminLive)
+      # Dev-only tmux console — admin-gated here; TmuxLive.mount also hard-gates
+      # on TmuxConsole.enabled? (dev-only PTY dep + config flag). Hidden in
+      # prod/test where the flag is off and the backend isn't compiled.
+      live("/tmux", TmuxLive)
     end
   end
 
