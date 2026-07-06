@@ -189,3 +189,45 @@ func TestReconcileWarmPool_RecycleSkipsOnServerListingError(t *testing.T) {
 		t.Errorf("listing-error pass: created=%d deleted=%d, want 0/0", created, deleted)
 	}
 }
+
+// ctxSensitiveProvider fails Delete when the PASSED context is already dead —
+// modelling the real hcloud shell-out, which the in-memory FakeProvider ignores.
+// The regression seam for the warm-dbebde03 leak: a teardown that inherits a
+// dying caller ctx (worker shutdown mid-grow) must still complete, because an
+// unregistered warm box has no other recovery path.
+type ctxSensitiveProvider struct {
+	cloud.CloudProvider
+}
+
+func (p ctxSensitiveProvider) Delete(ctx context.Context, name string) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("hcloud server delete %q: %w", name, err)
+	}
+	return p.CloudProvider.Delete(ctx, name)
+}
+
+func TestGrowWarmBox_TeardownSurvivesDyingContext(t *testing.T) {
+	seams, prov, _, runner := fakeSeams(t)
+	wc := &fakeWarmClient{}
+	seams.WarmClient = wc
+	seams.Provider = ctxSensitiveProvider{CloudProvider: prov}
+	// The freshen fails (any reason) AND the caller's ctx is already cancelled —
+	// the worker-shutdown-mid-grow shape that leaked warm-dbebde03.
+	runner.checkErr = fmt.Errorf("git fetch: interrupted by shutdown")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := growWarmBox(ctx, seams); err == nil {
+		t.Fatal("growWarmBox must report the freshen failure")
+	}
+
+	// The teardown ran on a FRESH context, so the box is GONE despite the dead
+	// caller ctx — no silent, unbounded spend.
+	warm, _ := prov.ListByLabel(context.Background(), cloud.WarmLabelKey, "true")
+	if len(warm) != 0 {
+		t.Errorf("box leaked through a dying-ctx teardown: %d warm boxes remain", len(warm))
+	}
+	if got, _ := wc.CountReady(context.Background()); got != 0 {
+		t.Errorf("a failed grow registered a row: %d", got)
+	}
+}
