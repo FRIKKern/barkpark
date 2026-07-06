@@ -548,8 +548,20 @@ if config_env() == :prod do
     rp_id: host,
     origin: "#{scheme}://#{host}"
 
+  # PUBLIC url port ≠ internal listen port (PORT). Every prod box fronts the
+  # app with a proxy on the scheme-standard port (Caddy 443/80; blue/green
+  # listens on 4000/4001) — baking PORT into `url:` made Endpoint.url()
+  # "https://host:4000", which broke every absolute-URL consumer: emailed
+  # reset/confirm links and the /login cloud deep link (login-brand-ux).
+  # PHX_PORT overrides for the rare box whose public port IS nonstandard.
+  url_port =
+    case System.get_env("PHX_PORT") do
+      p when is_binary(p) and p != "" -> String.to_integer(p)
+      _ -> if scheme == "https", do: 443, else: 80
+    end
+
   config :barkpark, BarkparkWeb.Endpoint,
-    url: [host: host, port: String.to_integer(System.get_env("PORT", "4000")), scheme: scheme],
+    url: [host: host, port: url_port, scheme: scheme],
     check_origin: check_origin,
     http: [
       # Enable IPv6 and bind on all interfaces.
