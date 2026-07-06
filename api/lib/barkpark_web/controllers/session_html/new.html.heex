@@ -1,43 +1,46 @@
-<div class="empty-state" style="min-height: 70vh;">
-  <div class="card" style="max-width: 420px; width: 100%;">
-    <div class="card-header" style="display: block;">
-      <h2 class="h2">Sign in</h2>
-      <p class="text-sm text-muted" style="margin-top: 4px;">
-        Sign in with your account, or paste an API token.
-      </p>
-    </div>
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
 
-    <div style="padding: 20px;">
-      <%= if Phoenix.Flash.get(@flash, :error) do %>
-        <div class="flash flash-error" role="alert">
-          {Phoenix.Flash.get(@flash, :error)}
-        </div>
-      <% end %>
-      <%= if Phoenix.Flash.get(@flash, :info) do %>
-        <div class="flash flash-info">
-          {Phoenix.Flash.get(@flash, :info)}
-        </div>
-      <% end %>
+    <h1 class="bp-auth-title">Sign in</h1>
+    <p class="bp-auth-sub">to continue to Studio on <b>{@instance_host}</b></p>
 
-      <.form :let={_f} for={%{}} as={:account} action={~p"/login/account"} method="post">
-        <input type="hidden" name="return_to" value={@return_to} />
+    <.auth_flash flash={@flash} />
 
-        <div class="form-group">
-          <label class="form-label" for="account_email">Email</label>
-          <input
-            type="email"
-            name="email"
-            id="account_email"
-            class="form-input"
-            autocomplete="username"
-            autofocus
-            required
-            placeholder="you@example.com"
-          />
-        </div>
+    <%= if @cloud_login_href do %>
+      <a class="bp-auth-btn" href={@cloud_login_href} data-cloud-login>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z" />
+        </svg>
+        Log in with Barkpark Cloud
+      </a>
+      <div class="bp-auth-divider"><span>or sign in with email</span></div>
+    <% end %>
 
-        <div class="form-group">
+    <.form :let={_f} for={%{}} as={:account} action={~p"/login/account"} method="post">
+      <input type="hidden" name="return_to" value={@return_to} />
+
+      <div class="form-group">
+        <label class="form-label" for="account_email">Email</label>
+        <input
+          type="email"
+          name="email"
+          id="account_email"
+          class="form-input"
+          autocomplete="username"
+          autofocus
+          required
+          placeholder="you@example.com"
+        />
+      </div>
+
+      <div class="form-group">
+        <div class="bp-auth-label-row">
           <label class="form-label" for="account_password">Password</label>
+          <a href={~p"/login/reset"}>Forgot password?</a>
+        </div>
+        <div class="bp-auth-input-affix">
           <input
             type="password"
             name="password"
@@ -45,55 +48,77 @@
             class="form-input"
             autocomplete="current-password"
             required
-            placeholder="password"
+            placeholder="••••••••••••"
+          />
+          <button
+            type="button"
+            class="bp-auth-eye"
+            data-eye-for="account_password"
+            tabindex="-1"
+            aria-label="Show password"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button type="submit" class={["bp-auth-btn", @cloud_login_href && "bp-auth-btn-quiet"]}>
+        Sign in
+      </button>
+    </.form>
+
+    <details data-token-signin>
+      <summary>Sign in with an API token instead</summary>
+
+      <.form :let={_f} for={%{}} as={:session} action={~p"/login"} method="post">
+        <input type="hidden" name="return_to" value={@return_to} />
+
+        <div class="form-group">
+          <label class="form-label" for="session_token">API token</label>
+          <input
+            type="password"
+            name="token"
+            id="session_token"
+            class="form-input"
+            autocomplete="off"
+            required
+            placeholder="paste token"
           />
         </div>
 
-        <div style="display: flex; gap: 8px; margin-top: 12px;">
-          <button type="submit" class="btn btn-primary">Sign in</button>
-          <a href="/studio" class="btn btn-ghost">Cancel</a>
-        </div>
+        <button type="submit" class="bp-auth-btn bp-auth-btn-quiet">Sign in with token</button>
       </.form>
+    </details>
 
-      <details style="margin-top: 20px;" data-token-signin>
-        <summary class="text-sm text-muted" style="cursor: pointer;">
-          Sign in with an API token instead
-        </summary>
-
-        <.form
-          :let={_f}
-          for={%{}}
-          as={:session}
-          action={~p"/login"}
-          method="post"
-          style="margin-top: 12px;"
-        >
-          <input type="hidden" name="return_to" value={@return_to} />
-
-          <div class="form-group">
-            <label class="form-label" for="session_token">API token</label>
-            <input
-              type="password"
-              name="token"
-              id="session_token"
-              class="form-input"
-              autocomplete="off"
-              required
-              placeholder="paste token"
-            />
-          </div>
-
-          <div style="display: flex; gap: 8px; margin-top: 12px;">
-            <button type="submit" class="btn btn-secondary">Sign in with token</button>
-          </div>
-        </.form>
-      </details>
-
-      <p class="text-sm text-muted" style="margin-top: 16px;">
-        Enterprise SSO? Use your organization's sign-in link:
-        <code>/v1/auth/oidc/&lt;org&gt;/start</code> or
-        <code>/v1/auth/saml/&lt;org&gt;/start</code>.
-      </p>
-    </div>
+    <p class="bp-auth-foot">
+      Using enterprise SSO? Open your organization's sign-in link —
+      <code>/v1/auth/oidc/&lt;org&gt;/start</code> — or ask your admin for it.
+    </p>
   </div>
+
+  <p class="bp-auth-pagefoot">Barkpark — the self-hosted content studio</p>
+
+  <script>
+    // Password show/hide — same affordance as the Cloud dashboard login.
+    document.querySelectorAll(".bp-auth-eye").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var input = document.getElementById(btn.dataset.eyeFor);
+        if (!input) return;
+        var show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      });
+    });
+  </script>
 </div>

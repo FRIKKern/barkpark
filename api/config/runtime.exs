@@ -40,6 +40,19 @@ if config_env() == :prod do
          System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
 end
 
+# "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
+# instance, the control plane's public origin here puts the cloud sign-in
+# button on /login. The button deep-links to the cloud SPA, which mints a
+# login ticket via the existing studio-link route and lands the user back
+# signed in. Unset → the button never renders (e.g. plain self-host).
+case System.get_env("BARKPARK_CLOUD_URL") do
+  url when is_binary(url) and url != "" ->
+    config :barkpark, :cloud_login_url, url
+
+  _ ->
+    :ok
+end
+
 config :barkpark, BarkparkWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 

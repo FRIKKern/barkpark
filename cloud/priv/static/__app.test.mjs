@@ -60,6 +60,7 @@ const sandbox = {
   localStorage: storage,
   sessionStorage: storage,
   navigator: {},
+  URL: URL, // studioLoginHost() parses instance origins with the WHATWG URL API
   fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
   EventSource: function () { return { addEventListener: noop, close: noop }; },
   setTimeout: noop,
@@ -2293,4 +2294,52 @@ test("C8: a failed EVENTS fetch is the error state with one Retry", async () => 
   } finally {
     sandbox.fetch = realFetch;
   }
+});
+
+// ── "Log in with Barkpark Cloud" (instance-login deep link) ─────────────────
+// The parse/match layer is pure and lives here; the mint round-trip rides the
+// server-tested studio-link route and is exercised live.
+
+test("instance-login: hash parses with and without the leading slash", () => {
+  assert.equal(
+    hooks.studioLoginFromHash("#/instance-login?url=https%3A%2F%2Fguerrilla.barkpark.cloud"),
+    "https://guerrilla.barkpark.cloud",
+  );
+  assert.equal(
+    hooks.studioLoginFromHash("#instance-login?url=https%3A%2F%2Fg.example"),
+    "https://g.example",
+  );
+  assert.equal(hooks.studioLoginFromHash("#fleet"), null);
+  assert.equal(hooks.studioLoginFromHash(""), null);
+  // Trailing params beyond url= are ignored, not swallowed into the origin.
+  assert.equal(
+    hooks.studioLoginFromHash("#/instance-login?url=https%3A%2F%2Fa.example&x=1"),
+    "https://a.example",
+  );
+});
+
+test("instance-login: a malformed deep link degrades to null, never throws", () => {
+  // The URIError white-screen class this harness exists for (see header):
+  // safeDecode returns the RAW string on a bad escape; the host parse is the
+  // layer that turns that garbage into "no target".
+  const garbage = hooks.studioLoginFromHash("#/instance-login?url=%E0%A4%A");
+  assert.equal(hooks.studioLoginHost(garbage), null);
+  assert.equal(hooks.studioLoginHost("not-a-url"), null);
+  assert.equal(hooks.studioLoginHost("javascript:alert(1)"), null);
+  assert.equal(hooks.studioLoginHost(null), null);
+  assert.equal(hooks.studioLoginHost("https://"), null);
+});
+
+test("instance-login: fleet match is host equality, never substring", () => {
+  const fleet = [
+    { id: "a", url: "https://alpha.barkpark.cloud" },
+    { id: "b", url: "https://guerrilla.barkpark.cloud/" },
+    { id: "c", url: null },
+  ];
+  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud").id, "b");
+  // A lookalike host must NOT match the real one.
+  assert.equal(hooks.studioLoginMatch(fleet, "https://evil-guerrilla.barkpark.cloud"), null);
+  assert.equal(hooks.studioLoginMatch(fleet, "https://guerrilla.barkpark.cloud.evil.example"), null);
+  assert.equal(hooks.studioLoginMatch([], "https://guerrilla.barkpark.cloud"), null);
+  assert.equal(hooks.studioLoginMatch(fleet, "garbage"), null);
 });

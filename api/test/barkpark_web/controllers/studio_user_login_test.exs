@@ -71,7 +71,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
       {_user, secret} = enroll_totp!(user)
 
       conn = login_account(conn, "mfa@example.com")
-      assert html_response(conn, 200) =~ "Two-factor code"
+      assert html_response(conn, 200) =~ "Two-step verification"
       refute get_session(conn, "user_session")
 
       conn =

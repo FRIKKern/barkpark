@@ -1,38 +1,35 @@
-<div class="empty-state" style="min-height: 70vh;">
-  <div class="card" style="max-width: 420px; width: 100%;">
-    <div class="card-header" style="display: block;">
-      <h2 class="h2">Two-factor code</h2>
-      <p class="text-sm text-muted" style="margin-top: 4px;">
-        Enter the six-digit code from your authenticator app, or a recovery code.
-      </p>
-    </div>
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
 
-    <div style="padding: 20px;">
-      <%= if Phoenix.Flash.get(@flash, :error) do %>
-        <div class="flash flash-error" role="alert">
-          {Phoenix.Flash.get(@flash, :error)}
-        </div>
-      <% end %>
+    <h1 class="bp-auth-title">Two-step verification</h1>
+    <p class="bp-auth-sub">Enter the six-digit code from your authenticator app.</p>
 
-      <.form :let={_f} for={%{}} as={:mfa} action={~p"/login/mfa"} method="post">
-        <input type="hidden" name="return_to" value={@return_to} />
+    <.auth_flash flash={@flash} />
 
+    <.form :let={_f} for={%{}} as={:mfa} action={~p"/login/mfa"} method="post">
+      <input type="hidden" name="return_to" value={@return_to} />
+
+      <div class="form-group">
+        <label class="form-label" for="mfa_code">Authenticator code</label>
+        <input
+          type="text"
+          name="code"
+          id="mfa_code"
+          class="form-input bp-auth-code"
+          inputmode="numeric"
+          autocomplete="one-time-code"
+          maxlength="6"
+          autofocus
+          placeholder="123456"
+        />
+      </div>
+
+      <details>
+        <summary>Use a recovery code instead</summary>
         <div class="form-group">
-          <label class="form-label" for="mfa_code">Authenticator code</label>
-          <input
-            type="text"
-            name="code"
-            id="mfa_code"
-            class="form-input"
-            inputmode="numeric"
-            autocomplete="one-time-code"
-            autofocus
-            placeholder="123456"
-          />
-        </div>
-
-        <div class="form-group">
-          <label class="form-label" for="mfa_recovery">…or a recovery code</label>
+          <label class="form-label" for="mfa_recovery">Recovery code</label>
           <input
             type="text"
             name="recovery_code"
@@ -42,12 +39,15 @@
             placeholder="recovery code"
           />
         </div>
+      </details>
 
-        <div style="display: flex; gap: 8px; margin-top: 12px;">
-          <button type="submit" class="btn btn-primary">Verify</button>
-          <a href="/login" class="btn btn-ghost">Start over</a>
-        </div>
-      </.form>
-    </div>
+      <div style="margin-top: 16px;">
+        <button type="submit" class="bp-auth-btn">Verify</button>
+      </div>
+    </.form>
+
+    <p class="bp-auth-foot">
+      <a href={~p"/login"}>Start over</a>
+    </p>
   </div>
 </div>
