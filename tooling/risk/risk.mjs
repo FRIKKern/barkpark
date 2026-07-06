@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { FRAGILE_DENSITY, UNTESTED_SCORE } from "../lib/thresholds.mjs";
 import { evalFormula } from "../lib/formula.mjs";
+import { elixirFnCov, jsFnCov } from "./fn-coverage.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -109,6 +110,12 @@ const code = sig.filter(s => s.kind === "code");
 // is mapped down onto each source file. Any suite that fails/times out is skipped
 // silently — those files keep the presence proxy.
 const realCov = {};
+// fnCov: path -> [ untested PUBLIC fns (pct < FN_COV_CUTOFF) ]. Sharpens the
+// Tested ¬coverage evidence — a 0%-covered public fn a high file-% would mask.
+// Kept lean (only fns below the cutoff) so the report doesn't bloat with a full
+// fn dump. Persisted + cache-restored exactly like realCov (zero-cost re-run).
+const fnCov = {};
+const FN_COV_CUTOFF = 50;
 let goPct = null, exPct = null, jsPct = null;
 function tryRun(cmd, a, opts) {
   // 30-min ceiling: the full `mix test --cover` suite prints its coverage table
@@ -122,6 +129,7 @@ const priorRpt = existsSync(join(HERE, "risk-report.json")) ? JSON.parse(readFil
 const covCacheHit = !NO_COVERAGE && COVSIG && priorRpt.coverageSig === COVSIG && priorRpt.realCov && Object.keys(priorRpt.realCov).length;
 if (covCacheHit) {
   Object.assign(realCov, priorRpt.realCov);
+  Object.assign(fnCov, priorRpt.fnCov || {});
   ({ go: goPct = null, elixir: exPct = null, js: jsPct = null } = priorRpt.coverageTotals || {});
   process.stderr.write("[coverage] reused cache — no code/test change (skipped go/mix suites)\n");
 }
@@ -154,6 +162,17 @@ if (!NO_COVERAGE && !covCacheHit) {
     }
     const tot = exOut.match(/^\|\s*([\d.]+)%\s*\|\s*Total\s*\|/m);
     if (tot) exPct = +tot[1];
+    // Per-public-fn coverage from the per-module cover HTML `mix test --cover` just
+    // wrote (api/cover/Elixir.<Module>.html). FREE (already on disk) — parses the
+    // worst-covered public fns so a 0%-fn drags a hot file's Tested finding up.
+    for (const [modName, f] of Object.entries(modToFile)) {
+      const covHtml = join(ROOT, "api/cover", `Elixir.${modName}.html`);
+      if (!existsSync(covHtml)) continue;
+      try {
+        const fns = elixirFnCov(readFileSync(covHtml, "utf8")).filter(fn => fn.pct < FN_COV_CUTOFF);
+        if (fns.length) fnCov[f] = fns;
+      } catch {}
+    }
   }
 }
 // -- JS/TS: ingest Istanbul coverage-final.json (vitest --coverage) where present.
@@ -175,6 +194,10 @@ if (!covCacheHit) {
         if (!code.some(f => f.path === rel)) continue;
         const pct = Math.round((sv.filter(c => c > 0).length / sv.length) * 100);
         realCov[rel] = { pct, source: "js" }; jsSum += pct; jsN++;
+        // per-public-fn coverage from Istanbul fnMap+f (FREE — same dump) — keep
+        // only fns below the cutoff so the report stays lean.
+        const fns = jsFnCov(data).filter(fn => fn.pct < FN_COV_CUTOFF);
+        if (fns.length) fnCov[rel] = fns;
       }
     } catch {}
   }
@@ -198,13 +221,14 @@ for (const s of code) {
   out[s.path] = { bugFixes: fixes, defectDensity: +(evalFormula(DEFECT_FORMULA, { fixes, churn: churn[s.path] || 1 })).toFixed(2),
     hasTest: has, testRefs: refs, testScore, testCoverageSource,
     realCoverage: rc ? rc.pct : null, proxyScore,
+    untestedFns: fnCov[s.path] || [],   // worst public fns (pct < cutoff) — sharpens ¬coverage
     primaryAuthorShare: own.primaryAuthorShare, authorCount: own.authorCount };
 }
 
 const report = { at: new Date().toISOString(),
   note: "testScore is REAL coverage (go/elixir) where measured; presence PROXY elsewhere — see testCoverageSource",
   coverageTotals: { go: goPct, elixir: exPct, js: jsPct },
-  coverageSig: COVSIG, realCov,
+  coverageSig: COVSIG, realCov, fnCov,
   files: out };
 writeFileSync(join(HERE, "risk-report.json"), JSON.stringify(report, null, 2));
 
