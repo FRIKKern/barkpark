@@ -394,7 +394,7 @@ defmodule Barkpark.PortableDoc.PatchTest do
     end
 
     test "insert-after adding a SECOND role:featured breaks max-1 ⇒ rejected" do
-      assert {:error, {:constraint, _msg, "insert-after"}} =
+      assert {:error, {:constraint, msg, "insert-after"}} =
                Patch.apply_patch(
                  title_featured_doc(),
                  %{
@@ -404,6 +404,9 @@ defmodule Barkpark.PortableDoc.PatchTest do
                  },
                  constraints: title_featured_decls()
                )
+
+      # Copy pin: the message is the envelope/flash text external producers see.
+      assert msg == "constraint: at most 1 block of \"featured\" allowed, found 2"
     end
 
     test "remove-block dropping below a synthetic min-2 is vetoed like a locked op" do

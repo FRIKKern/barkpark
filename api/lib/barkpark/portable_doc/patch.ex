@@ -370,13 +370,21 @@ defmodule Barkpark.PortableDoc.Patch do
         {:ok, after_blocks}
 
       decls ->
-        if Constraints.validate(before_blocks, decls) == [] do
-          case Constraints.validate(after_blocks, decls) do
-            [] -> {:ok, after_blocks}
-            [first | _] -> {:error, {:constraint, first, Map.get(op, "op")}}
-          end
-        else
-          {:ok, after_blocks}
+        # Validate the RESULT first: the common op keeps the doc valid, so the
+        # before-scan (only needed to decide whether a violation is NEW) is
+        # skipped entirely on the happy path. Truth table is unchanged: a valid
+        # result always passes; an invalid result is vetoed only when the doc
+        # was valid before the op (D12).
+        case Constraints.validate(after_blocks, decls) do
+          [] ->
+            {:ok, after_blocks}
+
+          [first | _] ->
+            if Constraints.validate(before_blocks, decls) == [] do
+              {:error, {:constraint, first, Map.get(op, "op")}}
+            else
+              {:ok, after_blocks}
+            end
         end
     end
   end

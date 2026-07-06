@@ -9,6 +9,7 @@ defmodule Barkpark.Content.Papers.TemplateTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.Template
+  alias Barkpark.PortableDoc.Constraints
   alias Barkpark.PortableDoc.Patch
 
   # ── pure template unit truths ────────────────────────────────────────────
@@ -54,6 +55,26 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     # locked doc missing its title block entirely
     assert [msg2] = Template.validate([%{"type" => "paragraph", "locked" => true}])
     assert msg2 =~ "missing"
+  end
+
+  test "paper_declarations: the seeded template satisfies every declaration (D3 byte-compat)" do
+    decls = Template.paper_declarations()
+
+    # The exact birth shape (title @0, featured @1, empty paragraph) — and the
+    # bare template — validate clean, so declaration-threaded ops on a fresh
+    # paper are subject to constraint vetoes, never blanket-passed by D12.
+    assert Constraints.validate(Template.maybe_seed([], nil, %{"title" => "T"}), decls) == []
+    assert Constraints.validate(Template.template_blocks("T"), decls) == []
+
+    # An ingress paragraph in its enforced place (after title, before featured)
+    # is welcome; the same block AFTER featured breaks the relative order.
+    [title, featured] = Template.template_blocks("T")
+    ingress = %{"id" => "ing", "type" => "paragraph", "role" => "ingress"}
+
+    assert Constraints.validate([title, ingress, featured], decls) == []
+
+    assert ["constraint: " <> _] =
+             Constraints.validate([title, featured, ingress], decls)
   end
 
   # ── op backstops (Patch) ─────────────────────────────────────────────────

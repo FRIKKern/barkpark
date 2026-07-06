@@ -93,13 +93,13 @@ defmodule Barkpark.PortableDoc.Constraints do
   defp presence_error(_presence, _kind, _n), do: []
 
   defp count_error({:exactly, c}, kind, n) when n != c,
-    do: ["constraint: exactly #{c} #{quoted(kind)} block(s) required, found #{n}"]
+    do: ["constraint: exactly #{count_blocks(c)} of #{quoted(kind)} required, found #{n}"]
 
   defp count_error({:min, c}, kind, n) when n < c,
-    do: ["constraint: at least #{c} #{quoted(kind)} block(s) required, found #{n}"]
+    do: ["constraint: at least #{count_blocks(c)} of #{quoted(kind)} required, found #{n}"]
 
   defp count_error({:max, c}, kind, n) when n > c,
-    do: ["constraint: at most #{c} #{quoted(kind)} block(s) allowed, found #{n}"]
+    do: ["constraint: at most #{count_blocks(c)} of #{quoted(kind)} allowed, found #{n}"]
 
   defp count_error(_count, _kind, _n), do: []
 
@@ -194,4 +194,7 @@ defmodule Barkpark.PortableDoc.Constraints do
 
   defp quoted(nil), do: "\"\""
   defp quoted(kind), do: "\"#{kind}\""
+
+  defp count_blocks(1), do: "1 block"
+  defp count_blocks(n), do: "#{n} blocks"
 end
