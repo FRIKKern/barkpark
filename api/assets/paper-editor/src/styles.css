@@ -53,7 +53,7 @@
   --bp-tone-neutral-bg: #f3f4f6;
   --bp-tone-neutral-fg: #374151;
   --bp-body-size: 18px;
-  --bp-body-lh: 1.70;
+  --bp-body-lh: 1.65;
   --bp-body-tracking: 0.005em;
   --bp-h1-size: 32px;
   --bp-h1-lh: 1.1;
@@ -131,10 +131,11 @@
 /* ── Block typography. line-height + letter-spacing values are byte-aligned
  * with render.ex heading_style/2 inline values (h1 1.1/-0.02em, h2 1.2,
  * h3 1.25) — a parity contract; do NOT change them or View<->Edit drift
- * returns. Heading margins are intentionally ZERO. */
-.bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 0; }
-.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 0; }
-.bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 0; }
+ * returns. Heading margins are TOP-only vertical rhythm (h1 1.2em, h2 1.9em,
+ * h3 1.5em), byte-mirrored with the reader's .bp-paper-surface hN rules. */
+.bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
+.bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
+.bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
 .bp-paper-editor-body p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
 .bp-paper-editor-body a  {
   color: var(--paper-accent); text-decoration: none;
