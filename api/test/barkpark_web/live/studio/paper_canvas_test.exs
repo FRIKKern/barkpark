@@ -671,6 +671,33 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ Render.render_block(cards, %{style: :article}),
              "the boundary widget emits the EXACT reader bytes for the static fleet block"
     end
+
+    test "pdd-t8: an EMPTY static fleet block gets a component-vocabulary empty note" do
+      # cards with no items renders "" through the reader producer — the widget must
+      # say so in the block's OWN vocabulary, not the task copy ("No matching
+      # tasks." on an empty cards block would be a lie).
+      html = editor_html([%{"id" => "c2", "type" => "cards", "items" => []}], %{})
+
+      assert html =~ "Nothing to show yet."
+      refute html =~ "No matching tasks."
+    end
+
+    test "pdd-t8: a stray query key on a STATIC fleet block never wedges it in loading" do
+      # Only the query-carrying task types ever get preview entries, so a static
+      # block carrying a stray "query" would previously spin forever — it must
+      # render directly instead.
+      cards = %{
+        "id" => "c3",
+        "type" => "cards",
+        "query" => %{"status" => "ready"},
+        "items" => [%{"title" => "Painted", "text" => "not loading"}]
+      }
+
+      html = editor_html([cards], %{})
+
+      assert html =~ "Painted"
+      refute html =~ "Loading live tasks…"
+    end
   end
 
   describe "paper_canvas_enabled?/0 (default FALSE)" do

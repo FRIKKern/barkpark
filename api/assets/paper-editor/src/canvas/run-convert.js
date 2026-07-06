@@ -194,8 +194,12 @@ const CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE = { bpSheet: "sheet", bpEmbed: "embed
 // attr, so bpFleet is NOT in CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE. This is the
 // canonical enumeration of the reader's non-prose component emitters
 // (render/components.ex + render/figures.ex asciicast + render/forms.ex form);
-// keep aligned with embed-node.js:BP_FLEET_NODE_NAME and
-// paper_canvas.ex:@canvas_fleet_types. `diagram` is DELIBERATELY absent — it rides
+// keep aligned with embed-node.js:BP_FLEET_NODE_NAME,
+// shared/paper.ex:@fleet_render_types (the server-paint push) and
+// paper_editor.ex:@fleet_preview_types (the boundary-widget twin). NOTE the run
+// PARTITION (paper_canvas.ex) is deliberately UNCHANGED for t8 — fleet blocks still
+// render as boundary widgets; bpFleet mounts only when t10 folds the fleet into
+// runs. `diagram` is DELIBERATELY absent — it rides
 // its own editable bpDiagram attr-atom (source textarea), not the read-only paint.
 const CANVAS_FLEET_TYPES = new Set([
   "tasks",

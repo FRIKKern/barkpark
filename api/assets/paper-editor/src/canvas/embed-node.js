@@ -382,9 +382,11 @@ export const Fleet = Node.create({
 
       return {
         dom,
-        // Re-render the fallback chip when the node's attrs change (echo / undo).
-        // The server HTML (if any) is re-injected by the hook on its own channel,
-        // keyed by the stable data-bp-fleet-id, so we only reset the fallback here.
+        // KEEP the existing DOM across attr updates (echo / undo): returning true
+        // preserves the paint hole AND whatever server HTML the hook already
+        // injected into it — a re-created node-view would flash back to the chip.
+        // A fresh paint for changed content arrives on the hook's own channel
+        // (bp:block-html, keyed by the stable data-bp-fleet-id), never from PM.
         update: (updated) => {
           if (updated.type.name !== BP_FLEET_NODE_NAME) return false;
           return true;

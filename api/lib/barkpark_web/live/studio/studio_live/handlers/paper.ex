@@ -24,7 +24,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           # t9: entering Edit — refresh the live task-block previews so the
           # boundary widgets paint CURRENT rows, not the rows from paper-open.
           # No-op when the canvas flag is OFF; display-only either way (D5).
-          Shared.push_task_previews(socket)
+          # pdd-t8: the fleet-in-canvas paint (bp:block-html) rides the same
+          # refresh — every push site pairs the two channels.
+          socket |> Shared.push_task_previews() |> Shared.push_block_renders()
         else
           stream(
             socket,

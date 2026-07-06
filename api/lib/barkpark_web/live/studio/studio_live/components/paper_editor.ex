@@ -605,7 +605,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <% {:ok, html} -> %>
           <%= raw(html) %>
         <% :empty -> %>
-          <div class="bp-tasks bp-tasks--empty">No matching tasks.</div>
+          <div class="bp-tasks bp-tasks--empty">{empty_note(@block)}</div>
         <% :error -> %>
           <div class="bp-tasks bp-tasks--empty">
             Live task preview unavailable — the Tasks plugin may be off.
@@ -627,6 +627,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # nil/unknown entry on a query block ⇒ still resolving (or the block has no
   # id to key a preview) — an honest "loading" note, never a fake empty board.
   # An author-pinned literal (no query) renders from its own rows directly.
+  # pdd-t8: :loading is gated to the QUERY-CARRYING TASK types — only those ever
+  # get a preview entry (TaskResolver.preview skips everything else), so a stray
+  # "query" key on a static fleet block must render directly, never spin forever.
   defp task_preview_state(block, preview) do
     cond do
       is_map(preview) and preview["error"] == true ->
@@ -635,12 +638,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       is_map(preview) ->
         block |> TaskResolver.apply_preview(preview) |> rendered_or_empty()
 
-      Map.has_key?(block, "query") ->
+      Map.get(block, "type") in @task_preview_types and Map.has_key?(block, "query") ->
         :loading
 
       true ->
         rendered_or_empty(block)
     end
+  end
+
+  # pdd-t8: the empty note in the block's OWN vocabulary — a task block's
+  # emptiness means "the query matched nothing"; a static component block's
+  # (cards / pipeline / notes with no items yet) means "no content yet".
+  # "No matching tasks." on an empty cards block would be a lie. The static copy
+  # mirrors the canvas fleet hook's empty-paint fallback (root.html.heex).
+  defp empty_note(block) do
+    if Map.get(block, "type") in @task_preview_types,
+      do: "No matching tasks.",
+      else: "Nothing to show yet."
   end
 
   # task_detail_html renders "" for an empty/matchless task — surface that as
