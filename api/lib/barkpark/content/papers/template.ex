@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Papers.Template do
   alias Barkpark.PortableDoc.Constraints
 
   @title_role "title"
+  @featured_role "featured"
 
   @doc """
   The paper's structural declarations, in the generic constraint vocabulary. The
@@ -60,21 +61,61 @@ defmodule Barkpark.Content.Papers.Template do
         locked: true
       },
       %{
-        kind: "featured",
-        presence: :optional,
-        count: {:max, 1},
-        position: [{:after, "title"}],
-        locked: true
-      },
-      %{
         kind: "ingress",
         presence: :optional,
         count: {:max, 1},
         position: [{:after, "title"}, {:before, "featured"}],
         locked: false
+      },
+      %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}],
+        locked: true
       }
     ]
   end
+
+  @doc """
+  The declarations in the JSON WIRE form the editor consumes (pdd-t20c): the SAME
+  rules as `paper_declarations/0`, string-keyed and tuple-free so `Jason.encode!`
+  can stamp them onto the canvas host as `data-constraints`. `canvas/constraints.js`
+  reads `count: {exactly|min|max: N}` and `position: "top" | {after, before}` to
+  render ghost slots + a calm client veto. DERIVED from the server declarations so
+  the client affordances can never drift from the checker (single source).
+  """
+  @spec client_declarations() :: [map()]
+  def client_declarations do
+    Enum.map(paper_declarations(), fn decl ->
+      %{
+        "kind" => decl.kind,
+        "role" => decl.kind,
+        "presence" => Atom.to_string(decl.presence),
+        "count" => wire_count(decl.count),
+        "position" => wire_position(decl.position),
+        "locked" => Map.get(decl, :locked, false)
+      }
+    end)
+  end
+
+  defp wire_count({kind, n}) when kind in [:exactly, :min, :max], do: %{Atom.to_string(kind) => n}
+
+  # `[{:index, 0}]` (or a leading top_group) → "top"; before/after relations fold
+  # into a single {after, before} object; anything else the client can't express
+  # collapses to "top" (the server backstop, t20b, is the real enforcer).
+  defp wire_position(position) when is_list(position) do
+    rels =
+      Enum.reduce(position, %{}, fn
+        {:after, kind}, acc -> Map.put(acc, "after", kind)
+        {:before, kind}, acc -> Map.put(acc, "before", kind)
+        _other, acc -> acc
+      end)
+
+    if map_size(rels) > 0, do: rels, else: "top"
+  end
+
+  defp wire_position(_), do: "top"
 
   @doc """
   The forced initial block set: the locked `role: "title"` level-1 heading. The

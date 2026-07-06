@@ -1196,4 +1196,140 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert {:noreply, ^s0} = PaperHandler.sidebar_toggle_section(%{}, s0)
     end
   end
+
+  # ── pdd-t20c: constraint vocabulary — ghost slots + the data-constraints stamp ──
+
+  describe "ghost_slots/1 (the pure model, gated on a doctrine paper + save-safety)" do
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    defp locked_title(id \\ "tpl-title"),
+      do: %{"id" => id, "type" => "heading", "level" => 1, "role" => "title", "locked" => true}
+
+    defp locked_featured(id \\ "tpl-featured"),
+      do: %{"id" => id, "type" => "image", "role" => "featured", "locked" => true}
+
+    test "a doctrine paper (locked title, no optionals) offers BOTH ghosts, ordered ingress→featured" do
+      blocks = [locked_title(), para("body")]
+      slots = PaperEditor.ghost_slots(blocks)
+
+      assert Enum.map(slots, & &1.kind) == ["ingress", "featured"]
+      assert Enum.find(slots, &(&1.kind == "featured")).locked == true
+      assert Enum.find(slots, &(&1.kind == "ingress")).locked == false
+      assert Enum.all?(slots, &(&1.after == "title"))
+    end
+
+    test "a present optional drops its ghost (featured present → only ingress remains)" do
+      # featured sits at block 1 (after the title); ingress is still absent AND
+      # save-safe? NO — inserting ingress after the title would displace the LOCKED
+      # featured, so the ghost is withheld (never a save error, rule 5).
+      blocks = [locked_title(), locked_featured()]
+      assert PaperEditor.ghost_slots(blocks) == []
+    end
+
+    test "a NON-doctrine paper (no locked blocks) offers no ghosts (additive, D3)" do
+      assert PaperEditor.ghost_slots([para("p1"), para("p2")]) == []
+    end
+
+    test "the ingress ghost IS offered when its insert is save-safe (title then an unlocked block)" do
+      # title + an unlocked paragraph: inserting ingress after the title displaces
+      # only the unlocked paragraph → safe → the ingress ghost is offered.
+      blocks = [locked_title(), para("body")]
+      assert Enum.any?(PaperEditor.ghost_slots(blocks), &(&1.kind == "ingress"))
+    end
+  end
+
+  describe "the flag-ON canvas stamps constraints + paints the ghost slots (doctrine paper)" do
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    defp doctrine_html(blocks) do
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "doctrine-p",
+        blocks: blocks,
+        canvas_eligible: true,
+        task_previews: %{}
+      )
+    end
+
+    test "the canvas run carries data-canvas-constraints (the JSON declarations) for a locked-carrying doc" do
+      html = doctrine_html([locked_title(), para("body")])
+
+      assert html =~ ~s(data-canvas-constraints=)
+      # the declaration kinds ride the stamp
+      assert html =~ "featured"
+      assert html =~ "ingress"
+      assert html =~ ~s(&quot;presence&quot;)
+    end
+
+    test "a NON-doctrine paper does NOT stamp constraints (additive — the attr renders empty)" do
+      html = doctrine_html([para("p1"), para("p2")])
+
+      refute html =~ ~s(data-canvas-constraints=&quot;[)
+      refute html =~ ~s(data-test-id="paper-ghost-slots")
+    end
+
+    test "the absent optionals paint as calm ghost affordances after the title run" do
+      html = doctrine_html([locked_title(), para("body")])
+
+      assert html =~ ~s(data-test-id="paper-ghost-slots")
+      assert html =~ ~s(data-test-id="paper-ghost-featured")
+      assert html =~ ~s(data-test-id="paper-ghost-ingress")
+      # each ghost is a real button wired to the materialize event, keyed by kind,
+      # carrying the anchor (the locked title id) — a click can only INSERT-AFTER.
+      assert html =~ ~s(phx-click="paper-materialize-slot")
+      assert html =~ ~s(phx-value-kind="featured")
+      assert html =~ ~s(phx-value-after="tpl-title")
+      # accessible name, never a bare glyph
+      assert html =~ "Add the optional featured image"
+    end
+
+    test "a paper whose optionals are already present shows NO ghosts (no empty husk, no dup slot)" do
+      full = [
+        locked_title(),
+        %{"id" => "ing", "type" => "paragraph", "role" => "ingress", "content" => []},
+        locked_featured()
+      ]
+
+      html = doctrine_html(full)
+      refute html =~ ~s(data-test-id="paper-ghost-slots")
+    end
+  end
+
+  describe "paper_materialize_slot/2 (the ghost → real block op)" do
+    alias BarkparkWeb.Studio.StudioLive.Handlers.Paper, as: P
+
+    defp materialize_socket(blocks) do
+      %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          paper_doc: %{doc_id: "doctrine-p", content: %{"blocks" => blocks}},
+          paper_rev: 0,
+          dataset: "production"
+        }
+      }
+    end
+
+    test "an unknown slot kind is a calm no-op (no op emitted, socket unchanged)" do
+      s0 = materialize_socket([%{"id" => "t", "role" => "title", "locked" => true}])
+      assert {:noreply, ^s0} = P.paper_materialize_slot(%{"kind" => "nope", "after" => "t"}, s0)
+    end
+
+    test "a malformed payload is a safe no-op" do
+      s0 = materialize_socket([])
+      assert {:noreply, ^s0} = P.paper_materialize_slot(%{}, s0)
+    end
+  end
 end

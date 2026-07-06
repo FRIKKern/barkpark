@@ -259,6 +259,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("paper-add-block", params, socket), do: Paper.paper_add_block(params, socket)
 
+  def handle_event("paper-materialize-slot", params, socket),
+    do: Paper.paper_materialize_slot(params, socket)
+
   def handle_event("paper-slash-insert", params, socket),
     do: Paper.paper_slash_insert(params, socket)
 
