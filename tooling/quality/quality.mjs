@@ -107,6 +107,23 @@ for (const r of erg.splitCandidates) if (r.refactorWorth > 5000 && !r.contract) 
 for (const [f, c] of allComp) if (c.hotspot >= hotspotCut && c.hotspot >= 60 && (roots[f]?._raw.churn ?? 0) >= 8) findings.push({ kind: "hotspot", file: f, dim: "Hotspot", sev: Math.min(1, c.hotspot / 100), effort: roots[f]._raw.tokens > 20000 ? 4 : 3, action: `Refactor hotspot — churn ${roots[f]._raw.churn} × ${roots[f]._raw.tokens.toLocaleString()} tok (hotspot ${c.hotspot})`, why: "high-churn high-complexity: the field's gold-standard refactor target" });
 // CRITICAL-UNTESTED findings — reach × ¬coverage in the danger top-K
 for (const { p: f } of critArr.slice(0, dangerTopK)) { const rk = risk[f] || {}; if ((comp[f]?.criticalUntested ?? 0) >= 50) findings.push({ kind: "untested", file: f, dim: "Tested", sev: Math.min(1, comp[f].criticalUntested / 100), effort: 2, action: `Add tests — reach ${reachOf(f)}, ${rk.hasTest ? "sibling test is thin" : "no sibling test"} (crit-untested ${comp[f].criticalUntested})`, why: "high-reach code with little/no coverage" }); }
+// UNTESTED-FN findings — the per-public-fn refinement of the SAME reach × ¬coverage
+// composite. A 0%-covered public fn inside a high-% file is masked by the file
+// rollup (the pane_builder / find_doc_path bug). We share dim "Tested" so dedupe
+// (file|dim) collapses this with the file-level untested finding to the HIGHEST
+// impact — and the fn-driven finding WINS precisely when the file % hid a bad fn.
+// sev comes from the WORST public fn's ¬coverage (0% ⇒ max sev), NOT the file %;
+// impact = reach × sev auto-ranks a 0%-fn in a high-reach file to the top.
+for (const [f, rk] of Object.entries(risk)) {
+  const fns = rk.untestedFns || [];
+  if (reachOf(f) < 40 || !fns.length) continue;
+  const worstPct = Math.min(...fns.map(fn => fn.pct));
+  const worstSev = Math.min(1, (100 - worstPct) / 100);
+  const list = fns.slice().sort((a, b) => a.pct - b.pct).map(fn => `${fn.name} ${fn.pct}%`).join(", ");
+  findings.push({ kind: "untested-fn", file: f, dim: "Tested", sev: worstSev, effort: 2,
+    action: `untested public fns: ${list}`,
+    why: `public fn(s) ${worstPct}%-covered inside a ${rk.testScore ?? "?"}%-covered file — masked by file rollup` });
+}
 // FILEBASE findings (Bloat + Aesthetics) — the tree-mess critic (tooling/aesthetics).
 // These describe the TREE, not a graph node, so they carry no transitive reach. Give
 // each a synthetic "blast" — how widely the mess is paid (root clutter is read on every
@@ -255,6 +272,15 @@ const worklists = {
   refactorWorth: topBy("refactorWorth"),
   priority: topBy("priority"),
 };
+// Name the culprit in the danger table: annotate each critical-untested row with
+// its worst untested public fn (pure annotation — no key/shape change) so the
+// "⚠ Critical-untested" row reads e.g. `pane_builder.ex — find_doc_path 0%`.
+for (const x of worklists.criticalUntested) {
+  const fns = risk[x.path]?.untestedFns || [];
+  if (!fns.length) continue;
+  const worst = fns.reduce((m, fn) => (fn.pct < m.pct ? fn : m), fns[0]);
+  x.worstFn = `${worst.name} ${worst.pct}%`;
+}
 
 const effortDays = deduped.reduce((a, f) => a + f.effort, 0);
 const out = {
@@ -270,7 +296,7 @@ const bar = (s) => { const c = s >= 85 ? "#16a34a" : s >= 70 ? "#65a30d" : s >= 
 const effLabel = ["", "low", "med", "high", "high+", "xhigh"];
 const frow = (f, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${f.impact}</td><td class=n>${f.reach}</td><td><span class="k ${f.kind}">${f.kind}</span></td>`
   + `<td>${f.dim}</td><td class=eff>${effLabel[f.effort]}</td><td class=path>${E(f.file)}</td><td class=act>${E(f.action)}${f.defect >= FRAGILE_DENSITY ? ` <b style="color:#b45309">⚠ defect ${f.defect}</b>` : ""}</td></tr>`;
-const wlRow = (x, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${x.score}</td><td class=path>${E(x.path)}</td><td class=meta>churn ${x.raw.churn} · ${x.raw.tokens.toLocaleString()}tok · reach ${x.raw.reach} · test ${x.raw.testScore}</td></tr>`;
+const wlRow = (x, i) => `<tr><td class=rank>${i + 1}</td><td class=n>${x.score}</td><td class=path>${E(x.path)}${x.worstFn ? ` <b style="color:#b45309">— ${E(x.worstFn)}</b>` : ""}</td><td class=meta>churn ${x.raw.churn} · ${x.raw.tokens.toLocaleString()}tok · reach ${x.raw.reach} · test ${x.raw.testScore}</td></tr>`;
 const wlTable = (title, sub, rows) => `<h2>${title}</h2><div class=sub>${sub}</div><table><thead><tr><th>#</th><th>Score</th><th>Path</th><th>Roots</th></tr></thead><tbody>${rows.map(wlRow).join("") || "<tr><td colspan=4 class=sub>none</td></tr>"}</tbody></table>`;
 
 const html = `<!doctype html><meta charset=utf-8><title>Barkpark — Codebase Quality (v2)</title>
@@ -284,7 +310,7 @@ h2{margin:18px 22px 4px;font-size:15px}.sub{margin:0 22px 6px;color:#64748b;font
 table{border-collapse:collapse;width:calc(100% - 44px);margin:0 22px}th,td{padding:5px 8px;border-bottom:1px solid #eef2f7;text-align:left;vertical-align:top}
 th{background:#e2e8f0;font-size:11px;text-transform:uppercase}td.n,td.rank{text-align:center;width:46px;font-variant-numeric:tabular-nums}td.rank{color:#cbd5e1}
 td.path{font-family:ui-monospace,monospace;font-size:12px}td.act,td.meta{font-size:12px;color:#334155;max-width:480px}td.eff{font-size:11px}
-.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested{background:#bae6fd}.k.hotspot{background:#fca5a5}.k.root-clutter,.k.tracked-artifact,.k.dir-fanout,.k.spotlight-clutter{background:#fde68a}.k.dead-doc,.k.dead-task,.k.yagni-orphan{background:#fbcfe8}</style>
+.k{font-size:10px;padding:1px 6px;border-radius:8px;text-transform:uppercase}.k.layering{background:#fecaca}.k.drift{background:#fed7aa}.k.duplication{background:#fef08a}.k.bloat{background:#ddd6fe}.k.untested,.k.untested-fn{background:#bae6fd}.k.hotspot{background:#fca5a5}.k.root-clutter,.k.tracked-artifact,.k.dir-fanout,.k.spotlight-clutter{background:#fde68a}.k.dead-doc,.k.dead-task,.k.yagni-orphan{background:#fbcfe8}</style>
 <header><div><div class=grade>${grade}</div><div class=gsub>overall ${overall}/100</div></div>
 <div><div style="font-size:17px;font-weight:700">Barkpark — Codebase Quality (v2 · root-clean)</div>
 <div class=gsub>${out.totalFindings} findings · est. effort ${effortDays} units · each dimension keys ONE canonical root · composites: ${E(cfg.source)} (${E(cfg.confidence)})</div></div></header>
