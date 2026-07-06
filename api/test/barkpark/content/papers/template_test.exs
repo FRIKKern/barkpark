@@ -115,6 +115,15 @@ defmodule Barkpark.Content.Papers.TemplateTest do
       msgs = Template.validate([%{"type" => "paragraph", "locked" => true}])
       assert Enum.any?(msgs, &(&1 =~ "required" and &1 =~ "title" and &1 =~ "missing"))
     end
+
+    test "a role:title block that is NOT a heading is rejected (byte-compat with the old gate)" do
+      # The generic vocabulary has no type axis; the paper rule "the title IS a
+      # heading" (derive_title reads its text; the reader renders the <h1>) must
+      # survive the re-expression — a raw API replace could otherwise swap it.
+      impostor = %{"id" => "t", "type" => "paragraph", "role" => "title", "locked" => true, "text" => "x"}
+      msgs = Template.validate([impostor])
+      assert Enum.any?(msgs, &(&1 =~ "title" and &1 =~ "heading"))
+    end
   end
 
   # ── op backstops (Patch) ─────────────────────────────────────────────────

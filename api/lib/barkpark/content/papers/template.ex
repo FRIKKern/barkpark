@@ -162,18 +162,31 @@ defmodule Barkpark.Content.Papers.Template do
   The gate half: declaration-violation errors for a locked-carrying block list.
   Returns `[]` for a valid doc AND for any doc with no locked blocks (additive,
   D3 — legacy papers stay byte-untouched). Delegates the enforcement math to
-  `Barkpark.PortableDoc.Constraints`.
+  `Barkpark.PortableDoc.Constraints`, plus the one paper rule the generic
+  vocabulary doesn't carry (declarations have no type axis): the `role: "title"`
+  block IS a heading — `derive_title/2` reads its `"text"` and the reader renders
+  it as the document `<h1>`.
   """
   @spec validate(term()) :: [String.t()]
   def validate(blocks) when is_list(blocks) do
     if Enum.any?(blocks, &locked?/1) do
-      Constraints.validate(blocks, paper_declarations())
+      Constraints.validate(blocks, paper_declarations()) ++ title_type_errors(blocks)
     else
       []
     end
   end
 
   def validate(_), do: []
+
+  defp title_type_errors(blocks) do
+    if Enum.any?(blocks, fn b ->
+         role_of(b) == @title_role and not match?(%{"type" => "heading"}, b)
+       end) do
+      [~s(the role "title" block must be a heading)]
+    else
+      []
+    end
+  end
 
   defp empty_paragraph do
     %{"id" => "tpl-body", "type" => "paragraph", "content" => []}

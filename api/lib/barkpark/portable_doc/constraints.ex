@@ -10,14 +10,15 @@ defmodule Barkpark.PortableDoc.Constraints do
     * **presence** — `:required` (the kind must appear) or `:optional`.
     * **cardinality** — how many may appear: `{:exactly, n}` / `{:min, n}` /
       `{:max, n}`.
-    * **position** — where they may sit, one of:
-      * `[{:index, n}]` — pinned to an absolute index (every occurrence).
-      * `[:top_group]` / `[:bottom_group]` — occurrences form a contiguous run at
+    * **position** — a list of position constraints, ALL of which must hold:
+      * `{:index, n}` — pinned to an absolute index (every occurrence).
+      * `:top_group` / `:bottom_group` — occurrences form a contiguous run at
         the very top / bottom of the doc.
-      * a list of `{:before, kind}` / `{:after, kind}` **relations** — RELATIVE
-        order against other kinds, checked ONLY between kinds actually present (an
-        absent anchor never fails a present block).
-      * `[:free]` — no position constraint.
+      * `{:before, kind}` / `{:after, kind}` **relations** — RELATIVE order
+        against other kinds, checked ONLY between kinds actually present (an
+        absent anchor never fails a present block). Relations compose, e.g.
+        `[{:after, "title"}, {:before, "featured"}]`.
+      * `:free` — no position constraint.
 
   `locked` on a declaration marks the kind as template-locked (the op-backstops in
   `Barkpark.PortableDoc.Patch` and the seed own that flag) — the checker itself is
@@ -41,7 +42,8 @@ defmodule Barkpark.PortableDoc.Constraints do
           | {:max, non_neg_integer()}
   @type position_atom :: :top_group | :bottom_group | :free
   @type relation :: {:before, kind()} | {:after, kind()}
-  @type position :: [{:index, non_neg_integer()}] | [position_atom()] | [relation()]
+  @type position_constraint :: {:index, non_neg_integer()} | position_atom() | relation()
+  @type position :: [position_constraint()]
   @type declaration :: %{
           kind: kind(),
           presence: presence(),
@@ -129,23 +131,30 @@ defmodule Barkpark.PortableDoc.Constraints do
 
   # ── position ────────────────────────────────────────────────────────────────
   # An absent kind constrains no position (presence/cardinality already spoke).
+  # Position is a LIST of constraints and every element must hold — a mixed list
+  # like `[{:index, 0}, {:before, "x"}]` enforces both (never a silent no-op).
   defp position_errors(_decl, [], _indexed, _total), do: []
 
-  defp position_errors(%{position: position, kind: kind}, indices, indexed, total) do
-    case position do
-      [{:index, n}] -> index_errors(kind, indices, n)
-      [:free] -> []
-      [:top_group] -> top_group_errors(kind, indices)
-      [:bottom_group] -> bottom_group_errors(kind, indices, total)
-      relations when is_list(relations) -> relation_errors(kind, indices, relations, indexed)
+  defp position_errors(%{position: position, kind: kind}, indices, indexed, total)
+       when is_list(position) do
+    Enum.flat_map(position, fn
+      {:index, n} -> index_errors(kind, indices, n)
+      :free -> []
+      :top_group -> top_group_errors(kind, indices)
+      :bottom_group -> bottom_group_errors(kind, indices, total)
+      {:after, anchor} -> anchored_errors(kind, indices, anchor, indexed, &after_error/4)
+      {:before, anchor} -> anchored_errors(kind, indices, anchor, indexed, &before_error/4)
       _ -> []
-    end
+    end)
   end
 
+  defp position_errors(_decl, _indices, _indexed, _total), do: []
+
   defp index_errors(kind, indices, n) do
-    if Enum.all?(indices, &(&1 == n)),
-      do: [],
-      else: [~s(the "#{kind}" block must be at block #{n}, found at #{List.first(indices)})]
+    case Enum.find(indices, &(&1 != n)) do
+      nil -> []
+      off -> [~s(the "#{kind}" block must be at block #{n}, found at #{off})]
+    end
   end
 
   defp top_group_errors(kind, indices) do
@@ -168,23 +177,11 @@ defmodule Barkpark.PortableDoc.Constraints do
   # Relative order: each relation is checked ONLY when the anchor kind is present.
   # `{:after, a}` — every occurrence of `kind` sits after every occurrence of `a`
   # (`min(kind) > max(a)`); `{:before, a}` — the mirror (`max(kind) < min(a)`).
-  defp relation_errors(kind, indices, relations, indexed) do
-    Enum.flat_map(relations, fn
-      {:after, anchor} ->
-        case Map.get(indexed, anchor, []) do
-          [] -> []
-          anchor_idx -> after_error(kind, indices, anchor, anchor_idx)
-        end
-
-      {:before, anchor} ->
-        case Map.get(indexed, anchor, []) do
-          [] -> []
-          anchor_idx -> before_error(kind, indices, anchor, anchor_idx)
-        end
-
-      _ ->
-        []
-    end)
+  defp anchored_errors(kind, indices, anchor, indexed, check) do
+    case Map.get(indexed, anchor, []) do
+      [] -> []
+      anchor_idx -> check.(kind, indices, anchor, anchor_idx)
+    end
   end
 
   defp after_error(kind, indices, anchor, anchor_idx) do

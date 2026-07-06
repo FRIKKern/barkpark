@@ -83,6 +83,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       assert [msg] = Constraints.validate([block("body"), block("title")], [decl])
       assert msg =~ "block 0" and msg =~ "found at 1"
     end
+
+    test "with several occurrences the OFFENDING index is reported, not a compliant one" do
+      decl = %{kind: "title", presence: :required, count: {:max, 2}, position: [{:index, 0}], locked: true}
+
+      assert [msg] = Constraints.validate([block("title"), block("body"), block("title")], [decl])
+      assert msg =~ "found at 2"
+    end
   end
 
   # ── position: relative order ────────────────────────────────────────────────
@@ -149,6 +156,31 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       decl = %{kind: "note", presence: :optional, count: {:min, 0}, position: [:free], locked: false}
 
       assert Constraints.validate([block("body"), block("note"), block("body")], [decl]) == []
+    end
+  end
+
+  # ── position: mixed constraint lists compose ─────────────────────────────────
+
+  describe "position — mixed constraint lists" do
+    test "a pinned index AND a relation in one list both enforce (no silent no-op)" do
+      decl = %{
+        kind: "title",
+        presence: :required,
+        count: {:exactly, 1},
+        position: [{:index, 0}, {:before, "featured"}],
+        locked: true
+      }
+
+      # both hold
+      assert Constraints.validate([block("title"), block("featured")], [decl]) == []
+
+      # index holds but the relation is broken → the relation still fires
+      assert [msg] = Constraints.validate([block("featured"), block("body"), block("title")], [decl]) |> Enum.filter(&(&1 =~ "before"))
+      assert msg =~ "title" and msg =~ "featured"
+
+      # relation holds but the pin is broken → the pin still fires
+      msgs = Constraints.validate([block("body"), block("title"), block("featured")], [decl])
+      assert Enum.any?(msgs, &(&1 =~ "block 0"))
     end
   end
 
