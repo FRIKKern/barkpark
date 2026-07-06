@@ -746,7 +746,18 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     if (placeholder) placeholder.hidden = true;
     picker.hidden = false;
     if (typeof picker.openBrowser === "function") {
-      picker.openBrowser();
+      // openBrowser() reports whether the asset-browser modal actually opened
+      // (false when window.BpAssetBrowser isn't wired) — fall back to the file
+      // dialog so a placeholder click is never a dead affordance.
+      if (picker.openBrowser()) return;
+      if (typeof picker.openFileDialog === "function") {
+        // Hand keyboard focus to the revealed empty card BEFORE the dialog, so
+        // a cancel lands the keyboard user on the picker, not <body>.
+        const card = picker.querySelector && picker.querySelector(".bp-mp-empty");
+        if (card && typeof card.focus === "function") card.focus();
+        picker.openFileDialog();
+        return;
+      }
       return;
     }
     // Fallback (older WC without the public method): poke the internal DOM.

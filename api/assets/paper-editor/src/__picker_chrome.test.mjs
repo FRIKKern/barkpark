@@ -7,6 +7,7 @@
 //   * ghost hides the actions row; default (attr absent / any other value) keeps it
 //   * the context menu offers Upload + Browse always, Remove ONLY when a value is set
 //   * canUpload:false drops the Upload item
+//   * busy:true disables every item (the mirror of default chrome's _setBusy)
 //
 // The DOM-driven bits (the actual menu element, the reveal swap, bp-change wiring)
 // are browser-only and exercised in the live editor; what's pinned here is the pure
@@ -104,6 +105,17 @@ check("menuItems: default args (no canUpload) still offer Upload", () => {
   assert.equal(ids({ hasValue: false }), "upload,browse");
   // and a bare call must not throw
   assert.equal(hook.menuItems().map((i) => i.id).join(","), "upload,browse");
+});
+
+check("menuItems: busy disables EVERY item (mirror of default chrome's _setBusy)", () => {
+  const items = hook.menuItems({ hasValue: true, canUpload: true, busy: true });
+  assert.equal(items.map((i) => i.id).join(","), "upload,browse,remove");
+  assert.ok(items.every((i) => i.disabled === true), "all items disabled while busy");
+});
+
+check("menuItems: not busy leaves every item enabled", () => {
+  assert.ok(hook.menuItems({ hasValue: true }).every((i) => !i.disabled));
+  assert.ok(hook.menuItems({ hasValue: false, busy: false }).every((i) => !i.disabled));
 });
 
 check("menuItems: every item carries an id + a human label", () => {

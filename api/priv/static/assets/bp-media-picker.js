@@ -38,12 +38,15 @@
 // current state. Pure + host-free so the test hook can pin it without a DOM.
 // Upload file + Browse library are always offered (a file dialog needs no token,
 // and Browse is a no-op if no asset browser is wired); Remove image appears ONLY
-// when an asset is set (nothing to remove otherwise).
-function bpMediaPickerMenuItems({ hasValue, canUpload } = {}) {
+// when an asset is set (nothing to remove otherwise). While an upload is in
+// flight (`busy`) every item is DISABLED — the exact mirror of the default
+// chrome, whose _setBusy disables its Upload/Browse/Remove buttons.
+function bpMediaPickerMenuItems({ hasValue, canUpload, busy } = {}) {
   const items = [];
   if (canUpload !== false) items.push({ id: "upload", label: "Upload file" });
   items.push({ id: "browse", label: "Browse library" });
   if (hasValue) items.push({ id: "remove", label: "Remove image", destructive: true });
+  if (busy) for (const item of items) item.disabled = true;
   return items;
 }
 
@@ -242,12 +245,11 @@ class BpMediaPicker extends HTMLElement {
       this._browseBtn.addEventListener("click", () => this._openBrowser());
     }
 
-    // Ghost variant: a right-click on the field opens the calm actions menu.
-    if (ghost) {
-      this.addEventListener("contextmenu", (e) => {
-        e.preventDefault();
-        this._openContextMenu(e.clientX, e.clientY);
-      });
+    // Ghost mode's actions are right-click-only — a hover tooltip is the
+    // doctrine-sanctioned discoverability affordance (rule 5: hover tooltips +
+    // context menus). Never set in the default variant (byte-identical render).
+    if (ghost && !this.title) {
+      this.title = "Right-click for image options";
     }
 
     // Empty-state card = click/keyboard target for the file dialog.
@@ -264,36 +266,56 @@ class BpMediaPicker extends HTMLElement {
       }
     });
 
-    // The whole component accepts a dropped image — empty OR selected
-    // (drop replaces). dragenter/leave pair via a counter so child
-    // elements don't flicker the highlight off.
+    // Root-level listeners bind ONCE per element, not once per render: a
+    // ProseMirror node move disconnects + reconnects the element, re-running
+    // connectedCallback → _render — binding here unguarded would stack
+    // duplicate contextmenu/drag handlers on every remount.
     this._dragDepth = 0;
-    this.addEventListener("dragover", (e) => {
-      e.preventDefault();
-    });
-    this.addEventListener("dragenter", (e) => {
-      e.preventDefault();
-      this._dragDepth++;
-      this.classList.add("bp-mp-drag-over");
-    });
-    this.addEventListener("dragleave", () => {
-      this._dragDepth = Math.max(0, this._dragDepth - 1);
-      if (this._dragDepth === 0) this.classList.remove("bp-mp-drag-over");
-    });
-    this.addEventListener("drop", (e) => {
-      e.preventDefault();
-      this._dragDepth = 0;
-      this.classList.remove("bp-mp-drag-over");
-      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f && (!f.type || f.type.indexOf("image/") === 0)) this._upload(f);
-    });
+    if (!this._rootListenersBound) {
+      this._rootListenersBound = true;
+
+      // Ghost variant: a right-click on the field opens the calm actions menu.
+      // Checked per-event (not at bind time) so the guard stays correct even if
+      // the `chrome` attribute changes after mount.
+      this.addEventListener("contextmenu", (e) => {
+        if (!this._isGhost()) return;
+        e.preventDefault();
+        this._openContextMenu(e.clientX, e.clientY);
+      });
+
+      // The whole component accepts a dropped image — empty OR selected
+      // (drop replaces). dragenter/leave pair via a counter so child
+      // elements don't flicker the highlight off.
+      this.addEventListener("dragover", (e) => {
+        e.preventDefault();
+      });
+      this.addEventListener("dragenter", (e) => {
+        e.preventDefault();
+        this._dragDepth++;
+        this.classList.add("bp-mp-drag-over");
+      });
+      this.addEventListener("dragleave", () => {
+        this._dragDepth = Math.max(0, this._dragDepth - 1);
+        if (this._dragDepth === 0) this.classList.remove("bp-mp-drag-over");
+      });
+      this.addEventListener("drop", (e) => {
+        e.preventDefault();
+        this._dragDepth = 0;
+        this.classList.remove("bp-mp-drag-over");
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f && (!f.type || f.type.indexOf("image/") === 0)) this._upload(f);
+      });
+    }
 
     this._renderPreview();
   }
 
+  // Returns TRUE when the asset-browser modal actually opened, FALSE when no
+  // browser is wired (window.BpAssetBrowser absent) — hosts use the report to
+  // fall back to the file dialog instead of leaving a click dead.
   _openBrowser() {
     const ensure = window.BpAssetBrowser && window.BpAssetBrowser.ensure;
-    if (!ensure) return;
+    if (!ensure) return false;
     const browser = ensure();
     browser.open({
       dataset: this._dataset(),
@@ -301,6 +323,7 @@ class BpMediaPicker extends HTMLElement {
       accept: "image/*",
       onSelect: (detail) => this._selectAsset(detail)
     });
+    return true;
   }
 
   _clearValue() {
@@ -320,9 +343,10 @@ class BpMediaPicker extends HTMLElement {
     if (this._fileInput) this._fileInput.click();
   }
 
-  // Open the asset-library browser modal. No-op if no asset browser is wired.
+  // Open the asset-library browser modal. Returns true when it opened, false
+  // when no asset browser is wired (so hosts can fall back to the file dialog).
   openBrowser() {
-    this._openBrowser();
+    return this._openBrowser();
   }
 
   // ── the ghost-chrome context menu (Upload / Browse / Remove) ───────────────
@@ -339,11 +363,22 @@ class BpMediaPicker extends HTMLElement {
       this._meta.assetId ||
       bpParseMediaValue(this._value).url
     );
-    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true });
+    // busy mirrors default chrome's _setBusy: items stay VISIBLE but disabled
+    // while an upload is in flight — never a menu item that silently no-ops.
+    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy });
+
+    // Focus-restore anchor: whatever was focused before the menu opened (the
+    // empty-state card, usually) so Escape lands the keyboard user back where
+    // they were instead of dropping focus to <body>.
+    this._menuPrevFocus =
+      document.activeElement && document.activeElement !== document.body
+        ? document.activeElement
+        : this.querySelector(".bp-mp-empty");
 
     const menu = document.createElement("div");
     menu.className = "bp-mp-menu";
     menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Image options");
     menu.style.cssText =
       "position:fixed;z-index:1000;display:flex;flex-direction:column;gap:2px;" +
       "min-width:160px;padding:4px;border-radius:8px;" +
@@ -352,6 +387,8 @@ class BpMediaPicker extends HTMLElement {
       "box-shadow:0 6px 20px rgba(0,0,0,0.16);";
     menu.style.left = x + "px";
     menu.style.top = y + "px";
+    // Right-clicking the menu itself must not stack the native menu on ours.
+    menu.addEventListener("contextmenu", (e) => e.preventDefault());
 
     for (const item of items) {
       const btn = document.createElement("button");
@@ -361,8 +398,12 @@ class BpMediaPicker extends HTMLElement {
       btn.setAttribute("role", "menuitem");
       btn.style.cssText = "justify-content:flex-start;width:100%;text-align:left;";
       btn.textContent = item.label;
+      if (item.disabled) {
+        btn.disabled = true;
+        btn.setAttribute("aria-disabled", "true");
+      }
       btn.addEventListener("click", () => {
-        this._closeContextMenu();
+        this._closeContextMenu(true);
         this._runMenuAction(item.id);
       });
       menu.appendChild(btn);
@@ -378,19 +419,56 @@ class BpMediaPicker extends HTMLElement {
       if (r.bottom > window.innerHeight) menu.style.top = Math.max(0, window.innerHeight - r.height - 4) + "px";
     }
 
-    const first = menu.querySelector(".bp-mp-menu-item");
-    if (first && typeof first.focus === "function") first.focus();
+    const focusables = () =>
+      Array.prototype.slice.call(menu.querySelectorAll(".bp-mp-menu-item:not([disabled])"));
+    const first = focusables()[0];
+    if (first && typeof first.focus === "function") {
+      first.focus();
+    } else if (typeof menu.focus === "function") {
+      // All items disabled (busy) — park focus on the menu container so Escape
+      // and the away-dismiss still work for a keyboard user.
+      menu.tabIndex = -1;
+      menu.focus();
+    }
 
+    // role=menu keyboarding: Escape dismisses (swallowed — a host Escape
+    // handler must not also fire), arrows/Home/End walk the enabled items,
+    // Tab walks OUT of a menu so it dismisses and lets focus move on.
     this._menuKeyHandler = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
+        e.stopPropagation();
+        this._closeContextMenu(true);
+        return;
+      }
+      if (e.key === "Tab") {
         this._closeContextMenu();
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+        const its = focusables();
+        if (!its.length) return;
+        e.preventDefault();
+        const idx = its.indexOf(document.activeElement);
+        let next;
+        if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = its.length - 1;
+        else if (e.key === "ArrowDown") next = idx < 0 ? 0 : (idx + 1) % its.length;
+        else next = idx < 0 ? its.length - 1 : (idx - 1 + its.length) % its.length;
+        if (typeof its[next].focus === "function") its[next].focus();
       }
     };
     this._menuAwayHandler = (e) => {
       if (this._menuEl && !this._menuEl.contains(e.target)) this._closeContextMenu();
     };
+    // A fixed-position menu must not drift away from its field — any scroll
+    // (capture catches inner scrollers) or resize dismisses it, like native menus.
+    this._menuViewportHandler = () => this._closeContextMenu();
     document.addEventListener("keydown", this._menuKeyHandler, true);
+    if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+      window.addEventListener("scroll", this._menuViewportHandler, true);
+      window.addEventListener("resize", this._menuViewportHandler);
+    }
     // Defer the click-away bind a tick so the opening right-click doesn't
     // immediately dismiss the menu it just spawned.
     this._menuAwayArm = setTimeout(() => {
@@ -398,7 +476,10 @@ class BpMediaPicker extends HTMLElement {
     }, 0);
   }
 
-  _closeContextMenu() {
+  // restoreFocus: true on Escape / a chosen action (keyboard continuity);
+  // absent on click-away / scroll / disconnect (focus must follow the click,
+  // and a removed element must never yank focus).
+  _closeContextMenu(restoreFocus) {
     if (this._menuAwayArm) {
       clearTimeout(this._menuAwayArm);
       this._menuAwayArm = null;
@@ -415,12 +496,30 @@ class BpMediaPicker extends HTMLElement {
       document.removeEventListener("mousedown", this._menuAwayHandler, true);
       this._menuAwayHandler = null;
     }
+    if (this._menuViewportHandler) {
+      if (typeof window !== "undefined" && typeof window.removeEventListener === "function") {
+        window.removeEventListener("scroll", this._menuViewportHandler, true);
+        window.removeEventListener("resize", this._menuViewportHandler);
+      }
+      this._menuViewportHandler = null;
+    }
+    const prev = this._menuPrevFocus;
+    this._menuPrevFocus = null;
+    if (restoreFocus && prev && typeof prev.focus === "function" && prev.isConnected !== false) {
+      prev.focus();
+    }
   }
 
   _runMenuAction(id) {
     if (id === "upload") this.openFileDialog();
     else if (id === "browse") this.openBrowser();
-    else if (id === "remove") this._clearValue();
+    else if (id === "remove") {
+      this._clearValue();
+      // Keyboard continuity after the destructive action: the field just went
+      // empty — land focus on the empty-state card (the next affordance).
+      const card = this._previewEl && this._previewEl.querySelector(".bp-mp-empty");
+      if (card && typeof card.focus === "function") card.focus();
+    }
   }
 
   _setClearVisible(visible) {
