@@ -297,7 +297,22 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ]
+    ] ++ tmux_console_entry()
+  end
+
+  # The dev-only tmux console tab (Task: Studio tmux console). Appears in the
+  # top menu ONLY when `TmuxConsole.enabled?/0` — a dev-only PTY dep plus an
+  # explicit config flag, so it is absent in prod/test. The route itself is
+  # admin-gated regardless. Flat singleton path (not dataset-scoped) — one
+  # shared tmux session serves every dataset.
+  defp tmux_console_entry do
+    if BarkparkWeb.Studio.TmuxConsole.enabled?() do
+      [%{label: "tmux", path: "/studio/tmux", icon: nil, order: 40, active_when: "/studio/tmux"}]
+    else
+      []
+    end
+  rescue
+    _ -> []
   end
 
   @doc false

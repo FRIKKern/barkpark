@@ -69,6 +69,11 @@ config :barkpark, :media_signing_secret, "dev-media-signing-secret-change-in-pro
 # public PAPER READER is unaffected (published papers stay world-readable).
 config :barkpark, :public_demo_studio, false
 
+# Studio tmux console — FAIL-CLOSED base. Only dev.exs turns it on (and only
+# dev carries the `only: [:dev]` PTY backend). prod/test inherit disabled;
+# there is no runtime.exs opt-in. See BarkparkWeb.Studio.TmuxConsole.
+config :barkpark, :tmux_console, enabled: false
+
 config :barkpark, :media_cdn,
   base_url: nil,
   invalidation: [adapter: :noop]
