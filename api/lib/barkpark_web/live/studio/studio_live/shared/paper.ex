@@ -95,6 +95,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> sync_paper_edit_doc()
             |> push_canvas_echo()
             |> push_task_previews()
+            |> push_block_renders()
 
           {:error, _reason} ->
             put_flash(socket, :error, "Edit failed")
@@ -129,6 +130,69 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       |> push_event("bp:task-preview", %{previews: previews})
     else
       socket
+    end
+  end
+
+  # pdd-t8 (fleet-in-canvas) — the reader's non-prose COMPONENT emitters, the
+  # canonical enumeration of blocks that render through `Render.render_block/2`'s
+  # component fleet (render/components.ex + render/figures.ex asciicast +
+  # render/forms.ex form). `diagram` is DELIBERATELY absent: it rides its own
+  # editable `bpDiagram` attr-atom in the canvas, not the read-only server paint.
+  # Keep aligned with run-convert.js:CANVAS_FLEET_TYPES.
+  @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
+
+  @doc false
+  # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
+  # block, render the reader's OWN HTML (`Render.render_block(block, %{style:
+  # :article})` — the SAME producer /papers and the t9 boundary widget use, rule 3
+  # / D8) and push it id-keyed on `bp:block-html`. The canvas `bpFleet` node-view
+  # paints it into its hole; until it arrives the node shows a loading chip.
+  #
+  # D5 (display only): task/query blocks are resolved through TaskResolver.preview
+  # onto a COPY (apply_preview) — the source `blocks` (the save baseline the canvas
+  # diffs / the ops the buttons emit) are NEVER touched, so a save right after a
+  # paint emits ZERO ops (D3). Session-tenant-scoped + fail-closed via task_previews.
+  # No-op when the canvas flag is OFF (nothing is mounted to receive it).
+  def push_block_renders(socket) do
+    if PaperCanvas.paper_canvas_enabled?() do
+      blocks = paper_top_level_blocks(socket)
+      previews = Map.new(task_previews(blocks, socket), &{&1["block_id"], &1})
+
+      renders =
+        blocks
+        |> Enum.filter(&fleet_block?/1)
+        |> Enum.map(fn block ->
+          %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
+        end)
+        |> Enum.reject(&(&1["block_id"] in [nil, ""]))
+
+      push_event(socket, "bp:block-html", %{renders: renders})
+    else
+      socket
+    end
+  end
+
+  defp fleet_block?(block) when is_map(block),
+    do: Map.get(block, "type") in @fleet_render_types
+
+  defp fleet_block?(_), do: false
+
+  # Render one fleet block's reader HTML. A query-carrying task block is resolved
+  # against its session-scoped preview (rows merged onto a COPY); every other fleet
+  # block renders directly from its own carried snapshot/data. An error preview
+  # falls back to the un-resolved block so the reader emitter degrades gracefully
+  # (an empty board) rather than crashing the push.
+  defp fleet_block_html(block, previews) do
+    resolved =
+      case Map.get(previews, Map.get(block, "id")) do
+        %{"error" => true} -> block
+        %{} = preview -> TaskResolver.apply_preview(block, preview)
+        _ -> block
+      end
+
+    case Render.render_block(resolved, %{style: :article}) do
+      html when is_binary(html) -> html
+      _ -> ""
     end
   end
 
@@ -388,6 +452,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       # parallel `bp:task-preview` channel — the source `blocks` above stay
       # unresolved (D5). No-op when the canvas flag is OFF.
       |> push_task_previews()
+      # pdd-t8: seed the fleet-in-canvas server paint (bp:block-html) too, so every
+      # non-prose fleet block's reader HTML lands the moment the editor opens.
+      |> push_block_renders()
     else
       socket
       |> assign(

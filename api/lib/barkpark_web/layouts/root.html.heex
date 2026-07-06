@@ -4441,6 +4441,49 @@
         };
         this.handleEvent("bp:task-preview", this._onTaskPreview);
 
+        // pdd-t8 — FLEET-IN-CANVAS server paint. The server renders EVERY top-level
+        // non-prose fleet block (task board / cards / pipeline / form / …) through
+        // the reader's OWN producer (Render.render_block/2, style: :article — rule 3
+        // / D8, one producer byte-for-byte) and pushes `bp:block-html`
+        // {renders:[{block_id, html}, …]}. We inject each html into the matching
+        // `bpFleet` node-view's paint hole (`[data-bp-fleet-id=<id>] [data-bp-fleet-
+        // body]`) inside THIS run's WC. DISPLAY ONLY (D5): the HTML never enters
+        // el.blocks / the diff baseline, so a save right after a paint emits ZERO ops
+        // (D3). The renders are STASHED so a WC remount (LiveView re-render of
+        // data-canvas-blocks) re-injects from the last paint rather than dropping
+        // back to the loading chip. An empty html paints an honest empty note, never
+        // a blank strip (mirrors task_block_preview/1's honesty).
+        this._fleetRenders = {};
+        this._paintFleet = (id, html) => {
+          const hole = this.el.querySelector(
+            `[data-bp-fleet-id="${(window.CSS && CSS.escape) ? CSS.escape(id) : id}"] [data-bp-fleet-body]`,
+          );
+          if (!hole) return; // this render's block is not in THIS run's WC
+          if (typeof html === "string" && html.trim() !== "") {
+            hole.innerHTML = html;
+          } else {
+            hole.innerHTML =
+              '<div class="bp-canvas-readonly-chip">Nothing to show yet.</div>';
+          }
+        };
+        this._onBlockHtml = (payload) => {
+          if (!payload || !Array.isArray(payload.renders)) return;
+          payload.renders.forEach((r) => {
+            if (!r || r.block_id == null) return;
+            this._fleetRenders[r.block_id] = r.html;
+            this._paintFleet(r.block_id, r.html);
+          });
+        };
+        this.handleEvent("bp:block-html", this._onBlockHtml);
+
+        // Re-inject any stashed fleet HTML whenever this hook's element is updated
+        // (a WC remount rebuilds the loading-chip holes from data-canvas-blocks).
+        this._repaintFleet = () => {
+          Object.keys(this._fleetRenders).forEach((id) =>
+            this._paintFleet(id, this._fleetRenders[id]),
+          );
+        };
+
         // Request the initial preview once the hook (and its listener above) is
         // mounted, so the live rows land even if the server's setup-time push
         // raced ahead of this handler's registration. Guarded to run-0 so a
@@ -4450,6 +4493,9 @@
         if (this.el.id === "paper-canvas-run-0") {
           this.pushEvent("task-preview-refresh", {});
         }
+      },
+      updated() {
+        if (typeof this._repaintFleet === "function") this._repaintFleet();
       },
       destroyed() {
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);

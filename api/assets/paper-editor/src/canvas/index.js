@@ -98,7 +98,7 @@ import { Field } from "./field-node.js";
 // NEVER emit a value/content patch — they render a read-only chip (sheet summary /
 // embed reference) with contentEditable false, are selectable so Backspace deletes the
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
-import { Sheet, Embed } from "./embed-node.js";
+import { Sheet, Embed, Fleet } from "./embed-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -528,6 +528,18 @@ class BpPaperCanvas extends HTMLElement {
         // only field-image/field-reference (pickers) remain boundaries.
         Sheet,
         Embed,
+        // pdd-t8 (fleet-in-canvas): the component-fleet SERVER-PAINTED read-only
+        // atom. Registers the SINGLE `bpFleet` node (atom, NO edit surface; the
+        // WHOLE block rides the bpBlock attr via data-bp-block) for EVERY fleet kind
+        // (tasks / task-board / roadmap / cards / pipeline / notes / status-legend /
+        // form / asciicast / …, discriminated by bpType). Its node-view paints an
+        // empty `.bp-paper-surface` hole keyed by data-bp-fleet-id; the Studio hook
+        // (root.html.heex `bp:block-html`) injects the reader's OWN server-rendered
+        // HTML into that hole (rule 3 / D8 — one producer, byte for byte), with a
+        // loading chip until it arrives. Structurally identical to Sheet/Embed: emits
+        // ZERO value/content ops, participates only in structural ops. bpFleet parses
+        // ONLY its own <div data-bp-fleet='true'>.
+        Fleet,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
