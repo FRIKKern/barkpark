@@ -84,7 +84,17 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   end
 
   defp open_editor(view) do
-    html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+    # With the canvas the mainline default (D7/D9) there is NO View⇄Edit toggle —
+    # opening a paper IS the editor, rendered directly on mount (rule 5). On the
+    # flag-OFF opt-out path the toggle is present and must be clicked to reveal the
+    # per-block editor. Handle both so every caller gets the editor HTML either way.
+    html =
+      if has_element?(view, ~s([data-test-id="paper-edit-toggle"])) do
+        view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+      else
+        render(view)
+      end
+
     assert html =~ ~s(data-test-id="studio-paper-block-editor")
     html
   end
@@ -102,51 +112,82 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   end
 
   # ── 1. FLAG-OFF BYTE-IDENTICAL (the critical test) ──────────────────────────
+  #
+  # The canvas is the mainline default now (D7/D9), so the legacy per-block path is
+  # an EXPLICIT opt-out (`BARKPARK_PAPER_CANVAS=0`). These tests pin that opt-out so
+  # they keep proving the OFF path is byte-identical to legacy (D3), independent of
+  # the flipped default.
 
-  test "flag OFF: editor renders the per-block path with NO <bp-paper-canvas>",
-       %{conn: conn} do
-    # The flag is unset in the suite baseline (ConnCase doesn't set it). Sanity-
-    # guard so a leaked env from another test can't silently pass this.
-    refute System.get_env("BARKPARK_PAPER_CANVAS") in ["1", "true"]
+  describe "flag OFF (explicit opt-out — BARKPARK_PAPER_CANVAS=0)" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    edit_html = open_editor(view)
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
 
-    # The per-block rich-text wrappers are present; the canvas is NOT.
-    assert edit_html =~ ~s(id="paper-ed-h-1")
-    assert edit_html =~ ~s(id="paper-ed-p-intro")
-    assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
-    assert edit_html =~ ~s(<bp-paper-editor)
-    refute edit_html =~ ~s(<bp-paper-canvas)
-    refute edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
-    refute edit_html =~ ~s(data-test-id="paper-canvas-run")
+      :ok
+    end
 
-    # The callout still renders via its existing per-block form (a run boundary
-    # in the ON path, but here just a normal per-block widget).
-    assert edit_html =~ ~s(data-edit-block-id="c-note")
-  end
+    test "the opt-out path opens read-only and shows the View⇄Edit toggle (a mode still exists here)",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
 
-  test "flag OFF render is BYTE-IDENTICAL to the stored snapshot (no OFF-path drift)",
-       %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    rendered = editor_html(open_editor(view))
+      # On the opt-out path a block paper opens in the READ-ONLY streamed View —
+      # the toggle is present and the block editor is NOT yet rendered. (Key on
+      # the real render marker `paper-canvas-run-0`, NOT the bare `<bp-paper-canvas`
+      # string — the latter also appears in the root layout's JS hook comments.)
+      assert html =~ ~s(data-test-id="paper-edit-toggle")
+      assert html =~ ~s(phx-update="stream")
+      refute html =~ ~s(data-test-id="studio-paper-block-editor")
+      refute html =~ ~s(id="paper-canvas-run-0")
+      refute html =~ ~s(data-test-id="paper-canvas-run")
+    end
 
-    if File.exists?(@snapshot_path) do
-      baseline = File.read!(@snapshot_path)
+    test "editor renders the per-block path with NO <bp-paper-canvas>", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      edit_html = open_editor(view)
 
-      assert rendered == baseline, """
-      FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
-      path must stay byte-identical. If this change is intentional, delete
-      #{@snapshot_path} and re-run to re-baseline.
-      """
-    else
-      File.mkdir_p!(Path.dirname(@snapshot_path))
-      File.write!(@snapshot_path, rendered)
+      # The per-block rich-text wrappers are present; the canvas is NOT.
+      assert edit_html =~ ~s(id="paper-ed-h-1")
+      assert edit_html =~ ~s(id="paper-ed-p-intro")
+      assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
+      assert edit_html =~ ~s(<bp-paper-editor)
+      refute edit_html =~ ~s(<bp-paper-canvas)
+      refute edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
+      refute edit_html =~ ~s(data-test-id="paper-canvas-run")
 
-      flunk("""
-      Wrote the flag-OFF snapshot baseline to #{@snapshot_path}.
-      Re-run the suite to assert byte-identity against it.
-      """)
+      # The callout still renders via its existing per-block form (a run boundary
+      # in the ON path, but here just a normal per-block widget).
+      assert edit_html =~ ~s(data-edit-block-id="c-note")
+    end
+
+    test "render is BYTE-IDENTICAL to the stored snapshot (no OFF-path drift)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      rendered = editor_html(open_editor(view))
+
+      if File.exists?(@snapshot_path) do
+        baseline = File.read!(@snapshot_path)
+
+        assert rendered == baseline, """
+        FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
+        path must stay byte-identical. If this change is intentional, delete
+        #{@snapshot_path} and re-run to re-baseline.
+        """
+      else
+        File.mkdir_p!(Path.dirname(@snapshot_path))
+        File.write!(@snapshot_path, rendered)
+
+        flunk("""
+        Wrote the flag-OFF snapshot baseline to #{@snapshot_path}.
+        Re-run the suite to assert byte-identity against it.
+        """)
+      end
     end
   end
 
@@ -165,6 +206,36 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       end)
 
       :ok
+    end
+
+    test "opening a paper IS the editor — the canvas mounts DIRECTLY on open, no View⇄Edit toggle (rule 5)",
+         %{conn: conn} do
+      # The whole point of the cutover: no click, no mode. The initial mount HTML
+      # already carries the canvas editor and NO toggle button.
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+      # The editor is live on open… (key on the real render marker
+      # `paper-canvas-run-0` — the bare `<bp-paper-canvas` string also appears in
+      # the root layout's JS hook comments, so it would assert vacuously.)
+      assert html =~ ~s(data-test-id="studio-paper-block-editor")
+      assert html =~ ~s(data-test-id="paper-canvas-run")
+      assert html =~ ~s(id="paper-canvas-run-0")
+
+      # …and the View⇄Edit toggle is GONE — there are no modes to be in.
+      refute html =~ ~s(data-test-id="paper-edit-toggle")
+      refute html =~ ~s(phx-click="paper-toggle-edit")
+
+      # The read-only streamed View pane is NOT rendered — the body is the canvas,
+      # not a per-block phx-update="stream" list.
+      refute html =~ ~s(id="paper-body-#{@slug}")
+
+      # The canvas region keeps an accessible name now that the toggle is gone.
+      assert html =~ ~s(data-test-id="studio-paper-shell")
+      assert html =~ ~s(aria-label="Editing )
+
+      # The "Open standalone" reader link + the Share affordance survive the
+      # toggle's removal — the header action row stays coherent.
+      assert html =~ ~s(data-test-id="paper-open-standalone")
     end
 
     test "renders ONE <bp-paper-canvas> run containing the callout INLINE (no per-block callout widget)",
@@ -1151,10 +1222,28 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     ]
   end
 
-  # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────
+  # ── 3. paper-ops HANDLER (flag OFF — the echo guard) ────────────────────────
+  #
+  # The `refute_push_event` guard proves the OFF path leaks NO `bp:canvas-update`
+  # echo. With the canvas now the mainline default (D7/D9), OFF is an explicit
+  # opt-out — pin it so these keep exercising the flag-OFF echo behavior.
+  describe "paper-ops HANDLER (flag OFF — BARKPARK_PAPER_CANVAS=0)" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
-  test "paper-ops folds a batch through apply_patches + persists identically to per-block",
-       %{conn: conn} do
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
+
+      :ok
+    end
+
+    test "paper-ops folds a batch through apply_patches + persists identically to per-block",
+         %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     open_editor(view)
 
@@ -1258,5 +1347,6 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     assert Content.paper_blocks(@slug, @dataset) == before
     assert view.pid == pid_before
     assert Process.alive?(view.pid)
+  end
   end
 end

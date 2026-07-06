@@ -113,8 +113,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     {bound, free} =
       if properties?, do: Projection.partition(assigns.blocks), else: {[], assigns.blocks}
 
-    # Phase-4 S2: the continuous-canvas flag. DEFAULT FALSE — when false the
-    # body renders the EXISTING per-block list verbatim (the `else` arm below).
+    # Phase-4 S2: the continuous-canvas flag. DEFAULT TRUE (the D7/D9 cutover) —
+    # only the explicit opt-out `BARKPARK_PAPER_CANVAS=0/false` is false, and when
+    # false the body renders the EXISTING per-block list verbatim (the `else` arm
+    # below).
     # When true, the free-block list is partitioned into maximal prose runs and
     # each run renders as ONE <bp-paper-canvas>; non-prose blocks stay on their
     # existing per-block widgets between runs. Computed once here so the template

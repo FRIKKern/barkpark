@@ -43,6 +43,22 @@ defmodule BarkparkWeb.PaperEditorTestHelpers do
       @slug "2026-05-24-editor-paper"
 
       setup do
+        # This feature suite pins the LEGACY per-block editor path (per-block
+        # <bp-paper-editor> wrappers, the View⇄Edit toggle, per-block forms). With
+        # the canvas now the mainline default (D7/D9), that path is an EXPLICIT
+        # opt-out — pin it here so `open_editor/1` finds the toggle and the blocks
+        # render per-block, independent of the flipped default. async:false makes
+        # the process-global env put safe; on_exit restores it.
+        prev = System.get_env("BARKPARK_PAPER_CANVAS")
+        System.put_env("BARKPARK_PAPER_CANVAS", "0")
+
+        on_exit(fn ->
+          case prev do
+            nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+            v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+          end
+        end)
+
         seed_paper_schema!()
         seed_block_paper!()
         :ok

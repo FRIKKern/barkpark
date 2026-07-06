@@ -63,7 +63,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         _ -> []
       end
 
-    assigns = assign(assigns, slug: slug, title: title, edit_blocks: edit_blocks)
+    # Doctrine rule 5 — no modes. With the canvas the mainline default (D7/D9),
+    # opening a block-backed paper IS the editor: the always-editable canvas
+    # renders DIRECTLY on open, with no View⇄Edit toggle and no `paper_edit_mode`
+    # gate. `paper_edit_mode` is derived-away here — the surface follows the flag
+    # + block_mode, not a mode the user has to be in.
+    #
+    # The flag-OFF opt-out (`BARKPARK_PAPER_CANVAS=0`, D3) keeps the legacy shape
+    # verbatim: the read-only streamed View pane PLUS the toggle, whose
+    # `paper_edit_mode` still gates Edit. HTML-only (legacy, blockless) papers have
+    # nothing to edit — they render the streamed/raw body in BOTH paths.
+    canvas_on = PaperCanvas.paper_canvas_enabled?()
+
+    show_editor = assigns.paper_block_mode && (canvas_on || assigns.paper_edit_mode)
+
+    assigns =
+      assign(assigns,
+        slug: slug,
+        title: title,
+        edit_blocks: edit_blocks,
+        canvas_on: canvas_on,
+        show_editor: show_editor
+      )
 
     ~H"""
     <div class="editor-panel" data-test-id="studio-paper-editor">
@@ -72,10 +93,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           <span class="badge badge-published">paper</span>
         </:status_pill>
         <:actions>
-          <%!-- View ⇄ Edit toggle. View is the read-only live stream; Edit
-                renders the per-block controls. Block-backed papers only. --%>
+          <%!-- View ⇄ Edit toggle — the flag-OFF OPT-OUT path ONLY. With the
+                canvas on (the D7/D9 default) there are no modes: the editor is
+                always open, so this toggle is not rendered (rule 5). It survives
+                for `BARKPARK_PAPER_CANVAS=0`, where View is the read-only live
+                stream and Edit renders the per-block controls. Block-backed
+                papers only. --%>
           <button
-            :if={@slug && @paper_block_mode}
+            :if={@slug && @paper_block_mode && not @canvas_on}
             type="button"
             class={"btn btn-sm " <> if(@paper_edit_mode, do: "btn-primary", else: "btn-ghost")}
             phx-click="paper-toggle-edit"
@@ -116,7 +141,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
       <div class="editor-with-preview">
         <div class="editor-body editor-panel-main bp-paper-body">
-          <main class="bp-paper-shell bp-paper-surface" data-test-id="studio-paper-shell">
+          <main
+            class="bp-paper-shell bp-paper-surface"
+            data-test-id="studio-paper-shell"
+            aria-label={@canvas_on && @slug && "Editing #{@title}"}
+          >
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
                   container. It survives a handle_info DOM diff but would be
                   torn down by a remount/navigate — the no-reload proof. --%>
@@ -127,7 +156,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 <article id="paper-body" data-rev={@paper_rev}>
                   <p id="paper-empty">No paper selected.</p>
                 </article>
-              <% @paper_edit_mode && @paper_block_mode -> %>
+              <% @show_editor -> %>
+                <%!-- Rule 5 — opening a paper IS the editor. On the canvas
+                      default this renders DIRECTLY on open (no toggle); on the
+                      opt-out path it renders once the user toggles into Edit. --%>
                 <.paper_block_editor
                   slug={@slug}
                   blocks={@edit_blocks}

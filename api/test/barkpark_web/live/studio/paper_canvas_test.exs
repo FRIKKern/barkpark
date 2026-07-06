@@ -4,7 +4,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     * `partition_runs/1` — partition a block list into maximal contiguous prose
       runs (`{:run, blocks}`) and non-prose boundaries (`{:block, block}`).
-    * `paper_canvas_enabled?/0` — the BARKPARK_PAPER_CANVAS flag, default FALSE.
+    * `paper_canvas_enabled?/0` — the BARKPARK_PAPER_CANVAS flag, default TRUE
+      (the D7/D9 cutover); only `"0"`/`"false"` opt out.
     * `run_id/1` — the stable run id (first block's id).
 
   No LiveView, no DB — these are the cheap, exhaustive proofs of the partition
@@ -647,8 +648,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert html =~ "No matching tasks."
     end
 
-    test "flag OFF: the shipped per-block list stays byte-free of any preview markup" do
-      System.delete_env("BARKPARK_PAPER_CANVAS")
+    test "flag OFF (explicit opt-out): the shipped per-block list stays byte-free of any preview markup" do
+      # The canvas is the default now (D7/D9), so OFF is an EXPLICIT opt-out —
+      # `delete_env` would leave the canvas ON. Pin the opt-out value.
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
       html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
       refute html =~ "paper-task-preview"
@@ -700,7 +703,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "paper_canvas_enabled?/0 (default FALSE)" do
+  describe "paper_canvas_enabled?/0 (default TRUE — the D7/D9 cutover)" do
     setup do
       prev = System.get_env("BARKPARK_PAPER_CANVAS")
 
@@ -714,22 +717,29 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       :ok
     end
 
-    test "unset → false (the shipped default)" do
+    test "unset → true (the shipped default — the canvas is the mainline editor)" do
       System.delete_env("BARKPARK_PAPER_CANVAS")
-      refute PaperCanvas.paper_canvas_enabled?()
+      assert PaperCanvas.paper_canvas_enabled?()
     end
 
-    test "empty / arbitrary values → false" do
-      for v <- ["", "0", "off", "no", "false-ish", "  ", "2"] do
+    test "the two explicit opt-out strings '0' / 'false' (case-insensitive, trimmed) → false" do
+      for v <- ["0", "false", "FALSE", "False", " false ", "  0 "] do
         System.put_env("BARKPARK_PAPER_CANVAS", v)
-        refute PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → false"
+        refute PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → false (opt-out)"
       end
     end
 
-    test "truthy '1' / 'true' (case-insensitive, trimmed) → true" do
+    test "'1' / 'true' (case-insensitive, trimmed) → true" do
       for v <- ["1", "true", "TRUE", "True", " true ", "  1 "] do
         System.put_env("BARKPARK_PAPER_CANVAS", v)
         assert PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → true"
+      end
+    end
+
+    test "empty / junk / any non-opt-out value → true (fails toward the mainline)" do
+      for v <- ["", "  ", "off", "no", "false-ish", "2", "yes", "disabled"] do
+        System.put_env("BARKPARK_PAPER_CANVAS", v)
+        assert PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → true (not an opt-out)"
       end
     end
   end
