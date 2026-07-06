@@ -22,8 +22,8 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # horizontal scroll on overflow. The value is HTML-escaped (the `<pre>` shows
   # source verbatim, so no Mermaid `pre.mermaid` selector concern here).
   def code_block_html(value) do
-    ~s|<pre style="background:var(--paper-bg-deep, #f5f2e9);border:0;border-radius:0;border-left:3px solid var(--paper-accent, #a23925);color:var(--paper-ink, #1a1a1a);padding:0.9rem 1.1rem;| <>
-      ~s|margin:1.2rem 0;font-family:#{@font_mono};font-size:0.9rem;line-height:1.5;| <>
+    ~s|<pre style="background:var(--paper-bg-deep, #f5f2e9);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #a23925);color:var(--paper-ink, #1a1a1a);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+      ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{escape_html(value)}</pre>|
   end
 
