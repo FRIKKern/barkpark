@@ -91,6 +91,14 @@ const (
 	focusFallbackHorizon = 48 * time.Hour
 )
 
+// finishedGraceAfter (charter D64 / wish Amendment 5): completion is not
+// activity. A FINISHED section (zero workable children) keeps its recency rank
+// only this long past its last activity — enough to SEE the completion land —
+// then it decays to the finished shelf at the bottom of the board, one
+// header+rollup line above the cancelled tombstones. Exclusive boundary like
+// the other age thresholds.
+const finishedGraceAfter = 1 * time.Hour
+
 // Cluster derivation policy. A loose task's cluster KEY is its first proj: label,
 // else its first area: label, else the most-shared of its remaining labels that
 // at least clusterShareMin loose tasks carry (frequency desc, ties lexically
@@ -299,6 +307,16 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 
 	sortEpics(board.Epics, repo)
 	// Strip the NOW-pinned claims from the ranked epics' displayed children (D14).
+	// Finished decay (charter D64 / Amendment 5): a section with no workable
+	// children keeps its recency rank only through the grace window, then sinks
+	// to the finished shelf (spineRows relocates Demoted sections to the bottom,
+	// above the tombstones). Active can never be true here (a live claim is
+	// workable), but guard anyway.
+	for i := range board.Epics {
+		e := &board.Epics[i]
+		e.Demoted = !e.Workable && !e.Active && now.Sub(e.LastActivity) > finishedGraceAfter
+	}
+
 	// Claimed tasks STAY in their section (charter D56, reversing D14): NOW is
 	// the glanceable summary band, and the same task ALSO renders in place — a
 	// spinner row heading its neighborhood (childBand 0) — so the list below NOW
@@ -332,6 +350,7 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// header mode, which is correct.
 	for i := range board.Clusters {
 		cl := &board.Clusters[i]
+		cl.Demoted = !cl.Workable && !cl.Active && now.Sub(cl.LastActivity) > finishedGraceAfter
 		cl.FocusSet = sectionFocus(cl.Tasks, nowAnchorsFor(cl.Tasks, board.Now), cl.LastActivity, now)
 	}
 	board.OrphansFocusSet = sectionFocus(board.Orphans, nowAnchorsFor(board.Orphans, board.Now), sectionActivity(board.Orphans, evAt), now)
@@ -597,6 +616,7 @@ func buildCluster(key string, members []Task, now time.Time, nowSet map[string]b
 	}
 	c.Tasks = keepDoneCue(nonTerm, done, evAt, &c.DoneFolded)
 	orderChildren(c.Tasks, now)
+	c.Workable = len(nonTerm) > 0
 	return c
 }
 
@@ -845,6 +865,7 @@ func buildEpic(root Task, children []Task, now time.Time, evAt map[string]time.T
 	}
 	epic.Children = keepDoneCue(nonTerm, done, evAt, &epic.DoneFolded)
 	orderChildren(epic.Children, now)
+	epic.Workable = len(nonTerm) > 0
 
 	freshest := root.UpdatedAt
 	for _, c := range children {
@@ -900,6 +921,16 @@ func sectionFocus(kept, nowAnchors []Task, lastActivity time.Time, now time.Time
 	if len(focus) == 0 && !lastActivity.IsZero() && now.Sub(lastActivity) <= focusFallbackHorizon {
 		if fb := freshestReady(kept, focusFallbackSeeds); len(fb) > 0 {
 			focus = computeFocus(kept, nowAnchors, fb)
+		}
+	}
+	if len(focus) == 0 && !lastActivity.IsZero() && now.Sub(lastActivity) <= finishedGraceAfter {
+		// A JUST-finished section (nothing workable, nothing ready) shows its
+		// ≤doneCueMax done cues through the grace window — the completion is
+		// SEEN before the section decays to the finished shelf (charter D64).
+		for _, k := range kept {
+			if isTerminal(k.Lifecycle) {
+				focus[bareID(k.DocID)] = true
+			}
 		}
 	}
 	if len(focus) == 0 {

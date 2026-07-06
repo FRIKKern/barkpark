@@ -997,3 +997,53 @@ func TestPriorityRank(t *testing.T) {
 		t.Errorf("absent/non-numeric priority must rank LAST")
 	}
 }
+
+// TestFinishedEpicDecay — charter D64 (wish Amendment 5): completion is not
+// activity. A freshly-finished epic keeps its recency rank through the grace
+// window (and shows its done cues — the completion is SEEN); past grace it
+// Demotes to the finished shelf, and spineRows relocates it below the orphans.
+func TestFinishedEpicDecay(t *testing.T) {
+	mk := func(closedAgo time.Duration) Snapshot {
+		return Snapshot{Tasks: []Task{
+			{DocID: "fin", Title: "Finished epic", Kind: kindGoal, Lifecycle: lifeOpen, UpdatedAt: refNow.Add(-30 * 24 * time.Hour)},
+			{DocID: "f1", Title: "done one", ParentID: "fin", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-closedAgo)},
+			{DocID: "f2", Title: "done two", ParentID: "fin", Lifecycle: lifeDone, UpdatedAt: refNow.Add(-closedAgo)},
+			{DocID: "work", Title: "Working epic", Kind: kindGoal, Lifecycle: lifeOpen, UpdatedAt: refNow.Add(-9 * 24 * time.Hour)},
+			{DocID: "w1", Title: "ready child", ParentID: "work", Lifecycle: lifeReady, UpdatedAt: refNow.Add(-8 * 24 * time.Hour)},
+		}}
+	}
+
+	// WITHIN grace: rank by recency (fresh closes outrank the stale workable
+	// epic), NOT demoted, and the done cues are visible (focus non-empty).
+	b := BuildBoard(mk(10*time.Minute), RepoContext{}, refNow)
+	fin := findEpic(t, b.Epics, "fin")
+	if fin.Demoted {
+		t.Fatalf("epic finished 10m ago is Demoted, want grace (finishedGraceAfter=%v)", finishedGraceAfter)
+	}
+	if b.Epics[0].Root.DocID != "fin" {
+		t.Fatalf("within grace: top epic = %s, want fin (fresh completion keeps rank)", b.Epics[0].Root.DocID)
+	}
+	if len(fin.FocusSet) == 0 {
+		t.Fatalf("within grace: FocusSet empty, want the done cues visible (the completion is SEEN)")
+	}
+
+	// PAST grace: Demoted; spineRows relocates it below the workable epic —
+	// and below the loose/orphan region if present.
+	b = BuildBoard(mk(2*time.Hour), RepoContext{}, refNow)
+	fin = findEpic(t, b.Epics, "fin")
+	if !fin.Demoted {
+		t.Fatalf("epic finished 2h ago is not Demoted, want the finished shelf")
+	}
+	var order []string
+	for _, sr := range spineRows(b, UIState{CollapsedEpics: map[string]bool{}}) {
+		if sr.Kind == spineEpicHeader {
+			order = append(order, sr.Ref)
+		}
+	}
+	if len(order) != 2 || order[0] != "work" || order[1] != "fin" {
+		t.Fatalf("spine epic order = %v, want [work fin] (finished shelf at the bottom)", order)
+	}
+	if len(fin.FocusSet) != 0 {
+		t.Fatalf("past grace: FocusSet = %v, want empty (header-only on the shelf)", fin.FocusSet)
+	}
+}

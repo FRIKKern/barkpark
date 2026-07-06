@@ -892,6 +892,16 @@ board.go / program.go / types.go) and against a read-only guerrilla dump.
     Guarded by `TestNextCursorParity` (a board WITH next rows) alongside the existing parity guards,
     UNWEAKENED.
 
+**D64 (2026-07-05/06, wish Amendment 5 — completion ≠ activity):** a section with zero WORKABLE
+children (nothing in_progress/ready/blocked/open) keeps its D49 recency rank only through a
+finishedGraceAfter=1h window — during grace the ≤2 done cues render so the completion is SEEN —
+then it Demotes: spineRows relocates it to the finished shelf at the board bottom (after orphans,
+above the W10-B tombstones), one header+rollup line, still selectable/expandable (explicit overrides
+win, D54). Why (user, verbatim): "we should not spend long time showing done epics at top - it will
+go to bottom after a short while." Guards: TestFinishedEpicDecay (grace boundary both sides) + the
+livecorpus goldens (the dormant 2/2 epic now pins the shelf).
+
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)

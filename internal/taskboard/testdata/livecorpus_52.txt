@@ -41,8 +41,6 @@ NEXT
   ↳  ✓ collect query targets                      3h
    ! styleguide gate - blocked on the r…  P2 blocked
 
-  Legacy migration cleanup ····················· 2/2
-
   sheets-parity ~ ······························ 1/3
    ○ SUM/AVG spill range                      P2 1/3
    ✓ A:A whole-column ref                         2h
@@ -54,6 +52,8 @@ NEXT
    ! revisit the old migration path       P3 blocked
    ✓ shipped loose task                           2h
   +1 more · 3 cancelled
+
+  Legacy migration cleanup ····················· 2/2
 
   Unified Aesthetic: one design language, every sur…
 

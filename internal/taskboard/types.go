@@ -165,6 +165,13 @@ type Epic struct {
 	// nowSet the NOW de-dup uses, so "the active group" is exactly "the group
 	// with a task pinned in NOW". An explicit user fold/unfold still overrides.
 	Active bool
+	// Workable is whether the epic still holds ≥1 non-terminal child (charter
+	// D64): the input to the finished-decay rule — completion is not activity.
+	Workable bool
+	// Demoted is the D64 verdict: finished (no workable children) AND past the
+	// finishedGraceAfter window — spineRows relocates the section to the
+	// finished shelf at the bottom, above the cancelled tombstones.
+	Demoted bool
 	// LastActivity is the epic's recency clock (charter D49 / wave-11): the newest
 	// lastActivity across the WHOLE member set (root + every descendant, INCLUDING
 	// the folded done/cancelled and the NOW-pinned claims), computed BEFORE any
@@ -198,6 +205,8 @@ type Cluster struct {
 	// LastActivity is the cluster's recency clock (charter D49 / wave-11): the
 	// newest lastActivity across its WHOLE pre-fold member set. sortClusters ranks
 	// by it (after Active), mirroring Epic.LastActivity.
+	Workable     bool
+	Demoted      bool
 	LastActivity time.Time
 	// FocusSet is the cluster's focus neighborhood (charter D51 / wave-11),
 	// mirroring Epic.FocusSet — the member doc ids the focus window picks plus the
