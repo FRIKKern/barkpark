@@ -20,10 +20,14 @@ defmodule BarkparkWeb.LoginTicketController do
   # straight off the header (RequireToken assigns only the verified struct, but
   # the session needs the raw value later). RequireToken guarantees a valid
   # Bearer reached here; the fallback clause is pure defense-in-depth.
-  def create(conn, _params) do
+  def create(conn, params) do
     case get_req_header(conn, "authorization") do
       ["Bearer " <> raw_token] ->
-        case Barkpark.Auth.mint_login_ticket(raw_token) do
+        # Optional `email` makes this a USER-shaped ticket (cloud-identity
+        # handoff): consuming it JIT-provisions that account and mints a
+        # user_session. Auth.mint_login_ticket gates it on the bearer holding
+        # `admin` — a lesser token gets the same generic unauthorized.
+        case Barkpark.Auth.mint_login_ticket(raw_token, user_email: params["email"]) do
           {:ok, ticket} ->
             conn
             |> put_status(:created)

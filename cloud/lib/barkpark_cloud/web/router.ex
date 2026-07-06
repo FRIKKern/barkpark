@@ -1344,7 +1344,11 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            case Registry.mint_studio_link(bp) do
+            # cloud-identity handoff: pass the cloud account's email so the
+            # instance signs the browser in AS this user (JIT-provisioned
+            # owner) rather than an anonymous admin-token session. Older
+            # instances ignore the field — legacy ticket, still one-click.
+            case Registry.mint_studio_link(bp, conn.assigns.current_user.email) do
               {:ok, url} ->
                 json(conn, 200, %{url: url})
 
