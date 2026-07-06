@@ -21,6 +21,7 @@ type hookRec struct {
 	gets    int
 	lastWkr string // worker_id on the last claim/close body
 	lastEp  int    // observed_epoch on the last close body
+	lastRev string // observed_rev on the last close body (digest-fence bypass, D82)
 }
 
 // newHookServer serves the three endpoints the hook touches: the drafts task
@@ -50,16 +51,19 @@ func newHookServer(t *testing.T, met []bool, claimEpoch int) (*httptest.Server, 
 			var body struct {
 				Worker string `json:"worker_id"`
 				Epoch  int    `json:"observed_epoch"`
+				Rev    string `json:"observed_rev"`
 			}
 			raw, _ := io.ReadAll(r.Body)
 			_ = json.Unmarshal(raw, &body)
 			rec.lastWkr = body.Worker
 			rec.lastEp = body.Epoch
+			rec.lastRev = body.Rev
 			_, _ = w.Write([]byte(`{"ok":true,"doc":{}}`))
 		case strings.Contains(p, "/v1/data/doc/") && strings.Contains(p, "/task/"):
 			rec.gets++
 			env := map[string]any{"result": map[string]any{
 				"_id":                 "task-x",
+				"rev":                 "r-fresh-1",
 				"lifecycle_status":    "in_progress",
 				"acceptance_criteria": crit,
 			}}
@@ -130,8 +134,10 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 		if code != exitOK {
 			t.Fatalf("exit = %d, want 0", code)
 		}
-		if rec.gets != 1 {
-			t.Errorf("gets = %d, want 1 (read to prove acceptance)", rec.gets)
+		if rec.gets != 2 {
+			// One read to prove acceptance, a second for the FRESH rev after the
+			// re-claim bumped it (D82: observed_rev must be current at close).
+			t.Errorf("gets = %d, want 2 (acceptance read + fresh-rev read)", rec.gets)
 		}
 		if rec.claims != 1 {
 			t.Errorf("claims = %d, want 1 (re-claim for the live epoch)", rec.claims)
@@ -141,6 +147,12 @@ func TestHookStopClosesOnlyWhenAllMet(t *testing.T) {
 		}
 		if rec.lastEp != 7 {
 			t.Errorf("close observed_epoch = %d, want the re-claimed 7", rec.lastEp)
+		}
+		// D82: the close must carry the fresh observed_rev so an agent that
+		// marked its own criteria met (a post-claim change) survives the server
+		// work-digest fence. Empty here means a regression to a plain DoClose.
+		if rec.lastRev != "r-fresh-1" {
+			t.Errorf("close observed_rev = %q, want r-fresh-1 (digest-fence bypass, D82)", rec.lastRev)
 		}
 	})
 

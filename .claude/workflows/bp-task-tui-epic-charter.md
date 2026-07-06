@@ -817,6 +817,7 @@ toggles, no data model beyond fields on Epic/Cluster/Board.
 | 19 | RESERVED: per-task mutation-events endpoint (`GET /v1/tasks/:doc_id/events`) — only if the derived timeline proves too thin in live use | M | — |
 | 20 | RESERVED: drafts-aware `driven_tasks`/graph projector fix (D13d found it published-only) — server-side, own epic gate | M | — |
 | 24 | Dispatch frontier: `area:`-aware interference model + greedy MWIS `Frontier` fn + `bp task frontier` verb + TUI IndependentReady switch (D67–D74) | L | 13 (this wave, CUT) |
+| 25 | CMUX bridge: `bp cmux` builtin (hook/dispatch/install/status) — pane-owns-a-task claim/renew/close-or-resume loop + frontier→agent-pane dispatch, fail-safe, no server change (D75–D81) | L | 14 (this wave, CUT) |
 
 **D56 (2026-07-05, user direction — reverses D14):** a claimed task renders in NOW *and* stays IN
 PLACE in its section — a spinner row heading its neighborhood (childBand 0), worker shown. Why (user,
@@ -1022,6 +1023,116 @@ D65/D66 from "one pick per root" into a real `area:`-aware interference model + 
     epics, watch `unproven` shrink. SLICE 4 (RESERVED): `bp task next --frontier`. Guards stay green
     UNWEAKENED (cursor-parity structural via the single spineRows producer; NEXT/glyph-budget/semrole
     parity untouched — the frontier adds a function + a verb, not board vocabulary).
+
+### Wave-14 architect decisions (2026-07-06 — the CMUX BRIDGE; wish "a cmux pane that IS a Barkpark worker + one-command frontier dispatch")
+
+Full design: `/Users/pelle/.claude/jobs/c06ba8c5/tmp/cmux-bridge-design.md` (→ Publish as paper
+`cmux-bridge`). This deepens the dispatch frontier (D67–D74) from "compute the honest capacity" into
+"ACT on it": a cmux pane auto-owns a task (claim→renew→close-or-resume) and `bp cmux dispatch` spawns
+the frontier into fresh agent panes. All code claims re-confirmed against the tree 2026-07-06 (not
+trusted from the brief): `ResolveWorker` honors `BARKPARK_WORKER_ID` (actions.go:203);
+`TaskClaimN`/`TaskCloseN` are the only mutation seams — NO heartbeat endpoint (client.go:892/923);
+`Get("task",id)` returns `(Doc,false)` on any error (client.go:670); `Frontier`/`FetchSnapshotFull`/
+`Board.IndependentReady` are the wave-13 shared model; the `task frontier` intercept (cli.go:146) is
+the pattern to mirror; zero `CMUX_`/`CLAUDE_CODE_SESSION_ID` refs exist in Go today (greenfield).
+
+75. **ONE client-side `bp cmux` builtin — hook/dispatch/install/status — intercepted in cli.go before
+    manifest dispatch, NO server/API change.** `case "cmux": return runCmux(out, g, ctx, rest[1:])`
+    in the noun switch (mirrors `runCloud`/`runAgent`); `runCmux` switches on the sub-verb. `cmux` is
+    a free noun (not a manifest noun; the manifest `task` verbs are ls/ready/prime/get/claim/close/
+    next/move — verified), so the intercept shadows nothing. Every mutation the bridge makes rides the
+    EXISTING claim/close endpoints and the single-doc read; the frontier snapshot is the one
+    `/v1/tasks` round-trip the board already fetches. *Why:* same headless-CMS, many-surfaces law — a
+    new surface over proven endpoints, gated on the Go suite alone.
+
+76. **Worker id is SURFACE-KEYED via one `CmuxWorkerID()` helper — the PANE owns the task, not the
+    agent.** `taskboard.CmuxWorkerID()` (beside `ResolveWorker`): `BARKPARK_WORKER_ID` else
+    `cmux-<CMUX_SURFACE_ID>` else `cmux-<CMUX_WORKSPACE_ID>` else `ResolveWorker()`. `CMUX_SURFACE_ID`
+    is durable + pane-unique + invariant for the pane's life; `CLAUDE_CODE_SESSION_ID` differs per
+    agent and subagents SHARE the pane's `CMUX_*`. Surface-keying means every subagent renews the
+    pane's ONE claim (re-claim under the same worker = renewal, never a 409); a session-keyed id would
+    make a subagent's claim collide with the lead's. Tier-1-first makes `BARKPARK_WORKER_ID` (which the
+    install shell-line sets to `cmux-$CMUX_SURFACE_ID`) always win and stay stable; because
+    `ResolveWorker` also checks it first, the tiers are consistent and degrade to `tui-<hostname>`
+    outside cmux. One function, unit-tested across the env matrix, used by every subcommand. *Why:*
+    the fencing lease is a per-pane resource; the id must track the pane, not the agent.
+
+77. **Hook-event → bp-action mapping, with the HONEST close default = acceptance-gated, never
+    turn-boundary.** `bp cmux hook <event>` reads the Claude hook JSON on stdin + env (`BARKPARK_TASK`;
+    worker via `CmuxWorkerID`) and runs ALONGSIDE cmux's own `cmux claude-hook` (adds, never replaces).
+    SessionStart → `DoClaim` (renewal-safe). PreToolUse → THROTTLED renew (re-claim, ≤1/60s via an
+    on-disk stamp under `{UserConfigDir}/barkpark/cmux/`). Stop **and** SessionEnd → **close IFF the
+    task has ≥1 `acceptance_criteria` and ALL are `met` (read via `Get("task",id)`); else do NOTHING**
+    → the 300s lease TTL expires → `task.lease_expired` → the built `↩ resume` (wave 12). Notification/
+    UserPromptSubmit/unknown → no-op. `Stop` fires at EVERY turn boundary, not "done", so an
+    unconditional close would false-close an interactive multi-turn agent after turn 1; the
+    acceptance gate is the ONE rule that is honest for both a one-shot dispatched agent and an
+    interactive pane (a task with no criteria can't be proven done → leave for resume; erring toward
+    not-closing is the honest failure mode, and the direct incentive for the §5/§6 authoring-quality
+    gate). Close observes the LIVE epoch by re-claiming right before close (renewal-safe; no epoch
+    persisted across the SessionStart/Stop process boundary; a foreign worker holding an expired lease
+    → our re-claim 409s → no close, no theft). *Why:* the WHO/INTENT/resume machinery already exists;
+    the bridge only feeds it truthful transitions.
+
+78. **CARDINAL fail-safe: a hook NEVER breaks the agent.** Every `bp cmux hook` path exits 0 (incl a
+    top-level `recover()`), writes NOTHING to stdout (some events feed hook stdout back into the
+    agent's context — diagnostics go to stderr, only under `--dry-run`/`BP_CMUX_DEBUG`), and uses a
+    bounded ~4s network timeout so a hung server never stalls a turn. Missing `BARKPARK_TASK` /
+    unreadable task / unreachable server / malformed stdin / unknown event are all silent no-ops; the
+    acceptance gate reads "can't read the task" as "can't prove acceptance" → leave claimed. `--dry-run`
+    prints the bp call it WOULD make and mutates nothing. *Why:* a non-zero exit or stray stdout from a
+    hook can abort/stall/poison the agent — the lease TTL is the backstop, so a missed action costs at
+    most an honest resume, never a hang.
+
+79. **`bp cmux dispatch [--max N] [--proven-only] [--dry-run]` reads the SHARED `taskboard.Frontier`
+    (imported, never reimplemented) and spawns one agent pane per pick — dry-run-first.** Fetch the
+    snapshot, BuildBoard, call `Frontier(snap, details, board.Now, now, FrontierOpts{Max,ProvenOnly})`,
+    and per pick emit `cmux new-surface --type agent-session --env BARKPARK_TASK=<doc_id> --prompt
+    <taskPrompt>`. Worker id is NOT passed at dispatch — the new pane derives its own
+    `BARKPARK_WORKER_ID=cmux-$CMUX_SURFACE_ID` from its freshly-injected surface id (a dispatched pane
+    and a hand-attached pane derive the worker identically; a dispatch-assigned id would fork that
+    invariant — rejected). `--dry-run` (DEFAULT when `cmux` is absent from PATH) PRINTS the launch plan
+    and spawns/mutates nothing; only spawns (`exec .Start`, never Wait) when cmux is on PATH and
+    --dry-run is off. `--max`/`--proven-only` mirror the frontier verb (ambition / careful dials). The
+    exact `cmux new-surface` flag spelling is confirmed at build against `cmux new-surface --help`
+    (dry-run-first is precisely so the operator eyeballs the invocation before any spawn). *Why:* one
+    interference model, two consumers (the CLI count and now the spawner) — they can never drift.
+
+80. **`bp cmux install` is PRINT-FIRST — never clobber `~/.claude/settings.json`.** `--print` (default,
+    the only slice-1 behavior) emits the Claude Code settings hooks block (SessionStart/Stop/SessionEnd
+    → `bp cmux hook <event>`; PreToolUse catch-all `matcher` → renew) PLUS the guarded shell line
+    `[ -n "$CMUX_SURFACE_ID" ] && export BARKPARK_WORKER_ID="cmux-$CMUX_SURFACE_ID"`, with copy-paste
+    instructions naming both `~/.claude/settings.json` and the shell profile / cmux pane-init, and the
+    emphasis that our hooks run ALONGSIDE cmux's own (additive per event). A `--merge [--yes]` mode
+    (RESERVED) carefully folds our four entries into an existing settings.json — deduped by exact
+    command string, foreign hooks preserved, backup-first, diff + consent, idempotent, print-only
+    fallback on malformed JSON. The hooks JSON schema is validated against the installed Claude Code
+    version at build. *Why:* "show, don't clobber without consent" + this phase's read-only posture.
+
+81. **SLICE PLAN + out-of-scope.** SLICE 1 (buildable NOW, no server change): `CmuxWorkerID`
+    (cb-worker-id) + `bp cmux hook` (cb-hook-entrypoint + cb-hook-failsafe) + `bp cmux status`
+    (cb-status-verb) + `bp cmux install --print` (cb-install-print) — the full pane-owns-a-task loop,
+    tested with fake-stdin × event × env matrix against httptest + the exit-0 fail-safe matrix.
+    SLICE 2 (needs wave-13 `df-frontier-fn` merged): `bp cmux dispatch` (cb-dispatch-verb). SLICE 3:
+    `bp cmux install --merge` (cb-install-merge) + docs (cb-docs-card, fold into the CLI card, 7-card
+    cap). SLICE 4 (RESERVED, cb-next-frontier-claim): claim-before-spawn dispatch reusing the wave-13
+    reserved `bp task next --frontier` atomic multi-claim to close the SessionStart-claim race. OUT OF
+    SCOPE (verified): server/API changes (none — no heartbeat exists, liveness IS renew-or-expire); the
+    orchestrator retry/lease loop; authoring `area:` labels (dispatch quality is bounded by wave-13's
+    coverage, not this bridge). Guards stay green UNWEAKENED — the bridge adds functions + a noun, not
+    board vocabulary.
+
+
+**D82 (2026-07-06, live-loop bug found by proving it):** the cmux Stop hook's auto-close FAILED in the
+realistic case — an agent that marks its own acceptance criteria met changes the doc after claiming,
+which trips the server's work-digest fence (doc_changed_since_claim); the renewal re-claim keeps the
+stale digest, so close 409'd and the fail-safe silently swallowed it → the task lease-expired into a
+resume instead of closing. FIX: hookStopClose reads the FRESH rev after re-claim and passes it as
+observed_rev (new apiclient.TaskCloseRevN + taskboard.DoCloseRev) — strict full-rev CAS is the
+server's sanctioned digest-fence bypass, and the worker match still prevents theft. Confirmed with a
+real end-to-end loop against guerrilla (claim → patch criteria met → Stop closes) and guarded by
+TestHookStopClosesOnlyWhenAllMet asserting observed_rev on the close body. LESSON: a hook that fails
+safe (exit 0) HIDES its own failures — only a real live loop, not unit tests + dry-run, surfaced this.
 
 
 ## Wave log
@@ -1574,3 +1685,89 @@ adds a function + a verb, not board vocabulary).
 - *Nits (non-blocking):* (1) JSON top-level `independent` stays 22 under `--proven-only` while `picks` is 3 — a
   scripter reading `.independent` gets the full-frontier count, not the returned set; trust `len(.picks)`. (2) piped
   (non-TTY) default emits JSON not table — conventional but undocumented. Neither is a model-correctness defect.
+
+### Wave 14 2026-07-06 (CUT: the CMUX BRIDGE — D75–D81; design + charter, NOT yet built)
+
+**The wish:** a cmux pane that IS a Barkpark worker — claim the task it owns on session-start, renew the
+lease while the agent works, close on proven acceptance (else lease-expire into the built `↩ resume`), and
+`bp cmux dispatch` spawns the wave-13 dispatch frontier into fresh agent panes ("send out N agents when they
+don't collide" in one keystroke). Deepens D67–D74 from "compute the honest capacity" to "act on it."
+
+**Verified/re-confirmed against the tree 2026-07-06 (read-only; nothing mutated):** `ResolveWorker` honors
+`BARKPARK_WORKER_ID` else `tui-<hostname>` (actions.go:203); `TaskClaimN`/`TaskCloseN` are the ONLY mutation
+seams — **no heartbeat endpoint exists**, so liveness = re-claim-to-renew + 300s TTL + `task.lease_expired`
+(client.go:892/923); `Get("task",id)` returns `(Doc,false)` on ANY read error — the ideal fail-safe for the
+acceptance gate (client.go:670); `Frontier`/`FetchSnapshotFull`/`Board.IndependentReady` are the shared
+wave-13 model to IMPORT (dispatch never reimplements interference); the `task frontier` intercept at
+cli.go:146 is the exact mirror pattern; **zero `CMUX_`/`CLAUDE_CODE_SESSION_ID` references exist in the Go
+tree — greenfield.** Feasibility findings (protected `CMUX_*` env, the `claude` hook shim firing
+`cmux claude-hook <event>`, surface≠session) taken from the wave-14 feasibility research.
+
+**The design — the cardinal invariant is fail-safe.** A hook NEVER breaks the agent: every `bp cmux hook`
+path exits 0 (incl a top-level recover), writes NOTHING to stdout, bounded ~4s network, `--dry-run` mutates
+nothing; a missed action costs at most an honest resume (the lease TTL is the backstop). The close default is
+**acceptance-gated, never turn-boundary** — Stop fires every turn, so close only when ≥1 criterion exists and
+ALL are met; else leave for resume. Worker id is **surface-keyed** (`cmux-<CMUX_SURFACE_ID>`) so all subagents
+in a pane renew the pane's ONE claim. Dispatch reads the SHARED `taskboard.Frontier` and is dry-run-first
+(default when cmux is absent from PATH). Install is print-first (never clobber `~/.claude/settings.json`).
+
+**Design:** `/Users/pelle/.claude/jobs/c06ba8c5/tmp/cmux-bridge-design.md` (worker-id derivation + hook-event
+→ bp-action table + acceptance-gated-close honesty + fail-safe rules + dispatch dry-run behavior + install
+block + slice plan + paper outline + the §5 `cb-*` task tree written out for the Publisher to transcribe).
+Paper to publish: `cmux-bridge`.
+
+**SLICE 1 is buildable NOW** (no server change): `CmuxWorkerID` (cb-worker-id) + `bp cmux hook`
+(cb-hook-entrypoint + cb-hook-failsafe) + `bp cmux status` (cb-status-verb) + `bp cmux install --print`
+(cb-install-print). SLICE 2 (needs wave-13 `df-frontier-fn` merged): `bp cmux dispatch` (cb-dispatch-verb).
+SLICE 3: `bp cmux install --merge` (cb-install-merge) + docs (cb-docs-card). SLICE 4 (RESERVED): claim-before-
+spawn dispatch (cb-next-frontier-claim). All existing guards stay green UNWEAKENED — the bridge adds functions
++ a noun, not board vocabulary. Publisher: file the `cmux-bridge-goal` tree (§11 of the design), publish the
+`cmux-bridge` paper, link the goal into the dispatch-frontier family (it consumes `Frontier`).
+
+### Wave 14 2026-07-06b (SHIPPED + PUBLISHED + integration-probed — the CMUX bridge, slices 1+2 built)
+
+Publisher + Builder + Direction all landed; direction ran a real merge-onto-`origin/main` integration probe.
+
+**Published (guerrilla, read-only-verified by direction):** paper `cmux-bridge` ("CMUX × Barkpark — a pane
+that IS a worker") renders HTTP 200 at `/papers/cmux-bridge` with all 7 sections (wish / what cmux gives us /
+worker-id derivation / hook contract / dispatch / install / honest limits). Task tree = 10 docs, ALL
+`_draft=false`, **zero draft duplicates**: goal `cmux-bridge-goal` (P1) triple-linked into the frontier family
+(`parent_id=dispatch-frontier-goal` + label `proj:dispatch-frontier` + `design_doc=cmux-bridge`); 9 children
+each `design_doc=cmux-bridge`, correct parents/priorities, criteria shape `{criterion,met:false,evidence}` with
+counts matching the design EXACTLY (worker-id 3, hook-entrypoint 5, hook-failsafe 3, status 4, install-print 3,
+dispatch 5, install-merge 4, docs 3, next-frontier-claim 2). Note: the `/v1/tasks` list projection strips
+`design_doc`/`acceptance_criteria` — verify those via a `drafts`-perspective `/v1/data/query` read, not the list.
+
+**Built** on `feat/bp-cmux-bridge-v1` (1 commit `c34774d5`, +1691 lines, client-side only — `cloud/`/`api`
+untouched): `internal/taskboard/cmux.go` (`CmuxWorkerID` four-tier), `internal/cli/cmux_hook.go` (the fail-safe
+adapter), `cmux_dispatch.go`, `cmux_install.go`, `cmux_cmd.go` (`runCmux` + `status`), the `case "cmux"`
+intercept in `cli.go`, and a behavior-preserving `apiclient.Get`→`GetPerspective` refactor so the acceptance
+gate reads the drafts overlay. **KEY BUILD CORRECTION:** the real cmux spawn primitive is
+`cmux new-workspace --name --cwd --command` (env inline in `--command`), NOT the design's feasibility-research
+`new-surface --type agent-session --env --prompt` (which does not exist) — adjusted in ONE place.
+
+**Integration probe (direction, throwaway worktree merged onto `origin/main` 448dced9):** merge is CLEAN (no
+conflicts, branch had diverged from an older base). Full gate GREEN on the merged tree — `CGO_ENABLED=0 go
+build ./...`, `CC=clang go vet` (cmux/taskboard/apiclient), `CC=clang go test` (all ok incl the `cli` package
+5.2s), `go test -race ./internal/taskboard/...` ok, gofmt clean. Live read-only runs against guerrilla:
+`bp cmux install --print` emits the exact hooks block + guarded shell line (never writes settings.json);
+`bp cmux dispatch --dry-run` printed one `cmux new-workspace` per pick for 22 live frontier picks (exit 0, no
+spawn, no mutation); dispatch WITHOUT `--dry-run` while cmux is absent from PATH auto-degraded ("dry-run (cmux
+not on PATH)") and spawned nothing; `bp cmux status` live-proved `CmuxWorkerID` tier-2 (derived
+`cmux-<CMUX_SURFACE_ID>` from THIS pane's real surface env). **Fail-safe matrix confirmed** — missing task,
+unknown task, unknown event, malformed stdin, and unreachable server ALL exit 0 with empty stdout; grep proved
+no `os.Exit` and no stdout write on the hook path, a top-level `recover()` at cmux_hook.go:75, a 4s network
+timeout, and dispatch importing the SHARED `taskboard.Frontier` + `.Start()` (never `Wait`). The adapter is
+fail-safe: a hook cannot break the agent.
+
+**Merge steps for the lead** (from repo root, main stays on main): `git fetch origin main` →
+`git worktree add --detach <tmp> origin/main` → `git -C <tmp> merge --no-ff feat/bp-cmux-bridge-v1` (clean) →
+gate as above → open the PR from `feat/bp-cmux-bridge-v1`. NOT pushed by direction (probe only).
+
+**Remaining after merge:** slice-3 `cb-install-merge` + `cb-docs-card` (docs card must fold into the existing
+CLI card — 7-card cap — and anchor the `case "cmux"` intercept for docs-anchors-check); slice-4 reserved
+`cb-next-frontier-claim` (claim-before-spawn, wants the orchestrator loop). Honest limits carried from design:
+dispatch quality is bounded by `area:` label coverage (~unset today — every probe pick showed `area: unset`
+except the cb-* tasks); the SessionStart-claim race (two dispatchers / a human already on the task) is the
+reserved atomic-claim-first fix; `drainHookStdin` has no wall-clock deadline (matches cmux's own contract —
+Claude closes stdin — judged not worth over-engineering for v1).

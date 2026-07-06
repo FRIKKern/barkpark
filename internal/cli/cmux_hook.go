@@ -182,8 +182,35 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg fu
 		dbg("re-claim for epoch failed (%v) — not closing (no theft)", err)
 		return
 	}
-	res := taskboard.DoClose(c, task, worker, epoch)
+	// The agent marking its own acceptance criteria met is a LEGITIMATE
+	// post-claim change, but it trips the server's work-digest fence
+	// (doc_changed_since_claim) — and the renewal above keeps the stale digest.
+	// Read the FRESH rev (after the re-claim bumped it) and pass observed_rev:
+	// strict full-rev CAS is the server's sanctioned bypass, and the worker
+	// match already prevents theft. Rev unreadable → plain close (may fence to
+	// resume, the honest direction).
+	rev := ""
+	if fresh, ok := c.GetPerspective("task", task, "drafts"); ok {
+		rev = docRev(fresh)
+	}
+	res := taskboard.DoCloseRev(c, task, worker, epoch, rev)
 	dbg("close: %s", res.Message)
+}
+
+// docRev pulls the document rev out of the flattened envelope (the doc API
+// returns "rev"; "_rev" is tolerated for forward-compat). Empty when absent.
+func docRev(doc apiclient.Doc) string {
+	for _, k := range []string{"rev", "_rev"} {
+		raw, ok := doc.Extra[k]
+		if !ok {
+			continue
+		}
+		var v string
+		if json.Unmarshal(raw, &v) == nil && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // acceptanceAllMet decodes content.acceptance_criteria (flattened onto the

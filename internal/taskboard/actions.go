@@ -67,6 +67,25 @@ func DoClaim(c *apiclient.Client, docID, worker string) ActionResult {
 // request body). If the row moved under us the server returns fenced_off /
 // stale_claim on a 409 and this reports OK:false with that honest reason; only a
 // clean close reports OK:true.
+// DoCloseRev is DoClose with an optional observed_rev strict-CAS guard (charter
+// D82). The cmux Stop hook passes the freshly-read rev so an agent that marked
+// its OWN acceptance criteria met — a legitimate post-claim change that trips
+// the work-digest fence — still closes; empty rev falls through to DoClose.
+func DoCloseRev(c *apiclient.Client, docID, worker string, epoch int, observedRev string) ActionResult {
+	if observedRev == "" {
+		return DoClose(c, docID, worker, epoch)
+	}
+	notices, err := c.TaskCloseRevN(docID, worker, epoch, observedRev)
+	if err != nil {
+		if msg, ok := resyncGuidance(err); ok {
+			return ActionResult{OK: false, Message: msg, Role: RoleDanger}
+		}
+		return ActionResult{OK: false, Message: "close rejected: " + humanizeReason(err)}
+	}
+	res := ActionResult{OK: true, Message: fmt.Sprintf("closed · epoch %d", epoch)}
+	return withTopNotice(res, notices)
+}
+
 func DoClose(c *apiclient.Client, docID, worker string, epoch int) ActionResult {
 	notices, err := c.TaskCloseN(docID, worker, epoch)
 	if err != nil {
