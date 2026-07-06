@@ -120,6 +120,31 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/tmux")
     end
+
+    test "account-admin with NO api_token (cloud/SSO session) sees the tab", %{conn: conn} do
+      enable_fake_console()
+
+      # A cloud-login admin carries an account session, not an api_token — the
+      # exact case that hid the tmux tab on guerrilla before the shares_admin?
+      # fix. Make the user an admin of the DEFAULT workspace (the flat admin
+      # surface's context) and log in via user_session only.
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{
+          email: "tmux-acct-admin-#{Ecto.UUID.generate()}@example.com",
+          password: "correct-horse-battery-staple-42"
+        })
+
+      %{id: ws_id} = Barkpark.Tenancy.get_default_workspace()
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_id, user.id, "admin", "user")
+      {:ok, session} = Barkpark.Accounts.create_user_session_token(user)
+
+      conn = init_test_session(conn, %{"user_session" => session})
+      {:ok, _view, html} = live(conn, "/studio/tmux")
+
+      # tab is visible AND the console mounts (was hidden + gated before the fix)
+      assert html =~ ~s(href="/studio/tmux")
+      assert html =~ ~s(phx-hook="TmuxTerminal")
+    end
   end
 
   describe "enabled + admin" do

@@ -74,7 +74,9 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
       |> default_scope_fallback()
-      |> then(fn s -> assign(s, :shares_admin?, admin?(s.assigns[:api_token])) end)
+      |> then(fn s ->
+        assign(s, :shares_admin?, admin?(s.assigns[:api_token], s.assigns[:current_user]))
+      end)
       |> assign_new(:nav_section, fn -> nil end)
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)
@@ -403,6 +405,23 @@ defmodule BarkparkWeb.StudioChrome do
     end
   end
 
-  defp admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
-  defp admin?(_), do: false
+  # "Admin" for chrome (Share button, self-update banner, tmux console tab) =
+  # an admin API token OR an account whose role on the default workspace is
+  # admin-grade. These are the SAME two paths the admin `on_mount` gate accepts
+  # (LiveAuth :admin). Without the account arm, a cloud/SSO session — which
+  # carries no api_token — would see no admin chrome even as the owner (this is
+  # why the tmux tab was invisible on cloud-login instances).
+  defp admin?(token, user), do: token_admin?(token) or account_admin?(user)
+
+  defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
+  defp token_admin?(_), do: false
+
+  defp account_admin?(%Barkpark.Accounts.User{} = user) do
+    case Tenancy.get_default_workspace() do
+      %{id: ws_id} -> Tenancy.Auth.authorize(user, ws_id, :admin) == :ok
+      _ -> false
+    end
+  end
+
+  defp account_admin?(_), do: false
 end
