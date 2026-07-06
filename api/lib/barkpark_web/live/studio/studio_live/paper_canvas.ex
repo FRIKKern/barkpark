@@ -6,11 +6,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   shipped per-block editor when the flag is OFF:
 
     * `paper_canvas_enabled?/0` — the feature flag. Reads `BARKPARK_PAPER_CANVAS`
-      from the environment. **Default FALSE.** Only the literal truthy strings
-      `"1"` / `"true"` (case-insensitive, surrounding whitespace trimmed) enable
-      the canvas. Unset, empty, or anything else ⇒ false ⇒ the EXISTING per-block
-      stream render runs verbatim. This is the prime-directive guard: flag-OFF is
-      byte-identical to today.
+      from the environment. **Default TRUE (the pd-doctrine cutover — D7/D9).**
+      The canvas is now the mainline editor: unset, empty, `"1"`, `"true"`, or
+      ANY value that is not an explicit opt-out ⇒ true ⇒ opening a paper IS the
+      always-editable canvas. Only the literal opt-out strings `"0"` / `"false"`
+      (case-insensitive, surrounding whitespace trimmed) disable it ⇒ the shipped
+      per-block stream render runs verbatim. This is the EXPLICIT OPT-OUT guard:
+      `BARKPARK_PAPER_CANVAS=0` (or `=false`) is byte-identical to the legacy
+      per-block path (D3). The flag FAILS TOWARD THE MAINLINE — a typo or an
+      unexpected value keeps the canvas on, never silently reverting.
 
     * `partition_runs/1` — partitions an ordered top-level block list into
       MAXIMAL CONTIGUOUS CANVAS RUNS. A run is a maximal stretch of CANVAS-
@@ -165,22 +169,27 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_readonly_atom_types ++ @canvas_fleet_types
 
   @doc """
-  The `BARKPARK_PAPER_CANVAS` feature flag. **Default FALSE.**
+  The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**
 
-  True only for `"1"` or `"true"` (case-insensitive, trimmed). Unset / empty /
-  any other value ⇒ false ⇒ the shipped per-block render path, unchanged.
+  The canvas is the mainline editor. Unset / empty / `"1"` / `"true"` / any value
+  that is NOT an explicit opt-out ⇒ true. ONLY the literal opt-out strings `"0"`
+  or `"false"` (case-insensitive, trimmed) ⇒ false ⇒ the shipped per-block render
+  path, byte-identical to legacy (D3). Fails toward the mainline: an unexpected
+  value keeps the canvas on.
   """
   @spec paper_canvas_enabled?() :: boolean()
   def paper_canvas_enabled? do
     case System.get_env("BARKPARK_PAPER_CANVAS") do
-      nil -> false
-      raw -> raw |> String.trim() |> String.downcase() |> truthy?()
+      nil -> true
+      raw -> raw |> String.trim() |> String.downcase() |> not_opted_out?()
     end
   end
 
-  defp truthy?("1"), do: true
-  defp truthy?("true"), do: true
-  defp truthy?(_), do: false
+  # The ONLY two values that disable the canvas. Everything else — including the
+  # empty string and any typo — keeps it on (fail toward the mainline).
+  defp not_opted_out?("0"), do: false
+  defp not_opted_out?("false"), do: false
+  defp not_opted_out?(_), do: true
 
   @doc """
   Partition an ordered block list into maximal contiguous canvas runs.

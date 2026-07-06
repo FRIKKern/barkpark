@@ -84,7 +84,17 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   end
 
   defp open_editor(view) do
-    html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+    # With the canvas the mainline default (D7/D9) there is NO View⇄Edit toggle —
+    # opening a paper IS the editor, rendered directly on mount (rule 5). On the
+    # flag-OFF opt-out path the toggle is present and must be clicked to reveal the
+    # per-block editor. Handle both so every caller gets the editor HTML either way.
+    html =
+      if has_element?(view, ~s([data-test-id="paper-edit-toggle"])) do
+        view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
+      else
+        render(view)
+      end
+
     assert html =~ ~s(data-test-id="studio-paper-block-editor")
     html
   end
@@ -102,51 +112,82 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
   end
 
   # ── 1. FLAG-OFF BYTE-IDENTICAL (the critical test) ──────────────────────────
+  #
+  # The canvas is the mainline default now (D7/D9), so the legacy per-block path is
+  # an EXPLICIT opt-out (`BARKPARK_PAPER_CANVAS=0`). These tests pin that opt-out so
+  # they keep proving the OFF path is byte-identical to legacy (D3), independent of
+  # the flipped default.
 
-  test "flag OFF: editor renders the per-block path with NO <bp-paper-canvas>",
-       %{conn: conn} do
-    # The flag is unset in the suite baseline (ConnCase doesn't set it). Sanity-
-    # guard so a leaked env from another test can't silently pass this.
-    refute System.get_env("BARKPARK_PAPER_CANVAS") in ["1", "true"]
+  describe "flag OFF (explicit opt-out — BARKPARK_PAPER_CANVAS=0)" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    edit_html = open_editor(view)
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
 
-    # The per-block rich-text wrappers are present; the canvas is NOT.
-    assert edit_html =~ ~s(id="paper-ed-h-1")
-    assert edit_html =~ ~s(id="paper-ed-p-intro")
-    assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
-    assert edit_html =~ ~s(<bp-paper-editor)
-    refute edit_html =~ ~s(<bp-paper-canvas)
-    refute edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
-    refute edit_html =~ ~s(data-test-id="paper-canvas-run")
+      :ok
+    end
 
-    # The callout still renders via its existing per-block form (a run boundary
-    # in the ON path, but here just a normal per-block widget).
-    assert edit_html =~ ~s(data-edit-block-id="c-note")
-  end
+    test "the opt-out path opens read-only and shows the View⇄Edit toggle (a mode still exists here)",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
 
-  test "flag OFF render is BYTE-IDENTICAL to the stored snapshot (no OFF-path drift)",
-       %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    rendered = editor_html(open_editor(view))
+      # On the opt-out path a block paper opens in the READ-ONLY streamed View —
+      # the toggle is present and the block editor is NOT yet rendered. (Key on
+      # the real render marker `paper-canvas-run-0`, NOT the bare `<bp-paper-canvas`
+      # string — the latter also appears in the root layout's JS hook comments.)
+      assert html =~ ~s(data-test-id="paper-edit-toggle")
+      assert html =~ ~s(phx-update="stream")
+      refute html =~ ~s(data-test-id="studio-paper-block-editor")
+      refute html =~ ~s(id="paper-canvas-run-0")
+      refute html =~ ~s(data-test-id="paper-canvas-run")
+    end
 
-    if File.exists?(@snapshot_path) do
-      baseline = File.read!(@snapshot_path)
+    test "editor renders the per-block path with NO <bp-paper-canvas>", %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      edit_html = open_editor(view)
 
-      assert rendered == baseline, """
-      FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
-      path must stay byte-identical. If this change is intentional, delete
-      #{@snapshot_path} and re-run to re-baseline.
-      """
-    else
-      File.mkdir_p!(Path.dirname(@snapshot_path))
-      File.write!(@snapshot_path, rendered)
+      # The per-block rich-text wrappers are present; the canvas is NOT.
+      assert edit_html =~ ~s(id="paper-ed-h-1")
+      assert edit_html =~ ~s(id="paper-ed-p-intro")
+      assert edit_html =~ ~s(phx-hook="BarkparkPaperEditor")
+      assert edit_html =~ ~s(<bp-paper-editor)
+      refute edit_html =~ ~s(<bp-paper-canvas)
+      refute edit_html =~ ~s(phx-hook="BarkparkPaperCanvas")
+      refute edit_html =~ ~s(data-test-id="paper-canvas-run")
 
-      flunk("""
-      Wrote the flag-OFF snapshot baseline to #{@snapshot_path}.
-      Re-run the suite to assert byte-identity against it.
-      """)
+      # The callout still renders via its existing per-block form (a run boundary
+      # in the ON path, but here just a normal per-block widget).
+      assert edit_html =~ ~s(data-edit-block-id="c-note")
+    end
+
+    test "render is BYTE-IDENTICAL to the stored snapshot (no OFF-path drift)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      rendered = editor_html(open_editor(view))
+
+      if File.exists?(@snapshot_path) do
+        baseline = File.read!(@snapshot_path)
+
+        assert rendered == baseline, """
+        FLAG-OFF render drifted from the committed snapshot. The per-block (OFF)
+        path must stay byte-identical. If this change is intentional, delete
+        #{@snapshot_path} and re-run to re-baseline.
+        """
+      else
+        File.mkdir_p!(Path.dirname(@snapshot_path))
+        File.write!(@snapshot_path, rendered)
+
+        flunk("""
+        Wrote the flag-OFF snapshot baseline to #{@snapshot_path}.
+        Re-run the suite to assert byte-identity against it.
+        """)
+      end
     end
   end
 
@@ -165,6 +206,94 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       end)
 
       :ok
+    end
+
+    test "opening a paper IS the editor — the canvas mounts DIRECTLY on open, no View⇄Edit toggle (rule 5)",
+         %{conn: conn} do
+      # The whole point of the cutover: no click, no mode. The initial mount HTML
+      # already carries the canvas editor and NO toggle button.
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+      # The editor is live on open… (key on the real render marker
+      # `paper-canvas-run-0` — the bare `<bp-paper-canvas` string also appears in
+      # the root layout's JS hook comments, so it would assert vacuously.)
+      assert html =~ ~s(data-test-id="studio-paper-block-editor")
+      assert html =~ ~s(data-test-id="paper-canvas-run")
+      assert html =~ ~s(id="paper-canvas-run-0")
+
+      # …and the View⇄Edit toggle is GONE — there are no modes to be in.
+      refute html =~ ~s(data-test-id="paper-edit-toggle")
+      refute html =~ ~s(phx-click="paper-toggle-edit")
+
+      # The read-only streamed View pane is NOT rendered — the body is the canvas,
+      # not a per-block phx-update="stream" list.
+      refute html =~ ~s(id="paper-body-#{@slug}")
+
+      # The canvas region keeps an accessible name now that the toggle is gone.
+      assert html =~ ~s(data-test-id="studio-paper-shell")
+      assert html =~ ~s(aria-label="Editing )
+
+      # The "Open standalone" reader link + the Share affordance survive the
+      # toggle's removal — the header action row stays coherent.
+      assert html =~ ~s(data-test-id="paper-open-standalone")
+    end
+
+    test "an external {:paper_block} delta re-syncs the edit doc and pushes the block to the WCs (no Edit mode needed)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+
+      # Another producer (the ingest endpoint / a second session) appends a
+      # block through the real Content + PubSub spine — the {:paper_block}
+      # frame arrives with sender != the LiveView pid.
+      {:ok, _} =
+        Content.apply_paper_block_op(
+          @slug,
+          %{
+            "op" => "append-block",
+            "block" => %{
+              "id" => "p-ext",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Appended externally."}]
+            }
+          },
+          @dataset
+        )
+
+      # Pre-t12b this sync was gated on `paper_edit_mode` — permanently false
+      # with the toggle retired — so the mainline canvas path silently skipped
+      # the edit-doc re-sync + WC push on external edits. The push proves BOTH
+      # halves: push_block_to_wc finds "p-ext" only in a paper_doc that
+      # sync_paper_edit_doc just re-read from the DB.
+      assert_push_event(view, "bp:block-update", %{block_id: "p-ext"}, 500)
+
+      # No remount — the delta was absorbed in place.
+      assert render(view) =~ ~s(id="paper-sentinel")
+    end
+
+    test "an HTML-only legacy paper opens READ-ONLY: raw body, no canvas, no toggle, no 'Editing' label",
+         %{conn: conn} do
+      legacy_slug = "2026-06-23-legacy-html-paper"
+
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: legacy_slug,
+          dataset: @dataset,
+          body_html: "<p>Legacy body, nothing to edit.</p>"
+        })
+
+      {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{legacy_slug}"))
+
+      # The raw body renders; there is no editor and no mode to toggle into —
+      # a blockless paper has nothing to edit on EITHER path (rule 5 does not
+      # invent an editor where no blocks exist).
+      assert html =~ "Legacy body, nothing to edit."
+      refute html =~ ~s(data-test-id="studio-paper-block-editor")
+      refute html =~ ~s(id="paper-canvas-run-0")
+      refute html =~ ~s(data-test-id="paper-edit-toggle")
+
+      # The accessible name must NOT claim an editing surface here — the label
+      # is gated on the editor actually being live, not on the flag alone.
+      refute html =~ ~s(aria-label="Editing )
     end
 
     test "renders ONE <bp-paper-canvas> run containing the callout INLINE (no per-block callout widget)",
@@ -1198,112 +1327,133 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
     ]
   end
 
-  # ── 3. paper-ops HANDLER ────────────────────────────────────────────────────
+  # ── 3. paper-ops HANDLER (flag OFF — the echo guard) ────────────────────────
+  #
+  # The `refute_push_event` guard proves the OFF path leaks NO `bp:canvas-update`
+  # echo. With the canvas now the mainline default (D7/D9), OFF is an explicit
+  # opt-out — pin it so these keep exercising the flag-OFF echo behavior.
+  describe "paper-ops HANDLER (flag OFF — BARKPARK_PAPER_CANVAS=0)" do
+    setup do
+      prev = System.get_env("BARKPARK_PAPER_CANVAS")
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
-  test "paper-ops folds a batch through apply_patches + persists identically to per-block",
-       %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    open_editor(view)
+      on_exit(fn ->
+        case prev do
+          nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+          v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+        end
+      end)
 
-    pid_before = view.pid
+      :ok
+    end
 
-    # A <bp-paper-canvas> run emits bp-canvas-ops {ops:[…]}; the hook forwards it
-    # as `paper-ops`. Here: one patch-block editing the intro paragraph's text —
-    # the SAME op shape the per-block path persists, just inside a batch array.
-    render_hook(view, "paper-ops", %{
-      "ops" => [
+    test "paper-ops folds a batch through apply_patches + persists identically to per-block",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      pid_before = view.pid
+
+      # A <bp-paper-canvas> run emits bp-canvas-ops {ops:[…]}; the hook forwards it
+      # as `paper-ops`. Here: one patch-block editing the intro paragraph's text —
+      # the SAME op shape the per-block path persists, just inside a batch array.
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "p-intro",
+            "patch" => %{
+              "content" => [%{"type" => "text", "value" => "Edited via canvas batch."}]
+            }
+          }
+        ]
+      })
+
+      block = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-intro"))
+      assert block["type"] == "paragraph"
+      assert block["content"] == [%{"type" => "text", "value" => "Edited via canvas batch."}]
+
+      # No remount — the batch went through the canonical persist path.
+      assert view.pid == pid_before
+      assert Process.alive?(view.pid)
+
+      # S4a flag-OFF guard: with the canvas flag UNSET (the suite baseline), the
+      # echo path pushes NOTHING — no <bp-paper-canvas> is mounted to receive it,
+      # and push_canvas_echo/1 gates on paper_canvas_enabled?(). The flag-OFF path
+      # stays byte-identical (no new push_event leaks into the per-block render).
+      refute_push_event(view, "bp:canvas-update", %{}, 50)
+    end
+
+    test "paper-ops persists a MULTI-op batch atomically (matches apply_patches)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
+
+      ops = [
         %{
           "op" => "patch-block",
-          "id" => "p-intro",
-          "patch" => %{"content" => [%{"type" => "text", "value" => "Edited via canvas batch."}]}
+          "id" => "h-1",
+          "patch" => %{"text" => "Canvas Paper (edited)"}
+        },
+        %{
+          "op" => "append-block",
+          "block" => %{
+            "id" => "p-new",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Appended in the same batch."}]
+          }
         }
       ]
-    })
 
-    block = Content.paper_blocks(@slug, @dataset) |> Enum.find(&(&1["id"] == "p-intro"))
-    assert block["type"] == "paragraph"
-    assert block["content"] == [%{"type" => "text", "value" => "Edited via canvas batch."}]
+      render_hook(view, "paper-ops", %{"ops" => ops})
 
-    # No remount — the batch went through the canonical persist path.
-    assert view.pid == pid_before
-    assert Process.alive?(view.pid)
+      blocks = Content.paper_blocks(@slug, @dataset)
 
-    # S4a flag-OFF guard: with the canvas flag UNSET (the suite baseline), the
-    # echo path pushes NOTHING — no <bp-paper-canvas> is mounted to receive it,
-    # and push_canvas_echo/1 gates on paper_canvas_enabled?(). The flag-OFF path
-    # stays byte-identical (no new push_event leaks into the per-block render).
-    refute_push_event(view, "bp:canvas-update", %{}, 50)
-  end
-
-  test "paper-ops persists a MULTI-op batch atomically (matches apply_patches)",
-       %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    open_editor(view)
-
-    ops = [
-      %{
-        "op" => "patch-block",
-        "id" => "h-1",
-        "patch" => %{"text" => "Canvas Paper (edited)"}
-      },
-      %{
-        "op" => "append-block",
-        "block" => %{
-          "id" => "p-new",
+      # Cross-check: the persisted blocks equal apply_patches over the seed blocks.
+      seed = [
+        %{"id" => "h-1", "type" => "heading", "text" => "Canvas Paper", "level" => 1},
+        %{
+          "id" => "p-intro",
           "type" => "paragraph",
-          "content" => [%{"type" => "text", "value" => "Appended in the same batch."}]
-        }
-      }
-    ]
+          "content" => [%{"type" => "text", "value" => "First run, paragraph one."}]
+        },
+        %{
+          "id" => "c-note",
+          "type" => "callout",
+          "tone" => "info",
+          "content" => [%{"type" => "text", "value" => "A boundary callout."}]
+        },
+        %{
+          "id" => "p-after",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Second run, paragraph two."}]
+        },
+        %{"id" => "d-end", "type" => "divider"}
+      ]
 
-    render_hook(view, "paper-ops", %{"ops" => ops})
+      {:ok, expected} = Barkpark.PortableDoc.Patch.apply_patches(seed, ops)
+      assert blocks == expected
 
-    blocks = Content.paper_blocks(@slug, @dataset)
+      heading = Enum.find(blocks, &(&1["id"] == "h-1"))
+      assert heading["text"] == "Canvas Paper (edited)"
+      assert List.last(blocks)["id"] == "p-new"
+    end
 
-    # Cross-check: the persisted blocks equal apply_patches over the seed blocks.
-    seed = [
-      %{"id" => "h-1", "type" => "heading", "text" => "Canvas Paper", "level" => 1},
-      %{
-        "id" => "p-intro",
-        "type" => "paragraph",
-        "content" => [%{"type" => "text", "value" => "First run, paragraph one."}]
-      },
-      %{
-        "id" => "c-note",
-        "type" => "callout",
-        "tone" => "info",
-        "content" => [%{"type" => "text", "value" => "A boundary callout."}]
-      },
-      %{
-        "id" => "p-after",
-        "type" => "paragraph",
-        "content" => [%{"type" => "text", "value" => "Second run, paragraph two."}]
-      },
-      %{"id" => "d-end", "type" => "divider"}
-    ]
+    test "paper-ops with an empty / non-list batch is a quiet no-op (never writes/crashes)",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+      open_editor(view)
 
-    {:ok, expected} = Barkpark.PortableDoc.Patch.apply_patches(seed, ops)
-    assert blocks == expected
+      before = Content.paper_blocks(@slug, @dataset)
+      pid_before = view.pid
 
-    heading = Enum.find(blocks, &(&1["id"] == "h-1"))
-    assert heading["text"] == "Canvas Paper (edited)"
-    assert List.last(blocks)["id"] == "p-new"
-  end
+      render_hook(view, "paper-ops", %{"ops" => []})
+      render_hook(view, "paper-ops", %{"ops" => "not-a-list"})
+      render_hook(view, "paper-ops", %{})
 
-  test "paper-ops with an empty / non-list batch is a quiet no-op (never writes/crashes)",
-       %{conn: conn} do
-    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
-    open_editor(view)
-
-    before = Content.paper_blocks(@slug, @dataset)
-    pid_before = view.pid
-
-    render_hook(view, "paper-ops", %{"ops" => []})
-    render_hook(view, "paper-ops", %{"ops" => "not-a-list"})
-    render_hook(view, "paper-ops", %{})
-
-    assert Content.paper_blocks(@slug, @dataset) == before
-    assert view.pid == pid_before
-    assert Process.alive?(view.pid)
+      assert Content.paper_blocks(@slug, @dataset) == before
+      assert view.pid == pid_before
+      assert Process.alive?(view.pid)
+    end
   end
 end

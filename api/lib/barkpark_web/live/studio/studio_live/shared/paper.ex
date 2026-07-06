@@ -445,9 +445,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         backlinks_unlinked: unlinked
       )
       |> assign(sidebar_assigns(paper))
+      # pdd-t12b: with the canvas ON (the mainline default) a block paper opens
+      # straight into the always-editable editor — the read-only streamed View
+      # branch is unreachable, so resolving + rendering every block into the
+      # stream here is pure wasted work (paper_stream_items task-resolves under
+      # the session scope since pdd-t11). Keep the stream initialized (reset to
+      # empty) so the assign shape is identical; the OFF opt-out path fills it
+      # exactly as before, and refetch_paper/paper-toggle-edit still refill it
+      # on the paths that render it.
       |> stream(
         :paper_blocks,
-        paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket)),
+        if(PaperCanvas.paper_canvas_enabled?(),
+          do: [],
+          else:
+            paper_stream_items(blocks, socket.assigns.dataset, ScopeHelpers.scope_opts(socket))
+        ),
         reset: true
       )
       # t9: seed the LIVE task-block preview the moment the editor opens, on the

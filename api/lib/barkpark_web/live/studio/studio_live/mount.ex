@@ -188,8 +188,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       sheet_presence_topic: nil,
       sheet_presences: [],
       # ── In-Studio paper block editor (convergence/studio-paper-editor) ───
-      # `paper_edit_mode` flips the paper pane between the read-only live
-      # stream (View — the default, unchanged) and the block edit form (Edit).
+      # `paper_edit_mode` is the flag-OFF OPT-OUT path's mode bit ONLY
+      # (pdd-t12b, rule 5): with the canvas the mainline default there are no
+      # modes — opening a paper IS the editor and this assign is ignored.
+      # On `BARKPARK_PAPER_CANVAS=0` it flips the paper pane between the
+      # read-only live stream (View) and the block edit form (Edit).
       # In Edit mode each per-block control fires a `paper-*` event that maps
       # to ONE DocPatchOp and calls `Content.apply_paper_block_op/3`; the
       # resulting `{:paper_block,…}` delta flows through the SAME stream

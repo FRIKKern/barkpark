@@ -66,6 +66,21 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
   end
 
   setup do
+    # These tests prove the READ-ONLY streamed View pane (phx-update="stream",
+    # keyed block ids, the no-reload sentinel). With the canvas now the mainline
+    # default (D7/D9) a block paper opens straight into the always-editable canvas
+    # instead of the streamed View, so pin the explicit opt-out to keep exercising
+    # the streamed path. async:false makes the process-global env put safe.
+    prev = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "0")
+
+    on_exit(fn ->
+      case prev do
+        nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+        v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+      end
+    end)
+
     seed_paper_schema!()
     seed_block_paper!()
     :ok
