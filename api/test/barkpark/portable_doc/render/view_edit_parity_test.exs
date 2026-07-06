@@ -327,4 +327,66 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
              "no shared property found for <#{element}> — a selector rename likely broke the mirror parser"
     end
   end
+
+  # ── 6. The callout TONE mirror — reader surface ↔ embedder bundle ──────────
+  # loop-epic/parity-callout. The canvas callout node-view carries the reader's
+  # own `bp-callout` + `bp-callout--<tone>` classes. In Studio those are painted
+  # by the inlined paper-surface.css `.bp-paper-surface .bp-callout*` cascade (the
+  # canvas mounts inside `.bp-paper-surface`), so root.html.heex declares NO tone
+  # rules — same single-producer reason lists omit their Edit margin (§4). But the
+  # standalone embedder bundle (styles.css) has NO `.bp-paper-surface` ancestor, so
+  # it carries a HAND-COPIED `.bp-paper-editor-body .bp-callout*` mirror. This test
+  # locks that mirror byte-for-byte to the reader: VIEW (paper-surface.css,
+  # `.bp-paper-surface`) vs BUNDLE (styles.css, `.bp-paper-editor-body`). NOT
+  # root.html.heex — Studio inherits tone and won't declare it.
+  @callout_tone_elements ~w(
+    .bp-callout .bp-callout--info .bp-callout--success .bp-callout--warning
+    .bp-callout--danger .bp-callout--neutral .bp-callout__summary .bp-callout__body
+  )
+
+  test "callout tone card is byte-identical between the reader surface and the embedder bundle" do
+    view = view_css()
+    bundle = bundle_css()
+
+    mismatches =
+      for element <- @callout_tone_elements,
+          view_decls = declarations_for(view, "bp-paper-surface", element),
+          bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element),
+          prop <- Map.keys(view_decls),
+          Map.has_key?(bundle_decls, prop),
+          view_decls[prop] != bundle_decls[prop] do
+        "#{element}.#{prop}: View=#{inspect(view_decls[prop])} Bundle=#{inspect(bundle_decls[prop])}"
+      end
+
+    assert mismatches == [],
+           """
+           Callout tone drift — the embedder bundle's hand-copied
+           `.bp-paper-editor-body .bp-callout*` mirror disagrees with the reader's
+           `.bp-paper-surface .bp-callout*` rules (paper-surface.css). Standalone
+           editors would paint callouts a different colour than the /papers reader.
+           Re-copy the reader tone block verbatim into styles.css (and rebuild the
+           bundle). Divergences:
+
+           #{Enum.join(mismatches, "\n")}
+           """
+  end
+
+  test "each callout tone element actually shares at least one property (parser sanity)" do
+    # distrust-vacuous-green: a class rename on either side would silently empty
+    # the diff above into a vacuous pass. Assert every tone element pairs up.
+    view = view_css()
+    bundle = bundle_css()
+
+    for element <- @callout_tone_elements do
+      view_decls = declarations_for(view, "bp-paper-surface", element)
+      bundle_decls = declarations_for(bundle, "bp-paper-editor-body", element)
+
+      shared =
+        MapSet.intersection(MapSet.new(Map.keys(view_decls)), MapSet.new(Map.keys(bundle_decls)))
+
+      assert MapSet.size(shared) > 0,
+             "no shared property found for `#{element}` — a callout tone selector " <>
+               "rename likely broke the mirror parser (reader ↔ bundle)."
+    end
+  end
 end
