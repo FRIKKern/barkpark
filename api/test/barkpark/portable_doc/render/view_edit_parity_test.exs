@@ -327,4 +327,78 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
              "no shared property found for <#{element}> — a selector rename likely broke the mirror parser"
     end
   end
+
+  # ── 6. Article-chrome ROLE prose parity (eyebrow/byline/ingress/pullquote) ──
+  # The canvas mounts these four blocks as `<p class="bp-role-*">` nodes matching
+  # the reader (run-convert.js CANVAS_ROLE_TYPES + role-nodes.js). Their typography
+  # is single-sourced in `.bp-paper-surface .bp-role-*` (paper-surface.css); the
+  # Studio (root.html.heex) and bundle (styles.css) both carry a `.bp-paper-editor-
+  # body .bp-role-*` mirror. Same drift tripwire as §2/§5 but on the ROLE classes:
+  # every (property, value) declared on the View selector must be byte-identical on
+  # BOTH edit selectors. `declarations_for/3` accepts a class selector as `element`
+  # (target ".bp-paper-surface .bp-role-eyebrow" etc.). pullquote's italic is an
+  # author mark the node emits INLINE (font-style:italic), NOT in the class — so it
+  # is intentionally absent from every surface's rule here (parity stays clean).
+  @role_classes ~w(.bp-role-eyebrow .bp-role-byline .bp-role-ingress .bp-role-pullquote)
+
+  test "each role class shares at least one property across View/Edit/bundle (parser sanity)" do
+    view = view_css()
+    edit = edit_css()
+    bundle = bundle_css()
+
+    for class <- @role_classes do
+      view_decls = declarations_for(view, "bp-paper-surface", class)
+      edit_decls = declarations_for(edit, "bp-paper-editor-body", class)
+      bundle_decls = declarations_for(bundle, "bp-paper-editor-body", class)
+
+      assert map_size(view_decls) > 0,
+             "no View declarations for #{class} — a selector rename likely broke the parser"
+
+      assert MapSet.size(
+               MapSet.intersection(
+                 MapSet.new(Map.keys(view_decls)),
+                 MapSet.new(Map.keys(edit_decls))
+               )
+             ) > 0,
+             "no shared View↔Edit property for #{class} — the mirror is missing or renamed"
+
+      assert MapSet.size(
+               MapSet.intersection(
+                 MapSet.new(Map.keys(view_decls)),
+                 MapSet.new(Map.keys(bundle_decls))
+               )
+             ) > 0,
+             "no shared View↔bundle property for #{class} — the mirror is missing or renamed"
+    end
+  end
+
+  test "every role-class (property, value) is byte-identical across View, Edit, and bundle" do
+    view = view_css()
+    edit = edit_css()
+    bundle = bundle_css()
+
+    mismatches =
+      for class <- @role_classes,
+          view_decls = declarations_for(view, "bp-paper-surface", class),
+          edit_decls = declarations_for(edit, "bp-paper-editor-body", class),
+          bundle_decls = declarations_for(bundle, "bp-paper-editor-body", class),
+          {prop, value} <- Enum.to_list(view_decls),
+          surface <- [{"Edit", edit_decls}, {"Bundle", bundle_decls}],
+          {label, decls} = surface,
+          Map.get(decls, prop) != value do
+        "#{class}.#{prop}: View=#{inspect(value)} #{label}=#{inspect(Map.get(decls, prop))}"
+      end
+
+    assert mismatches == [],
+           """
+           Article-chrome ROLE typography drift — a `.bp-role-*` property differs
+           between the single source (paper-surface.css `.bp-paper-surface`) and an
+           editor mirror (root.html.heex or assets/paper-editor/src/styles.css). The
+           canvas role node would then render differently from the reader. Byte-align
+           the mirrors to the View value (and rebuild the bundle if styles.css
+           changed). Divergences:
+
+           #{Enum.join(mismatches, "\n")}
+           """
+  end
 end

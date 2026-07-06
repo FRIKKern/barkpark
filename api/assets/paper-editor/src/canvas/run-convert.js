@@ -67,6 +67,30 @@ const CANVAS_ATOM_TYPES = new Set(["divider"]);
 // a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
 const CANVAS_CONTENT_TYPES = new Set(["callout"]);
 
+// Article-chrome ROLE prose: eyebrow / byline / ingress / pullquote. UNLIKE every
+// other canvas node these need NO NODE_NAME map — node.type === bpType for all four
+// (role-nodes.js names the node after the bpType). They mount as PLAIN styled prose
+// (a `<p class="bp-role-*">` matching the reader), chrome-free, so they diff like a
+// prose block would but with a per-role BODY MODEL:
+//   eyebrow  → a PLAIN string in `text`  (compose.ex reads Map.get(b,"text"))
+//   byline   → an `items` LIST joined/split on " · " (blocks.ex build_block_patch)
+//   ingress  → an inline `content` array (the shared inline serializer)
+//   pullquote→ an inline `content` array (the shared inline serializer)
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_role_types.
+const CANVAS_ROLE_TYPES = new Set(["eyebrow", "byline", "ingress", "pullquote"]);
+const ROLE_BODY_MODEL = {
+  eyebrow: "text",
+  byline: "items",
+  ingress: "inline",
+  pullquote: "inline",
+};
+
+// True when a portable-doc BLOCK type (and, since node.type === bpType, a NODE type)
+// is an article-chrome role block.
+function isCanvasRoleType(t) {
+  return CANVAS_ROLE_TYPES.has(t);
+}
+
 // S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
 // (no PM-managed interior, like the divider) whose body text rides in an ATTR and
 // is edited by a NON-PM control (a <textarea> island; see code-node.js). The code
@@ -423,6 +447,15 @@ export function runToTiptap(blocks) {
       return fleetBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasRoleType(bpType)) {
+      // An article-chrome ROLE node (eyebrow / byline / ingress / pullquote): a
+      // native prose node of that type whose BODY carries the role's persisted text/
+      // items/inline, styled by a bp-role-* class to MATCH THE READER. role-nodes.js
+      // declares the node, so getJSON() round-trips the body + bpId/bpType. node.type
+      // === bpType (no NODE_NAME indirection).
+      return roleBlockToNode(block, bpId, bpType);
+    }
+
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
     return {
       type: "bpOpaque",
@@ -540,6 +573,131 @@ function stableCalloutKey(node) {
     collapsed: a.collapsed === true,
     content: node.content || null,
   });
+}
+
+// ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────
+//
+// The four article-chrome ROLE blocks ⇄ their same-named TipTap prose nodes. UNLIKE
+// the callout (chrome + inline body) these are chrome-free styled prose, but their
+// PERSIST shape differs by role — so the block ⇄ node body mapping dispatches on
+// ROLE_BODY_MODEL:
+//   text  (eyebrow)  — a PLAIN string in `text`. The node body is a single text run;
+//     an empty string → a CONTENTLESS node (no `content` key) so an empty eyebrow's
+//     getJSON re-projection matches (nodeText of a contentless node is "").
+//   items (byline)   — an `items` LIST. The reader joins with " · "; the canvas shows
+//     the JOINED display string as the node's text, and splits it back on "·" (the
+//     BYTE-MIRROR of blocks.ex build_block_patch byline). A legacy text-only byline
+//     (no `items`) falls back to its `text` on display and MIGRATES to items on first
+//     save — the SAME behaviour the form has (its input value = items joined).
+//   inline (ingress/pullquote) — an inline `content` array, via the SHARED
+//     inlineArrayToTiptap / tiptapInlineToPd (the callout body path). Marks work.
+//
+// bpId/bpType ride node.attrs; node.type === bpType for all four (no NODE_NAME map).
+
+// The concatenated text of a node's inline text children (an eyebrow/byline body is a
+// single text run; a contentless node yields "").
+function roleNodeText(node) {
+  return ((node && node.content) || []).map((n) => n.text || "").join("");
+}
+
+// Split a byline display string into its items — the BYTE-MIRROR of blocks.ex:60-67
+// build_block_patch byline: split on "·", trim each, drop the empties.
+function splitBylineItems(s) {
+  return String(s == null ? "" : s)
+    .split("·")
+    .map((x) => x.trim())
+    .filter((x) => x !== "");
+}
+
+// The DISPLAY text a byline block shows in its node: the items joined with " · ", or
+// (legacy) the plain `text` when there are no items. Mirrors the form input value.
+function bylineDisplay(block) {
+  const items = block && block.items;
+  if (Array.isArray(items) && items.length) return items.join(" · ");
+  return (block && block.text) || "";
+}
+
+// roleBlockToNode(block) → { type:<role>, attrs:{ bpId, bpType }, content?:[text|inline] }
+//
+// The body is built per ROLE_BODY_MODEL:
+//   text  → a single text run of block.text (or a CONTENTLESS node when empty).
+//   items → a single text run of the " · "-joined display (contentless when empty).
+//   inline→ inlineArrayToTiptap(block.content) (the shared serializer; may be empty).
+function roleBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType };
+  const model = ROLE_BODY_MODEL[bpType];
+  const node = { type: bpType, attrs };
+
+  if (model === "inline") {
+    const inline = inlineArrayToTiptap((block && block.content) || []);
+    if (inline.length) node.content = inline;
+    return node;
+  }
+
+  // text / items → a single text run of the display string (contentless when "").
+  const text =
+    model === "items" ? bylineDisplay(block) : (block && block.text) || "";
+  if (text) node.content = [{ type: "text", text }];
+  return node;
+}
+
+// roleNodeToBlock(node, id) → the reconstructed portable-doc role block. The inverse of
+// roleBlockToNode, dispatched by ROLE_BODY_MODEL[node.type]:
+//   text  → { id, type:"eyebrow", text:<nodeText> }
+//   items → { id, type:"byline", items:splitBylineItems(<nodeText>) }
+//   inline→ { id, type:<role>, content:tiptapInlineToPd(node.content) }
+function roleNodeToBlock(node, id) {
+  const bpType = (node && node.type) || "eyebrow";
+  const model = ROLE_BODY_MODEL[bpType];
+  if (model === "inline") {
+    return {
+      id,
+      type: bpType,
+      content: tiptapInlineToPd((node && node.content) || []),
+    };
+  }
+  if (model === "items") {
+    return { id, type: bpType, items: splitBylineItems(roleNodeText(node)) };
+  }
+  return { id, type: bpType, text: roleNodeText(node) };
+}
+
+// The mutable-fields PATCH for a role block (the analogue of calloutNodeToPatch). It
+// is roleNodeToBlock MINUS id/type — the shallow-merge fields patch.ex re-pins. Every
+// role has exactly ONE mutable field (text / items / content), emitted UNCONDITIONALLY
+// (simpler than the callout's removal-safe maybe_put — there is no optional field to
+// drop), so a shallow merge always lands the current body.
+function roleNodeToPatch(node) {
+  const bpType = (node && node.type) || "eyebrow";
+  const model = ROLE_BODY_MODEL[bpType];
+  if (model === "inline") {
+    return { content: tiptapInlineToPd((node && node.content) || []) };
+  }
+  if (model === "items") {
+    return { items: splitBylineItems(roleNodeText(node)) };
+  }
+  return { text: roleNodeText(node) };
+}
+
+// True when a role node's body changed. We compare the canonical projection of the
+// DERIVED stable body — for a byline the DERIVED `items` (NOT the raw " · " display
+// string), so join/split is idempotent and an unedited byline emits ZERO ops. Uses the
+// SAME canonicalJSON the prose/callout paths use, so a node from roleBlockToNode and the
+// SAME node from getJSON compare EQUAL despite key-order differences.
+function roleNodeChanged(prevNode, nextNode) {
+  return stableRoleKey(prevNode) !== stableRoleKey(nextNode);
+}
+
+function stableRoleKey(node) {
+  const bpType = (node && node.type) || "eyebrow";
+  const model = ROLE_BODY_MODEL[bpType];
+  if (model === "inline") {
+    return canonicalJSON({ content: (node && node.content) || null });
+  }
+  if (model === "items") {
+    return canonicalJSON({ items: splitBylineItems(roleNodeText(node)) });
+  }
+  return canonicalJSON({ text: roleNodeText(node) });
 }
 
 // ── code ⇄ canvas attr-atom node (S3.3) ─────────────────────────────────────
@@ -1046,6 +1204,9 @@ function classifyNode(node) {
   const isField = isCanvasFieldNode(node.type);
   const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
   const isFleet = isCanvasFleetNode(node.type);
+  // Article-chrome role node — node.type IS the bpType (eyebrow/byline/ingress/
+  // pullquote), so the bpType fallback below resolves it via `node.type`.
+  const isRole = isCanvasRoleType(node.type);
   const bpType =
     (node.attrs && node.attrs.bpType) ||
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
@@ -1061,6 +1222,7 @@ function classifyNode(node) {
     isField,
     isReadOnlyAtom,
     isFleet,
+    isRole,
   };
 }
 
@@ -1331,6 +1493,21 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isRole) {
+      // Article-chrome role node (eyebrow/byline/ingress/pullquote): diff the single
+      // mutable body (text/items/content); emit one patch-block carrying only that
+      // field when it changed. An UNCHANGED role emits NO op (canonical compare on the
+      // DERIVED body — for a byline the split items, so join/split is idempotent).
+      if (roleNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: roleNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (proseNodeChanged(prevNode, entry.node)) {
       const bpType = entry.bpType || (prevBlock && prevBlock.type);
       ops.push(buildPatchBlockOp(nodeToDocEnvelope(entry.node), entry.id, bpType));
@@ -1463,6 +1640,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (type === "bpOpaque") {
     return carriedBlockEqual(serverNode, liveNode);
   }
+  // Article-chrome role (eyebrow/byline/ingress/pullquote): the derived body.
+  if (isCanvasRoleType(type)) {
+    return !roleNodeChanged(serverNode, liveNode);
+  }
   // Prose (paragraph / heading / list nodes): type + level + content.
   return !proseNodeChanged(serverNode, liveNode);
 }
@@ -1529,6 +1710,12 @@ function nextNodeToBlock(entry) {
     // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
     // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
     return fleetNodeToBlock(node, entry.id);
+  }
+  if (entry.isRole) {
+    // Article-chrome role insert (eyebrow/byline/ingress/pullquote): reconstruct the
+    // full role block (its text/items/content body) with the minted id, via the
+    // dedicated mapper. block.type comes off the node.type (=== bpType).
+    return roleNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.

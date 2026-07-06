@@ -3005,6 +3005,17 @@
     .bp-paper-editor-body ol { padding-left: var(--bp-list-indent); }
     .bp-paper-editor-body ul li { list-style: disc; }
     .bp-paper-editor-body ol li { list-style: decimal; }
+    /* Article-chrome ROLE prose (eyebrow/byline/ingress/pullquote) — the canvas
+       node-view emits `<p class="bp-role-*">` matching the reader, so these MIRROR
+       the single-source `.bp-paper-surface .bp-role-*` rules in paper-surface.css
+       (values byte-copied; view_edit_parity_test enforces the match). pullquote's
+       italic is an author mark the node emits INLINE (font-style:italic), NOT in the
+       class, so it stays out of these rules on both surfaces. Keep byte-aligned with
+       paper-surface.css + assets/paper-editor/src/styles.css. */
+    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
+    .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
+    .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
     /* Block chrome ported VERBATIM from the paper-editor bundle
        (assets/paper-editor/src/styles.css blockquote/hr/img) — Studio runs
        with BP_PAPER_EDITOR_NO_INJECT so this inline mirror is the ONLY styles
