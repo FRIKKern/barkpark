@@ -439,8 +439,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
-        backlinks_unlinked: unlinked,
-        backlinks_open: true
+        backlinks_unlinked: unlinked
       )
       |> assign(sidebar_assigns(paper))
       |> stream(
@@ -466,8 +465,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_edit_mode: false,
         backlinks_used_by: used_by,
         backlinks_linked: linked,
-        backlinks_unlinked: unlinked,
-        backlinks_open: true
+        backlinks_unlinked: unlinked
       )
       |> assign(sidebar_assigns(paper))
       |> stream(:paper_blocks, [], reset: true)
@@ -551,8 +549,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         paper_task_previews: %{},
         backlinks_used_by: [],
         backlinks_linked: [],
-        backlinks_unlinked: [],
-        backlinks_open: true
+        backlinks_unlinked: []
       )
       |> assign(sidebar_assigns(nil))
     else
@@ -560,14 +557,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         editor_view: :form,
         backlinks_used_by: [],
         backlinks_linked: [],
-        backlinks_unlinked: [],
-        backlinks_open: true
+        backlinks_unlinked: []
       )
     end
   end
 
   @doc false
   def paper_stream_items(blocks, dataset, scope) do
+    # pdd-t11 debt fix (2): resolve LIVE task/query blocks the SAME way the
+    # /papers reader does — `Content.Papers.resolve_tasks_in_blocks/2`, the ONE
+    # producer (doctrine rule 3). Without this, the Studio read-only VIEW render
+    # left a paper's embedded board/list/roadmap as an empty query block while
+    # the public reader showed real `bp` rows. Session-tenant scoped + fail-closed
+    # (a nil workspace resolves ZERO rows via Tasks.Query → Scope.scope_to_workspace,
+    # never a cross-tenant leak). DISPLAY-ONLY (D5): this feeds the render stream
+    # only — the paper_doc's stored `blocks` (the save baseline the canvas diffs
+    # against) stay UNresolved, so a save right after a view never freezes a stale
+    # snapshot into the doc (D3 byte-stability). An author-pinned literal snapshot
+    # (no `query`) is left untouched, so plugin-off papers still render.
+    blocks = Content.Papers.resolve_tasks_in_blocks(blocks, scope)
+
     resolver = fn value, ref_type -> Content.reference_title(value, ref_type, dataset, scope) end
 
     codelist_resolver = fn plugin, codelist_id, code ->

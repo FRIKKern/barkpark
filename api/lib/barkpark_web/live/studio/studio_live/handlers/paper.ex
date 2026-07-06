@@ -81,14 +81,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
      })}
   end
 
-  @doc """
-  Collapse / expand the backlinks panel. Pure assign flip — no re-query (the
-  list was loaded once in `Shared.setup_paper_view/2`).
-  """
-  def backlinks_toggle(socket) do
-    {:noreply, assign(socket, backlinks_open: !socket.assigns[:backlinks_open])}
-  end
-
   # ── t6: WordPress-style metadata sidebar (doctrine Rule 4/5) ────────────────
   #
   # All three are PURE assign flips — none call `Shared.paper_op/2` or the block
