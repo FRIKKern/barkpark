@@ -17,6 +17,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   """
   use BarkparkWeb, :html
 
+  alias Barkpark.Content.Papers.Template
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -137,6 +138,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     # editor, where `paper-ops` (→ paper_doc) is the wrong persist path.
     canvas_on? = PaperCanvas.paper_canvas_enabled?() and assigns.canvas_eligible
 
+    segments = if canvas_on?, do: index_segments(PaperCanvas.partition_runs(free)), else: []
+
     assigns =
       assigns
       |> assign(:bound_blocks, bound)
@@ -144,10 +147,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       |> assign(:last_index, length(free) - 1)
       |> assign(:doc_stats, beta_doc_stats(assigns.blocks))
       |> assign(:canvas_on?, canvas_on?)
-      |> assign(
-        :segments,
-        if(canvas_on?, do: index_segments(PaperCanvas.partition_runs(free)), else: [])
-      )
+      |> assign(:segments, segments)
+      # pdd-t20c: the doc's constraint vocabulary, JSON-encoded for the canvas host
+      # (only for docs that carry locked blocks — additive), + the ghost slots the
+      # canvas branch interleaves between runs (the t13 featured-placeholder pattern
+      # generalized). Both are [] / nil for a non-doctrine paper, so its render is
+      # byte-untouched.
+      |> assign(:paper_constraints, doc_constraints(free))
+      |> assign(:render_items, if(canvas_on?, do: interleave_ghosts(segments, free), else: []))
 
     ~H"""
     <%!-- The whole block list is a drag-sortable surface. The
@@ -216,17 +223,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               (edit_block/1) — same toolbar, same fields, same ops. The
               data-expected-fields carrier above stays OUTSIDE every ignore
               wrapper (it re-renders on each block-list change). --%>
-        <%= for segment <- @segments do %>
-          <%= case segment do %>
-            <% {:run, run_blocks, run_ordinal, locked_tail} -> %>
+        <%= for item <- @render_items do %>
+          <%= case item do %>
+            <% {:seg, {:run, run_blocks, run_ordinal, locked_tail}} -> %>
               <.canvas_run
                 run_blocks={run_blocks}
                 run_ordinal={run_ordinal}
                 locked_tail={locked_tail}
+                constraints={@paper_constraints}
                 dataset={@dataset}
                 api_token_raw={@api_token_raw}
               />
-            <% {:block, block, index} -> %>
+            <% {:seg, {:block, block, index}} -> %>
               <.edit_block
                 block={block}
                 index={index}
@@ -239,6 +247,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 api_token_raw={@api_token_raw}
                 task_previews={@task_previews}
               />
+            <% {:ghosts, ghosts, anchor_id} -> %>
+              <.ghost_slots_group ghosts={ghosts} anchor_id={anchor_id} />
           <% end %>
         <% end %>
       <% else %>
@@ -442,6 +452,115 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp annotate_locked_tails([segment | rest]), do: [segment | annotate_locked_tails(rest)]
   defp annotate_locked_tails([]), do: []
 
+  # ── pdd-t20c: the constraint vocabulary in the editor (ghost slots + the stamp) ──
+
+  # The JSON constraint payload for the canvas host — ONLY for docs that already
+  # carry locked blocks (a doctrine paper). A plain paper (no locked title) gets
+  # nil, so the `data-canvas-constraints` attribute renders empty and the WC vetoes
+  # nothing — byte-untouched (D3).
+  defp doc_constraints(blocks) when is_list(blocks) do
+    if doctrine_paper?(blocks), do: Jason.encode!(Template.paper_declarations()), else: nil
+  end
+
+  defp doc_constraints(_), do: nil
+
+  defp doctrine_paper?(blocks) do
+    Enum.any?(blocks, fn b -> is_map(b) and Map.get(b, "locked") == true end)
+  end
+
+  # The GHOST SLOTS to offer: each OPTIONAL declaration whose kind is ABSENT from the
+  # doc AND whose materialization is provably save-safe right now (inserting after
+  # its anchor would not displace a locked block — so the affordance can NEVER
+  # produce a save error, doctrine rule 5). Only for a doctrine paper. The pure twin
+  # of canvas/constraints.js ghostSlots, gated by the same "carries locked" rule as
+  # the stamp so a non-doctrine paper offers nothing.
+  @doc false
+  def ghost_slots(blocks) when is_list(blocks) do
+    if doctrine_paper?(blocks) do
+      present = MapSet.new(blocks, &block_role/1)
+
+      Template.paper_declarations()
+      |> Enum.filter(fn d ->
+        d["presence"] == "optional" and not MapSet.member?(present, d["kind"]) and
+          materialize_safe?(blocks, get_in(d, ["position", "after"]))
+      end)
+      |> Enum.map(fn d ->
+        %{
+          kind: d["kind"],
+          role: d["kind"],
+          locked: d["locked"] == true,
+          after: get_in(d, ["position", "after"])
+        }
+      end)
+    else
+      []
+    end
+  end
+
+  def ghost_slots(_), do: []
+
+  # Materializing a ghost inserts its block DIRECTLY AFTER the block carrying the
+  # anchor role. That is save-safe iff the block currently occupying that next slot
+  # is NOT locked (inserting there would otherwise displace a locked block and the
+  # server rejects it — check_locked_placement). Absent anchor / absent next block
+  # ⇒ safe (nothing to displace).
+  defp materialize_safe?(blocks, nil), do: is_list(blocks)
+
+  defp materialize_safe?(blocks, anchor_role) do
+    case Enum.find_index(blocks, fn b -> block_role(b) == anchor_role end) do
+      nil ->
+        false
+
+      idx ->
+        case Enum.at(blocks, idx + 1) do
+          nil -> true
+          next -> Map.get(next, "locked") != true
+        end
+    end
+  end
+
+  defp block_role(b) when is_map(b), do: Map.get(b, "role")
+  defp block_role(_), do: nil
+
+  defp title_block_id(blocks) do
+    case Enum.find(blocks, fn b -> block_role(b) == "title" end) do
+      %{"id" => id} -> id
+      _ -> nil
+    end
+  end
+
+  defp run_contains_role?({:run, blocks, _ordinal, _locked_tail}, role),
+    do: Enum.any?(blocks, fn b -> block_role(b) == role end)
+
+  defp run_contains_role?({:block, block, _index}, role), do: block_role(block) == role
+  defp run_contains_role?(_, _), do: false
+
+  # Interleave the ghost slots into the segment stream: wrap every segment as
+  # `{:seg, segment}`, and place the whole ghost group RIGHT AFTER the first segment
+  # that carries the anchor (the "title" run). The group carries the anchor block id
+  # so a click materializes the block after the title via the op path. A paper with
+  # no ghosts renders the segments verbatim (byte-untouched).
+  defp interleave_ghosts(segments, free) do
+    case ghost_slots(free) do
+      [] ->
+        Enum.map(segments, &{:seg, &1})
+
+      ghosts ->
+        anchor_id = title_block_id(free)
+
+        {items, _placed} =
+          Enum.map_reduce(segments, false, fn seg, placed ->
+            if not placed and run_contains_role?(seg, "title") do
+              {[{:seg, seg}, {:ghosts, ghosts, anchor_id}], true}
+            else
+              {[{:seg, seg}], placed}
+            end
+          end)
+
+        List.flatten(items)
+    end
+  end
+
   # Phase-4 S2 (flag ON): ONE <bp-paper-canvas> over a maximal prose run. The
   # phx-update="ignore" wrapper is KEYED BY THE RUN'S ORDINAL (Bug #1a: a STABLE
   # run id that survives a leading-block change, NOT the mutable first-block id) so
@@ -471,6 +590,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # harmlessly (the canvas reads them only when mounting a picker node-view).
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
+  # pdd-t20c: the doc's constraint vocabulary (JSON-encoded
+  # Template.paper_declarations()), stamped only for docs that carry locked blocks —
+  # additive. Rides to the canvas WC as data-constraints via the hook; the WC's
+  # filterTransaction then vetoes a cardinality/relative-order violation calmly.
+  attr(:constraints, :string, default: nil)
 
   def canvas_run(assigns) do
     assigns = assign(assigns, :run_id, PaperCanvas.run_id(assigns.run_ordinal))
@@ -485,12 +609,64 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
       data-canvas-locked-tail={@locked_tail && "true"}
+      data-canvas-constraints={@constraints}
       data-test-id="paper-canvas-run"
     >
       <bp-paper-canvas></bp-paper-canvas>
     </div>
     """
   end
+
+  # pdd-t20c: the GHOST SLOTS for a doctrine paper's absent optional blocks — the
+  # t13 featured-placeholder pattern GENERALIZED. Each ghost is a calm, evergreen,
+  # keyboard-reachable affordance sitting in its enforced place (after the title
+  # run). A click MATERIALIZES the real block after the anchor via the SAME op path
+  # the canvas uses (paper-materialize-slot → insert-after) — the ghost itself is
+  # LiveView-rendered chrome that NEVER enters the PM doc or the save baseline (D5):
+  # an untouched paper saves zero ops. Only save-safe ghosts are offered
+  # (`ghost_slots/1` gates on non-displacement), so a click can never error (rule 5).
+  attr(:ghosts, :list, required: true)
+  attr(:anchor_id, :string, default: nil)
+
+  def ghost_slots_group(assigns) do
+    ~H"""
+    <div class="bp-paper-ghost-slots" data-test-id="paper-ghost-slots">
+      <button
+        :for={g <- @ghosts}
+        type="button"
+        class={"bp-paper-ghost-slot bp-paper-ghost-#{g.kind}"}
+        phx-click="paper-materialize-slot"
+        phx-value-kind={g.kind}
+        phx-value-after={@anchor_id}
+        data-test-id={"paper-ghost-#{g.kind}"}
+        aria-label={ghost_aria_label(g.kind)}
+      >
+        <span class="bp-paper-ghost-icon" aria-hidden="true"><%= ghost_glyph(g.kind) %></span>
+        <span class="bp-paper-ghost-body">
+          <span class="bp-paper-ghost-label"><%= ghost_label(g.kind) %></span>
+          <span class="bp-paper-ghost-hint"><%= ghost_hint(g.kind) %></span>
+        </span>
+      </button>
+    </div>
+    """
+  end
+
+  # Calm copy for each ghost kind — the affordance is chrome, not an error.
+  defp ghost_label("featured"), do: "Add a featured image"
+  defp ghost_label("ingress"), do: "Ingress — the lead paragraph"
+  defp ghost_label(kind), do: "Add #{kind}"
+
+  defp ghost_hint("featured"), do: "Optional · sits above the article, after the title"
+  defp ghost_hint("ingress"), do: "Optional · the standfirst that opens the piece"
+  defp ghost_hint(_), do: "Optional"
+
+  defp ghost_glyph("featured"), do: "🖼"
+  defp ghost_glyph("ingress"), do: "¶"
+  defp ghost_glyph(_), do: "＋"
+
+  defp ghost_aria_label("featured"), do: "Add the optional featured image, after the title"
+  defp ghost_aria_label("ingress"), do: "Add the optional ingress lead paragraph, after the title"
+  defp ghost_aria_label(kind), do: "Add the optional #{kind}"
 
   # The per-block edit row (toolbar + type-aware fields). Extracted verbatim from
   # paper_block_editor/1's block :for so BOTH the flag-OFF list render and the

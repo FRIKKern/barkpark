@@ -224,6 +224,7 @@ defmodule Barkpark.Content.Papers.WriterSeamTest do
   @moduledoc "pdd-t16: the Writer/mutate path gives papers the same birth guarantee as upsert_paper."
   use Barkpark.DataCase, async: false
   alias Barkpark.Content
+  alias Barkpark.Content.Papers.Template
 
   test "create_document type paper with explicit [] blocks is born templated + article + derived title" do
     {:ok, doc} =
@@ -260,5 +261,48 @@ defmodule Barkpark.Content.Papers.WriterSeamTest do
 
     refute Map.has_key?(doc.content, "blocks")
     refute doc.content["style"] == "article"
+  end
+
+  # ── pdd-t20c: the constraint vocabulary (paper_declarations/0) ─────────────
+
+  describe "paper_declarations/0 — the current template re-expressed as declarations" do
+    test "declares title required exactly-1 @top locked" do
+      title = Enum.find(Template.paper_declarations(), &(&1["kind"] == "title"))
+
+      assert title["role"] == "title"
+      assert title["presence"] == "required"
+      assert title["count"] == %{"exactly" => 1}
+      assert title["position"] == "top"
+      assert title["locked"] == true
+    end
+
+    test "declares featured optional max-1 after(title) locked" do
+      featured = Enum.find(Template.paper_declarations(), &(&1["kind"] == "featured"))
+
+      assert featured["presence"] == "optional"
+      assert featured["count"] == %{"max" => 1}
+      assert featured["position"] == %{"after" => "title"}
+      assert featured["locked"] == true
+    end
+
+    test "declares ingress optional max-1 after(title) before(featured) unlocked" do
+      ingress = Enum.find(Template.paper_declarations(), &(&1["kind"] == "ingress"))
+
+      assert ingress["presence"] == "optional"
+      assert ingress["count"] == %{"max" => 1}
+      assert ingress["position"] == %{"after" => "title", "before" => "featured"}
+      assert ingress["locked"] == false
+    end
+
+    test "the declared order is title, ingress, featured (the enforced document order)" do
+      assert Enum.map(Template.paper_declarations(), & &1["kind"]) ==
+               ["title", "ingress", "featured"]
+    end
+
+    test "JSON-encodes cleanly for the data-constraints stamp" do
+      json = Jason.encode!(Template.paper_declarations())
+      assert {:ok, decoded} = Jason.decode(json)
+      assert length(decoded) == 3
+    end
   end
 end

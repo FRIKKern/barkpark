@@ -31,6 +31,57 @@ defmodule Barkpark.Content.Papers.Template do
   @title_role "title"
   @featured_role "featured"
 
+  @doc """
+  The template re-expressed as the CONSTRAINT VOCABULARY (pdd-t20) — the SAME shape
+  the editor consumes as ghost slots + a calm client veto (canvas/constraints.js),
+  JSON-encoded onto the canvas host as `data-constraints`.
+
+  Each DECLARATION is `{kind, role, presence, count, position, locked}`:
+
+    * `presence` — `"required"` | `"optional"`.
+    * `count` — `%{"exactly" => n}` | `%{"min" => n}` | `%{"max" => n}`.
+    * `position` — `"top"` (block 0) | `%{"after" => kind, "before" => kind}`
+      (a relative order rule; either key optional).
+    * `locked` — whether a materialized instance is a template-locked block.
+
+  The current template, byte-compatibly: the title is required, exactly one, at the
+  top, locked; the ingress is optional, at most one, after the title and before the
+  featured; the featured image is optional, at most one, after the title, locked.
+  Only the REQUIRED minimum is seeded at birth (`maybe_seed/2` seeds the title);
+  the optionals are offered as ghost affordances in their enforced place and
+  MATERIALIZE on use — absent, never an empty husk. Additive (D3): declarations are
+  read only for docs that already carry locked blocks.
+  """
+  @spec paper_declarations() :: [map()]
+  def paper_declarations do
+    [
+      %{
+        "kind" => @title_role,
+        "role" => @title_role,
+        "presence" => "required",
+        "count" => %{"exactly" => 1},
+        "position" => "top",
+        "locked" => true
+      },
+      %{
+        "kind" => "ingress",
+        "role" => "ingress",
+        "presence" => "optional",
+        "count" => %{"max" => 1},
+        "position" => %{"after" => @title_role, "before" => @featured_role},
+        "locked" => false
+      },
+      %{
+        "kind" => @featured_role,
+        "role" => @featured_role,
+        "presence" => "optional",
+        "count" => %{"max" => 1},
+        "position" => %{"after" => @title_role},
+        "locked" => true
+      }
+    ]
+  end
+
   @doc "The forced initial block set: locked title heading + locked featured image."
   @spec template_blocks(String.t() | nil) :: [map()]
   def template_blocks(title) do

@@ -179,6 +179,13 @@ import {
 // its own DOM-free module so it unit-tests in plain Node (this file can't be
 // imported DOM-free — it calls customElements.define at load).
 import { transactionVetoesLock } from "./locks.js";
+// pdd-t20c: the PURE constraint-vocabulary veto — the calm lock veto GENERALIZED to
+// cardinality (a remove dropping a required/min-N kind below its floor) + relative
+// order (a move misplacing a positioned kind against its before/after relation).
+// Wired into the SAME filterTransaction plugin below, reading the JSON declarations
+// LIVE off the host's data-constraints (twin of data-locked-tail). DOM-free so it
+// unit-tests in plain Node like locks.js.
+import { transactionVetoesConstraints, parseConstraints } from "./constraints.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -443,15 +450,23 @@ class BpPaperCanvas extends HTMLElement {
             new Plugin({
               filterTransaction: (tr, state) =>
                 // Programmatic applies (initial seed via the blocks setter,
-                // foreign-echo setContent) legitimately grow/replace the doc —
-                // the veto guards USER edits only (found live: the plugin
-                // vetoed its own initial content seed on locked-tail runs).
+                // foreign-echo setContent, ghost-slot materialization via
+                // _programmaticApply) legitimately grow/replace the doc — the veto
+                // guards USER edits only (found live: the plugin vetoed its own
+                // initial content seed on locked-tail runs). pdd-t20c: the
+                // constraint veto rides the SAME exemption + the SAME plugin,
+                // reading declarations LIVE off data-constraints.
                 host._programmaticApply === true ||
-                !transactionVetoesLock(
+                (!transactionVetoesLock(
                   tr,
                   state,
                   host.getAttribute("data-locked-tail") === "true",
-                ),
+                ) &&
+                  !transactionVetoesConstraints(
+                    tr,
+                    state,
+                    parseConstraints(host.getAttribute("data-constraints")),
+                  )),
             }),
           ],
         }),
