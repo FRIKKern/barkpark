@@ -119,14 +119,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       previews = task_previews(paper_top_level_blocks(socket), socket)
 
       socket
-      # The SERVER-RENDERED consumer: task blocks are non-prose, so the beta
-      # canvas renders them as boundary widgets (edit_block/1) OUTSIDE the WC —
-      # this id-keyed assign is what `task_block_preview/1` paints the live rows
-      # from, via the reader's own Render producer (rule 3). Phoenix skips the
+      # The SERVER-RENDERED consumer: the id-keyed assign `task_block_preview/1`
+      # (paper_editor.ex) paints live rows from, via the reader's own Render
+      # producer (rule 3). t12a: after the partition flip a top-level fleet block
+      # rides a canvas RUN (its display paint arrives via push_block_renders'
+      # bp:block-html), so this boundary-widget path is DORMANT in the flag-ON
+      # paper pane — retained infra, retirement is wave-4/human. Phoenix skips the
       # assign when the map is unchanged, so a no-op refresh re-renders nothing.
       |> assign(:paper_task_previews, Map.new(previews, &{&1["block_id"], &1}))
       # The CLIENT channel twin: the same rows for the canvas hook → the WC's
-      # (future, t8) node views. Both carriers are display-only (D5).
+      # applyTaskPreviews (still a progressive no-op — the WC paints fleet HTML
+      # from bp:block-html instead). Both carriers are display-only (D5).
       |> push_event("bp:task-preview", %{previews: previews})
     else
       socket
