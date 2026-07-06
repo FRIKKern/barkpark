@@ -429,7 +429,12 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// ready queue. Computed AFTER the NOW loop (board.Now is final) and after the
 	// ready overlay is on s.Tasks (composeSnapshot marked Lifecycle==ready upstream).
 	board.Next, board.NextReadyMore = resolveNext(s, byID, board.Now, now)
-	board.IndependentReady = independentReady(s, byID)
+	// D66 → wave-13: the honest parallel capacity is the size of the dispatch
+	// Frontier — the SAME model `bp task frontier` prints, so the "NEXT · N
+	// independent" label and the CLI verb can never drift. nil DetailIndex on
+	// the board path skips the design_doc key tier (1:1 with root on the corpus,
+	// so the count is unchanged), and the default opts read the full capacity.
+	board.IndependentReady = len(Frontier(s, nil, board.Now, now, FrontierOpts{}))
 
 	return board
 }
@@ -452,52 +457,13 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, nowT time.Time) (
 	for _, t := range now {
 		nowSet[bareID(t.DocID)] = true
 	}
-	// A bareID index so a drafts.* task id joins a bare event id (and vice versa).
-	byBare := make(map[string]Task, len(byID))
-	for _, t := range byID {
-		byBare[bareID(t.DocID)] = t
-	}
-	// evAt indexes the freshest event per task, the recency signal the ready head
-	// sorts on (a tie-break under priority).
-	evAt := make(map[string]time.Time, len(s.Events))
-	for _, e := range s.Events {
-		id := bareID(e.DocID)
-		if a, ok := evAt[id]; !ok || e.At.After(a) {
-			evAt[id] = e.At
-		}
-	}
-
-	// Events newest-first so the freshest lease_expired per task wins the dedup.
-	evs := make([]Event, len(s.Events))
-	copy(evs, s.Events)
-	sort.SliceStable(evs, func(i, j int) bool { return evs[i].At.After(evs[j].At) })
-
-	var resumables []NextItem
-	seenResume := make(map[string]bool)
-	for _, e := range evs {
-		if e.Mutation != mutationLeaseExpired {
-			continue
-		}
-		bare := bareID(e.DocID)
-		if seenResume[bare] {
-			continue
-		}
-		t, ok := byBare[bare]
-		if !ok {
-			continue
-		}
-		if isTerminal(t.Lifecycle) || t.Lifecycle == lifeInProgress {
-			continue // it finished or is being worked again — not a follow-up
-		}
-		if t.Claim != nil && t.Claim.Worker != "" {
-			continue // someone re-claimed it
-		}
-		if laterClaimOrClose(s.Events, bare, e.At) {
-			continue // a later claim/close superseded the drop
-		}
-		seenResume[bare] = true
-		resumables = append(resumables, NextItem{Task: t, Kind: nextResume, LeaseExpiredAt: e.At})
-	}
+	// Shared substrate (frontier.go): a bareID task index, the freshest-event
+	// recency clock, the resumables (dropped-mid-work leases), and the
+	// continuity roots — the SAME derivations the dispatch Frontier uses, so the
+	// NEXT strip and the frontier count never diverge.
+	byBare := buildByBare(byID)
+	evAt := buildEvAt(s.Events)
+	resumables := computeResumables(s, byBare)
 
 	// Ready head: every ready task EXCEPT a resumable or a NOW-pinned one.
 	excl := make(map[string]bool, len(resumables))
@@ -515,49 +481,14 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, nowT time.Time) (
 		}
 		ready = append(ready, t)
 	}
-	// D65 curation: score every candidate; the strip is the best next MOVES,
-	// not the raw priority head. Continuity roots = the neighborhoods of live
-	// claims and resumables ("finish what we started").
-	contRoots := make(map[string]bool, len(now)+len(resumables))
-	for _, t := range now {
-		contRoots[rootOfBare(byBare, t.DocID)] = true
-	}
-	for _, ni := range resumables {
-		contRoots[rootOfBare(byBare, ni.Task.DocID)] = true
-	}
-	score := func(t Task) (int, string) {
-		pts := nextPriorityPts(t.Priority)
-		reason := ""
-		if root := rootOfBare(byBare, t.DocID); contRoots[root] && root != bareID(t.DocID) {
-			pts += nextContinuityBoost
-			if rt, ok := byBare[root]; ok && rt.Title != "" {
-				reason = "continues " + rt.Title
-			} else {
-				reason = "continues active work"
-			}
-		}
-		if n := t.DependentCount; n > 0 {
-			c := n
-			if c > nextLeverageCap {
-				c = nextLeverageCap
-			}
-			pts += c * nextLeveragePer
-			if reason == "" {
-				reason = fmt.Sprintf("unblocks %d", n)
-			}
-		}
-		if t.Criteria != nil && t.Criteria.Total >= 2 {
-			pts += nextWellFormedBoost
-		}
-		if nowT.Sub(lastActivity(t, evAt)) > nextZombieAfter {
-			pts -= nextZombiePenalty
-		}
-		return pts, reason
-	}
+	// D65 curation: score every candidate with the ONE shared scorer
+	// (scoreReadyTask). Continuity roots = the neighborhoods of live claims and
+	// resumables ("finish what we started").
+	contRoots := continuityRoots(byBare, now, resumables)
 	scores := make(map[string]int, len(ready))
 	reasons := make(map[string]string, len(ready))
 	for _, t := range ready {
-		pts, why := score(t)
+		pts, why := scoreReadyTask(t, contRoots, byBare, evAt, nowT)
 		scores[bareID(t.DocID)] = pts
 		reasons[bareID(t.DocID)] = why
 	}
@@ -607,21 +538,117 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, nowT time.Time) (
 	return out, len(ready) - readyPlaced
 }
 
-// independentReady counts the DISTINCT root neighborhoods across the whole
-// ready set — the board's honest parallel-capacity read (charter D66): how many
-// non-interfering next moves exist right now if every neighborhood took one.
-func independentReady(s Snapshot, byID map[string]Task) int {
-	byBare := make(map[string]Task, len(byID))
+// buildByBare indexes tasks by their bareID (drafts.-prefix stripped) so a
+// drafts.* id joins a bare parent/event id and vice versa.
+func buildByBare(byID map[string]Task) map[string]Task {
+	m := make(map[string]Task, len(byID))
 	for _, t := range byID {
-		byBare[bareID(t.DocID)] = t
+		m[bareID(t.DocID)] = t
 	}
-	roots := map[string]bool{}
-	for _, t := range s.Tasks {
-		if t.Lifecycle == lifeReady {
-			roots[rootOfBare(byBare, t.DocID)] = true
+	return m
+}
+
+// buildEvAt indexes the freshest prime-event time per (bareID) task — the
+// recency signal the ready head sorts on and the zombie discount reads.
+func buildEvAt(events []Event) map[string]time.Time {
+	m := make(map[string]time.Time, len(events))
+	for _, e := range events {
+		id := bareID(e.DocID)
+		if a, ok := m[id]; !ok || e.At.After(a) {
+			m[id] = e.At
 		}
 	}
-	return len(roots)
+	return m
+}
+
+// computeResumables derives the resumable follow-ups (charter wave-12 D61): a
+// task.lease_expired whose task is still non-terminal, not in_progress and
+// unclaimed, with NO later claim/close for the same bareID — a dropped
+// mid-work claim, the truest follow-up intent. Deduped by bareID (freshest
+// lease wins). Shared by resolveNext and Frontier so both read one derivation.
+func computeResumables(s Snapshot, byBare map[string]Task) []NextItem {
+	// Events newest-first so the freshest lease_expired per task wins the dedup.
+	evs := make([]Event, len(s.Events))
+	copy(evs, s.Events)
+	sort.SliceStable(evs, func(i, j int) bool { return evs[i].At.After(evs[j].At) })
+
+	var resumables []NextItem
+	seen := make(map[string]bool)
+	for _, e := range evs {
+		if e.Mutation != mutationLeaseExpired {
+			continue
+		}
+		bare := bareID(e.DocID)
+		if seen[bare] {
+			continue
+		}
+		t, ok := byBare[bare]
+		if !ok {
+			continue
+		}
+		if isTerminal(t.Lifecycle) || t.Lifecycle == lifeInProgress {
+			continue // it finished or is being worked again — not a follow-up
+		}
+		if t.Claim != nil && t.Claim.Worker != "" {
+			continue // someone re-claimed it
+		}
+		if laterClaimOrClose(s.Events, bare, e.At) {
+			continue // a later claim/close superseded the drop
+		}
+		seen[bare] = true
+		resumables = append(resumables, NextItem{Task: t, Kind: nextResume, LeaseExpiredAt: e.At})
+	}
+	return resumables
+}
+
+// continuityRoots is the set of root neighborhoods holding LIVE work (NOW
+// claims + resumables) — the D65 "finish what we started" boost key.
+func continuityRoots(byBare map[string]Task, now []Task, resumables []NextItem) map[string]bool {
+	roots := make(map[string]bool, len(now)+len(resumables))
+	for _, t := range now {
+		roots[rootOfBare(byBare, t.DocID)] = true
+	}
+	for _, ni := range resumables {
+		roots[rootOfBare(byBare, ni.Task.DocID)] = true
+	}
+	return roots
+}
+
+// scoreReadyTask is the ONE D65 curation scorer (charter D65). It is the single
+// scoring truth shared by the NEXT strip (resolveNext) and the dispatch
+// Frontier — there is no second scoring path. Continuity with live/dropped work
+// (+200), unblock leverage (+30/dependent, cap 5), well-formedness (+100 for ≥2
+// acceptance criteria), priority points (P0 80 / P1 60 / P2 30 / else 10), and a
+// zombie discount (−50 past 7d untouched). Returns the score and the dominant
+// reason a row renders.
+func scoreReadyTask(t Task, contRoots map[string]bool, byBare map[string]Task, evAt map[string]time.Time, nowT time.Time) (int, string) {
+	pts := nextPriorityPts(t.Priority)
+	reason := ""
+	if root := rootOfBare(byBare, t.DocID); contRoots[root] && root != bareID(t.DocID) {
+		pts += nextContinuityBoost
+		if rt, ok := byBare[root]; ok && rt.Title != "" {
+			reason = "continues " + rt.Title
+		} else {
+			reason = "continues active work"
+		}
+	}
+	if n := t.DependentCount; n > 0 {
+		c := n
+		if c > nextLeverageCap {
+			c = nextLeverageCap
+		}
+		pts += c * nextLeveragePer
+		if reason == "" {
+			reason = fmt.Sprintf("unblocks %d", n)
+		}
+	}
+	if t.Criteria != nil && t.Criteria.Total >= 2 {
+		pts += nextWellFormedBoost
+	}
+	if nowT.Sub(lastActivity(t, evAt)) > nextZombieAfter {
+		pts -= nextZombiePenalty
+	}
+	return pts, reason
 }
 
 // laterClaimOrClose reports whether a task (by bareID) has a task.claimed or
