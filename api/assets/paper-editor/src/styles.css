@@ -359,52 +359,35 @@ html[data-theme="dark"] .bp-wikilink-menu {
   margin: 0 1px;
 }
 
-/* ── canvas callout node-view (Phase-4 S3.2) ────────────────────────────────
- * Layout only — the tone frame (border/background/foreground/icon) is painted
- * inline by the node-view's paint() from the canonical tone_palette, so these
- * rules just give the chrome spacing/structure to match the rendered article
- * callout (walk.ex:1136 padding:16px, walk.ex:1146 no radius). The contentDOM
- * body is the editable region. */
-.bp-canvas-callout {
-  margin: 1em 0;
-  padding: 16px;
-}
-.bp-canvas-callout-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 700;
-  user-select: none;
-}
-.bp-canvas-callout-icon {
-  flex: 0 0 auto;
-  line-height: 1;
-}
-.bp-canvas-callout-title {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-.bp-canvas-callout-fold {
-  flex: 0 0 auto;
-  cursor: pointer;
-  background: none;
-  border: 0;
-  padding: 0 4px;
-  font: inherit;
-  color: inherit;
-  opacity: 0.7;
-}
-.bp-canvas-callout-fold:hover { opacity: 1; }
-/* pdd-t12c: keyboard focus reveals the fold control exactly as hover does — the
- * hover-only affordance gets a :focus-visible twin (WCAG 2.4.7; rule 5). */
-.bp-canvas-callout-fold:focus-visible {
-  opacity: 1;
-  outline: 2px solid var(--paper-accent, #1e5347);
-  outline-offset: 1px;
-  border-radius: 3px;
-}
-.bp-canvas-callout-body { margin-top: 6px; }
-.bp-canvas-callout-head + .bp-canvas-callout-body { margin-top: 8px; }
+/* ── canvas callout node-view (loop-epic/parity-callout) ─────────────────────
+ * `bp-canvas-callout` is now a THIN edit-only layout hook: the tone card
+ * (padding / border-left / background / color) rides the reader's own
+ * `bp-callout` + `bp-callout--<tone>` classes, painted here by the hand-copied
+ * `.bp-paper-editor-body .bp-callout*` mirror below (standalone hosts) and, in
+ * Studio, by the inlined paper-surface.css `.bp-paper-surface .bp-callout*`
+ * cascade. No margin/padding/icon here anymore — those moved onto `bp-callout`.
+ * The run-in body displays inline so `<strong>title</strong> ` + the editable
+ * body share one line (the reader has no body wrapper). */
+.bp-canvas-callout > strong { font-weight: 700; }
+/* Run-in ONLY on the non-collapsible <div> root — the collapsible <details>
+ * keeps a block body below its <summary> (margin-top:8px, reader-shaped). */
+div.bp-canvas-callout > .bp-callout__body { display: inline; }
+
+/* ── Reader tone mirror (byte-identical to paper-surface.css:224-231, scoped to
+ * `.bp-paper-editor-body`). Standalone embedders have no `.bp-paper-surface`
+ * ancestor, so the reader's tone rules never reach the canvas callout there;
+ * this hand-copied mirror supplies them. Studio does NOT need it (it inherits
+ * the reader rules via the surface cascade) — this is the blessed standalone-
+ * host extra pattern. view_edit_parity_test.exs §"callout tone mirror" locks it
+ * byte-for-byte to the reader. Tokens `--bp-tone-*` are defined above. */
+.bp-paper-editor-body .bp-callout { padding: 16px; border-left: 4px solid transparent; }
+.bp-paper-editor-body .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
+.bp-paper-editor-body .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
+.bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
+.bp-paper-editor-body .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
+.bp-paper-editor-body .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+.bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
+.bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
 /* ── canvas read-only atom node-views (Phase-4 S3.6: sheet + embed) ──────────
  * sheet / embed are REFERENCES, not editable text — a read-only chip rendered by
