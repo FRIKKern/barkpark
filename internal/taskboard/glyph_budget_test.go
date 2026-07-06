@@ -51,6 +51,7 @@ var glyphAllowlist = map[rune]string{
 	'▎': "selection bar",
 	'·': "dotted leader / meta separator",
 	'–': "en-dash in a phase-band W-code range (W3–4) — charter wave-10 W10-A",
+	'↩': "resume-dropped-work marker in the NEXT intent strip — charter wave-12 D60",
 	'↳': "nested-subtask guide",
 	'⇄': "server marker",
 	'…': "honest truncation ellipsis",

@@ -489,52 +489,119 @@ func TaskRow(t Task, selected bool, depth int, guide bool, width, frame int, now
 	return []string{left + strings.Repeat(" ", gap) + metaStyled}
 }
 
-// NowCard is a pinned two-line claim card (spec §3 NOW band):
+// NowCard is a pinned ONE-line agent-first claim row (charter wave-12 D59) —
+// "what agent is working on stuff":
 //
-//	⠋ Wire the SSE live bridge
-//	   opus-3 · 4m · 2/3 · Cloud GUI epic
+//	⠋ opus-3  wire the SSE live bridge  ………  2/3  4m
 //
-// breadcrumb is the parent epic's title (the caller resolves ParentID). The
-// glyph is the live blue Braille spinner (frame'th), tinted by the claim lease
-// (info→warn→danger via glyphStyleFor). NOW cards are cursor rows (the first
-// indexes in the shell's visibleRows), so like TaskRow they carry a leading
-// selection-marker column: ▎ when the cursor is on this card, a space otherwise.
-func NowCard(t Task, breadcrumb string, selected bool, width, frame int, now time.Time) []string {
+// The WORKER leads as the SUBJECT (blue, infoStyle — the same hue TaskRow paints
+// its claimed worker), before a monochrome title, because the wish is agent-
+// attributed current work. The glyph is the live blue Braille spinner (frame'th),
+// tinted by the claim lease (info→warn→danger via glyphStyleFor). Right-meta sheds
+// right→left with the shared fitRowMeta idiom: bare criteria N/M, then the lease-
+// tinted ticking LiveElapsed age (the NOW band is the one place work runs, so it
+// ticks in seconds — decision 19). The epic breadcrumb is DROPPED (D56 renders the
+// claim in-context down in the spine, so it is redundant here). Below dropMetaBelow
+// the row is spinner + worker + title only. NOW cards are the FIRST cursor rows in
+// the shell's visibleRows, so like TaskRow they carry a leading selection-marker
+// column: ▎ when the cursor is on this row, a space otherwise. Returns a []string
+// of length 1 (kept as a slice so renderNowBand's loop is unchanged).
+func NowCard(t Task, selected bool, width, frame int, now time.Time) []string {
+	marker := SelectionMarker(selected)
 	glyph := glyphStyleFor(t, now).Render(boardGlyph(t.Lifecycle, frame))
+	lead := marker + glyph + " "
+	const leadW = 3 // marker + glyph + space
+
+	workerStyled, workerW := "", 0
+	if t.Claim != nil && t.Claim.Worker != "" {
+		workerStyled = infoStyle.Render(t.Claim.Worker) + " "
+		workerW = disp(t.Claim.Worker) + 1
+	}
+
 	titleText, placeholder := rowTitle(t)
 	tStyle := titleStyle
 	if placeholder {
 		tStyle = dimStyle
 	}
-	title := truncate(titleText, width-3)
-	line1 := SelectionMarker(selected) + glyph + " " + tStyle.Render(title)
 
-	var sparts []string
-	add := func(p, s string) {
-		if p == "" {
-			return
+	if width < dropMetaBelow {
+		// Narrow degrade: spinner + worker + title only (no meta).
+		avail := width - leadW - workerW
+		if avail < 1 {
+			avail = 1
 		}
-		sparts = append(sparts, s)
+		return []string{lead + workerStyled + tStyle.Render(truncate(titleText, avail))}
+	}
+
+	var drop []metaToken
+	if f := criteriaFraction(t.Criteria); f != "" {
+		drop = append(drop, metaToken{f, dimStyle.Render(f)})
 	}
 	if t.Claim != nil {
-		add(t.Claim.Worker, dimStyle.Render(t.Claim.Worker))
-		if age := AgeBadge(t.Claim.ClaimedAt, now); age != "" {
+		if el := LiveElapsed(t.Claim.ClaimedAt, now); el != "" {
 			st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
-			add(age, st.Render(age))
+			drop = append(drop, metaToken{el, st.Render(el)})
 		}
 	}
-	if f := criteriaFraction(t.Criteria); f != "" {
-		add(f, dimStyle.Render(f))
+	metaStyled, titleBudget := fitRowMeta(drop, metaToken{}, width-leadW-workerW)
+	title := truncate(titleText, titleBudget)
+	left := lead + workerStyled + tStyle.Render(title)
+	if metaStyled == "" {
+		return []string{left}
 	}
-	if breadcrumb != "" {
-		add(breadcrumb, dimStyle.Render(breadcrumb))
+	gap := width - disp(left) - disp(metaStyled)
+	if gap < 1 {
+		gap = 1
 	}
-	// Truncate the styled join on display width so it never overruns —
-	// truncate is ANSI-aware, so the claim-age tint survives the clip.
-	styled := strings.Join(sparts, " · ")
-	if disp(styled) > width-3 {
-		styled = truncate(styled, width-3)
+	return []string{left + strings.Repeat(" ", gap) + metaStyled}
+}
+
+// renderNextRow renders one NEXT intent-strip row (charter wave-12 D60), a real
+// cursor stop c can claim. Two grammars by kind:
+//
+//	↩ resume 'wire the Studio user-login form' · lease expired 8m   (nextResume)
+//	○ P0 urgent P0 ready fix                                        (nextReady)
+//
+// A resumable leads with the ↩ resume marker (amber — a lease lapsed, follow it up)
+// and trails a dim "lease expired <age>" cause; the meta sheds first when tight so
+// the title never starves. A ready row is one calm line: the full-foreground ○
+// ready glyph, its color-severity Pn, and a monochrome title. The selection marker
+// rides the leading gutter column like TaskRow/NowCard.
+func renderNextRow(it NextItem, selected bool, width int, now time.Time) string {
+	marker := SelectionMarker(selected)
+	titleText, placeholder := rowTitle(it.Task)
+	tStyle := lipgloss.NewStyle()
+	if placeholder {
+		tStyle = dimStyle
 	}
-	line2 := "   " + styled
-	return []string{line1, line2}
+	switch it.Kind {
+	case nextResume:
+		head := marker + warnStyle.Render("↩") + " " + dimStyle.Render("resume ")
+		headW := 3 + disp("resume ") // marker + glyph + space + "resume "
+		metaPlain := " · lease expired " + AgeBadge(it.LeaseExpiredAt, now)
+		meta := dimStyle.Render(metaPlain)
+		metaW := disp(metaPlain)
+		budget := width - headW - metaW
+		if budget < 8 { // the title would starve — drop the meta, keep the title
+			budget = width - headW
+			if budget < 1 {
+				budget = 1
+			}
+			return truncate(head+tStyle.Render(truncate("'"+titleText+"'", budget)), width)
+		}
+		return truncate(head+tStyle.Render(truncate("'"+titleText+"'", budget))+meta, width)
+	default: // nextReady
+		head := marker + readyStyle.Render("○") + " "
+		headW := 3
+		pri, priW := "", 0
+		if lbl := priorityLabel(it.Task.Priority); lbl != "" {
+			pri = priorityStyle(it.Task.Priority).Render(lbl) + " "
+			priW = disp(lbl) + 1
+		}
+		budget := width - headW - priW
+		if budget < 1 {
+			budget = 1
+		}
+		return truncate(head+pri+tStyle.Render(truncate(titleText, budget)), width)
+	}
 }

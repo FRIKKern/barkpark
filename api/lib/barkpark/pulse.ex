@@ -24,7 +24,9 @@ defmodule Barkpark.Pulse do
 
     * `fields`       — `%{"name" => spec}` event schema; specs are
       `["int", min, max]`, `["float", min, max]`, or `["bool"]`
-      (JSON-friendly so the env var can carry them)
+      (JSON-friendly so the env var can carry them). A 4th element makes the
+      field OPTIONAL with that default (`["float", 0, 1, 0]`) — how a schema
+      grows without breaking already-deployed clients
     * `max_bytes`    — encoded-payload ceiling (default 200)
     * `rate_per_min` — per-IP sustained events/minute (default 10; burst 3)
     * `daily_cap`    — per-channel global ceiling per UTC day (default 5000)
@@ -103,21 +105,24 @@ defmodule Barkpark.Pulse do
     end)
   end
 
+  # a 4-element spec is optional-with-default — absent means the default,
+  # so a channel schema can grow without rejecting older clients
+  defp coerce_field([_t, _min, _max, default], :error), do: {:ok, default}
   defp coerce_field(_spec, :error), do: {:error, "is required"}
 
-  defp coerce_field(["int", min, max], {:ok, v}) when is_integer(v) and v >= min and v <= max,
+  defp coerce_field(["int", min, max | _], {:ok, v}) when is_integer(v) and v >= min and v <= max,
     do: {:ok, v}
 
-  defp coerce_field(["int", min, max], {:ok, _}),
+  defp coerce_field(["int", min, max | _], {:ok, _}),
     do: {:error, "must be an integer in #{min}..#{max}"}
 
-  defp coerce_field(["float", min, max], {:ok, v}) when is_number(v) do
+  defp coerce_field(["float", min, max | _], {:ok, v}) when is_number(v) do
     if v >= min and v <= max,
       do: {:ok, v * 1.0},
       else: {:error, "must be a number in #{min}..#{max}"}
   end
 
-  defp coerce_field(["float", _min, _max], {:ok, _}), do: {:error, "must be a number"}
+  defp coerce_field(["float", _min, _max | _], {:ok, _}), do: {:error, "must be a number"}
   defp coerce_field(["bool"], {:ok, v}) when is_boolean(v), do: {:ok, v}
   defp coerce_field(["bool"], {:ok, _}), do: {:error, "must be a boolean"}
   defp coerce_field(spec, _), do: {:error, "unsupported field spec #{inspect(spec)}"}

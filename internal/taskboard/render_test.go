@@ -245,9 +245,11 @@ func TestRenderTruncationNote(t *testing.T) {
 func TestRenderEmptyBoardIsHonest(t *testing.T) {
 	empty := Board{Counts: map[string]int{}}
 	frame := ansi.Strip(Render(empty, UIState{Conn: ConnOffline}, 80, 30, fixedNow))
-	// Empty NOW reads the honest all-clear (charter D52 / wave-11 retired the READY
-	// TO CLAIM head — claim-forward is the cursor + c now).
-	for _, want := range []string{"NOW", "nothing claimed", "all clear", "All clear", "offline", "jk move"} {
+	// Empty NOW + empty NEXT collapse the pinned band to NOTHING (charter wave-12
+	// D58/D63 — no "NOW" label, no "nothing claimed" line). The honest all-clear
+	// lives in the spine ("All clear — no open tasks."), and the header/footer still
+	// paint, so the frame is never blank.
+	for _, want := range []string{"All clear", "offline", "jk move"} {
 		if !strings.Contains(frame, want) {
 			t.Errorf("empty frame missing %q:\n%s", want, frame)
 		}
@@ -667,26 +669,35 @@ func TestRenderStaleAgesAndCount(t *testing.T) {
 	}
 }
 
-// TestNowCardIsCalm proves a pinned NOW card carries the live Braille spinner
-// glyph (frame 0 ⠋ at rest), its worker and criteria DIGITS (no ▰▱ bar), and no
-// twin ⧉ marker — that density moved to the detail view with the calm-board
-// subtraction; the spinner is the design-language in_progress mark (charter D38).
-func TestNowCardIsCalm(t *testing.T) {
+// TestNowCardIsAgentFirst proves a pinned NOW card is ONE agent-first line
+// (charter wave-12 D59): the live Braille spinner (frame 0 ⠋ at rest), then the
+// WORKER as the subject BEFORE the title, then bare criteria DIGITS (no ▰▱ bar)
+// and the ticking age — no twin ⧉ marker, no epic breadcrumb.
+func TestNowCardIsAgentFirst(t *testing.T) {
 	claimed := Task{
 		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
 		TwinOf: "sum2", Criteria: &Criteria{Met: 2, Total: 3}, UpdatedAt: fixedNow,
 		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
 	}
-	lines := NowCard(claimed, "", false, 80, 0, fixedNow)
-	l0, l1 := ansi.Strip(lines[0]), ansi.Strip(lines[1])
-	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "⠋ Add the SUM() function") {
-		t.Errorf("NOW card line 1 should be ⠋ spinner + title, got %q", l0)
+	lines := NowCard(claimed, false, 80, 0, fixedNow)
+	if len(lines) != 1 {
+		t.Fatalf("NOW card should be exactly ONE line now, got %d: %q", len(lines), lines)
+	}
+	l0 := ansi.Strip(lines[0])
+	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "⠋ opus-3") {
+		t.Errorf("NOW card should lead with ⠋ spinner + worker (agent-first), got %q", l0)
+	}
+	// The worker (subject) precedes the title.
+	wi := strings.Index(l0, "opus-3")
+	ti := strings.Index(l0, "Add the SUM() function")
+	if wi < 0 || ti < 0 || wi > ti {
+		t.Errorf("worker must lead the title (agent-first), got %q", l0)
 	}
 	if strings.Contains(l0, "⧉") {
 		t.Errorf("NOW card should not wear a twin ⧉ marker: %q", l0)
 	}
-	if !strings.Contains(l1, "2/3") || strings.Contains(l1, "▰") || strings.Contains(l1, "▱") {
-		t.Errorf("NOW card line 2 should show bare criteria digits, no bar: %q", l1)
+	if !strings.Contains(l0, "2/3") || strings.Contains(l0, "▰") || strings.Contains(l0, "▱") {
+		t.Errorf("NOW card should show bare criteria digits, no bar: %q", l0)
 	}
 }
 

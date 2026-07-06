@@ -3,11 +3,8 @@ barkpark · tasks                                                            ⇄
 █████████████████████████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░
 
 NOW
- ⠋ Debounce the refetch loop
-   pelle · 1m30s · Cloud GUI epic
-
- ⠋ Wire the SSE live bridge
-   opus-3 · 4m00s · 2/3 · Cloud GUI epic
+ ⠋ pelle Debounce the refetch loop                                                             1m30s
+ ⠋ opus-3 Wire the SSE live bridge                                                         2/3 4m00s
 
   Cloud GUI epic ·············································································· 7/10
   ▎○ Reconcile the #979 role seam                                                             P2 1/2
@@ -22,6 +19,9 @@ NOW
   living-values ~ ·············································································· 0/2
 
   (no epic) ···················································································· 0/2
+
+
+
 
 
 

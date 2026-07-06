@@ -90,7 +90,8 @@ config :barkpark, :pulse_channels, %{
       "hue" => ["int", 0, 359],
       "x" => ["float", 0, 1],
       "y" => ["float", 0, 1],
-      "mega" => ["bool"]
+      "mega" => ["bool"],
+      "chg" => ["float", 0, 1, 0]
     },
     "rate_per_min" => 600,
     "daily_cap" => 100_000

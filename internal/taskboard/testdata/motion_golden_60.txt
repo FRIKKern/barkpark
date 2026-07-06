@@ -3,13 +3,13 @@ barkpark · tasks                   ⇄ guerrilla  ● live · now
 ████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░
 
 NOW
-▎⠼ Ship the live bridge
-   opus-3 · 4m30s · 1/3 · Motion epic
+▎⠼ opus-3 Ship the live bridge                     1/3 4m30s
 
   Motion epic ·········································· 2/4
    ○ Reticulate the splines                               P2
    ○ A settled unchanged row                              P3
   +2 done
+
 
 
 

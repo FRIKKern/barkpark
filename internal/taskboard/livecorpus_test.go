@@ -139,11 +139,20 @@ func corpusSnapshot() Snapshot {
 	add(ctask("orph-cancel2", "abandoned loose task two", lifeCancelled, ""))
 	add(withUpdated(ctask("orph-done", "shipped loose task", lifeDone, ""), 2*time.Hour))
 
+	// ── NEXT intent strip (charter wave-12) ─────────────────────────────────────
+	// studio-user-login was claimed, the lease EXPIRED (worker cleared → open,
+	// unclaimed), and NO later claim/close followed → a nextResume row, FIRST in
+	// NEXT (the truest follow-up). orph-p0 is a P0 ready orphan → the ready head is
+	// P0-first behind the resumable.
+	add(withUpdated(ctask("studio-user-login", "wire the Studio user-login form", lifeOpen, "1"), 8*time.Minute))
+	add(withUpdated(ctask("orph-p0", "urgent P0 ready fix", lifeReady, "0"), 30*time.Minute))
+
 	events := []Event{
 		{Mutation: "task.claimed", DocID: "auth-w1-claim", At: corpusFixedNow.Add(-5 * time.Minute)},
 		{Mutation: "task.closed", DocID: "auth-done-00", At: corpusFixedNow.Add(-1 * time.Hour)},
+		{Mutation: "task.lease_expired", DocID: "studio-user-login", At: corpusFixedNow.Add(-8 * time.Minute)},
 	}
-	counts := map[string]int{"in_progress": 2, "blocked": 2, "open": 20, "done": 30, "cancelled": 6}
+	counts := map[string]int{"in_progress": 2, "blocked": 2, "open": 21, "done": 30, "cancelled": 6}
 	return Snapshot{Tasks: tasks, Events: events, Counts: counts, FetchedAt: corpusFixedNow.Add(-90 * time.Second)}
 }
 
@@ -379,8 +388,11 @@ func TestActivityFocus(t *testing.T) {
 			}
 		}
 	}
-	if f := ansi.Strip(Render(emptyNow, st, 72, 80, corpusFixedNow)); !strings.Contains(f, "all clear") {
-		t.Errorf("empty-NOW board did not read the calm all-clear:\n%s", f)
+	// With NOW empty the WHO band collapses, but the INTENT strip still surfaces
+	// what to pick up next (charter wave-12): the resumable + the ready head. The
+	// board is never a dead-end all-clear when there IS follow-up work.
+	if f := ansi.Strip(Render(emptyNow, st, 72, 80, corpusFixedNow)); !strings.Contains(f, "NEXT") {
+		t.Errorf("empty-NOW board did not surface the NEXT intent strip:\n%s", f)
 	}
 
 	// D51: the merged window — BOTH claims' parents (auth-w1, auth-w2) are in the

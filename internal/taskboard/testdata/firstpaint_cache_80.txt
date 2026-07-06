@@ -3,12 +3,12 @@ barkpark · tasks                                     ⇄ guerrilla  ◐ polling
 ████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░
 
 NOW
-▎⠋ SSE reconnect backoff
-   opus-3 · 12m · 1/3 · Cloud GUI epic
+▎⠋ opus-3 SSE reconnect backoff                                          1/3 12m
 
   Cloud GUI epic ··························································· 0/2
    ○ Reconcile the #979 role seam
    ! Ship the offline banner                                             blocked
+
 
 
 

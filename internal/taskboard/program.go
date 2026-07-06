@@ -72,6 +72,7 @@ type rowKind int
 
 const (
 	rowNow           rowKind = iota // a NOW-band card (an unexpired claim)
+	rowNext                         // a NEXT intent-strip row (resumable / ready head, charter wave-12 D60)
 	rowEpicHeader                   // an epic section header
 	rowChild                        // a visible child task inside an expanded epic
 	rowClusterHeader                // a derived-cluster section header
@@ -443,10 +444,23 @@ func (m Model) handleBoardKey(key string) (tea.Model, tea.Cmd) {
 	case "l":
 		return m.setEpicFoldUnderCursor(false), nil
 	case "c":
-		t, ok := m.taskUnderCursor()
+		r, ok := m.currentRow()
 		if !ok {
 			m.setStrip("no task under the cursor to claim", RoleWarn)
 			return m, nil
+		}
+		t, found := m.taskByID(r.docID)
+		if !found {
+			m.setStrip("no task under the cursor to claim", RoleWarn)
+			return m, nil
+		}
+		// A resumable NEXT row is routed AROUND the local ready-gate (charter D62):
+		// a live resumable is `open` and outside prime's clamped ready overlay, so
+		// claimTask's ready-gate would wrongly refuse it — but it was provably
+		// claimable moments ago, and the SERVER is the real arbiter (an honest strip
+		// renders on a genuine refusal). Every other row keeps the ready-gate path.
+		if r.kind == rowNext && m.nextKindOf(r.docID) == nextResume {
+			return m, m.claimCmd(t.DocID, ResolveWorker())
 		}
 		return m.claimTask(t)
 	case "x":
@@ -654,12 +668,19 @@ func (m Model) taskUnderCursor() (Task, bool) {
 	return m.taskByID(r.docID)
 }
 
-// taskByID finds a task anywhere on the board (NOW band, epic roots, epic
-// children, cluster members, orphans) by doc id.
+// taskByID finds a task anywhere on the board (NOW band, NEXT intent strip, epic
+// roots, epic children, cluster members, orphans) by doc id.
 func (m Model) taskByID(id string) (Task, bool) {
 	for _, t := range m.board.Now {
 		if t.DocID == id {
 			return t, true
+		}
+	}
+	// A NEXT row (charter wave-12 D61) — a resumable can be a folded orphan absent
+	// from Now/Epics/Clusters/Orphans, so c/enter/o must find it here.
+	for _, ni := range m.board.Next {
+		if ni.Task.DocID == id {
+			return ni.Task, true
 		}
 	}
 	for _, e := range m.board.Epics {
@@ -764,7 +785,7 @@ func (m Model) activateBoard() Model {
 		// expanded) toggles back, mirroring the header.
 		m.ui.CollapsedEpics[r.docID] = m.sectionExpandedByKey(r.docID)
 		m.clampCursor()
-	case rowNow, rowChild, rowClusterMember, rowOrphan:
+	case rowNow, rowNext, rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
 		if t, found := m.taskByID(r.docID); found && t.Title != "" {
 			title = t.Title
@@ -772,6 +793,18 @@ func (m Model) activateBoard() Model {
 		(&m).pushFrame(Frame{Kind: FrameTask, Ref: r.docID, Title: title})
 	}
 	return m
+}
+
+// nextKindOf reports the NextKind of a NEXT row by doc id (charter wave-12 D62),
+// so the c handler can route a resumable around the local ready-gate. Defaults to
+// nextReady for any id not in the strip.
+func (m Model) nextKindOf(docID string) NextKind {
+	for _, ni := range m.board.Next {
+		if ni.Task.DocID == docID {
+			return ni.Kind
+		}
+	}
+	return nextReady
 }
 
 // setEpicFoldUnderCursor is h (fold) / l (unfold): deterministic, idempotent
@@ -947,6 +980,13 @@ func (m Model) visibleRows() []row {
 	// claim-forward stays via the cursor landing on any ready row in the spine.
 	for _, t := range m.board.Now {
 		rows = append(rows, row{kind: rowNow, docID: t.DocID})
+	}
+	// The NEXT intent strip follows NOW in the pinned band (charter wave-12 D63):
+	// each resumable / ready-head row is a cursor stop c can claim. Height-
+	// independent — always len(b.Next) rows; renderNextBand's fold is purely visual,
+	// so parity holds against flattenSpine's len(Now)+len(Next) pinned offset.
+	for i := range m.board.Next {
+		rows = append(rows, row{kind: rowNext, docID: m.board.Next[i].Task.DocID})
 	}
 	// The scrolling spine is the SELECTABLE subset of the ONE ordered producer
 	// (spineRows, charter D42) — the SAME list flattenSpine renders. Headers,

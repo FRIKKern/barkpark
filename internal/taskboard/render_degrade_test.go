@@ -47,13 +47,14 @@ func TestHeaderStyledTruncateKeepsContent(t *testing.T) {
 	}
 }
 
-// TestManyClaimsKeepHeightContract proves the pinned NOW band degrades
-// (separators dropped, then cards folded to "+N more claimed") instead of
-// pushing the spine/ticker/footer off the pane — 6+ concurrent claims is the
-// NORM when a builder swarm is running.
+// TestManyClaimsKeepHeightContract proves the pinned NOW band degrades (agent
+// rows folded to "+N more claimed") instead of pushing the spine/ticker/footer off
+// the pane — a large concurrent-claim swarm is the NORM when many builders run.
+// With the wave-12 one-line agent rows the fold threshold is higher, so the fixture
+// carries enough claims to force the fold at height 30 (charter wave-12 D59/D63).
 func TestManyClaimsKeepHeightContract(t *testing.T) {
 	b := loadBoardFixture(t)
-	for i := 0; i < 8; i++ {
+	for i := 0; i < 24; i++ {
 		c := b.Now[0]
 		c.DocID = c.DocID + strings.Repeat("x", i+1)
 		b.Now = append(b.Now, c)
@@ -71,10 +72,12 @@ func TestManyClaimsKeepHeightContract(t *testing.T) {
 	}
 }
 
-// TestNowBreadcrumbResolvesDormantEpic proves a claimed task whose epic is
-// dormant (children folded away, so it is absent from the visible spine)
-// still gets its epic breadcrumb on the NOW card via ParentID resolution.
-func TestNowBreadcrumbResolvesDormantEpic(t *testing.T) {
+// TestNowAgentRowForDormantEpicClaim proves a claimed task whose epic is dormant
+// (children folded away, so it is absent from the visible spine) still surfaces in
+// the NOW band as an agent-first one-line row (charter wave-12 D59: worker leads,
+// no line-2 epic breadcrumb — the breadcrumb is retired, D56 shows the claim in
+// context down in the spine instead).
+func TestNowAgentRowForDormantEpicClaim(t *testing.T) {
 	b := loadBoardFixture(t)
 	b.Now = append(b.Now, Task{
 		DocID: "under-dormant", Title: "Reindex the media store",
@@ -86,9 +89,12 @@ func TestNowBreadcrumbResolvesDormantEpic(t *testing.T) {
 	if idx < 0 {
 		t.Fatalf("NOW card missing:\n%s", frame)
 	}
-	line2 := strings.Split(frame[idx:], "\n")[1]
-	if !strings.Contains(line2, "Search & Media epic") {
-		t.Errorf("breadcrumb missing for dormant-epic claim: %q", line2)
+	// The claim's own row carries the worker (agent-attributed) alongside the title,
+	// on ONE line — no separate breadcrumb line beneath it.
+	rowStart := strings.LastIndex(frame[:idx], "\n") + 1
+	row := frame[rowStart : strings.Index(frame[rowStart:], "\n")+rowStart]
+	if !strings.Contains(row, "opus-9") {
+		t.Errorf("NOW agent row missing the worker attribution: %q", row)
 	}
 }
 

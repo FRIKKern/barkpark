@@ -756,6 +756,53 @@ defmodule BarkparkWeb.Studio.StudioLivePaperCanvasTest do
       assert hd(run_b)["content"] == [%{"type" => "text", "value" => "run two edited"}]
     end
 
+    test "t12a: a fleet-containing doc [heading, task-board, paragraph] echoes ONE run (the fleet block no longer splits)",
+         %{conn: conn} do
+      # push_canvas_echo partitions with the SAME PaperCanvas.partition_runs the
+      # editor mounts, so after the t12a flip a top-level fleet block folds INTO the
+      # run — the whole doc echoes as ONE run keyed "run-0", the fleet block riding
+      # verbatim between the prose blocks (it paints in-canvas via bpFleet, D8/D5).
+      fleet_slug = "2026-07-06-canvas-fleet"
+
+      blocks = [
+        %{"id" => "f-h", "type" => "heading", "text" => "Board", "level" => 2},
+        %{"id" => "f-board", "type" => "task-board", "snapshot" => []},
+        %{
+          "id" => "f-after",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "after the board"}]
+        }
+      ]
+
+      {:ok, _} = Content.upsert_paper(%{slug: fleet_slug, dataset: @dataset, blocks: blocks})
+
+      {:ok, view, _html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{fleet_slug}"))
+
+      open_editor(view)
+
+      render_hook(view, "paper-ops", %{
+        "ops" => [
+          %{
+            "op" => "patch-block",
+            "id" => "f-after",
+            "patch" => %{"content" => [%{"type" => "text", "value" => "edited"}]}
+          }
+        ]
+      })
+
+      assert_push_event(view, "bp:canvas-update", %{runs: runs})
+
+      # ONE run — the task-board rides it verbatim, no boundary split.
+      assert [%{run_id: "run-0", blocks: run_blocks}] = runs
+      assert Enum.map(run_blocks, & &1["id"]) == ["f-h", "f-board", "f-after"]
+
+      # The fleet block rode VERBATIM (D5): still a raw task-board, no snapshot
+      # resolution serialized into the echoed baseline.
+      board = Enum.find(run_blocks, &(&1["id"] == "f-board"))
+      assert board["type"] == "task-board"
+    end
+
     test "S3.6: [paragraph, embed, paragraph] renders ONE canvas run containing the (read-only) embed" do
       blocks = [
         %{
