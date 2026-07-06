@@ -696,6 +696,12 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
 
   if (fieldType === "field-image") {
+    // GHOST chrome (pd-doctrine rule 6): in the canvas the picker is an atom that
+    // must show nothing the reader lacks — no Upload/Browse/Remove button row. The
+    // ghost variant renders the bare preview (or, while empty, the placeholder
+    // frame in front of it) and routes actions through the WC's context menu +
+    // the public openFileDialog()/openBrowser() methods below.
+    picker.setAttribute("chrome", "ghost");
     // The media picker reads the raw bearer token from data-token (empty disables
     // upload; browse + select still work). Per-block: data-token={@api_token_raw}.
     if (scope.token) picker.setAttribute("data-token", scope.token);
@@ -729,15 +735,32 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // with a still-empty value, so an in-flight browse is never yanked away.
   let revealed = false;
 
-  // Open the media picker: reveal the real WC and trigger its chooser. We prefer the
-  // WC's "Browse library" button (the asset browser), falling back to its empty card
-  // (the file dialog), then to focusing the WC — each is best-effort so a WC-internal
-  // change can never throw here.
+  // Open the media picker: reveal the real WC and trigger its chooser. We prefer
+  // the WC's PUBLIC openBrowser() method (ghost chrome omits the .bp-mp-browse
+  // button, so we no longer poke internals); the querySelector chain is kept as a
+  // best-effort fallback for an older/default-chrome WC. Each step is guarded so a
+  // WC-internal change can never throw here.
   const openPicker = () => {
     if (!editor.isEditable) return;
     revealed = true;
     if (placeholder) placeholder.hidden = true;
     picker.hidden = false;
+    if (typeof picker.openBrowser === "function") {
+      // openBrowser() reports whether the asset-browser modal actually opened
+      // (false when window.BpAssetBrowser isn't wired) — fall back to the file
+      // dialog so a placeholder click is never a dead affordance.
+      if (picker.openBrowser()) return;
+      if (typeof picker.openFileDialog === "function") {
+        // Hand keyboard focus to the revealed empty card BEFORE the dialog, so
+        // a cancel lands the keyboard user on the picker, not <body>.
+        const card = picker.querySelector && picker.querySelector(".bp-mp-empty");
+        if (card && typeof card.focus === "function") card.focus();
+        picker.openFileDialog();
+        return;
+      }
+      return;
+    }
+    // Fallback (older WC without the public method): poke the internal DOM.
     const trigger =
       (picker.querySelector && picker.querySelector(".bp-mp-browse")) ||
       (picker.querySelector && picker.querySelector(".bp-mp-empty"));
