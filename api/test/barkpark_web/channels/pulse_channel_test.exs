@@ -12,20 +12,21 @@ defmodule BarkparkWeb.PulseChannelTest do
 
   @valid %{"hue" => 200, "x" => 0.5, "y" => 0.25, "mega" => false, "chg" => 0.8}
 
-  defp join!(name) do
+  defp join!(name, params \\ %{}) do
     {:ok, reply, socket} =
       BarkparkWeb.PulseSocket
       |> socket(nil, %{})
-      |> subscribe_and_join(BarkparkWeb.PulseChannel, "pulse:" <> name)
+      |> subscribe_and_join(BarkparkWeb.PulseChannel, "pulse:" <> name, params)
 
     {reply, socket}
   end
 
-  test "join on a configured channel replies with the durable total" do
+  test "join on a configured channel replies with the durable total + own sid" do
     {:ok, _} = Pulse.record_event("test-storm", Map.delete(@valid, "chg"))
     total = Pulse.total("test-storm")
     {reply, _socket} = join!("test-storm")
-    assert reply == %{total: total}
+    assert %{total: ^total, sid: sid} = reply
+    assert is_binary(sid) and byte_size(sid) == 8
   end
 
   test "join on an unknown channel fails closed" do
@@ -96,6 +97,41 @@ defmodule BarkparkWeb.PulseChannelTest do
       push(sender, "cursor", %{"nope" => true})
       push(sender, "steal_tokens", %{})
       refute_broadcast "cursor", %{}, 120
+    end
+  end
+
+  describe "roster presence" do
+    test "join tracks the socket and pushes a presence_state with the hue" do
+      {_reply, _socket} = join!("test-storm", %{"hue" => 200})
+
+      assert_push "presence_state", state
+      assert map_size(state) == 1
+      [{sid, %{metas: [meta]}}] = Map.to_list(state)
+      assert is_binary(sid)
+      assert meta.hue == 200
+    end
+
+    test "a second joiner produces a presence_diff carrying its hue" do
+      {_reply, _first} = join!("test-storm", %{"hue" => 10})
+      assert_push "presence_state", _state
+      # drain the first socket's own join diff (hue 10) before the second joins
+      assert_broadcast "presence_diff", %{joins: first_joins}
+      assert [%{metas: [%{hue: 10}]}] = Map.values(first_joins)
+
+      {:ok, _reply, _second} =
+        BarkparkWeb.PulseSocket
+        |> socket(nil, %{})
+        |> subscribe_and_join(BarkparkWeb.PulseChannel, "pulse:test-storm", %{"hue" => 290})
+
+      assert_broadcast "presence_diff", %{joins: joins}
+      assert [%{metas: [%{hue: 290}]}] = Map.values(joins)
+    end
+
+    test "a missing/invalid hue defaults to 0" do
+      {_reply, _socket} = join!("test-storm", %{"hue" => "purple"})
+      assert_push "presence_state", state
+      [{_sid, %{metas: [meta]}}] = Map.to_list(state)
+      assert meta.hue == 0
     end
   end
 end

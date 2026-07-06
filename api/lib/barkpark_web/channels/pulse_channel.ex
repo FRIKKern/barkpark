@@ -19,20 +19,32 @@ defmodule BarkparkWeb.PulseChannel do
   and never touches the database, the counter, or the feed. `x = -1` means
   "cursor left". A stolen socket can therefore wiggle a ghost cursor and
   nothing else.
+
+  ## Roster presence
+
+  Beyond the fleeting cursor frames, every joined socket is tracked in
+  `BarkparkWeb.Presence` under its `sid` with its accent `hue` as metadata —
+  so a client can render "who's here right now, in their colors" including
+  idle visitors who aren't moving. The joining socket receives a
+  `"presence_state"` snapshot; Phoenix broadcasts `"presence_diff"` on
+  join/leave automatically. The hue comes from the join params (`{hue: N}`),
+  defaulting to 0.
   """
   use Phoenix.Channel
 
   alias Barkpark.Pulse
+  alias BarkparkWeb.Presence
 
   @cursor_min_interval_ms 80
 
   @impl true
-  def join("pulse:" <> name, _params, socket) do
+  def join("pulse:" <> name, params, socket) do
     case Pulse.channel(name) do
       {:ok, _cfg} ->
         socket =
           socket
           |> assign(:sid, Base.encode16(:crypto.strong_rand_bytes(4), case: :lower))
+          |> assign(:hue, valid_hue(params["hue"]))
           # monotonic time is usually NEGATIVE — a 0 sentinel would throttle
           # every frame forever. Seed one interval in the past instead.
           |> assign(
@@ -40,11 +52,26 @@ defmodule BarkparkWeb.PulseChannel do
             System.monotonic_time(:millisecond) - @cursor_min_interval_ms - 1
           )
 
-        {:ok, %{total: Pulse.total(name)}, socket}
+        send(self(), :after_join)
+        # the reply carries the socket's own sid so the client can mark itself
+        # in the presence roster (which lists everyone by sid)
+        {:ok, %{total: Pulse.total(name), sid: socket.assigns.sid}, socket}
 
       :error ->
         {:error, %{reason: "unknown pulse channel"}}
     end
+  end
+
+  @impl true
+  def handle_info(:after_join, socket) do
+    {:ok, _} =
+      Presence.track(socket, socket.assigns.sid, %{
+        hue: socket.assigns.hue,
+        online_at: System.system_time(:second)
+      })
+
+    push(socket, "presence_state", Presence.list(socket))
+    {:noreply, socket}
   end
 
   @impl true
@@ -76,4 +103,7 @@ defmodule BarkparkWeb.PulseChannel do
   # anything else inbound is silently ignored — this stays a presence-and-feed
   # surface, never a write path
   def handle_in(_event, _payload, socket), do: {:noreply, socket}
+
+  defp valid_hue(h) when is_integer(h) and h >= 0 and h <= 359, do: h
+  defp valid_hue(_), do: 0
 end
