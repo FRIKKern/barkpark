@@ -1,6 +1,6 @@
 defmodule Barkpark.StructureWorkspaceScopeTest do
   @moduledoc """
-  Pins that `Structure.build/3` scopes the Studio desk to the requesting
+  Pins that `Structure.build/2` scopes the Studio desk to the requesting
   workspace:
 
     * host groups gate on the workspace's OWN schemas — a workspace with a
@@ -69,8 +69,8 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     register_schema!("paper", "Papers", scope(ctx.ws_a, ctx.proj_a))
     register_schema!("post", "Posts", scope(ctx.ws_b, ctx.proj_b))
 
-    a_types = Structure.build(@dataset, nil, scope(ctx.ws_a, ctx.proj_a)) |> type_names()
-    b_types = Structure.build(@dataset, nil, scope(ctx.ws_b, ctx.proj_b)) |> type_names()
+    a_types = Structure.build(@dataset, scope(ctx.ws_a, ctx.proj_a)) |> type_names()
+    b_types = Structure.build(@dataset, scope(ctx.ws_b, ctx.proj_b)) |> type_names()
 
     assert "paper" in a_types
     refute "post" in a_types, "workspace A must not show workspace B's post type"
@@ -86,8 +86,8 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     # out of workspace B.
     register_schema!("task", "Tasks", scope(ctx.ws_a, ctx.proj_a))
 
-    a_types = Structure.build(@dataset, nil, scope(ctx.ws_a, ctx.proj_a)) |> type_names()
-    b_types = Structure.build(@dataset, nil, scope(ctx.ws_b, ctx.proj_b)) |> type_names()
+    a_types = Structure.build(@dataset, scope(ctx.ws_a, ctx.proj_a)) |> type_names()
+    b_types = Structure.build(@dataset, scope(ctx.ws_b, ctx.proj_b)) |> type_names()
 
     assert "task" in a_types, "workspace A registered task → Tasks desk node kept"
     refute "task" in b_types, "workspace B has no task schema → Tasks desk node dropped"
@@ -99,8 +99,8 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     # appear only in a workspace that registered the `book` schema.
     register_schema!("book", "Book (ONIX 3.0)", scope(ctx.ws_a, ctx.proj_a))
 
-    a_titles = Structure.build(@dataset, nil, scope(ctx.ws_a, ctx.proj_a)) |> titles()
-    b_titles = Structure.build(@dataset, nil, scope(ctx.ws_b, ctx.proj_b)) |> titles()
+    a_titles = Structure.build(@dataset, scope(ctx.ws_a, ctx.proj_a)) |> titles()
+    b_titles = Structure.build(@dataset, scope(ctx.ws_b, ctx.proj_b)) |> titles()
 
     assert "Pending submissions" in a_titles,
            "workspace A registered book → Bokbasen desk nodes kept"

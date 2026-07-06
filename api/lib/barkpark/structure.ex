@@ -45,7 +45,7 @@ defmodule Barkpark.Structure do
   every workspace's desk. With no scope (`[]`, the flat/Default desk) the
   filter is a no-op, preserving legacy behaviour.
   """
-  def build(dataset \\ "production", current_path \\ nil, opts \\ []) do
+  def build(dataset \\ "production", opts \\ []) do
     # The desk lists a workspace's content TYPES, which are workspace-level —
     # NOT per-project. Scope by workspace + shared globals (`include_global`)
     # and the dataset STRING; deliberately DROP `:project_id` so the read does
@@ -61,7 +61,7 @@ defmodule Barkpark.Structure do
       id: "root",
       title: "Structure",
       type: :list,
-      items: build_desk_items(schema_map, dataset, current_path, opts)
+      items: build_desk_items(schema_map, dataset, opts)
     }
   end
 
@@ -69,7 +69,7 @@ defmodule Barkpark.Structure do
   # This is the equivalent of Sanity's deskStructure export.
   # Edit this function to change the navigation tree.
 
-  defp build_desk_items(schemas, dataset, current_path, opts) do
+  defp build_desk_items(schemas, dataset, opts) do
     host_items =
       [
         build_content_group(schemas),
@@ -89,37 +89,44 @@ defmodule Barkpark.Structure do
     # plugin contributions. The default lift (no override) simply
     # appends plugin map entries — behaviour-equivalent to the legacy
     # host-side concat.
-    #
-    # The chain returns a mixed list of `%Node{}` structs (host
-    # baseline + any plugin overrides that returned them) plus
-    # plugin-shape maps (`%{type: :link | :document_list | :nested |
-    # :divider, …}`). Translate the maps through `plugin_item_to_node/1`
-    # and let host structs pass through. A divider between the host
-    # slice and plugin-contributed nodes is preserved by
-    # `maybe_join/1`'s post-pass on the host/plugin partition.
     resolved =
       safe_collect_desk_items(host_items, %{
         dataset: dataset,
-        current_path: current_path,
+        # Part of the documented plugin ctx contract (`Barkpark.Plugin`
+        # resolve_desk_items/2 §ctx). Desk builds are not per-URL today,
+        # so no caller threads a live path — plugins always see nil.
+        current_path: nil,
         scope: opts
       })
 
+    # Partition the chain's mixed output by BASELINE MEMBERSHIP, not
+    # struct-ness: only nodes the host itself built count as host. A
+    # `%Node{}` a plugin returned (new or amended) is a plugin
+    # contribution and must ride the same workspace gating as the
+    # map-shaped items (`%{type: :link | :document_list | :nested |
+    # :divider, …}`) — classifying on struct-ness alone let any
+    # struct-returning plugin bypass `scope_plugin_nodes/4` and leak
+    # into every workspace's desk. Consequence of the partition: plugin
+    # contributions always render AFTER the host slice (with a divider,
+    # via `maybe_join/2`) — a plugin can drop or reorder host entries
+    # but cannot interleave its own items between them.
     {host_part, plugin_part} =
       Enum.split_with(resolved, fn
-        %Node{} -> true
+        %Node{} = node -> node in host_items
         _ -> false
       end)
 
     plugin_nodes =
       plugin_part
-      |> Enum.map(&plugin_item_to_node/1)
+      |> Enum.with_index()
+      |> Enum.map(fn {item, idx} -> plugin_item_to_node(item, idx) end)
       |> Enum.reject(&is_nil/1)
       |> scope_plugin_nodes(schemas, dataset, opts)
 
     if plugin_nodes == [] do
       host_part
     else
-      maybe_join([host_part, plugin_nodes])
+      maybe_join([host_part, plugin_nodes], "plugjoin")
     end
   end
 
@@ -221,16 +228,27 @@ defmodule Barkpark.Structure do
     end
   end
 
-  defp plugin_item_to_node(%{type: :divider} = item) do
+  # `idx` is the item's position in the plugin slice (nested items compose
+  # "#{parent}-#{child}") — used only where the item carries nothing unique
+  # to hash. Positional, NOT `System.unique_integer/1`: node ids must be
+  # stable across rebuilds (LiveView keyed diffs; `/v1/structure` responses
+  # should byte-compare for TUI callers).
+  #
+  # A plugin's `resolve_desk_items/2` override may hand back full `%Node{}`
+  # structs (its own, or amended host nodes). Pass them through verbatim —
+  # they are gated downstream like every other plugin contribution.
+  defp plugin_item_to_node(%Node{} = node, _idx), do: node
+
+  defp plugin_item_to_node(%{type: :divider} = item, idx) do
     %Node{
       type: :divider,
-      id: "plugin-div-#{System.unique_integer([:positive])}",
+      id: "plugin-div-#{idx}",
       title: item[:label],
       requires_type: item[:requires_schema]
     }
   end
 
-  defp plugin_item_to_node(%{type: :link, label: label, path: path} = item) do
+  defp plugin_item_to_node(%{type: :link, label: label, path: path} = item, _idx) do
     %Node{
       id: "plugin-link-#{:erlang.phash2({label, path})}",
       title: label,
@@ -241,7 +259,7 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp plugin_item_to_node(%{type: :document_list, label: label, doc_type: doc_type} = item) do
+  defp plugin_item_to_node(%{type: :document_list, label: label, doc_type: doc_type} = item, _idx) do
     %Node{
       id: "plugin-doclist-#{:erlang.phash2({label, doc_type, item[:filter] || %{}})}",
       title: label,
@@ -255,25 +273,31 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp plugin_item_to_node(%{type: :nested, label: label, items: inner} = item)
+  defp plugin_item_to_node(%{type: :nested, label: label, items: inner} = item, idx)
        when is_list(inner) do
     %Node{
       id: "plugin-nest-#{:erlang.phash2({label, length(inner)})}",
       title: label,
       icon: item[:icon],
       type: :list,
-      items: inner |> Enum.map(&plugin_item_to_node/1) |> Enum.reject(&is_nil/1)
+      items:
+        inner
+        |> Enum.with_index()
+        |> Enum.map(fn {child, j} -> plugin_item_to_node(child, "#{idx}-#{j}") end)
+        |> Enum.reject(&is_nil/1)
     }
   end
 
-  defp plugin_item_to_node(_), do: nil
+  defp plugin_item_to_node(_, _idx), do: nil
 
   # Joins non-empty groups with a single divider between adjacent non-empty
   # groups. Avoids stray dividers when a group is absent. If a group
   # itself begins with its own `:divider` (plugin contributions often do,
   # to label themselves), drop the synthesized one — otherwise the tree
-  # ends up with consecutive dividers.
-  defp maybe_join(groups) do
+  # ends up with consecutive dividers. Divider ids are positional (stable
+  # across rebuilds); `id_prefix` keeps the two call sites (host groups,
+  # host↔plugin join) from colliding.
+  defp maybe_join(groups, id_prefix \\ "div") do
     groups
     |> Enum.reject(&(&1 == []))
     |> Enum.with_index()
@@ -283,7 +307,7 @@ defmodule Barkpark.Structure do
       else
         case group do
           [%Node{type: :divider} | _] -> group
-          _ -> [divider() | group]
+          _ -> [%Node{type: :divider, id: "#{id_prefix}-#{idx}"} | group]
         end
       end
     end)
@@ -493,7 +517,7 @@ defmodule Barkpark.Structure do
               type: :document_type_list,
               type_name: schema.name
             },
-            divider()
+            %Node{type: :divider, id: "#{schema.name}-div"}
           ] ++
             Enum.map(status_field["options"], fn opt ->
               %Node{
@@ -522,10 +546,6 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp divider do
-    %Node{type: :divider, id: "div-#{System.unique_integer([:positive])}"}
-  end
-
   # frt plugin: names of the schemas the frt plugin renders via its own
   # desk_items/1 groups. Pulled from the plugin module (single source of
   # truth) so adding/removing an frt type never needs a host edit here.
@@ -542,24 +562,6 @@ defmodule Barkpark.Structure do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────
-
-  @doc "Get sidebar items for the layout (flat list for rendering)."
-  def sidebar_items(dataset \\ "production") do
-    schemas = Content.list_schemas(dataset)
-    public = Enum.filter(schemas, &(&1.visibility == "public"))
-    private = Enum.filter(schemas, &(&1.visibility == "private"))
-
-    %{
-      content:
-        Enum.map(public, fn s ->
-          %{name: s.name, title: s.title, icon: s.icon, visibility: :public}
-        end),
-      settings:
-        Enum.map(private, fn s ->
-          %{name: s.name, title: s.title, icon: s.icon, visibility: :private}
-        end)
-    }
-  end
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)

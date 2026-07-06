@@ -40,7 +40,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @spec build(String.t(), [String.t()], keyword()) :: {[map()], map() | nil}
   def build(dataset, nav_path, opts) do
-    structure = Structure.build(dataset, nil, scope(opts))
+    structure = Structure.build(dataset, scope(opts))
 
     root_pane = %{
       title: structure.title,
@@ -202,26 +202,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           selected: Enum.at(rest, 0)
         }
 
-        editor =
-          case rest do
-            [doc_id | _] ->
-              {doc, is_draft, has_pub} =
-                Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
-
-              if doc && schema do
-                %{
-                  doc: doc,
-                  schema: schema,
-                  type: type_name,
-                  is_draft: is_draft,
-                  has_published: has_pub,
-                  form: Content.doc_to_form(doc, schema)
-                }
-              end
-
-            _ ->
-              nil
-          end
+        editor = build_editor(type_name, schema, rest, dataset, opts, nil)
 
         {panes ++ [doc_pane], editor}
 
@@ -263,15 +244,6 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
         docs = Content.list_documents(type_name, dataset, list_opts)
 
-        # Papers are listed in the desk and OPEN LIVE inside the Studio editor
-        # pane (a streaming block view), NOT the Studio form editor and NOT an
-        # external link out to `/papers/:slug`. Their list rows are ordinary
-        # selectable `:doc` rows so `phx-click="select"` drives Studio-internal
-        # navigation to `/studio/:dataset/paper/:slug`; the editor map carries
-        # `view: :paper` so StudioLive renders the block stream instead of a
-        # field form.
-        paper? = type_name == Content.paper_type()
-
         doc_pane = %{
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
@@ -282,119 +254,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           selected: Enum.at(rest, 0)
         }
 
-        editor =
-          cond do
-            type_name == "mediaAsset" and rest == [] ->
-              %{
-                view: :media_explorer,
-                type: type_name,
-                schema: schema,
-                kind_filter: desk_kind_filter(active_group)
-              }
-
-            # A paper opens as a LIVE block view in the editor pane. Build a
-            # `view: :paper` editor map carrying the paper document so
-            # StudioLive can render + subscribe to the block stream.
-            paper? ->
-              case rest do
-                [slug | _] ->
-                  case Content.get_paper(slug, dataset, scope(opts)) do
-                    nil ->
-                      nil
-
-                    paper_doc ->
-                      %{
-                        view: :paper,
-                        doc: paper_doc,
-                        schema: schema,
-                        type: type_name,
-                        is_draft: false,
-                        has_published: false,
-                        form: %{}
-                      }
-                  end
-
-                _ ->
-                  nil
-              end
-
-            # A `graph` doc opens as the blast-radius Canvas2D pane (Goal
-            # ges/graph-edge-seam, Phase 5). Same draft-first doc resolution as
-            # the generic branch, but the editor map carries `view: :graph` plus
-            # the traversed node/edge payload (reverse direction — the
-            # blast-radius is "what would break if this doc went away"). The
-            # GraphView LiveComponent renders it; the StudioLive `:graph` arm
-            # wires it up. Built via Content.Graph.traverse/2 (Phase 4).
-            type_name == "graph" ->
-              case rest do
-                [doc_id | _] ->
-                  {doc, is_draft, has_pub} =
-                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
-
-                  if doc do
-                    %{
-                      view: :graph,
-                      doc: doc,
-                      schema: schema,
-                      type: type_name,
-                      is_draft: is_draft,
-                      has_published: has_pub,
-                      form: %{},
-                      graph: graph_payload(doc, dataset, scope(opts))
-                    }
-                  end
-
-                _ ->
-                  nil
-              end
-
-            # A sheet opens as the collaborative grid editor (Sheets M2).
-            # Same draft-first doc resolution as the generic branch, but the
-            # editor map carries `view: :sheet` so StudioLive renders the
-            # SheetGrid LiveComponent instead of the field form.
-            type_name == "sheet" ->
-              case rest do
-                [doc_id | _] ->
-                  {doc, is_draft, has_pub} =
-                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
-
-                  if doc do
-                    %{
-                      view: :sheet,
-                      doc: doc,
-                      schema: schema,
-                      type: type_name,
-                      is_draft: is_draft,
-                      has_published: has_pub,
-                      form: %{}
-                    }
-                  end
-
-                _ ->
-                  nil
-              end
-
-            true ->
-              case rest do
-                [doc_id | _] ->
-                  {doc, is_draft, has_pub} =
-                    Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope(opts))
-
-                  if doc && schema do
-                    %{
-                      doc: doc,
-                      schema: schema,
-                      type: type_name,
-                      is_draft: is_draft,
-                      has_published: has_pub,
-                      form: Content.doc_to_form(doc, schema)
-                    }
-                  end
-
-                _ ->
-                  nil
-              end
-          end
+        editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
 
         {panes ++ [doc_pane], editor}
 
@@ -428,6 +288,130 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       _ ->
         {panes, nil}
+    end
+  end
+
+  # ── Editor dispatch ────────────────────────────────────────────────────────
+  #
+  # ONE dispatch table shared by BOTH document-list branches
+  # (`:document_type_list` and `:plugin_document_list`), so a
+  # plugin-contributed list over a special type opens the same editor a host
+  # desk row does:
+  #
+  #   * papers open LIVE inside the Studio editor pane (a streaming block
+  #     view, `view: :paper`) — NOT the field form and NOT a link out to
+  #     `/papers/:slug`;
+  #   * sheets open the collaborative grid (`view: :sheet`, Sheets M2);
+  #   * `graph` docs open the blast-radius Canvas2D pane (`view: :graph`,
+  #     Goal ges/graph-edge-seam Phase 5) with the traversed node/edge
+  #     payload via Content.Graph.traverse/2;
+  #   * a mediaAsset list with NO doc selected opens the asset explorer
+  #     (`view: :media_explorer`), kind-filtered by the active desk chip;
+  #   * everything else resolves draft-first into the field-form editor.
+  #
+  # Returns the editor map or nil (no doc selected / doc not found).
+  defp build_editor(type_name, schema, rest, dataset, opts, active_group) do
+    scope_kw = scope(opts)
+
+    cond do
+      type_name == "mediaAsset" and rest == [] ->
+        %{
+          view: :media_explorer,
+          type: type_name,
+          schema: schema,
+          kind_filter: desk_kind_filter(active_group)
+        }
+
+      # `Content.paper_type/0` is the canonical accessor for the paper type
+      # name; "sheet"/"graph" are fixed plugin schema names with no accessor.
+      type_name == Content.paper_type() ->
+        case rest do
+          [slug | _] ->
+            case Content.get_paper(slug, dataset, scope_kw) do
+              nil ->
+                nil
+
+              paper_doc ->
+                %{
+                  view: :paper,
+                  doc: paper_doc,
+                  schema: schema,
+                  type: type_name,
+                  is_draft: false,
+                  has_published: false,
+                  form: %{}
+                }
+            end
+
+          _ ->
+            nil
+        end
+
+      type_name == "graph" ->
+        case rest do
+          [doc_id | _] ->
+            {doc, is_draft, has_pub} =
+              Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope_kw)
+
+            if doc do
+              %{
+                view: :graph,
+                doc: doc,
+                schema: schema,
+                type: type_name,
+                is_draft: is_draft,
+                has_published: has_pub,
+                form: %{},
+                graph: graph_payload(doc, dataset, scope_kw)
+              }
+            end
+
+          _ ->
+            nil
+        end
+
+      type_name == "sheet" ->
+        case rest do
+          [doc_id | _] ->
+            {doc, is_draft, has_pub} =
+              Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope_kw)
+
+            if doc do
+              %{
+                view: :sheet,
+                doc: doc,
+                schema: schema,
+                type: type_name,
+                is_draft: is_draft,
+                has_published: has_pub,
+                form: %{}
+              }
+            end
+
+          _ ->
+            nil
+        end
+
+      true ->
+        case rest do
+          [doc_id | _] ->
+            {doc, is_draft, has_pub} =
+              Content.fetch_doc_with_draft(type_name, doc_id, dataset, scope_kw)
+
+            if doc && schema do
+              %{
+                doc: doc,
+                schema: schema,
+                type: type_name,
+                is_draft: is_draft,
+                has_published: has_pub,
+                form: Content.doc_to_form(doc, schema)
+              }
+            end
+
+          _ ->
+            nil
+        end
     end
   end
 
@@ -680,37 +664,48 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @doc """
   Find the URL path segments for a given (type, doc_id) in the
-  Structure tree. Handles direct children (simple doc list), nested
-  sub-lists (e.g. posts inside a settings sub-list), and singleton
-  fallback. Used by the `jump-to-user` event handler to resolve a
-  presence target back to a navigable URL.
+  Structure tree. Recursively searches nested groups (at any depth) for
+  the node that lists `type` — a `:document_type_list` or
+  `:plugin_document_list` (preferring the unfiltered "All" view over
+  filtered sub-views of the same type) or a `:document` singleton
+  (whose path omits the doc id: singletons resolve by type name).
+  Falls back to `[type, doc_id]` when the type isn't in the tree.
+  Used by the `jump-to-user` event handler to resolve a presence
+  target back to a navigable URL.
   """
   @spec find_doc_path(map(), String.t(), String.t()) :: [String.t()]
   def find_doc_path(structure, type, doc_id) do
-    direct = Enum.find(structure.items, &(&1.id == type && &1.type == :document_type_list))
+    case find_type_node(structure.items || [], type, []) do
+      {path, %{type: :document}} -> path
+      {path, _node} -> path ++ [doc_id]
+      nil -> [type, doc_id]
+    end
+  end
+
+  # DFS for the structure node that lists `type`. Returns `{id_path, node}`
+  # or nil. At each level direct matches beat descents into sub-lists, and
+  # among doc-list siblings of the same type the unfiltered one (the "All"
+  # view a filtered group always carries) beats the filtered sub-views.
+  defp find_type_node(items, type, acc) do
+    direct =
+      items
+      |> Enum.filter(fn node ->
+        node.type in [:document_type_list, :plugin_document_list, :document] and
+          (node.type_name == type or node.id == type)
+      end)
+      |> Enum.sort_by(&(&1.filter != nil))
+      |> List.first()
 
     if direct do
-      [type, doc_id]
+      {acc ++ [direct.id], direct}
     else
-      parent =
-        Enum.find(structure.items, fn node ->
-          node.type == :list &&
-            Enum.any?(node.items || [], fn child ->
-              child.type == :document_type_list && child.type_name == type
-            end)
-        end)
+      Enum.find_value(items, fn
+        %{type: :list, items: children} = node when is_list(children) ->
+          find_type_node(children, type, acc ++ [node.id])
 
-      if parent do
-        all_item =
-          Enum.find(parent.items, fn child ->
-            child.type == :document_type_list && child.type_name == type && child.filter == nil
-          end)
-
-        sub_id = if all_item, do: all_item.id, else: "#{type}-all"
-        [parent.id, sub_id, doc_id]
-      else
-        [type, doc_id]
-      end
+        _ ->
+          nil
+      end)
     end
   end
 end

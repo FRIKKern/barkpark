@@ -14,8 +14,12 @@ defmodule BarkparkWeb.StructureController do
   Auth matches the schema index the TUI already calls (admin token on the
   same pipelines); response: `{"structure": <node>}` where a node is
   `{id, title, icon, type, typeName, filter, items: [node], child: node}`.
-  `type` is one of `list · list_item · document_type_list · document ·
-  divider`. Absent fields are omitted, never null-padded.
+  `type` is one of `list · document_type_list · document · divider ·
+  plugin_link · plugin_document_list`. `filter` is a `"field=value"` string
+  (a path on `plugin_link` nodes), EXCEPT on `plugin_document_list` nodes
+  where it is the raw filter-map object — the Go client decodes it as
+  `json.RawMessage` and `DeskNode.FilterString()` normalizes both shapes.
+  Absent fields are omitted, never null-padded.
   """
 
   use BarkparkWeb, :controller
@@ -25,7 +29,7 @@ defmodule BarkparkWeb.StructureController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   def show(conn, %{"dataset" => dataset}) do
-    json(conn, %{structure: node_json(Structure.build(dataset, nil, scope_opts(conn)))})
+    json(conn, %{structure: node_json(Structure.build(dataset, scope_opts(conn)))})
   end
 
   defp node_json(%Structure.Node{} = node) do
