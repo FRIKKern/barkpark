@@ -311,7 +311,13 @@ defmodule Barkpark.Content.Papers.BlockOps do
       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          blocks = get_in(doc.content || %{}, ["blocks"]) || [],
-         {:ok, patched} <- Patch.apply_patch(blocks, op),
+         # Doctrine backstop (pdd-t20): the OP layer enforces the paper
+         # constraint VOCABULARY (cardinality + relative order) alongside the
+         # locked-placement checks Patch already runs. The PAPER declaration set
+         # is passed by the caller (core stays generic, D10); D12's
+         # only-when-before-valid guard keeps the legacy corpus untouched (D3).
+         {:ok, patched} <-
+           Patch.apply_patch(blocks, op, constraints: Papers.Template.paper_declarations()),
          # Route the op-applied list through the SAME chokepoint before
          # persisting: a NEW op-inserted block carrying no id (clients normally
          # mint ids, but the op payload is not guaranteed to) would otherwise be
@@ -515,8 +521,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # the first failure (returning that op's tagged error) so a partial batch is
   # never persisted. Affected ids are de-duped while preserving first-seen order.
   defp fold_paper_ops(blocks, ops) do
+    # Doctrine backstop (pdd-t20): thread the PAPER constraint declarations into
+    # every op of the atomic fold, so a batch op that breaks a cardinality /
+    # relative-order rule halts the fold exactly like a locked-block op (the
+    # paper stays UNCHANGED). Same declaration set as the single-op path.
+    constraints = Papers.Template.paper_declarations()
+
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
-      with {:ok, next} <- Patch.apply_patch(acc, op),
+      with {:ok, next} <- Patch.apply_patch(acc, op, constraints: constraints),
            {:ok, affected} <- locate_paper_affected(op, next) do
         new_ids =
           case affected.block_id do

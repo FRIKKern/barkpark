@@ -30,6 +30,47 @@ defmodule Barkpark.Content.Papers.Template do
 
   @title_role "title"
   @featured_role "featured"
+  @ingress_role "ingress"
+
+  @doc """
+  The paper body's constraint vocabulary (pdd-t20) — the current template
+  re-expressed as `Barkpark.PortableDoc.Constraints` declarations,
+  BYTE-COMPATIBLY with `validate/1`:
+
+    * `title`    — required, exactly-1, at `@top[0]`, locked.
+    * `featured` — optional, max-1, after `title`.
+    * `ingress`  — optional, max-1, after `title` and before `featured`.
+
+  Threaded by the op-layer backstop (`Content.Papers.BlockOps` →
+  `Patch.apply_patch/3`'s `:constraints` opt) so a streaming op that breaks a
+  cardinality or relative-order rule is vetoed calmly, exactly like a locked op.
+  A well-formed template paper (title heading @0, featured image after it)
+  satisfies every declaration, so the pre-doctrine corpus is untouched (D3).
+  """
+  @spec paper_declarations() :: [map()]
+  def paper_declarations do
+    [
+      %{
+        kind: @title_role,
+        presence: :required,
+        count: {:exactly, 1},
+        position: {:index, 0},
+        locked: true
+      },
+      %{
+        kind: @featured_role,
+        presence: :optional,
+        count: {:max, 1},
+        position: {:after, @title_role}
+      },
+      %{
+        kind: @ingress_role,
+        presence: :optional,
+        count: {:max, 1},
+        position: {:after, @title_role, :before, @featured_role}
+      }
+    ]
+  end
 
   @doc "The forced initial block set: locked title heading + locked featured image."
   @spec template_blocks(String.t() | nil) :: [map()]

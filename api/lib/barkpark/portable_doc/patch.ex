@@ -62,6 +62,7 @@ defmodule Barkpark.PortableDoc.Patch do
       {:error, {:type_mismatch, target, op}}
       {:error, {:duplicate_id, target, op}}
       {:error, {:locked_block, target, op}}
+      {:error, {:constraint, message, op}}
       {:error, {:invalid_op, op_value}}
 
   where `target` is the offending id (or `afterId`), and `op` is the failing
@@ -71,14 +72,30 @@ defmodule Barkpark.PortableDoc.Patch do
   rejected — both when the op TARGETS the locked block and when its side
   effect would shift a locked block's top-level position (e.g. an insert-after
   landing inside the locked prefix).
+
+  `:constraint` is the CONSTRAINT-VOCABULARY backstop (pdd-t20) — the calm
+  SIBLING of `:locked_block`. When the caller threads a doc type's constraint
+  DECLARATIONS via `apply_patch/3`'s `opts[:constraints]`
+  (`Barkpark.PortableDoc.Constraints` shape), an op whose result would break a
+  CARDINALITY (min/max/exactly) or RELATIVE-order (after/before/index) rule is
+  rejected — a `remove-block` dropping below a min-N, an `insert-after` adding
+  a second max-1 block, or a `move-block` misplacing an optional-but-positioned
+  block. `message` is the first human-readable violation string. The veto fires
+  ONLY when the doc was VALID before the op (D12): a legacy / already-invalid
+  doc plus an unrelated op is NOT rejected, so no edit is punished for a
+  pre-existing violation. With no declarations passed the engine is
+  byte-identical to the pre-vocabulary behaviour (D3 additive).
   """
+
+  alias Barkpark.PortableDoc.Constraints
 
   @type block :: %{required(String.t()) => term()}
   @type blocks :: [block()]
   @type doc :: %{required(String.t()) => term()}
   @type op :: %{required(String.t()) => term()}
 
-  @type error_code :: :block_not_found | :type_mismatch | :duplicate_id | :locked_block
+  @type error_code ::
+          :block_not_found | :type_mismatch | :duplicate_id | :locked_block | :constraint
   @type error ::
           {:error, {error_code(), String.t(), String.t()}}
           | {:error, {:invalid_op, term()}}
@@ -90,22 +107,38 @@ defmodule Barkpark.PortableDoc.Patch do
   blocks. Returns the same shape it was given on success — `{:ok, new_doc}` for
   a document, `{:ok, new_blocks}` for a bare list — or `{:error, reason}`.
 
+  `opts` (optional) may carry `:constraints` — a
+  `Barkpark.PortableDoc.Constraints` declaration list. When present, an op whose
+  result breaks a cardinality / relative-order rule is rejected `{:constraint,
+  message, op}` (see the [errors](#module-errors)). Omitting it (the default)
+  leaves the engine byte-identical to the pre-vocabulary behaviour.
+
   Pure and immutable: the input is never mutated; only the path from the root
   down to the target block is rebuilt (structural sharing), every untouched
   subtree keeps its identity.
   """
   @spec apply_patch(doc(), op()) :: {:ok, doc()} | error()
   @spec apply_patch(blocks(), op()) :: {:ok, blocks()} | error()
-  def apply_patch(%{"blocks" => blocks} = doc, op) when is_list(blocks) do
-    case apply_patch(blocks, op) do
+  @spec apply_patch(doc(), op(), keyword()) :: {:ok, doc()} | error()
+  @spec apply_patch(blocks(), op(), keyword()) :: {:ok, blocks()} | error()
+  def apply_patch(doc_or_blocks, op), do: apply_patch(doc_or_blocks, op, [])
+
+  def apply_patch(%{"blocks" => blocks} = doc, op, opts) when is_list(blocks) do
+    case apply_patch(blocks, op, opts) do
       {:ok, new_blocks} -> {:ok, Map.put(doc, "blocks", new_blocks)}
       {:error, _} = err -> err
     end
   end
 
-  def apply_patch(blocks, op) when is_list(blocks) do
-    with {:ok, new_blocks} <- apply_to_blocks(blocks, op) do
-      check_locked_placement(blocks, new_blocks, op)
+  def apply_patch(blocks, op, opts) when is_list(blocks) do
+    # Enforcement order: apply → locked-placement check (op-specific, more
+    # precise) → constraint-vocabulary check (cardinality + relative order).
+    # Locks are checked FIRST so a displaced locked block keeps its
+    # `{:locked_block, …}` error; constraints only ever ADD a rejection class,
+    # never mask one.
+    with {:ok, new_blocks} <- apply_to_blocks(blocks, op),
+         {:ok, new_blocks} <- check_locked_placement(blocks, new_blocks, op) do
+      check_constraints(blocks, new_blocks, op, opts)
     end
   end
 
@@ -121,12 +154,21 @@ defmodule Barkpark.PortableDoc.Patch do
 
   Pure and immutable, like `apply_patch/2`: no Repo access, no I/O. An empty
   list is a no-op that returns `{:ok, input}`.
+
+  `opts` (optional) is threaded verbatim into each `apply_patch/3` — so a
+  `:constraints` declaration list is evaluated per op, halting the batch on the
+  first op that breaks a rule (the paper op-fold in `Content.Papers.BlockOps`
+  passes the paper declarations here).
   """
   @spec apply_patches(doc(), [op()]) :: {:ok, doc()} | error()
   @spec apply_patches(blocks(), [op()]) :: {:ok, blocks()} | error()
-  def apply_patches(doc_or_blocks, ops) when is_list(ops) do
+  @spec apply_patches(doc(), [op()], keyword()) :: {:ok, doc()} | error()
+  @spec apply_patches(blocks(), [op()], keyword()) :: {:ok, blocks()} | error()
+  def apply_patches(doc_or_blocks, ops), do: apply_patches(doc_or_blocks, ops, [])
+
+  def apply_patches(doc_or_blocks, ops, opts) when is_list(ops) do
     Enum.reduce_while(ops, {:ok, doc_or_blocks}, fn op, {:ok, acc} ->
-      case apply_patch(acc, op) do
+      case apply_patch(acc, op, opts) do
         {:ok, next} -> {:cont, {:ok, next}}
         {:error, _} = err -> {:halt, err}
       end
@@ -304,6 +346,38 @@ defmodule Barkpark.PortableDoc.Patch do
         nil -> {:ok, after_blocks}
         {id, _idx} -> {:error, {:locked_block, id, Map.get(op, "op")}}
       end
+    end
+  end
+
+  # Doctrine backstop (pdd-t20): the CONSTRAINT-VOCABULARY op-layer veto — the
+  # calm sibling of check_locked_placement. When the caller threads a doc type's
+  # constraint DECLARATIONS via `opts[:constraints]`, an op whose result would
+  # break a cardinality (min/max/exactly) or relative-order (after/before/index)
+  # rule is rejected `{:constraint, first_error, op}`.
+  #
+  # The ONLY-WHEN-BEFORE-VALID guard is LOAD-BEARING (D12): the veto fires only
+  # when the doc satisfied every declaration BEFORE the op. A legacy /
+  # already-invalid doc (e.g. a pre-doctrine paper with no title block) plus an
+  # unrelated op is NOT rejected — an edit is never punished for a pre-existing
+  # violation, and the op engine stays additive over the untouched corpus (D3).
+  #
+  # With no declarations passed (the common case, incl. every non-paper op), the
+  # scan short-circuits and the result is byte-identical to the pre-vocabulary
+  # engine.
+  defp check_constraints(before_blocks, after_blocks, op, opts) do
+    case Keyword.get(opts, :constraints, []) do
+      [] ->
+        {:ok, after_blocks}
+
+      decls ->
+        if Constraints.validate(before_blocks, decls) == [] do
+          case Constraints.validate(after_blocks, decls) do
+            [] -> {:ok, after_blocks}
+            [first | _] -> {:error, {:constraint, first, Map.get(op, "op")}}
+          end
+        else
+          {:ok, after_blocks}
+        end
     end
   end
 
