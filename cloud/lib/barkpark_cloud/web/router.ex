@@ -3446,8 +3446,70 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/internal/warm-servers/claim-refresh {min_age_seconds?} → atomically
+  # pop the STALEST ready box for a background REFRESH to origin/main
+  # (snapshot-management self-refresh loop). 200 {name, ip, claim_token} or 204
+  # when no ready box is due. The box is `refreshing` (out of the assignable set)
+  # until the worker releases it via .../refreshed. min_age_seconds gates churn:
+  # a box refreshed within it is not re-picked (default 90s).
+  post "/v1/internal/warm-servers/claim-refresh" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      min_age =
+        case conn.body_params["min_age_seconds"] do
+          n when is_integer(n) and n >= 0 -> n
+          _ -> 90
+        end
+
+      case Registry.claim_warm_server_for_refresh(generate_claim_token(), min_age) do
+        nil -> send_resp(conn, 204, "")
+        ws -> json(conn, 200, %{name: ws.name, ip: ws.ip, claim_token: ws.claim_token})
+      end
+    end
+  end
+
+  # POST /v1/internal/warm-servers/:name/refreshed {claim_token, refreshed?} →
+  # release a refreshing box BACK to ready (refreshing → ready). claim-fenced;
+  # `refreshed: true` (default) stamps refreshed_at now (drop to the back of the
+  # queue), `false` leaves it (retry sooner). A refresh failure NEVER removes a
+  # box — it still serves working code. 200 {ok: true}.
+  post "/v1/internal/warm-servers/:name/refreshed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      token =
+        case conn.body_params["claim_token"] do
+          t when is_binary(t) and t != "" -> t
+          _ -> nil
+        end
+
+      refreshed? = conn.body_params["refreshed"] != false
+
+      cond do
+        is_nil(token) ->
+          json(conn, 422, %{error: "claim_token_required"})
+
+        true ->
+          {:ok, _} =
+            Registry.release_warm_server_after_refresh(
+              conn.path_params["name"],
+              token,
+              refreshed?
+            )
+
+          json(conn, 200, %{ok: true})
+      end
+    end
+  end
+
   # GET /v1/internal/warm-servers/count → 200 {ready: N}. The reconciler's grow/
-  # shrink input (how many ready boxes the pool currently holds).
+  # shrink input (pool size = ready + refreshing; a refreshing box is a transient
+  # pool member, so it never triggers a spurious grow).
   get "/v1/internal/warm-servers/count" do
     conn = Auth.require_worker(conn, [])
 

@@ -226,6 +226,17 @@ type Worker struct {
 	// addition to the startup reconcile), so a long-lived worker keeps the pool at
 	// size without a separate timer. Zero → startup-only.
 	ReconcileEvery int
+	// Refresh keeps idle pool boxes at origin/main (snapshot-management): each call
+	// launches an ASYNC background refresh of the STALEST due box (out of the
+	// assignable set while it refreshes, fail-open) so a go-live almost never
+	// rebuilds at claim time. Non-blocking + one-in-flight (DefaultRefresh gates
+	// it), so the claim loop is never held up by a multi-minute rebuild. nil → the
+	// pool is only kept current at refill/reconcile (the pre-self-refresh behavior).
+	Refresh func(context.Context)
+	// RefreshEvery, when > 0, calls Refresh every Nth completed cycle in Run. Sized
+	// small (a check is cheap — a 204 when nothing is due) so the pool tracks main
+	// tightly. Zero → no periodic refresh.
+	RefreshEvery int
 	// ShutdownDeadline bounds a graceful shutdown's grace window (dwb-15). Zero →
 	// DefaultShutdownDeadline. See Shutdown.
 	ShutdownDeadline time.Duration
@@ -693,6 +704,14 @@ func (w *Worker) RunWith(ctx context.Context, onCycle func(claimed bool, err err
 			if rerr := w.ReconcileOnce(ctx); rerr != nil && onCycle != nil {
 				onCycle(false, fmt.Errorf("warm-pool reconcile: %w", rerr))
 			}
+		}
+
+		// Periodic self-refresh: every RefreshEvery cycles, kick a background
+		// refresh of the stalest due pool box to origin/main so a claim almost
+		// never rebuilds (snapshot-management). Non-blocking + one-in-flight, so a
+		// multi-minute rebuild never holds up the claim loop.
+		if w.RefreshEvery > 0 && w.Refresh != nil && cycles%w.RefreshEvery == 0 {
+			w.Refresh(ctx)
 		}
 
 		// Only idle-sleep when there was nothing to do; a drained job loops

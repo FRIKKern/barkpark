@@ -169,6 +169,97 @@ defmodule BarkparkCloud.WarmPoolTest do
     end
   end
 
+  # snapshot-management: the self-refresh loop keeps idle pool boxes at origin/main
+  # so a go-live almost never rebuilds. A refreshing box is OUT of the assignable
+  # set but STILL a pool member (returns to ready; counts toward pool size).
+  describe "claim_warm_server_for_refresh/2 + release_warm_server_after_refresh/3" do
+    test "claims the STALEST ready box (never-refreshed first) → refreshing, and back to ready" do
+      {:ok, _} = Registry.register_warm_server("warm-old", "10.0.0.1")
+      {:ok, _} = Registry.register_warm_server("warm-new", "10.0.0.2")
+      # warm-new was just refreshed; warm-old never was → warm-old is stalest.
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      from(w in WarmServer, where: w.name == "warm-new")
+      |> Repo.update_all(set: [refreshed_at: now])
+
+      assert %WarmServer{name: "warm-old", status: "refreshing", claim_token: "rt-1"} =
+               ws = Registry.claim_warm_server_for_refresh("rt-1", 90)
+
+      # A refreshing box is not assignable, but still counts toward pool size.
+      assert Registry.claim_warm_server("assign-x").name == "warm-new"
+      # (only warm-new was assignable; warm-old is refreshing)
+
+      # Release it back to ready, stamping refreshed_at.
+      assert {:ok, 1} = Registry.release_warm_server_after_refresh(ws.name, "rt-1", true)
+      reloaded = Repo.get_by!(WarmServer, name: "warm-old")
+      assert reloaded.status == "ready"
+      assert reloaded.refreshed_at != nil
+      assert reloaded.claim_token == nil
+    end
+
+    test "skips a box refreshed within min_age; nil when nothing is due" do
+      {:ok, _} = Registry.register_warm_server("warm-fresh", "10.0.0.1")
+
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      from(w in WarmServer, where: w.name == "warm-fresh")
+      |> Repo.update_all(set: [refreshed_at: now])
+
+      # Refreshed 0s ago, min_age 90s → not due.
+      assert Registry.claim_warm_server_for_refresh("rt", 90) == nil
+    end
+
+    test "a failed refresh (refreshed?: false) returns to ready WITHOUT stamping refreshed_at" do
+      {:ok, _} = Registry.register_warm_server("warm-fail", "10.0.0.1")
+      ws = Registry.claim_warm_server_for_refresh("rt-f", 0)
+      assert ws.status == "refreshing"
+
+      assert {:ok, 1} = Registry.release_warm_server_after_refresh("warm-fail", "rt-f", false)
+      reloaded = Repo.get_by!(WarmServer, name: "warm-fail")
+      assert reloaded.status == "ready"
+      # Left null → retried on the next pass rather than waiting out min_age.
+      assert reloaded.refreshed_at == nil
+    end
+
+    test "release is claim-fenced: a stale token is a no-op" do
+      {:ok, _} = Registry.register_warm_server("warm-fence-r", "10.0.0.1")
+      _ = Registry.claim_warm_server_for_refresh("rt-live", 0)
+
+      assert {:ok, 0} =
+               Registry.release_warm_server_after_refresh("warm-fence-r", "rt-stale", true)
+
+      # The box is still refreshing (the live claimant's token wasn't matched).
+      assert Repo.get_by!(WarmServer, name: "warm-fence-r").status == "refreshing"
+    end
+
+    test "count_ready_warm_servers counts ready + refreshing (pool membership)" do
+      {:ok, _} = Registry.register_warm_server("warm-r", "10.0.0.1")
+      {:ok, _} = Registry.register_warm_server("warm-x", "10.0.0.2")
+      _ = Registry.claim_warm_server_for_refresh("rt", 0)
+      # One ready + one refreshing = pool size 2 (a refreshing box mustn't trick
+      # the reconciler into growing a spurious replacement).
+      assert Registry.count_ready_warm_servers() == 2
+    end
+
+    test "a stale refreshing box is RECOVERED to ready (not deleted — it still serves)" do
+      {:ok, _} = Registry.register_warm_server("warm-stuck", "10.0.0.1")
+      _ = Registry.claim_warm_server_for_refresh("rt", 0)
+
+      old =
+        DateTime.utc_now()
+        |> DateTime.add(-(Registry.warm_stale_after_seconds() + 60), :second)
+        |> DateTime.truncate(:microsecond)
+
+      from(w in WarmServer, where: w.name == "warm-stuck")
+      |> Repo.update_all(set: [claimed_at: old])
+
+      assert Registry.reap_stale_warm_claims() == 1
+      reloaded = Repo.get_by!(WarmServer, name: "warm-stuck")
+      assert reloaded.status == "ready"
+      assert reloaded.claim_token == nil
+    end
+  end
+
   # claim-fence (bp-c55): a warm box that was claimed, reaped as stale, then re-
   # registered + re-claimed under the SAME name must NOT be torn down by the first
   # (now-stale) worker's delete. When the worker echoes the claim_token it holds,
@@ -245,6 +336,8 @@ defmodule BarkparkCloud.WarmPoolTest do
       for {method, path} <- [
             {"POST", "/v1/internal/warm-servers/claim"},
             {"POST", "/v1/internal/warm-servers/claim-retire"},
+            {"POST", "/v1/internal/warm-servers/claim-refresh"},
+            {"POST", "/v1/internal/warm-servers/warm-x/refreshed"},
             {"GET", "/v1/internal/warm-servers/count"}
           ] do
         assert call(method, path, nil, nil).status == 401
@@ -314,6 +407,64 @@ defmodule BarkparkCloud.WarmPoolTest do
 
       assert call("POST", "/v1/internal/warm-servers/claim-retire", nil, @worker_token).status ==
                204
+    end
+
+    test "claim-refresh pops the stalest box; refreshed releases it back to ready" do
+      assert call(
+               "POST",
+               "/v1/internal/warm-servers",
+               %{name: "warm-rf1", ip: "10.2.2.2"},
+               @worker_token
+             ).status == 201
+
+      claim =
+        call(
+          "POST",
+          "/v1/internal/warm-servers/claim-refresh",
+          %{min_age_seconds: 0},
+          @worker_token
+        )
+
+      assert claim.status == 200
+      body = json_body(claim)
+      assert body["name"] == "warm-rf1"
+      token = body["claim_token"]
+      assert is_binary(token) and token != ""
+
+      # It's now refreshing (out of the assignable set) but still counts as pool.
+      assert json_body(call("GET", "/v1/internal/warm-servers/count", nil, @worker_token)) ==
+               %{"ready" => 1}
+
+      # Nothing else due → 204.
+      assert call(
+               "POST",
+               "/v1/internal/warm-servers/claim-refresh",
+               %{min_age_seconds: 0},
+               @worker_token
+             ).status ==
+               204
+
+      # Release back to ready.
+      done =
+        call(
+          "POST",
+          "/v1/internal/warm-servers/warm-rf1/refreshed",
+          %{claim_token: token, refreshed: true},
+          @worker_token
+        )
+
+      assert done.status == 200
+      assert json_body(done) == %{"ok" => true}
+      assert Registry.count_ready_warm_servers() == 1
+    end
+
+    test "refreshed without a claim_token is 422" do
+      assert call(
+               "POST",
+               "/v1/internal/warm-servers/warm-any/refreshed",
+               %{refreshed: true},
+               @worker_token
+             ).status == 422
     end
   end
 end

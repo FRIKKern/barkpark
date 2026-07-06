@@ -1757,9 +1757,9 @@ defmodule BarkparkCloud.Registry do
 
     result =
       Repo.transaction(fn ->
-        # Self-clean: drop stale claimed/retiring rows (crashed-mid-consume) so
-        # they don't accumulate. Bookkeeping only — never touches a Hetzner box.
-        reap_stale_warm_query(now) |> Repo.delete_all()
+        # Self-clean: recover stale rows (crashed-mid-consume) so they don't
+        # accumulate. Bookkeeping only — never touches a Hetzner box.
+        reap_stale_warm_claims_txn(now)
 
         locked =
           from(w in WarmServer,
@@ -1794,6 +1794,97 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Atomically claim the STALEST ready warm box for a background REFRESH
+  (ready → refreshing) — the self-refresh loop's lever for keeping idle pool
+  boxes at origin/main so a claim almost never rebuilds (snapshot-management).
+
+  Only picks a box whose `refreshed_at` is null (never refreshed) or older than
+  `min_age_seconds` (so a just-refreshed box isn't re-picked — bounds SSH churn);
+  among eligible boxes the stalest (nulls first, then oldest refreshed_at) wins.
+  A refreshing box is OUT of the assignable set (assign claims `ready` only), so
+  a go-live never grabs a box mid-rebuild. Returns `%WarmServer{}` or `nil` when
+  no ready box is due a refresh. Race-safe via FOR UPDATE SKIP LOCKED.
+  """
+  @spec claim_warm_server_for_refresh(String.t(), non_neg_integer()) :: WarmServer.t() | nil
+  def claim_warm_server_for_refresh(claim_token, min_age_seconds)
+      when is_binary(claim_token) and is_integer(min_age_seconds) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+    due_before = DateTime.add(now, -min_age_seconds, :second)
+
+    result =
+      Repo.transaction(fn ->
+        reap_stale_warm_claims_txn(now)
+
+        locked =
+          from(w in WarmServer,
+            where:
+              w.status == "ready" and
+                (is_nil(w.refreshed_at) or w.refreshed_at < ^due_before),
+            # nulls first (Postgres sorts NULL last on ASC → force it first), then
+            # oldest refreshed_at: the stalest box refreshes first.
+            order_by: [asc_nulls_first: w.refreshed_at, asc: w.inserted_at, asc: w.id],
+            limit: 1,
+            lock: "FOR UPDATE SKIP LOCKED"
+          )
+
+        case Repo.one(locked) do
+          nil ->
+            nil
+
+          %WarmServer{} = ws ->
+            {:ok, claimed} =
+              ws
+              |> WarmServer.changeset(%{
+                status: "refreshing",
+                claim_token: claim_token,
+                claimed_at: now
+              })
+              |> Repo.update()
+
+            claimed
+        end
+      end)
+
+    case result do
+      {:ok, ws} -> ws
+      {:error, _} -> nil
+    end
+  end
+
+  @doc """
+  Release a refreshing box BACK to `ready` after the self-refresh loop finished
+  with it (refreshing → ready). claim-fenced on `claim_token` so a stale release
+  (the box was reaped back to ready and re-claimed) is a `{:ok, 0}` no-op.
+
+  `refreshed?` records the OUTCOME: on a successful refresh (`true`) the box's
+  `refreshed_at` is stamped now, so it drops to the back of the refresh queue; on
+  a failed/skipped refresh (`false`) `refreshed_at` is LEFT unchanged, so the box
+  is retried on the next pass rather than waiting out the full min-interval. Both
+  cases return the box to the assignable pool immediately — a refresh failure
+  never removes a box (it still serves working, if slightly-behind, code).
+  Returns `{:ok, count}` (rows updated).
+  """
+  @spec release_warm_server_after_refresh(String.t(), String.t(), boolean()) ::
+          {:ok, non_neg_integer()}
+  def release_warm_server_after_refresh(name, claim_token, refreshed?)
+      when is_binary(name) and is_binary(claim_token) and is_boolean(refreshed?) do
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    sets =
+      [status: "ready", claim_token: nil, claimed_at: nil] ++
+        if refreshed?, do: [refreshed_at: now], else: []
+
+    {count, _} =
+      from(w in WarmServer,
+        where: w.name == ^name and w.status == "refreshing" and w.claim_token == ^claim_token,
+        update: [set: ^sets]
+      )
+      |> Repo.update_all([])
+
+    {:ok, count}
+  end
+
+  @doc """
   Delete the warm row for `name` — called once a claimed box is consumed (assigned
   live, or torn down on a failed assign) or a retiring box is deleted. IDEMPOTENT:
   a missing row is a no-op. Returns `{:ok, rows_deleted}`.
@@ -1816,31 +1907,59 @@ defmodule BarkparkCloud.Registry do
     {:ok, count}
   end
 
-  @doc "How many warm boxes are `ready` (unclaimed) — the reconciler's grow/shrink input."
+  @doc """
+  How many warm boxes are in the POOL — the reconciler's grow/shrink input. This
+  counts `ready` PLUS `refreshing`: a refreshing box is transiently out of the
+  assignable set but is still a pool member (it returns to ready), so counting it
+  keeps the self-refresh loop from tricking the reconciler into growing a spurious
+  replacement. `claimed`/`retiring` are LEAVING the pool (becoming an instance /
+  being deleted), so they are excluded.
+  """
   @spec count_ready_warm_servers() :: non_neg_integer()
   def count_ready_warm_servers do
-    Repo.aggregate(from(w in WarmServer, where: w.status == "ready"), :count)
+    Repo.aggregate(from(w in WarmServer, where: w.status in ["ready", "refreshing"]), :count)
   end
 
   @doc """
-  Delete warm rows stuck `claimed`/`retiring` past the stale threshold (a worker
-  crashed between claiming and consuming/deleting the row). Bookkeeping only — the
-  Go worker owns the Hetzner box's lifecycle; this never deletes a box. Returns the
-  count reaped.
+  Recover warm rows stuck past the stale threshold (a worker crashed between
+  claiming and consuming/releasing the row). `claimed`/`retiring` are DELETED
+  (bookkeeping — the Go worker owns the box's lifecycle), while a stale
+  `refreshing` box is put BACK to `ready` (it still serves working code, so it
+  rejoins the pool rather than being lost). Returns the total count recovered.
   """
   @spec reap_stale_warm_claims() :: non_neg_integer()
   def reap_stale_warm_claims do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
-    {count, _} = reap_stale_warm_query(now) |> Repo.delete_all()
-    count
+
+    Repo.transaction(fn -> reap_stale_warm_claims_txn(now) end)
+    |> case do
+      {:ok, count} -> count
+      _ -> 0
+    end
   end
 
-  defp reap_stale_warm_query(now) do
+  # The recovery, runnable INSIDE an enclosing claim transaction (so a claim
+  # self-cleans atomically) or standalone. Returns the total rows recovered.
+  defp reap_stale_warm_claims_txn(now) do
     stale_before = DateTime.add(now, -warm_stale_after_seconds(), :second)
 
-    from(w in WarmServer,
-      where: w.status in ["claimed", "retiring"] and w.claimed_at < ^stale_before
-    )
+    {deleted, _} =
+      from(w in WarmServer,
+        where: w.status in ["claimed", "retiring"] and w.claimed_at < ^stale_before
+      )
+      |> Repo.delete_all()
+
+    # A crashed refresh: the box still serves working code — return it to the
+    # assignable pool instead of deleting it. claim_token/claimed_at cleared;
+    # refreshed_at left as-is so it is retried soon.
+    {readied, _} =
+      from(w in WarmServer,
+        where: w.status == "refreshing" and w.claimed_at < ^stale_before,
+        update: [set: [status: "ready", claim_token: nil, claimed_at: nil]]
+      )
+      |> Repo.update_all([])
+
+    deleted + readied
   end
 
   @doc """
