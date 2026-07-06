@@ -230,10 +230,11 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	base := cloud.ServerSpec{
 		Region:     job.Region,
 		ServerType: job.ServerType,
-		// Image resolves via DefaultSpec so BARKPARK_SERVER_IMAGE points instances
-		// at the baked warm-pool snapshot (Barkpark pre-installed); without it,
-		// falls back to bare ubuntu-22.04.
-		Image: cloud.DefaultSpec(cloud.ProviderHetzner).Image,
+		// Image resolves DYNAMICALLY (snapshot-management): the newest baked
+		// `role=warm-image` snapshot when one exists, else the env-pinned
+		// BARKPARK_SERVER_IMAGE fallback — a one-shot go-live boots the same
+		// fresh bake the pool does.
+		Image: cloud.FreshSpec(ctx, cloud.ProviderHetzner).Image,
 	}
 
 	// The instance label is the slug when present (DNS-safe), else the name.

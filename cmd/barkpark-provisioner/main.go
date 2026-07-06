@@ -119,8 +119,13 @@ func run(args []string) int {
 	// gate, and tear it down (paid create churn with no customer ever served). The
 	// honest signal is to refuse to start. (BARKPARK_SSH_KEY / BARKPARK_SSH_KEY_FILE
 	// are validated lazily by the provider/runner with their own clear errors.)
+	//
+	// Snapshot-management: at CREATE time the env pin is only the FALLBACK — the
+	// newest `role=warm-image` snapshot the nightly bake publishes wins
+	// (cloud.ResolveWarmImage), so this value no longer needs hand-updating; it
+	// just guarantees a sane floor on a fresh account / first boot.
 	if strings.TrimSpace(os.Getenv("BARKPARK_SERVER_IMAGE")) == "" {
-		fmt.Fprintln(os.Stderr, "barkpark-provisioner: BARKPARK_SERVER_IMAGE is required (the baked warm-pool snapshot id; without it instances boot bare ubuntu with no Barkpark and fail the health gate)")
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: BARKPARK_SERVER_IMAGE is required (the fallback warm-pool snapshot id; newer role=warm-image snapshots are resolved dynamically at create time)")
 		return 1
 	}
 

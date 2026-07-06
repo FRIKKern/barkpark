@@ -25,6 +25,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
+	"time"
 )
 
 // Provider slugs the cloud seam understands. Only hetzner is wired to a real
@@ -150,6 +152,135 @@ func DefaultSpec(provider string) ServerSpec {
 	default:
 		return ServerSpec{}
 	}
+}
+
+// ── Dynamic warm-image resolution (snapshot-management) ─────────────────────
+// The bake pipeline (deploy/bake-server-image.sh) publishes each fresh bake as
+// a Hetzner snapshot labeled `role=warm-image` (+ `commit=<sha>`). Image
+// selection is DYNAMIC: the newest AVAILABLE labeled snapshot wins at create
+// time, so publishing a bake makes it live with NO env edit and NO worker
+// restart — BARKPARK_SERVER_IMAGE survives only as the fallback when no
+// labeled snapshot exists (first boot / a fresh account).
+
+// warmImageSelector is the hcloud label selector every baked image carries.
+const warmImageSelector = "role=warm-image"
+
+// WarmImageLister shells `hcloud image list` for the labeled snapshots. A
+// package var (EXPORTED: the provisioner package's tests inject fixtures too).
+var WarmImageLister = func(ctx context.Context) (string, error) {
+	return runCapture(ctx, "hcloud", "image", "list",
+		"--type", "snapshot", "--selector", warmImageSelector, "-o", "json")
+}
+
+// The resolve cache: image publishes are rare (nightly), creates are bursty
+// (a reconcile pass), so a short TTL keeps hcloud round-trips off the hot path
+// while a fresh bake still lands within a minute.
+var warmImageCache struct {
+	mu sync.Mutex
+	id string
+	at time.Time
+}
+
+const warmImageCacheTTL = 60 * time.Second
+
+// ResetWarmImageCache clears the resolve cache — for tests that swap
+// WarmImageLister mid-run, and for callers that KNOW a bake just published.
+func ResetWarmImageCache() {
+	warmImageCache.mu.Lock()
+	defer warmImageCache.mu.Unlock()
+	warmImageCache.id = ""
+	warmImageCache.at = time.Time{}
+}
+
+// ResolveWarmImage returns the id of the newest AVAILABLE `role=warm-image`
+// snapshot, or "" when none exists / the lookup fails (callers then keep the
+// BARKPARK_SERVER_IMAGE fallback from DefaultSpec — resolution is a fast path,
+// never a new failure mode). Successes are cached for a minute; failures are
+// not cached (the next create retries).
+func ResolveWarmImage(ctx context.Context) string {
+	warmImageCache.mu.Lock()
+	defer warmImageCache.mu.Unlock()
+	if warmImageCache.id != "" && time.Since(warmImageCache.at) < warmImageCacheTTL {
+		return warmImageCache.id
+	}
+
+	out, err := WarmImageLister(ctx)
+	if err != nil {
+		return ""
+	}
+	var images []struct {
+		ID      int64  `json:"id"`
+		Status  string `json:"status"`
+		Created string `json:"created"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &images); jerr != nil {
+		return ""
+	}
+	best, bestCreated := "", ""
+	for _, img := range images {
+		if img.Status != "available" {
+			continue
+		}
+		// RFC3339 sorts lexicographically — newest created wins.
+		if img.Created > bestCreated {
+			bestCreated = img.Created
+			best = fmt.Sprintf("%d", img.ID)
+		}
+	}
+	if best != "" {
+		warmImageCache.id = best
+		warmImageCache.at = time.Now()
+	}
+	return best
+}
+
+// FreshSpec is DefaultSpec with the image resolved dynamically: the newest
+// baked snapshot when one is labeled, else the env-pinned fallback. EVERY
+// create site (warm refill, reconcile grow, one-shot go-live) builds from this
+// so a nightly bake reaches all of them at once.
+func FreshSpec(ctx context.Context, provider string) ServerSpec {
+	spec := DefaultSpec(provider)
+	if provider == ProviderHetzner {
+		if img := ResolveWarmImage(ctx); img != "" {
+			spec.Image = img
+		}
+	}
+	return spec
+}
+
+// WarmServerImageLister lists the pool's live boxes (`barkpark-warm=true`) with
+// the image each was CREATED from — the generation signal the reconciler's
+// recycle phase compares against ResolveWarmImage. A package var for tests.
+var WarmServerImageLister = func(ctx context.Context) (string, error) {
+	return runCapture(ctx, "hcloud", "server", "list",
+		"--selector", WarmLabelKey+"="+warmLabelVal, "-o", "json")
+}
+
+// WarmServerImages maps each live warm box's name → the id of the image it was
+// created from. An error means the generation check is skipped this pass —
+// recycling is an optimization, never a reconcile blocker.
+func WarmServerImages(ctx context.Context) (map[string]string, error) {
+	out, err := WarmServerImageLister(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var servers []struct {
+		Name  string `json:"name"`
+		Image *struct {
+			ID int64 `json:"id"`
+		} `json:"image"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &servers); jerr != nil {
+		return nil, jerr
+	}
+	images := make(map[string]string, len(servers))
+	for _, s := range servers {
+		if s.Name == "" || s.Image == nil {
+			continue
+		}
+		images[s.Name] = fmt.Sprintf("%d", s.Image.ID)
+	}
+	return images, nil
 }
 
 // sshKeyLister lists the account's ssh-key names, one per line, via

@@ -270,12 +270,14 @@ func (c *HTTPWarmPoolClient) do2xx(req *http.Request, what string) error {
 var _ WarmPoolClient = (*HTTPWarmPoolClient)(nil)
 
 // warmBaseSpec is the uniform spec every warm-pool box is created from: the
-// provider defaults (region/type via BARKPARK_SERVER_TYPE/LOCATION, image via the
-// required BARKPARK_SERVER_IMAGE baked snapshot). The pool is uniform — the
-// per-job region/server_type only apply to a one-shot custom create — so refill
-// and reconcile both use this. Name is left empty; CreateWarmServer fills warm-<rand>.
-func warmBaseSpec() cloud.ServerSpec {
-	spec := cloud.DefaultSpec(cloud.ProviderHetzner)
+// provider defaults (region/type via BARKPARK_SERVER_TYPE/LOCATION), with the
+// image resolved DYNAMICALLY (snapshot-management): the newest baked
+// `role=warm-image` snapshot when one exists, else the BARKPARK_SERVER_IMAGE
+// fallback. The pool is uniform — the per-job region/server_type only apply to
+// a one-shot custom create — so refill and reconcile both use this. Name is
+// left empty; CreateWarmServer fills warm-<rand>.
+func warmBaseSpec(ctx context.Context) cloud.ServerSpec {
+	spec := cloud.FreshSpec(ctx, cloud.ProviderHetzner)
 	spec.Name = ""
 	return spec
 }
@@ -343,7 +345,7 @@ func defaultWarmRefill(ctx context.Context, seams Seams) {
 	rctx, cancel := context.WithTimeout(ctx, warmRefillTimeout)
 	defer cancel()
 
-	host, err := cloud.CreateWarmServer(rctx, seams.Provider, warmBaseSpec())
+	host, err := cloud.CreateWarmServer(rctx, seams.Provider, warmBaseSpec(rctx))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refill create failed: %v\n", err)
 		return
@@ -403,29 +405,9 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 	switch {
 	case ready < size:
 		for i := 0; i < size-ready; i++ {
-			host, herr := cloud.CreateWarmServer(ctx, seams.Provider, warmBaseSpec())
-			if herr != nil {
-				errs = append(errs, fmt.Sprintf("create: %v", herr))
-				break // likely sold out — stop; the next pass retries
-			}
-			// dwb-17: freshen to origin/main before the box enters the pool.
-			// FAIL-CLOSED — tear a box that can't be brought current down rather than
-			// register a stale box; stop the grow loop (the next pass retries).
-			if ferr := freshenWarmBox(ctx, seams, host); ferr != nil {
-				if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
-					errs = append(errs, fmt.Sprintf("freshen %s (stale-box delete also failed: %v): %v", host.Name, derr, ferr))
-				} else {
-					errs = append(errs, fmt.Sprintf("freshen %s (box torn down — stale box kept out of pool): %v", host.Name, ferr))
-				}
-				break
-			}
-			if rerr := seams.WarmClient.Register(ctx, WarmServer{Name: host.Name, IP: host.IP}); rerr != nil {
-				if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
-					errs = append(errs, fmt.Sprintf("register %s (orphan delete also failed: %v): %v", host.Name, derr, rerr))
-				} else {
-					errs = append(errs, fmt.Sprintf("register %s (box torn down): %v", host.Name, rerr))
-				}
-				break
+			if gerr := growWarmBox(ctx, seams); gerr != nil {
+				errs = append(errs, gerr.Error())
+				break // likely sold out / a failed freshen — stop; the next pass retries
 			}
 			created++
 		}
@@ -451,10 +433,105 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 		}
 	}
 
+	// Generation recycle (snapshot-management): a pool box created from a
+	// SUPERSEDED image serves current code (it was freshened at refill) but
+	// rebuilds slowly on every claim-time drift — roll the pool onto the newest
+	// bake ONE box per pass (retire the oldest ready box, then grow a
+	// replacement from the fresh image immediately, so the pool only ever dips
+	// by one during the swap). Runs only when the pool is otherwise settled at
+	// size; any error here is reported but never blocks the grow/shrink duty.
+	if ready == size && size > 0 {
+		if recycled, rerr := recycleStaleWarmBox(ctx, seams); rerr != nil {
+			errs = append(errs, rerr.Error())
+		} else if recycled {
+			deleted++
+			if gerr := growWarmBox(ctx, seams); gerr != nil {
+				errs = append(errs, gerr.Error())
+			} else {
+				created++
+			}
+		}
+	}
+
 	if len(errs) > 0 {
 		return created, deleted, fmt.Errorf("reconcile warm pool: %s", strings.Join(errs, "; "))
 	}
 	return created, deleted, nil
+}
+
+// growWarmBox creates + freshens + registers ONE pool box, tearing the box down
+// on any failure so nothing billable leaks untracked. Shared by the reconcile
+// grow loop and the generation recycle.
+func growWarmBox(ctx context.Context, seams Seams) error {
+	host, herr := cloud.CreateWarmServer(ctx, seams.Provider, warmBaseSpec(ctx))
+	if herr != nil {
+		return fmt.Errorf("create: %v", herr)
+	}
+	// dwb-17: freshen to origin/main before the box enters the pool.
+	// FAIL-CLOSED — tear a box that can't be brought current down rather than
+	// register a stale box.
+	if ferr := freshenWarmBox(ctx, seams, host); ferr != nil {
+		if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
+			return fmt.Errorf("freshen %s (stale-box delete also failed: %v): %v", host.Name, derr, ferr)
+		}
+		return fmt.Errorf("freshen %s (box torn down — stale box kept out of pool): %v", host.Name, ferr)
+	}
+	if rerr := seams.WarmClient.Register(ctx, WarmServer{Name: host.Name, IP: host.IP}); rerr != nil {
+		if derr := seams.Provider.Delete(ctx, host.Name); derr != nil {
+			return fmt.Errorf("register %s (orphan delete also failed: %v): %v", host.Name, derr, rerr)
+		}
+		return fmt.Errorf("register %s (box torn down): %v", host.Name, rerr)
+	}
+	return nil
+}
+
+// recycleStaleWarmBox retires ONE ready pool box whose creation image is not
+// the current newest bake. Returns (true, nil) when a box was retired (the
+// caller grows the replacement), (false, nil) when the whole pool is already
+// on the newest image — or when the generation can't be determined (no labeled
+// bake yet, hcloud listing failed): recycling is an optimization and NEVER
+// invents work on uncertain data.
+//
+// ClaimForRetire pops the OLDEST ready box, which by construction is the
+// stalest (boxes from a newer image can only have been registered after that
+// image existed). If ordering was ever perturbed (a manual re-register) the
+// worst case is one wasteful swap onto the same fresh image — benign.
+func recycleStaleWarmBox(ctx context.Context, seams Seams) (bool, error) {
+	current := cloud.ResolveWarmImage(ctx)
+	if current == "" {
+		return false, nil // no labeled bake yet — nothing to compare against
+	}
+	images, err := cloud.WarmServerImages(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: generation check skipped (warm server listing failed): %v\n", err)
+		return false, nil
+	}
+	stale := 0
+	for _, img := range images {
+		if img != current {
+			stale++
+		}
+	}
+	if stale == 0 {
+		return false, nil
+	}
+
+	ws, ok, rerr := seams.WarmClient.ClaimForRetire(ctx)
+	if rerr != nil {
+		return false, fmt.Errorf("recycle claim-retire: %v", rerr)
+	}
+	if !ok {
+		return false, nil // raced away (a live assign got there first) — fine
+	}
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: recycling warm box %s onto image %s (%d stale in pool)\n", ws.Name, current, stale)
+	if derr := seams.Provider.Delete(ctx, ws.Name); derr != nil {
+		// Box not gone — its row stays `retiring` for the reaper; report it.
+		return false, fmt.Errorf("recycle delete %s: %v", ws.Name, derr)
+	}
+	if derr := seams.WarmClient.Delete(ctx, ws.Name, ws.ClaimToken); derr != nil {
+		return true, fmt.Errorf("recycle row delete %s: %v", ws.Name, derr)
+	}
+	return true, nil
 }
 
 // DefaultReconcile returns a ReconcileFunc bound to seams + size — the value the

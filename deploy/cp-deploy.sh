@@ -152,4 +152,17 @@ else
   log "no provisioner binary passed; leaving worker as-is"
 fi
 
+# Snapshot-management: install the nightly warm-image bake pipeline (script +
+# systemd timer) from the checkout, idempotently — the timer keeps the baked
+# snapshot tracking main, the provisioner resolves the newest labeled snapshot
+# dynamically, and the pool reconciler recycles standing boxes onto it.
+if [ -f deploy/bake-server-image.sh ]; then
+  install -m 0755 deploy/bake-server-image.sh /usr/local/bin/barkpark-bake-server-image
+  install -m 0644 deploy/systemd/barkpark-image-bake.service /etc/systemd/system/barkpark-image-bake.service
+  install -m 0644 deploy/systemd/barkpark-image-bake.timer /etc/systemd/system/barkpark-image-bake.timer
+  systemctl daemon-reload
+  systemctl enable --now barkpark-image-bake.timer >/dev/null 2>&1 || true
+  log "image-bake timer: $(systemctl is-enabled barkpark-image-bake.timer 2>/dev/null || echo not-installed)"
+fi
+
 log "DONE — control plane slot $TARGET live at $(git rev-parse --short HEAD)"
