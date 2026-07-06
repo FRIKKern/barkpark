@@ -409,6 +409,130 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
     end
   end
 
+  describe "parse/2 — surface classification (pd-doctrine t7, the sidebar test)" do
+    test "accepts surface: \"body\"" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "body", "type" => "richText", "surface" => "body"}]
+      }
+
+      assert {:ok, %Parsed{fields: [%Field{surface: "body"}]}} = SchemaDefinition.parse(schema)
+    end
+
+    test "accepts surface: \"sidebar\"" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "slug", "type" => "slug", "surface" => "sidebar"}]
+      }
+
+      assert {:ok, %Parsed{fields: [%Field{surface: "sidebar"}]}} = SchemaDefinition.parse(schema)
+    end
+
+    test "defaults surface to nil when the attribute is absent (unclassified)" do
+      schema = %{"name" => "post", "fields" => [%{"name" => "title", "type" => "string"}]}
+
+      assert {:ok, %Parsed{fields: [%Field{surface: nil}]}} = SchemaDefinition.parse(schema)
+    end
+
+    test "rejects an invalid surface value" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "title", "type" => "string", "surface" => "footer"}]
+      }
+
+      assert {:error, :field_surface_invalid} = SchemaDefinition.parse(schema)
+    end
+
+    test "rejects a non-string surface value" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "title", "type" => "string", "surface" => true}]
+      }
+
+      assert {:error, :field_surface_invalid} = SchemaDefinition.parse(schema)
+    end
+
+    test "surface is data-only: does NOT flip a legacy schema off flat_mode" do
+      schema = %{
+        "name" => "post",
+        "fields" => [
+          %{"name" => "title", "type" => "string", "surface" => "body"},
+          %{"name" => "slug", "type" => "slug", "surface" => "sidebar"}
+        ]
+      }
+
+      assert SchemaDefinition.flat?(schema) == true
+    end
+
+    test "a legacy schema with no surface round-trips byte-identically (raw preserved)" do
+      legacy_field = %{"name" => "title", "type" => "string"}
+      schema = %{"name" => "post", "fields" => [legacy_field]}
+
+      assert {:ok, %Parsed{fields: [field]}} = SchemaDefinition.parse(schema)
+      assert field.surface == nil
+      # raw carries the ORIGINAL field map, no injected surface key.
+      assert field.raw == legacy_field
+      refute Map.has_key?(field.raw, "surface")
+    end
+
+    test "a composite subfield carries its own surface (recursion inherits the flag)" do
+      schema = %{
+        "name" => "book",
+        "fields" => [
+          %{
+            "name" => "publishing",
+            "type" => "composite",
+            "surface" => "sidebar",
+            "fields" => [
+              %{"name" => "imprint", "type" => "string", "surface" => "sidebar"},
+              %{"name" => "blurb", "type" => "string", "surface" => "body"}
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, %Parsed{fields: [outer]}} = SchemaDefinition.parse(schema)
+      assert outer.surface == "sidebar"
+      assert %Field{fields: [imprint, blurb]} = outer
+      assert imprint.surface == "sidebar"
+      assert blurb.surface == "body"
+    end
+
+    test "an invalid surface on a composite subfield is rejected too" do
+      schema = %{
+        "name" => "book",
+        "fields" => [
+          %{
+            "name" => "publishing",
+            "type" => "composite",
+            "fields" => [%{"name" => "imprint", "type" => "string", "surface" => "nope"}]
+          }
+        ]
+      }
+
+      assert {:error, :field_surface_invalid} = SchemaDefinition.parse(schema)
+    end
+
+    test "an arrayOf `of` descriptor carries surface (recursion inherits the flag)" do
+      schema = %{
+        "name" => "book",
+        "fields" => [
+          %{
+            "name" => "contributors",
+            "type" => "arrayOf",
+            "ordered" => true,
+            "surface" => "sidebar",
+            "of" => %{"type" => "string", "surface" => "sidebar"}
+          }
+        ]
+      }
+
+      assert {:ok, %Parsed{fields: [field]}} = SchemaDefinition.parse(schema)
+      assert field.surface == "sidebar"
+      assert %Field{of: %Field{surface: "sidebar"}} = field
+    end
+  end
+
   describe "namespace constants" do
     test "exposes plugin reserved + custom prefixes" do
       assert SchemaDefinition.plugin_reserved_prefix() == "plugin:"

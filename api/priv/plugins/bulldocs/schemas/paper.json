@@ -4,10 +4,10 @@
   "icon": "📰",
   "visibility": "public",
   "fields": [
-    { "name": "title", "title": "Title", "type": "string" },
-    { "name": "event_type", "title": "Event Type", "type": "string" },
-    { "name": "source_doc", "title": "Source Doc", "type": "string" },
-    { "name": "goal_id", "title": "Goal", "type": "string" },
-    { "name": "related", "title": "Related", "type": "arrayOf", "ordered": false, "of": { "type": "reference", "refType": "paper" } }
+    { "name": "title", "title": "Title", "type": "string", "surface": "body" },
+    { "name": "event_type", "title": "Event Type", "type": "string", "surface": "sidebar" },
+    { "name": "source_doc", "title": "Source Doc", "type": "string", "surface": "sidebar" },
+    { "name": "goal_id", "title": "Goal", "type": "string", "surface": "sidebar" },
+    { "name": "related", "title": "Related", "type": "arrayOf", "ordered": false, "surface": "sidebar", "of": { "type": "reference", "refType": "paper" } }
   ]
 }

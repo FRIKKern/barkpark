@@ -4,7 +4,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     * `partition_runs/1` — partition a block list into maximal contiguous prose
       runs (`{:run, blocks}`) and non-prose boundaries (`{:block, block}`).
-    * `paper_canvas_enabled?/0` — the BARKPARK_PAPER_CANVAS flag, default FALSE.
+    * `paper_canvas_enabled?/0` — the BARKPARK_PAPER_CANVAS flag, default TRUE
+      (the D7/D9 cutover); only `"0"`/`"false"` opt out.
     * `run_id/1` — the stable run id (first block's id).
 
   No LiveView, no DB — these are the cheap, exhaustive proofs of the partition
@@ -53,11 +54,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
-  # t9: a task-list block is NOT canvas-eligible (it renders as a boundary
-  # widget), so it partitions to a `{:block, raw}` — and the raw block the editor
-  # mounts (and later saves) still carries its live `query`, never a snapshot.
+  # t12a: a task-list (like every fleet kind) is now CANVAS-ELIGIBLE — it rides a
+  # run as a server-painted read-only atom (bpFleet), carrying the whole block
+  # verbatim. The raw block the editor mounts (and later saves) still carries its
+  # live `query`, never a snapshot (D5) — folding it into a run does not resolve it.
   defp task_list(id),
     do: %{"id" => id, "type" => "task-list", "query" => %{"parent_id" => "epic"}}
+
+  # t12a: representative FLEET kinds — all 12 are now canvas-eligible (server-painted
+  # read-only atoms). A static fleet block carries its own data; a query fleet block
+  # carries a `query`. Both ride a run verbatim.
+  defp task_board(id), do: %{"id" => id, "type" => "task-board", "snapshot" => []}
+  defp cards(id), do: %{"id" => id, "type" => "cards", "items" => []}
+  defp fleet(id, type), do: %{"id" => id, "type" => type}
 
   # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
   # task_previews wires the real Tasks.Query fetcher; here we prove the two-
@@ -189,6 +198,60 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # sheet/embed (read-only atoms) AND code (attr-atom) AND callout (content) are ALL
       # canvas-eligible, so the whole stretch is ONE maximal run — none split.
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    # ── t12a: the 12 FLEET kinds are now CANVAS-ELIGIBLE — they no longer split ──
+
+    test "t12a: every fleet kind INSIDE prose keeps the run whole (was a boundary widget)" do
+      # All 12 fleet types are canvas-eligible (server-painted read-only atoms), so
+      # each rides the prose run rather than splitting it. `diagram` is NOT here — it
+      # rides its own editable attr-atom, already covered above.
+      for type <-
+            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire) do
+        blk = fleet("x1", type)
+        blocks = [para("p1"), blk, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}],
+               "expected #{type} to ride the run (canvas-eligible)"
+      end
+    end
+
+    test "t12a: [heading, task-board, paragraph] is ONE run (the fleet block no longer splits)" do
+      blocks = [heading("h1"), task_board("b1"), para("p1")]
+
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "t12a: a fleet block folds into a run but rides VERBATIM (raw, no snapshot injected — D5)" do
+      blocks = [para("p1"), task_list("t1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+      # The block is unchanged by partitioning — its live query is intact, no
+      # snapshot leaked in. The save baseline the canvas diffs is byte-identical.
+      assert Enum.at(blocks, 1)["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(Enum.at(blocks, 1), "snapshot")
+    end
+
+    test "t12a: a fleet block + sheet + code + callout in ONE run (all canvas-eligible)" do
+      blocks = [para("p1"), cards("c1"), sheet("s1"), code("k1"), callout("cl1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "t12a: a nested-structure boundary still splits while fleet blocks ride each run" do
+      # A composite (nested-structure) field is STILL a boundary; the fleet blocks
+      # (task-board, cards) ride the prose runs on either side of it.
+      blocks = [para("p1"), task_board("b1"), boundary("cmp"), cards("c1"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1"), task_board("b1")]},
+               {:block, boundary("cmp")},
+               {:run, [cards("c1"), para("p2")]}
+             ]
+    end
+
+    test "t12a: a lone fleet block is a single run, not a boundary" do
+      assert PaperCanvas.partition_runs([task_board("b1")]) == [{:run, [task_board("b1")]}]
     end
 
     # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
@@ -460,6 +523,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.canvas?(picker("f"))
       assert PaperCanvas.canvas?(picker_ref("fr"))
 
+      # t12a: each of the 12 FLEET kinds is canvas-eligible (server-painted read-only
+      # atoms carrying the whole block verbatim on bpFleet). `diagram` is NOT a fleet
+      # type — it stays an attr-atom (asserted canvas above via its own clause).
+      for type <-
+            ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire) do
+        assert PaperCanvas.canvas?(fleet("f", type)), "expected #{type} to be canvas-eligible"
+      end
+
       # Still boundaries — only the NESTED-STRUCTURE fields stay run boundaries.
       refute PaperCanvas.canvas?(boundary("cmp"))
       refute PaperCanvas.canvas?(boundary2("arr"))
@@ -521,14 +592,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   end
 
   describe "live task-block preview (t9) — parallel channel, save-stable (D5)" do
-    test "the block the editor mounts stays a RAW query boundary — no snapshot injected" do
+    test "t12a: the block the editor mounts rides the run as a RAW query block — no snapshot injected" do
       blocks = [para("p1"), task_list("t1"), para("p2")]
 
-      assert PaperCanvas.partition_runs(blocks) == [
-               {:run, [para("p1")]},
-               {:block, task_list("t1")},
-               {:run, [para("p2")]}
-             ]
+      # t12a flip: the task block is now canvas-eligible, so it folds INTO the run
+      # (server-painted in-canvas via bpFleet) instead of splitting into its own
+      # boundary widget. It still rides VERBATIM — raw query, no snapshot (D5).
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+      assert Enum.at(blocks, 1)["query"] == %{"parent_id" => "epic"}
+      refute Map.has_key?(Enum.at(blocks, 1), "snapshot")
     end
 
     test "resolving the preview leaves the mounted/saved blocks BYTE-IDENTICAL → an untouched save emits ZERO ops" do
@@ -556,13 +628,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
   end
 
-  describe "task_block_preview (t9) — the boundary widget PAINTS the live rows" do
-    import Phoenix.LiveViewTest
-
-    alias Barkpark.PortableDoc.Render
+  describe "t12a flip — the flag-ON paper pane rides fleet blocks IN-CANVAS (no boundary widget)" do
     alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
-    # The flag-ON editor render: canvas runs + boundary widgets. Static
+    # The flag-ON editor render for the PAPER PANE (canvas_eligible). Static
     # function-component render — no LiveView process, no DB.
     setup do
       prev = System.get_env("BARKPARK_PAPER_CANVAS")
@@ -587,6 +656,65 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       )
     end
 
+    defp run_count(html), do: length(String.split(html, ~s(data-test-id="paper-canvas-run"))) - 1
+
+    test "a query fleet block (task-list) now rides ONE canvas run, NOT a boundary widget (D5 verbatim)" do
+      html = editor_html([para("p1"), task_list("t1"), para("p2")], %{})
+
+      # The flip: the fleet block folded INTO the run, so it paints in-canvas via
+      # the bpFleet node-view (+ push_block_renders' bp:block-html) — it no longer
+      # falls through to the per-block boundary widget.
+      refute html =~ ~s(data-test-id="paper-task-preview"),
+             "a top-level fleet block must NOT render a boundary widget in the flag-ON paper pane"
+
+      # The whole doc is ONE canvas run carrying the block verbatim (D5): its raw
+      # query rides into the seed, and no resolved snapshot is ever serialized in.
+      assert run_count(html) == 1
+      assert html =~ ~s(data-canvas-blocks)
+      assert html =~ "task-list"
+      assert html =~ "parent_id"
+      refute html =~ ~s(&quot;snapshot&quot;)
+    end
+
+    test "a STATIC fleet block (cards) also rides the run, not a boundary widget" do
+      html = editor_html([heading("h1"), cards("c1"), para("p1")], %{})
+
+      refute html =~ ~s(data-test-id="paper-task-preview")
+      assert run_count(html) == 1
+      assert html =~ ~s(data-canvas-blocks)
+      assert html =~ "cards"
+    end
+
+    test "a nested-structure boundary still splits fleet-bearing runs into TWO canvas runs" do
+      # composite is still a boundary; the task-board and cards ride the runs on
+      # either side — so two canvas runs render, with the composite between them on
+      # its own per-block widget.
+      html =
+        editor_html(
+          [para("p1"), task_board("b1"), boundary("cmp"), cards("c1"), para("p2")],
+          %{}
+        )
+
+      assert run_count(html) == 2
+      refute html =~ ~s(data-test-id="paper-task-preview")
+      # the composite boundary still renders its own per-block edit row
+      assert html =~ ~s(data-edit-block-id="cmp")
+    end
+  end
+
+  describe "task_block_preview/1 — retained boundary widget still paints the reader's producer (D8/rule 3)" do
+    alias Barkpark.PortableDoc.Render
+    alias BarkparkWeb.Studio.StudioLive.Components.PaperEditor
+
+    # t12a: after the partition flip a fleet block no longer reaches this widget in
+    # the paper pane (it rides a run). The widget is RETAINED infra (deletion is a
+    # wave-4/human step), so its painting contract is proven by rendering the
+    # component DIRECTLY — the reader-producer parity (rule 3) that the in-canvas
+    # bpFleet paint also inherits, since both call Render.render_block/2.
+    defp preview_html(block, preview) do
+      render_component(&PaperEditor.task_block_preview/1, block: block, preview: preview)
+    end
+
     test "a resolved preview renders through the READER'S producer (rule 3), display-only (D5)" do
       block = task_list("t1")
 
@@ -596,34 +724,33 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         "snapshot" => [%{"title" => "Ship the seam", "status" => "ready"}]
       }
 
-      html = editor_html([para("p1"), block, para("p2")], %{"t1" => entry})
+      html = preview_html(block, entry)
 
       # The widget paints the live rows…
       assert html =~ ~s(data-test-id="paper-task-preview")
       assert html =~ "Ship the seam"
 
       # …as the EXACT bytes /papers would emit for the resolved block — one
-      # producer, byte for byte (doctrine rule 3).
+      # producer, byte for byte (doctrine rule 3). The same producer the in-canvas
+      # bpFleet atom paints, so parity is shared.
       resolved = TaskResolver.apply_preview(block, entry)
       assert html =~ Render.render_block(resolved, %{style: :article})
 
-      # D5 in the DOM: the canvas seeds (the save baseline) still carry the raw
-      # prose runs, and no resolved snapshot is ever serialized back into any
-      # data-canvas-blocks / data-block editor state.
-      assert html =~ ~s(data-canvas-blocks)
+      # D5: the widget never serializes the resolved snapshot back — it renders the
+      # display HTML off a COPY, the source block is untouched.
       refute html =~ ~s(&quot;snapshot&quot;)
     end
 
     test "an error entry degrades to the quiet plugin-off note" do
       entry = %{"block_id" => "t1", "type" => "task-list", "error" => true}
-      html = editor_html([task_list("t1")], %{"t1" => entry})
+      html = preview_html(task_list("t1"), entry)
 
       assert html =~ "Live task preview unavailable"
       refute html =~ "Loading live tasks"
     end
 
     test "a query block with no entry yet shows the honest loading note" do
-      html = editor_html([task_list("t1")], %{})
+      html = preview_html(task_list("t1"), nil)
       assert html =~ "Loading live tasks"
     end
 
@@ -634,7 +761,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         "snapshot" => [%{"title" => "Pinned row", "status" => "done"}]
       }
 
-      html = editor_html([pinned], %{})
+      html = preview_html(pinned, nil)
       assert html =~ "Pinned row"
       refute html =~ "Loading live tasks"
     end
@@ -643,40 +770,45 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       block = %{"id" => "d1", "type" => "task-detail", "query" => %{"nope" => 1}}
       entry = %{"block_id" => "d1", "type" => "task-detail", "task" => %{}}
 
-      html = editor_html([block], %{"d1" => entry})
+      html = preview_html(block, entry)
       assert html =~ "No matching tasks."
     end
 
-    test "flag OFF: the shipped per-block list stays byte-free of any preview markup" do
-      System.delete_env("BARKPARK_PAPER_CANVAS")
+    test "flag OFF (explicit opt-out): the shipped per-block list stays byte-free of any preview markup" do
+      # The canvas is the default now (D7/D9), so OFF is an EXPLICIT opt-out —
+      # `delete_env` would leave the canvas ON. Pin the opt-out value.
+      System.put_env("BARKPARK_PAPER_CANVAS", "0")
 
       html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
       refute html =~ "paper-task-preview"
     end
 
     test "pdd-t8: a STATIC (non-task) fleet block paints the reader's producer directly" do
-      # `cards` carries no query + no preview entry — the boundary widget renders it
-      # straight through Render.render_block/2 (rule 3: one producer, byte for byte),
-      # not just the raw editable fields. This is the fleet-in-canvas broadening.
+      # `cards` carries no query + no preview entry — the widget renders it straight
+      # through Render.render_block/2 (rule 3: one producer, byte for byte), not just
+      # the raw editable fields.
       cards = %{
         "id" => "c1",
         "type" => "cards",
         "items" => [%{"title" => "Kinsta", "text" => "honest states"}]
       }
 
-      html = editor_html([cards], %{})
+      html = preview_html(cards, nil)
 
-      assert html =~ ~s(data-test-id="paper-task-preview"), "the fleet block gets a preview widget"
+      assert html =~ ~s(data-test-id="paper-task-preview"),
+             "the fleet block gets a preview widget"
+
       assert html =~ "Kinsta"
+
       assert html =~ Render.render_block(cards, %{style: :article}),
-             "the boundary widget emits the EXACT reader bytes for the static fleet block"
+             "the widget emits the EXACT reader bytes for the static fleet block"
     end
 
     test "pdd-t8: an EMPTY static fleet block gets a component-vocabulary empty note" do
       # cards with no items renders "" through the reader producer — the widget must
       # say so in the block's OWN vocabulary, not the task copy ("No matching
       # tasks." on an empty cards block would be a lie).
-      html = editor_html([%{"id" => "c2", "type" => "cards", "items" => []}], %{})
+      html = preview_html(%{"id" => "c2", "type" => "cards", "items" => []}, nil)
 
       assert html =~ "Nothing to show yet."
       refute html =~ "No matching tasks."
@@ -693,14 +825,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
         "items" => [%{"title" => "Painted", "text" => "not loading"}]
       }
 
-      html = editor_html([cards], %{})
+      html = preview_html(cards, nil)
 
       assert html =~ "Painted"
       refute html =~ "Loading live tasks…"
     end
   end
 
-  describe "paper_canvas_enabled?/0 (default FALSE)" do
+  describe "paper_canvas_enabled?/0 (default TRUE — the D7/D9 cutover)" do
     setup do
       prev = System.get_env("BARKPARK_PAPER_CANVAS")
 
@@ -714,22 +846,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       :ok
     end
 
-    test "unset → false (the shipped default)" do
+    test "unset → true (the shipped default — the canvas is the mainline editor)" do
       System.delete_env("BARKPARK_PAPER_CANVAS")
-      refute PaperCanvas.paper_canvas_enabled?()
+      assert PaperCanvas.paper_canvas_enabled?()
     end
 
-    test "empty / arbitrary values → false" do
-      for v <- ["", "0", "off", "no", "false-ish", "  ", "2"] do
+    test "the two explicit opt-out strings '0' / 'false' (case-insensitive, trimmed) → false" do
+      for v <- ["0", "false", "FALSE", "False", " false ", "  0 "] do
         System.put_env("BARKPARK_PAPER_CANVAS", v)
-        refute PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → false"
+        refute PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → false (opt-out)"
       end
     end
 
-    test "truthy '1' / 'true' (case-insensitive, trimmed) → true" do
+    test "'1' / 'true' (case-insensitive, trimmed) → true" do
       for v <- ["1", "true", "TRUE", "True", " true ", "  1 "] do
         System.put_env("BARKPARK_PAPER_CANVAS", v)
         assert PaperCanvas.paper_canvas_enabled?(), "expected #{inspect(v)} → true"
+      end
+    end
+
+    test "empty / junk / any non-opt-out value → true (fails toward the mainline)" do
+      for v <- ["", "  ", "off", "no", "false-ish", "2", "yes", "disabled"] do
+        System.put_env("BARKPARK_PAPER_CANVAS", v)
+
+        assert PaperCanvas.paper_canvas_enabled?(),
+               "expected #{inspect(v)} → true (not an opt-out)"
       end
     end
   end
