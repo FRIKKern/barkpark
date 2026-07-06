@@ -1411,6 +1411,24 @@ select.form-input {
   white-space: pre;
   margin: 0;
 }
+/* Guided Vercel fallback (no platform token): values FIRST with per-field copy,
+   then the Deploy button, so the empty Vercel form is an expected next step. */
+.new-vercel-guide { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; margin: 6px 0 18px; }
+.new-vercel-guide .new-env-head { margin-bottom: 6px; }
+.new-vercel-guide .btn-vercel { margin-top: 12px; }
+.new-env-rows { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; counter-reset: envrow; }
+.new-env-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--muted-surface);
+  border-radius: var(--radius-sm);
+}
+.new-env-key { font-size: 12px; word-break: break-all; }
+.new-env-row .btn { flex: 0 0 auto; }
+
 .new-golive { border-top: 1px solid var(--border); padding-top: 16px; }
 .new-golive-row { display: flex; gap: 8px; margin-top: 8px; }
 .new-golive-row .form-input { flex: 1; }

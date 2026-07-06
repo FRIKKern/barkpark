@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
@@ -230,4 +231,112 @@ func TestGrowWarmBox_TeardownSurvivesDyingContext(t *testing.T) {
 	if got, _ := wc.CountReady(context.Background()); got != 0 {
 		t.Errorf("a failed grow registered a row: %d", got)
 	}
+}
+
+// ── Self-refresh loop (snapshot-management: keep idle pool boxes current) ──────
+
+// TestRefreshOneStalePoolBox_HappyPathReturnsBoxToReady proves the self-refresh
+// runner claims the stalest ready box, freshens it, and RELEASES it back to ready
+// with refreshed=true — the box never leaves the pool.
+func TestRefreshOneStalePoolBox_HappyPathReturnsBoxToReady(t *testing.T) {
+	seams, _, _, _ := fakeSeams(t)
+	wc := &fakeWarmClient{rows: []fakeWarmRow{{name: "warm-a", ip: "10.0.0.1", status: "ready"}}}
+	seams.WarmClient = wc
+
+	refreshOneStalePoolBox(context.Background(), seams)
+
+	if got := wc.statusOf("warm-a"); got != "ready" {
+		t.Errorf("box status after refresh = %q, want ready (returned to the pool)", got)
+	}
+	if len(wc.refreshClaims) != 1 || wc.refreshClaims[0] != "warm-a" {
+		t.Errorf("refresh claims = %v, want [warm-a]", wc.refreshClaims)
+	}
+	if len(wc.markRefreshedCalls) != 1 || !wc.markRefreshedCalls[0].refreshed {
+		t.Errorf("markRefreshed calls = %v, want one with refreshed=true", wc.markRefreshedCalls)
+	}
+}
+
+// TestRefreshOneStalePoolBox_FreshenFailureIsFailOpen proves a freshen failure
+// does NOT tear the box down (unlike grow) — it returns to ready with
+// refreshed=false (retry sooner), still serving working code.
+func TestRefreshOneStalePoolBox_FreshenFailureIsFailOpen(t *testing.T) {
+	seams, _, _, runner := fakeSeams(t)
+	runner.checkErr = fmt.Errorf("git fetch: transient network")
+	wc := &fakeWarmClient{rows: []fakeWarmRow{{name: "warm-a", ip: "10.0.0.1", status: "ready"}}}
+	seams.WarmClient = wc
+
+	refreshOneStalePoolBox(context.Background(), seams)
+
+	if got := wc.statusOf("warm-a"); got != "ready" {
+		t.Errorf("a failed refresh must return the box to ready (fail-open), got %q", got)
+	}
+	if len(wc.markRefreshedCalls) != 1 || wc.markRefreshedCalls[0].refreshed {
+		t.Errorf("a failed refresh must release with refreshed=false; got %v", wc.markRefreshedCalls)
+	}
+}
+
+// TestRefreshOneStalePoolBox_NothingDueIsANoOp proves the runner is a no-op when
+// no box is due (all already refreshed) — no freshen, no release.
+func TestRefreshOneStalePoolBox_NothingDueIsANoOp(t *testing.T) {
+	seams, _, _, _ := fakeSeams(t)
+	wc := &fakeWarmClient{rows: []fakeWarmRow{{name: "warm-a", ip: "10.0.0.1", status: "ready", refreshed: true}}}
+	seams.WarmClient = wc
+
+	refreshOneStalePoolBox(context.Background(), seams)
+
+	if len(wc.refreshClaims) != 0 || len(wc.markRefreshedCalls) != 0 {
+		t.Errorf("nothing-due refresh must be a no-op; claims=%v marks=%v", wc.refreshClaims, wc.markRefreshedCalls)
+	}
+}
+
+// TestDefaultRefresh_OneInFlight proves DefaultRefresh runs at most one refresh at
+// a time — a second call while one is running is skipped (the guard that keeps the
+// single-threaded worker from stacking rebuilds).
+func TestDefaultRefresh_OneInFlight(t *testing.T) {
+	seams, _, _, runner := fakeSeams(t)
+	// A blocking runner so the first refresh is still "in flight" when the second
+	// DefaultRefresh call lands.
+	release := make(chan struct{})
+	runner.checkGate = release
+	wc := &fakeWarmClient{rows: []fakeWarmRow{
+		{name: "warm-a", ip: "10.0.0.1", status: "ready"},
+		{name: "warm-b", ip: "10.0.0.2", status: "ready"},
+	}}
+	seams.WarmClient = wc
+
+	refresh := DefaultRefresh(seams)
+	refresh(context.Background()) // launches an async refresh, blocks in freshen
+	// Give the goroutine a moment to claim + block.
+	waitFor(t, func() bool { return len(wc.claimsSnapshot()) == 1 }, time.Second)
+	refresh(context.Background()) // should be skipped (one in flight)
+	// Still exactly one claim.
+	if n := len(wc.claimsSnapshot()); n != 1 {
+		t.Errorf("second DefaultRefresh call must be skipped while one is in flight; claims=%d", n)
+	}
+	close(release) // let the first finish
+	waitFor(t, func() bool { return len(wc.marksSnapshot()) == 1 }, 2*time.Second)
+}
+
+func (f *fakeWarmClient) claimsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.refreshClaims...)
+}
+
+func (f *fakeWarmClient) marksSnapshot() []markRefreshedCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]markRefreshedCall(nil), f.markRefreshedCalls...)
+}
+
+func waitFor(t *testing.T, cond func() bool, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("condition not met within timeout")
 }

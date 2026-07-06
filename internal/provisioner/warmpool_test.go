@@ -16,7 +16,8 @@ import (
 
 // fakeWarmRow is one warm-server row in the fake claim store.
 type fakeWarmRow struct {
-	name, ip, status string // status: ready | claimed | retiring
+	name, ip, status string // status: ready | claimed | retiring | refreshing
+	refreshed        bool   // set true by MarkRefreshed(…, true); ClaimForRefresh skips a refreshed row
 }
 
 // fakeWarmClient is an in-memory, genuinely-atomic (mutex) WarmPoolClient — the
@@ -24,12 +25,20 @@ type fakeWarmRow struct {
 // (Postgres FOR UPDATE SKIP LOCKED lives in the cloud/ Elixir app and is tested
 // there); this fake proves the GO orchestration claims-and-consumes correctly and
 // that two concurrent claimers at the seam boundary never both win a row.
+type markRefreshedCall struct {
+	name      string
+	refreshed bool
+}
+
 type fakeWarmClient struct {
-	mu         sync.Mutex
-	rows       []fakeWarmRow
-	registered []string // every name Register was called with (idempotency-agnostic)
-	claimErr   error    // when set, Claim returns it (transport failure)
-	countErr   error    // when set, CountReady returns it
+	mu                 sync.Mutex
+	rows               []fakeWarmRow
+	registered         []string            // every name Register was called with (idempotency-agnostic)
+	claimErr           error               // when set, Claim returns it (transport failure)
+	countErr           error               // when set, CountReady returns it
+	refreshClaimErr    error               // when set, ClaimForRefresh returns it
+	refreshClaims      []string            // names ClaimForRefresh popped (assertions)
+	markRefreshedCalls []markRefreshedCall // MarkRefreshed calls (assertions)
 }
 
 func (f *fakeWarmClient) Register(_ context.Context, ws WarmServer) error {
@@ -68,6 +77,40 @@ func (f *fakeWarmClient) ClaimForRetire(_ context.Context) (WarmServer, bool, er
 	return f.claimReady("retiring")
 }
 
+// ClaimForRefresh pops the first not-yet-refreshed ready row → refreshing. The
+// minAge gate is modelled by the per-row `refreshed` flag (a refreshed row is
+// skipped). Records the claim for assertions.
+func (f *fakeWarmClient) ClaimForRefresh(_ context.Context, _ int) (WarmServer, bool, error) {
+	if f.refreshClaimErr != nil {
+		return WarmServer{}, false, f.refreshClaimErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.rows {
+		if f.rows[i].status == "ready" && !f.rows[i].refreshed {
+			f.rows[i].status = "refreshing"
+			f.refreshClaims = append(f.refreshClaims, f.rows[i].name)
+			return WarmServer{Name: f.rows[i].name, IP: f.rows[i].ip, ClaimToken: "rt-" + f.rows[i].name}, true, nil
+		}
+	}
+	return WarmServer{}, false, nil
+}
+
+// MarkRefreshed returns a refreshing row to ready, stamping `refreshed` from the
+// outcome. Records the (name, refreshed) pair for assertions.
+func (f *fakeWarmClient) MarkRefreshed(_ context.Context, name, _ string, refreshed bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.markRefreshedCalls = append(f.markRefreshedCalls, markRefreshedCall{name: name, refreshed: refreshed})
+	for i := range f.rows {
+		if f.rows[i].name == name && f.rows[i].status == "refreshing" {
+			f.rows[i].status = "ready"
+			f.rows[i].refreshed = refreshed
+		}
+	}
+	return nil
+}
+
 func (f *fakeWarmClient) Delete(_ context.Context, name, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -89,7 +132,9 @@ func (f *fakeWarmClient) CountReady(_ context.Context) (int, error) {
 	defer f.mu.Unlock()
 	n := 0
 	for _, r := range f.rows {
-		if r.status == "ready" {
+		// Pool size = ready + refreshing (a refreshing box is a transient pool
+		// member), matching count_ready_warm_servers/0 in the control plane.
+		if r.status == "ready" || r.status == "refreshing" {
 			n++
 		}
 	}
