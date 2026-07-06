@@ -139,4 +139,69 @@ defmodule Barkpark.Tasks.DedupTest do
 
     assert Enum.any?(payload.similar, &(&1.lifecycle_status == "done"))
   end
+
+  # ── tier-2 judge escalation ────────────────────────────────────────────────
+
+  defmodule FakeJudge do
+    def post(_url, _body, _headers) do
+      case Application.get_env(:barkpark, :judge_fake) do
+        {:ok, text} -> {:ok, 200, %{"content" => [%{"type" => "text", "text" => text}]}}
+        {:error, r} -> {:error, r}
+        other -> other
+      end
+    end
+  end
+
+  # A cross-epic pair with partial token overlap → lands in the ADVISE band
+  # (sim ~0.42, below the 0.55 refuse floor), which is exactly where the judge
+  # is consulted.
+  @adv_title_a "alpha beta gamma delta"
+  @adv_title_b "alpha beta gamma zeta"
+
+  defp with_judge(fake) do
+    Application.put_env(:barkpark, :judge_http_adapter, FakeJudge)
+    Application.put_env(:barkpark, :anthropic_api_key, "sk-test")
+    Application.put_env(:barkpark, :judge_fake, fake)
+
+    on_exit(fn ->
+      Application.delete_env(:barkpark, :judge_http_adapter)
+      Application.delete_env(:barkpark, :anthropic_api_key)
+      Application.delete_env(:barkpark, :judge_fake)
+    end)
+  end
+
+  describe "tier-2 judge escalation" do
+    test "a judged 'duplicate' escalates an advise-band match to a REFUSE", %{scope: scope} do
+      with_judge({:ok, ~s({"relation":"duplicate","confidence":0.9,"reason":"same"})})
+      {:ok, _} = create_task("adv-a", @adv_title_a, scope, %{"parent_id" => "epic-a"})
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("adv-b", @adv_title_b, scope, %{"parent_id" => "epic-b"})
+
+      assert Enum.any?(payload.similar, &(&1.id == "adv-a"))
+    end
+
+    test "a judged 'distinct' leaves the advise match non-blocking (create allowed)", %{
+      scope: scope
+    } do
+      with_judge({:ok, ~s({"relation":"distinct","confidence":0.9,"reason":"different"})})
+      {:ok, _} = create_task("adv-a2", @adv_title_a, scope, %{"parent_id" => "epic-a"})
+
+      assert {:ok, _} = create_task("adv-b2", @adv_title_b, scope, %{"parent_id" => "epic-b"})
+    end
+
+    test "a judge error fails open — the advise match does not block", %{scope: scope} do
+      with_judge({:error, :timeout})
+      {:ok, _} = create_task("adv-a3", @adv_title_a, scope, %{"parent_id" => "epic-a"})
+
+      assert {:ok, _} = create_task("adv-b3", @adv_title_b, scope, %{"parent_id" => "epic-b"})
+    end
+
+    test "low judge confidence does not escalate", %{scope: scope} do
+      with_judge({:ok, ~s({"relation":"duplicate","confidence":0.4,"reason":"maybe"})})
+      {:ok, _} = create_task("adv-a4", @adv_title_a, scope, %{"parent_id" => "epic-a"})
+
+      assert {:ok, _} = create_task("adv-b4", @adv_title_b, scope, %{"parent_id" => "epic-b"})
+    end
+  end
 end

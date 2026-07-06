@@ -36,7 +36,7 @@ defmodule Barkpark.Tasks.Dedup do
 
   alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
-  alias Barkpark.Tasks.Similarity
+  alias Barkpark.Tasks.{Judge, Similarity}
 
   # Bound the worst-case scan. The backlog is small (hundreds); this caps a
   # pathological corpus without an FTS pre-filter, which tier-2 can add later.
@@ -66,11 +66,19 @@ defmodule Barkpark.Tasks.Dedup do
       assessment =
         Similarity.assess(new_task, candidates, distinct_from: distinct)
 
-      case assessment.refuse do
+      # Tier-2 (task-obsession layer 2): the gray-zone `advise` matches are the
+      # ones tier-1 is unsure about. When a judge is configured, ask it; a
+      # confident duplicate/already_landed verdict escalates the match to a hard
+      # refuse. Everything fails open — no judge, or a judge error, leaves the
+      # tier-1 verdict untouched.
+      {escalated, remaining_advise} = judge_escalate(new_task, candidates, assessment.advise)
+      refuse = assessment.refuse ++ escalated
+
+      case refuse do
         [] ->
           :ok
 
-        refuse ->
+        _ ->
           {:error,
            {:duplicate_task,
             %{
@@ -78,13 +86,50 @@ defmodule Barkpark.Tasks.Dedup do
                 "this task looks like an existing one — claim/extend it, or pass " <>
                   "distinct_from: [\"<id>\"] to confirm it is different",
               similar: Enum.map(refuse, &present/1),
-              advise: Enum.map(assessment.advise, &present/1)
+              advise: Enum.map(remaining_advise, &present/1)
             }}}
       end
     end
   end
 
   def check_new_task(_type, _attrs, _dataset, _prev_doc, _opts), do: :ok
+
+  # ── tier-2 judge escalation (fail-open) ────────────────────────────────────
+
+  # A judged `duplicate`/`already_landed` needs at least this confidence to
+  # escalate an advise match to a hard refuse.
+  @judge_confidence 0.7
+
+  # Returns {escalated, remaining_advise}. No judge configured → escalate
+  # nothing (tier-1 stands). The advise band is top-K-bounded, so this is a
+  # handful of calls at most, only on the gray-zone matches.
+  defp judge_escalate(_new_task, _candidates, []), do: {[], []}
+
+  defp judge_escalate(new_task, candidates, advise) do
+    if Judge.configured?() do
+      by_id = Map.new(candidates, fn c -> {Similarity.norm_id(Map.get(c, :id)), c} end)
+
+      Enum.split_with(advise, fn match ->
+        escalate?(new_task, Map.get(by_id, Similarity.norm_id(match.id)))
+      end)
+    else
+      {[], advise}
+    end
+  end
+
+  defp escalate?(_new_task, nil), do: false
+
+  defp escalate?(new_task, candidate) do
+    case Judge.judge(new_task, candidate) do
+      {:ok, %{relation: rel, confidence: conf}}
+      when rel in ["duplicate", "already_landed"] and conf >= @judge_confidence ->
+        true
+
+      # distinct / expands / low confidence / ANY error → fail open, don't escalate.
+      _ ->
+        false
+    end
+  end
 
   # ── candidate fetch (fail-open) ────────────────────────────────────────────
 
