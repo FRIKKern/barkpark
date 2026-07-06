@@ -1,0 +1,61 @@
+{
+ "method": "me-as-judge (claude-fable-5, this session) on the structurally-excluded cross residue at sim>=0.30; production tier-2 (tob-w2-llm-judge) wires the Batch/Messages API with a provisioned key using tooling/task-obsession/judge_prompt.md",
+ "verdicts": [
+  {
+   "a": "drafts.loop-low-mutate-attribution",
+   "b": "drafts.loop-low-history-offset-retention",
+   "sim": 0.433,
+   "relation": "distinct",
+   "confidence": 0.95,
+   "reason": "both are pipeline-mined loop-low batch items sharing the \"Round N backlog\" template; A fixes unattributed REST mutate writes, B fixes history-offset retention \u2014 different subjects"
+  },
+  {
+   "a": "drafts.loop-low-mutate-attribution",
+   "b": "drafts.loop-low-localizedtext-unknown-lang",
+   "sim": 0.422,
+   "relation": "distinct",
+   "confidence": 0.95,
+   "reason": "shared batch boilerplate; A=mutate attribution, B=localizedtext unknown-lang handling"
+  },
+  {
+   "a": "drafts.schema-workspace-safety-goal",
+   "b": "drafts.content-history-goal",
+   "sim": 0.378,
+   "relation": "distinct",
+   "confidence": 0.9,
+   "reason": "two different top-level goals sharing goal-doc boilerplate; workspace-safety vs content-history"
+  },
+  {
+   "a": "drafts.loop-csp-studio-draft",
+   "b": "drafts.loop-low-mutate-attribution",
+   "sim": 0.3,
+   "relation": "distinct",
+   "confidence": 0.9,
+   "reason": "both loop-batch items; CSP studio header vs mutate attribution"
+  },
+  {
+   "a": "drafts.loop-csp-studio-draft",
+   "b": "drafts.loop-low-history-offset-retention",
+   "sim": 0.3,
+   "relation": "distinct",
+   "confidence": 0.9,
+   "reason": "shared batch boilerplate, unrelated subjects"
+  },
+  {
+   "a": "drafts.loop-csp-studio-draft",
+   "b": "drafts.loop-low-crystallizer-backfill",
+   "sim": 0.3,
+   "relation": "distinct",
+   "confidence": 0.9,
+   "reason": "shared batch boilerplate, unrelated subjects"
+  }
+ ],
+ "human_review": [
+  {
+   "a": "parity-page",
+   "b": "aesthetic-unification-epic",
+   "sim": 0.202,
+   "note": "BELOW the 0.30 judge floor, surfaced by human judgment: two OPEN epics both about cross-surface visual consistency (GUI/TUI/web parity). Not a task-level duplicate, but the two INITIATIVES may overlap in scope \u2014 worth a human decision on whether to merge or explicitly delineate them."
+  }
+ ]
+}
