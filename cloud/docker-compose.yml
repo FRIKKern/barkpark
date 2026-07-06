@@ -100,10 +100,20 @@ services:
 
   # Self-hosted outbound mail relay (Postfix + OpenDKIM) — see
   # cloud/postfix/README.md for DNS records, TLS cert, and the Hetzner
-  # port-25 unblock this needs in prod. Not published to the host; reachable
-  # only by control_plane over this compose project's default network.
+  # port-25 unblock this needs in prod.
+  #
+  # Submission (587) is published so the SEPARATE content-instance boxes
+  # (guerrilla, prod — not on this compose network) can relay their identity
+  # mail (magic-link / password-reset / verify-email) through it, with
+  # SMTP_HOST=mail.barkpark.cloud. This is NOT an open relay: postfix's
+  # smtpd_relay_restrictions = permit_sasl_authenticated, reject_unauth_
+  # destination — a client must present the SASL credential to send, exactly
+  # like any public mail-submission service. The control_plane still reaches
+  # it in-network as `postfix`.
   postfix:
     build: ./postfix
+    ports:
+      - "587:587"
     environment:
       - SMTP_USERNAME
       - SMTP_PASSWORD

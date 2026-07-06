@@ -1182,14 +1182,14 @@ func TestProvision_SingleAppRestart(t *testing.T) {
 // redaction.
 func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 	sec := knownFourSecrets()
-	s := secretsInstallStep(sec)
+	s := secretsInstallStep(sec, MailRelay{})
 
 	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
 		t.Fatalf("secretsInstallStep argv = %v, want [bash -lc <script>]", s.Argv)
 	}
 	script := s.Argv[2]
 	for _, want := range []string{
-		"export BP_SKB='" + sec.SecretKeyBase + "'",     // each secret rides in via its own env
+		"export BP_SKB='" + sec.SecretKeyBase + "'", // each secret rides in via its own env
 		"export BP_KEK='" + sec.Kek + "'",
 		"export BP_CLOAK='" + sec.CloakKey + "'",
 		"export BP_PREVIEW='" + sec.PreviewJWTSecret + "'",
@@ -1229,6 +1229,100 @@ func TestSecretsInstallStep_ShapeAndRedaction(t *testing.T) {
 	}
 }
 
+// TestSecretsInstallStep_MailRelayInjection proves the shared mail relay is
+// written into the instance .env when enabled (so magic-link / reset / verify
+// actually deliver), with the SASL password treated exactly like the other
+// secrets: via $BP_SMTP_PASS in the Argv, never in Title/Cmd, and listed for
+// redaction. Host/port/username (non-secret) appear as plain printf values.
+func TestSecretsInstallStep_MailRelayInjection(t *testing.T) {
+	sec := knownFourSecrets()
+	mail := MailRelay{
+		Host:     "mail.barkpark.cloud",
+		Username: "barkpark-cloud",
+		Password: "eQorzMDR7Ki8DoKxSu3owEZdvoa0lkMP",
+		// Port omitted → defaults to 587.
+	}
+	s := secretsInstallStep(sec, mail)
+	script := s.Argv[2]
+
+	for _, want := range []string{
+		"export BP_SMTP_PASS='" + mail.Password + "'", // password rides via its own env
+		// the strip list grew to cover the SMTP keys (idempotent re-run)
+		"-e '^SMTP_HOST=' -e '^SMTP_PORT=' -e '^SMTP_USERNAME=' -e '^SMTP_PASSWORD=' -e '^SMTP_VERIFY_PEER='",
+		`printf 'SMTP_HOST=%s\n' 'mail.barkpark.cloud'`,
+		`printf 'SMTP_PORT=%s\n' '587'`, // default applied
+		`printf 'SMTP_USERNAME=%s\n' 'barkpark-cloud'`,
+		`printf 'SMTP_PASSWORD=%s\n' "$BP_SMTP_PASS"`, // secret from env, not script text
+		`printf 'SMTP_VERIFY_PEER=%s\n' 'true'`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("mail-enabled step missing %q; script:\n%s", want, script)
+		}
+	}
+	// Still exactly one restart.
+	if got := strings.Count(script, "systemctl restart barkpark"); got != 1 {
+		t.Errorf("want exactly one restart, got %d", got)
+	}
+	// The password must never surface in the narrated Title/Cmd.
+	if strings.Contains(s.Title, mail.Password) || strings.Contains(s.Cmd, mail.Password) {
+		t.Errorf("mail password leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
+	}
+	// The password is listed for redaction of captured failure output.
+	found := false
+	for _, r := range s.Redact {
+		if r == mail.Password {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("mail password not listed in Redact: %v", s.Redact)
+	}
+}
+
+// TestSecretsInstallStep_NoMailWhenDisabled is the no-regression guarantee: a
+// zero MailRelay injects NO SMTP lines, so an instance provisioned by a worker
+// without SMTP_RELAY_* is byte-identical to the pre-mail behavior.
+func TestSecretsInstallStep_NoMailWhenDisabled(t *testing.T) {
+	script := secretsInstallStep(knownFourSecrets(), MailRelay{}).Argv[2]
+	for _, forbidden := range []string{"SMTP_HOST=", "SMTP_PASSWORD=", "BP_SMTP_PASS"} {
+		if strings.Contains(script, forbidden) {
+			t.Errorf("disabled mail relay still emitted %q; script:\n%s", forbidden, script)
+		}
+	}
+}
+
+// TestMailRelay_Validate covers the shape guard: a fully-empty relay is valid
+// (mail simply off), a fully-specified safe relay is enabled, and partial or
+// shell-unsafe values are rejected with a specific error.
+func TestMailRelay_Validate(t *testing.T) {
+	good := MailRelay{Host: "mail.barkpark.cloud", Username: "barkpark-cloud", Password: "aBc123+/=-_"}
+	cases := []struct {
+		name    string
+		m       MailRelay
+		wantErr bool
+		enabled bool
+	}{
+		{"empty is valid+off", MailRelay{}, false, false},
+		{"full is valid+enabled", good, false, true},
+		{"partial (no password)", MailRelay{Host: "mail.barkpark.cloud", Username: "u"}, true, false},
+		{"host with quote", MailRelay{Host: "m'x", Username: "u", Password: "p"}, true, false},
+		{"password with space", MailRelay{Host: "mail.barkpark.cloud", Username: "u", Password: "a b"}, true, false},
+		{"non-numeric port", MailRelay{Host: "mail.barkpark.cloud", Port: "5x7", Username: "u", Password: "p"}, true, false},
+		{"email username ok", MailRelay{Host: "mail.barkpark.cloud", Username: "postmaster@barkpark.cloud", Password: "p"}, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.m.Validate()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() err = %v, wantErr = %v", err, tc.wantErr)
+			}
+			if got := tc.m.Enabled(); got != tc.enabled {
+				t.Errorf("Enabled() = %v, want %v", got, tc.enabled)
+			}
+		})
+	}
+}
+
 // TestSecretsInstallStep_RedactsKEKOnFailure proves a failing secrets-install step
 // whose captured SSH output echoes the BARKPARK_KEK has it scrubbed from the
 // wrapped error — the acceptance criterion that the KEK value can never reach
@@ -1246,7 +1340,7 @@ func TestSecretsInstallStep_RedactsKEKOnFailure(t *testing.T) {
 				"\nBARKPARK_CLOAK_KEY=" + sec.CloakKey, fmt.Errorf("exit status 1")
 		},
 	}
-	err := r.Run(context.Background(), secretsInstallStep(sec))
+	err := r.Run(context.Background(), secretsInstallStep(sec, MailRelay{}))
 	if err == nil {
 		t.Fatal("SSHStepRunner.Run: want an error for the failed secrets step, got nil")
 	}
@@ -1422,7 +1516,7 @@ func TestProvision_InstallsAllFourSecretsBeforeMigrate(t *testing.T) {
 // running the step twice over the same file yields exactly one line per key.
 func TestSecretsInstallStep_Idempotent(t *testing.T) {
 	sec := knownFourSecrets()
-	script := secretsInstallStep(sec).Argv[2]
+	script := secretsInstallStep(sec, MailRelay{}).Argv[2]
 	// The grep -v must strip a prior line for EACH of the four keys (the anchored
 	// '^KEY=' patterns) — that is what makes append-then-swap idempotent.
 	for _, key := range []string{"SECRET_KEY_BASE", "BARKPARK_KEK", "BARKPARK_CLOAK_KEY", "PREVIEW_JWT_SECRET"} {

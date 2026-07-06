@@ -359,6 +359,15 @@ type WarmPool struct {
 	Registry RegistryClient
 	Secrets  SecretGen
 
+	// Mail is the SHARED transactional-mail relay every provisioned instance is
+	// pointed at (magic-link / password-reset / verify-email). Unlike the
+	// per-instance Secrets, these values are the same for every tenant — the
+	// instance authenticates to the control-plane's Postfix submission relay.
+	// Zero value (Enabled()==false) → the instance is provisioned WITHOUT SMTP,
+	// so Barkpark.Mailer stays on the Local adapter (no delivery) exactly as
+	// before this field existed. Populated from the worker's SMTP_RELAY_* env.
+	Mail MailRelay
+
 	// MigrateArgv is the `mix ecto.migrate` argv the migrate step carries. It is
 	// NOT executed in tests (the fake runner records it); the real runner shells
 	// it out on the box. Empty → defaultMigrateArgv.
@@ -578,6 +587,72 @@ func validateSecrets(s Secrets) error {
 	return nil
 }
 
+// MailRelay is the SHARED transactional-mail submission relay every provisioned
+// instance is pointed at. Host/Port/Username are non-secret; Password is the SASL
+// credential (redacted like the per-instance secrets). Sourced from the worker's
+// SMTP_RELAY_* env — see cmd/barkpark-provisioner/main.go.
+type MailRelay struct {
+	Host     string
+	Port     string // defaults to "587" when empty
+	Username string
+	Password string
+}
+
+// mailHostAlphabet / mailUserAlphabet are the shell-safe shapes the mail values
+// are single-quoted into the install step's script with. Host is a DNS name;
+// Username may be an email local@domain. Neither may carry a quote/space/`;`/`$`
+// that could break out of the single-quoted printf. Password reuses the strict
+// secretValueAlphabet (it is the SASL secret).
+var (
+	mailHostAlphabet = regexp.MustCompile(`^[A-Za-z0-9.-]+$`)
+	mailUserAlphabet = regexp.MustCompile(`^[A-Za-z0-9._@+-]+$`)
+	mailPortAlphabet = regexp.MustCompile(`^[0-9]+$`)
+)
+
+// configured reports whether the operator set ANY relay field — i.e. intended
+// mail. Used to tell "not configured" (fine, skip) from "misconfigured" (loud).
+func (m MailRelay) configured() bool {
+	return m.Host != "" || m.Username != "" || m.Password != "" || m.Port != ""
+}
+
+// port returns the submission port, defaulting to 587.
+func (m MailRelay) port() string {
+	if m.Port == "" {
+		return "587"
+	}
+	return m.Port
+}
+
+// Enabled reports whether the relay is fully specified AND shell-safe, so the
+// install step may inject it. A partial/misconfigured relay is NOT enabled (the
+// worker logs that at startup); a zero value is simply off.
+func (m MailRelay) Enabled() bool { return m.Validate() == nil && m.Host != "" }
+
+// Validate rejects a partially- or unsafely-specified relay. A fully-empty relay
+// is valid (mail simply off). Returns a specific error otherwise so the worker
+// can surface exactly what the operator got wrong.
+func (m MailRelay) Validate() error {
+	if !m.configured() {
+		return nil
+	}
+	if m.Host == "" || m.Username == "" || m.Password == "" {
+		return fmt.Errorf("mail relay is partially configured (need SMTP_RELAY_HOST + SMTP_RELAY_USERNAME + SMTP_RELAY_PASSWORD)")
+	}
+	if !mailHostAlphabet.MatchString(m.Host) {
+		return fmt.Errorf("SMTP_RELAY_HOST %q has an unexpected shape", m.Host)
+	}
+	if !mailPortAlphabet.MatchString(m.port()) {
+		return fmt.Errorf("SMTP_RELAY_PORT %q is not numeric", m.Port)
+	}
+	if !mailUserAlphabet.MatchString(m.Username) {
+		return fmt.Errorf("SMTP_RELAY_USERNAME %q has an unexpected shape", m.Username)
+	}
+	if !secretValueAlphabet.MatchString(m.Password) {
+		return fmt.Errorf("SMTP_RELAY_PASSWORD has an unexpected shape; refusing to interpolate it into a shell command")
+	}
+	return nil
+}
+
 // secretsInstallStep builds the per-instance step that installs ALL minted
 // per-instance secrets into /opt/barkpark/.env and restarts Barkpark so the app
 // runs on its OWN keys. The warm image BAKES a shared SECRET_KEY_BASE and (worse) a
@@ -595,27 +670,56 @@ func validateSecrets(s Secrets) error {
 // TEXT), and the file is swapped in with mv — so re-running the chain never
 // duplicates a line. The single restart makes Phoenix re-read every key at boot (it
 // reads them once at startup, exactly like PHX_HOST).
-func secretsInstallStep(s Secrets) CaddyStep {
+func secretsInstallStep(s Secrets, mail MailRelay) CaddyStep {
 	const envFile = "/opt/barkpark/.env"
 	script := `export BP_SKB='` + s.SecretKeyBase + `'; ` +
 		`export BP_KEK='` + s.Kek + `'; ` +
 		`export BP_CLOAK='` + s.CloakKey + `'; ` +
-		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; ` +
-		`touch ` + envFile + `; ` +
-		`grep -v -e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET=' ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
-		`printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
+		`export BP_PREVIEW='` + s.PreviewJWTSecret + `'; `
+
+	// grep -v strip list (idempotency) + the append block, both grown when the
+	// shared mail relay is injected. The strip removes any prior line for a key
+	// so a re-run never duplicates.
+	strip := `-e '^SECRET_KEY_BASE=' -e '^BARKPARK_KEK=' -e '^BARKPARK_CLOAK_KEY=' -e '^PREVIEW_JWT_SECRET='`
+	appends := `printf 'SECRET_KEY_BASE=%s\n' "$BP_SKB" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_KEK=%s\n' "$BP_KEK" >> ` + envFile + `.bpnew; ` +
 		`printf 'BARKPARK_CLOAK_KEY=%s\n' "$BP_CLOAK" >> ` + envFile + `.bpnew; ` +
-		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; ` +
+		`printf 'PREVIEW_JWT_SECRET=%s\n' "$BP_PREVIEW" >> ` + envFile + `.bpnew; `
+
+	redact := []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret}
+	cmd := "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted)"
+
+	// Point the instance at the shared transactional-mail relay so magic-link /
+	// password-reset / verify-email actually deliver (else Barkpark.Mailer stays
+	// on the never-delivering Local adapter). Host/Port/Username are non-secret
+	// and single-quoted directly (validated shell-safe by MailRelay.Validate);
+	// the SASL password rides via $BP_SMTP_PASS (Argv only, redacted) like the
+	// other secrets. VERIFY_PEER stays on — the relay presents a real cert.
+	if mail.Enabled() {
+		script += `export BP_SMTP_PASS='` + mail.Password + `'; `
+		strip += ` -e '^SMTP_HOST=' -e '^SMTP_PORT=' -e '^SMTP_USERNAME=' -e '^SMTP_PASSWORD=' -e '^SMTP_VERIFY_PEER='`
+		appends += `printf 'SMTP_HOST=%s\n' '` + mail.Host + `' >> ` + envFile + `.bpnew; ` +
+			`printf 'SMTP_PORT=%s\n' '` + mail.port() + `' >> ` + envFile + `.bpnew; ` +
+			`printf 'SMTP_USERNAME=%s\n' '` + mail.Username + `' >> ` + envFile + `.bpnew; ` +
+			`printf 'SMTP_PASSWORD=%s\n' "$BP_SMTP_PASS" >> ` + envFile + `.bpnew; ` +
+			`printf 'SMTP_VERIFY_PEER=%s\n' 'true' >> ` + envFile + `.bpnew; `
+		redact = append(redact, mail.Password)
+		cmd += " + SMTP relay (mail." + mail.Host + ", password redacted)"
+	}
+
+	script += `touch ` + envFile + `; ` +
+		`grep -v ` + strip + ` ` + envFile + ` > ` + envFile + `.bpnew || true; ` +
+		appends +
 		`mv ` + envFile + `.bpnew ` + envFile + `; ` +
 		`systemctl restart barkpark`
+
 	return CaddyStep{
 		Title: "install the minted per-instance secrets + restart Barkpark",
-		Cmd:   "install per-instance SECRET_KEY_BASE + BARKPARK_KEK + BARKPARK_CLOAK_KEY + PREVIEW_JWT_SECRET (values redacted) + systemctl restart barkpark",
+		Cmd:   cmd + " + systemctl restart barkpark",
 		Argv:  []string{"bash", "-lc", script},
 		// Every value rides in the Argv (base64'd over SSH); scrub them all from any
 		// captured output so a step failure never surfaces a secret value.
-		Redact: []string{s.SecretKeyBase, s.Kek, s.CloakKey, s.PreviewJWTSecret},
+		Redact: redact,
 		// This step rewrites .env; a failure could echo other secret-shaped lines
 		// (DATABASE_URL, etc.) from grep/printf. Pattern-scrub those too.
 		RedactEnvSecrets: true,
@@ -754,15 +858,16 @@ func (realStepRunner) Run(ctx context.Context, s CaddyStep) error {
 //
 //  1. assign      — pop a ready host from the warm pool (triggers a refill).
 //  2. secrets     — mint per-instance SECRET_KEY_BASE, BARKPARK_KEK,
-//                   BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
+//     BARKPARK_CLOAK_KEY, PREVIEW_JWT_SECRET + admin token.
 //  3. dns         — UpsertRecord an A record <name>.<zone> → the host IP.
 //  4. caddy       — run the Caddy/TLS steps (sets PHX_HOST/PHX_SCHEME).
 //  5. secrets-install — write the four per-instance secrets into .env + restart
-//                   (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
+//     (BEFORE migrate — runtime.exs requires BARKPARK_KEK in prod).
 //  6. migrate     — run the mix ecto.migrate step.
 //  7. admin-token — install the minted admin token (after migrate).
 //  8. health      — RunHealthGate against the new server (FAIL CLOSED here).
 //  9. register    — record the LiveServer in the control-plane registry.
+//
 // 10. replacement — already triggered by the pop in step 1 (pool stays warm).
 //
 // FAIL CLOSED: if health (step 6) does not pass, Provision returns the gate
@@ -1011,7 +1116,7 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
-	if err := runner.Run(ctx, secretsInstallStep(secrets)); err != nil {
+	if err := runner.Run(ctx, secretsInstallStep(secrets, wp.Mail)); err != nil {
 		wp.progress("configure", "failed", "secrets")
 		return LiveServer{}, fmt.Errorf("secrets: %w", err)
 	}
