@@ -74,6 +74,25 @@ type RepoContext struct {
 	Mentioned map[string]int
 }
 
+// NextKind discriminates a NEXT intent-strip row (charter wave-12 D60): a
+// resumable (a lease dropped this task mid-work — the truest follow-up) or the
+// priority head of the ready queue (what the system is about to pick up).
+type NextKind int
+
+const (
+	nextResume NextKind = iota // a lease expired mid-work — the truest follow-up
+	nextReady                  // the priority head of the ready queue
+)
+
+// NextItem is one row of the NEXT intent strip (charter wave-12 D60/D61). Each
+// is a real cursor stop — c claims it. A resumable carries the lease-expiry time
+// its row shows ("lease expired 8m"); a ready item leaves it zero.
+type NextItem struct {
+	Task           Task
+	Kind           NextKind
+	LeaseExpiredAt time.Time // Event.At for nextResume; zero for nextReady
+}
+
 // Board is the fully organized, render-ready model.
 type Board struct {
 	Now      []Task    // unexpired claims, updated desc
@@ -114,9 +133,19 @@ type Board struct {
 	TaskCount int
 	// Stale is the count of non-terminal tasks untouched longer than the warn
 	// threshold (3d) — the header's "N stale" instrument. 0 renders nothing.
-	Stale  int
-	Counts map[string]int
-	Events []Event
+	Stale int
+	// Next is the pinned NEXT intent strip (charter wave-12 D60/D61): resumables
+	// (leases dropped mid-work) FIRST, then the priority head of the ready queue,
+	// capped at nextMax. Each is a real cursor stop (c claims it). Rendered as a
+	// tiny strip under NOW; empty => the strip collapses to nothing.
+	Next []NextItem
+	// NextReadyMore is the honest remainder count for the NEXT strip's dim
+	// "+N ready" tail: ready candidates that did not fit the nextMax budget after
+	// the resumables. Resumables are NEVER counted here (they are follow-up, not
+	// "ready"). A pointer to the spine below, never a cursor stop.
+	NextReadyMore int
+	Counts        map[string]int
+	Events        []Event
 }
 
 type Epic struct {

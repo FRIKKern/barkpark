@@ -47,6 +47,17 @@ const (
 	staleCountAfter = 3 * 24 * time.Hour
 )
 
+// nextMax is the hard cap on the NEXT intent strip (charter wave-12 D60): at
+// most this many cursor rows total across resumables + the ready head, so the
+// strip stays a tiny 2-3 line glance, never the old READY-TO-CLAIM wall (D52).
+const nextMax = 3
+
+// mutationLeaseExpired is the prime event a dropped claim emits when its lease is
+// swept (worker cleared, lifecycle reverted). It is the resumable signal
+// resolveNext joins to a still-open, unclaimed task — the truest follow-up intent
+// (charter wave-12 D61).
+const mutationLeaseExpired = "task.lease_expired"
+
 // doneCueMax is how many of a section's FRESHEST done children survive the
 // terminal fold as a dim completion CUE (charter D50 / wave-11). Age no longer
 // grants a done row: every terminal child beyond this count folds into the
@@ -341,7 +352,134 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 
 	board.Stale = countStale(s.Tasks, now)
 
+	// NEXT intent strip (charter wave-12 D60/D61): what the system is about to work
+	// on — resumables (leases dropped mid-work) first, then the priority head of the
+	// ready queue. Computed AFTER the NOW loop (board.Now is final) and after the
+	// ready overlay is on s.Tasks (composeSnapshot marked Lifecycle==ready upstream).
+	board.Next, board.NextReadyMore = resolveNext(s, byID, board.Now, now)
+
 	return board
+}
+
+// resolveNext builds the NEXT intent strip (charter wave-12 D60/D61): the tiny
+// "what we intend to follow up + what's up next" glance under NOW.
+//
+//  1. RESUMABLES first — the truest follow-up. Walk s.Events newest-first for a
+//     task.lease_expired whose task is still non-terminal, NOT in_progress and
+//     unclaimed, with NO later task.claimed/closed for the same bareID (the lease
+//     really lapsed and nobody has picked it back up). Deduped by bareID (freshest
+//     lease wins). A dropped mid-work claim is the strongest signal of intent.
+//  2. READY HEAD then — the P0-first head of the ready queue (the SAME order
+//     `bp task next` uses), excluding any resumable and any NOW-pinned task.
+//  3. Concatenate resumables ++ ready head, cap at nextMax TOTAL. NextReadyMore is
+//     the ready remainder that did not fit (resumables are never counted there —
+//     they are follow-up, not "ready").
+func resolveNext(s Snapshot, byID map[string]Task, now []Task, _ time.Time) ([]NextItem, int) {
+	nowSet := make(map[string]bool, len(now))
+	for _, t := range now {
+		nowSet[bareID(t.DocID)] = true
+	}
+	// A bareID index so a drafts.* task id joins a bare event id (and vice versa).
+	byBare := make(map[string]Task, len(byID))
+	for _, t := range byID {
+		byBare[bareID(t.DocID)] = t
+	}
+	// evAt indexes the freshest event per task, the recency signal the ready head
+	// sorts on (a tie-break under priority).
+	evAt := make(map[string]time.Time, len(s.Events))
+	for _, e := range s.Events {
+		id := bareID(e.DocID)
+		if a, ok := evAt[id]; !ok || e.At.After(a) {
+			evAt[id] = e.At
+		}
+	}
+
+	// Events newest-first so the freshest lease_expired per task wins the dedup.
+	evs := make([]Event, len(s.Events))
+	copy(evs, s.Events)
+	sort.SliceStable(evs, func(i, j int) bool { return evs[i].At.After(evs[j].At) })
+
+	var resumables []NextItem
+	seenResume := make(map[string]bool)
+	for _, e := range evs {
+		if e.Mutation != mutationLeaseExpired {
+			continue
+		}
+		bare := bareID(e.DocID)
+		if seenResume[bare] {
+			continue
+		}
+		t, ok := byBare[bare]
+		if !ok {
+			continue
+		}
+		if isTerminal(t.Lifecycle) || t.Lifecycle == lifeInProgress {
+			continue // it finished or is being worked again — not a follow-up
+		}
+		if t.Claim != nil && t.Claim.Worker != "" {
+			continue // someone re-claimed it
+		}
+		if laterClaimOrClose(s.Events, bare, e.At) {
+			continue // a later claim/close superseded the drop
+		}
+		seenResume[bare] = true
+		resumables = append(resumables, NextItem{Task: t, Kind: nextResume, LeaseExpiredAt: e.At})
+	}
+
+	// Ready head: every ready task EXCEPT a resumable or a NOW-pinned one.
+	excl := make(map[string]bool, len(resumables))
+	for _, ni := range resumables {
+		excl[bareID(ni.Task.DocID)] = true
+	}
+	var ready []Task
+	for _, t := range s.Tasks {
+		if t.Lifecycle != lifeReady {
+			continue
+		}
+		bare := bareID(t.DocID)
+		if excl[bare] || nowSet[bare] {
+			continue
+		}
+		ready = append(ready, t)
+	}
+	sort.SliceStable(ready, func(i, j int) bool {
+		ri, rj := priorityRank(ready[i].Priority), priorityRank(ready[j].Priority)
+		if ri != rj {
+			return ri < rj
+		}
+		return lastActivity(ready[i], evAt).After(lastActivity(ready[j], evAt))
+	})
+
+	// Concatenate resumables ++ ready head, capped at nextMax TOTAL. Resumables
+	// take precedence; if they alone exceed the cap the ready head shows nothing.
+	out := resumables
+	if len(out) > nextMax {
+		out = out[:nextMax]
+	}
+	readyPlaced := 0
+	for _, t := range ready {
+		if len(out) >= nextMax {
+			break
+		}
+		out = append(out, NextItem{Task: t, Kind: nextReady})
+		readyPlaced++
+	}
+	return out, len(ready) - readyPlaced
+}
+
+// laterClaimOrClose reports whether a task (by bareID) has a task.claimed or
+// task.closed event strictly after `after` — a drop that has since been picked
+// back up or finished is no longer a follow-up intent (charter wave-12 D61).
+func laterClaimOrClose(events []Event, bare string, after time.Time) bool {
+	for _, e := range events {
+		if bareID(e.DocID) != bare {
+			continue
+		}
+		if (e.Mutation == "task.claimed" || e.Mutation == "task.closed") && e.At.After(after) {
+			return true
+		}
+	}
+	return false
 }
 
 // looseLabelFreq counts, per label, how many loose tasks carry it (deduped

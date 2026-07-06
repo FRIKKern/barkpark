@@ -51,18 +51,45 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	// so measure it before budgeting rather than assuming a fixed height.
 	top := renderHeader(b, st, width, now)
 
-	// Budget the pinned NOW band so a swarm of concurrent claims can never push
-	// the spine/ticker/footer off the pane: header + 2 blanks + bottom are
-	// fixed, and the spine keeps at least minSpine lines.
+	// The pinned band (WHO = NOW claims + INTENT = NEXT strip) sits between the
+	// header and the spine (charter wave-12 D58/D63). Budget it so a swarm of
+	// concurrent claims can never push the spine/ticker/footer off the pane: header
+	// + 2 blanks + bottom are fixed, and the spine keeps at least minSpine lines.
+	// NOW reserves its lines FIRST; NEXT gets the remainder and folds before the
+	// spine starves (NOW is last to shed). An empty NOW+NEXT collapses the band to
+	// NOTHING — no labels, no blank spacers (the all-clear lives in the momentum
+	// header's "0 in flight").
 	const minSpine = 4
-	nowBudget := height - len(top) - 2 - len(bottom) - minSpine
-	if nowBudget < 2 {
-		nowBudget = 2 // "NOW" + one honest line, whatever the pane size
-	}
+	if len(b.Now) > 0 || len(b.Next) > 0 {
+		bandBudget := height - len(top) - 2 - len(bottom) - minSpine
+		if bandBudget < 2 {
+			bandBudget = 2 // one honest row, whatever the pane size
+		}
+		// Reserve NEXT its single collapse line BEFORE NOW spends the budget, so a
+		// greedy NOW can never orphan a NEXT cursor stop (charter D63: NEXT folds to
+		// "+N intent", it never silently vanishes while it owns rows). Under the very
+		// tightest budget both bands collapse to one catch line apiece (1 NOW + 1
+		// NEXT == the clamped floor), so every pinned cursor row stays markable. NOW
+		// keeps the full budget whenever NEXT is empty (unchanged path).
+		nowBudget := bandBudget
+		if len(b.Next) > 0 {
+			nowBudget = bandBudget - 1
+			if nowBudget < 1 {
+				nowBudget = 1
+			}
+		}
+		nowLines := renderNowBand(b, st, width, nowBudget, now)
+		nextBudget := bandBudget - len(nowLines)
+		if nextBudget < 0 {
+			nextBudget = 0
+		}
+		nextLines := renderNextBand(b, st, width, nextBudget, now)
 
-	top = append(top, "")
-	top = append(top, renderNowBand(b, st, width, nowBudget, now)...)
-	top = append(top, "")
+		top = append(top, "")
+		top = append(top, nowLines...)
+		top = append(top, nextLines...)
+		top = append(top, "")
+	}
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
 
@@ -317,52 +344,40 @@ func connGlyphWord(c ConnState) (string, string) {
 
 // ── NOW band (pinned) ────────────────────────────────────────────────────────
 
-// renderNowBand renders the pinned claim band within maxLines, degrading
-// honestly instead of overflowing: full two-line cards with breathing room →
-// cards without separators → as many cards as fit plus a dim "+N more claimed"
-// fold. The band never lies about how much is in flight. NOW cards are the
-// FIRST cursor rows (indexes [0, len(b.Now)) — the shell's visibleRows order),
-// so the card at st.Cursor wears the selection marker; a selection folded into
-// the "+N more" line marks that line instead, never vanishing silently.
+// renderNowBand renders the WHO half of the pinned band (charter wave-12 D59):
+// one agent-first line per live claim, within maxLines. An empty NOW returns nil
+// — NO "NOW" label, NO "nothing claimed" line: the empty band collapses and the
+// all-clear lives in the momentum header's "0 in flight". NOW cards are the FIRST
+// cursor rows (indexes [0, len(b.Now)) — the shell's visibleRows order), so the
+// row at st.Cursor wears the selection marker; when more claims exist than fit,
+// the rest fold into a dim "+N more claimed" line that CATCHES a folded-row
+// selection, never vanishing silently.
 func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
-	lines := []string{boldStyle.Render("NOW")}
 	if len(b.Now) == 0 {
-		// Nothing claimed. An honest all-clear (charter D52 / wave-11 retired the
-		// READY TO CLAIM head — claim-forward is now the cursor landing on any ready
-		// row + c). The separator is the board's calm "·".
-		lines = append(lines, dimStyle.Render("   nothing claimed · all clear"))
-		return lines
+		return nil
 	}
-	bc := epicTitleByChild(b)
 	n := len(b.Now)
-
-	// Preferred: cards separated by blank lines (1 + 3n - 1 lines).
-	spaced := 3*n <= maxLines
-	// Compact: cards back to back (1 + 2n lines). Over budget, show as many
-	// full cards as fit and fold the rest into one honest count line.
+	// Fully collapsed: only one line fits (the tightest supported panes, where NEXT
+	// has reserved the band's other line). Drop the "NOW" label and fold EVERY claim
+	// into one dim "+N claimed" catch line that still marks a folded NOW-row cursor,
+	// so no claim cursor stop is ever left unmarked (the parity floor).
+	if maxLines < 2 {
+		sel := st.Cursor < n
+		return []string{dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d claimed", n), width))}
+	}
+	lines := []string{boldStyle.Render("NOW")}
 	shown := n
-	if 1+2*n > maxLines {
-		shown = (maxLines - 2) / 2 // reserve the header + fold line
+	if 1+n > maxLines {
+		shown = maxLines - 2 // reserve the header + fold line
 		if shown < 0 {
 			shown = 0
 		}
 	}
-
 	for i, t := range b.Now[:shown] {
-		if spaced && i > 0 {
-			lines = append(lines, "")
-		}
-		// flashTitle lights line-1's title if this claim just changed; NowCard's
-		// existing ansi-aware truncation carries the emphasis through width-safely.
-		card := NowCard(flashTitle(t, st, now), bc[t.DocID], st.Cursor == i, width, st.Frame, now)
-		// The NOW band is the ONE place real work runs, so its claim age ticks in
-		// SECONDS (decision 19). NowCard builds line-1 (glyph, twin, title); render
-		// rebuilds line-2 so its age reads LiveElapsed instead of the coarse
-		// AgeBadge, with the lease tint (claimRole) unchanged.
-		if len(card) == 2 {
-			card[1] = nowCardMeta(t, bc[t.DocID], width, now)
-		}
-		lines = append(lines, card...)
+		// flashTitle lights the title if this claim just changed; NowCard's ansi-
+		// aware truncation carries the emphasis through width-safely.
+		lines = append(lines, NowCard(flashTitle(t, st, now), st.Cursor == i, width, st.Frame, now)...)
 	}
 	if folded := n - shown; folded > 0 {
 		sel := st.Cursor >= shown && st.Cursor < n
@@ -372,27 +387,57 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 	return lines
 }
 
-// epicTitleByChild maps a child doc_id -> its epic's title, for NOW-card
-// breadcrumbs (Task carries only ParentID, not the parent's title).
-func epicTitleByChild(b Board) map[string]string {
-	byParent := map[string]string{}
-	for _, e := range b.Epics {
-		byParent[e.Root.DocID] = e.Root.Title
+// renderNextBand renders the INTENT half of the pinned band (charter wave-12
+// D60): a tiny NEXT strip directly under NOW showing what the system is ABOUT to
+// work on — resumables first, then the priority head of the ready queue. The
+// "NEXT" label is DIM (intent is subordinate to active work; NOW's label is bold,
+// so the weight difference encodes active > intent). Each row is a real cursor
+// stop at indexes [len(b.Now), len(b.Now)+len(b.Next)). When the rows don't fit
+// maxLines they fold to a dim "+N intent" catch line (the visual collapse of the
+// folded cursor rows, NOT a separate stop). A display-only "+N ready" tail points
+// at the spine below and sheds FIRST under height pressure. Empty NEXT => nil.
+func renderNextBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
+	if len(b.Next) == 0 || maxLines < 1 {
+		return nil
 	}
-	out := map[string]string{}
-	for _, e := range b.Epics {
-		for _, c := range e.Children {
-			out[c.DocID] = e.Root.Title
+	base := len(b.Now)
+	n := len(b.Next)
+	// Fully collapsed: only one line fits (the tightest supported panes). Drop the
+	// "NEXT" label and fold EVERY intent row into one dim "+N intent" catch line that
+	// still marks a folded NEXT-row cursor — the charter D63 guarantee that NEXT
+	// sheds to "+N intent" rather than vanishing while it owns cursor stops.
+	if maxLines < 2 {
+		sel := st.Cursor >= base && st.Cursor < base+n
+		return []string{dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", n), width))}
+	}
+	lines := []string{dimStyle.Render("NEXT")}
+
+	// Rows take priority over the display-only "+N ready" tail. Show as many rows
+	// as fit under maxLines (reserving the label); fold the remainder to "+N intent".
+	shown := n
+	if 1+n > maxLines {
+		shown = maxLines - 2 // label + fold line
+		if shown < 0 {
+			shown = 0
 		}
 	}
-	// A NOW task may not be listed among a shown epic's children (dormant epic,
-	// folded child); resolve its ParentID against the epic roots directly.
-	for _, t := range b.Now {
-		if _, ok := out[t.DocID]; !ok && t.ParentID != "" {
-			out[t.DocID] = byParent[t.ParentID]
-		}
+	for i := 0; i < shown; i++ {
+		lines = append(lines, renderNextRow(b.Next[i], st.Cursor == base+i, width, now))
 	}
-	return out
+	if folded := n - shown; folded > 0 {
+		sel := st.Cursor >= base+shown && st.Cursor < base+n
+		lines = append(lines, dimStyle.Render(truncate(
+			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", folded), width)))
+	}
+	// The "+N ready" tail is a display-only pointer to the ready rows in the spine
+	// below (never a cursor stop, never counted in len(b.Next)). It sheds FIRST
+	// under height pressure, so append it only when a spare line remains.
+	if b.NextReadyMore > 0 && len(lines) < maxLines {
+		lines = append(lines, dimStyle.Render(truncate(
+			fmt.Sprintf("   +%d ready", b.NextReadyMore), width)))
+	}
+	return lines
 }
 
 // ── Motion paint (flash + live elapsed) ──────────────────────────────────────
@@ -414,39 +459,6 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
-// nowCardMeta rebuilds a NOW card's second line (worker · elapsed · criteria ·
-// breadcrumb) so the claim age reads LiveElapsed's ticking seconds instead of
-// NowCard's coarse AgeBadge (decision 19). It mirrors NowCard's line-2 structure
-// exactly — same order, same " · " join, same width clamp, same claimRole lease
-// tint, same calm criteria digits — differing ONLY in the age token.
-func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
-	var sparts []string
-	add := func(p, s string) {
-		if p == "" {
-			return
-		}
-		sparts = append(sparts, s)
-	}
-	if t.Claim != nil {
-		add(t.Claim.Worker, dimStyle.Render(t.Claim.Worker))
-		if el := LiveElapsed(t.Claim.ClaimedAt, now); el != "" {
-			st := roleStyle(claimRole(t.Claim.ClaimedAt, now))
-			add(el, st.Render(el))
-		}
-	}
-	if f := criteriaFraction(t.Criteria); f != "" {
-		add(f, dimStyle.Render(f))
-	}
-	if breadcrumb != "" {
-		add(breadcrumb, dimStyle.Render(breadcrumb))
-	}
-	styled := strings.Join(sparts, " · ")
-	if disp(styled) > width-3 {
-		styled = truncate(styled, width-3)
-	}
-	return "   " + styled
-}
-
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
@@ -462,10 +474,10 @@ func nowCardMeta(t Task, breadcrumb string, width int, now time.Time) string {
 // is now impossible: visibleRows filters the SAME producer to its Selectable set.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	// The pinned NOW cards own the first indexes (renderNowBand marks them). The
-	// READY TO CLAIM head is retired (charter D52 / wave-11), so the spine's first
-	// selectable row always follows the NOW cards.
-	selIdx := len(b.Now)
+	// The pinned band owns the first indexes: the NOW cards (renderNowBand marks
+	// them), then the NEXT intent rows (renderNextBand marks them — charter wave-12
+	// D63). So the spine's first selectable row follows NOW + NEXT.
+	selIdx := len(b.Now) + len(b.Next)
 	emit := func(s string) { lines = append(lines, s) }
 	markSel := func() bool {
 		selected := selIdx == st.Cursor

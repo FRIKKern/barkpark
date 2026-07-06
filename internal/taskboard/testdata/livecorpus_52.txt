@@ -1,13 +1,15 @@
 barkpark · tasks            ⇄ guerrilla  ● live · 1m
-⠋ 2 in flight · ○ 7 ready · ✓ 30 done · 1 stale  56%
-█████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░
+⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 1 stale  55%
+████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░
 
 NOW
-▎⠋ wire the append-only audit sink
-   opus-3 · 5m00s · Enterprise-ready auth - one lay…
-
- ⠋ map SAML group claims to roles
-   fable-1 · 8m00s · Enterprise-ready auth - one la…
+▎⠋ opus-3 wire the append-only audit sink      5m00s
+ ⠋ fable-1 map SAML group claims to roles      8m00s
+NEXT
+ ↩ resume 'wire the Studio user-… · lease expired 8m
+ ○ P0 urgent P0 ready fix
+ ○ P1 append-only event schema
+   +6 ready
 
   Enterprise-ready auth - one layer, easy… ··· 25/32
    ○ W1 · Tenant-wide audit event bus             P1
@@ -46,16 +48,14 @@ NOW
    ✓ A:A whole-column ref                         2h
   +1 more
 
-  (no epic) ···································· 1/3
+  (no epic) ···································· 1/5
+   ○ urgent P0 ready fix                          P0
    ○ quality lint pass on the loose pile          P3
    ! revisit the old migration path       P3 blocked
    ✓ shipped loose task                           2h
-  +3 cancelled
+  +1 more · 3 cancelled
 
   Unified Aesthetic: one design language, every sur…
-
-
-
 
 
 
