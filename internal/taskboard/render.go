@@ -24,7 +24,6 @@ var Chrome = ChromeInfo{RepoName: "—", Branch: "—", Server: "—"}
 // gutter + indent + weight, never a border.
 const childIndent = 2
 
-// @canonical capability:taskboard-render aka:portrait,tui,task board,glance pane doc:docs/cards/tui.md
 // Render draws the whole portrait frame for a 60–100col × 100+row pane, INVERTED
 // (charter Amendment 6 / D83): a one-line identity strip pinned at the very top,
 // then the scrolling epic spine (a window around st.Cursor) filling the top
@@ -33,6 +32,8 @@ const childIndent = 2
 // order follows the visual top→bottom order: spine rows first, then NEXT, then
 // NOW (charter D84/D86). It is pure — no I/O, no tea, no network — so goldens are
 // the primary gate. Below 60 cols rows shed their right-meta and keep glyph+title.
+//
+// @canonical capability:taskboard-render aka:portrait,tui,task board,glance pane doc:docs/cards/tui.md
 func Render(b Board, st UIState, width, height int, now time.Time) string {
 	if width < 20 {
 		width = 20
