@@ -24,9 +24,14 @@
 //
 // DOM-free: imports ONLY `@tiptap/core` (loads in plain Node) plus a toDOM that
 // is inert until mounted in an Editor — so the pure-Node smoke harness can
-// import this module to assert its schema without a browser. A toDOM `<hr>` is
-// enough for v1; a custom node-view (delete affordance / selected styling) is a
-// deliberate later add ONLY if the bare atom proves insufficient.
+// import this module to assert its schema without a browser. The toDOM emits the
+// reader's §-on-a-hairline structure — a `<div class="bp-section-divider">`
+// wrapping a `<span class="bp-section-divider__mark">§</span>` — byte-aligned
+// with `Figures.section_divider_html/0` (figures.ex:33-37) so the edit canvas
+// paints the same centered section mark the /papers article reader does, instead
+// of a bare `<hr>`. Still a pure ATOM (the § is a static renderHTML literal, not
+// editable PM content); a custom node-view (delete affordance / selected styling)
+// is a deliberate later add ONLY if the bare atom proves insufficient.
 
 import { Node, mergeAttributes } from "@tiptap/core";
 
@@ -69,16 +74,30 @@ export const Divider = Node.create({
     };
   },
 
-  // Parse an <hr> back into a divider node (so a setContent of rendered HTML
-  // round-trips). The data-* attrs are read by addAttributes' parseHTML above.
+  // Parse the § divider DOM back into a divider node (so a setContent of rendered
+  // HTML, and an intra-canvas paste of a copied divider, round-trip). Also keeps
+  // parsing legacy bare `<hr>` (older content + the StarterKit `---` inputrule in
+  // the per-block prose editor). The data-* attrs are read by addAttributes'
+  // parseHTML above off whichever element matched.
   parseHTML() {
-    return [{ tag: "hr" }];
+    return [
+      { tag: "div.bp-section-divider" },
+      { tag: "div[data-bp-type='divider']" },
+      { tag: "hr" },
+    ];
   },
 
-  // Render the atom as a bare <hr> carrying its data-bp-* stamp. mergeAttributes
-  // folds in the per-attr renderHTML output (data-bp-id / data-bp-type). An <hr>
-  // is a void element — no content hole (no `0`), matching the leaf schema.
+  // Render the atom as the reader's §-on-a-hairline structure: an outer
+  // `<div class="bp-section-divider">` (the hairline rule) wrapping a
+  // `<span class="bp-section-divider__mark">§</span>` (the masked glyph),
+  // byte-aligned with Figures.section_divider_html/0 (figures.ex:33-37).
+  // mergeAttributes folds the per-attr renderHTML output (data-bp-id /
+  // data-bp-type) onto the OUTER div — preserving the bp-attrs stamp contract.
   renderHTML({ HTMLAttributes }) {
-    return ["hr", mergeAttributes(HTMLAttributes)];
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, { class: "bp-section-divider" }),
+      ["span", { class: "bp-section-divider__mark" }, "§"],
+    ];
   },
 });
