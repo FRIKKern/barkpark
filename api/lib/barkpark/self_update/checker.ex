@@ -88,11 +88,15 @@ defmodule Barkpark.SelfUpdate.Checker do
       base = %{base | canonical_release: fork_advice(cfg, client, repo, latest)}
 
       if latest > running do
+        notes = fetch_notes(client, repo, latest_tag)
+
         %{
           base
           | state: :behind,
             latest_release: latest_release,
-            digest: fetch_digest(client, repo, "v" <> running_release, latest_tag)
+            digest: fetch_digest(client, repo, "v" <> running_release, latest_tag),
+            notes_body: notes.body,
+            notes_url: notes.url
         }
       else
         %{base | state: :current, latest_release: latest_release}
@@ -151,6 +155,18 @@ defmodule Barkpark.SelfUpdate.Checker do
     case client.digest(repo, from_tag, to_tag) do
       {:ok, lines} when is_list(lines) -> lines
       _error -> []
+    end
+  end
+
+  # Curated notes (isu-w2) are best-effort, exactly like the digest: any
+  # failure — or a client that predates the callback — degrades to "no
+  # notes", and the Studio bar falls back to the commit digest.
+  defp fetch_notes(client, repo, tag) do
+    with true <- function_exported?(client, :release_notes, 2),
+         {:ok, %{body: body, url: url}} <- client.release_notes(repo, tag) do
+      %{body: body, url: url}
+    else
+      _ -> %{body: nil, url: nil}
     end
   end
 

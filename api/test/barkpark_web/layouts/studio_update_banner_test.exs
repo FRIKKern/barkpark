@@ -109,6 +109,30 @@ defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
       assert html =~ "feat: b"
     end
 
+    test "curated release notes (isu-w2) win over the digest and link out", %{conn: conn} do
+      prime_behind!()
+
+      # Prime the Fake with a curated GitHub Release body + URL for this check.
+      Application.put_env(:barkpark, Barkpark.SelfUpdate.Client.Fake,
+        latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+        digest: {:ok, ["fix: a", "feat: b"]},
+        release_notes:
+          {:ok, %{body: "## Highlights\nShiny new thing", url: "https://example.test/releases/v999.0.0"}}
+      )
+
+      assert Barkpark.SelfUpdate.check_now().notes_body =~ "Shiny new thing"
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+      assert html =~ ~s|class="bp-update-notes"|
+      assert html =~ "Shiny new thing"
+      assert html =~ "Full release notes"
+      assert html =~ "https://example.test/releases/v999.0.0"
+      # With curated notes present, the raw commit digest is NOT rendered.
+      refute html =~ "fix: a"
+    end
+
     test "apply OFF (default) shows 'How to update', not the Update-now button", %{conn: conn} do
       prime_behind!()
 

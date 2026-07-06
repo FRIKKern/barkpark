@@ -40,6 +40,8 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
              latest_release: nil,
              canonical_release: nil,
              digest: [],
+             notes_body: nil,
+             notes_url: nil,
              checked_at: nil,
              error: nil
            }
@@ -110,6 +112,38 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
     assert status.latest_release == "999.0.0"
     assert status.digest == []
     assert status.error == nil
+  end
+
+  test "curated release notes (isu-w2) flow into the :behind status" do
+    prime(
+      latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+      digest: {:ok, ["fix: a thing"]},
+      release_notes: {:ok, %{body: "Big release", url: "https://example.test/r/v999.0.0"}}
+    )
+
+    start_supervised!({Checker, @quiet_opts})
+
+    status = SelfUpdate.check_now()
+
+    assert status.state == :behind
+    assert status.notes_body == "Big release"
+    assert status.notes_url == "https://example.test/r/v999.0.0"
+  end
+
+  test "a release-notes error is tolerated — still :behind, notes nil" do
+    prime(
+      latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
+      digest: {:ok, []},
+      release_notes: {:error, :rate_limited}
+    )
+
+    start_supervised!({Checker, @quiet_opts})
+
+    status = SelfUpdate.check_now()
+
+    assert status.state == :behind
+    assert status.notes_body == nil
+    assert status.notes_url == nil
   end
 
   test "the pre-first-check status is the :unknown baseline" do

@@ -25,6 +25,9 @@ defmodule Barkpark.SelfUpdate.Client.GitHub do
   @receive_timeout 10_000
   @release_tag_re ~r/^v(\d+)\.(\d+)\.(\d+)$/
   @digest_cap 50
+  # Curated release bodies can be long; cap what we carry into the status
+  # map / Studio bar. The full text is always one click away via the URL.
+  @notes_cap 4_000
 
   @impl true
   def latest_release(repo) do
@@ -57,6 +60,25 @@ defmodule Barkpark.SelfUpdate.Client.GitHub do
 
       {:ok, _other} ->
         {:error, :unexpected_body}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @impl true
+  def release_notes(repo, tag) do
+    case request("#{@api_base}/repos/#{repo}/releases/tags/#{tag}") do
+      {:ok, release} when is_map(release) ->
+        {:ok, %{body: notes_body(Map.get(release, "body")), url: notes_url(release)}}
+
+      {:ok, _other} ->
+        {:ok, %{body: nil, url: nil}}
+
+      # A tag with no published GitHub Release is the common case, not a
+      # failure — degrade to "no curated notes" so the caller uses the digest.
+      {:error, {:http_status, 404}} ->
+        {:ok, %{body: nil, url: nil}}
 
       {:error, reason} ->
         {:error, reason}
@@ -110,4 +132,17 @@ defmodule Barkpark.SelfUpdate.Client.GitHub do
   end
 
   defp first_line(_other), do: nil
+
+  # Trim + cap the release body; an empty body reads as "no curated notes".
+  defp notes_body(body) when is_binary(body) do
+    case String.trim(body) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, @notes_cap)
+    end
+  end
+
+  defp notes_body(_other), do: nil
+
+  defp notes_url(%{"html_url" => url}) when is_binary(url) and url != "", do: url
+  defp notes_url(_other), do: nil
 end

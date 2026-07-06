@@ -97,6 +97,11 @@ defmodule Barkpark.SelfUpdate do
       latest_release: nil,
       canonical_release: nil,
       digest: [],
+      # Curated release notes for the latest release (isu-w2): the human-
+      # authored body + its URL, when a Release exists. nil/`[]` fall back
+      # to the raw commit `digest`.
+      notes_body: nil,
+      notes_url: nil,
       checked_at: nil,
       error: nil
     }
