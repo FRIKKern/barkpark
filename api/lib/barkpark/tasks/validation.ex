@@ -125,6 +125,10 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_list(content, "history")
     |> check_optional_map(content, "estimate")
     |> check_optional_map(content, "outcome")
+    # Land digest (task-obsession layer 3): what the task changed —
+    # %{"prs","files","capability_slugs"}. Written at close; read by the CI
+    # re-land check. Top-level shape only (map), per the claim precedent.
+    |> check_optional_map(content, "landed")
     |> check_optional_map(content, "history_summary")
     |> check_optional_map_list(content, "worklog")
     |> check_optional_map_list(content, "acceptance_criteria")

@@ -321,6 +321,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:lifecycle_status, params["lifecycle_status"])
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
+        |> Params.put_opt(:landed, params["landed"])
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.

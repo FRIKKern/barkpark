@@ -54,6 +54,20 @@ A PR targeting `main` must clear:
    tightens the check to require the task be claimed by the author's mapped
    worker. **Currently advisory** until made required-by-name (below).
 
+8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
+   only** (`continue-on-error: true`): flags when a PR changes files a
+   recently-closed task already landed. Each task's `content.landed.files`
+   digest is written at close (the land-digest close path); the check diffs the
+   PR's changed files against every closed task's digest. Two dampers keep it
+   readable (both in the unit-tested `tooling/task-obsession/reland_check.py`,
+   `bash tooling/task-obsession/reland_check.test.sh`): **hot-file
+   down-weighting** (files in a large fraction of digests + a seed list carry no
+   signal) and **dependency-edge suppression** (a finding against a task the
+   PR's own task depends on is dropped — reverts/follow-ups are expected;
+   best-effort, needs `BARKPARK_TASK_TOKEN` to read edges). Ledger unreachable →
+   no findings. Surfaces as a `::warning::` + job summary; never blocks — add a
+   `blocks` edge to the prior task to silence an intentional overlap.
+
 The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 `mix compile --warnings-as-errors` + `mix test` against Postgres — is
 **blocking** (no `continue-on-error`). The test-infra remediation was
