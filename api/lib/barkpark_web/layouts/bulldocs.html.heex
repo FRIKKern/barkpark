@@ -88,6 +88,19 @@
       line-height: 1.65;
     }
 
+    /* pdd-t19 — the article stream's VERTICAL RHYTHM. Heading margins are
+       intentionally ZERO in the shared surface rules (the edit canvas gets its
+       rhythm from block gap), so the READER's own shell supplies the
+       equivalent here: breathing room above each heading row and a calm gap
+       after the title. Scoped to the article stream rows — the shared
+       `.bp-paper-surface` rules (parity-gated with the editor) are untouched,
+       and email / non-article papers keep their bytes. */
+    .bp-paper-article [data-block-id] h1 { margin: 0 0 0.6em; }
+    .bp-paper-article [data-block-id] h2 { margin: 1.9em 0 0.45em; }
+    .bp-paper-article [data-block-id] h3 { margin: 1.5em 0 0.4em; }
+    .bp-paper-article [data-block-id]:first-child h1,
+    .bp-paper-article [data-block-id]:first-child h2 { margin-top: 0; }
+
     /* Native form block (grill / questionnaire). render.ex emits a render-only
        <section class="bp-form bp-form-grill|bp-form-questionnaire"> of
        <fieldset class="bp-form-question"> cards, each with a <legend> prompt,
