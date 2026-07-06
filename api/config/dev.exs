@@ -83,10 +83,3 @@ config :barkpark, :allow_private_outbound, true
 # demo / no-login dev posture). OFF by default in prod — see runtime.exs
 # (BARKPARK_PUBLIC_DEMO_STUDIO) and config.exs for the fail-closed base.
 config :barkpark, :public_demo_studio, true
-
-# Studio tmux console (dev ONLY — /studio/tmux). A browser terminal on a real
-# tmux session on this host = arbitrary code execution, so it is enabled ONLY
-# here: the `expty` PTY dep is `only: [:dev]` and this is the sole config that
-# turns it on. There is deliberately NO runtime.exs env-var to enable it in
-# prod. See lib/barkpark_web/studio/tmux_console.ex for the full contract.
-config :barkpark, :tmux_console, enabled: true, backend: ExPTY

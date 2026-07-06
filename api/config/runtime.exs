@@ -40,6 +40,13 @@ if config_env() == :prod do
          System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
 end
 
+# Studio tmux console: ON by default on every Studio (admin-gated; auto-refused
+# on any host where public_demo_studio is on). Opt OUT per host by setting
+# BARKPARK_TMUX_CONSOLE to a falsy value. Merge keeps the compiled backend.
+if System.get_env("BARKPARK_TMUX_CONSOLE") in ["0", "false", "no", "off"] do
+  config :barkpark, :tmux_console, enabled: false
+end
+
 # "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
 # instance, the control plane's public origin here puts the cloud sign-in
 # button on /login. The button deep-links to the cloud SPA, which mints a

@@ -203,6 +203,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :scope_prefix, :string, default: ""
   attr :nav_section, :atom, default: nil
   attr :current_path, :string, default: nil
+  attr :admin?, :boolean, default: false
 
   def studio_tabs(assigns) do
     ctx = %{
@@ -211,7 +212,12 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       scope_prefix: assigns[:scope_prefix] || ""
     }
 
-    baseline = default_top_menu_entries(assigns.dataset, assigns[:scope_prefix] || "")
+    baseline =
+      default_top_menu_entries(
+        assigns.dataset,
+        assigns[:scope_prefix] || "",
+        assigns[:admin?] == true
+      )
 
     tabs =
       try do
@@ -254,7 +260,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   #
   # Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs
   # (which default to 100 via `normalize_top_menu_entry/1`).
-  defp default_top_menu_entries(dataset, scope_prefix) when is_binary(dataset) do
+  defp default_top_menu_entries(dataset, scope_prefix, admin?) when is_binary(dataset) do
     ds = URI.encode(dataset)
 
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
@@ -297,16 +303,16 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ] ++ tmux_console_entry()
+    ] ++ tmux_console_entry(admin?)
   end
 
-  # The dev-only tmux console tab (Task: Studio tmux console). Appears in the
-  # top menu ONLY when `TmuxConsole.enabled?/0` — a dev-only PTY dep plus an
-  # explicit config flag, so it is absent in prod/test. The route itself is
-  # admin-gated regardless. Flat singleton path (not dataset-scoped) — one
-  # shared tmux session serves every dataset.
-  defp tmux_console_entry do
-    if BarkparkWeb.Studio.TmuxConsole.enabled?() do
+  # The tmux console tab. Shown ONLY to admins (`admin?`, from the
+  # `shares_admin?` chrome flag) AND only where `TmuxConsole.enabled?/0` holds
+  # (on by default; hard-refused on public-demo hosts). The route is
+  # admin-gated regardless — this just keeps the tab out of non-admin chrome.
+  # Flat singleton path (not dataset-scoped): one shared session per host.
+  defp tmux_console_entry(admin?) do
+    if admin? and BarkparkWeb.Studio.TmuxConsole.enabled?() do
       [%{label: "tmux", path: "/studio/tmux", icon: nil, order: 40, active_when: "/studio/tmux"}]
     else
       []
