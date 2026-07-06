@@ -509,6 +509,65 @@
       letter-spacing: 0.06em; color: var(--fg-dim);
     }
 
+    /* ── Self-update bar (isu-w1): slim admin strip pinned above the topbar.
+       Server-rendered chrome (admin + :behind only); the `bp-update-bar`
+       initialiser in the scripts below wires Update-now / changelog / dismiss.
+       Theme-aware via the shared vars (no hard-coded light/dark). */
+    .bp-update-bar {
+      display: flex; flex-direction: column; flex-shrink: 0;
+      background: var(--bg-card); border-bottom: 1px solid var(--border-muted);
+      font-size: 12.5px;
+    }
+    .bp-update-bar-main {
+      display: flex; align-items: center; gap: 10px;
+      min-height: 34px; padding: 0 16px;
+    }
+    .bp-update-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+      background: var(--warning); animation: bp-update-pulse 2.4s ease-out infinite;
+    }
+    @keyframes bp-update-pulse {
+      0%   { box-shadow: 0 0 0 0 hsl(38 92% 50% / 0.45); }
+      70%  { box-shadow: 0 0 0 6px hsl(38 92% 50% / 0); }
+      100% { box-shadow: 0 0 0 0 hsl(38 92% 50% / 0); }
+    }
+    @media (prefers-reduced-motion: reduce) { .bp-update-dot { animation: none; } }
+    .bp-update-msg { color: var(--fg); }
+    .bp-update-msg strong { font-weight: 700; }
+    .bp-update-run { color: var(--fg-dim); }
+    .bp-update-status { color: var(--fg-muted); font-size: 12px; }
+    .bp-update-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
+    .bp-update-btn {
+      height: 24px; padding: 0 12px; border: none; border-radius: 5px;
+      font-size: 12px; font-weight: 600; color: #fff; background: var(--warning);
+      cursor: pointer; transition: filter 0.1s;
+    }
+    .bp-update-btn:hover { filter: brightness(1.06); }
+    .bp-update-btn:disabled { opacity: 0.6; cursor: default; filter: none; }
+    .bp-update-link {
+      padding: 2px 4px; background: none; border: none; cursor: pointer;
+      color: var(--fg-muted); font-size: 12px;
+      text-decoration: underline; text-underline-offset: 2px;
+    }
+    .bp-update-link:hover { color: var(--fg); }
+    .bp-update-dismiss {
+      padding: 2px 6px; background: none; border: none; border-radius: 4px;
+      color: var(--fg-dim); font-size: 16px; line-height: 1; cursor: pointer;
+    }
+    .bp-update-dismiss:hover { color: var(--fg); background: var(--bg-muted); }
+    .bp-update-changelog {
+      padding: 6px 16px 10px 33px; background: var(--bg-muted);
+      border-top: 1px dashed var(--border-muted); color: var(--fg-muted); line-height: 1.5;
+    }
+    .bp-update-changelog ul { margin: 0; padding-left: 16px; }
+    .bp-update-changelog code {
+      font-family: var(--font-mono); font-size: 11px;
+      padding: 1px 4px; border-radius: 3px; background: var(--bg-card);
+    }
+    .bp-update-fork { padding: 2px 16px 6px 33px; color: var(--fg-dim); font-size: 11px; }
+    .bp-update-bar--muted { background: var(--bg-muted); }
+    .bp-update-bar--muted .bp-update-bar-main { min-height: 28px; }
+
     /* ── Pane layout (shared across all Studio panes) ──────────────────── */
     .pane-layout { display: flex; flex: 1; overflow: hidden; }
     .pane-column {
@@ -4098,6 +4157,142 @@
         Rule #4's no-heavy-blocking-scripts intent). Loaded NON-DEFER at the
         bottom of body so it defines window.BarkparkGraph BEFORE the inline
         Hooks registration below and BEFORE the LiveSocket connects. --%>
+  <%!-- Self-update bar (isu-w1) — the slim admin strip rendered above the
+        Studio topbar (BarkparkWeb.StudioComponents.Nav.studio_update_banner).
+        It lives in the layout, OUTSIDE the LiveView diff, so it is driven by a
+        delegated DOM listener here, NOT a phx-hook. Actions: dismiss (per-
+        release localStorage), changelog/how-to toggle, and "Update now" which
+        POSTs the admin trigger then polls to completion. The apply run makes
+        the server git-pull + rebuild + restart, so the poller treats a
+        connection drop as "restarting" and reloads once the box answers again
+        on a release that is no longer behind. --%>
+  <script>
+    (function () {
+      var POLL_MS = 3000;
+      var MAX_MS = 8 * 60 * 1000; // give a full rebuild+restart room, then bail
+
+      function bar() { return document.getElementById("bp-update-bar"); }
+      function dismissKey(el) { return "bp:update-dismissed:" + (el.dataset.release || ""); }
+
+      function applyDismiss() {
+        var el = bar();
+        if (!el) return;
+        try {
+          if (localStorage.getItem(dismissKey(el)) === "1") el.setAttribute("hidden", "");
+        } catch (e) {}
+      }
+
+      function setStatus(el, msg) {
+        var s = el.querySelector("[data-bp-update-status]");
+        if (s) s.textContent = msg || "";
+      }
+
+      function toggle(targetId, btn) {
+        var panel = document.getElementById(targetId);
+        if (!panel) return;
+        var willOpen = panel.hasAttribute("hidden");
+        if (willOpen) panel.removeAttribute("hidden");
+        else panel.setAttribute("hidden", "");
+        if (btn) btn.setAttribute("aria-expanded", String(willOpen));
+      }
+
+      function startApply(el, btn) {
+        var token = el.dataset.token || "";
+        var authed = { Authorization: "Bearer " + token };
+        var startedAt = Date.now();
+        var target = el.dataset.release || "";
+        var sawDrop = false;   // a connection drop = the box is restarting
+        var sawActive = false; // observed OUR run go "running" at least once
+
+        if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
+        setStatus(el, "Starting update…");
+
+        function fail(msg) {
+          setStatus(el, msg);
+          if (btn) { btn.disabled = false; btn.textContent = "Update now"; }
+        }
+
+        function poll() {
+          if (Date.now() - startedAt > MAX_MS) {
+            return fail("Taking longer than expected — reload to check.");
+          }
+          fetch("/v1/admin/self-update", { headers: authed, credentials: "same-origin" })
+            .then(function (r) {
+              if (r.status === 401 || r.status === 403) throw new Error("unauthorized");
+              return r.json();
+            })
+            .then(function (data) {
+              var runner = (data && data.state) || "";
+              var check = (data && data.check) || {};
+              if (runner === "running") sawActive = true;
+              // Server came back after a restart on a release that's no longer
+              // behind → the update landed.
+              if (sawDrop && check.state && check.state !== "behind") {
+                setStatus(el, "Updated to " + (check.running_release || target) + " — reloading…");
+                return setTimeout(function () { location.reload(); }, 1200);
+              }
+              // A clean finish WITHOUT a restart drop (rare: e.g. a container
+              // that restarts out-of-band). Only trust "done" once we've seen
+              // OUR run go active — the Runner's state outlives prior runs, so
+              // a first-poll "done" is stale, not us.
+              if (runner === "done" && (sawActive || sawDrop)) {
+                if (data.exit_code && data.exit_code !== 0) {
+                  return fail("Update failed (exit " + data.exit_code + ") — check server logs.");
+                }
+                setStatus(el, "Updated — reloading…");
+                return setTimeout(function () { location.reload(); }, 1200);
+              }
+              setStatus(el, sawActive || sawDrop ? "Rebuilding…" : "Updating…");
+              setTimeout(poll, POLL_MS);
+            })
+            .catch(function (err) {
+              if (err && err.message === "unauthorized") {
+                return fail("Not authorised — sign in as an admin and retry.");
+              }
+              // Connection refused mid-rebuild is the EXPECTED restart window.
+              sawDrop = true;
+              setStatus(el, "Rebuilding & restarting…");
+              setTimeout(poll, POLL_MS);
+            });
+        }
+
+        fetch("/v1/admin/self-update", { method: "POST", headers: authed, credentials: "same-origin" })
+          .then(function (r) {
+            if (r.status === 401 || r.status === 403) return fail("Not authorised — sign in as an admin and retry.");
+            if (r.status === 503) return fail("One-click update isn't enabled on this instance.");
+            // 202 started, or 409 already-running — either way, poll to completion.
+            poll();
+          })
+          .catch(function () {
+            // The trigger itself may have already begun the restart.
+            sawDrop = true;
+            poll();
+          });
+      }
+
+      document.addEventListener("click", function (ev) {
+        var btn = ev.target.closest && ev.target.closest("[data-bp-update-action]");
+        if (!btn) return;
+        var el = bar();
+        if (!el) return;
+        var action = btn.getAttribute("data-bp-update-action");
+        if (action === "dismiss") {
+          try { localStorage.setItem(dismissKey(el), "1"); } catch (e) {}
+          el.setAttribute("hidden", "");
+        } else if (action === "toggle") {
+          toggle(btn.getAttribute("data-bp-update-target"), btn);
+        } else if (action === "apply") {
+          startApply(el, btn);
+        }
+      });
+
+      // Re-apply the per-release dismiss on first paint and after any LiveView
+      // navigation that may have re-rendered the layout chrome.
+      if (document.readyState !== "loading") applyDismiss();
+      else document.addEventListener("DOMContentLoaded", applyDismiss);
+      window.addEventListener("phx:page-loading-stop", applyDismiss);
+    })();
+  </script>
   <script src="/assets/bp-graph.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");

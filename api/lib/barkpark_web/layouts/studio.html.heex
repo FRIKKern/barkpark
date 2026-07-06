@@ -1,4 +1,13 @@
 <.studio_shell>
+  <%!-- Self-update bar: admins only (shares_admin? chrome flag), and only when
+        SelfUpdate reports the instance is behind. Pinned ABOVE the topbar as a
+        slim strip; driven by the vanilla `bp-update-bar` initialiser in
+        root.html.heex (this bar is layout chrome, outside the LiveView diff). --%>
+  <BarkparkWeb.StudioComponents.Nav.studio_update_banner
+    admin?={assigns[:shares_admin?] == true}
+    api_token_raw={assigns[:api_token_raw]}
+  />
+
   <.studio_topbar>
     <:brand>
       <div class="studio-bar-brand">
@@ -78,12 +87,6 @@
       </div>
     </:actions>
   </.studio_topbar>
-
-  <%!-- Self-update banner: admins only (shares_admin? chrome flag), and only
-        when SelfUpdate reports the instance is behind the latest release.
-        Fully-qualified (like WorkspaceSwitcher above) — not on the
-        StudioComponents facade. --%>
-  <BarkparkWeb.StudioComponents.Nav.studio_update_banner admin?={assigns[:shares_admin?] == true} />
 
   <.studio_flash flash={@flash} />
 

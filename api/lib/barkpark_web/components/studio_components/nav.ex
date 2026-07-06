@@ -32,54 +32,119 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   end
 
   @doc """
-  Self-update banner for the Studio chrome. Renders ONLY when the caller
-  is an admin (`@admin?`, threaded from the `shares_admin?` chrome flag)
-  AND the running instance is behind the latest published release
-  (`Barkpark.SelfUpdate.status/0` reports `state: :behind`). Any other
-  state — `:disabled` (Checker not running, e.g. test env), `:unknown`,
-  `:current` — emits no markup, so surfaces without the feature stay
-  byte-identical.
+  Self-update bar for the Studio chrome — a slim strip pinned above the
+  topbar. Renders ONLY when the caller is an admin (`@admin?`, threaded
+  from the `shares_admin?` chrome flag) AND the running instance is behind
+  the latest published release (`Barkpark.SelfUpdate.status/0` reports
+  `state: :behind`). Any other state — `:disabled` (Checker not running,
+  e.g. test env), `:unknown`, `:current` — emits no update markup, so
+  surfaces without the feature stay byte-identical (the `:current`-but-
+  fork-behind advice line is the one exception).
 
-  The status is computed ONCE per render (a cheap GenServer call) and,
-  like `studio_tabs/1`'s registry lookup, is wrapped fail-closed: a
-  crashed/missing SelfUpdate process must never take the chrome down.
+  The bar carries the raw session token (`@api_token_raw`, same value
+  Studio already hands its Web Components) and whether one-click apply is
+  enabled (`Barkpark.SelfUpdate.Runner.enabled?/0`) as data attributes;
+  the vanilla `bp-update-bar` initialiser in `root.html.heex` reads them
+  to drive "Update now" (POST `/v1/admin/self-update`, then poll to
+  completion) and the per-release localStorage dismiss. It is deliberately
+  NOT a `phx-hook`: this bar lives in the layout, OUTSIDE the LiveView
+  diff, so a delegated DOM listener is what actually reaches it.
+
+  Both status and apply-enabled are computed ONCE per render (cheap calls)
+  and wrapped fail-closed: a crashed/missing SelfUpdate process must never
+  take the chrome down.
   """
   attr :admin?, :boolean, default: false
+  attr :api_token_raw, :string, default: nil
 
   def studio_update_banner(assigns) do
     status = if assigns.admin?, do: self_update_status(), else: nil
-    assigns = assign(assigns, :update_status, status)
+
+    assigns =
+      assigns
+      |> assign(:update_status, status)
+      |> assign(:apply_enabled?, assigns.admin? and self_update_apply_enabled?())
 
     ~H"""
     <%= if match?(%{state: :behind}, @update_status) do %>
       <div
-        id="bp-update-banner"
-        style="margin: 8px 16px 0; padding: 8px 12px; font-size: 13px; border-radius: 6px; border-left: 3px solid var(--warning); background: hsl(38 92% 50% / 0.12); color: var(--warning);"
+        id="bp-update-bar"
+        class="bp-update-bar"
+        data-release={@update_status.latest_release}
+        data-apply={to_string(@apply_enabled?)}
+        data-token={@api_token_raw}
       >
-        Update available — Barkpark <%= @update_status.latest_release %> (you run <%= @update_status.running_release %>)
-        <%= if @update_status.canonical_release do %>
-          <div id="bp-fork-advice" style="margin-top: 2px; font-size: 12px; opacity: 0.85;">
-            Your fork's upstream, open-source Barkpark, is further ahead at <%= @update_status.canonical_release %> — consider syncing the fork.
+        <div class="bp-update-bar-main">
+          <span class="bp-update-dot" aria-hidden="true"></span>
+          <span class="bp-update-msg">
+            New update available — Barkpark <strong><%= @update_status.latest_release %></strong>
+            <span class="bp-update-run">· you run <%= @update_status.running_release %></span>
+          </span>
+          <span class="bp-update-status" data-bp-update-status role="status" aria-live="polite"></span>
+          <div class="bp-update-actions">
+            <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
+              <button
+                type="button"
+                class="bp-update-link"
+                data-bp-update-action="toggle"
+                data-bp-update-target="bp-update-changelog"
+                aria-expanded="false"
+                aria-controls="bp-update-changelog"
+              >What's changed</button>
+            <% end %>
+            <%= if @apply_enabled? do %>
+              <button type="button" class="bp-update-btn" data-bp-update-action="apply">Update now</button>
+            <% else %>
+              <button
+                type="button"
+                class="bp-update-link"
+                data-bp-update-action="toggle"
+                data-bp-update-target="bp-update-howto"
+                aria-expanded="false"
+                aria-controls="bp-update-howto"
+              >How to update</button>
+            <% end %>
+            <button
+              type="button"
+              class="bp-update-dismiss"
+              data-bp-update-action="dismiss"
+              aria-label="Dismiss update notice"
+              title="Dismiss"
+            >×</button>
           </div>
-        <% end %>
+        </div>
         <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
-          <details style="margin-top: 4px;">
-            <summary style="cursor: pointer;">what changed</summary>
-            <ul style="margin: 4px 0 0 18px; padding: 0;">
+          <div id="bp-update-changelog" class="bp-update-changelog" hidden>
+            <ul>
               <%= for line <- @update_status.digest do %>
                 <li><%= line %></li>
               <% end %>
             </ul>
-          </details>
+          </div>
+        <% end %>
+        <%= unless @apply_enabled? do %>
+          <div id="bp-update-howto" class="bp-update-changelog" hidden>
+            One-click update isn't enabled on this instance. Deploy it with <code>git pull</code>
+            on the server (the post-merge hook rebuilds &amp; restarts), or set
+            <code>BARKPARK_SELF_UPDATE_APPLY=1</code> to turn on the button here.
+          </div>
+        <% end %>
+        <%= if @update_status.canonical_release do %>
+          <div class="bp-update-fork">
+            Your fork's upstream, open-source Barkpark, is further ahead at
+            <%= @update_status.canonical_release %> — consider syncing the fork.
+          </div>
         <% end %>
       </div>
     <% end %>
     <%= if match?(%{state: :current}, @update_status) and @update_status.canonical_release do %>
-      <div
-        id="bp-fork-advice"
-        style="margin: 8px 16px 0; padding: 6px 12px; font-size: 12px; border-radius: 6px; border-left: 3px solid var(--fg-dim); background: hsl(0 0% 50% / 0.08); color: var(--fg-dim);"
-      >
-        Current with your fork — but open-source Barkpark is ahead at <%= @update_status.canonical_release %>; consider syncing the fork.
+      <div id="bp-update-fork-only" class="bp-update-bar bp-update-bar--muted">
+        <div class="bp-update-bar-main">
+          <span class="bp-update-msg bp-update-run">
+            Current with your fork — but open-source Barkpark is ahead at
+            <%= @update_status.canonical_release %>; consider syncing the fork.
+          </span>
+        </div>
       </div>
     <% end %>
     """
@@ -94,6 +159,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     _ -> nil
   catch
     _, _ -> nil
+  end
+
+  # Whether one-click apply is armed on this box (BARKPARK_SELF_UPDATE_APPLY=1
+  # → Runner.enabled?). Same belt-and-braces fail-closed as the status call:
+  # a missing/renamed Runner must degrade to "no button", never crash chrome.
+  defp self_update_apply_enabled? do
+    Barkpark.SelfUpdate.Runner.enabled?()
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
   end
 
   @doc """

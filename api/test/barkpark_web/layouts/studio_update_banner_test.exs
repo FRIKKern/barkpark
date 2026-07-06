@@ -74,36 +74,81 @@ defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
   defp restore_env(key, nil), do: Application.delete_env(:barkpark, key)
   defp restore_env(key, prior), do: Application.put_env(:barkpark, key, prior)
 
-  describe "update banner" do
-    test "admin session sees the banner with release pair and digest", %{conn: conn} do
+  # Arm the one-click apply Runner (BARKPARK_SELF_UPDATE_APPLY=1 equivalent)
+  # for the duration of a test, so the "Update now" button renders.
+  defp with_apply_enabled(fun) do
+    prior = Application.get_env(:barkpark, Barkpark.SelfUpdate.Runner)
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.SelfUpdate.Runner,
+      Keyword.merge(prior || [], enabled: true)
+    )
+
+    try do
+      fun.()
+    after
+      restore_env(Barkpark.SelfUpdate.Runner, prior)
+    end
+  end
+
+  describe "update bar" do
+    test "admin session sees the bar with release pair and digest", %{conn: conn} do
       prime_behind!()
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
-      assert html =~ ~s|id="bp-update-banner"|
-      assert html =~ "Update available — Barkpark 999.0.0"
-      assert html =~ "(you run "
+      assert html =~ ~s|id="bp-update-bar"|
+      assert html =~ "New update available — Barkpark"
+      assert html =~ "999.0.0"
+      assert html =~ "you run "
       # Digest is non-empty, so the collapsible changelog renders.
-      assert html =~ "what changed"
+      assert html =~ "What&#39;s changed"
       assert html =~ "fix: a"
       assert html =~ "feat: b"
     end
 
-    test "non-admin session does NOT see the banner even when behind", %{conn: conn} do
+    test "apply OFF (default) shows 'How to update', not the Update-now button", %{conn: conn} do
+      prime_behind!()
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+      assert html =~ ~s|data-apply="false"|
+      assert html =~ "How to update"
+      refute html =~ ~s|data-bp-update-action="apply"|
+    end
+
+    test "apply ON shows the Update-now button and carries the raw token", %{conn: conn} do
+      prime_behind!()
+
+      with_apply_enabled(fn ->
+        conn = init_test_session(conn, %{"api_token" => @admin_token})
+        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+
+        assert html =~ ~s|data-apply="true"|
+        assert html =~ ~s|data-bp-update-action="apply"|
+        assert html =~ "Update now"
+        # The bar carries the session token so the vanilla fetch can auth.
+        assert html =~ ~s|data-token="#{@admin_token}"|
+      end)
+    end
+
+    test "non-admin session does NOT see the bar even when behind", %{conn: conn} do
       prime_behind!()
 
       conn = init_test_session(conn, %{"api_token" => @member_token})
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
-      refute html =~ ~s|id="bp-update-banner"|
+      refute html =~ ~s|id="bp-update-bar"|
     end
 
-    test "banner absent when the Checker is not running (:disabled default)", %{conn: conn} do
+    test "bar absent when the Checker is not running (:disabled default)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
-      refute html =~ ~s|id="bp-update-banner"|
+      refute html =~ ~s|id="bp-update-bar"|
     end
   end
 end

@@ -93,14 +93,14 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
   end
 
   describe "self-update chrome (isu-4)" do
-    test "update banner is absent by default (Checker not running in test env)", %{conn: conn} do
+    test "update bar is absent by default (Checker not running in test env)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
       # In test env the SelfUpdate Checker is not supervised, so
-      # `SelfUpdate.status/0` reports `state: :disabled` and the banner
+      # `SelfUpdate.status/0` reports `state: :disabled` and the bar
       # must not render — even for an admin session.
-      refute html =~ ~s|id="bp-update-banner"|
+      refute html =~ ~s|id="bp-update-bar"|
     end
 
     test "footer renders the build-version span", %{conn: conn} do
