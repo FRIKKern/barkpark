@@ -20,6 +20,38 @@
 // `display: inline-flex`, which (author CSS beats UA CSS) overrides
 // `[hidden]` and used to leave a dead red Remove button visible on empty
 // fields.
+//
+// ── chrome="ghost" (pd-doctrine rule 6 — no chrome on atoms) ───────────────
+//
+// In the continuous-canvas PortableDoc editor an image field is an ATOM that
+// must show NOTHING the reader lacks (doctrine rule 6). The default variant's
+// Upload / Browse / Remove buttons ARE chrome — so `chrome="ghost"` drops the
+// whole `.bp-mp-actions` row: the empty-state card stays the click/Enter/Space
+// file-dialog affordance, the SET state renders the bare preview only, and the
+// actions ride a right-click context menu (Upload file / Browse library /
+// Remove image) instead. The attribute is OPT-IN: absent → the default variant
+// renders BYTE-IDENTICALLY (sidebar / per-block form contexts keep full chrome).
+// Hosts drive it through the public openFileDialog() / openBrowser() methods
+// rather than poking .bp-mp-browse internals.
+
+// The context-menu MODEL for a ghost picker — the ordered menu items given the
+// current state. Pure + host-free so the test hook can pin it without a DOM.
+// Upload file + Browse library are always offered (a file dialog needs no token,
+// and Browse is a no-op if no asset browser is wired); Remove image appears ONLY
+// when an asset is set (nothing to remove otherwise).
+function bpMediaPickerMenuItems({ hasValue, canUpload } = {}) {
+  const items = [];
+  if (canUpload !== false) items.push({ id: "upload", label: "Upload file" });
+  items.push({ id: "browse", label: "Browse library" });
+  if (hasValue) items.push({ id: "remove", label: "Remove image", destructive: true });
+  return items;
+}
+
+// Whether a variant renders the visible `.bp-mp-actions` button row. Only the
+// default (attr absent / any non-"ghost" value) does; "ghost" hides it entirely.
+function bpMediaPickerShowsActions(variant) {
+  return variant !== "ghost";
+}
 
 function bpParseMediaValue(raw) {
   if (!raw || typeof raw !== "string") return { url: "", assetId: "" };
@@ -99,6 +131,13 @@ class BpMediaPicker extends HTMLElement {
 
   disconnectedCallback() {
     this._mounted = false;
+    this._closeContextMenu();
+  }
+
+  // Ghost chrome (pd-doctrine rule 6): drop the visible actions row; actions
+  // ride the empty-card click + a right-click context menu instead.
+  _isGhost() {
+    return this.getAttribute("chrome") === "ghost";
   }
 
   get value() {
@@ -161,16 +200,25 @@ class BpMediaPicker extends HTMLElement {
   }
 
   _render() {
+    const ghost = this._isGhost();
+
+    // Ghost chrome omits the whole actions row (no Upload / Browse / Remove
+    // buttons ever) — but the file input must still exist for the file dialog,
+    // so it rides bare when there's no `.bp-mp-upload` label to host it.
+    const actionsHtml = ghost
+      ? '<input class="bp-mp-file" type="file" accept="image/*" hidden />'
+      : '<div class="bp-mp-actions">' +
+        '<label class="bp-mp-upload btn btn-sm">' +
+        "<span>Upload</span>" +
+        '<input type="file" accept="image/*" hidden />' +
+        "</label>" +
+        '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
+        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
+        "</div>";
+
     this.innerHTML =
       '<div class="bp-mp-preview"></div>' +
-      '<div class="bp-mp-actions">' +
-      '<label class="bp-mp-upload btn btn-sm">' +
-      "<span>Upload</span>" +
-      '<input type="file" accept="image/*" hidden />' +
-      "</label>" +
-      '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
-      '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
-      "</div>" +
+      actionsHtml +
       '<div class="bp-mp-error" role="alert"></div>';
 
     this._previewEl = this.querySelector(".bp-mp-preview");
@@ -185,14 +233,22 @@ class BpMediaPicker extends HTMLElement {
       e.target.value = "";
     });
 
-    this._clearBtn.addEventListener("click", () => {
-      this._value = "";
-      this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
-      this._renderPreview();
-      this._emit();
-    });
+    // Browse/Remove buttons exist only in the default variant (ghost drops the
+    // whole row and routes those actions through the context menu instead).
+    if (this._clearBtn) {
+      this._clearBtn.addEventListener("click", () => this._clearValue());
+    }
+    if (this._browseBtn) {
+      this._browseBtn.addEventListener("click", () => this._openBrowser());
+    }
 
-    this._browseBtn.addEventListener("click", () => this._openBrowser());
+    // Ghost variant: a right-click on the field opens the calm actions menu.
+    if (ghost) {
+      this.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        this._openContextMenu(e.clientX, e.clientY);
+      });
+    }
 
     // Empty-state card = click/keyboard target for the file dialog.
     // Delegated once (the preview's innerHTML is replaced on every render).
@@ -245,6 +301,126 @@ class BpMediaPicker extends HTMLElement {
       accept: "image/*",
       onSelect: (detail) => this._selectAsset(detail)
     });
+  }
+
+  _clearValue() {
+    this._value = "";
+    this._meta = { url: "", assetId: "", alt: "", width: null, height: null, mime: "" };
+    this._renderPreview();
+    this._emit();
+  }
+
+  // ── public host API — call these instead of poking .bp-mp-* internals ──────
+  // Ghost-chrome hosts (the canvas node-view) drive the picker through these so
+  // they never depend on the internal button DOM (which ghost mode omits).
+
+  // Open the native file dialog (upload a new file). No-op while busy.
+  openFileDialog() {
+    if (this._busy) return;
+    if (this._fileInput) this._fileInput.click();
+  }
+
+  // Open the asset-library browser modal. No-op if no asset browser is wired.
+  openBrowser() {
+    this._openBrowser();
+  }
+
+  // ── the ghost-chrome context menu (Upload / Browse / Remove) ───────────────
+  //
+  // A small self-contained calm menu positioned at the cursor. Items use the
+  // Studio `.btn` styling; container styling is inlined so the menu is fully
+  // self-contained (it appends to <body>, outside the light-DOM WC). Dismisses
+  // on Escape, click-away, or after an action fires.
+  _openContextMenu(x, y) {
+    this._closeContextMenu();
+
+    const hasValue = !!(
+      this._meta.url ||
+      this._meta.assetId ||
+      bpParseMediaValue(this._value).url
+    );
+    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true });
+
+    const menu = document.createElement("div");
+    menu.className = "bp-mp-menu";
+    menu.setAttribute("role", "menu");
+    menu.style.cssText =
+      "position:fixed;z-index:1000;display:flex;flex-direction:column;gap:2px;" +
+      "min-width:160px;padding:4px;border-radius:8px;" +
+      "background:var(--popover,var(--bg,#fff));color:var(--fg,inherit);" +
+      "border:1px solid var(--border,rgba(0,0,0,0.12));" +
+      "box-shadow:0 6px 20px rgba(0,0,0,0.16);";
+    menu.style.left = x + "px";
+    menu.style.top = y + "px";
+
+    for (const item of items) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className =
+        "bp-mp-menu-item btn btn-sm" + (item.destructive ? " btn-destructive" : "");
+      btn.setAttribute("role", "menuitem");
+      btn.style.cssText = "justify-content:flex-start;width:100%;text-align:left;";
+      btn.textContent = item.label;
+      btn.addEventListener("click", () => {
+        this._closeContextMenu();
+        this._runMenuAction(item.id);
+      });
+      menu.appendChild(btn);
+    }
+
+    document.body.appendChild(menu);
+    this._menuEl = menu;
+
+    // Clamp inside the viewport so a right-click near an edge stays reachable.
+    if (typeof menu.getBoundingClientRect === "function" && typeof window !== "undefined") {
+      const r = menu.getBoundingClientRect();
+      if (r.right > window.innerWidth) menu.style.left = Math.max(0, window.innerWidth - r.width - 4) + "px";
+      if (r.bottom > window.innerHeight) menu.style.top = Math.max(0, window.innerHeight - r.height - 4) + "px";
+    }
+
+    const first = menu.querySelector(".bp-mp-menu-item");
+    if (first && typeof first.focus === "function") first.focus();
+
+    this._menuKeyHandler = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this._closeContextMenu();
+      }
+    };
+    this._menuAwayHandler = (e) => {
+      if (this._menuEl && !this._menuEl.contains(e.target)) this._closeContextMenu();
+    };
+    document.addEventListener("keydown", this._menuKeyHandler, true);
+    // Defer the click-away bind a tick so the opening right-click doesn't
+    // immediately dismiss the menu it just spawned.
+    this._menuAwayArm = setTimeout(() => {
+      document.addEventListener("mousedown", this._menuAwayHandler, true);
+    }, 0);
+  }
+
+  _closeContextMenu() {
+    if (this._menuAwayArm) {
+      clearTimeout(this._menuAwayArm);
+      this._menuAwayArm = null;
+    }
+    if (this._menuEl && this._menuEl.parentNode) {
+      this._menuEl.parentNode.removeChild(this._menuEl);
+    }
+    this._menuEl = null;
+    if (this._menuKeyHandler) {
+      document.removeEventListener("keydown", this._menuKeyHandler, true);
+      this._menuKeyHandler = null;
+    }
+    if (this._menuAwayHandler) {
+      document.removeEventListener("mousedown", this._menuAwayHandler, true);
+      this._menuAwayHandler = null;
+    }
+  }
+
+  _runMenuAction(id) {
+    if (id === "upload") this.openFileDialog();
+    else if (id === "browse") this.openBrowser();
+    else if (id === "remove") this._clearValue();
   }
 
   _setClearVisible(visible) {
@@ -372,3 +548,13 @@ class BpMediaPicker extends HTMLElement {
 }
 
 customElements.define("bp-media-picker", BpMediaPicker);
+
+// Test hook (cloud-SPA __bpTestHook pattern): expose the PURE variant/menu model
+// so __picker_chrome.test.mjs can assert it without a browser. No behavior in
+// prod — a plain data hook off the same pure functions the WC uses.
+if (typeof window !== "undefined") {
+  window.__bpMediaPickerTestHook = {
+    menuItems: bpMediaPickerMenuItems,
+    showsActions: bpMediaPickerShowsActions
+  };
+}
