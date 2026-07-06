@@ -191,6 +191,12 @@ defmodule BarkparkWeb.SessionHTML do
       .bp-auth-pagefoot { font-size: 12px; color: var(--fg-dim); }
 
       .bp-auth .flash { margin-bottom: 16px; }
+      /* The root .flash-info is hardcoded preview-blue; on-brand here. */
+      .bp-auth .flash-info {
+        background: var(--ring-soft);
+        border-color: var(--ring-soft);
+        color: var(--primary);
+      }
 
       /* MFA: the one-time code reads as a code. */
       .bp-auth input.bp-auth-code {
