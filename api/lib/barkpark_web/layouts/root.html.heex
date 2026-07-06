@@ -2472,6 +2472,11 @@
     }
     .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
     .bp-paper-drag-grip:active { cursor: grabbing; }
+    /* pdd-t12c: a locked grip is a tab stop (it carries the template note for
+       keyboard/SR users) — draw the standard accent ring so the stop is visible. */
+    .bp-paper-drag-grip:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
     .bp-paper-dragging { opacity: 0.5; }
     /* pdd-t2: a template-locked block's grip is inert — quiet, no grab cursor
        (the span carries no draggable/data-drag-grip when locked). */
@@ -3089,11 +3094,38 @@
       opacity: 0.7;
     }
     .bp-canvas-callout-fold:hover { opacity: 1; }
+    /* pdd-t12c: keyboard focus reveals the fold control exactly as hover does
+       (WCAG 2.4.7; rule 5). MUST stay in lockstep with styles.css. */
+    .bp-canvas-callout-fold:focus-visible {
+      opacity: 1;
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 1px;
+      border-radius: 3px;
+    }
     .bp-canvas-callout-body { margin-top: 6px; }
     .bp-canvas-callout-head + .bp-canvas-callout-body { margin-top: 8px; }
     .bp-canvas-readonly {
       margin: 1em 0;
       user-select: none;
+    }
+    /* pdd-t12c: the read-only atoms are keyboard-focusable (tabindex on the
+       node-view wrapper) so a non-mouse user can reach + select them (→ Backspace
+       deletes). Same 2px accent outline as every other keyboard affordance here.
+       MUST stay in lockstep with styles.css. */
+    .bp-canvas-readonly:focus-visible {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
+      border-radius: 6px;
+    }
+    /* pdd-t12c: a node-SELECTED atom (mouse click-select or keyboard Enter/Space)
+       is armed — the next Backspace deletes it. ProseMirror adds
+       .ProseMirror-selectednode but ships no CSS for it; without this rule the
+       armed state is invisible. MUST stay in lockstep with styles.css. */
+    .bp-canvas-readonly.ProseMirror-selectednode {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
+      border-radius: 6px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
     }
     .bp-canvas-readonly-chip {
       display: inline-flex;
@@ -4750,6 +4782,13 @@
     // not fight the sortable hook.
     const BP_PAPER_CTX_MENU_ID = "bp-paper-context-menu";
 
+    // pdd-t12c: the keyboard twin of a right-click — Shift+F10 (universal) or the
+    // dedicated ContextMenu key opens the SAME block menu, so every affordance the
+    // mouse has is reachable without one (WCAG 2.1.1; rule 5). Pure predicate.
+    function bpIsCtxMenuKey(e) {
+      return e.key === "ContextMenu" || (e.shiftKey && e.key === "F10");
+    }
+
     function bpPaperCtxMenuItems(menu) {
       return Array.from(menu.querySelectorAll(".bp-paper-context-menu__item"));
     }
@@ -4978,10 +5017,39 @@
           bpPaperCtxMenuOpen(this, e.clientX, e.clientY, block);
         };
         this._body.addEventListener("contextmenu", this._onContextMenu);
+
+        // pdd-t12c: keyboard parity — Shift+F10 / ContextMenu key opens the block
+        // menu at the focused block, so keyboard users get the move/delete (or the
+        // locked-template note) the right-click menu ships. Same guards as the
+        // pointer path: inside editable text / a form control the native menu wins
+        // (hijacking would kill paste/spellcheck); off a block, nothing. Anchor to
+        // document.activeElement (where the key was pressed) → its owning block →
+        // its rect, so the menu lands next to the block, not the viewport origin.
+        this._onKeyDown = (e) => {
+          if (!bpIsCtxMenuKey(e)) return;
+          const active = document.activeElement;
+          const t = active && active !== document.body ? active : e.target;
+          if (!t || typeof t.closest !== "function") return;
+          if (
+            t.isContentEditable ||
+            t.closest(
+              'input, textarea, select, [contenteditable="true"], .bp-paper-editor-body',
+            )
+          )
+            return; // canvas atoms + editable fields own their own keys
+          const block = t.closest("[data-edit-block-id]");
+          if (!block || !this._body.contains(block)) return;
+          e.preventDefault();
+          const r = block.getBoundingClientRect();
+          bpPaperCtxMenuOpen(this, r.left + 12, r.top + 12, block);
+        };
+        this._body.addEventListener("keydown", this._onKeyDown);
       },
       destroyed() {
         if (this._body && this._onContextMenu)
           this._body.removeEventListener("contextmenu", this._onContextMenu);
+        if (this._body && this._onKeyDown)
+          this._body.removeEventListener("keydown", this._onKeyDown);
         // If this instance owns the open menu, close it so no window/document
         // listeners are stranded when the editor is torn down.
         const menu = document.getElementById(BP_PAPER_CTX_MENU_ID);

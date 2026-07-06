@@ -269,6 +269,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   do: "Part of the document template",
                   else: "Drag to reorder block"
               }
+              tabindex={Map.get(block, "locked") == true && "0"}
               data-test-id="paper-drag-grip"
             >⋮⋮</span>
             <span class="bp-paper-edit-kind"><%= Map.get(block, "type") %></span>
@@ -538,6 +539,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               do: "Part of the document template",
               else: "Drag to reorder block"
           }
+          tabindex={Map.get(@block, "locked") == true && "0"}
           data-test-id="paper-drag-grip"
         >⋮⋮</span>
         <span class="bp-paper-edit-kind"><%= Map.get(@block, "type") %></span>

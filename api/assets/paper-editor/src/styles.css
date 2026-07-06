@@ -379,6 +379,14 @@ html[data-theme="dark"] .bp-wikilink-menu {
   opacity: 0.7;
 }
 .bp-canvas-callout-fold:hover { opacity: 1; }
+/* pdd-t12c: keyboard focus reveals the fold control exactly as hover does — the
+ * hover-only affordance gets a :focus-visible twin (WCAG 2.4.7; rule 5). */
+.bp-canvas-callout-fold:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--paper-accent, #1e5347);
+  outline-offset: 1px;
+  border-radius: 3px;
+}
 .bp-canvas-callout-body { margin-top: 6px; }
 .bp-canvas-callout-head + .bp-canvas-callout-body { margin-top: 8px; }
 
@@ -391,6 +399,27 @@ html[data-theme="dark"] .bp-wikilink-menu {
 .bp-canvas-readonly {
   margin: 1em 0;
   user-select: none;
+}
+/* pdd-t12c: the read-only atoms are keyboard-focusable (tabindex on the node-view
+ * wrapper) so a non-mouse user can reach + select them (→ Backspace deletes). The
+ * ring is the same 2px accent outline every other keyboard affordance here draws
+ * (callout fold, placeholder); :focus-visible keeps it keyboard-only (a mouse
+ * click does not draw the ring). */
+.bp-canvas-readonly:focus-visible {
+  outline: 2px solid var(--paper-accent, #1e5347);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+/* pdd-t12c: a node-SELECTED atom (mouse click-select or keyboard Enter/Space) is
+ * armed — the very next Backspace deletes it. ProseMirror adds
+ * .ProseMirror-selectednode but ships no CSS for it, so without this rule the
+ * armed state is invisible and the delete looks like it came from nowhere. Same
+ * accent outline as focus plus a soft wash: selection reads like selection. */
+.bp-canvas-readonly.ProseMirror-selectednode {
+  outline: 2px solid var(--paper-accent, #1e5347);
+  outline-offset: 2px;
+  border-radius: 6px;
+  background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
 }
 .bp-canvas-readonly-chip {
   display: inline-flex;

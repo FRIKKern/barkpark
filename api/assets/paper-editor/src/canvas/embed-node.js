@@ -212,7 +212,7 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
     //   * ignoreMutation: () => true — PM never reads the chip's DOM mutations back
     //     into the document (there is no contentDOM on an atom).
     addNodeView() {
-      return ({ node }) => {
+      return ({ node, getPos, editor }) => {
         const block = (node.attrs && node.attrs.bpBlock) || {};
 
         const dom = document.createElement("div");
@@ -226,6 +226,17 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
         chip.textContent = chipLabel(block);
         dom.appendChild(chip);
 
+        // pdd-t12c: keyboard + screen-reader parity — a tab stop with an accessible
+        // name, a locked-state announcement, and Enter/Space → select (→ Backspace
+        // deletes). The chip carries no interior focusable content, so the wrapper
+        // tab stop is the ONLY non-mouse way to reach and delete it.
+        wireAtomAccessibility(dom, {
+          block,
+          chipText: chipLabel(block),
+          editor,
+          getPos,
+        });
+
         return {
           dom,
           // NO contentDOM — this is a read-only atom; there is no PM content hole and
@@ -238,6 +249,11 @@ function readOnlyAtomNode({ name, bpType, chipLabel, className }) {
             if (updated.type.name !== name) return false;
             const b = (updated.attrs && updated.attrs.bpBlock) || {};
             chip.textContent = chipLabel(b);
+            // Keep the accessible name + lock cue in lockstep with the re-rendered
+            // chip (an echo/undo may change the block's locked state or content).
+            dom.setAttribute("aria-label", atomAriaLabel(chipLabel(b), b));
+            if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
+            else dom.removeAttribute("data-bp-locked");
             return true;
           },
 
@@ -314,6 +330,90 @@ export function fleetChipLabel(block) {
   return FLEET_KIND_LABELS[type] || (type ? `Block · ${type}` : "Block");
 }
 
+// ── pdd-t12c: one-surface a11y helpers (keyboard + screen-reader parity) ───────
+//
+// The read-only atoms (sheet / embed / fleet) are made keyboard-reachable (a
+// tabindex tab stop) with an accessible NAME and a locked-state announcement, so
+// every affordance the mouse has (select → Backspace-delete, hover cue) has a
+// keyboard + screen-reader twin (rule 5: chrome around content, never a mode).
+// These are PURE (no DOM) so they unit-test in node:vm — the node-view wiring that
+// consumes them is manual-verify (needs a browser).
+
+// A block is template-locked when it carries `locked === true` (the BpAttrs
+// round-trip / server contract). Anything else (absent, false, truthy-but-not-true)
+// is NOT locked — locks are an explicit, strict flag (pdd-t2).
+export function isBlockLocked(block) {
+  return !!(block && block.locked === true);
+}
+
+// The accessible NAME for a read-only atom: the same terse chip text the sighted
+// user sees, plus an explicit locked-state clause when the block is a mandated
+// template block. Screen-reader users hear WHAT the block is ("Task board") and,
+// when it applies, that it is immovable ("locked, part of the document template")
+// — mirroring the quiet hover cue (rule 5). `chipText` is whatever chip-label
+// helper the atom uses (sheetChipLabel / embedChipLabel / fleetChipLabel), so the
+// name is always in lockstep with the visible chip, never hand-mirrored.
+export function atomAriaLabel(chipText, block) {
+  const base = chipText || "Block";
+  return isBlockLocked(block)
+    ? `${base} — locked, part of the document template`
+    : base;
+}
+
+// Enter / Space is the "select this block" activation on a keyboard-focused atom —
+// it bridges DOM focus (Tab landed on the wrapper) to a ProseMirror NodeSelection,
+// so the very next Backspace/Delete removes the atom (the same structural delete a
+// mouse gets by click-selecting + Backspace). Space arrives as " " (or the legacy
+// "Spacebar"); we accept both, matching field-node.js's placeholder activation.
+export function isActivateKey(event) {
+  if (!event) return false;
+  return event.key === "Enter" || event.key === " " || event.key === "Spacebar";
+}
+
+// Bridge a keyboard-focused read-only atom to a ProseMirror NodeSelection so the
+// next Backspace/Delete removes it. Best-effort + guarded: a detached test env, a
+// stale getPos, or a mid-teardown editor must never throw out of a keydown.
+function selectAtomNode(editor, getPos) {
+  if (!editor || typeof getPos !== "function") return false;
+  let pos;
+  try {
+    pos = getPos();
+  } catch (_) {
+    return false;
+  }
+  if (pos == null) return false;
+  try {
+    editor.chain().setNodeSelection(pos).focus().run();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Apply the shared read-only-atom a11y contract to a node-view wrapper: a tab stop
+// with a role + accessible name, a locked-state data hook + announcement, and an
+// Enter/Space handler that selects the atom (→ Backspace deletes). The interior
+// stays fully interactive (the island `stopEvent`/`ignoreMutation` contract lets
+// painted links/inputs/scrollers work natively) — this only ADDS the keyboard path
+// to the WHOLE-block affordance, and only when the wrapper itself is the key target
+// (an interior link/input owns its own keys).
+function wireAtomAccessibility(dom, { block, chipText, editor, getPos }) {
+  dom.setAttribute("tabindex", "0");
+  dom.setAttribute("role", "group");
+  dom.setAttribute("aria-label", atomAriaLabel(chipText, block));
+  if (isBlockLocked(block)) dom.setAttribute("data-bp-locked", "true");
+
+  dom.addEventListener("keydown", (e) => {
+    // Only the wrapper itself — never an interior link / form control / scroller
+    // the painted fleet HTML carries; those own their keystrokes.
+    if (e.target !== dom) return;
+    if (isActivateKey(e)) {
+      e.preventDefault();
+      selectAtomNode(editor, getPos);
+    }
+  });
+}
+
 // The `bpFleet` node. Shares the read-only atom SCHEMA (atom, group:"block",
 // selectable, defining, the id/type/bpBlock attrs, the data-bp-type parse anchor)
 // but overrides the NodeView to render a server-paint hole instead of a chip. The
@@ -355,7 +455,7 @@ export const Fleet = Node.create({
   //   turns a click (or the hook's own innerHTML write) into a transaction or reads
   //   it back into the document.
   addNodeView() {
-    return ({ node }) => {
+    return ({ node, getPos, editor }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || (block && block.type) || "";
       const bpId = (node.attrs && node.attrs.bpId) || "";
@@ -380,6 +480,20 @@ export const Fleet = Node.create({
       body.appendChild(chip);
       dom.appendChild(body);
 
+      // pdd-t12c: keyboard + screen-reader parity — a tab stop with the fleet block's
+      // human name + locked-state announcement, and Enter/Space → select (→ Backspace
+      // deletes). The painted reader HTML keeps ALL its own interactivity: interior
+      // links/inputs/scrollers stay native (the island stopEvent/ignoreMutation
+      // contract below never swallows them), and the aria-label names the WHOLE block
+      // for a screen reader landing on the atom. `e.target !== dom` guards so a
+      // keystroke inside a painted form control is never hijacked for atom selection.
+      wireAtomAccessibility(dom, {
+        block,
+        chipText: fleetChipLabel(block),
+        editor,
+        getPos,
+      });
+
       return {
         dom,
         // KEEP the existing DOM across attr updates (echo / undo): returning true
@@ -389,6 +503,13 @@ export const Fleet = Node.create({
         // (bp:block-html, keyed by the stable data-bp-fleet-id), never from PM.
         update: (updated) => {
           if (updated.type.name !== BP_FLEET_NODE_NAME) return false;
+          // Keep the accessible name + lock cue in lockstep with the carried block
+          // (an echo/undo could change locked state) WITHOUT touching the painted
+          // body — the aria lives on the wrapper, so the server HTML is untouched.
+          const b = (updated.attrs && updated.attrs.bpBlock) || {};
+          dom.setAttribute("aria-label", atomAriaLabel(fleetChipLabel(b), b));
+          if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
+          else dom.removeAttribute("data-bp-locked");
           return true;
         },
         // PM must NOT turn a click inside the painted body into a transaction — a
