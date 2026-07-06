@@ -229,8 +229,6 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-block-autosave", params, socket),
     do: Paper.paper_block_autosave(params, socket)
 
-  def handle_event("backlinks-toggle", _params, socket), do: Paper.backlinks_toggle(socket)
-
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4/5). Pure assign flips;
   # none touch body blocks.
   def handle_event("sidebar-toggle-panel", _params, socket),

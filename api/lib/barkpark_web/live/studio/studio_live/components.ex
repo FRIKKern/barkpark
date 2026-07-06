@@ -45,7 +45,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
-  attr(:backlinks_open, :boolean, default: true)
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
@@ -171,131 +170,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <% end %>
           </main>
         </div>
-        <aside
-          :if={@paper_doc}
-          class={"bp-backlinks-panel " <> if(@backlinks_open, do: "is-open", else: "is-collapsed")}
-          data-test-id="studio-backlinks-panel"
-        >
-          <div class="bp-backlinks-head">
-            <button
-              type="button"
-              class="bp-backlinks-toggle"
-              phx-click="backlinks-toggle"
-              aria-expanded={to_string(@backlinks_open)}
-              data-test-id="backlinks-toggle"
-            >
-              <.icon name={if @backlinks_open, do: "chevron-down", else: "chevron-right"} size={14} />
-              <span>Backlinks</span>
-            </button>
-            <button
-              type="button"
-              class="bp-backlinks-refresh"
-              phx-click="backlinks-refresh"
-              title="Refresh backlinks"
-              data-test-id="backlinks-refresh"
-            >
-              <.icon name="refresh-cw" size={12} />
-            </button>
-          </div>
-
-          <div :if={@backlinks_open} class="bp-backlinks-body">
-            <%!-- Used by / impact (lvw-t3): docs whose BODY valueref-references
-                  this doc as a canonical value. Rendered FIRST (it is the
-                  impact panel) and only when non-empty — an ordinary paper
-                  with no value-dependents gets no noise section. The list is
-                  the fail-closed reverse_referencers result: out-of-scope
-                  referencers were dropped upstream (no stub, no aggregate
-                  count), and the published-only corpus means a draft-only
-                  referencer is absent BY DESIGN (D1). --%>
-            <section
-              :if={@backlinks_used_by != []}
-              class="bp-backlinks-section"
-              data-test-id="backlinks-used-by"
-            >
-              <h4 class="bp-backlinks-section-title">Used by ({length(@backlinks_used_by)})</h4>
-              <ul class="bp-backlinks-list">
-                <li :for={ref <- @backlinks_used_by}>
-                  <button
-                    :if={ref[:from_doc_id]}
-                    type="button"
-                    class="bp-backlinks-row is-clickable"
-                    phx-click="open-backlink"
-                    phx-value-slug={ref.from_doc_id}
-                    phx-value-type={ref.type}
-                    data-test-id="backlink-row"
-                  >
-                    <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                    <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                  </button>
-                  <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
-                    <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                    <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                  </div>
-                </li>
-              </ul>
-            </section>
-
-            <section class="bp-backlinks-section" data-test-id="backlinks-linked">
-              <h4 class="bp-backlinks-section-title">Linked mentions ({length(@backlinks_linked)})</h4>
-              <%= if @backlinks_linked == [] do %>
-                <p class="bp-backlinks-empty">No linked mentions.</p>
-              <% else %>
-                <ul class="bp-backlinks-list">
-                  <li :for={ref <- @backlinks_linked}>
-                    <button
-                      :if={ref[:from_doc_id]}
-                      type="button"
-                      class="bp-backlinks-row is-clickable"
-                      phx-click="open-backlink"
-                      phx-value-slug={ref.from_doc_id}
-                      phx-value-type={ref.type}
-                      data-test-id="backlink-row"
-                    >
-                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                    </button>
-                    <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
-                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                    </div>
-                  </li>
-                </ul>
-              <% end %>
-            </section>
-
-            <section class="bp-backlinks-section" data-test-id="backlinks-unlinked">
-              <h4 class="bp-backlinks-section-title">Derived mentions ({length(@backlinks_unlinked)})</h4>
-              <%= if @backlinks_unlinked == [] do %>
-                <p class="bp-backlinks-empty">No derived mentions.</p>
-              <% else %>
-                <ul class="bp-backlinks-list">
-                  <li :for={ref <- @backlinks_unlinked}>
-                    <button
-                      :if={ref[:from_doc_id]}
-                      type="button"
-                      class="bp-backlinks-row is-clickable"
-                      phx-click="open-backlink"
-                      phx-value-slug={ref.from_doc_id}
-                      phx-value-type={ref.type}
-                      data-test-id="backlink-row"
-                    >
-                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                    </button>
-                    <div :if={!ref[:from_doc_id]} class="bp-backlinks-row" data-test-id="backlink-row">
-                      <span class="bp-backlinks-title">{ref.title || "Untitled"}</span>
-                      <span class="bp-backlinks-meta">{ref.type} / {ref.via_field}</span>
-                    </div>
-                  </li>
-                </ul>
-              <% end %>
-            </section>
-          </div>
-        </aside>
-
-        <%!-- t6: the WordPress-style document sidebar. Renders alongside the
-              canvas for every paper; collapsing it (or any section) never
-              reflows or transforms the body — it is chrome around content. --%>
+        <%!-- t6 + pdd-t11: the ONE WordPress-style document sidebar. The
+              backlinks aside used to be a SECOND right panel stacked beside this
+              one (the two-right-panels UX debt wave 1 pre-loaded into t11) —
+              inbound references now fold into this sidebar's Relations section, so
+              a paper carries a single calm metadata column. Collapsing it (or any
+              section) never reflows or transforms the body — chrome around
+              content. --%>
         <.paper_metadata_sidebar
           :if={@paper_doc}
           paper_doc={@paper_doc}
@@ -305,6 +186,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           collapsed={@sidebar_collapsed}
           slug_draft={@sidebar_slug_draft}
           slug_feedback={@sidebar_slug_feedback}
+          backlinks_used_by={@backlinks_used_by}
+          backlinks_linked={@backlinks_linked}
+          backlinks_unlinked={@backlinks_unlinked}
         />
       </div>
     </div>
@@ -329,6 +213,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:collapsed, :any, default: nil)
   attr(:slug_draft, :string, default: nil)
   attr(:slug_feedback, :any, default: nil)
+  # pdd-t11: inbound references (backlinks), folded into the Relations section so
+  # a paper carries ONE right panel instead of two stacked asides. All resolved
+  # (each ref carries a :title from reverse_referencers) — never a raw id.
+  attr(:backlinks_used_by, :list, default: [])
+  attr(:backlinks_linked, :list, default: [])
+  attr(:backlinks_unlinked, :list, default: [])
 
   def paper_metadata_sidebar(assigns) do
     paper = assigns.paper_doc
@@ -478,20 +368,61 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           <% end %>
         </.sidebar_section>
 
+        <%!-- Relations = OUTBOUND references (this paper → other docs, from its
+              body/fields) + INBOUND backlinks (other docs → this paper), folded
+              into one section (pdd-t11: was a second right aside). A refresh
+              re-queries the inbound edges; outbound relations come from the block
+              list itself, so they need no refetch. Every row shows a resolved
+              TITLE (reference_title for outbound, reverse_referencers' :title for
+              inbound) — NEVER a raw id (wave-1 integration lesson). --%>
         <.sidebar_section
           key="relations"
           title="Relations"
           open={PaperCanvas.sidebar_section_open?(@collapsed, "relations")}
         >
-          <%= if @relations == [] do %>
+          <% has_any =
+            @relations != [] or @backlinks_used_by != [] or @backlinks_linked != [] or
+              @backlinks_unlinked != [] %>
+          <div class="bp-doc-rel-head">
+            <button
+              type="button"
+              class="bp-doc-rel-refresh"
+              phx-click="backlinks-refresh"
+              title="Refresh inbound references"
+              data-test-id="backlinks-refresh"
+            >
+              <.icon name="refresh-cw" size={12} />
+            </button>
+          </div>
+
+          <%= if not has_any do %>
             <p class="bp-doc-empty" data-test-id="sidebar-relations-empty">No relations.</p>
           <% else %>
-            <ul class="bp-doc-rels" data-test-id="sidebar-relations">
-              <li :for={rel <- @relations} class="bp-doc-rel">
-                <span class="bp-doc-rel__label">{rel.label}</span>
-                <span class="bp-doc-rel__id" title={rel.id}>{rel.title}</span>
-              </li>
-            </ul>
+            <%!-- Outbound: docs THIS paper references (its own body/fields). --%>
+            <section :if={@relations != []} class="bp-doc-rel-group">
+              <h4 class="bp-doc-rel-group__h">References ({length(@relations)})</h4>
+              <ul class="bp-doc-rels" data-test-id="sidebar-relations">
+                <li :for={rel <- @relations} class="bp-doc-rel">
+                  <span class="bp-doc-rel__label">{rel.label}</span>
+                  <span class="bp-doc-rel__id" title={rel.id}>{rel.title}</span>
+                </li>
+              </ul>
+            </section>
+
+            <%!-- Inbound (backlinks): docs that reference THIS paper. Used-by
+                  (valueref impact) first, then linked + derived mentions. Each
+                  group renders only when non-empty (folded chrome stays calm). --%>
+            <.backlink_group title="Used by" refs={@backlinks_used_by} test_id="backlinks-used-by" />
+            <.backlink_group
+              title="Linked mentions"
+              refs={@backlinks_linked}
+              test_id="backlinks-linked"
+            />
+            <.backlink_group
+              title="Derived mentions"
+              refs={@backlinks_unlinked}
+              test_id="backlinks-unlinked"
+            />
           <% end %>
         </.sidebar_section>
       </div>
@@ -528,6 +459,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <div :if={@open} id={"bp-doc-sec-body-" <> @key} class="bp-doc-sec__body">
         {render_slot(@inner_block)}
       </div>
+    </section>
+    """
+  end
+
+  # One inbound-backlinks group inside the Relations section (pdd-t11). Renders
+  # only when it has rows, so an ordinary paper with no dependents shows nothing.
+  # Each ref carries a resolved :title (from reverse_referencers) — a row is a
+  # <button> when the referencer is navigable (`from_doc_id`), else a static div;
+  # both paths show the title, never the raw id. `open-backlink` jumps to it.
+  attr(:title, :string, required: true)
+  attr(:refs, :list, required: true)
+  attr(:test_id, :string, required: true)
+
+  defp backlink_group(assigns) do
+    ~H"""
+    <section :if={@refs != []} class="bp-doc-rel-group" data-test-id={@test_id}>
+      <h4 class="bp-doc-rel-group__h">{@title} ({length(@refs)})</h4>
+      <ul class="bp-doc-backlinks">
+        <li :for={ref <- @refs}>
+          <button
+            :if={ref[:from_doc_id]}
+            type="button"
+            class="bp-doc-backlink is-clickable"
+            phx-click="open-backlink"
+            phx-value-slug={ref.from_doc_id}
+            phx-value-type={ref.type}
+            data-test-id="backlink-row"
+          >
+            <span class="bp-doc-backlink__title">{ref.title || "Untitled"}</span>
+            <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
+          </button>
+          <div :if={!ref[:from_doc_id]} class="bp-doc-backlink" data-test-id="backlink-row">
+            <span class="bp-doc-backlink__title">{ref.title || "Untitled"}</span>
+            <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
+          </div>
+        </li>
+      </ul>
     </section>
     """
   end
@@ -706,7 +674,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
-          backlinks_open={@backlinks_open}
           sidebar_open={Map.get(assigns, :sidebar_open, true)}
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}

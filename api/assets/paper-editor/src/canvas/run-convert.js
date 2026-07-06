@@ -178,6 +178,45 @@ const CANVAS_READONLY_ATOM_NODE_NAMES = { sheet: "bpSheet", embed: "bpEmbed" };
 // to detect a read-only atom by its NODE type (the type carried on a getJSON node).
 const CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE = { bpSheet: "sheet", bpEmbed: "embed" };
 
+// pdd-t8 (fleet-in-canvas): the COMPONENT-FLEET block kinds the canvas handles as
+// SERVER-PAINTED READ-ONLY ATOM nodes. Like sheet/embed these are REFERENCES the
+// editor never edits inline — but UNLIKE sheet/embed (whose read-only chip is
+// computed client-side) a fleet block's TRUTH is the reader's own HTML (rule 3 /
+// D8: ONE producer, byte for byte). So the canvas carries the WHOLE block verbatim
+// on `bpBlock` (the bpOpaque verbatim-carry) AND paints the SERVER-pushed HTML
+// (`bp:block-html`, keyed by bpId) into the node-view interior, falling back to a
+// chip while that HTML is still loading. They emit ZERO value/content ops and
+// participate ONLY in structural ops (insert/remove/move by bpId) — identical op
+// posture to sheet/embed.
+//
+// ALL fleet kinds project to the SINGLE `bpFleet` node (like the 9 field-* kinds
+// share `bpField`), discriminated by the bpType attr; the reverse mapping is the
+// attr, so bpFleet is NOT in CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE. This is the
+// canonical enumeration of the reader's non-prose component emitters
+// (render/components.ex + render/figures.ex asciicast + render/forms.ex form);
+// keep aligned with embed-node.js:BP_FLEET_NODE_NAME,
+// shared/paper.ex:@fleet_render_types (the server-paint push) and
+// paper_editor.ex:@fleet_preview_types (the boundary-widget twin). NOTE the run
+// PARTITION (paper_canvas.ex) is deliberately UNCHANGED for t8 — fleet blocks still
+// render as boundary widgets; bpFleet mounts only when t10 folds the fleet into
+// runs. `diagram` is DELIBERATELY absent — it rides
+// its own editable bpDiagram attr-atom (source textarea), not the read-only paint.
+const CANVAS_FLEET_TYPES = new Set([
+  "tasks",
+  "task-list",
+  "task-detail",
+  "task-board",
+  "roadmap",
+  "notes",
+  "cards",
+  "pipeline",
+  "status-legend",
+  "asciicast",
+  "form",
+  "questionnaire",
+]);
+const CANVAS_FLEET_NODE_NAME = "bpFleet";
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
@@ -232,6 +271,22 @@ function isCanvasReadOnlyAtomNode(nodeType) {
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE,
     nodeType,
   );
+}
+
+// True when a portable-doc BLOCK type is a canvas fleet block (pdd-t8: "tasks" |
+// "cards" | "pipeline" | "form" | …). These ride INTO the canvas as server-painted
+// read-only atoms carrying the whole block verbatim; they never emit a value/content
+// op — structurally they behave EXACTLY like a sheet/embed read-only atom.
+function isCanvasFleetType(type) {
+  return CANVAS_FLEET_TYPES.has(type);
+}
+
+// True when a TipTap NODE type is the canvas fleet node ("bpFleet"). runToOps reads
+// node.type off a getJSON node (the NODE name); ALL fleet types share the single
+// `bpFleet` node, so the specific kind comes off the bpType attr, not the node type
+// (the same multiplexing bpField uses).
+function isCanvasFleetNode(nodeType) {
+  return nodeType === CANVAS_FLEET_NODE_NAME;
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -354,6 +409,17 @@ export function runToTiptap(blocks) {
       // node-view (embed-node.js) instead of the generic opaque placeholder. NOTE the
       // node.type is the NODE name (bpSheet / bpEmbed), not the bpType (sheet / embed).
       return readOnlyAtomBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasFleetType(bpType)) {
+      // A canvas FLEET node (pdd-t8: tasks / cards / pipeline / form / …): a
+      // SERVER-PAINTED read-only atom. Structurally identical to the sheet/embed
+      // read-only atom — the WHOLE block rides VERBATIM on `bpBlock`, ZERO
+      // value/content ops — but ALL fleet kinds share the ONE `bpFleet` node
+      // (discriminated by bpType), and its node-view paints the reader's own pushed
+      // HTML (bp:block-html) rather than a client-computed chip. NOTE the node.type
+      // is the NODE name (bpFleet), not the bpType.
+      return fleetBlockToNode(block, bpId, bpType);
     }
 
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
@@ -823,6 +889,47 @@ function readOnlyAtomNodeToBlock(node, id) {
   return { id, type: bpType };
 }
 
+// ── fleet ⇄ canvas server-painted read-only atom node (pdd-t8) ────────────────
+//
+// The component-fleet blocks ({ id, type:"tasks"|"cards"|"pipeline"|"form"|…, … })
+// ⇄ the SINGLE TipTap `bpFleet` READ-ONLY ATOM node. Structurally these are the
+// sheet/embed read-only atom (the WHOLE block rides VERBATIM on `bpBlock`; ZERO
+// value/content ops; structural-only participation) — the ONLY differences are (1)
+// ALL fleet kinds share the ONE `bpFleet` node (the specific kind rides the bpType
+// attr, exactly like bpField multiplexes the 9 field-* kinds) and (2) the node-view
+// paints the reader's OWN pushed HTML (bp:block-html) instead of a client-computed
+// chip. Nothing here is EDITED in the editor — a task board / card grid / pipeline /
+// grill is authored elsewhere and rendered read-only in the canvas exactly as the
+// /papers reader renders it.
+
+// fleetBlockToNode(block) → { type:"bpFleet", attrs:{ bpId, bpType, bpBlock:<whole
+//   block, deep-cloned> } }
+//
+// The whole block is deep-cloned onto bpBlock (no shared ref / no mutation), so an
+// UNCHANGED fleet block is deep-equal to the original. The node name is ALWAYS
+// bpFleet; the original kind rides bpType (so runToOps/reconstruct read it back).
+function fleetBlockToNode(block, bpId, bpType) {
+  return {
+    type: CANVAS_FLEET_NODE_NAME,
+    attrs: { bpId, bpType, bpBlock: deepClone(block) },
+  };
+}
+
+// fleetNodeToBlock(node, id) → the carried block VERBATIM, with the given id stamped
+// on. The inverse of fleetBlockToNode: it returns the deep-cloned bpBlock (so callers
+// never share a ref with the node's attr) with `id` pinned — EXACTLY the bpOpaque /
+// read-only-atom insert reconstruction. A node with no bpBlock (which the canvas never
+// produces) degrades to a bare { id, type } off the bpType attr.
+function fleetNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  if (attrs.bpBlock != null) {
+    const block = deepClone(attrs.bpBlock);
+    block.id = id;
+    return block;
+  }
+  return { id, type: attrs.bpType || "tasks" };
+}
+
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
 
 // Strip our { bpId, bpType } stamp back off a prose node so the node is the
@@ -937,11 +1044,12 @@ function classifyNode(node) {
   const isAttrAtom = isCanvasAttrAtomNode(node.type);
   const isField = isCanvasFieldNode(node.type);
   const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
+  const isFleet = isCanvasFleetNode(node.type);
   const bpType =
     (node.attrs && node.attrs.bpType) ||
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
-    (isField ? "field-string" : node.type);
+    (isField ? "field-string" : isFleet ? "tasks" : node.type);
   return {
     node,
     bpType,
@@ -951,6 +1059,7 @@ function classifyNode(node) {
     isAttrAtom,
     isField,
     isReadOnlyAtom,
+    isFleet,
   };
 }
 
@@ -1154,7 +1263,13 @@ export function runToOps(prevBlocks, nextDoc) {
   // REFERENCE carrying the whole block verbatim — nothing is edited in the editor, so
   // it NEVER emits a value/content patch (the read-only-never-patches guarantee).
   for (const entry of nextSeq) {
-    if (entry.isNew || entry.isOpaque || entry.isAtom || entry.isReadOnlyAtom)
+    if (
+      entry.isNew ||
+      entry.isOpaque ||
+      entry.isAtom ||
+      entry.isReadOnlyAtom ||
+      entry.isFleet
+    )
       continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
@@ -1338,6 +1453,11 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasReadOnlyAtomNode(type)) {
     return carriedBlockEqual(serverNode, liveNode);
   }
+  // Fleet (pdd-t8: bpFleet — tasks / cards / pipeline / form / …): the whole carried
+  // block, id excluded — same verbatim-carry equality as the read-only atom.
+  if (isCanvasFleetNode(type)) {
+    return carriedBlockEqual(serverNode, liveNode);
+  }
   // Opaque carry-through: the whole carried block, id excluded.
   if (type === "bpOpaque") {
     return carriedBlockEqual(serverNode, liveNode);
@@ -1402,6 +1522,12 @@ function nextNodeToBlock(entry) {
     // VERBATIM, with the minted id stamped on — EXACTLY the bpOpaque insert
     // reconstruction (the read-only atom carries the full block, not just a value).
     return readOnlyAtomNodeToBlock(node, entry.id);
+  }
+  if (entry.isFleet) {
+    // Fleet insert (pdd-t8: tasks / cards / pipeline / form / …): the carried WHOLE
+    // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
+    // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
+    return fleetNodeToBlock(node, entry.id);
   }
   if (entry.isOpaque) {
     // Opaque insert: the carried block JSON, deep-cloned, with the minted id.

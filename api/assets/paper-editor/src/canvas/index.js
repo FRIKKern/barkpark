@@ -98,7 +98,7 @@ import { Field } from "./field-node.js";
 // NEVER emit a value/content patch — they render a read-only chip (sheet summary /
 // embed reference) with contentEditable false, are selectable so Backspace deletes the
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
-import { Sheet, Embed } from "./embed-node.js";
+import { Sheet, Embed, Fleet } from "./embed-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -167,7 +167,11 @@ import { blocksToMarkdown, markdownToBlocks } from "../markdown.js";
 // edited markdown (markdownToBlocks → fresh minted ids), then realign those ids onto
 // the source baseline so a surviving block keeps its id and runToOps emits a PATCH
 // (not remove+insert) for an in-place edit. See ./source-realign.js.
-import { realignBlockIds, deepCloneBlocks } from "./source-realign.js";
+import {
+  realignBlockIds,
+  clampLockedPrefix,
+  deepCloneBlocks,
+} from "./source-realign.js";
 // pdd-t2: the PURE doctrine template-lock veto predicate — wired into the editor's
 // filterTransaction below so a locked mandated block (title @0 / featured @1) can
 // never be deleted or moved live (the FELT half of the server backstop). Split into
@@ -528,6 +532,18 @@ class BpPaperCanvas extends HTMLElement {
         // only field-image/field-reference (pickers) remain boundaries.
         Sheet,
         Embed,
+        // pdd-t8 (fleet-in-canvas): the component-fleet SERVER-PAINTED read-only
+        // atom. Registers the SINGLE `bpFleet` node (atom, NO edit surface; the
+        // WHOLE block rides the bpBlock attr via data-bp-block) for EVERY fleet kind
+        // (tasks / task-board / roadmap / cards / pipeline / notes / status-legend /
+        // form / asciicast / …, discriminated by bpType). Its node-view paints an
+        // empty `.bp-paper-surface` hole keyed by data-bp-fleet-id; the Studio hook
+        // (root.html.heex `bp:block-html`) injects the reader's OWN server-rendered
+        // HTML into that hole (rule 3 / D8 — one producer, byte for byte), with a
+        // loading chip until it arrives. Structurally identical to Sheet/Embed: emits
+        // ZERO value/content ops, participates only in structural ops. bpFleet parses
+        // ONLY its own <div data-bp-fleet='true'>.
+        Fleet,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
@@ -1542,7 +1558,19 @@ class BpPaperCanvas extends HTMLElement {
         // keeps its id → runToOps emits a PATCH (not remove+insert) for an in-place
         // edit. L0 = this._sourceBaselineBlocks (captured from the LIVE doc on enter).
         const L0 = this._sourceBaselineBlocks;
-        const L1 = realignBlockIds(L0, markdownToBlocks(md));
+        // Realign parsed ids onto the baseline, then CLAMP the locked template
+        // prefix (D4's felt half for source mode): a source-mode DELETE / MOVE /
+        // retype of the locked title is reconstructed away so the client view
+        // can't diverge from the server (which vetoes the same op with
+        // {:locked_block, id, op}) — while a same-type CONTENT edit (a retitle)
+        // rides through as the patch-block the server accepts, exactly like a
+        // rich-mode retitle (locks are placement locks, not content locks).
+        // Additive — a template-free run is returned untouched, so a lock-free
+        // paper stays byte-identical (D3).
+        const L1 = clampLockedPrefix(
+          L0,
+          realignBlockIds(L0, markdownToBlocks(md)),
+        );
         // ONE projection of L1, used for BOTH the editor content and the emitted diff,
         // so the rich editor and the ops it sends are derived from the exact same doc.
         const L1Doc = runToTiptap(L1);

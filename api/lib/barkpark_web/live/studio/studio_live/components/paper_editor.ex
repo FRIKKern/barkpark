@@ -22,8 +22,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
 
   # t9 — the task block types whose boundary widget paints a LIVE preview
-  # (mirrors TaskResolver's @snapshot_types + @detail_type).
+  # (mirrors TaskResolver's @snapshot_types + @detail_type). These are the fleet
+  # blocks that can carry a `query` and thus need the session-scoped preview map
+  # (loading state until the rows resolve).
   @task_preview_types ~w(tasks task-list task-board roadmap task-detail)
+
+  # pdd-t8 — the FULL non-prose fleet whose boundary widget paints the reader's own
+  # HTML (rule 3: one producer, byte for byte). Beyond the query-carrying task types
+  # above, these are the STATIC component blocks that render directly from their own
+  # carried data (no query, no scope) — cards / pipeline / notes / status-legend /
+  # form / asciicast. `diagram` is absent: it rides its editable bpDiagram atom in a
+  # canvas run, not a boundary widget. Keep aligned with shared/paper.ex:
+  # @fleet_render_types (the canvas-node twin of this boundary paint).
+  @fleet_preview_types @task_preview_types ++
+                         ~w(notes cards pipeline status-legend form questionnaire asciicast)
 
   # ── Classic <-> Beta segmented toggle (Exp-P3.2, barkpark-g2ql) ─────────────
   # Two-button segmented control fired into `editor-set-mode`. The active mode
@@ -593,7 +605,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <% {:ok, html} -> %>
           <%= raw(html) %>
         <% :empty -> %>
-          <div class="bp-tasks bp-tasks--empty">No matching tasks.</div>
+          <div class="bp-tasks bp-tasks--empty">{empty_note(@block)}</div>
         <% :error -> %>
           <div class="bp-tasks bp-tasks--empty">
             Live task preview unavailable — the Tasks plugin may be off.
@@ -605,12 +617,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     """
   end
 
+  # pdd-t8: broadened from the task-only set to the FULL non-prose fleet — every
+  # component block now paints the reader's HTML in its boundary widget, not just
+  # the query-carrying task blocks. A static block (cards / pipeline / form / …)
+  # has no query + no preview entry, so task_preview_state renders it directly.
   defp task_preview_block?(block),
-    do: Map.get(block, "type") in @task_preview_types
+    do: Map.get(block, "type") in @fleet_preview_types
 
   # nil/unknown entry on a query block ⇒ still resolving (or the block has no
   # id to key a preview) — an honest "loading" note, never a fake empty board.
   # An author-pinned literal (no query) renders from its own rows directly.
+  # pdd-t8: :loading is gated to the QUERY-CARRYING TASK types — only those ever
+  # get a preview entry (TaskResolver.preview skips everything else), so a stray
+  # "query" key on a static fleet block must render directly, never spin forever.
   defp task_preview_state(block, preview) do
     cond do
       is_map(preview) and preview["error"] == true ->
@@ -619,12 +638,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       is_map(preview) ->
         block |> TaskResolver.apply_preview(preview) |> rendered_or_empty()
 
-      Map.has_key?(block, "query") ->
+      Map.get(block, "type") in @task_preview_types and Map.has_key?(block, "query") ->
         :loading
 
       true ->
         rendered_or_empty(block)
     end
+  end
+
+  # pdd-t8: the empty note in the block's OWN vocabulary — a task block's
+  # emptiness means "the query matched nothing"; a static component block's
+  # (cards / pipeline / notes with no items yet) means "no content yet".
+  # "No matching tasks." on an empty cards block would be a lie. The static copy
+  # mirrors the canvas fleet hook's empty-paint fallback (root.html.heex).
+  defp empty_note(block) do
+    if Map.get(block, "type") in @task_preview_types,
+      do: "No matching tasks.",
+      else: "Nothing to show yet."
   end
 
   # task_detail_html renders "" for an empty/matchless task — surface that as

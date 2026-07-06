@@ -653,6 +653,51 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
       refute html =~ "paper-task-preview"
     end
+
+    test "pdd-t8: a STATIC (non-task) fleet block paints the reader's producer directly" do
+      # `cards` carries no query + no preview entry — the boundary widget renders it
+      # straight through Render.render_block/2 (rule 3: one producer, byte for byte),
+      # not just the raw editable fields. This is the fleet-in-canvas broadening.
+      cards = %{
+        "id" => "c1",
+        "type" => "cards",
+        "items" => [%{"title" => "Kinsta", "text" => "honest states"}]
+      }
+
+      html = editor_html([cards], %{})
+
+      assert html =~ ~s(data-test-id="paper-task-preview"), "the fleet block gets a preview widget"
+      assert html =~ "Kinsta"
+      assert html =~ Render.render_block(cards, %{style: :article}),
+             "the boundary widget emits the EXACT reader bytes for the static fleet block"
+    end
+
+    test "pdd-t8: an EMPTY static fleet block gets a component-vocabulary empty note" do
+      # cards with no items renders "" through the reader producer — the widget must
+      # say so in the block's OWN vocabulary, not the task copy ("No matching
+      # tasks." on an empty cards block would be a lie).
+      html = editor_html([%{"id" => "c2", "type" => "cards", "items" => []}], %{})
+
+      assert html =~ "Nothing to show yet."
+      refute html =~ "No matching tasks."
+    end
+
+    test "pdd-t8: a stray query key on a STATIC fleet block never wedges it in loading" do
+      # Only the query-carrying task types ever get preview entries, so a static
+      # block carrying a stray "query" would previously spin forever — it must
+      # render directly instead.
+      cards = %{
+        "id" => "c3",
+        "type" => "cards",
+        "query" => %{"status" => "ready"},
+        "items" => [%{"title" => "Painted", "text" => "not loading"}]
+      }
+
+      html = editor_html([cards], %{})
+
+      assert html =~ "Painted"
+      refute html =~ "Loading live tasks…"
+    end
   end
 
   describe "paper_canvas_enabled?/0 (default FALSE)" do
