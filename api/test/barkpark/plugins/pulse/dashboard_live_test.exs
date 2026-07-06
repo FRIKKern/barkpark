@@ -1,0 +1,71 @@
+defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
+  @moduledoc """
+  The read-only Studio dashboard for Pulse channels: it mounts under
+  `/studio/pulse` (admin), shows each channel's durable total, ticks live on a
+  strike broadcast, and is linked from the Structure desk via `desk_items/1`.
+  """
+
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Pulse
+  alias Barkpark.Auth
+
+  @admin_token "pulse-dashboard-admin-test-token"
+
+  setup do
+    {:ok, _} =
+      Auth.create_token(@admin_token, "pulse dashboard admin", "production", [
+        "read",
+        "write",
+        "admin"
+      ])
+
+    conn = build_conn() |> init_test_session(%{"api_token" => @admin_token})
+    {:ok, conn: conn}
+  end
+
+  test "mounts at /studio/pulse and shows the channel's durable total", %{conn: conn} do
+    for _ <- 1..3,
+        do:
+          Pulse.record_event("test-storm", %{"hue" => 1, "x" => 0.1, "y" => 0.1, "mega" => false})
+
+    total = Pulse.total("test-storm")
+
+    {:ok, _view, html} = live(conn, "/studio/pulse")
+    assert html =~ "Lightning Storm"
+    assert html =~ "test-storm"
+    assert html =~ Integer.to_string(total)
+    assert html =~ "strikes ever"
+  end
+
+  test "a strike broadcast ticks the total live", %{conn: conn} do
+    {:ok, view, _html} = live(conn, "/studio/pulse")
+
+    BarkparkWeb.Endpoint.broadcast("pulse:test-storm", "strike", %{
+      id: 999_999,
+      payload: %{"hue" => 1, "x" => 0.1, "y" => 0.1, "mega" => false},
+      total: 424_242
+    })
+
+    assert render(view) =~ "424,242"
+  end
+
+  test "the plugin contributes a Structure-desk link to the dashboard" do
+    items = Barkpark.Plugins.Pulse.desk_items("production")
+    assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/studio/pulse"))
+  end
+
+  test "the Lightning Storm link actually survives into the built desk tree" do
+    tree = Barkpark.Structure.build("pulse_desk_probe")
+
+    node =
+      Enum.find(tree.items, fn n ->
+        n.type == :plugin_link and n.filter == "/studio/pulse"
+      end)
+
+    assert %Barkpark.Structure.Node{title: "Lightning Storm"} = node,
+           "the /studio/pulse link must appear in the desk regardless of schema"
+  end
+end

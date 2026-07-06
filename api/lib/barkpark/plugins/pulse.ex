@@ -42,8 +42,21 @@ defmodule Barkpark.Plugins.Pulse do
       {:options, "/pulse/:channel/recent", BarkparkWeb.PulseController, :preflight,
        auth: :public_api},
       {:options, "/pulse/:channel/stats", BarkparkWeb.PulseController, :preflight,
-       auth: :public_api}
+       auth: :public_api},
+      # Read-only Studio dashboard: the channel counters live in plain tables
+      # outside the document model, so the schema-driven desk can't show them —
+      # this admin LiveView does, mounted at /studio/pulse.
+      {:live, "/pulse", Barkpark.Plugins.Pulse.Web.DashboardLive, :index, auth: :admin}
     ]
+  end
+
+  # Surface the dashboard in the Structure desk. The `/studio/pulse` path has no
+  # derivable schema type, so the host's desk scoper keeps the link in EVERY
+  # desk (scoped and unscoped) — it never gates it away (Structure.plugin_link_type
+  # returns nil → node kept). A plain observational link, no `requires_schema`.
+  @impl Barkpark.Plugin
+  def desk_items(_dataset) do
+    [%{type: :link, label: "Lightning Storm", path: "/studio/pulse", icon: "zap"}]
   end
 
   @impl Barkpark.Plugin
