@@ -668,7 +668,24 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 // JSON either way: 200-with-wrong-data, no error anywhere. A body with no
 // "result" object (legacy/flat shape) still decodes directly.
 func (c *Client) Get(typeName, id string) (Doc, bool) {
+	return c.GetPerspective(typeName, id, "")
+}
+
+// GetPerspective is Get with an explicit dataset view: a non-empty perspective
+// ("drafts"/"raw") is appended as ?perspective=<p> so a caller can read
+// unpublished edits; an empty perspective leaves the server default (published),
+// which is exactly what Get delegates. The cmux hook's acceptance gate reads
+// "drafts" so an agent's just-recorded `met=true` (which lands as a draft
+// overlay on a published task) is visible before the auto-close decision. Same
+// {"result":{…}} envelope peel + fail-closed (Doc,false)-on-any-error contract
+// as Get.
+func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(id))
+	if perspective != "" {
+		params := url.Values{}
+		params.Set("perspective", perspective)
+		endpoint += "?" + params.Encode()
+	}
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {

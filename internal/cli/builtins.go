@@ -298,7 +298,7 @@ func whoamiSourceLabel(source string, active bool) string {
 // `bp <TAB>` offers it. TestCompletionNounsCoverAllDispatchedBuiltins parses that
 // switch and fails on drift — do not hand-trim this without updating the switch.
 var completionNouns = []string{
-	"agent", "attach", "barkparks", "capabilities", "cloud", "completion", "deploy",
+	"agent", "attach", "barkparks", "capabilities", "cloud", "cmux", "completion", "deploy",
 	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
 	"logout", "make", "media", "migrate", "paper", "plugin", "provider", "register",
 	"schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
