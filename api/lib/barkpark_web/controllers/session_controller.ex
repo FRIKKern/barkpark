@@ -165,25 +165,7 @@ defmodule BarkparkWeb.SessionController do
         |> render(:new, new_assigns(return_to))
 
       user ->
-        cond do
-          user.totp_enabled ->
-            conn
-            |> put_session("studio_mfa_user", user.id)
-            |> put_session("studio_mfa_at", System.system_time(:second))
-            |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
-
-          Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) ->
-            conn
-            |> put_flash(
-              :error,
-              "Your organization requires MFA. Enrol a factor first " <>
-                "(POST /v1/auth/mfa/enroll or `bp auth mfa enroll`), then sign in again."
-            )
-            |> render(:new, new_assigns(return_to))
-
-          true ->
-            mint_user_session(conn, user, return_to, mfa_verified: false)
-        end
+        complete_sign_in(conn, user, return_to)
     end
   end
 
@@ -192,6 +174,87 @@ defmodule BarkparkWeb.SessionController do
     |> put_flash(:error, "Email and password are required.")
     |> render(:new, new_assigns(sanitize_return_to(params["return_to"])))
   end
+
+  # The shared post-authentication decision, reused by password (`account/2`)
+  # AND magic-link (`magic/2`) sign-in so both surfaces enforce the SAME second
+  # factor — a magic link must never be a 2FA / org-MFA bypass. A TOTP-armed
+  # user is routed to the second step (`mfa/2`); a governed factor-less user is
+  # blocked with enrolment guidance (era-w2-org-require-mfa); otherwise the
+  # session is minted directly.
+  defp complete_sign_in(conn, user, return_to) do
+    cond do
+      user.totp_enabled ->
+        conn
+        |> put_session("studio_mfa_user", user.id)
+        |> put_session("studio_mfa_at", System.system_time(:second))
+        |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
+
+      Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) ->
+        conn
+        |> put_flash(
+          :error,
+          "Your organization requires MFA. Enrol a factor first " <>
+            "(POST /v1/auth/mfa/enroll or `bp auth mfa enroll`), then sign in again."
+        )
+        |> render(:new, new_assigns(return_to))
+
+      true ->
+        mint_user_session(conn, user, return_to, mfa_verified: false)
+    end
+  end
+
+  @doc """
+  Magic-link sign-in — request it (`GET|POST /login/magic`). Browser twin of
+  `POST /v1/auth/request-magic-link` (AuthController): the SAME anti-enumeration
+  contract — whether or not the address has an account, the page shows the same
+  confirmation. The emailed link is the same `/auth/magic/<token>` URL the JSON
+  flow already sends (which `magic/2` below makes land in a browser).
+  """
+  def magic_request_form(conn, _params) do
+    render(conn, :magic_request, page_title: "Sign-in link", sent: false)
+  end
+
+  def magic_request(conn, %{"email" => email}) when is_binary(email) do
+    case Barkpark.Accounts.build_login_token(String.trim(email)) do
+      {:ok, token, user} ->
+        Barkpark.Accounts.UserNotifier.deliver_magic_link(
+          user.email,
+          BarkparkWeb.Endpoint.url() <> "/auth/magic/" <> token
+        )
+
+      _ ->
+        :ok
+    end
+
+    render(conn, :magic_request, page_title: "Sign-in link", sent: true)
+  end
+
+  def magic_request(conn, _params), do: redirect(conn, to: "/login/magic")
+
+  @doc """
+  Magic-link sign-in — complete it (`GET /auth/magic/:token`). Consumes the
+  single-use login token (email possession = a factor), then rides the shared
+  `complete_sign_in/3` decision so a TOTP-armed or org-governed user still meets
+  the second factor. Before this route the emailed link 404'd in a browser (only
+  the JSON `POST /magic-login` existed). Same GET-consume magic-link tradeoff as
+  the ticket flow: single-use + short TTL + `no-store` + `no-referrer`; every
+  failure kind yields ONE generic flash (no oracle).
+  """
+  def magic(conn, %{"token" => token}) when is_binary(token) do
+    conn = no_store(conn)
+
+    case Barkpark.Accounts.consume_login_token(token) do
+      {:ok, user} ->
+        complete_sign_in(conn, user, @default_return_to)
+
+      :error ->
+        conn
+        |> put_flash(:error, "This sign-in link is invalid or has expired — request a fresh one.")
+        |> redirect(to: "/login/magic")
+    end
+  end
+
+  def magic(conn, _params), do: redirect(conn, to: "/login/magic")
 
   @doc """
   "Forgot password?" — browser twin of `POST /v1/auth/request-reset`

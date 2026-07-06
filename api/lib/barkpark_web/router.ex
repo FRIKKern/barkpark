@@ -450,6 +450,14 @@ defmodule BarkparkWeb.Router do
     get("/auth/reset/:token", SessionController, :reset_form)
     post("/auth/reset/:token", SessionController, :reset_submit)
 
+    # Magic-link (passwordless) browser sign-in: request page + the landing for
+    # the emailed /auth/magic/<token> link (which 404'd in a browser before —
+    # only the JSON POST /magic-login existed). Consume routes through the same
+    # second-factor step as password login (no 2FA bypass).
+    get("/login/magic", SessionController, :magic_request_form)
+    post("/login/magic", SessionController, :magic_request)
+    get("/auth/magic/:token", SessionController, :magic)
+
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
     # session api_token (no paste), redirect to /studio. Minted by
     # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.
