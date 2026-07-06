@@ -902,6 +902,23 @@ go to bottom after a short while." Guards: TestFinishedEpicDecay (grace boundary
 livecorpus goldens (the dormant 2/2 epic now pins the shelf).
 
 
+**D65 (2026-07-06, user directive "What is set as 'Next' must be deeply curated"):** the NEXT ready
+head is SCORED, not priority-sorted: continuity with live/dropped neighborhoods (+200, "finish what
+we started"), unblock leverage (+30/dependent, cap 5), well-formedness (+100 for >=2 acceptance
+criteria — an agent can actually finish it), priority points (P0 80 / P1 60 / P2 30 / else 10), and
+a zombie discount (-50 past 7d untouched). Every ready pick renders its dominant reason dim
+("continues <root>", "unblocks N") — a deeply-curated pick explains itself. Weights are transparent
+constants; guards TestNextCurationSignals + the restated TestNextReadyHeadP0First.
+
+**D66 (same directive, second half — "base next on all the different spots not impacting each
+other"):** the strip is a PARALLEL-SAFE dispatch head: at most ONE pick per root neighborhood (the
+blast-radius key the data carries), so the ≤3 rows are independent moves, never one epic's queue.
+Board.IndependentReady counts distinct ready neighborhoods — the label reads "NEXT · N independent",
+the honest "how many agents could run right now" capacity. The FULL blast-radius/dispatch model
+(labels/papers/deps as interference signals, a frontier verb, 50-agent ambition) is chartered as the
+NEXT WAVE, not squeezed in here.
+
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)

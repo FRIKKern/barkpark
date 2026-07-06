@@ -1,6 +1,7 @@
 package taskboard
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -46,6 +47,58 @@ const (
 	// band demotion so the number warns before rows visibly rot.
 	staleCountAfter = 3 * 24 * time.Hour
 )
+
+// D65 — NEXT is deeply curated (user directive 2026-07-06: "What is set as
+// 'Next' must be deeply curated"). A ready candidate is scored, not just
+// priority-sorted: continuing the neighborhood of work that is LIVE (or just
+// dropped) beats a cold P0; unblocking other tasks beats a leaf; a well-formed
+// task (real acceptance criteria — an agent can actually finish it) beats an
+// under-specified one; and a zombie that sat untouched for a week stops
+// outranking fresh intent on its priority label alone. Weights are transparent
+// and the render shows each row's dominant reason.
+const (
+	nextContinuityBoost = 200                // shares a root with NOW/resumable work
+	nextLeveragePer     = 30                 // per dependent task unblocked…
+	nextLeverageCap     = 5                  // …capped
+	nextWellFormedBoost = 100                // has >=2 acceptance criteria
+	nextZombiePenalty   = 50                 // ready but untouched for…
+	nextZombieAfter     = 7 * 24 * time.Hour // …this long
+)
+
+// nextPriorityPts maps priority to curation points — priority still matters,
+// it just no longer trumps momentum + actionability on its own.
+func nextPriorityPts(p string) int {
+	switch priorityRank(p) {
+	case 0:
+		return 80
+	case 1:
+		return 60
+	case 2:
+		return 30
+	default:
+		return 10
+	}
+}
+
+// rootOfBare walks a task's parent chain (bareID-normalized, cycle-capped) to
+// its root id — the D65 continuity key.
+func rootOfBare(byBare map[string]Task, id string) string {
+	seen := map[string]bool{}
+	cur := bareID(id)
+	for !seen[cur] {
+		seen[cur] = true
+		t, ok := byBare[cur]
+		if !ok || t.ParentID == "" {
+			return cur
+		}
+		next := bareID(t.ParentID)
+		if _, ok := byBare[next]; !ok {
+			return cur
+		}
+		cur = next
+	}
+	return cur
+}
 
 // nextMax is the hard cap on the NEXT intent strip (charter wave-12 D60): at
 // most this many cursor rows total across resumables + the ready head, so the
@@ -376,6 +429,7 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 	// ready queue. Computed AFTER the NOW loop (board.Now is final) and after the
 	// ready overlay is on s.Tasks (composeSnapshot marked Lifecycle==ready upstream).
 	board.Next, board.NextReadyMore = resolveNext(s, byID, board.Now, now)
+	board.IndependentReady = independentReady(s, byID)
 
 	return board
 }
@@ -393,7 +447,7 @@ func BuildBoard(s Snapshot, repo RepoContext, now time.Time) Board {
 //  3. Concatenate resumables ++ ready head, cap at nextMax TOTAL. NextReadyMore is
 //     the ready remainder that did not fit (resumables are never counted there —
 //     they are follow-up, not "ready").
-func resolveNext(s Snapshot, byID map[string]Task, now []Task, _ time.Time) ([]NextItem, int) {
+func resolveNext(s Snapshot, byID map[string]Task, now []Task, nowT time.Time) ([]NextItem, int) {
 	nowSet := make(map[string]bool, len(now))
 	for _, t := range now {
 		nowSet[bareID(t.DocID)] = true
@@ -461,13 +515,75 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, _ time.Time) ([]N
 		}
 		ready = append(ready, t)
 	}
+	// D65 curation: score every candidate; the strip is the best next MOVES,
+	// not the raw priority head. Continuity roots = the neighborhoods of live
+	// claims and resumables ("finish what we started").
+	contRoots := make(map[string]bool, len(now)+len(resumables))
+	for _, t := range now {
+		contRoots[rootOfBare(byBare, t.DocID)] = true
+	}
+	for _, ni := range resumables {
+		contRoots[rootOfBare(byBare, ni.Task.DocID)] = true
+	}
+	score := func(t Task) (int, string) {
+		pts := nextPriorityPts(t.Priority)
+		reason := ""
+		if root := rootOfBare(byBare, t.DocID); contRoots[root] && root != bareID(t.DocID) {
+			pts += nextContinuityBoost
+			if rt, ok := byBare[root]; ok && rt.Title != "" {
+				reason = "continues " + rt.Title
+			} else {
+				reason = "continues active work"
+			}
+		}
+		if n := t.DependentCount; n > 0 {
+			c := n
+			if c > nextLeverageCap {
+				c = nextLeverageCap
+			}
+			pts += c * nextLeveragePer
+			if reason == "" {
+				reason = fmt.Sprintf("unblocks %d", n)
+			}
+		}
+		if t.Criteria != nil && t.Criteria.Total >= 2 {
+			pts += nextWellFormedBoost
+		}
+		if nowT.Sub(lastActivity(t, evAt)) > nextZombieAfter {
+			pts -= nextZombiePenalty
+		}
+		return pts, reason
+	}
+	scores := make(map[string]int, len(ready))
+	reasons := make(map[string]string, len(ready))
+	for _, t := range ready {
+		pts, why := score(t)
+		scores[bareID(t.DocID)] = pts
+		reasons[bareID(t.DocID)] = why
+	}
 	sort.SliceStable(ready, func(i, j int) bool {
+		si, sj := scores[bareID(ready[i].DocID)], scores[bareID(ready[j].DocID)]
+		if si != sj {
+			return si > sj
+		}
 		ri, rj := priorityRank(ready[i].Priority), priorityRank(ready[j].Priority)
 		if ri != rj {
 			return ri < rj
 		}
 		return lastActivity(ready[i], evAt).After(lastActivity(ready[j], evAt))
 	})
+
+	// D66 — the strip is a PARALLEL-SAFE dispatch head (user directive: "base
+	// next on all the different spots not impacting each other"): among the
+	// curated ready candidates, pick at most ONE per root neighborhood (the
+	// blast-radius key we have), so the 3 rows are 3 INDEPENDENT next moves,
+	// not 3 tasks from one epic that would collide. IndependentReady counts the
+	// distinct workable neighborhoods across the WHOLE ready set — the board's
+	// honest parallel-capacity read ("how many agents could run right now").
+	usedRoot := make(map[string]bool, len(resumables))
+	for _, ni := range resumables {
+		usedRoot[rootOfBare(byBare, ni.Task.DocID)] = true
+	}
 
 	// Concatenate resumables ++ ready head, capped at nextMax TOTAL. Resumables
 	// take precedence; if they alone exceed the cap the ready head shows nothing.
@@ -477,13 +593,35 @@ func resolveNext(s Snapshot, byID map[string]Task, now []Task, _ time.Time) ([]N
 	}
 	readyPlaced := 0
 	for _, t := range ready {
+		if root := rootOfBare(byBare, t.DocID); usedRoot[root] {
+			continue // same neighborhood as an already-picked move — not independent
+		} else {
+			usedRoot[root] = true
+		}
 		if len(out) >= nextMax {
 			break
 		}
-		out = append(out, NextItem{Task: t, Kind: nextReady})
+		out = append(out, NextItem{Task: t, Kind: nextReady, Reason: reasons[bareID(t.DocID)]})
 		readyPlaced++
 	}
 	return out, len(ready) - readyPlaced
+}
+
+// independentReady counts the DISTINCT root neighborhoods across the whole
+// ready set — the board's honest parallel-capacity read (charter D66): how many
+// non-interfering next moves exist right now if every neighborhood took one.
+func independentReady(s Snapshot, byID map[string]Task) int {
+	byBare := make(map[string]Task, len(byID))
+	for _, t := range byID {
+		byBare[bareID(t.DocID)] = t
+	}
+	roots := map[string]bool{}
+	for _, t := range s.Tasks {
+		if t.Lifecycle == lifeReady {
+			roots[rootOfBare(byBare, t.DocID)] = true
+		}
+	}
+	return len(roots)
 }
 
 // laterClaimOrClose reports whether a task (by bareID) has a task.claimed or

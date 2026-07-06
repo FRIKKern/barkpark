@@ -91,6 +91,9 @@ type NextItem struct {
 	Task           Task
 	Kind           NextKind
 	LeaseExpiredAt time.Time // Event.At for nextResume; zero for nextReady
+	// Reason is the D65 curation justification a ready row shows ("continues
+	// <root>", "unblocks N") — every deeply-curated pick explains itself.
+	Reason string
 }
 
 // Board is the fully organized, render-ready model.
@@ -144,8 +147,12 @@ type Board struct {
 	// the resumables. Resumables are NEVER counted here (they are follow-up, not
 	// "ready"). A pointer to the spine below, never a cursor stop.
 	NextReadyMore int
-	Counts        map[string]int
-	Events        []Event
+	// IndependentReady is the D66 parallel-capacity read: how many DISTINCT
+	// root neighborhoods hold ready work right now — the number of agents that
+	// could run in parallel without stepping on each other's blast radius.
+	IndependentReady int
+	Counts           map[string]int
+	Events           []Event
 }
 
 type Epic struct {

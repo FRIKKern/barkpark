@@ -40,8 +40,10 @@ func TestNextResumableFirst(t *testing.T) {
 	}
 }
 
-// TestNextReadyHeadP0First — behind the resumables, the ready head is P0-first
-// (the same order bp task next uses), and resumables always precede ready rows.
+// TestNextReadyHeadP0First — behind the resumables, the ready head is CURATED
+// (charter D65): continuity with live/dropped work + leverage + well-formedness
+// outrank the raw priority label, so the fixture's P1 inside the ACTIVE auth
+// epic beats the cold orphan P0. Resumables still always precede ready rows.
 func TestNextReadyHeadP0First(t *testing.T) {
 	b := BuildBoard(corpusSnapshot(), RepoContext{}, corpusFixedNow)
 	seenReady := false
@@ -60,8 +62,13 @@ func TestNextReadyHeadP0First(t *testing.T) {
 	if firstReady == nil {
 		t.Fatalf("no ready row in NEXT — the P0 head did not resolve: %+v", nextKinds(b.Next))
 	}
-	if got := priorityRank(firstReady.Task.Priority); got != 0 {
-		t.Errorf("first NEXT ready row = %q (priority rank %d), want the P0 head (orph-p0)", firstReady.Task.DocID, got)
+	// D65: the continuity pick leads (auth is the active epic) and explains
+	// itself; the cold orphan P0 no longer wins on its label alone.
+	if firstReady.Task.DocID != "auth-w1-s1" {
+		t.Errorf("first NEXT ready row = %q, want auth-w1-s1 (continuity with the active epic, D65)", firstReady.Task.DocID)
+	}
+	if !strings.Contains(firstReady.Reason, "continues") {
+		t.Errorf("curated pick carries reason %q, want a 'continues …' justification", firstReady.Reason)
 	}
 	// The cap holds and there is an honest remainder tail.
 	if len(b.Next) > nextMax {
@@ -285,3 +292,44 @@ func TestPinnedRowParityUnderHeightPressure(t *testing.T) {
 }
 
 var _ tea.Model = Model{}
+
+// TestNextCurationSignals — charter D65/D66 unit truths: leverage beats a plain
+// peer, zombies sink, and the strip picks at most one task per root
+// neighborhood (independent moves, not one epic's queue).
+func TestNextCurationSignals(t *testing.T) {
+	old := refNow.Add(-8 * 24 * time.Hour)
+	s := Snapshot{Tasks: []Task{
+		{DocID: "g1", Title: "Epic one", Kind: kindGoal, Lifecycle: lifeOpen, UpdatedAt: refNow},
+		{DocID: "a", Title: "unblocker", ParentID: "g1", Lifecycle: lifeReady, Priority: "2", DependentCount: 3, UpdatedAt: refNow},
+		{DocID: "b", Title: "plain peer", ParentID: "g1", Lifecycle: lifeReady, Priority: "2", UpdatedAt: refNow},
+		{DocID: "g2", Title: "Epic two", Kind: kindGoal, Lifecycle: lifeOpen, UpdatedAt: refNow},
+		{DocID: "c", Title: "zombie p0", ParentID: "g2", Lifecycle: lifeReady, Priority: "0", UpdatedAt: old},
+		{DocID: "d", Title: "fresh p1", ParentID: "g2", Lifecycle: lifeReady, Priority: "1", UpdatedAt: refNow},
+	}}
+	b := BuildBoard(s, RepoContext{}, refNow)
+	if len(b.Next) < 2 {
+		t.Fatalf("NEXT = %d rows, want >=2 (two independent neighborhoods)", len(b.Next))
+	}
+	// One pick per root (D66): never two rows from the same epic.
+	roots := map[string]bool{}
+	for _, ni := range b.Next {
+		root := ni.Task.ParentID
+		if roots[root] {
+			t.Fatalf("two NEXT rows from root %q — the strip must pick independent moves", root)
+		}
+		roots[root] = true
+	}
+	// Leverage (D65): the unblocker beats its plain same-priority peer.
+	for _, ni := range b.Next {
+		if ni.Task.ParentID == "g1" && ni.Task.DocID != "a" {
+			t.Errorf("g1 pick = %q, want the unblocker 'a' (DependentCount=3)", ni.Task.DocID)
+		}
+		// Zombie (D65): the week-old P0 loses to the fresh P1 in the same epic.
+		if ni.Task.ParentID == "g2" && ni.Task.DocID != "d" {
+			t.Errorf("g2 pick = %q, want the fresh 'd' (zombie P0 sinks)", ni.Task.DocID)
+		}
+	}
+	if b.IndependentReady != 2 {
+		t.Errorf("IndependentReady = %d, want 2 (two neighborhoods hold ready work)", b.IndependentReady)
+	}
+}

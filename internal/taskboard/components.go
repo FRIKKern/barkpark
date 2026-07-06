@@ -598,10 +598,20 @@ func renderNextRow(it NextItem, selected bool, width int, now time.Time) string 
 			pri = priorityStyle(it.Task.Priority).Render(lbl) + " "
 			priW = disp(lbl) + 1
 		}
-		budget := width - headW - priW
+		// The D65 reason trails dim (" · continues <root>", " · unblocks 3") and
+		// sheds FIRST when tight — the title never starves for its justification.
+		reasonPlain := ""
+		if it.Reason != "" {
+			reasonPlain = " · " + truncate(it.Reason, 28)
+		}
+		budget := width - headW - priW - disp(reasonPlain)
+		if budget < 12 && reasonPlain != "" {
+			reasonPlain = ""
+			budget = width - headW - priW
+		}
 		if budget < 1 {
 			budget = 1
 		}
-		return truncate(head+pri+tStyle.Render(truncate(titleText, budget)), width)
+		return truncate(head+pri+tStyle.Render(truncate(titleText, budget))+dimStyle.Render(reasonPlain), width)
 	}
 }
