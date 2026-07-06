@@ -441,6 +441,15 @@ defmodule BarkparkWeb.Router do
     post("/login/mfa", SessionController, :mfa)
     post("/logout", SessionController, :delete)
 
+    # Browser password-reset (login-brand-ux): "Forgot password?" page + the
+    # landing page for the emailed /auth/reset/<token> link (which the JSON
+    # request-reset flow was already sending — it 404'd in a browser before
+    # these routes). Anti-enumeration mirrors POST /v1/auth/request-reset.
+    get("/login/reset", SessionController, :reset_request_form)
+    post("/login/reset", SessionController, :reset_request)
+    get("/auth/reset/:token", SessionController, :reset_form)
+    post("/auth/reset/:token", SessionController, :reset_submit)
+
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
     # session api_token (no paste), redirect to /studio. Minted by
     # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.

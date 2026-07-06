@@ -3952,6 +3952,45 @@
     try { sessionStorage.removeItem(INVITE_KEY); } catch (e) {}
   }
 
+  // ------------------------------------------- "Log in with Barkpark Cloud"
+  // An instance's /login page deep-links here carrying its own public origin:
+  //   https://barkpark.cloud/#/instance-login?url=https%3A%2F%2Fguerrilla.barkpark.cloud
+  // Same park/resume shape as invitations: logged out → park the origin +
+  // banner the login card; the first authed render() matches the origin
+  // against the user's OWN fleet and rides the existing studio-link mint —
+  // authorization never moves client-side, the deep link carries no secret.
+  var STUDIO_LOGIN_KEY = "bpcloud.studioLogin";
+  function studioLoginFromHash(hash) {
+    var m = (hash != null ? hash : location.hash || "").match(/^#\/?instance-login\?url=([^&]+)/);
+    return m ? safeDecode(m[1]) : null;
+  }
+  function parkedStudioLogin() {
+    try { return sessionStorage.getItem(STUDIO_LOGIN_KEY); } catch (e) { return null; }
+  }
+  function parkStudioLogin(u) {
+    try { sessionStorage.setItem(STUDIO_LOGIN_KEY, u); } catch (e) {}
+  }
+  function clearParkedStudioLogin() {
+    try { sessionStorage.removeItem(STUDIO_LOGIN_KEY); } catch (e) {}
+  }
+  // Pure: the https host of an instance origin, or null for anything that
+  // does not parse as an https/http URL (a malformed deep link must degrade
+  // to "no target", never throw inside render()).
+  function studioLoginHost(u) {
+    if (typeof u !== "string" || !/^https?:\/\//i.test(u)) return null;
+    try { return new URL(u).host || null; } catch (e) { return null; }
+  }
+  // Pure: which of MY instances is the deep link asking for? Host equality
+  // against each barkpark's public url — never a substring match.
+  function studioLoginMatch(fleet, instanceUrl) {
+    var want = studioLoginHost(instanceUrl);
+    if (!want || !Array.isArray(fleet)) return null;
+    for (var i = 0; i < fleet.length; i++) {
+      if (fleet[i] && studioLoginHost(fleet[i].url) === want) return fleet[i];
+    }
+    return null;
+  }
+
   // Pure: what the landing shows BEFORE any accept POST.
   //   preview 404 / absent        → "invalid"        (revoked / used / garbage)
   //   preview past its expiry     → "expired"        (landed after the clock ran out)
@@ -4177,6 +4216,53 @@
         clearParkedInvite();
         slot.innerHTML = "That invitation link isn't valid any more — it may have expired or been revoked. You can still log in.";
       }
+    });
+  }
+
+  // A parked instance-login landing (logged out): say what signing in will do.
+  // Static copy — unlike the invite banner there is nothing to preview server-
+  // side, and probing would leak which hosts are managed here.
+  function showAuthStudioBanner(instanceUrl) {
+    var host = studioLoginHost(instanceUrl);
+    var loginCard = $("#login-card");
+    if (!loginCard) return;
+    if (!host) { clearParkedStudioLogin(); return; }
+    var slot = document.getElementById("auth-studio-login");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.id = "auth-studio-login";
+      slot.className = "auth-invite";
+      loginCard.insertBefore(slot, loginCard.firstChild);
+    }
+    slot.innerHTML = '<span class="auth-invite-title">Log in to open Studio on ' +
+      esc(host) + ".</span> You'll be sent straight back once you're signed in.";
+  }
+
+  // First authed render() after an instance-login landing: match the origin
+  // against MY fleet, mint through the existing studio-link route, and send
+  // the browser back. Failures degrade to a toast on the normal dashboard —
+  // the park is cleared up front so a broken link can't loop every render.
+  function resumeStudioLogin(instanceUrl) {
+    clearParkedStudioLogin();
+    var host = studioLoginHost(instanceUrl);
+    if (!host) return;
+    ensureFleet().then(function (fleet) {
+      if (!fleet) {
+        toast({ kind: "error", title: "Couldn't reach your instances", body: "Try again from " + host + "/login." });
+        return;
+      }
+      var bp = studioLoginMatch(fleet, instanceUrl);
+      if (!bp) {
+        toast({ kind: "error", title: "Instance not linked", body: host + " isn't managed by this account." });
+        return;
+      }
+      api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/studio-link", {}).then(function (r) {
+        if (r.status === 200 && r.data && r.data.url) {
+          location.replace(r.data.url);
+        } else {
+          toast({ kind: "error", title: "Couldn't open Studio", body: friendly(r.data, "Try again from the instance page.") });
+        }
+      });
     });
   }
 
@@ -6647,6 +6733,19 @@
           // e.g. back on the sign-in screen after "Switch account".
           showAuthInviteBanner(parkedInviteToken());
         }
+        // An instance-login deep link (#/instance-login?url=…) landed while
+        // logged out: park the origin, scrub it from the address bar, and say
+        // what signing in will do. The first authed render() resumes it.
+        var studioLoginUrl = studioLoginFromHash(location.hash);
+        if (studioLoginUrl) {
+          parkStudioLogin(studioLoginUrl);
+          if (typeof history !== "undefined" && history.replaceState) {
+            history.replaceState(null, "", location.pathname + location.search);
+          }
+          showAuthStudioBanner(studioLoginUrl);
+        } else if (parkedStudioLogin()) {
+          showAuthStudioBanner(parkedStudioLogin());
+        }
         $("#auth-email").focus();
       }
       return;
@@ -6671,6 +6770,19 @@
     // EXCEPT an explicit drill-down deep link (#site/…, #instance/…): someone
     // who just opened a specific resource asked for THAT; an undecided invite
     // stays parked and resumes on the next plain boot instead of hijacking it.
+    // Instance-login resume: a pending "Log in with Barkpark Cloud" handoff —
+    // on the hash if the user arrived already signed in, parked if it rode
+    // through login/signup/OAuth. On success location.replace() leaves the
+    // dashboard entirely; failures toast over the normal render below.
+    var pendingStudioLogin = studioLoginFromHash(location.hash) || parkedStudioLogin();
+    if (pendingStudioLogin) {
+      if (studioLoginFromHash(location.hash) &&
+          typeof history !== "undefined" && history.replaceState) {
+        history.replaceState(null, "", location.pathname + location.search);
+      }
+      resumeStudioLogin(pendingStudioLogin);
+    }
+
     var preInviteView = parseHash().view;
     if (parkedInviteToken() && preInviteView !== "invite" &&
         preInviteView !== "site" && preInviteView !== "instance") {
@@ -6786,6 +6898,9 @@
   if (typeof globalThis !== "undefined" && typeof globalThis.__bpTestHook === "function") {
     globalThis.__bpTestHook({
       esc: esc, safeDecode: safeDecode, parseHash: parseHash, relTime: relTime,
+      // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
+      studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
+      studioLoginMatch: studioLoginMatch,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.

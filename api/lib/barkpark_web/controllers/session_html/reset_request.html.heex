@@ -1,0 +1,44 @@
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
+
+    <%= if @sent do %>
+      <h1 class="bp-auth-title">Check your email</h1>
+      <p class="bp-auth-sub">
+        If that address has an account, a password-reset link is on its way.
+        The link is single-use and expires soon — open it promptly.
+      </p>
+      <a class="bp-auth-btn bp-auth-btn-quiet" href={~p"/login"}>Back to sign in</a>
+    <% else %>
+      <h1 class="bp-auth-title">Reset your password</h1>
+      <p class="bp-auth-sub">
+        Enter your account email and we'll send you a link to set a new password.
+      </p>
+
+      <.auth_flash flash={@flash} />
+
+      <.form :let={_f} for={%{}} as={:reset} action={~p"/login/reset"} method="post">
+        <div class="form-group">
+          <label class="form-label" for="reset_email">Email</label>
+          <input
+            type="email"
+            name="email"
+            id="reset_email"
+            class="form-input"
+            autocomplete="username"
+            autofocus
+            required
+            placeholder="you@example.com"
+          />
+        </div>
+
+        <button type="submit" class="bp-auth-btn">Email me a reset link</button>
+      </.form>
+
+      <p class="bp-auth-foot">
+        Remembered it after all? <a href={~p"/login"}>Back to sign in</a>
+      </p>
+    <% end %>
+  </div>
+</div>

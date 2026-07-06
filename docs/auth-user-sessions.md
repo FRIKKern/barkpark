@@ -85,6 +85,17 @@ sign-in**: the anonymous Default-workspace demo posture is gated by
 `BARKPARK_PUBLIC_DEMO_STUDIO=1`) — flag-off anonymous browsers redirect to
 `/login`; published papers stay world-readable regardless.
 
+Browser password-reset rides the same email tokens as the JSON flow:
+`GET|POST /login/reset` ("Forgot password?", anti-enumeration — always the
+same confirmation) and `GET|POST /auth/reset/:token` (the emailed link's
+landing page; render never consumes the token, only submit verifies it).
+On a cloud-managed instance, `BARKPARK_CLOUD_URL` (→ `:cloud_login_url`)
+puts a **Log in with Barkpark Cloud** button on `/login`: it deep-links to
+`<cloud>/#/instance-login?url=<own-origin>`; the cloud SPA matches the
+origin against the signed-in user's own fleet and rides the existing
+studio-link mint back to `/login/ticket/:t` — the href carries no secret
+and authorization stays on the cloud route. Unset → no button.
+
 ### Org-wide required MFA (opt-in overlay)
 
 `organizations.require_mfa` (default false; admin-portal toggle) forces factor

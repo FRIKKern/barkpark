@@ -1,0 +1,71 @@
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
+
+    <h1 class="bp-auth-title">Set a new password</h1>
+    <p class="bp-auth-sub">Choose a new password for your account.</p>
+
+    <.auth_flash flash={@flash} />
+
+    <.form :let={_f} for={%{}} as={:reset} action={~p"/auth/reset/#{@token}"} method="post">
+      <div class="form-group">
+        <label class="form-label" for="reset_password">New password</label>
+        <div class="bp-auth-input-affix">
+          <input
+            type="password"
+            name="password"
+            id="reset_password"
+            class="form-input"
+            autocomplete="new-password"
+            minlength={Barkpark.Accounts.User.min_password_length()}
+            autofocus
+            required
+            placeholder="••••••••••••"
+          />
+          <button
+            type="button"
+            class="bp-auth-eye"
+            data-eye-for="reset_password"
+            tabindex="-1"
+            aria-label="Show password"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+            </svg>
+          </button>
+        </div>
+        <p class="bp-auth-sub" style="margin: 6px 0 0;">
+          At least {Barkpark.Accounts.User.min_password_length()} characters.
+        </p>
+      </div>
+
+      <button type="submit" class="bp-auth-btn">Set new password</button>
+    </.form>
+
+    <p class="bp-auth-foot">
+      <a href={~p"/login"}>Back to sign in</a>
+    </p>
+  </div>
+
+  <script>
+    document.querySelectorAll(".bp-auth-eye").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var input = document.getElementById(btn.dataset.eyeFor);
+        if (!input) return;
+        var show = input.type === "password";
+        input.type = show ? "text" : "password";
+        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      });
+    });
+  </script>
+</div>

@@ -13,7 +13,7 @@ defmodule BarkparkWeb.SessionController do
 
   def new(conn, params) do
     return_to = sanitize_return_to(params["return_to"])
-    render(conn, :new, return_to: return_to, page_title: "Sign in")
+    render(conn, :new, new_assigns(return_to))
   end
 
   def create(conn, %{"token" => raw_token} = params) when is_binary(raw_token) do
@@ -31,14 +31,44 @@ defmodule BarkparkWeb.SessionController do
       {:error, :unauthorized} ->
         conn
         |> put_flash(:error, "Invalid API token.")
-        |> render(:new, return_to: return_to, page_title: "Sign in")
+        |> render(:new, new_assigns(return_to))
     end
   end
 
   def create(conn, _params) do
     conn
     |> put_flash(:error, "Token is required.")
-    |> render(:new, return_to: @default_return_to, page_title: "Sign in")
+    |> render(:new, new_assigns(@default_return_to))
+  end
+
+  # Every render of :new carries the same assign set — error re-renders must
+  # not lose the cloud button or the host line.
+  defp new_assigns(return_to) do
+    [
+      return_to: return_to,
+      page_title: "Sign in",
+      instance_host: instance_host(),
+      cloud_login_href: cloud_login_href()
+    ]
+  end
+
+  defp instance_host, do: URI.parse(BarkparkWeb.Endpoint.url()).host
+
+  # "Log in with Barkpark Cloud": on a cloud-managed instance (runtime env
+  # BARKPARK_CLOUD_URL → :cloud_login_url), deep-link to the control plane's
+  # SPA carrying THIS instance's public origin. The SPA matches the origin
+  # against the signed-in user's own fleet and round-trips a login ticket to
+  # /login/ticket/:t — authorization stays entirely on the cloud's
+  # studio-link route, so the href carries no secret. nil → no button.
+  defp cloud_login_href do
+    case Application.get_env(:barkpark, :cloud_login_url) do
+      url when is_binary(url) and url != "" ->
+        String.trim_trailing(url, "/") <>
+          "/#/instance-login?url=" <> URI.encode_www_form(BarkparkWeb.Endpoint.url())
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
@@ -132,7 +162,7 @@ defmodule BarkparkWeb.SessionController do
       nil ->
         conn
         |> put_flash(:error, "Email or password is incorrect.")
-        |> render(:new, return_to: return_to, page_title: "Sign in")
+        |> render(:new, new_assigns(return_to))
 
       user ->
         cond do
@@ -140,7 +170,7 @@ defmodule BarkparkWeb.SessionController do
             conn
             |> put_session("studio_mfa_user", user.id)
             |> put_session("studio_mfa_at", System.system_time(:second))
-            |> render(:mfa, return_to: return_to, page_title: "Two-factor code")
+            |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
 
           Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) ->
             conn
@@ -149,7 +179,7 @@ defmodule BarkparkWeb.SessionController do
               "Your organization requires MFA. Enrol a factor first " <>
                 "(POST /v1/auth/mfa/enroll or `bp auth mfa enroll`), then sign in again."
             )
-            |> render(:new, return_to: return_to, page_title: "Sign in")
+            |> render(:new, new_assigns(return_to))
 
           true ->
             mint_user_session(conn, user, return_to, mfa_verified: false)
@@ -160,10 +190,83 @@ defmodule BarkparkWeb.SessionController do
   def account(conn, params) do
     conn
     |> put_flash(:error, "Email and password are required.")
-    |> render(:new,
-      return_to: sanitize_return_to(params["return_to"]),
-      page_title: "Sign in"
-    )
+    |> render(:new, new_assigns(sanitize_return_to(params["return_to"])))
+  end
+
+  @doc """
+  "Forgot password?" — browser twin of `POST /v1/auth/request-reset`
+  (AuthController). Same anti-enumeration contract: whether or not the address
+  has an account, the page shows the SAME confirmation. The emailed link is the
+  same `/auth/reset/<token>` URL the API flow sends; `reset_form/2` below is
+  what makes that link actually land somewhere in a browser.
+  """
+  def reset_request_form(conn, _params) do
+    render(conn, :reset_request, page_title: "Reset password", sent: false)
+  end
+
+  def reset_request(conn, %{"email" => email}) when is_binary(email) do
+    if user = Barkpark.Accounts.get_user_by_email(String.trim(email)) do
+      {:ok, token} = Barkpark.Accounts.build_email_token(user, "reset")
+
+      Barkpark.Accounts.UserNotifier.deliver_reset(
+        user.email,
+        BarkparkWeb.Endpoint.url() <> "/auth/reset/" <> token
+      )
+    end
+
+    render(conn, :reset_request, page_title: "Reset password", sent: true)
+  end
+
+  def reset_request(conn, _params), do: redirect(conn, to: "/login/reset")
+
+  @doc """
+  Landing page for the emailed reset link (`GET /auth/reset/:token`). The
+  token is only VERIFIED on submit — rendering the form never consumes or
+  oracles it (`reset_submit/2` gives every bad token the same generic error).
+  """
+  def reset_form(conn, %{"token" => token}) when is_binary(token) do
+    conn
+    |> no_store()
+    |> render(:reset, page_title: "Set a new password", token: token)
+  end
+
+  def reset_submit(conn, %{"token" => token, "password" => password})
+      when is_binary(token) and is_binary(password) do
+    case Barkpark.Accounts.reset_user_password(token, %{password: password}) do
+      {:ok, _user} ->
+        conn
+        |> configure_session(renew: true)
+        |> put_flash(:info, "Password updated — sign in with your new password.")
+        |> redirect(to: "/login")
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        # Policy failure (too short, breached, …): the token survives — the
+        # same link can be retried with a stronger password.
+        conn
+        |> put_flash(:error, password_error(changeset))
+        |> no_store()
+        |> render(:reset, page_title: "Set a new password", token: token)
+
+      :error ->
+        conn
+        |> put_flash(:error, "That reset link is invalid or has expired — request a fresh one.")
+        |> redirect(to: "/login/reset")
+    end
+  end
+
+  def reset_submit(conn, _params), do: redirect(conn, to: "/login/reset")
+
+  defp password_error(changeset) do
+    changeset
+    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+      Enum.reduce(opts, msg, fn {k, v}, acc ->
+        String.replace(acc, "%{#{k}}", to_string(v))
+      end)
+    end)
+    |> case do
+      %{password: [msg | _]} -> "Password " <> msg <> "."
+      _ -> "That password can't be used — pick a different one."
+    end
   end
 
   @doc """
@@ -192,7 +295,7 @@ defmodule BarkparkWeb.SessionController do
         if is_binary(user_id) and fresh? do
           conn
           |> put_flash(:error, "That code didn't work — try again.")
-          |> render(:mfa, return_to: return_to, page_title: "Two-factor code")
+          |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
         else
           conn
           |> configure_session(renew: true)

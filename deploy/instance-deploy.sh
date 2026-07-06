@@ -67,6 +67,13 @@ for v in BARKPARK_KEK BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET; do
     log "added missing ${v} to .env"
   fi
 done
+
+# This instance is managed by the barkpark.cloud control plane — the pointer
+# puts "Log in with Barkpark Cloud" on /login (login-brand-ux). Not a secret.
+if ! grep -q '^BARKPARK_CLOUD_URL=' .env 2>/dev/null; then
+  echo 'BARKPARK_CLOUD_URL=https://barkpark.cloud' >> .env
+  log "added BARKPARK_CLOUD_URL to .env"
+fi
 set -a; . ./.env; set +a
 
 # ---- Arm the Caddy maintenance page (branded 503 + Retry-After) so ANY window
