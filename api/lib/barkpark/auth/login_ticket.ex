@@ -21,6 +21,10 @@ defmodule Barkpark.Auth.LoginTicket do
   schema "login_tickets" do
     field :ticket_hash, :string
     field :api_token, Barkpark.EncryptedBinary
+    # cloud-identity-studio-handoff: non-nil makes this a USER-shaped ticket —
+    # consuming it JIT-provisions this email (Default-workspace owner) and
+    # mints a user_session. Only an admin-permission bearer may mint one.
+    field :user_email, :string
     field :expires_at, :utc_datetime_usec
     field :used_at, :utc_datetime_usec
 
@@ -31,7 +35,7 @@ defmodule Barkpark.Auth.LoginTicket do
 
   def changeset(ticket, attrs) do
     ticket
-    |> cast(attrs, [:ticket_hash, :api_token, :expires_at, :used_at])
+    |> cast(attrs, [:ticket_hash, :api_token, :user_email, :expires_at, :used_at])
     |> validate_required([:ticket_hash, :api_token, :expires_at])
     |> unique_constraint(:ticket_hash)
   end

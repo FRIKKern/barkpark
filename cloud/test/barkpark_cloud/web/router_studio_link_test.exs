@@ -110,6 +110,24 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
       refute conn.resp_body =~ @instance_admin_token
     end
 
+    test "the mint body carries the cloud user's email (cloud-identity handoff)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 201, body: ~s({"ticket":"bplt_user-shaped-1","expires_in":60})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
+      assert conn.status == 200
+
+      # The instance mint request asks for a USER-shaped ticket bound to the
+      # cloud account's email — the browser lands signed in AS this user.
+      assert [req] = StudioLinkFakeHttpClient.requests()
+      assert Jason.decode!(req.body) == %{"email" => user.email}
+    end
+
     test "cross-team: a member of ANOTHER team gets the same 404 as a nonexistent id (no leak)" do
       {_user_b, team_b} = user_with_team()
       bp_b = live_barkpark(team_b)

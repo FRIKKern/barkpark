@@ -1874,11 +1874,21 @@ defmodule BarkparkCloud.Registry do
   Transport is the swappable `:studio_link_http_client` module (default
   `BarkparkCloud.Billing.HttpClient` — verified TLS `:httpc`; tests wire
   `BarkparkCloud.StudioLinkFakeHttpClient`).
+
+  A `user_email` (cloud-identity-studio-handoff) asks the instance for a
+  USER-shaped ticket: consuming it signs the browser in AS that account
+  (JIT-provisioned, Default-workspace owner) instead of an anonymous
+  admin-token session — the "your cloud account works on your instance"
+  handoff. An older instance ignores the extra field and mints the legacy
+  token-shaped ticket: graceful degradation, never an error.
   """
-  @spec mint_studio_link(Barkpark.t()) ::
+  @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
           {:ok, String.t()}
           | {:error, :not_live | :no_admin_token | :decrypt_failed | :instance_error}
-  def mint_studio_link(%Barkpark{url: url} = bp) when is_binary(url) and url != "" do
+  def mint_studio_link(bp, user_email \\ nil)
+
+  def mint_studio_link(%Barkpark{url: url} = bp, user_email)
+      when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
         {:error, :no_admin_token}
@@ -1889,6 +1899,12 @@ defmodule BarkparkCloud.Registry do
       {:ok, admin_token} ->
         base = String.trim_trailing(url, "/")
 
+        body =
+          case user_email do
+            email when is_binary(email) and email != "" -> Jason.encode!(%{email: email})
+            _ -> "{}"
+          end
+
         request = %{
           method: :post,
           url: base <> "/v1/auth/login-tickets",
@@ -1897,7 +1913,7 @@ defmodule BarkparkCloud.Registry do
             {"Accept", "application/json"},
             {"Content-Type", "application/json"}
           ],
-          body: "{}"
+          body: body
         }
 
         case studio_link_http_client().request(request) do
@@ -1916,7 +1932,7 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  def mint_studio_link(_), do: {:error, :not_live}
+  def mint_studio_link(_, _), do: {:error, :not_live}
 
   # Transport seam — swappable in tests via
   # `config :barkpark_cloud, :studio_link_http_client, FakeClient` (same shape as

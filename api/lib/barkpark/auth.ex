@@ -67,23 +67,41 @@ defmodule Barkpark.Auth do
 
   Never log the returned ticket or the api_token; never place the api_token in a
   URL. Only the ticket travels in the handoff URL.
+
+  A USER-shaped ticket (cloud-identity-studio-handoff) carries `opts[:user_email]`
+  — consuming it JIT-provisions that account and mints a `user_session` (the
+  Barkpark Cloud "same account on your instance" handoff). Because consuming
+  grants a Default-workspace OWNER, minting one requires the bearer to hold the
+  `admin` permission (the control plane's stored per-instance admin token) —
+  a read-only token minting a user ticket would be privilege escalation.
   """
-  @spec mint_login_ticket(binary()) :: {:ok, binary()} | {:error, :unauthorized}
-  def mint_login_ticket(raw_api_token) when is_binary(raw_api_token) do
+  @spec mint_login_ticket(binary(), keyword()) :: {:ok, binary()} | {:error, :unauthorized}
+  def mint_login_ticket(raw_api_token, opts \\ [])
+
+  def mint_login_ticket(raw_api_token, opts) when is_binary(raw_api_token) do
+    user_email = presence(opts[:user_email])
+
     case verify_token(raw_api_token) do
-      {:ok, _token} ->
-        raw_ticket = "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-        now = DateTime.utc_now()
+      {:ok, token} ->
+        if user_email != nil and not has_permission?(token, "admin") do
+          {:error, :unauthorized}
+        else
+          raw_ticket =
+            "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
-        attrs = %{
-          ticket_hash: hash_ticket(raw_ticket),
-          api_token: raw_api_token,
-          expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
-        }
+          now = DateTime.utc_now()
 
-        case %LoginTicket{} |> LoginTicket.changeset(attrs) |> Repo.insert() do
-          {:ok, _ticket} -> {:ok, raw_ticket}
-          {:error, _changeset} -> {:error, :unauthorized}
+          attrs = %{
+            ticket_hash: hash_ticket(raw_ticket),
+            api_token: raw_api_token,
+            user_email: user_email,
+            expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
+          }
+
+          case %LoginTicket{} |> LoginTicket.changeset(attrs) |> Repo.insert() do
+            {:ok, _ticket} -> {:ok, raw_ticket}
+            {:error, _changeset} -> {:error, :unauthorized}
+          end
         end
 
       {:error, :unauthorized} ->
@@ -91,7 +109,16 @@ defmodule Barkpark.Auth do
     end
   end
 
-  def mint_login_ticket(_), do: {:error, :unauthorized}
+  def mint_login_ticket(_, _), do: {:error, :unauthorized}
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_), do: nil
 
   @doc """
   Atomically consume a login ticket, returning the bound RAW api_token (dwb-7).
@@ -115,11 +142,19 @@ defmodule Barkpark.Auth do
     query =
       from t in LoginTicket,
         where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
-        select: t.api_token
+        select: {t.api_token, t.user_email}
 
     case Repo.update_all(query, set: [used_at: now]) do
-      {1, [raw_api_token]} -> {:ok, raw_api_token}
-      _ -> {:error, :invalid}
+      # user-shaped (cloud-identity handoff): the consumer mints a
+      # user_session for this email instead of dropping the token in.
+      {1, [{raw_api_token, user_email}]} when is_binary(user_email) ->
+        {:ok, {:user, user_email, raw_api_token}}
+
+      {1, [{raw_api_token, nil}]} ->
+        {:ok, raw_api_token}
+
+      _ ->
+        {:error, :invalid}
     end
   end
 

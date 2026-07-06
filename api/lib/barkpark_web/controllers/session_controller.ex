@@ -60,7 +60,28 @@ defmodule BarkparkWeb.SessionController do
     conn = no_store(conn)
 
     case Barkpark.Auth.consume_login_ticket(raw_ticket) do
-      {:ok, api_token} ->
+      # USER-shaped ticket (cloud-identity-studio-handoff): the Barkpark Cloud
+      # owner lands signed in AS their cloud account. JIT-provision mirrors
+      # SSO (find-or-create by email); the Default-workspace OWNER grant is
+      # legitimate because minting required the instance ADMIN token, and the
+      # control plane only mints for the instance's own team.
+      {:ok, {:user, email, _admin_token}} ->
+        user = Barkpark.Sso.find_or_create_user(email)
+        ensure_default_owner_membership(user)
+
+        {:ok, token} =
+          Barkpark.Accounts.create_user_session_token(user,
+            ip_address: client_ip(conn),
+            user_agent: user_agent(conn)
+          )
+
+        conn
+        |> configure_session(renew: true)
+        |> put_session("user_session", token)
+        |> put_flash(:info, "Signed in.")
+        |> redirect(to: @default_return_to)
+
+      {:ok, api_token} when is_binary(api_token) ->
         conn
         |> configure_session(renew: true)
         |> put_session("api_token", api_token)
@@ -79,6 +100,19 @@ defmodule BarkparkWeb.SessionController do
     |> no_store()
     |> put_flash(:error, "This sign-in link is invalid or has expired.")
     |> redirect(to: "/login")
+  end
+
+  # Idempotent: an existing membership (any role) is left untouched — the
+  # handoff never DOWNGRADES; absence gets the owner grant the admin-token
+  # mint vouches for.
+  defp ensure_default_owner_membership(user) do
+    with %{id: ws_id} <- Barkpark.Tenancy.get_default_workspace(),
+         nil <- Barkpark.Tenancy.Auth.membership(user, ws_id) do
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_id, user.id, "owner", "user")
+      :ok
+    else
+      _ -> :ok
+    end
   end
 
   @doc """
