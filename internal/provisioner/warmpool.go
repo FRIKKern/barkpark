@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
@@ -44,6 +45,17 @@ type WarmPoolClient interface {
 	// shrinking an oversized pool). SKIP LOCKED, so it can never grab a box an
 	// assign already claimed. ok=false means nothing ready to retire.
 	ClaimForRetire(ctx context.Context) (ws WarmServer, ok bool, err error)
+	// ClaimForRefresh pops the STALEST ready box for a background REFRESH to
+	// origin/main (snapshot-management self-refresh loop) — ready → refreshing, so
+	// the box is out of the assignable set while it refreshes but stays a pool
+	// member. minAgeSeconds skips a box refreshed within it (churn gate).
+	// ok=false means no ready box is due a refresh. SKIP LOCKED.
+	ClaimForRefresh(ctx context.Context, minAgeSeconds int) (ws WarmServer, ok bool, err error)
+	// MarkRefreshed releases a refreshing box BACK to ready (refreshing → ready),
+	// claim-fenced on claimToken. refreshed=true stamps its refreshed_at now (drop
+	// to the back of the refresh queue); false leaves it (retry sooner). A refresh
+	// failure NEVER removes a box — it still serves working code.
+	MarkRefreshed(ctx context.Context, name, claimToken string, refreshed bool) error
 	// Register records a freshly-created warm box into the pool. Idempotent on name.
 	Register(ctx context.Context, ws WarmServer) error
 	// Delete drops a box's claim-store row once its box is consumed (assigned live,
@@ -58,11 +70,13 @@ type WarmPoolClient interface {
 }
 
 const (
-	warmClaimPath       = "/v1/internal/warm-servers/claim"
-	warmClaimRetirePath = "/v1/internal/warm-servers/claim-retire"
-	warmRegisterPath    = "/v1/internal/warm-servers"
-	warmCountPath       = "/v1/internal/warm-servers/count"
-	warmDeletePathFmt   = "/v1/internal/warm-servers/%s"
+	warmClaimPath        = "/v1/internal/warm-servers/claim"
+	warmClaimRetirePath  = "/v1/internal/warm-servers/claim-retire"
+	warmClaimRefreshPath = "/v1/internal/warm-servers/claim-refresh"
+	warmRegisterPath     = "/v1/internal/warm-servers"
+	warmCountPath        = "/v1/internal/warm-servers/count"
+	warmDeletePathFmt    = "/v1/internal/warm-servers/%s"
+	warmRefreshedPathFmt = "/v1/internal/warm-servers/%s/refreshed"
 )
 
 // warmRefillTimeout bounds a single async pool refill (create + freshen + register
@@ -197,6 +211,54 @@ func (c *HTTPWarmPoolClient) Claim(ctx context.Context) (WarmServer, bool, error
 // ClaimForRetire pops a ready box for retirement.
 func (c *HTTPWarmPoolClient) ClaimForRetire(ctx context.Context) (WarmServer, bool, error) {
 	return c.claimOne(ctx, warmClaimRetirePath)
+}
+
+// ClaimForRefresh pops the stalest ready box for a background refresh, passing
+// the churn gate (POST {min_age_seconds}).
+func (c *HTTPWarmPoolClient) ClaimForRefresh(ctx context.Context, minAgeSeconds int) (WarmServer, bool, error) {
+	buf, _ := json.Marshal(map[string]int{"min_age_seconds": minAgeSeconds})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(warmClaimRefreshPath), bytes.NewReader(buf))
+	if err != nil {
+		return WarmServer{}, false, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
+
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return WarmServer{}, false, err
+	}
+	defer resp.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return WarmServer{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return WarmServer{}, false, fmt.Errorf("POST %s: status %d: %s", warmClaimRefreshPath, resp.StatusCode, truncate(string(data), 200))
+	}
+	var ws WarmServer
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &ws); err != nil {
+			return WarmServer{}, false, fmt.Errorf("decode %s response: %w", warmClaimRefreshPath, err)
+		}
+	}
+	if strings.TrimSpace(ws.Name) == "" {
+		return WarmServer{}, false, fmt.Errorf("%s response missing name: %s", warmClaimRefreshPath, truncate(string(data), 200))
+	}
+	return ws, true, nil
+}
+
+// MarkRefreshed releases a refreshing box back to ready (POST {claim_token,
+// refreshed}); enforces a 2xx.
+func (c *HTTPWarmPoolClient) MarkRefreshed(ctx context.Context, name, claimToken string, refreshed bool) error {
+	buf, _ := json.Marshal(map[string]any{"claim_token": claimToken, "refreshed": refreshed})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url(fmt.Sprintf(warmRefreshedPathFmt, name)), bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
+	return c.do2xx(req, "mark warm server refreshed "+name)
 }
 
 // Register records a warm box into the pool (POST {name, ip}); enforces a 2xx.
@@ -457,6 +519,89 @@ func ReconcileWarmPoolWith(ctx context.Context, seams Seams, size int) (created,
 		return created, deleted, fmt.Errorf("reconcile warm pool: %s", strings.Join(errs, "; "))
 	}
 	return created, deleted, nil
+}
+
+// warmRefreshMinAgeSeconds gates self-refresh churn: a pool box refreshed within
+// this window is not re-picked. ~90s keeps the pool within a couple of minutes
+// of origin/main (plus each freshen's own time) while bounding SSH/fetch load.
+const warmRefreshMinAgeSeconds = 90
+
+// DefaultRefresh returns the Worker.Refresh hook bound to seams: each call
+// launches — at most ONE at a time — an async background refresh of the stalest
+// due pool box. Non-blocking so the worker's claim loop is never held up by a
+// multi-minute rebuild; the one-in-flight guard bounds concurrent SSH load to a
+// single box (matching the single-threaded worker's spirit).
+func DefaultRefresh(seams Seams) func(context.Context) {
+	var inFlight atomicBool
+	return func(ctx context.Context) {
+		if seams.WarmClient == nil {
+			return
+		}
+		if !inFlight.compareAndSwap(false, true) {
+			return // a refresh is already running — skip this tick
+		}
+		go func() {
+			defer inFlight.store(false)
+			refreshOneStalePoolBox(ctx, seams)
+		}()
+	}
+}
+
+// refreshOneStalePoolBox claims the stalest due pool box, brings its checkout to
+// origin/main (fail-OPEN — a refresh failure leaves the box serving working
+// code), and releases it BACK to ready. Runs in a DefaultRefresh goroutine.
+//
+// Fail-open contrast with growWarmBox: growing a NEW box is fail-closed (a box
+// that can't be made current must never ENTER the pool), but re-freshening an
+// EXISTING pool box is fail-open — it already serves working code, so a transient
+// freshen failure must not delete it; it returns to ready and is retried.
+func refreshOneStalePoolBox(ctx context.Context, seams Seams) {
+	ws, ok, err := seams.WarmClient.ClaimForRefresh(ctx, warmRefreshMinAgeSeconds)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refresh claim failed: %v\n", err)
+		return
+	}
+	if !ok {
+		return // nothing due — the pool is fresh enough
+	}
+
+	host := cloud.Server{Name: ws.Name, IP: ws.IP}
+	ferr := freshenWarmBox(ctx, seams, host)
+	if ferr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refresh %s degraded (box stays in pool on prior code): %v\n", ws.Name, ferr)
+	}
+
+	// Release BACK to ready on a FRESH bounded context so a cancelled worker ctx
+	// (shutdown) still returns the box to the pool. refreshed=true only when the
+	// freshen actually succeeded (so a failed box is retried next pass).
+	rctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if merr := seams.WarmClient.MarkRefreshed(rctx, ws.Name, ws.ClaimToken, ferr == nil); merr != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: warm refresh release %s failed (stale-refresh reaper recovers it): %v\n", ws.Name, merr)
+	}
+}
+
+// atomicBool is a tiny CAS flag (no sync/atomic.Bool dependency assumptions) for
+// the one-in-flight refresh guard.
+type atomicBool struct {
+	mu sync.Mutex
+	v  bool
+}
+
+func (b *atomicBool) compareAndSwap(old, new bool) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.v != old {
+		return false
+	}
+	b.v = new
+	return true
+}
+
+func (b *atomicBool) store(v bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.v = v
 }
 
 // teardownWarmBox deletes a warm box on a FRESH bounded context — NEVER the

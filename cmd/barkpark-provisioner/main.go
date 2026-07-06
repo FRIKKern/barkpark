@@ -67,6 +67,14 @@ const sweepEveryCycles = 200
 // GET + at most a create/retire), far less often under load.
 const reconcileEveryCycles = 50
 
+// refreshEveryCycles kicks the self-refresh loop every Nth completed cycle
+// (snapshot-management): keep idle pool boxes at origin/main so a go-live almost
+// never rebuilds at claim time. 6 cycles at the 5s idle cadence is a check ~every
+// 30s — the check is cheap (a 204 when nothing is due), and the server-side
+// min-age gate (~90s) is what actually bounds per-box refresh frequency. Tighter
+// than reconcile because staying current is the whole point.
+const refreshEveryCycles = 6
+
 // warmPoolSize reads WARM_POOL_SIZE (default 0 = the warm pool DISABLED, so
 // provisioning stays on the proven one-shot path). A non-numeric or negative
 // value is treated as 0 with a warning — a typo must never silently enable paid
@@ -220,11 +228,14 @@ func run(args []string) int {
 		SweepEvery: sweepEveryCycles,
 	}
 
-	// Warm-pool reconcile: hold the pool at size on startup + periodically. Only
-	// wired when the pool is enabled, so a disabled worker never touches the pool.
+	// Warm-pool reconcile + self-refresh: hold the pool at size, and keep idle
+	// boxes at origin/main so a go-live almost never rebuilds. Only wired when the
+	// pool is enabled, so a disabled worker never touches the pool.
 	if poolSize > 0 {
 		w.Reconcile = provisioner.DefaultReconcile(seams, poolSize)
 		w.ReconcileEvery = reconcileEveryCycles
+		w.Refresh = provisioner.DefaultRefresh(seams)
+		w.RefreshEvery = refreshEveryCycles
 	}
 
 	// dwb-15: graceful shutdown. We must NOT use signal.NotifyContext here — that

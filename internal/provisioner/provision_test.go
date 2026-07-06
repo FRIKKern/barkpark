@@ -40,6 +40,9 @@ type recordingRunner struct {
 	checkErr   error
 	rebuildErr error
 	rebuildRan bool
+	// checkGate, when non-nil, blocks the cheap-check until the channel is closed —
+	// lets a test hold a freshen "in flight" to prove the one-in-flight refresh guard.
+	checkGate chan struct{}
 }
 
 func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
@@ -67,6 +70,9 @@ func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, e
 			return "rebuild failed on box", r.rebuildErr
 		}
 		return "rebuilt", nil
+	}
+	if r.checkGate != nil {
+		<-r.checkGate // block until the test releases the in-flight freshen
 	}
 	if r.checkErr != nil {
 		return "fatal: unable to access origin", r.checkErr
