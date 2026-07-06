@@ -167,16 +167,29 @@ func spineRows(b Board, st UIState) []SpineRow {
 	// W10-B: a cancelled-root epic is a tombstone — it collapses to ONE dim line
 	// at the very BOTTOM of the board (after clusters/orphans), so dead epics stop
 	// occupying prime space. Partition them out of the in-place epic loop here.
-	var deadEpics []Epic
+	// D64 (Amendment 5 — completion ≠ activity): a FINISHED section past its
+	// grace window (Demoted) relocates to the finished shelf just above those
+	// tombstones — still a normal, selectable, expandable section (h/l/enter and
+	// explicit overrides all work), just no longer occupying prime space.
+	var deadEpics, finishedEpics []Epic
 	for _, e := range b.Epics {
 		if e.Root.Lifecycle == lifeCancelled {
 			deadEpics = append(deadEpics, e)
 			continue
 		}
+		if e.Demoted {
+			finishedEpics = append(finishedEpics, e)
+			continue
+		}
 		section(spineEpicHeader, rowChild, e.Root.DocID, e.Root.Title, phaseCodeOf(e.Root), false,
 			e.Children, epicMode(st, e), e.FocusSet, e.DoneFolded, e.CancelledFolded, true)
 	}
+	var finishedClusters []Cluster
 	for _, cl := range b.Clusters {
+		if cl.Demoted {
+			finishedClusters = append(finishedClusters, cl)
+			continue
+		}
 		section(spineClusterHeader, rowClusterMember, clusterFoldKey(cl.Key),
 			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterMode(st, cl), cl.FocusSet, cl.DoneFolded, cl.CancelledFolded, false)
 	}
@@ -187,6 +200,15 @@ func spineRows(b Board, st UIState) []SpineRow {
 		}
 		section(spineOrphanHeader, rowOrphan, orphansFoldKey, title, "", false,
 			b.Orphans, orphansMode(st, b), b.OrphansFocusSet, b.OrphansFolded, b.OrphansCancelledFolded, false)
+	}
+	// The finished shelf (D64): decayed sections, newest completion first.
+	for _, e := range finishedEpics {
+		section(spineEpicHeader, rowChild, e.Root.DocID, e.Root.Title, phaseCodeOf(e.Root), false,
+			e.Children, epicMode(st, e), e.FocusSet, e.DoneFolded, e.CancelledFolded, true)
+	}
+	for _, cl := range finishedClusters {
+		section(spineClusterHeader, rowClusterMember, clusterFoldKey(cl.Key),
+			clusterDisplayName(cl.Key), "", true, cl.Tasks, clusterMode(st, cl), cl.FocusSet, cl.DoneFolded, cl.CancelledFolded, false)
 	}
 	for _, e := range deadEpics {
 		sep()
