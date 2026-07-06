@@ -48,7 +48,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         socket
 
       true ->
-        case Content.apply_paper_block_op(slug, op, dataset) do
+        case Content.apply_paper_block_op(
+               slug,
+               op,
+               dataset,
+               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+             ) do
           {:ok, _result} ->
             socket
             |> sync_paper_edit_doc()
@@ -85,7 +90,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         socket
 
       true ->
-        case Content.apply_paper_block_ops(slug, ops, dataset) do
+        case Content.apply_paper_block_ops(
+               slug,
+               ops,
+               dataset,
+               BarkparkWeb.ScopeHelpers.scope_opts(socket)
+             ) do
           {:ok, _result} ->
             # Re-read the paper (apply_paper_block_ops returns only the batch
             # receipt %{slug, op_count, rev, block_ids} — NOT the post-apply

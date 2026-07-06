@@ -96,6 +96,25 @@ defmodule Barkpark.Content.Papers.Template do
   def derive_title(attrs, _blocks), do: attrs
 
   @doc """
+  Template papers are ARTICLE papers (doctrine rule 3 — 100% parity): the
+  canvas paints every block through the `:article` producer, so a paper whose
+  body carries the locked title must ALSO read as `:article` publicly, or the
+  reader's legacy bold-span heading diverges from the canvas' real `<h1>`
+  (found live, pdd-t15). Additive: an explicit caller style always wins, and
+  papers with no title block (the legacy corpus) keep their bytes (D3/D6).
+  """
+  @spec stamp_article_style(map(), term()) :: map()
+  def stamp_article_style(attrs, blocks) when is_list(blocks) do
+    if is_binary(attrs["style"]) or not has_role?(blocks, @title_role) do
+      attrs
+    else
+      Map.put(attrs, "style", "article")
+    end
+  end
+
+  def stamp_article_style(attrs, _blocks), do: attrs
+
+  @doc """
   The gate half: template-shape errors for a locked-carrying block list.
   Returns `[]` for a valid doc AND for any doc with no locked blocks.
   """

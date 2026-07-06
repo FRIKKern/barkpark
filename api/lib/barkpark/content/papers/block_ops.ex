@@ -123,7 +123,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     # Doctrine (pdd-t4): the row title IS the locked title block's text — one
     # truth. Additive: papers with no role:"title" block keep their given title.
-    attrs = Papers.Template.derive_title(attrs, blocks)
+    attrs =
+      attrs
+      |> Papers.Template.derive_title(blocks)
+      |> Papers.Template.stamp_article_style(blocks)
 
     # Field-encryption CHOKEPOINT (Phase 2). Encrypt bound block values for any
     # schema field marked `encrypted: true` BEFORE they are rendered into the
