@@ -86,7 +86,7 @@ defmodule Barkpark.Content.Schema do
 
     # `include_global: true` makes a workspace-scoped read ALSO surface shared
     # global (nil-workspace) schemas — the Studio desk wants the workspace's own
-    # types plus the shared/plugin base layer (see Barkpark.Structure.build/3).
+    # types plus the shared/plugin base layer (see Barkpark.Structure.build/2).
     # The default stays the strict, fail-closed workspace-or-global read.
     scope_fun =
       if Keyword.get(opts, :include_global, false),

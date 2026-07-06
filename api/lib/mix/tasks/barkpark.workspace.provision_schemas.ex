@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemas do
   scope.
 
   The Studio desk is built from the schemas registered in the workspace being
-  viewed (`Barkpark.Structure.build/3`), so a dedicated workspace only
+  viewed (`Barkpark.Structure.build/2`), so a dedicated workspace only
   surfaces the plugin features whose schemas it actually owns. Creating a
   workspace (`Tenancy.create_workspace_with_owner/_`) does NOT register plugin
   schemas, so a fresh dedicated workspace starts with an empty desk — this
