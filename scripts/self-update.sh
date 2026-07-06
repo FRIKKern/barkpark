@@ -30,7 +30,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "[self-update] fetching..."
-git fetch origin --tags --prune
+# Branch refs are the update itself — a fetch failure here is fatal. Tags are
+# fetched SEPARATELY, forced and non-fatal: a stale local tag that diverged
+# from the remote (seen live 2026-07-06: the box's old v0.0.83 differed and
+# `--tags` refused to clobber it, aborting the whole update under set -e)
+# must never block applying code. --force adopts the remote's tags as truth —
+# release tags are immutable by rule, and BuildInfo's describe needs them
+# current for the rebuilt version stamp.
+git fetch origin --prune
+git fetch origin --tags --force ||
+  echo "[self-update] WARN: tag fetch failed — continuing (version stamp may lag)"
 
 BRANCH="${BARKPARK_UPSTREAM_BRANCH:-main}"
 echo "[self-update] fast-forwarding to origin/$BRANCH..."
