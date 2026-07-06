@@ -1,37 +1,86 @@
 defmodule Barkpark.Content.Papers.Template do
   @moduledoc """
-  The PortableDoc body template — the content-first doctrine's enforcement core
-  (paper `portabledoc-doctrine`, tasks pdd-t1/t3/t4).
+  The PortableDoc paper template — the content-first doctrine's enforcement core
+  (paper `portabledoc-doctrine`, tasks pdd-t1/t3/t4/t20).
 
-  Structure is guaranteed by ENFORCED BLOCKS, not fields: a new paper opens as a
-  document — a locked `role: "title"` heading at block 0 and a locked
-  `role: "featured"` image at block 1 — never a blank form. This module owns the
-  three server truths:
+  Structure is guaranteed by DECLARATIONS, not fields. The paper's declaration set
+  (`paper_declarations/0`) is expressed in the generic constraint vocabulary
+  (`Barkpark.PortableDoc.Constraints`, pdd-t20):
 
-    * `maybe_seed/2` — seed the forced initial block set on a BRAND-NEW paper
-      whose caller provided no blocks (the Beta canvas' new-doc path), or when
-      the caller opts in with `"template" => true`. Existing papers and callers
-      with explicit blocks are byte-untouched — corpus migration is its own
-      task (pdd-t5), never a side effect.
-    * `derive_title/2` — `doc.title` IS the locked title block's text (one
-      truth, no second field to drift). Fires only when a `role: "title"` block
-      exists, so legacy papers keep their row title.
-    * `validate/1` — the `before_save` gate half (wired by the Bulldocs
-      plugin): a doc that carries locked blocks must keep the template shape —
-      exactly one `role: "title"` heading and it sits at block 0; a
-      `role: "featured"` block sits at block 1. Papers with no locked blocks
-      pass untouched (additive enforcement).
+    * a **required** `role: "title"` heading, exactly one, pinned to block 0,
+      locked;
+    * an **optional** `role: "featured"` image, at most one, positioned *after* the
+      title, locked;
+    * an **optional** `role: "ingress"` block, at most one, positioned *after* the
+      title and *before* the featured, unlocked.
 
-  The op-level backstop lives in `Barkpark.PortableDoc.Patch`: a `remove-block`
-  or `move-block` targeting a `"locked" => true` block is rejected, and
-  `patch-block` cannot strip `locked` — so no client, canvas or raw API, can
-  unmake the guarantee.
+  A new paper opens as a document — the locked title heading — never a blank form.
+  The optional slots (featured, ingress) are ghost affordances the editor offers
+  in their enforced place; only the required minimum is seeded at birth (D11). This
+  module owns the paper's server truths:
+
+    * `template_blocks/1` — the forced initial block set: just the locked
+      `role: "title"` heading (id `tpl-title`). Optional blocks are NOT seeded.
+    * `maybe_seed/3` — seed the forced initial set on a BRAND-NEW paper whose
+      caller provided no blocks (the Beta canvas' new-doc path), or when the caller
+      opts in with `"template" => true`. Existing papers and callers with explicit
+      blocks are byte-untouched — corpus migration is its own task (pdd-t5), never
+      a side effect.
+    * `derive_title/2` — `doc.title` IS the locked title block's text (one truth,
+      no second field to drift). Fires only when a `role: "title"` block exists, so
+      legacy papers keep their row title.
+    * `validate/1` — the `before_save` gate half (wired by the Bulldocs plugin): a
+      doc that carries locked blocks must satisfy `paper_declarations/0`. Papers
+      with no locked blocks pass untouched (additive enforcement, D3).
+
+  The op-level backstop lives in `Barkpark.PortableDoc.Patch`: a `remove-block` or
+  `move-block` targeting a `"locked" => true` block (or an op that would DISPLACE
+  one) is rejected, and `patch-block` cannot strip `locked`/`role` — so no client,
+  canvas or raw API, can unmake the guarantee.
   """
 
-  @title_role "title"
-  @featured_role "featured"
+  alias Barkpark.PortableDoc.Constraints
 
-  @doc "The forced initial block set: locked title heading + locked featured image."
+  @title_role "title"
+
+  @doc """
+  The paper's structural declarations, in the generic constraint vocabulary. The
+  current template re-expressed byte-compatibly: title required-exactly-1 at block
+  0 (locked), featured optional-max-1 after the title (locked), ingress
+  optional-max-1 after the title and before the featured (unlocked).
+  """
+  @spec paper_declarations() :: [Constraints.declaration()]
+  def paper_declarations do
+    [
+      %{
+        kind: "title",
+        presence: :required,
+        count: {:exactly, 1},
+        position: [{:index, 0}],
+        locked: true
+      },
+      %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}],
+        locked: true
+      },
+      %{
+        kind: "ingress",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}, {:before, "featured"}],
+        locked: false
+      }
+    ]
+  end
+
+  @doc """
+  The forced initial block set: the locked `role: "title"` level-1 heading. The
+  optional featured/ingress slots are NOT seeded — they are ghost affordances the
+  editor offers in their enforced place (D11).
+  """
   @spec template_blocks(String.t() | nil) :: [map()]
   def template_blocks(title) do
     [
@@ -42,12 +91,6 @@ defmodule Barkpark.Content.Papers.Template do
         "role" => @title_role,
         "locked" => true,
         "text" => to_string(title || "")
-      },
-      %{
-        "id" => "tpl-featured",
-        "type" => "image",
-        "role" => @featured_role,
-        "locked" => true
       }
     ]
   end
@@ -64,7 +107,8 @@ defmodule Barkpark.Content.Papers.Template do
   def maybe_seed(blocks, nil, attrs) do
     cond do
       # An explicit empty block list = "a new blank document" (the canvas'
-      # new-doc path). A nil `blocks` is the HTML-only ingest path — untouched.
+      # new-doc path): the locked title + an empty body paragraph to type into.
+      # A nil `blocks` is the HTML-only ingest path — untouched.
       blocks == [] ->
         template_blocks(attrs["title"]) ++ [empty_paragraph()]
 
@@ -115,13 +159,18 @@ defmodule Barkpark.Content.Papers.Template do
   def stamp_article_style(attrs, _blocks), do: attrs
 
   @doc """
-  The gate half: template-shape errors for a locked-carrying block list.
-  Returns `[]` for a valid doc AND for any doc with no locked blocks.
+  The gate half: declaration-violation errors for a locked-carrying block list.
+  Returns `[]` for a valid doc AND for any doc with no locked blocks (additive,
+  D3 — legacy papers stay byte-untouched). Delegates the enforcement math to
+  `Barkpark.PortableDoc.Constraints`, plus the one paper rule the generic
+  vocabulary doesn't carry (declarations have no type axis): the `role: "title"`
+  block IS a heading — `derive_title/2` reads its `"text"` and the reader renders
+  it as the document `<h1>`.
   """
   @spec validate(term()) :: [String.t()]
   def validate(blocks) when is_list(blocks) do
     if Enum.any?(blocks, &locked?/1) do
-      title_errors(blocks) ++ featured_errors(blocks)
+      Constraints.validate(blocks, paper_declarations()) ++ title_type_errors(blocks)
     else
       []
     end
@@ -129,30 +178,13 @@ defmodule Barkpark.Content.Papers.Template do
 
   def validate(_), do: []
 
-  defp title_errors(blocks) do
-    case Enum.with_index(blocks) |> Enum.filter(fn {b, _} -> role_of(b) == @title_role end) do
-      [{%{"type" => "heading"}, 0}] ->
-        []
-
-      [] ->
-        ["template: the locked title block is missing (a paper opens with its title at block 0)"]
-
-      [{%{"type" => "heading"}, idx}] ->
-        ["template: the title block must be block 0, found at #{idx}"]
-
-      [{_other, _}] ->
-        ["template: the role \"title\" block must be a heading"]
-
-      many ->
-        ["template: exactly one title block allowed, found #{length(many)}"]
-    end
-  end
-
-  defp featured_errors(blocks) do
-    case Enum.with_index(blocks) |> Enum.find(fn {b, _} -> role_of(b) == @featured_role end) do
-      nil -> []
-      {_b, 1} -> []
-      {_b, idx} -> ["template: the featured block must be block 1, found at #{idx}"]
+  defp title_type_errors(blocks) do
+    if Enum.any?(blocks, fn b ->
+         role_of(b) == @title_role and not match?(%{"type" => "heading"}, b)
+       end) do
+      [~s(the role "title" block must be a heading)]
+    else
+      []
     end
   end
 
