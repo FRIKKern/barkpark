@@ -225,3 +225,32 @@ The policy (D58, implement after wave 12 merges — same goldens):
    the D51-a fallback, which only seeds READY tasks) is empty → header-only. Inactive-but-workable
    sections keep the existing D51/D51-a behavior (header+rollup; recent ones show 2 fresh ready seeds).
 4. Cancelled-root tombstones (W10-B) stay last. Explicit h/l/enter overrides still win (D54).
+
+---
+
+## AMENDMENT 6 (2026-07-07) — INVERT the pane: list on top, activity band pinned at the BOTTOM
+
+User, verbatim: "We need the top part of tui to be on bottom - i dont like fixed on top - better
+bottom - reverse things." (This supersedes the top-pinned band of waves 11-12; the earlier
+retraction of "activity at the bottom" is itself retracted — the band goes to the bottom now, but as
+the SAME rich activity band, NOT the abandoned scrolling console.)
+
+The reversal: the SCROLLING TASK LIST becomes the top region and fills from the top; the pinned band
+(momentum header + progress bar + NOW + NEXT) moves to the BOTTOM, fixed directly above the ticker/
+footer, never scrolling. The thin identity line (barkpark · tasks · ⇄ guerrilla ● live) — architect's
+call whether it stays as the single orienting line at the very top or also moves down; pick what reads
+best and justify.
+
+Vertical order, top → bottom (the reversed pane):
+  [identity line?]  [ TASK LIST — scrolls ]  [NOW]  [NEXT]  [momentum + progress bar]  [ticker]  [footer]
+(i.e. bottom-up mirror of today: momentum nearest the footer like a status bar, then NEXT, then NOW,
+then the list above — architect nails the exact intra-band order so it reads as a natural flip.)
+
+CURSOR must follow VISUAL order (the crux): with the band at the bottom, the cursor should flow top→
+bottom = list rows first, THEN the NEXT rows, THEN the NOW rows at the very bottom — so `j` from the
+top walks the list and continues down into the claimable band, `k` back up. This MOVES the pinned
+band's selectable indices from BEFORE the spine to AFTER it. That is a real change to the visibleRows
+index space — the cursor-parity guards (visibleRows ↔ flattenSpine, the ONE spineRows producer) MUST
+hold: both paths reorder together, goldens regenerate, `c` still claims a NOW/NEXT row, enter still
+opens. The Compose gutter (1 left / 3 right), the finished-shelf decay, and every wave-8..14 behavior
+stay; only the vertical placement + cursor order invert.
