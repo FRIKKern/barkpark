@@ -1,0 +1,165 @@
+name: pr-task-gate
+
+# Task-obsession layer 1 (see docs/ops/merge-gates.md + the `task-obsession`
+# paper): every PR must be backed by a task that is actively being worked, on
+# the ledger-of-record (guerrilla — decision D4). No task, no merge.
+#
+# The pure ledger decision lives in scripts/pr-task-gate.sh (unit-tested); this
+# workflow only plumbs the GitHub PR context into it and applies two escape
+# hatches that are part of the design, not loopholes:
+#
+#   • Merge-base cutoff (D-rollout): a PR whose base commit predates this gate
+#     is grandfathered. Detected self-referentially — if this workflow file is
+#     absent at the PR's base SHA, the PR was branched before the gate existed,
+#     so it is exempt. This is why turning the gate on does NOT red the open-PR
+#     fleet. A PR rebased onto post-gate main adopts the rule.
+#
+#   • Hotfix lane (D3): a `hotfix!` label passes the gate AND auto-files a
+#     linked override task (the durable record), rather than silently waiving
+#     the requirement. The exception path SATISFIES the invariant (a task now
+#     exists for the change) instead of skipping it. Auto-file needs a write
+#     token secret (BARKPARK_TASK_TOKEN); without it the lane still passes but
+#     logs that the record was not filed — a human-provisioned gate.
+#
+# Enforcement note: `main` has no branch protection today, so a red check here
+# does not yet mechanically block a merge. To make it binding, add this job to
+# the required-status-checks list BY NAME (see merge-gates.md). Required-by-name
+# is load-bearing (D3): a workflow that silently never runs on a conflicted PR
+# must read as "not satisfied", not as a passing/absent check.
+
+on:
+  pull_request:
+    # No paths filter: any change needs a task, so every PR is checked. The job
+    # is cheap (one HTTPS GET), and the merge-base cutoff grandfathers old PRs.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-task-gate-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  pr-task-gate:
+    name: PR references an active task
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history to reach the base ref)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge-base cutoff — grandfather PRs branched before this gate
+        id: cutoff
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -uo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
+          if git cat-file -e "${BASE_SHA}:.github/workflows/pr-task-gate.yml" 2>/dev/null; then
+            echo "enforced=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "enforced=0" >> "$GITHUB_OUTPUT"
+            echo "This PR's base ($BASE_SHA) predates the pr-task-gate — grandfathered, not enforced." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Detect hotfix label
+        id: hotfix
+        if: steps.cutoff.outputs.enforced == '1'
+        run: |
+          set -uo pipefail
+          if jq -e '.pull_request.labels[]?.name == "hotfix!"' "$GITHUB_EVENT_PATH" >/dev/null; then
+            echo "hotfix=1" >> "$GITHUB_OUTPUT"
+          else
+            echo "hotfix=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      # D3: the hotfix lane files a task instead of waiving the rule. Best-effort
+      # — the label alone passes the gate; the auto-file is the durable record,
+      # and its absence (missing token) is logged, not fatal.
+      - name: Hotfix lane — auto-file the override task
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix == '1'
+        env:
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+          TASK_TOKEN: ${{ secrets.BARKPARK_TASK_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -uo pipefail
+          echo "::notice title=Hotfix lane::PR labelled 'hotfix!' — gate passes; filing an override task as the durable record."
+          if [ -z "${TASK_TOKEN:-}" ]; then
+            echo "::warning title=Hotfix override not recorded::BARKPARK_TASK_TOKEN secret is not set, so the override task was not auto-filed. Provision the secret to close this gap (see merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Idempotent create keyed on the PR number, so re-runs don't duplicate.
+          # jq --arg reads values as DATA — the attacker-controlled PR title
+          # cannot inject shell or JSON.
+          body="$(jq -n \
+            --arg id "hotfix-pr-${PR_NUMBER}" \
+            --arg title "hotfix override: ${PR_TITLE}" \
+            --arg desc "Auto-filed by pr-task-gate for PR #${PR_NUMBER} (${PR_URL}) which merged under the hotfix! lane. Follow-up: confirm the bypass was a genuine emergency." \
+            '{mutations: [{createIfNotExists: {
+                _id: $id, _type: "task", title: ($title[0:200]),
+                kind: "task", lifecycle_status: "open",
+                labels: ["hotfix-override", "merge-gate-override", "proj:task-obsession"],
+                description: $desc }}]}')"
+          code="$(curl -sS -m 20 -o /tmp/hotfix-file.json -w '%{http_code}' \
+            -X POST "${LEDGER_BASE%/}/v1/data/mutate/production" \
+            -H "Authorization: Bearer ${TASK_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "$body" 2>/dev/null || echo 000)"
+          if [ "$code" = "200" ] || [ "$code" = "201" ]; then
+            echo "Filed override task hotfix-pr-${PR_NUMBER}." | tee -a "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning title=Hotfix auto-file failed::Ledger returned HTTP ${code}; the gate still passes but the override task was not recorded." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Extract the task reference from the PR
+        id: ref
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -uo pipefail
+          # PR-controlled text arrives via env (never interpolated into the
+          # script body) so it cannot inject shell. Match a `Task: <doc_id>`
+          # trailer, case-insensitive, first occurrence.
+          task_id="$(printf '%s' "${PR_BODY:-}" \
+            | grep -ioE '^[[:space:]]*task:[[:space:]]*[a-z0-9][a-z0-9._/-]*' \
+            | head -1 \
+            | sed -E 's/^[[:space:]]*[Tt][Aa][Ss][Kk]:[[:space:]]*//')"
+          echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
+
+      # Optional author→worker map: .github/pr-task-workers.json = { "<gh-login>": "<worker-id>" }.
+      # When present and the PR author is listed, the task's claim.worker must
+      # match — the strict "claimed by the author" form. Absent/unlisted → any
+      # active claim is accepted (the map is opt-in tightening, not a prereq).
+      - name: Resolve expected worker (optional author map)
+        id: worker
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -uo pipefail
+          expected=""
+          if [ -f .github/pr-task-workers.json ]; then
+            expected="$(jq -r --arg a "$PR_AUTHOR" '.[$a] // ""' .github/pr-task-workers.json)"
+          fi
+          echo "expected=${expected}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify the task is active on the ledger
+        if: steps.cutoff.outputs.enforced == '1' && steps.hotfix.outputs.hotfix != '1'
+        env:
+          TASK_ID: ${{ steps.ref.outputs.task_id }}
+          EXPECTED_WORKER: ${{ steps.worker.outputs.expected }}
+          LEDGER_BASE: ${{ vars.BARKPARK_LEDGER_BASE || 'https://guerrilla.barkpark.cloud' }}
+        run: |
+          set -uo pipefail
+          bash scripts/pr-task-gate.sh
+          rc=$?
+          if [ "$rc" = "2" ]; then
+            echo "::warning title=Ledger unreachable::The task ledger could not be reached, so this PR's task backing could not be verified. Not blocking the merge on an infra error — re-run once the ledger is reachable." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          exit "$rc"

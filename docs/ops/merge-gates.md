@@ -36,6 +36,24 @@ A PR targeting `main` must clear:
    from the root copy again (it diverged both ways on main, fixed 2026-07-02).
    Edit the ROOT deploy.sh, then `make cli-assets-sync`.
 
+7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
+   task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
+   description naming a task that is `in_progress` (claimed) on the
+   ledger-of-record (guerrilla). No task / task not found / not in_progress →
+   the check fails. The pure ledger decision is the unit-tested
+   `scripts/pr-task-gate.sh` (`bash scripts/pr-task-gate.test.sh`, hermetic);
+   the workflow only plumbs PR context in. Three designed behaviours:
+   **merge-base cutoff** — a PR whose base predates the gate (workflow absent at
+   base SHA) is grandfathered, so turning the gate on does not red the open-PR
+   fleet; **hotfix lane** — a `hotfix!` label passes AND auto-files an override
+   task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
+   passes but logs that the record was not filed); **ledger-outage neutral** —
+   a 5xx / unreachable ledger warns and passes (an infra blip must not freeze
+   merges), while only a definitive "no task / not found / not in_progress"
+   fails. Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
+   tightens the check to require the task be claimed by the author's mapped
+   worker. **Currently advisory** until made required-by-name (below).
+
 The **`mix-test` CI job** (`.github/workflows/elixir.yml`) — dev-mode
 `mix compile --warnings-as-errors` + `mix test` against Postgres — is
 **blocking** (no `continue-on-error`). The test-infra remediation was
@@ -50,6 +68,27 @@ GitHub. The checks that *should* be green before merge are `mix-prod-compile`,
 `mix-test`, and `validation-perf`; `format` is advisory; `plugin-node`
 matters only when the PR touches `api/priv/plugins/**`. If these are meant to
 be enforced, add a branch-protection rule requiring those status checks.
+
+### Making `pr-task-gate` binding (required-by-name)
+
+The gate ships **advisory** — a red check does not yet block a merge, because
+`main` has no branch protection. It becomes binding only when added to the
+required-status-checks list **by name**. Required-by-name is load-bearing (D3):
+a workflow that silently never runs on a conflicting PR must read as
+"not satisfied", not as an absent/passing check.
+
+```bash
+# One-time, needs repo admin. Adds pr-task-gate to the required checks.
+gh api -X PATCH repos/:owner/:repo/branches/main/protection/required_status_checks \
+  -f 'checks[][context]=PR references an active task'
+```
+
+Two human-provisioned prerequisites before flipping it on:
+- **`BARKPARK_TASK_TOKEN`** repo secret — a guerrilla write token, so the
+  `hotfix!` lane can auto-file its override task. Without it the lane still
+  passes (logs a warning); the token only closes the record-keeping gap.
+- Optionally `BARKPARK_LEDGER_BASE` repo **variable** to point the gate at a
+  different ledger instance (defaults to `https://guerrilla.barkpark.cloud`).
 
 ## Local pre-merge check
 
