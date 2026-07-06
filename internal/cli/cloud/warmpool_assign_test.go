@@ -103,10 +103,19 @@ func TestCreateWarmServer_LabelFailureTearsDownBox(t *testing.T) {
 	}
 }
 
-func TestAssignWarm_HappyPathSkipsCreateAndFlipsLabels(t *testing.T) {
+func TestAssignWarm_HappyPathReportsCreateAndFlipsLabels(t *testing.T) {
 	spec := acmeSpec()
 	wp, prov, dns, runner, reg := warmAssignPool(greenGate(spec.healthTarget()))
 	ctx := context.Background()
+
+	// Record the step narration: the warm path MUST report `create` done, or the
+	// /new + admin timelines hang "Creating your server" pending forever.
+	var steps []string
+	wp.Progress = func(step, status, _ string) {
+		if step == "create" {
+			steps = append(steps, status)
+		}
+	}
 
 	// A claimed warm box already exists (created + warm-labelled ahead of time).
 	host, err := CreateWarmServer(ctx, prov, warmSpec())
@@ -118,6 +127,17 @@ func TestAssignWarm_HappyPathSkipsCreateAndFlipsLabels(t *testing.T) {
 	live, err := wp.AssignWarm(ctx, host, spec)
 	if err != nil {
 		t.Fatalf("AssignWarm: %v", err)
+	}
+
+	// ── create is REPORTED started→done (no create sub-steps, but the phase is
+	// honestly shown complete — the pre-warmed box IS the user's ready server) ──
+	if len(steps) < 2 || steps[0] != "started" || steps[len(steps)-1] != "done" {
+		t.Errorf("create narration = %v, want started…done (the warm assign must report create)", steps)
+	}
+	for _, s := range steps {
+		if s == "failed" {
+			t.Errorf("a healthy warm assign must not narrate create failed: %v", steps)
+		}
 	}
 
 	// ── NO new server created: the assigned box IS the warm box (same IP) ──

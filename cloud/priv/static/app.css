@@ -1264,6 +1264,39 @@ select.form-input {
 /* progress step */
 .new-progress h2 { font-size: 20px; margin: 0 0 4px; }
 .new-elapsed { font-variant-numeric: tabular-nums; }
+
+/* ── Overall progress (the headline master bar; shared /new + instance timeline).
+   A calm evergreen fill over a soft track, with "Step N of M" + "about 40s left".
+   Width + text patch in place each 1s tick; the transition smooths the jumps. */
+.prov-overall { margin: 18px 0 4px; }
+.new-progress .prov-overall { margin: 18px 0 6px; }
+.prov-overall-track {
+  height: 6px;
+  border-radius: var(--pill);
+  background: var(--ring-soft);
+  overflow: hidden;
+}
+.prov-overall-fill {
+  height: 100%;
+  width: 0;
+  border-radius: var(--pill);
+  background: var(--primary);
+  transition: width 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.prov-overall.is-done .prov-overall-fill { background: var(--ok); }
+.prov-overall.is-failed .prov-overall-fill { background: var(--danger); }
+.prov-overall-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+  font-size: 12px;
+}
+.prov-overall-meta > span:first-child { color: var(--text); font-weight: 600; }
+.prov-overall.is-failed .prov-overall-meta > span:first-child { color: var(--danger); }
+.prov-overall-eta { color: var(--dim); font-variant-numeric: tabular-nums; }
+
 .new-steps { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .new-step { display: flex; align-items: center; gap: 12px; }
 .new-step-dot {
