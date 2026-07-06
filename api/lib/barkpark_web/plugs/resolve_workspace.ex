@@ -42,6 +42,16 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   pipeline that doesn't pass the option keeps the hard fail-closed gate. The
   pass-through is marked `assigns[:anonymous_default_read] = true` so
   downstream surfaces can tell it from a member resolve.
+
+  ## Studio demo flag (studio-anonymous-default-lockdown)
+
+  `allow_anonymous_default: :studio_demo` is the STUDIO pipelines' spelling:
+  the allowance only applies while `config :barkpark, :public_demo_studio` is
+  true (dev/test default; prod opt-in via BARKPARK_PUBLIC_DEMO_STUDIO). With
+  the flag off, an anonymous HTML request for the Default workspace redirects
+  to `/login` (return_to preserved) instead of 403ing — production Studio
+  requires a sign-in. The paper reader keeps the literal `true` (published
+  papers are world-readable by design).
   """
 
   import Plug.Conn
@@ -82,16 +92,39 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       # The Default-workspace public allowance keys on NO TOKEN (P3 posture).
       # A signed-in user without a Default membership still gets it — being
       # signed in never grants less than anonymous.
-      is_nil(token) and Keyword.get(opts, :allow_anonymous_default, false) and
+      is_nil(token) and anonymous_default_allowed?(opts) and
           default_workspace?(workspace) ->
         conn
         |> assign(:current_workspace, workspace)
         |> assign(:anonymous_default_read, true)
 
+      # Flag-off Studio: the anonymous browser isn't forbidden, it's just not
+      # signed in — send it to the sign-in page rather than a 403 envelope.
+      is_nil(token) and is_nil(user) and studio_demo_opt?(opts) and
+          default_workspace?(workspace) ->
+        conn
+        |> Phoenix.Controller.redirect(
+          to: "/login?return_to=#{URI.encode_www_form(conn.request_path)}"
+        )
+        |> halt()
+
       true ->
         halt_envelope(conn, {:error, :forbidden})
     end
   end
+
+  # `true` → unconditional (paper reader); `:studio_demo` → only while the
+  # public-demo flag is on; absent/false → never.
+  defp anonymous_default_allowed?(opts) do
+    case Keyword.get(opts, :allow_anonymous_default, false) do
+      true -> true
+      :studio_demo -> Application.get_env(:barkpark, :public_demo_studio, false)
+      _ -> false
+    end
+  end
+
+  defp studio_demo_opt?(opts),
+    do: Keyword.get(opts, :allow_anonymous_default, false) == :studio_demo
 
   defp default_workspace?(workspace) do
     case Tenancy.get_default_workspace() do

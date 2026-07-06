@@ -78,3 +78,8 @@ config :barkpark, :dev_browser_token, "barkpark-dev-token"
 # SSRF guard escape hatch (Barkpark.Net.SafeOutbound). Local webhooks commonly
 # point at localhost during development; prod/runtime leaves this false.
 config :barkpark, :allow_private_outbound, true
+
+# Anonymous browsers may enter the Default workspace's Studio (the public
+# demo / no-login dev posture). OFF by default in prod — see runtime.exs
+# (BARKPARK_PUBLIC_DEMO_STUDIO) and config.exs for the fail-closed base.
+config :barkpark, :public_demo_studio, true

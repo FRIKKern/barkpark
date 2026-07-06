@@ -79,7 +79,11 @@ HTML callers into `/studio` on their fresh cookie (API callers keep JSON).
 A user is a first-class Studio principal: workspace access flows from
 user-type memberships through `Tenancy.Auth.authorize/3`, and the flat
 admin surfaces accept a Default-workspace owner/admin. API-token paste and
-login tickets remain as the machine paths.
+login tickets remain as the machine paths. **Production Studio requires a
+sign-in**: the anonymous Default-workspace demo posture is gated by
+`config :barkpark, :public_demo_studio` (dev/test true; prod opt-in via
+`BARKPARK_PUBLIC_DEMO_STUDIO=1`) — flag-off anonymous browsers redirect to
+`/login`; published papers stay world-readable regardless.
 
 ### Org-wide required MFA (opt-in overlay)
 

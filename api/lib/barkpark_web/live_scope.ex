@@ -122,7 +122,11 @@ defmodule BarkparkWeb.LiveScope do
               Tenancy.Auth.authorize(socket.assigns[:current_user], ws.id, :read) == :ok ->
             {:ok, :member}
 
-          match?(%{id: id} when id == ws.id, Tenancy.get_default_workspace()) ->
+          # The Default demo allowance only while the public-demo flag is on
+          # (studio-anonymous-default-lockdown — prod requires a sign-in;
+          # flag-off falls through to the share arm, then deny → /login).
+          Application.get_env(:barkpark, :public_demo_studio, false) and
+              match?(%{id: id} when id == ws.id, Tenancy.get_default_workspace()) ->
             {:ok, :anonymous_default}
 
           Barkpark.Sharing.shared?(ws.slug, proj.slug, dataset || "production", :docs) ->

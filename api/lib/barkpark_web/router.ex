@@ -193,10 +193,11 @@ defmodule BarkparkWeb.Router do
     plug(:protect_from_forgery)
     plug(:put_secure_browser_headers)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
-    # Anonymous resolves the DEFAULT workspace only (P3 cutover — the flat
-    # Studio's public-demo/dev posture carried onto the scoped surface);
-    # every other anonymous scope still fails closed, token paths unchanged.
-    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
+    # Anonymous resolves the DEFAULT workspace only while the public-demo
+    # flag is on (:studio_demo — dev/test true, PROD OFF unless
+    # BARKPARK_PUBLIC_DEMO_STUDIO); flag-off anonymous → redirect to /login.
+    # Every other anonymous scope still fails closed, token paths unchanged.
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: :studio_demo)
     plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
@@ -222,7 +223,7 @@ defmodule BarkparkWeb.Router do
     plug(:put_secure_browser_headers)
     plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
-    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: true)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: :studio_demo)
     plug(BarkparkWeb.Plugs.ResolveProject)
   end
 
