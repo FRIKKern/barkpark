@@ -1034,7 +1034,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Parchment background, terracotta left-border, horizontal scroll —
       # now emitted through `var(--paper-*, hex)` for dark-mode theming.
       assert html =~ "background:var(--paper-bg-deep, #f5f2e9)"
-      assert html =~ "border-left:3px solid var(--paper-accent, #a23925)"
+      # S9: geometry is now token-bound (--bp-codeblock-*), accent colour still
+      # binds --paper-accent for dark-mode theming.
+      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #a23925)"
+      assert html =~ "font-size:var(--bp-codeblock-size, 0.9rem)"
       assert html =~ "overflow-x:auto"
       # The value is escaped inside the single <pre> (no per-line <code> chips).
       assert html =~ "if x &lt; 2 &amp; y &gt; 0:"

@@ -3158,9 +3158,19 @@
        (view title is <strong>, walk.ex:1130-1133), chip tokens bound to real
        --paper-* vars, and the compound pre.bp-canvas-code frame (figures.ex:25). */
     .bp-paper-editor-body pre.bp-canvas-code {
-      background: var(--paper-bg-deep); border: 0; border-left: 3px solid var(--paper-accent);
-      border-radius: 0; padding: 0.9rem 1.1rem; margin: 1.2rem 0;
-      font-size: 0.9rem; line-height: 1.5; overflow-x: auto;
+      background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-accent);
+      border-radius: var(--bp-codeblock-radius); padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin);
+      font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: normal; overflow-x: auto;
+    }
+    /* The <textarea> EDIT island inside the frame — S9. Bound to the same
+       --bp-codeblock- and --paper- tokens as the reader <pre> so the editable code
+       renders byte-identically (0.9rem/1.5, mono, ink). Keep BYTE-IDENTICAL with
+       assets/paper-editor/src/styles.css. */
+    .bp-canvas-code-area {
+      font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+      color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+      background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
     }
     /* loop-epic/parity-callout: `bp-canvas-callout` is a thin edit-only layout
        hook; the tone card (padding/border-left/background/color) rides the
