@@ -114,6 +114,10 @@ defmodule Barkpark.Tasks.Validation do
     |> check_optional_string(content, "retro")
     |> check_optional_string_list(content, "papers")
     |> check_optional_string_list(content, "attachments")
+    # Find-or-create gate (task-obsession): ids the author declared distinct
+    # from near-duplicate candidates — the escape hatch AND the persisted,
+    # queryable rejection trail (Barkpark.Tasks.Dedup).
+    |> check_optional_string_list(content, "distinct_from")
     # any-element lists: reads already tolerate legacy W7-mirror label
     # lists, and history elements are compactor-owned event maps —
     # don't over-constrain either.

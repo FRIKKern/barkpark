@@ -128,6 +128,16 @@ defmodule Barkpark.Content.Writer do
         _ -> nil
       end
 
+    # Find-or-create gate (task-obsession layer 1): a NEW kind:task birth is
+    # refused if it duplicates an existing task. Only fires when prev_doc is nil
+    # (a genuine create — updates/autosaves/publishes pass straight through) and
+    # fails open. See Barkpark.Tasks.Dedup.
+    with :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
+      create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts)
+    end
+  end
+
+  defp create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts) do
     payload = %{
       event: :before_save,
       doc: attrs,

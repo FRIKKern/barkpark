@@ -173,6 +173,18 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
+  # Find-or-create gate (task-obsession layer 1): a new task duplicates an
+  # existing one. 409 Conflict; the similar-candidate list rides in `details` so
+  # the CLI/SDK can show the author which task to claim/extend, or which id to
+  # pass in `distinct_from` to confirm it is genuinely different.
+  defp build({:error, {:duplicate_task, payload}}) when is_map(payload),
+    do: %{
+      code: "duplicate_task",
+      message: Map.get(payload, :message, "task duplicates an existing task"),
+      status: 409,
+      details: Map.take(payload, [:similar, :advise])
+    }
+
   defp build({:error, %Ecto.Changeset{} = cs}) do
     details =
       Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
