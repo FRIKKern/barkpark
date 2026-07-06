@@ -162,6 +162,20 @@ defmodule Barkpark.Content.SchemaDefinition do
       # passthrough
       :onix,
       :validations,
+      # sidebar-test classification (pd-doctrine t7, rule 4). Data-only, additive,
+      # opt-in — codifies "does this field read as part of the article?" as a
+      # SCHEMA FACT rather than editor folklore. Consumed later by sidebar-v2 (D1
+      # says the schema-v2 generalization lands as pure metadata; no editor
+      # consumer this wave). Valid values are EXACTLY:
+      #   * `"body"`    — reads as the article (title, body, rich text, featured
+      #                   image, content blocks).
+      #   * `"sidebar"` — WordPress-style right rail (slug, status, taxonomies,
+      #                   relations, dates, trade metadata, settings).
+      #   * `nil`       — unclassified (the attribute is absent). Byte-compatible
+      #                   with every existing schema; a schema without `surface`
+      #                   parses and round-trips unchanged (D3-additive).
+      # Any other value is rejected as `{:error, :field_surface_invalid}`.
+      :surface,
       # field-encryption marker (Phase 2, core-auth). Data-only — `true` flags a
       # field whose value is stored ciphertext-at-rest via
       # `Barkpark.Content.Encryption` on the write path. No migration: this lives
@@ -414,6 +428,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     type = Map.get(f, "type")
 
     with :ok <- validate_field_name(name, plugin),
+         {:ok, surface} <- parse_field_surface(Map.get(f, "surface")),
          {:ok, %Field{} = base} <- parse_field_type(type, f, plugin) do
       {:ok,
        %{
@@ -428,12 +443,20 @@ defmodule Barkpark.Content.SchemaDefinition do
            private: Map.get(f, "private", false),
            visibility: Map.get(f, "visibility"),
            readable_by: Map.get(f, "readable_by", []),
+           surface: surface,
            raw: f
        }}
     end
   end
 
   defp parse_field(_, _), do: {:error, :field_must_be_a_map}
+
+  # sidebar-test classification (pd-doctrine t7, rule 4). Absent ⇒ nil
+  # (unclassified — byte-compatible with every legacy schema). Only the two
+  # canonical values pass; anything else is a hard parse error.
+  defp parse_field_surface(nil), do: {:ok, nil}
+  defp parse_field_surface(v) when v in ~w(body sidebar), do: {:ok, v}
+  defp parse_field_surface(_), do: {:error, :field_surface_invalid}
 
   defp validate_field_name(nil, _), do: {:error, :field_missing_name}
 
