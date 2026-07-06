@@ -2472,6 +2472,11 @@
     }
     .bp-paper-drag-grip:hover { color: var(--paper-ink-soft); }
     .bp-paper-drag-grip:active { cursor: grabbing; }
+    /* pdd-t12c: a locked grip is a tab stop (it carries the template note for
+       keyboard/SR users) — draw the standard accent ring so the stop is visible. */
+    .bp-paper-drag-grip:focus-visible {
+      outline: 2px solid var(--paper-accent); outline-offset: 1px; border-radius: 3px;
+    }
     .bp-paper-dragging { opacity: 0.5; }
     /* pdd-t2: a template-locked block's grip is inert — quiet, no grab cursor
        (the span carries no draggable/data-drag-grip when locked). */
@@ -3105,12 +3110,22 @@
     }
     /* pdd-t12c: the read-only atoms are keyboard-focusable (tabindex on the
        node-view wrapper) so a non-mouse user can reach + select them (→ Backspace
-       deletes). The focus ring is the visible twin of the mouse's click-select.
+       deletes). Same 2px accent outline as every other keyboard affordance here.
        MUST stay in lockstep with styles.css. */
     .bp-canvas-readonly:focus-visible {
-      outline: none;
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
       border-radius: 6px;
-      box-shadow: 0 0 0 3px var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
+    }
+    /* pdd-t12c: a node-SELECTED atom (mouse click-select or keyboard Enter/Space)
+       is armed — the next Backspace deletes it. ProseMirror adds
+       .ProseMirror-selectednode but ships no CSS for it; without this rule the
+       armed state is invisible. MUST stay in lockstep with styles.css. */
+    .bp-canvas-readonly.ProseMirror-selectednode {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 2px;
+      border-radius: 6px;
+      background: var(--paper-accent-soft, rgba(30, 83, 71, 0.1));
     }
     .bp-canvas-readonly-chip {
       display: inline-flex;
