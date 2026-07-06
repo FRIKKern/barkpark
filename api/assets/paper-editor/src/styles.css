@@ -74,6 +74,12 @@
   --bp-pre-pad: 14px 16px;
   --bp-pre-margin: 0 0 22px;
   --bp-pre-radius: 4px;
+  --bp-codeblock-size: 0.9rem;
+  --bp-codeblock-lh: 1.5;
+  --bp-codeblock-pad: 0.9rem 1.1rem;
+  --bp-codeblock-margin: 1.2rem 0;
+  --bp-codeblock-radius: 0;
+  --bp-codeblock-accent-w: 3px;
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
   --st-info: #2563eb;
@@ -167,13 +173,28 @@
   border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
 }
 /* Canvas code node frame — out-ranks the generic pre rule above (higher
- * specificity via the .bp-canvas-code class code-node.js:207 stamps). The
- * node-view's inline style sets only fontFamily/whiteSpace, so this rule
- * carries the terracotta left-accent parchment frame, byte-aligned with the
- * VIEW block (figures.ex:25-27 code_block_html/1). */
+ * specificity via the .bp-canvas-code class code-node.js stamps). S9: the
+ * node-view no longer sets fontFamily/whiteSpace inline (they were the drift),
+ * so this rule carries the WHOLE terracotta left-accent frame incl. the mono
+ * font + ink colour, all bound to the --bp-codeblock-* / --paper-* tokens so it
+ * is byte-aligned AND theme-aligned with the VIEW block (figures.ex
+ * code_block_html/1). Keep BYTE-IDENTICAL with the root.html.heex copy. */
 .bp-paper-editor-body pre.bp-canvas-code {
-  background: var(--paper-bg-deep); border: 0; border-left: 3px solid var(--paper-accent); border-radius: 0;
-  padding: 0.9rem 1.1rem; margin: 1.2rem 0; font-size: 0.9rem; line-height: 1.5; overflow-x: auto;
+  background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-accent); border-radius: var(--bp-codeblock-radius);
+  padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin); font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: normal; overflow-x: auto;
+}
+/* The <textarea> EDIT island inside the frame. Form controls do not inherit the
+ * frame font, so bind the SAME --bp-codeblock- and --paper- tokens here — the
+ * editable code then renders byte-identically to the reader <pre> (0.9rem/1.5,
+ * mono, ink). white-space:pre + overflow-wrap:normal == the reader no-wrap
+ * pre; transparent/borderless so only the frame paints. NONE of this touches
+ * the island contract (stopEvent/ignoreMutation), so editing is unaffected.
+ * Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-canvas-code-area {
+  font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
+  color: var(--paper-ink); white-space: pre; overflow-wrap: normal;
+  background: transparent; border: 0; padding: 0; width: 100%; box-sizing: border-box; resize: vertical;
 }
 .bp-paper-editor-body blockquote {
   margin: 12pt 0 0; padding: 12pt 16pt;

@@ -206,11 +206,12 @@ export const Code = Node.create({
       const dom = document.createElement("pre");
       dom.className = "bp-canvas-code";
       dom.setAttribute("data-bp-type", "code");
-      // Monospace + preserve the textarea's own whitespace; the <pre> is a frame,
-      // the textarea owns the editable text.
-      dom.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      dom.style.whiteSpace = "normal"; // the textarea wraps/scrolls; the <pre> frame doesn't
+      // S9 code-interior: font-family + white-space now live in the
+      // `.bp-canvas-code` CSS rule (both sinks), bound to --paper-font-mono — NOT
+      // stamped inline here. The old inline stack ("…SFMono-Regular…Consolas…")
+      // diverged from the reader's --paper-font-mono AND, being inline, out-ranked
+      // the token — the source of the code-block font drift. Removing it lets the
+      // shared token win, so the <pre> frame is theme-agnostic and reader-aligned.
 
       // The OPTIONAL language input — a small non-PM control. Editing it writes the
       // `lang` attr (debounced) exactly like the textarea writes `value`.
@@ -235,15 +236,14 @@ export const Code = Node.create({
       const area = document.createElement("textarea");
       area.className = "bp-canvas-code-area";
       area.setAttribute("spellcheck", "false");
-      area.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-      area.style.width = "100%";
-      area.style.boxSizing = "border-box";
-      area.style.border = "none";
-      area.style.background = "transparent";
-      area.style.resize = "vertical";
-      area.style.whiteSpace = "pre";
-      area.style.overflowWrap = "normal";
+      // S9 code-interior: the textarea's typography (font / size / line-height /
+      // colour / whitespace / transparent-borderless frame / width / resize) now
+      // lives in the `.bp-canvas-code-area` CSS rule (both sinks), token-bound to
+      // the SAME --bp-codeblock-*/--paper-* the reader <pre> uses — so the editable
+      // code renders at 0.9rem/1.5 mono/ink, byte-identical to the reader, instead
+      // of the UA-default ~13.3px sans the old inline styles left unset. Kept
+      // outside inline JS so the shared token can win; NONE of this touches the
+      // island contract (stopEvent/ignoreMutation), so editing is unaffected.
 
       dom.appendChild(langInput);
       dom.appendChild(area);
