@@ -182,6 +182,28 @@ func run(args []string) int {
 		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 
+	// Transactional-mail relay (SMTP_RELAY_*): the SHARED submission relay every
+	// provisioned instance is pointed at so magic-link / password-reset /
+	// verify-email actually deliver (without it, Barkpark.Mailer stays on the
+	// never-delivering Local adapter). Non-secret host/port/username + the SASL
+	// password. When unset the instance is provisioned without SMTP exactly as
+	// before; a PARTIAL/malformed relay is logged loudly and skipped (rather than
+	// silently shipping a broken .env). SMTP_RELAY_PORT defaults to 587.
+	seams.Mail = cloud.MailRelay{
+		Host:     strings.TrimSpace(os.Getenv("SMTP_RELAY_HOST")),
+		Port:     strings.TrimSpace(os.Getenv("SMTP_RELAY_PORT")),
+		Username: strings.TrimSpace(os.Getenv("SMTP_RELAY_USERNAME")),
+		Password: os.Getenv("SMTP_RELAY_PASSWORD"),
+	}
+	if err := seams.Mail.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: mail relay DISABLED — %v; provisioned instances will not send email until SMTP_RELAY_* is fixed\n", err)
+		seams.Mail = cloud.MailRelay{}
+	} else if seams.Mail.Enabled() {
+		fmt.Fprintf(os.Stderr, "barkpark-provisioner: mail relay ENABLED — provisioned instances relay via %s (password redacted)\n", seams.Mail.Host)
+	} else {
+		fmt.Fprintln(os.Stderr, "barkpark-provisioner: mail relay not configured (SMTP_RELAY_* unset) — provisioned instances will NOT send email")
+	}
+
 	// Warm pool (dwb-10): OPT-IN via WARM_POOL_SIZE (default 0 = DISABLED, one-shot
 	// only). When enabled, wire the control-plane claim-store client (same
 	// ControlURL + WORKER_TOKEN as the job queue) so a go-live assigns a pre-baked

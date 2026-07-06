@@ -43,6 +43,12 @@ type Seams struct {
 	Runner  cloud.StepRunner
 	Secrets cloud.SecretGen // nil → the real secret-gen
 
+	// Mail is the SHARED transactional-mail relay every provisioned instance is
+	// pointed at (magic-link / password-reset / verify-email). Zero value → the
+	// instance is provisioned without SMTP (Local adapter, no delivery). Sourced
+	// from the worker's SMTP_RELAY_* env in cmd/barkpark-provisioner/main.go.
+	Mail cloud.MailRelay
+
 	// HealthPollInterval / HealthPollDeadline tune the bounded health-gate poll the
 	// chain runs after configuring a box (cloud F2). Production leaves both ZERO so
 	// the cloud package picks its defaults (~10s interval, ~4m deadline) — generous
@@ -279,6 +285,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		RunnerFor:          seams.RunnerFor,
 		Runner:             seams.Runner,
 		Secrets:            seams.Secrets,
+		Mail:               seams.Mail,
 		HealthPollInterval: seams.HealthPollInterval,
 		HealthPollDeadline: seams.HealthPollDeadline,
 		// The chain fires create/secure/configure at its real phase boundaries;

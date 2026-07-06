@@ -71,6 +71,28 @@ deploys fully automatic.
    (The CLAUDE.md prod box `89.167.28.206` is a candidate once the deploy key is
    added to its `authorized_keys`.)
 
+## Instance mail (provisioner-injected)
+
+Every provisioned instance must relay transactional mail (magic-link /
+password-reset / verify-email) through the control-plane Postfix relay, or
+`Barkpark.Mailer` falls back to the never-delivering Local adapter and identity
+emails silently drop. The **provisioner** does this automatically: set these on
+`barkpark-cp:/etc/barkpark-provisioner.env` (the worker's `EnvironmentFile`) and
+each go-live writes them into the new box's `/opt/barkpark/.env`:
+
+```
+SMTP_RELAY_HOST=mail.barkpark.cloud
+SMTP_RELAY_PORT=587
+SMTP_RELAY_USERNAME=barkpark-cloud        # same SASL user as the CP's own postfix
+SMTP_RELAY_PASSWORD=…                      # = cloud/.env SMTP_PASSWORD
+```
+
+Unset → instances provision without SMTP (no mail), same as before. A
+partial/malformed relay is logged at worker startup (`mail relay DISABLED — …`)
+and skipped rather than shipping a broken `.env`; a good one logs `mail relay
+ENABLED`. The relay submission port (587) is published for instances by
+`cloud/docker-compose.yml`; it is SASL-gated (not an open relay).
+
 ## Mail relay TLS renewal
 
 `.github/workflows/renew-mail-cert.yml` runs `deploy/renew-mail-cert.sh` on
