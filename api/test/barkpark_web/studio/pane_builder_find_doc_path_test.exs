@@ -34,7 +34,12 @@ defmodule BarkparkWeb.Studio.PaneBuilderFindDocPathTest do
           type: :list,
           type_name: "post",
           items: [
-            %Node{id: "post-all", title: "All Posts", type: :document_type_list, type_name: "post"},
+            %Node{
+              id: "post-all",
+              title: "All Posts",
+              type: :document_type_list,
+              type_name: "post"
+            },
             %Node{type: :divider, id: "post-div"},
             %Node{
               id: "post-draft",
