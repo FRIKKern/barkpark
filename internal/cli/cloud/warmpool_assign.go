@@ -86,8 +86,20 @@ func (wp *WarmPool) AssignWarm(ctx context.Context, host Server, spec GoLiveSpec
 		return LiveServer{}, fmt.Errorf("assign: a CloudProvider must be set")
 	}
 
+	// `create` narration (unified-provision-view fix): the box was pre-created in
+	// the pool, but the /new + admin timelines list `create` as a planned step,
+	// so the warm path MUST report it or "Creating your server" hangs pending
+	// forever (the box is instantly ready — which is exactly the warm-pool win to
+	// show). From the customer's view a server IS being readied for them; the pool
+	// is an implementation detail. Emit started→done around the identity label
+	// (the box's create-time safe boundary, mirroring the one-shot path which
+	// emits `create done` once the fqdn identity is stamped).
+	wp.progress("create", "started", "")
+	wp.progress("create", "progress", "Preparing your server…")
+
 	// 1. identity label — fail closed exactly like ProvisionOneShot's create path.
 	if err := wp.labelFQDN(ctx, host.Name, spec.fqdn()); err != nil {
+		wp.progress("create", "failed", "identity")
 		if cerr := wp.cleanupHost(host, spec); cerr != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: %v\n", cerr)
 		}
@@ -101,8 +113,11 @@ func (wp *WarmPool) AssignWarm(ctx context.Context, host Server, spec GoLiveSpec
 			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: assign %s: remove %s label: %v\n", host.Name, WarmLabelKey, err)
 		}
 	}
+	// The box exists and its identity is stamped — create is a completed boundary
+	// (parity with the one-shot path's `wp.progress("create", "done", "")`).
+	wp.progress("create", "done", "")
 
-	// 3. shared go-live chain (create skipped — the box is already booted).
+	// 3. shared go-live chain (the box is already booted — no create sub-steps).
 	live, err := wp.configureHost(ctx, host, spec)
 	if err != nil {
 		if cerr := wp.cleanupHost(host, spec); cerr != nil {

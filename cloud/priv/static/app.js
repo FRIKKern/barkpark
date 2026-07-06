@@ -5255,9 +5255,16 @@
   // server reports it. Unknown future step names still render generically in
   // first-seen order — never a crash.
   var SERVER_STEP_ORDER = ["create", "freshen", "secure", "configure", "content", "verify", "ready"];
-  // Fallback steps: hidden from the checklist/timeline until the server reports
-  // a first entry for them (a planned step renders pending from the start).
-  var SERVER_STEP_OPTIONAL = { freshen: true };
+  // OPTIONAL (conditional) steps: hidden from the checklist/timeline until the
+  // server reports a first entry for them (a planned step renders pending from
+  // the start, so listing a step the worker may never emit hangs it forever).
+  //   * freshen — only narrated when it INTERVENES (stale-box rebuild / degrade);
+  //     warm boxes are pre-freshened, so the common assign emits nothing.
+  //   * content — the template bootstrap, "skipped when the job carries no
+  //     template" (ProvisionJob). A template-less launch never emits it, so it
+  //     must not sit as a stuck "Installing your content"; a templated launch
+  //     reports it and it slots in between configure and verify.
+  var SERVER_STEP_OPTIONAL = { freshen: true, content: true };
   var SERVER_STEP_LABELS = {
     create: "Creating your server",
     freshen: "Updating to the latest Barkpark",
@@ -5295,6 +5302,90 @@
     var r = elapsedMs / expectedMs;
     if (r <= 1) return 0.9 * r;
     return 0.9 + 0.08 * (1 - Math.exp(1 - r));
+  }
+
+  // ── Overall progress (the headline bar) ─────────────────────────────────────
+  // The provisioning-ui upgrade: one master bar + "Step N of M · about 40s left"
+  // above the per-phase rows, so the user reads the whole run at a glance (the
+  // "how much longer" the whole flow was missing). Pure over the PACED display
+  // rows so the bar and the checklist never disagree. Each VISIBLE step is
+  // weighted by its duration estimate; its contribution is its role fraction
+  // (done=1, active=ring, completing≈1 mid-dwell, pending=0). The remaining
+  // weight doubles as a rough time-left proxy — honest for the common warm path
+  // and, when the freshen rebuild row is showing, correctly says "about 5m left".
+  function provisionOverall(rows) {
+    rows = rows || [];
+    var failed = false, allDone = rows.length > 0, activeIdx = -1;
+    var totalW = 0, doneW = 0, etaMs = 0;
+    for (var i = 0; i < rows.length; i++) {
+      var r = rows[i];
+      var w = SERVER_STEP_EXPECTED_MS[r.step] || 15000;
+      var frac;
+      if (r.role === "failed") { failed = true; frac = 0; }
+      else if (r.role === "ok") frac = 1;
+      else if (r.completing) { frac = 0.97; if (activeIdx < 0) activeIdx = i; }
+      else if (r.role === "active") { frac = stepRingProgress(r.elapsedMs, w); if (activeIdx < 0) activeIdx = i; }
+      else frac = 0; // pending
+      if (r.role !== "ok") allDone = false;
+      totalW += w;
+      doneW += w * frac;
+      etaMs += w * (1 - frac);
+    }
+    var pct = totalW ? (doneW / totalW) * 100 : 0;
+    return {
+      pct: allDone ? 100 : Math.min(Math.round(pct), 99), // never 100 until truly done
+      index: activeIdx >= 0 ? activeIdx + 1 : (allDone ? rows.length : Math.min(1, rows.length)),
+      count: rows.length,
+      etaMs: allDone ? 0 : etaMs,
+      done: allDone,
+      failed: failed
+    };
+  }
+
+  function overallSummaryText(o) {
+    if (o.failed) return "Setup failed";
+    if (o.done) return "All set";
+    if (!o.count) return "Starting…";
+    return "Step " + o.index + " of " + o.count;
+  }
+  function overallEtaText(o) {
+    if (o.failed) return "";
+    if (o.done) return "Ready";
+    return (o.etaMs != null && o.etaMs >= 1000) ? "about " + fmtDur(o.etaMs) + " left" : "almost there";
+  }
+
+  // The master-bar markup (shared by /new + the instance timeline). data-overall*
+  // hooks let the 1s tick patch width/summary/eta in place — no rebuild.
+  function provisionOverallHtml(rows) {
+    var o = provisionOverall(rows);
+    var state = o.failed ? " is-failed" : o.done ? " is-done" : "";
+    return '<div class="prov-overall' + state + '" data-overall>' +
+      '<div class="prov-overall-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + o.pct + '">' +
+        '<div class="prov-overall-fill" data-overall-fill style="width:' + o.pct + '%"></div>' +
+      "</div>" +
+      '<div class="prov-overall-meta">' +
+        '<span data-overall-summary>' + esc(overallSummaryText(o)) + "</span>" +
+        '<span class="prov-overall-eta" data-overall-eta>' + esc(overallEtaText(o)) + "</span>" +
+      "</div>" +
+    "</div>";
+  }
+
+  // Patch the master bar in place from the current display rows (called each 1s
+  // tick + on every SSE step change). Null-safe; no-op when the bar isn't mounted.
+  function patchProvisionOverall(scope, rows) {
+    if (!scope || !scope.querySelector) return;
+    var el = scope.querySelector("[data-overall]");
+    if (!el) return;
+    var o = provisionOverall(rows);
+    var fill = el.querySelector("[data-overall-fill]");
+    if (fill) fill.style.width = o.pct + "%";
+    var track = el.querySelector(".prov-overall-track");
+    if (track) track.setAttribute("aria-valuenow", String(o.pct));
+    var sum = el.querySelector("[data-overall-summary]");
+    if (sum) sum.textContent = overallSummaryText(o);
+    var eta = el.querySelector("[data-overall-eta]");
+    if (eta) eta.textContent = overallEtaText(o);
+    el.className = "prov-overall" + (o.failed ? " is-failed" : o.done ? " is-done" : "");
   }
 
   // ============================================ C3 PROVISION TIMELINE (one fold)
@@ -5616,6 +5707,7 @@
     return '<section class="bp-timeline" data-tl data-tl-bp="' + esc((bp && bp.id) || "") +
         '" data-tl-lc="' + (failed ? "failed" : "provisioning") + '">' +
         head +
+        provisionOverallHtml(rows) +
         timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
         retry +
         timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed) +
@@ -5685,6 +5777,7 @@
     var total = section.querySelector("[data-tl-total]");
     if (total) { var t = provisionTotalMs(bp, Date.now()); total.textContent = t != null ? fmtDur(t) : ""; }
     tickActiveRing(section, provisionSteps(bp, Date.now()));
+    patchProvisionOverall(section, instanceDisplayRows(bp));
   }
 
   // The SSE fast path (unified-provision-view): a fresh fleet row for the SAME
@@ -5713,6 +5806,7 @@
     var total = section.querySelector("[data-tl-total]");
     if (total) { var t = provisionTotalMs(bp, Date.now()); total.textContent = t != null ? fmtDur(t) : ""; }
     tickActiveRing(section, provisionSteps(bp, Date.now()));
+    patchProvisionOverall(section, instanceDisplayRows(bp));
   }
 
   function startInstanceTicker(bp) {
@@ -6291,14 +6385,14 @@
   // passing is impossible — that's server-driven — so no step DOM is touched.
   function newTickProgressClock() {
     var serverSteps = newState.serverSteps || [];
-    var el = document.querySelector("#new-body .new-elapsed");
+    var scope = document.querySelector("#new-body");
+    var el = scope && scope.querySelector(".new-elapsed");
     if (el) el.textContent = newElapsedSeconds(serverSteps) + "s elapsed";
     // Ring + live time via the SHARED per-second patch (tickActiveRing — the
-    // same helper the instance timeline ticks with).
-    tickActiveRing(
-      document.querySelector("#new-body"),
-      provisionSteps({ provision_steps: serverSteps }, Date.now())
-    );
+    // same helper the instance timeline ticks with), plus the master bar.
+    var truthRows = provisionSteps({ provision_steps: serverSteps }, Date.now());
+    tickActiveRing(scope, truthRows);
+    patchProvisionOverall(scope, newDisplayRows() || []);
   }
 
   // The steps region's markup: the pre-first-event placeholder, else the PACED
@@ -6336,11 +6430,13 @@
       var prevBody = document.querySelector("#new-body .new-console-body");
       if (prevBody && newState.consoleStick === false) newState.consoleScrollTop = prevBody.scrollTop;
       var title = (newState.template && newState.template.title) || "your Barkpark";
+      var mountRows = newDisplayRows();
       newSetBody(newPanel(
         '<div class="new-progress">' +
           newConnBannerHtml() +
           "<h2>Setting up " + esc(title) + "</h2>" +
           '<p class="dim">This usually takes under a minute. <span class="new-elapsed">' + newElapsedSeconds(newState.serverSteps || []) + "s elapsed</span></p>" +
+          (mountRows ? provisionOverallHtml(mountRows) : "") +
           newProgressStepsHtml() +
           newConsoleHtml() +
         "</div>"));
@@ -6355,6 +6451,14 @@
       // The re-mount replays the dwb-19 caption fade for the changed list —
       // that's the intended "new information" cue.
       if (ul) ul.outerHTML = newProgressStepsHtml();
+      // First real steps arrived after the "Starting…" placeholder → the master
+      // bar wasn't mounted yet; insert it above the freshly-rendered steps.
+      var rows = newDisplayRows();
+      if (rows && !mounted.querySelector("[data-overall]")) {
+        var stepsEl = mounted.querySelector(".new-steps");
+        if (stepsEl) stepsEl.insertAdjacentHTML("beforebegin", provisionOverallHtml(rows));
+      }
+      patchProvisionOverall(mounted, rows || []);
     }
     if (consoleSig !== newState.consoleSig) {
       newState.consoleSig = consoleSig;
@@ -6975,6 +7079,8 @@
       // Presentation pacing (min-dwell): pure display shim + the resume seed.
       paceSteps: paceSteps, seedPaceLedger: seedPaceLedger,
       newStepMinDwellMs: NEW_STEP_MIN_DWELL_MS,
+      // Overall master bar (provisioning-ui upgrade): pure model + markup.
+      provisionOverall: provisionOverall, provisionOverallHtml: provisionOverallHtml,
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
       vercelCloneUrl: vercelCloneUrl,

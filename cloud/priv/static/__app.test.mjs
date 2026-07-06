@@ -624,15 +624,15 @@ test("fmtDur: A4 hour arm (≥60m) reads '2h 1m'", () => {
 
 // ── provisionSteps: the table test over every fixture the slice must handle ──
 
-test("provisionSteps: empty (legacy row) → the six PLANNED steps pending (freshen is a fallback, hidden until reported)", () => {
+test("provisionSteps: empty (legacy row) → the five PLANNED steps pending (freshen + content are conditional, hidden until reported)", () => {
   const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
-  assert.equal(rows.length, 6);
-  // dwb-17/D10 + D45 order: freshen is OPTIONAL (warm boxes are pre-freshened;
-  // the worker narrates it only when it intervenes), so an unreported freshen
-  // never renders as a planned phase. The verify gate probes BETWEEN content
-  // and ready, so it displays there.
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
-  assert.equal(rows[4].label, "Testing login & Studio"); // D45 label
+  assert.equal(rows.length, 5);
+  // freshen (fallback rebuild) AND content (template bootstrap, skipped when the
+  // job carries no template) are OPTIONAL — an unreported conditional step never
+  // renders as a planned phase (it would hang pending forever). The verify gate
+  // slots wherever content lands (or directly after configure when there's none).
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "verify", "ready"]);
+  assert.equal(rows[3].label, "Testing login & Studio"); // D45 label
   for (const r of rows) {
     assert.equal(r.role, "pending");
     assert.equal(r.elapsedMs, null);
@@ -640,8 +640,19 @@ test("provisionSteps: empty (legacy row) → the six PLANNED steps pending (fres
     assert.deepEqual([...r.probes], []);
   }
   // Total over junk: null bp never throws.
-  assert.equal(hooks.provisionSteps(null, NOW).length, 6);
-  assert.equal(hooks.provisionSteps(undefined).length, 6);
+  assert.equal(hooks.provisionSteps(null, NOW).length, 5);
+  assert.equal(hooks.provisionSteps(undefined).length, 5);
+});
+
+test("provisionSteps: a REPORTED content renders in place between configure and verify (a templated launch)", () => {
+  const rows = hooks.provisionSteps({ provision_steps: [
+    { step: "configure", status: "done", at: T(2) },
+    { step: "content", status: "started", at: T(3) },
+  ] }, NOW);
+  assert.ok([...rows.map((r) => r.step)].includes("content"));
+  const content = rows.filter((r) => r.step === "content")[0];
+  assert.equal(content.label, "Installing your content");
+  assert.equal(content.role, "active");
 });
 
 test("provisionSteps: a REPORTED freshen renders in place between create and secure (the fallback fired)", () => {
@@ -650,7 +661,8 @@ test("provisionSteps: a REPORTED freshen renders in place between create and sec
     { step: "create", status: "done", at: T(2) },
     { step: "freshen", status: "started", at: T(2) },
   ] }, NOW);
-  assert.deepEqual([...rows.map((r) => r.step)], ["create", "freshen", "secure", "configure", "content", "verify", "ready"]);
+  // content stays hidden (unreported); freshen slots in because it WAS reported.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "freshen", "secure", "configure", "verify", "ready"]);
   assert.equal(rows[1].label, "Updating to the latest Barkpark"); // dwb-17 freshen label
   assert.equal(rows[1].role, "active");
 });
@@ -668,10 +680,12 @@ test("provisionSteps: partial (mid-configure) — done/done/active/pending…", 
   // Unstarted freshen is HIDDEN (fallback step) — secure follows create directly.
   assert.deepEqual(norm(rows[1]), { step: "secure", label: "Securing your domain", role: "ok", elapsedMs: 2000, caption: "", probes: [] });
   assert.deepEqual(norm(rows[2]), { step: "configure", label: "Configuring Barkpark", role: "active", elapsedMs: 5000, caption: "Installing packages", probes: [] });
-  assert.equal(rows[3].role, "pending"); // content
-  assert.equal(rows[3].elapsedMs, null);
-  assert.equal(rows[4].role, "pending"); // verify still upcoming
-  assert.equal(rows[5].role, "pending"); // ready last
+  // content unreported → hidden; verify + ready follow configure directly.
+  assert.equal(rows[3].step, "verify");
+  assert.equal(rows[3].role, "pending"); // verify still upcoming
+  assert.equal(rows[4].step, "ready");
+  assert.equal(rows[4].role, "pending"); // ready last
+  assert.equal(rows.length, 5);
 });
 
 test("provisionSteps: verify with probe lines → checklist under the step", () => {
@@ -680,7 +694,7 @@ test("provisionSteps: verify with probe lines → checklist under the step", () 
     { step: "verify", status: "progress", at: T(6), detail: "verify.login: 200 in 120ms" },
     { step: "verify", status: "progress", at: T(7), detail: "verify.query: 200 in 42ms" },
   ] };
-  const verify = hooks.provisionSteps(bp, NOW)[4]; // freshen hidden (unreported) → verify at index 4
+  const verify = hooks.provisionSteps(bp, NOW)[3]; // freshen + content hidden (unreported) → verify at index 3
   assert.equal(verify.role, "active");
   assert.equal(verify.caption, "Probing the golden path");   // the started narration
   assert.deepEqual([...verify.probes], ["verify.login: 200 in 120ms", "verify.query: 200 in 42ms"]);
@@ -703,8 +717,8 @@ test("provisionSteps: an UNKNOWN step name renders generically (label = raw name
     { step: "teardown", status: "started", at: T(0), detail: "cleaning up" },
   ] };
   const rows = hooks.provisionSteps(bp, NOW);
-  assert.equal(rows.length, 7); // six planned (freshen unreported → hidden) + the appended unknown
-  const t = rows[6];
+  assert.equal(rows.length, 6); // five planned (freshen + content unreported → hidden) + the appended unknown
+  const t = rows[5];
   assert.equal(t.step, "teardown");
   assert.equal(t.label, "teardown"); // forward-compat: raw name, never undefined
   assert.equal(t.role, "active");
@@ -955,6 +969,54 @@ test("seedPaceLedger: resume renders finished history instantly (no theatre repl
   const rows = hooks.paceSteps(truth, ledger, 600000);
   assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "active"]);
   assert.ok(rows.every((r) => !r.completing));
+});
+
+// ── Overall master bar (provisioning-ui upgrade) ────────────────────────────
+
+test("provisionOverall: empty rows → 0%, no eta", () => {
+  const o = hooks.provisionOverall([]);
+  assert.equal(o.pct, 0);
+  assert.equal(o.count, 0);
+  assert.equal(o.done, false);
+});
+
+test("provisionOverall: all steps done → 100%, done, index=count", () => {
+  const rows = [paceRow("create", "ok"), paceRow("secure", "ok"), paceRow("ready", "ok")];
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.pct, 100);
+  assert.equal(o.done, true);
+  assert.equal(o.index, 3);
+  assert.equal(o.etaMs, 0);
+});
+
+test("provisionOverall: never reads 100% until every step is done (a mid-active run caps at 99)", () => {
+  const rows = [
+    paceRow("create", "ok"),
+    { step: "secure", role: "active", label: "s", elapsedMs: 44000, caption: "", probes: [] }, // ~on-estimate
+    paceRow("ready", "pending"),
+  ];
+  const o = hooks.provisionOverall(rows);
+  assert.ok(o.pct > 0 && o.pct <= 99, `pct ${o.pct} must be in (0,99]`);
+  assert.equal(o.done, false);
+  assert.equal(o.index, 2); // the active step
+  assert.ok(o.etaMs > 0, "a running provision has time remaining");
+});
+
+test("provisionOverall: a failed step marks the model failed", () => {
+  const rows = [paceRow("create", "ok"), paceRow("secure", "failed")];
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.failed, true);
+  assert.equal(o.done, false);
+});
+
+test("provisionOverallHtml: carries the progressbar, fill width, and Step N of M summary", () => {
+  const rows = [paceRow("create", "ok"), { step: "secure", role: "active", label: "s", elapsedMs: 10000, caption: "", probes: [] }, paceRow("ready", "pending")];
+  const html = hooks.provisionOverallHtml(rows);
+  assert.match(html, /data-overall/);
+  assert.match(html, /role="progressbar"/);
+  assert.match(html, /data-overall-fill style="width:\d+%"/);
+  assert.match(html, /data-overall-summary>Step 2 of 3</);
+  assert.match(html, /data-overall-eta>/);
 });
 
 test("newStepsHtml: a completing row carries the completing class and a visible sweep start", () => {
