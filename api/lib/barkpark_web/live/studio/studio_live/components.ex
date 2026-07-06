@@ -141,10 +141,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
       <div class="editor-with-preview">
         <div class="editor-body editor-panel-main bp-paper-body">
+          <%!-- The accessible name is added ONLY when the always-editable
+                canvas is the surface (@canvas_on keeps the OFF path
+                byte-identical, D3; @show_editor keeps the name honest — an
+                HTML-only legacy paper on the ON path renders a READ-ONLY raw
+                body, which must not be announced as "Editing"). --%>
           <main
             class="bp-paper-shell bp-paper-surface"
             data-test-id="studio-paper-shell"
-            aria-label={@canvas_on && @slug && "Editing #{@title}"}
+            aria-label={@canvas_on && @show_editor && @slug && "Editing #{@title}"}
           >
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
                   container. It survives a handle_info DOM diff but would be

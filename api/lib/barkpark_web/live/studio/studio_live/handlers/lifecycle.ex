@@ -10,7 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
-  alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Shared}
 
   def finish_handle_params(socket, dataset, path, desk, uri, params) do
     socket =
@@ -98,8 +98,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       true ->
         socket = Shared.apply_paper_delta(socket, frame)
 
+        # Rule 5 (pdd-t12b): with the canvas the mainline default there is no
+        # Edit mode — the always-editable editor is live whenever the flag is
+        # on, so an external delta must re-sync `paper_doc` (the sidebar, the
+        # display pushes, and the next preview/paint all read it) and push the
+        # block to the per-block WCs, exactly as legacy Edit mode did. The
+        # flag-OFF opt-out keeps the old shape: only Edit mode syncs; the
+        # read-only View rides `apply_paper_delta` alone.
         socket =
-          if socket.assigns[:paper_edit_mode] do
+          if socket.assigns[:paper_edit_mode] or PaperCanvas.paper_canvas_enabled?() do
             socket
             |> Shared.sync_paper_edit_doc()
             |> Shared.push_block_to_wc(frame.block_id)
