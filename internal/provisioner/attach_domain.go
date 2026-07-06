@@ -1,0 +1,235 @@
+package provisioner
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"regexp"
+	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/caddyfile"
+	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+)
+
+// attachEnvFile is the env file deploy.sh sources for the app on every managed
+// box (the same /opt/barkpark/.env the provision-time PHX_HOST/PHX_SCHEME steps
+// write). The attach-domain flow merges the custom host's origin into
+// BARKPARK_EXTRA_ORIGINS here so Phoenix check_origin admits it after a restart.
+const attachEnvFile = "/opt/barkpark/.env"
+
+// attachCaddyfilePath is the instance box's Caddyfile — the single-FQDN file the
+// provision-time setup.CaddySteps wrote. The attach-domain flow APPENDS a second
+// vhost for the custom host rather than rewriting the whole file, so the
+// provision-time block (and any prior attached host) is never clobbered.
+const attachCaddyfilePath = "/etc/caddy/Caddyfile"
+
+// attachCustomHostRe is the V1 custom-host shape: exactly ONE DNS label under
+// the platform zone (gyldendal.barkpark.cloud) — we own that DNS zone, so an
+// A-record upsert is safe. Arbitrary customer domains are a later wave. The
+// worker validates DEFENSIVELY against this even though the control plane
+// already did: the custom host is interpolated into a Caddyfile and a shell
+// script on the box, so a hostile value from a compromised/buggy control plane
+// must abort HERE, before any side effect.
+var attachCustomHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$`)
+
+// attachDNSLabelRe is a single well-formed DNS label (the custom host minus the
+// platform zone) — what the DNS seam upserts as the record Name.
+var attachDNSLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// AttachDomainFunc points a custom host at one live box for a claimed
+// attach-domain job: DNS A record → BARKPARK_EXTRA_ORIGINS merge + Caddy vhost
+// on the box → caddy reload + app restart. Injected like DeprovisionFunc so the
+// worker stays transport-only and tests drive it against fakes. It is naturally
+// IDEMPOTENT (DNS upsert, guarded env merge, guarded vhost append), so a re-run
+// after a dropped succeed-report is a safe no-op — no orphan edge to guard.
+type AttachDomainFunc func(ctx context.Context, spec AttachDomainSpec) error
+
+// validateAttachDomainSpec is the fail-closed gate every attach-domain job
+// passes BEFORE any side effect. The worker never trusts the control-plane
+// payload: custom_host/dns_label reach a Caddyfile and a remote shell script,
+// and ip reaches the SSH argv, so each is re-validated against the strict V1
+// shapes here. Any miss aborts with NO DNS write and NO remote command.
+func validateAttachDomainSpec(spec AttachDomainSpec) error {
+	if !attachCustomHostRe.MatchString(spec.CustomHost) {
+		return fmt.Errorf("attach-domain: custom_host %q is not a single label under %s — refusing before any side effect", spec.CustomHost, Zone)
+	}
+	if !attachDNSLabelRe.MatchString(spec.DNSLabel) {
+		return fmt.Errorf("attach-domain: dns_label %q is not a valid DNS label — refusing before any side effect", spec.DNSLabel)
+	}
+	if spec.DNSZone != Zone {
+		return fmt.Errorf("attach-domain: dns_zone %q is not the platform zone %s (V1 attaches platform-zone hosts only)", spec.DNSZone, Zone)
+	}
+	if spec.CustomHost != spec.DNSLabel+"."+spec.DNSZone {
+		return fmt.Errorf("attach-domain: custom_host %q does not equal dns_label+dns_zone (%q.%q) — inconsistent claim", spec.CustomHost, spec.DNSLabel, spec.DNSZone)
+	}
+	if net.ParseIP(spec.IP) == nil {
+		return fmt.Errorf("attach-domain: ip %q is not a valid IP address — refusing before any side effect", spec.IP)
+	}
+	if spec.AppPort < 1 || spec.AppPort > 65535 {
+		return fmt.Errorf("attach-domain: app_port %d is not a valid port", spec.AppPort)
+	}
+	return nil
+}
+
+// renderCustomHostVhost renders the Caddy vhost block APPENDED for the custom
+// host, mirroring the provision-time caddyfileTemplate shape (site block keyed
+// on the host + reverse_proxy + the branded maintenance handler) with ONE
+// deliberate difference: `tls { on_demand }`. Issuance for an attached host is
+// on-demand and gated by the control plane's /v1/tls/ask endpoint
+// (Registry.domain_registered? must approve the host), so a cert is only
+// obtained for hosts the control plane vouches for.
+func renderCustomHostVhost(host string, appPort int) string {
+	var sb strings.Builder
+	sb.WriteString("\n# Managed by barkpark-provisioner (attach-domain) — custom host " + host + ".\n")
+	sb.WriteString("# On-demand TLS is gated by the control plane's /v1/tls/ask. Do not edit by hand.\n")
+	sb.WriteString(host + " {\n")
+	sb.WriteString("\ttls {\n")
+	sb.WriteString("\t\ton_demand\n")
+	sb.WriteString("\t}\n")
+	sb.WriteString(fmt.Sprintf("\treverse_proxy 127.0.0.1:%d\n", appPort))
+	sb.WriteString(caddyfile.MaintenanceHandler("\t"))
+	sb.WriteString("}\n")
+	return sb.String()
+}
+
+// mergeExtraOriginStep renders the idempotent "merge https://<host> into
+// BARKPARK_EXTRA_ORIGINS" step for the app env file. It follows the
+// secrets-install rewrite model (grep -v strip + printf append + mv — portable,
+// no sed -i) rather than setEnvVarStep's replace-whole-value, because the value
+// is a comma-separated LIST that must be extended, not overwritten: an existing
+// origin (another attached host) is preserved, and a re-run with the origin
+// already present changes nothing. The interpolated origin is safe by
+// construction — validateAttachDomainSpec pinned the host to [a-z0-9.-].
+func mergeExtraOriginStep(origin, envFile string) cloud.CaddyStep {
+	script := strings.Join([]string{
+		"cur=$(grep '^BARKPARK_EXTRA_ORIGINS=' " + envFile + " 2>/dev/null | head -n1 | cut -d= -f2- || true)",
+		"case \",$cur,\" in",
+		"*,'" + origin + "',*) : ;;",
+		"*)",
+		"  if [ -n \"$cur\" ]; then new=\"$cur," + origin + "\"; else new='" + origin + "'; fi",
+		"  tmp=$(mktemp)",
+		"  grep -v '^BARKPARK_EXTRA_ORIGINS=' " + envFile + " > \"$tmp\" 2>/dev/null || true",
+		"  printf 'BARKPARK_EXTRA_ORIGINS=%s\\n' \"$new\" >> \"$tmp\"",
+		"  mv \"$tmp\" " + envFile,
+		"  ;;",
+		"esac",
+	}, "\n")
+	argv := []string{"bash", "-lc", script}
+	return cloud.CaddyStep{
+		Title: "merge " + origin + " into BARKPARK_EXTRA_ORIGINS in the app env (Phoenix check_origin)",
+		Cmd:   script,
+		Argv:  argv,
+	}
+}
+
+// appendCustomVhostStep renders the idempotent "append the custom-host vhost to
+// the Caddyfile" step: a guarded heredoc'd `tee -a` (the writeFileStep idiom,
+// append mode) that is SKIPPED when the host's site block already exists, so a
+// re-run never duplicates the block. The single-quoted heredoc delimiter keeps
+// the vhost body literal (no shell/var expansion).
+func appendCustomVhostStep(host string, appPort int, caddyfilePath string) cloud.CaddyStep {
+	vhost := renderCustomHostVhost(host, appPort)
+	script := "if ! grep -qF '" + host + " {' " + caddyfilePath + " 2>/dev/null; then tee -a " + caddyfilePath + " > /dev/null << 'BPEOF'\n" + vhost + "BPEOF\nfi"
+	argv := []string{"bash", "-lc", script}
+	return cloud.CaddyStep{
+		Title: "append the Caddy vhost for " + host + " (tls on_demand → 127.0.0.1:" + fmt.Sprintf("%d", appPort) + ")",
+		Cmd:   "grep -qF '" + host + " {' " + caddyfilePath + " || tee -a " + caddyfilePath + " << 'BPEOF' … BPEOF",
+		Argv:  argv,
+	}
+}
+
+// caddyValidateReloadStep validates the Caddyfile BEFORE reloading — a
+// malformed config must never be handed to a live Caddy — then enables +
+// reloads exactly like the provision-time caddyReloadStep (`enable --now` is
+// idempotent and covers a cold start; `reload` re-reads without dropping
+// connections).
+func caddyValidateReloadStep(caddyfilePath string) cloud.CaddyStep {
+	script := "caddy validate --config " + caddyfilePath + " && systemctl enable --now caddy && systemctl reload caddy"
+	argv := []string{"bash", "-lc", script}
+	return cloud.CaddyStep{
+		Title: "validate + reload Caddy (apply the new custom-host vhost)",
+		Cmd:   script,
+		Argv:  argv,
+	}
+}
+
+// instanceRestartStep restarts the Barkpark app so it re-reads the env —
+// Phoenix reads check_origin once at boot, so without this restart the merged
+// BARKPARK_EXTRA_ORIGINS never takes effect and LiveView 403s the new host
+// (the same click-dead footgun the provision-time barkparkRestartStep guards).
+func instanceRestartStep() cloud.CaddyStep {
+	argv := []string{"bash", "-lc", "systemctl restart barkpark"}
+	return cloud.CaddyStep{
+		Title: "restart Barkpark (pick up BARKPARK_EXTRA_ORIGINS — LiveView check_origin)",
+		Cmd:   "systemctl restart barkpark",
+		Argv:  argv,
+	}
+}
+
+// attachDomainSteps is the ordered remote plan for one VALIDATED attach-domain
+// spec — env merge, vhost append, caddy validate+reload, app restart. Pure (no
+// I/O): tests execute the rendered scripts against temp files to prove the
+// idempotence guards, and DefaultAttachDomain runs them over the SSH seam.
+// Callers MUST have passed spec through validateAttachDomainSpec first — the
+// scripts interpolate spec.CustomHost.
+func attachDomainSteps(spec AttachDomainSpec, envFile, caddyfilePath string) []cloud.CaddyStep {
+	origin := "https://" + spec.CustomHost
+	return []cloud.CaddyStep{
+		mergeExtraOriginStep(origin, envFile),
+		appendCustomVhostStep(spec.CustomHost, spec.AppPort, caddyfilePath),
+		caddyValidateReloadStep(caddyfilePath),
+		instanceRestartStep(),
+	}
+}
+
+// AttachDomainWith attaches spec.CustomHost to the box at spec.IP via the
+// seams' DNS + per-host runner:
+//
+//  1. DEFENSIVE validation (validateAttachDomainSpec) — a hostile/inconsistent
+//     claim payload aborts before ANY side effect.
+//  2. DNS: upsert the A record <dns_label>.<dns_zone> → ip (create-or-replace,
+//     idempotent).
+//  3. SSH: merge https://<custom_host> into BARKPARK_EXTRA_ORIGINS, append the
+//     on-demand-TLS Caddy vhost, validate + reload Caddy, restart the app —
+//     every remote command through the StepRunner seam, each step idempotent.
+//
+// A step failure aborts the remainder and fails the job. A DNS record already
+// upserted when a later step fails is ACCEPTABLE residue: it points the host at
+// the box the instance already lives on, and the retry's upsert is a no-op.
+func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) error {
+	if err := validateAttachDomainSpec(spec); err != nil {
+		return err
+	}
+	if seams.DNS == nil {
+		return fmt.Errorf("provisioner: a DNSProvider must be set to attach a domain")
+	}
+
+	rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP}
+	if err := seams.DNS.UpsertRecord(ctx, rec); err != nil {
+		return fmt.Errorf("attach-domain %s: dns upsert: %w", spec.CustomHost, err)
+	}
+
+	runnerFor := seams.RunnerFor
+	if runnerFor == nil {
+		// The same production default the warm-pool chain falls back to: a per-host
+		// SSH runner for the box's IP.
+		runnerFor = func(host string) cloud.StepRunner { return cloud.NewSSHStepRunner(host) }
+	}
+	runner := runnerFor(spec.IP)
+	for _, s := range attachDomainSteps(spec, attachEnvFile, attachCaddyfilePath) {
+		if err := runner.Run(ctx, s); err != nil {
+			return fmt.Errorf("attach-domain %s: %w", spec.CustomHost, err)
+		}
+	}
+	return nil
+}
+
+// DefaultAttachDomain returns an AttachDomainFunc bound to seams — the value the
+// Worker calls per attach-domain job. Tests bind it to the fakes; main() binds
+// it to the real Cloud DNS + per-host SSH runner (the SAME seams as
+// provision/deprovision).
+func DefaultAttachDomain(seams Seams) AttachDomainFunc {
+	return func(ctx context.Context, spec AttachDomainSpec) error {
+		return AttachDomainWith(ctx, seams, spec)
+	}
+}

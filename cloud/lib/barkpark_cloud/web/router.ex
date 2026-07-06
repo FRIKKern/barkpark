@@ -1544,6 +1544,73 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/barkparks/:id/domain {domain} → 202 {ok, custom_host, status:
+  # "attaching"} — attach a bare platform-zone host (instance custom domains,
+  # e.g. gyldendal.barkpark.cloud) to a managed instance. Persists the validated
+  # custom_host on the row (Registry.set_custom_host — v1: exactly one label
+  # under barkpark.cloud; anything else is 422) and enqueues an "attach_domain"
+  # job the Go worker drains (DNS A record + box wiring). 409 taken when the
+  # host is already claimed by a site domain / another instance's custom_host /
+  # a provisioning FQDN; 409 already_attaching while a previous attach is still
+  # in flight (the one-active-job-per-kind partial index).
+  #
+  # ADMIN-gated: pointing platform DNS + rewriting a live box's Caddy/env is
+  # privileged infra, like self-update above — require_primary_team_admin halts
+  # 401 / 422 no_team / 403 for a plain member. TEAM-SCOPED fail-closed:
+  # wrong-team / nonexistent / malformed id is the SAME 404 (no existence leak).
+  post "/v1/barkparks/:id/domain" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+        domain = conn.body_params["domain"]
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            if is_binary(domain) and domain != "" do
+              attach_custom_domain(conn, team, bp, domain)
+            else
+              json(conn, 422, %{error: "domain_required"})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # The persist + enqueue tail of POST /v1/barkparks/:id/domain, after the auth
+  # + team-scope + presence gates all passed.
+  defp attach_custom_domain(conn, team, bp, domain) do
+    case Registry.set_custom_host(bp, domain) do
+      {:ok, bp} ->
+        case Registry.enqueue_attach_domain_job(bp) do
+          {:ok, _job} ->
+            push_event(team.id, "fleet")
+            json(conn, 202, %{ok: true, custom_host: bp.custom_host, status: "attaching"})
+
+          {:error, :already_attaching} ->
+            json(conn, 409, %{error: "already_attaching"})
+
+          {:error, _changeset} ->
+            json(conn, 422, %{error: "invalid"})
+        end
+
+      {:error, :taken} ->
+        json(conn, 409, %{error: "taken"})
+
+      {:error, %Ecto.Changeset{}} ->
+        json(conn, 422, %{error: "invalid_domain"})
+    end
+  end
+
   # GET /v1/barkparks/:id/bootstrap → 200 {template, workspace, project, dataset,
   # read_token, env} — the dwb-4 content-bootstrap outputs the worker reported on
   # /succeed, decrypted for the OWNER (the dashboard/dwb-6 deploy step consumes
@@ -3083,6 +3150,92 @@ defmodule BarkparkCloud.Web.Router do
       reason = conn.body_params["error"]
 
       case Registry.fail_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  ## Internal attach-domain queue (worker-token auth) — the custom-domain drain.
+
+  post "/v1/internal/attach-domain-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_attach_domain_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          json(conn, 200, attach_domain_claim_json(job, barkpark))
+      end
+    end
+  end
+
+  post "/v1/internal/attach-domain-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      # The box ip the worker configured — optional telemetry stamped as
+      # result_ip when echoed; the custom_host itself was persisted at enqueue.
+      ip =
+        case conn.body_params["ip"] do
+          ip when is_binary(ip) and ip != "" -> ip
+          _ -> nil
+        end
+
+      case Registry.succeed_attach_domain_job(conn.path_params["id"], ip, claim_token_opts(conn)) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        # claim-fence (bp-c55): a stale worker whose claim was swept + re-claimed.
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  post "/v1/internal/attach-domain-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_attach_domain_job(
              conn.path_params["id"],
              if(is_binary(reason), do: reason, else: "unspecified"),
              claim_token_opts(conn)
@@ -4829,6 +4982,9 @@ defmodule BarkparkCloud.Web.Router do
       update_running_release: bp.update_running_release,
       update_latest_release: bp.update_latest_release,
       update_checked_at: bp.update_checked_at,
+      # Instance custom domain — the attached platform-zone host (nil until a
+      # team attaches one), so the dashboard can render it on the fleet row.
+      custom_host: bp.custom_host,
       inserted_at: bp.inserted_at
     }
 
@@ -5719,6 +5875,29 @@ defmodule BarkparkCloud.Web.Router do
       ip: barkpark.host,
       dns_label: Barkpark.subdomain_from_url(barkpark),
       dns_zone: Barkpark.base_domain()
+    }
+  end
+
+  # The claim payload the Go worker decodes into an attach-domain spec (instance
+  # custom domains). Keys are EXACTLY the pinned cross-language contract:
+  # {job_id, claim_token, ip, custom_host, dns_label, dns_zone, app_port}.
+  # `ip` is the instance box the worker SSHes to; `dns_label`/`dns_zone` split
+  # the custom host for the A-record upsert (`<label>.<zone>` == custom_host by
+  # construction — v1 hosts are one label under the platform zone).
+  defp attach_domain_claim_json(job, barkpark) do
+    %{
+      job_id: job.id,
+      # claim-fence (bp-c55): echoed back on succeed/fail to fence a stale re-claim.
+      claim_token: job.claim_token,
+      ip: barkpark.host,
+      custom_host: barkpark.custom_host,
+      dns_label: Barkpark.custom_host_label(barkpark),
+      dns_zone: Barkpark.base_domain(),
+      # Every managed instance serves Phoenix on 4000 behind Caddy (the
+      # provision-time `reverse_proxy localhost:4000`). A LITERAL on purpose —
+      # the registry doesn't store a per-row port; make it a column the day a
+      # box can run on anything else.
+      app_port: 4000
     }
   end
 

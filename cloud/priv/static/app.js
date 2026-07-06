@@ -1968,6 +1968,11 @@
           esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
       : "";
 
+    // custom-domain: live + no custom host yet → offer the attach flow.
+    var domainBtn = lc.live && !bp.custom_host
+      ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
+      : "";
+
     var actions =
       lc.removing
         ? ""
@@ -1978,6 +1983,7 @@
             : bp.host
               ? updateBtn +
                 '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
+                domainBtn +
                 '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
               : "";
 
@@ -2040,6 +2046,7 @@
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("ID", bp.id) +
           railRowCopy("Host", bp.host || "—") +
+          railRow("Domain", bp.custom_host || "—") +
           railRow("Mode", bp.mode || "—") +
           railRow("Health", railValue(cap(health), hasHost)) +
           railRow("Agent", railValue(cap(agent), hasHost)) +
@@ -2058,6 +2065,8 @@
     if (openBtn) openBtn.addEventListener("click", function () { openStudio(bp.id, openBtn); });
     var update = $("#inst-update");
     if (update) update.addEventListener("click", function () { confirmUpdateInstance(bp); });
+    var domain = $("#inst-domain");
+    if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
     var remove = $("#inst-remove");
@@ -2153,6 +2162,60 @@
       } else {
         toast({ kind: "error", title: "Couldn't start the update", body: "Please try again in a moment." });
       }
+    });
+  }
+
+  // custom-domain: attach a bare barkpark.cloud host to a live instance. The
+  // control plane validates + queues the DNS/TLS work (202); the fleet payload
+  // carries custom_host once it's persisted.
+  function openAttachDomainModal(bp) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Attach a domain to ' + esc(bp.name) + "</h2>" +
+      '<p class="modal-sub">Point a <b>barkpark.cloud</b> subdomain at this instance &mdash; DNS and TLS are set up for you.</p>' +
+      '<form id="domain-form">' +
+        '<label class="label" for="domain-input">Domain</label>' +
+        '<input class="form-input" id="domain-input" placeholder="name.barkpark.cloud" required autocomplete="off" spellcheck="false">' +
+        '<div id="domain-error" class="form-error" hidden></div>' +
+        '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+          '<button class="btn btn-primary" type="submit" id="domain-go">Attach domain</button></div>' +
+      "</form>"
+    );
+    var form = $("#domain-form");
+    if (form) form.addEventListener("submit", function (e) { e.preventDefault(); attachDomain(bp); });
+  }
+
+  function attachDomain(bp) {
+    var value = (($("#domain-input") || {}).value || "").trim();
+    var errEl = $("#domain-error");
+    if (errEl) errEl.hidden = true;
+    if (!value) {
+      // Belt-and-braces behind the input's `required` — never POST an empty domain.
+      if (errEl) { errEl.hidden = false; errEl.textContent = "Enter a domain like name.barkpark.cloud."; }
+      return;
+    }
+    var btn = $("#domain-go");
+    if (btn) { btn.disabled = true; btn.textContent = "Attaching…"; }
+    api("POST", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/domain", { domain: value }).then(function (r) {
+      if (r.status === 202) {
+        closeModal();
+        toast({ kind: "success", title: "Domain attaching", body: "DNS + TLS will be live shortly." });
+        fleetCache = null;
+        loadInstance(bp.id);
+        return;
+      }
+      if (btn) { btn.disabled = false; btn.textContent = "Attach domain"; }
+      var code = r.data && r.data.error;
+      var msg = code === "taken"
+        ? "That domain is already in use."
+        : code === "already_attaching"
+          ? "An attach is already running."
+          : r.status === 422
+            ? "Only <name>.barkpark.cloud domains are supported for now."
+            : friendly(r.data, "Something went wrong — please try again.");
+      // textContent, not innerHTML — the literal "<name>" (and any echoed input)
+      // must render as text, never as markup.
+      if (errEl) { errEl.hidden = false; errEl.textContent = msg; }
+      else toast({ kind: "error", title: "Couldn't attach the domain", body: msg });
     });
   }
 

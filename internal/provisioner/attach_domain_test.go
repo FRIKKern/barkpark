@@ -1,0 +1,543 @@
+package provisioner
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+)
+
+// attachEventLog is a shared ordered event log the fake DNS + fake runner both
+// append to, so a test can assert the DNS upsert strictly PRECEDES every SSH
+// step (DNS-then-SSH — Caddy's on-demand issuance needs the record in place).
+type attachEventLog struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (l *attachEventLog) add(e string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, e)
+}
+
+func (l *attachEventLog) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.events...)
+}
+
+// recordingAttachDNS is the ordered-log DNS fake: it records each upsert (and
+// its exact Record) without any network. err, when set, fails the upsert.
+type recordingAttachDNS struct {
+	log     *attachEventLog
+	mu      sync.Mutex
+	upserts []cloud.Record
+	err     error
+}
+
+func (d *recordingAttachDNS) UpsertRecord(_ context.Context, rec cloud.Record) error {
+	d.mu.Lock()
+	d.upserts = append(d.upserts, rec)
+	d.mu.Unlock()
+	if d.log != nil {
+		d.log.add("dns:upsert " + cloud.Fqdn(rec.Name, rec.Zone) + "→" + rec.Value)
+	}
+	return d.err
+}
+
+func (d *recordingAttachDNS) DeleteRecord(context.Context, string, string, string) error {
+	return nil
+}
+
+func (d *recordingAttachDNS) Resolve(context.Context, string) ([]string, error) { return nil, nil }
+
+var _ cloud.DNSProvider = (*recordingAttachDNS)(nil)
+
+// recordingAttachRunner is the ordered-log StepRunner fake: it records each step
+// without touching a box. A non-empty failOn errors the first step whose Title
+// contains it (the SSH-failure path).
+type recordingAttachRunner struct {
+	log    *attachEventLog
+	mu     sync.Mutex
+	steps  []cloud.CaddyStep
+	failOn string
+}
+
+func (r *recordingAttachRunner) Run(_ context.Context, s cloud.CaddyStep) error {
+	r.mu.Lock()
+	r.steps = append(r.steps, s)
+	r.mu.Unlock()
+	if r.log != nil {
+		r.log.add("ssh:" + s.Title)
+	}
+	if r.failOn != "" && strings.Contains(s.Title, r.failOn) {
+		return errBoom
+	}
+	return nil
+}
+
+// attachFakeSeams wires DefaultAttachDomain entirely from the recording fakes —
+// no real DNS, no real box.
+func attachFakeSeams() (Seams, *recordingAttachDNS, *recordingAttachRunner, *attachEventLog) {
+	log := &attachEventLog{}
+	dns := &recordingAttachDNS{log: log}
+	runner := &recordingAttachRunner{log: log}
+	seams := Seams{
+		DNS:       dns,
+		RunnerFor: func(string) cloud.StepRunner { return runner },
+	}
+	return seams, dns, runner, log
+}
+
+// validAttachSpec is the pinned-contract claim payload the tests drive.
+func validAttachSpec() AttachDomainSpec {
+	return AttachDomainSpec{
+		JobID:      "adjob-1",
+		IP:         "203.0.113.9",
+		CustomHost: "gyldendal.barkpark.cloud",
+		DNSLabel:   "gyldendal",
+		DNSZone:    "barkpark.cloud",
+		AppPort:    4000,
+	}
+}
+
+// fakeAttachDomainControlPlane is an httptest-backed stand-in for the Elixir
+// control plane's internal ATTACH-DOMAIN-jobs endpoints — the attach-domain twin
+// of fakeDeprovisionControlPlane. It serves one queued spec on claim (then 204
+// once drained) and records the succeed/fail report.
+type fakeAttachDomainControlPlane struct {
+	mu sync.Mutex
+
+	spec *AttachDomainSpec // served on the next claim; nil → 204
+
+	claimCount  int
+	claimAuth   string
+	succeededID string
+	succeedAuth string
+	failedID    string
+	failedError string
+	failAuth    string
+}
+
+func (f *fakeAttachDomainControlPlane) handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/v1/internal/attach-domain-jobs/claim", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.claimCount++
+		f.claimAuth = r.Header.Get("Authorization")
+		if f.spec == nil {
+			w.WriteHeader(http.StatusNoContent) // 204 — nothing pending
+			return
+		}
+		// 200 {job_id, claim_token, ip, custom_host, dns_label, dns_zone, app_port}
+		_ = json.NewEncoder(w).Encode(f.spec)
+		f.spec = nil // serve it once; subsequent claims are 204
+	})
+
+	// /v1/internal/attach-domain-jobs/:id/succeed and /fail — route on the trailing verb.
+	mux.HandleFunc("/v1/internal/attach-domain-jobs/", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		id, verb := parseAttachDomainJobPath(r.URL.Path)
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]string
+		_ = json.Unmarshal(body, &payload)
+
+		switch verb {
+		case "succeed":
+			f.succeededID = id
+			f.succeedAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		case "fail":
+			f.failedID = id
+			f.failedError = payload["error"]
+			f.failAuth = r.Header.Get("Authorization")
+			_ = json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+		default:
+			http.Error(w, "not found", http.StatusNotFound)
+		}
+	})
+
+	return mux
+}
+
+// parseAttachDomainJobPath splits /v1/internal/attach-domain-jobs/<id>/<verb>.
+func parseAttachDomainJobPath(p string) (id, verb string) {
+	const prefix = "/v1/internal/attach-domain-jobs/"
+	rest := p[len(prefix):]
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == '/' {
+			return rest[:i], rest[i+1:]
+		}
+	}
+	return rest, ""
+}
+
+// TestRunOnceAttachDomainHappyPath is the full happy path through the worker:
+// the control plane hands back an attach-domain spec → the executor upserts the
+// DNS A record FIRST, then runs the four SSH steps in order (env merge → vhost
+// append → caddy validate+reload → app restart) → the worker POSTs succeed with
+// the Bearer WORKER_TOKEN.
+func TestRunOnceAttachDomainHappyPath(t *testing.T) {
+	spec := validAttachSpec()
+	cp := &fakeAttachDomainControlPlane{spec: &spec}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	seams, dns, runner, log := attachFakeSeams()
+	w := &Worker{
+		ControlURL:   srv.URL,
+		Token:        testToken,
+		HTTPClient:   srv.Client(),
+		AttachDomain: DefaultAttachDomain(seams),
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain: %v", err)
+	}
+	if !claimed {
+		t.Fatal("RunOnceAttachDomain claimed=false, want true (an attach-domain job was queued)")
+	}
+
+	// ── DNS: exactly one A upsert, label→ip in the platform zone ──
+	if len(dns.upserts) != 1 {
+		t.Fatalf("DNS upserts = %d, want 1 (%v)", len(dns.upserts), dns.upserts)
+	}
+	rec := dns.upserts[0]
+	if rec.Zone != "barkpark.cloud" || rec.Name != "gyldendal" || rec.Type != "A" || rec.Value != "203.0.113.9" {
+		t.Errorf("DNS upsert = %+v, want gyldendal.barkpark.cloud A → 203.0.113.9", rec)
+	}
+
+	// ── ordering: the DNS upsert strictly precedes every SSH step ──
+	events := log.all()
+	if len(events) != 5 {
+		t.Fatalf("events = %v, want 1 dns + 4 ssh", events)
+	}
+	if !strings.HasPrefix(events[0], "dns:upsert gyldendal.barkpark.cloud") {
+		t.Errorf("first event = %q, want the DNS upsert before any SSH step", events[0])
+	}
+	for i, want := range []string{"BARKPARK_EXTRA_ORIGINS", "Caddy vhost", "validate + reload", "restart Barkpark"} {
+		if !strings.Contains(events[i+1], want) {
+			t.Errorf("event[%d] = %q, want an ssh step containing %q", i+1, events[i+1], want)
+		}
+	}
+
+	// ── the rendered steps carry the pinned config ──
+	envScript := runner.steps[0].Argv[2]
+	if !strings.Contains(envScript, "BARKPARK_EXTRA_ORIGINS") || !strings.Contains(envScript, "https://gyldendal.barkpark.cloud") {
+		t.Errorf("env-merge script missing the origin merge: %q", envScript)
+	}
+	vhostScript := runner.steps[1].Argv[2]
+	for _, want := range []string{"gyldendal.barkpark.cloud {", "on_demand", "reverse_proxy 127.0.0.1:4000", "handle_errors"} {
+		if !strings.Contains(vhostScript, want) {
+			t.Errorf("vhost script missing %q:\n%s", want, vhostScript)
+		}
+	}
+
+	// ── claim + succeed carried the Bearer WORKER_TOKEN; fail was NOT called ──
+	if cp.claimAuth != "Bearer "+testToken {
+		t.Errorf("claim Authorization = %q, want Bearer %s", cp.claimAuth, testToken)
+	}
+	if cp.succeededID != "adjob-1" {
+		t.Errorf("succeed job id = %q, want adjob-1", cp.succeededID)
+	}
+	if cp.succeedAuth != "Bearer "+testToken {
+		t.Errorf("succeed Authorization = %q, want Bearer %s", cp.succeedAuth, testToken)
+	}
+	if cp.failedID != "" {
+		t.Errorf("fail was called (id=%q) on the happy path, want none", cp.failedID)
+	}
+}
+
+// TestAttachDomainHostileSpecAborts is the fail-closed gate: a hostile or
+// inconsistent claim payload (the worker NEVER trusts the control plane) must
+// abort with NO DNS upsert and NO remote command — the values reach a Caddyfile
+// and a shell script, so nothing may run before validation passes.
+func TestAttachDomainHostileSpecAborts(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*AttachDomainSpec)
+	}{
+		{"shell metachars in custom_host", func(s *AttachDomainSpec) { s.CustomHost = "evil; rm -rf /.barkpark.cloud" }},
+		{"command substitution in custom_host", func(s *AttachDomainSpec) { s.CustomHost = "$(reboot).barkpark.cloud" }},
+		{"foreign zone", func(s *AttachDomainSpec) { s.CustomHost = "gyldendal.evil.com"; s.DNSZone = "evil.com" }},
+		{"multi-label host", func(s *AttachDomainSpec) { s.CustomHost = "a.b.barkpark.cloud"; s.DNSLabel = "a.b" }},
+		{"uppercase host", func(s *AttachDomainSpec) { s.CustomHost = "Gyldendal.barkpark.cloud"; s.DNSLabel = "Gyldendal" }},
+		{"newline injection in dns_label", func(s *AttachDomainSpec) { s.DNSLabel = "gyldendal\nmalicious" }},
+		{"label/host mismatch", func(s *AttachDomainSpec) { s.DNSLabel = "other" }},
+		{"zone not the platform zone", func(s *AttachDomainSpec) { s.DNSZone = "barkpark.dev" }},
+		{"hostile ip", func(s *AttachDomainSpec) { s.IP = "203.0.113.9; reboot" }},
+		{"empty ip", func(s *AttachDomainSpec) { s.IP = "" }},
+		{"zero app_port", func(s *AttachDomainSpec) { s.AppPort = 0 }},
+		{"out-of-range app_port", func(s *AttachDomainSpec) { s.AppPort = 70000 }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			seams, dns, runner, _ := attachFakeSeams()
+			spec := validAttachSpec()
+			tc.mutate(&spec)
+
+			err := DefaultAttachDomain(seams)(context.Background(), spec)
+			if err == nil {
+				t.Fatalf("DefaultAttachDomain accepted a hostile spec %+v, want an error", spec)
+			}
+			if len(dns.upserts) != 0 {
+				t.Errorf("DNS was touched (%v) for a hostile spec, want NO side effects", dns.upserts)
+			}
+			if len(runner.steps) != 0 {
+				t.Errorf("the runner ran %d step(s) for a hostile spec, want NO side effects", len(runner.steps))
+			}
+		})
+	}
+}
+
+// TestRunOnceAttachDomainHostileSpecReportsFail proves the worker loop reports
+// a validation abort to /fail (the job is failed, not silently dropped) and
+// never POSTs succeed.
+func TestRunOnceAttachDomainHostileSpecReportsFail(t *testing.T) {
+	spec := validAttachSpec()
+	spec.JobID = "adjob-evil"
+	spec.CustomHost = "$(reboot).barkpark.cloud"
+	cp := &fakeAttachDomainControlPlane{spec: &spec}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	seams, dns, runner, _ := attachFakeSeams()
+	w := &Worker{
+		ControlURL:   srv.URL,
+		Token:        testToken,
+		HTTPClient:   srv.Client(),
+		AttachDomain: DefaultAttachDomain(seams),
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain returned an error for a validation abort, want nil (reported to /fail): %v", err)
+	}
+	if !claimed {
+		t.Error("RunOnceAttachDomain claimed=false, want true (the job was drained even though it failed)")
+	}
+	if cp.failedID != "adjob-evil" {
+		t.Errorf("fail job id = %q, want adjob-evil", cp.failedID)
+	}
+	if !strings.Contains(cp.failedError, "custom_host") {
+		t.Errorf("fail error = %q, want the validation message", cp.failedError)
+	}
+	if cp.succeededID != "" {
+		t.Errorf("succeed was called (id=%q) for a hostile spec, want none", cp.succeededID)
+	}
+	if len(dns.upserts) != 0 || len(runner.steps) != 0 {
+		t.Errorf("side effects ran for a hostile spec: dns=%v steps=%d", dns.upserts, len(runner.steps))
+	}
+}
+
+// TestRunOnceAttachDomainEmptyQueueNoCall proves a 204 claim is a clean no-op.
+func TestRunOnceAttachDomainEmptyQueueNoCall(t *testing.T) {
+	cp := &fakeAttachDomainControlPlane{spec: nil} // 204 on claim
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	calls := 0
+	w := &Worker{
+		ControlURL: srv.URL,
+		Token:      testToken,
+		HTTPClient: srv.Client(),
+		AttachDomain: func(context.Context, AttachDomainSpec) error {
+			calls++
+			return nil
+		},
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain: %v", err)
+	}
+	if claimed {
+		t.Error("RunOnceAttachDomain claimed=true on a 204, want false")
+	}
+	if calls != 0 {
+		t.Errorf("AttachDomain ran %d times on an empty queue, want 0", calls)
+	}
+	if cp.succeededID != "" || cp.failedID != "" {
+		t.Errorf("a report was posted on an empty queue: succeed=%q fail=%q", cp.succeededID, cp.failedID)
+	}
+}
+
+// TestRunOnceAttachDomainSSHFailureReportsFail proves a remote-step FAILURE is
+// reported to /fail (not /succeed) and the cycle still counts as a handled
+// claim. The DNS A record upserted BEFORE the failing step is ACCEPTABLE
+// residue by design: it points the custom host at the box the instance already
+// lives on, and the retry's upsert (create-or-replace) is an idempotent no-op —
+// there is no orphan to clean up, so the executor does not roll DNS back.
+func TestRunOnceAttachDomainSSHFailureReportsFail(t *testing.T) {
+	spec := validAttachSpec()
+	spec.JobID = "adjob-2"
+	cp := &fakeAttachDomainControlPlane{spec: &spec}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	seams, dns, runner, _ := attachFakeSeams()
+	runner.failOn = "validate + reload"
+	w := &Worker{
+		ControlURL:   srv.URL,
+		Token:        testToken,
+		HTTPClient:   srv.Client(),
+		AttachDomain: DefaultAttachDomain(seams),
+	}
+
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain returned an error for a step failure, want nil (reported to /fail): %v", err)
+	}
+	if !claimed {
+		t.Error("RunOnceAttachDomain claimed=false, want true (the job was drained even though it failed)")
+	}
+	if cp.failedID != "adjob-2" {
+		t.Errorf("fail job id = %q, want adjob-2", cp.failedID)
+	}
+	if !strings.Contains(cp.failedError, errBoom.Error()) {
+		t.Errorf("fail error = %q, want it to carry %q", cp.failedError, errBoom.Error())
+	}
+	if cp.succeededID != "" {
+		t.Errorf("succeed was called (id=%q) on a step failure, want none", cp.succeededID)
+	}
+	// The DNS upsert had already run — acceptable (see the test comment above).
+	if len(dns.upserts) != 1 {
+		t.Errorf("DNS upserts = %d, want 1 (the upsert precedes the failing SSH step)", len(dns.upserts))
+	}
+	// The failing step aborted the remainder: restart never ran.
+	if got := len(runner.steps); got != 3 {
+		t.Errorf("runner ran %d steps, want 3 (env merge, vhost append, failing reload — no restart)", got)
+	}
+}
+
+// runAttachScript executes one rendered remote step's script locally with bash
+// against the temp files attachDomainSteps was pointed at. The Argv is
+// ["bash","-lc",script]; the test drops -l (no login profile noise) — the
+// script itself is identical.
+func runAttachScript(t *testing.T, s cloud.CaddyStep) {
+	t.Helper()
+	out, err := exec.Command("bash", "-c", s.Argv[2]).CombinedOutput()
+	if err != nil {
+		t.Fatalf("step %q failed: %v\n%s", s.Title, err, out)
+	}
+}
+
+// TestAttachDomainStepsIdempotent proves the two mutating box steps are
+// idempotent by EXECUTING their rendered scripts (real bash, temp files) twice:
+// the origin is merged into BARKPARK_EXTRA_ORIGINS exactly once (an existing
+// list entry from another host is preserved, unrelated keys untouched) and the
+// Caddy vhost block is appended exactly once.
+func TestAttachDomainStepsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "app.env")
+	caddyFile := filepath.Join(dir, "Caddyfile")
+
+	// Seed the files the way a provisioned box looks: PHX_* pair + a prior
+	// extra origin in the env, and the provision-time single-FQDN site block.
+	if err := os.WriteFile(envFile, []byte("PHX_HOST=acme.barkpark.cloud\nPHX_SCHEME=https\nBARKPARK_EXTRA_ORIGINS=https://other.barkpark.cloud\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(caddyFile, []byte("acme.barkpark.cloud {\n\treverse_proxy localhost:4000\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	spec := validAttachSpec()
+	steps := attachDomainSteps(spec, envFile, caddyFile)
+	if len(steps) != 4 {
+		t.Fatalf("attachDomainSteps returned %d steps, want 4", len(steps))
+	}
+
+	// Run the env-merge and vhost-append steps TWICE — the re-run must change nothing.
+	for i := 0; i < 2; i++ {
+		runAttachScript(t, steps[0])
+		runAttachScript(t, steps[1])
+	}
+
+	env, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(env), "https://gyldendal.barkpark.cloud"); got != 1 {
+		t.Errorf("origin appears %d times in the env after a re-run, want exactly 1:\n%s", got, env)
+	}
+	if got := strings.Count(string(env), "BARKPARK_EXTRA_ORIGINS="); got != 1 {
+		t.Errorf("BARKPARK_EXTRA_ORIGINS appears %d times, want exactly 1:\n%s", got, env)
+	}
+	if !strings.Contains(string(env), "BARKPARK_EXTRA_ORIGINS=https://other.barkpark.cloud,https://gyldendal.barkpark.cloud") {
+		t.Errorf("the prior origin was not preserved in the merged list:\n%s", env)
+	}
+	if !strings.Contains(string(env), "PHX_HOST=acme.barkpark.cloud") || !strings.Contains(string(env), "PHX_SCHEME=https") {
+		t.Errorf("unrelated env keys were disturbed:\n%s", env)
+	}
+
+	caddy, err := os.ReadFile(caddyFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(caddy), "gyldendal.barkpark.cloud {"); got != 1 {
+		t.Errorf("custom-host site block appears %d times after a re-run, want exactly 1:\n%s", got, caddy)
+	}
+	if !strings.Contains(string(caddy), "acme.barkpark.cloud {") {
+		t.Errorf("the provision-time site block was disturbed:\n%s", caddy)
+	}
+	for _, want := range []string{"on_demand", "reverse_proxy 127.0.0.1:4000", "handle_errors"} {
+		if !strings.Contains(string(caddy), want) {
+			t.Errorf("appended vhost missing %q:\n%s", want, caddy)
+		}
+	}
+}
+
+// TestAttachDomainMergeCreatesKeyWhenAbsent proves the env merge on a box with
+// NO existing BARKPARK_EXTRA_ORIGINS creates the key with the single origin —
+// and stays single after a re-run.
+func TestAttachDomainMergeCreatesKeyWhenAbsent(t *testing.T) {
+	dir := t.TempDir()
+	envFile := filepath.Join(dir, "app.env")
+	caddyFile := filepath.Join(dir, "Caddyfile")
+	if err := os.WriteFile(envFile, []byte("PHX_HOST=acme.barkpark.cloud\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	steps := attachDomainSteps(validAttachSpec(), envFile, caddyFile)
+	runAttachScript(t, steps[0])
+	runAttachScript(t, steps[0])
+
+	env, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(env), "BARKPARK_EXTRA_ORIGINS=https://gyldendal.barkpark.cloud"); got != 1 {
+		t.Errorf("BARKPARK_EXTRA_ORIGINS=<origin> appears %d times, want exactly 1:\n%s", got, env)
+	}
+	if !strings.Contains(string(env), "PHX_HOST=acme.barkpark.cloud") {
+		t.Errorf("PHX_HOST was disturbed:\n%s", env)
+	}
+}
+
+// TestRunOnceAttachDomainNilFuncIsNoOp mirrors the deprovision contract: a
+// worker without the AttachDomain seam quietly skips the queue.
+func TestRunOnceAttachDomainNilFuncIsNoOp(t *testing.T) {
+	w := &Worker{ControlURL: "http://127.0.0.1:1", Token: testToken}
+	claimed, err := w.RunOnceAttachDomain(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceAttachDomain with a nil func: %v", err)
+	}
+	if claimed {
+		t.Error("claimed=true with a nil AttachDomain, want false")
+	}
+}

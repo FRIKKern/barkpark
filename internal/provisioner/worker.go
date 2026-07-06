@@ -89,6 +89,34 @@ const (
 	deprovisionFailPathFmt    = "/v1/internal/deprovision-jobs/%s/fail"
 )
 
+const (
+	attachDomainClaimPath      = "/v1/internal/attach-domain-jobs/claim"
+	attachDomainSucceedPathFmt = "/v1/internal/attach-domain-jobs/%s/succeed"
+	attachDomainFailPathFmt    = "/v1/internal/attach-domain-jobs/%s/fail"
+)
+
+// AttachDomainSpec is one claimed attach-domain job as the control plane hands
+// it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
+// 200 (a 204 means no pending job). ip is the box the instance lives on (the
+// barkpark's host), custom_host the full platform-zone host to attach
+// (gyldendal.barkpark.cloud), dns_label/dns_zone the A record's halves, and
+// app_port the local Phoenix port the new Caddy vhost proxies to. The worker
+// re-validates ALL of it defensively (validateAttachDomainSpec) before any side
+// effect — the claim payload is never trusted blindly.
+type AttachDomainSpec struct {
+	JobID string `json:"job_id"`
+	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
+	// stamped on this claim; the worker echoes it on succeed/fail so a
+	// swept-and-re-claimed job's stale worker cannot flip the row it lost. Empty
+	// when a pre-Stage-1 control plane omitted the key (the worker then sends none).
+	ClaimToken string `json:"claim_token,omitempty"`
+	IP         string `json:"ip"`
+	CustomHost string `json:"custom_host"`
+	DNSLabel   string `json:"dns_label"`
+	DNSZone    string `json:"dns_zone"`
+	AppPort    int    `json:"app_port"`
+}
+
 // JobSpec is one claimed provision job as the control plane hands it back. It is
 // the EXACT JSON the Elixir claim endpoint returns on 200 (a 204 means no
 // pending job). region/server_type default to the warm-pool defaults (nbg1/
@@ -161,6 +189,10 @@ type Worker struct {
 	// Deprovision tears down one box (server + DNS) for a claimed deprovision job.
 	// nil → the worker only provisions. Injected like Provision.
 	Deprovision DeprovisionFunc
+	// AttachDomain points a custom host at one live box (DNS A record + on-box
+	// env/Caddy config) for a claimed attach-domain job. nil → the worker skips
+	// the attach-domain queue. Injected like Provision/Deprovision.
+	AttachDomain AttachDomainFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
@@ -944,6 +976,122 @@ func (w *Worker) succeedDeprovisionWithRetry(ctx context.Context, jobID, claimTo
 
 func (w *Worker) failDeprovisionWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
 	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failDeprovision(ctx, jobID, claimToken, errMsg) })
+}
+
+func (w *Worker) RunAttachDomain(ctx context.Context) error {
+	return w.RunAttachDomainWith(ctx, nil)
+}
+
+func (w *Worker) RunAttachDomainWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
+	interval := w.Interval
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		claimed, err := w.RunOnceAttachDomain(ctx)
+		if onCycle != nil {
+			onCycle(claimed, err)
+		}
+
+		if !claimed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+}
+
+// RunOnceAttachDomain claims one attach-domain job, points the DNS A record at
+// the box and configures it (env origin merge + Caddy vhost + reload/restart),
+// reports succeed/fail. NO orphan edge: every attach step is idempotent (DNS
+// upsert, guarded env merge, guarded vhost append), so a dropped succeed-report
+// just re-runs as a no-op on a later reaper re-claim.
+func (w *Worker) RunOnceAttachDomain(ctx context.Context) (claimed bool, err error) {
+	if w.AttachDomain == nil {
+		return false, nil
+	}
+
+	spec, ok, err := w.claimAttachDomain(ctx)
+	if err != nil {
+		return false, fmt.Errorf("attach-domain claim: %w", err)
+	}
+	if !ok {
+		return false, nil
+	}
+
+	if aerr := w.AttachDomain(ctx, spec); aerr != nil {
+		if rerr := w.failAttachDomainWithRetry(ctx, spec.JobID, spec.ClaimToken, aerr.Error()); rerr != nil {
+			return false, fmt.Errorf("report attach-domain fail for job %s (attach error %v): %w", spec.JobID, aerr, rerr)
+		}
+		return true, nil
+	}
+
+	if rerr := w.succeedAttachDomainWithRetry(ctx, spec.JobID, spec.ClaimToken); rerr != nil {
+		return false, fmt.Errorf("report attach-domain succeed for job %s (box already configured; job left for retry): %w", spec.JobID, rerr)
+	}
+	return true, nil
+}
+
+func (w *Worker) claimAttachDomain(ctx context.Context) (AttachDomainSpec, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(attachDomainClaimPath), nil)
+	if err != nil {
+		return AttachDomainSpec{}, false, err
+	}
+	w.authorize(req)
+
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return AttachDomainSpec{}, false, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return AttachDomainSpec{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return AttachDomainSpec{}, false, fmt.Errorf("POST %s: status %d: %s", attachDomainClaimPath, resp.StatusCode, truncate(string(data), 200))
+	}
+
+	var spec AttachDomainSpec
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &spec); err != nil {
+			return AttachDomainSpec{}, false, fmt.Errorf("decode attach-domain claim response: %w", err)
+		}
+	}
+	if strings.TrimSpace(spec.JobID) == "" {
+		return AttachDomainSpec{}, false, fmt.Errorf("attach-domain claim response missing job_id: %s", truncate(string(data), 200))
+	}
+	return spec, true, nil
+}
+
+// succeedAttachDomain reports a completed attach. claim-fence (bp-c55): echo the
+// claim_token when present so a stale worker's succeed is fenced; sent only when
+// non-empty (Stage 1 compat with a token-less control plane).
+func (w *Worker) succeedAttachDomain(ctx context.Context, jobID, claimToken string) error {
+	return w.postJSON(ctx, fmt.Sprintf(attachDomainSucceedPathFmt, jobID), claimBody(nil, claimToken))
+}
+
+func (w *Worker) failAttachDomain(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.postJSON(ctx, fmt.Sprintf(attachDomainFailPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
+}
+
+func (w *Worker) succeedAttachDomainWithRetry(ctx context.Context, jobID, claimToken string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeedAttachDomain(ctx, jobID, claimToken) })
+}
+
+func (w *Worker) failAttachDomainWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failAttachDomain(ctx, jobID, claimToken, errMsg) })
 }
 
 // truncate caps s at n runes for error messages.

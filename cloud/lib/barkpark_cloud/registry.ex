@@ -674,6 +674,34 @@ defmodule BarkparkCloud.Registry do
     active_job_of_kind?(barkpark_id, "deprovision")
   end
 
+  @doc """
+  Enqueue a `pending` ATTACH-DOMAIN job for `barkpark` — the custom-domain
+  attach path (instance custom domains). The Go worker drains it, upserts the
+  DNS A record for the custom host, wires the box (extra origin + Caddy vhost +
+  restarts), and reports back; the `custom_host` itself was already persisted by
+  `set_custom_host/2` before this enqueue, so the job's success just flips the
+  job row.
+
+  Guarded against a duplicate concurrent attach: if an ACTIVE (pending/claimed)
+  attach-domain job already exists for this barkpark, returns `{:error,
+  :already_attaching}` rather than enqueuing a second one (the partial unique
+  index is the atomic race backstop, exactly as for deprovision).
+  """
+  @spec enqueue_attach_domain_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_attaching | Ecto.Changeset.t()}
+  def enqueue_attach_domain_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "attach_domain") do
+      {:error, :already_attaching}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{barkpark_id: bp_id, kind: "attach_domain", status: "pending"})
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_attaching)
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -792,6 +820,15 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_deprovision_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_deprovision_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "deprovision")
+
+  @doc """
+  Atomically claim the next claimable ATTACH-DOMAIN job — the custom-domain
+  attach path's worker pull. Same machinery as `claim_next_job/2`, filtered to
+  `kind: "attach_domain"`.
+  """
+  @spec claim_next_attach_domain_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_attach_domain_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "attach_domain")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
@@ -1469,6 +1506,76 @@ defmodule BarkparkCloud.Registry do
         end)
     end
   end
+
+  @doc """
+  Mark attach-domain job `id` succeeded — the DNS record + box wiring for the
+  custom host landed. The `custom_host` was already persisted on the barkpark by
+  `set_custom_host/2` at enqueue time, so success just flips the JOB row
+  (stamping `result_ip` when the worker echoed the box ip it configured — nil
+  keeps it unset). Same idempotency + fencing contract as `succeed_job/3`:
+
+    * `"succeeded"` (a RETRIED/duplicate succeed) — `{:ok, job}` unchanged (→ 200).
+    * `"failed"` (terminal) — `{:error, :conflict}` (→ 409), never resurrected.
+    * mismatched `claim_token` — `{:error, :stale_claim}` (claim-fence, bp-c55).
+  """
+  @spec succeed_attach_domain_job(binary(), String.t() | nil, keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def succeed_attach_domain_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts) do
+    claim_token = Keyword.get(opts, :claim_token)
+
+    case uuid_or_nil(id) do
+      nil ->
+        {:error, :not_found}
+
+      _uuid ->
+        # claim-fence (bp-c55): FOR UPDATE read + guard + write in one transaction.
+        # The idempotent/terminal short-circuits run BEFORE the token check.
+        Repo.transaction(fn ->
+          case lock_provision_job(id) do
+            nil ->
+              Repo.rollback(:not_found)
+
+            # IDEMPOTENT: an already-succeeded job. A dropped response + worker
+            # re-POST lands here and gets a 200.
+            %ProvisionJob{status: "succeeded"} = job ->
+              job
+
+            # STATUS GUARD: terminal is terminal — a straggler succeed must not
+            # resurrect a failed attach.
+            %ProvisionJob{status: "failed"} ->
+              Repo.rollback(:conflict)
+
+            %ProvisionJob{} = job ->
+              if stale_claim?(job, claim_token) do
+                Repo.rollback(:stale_claim)
+              else
+                attrs =
+                  if is_binary(ip) and ip != "",
+                    do: %{status: "succeeded", result_ip: ip},
+                    else: %{status: "succeeded"}
+
+                case job |> ProvisionJob.changeset(attrs) |> Repo.update() do
+                  {:ok, updated} -> updated
+                  {:error, cs} -> Repo.rollback(cs)
+                end
+              end
+          end
+        end)
+    end
+  end
+
+  @doc """
+  Mark attach-domain job `id` failed with `error`. The barkpark keeps its
+  persisted `custom_host` (re-attach is the recovery path — the ask-gate
+  already approving the host is harmless). Delegates to `fail_job/3` — the
+  status machinery is kind-agnostic, exactly as the deprovision fail route uses
+  it.
+  """
+  @spec fail_attach_domain_job(binary(), String.t(), keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def fail_attach_domain_job(id, error, opts \\ []), do: fail_job(id, error, opts)
 
   @doc """
   The latest provision job for each barkpark id in `ids`, as a map
@@ -2734,8 +2841,96 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  The on-demand TLS gate: is `domain` registered to ANY Site? Lookup is an
-  indexed array-contains against `sites.domains` (GIN). Returns true / false.
+  Attach custom domain `domain` (a bare platform-zone host, e.g.
+  `gyldendal.barkpark.cloud`) to `barkpark` — the persist half of the attach
+  flow, run BEFORE `enqueue_attach_domain_job/1` so the worker's claim payload
+  (and the TLS ask-gate) read the host off the row.
+
+  Validation + normalization live in `Barkpark.custom_host_changeset/2` (v1:
+  exactly one label under the platform zone). On top of that, the host must not
+  already be claimed by ANY other surface that answers on the zone — a Site
+  domain, another barkpark's `custom_host`, or a provisioning FQDN (any
+  barkpark's `url`, clean or suffixed) — each of those would silently shadow or
+  be shadowed by the attach. Taken → `{:error, :taken}`. The pre-check is
+  check-then-write; the `barkparks_custom_host_unique_idx` unique constraint is
+  the atomic backstop for a custom_host↔custom_host race (translated to the
+  same `:taken`).
+
+  Returns `{:ok, %Barkpark{}}`, `{:error, :taken}`, or a validation
+  `{:error, %Ecto.Changeset{}}` for a malformed domain.
+  """
+  @spec set_custom_host(Barkpark.t(), term()) ::
+          {:ok, Barkpark.t()} | {:error, :taken | Ecto.Changeset.t()}
+  def set_custom_host(%Barkpark{} = barkpark, domain) do
+    changeset = Barkpark.custom_host_changeset(barkpark, %{custom_host: domain})
+
+    cond do
+      not changeset.valid? ->
+        {:error, %{changeset | action: :update}}
+
+      custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark.id) ->
+        {:error, :taken}
+
+      true ->
+        changeset |> Repo.update() |> translate_custom_host_conflict()
+    end
+  end
+
+  # Is `norm` (already normalized by the changeset) claimed anywhere else on the
+  # zone? Three surfaces, fail-closed OR: a Site's domains array, ANOTHER
+  # barkpark's custom_host (self is excluded — re-attaching your own host is an
+  # idempotent no-op, not a conflict), or any barkpark's provisioning FQDN
+  # (`url` stores `https://<fqdn>` — including this barkpark's own primary FQDN,
+  # which never needs attaching).
+  defp custom_host_taken?(norm, self_id) do
+    registered_site_domain?(norm) or
+      other_barkpark_custom_host?(norm, self_id) or
+      provisioning_fqdn_taken?(norm)
+  end
+
+  defp other_barkpark_custom_host?(norm, self_id) do
+    Barkpark
+    |> where([b], b.custom_host == ^norm and b.id != ^self_id)
+    |> select([b], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  defp provisioning_fqdn_taken?(norm) do
+    url = "https://" <> norm
+
+    Barkpark
+    |> where([b], b.url == ^url)
+    |> select([b], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  # Map a lost race on barkparks_custom_host_unique_idx to the same :taken the
+  # pre-check returns; any other outcome passes through unchanged.
+  defp translate_custom_host_conflict({:error, %Ecto.Changeset{errors: errors}} = err) do
+    if Enum.any?(errors, fn {field, {_msg, opts}} ->
+         field == :custom_host and Keyword.get(opts, :constraint) == :unique
+       end) do
+      {:error, :taken}
+    else
+      err
+    end
+  end
+
+  defp translate_custom_host_conflict(other), do: other
+
+  @doc """
+  The on-demand TLS gate: is `domain` registered to ANY Site, live branch
+  preview, or instance custom host? Returns true / false.
 
   Caddy's `on_demand_tls.ask` calls this — a 200 means "we own this hostname,
   go ahead and issue a cert"; a 404 means "stop, this is not our hostname"
@@ -2745,7 +2940,8 @@ defmodule BarkparkCloud.Registry do
   def domain_registered?(domain) when is_binary(domain) do
     norm = domain |> String.downcase() |> String.trim() |> String.trim_trailing(".")
 
-    registered_site_domain?(norm) or registered_preview_host?(norm)
+    registered_site_domain?(norm) or registered_preview_host?(norm) or
+      registered_custom_host?(norm)
   end
 
   defp registered_site_domain?(norm) do
@@ -2772,6 +2968,23 @@ defmodule BarkparkCloud.Registry do
         d.status in ~w(queued building pushing live)
     )
     |> select([d], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  # Instance custom domains: a custom_host attached to any barkpark is
+  # TLS-allowlisted so the instance box's on-demand issuance for it succeeds.
+  # `custom_host` is stored normalized (custom_host_changeset), the SAME
+  # normalization applied to `norm` above — an equality match, indexed by
+  # barkparks_custom_host_unique_idx.
+  defp registered_custom_host?(norm) do
+    Barkpark
+    |> where([b], b.custom_host == ^norm)
+    |> select([b], 1)
     |> limit(1)
     |> Repo.one()
     |> case do

@@ -37,7 +37,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @foreign_key_type :binary_id
 
   @statuses ~w(pending claimed succeeded failed)
-  @kinds ~w(provision deprovision)
+  @kinds ~w(provision deprovision attach_domain)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
   # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the
@@ -70,9 +70,9 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   schema "provision_jobs" do
     field :status, :string, default: "pending"
     # Discriminates the go-live (provision) queue from the Remove (deprovision)
-    # queue — the two share this table + the claim/stale-recovery machinery but
-    # are claimed by separate, kind-filtered queries so neither worker loop grabs
-    # the other's jobs.
+    # queue and the custom-domain (attach_domain) queue — the kinds share this
+    # table + the claim/stale-recovery machinery but are claimed by separate,
+    # kind-filtered queries so no worker loop grabs another's jobs.
     field :kind, :string, default: "provision"
     field :claim_token, :string
     field :claimed_at, :utc_datetime_usec

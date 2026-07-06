@@ -76,6 +76,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # alphanumerics, dot, colon, underscore, hyphen.
   @host_format ~r/^[A-Za-z0-9.:_-]+$/
 
+  # Instance custom domains, v1 DELIBERATELY narrow: exactly ONE RFC-1035 label
+  # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS zone,
+  # so the attach worker can stand the record up unassisted. Arbitrary customer
+  # domains (their own zone, CNAME/A verification) are a later wave. The regex is
+  # the whole gate: anything it rejects never reaches a Caddyfile or a shell.
+  @custom_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$/
+
   schema "barkparks" do
     field :name, :string
     field :slug, :string
@@ -143,6 +150,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :vercel_deploy_url, :string
     field :vercel_claim_encrypted, :string
     field :vercel_claim_minted_at, :utc_datetime_usec
+
+    # Instance custom domain (isu follow-up) — the bare platform-zone host
+    # (`gyldendal.barkpark.cloud`) attached to this managed instance. Written
+    # ONLY through the narrow `custom_host_changeset/2` (via
+    # `Registry.set_custom_host/2`, which also runs the cross-surface taken
+    # check); globally unique via `barkparks_custom_host_unique_idx`.
+    field :custom_host, :string
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -282,6 +296,18 @@ defmodule BarkparkCloud.Registry.Barkpark do
   end
 
   def subdomain_from_url(%__MODULE__{} = bp), do: provisioning_subdomain(bp)
+
+  @doc """
+  The DNS label of the attached custom host — `"gyldendal"` for
+  `gyldendal.barkpark.cloud`. A v1 custom host is exactly one label under
+  `#{@base_domain}` (enforced by `custom_host_changeset/2`), so stripping the
+  zone suffix is the whole derivation. `nil` when no custom host is attached.
+  """
+  @spec custom_host_label(t()) :: String.t() | nil
+  def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host),
+    do: String.replace_suffix(host, "." <> @base_domain, "")
+
+  def custom_host_label(%__MODULE__{}), do: nil
 
   @doc """
   A subdomain-safe, stable short id for a team UUID: the first
@@ -440,6 +466,38 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_length(:vercel_project_id, max: 255)
     |> validate_length(:vercel_deploy_url, max: 255)
   end
+
+  @doc """
+  Narrow changeset for attaching a custom domain — only `custom_host` is
+  castable, so a domain attach can never rename a Barkpark or reassign its Team
+  (the same containment posture as `vercel_changeset/2`). The value is
+  normalized (lowercased, trimmed, trailing dot stripped — the SAME
+  normalization `Registry.domain_registered?/1` applies, so the stored host and
+  the ask-gate lookup can never diverge) and validated against the v1
+  one-label-under-`#{@base_domain}` format. Written only by
+  `Registry.set_custom_host/2`, which layers the cross-surface taken check on
+  top; the `barkparks_custom_host_unique_idx` unique constraint is the atomic
+  race backstop.
+  """
+  def custom_host_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:custom_host])
+    |> update_change(:custom_host, &normalize_custom_host/1)
+    |> validate_required([:custom_host])
+    |> validate_length(:custom_host, max: 253)
+    |> validate_format(:custom_host, @custom_host_format,
+      message: "must be a single label under #{@base_domain}"
+    )
+    |> unique_constraint(:custom_host,
+      name: :barkparks_custom_host_unique_idx,
+      message: "is already taken"
+    )
+  end
+
+  defp normalize_custom_host(host) when is_binary(host),
+    do: host |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+
+  defp normalize_custom_host(other), do: other
 
   @doc """
   Changeset for the `StalenessWorker`'s offline flip and for the report path's

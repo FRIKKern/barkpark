@@ -207,6 +207,11 @@ func run(args []string) int {
 		// The Remove drain: delete the real Hetzner box + DNS for a deprovision
 		// job (idempotent). Runs in its own goroutine below.
 		Deprovision: provisioner.DefaultDeprovision(seams),
+		// The custom-domain drain: point a platform-zone host at a live box (DNS A
+		// record + on-box BARKPARK_EXTRA_ORIGINS merge + Caddy vhost + reload/
+		// restart) for an attach-domain job (idempotent). Runs in its own
+		// goroutine below, exactly like the deprovision loop.
+		AttachDomain: provisioner.DefaultAttachDomain(seams),
 		// Auto-recover orphan boxes (a prior double-failure: succeed-report failed →
 		// teardown → provider.Delete failed → box marked barkpark-orphaned=true). The
 		// sweep deletes ONLY those labeled boxes — never a managed/live box — so it is
@@ -269,7 +274,7 @@ func run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision) every %s\n", *controlURL, interval.String())
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain) every %s\n", *controlURL, interval.String())
 
 	go func() {
 		_ = w.RunDeprovisionWith(ctx, func(claimed bool, err error) {
@@ -278,6 +283,17 @@ func run(args []string) int {
 				fmt.Fprintf(os.Stderr, "barkpark-provisioner: deprovision cycle error: %v\n", err)
 			case claimed:
 				fmt.Fprintln(os.Stderr, "barkpark-provisioner: deprovisioned a box")
+			}
+		})
+	}()
+
+	go func() {
+		_ = w.RunAttachDomainWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: attach-domain cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: attached a custom domain")
 			}
 		})
 	}()
