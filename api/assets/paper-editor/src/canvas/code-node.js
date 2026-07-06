@@ -224,6 +224,9 @@ export const Code = Node.create({
       langInput.type = "text";
       langInput.className = "bp-canvas-code-lang";
       langInput.placeholder = "lang";
+      // Accessible name that survives the resting-chrome hide (a placeholder is
+      // only a fallback name, and it's invisible while the control is hidden).
+      langInput.setAttribute("aria-label", "code language");
       langInput.setAttribute("contenteditable", "false");
 
       // The EDIT island: a textarea showing the code. Monospace, full-width,
@@ -256,10 +259,13 @@ export const Code = Node.create({
       let hovered = false;
       let focused = false;
       const syncChrome = () => {
+        // Both reveal channels are gated on editability: a non-editable editor
+        // (view mode) must not surface an empty readonly config control on
+        // hover OR focus — there is nothing the reveal could let you do.
         const hide = configControlHidden({
           value: langInput.value,
           hovered: hovered && editor.isEditable,
-          focused,
+          focused: focused && editor.isEditable,
         });
         langInput.style.display = hide ? "none" : "";
       };
@@ -289,7 +295,15 @@ export const Code = Node.create({
         focused = true;
         syncChrome();
       };
-      const onFocusOut = () => {
+      const onFocusOut = (e) => {
+        // Focus-within guard: focusout fires BEFORE the next element receives
+        // focus, so hiding here would yank display:none onto the langInput in the
+        // middle of a Shift+Tab from the textarea INTO it — the browser's focus
+        // fixup then drops focus to <body> and the control is never reachable by
+        // keyboard. relatedTarget is the element gaining focus; when it is still
+        // inside this atom, focus is only MOVING within, not leaving — keep the
+        // chrome revealed and let the subsequent focusin confirm it.
+        if (e && e.relatedTarget && dom.contains(e.relatedTarget)) return;
         focused = false;
         syncChrome();
       };

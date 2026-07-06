@@ -126,6 +126,13 @@ check("config-bearing atoms wire the resting-chrome gate (configControlHidden)",
       `${rel} dropped the hover/focus reveal wiring — the gated config control ` +
         `would be unreachable (hidden with no way to reveal it).`,
     );
+    assert.ok(
+      /relatedTarget/.test(src),
+      `${rel} dropped the focus-within (relatedTarget) guard in focusout — ` +
+        `focusout fires BEFORE the next element gains focus, so hiding while ` +
+        `focus merely MOVES within the atom yanks display:none onto the input ` +
+        `mid-Tab and keyboard users can never reach it.`,
+    );
   }
 });
 

@@ -259,6 +259,9 @@ export const Diagram = Node.create({
       captionInput.type = "text";
       captionInput.className = "bp-canvas-diagram-caption";
       captionInput.placeholder = "caption";
+      // Accessible name that survives the resting-chrome hide (a placeholder is
+      // only a fallback name, and it's invisible while the control is hidden).
+      captionInput.setAttribute("aria-label", "diagram caption");
       captionInput.setAttribute("contenteditable", "false");
 
       dom.appendChild(area);
@@ -274,10 +277,13 @@ export const Diagram = Node.create({
       let hovered = false;
       let focused = false;
       const syncChrome = () => {
+        // Both reveal channels are gated on editability: a non-editable editor
+        // (view mode) must not surface an empty readonly config control on
+        // hover OR focus — there is nothing the reveal could let you do.
         const hide = configControlHidden({
           value: captionInput.value,
           hovered: hovered && editor.isEditable,
-          focused,
+          focused: focused && editor.isEditable,
         });
         captionInput.style.display = hide ? "none" : "";
       };
@@ -307,7 +313,16 @@ export const Diagram = Node.create({
         focused = true;
         syncChrome();
       };
-      const onFocusOut = () => {
+      const onFocusOut = (e) => {
+        // Focus-within guard: focusout fires BEFORE the next element receives
+        // focus, so hiding here would yank display:none onto the captionInput in
+        // the middle of a Tab from the textarea INTO it (the caption follows the
+        // textarea in DOM order) — the browser's focus fixup then drops focus to
+        // <body> and the control is never reachable by keyboard. relatedTarget is
+        // the element gaining focus; when it is still inside this atom, focus is
+        // only MOVING within, not leaving — keep the chrome revealed and let the
+        // subsequent focusin confirm it.
+        if (e && e.relatedTarget && dom.contains(e.relatedTarget)) return;
         focused = false;
         syncChrome();
       };
