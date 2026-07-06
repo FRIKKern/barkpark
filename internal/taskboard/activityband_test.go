@@ -87,10 +87,11 @@ func nextKinds(ns []NextItem) []NextKind {
 	return out
 }
 
-// TestNextCursorParity — a board WITH next rows: the NEXT rows are cursor stops
-// pinned at [len(Now), len(Now)+len(Next)); visibleRows' head count matches
-// flattenSpine's pinned offset, so the ▎ marker sits on exactly the acted-on row
-// for EVERY cursor index (charter D63 structural parity, extended to NEXT).
+// TestNextCursorParity — a board WITH next rows: after Amendment 6 the pinned band
+// is the TAIL of the index space (charter D84/D86) — the NEXT rows are cursor stops
+// at [S, S+len(Next)) and the NOW rows at [S+len(Next), …), S = selectableSpineCount.
+// visibleRows' order matches Render's pinned bases, so the ▎ marker sits on exactly
+// the acted-on row for EVERY cursor index (structural parity, re-based to the tail).
 func TestNextCursorParity(t *testing.T) {
 	m := testModel(nextBoard())
 	m.ui.Conn = ConnLive
@@ -99,14 +100,17 @@ func TestNextCursorParity(t *testing.T) {
 	m.width, m.height = 80, 60
 
 	rows := m.visibleRows()
-	// The head is exactly NOW + NEXT before any spine row.
-	head := len(m.board.Now) + len(m.board.Next)
-	for i := 0; i < head; i++ {
-		if i < len(m.board.Now) && rows[i].kind != rowNow {
-			t.Fatalf("pinned row %d is %v, want rowNow", i, rows[i].kind)
+	s := selectableSpineCount(m.board, m.ui)
+	// The pinned band is now the TAIL: [S, S+len(Next)) NEXT, then [S+len(Next), …) NOW.
+	for i := 0; i < len(m.board.Next); i++ {
+		if rows[s+i].kind != rowNext {
+			t.Fatalf("pinned row %d is %v, want rowNext", s+i, rows[s+i].kind)
 		}
-		if i >= len(m.board.Now) && rows[i].kind != rowNext {
-			t.Fatalf("pinned row %d is %v, want rowNext", i, rows[i].kind)
+	}
+	for i := 0; i < len(m.board.Now); i++ {
+		j := s + len(m.board.Next) + i
+		if rows[j].kind != rowNow {
+			t.Fatalf("pinned row %d is %v, want rowNow", j, rows[j].kind)
 		}
 	}
 	for i, r := range rows {
@@ -221,7 +225,7 @@ func TestNextResumeClaimBypassesGate(t *testing.T) {
 	// (b) WITH the bypass, c on the resumable NEXT row issues the claim regardless.
 	m2 := testModel(b)
 	m2.now = func() time.Time { return time.Unix(2, 0) }
-	m2.ui.Cursor = len(b.Now) // the first NEXT row (the resumable)
+	m2.ui.Cursor = selectableSpineCount(m2.board, m2.ui) // the first NEXT row (band is the tail now)
 	if r, ok := m2.currentRow(); !ok || r.kind != rowNext {
 		t.Fatalf("cursor did not land on the NEXT resumable row, got %+v ok=%v", r, ok)
 	}
@@ -241,7 +245,7 @@ func TestNextRowActionsResolve(t *testing.T) {
 	b := nextBoard()
 	m := testModel(b)
 	m.cfg.BaseURL = "https://guerrilla.barkpark.cloud"
-	m.ui.Cursor = len(b.Now) // the resumable NEXT row
+	m.ui.Cursor = selectableSpineCount(m.board, m.ui) // the resumable NEXT row (band is the tail now)
 	if _, found := m.taskByID("nx-resume"); !found {
 		t.Fatalf("taskByID must find a NEXT row's task")
 	}
@@ -253,7 +257,7 @@ func TestNextRowActionsResolve(t *testing.T) {
 	// o builds a Studio deep link on the strip.
 	m2 := testModel(b)
 	m2.cfg.BaseURL = "https://guerrilla.barkpark.cloud"
-	m2.ui.Cursor = len(b.Now)
+	m2.ui.Cursor = selectableSpineCount(m2.board, m2.ui)
 	nm2, _ := step(t, m2, runes("o"))
 	if !strings.Contains(nm2.ui.Strip.Message, "nx-resume") {
 		t.Errorf("o on a NEXT row should surface a Studio link carrying the doc id, got %q", nm2.ui.Strip.Message)
@@ -271,19 +275,24 @@ func TestPinnedRowParityUnderHeightPressure(t *testing.T) {
 	if len(b.Now) == 0 || len(b.Next) == 0 {
 		t.Fatalf("fixture must carry NOW and NEXT rows, got now=%d next=%d", len(b.Now), len(b.Next))
 	}
-	pinned := len(b.Now) + len(b.Next)
-	// Down to the documented height floor of 8, every pinned cursor index keeps its
-	// single marker (the spine may scroll a spine cursor off below ~13, which is the
-	// pre-existing floor behavior — pinned rows never fold out of markability).
+	// After Amendment 6 (charter D84/D86) the pinned band is the TAIL of the index
+	// space: NEXT at [S, S+len(Next)), then NOW at [S+len(Next), …). spineRows depends
+	// only on b + st (not height), so S is stable across the h loop.
+	st0 := corpusUIState()
+	s := selectableSpineCount(b, st0)
+	// Down to the documented height floor, every pinned cursor index keeps its single
+	// marker even when the band folds (the spine may scroll a spine cursor off below
+	// ~13 — pre-existing floor behavior — but pinned rows never fold out of markability).
 	for h := 13; h <= 30; h++ {
-		for ci := 0; ci < pinned; ci++ {
+		for k := 0; k < len(b.Next)+len(b.Now); k++ {
+			ci := s + k // the pinned band is the TAIL of the index space now
 			st := corpusUIState()
 			st.Cursor = ci
 			frame := ansi.Strip(Render(b, st, 72, h, corpusFixedNow))
 			if got := strings.Count(frame, "▎"); got != 1 {
-				kind := "NOW"
-				if ci >= len(b.Now) {
-					kind = "NEXT"
+				kind := "NEXT"
+				if k >= len(b.Next) { // NEXT precedes NOW now (charter D84)
+					kind = "NOW"
 				}
 				t.Fatalf("h=%d cursor=%d (%s row): %d ▎ markers, want exactly 1\n%s", h, ci, kind, got, frame)
 			}

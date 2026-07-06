@@ -1135,6 +1135,67 @@ TestHookStopClosesOnlyWhenAllMet asserting observed_rev on the close body. LESSO
 safe (exit 0) HIDES its own failures — only a real live loop, not unit tests + dry-run, surfaced this.
 
 
+### Wave-15 architect decisions (2026-07-07 — INVERT THE PANE; wish AMENDMENT 6 "reverse things — the top part on bottom")
+
+The user's wish, verbatim: "We need the top part of tui to be on bottom - i dont like fixed on top -
+better bottom - reverse things." The SCROLLING TASK LIST becomes the top region and fills from the
+top; the pinned band (momentum + progress + NOW + NEXT) moves to the BOTTOM, fixed directly above the
+ticker/footer. Everything from waves 8–14 (focus windows, finished-shelf decay, curated NEXT, cmux
+workers in NOW, the Compose gutter) is unchanged — ONLY the vertical placement and the cursor index
+space invert. This is a pure `internal/taskboard` render+shell slice: `spine.go` (the ONE spineRows
+producer), `compose.go`, `components.go` and pdrender are UNTOUCHED; no server/API change.
+
+83. **The pinned band relocates to the BOTTOM as fixed status chrome; the momentum line + progress
+    bar + truncation note DESCEND with it.** `Render` reassembles top→bottom as `[identityTop] [spine
+    — scrolls] [band: NEXT then NOW] [momentum + progress + trunc] [ticker] [action strip?] [footer]`.
+    `renderHeader` splits into `renderIdentityTop` (the one identity line, pinned top) and
+    `renderStatusFooter` (momentum + progress + the "showing N of M" note, now fixed BOTTOM chrome).
+    The status chrome is NEVER sheddable — exactly as the header block was never sheddable up top.
+    *Why:* the user reads a status bar at the bottom "like a status bar"; momentum nearest the footer.
+
+84. **Intra-band order + cursor order both flow top→bottom = NEXT above NOW, and the cursor walks the
+    LIST first then descends into the band.** Vertically the band paints NEXT (dim label, intent)
+    ABOVE NOW (bold label, live claims) so NOW sits nearest the momentum status bar. The cursor follows
+    the visual order: spine selectable rows own the FIRST indices, then NEXT, then NOW at the very
+    bottom. `j` from cursor 0 (top of the list) walks the list down, crosses into NEXT, then NOW; `k`
+    reverses. *Why:* cursor order == visual order is the one honest rule for an inverted pane; the crux
+    of the slice.
+
+85. **The thin identity line STAYS pinned at the very top — it is orientation, not activity.**
+    `barkpark · tasks · ⇄ guerrilla ● live · 2m` answers "what am I looking at / is it live"; it is a
+    fixed title, not a live status readout, so it does not belong in the descending activity band. It
+    stays as the single orienting line at the top. *Why:* a title that scrolls or floats to the bottom
+    stops orienting; the live status (momentum/progress) is what belongs down with the ticker.
+
+86. **The cursor index space flips in LOCKSTEP through ONE base `S = selectableSpineCount(b, st)`.**
+    Today the band owned `[0, lenNow)[lenNow, lenNow+lenNext)` before the spine; now the spine owns
+    `[0, S)`, NEXT owns `[S, S+lenNext)`, NOW owns `[S+lenNext, …)`. `S` is computed once in `Render`
+    from the SAME `spineRows` producer and passed as `base` to `renderNextBand` (base=S) and
+    `renderNowBand` (base=S+lenNext); `flattenSpine`'s `selIdx` re-bases to 0; `visibleRows` emits the
+    spine selectable subset FIRST, then NEXT, then NOW. Because both the shell (`visibleRows`) and the
+    renderer (`flattenSpine` + the band renderers) read the one producer and the one `S`, cursor-parity
+    stays STRUCTURAL — the ▎ marker lands on the painted line at every index by construction, top→
+    bottom. *Why:* one source of truth for the reorder; parity can't desync.
+
+87. **The band budgets off the BOTTOM; the spine keeps ≥ minSpine (4) and the band sheds from the top.**
+    `bandBudget = height − len(identityTop) − 2 blanks − len(chrome) − minSpine`. NOW reserves its lines
+    FIRST (last to shed); NEXT gets the remainder and folds first (`+N intent`), its display-only `+N
+    ready` tail shedding before that. An empty NOW+NEXT collapses the band to NOTHING — no labels, no
+    blank spacers (the all-clear lives in the momentum "0 in flight") — so an idle board stays byte-
+    stable. *Why:* the list is the hero region now; the sheddable band protects it from starving from
+    the bottom, mirroring the old top-shed behavior.
+
+88. **Goldens regenerate; reading-frame goldens stay byte-identical; guards walk unweakened.** Every
+    board + `compose_wide_120` + livecorpus + motion/still/firstpaint golden inverts and is regenerated
+    with `-update` (deliberate, eyeballed, never hand-edited); the reading-frame goldens
+    (`compose_task_*`, `detail_*`, `paper_*`) MUST NOT change (a diff there = the inversion leaked into
+    a reader, a bug). The cursor-parity guards (`TestNextCursorParity`, `TestPinnedRowParityUnderHeight
+    Pressure`, `TestCursorParity*`) keep their exhaustive per-index ▎ walk, re-based to the tail; a new
+    `TestInvertedIndexOrder` pins spine→NEXT→NOW explicitly. Glyph-budget + semrole parity green — the
+    inversion adds NO vocabulary. *Why:* the flip is placement-only; the gates prove it changed nothing
+    about what a row means, only where it sits.
+
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)
@@ -1771,3 +1832,45 @@ dispatch quality is bounded by `area:` label coverage (~unset today — every pr
 except the cb-* tasks); the SessionStart-claim race (two dispatchers / a human already on the task) is the
 reserved atomic-claim-first fix; `drainHookStdin` has no wall-clock deadline (matches cmux's own contract —
 Claude closes stdin — judged not worth over-engineering for v1).
+
+### Wave 15 2026-07-07 (SHIPPED + live-eyeballed — INVERT THE PANE; wish AMENDMENT 6, D83–D88)
+
+**The flip.** The scrolling task list is now the TOP region (fills from under the identity line); the pinned
+band (NEXT above NOW) + momentum line + progress bar + truncation note descend to the BOTTOM as fixed status
+chrome, directly above the ticker + footer. The identity line (`barkpark · tasks · ⇄ guerrilla ● live`) STAYS
+pinned at the very top (D85 — orientation, not activity). Vertical order top→bottom:
+`[identity] [LIST — scrolls] [NEXT] [NOW] [momentum + progress] [ticker] [footer]`. Waves 8–14 behavior
+(focus windows, finished-shelf decay, curated NEXT, cmux workers in NOW, the Compose gutter) is untouched —
+only vertical placement + cursor order inverted.
+
+**The crux — cursor index space flips in lockstep (D86).** One base `S = selectableSpineCount(b, st)` computed
+once in `Render` from the ONE `spineRows` producer: spine owns `[0, S)`, NEXT owns `[S, S+lenNext)`, NOW owns
+`[S+lenNext, …)`. `render.go`: `Render` reassembled top→bottom with the band budgeted off the bottom
+(D87, `minSpine=4`); `renderHeader` split into `renderIdentityTop` + `renderStatusFooter`; `renderNowBand` /
+`renderNextBand` take a `base` param and offset every cursor comparison; `flattenSpine` selIdx re-based to 0;
+new `selectableSpineCount`. `program.go`: `visibleRows` emits the spine selectable subset FIRST, then NEXT, then
+NOW — so the shell and renderer read the same producer + same S and cursor-parity is STRUCTURAL.
+
+**Gates GREEN (host, CC=/usr/bin/clang).** `CGO_ENABLED=0 go build ./...`, `go vet ./internal/taskboard/...`,
+`go test ./internal/taskboard/... ./internal/cli/... -count=1`, `go test -race ./internal/taskboard/...` — all
+ok; gofmt clean. Cursor-parity guards kept their exhaustive per-index ▎ walk, RE-BASED to the tail
+(`TestNextCursorParity`, `TestPinnedRowParityUnderHeightPressure` sweeping h=13..30 at ci=S+k, `TestCursorParity*`);
+`TestVisibleRowsOrderAndKinds`/`WithClusters` hard-index expectations updated to spine→NEXT→NOW; a new
+`TestInvertedIndexOrder` pins the order explicitly; `livecorpus_test` finds the momentum line by its "in flight"
+marker (no longer line index 1). Glyph-budget + semrole parity green — the flip added NO vocabulary.
+
+**Goldens regenerated deliberately + eyeballed.** Every board frame + `compose_wide_120` + livecorpus +
+motion/still/firstpaint golden inverts (18 testdata files). Reading-frame goldens (`compose_task_*`, `detail_*`,
+`paper_*`) stayed BYTE-IDENTICAL — confirming the inversion never leaked into a reader. A second `-update` pass
+produced zero further diff (deterministic).
+
+**Live read-only eyeball vs guerrilla (56 + 72).** Fetched the real corpus and rendered the inverted frame
+headless. Line 1 = identity strip; the list scrolls at the top (epics recency-ranked, phase bands, `↓ 62 more
+below` overflow); at the bottom NEXT (`NEXT · 28 independent`, resumables, `+97 ready` tail) sits ABOVE NOW
+(live claim), then momentum (`⠿ 1 in flight · ○ 100+ ready · ✓ 243 done  68%`) + progress bar + ticker + footer.
+Cursor walk proven on live data at 72: ci=0 → top list row, ci=S-1=72 → last spine row, ci=S=73 → first NEXT
+row, ci=75 → third NEXT row — the ▎ flows top→bottom through the list and continues into the band. NEVER mutated
+a live task.
+
+**Next wave.** Charter §6 hygiene + human polish + the D43 pdrender glyph-unify remain (unchanged by this wave —
+placement-only). Nothing new opened.

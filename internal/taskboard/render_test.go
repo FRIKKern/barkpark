@@ -42,12 +42,15 @@ func loadBoardFixture(t *testing.T) Board {
 }
 
 // fixtureUIState pins a cursor-selected spine row so the goldens exercise the ▎
-// selection marker. The cursor indexes the SHELL's visibleRows order (NOW cards,
-// then each epic's header + children, then clusters, then orphans). After the
-// NOW de-dup the two claimed tasks render ONLY in the pinned band, so the first
-// spine child under the epic header is index 3 — the ready "Reconcile the #979
-// role seam". Inline expand is gone (charter D11): enter now PUSHES a detail
-// frame the compositor paints, so the BOARD golden is a single calm line per row.
+// selection marker. After Amendment 6 (charter D84/D86) the scrolling list is the
+// TOP region and its selectable rows own the FIRST indices [0, S); the pinned band
+// (NEXT then NOW) is the TAIL at [S, …). So the cursor indexes the SHELL's inverted
+// visibleRows order (spine header + children + clusters + orphans, THEN NEXT, THEN
+// NOW). The claimed tasks render ONLY in the pinned band at the bottom (NOW de-dup),
+// so index 3 lands on a spine row near the top of the list — a deliberate spine-row
+// marker (the pinned-band ▎ is exhaustively covered by the parity guards). Inline
+// expand is gone (charter D11): enter PUSHES a detail frame the compositor paints,
+// so the BOARD golden is a single calm line per row.
 //
 // Frame is left at 0: the calm-board subtraction retired the frame-driven glyph
 // animation (there is no spinner to capture in a moving state anymore), so a

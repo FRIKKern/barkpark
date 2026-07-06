@@ -1,17 +1,5 @@
 barkpark · tasks            ⇄ guerrilla  ● live · 1m
-⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 1 stale  55%
-████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░
-
-NOW
-▎⠋ opus-3 wire the append-only audit sink      5m00s
- ⠋ fable-1 map SAML group claims to roles      8m00s
-NEXT · 6 independent
- ↩ resume 'wire the Studio user-… · lease expired 8m
- ○ P1 append-only ev… · continues Enterprise-ready …
- ○ P1 task-resolver -> live snapshot
-   +6 ready
-
-  Enterprise-ready auth - one layer, easy… ··· 25/32
+▎ Enterprise-ready auth - one layer, easy… ··· 25/32
    ○ W1 · Tenant-wide audit event bus             P1
   ↳  ⠋ wire the append-only audit sink     P1 opus-3
   ↳  ○ append-only event schema               P1 0/3
@@ -75,6 +63,18 @@ NEXT · 6 independent
 
 
 
+
+NEXT · 6 independent
+ ↩ resume 'wire the Studio user-… · lease expired 8m
+ ○ P1 append-only ev… · continues Enterprise-ready …
+ ○ P1 task-resolver -> live snapshot
+   +6 ready
+NOW
+ ⠋ opus-3 wire the append-only audit sink      5m00s
+ ⠋ fable-1 map SAML group claims to roles      8m00s
+
+⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 1 stale  55%
+████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░
 ────────────────────────────────────────────────────
 ⠋ claimed 'auth-w1-claim' · 5m
 jk · enter open · esc back · c claim · x close · o …

@@ -75,12 +75,13 @@ func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: [
 func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	rows := m.visibleRows()
+	// Amendment 6 (charter D84/D86): the scrolling list is the TOP region, so its
+	// selectable spine rows own the FIRST indices; the pinned band (NEXT then NOW)
+	// is the TAIL. sampleBoard carries no NEXT, so the two NOW cards land last.
 	want := []struct {
 		kind  rowKind
 		docID string
 	}{
-		{rowNow, "n1"},
-		{rowNow, "n2"},
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
@@ -90,6 +91,8 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowChild, "c3"},
 		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
 		{rowOrphan, "o1"},
+		{rowNow, "n1"}, // pinned band at the tail now (charter D84)
+		{rowNow, "n2"},
 	}
 	if len(rows) != len(want) {
 		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -183,15 +186,17 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 // parity walk also proves the twin glyph never shifts the acted-on row.
 //
 // Fresh (nothing collapsed) it flattens to 16 navigable rows. Every section is
-// under the head cap, so all children show — including e2's lone child cx. The
-// loose bucket's navigable header sits before o1:
+// under the head cap, so all children show — including e2's lone child cx. After
+// Amendment 6 (charter D84/D86) the scrolling list is the TOP region: its spine
+// rows own [0, S), then the pinned band (NEXT then NOW) is the TAIL. clusterBoard
+// carries no NEXT, so the two NOW cards land last (14, 15):
 //
-//	0 now n1        6 child cx              12 clusterHeader beta
-//	1 now n2        7 header e3             13 clusterMember b1
-//	2 header e1     8 child c3              14 orphan header
-//	3 child c1      9 clusterHeader alpha   15 orphan o1
-//	4 child c2     10 clusterMember a1
-//	5 header e2    11 clusterMember a2
+//	0 header e1     6 child c3             12 orphan header
+//	1 child c1      7 clusterHeader alpha  13 orphan o1
+//	2 child c2      8 clusterMember a1     14 now n1
+//	3 header e2     9 clusterMember a2     15 now n2
+//	4 child cx     10 clusterHeader beta
+//	5 header e3    11 clusterMember b1
 func clusterBoard() Board {
 	b := sampleBoard()
 	a1 := t("a1")
@@ -213,8 +218,6 @@ func TestVisibleRowsWithClusters(t2 *testing.T) {
 		kind  rowKind
 		docID string
 	}{
-		{rowNow, "n1"},
-		{rowNow, "n2"},
 		{rowEpicHeader, "e1"},
 		{rowChild, "c1"},
 		{rowChild, "c2"},
@@ -229,6 +232,8 @@ func TestVisibleRowsWithClusters(t2 *testing.T) {
 		{rowClusterMember, "b1"},
 		{rowOrphanHeader, orphansFoldKey}, // loose bucket header, then its rows
 		{rowOrphan, "o1"},
+		{rowNow, "n1"}, // pinned band at the tail now (charter D84)
+		{rowNow, "n2"},
 	}
 	if len(rows) != len(want) {
 		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -501,8 +506,9 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 		t2.Fatalf("unfolded cluster board = %d rows, want 16", got)
 	}
 
-	// Put the cursor on the alpha cluster header (index 9) and fold with h.
-	m.ui.Cursor = 9
+	// Put the cursor on the alpha cluster header (index 7 — the spine leads now,
+	// charter D84/D86) and fold with h.
+	m.ui.Cursor = 7
 	m, _ = step(t2, m, runes("h"))
 	if !m.ui.CollapsedEpics[clusterHeaderKey("proj:alpha")] {
 		t2.Fatalf("h on a cluster header did not record the fold")
@@ -516,14 +522,14 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 			t2.Fatalf("folded cluster member %q is still navigable", r.docID)
 		}
 	}
-	// j from the alpha header steps straight to the beta header (index 10 now).
+	// j from the alpha header steps straight to the beta header (index 8 now).
 	m, _ = step(t2, m, runes("j"))
 	if r, _ := m.currentRow(); r.kind != rowClusterHeader || r.docID != clusterHeaderKey("proj:beta") {
 		t2.Fatalf("j across the folded cluster landed on {%v %q}, want the beta header", r.kind, r.docID)
 	}
 
 	// enter on the alpha header (back up one row) unfolds it again.
-	m.ui.Cursor = 9
+	m.ui.Cursor = 7
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.visibleRows()) != 16 {
 		t2.Fatalf("enter did not unfold alpha: %d rows, want 16", len(m.visibleRows()))
@@ -541,11 +547,11 @@ func TestActVerbsReachClusterMembers(t2 *testing.T) {
 	if got, ok := m.taskByID("a2"); !ok || got.DocID != "a2" {
 		t2.Fatalf("taskByID did not find cluster member a2: %v %+v", ok, got)
 	}
-	// Cursor on b1 (index 13 — cx now shows, shifting members down one), c fires
-	// a claim command (ready row).
-	m.ui.Cursor = 13
+	// Cursor on b1 (index 11 — the spine leads the index space now, charter
+	// D84/D86), c fires a claim command (ready row).
+	m.ui.Cursor = 11
 	if r, _ := m.currentRow(); r.docID != "b1" {
-		t2.Fatalf("cursor 13 is on %q, want b1", r.docID)
+		t2.Fatalf("cursor 11 is on %q, want b1", r.docID)
 	}
 	m2, cmd := step(t2, m, runes("c"))
 	if cmd == nil {
@@ -601,7 +607,7 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 
 func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 2 // header e1
+	m.ui.Cursor = 0 // header e1 (the spine leads the index space now, charter D84/D86)
 
 	// e1 is a FOCUS section (its neighborhood happens to be both children). enter
 	// on a focus/header section writes an explicit EXPAND (entry=false) — charter
@@ -625,14 +631,14 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	if len(rows) != 9 {
 		t2.Fatalf("after collapsing e1: %d rows, want 9", len(rows))
 	}
-	if rows[3].docID != "e2" { // e1 header now immediately followed by e2 header
-		t2.Fatalf("row 3 after collapse = %q, want e2 header", rows[3].docID)
+	if rows[1].docID != "e2" { // e1 header now immediately followed by e2 header
+		t2.Fatalf("row 1 after collapse = %q, want e2 header", rows[1].docID)
 	}
 }
 
 func TestHFoldsAndLUnfoldsDeterministically(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 7 // header e3 (cx now shows under e2, shifting e3's header down one)
+	m.ui.Cursor = 5 // header e3 (the spine leads the index space now, charter D84/D86)
 
 	// h folds; a second h is idempotent (NOT a toggle — the help text promises
 	// "h / l  fold / unfold", so each key always means the same thing).
@@ -724,7 +730,7 @@ func TestExpandedInactiveEpicHasNoPhantomCollapse(t2 *testing.T) {
 
 func TestHAndLOnTaskAreNoOps(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 0 // now card n1 (a task, not a header)
+	m.ui.Cursor = 9 // now card n1 (a task, not a header) — the pinned band is the tail now (charter D84/D86)
 	m, _ = step(t2, m, runes("l"))
 	m, _ = step(t2, m, runes("h"))
 	// h/l are the section-fold controls; on a task row they must do NOTHING — no
@@ -742,7 +748,7 @@ func TestHAndLOnTaskAreNoOps(t2 *testing.T) {
 // board's own row count, and esc pops back to the board.
 func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 0 // now card n1
+	m.ui.Cursor = 9 // now card n1 — the pinned band is the tail now (charter D84/D86)
 
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.stack) != 2 {
@@ -763,7 +769,7 @@ func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 	}
 
 	// enter on a child row pushes that child's FrameTask.
-	m.ui.Cursor = 3 // child c1
+	m.ui.Cursor = 1 // child c1 (the spine leads the index space now, charter D84/D86)
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if top := m.topFrame(); top.Kind != FrameTask || top.Ref != "c1" {
 		t2.Fatalf("enter on a child pushed {%v %q}, want {FrameTask c1}", top.Kind, top.Ref)
@@ -1418,5 +1424,29 @@ func TestEnterOnMoreLineExpandsSection(t *testing.T) {
 	key := rows[moreAt].docID
 	if !m.sectionExpandedByKey(key) {
 		t.Fatalf("section %q not in modeExpanded after enter on its fold line", key)
+	}
+}
+
+// TestInvertedIndexOrder pins Amendment 6 (charter D84/D86): the spine selectable
+// rows own [0, S), then NEXT [S, S+lenNext), then NOW [S+lenNext, …) — the pinned
+// band is the TAIL of the index space, so the cursor flows top→bottom through the
+// list first and continues down into the claimable band.
+func TestInvertedIndexOrder(t *testing.T) {
+	m := testModel(nextBoard())
+	rows := m.visibleRows()
+	s := selectableSpineCount(m.board, m.ui)
+	if s <= 0 {
+		t.Fatalf("fixture must have spine rows, got S=%d", s)
+	}
+	for i := 0; i < s; i++ {
+		if rows[i].kind == rowNow || rows[i].kind == rowNext {
+			t.Fatalf("row %d is a pinned band kind %v — the band must follow the spine", i, rows[i].kind)
+		}
+	}
+	if rows[s].kind != rowNext {
+		t.Fatalf("row S (%d) is %v, want the first NEXT row", s, rows[s].kind)
+	}
+	if rows[s+len(m.board.Next)].kind != rowNow {
+		t.Fatalf("row S+lenNext is %v, want the first NOW row", rows[s+len(m.board.Next)].kind)
 	}
 }

@@ -304,10 +304,21 @@ func TestLiveCorpusInvariants(t *testing.T) {
 			t.Errorf("w%d: the cancelled fold tail / tombstone vanished (W10-B regression)\n%s", width, frame)
 		}
 
-		// The momentum % (line index 1) must be intact — meta reserved before the
-		// title ellipsizes (D-D).
-		if pct := regexp.MustCompile(`\d+%`).FindString(lines[1]); pct == "" {
-			t.Errorf("w%d: momentum %% truncated off the line: %q (D-D regression)", width, lines[1])
+		// The momentum % must be intact — meta reserved before the title ellipsizes
+		// (D-D). After Amendment 6 the momentum line relocated to the bottom status
+		// chrome (charter D83), so find it by its "in flight" marker rather than a
+		// fixed line index.
+		var momentum string
+		for _, ln := range lines {
+			if strings.Contains(ln, "in flight") {
+				momentum = ln
+				break
+			}
+		}
+		if momentum == "" {
+			t.Errorf("w%d: momentum line (\"in flight\") missing from the frame", width)
+		} else if pct := regexp.MustCompile(`\d+%`).FindString(momentum); pct == "" {
+			t.Errorf("w%d: momentum %% truncated off the line: %q (D-D regression)", width, momentum)
 		}
 	}
 }
