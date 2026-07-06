@@ -82,7 +82,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
           </span>
           <span class="bp-update-status" data-bp-update-status role="status" aria-live="polite"></span>
           <div class="bp-update-actions">
-            <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
+            <%= if changelog_present?(@update_status) do %>
               <button
                 type="button"
                 class="bp-update-link"
@@ -113,13 +113,28 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             >×</button>
           </div>
         </div>
-        <%= if is_list(@update_status.digest) and @update_status.digest != [] do %>
+        <%= if changelog_present?(@update_status) do %>
           <div id="bp-update-changelog" class="bp-update-changelog" hidden>
-            <ul>
-              <%= for line <- @update_status.digest do %>
-                <li><%= line %></li>
-              <% end %>
-            </ul>
+            <%= if notes_present?(@update_status) do %>
+              <%!-- Curated release notes (isu-w2): human-authored body, kept
+                    as plain text (pre-wrapped) — safe and auto-escaped. Full
+                    formatted notes are one click away via the link below. --%>
+              <div class="bp-update-notes"><%= @update_status.notes_body %></div>
+            <% else %>
+              <ul>
+                <%= for line <- @update_status.digest do %>
+                  <li><%= line %></li>
+                <% end %>
+              </ul>
+            <% end %>
+            <%= if @update_status.notes_url do %>
+              <a
+                class="bp-update-notes-link"
+                href={@update_status.notes_url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >Full release notes ↗</a>
+            <% end %>
           </div>
         <% end %>
         <%= unless @apply_enabled? do %>
@@ -160,6 +175,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   catch
     _, _ -> nil
   end
+
+  # Curated notes (isu-w2) win over the raw commit digest in the changelog
+  # panel; the "What's changed" toggle shows when EITHER is present.
+  defp changelog_present?(%{} = s), do: notes_present?(s) or digest_present?(s)
+  defp changelog_present?(_), do: false
+
+  defp notes_present?(%{notes_body: body}) when is_binary(body), do: String.trim(body) != ""
+  defp notes_present?(_), do: false
+
+  defp digest_present?(%{digest: digest}) when is_list(digest), do: digest != []
+  defp digest_present?(_), do: false
 
   # Whether one-click apply is armed on this box (BARKPARK_SELF_UPDATE_APPLY=1
   # → Runner.enabled?). Same belt-and-braces fail-closed as the status call:

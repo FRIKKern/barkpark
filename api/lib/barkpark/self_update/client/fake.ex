@@ -29,5 +29,11 @@ defmodule Barkpark.SelfUpdate.Client.Fake do
     Keyword.get(cfg(), :digest, {:ok, []})
   end
 
+  @impl true
+  def release_notes(_repo, _tag) do
+    # Unprimed → "no curated notes", so checker tests default to the digest.
+    Keyword.get(cfg(), :release_notes, {:ok, %{body: nil, url: nil}})
+  end
+
   defp cfg, do: Application.get_env(:barkpark, __MODULE__, [])
 end

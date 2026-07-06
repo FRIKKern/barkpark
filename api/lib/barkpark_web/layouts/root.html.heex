@@ -560,6 +560,14 @@
       border-top: 1px dashed var(--border-muted); color: var(--fg-muted); line-height: 1.5;
     }
     .bp-update-changelog ul { margin: 0; padding-left: 16px; }
+    /* Curated release notes (isu-w2): human-authored body, kept as plain
+       pre-wrapped text; the raw digest <ul> is the fallback. */
+    .bp-update-notes { white-space: pre-wrap; margin: 0; max-height: 40vh; overflow-y: auto; }
+    .bp-update-notes-link {
+      display: inline-block; margin-top: 8px; font-size: 12px; font-weight: 600;
+      color: var(--warning); text-decoration: none;
+    }
+    .bp-update-notes-link:hover { text-decoration: underline; }
     .bp-update-changelog code {
       font-family: var(--font-mono); font-size: 11px;
       padding: 1px 4px; border-radius: 3px; background: var(--bg-card);

@@ -90,6 +90,8 @@ defmodule BarkparkWeb.SelfUpdateController do
       latest_release: status.latest_release,
       canonical_release: status.canonical_release,
       digest: status.digest,
+      notes_body: Map.get(status, :notes_body),
+      notes_url: Map.get(status, :notes_url),
       checked_at: iso(status.checked_at)
     }
   end
