@@ -30,6 +30,14 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   pd-doctrine M3 spine (t8 fleet-in-canvas, t10 parity gate) is built on — a
   full canvas⇄reader diff extends the same parser.
 
+  This file guards the PROSE typography surface (headings/paragraph/list/…). Its
+  sibling `canvas_reader_parity_gate_test.exs` (t10) guards the NON-PROSE FLEET
+  surface — asserting the canvas paints every fleet block (tasks/board/roadmap/
+  cards/pipeline/notes/legend/detail/form/figures + sheet/embed chip-carry)
+  through the ONE reader producer, `Render.render_block(block, %{style: :article})`,
+  and that the canvas node-view JS hand-mirrors no fleet markup. Together they are
+  the pd-doctrine rule-3 tripwire pair.
+
   Intentional, documented divergences (View-only list bottom-margin) are
   encoded as guarded invariants below, so ADDING them to Edit trips the wire and
   forces a conscious decision rather than silent double-spacing.
