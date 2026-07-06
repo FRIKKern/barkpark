@@ -149,6 +149,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (all 12 kinds, diagram absent from every one).
   @canvas_fleet_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
+  # Article-chrome ROLE prose (eyebrow / byline / ingress / pullquote) — chrome-free
+  # STYLED prose the canvas handles as plain ProseMirror nodes (run-convert.js
+  # CANVAS_ROLE_TYPES → same-named nodes; role-nodes.js). UNLIKE the callout content
+  # node (tone frame + fold chrome around a contentDOM), these emit ONE styled element
+  # with a `bp-role-*` class — NO node-view. Their bodies persist per role (eyebrow
+  # `text` string, byline `items` list, ingress/pullquote inline `content`); each CAN
+  # emit a patch-block on a body edit and no longer SPLITS a run.
+  #
+  # KEEP LOCKSTEP with run-convert.js CANVAS_ROLE_TYPES and role-nodes.js.
+  @canvas_role_types ~w(eyebrow byline ingress pullquote)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
@@ -166,7 +177,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_content_types ++
                   @canvas_field_types ++
                   @canvas_picker_field_types ++
-                  @canvas_readonly_atom_types ++ @canvas_fleet_types
+                  @canvas_readonly_atom_types ++
+                  @canvas_fleet_types ++ @canvas_role_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**
@@ -198,11 +210,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
 
     * `{:run, [canvas_block, …]}` — one-or-more adjacent CANVAS-ELIGIBLE blocks
       (prose `paragraph|heading|list` PLUS canvas atoms `divider` PLUS canvas
-      content nodes `callout` PLUS canvas attr-atoms `code`/`diagram`). A MAXIMAL
+      content nodes `callout` PLUS canvas attr-atoms `code`/`diagram` PLUS
+      article-chrome ROLE prose `eyebrow`/`byline`/`ingress`/`pullquote`). A MAXIMAL
       run: it extends as far as the next non-canvas boundary. As of S3.4 a divider, a
       callout, a code block AND a diagram block are all canvas-eligible, so a
       `[heading, paragraph, diagram, paragraph]` is ONE run (the diagram no longer
-      splits it).
+      splits it); the role blocks fold in the same way.
     * `{:block, boundary_block}` — a single non-canvas block (field-* / sheet /
       … ) that is a run boundary.
 
@@ -246,7 +259,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   control-atom (the 7 `field-*` types as of S3.5) OR a read-only atom (`sheet` /
   `embed` as of S3.6, carrying the whole block verbatim) OR a FLEET server-paint
   atom (the 12 `tasks`/`task-board`/`cards`/`form`/… kinds as of t12a, whole block
-  verbatim on `bpFleet`, painted with the reader's own HTML). Canvas-eligible blocks
+  verbatim on `bpFleet`, painted with the reader's own HTML) OR an article-chrome
+  ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
+  prose matching the reader). Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
   `field-reference` RIDE a run too — only the nested-structure fields composite /
   arrayOf / codelist / localizedText / section stay boundaries) is a `{:block, …}`

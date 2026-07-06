@@ -48,11 +48,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
-  def compose_block(%{"type" => "eyebrow"} = b, _style) do
+  def compose_block(%{"type" => "eyebrow"} = b, style) do
     # Uppercase, letter-spaced, accent kicker (article) / muted line (email).
-    # The walk reads `_role` to pick the styling per palette.
+    # The walk reads `_role` to pick the styling per palette. Article mode emits
+    # a real `<p>` (like byline/ingress) so the canvas node-view's `<p
+    # class="bp-role-eyebrow">` inherits the SAME block rhythm the reader does —
+    # otherwise the edit `<p>` picks up the generic `.bp-paper-editor-body p`
+    # 12pt margin the reader's inline `<span>` never had (View↔Edit drift).
+    # Email/default keeps the byte-stable `<span>` form.
+    kind = if style == :article, do: "PdParagraph", else: "PdText"
+
     %{
-      "kind" => "PdText",
+      "kind" => kind,
       "_role" => "eyebrow",
       "children" => [stringish(Map.get(b, "text", ""))]
     }
