@@ -1807,9 +1807,16 @@
       tab = h.view === "instance" ? h.tab : INSTANCE_TAB_DEFAULT;
     }
     tab = instanceTabOf(tab);
-    stopInstanceTicker(); // the DOM the ticker updates is about to be replaced
+    stopInstanceTicker(); // the DOM the ticker updates is about to be replaced (or re-armed by the fast path)
     var box = $("#instance-body");
-    box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
+    // Keep the current view up while refetching — wiping to "Loading…" here
+    // made every provisioning SSE tick flash the whole panel. The loading state
+    // only shows when the box isn't already rendering THIS instance (navigating
+    // to a different one still swaps to an honest loading state immediately).
+    var mountedPanel = box.querySelector("#instance-tabpanel");
+    if (!mountedPanel || mountedPanel.getAttribute("data-inst") !== String(id)) {
+      box.innerHTML = '<div class="loading">Loading instance&hellip;</div>';
+    }
     ensureFleet().then(function (list) {
       if (seq !== instanceLoadSeq) return; // a newer load owns the view
       if (!list) {
@@ -1838,6 +1845,22 @@
       var lc = instanceLifecycle(bp);
       if (lc.provisioning || lc.failed) provisioningSeen[bp.id] = true;
       var showReady = tab === "overview" && readyFoldTrigger(bp) && !!provisioningSeen[bp.id];
+      // SSE fast path (unified-provision-view): while provisioning, every step/
+      // console broadcast lands here — but a full remount restarts every
+      // animation (the same bug #1157 fixed on /new). When THIS instance's
+      // timeline is already mounted in the SAME phase, patch the live regions
+      // (steps / console / clocks / header chip) in place and re-arm the ticker;
+      // any phase change (→ failed, → live/ready fold) falls through to the
+      // full render below.
+      var mountedTl = box.querySelector('[data-tl][data-tl-bp="' + bp.id + '"]');
+      if (mountedTl && tab === "overview" && !showReady && lc.provisioning &&
+          mountedTl.getAttribute("data-tl-lc") === "provisioning") {
+        patchInstanceTimeline(mountedTl, bp);
+        var chip = box.querySelector(".fleet-url.provisioning");
+        if (chip) chip.outerHTML = provisionChipHtml(bp, Date.now());
+        startInstanceTicker(bp);
+        return;
+      }
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
       var panel = box.querySelector("#instance-tabpanel");
@@ -1884,7 +1907,7 @@
     tab = instanceTabOf(tab);
     return instanceHeaderHtml(bp) +
       instanceTabStripHtml(bp, tab) +
-      '<div id="instance-tabpanel" class="inst-tabpanel">' +
+      '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
         (tab === "overview" ? instanceOverviewHtml(bp, opts) : "") +
       "</div>";
   }
@@ -5278,14 +5301,17 @@
     return '<div class="fleet-url provisioning">' + esc(c.label) + t + "</div>";
   }
 
-  // ── Mount 1 presentation: the /new checklist markup (byte-locked in tests) ──
-  // The active row's dot doubles as the per-phase loading bar: a conic-gradient
-  // ring filled by --p (stepRingProgress over the phase's expected duration),
-  // ticked IN PLACE each second via data-ring — never a rebuild. The time
-  // column narrates pace: pending "~30s" (the plan), active "12s · ~30s" (live,
-  // ticked via data-time), done/failed the real elapsed. A `next` row (see
-  // markNextStep) keeps the pending dot but pulses + spins so the between-steps
-  // window never reads frozen.
+  // ── THE shared step-rows component (byte-locked in tests) ──────────────────
+  // ONE presentation for BOTH provisioning surfaces — the /new progress screen
+  // AND the cloud-admin instance timeline render these rows (the class family
+  // keeps its historical `new-step` name). The active row's dot doubles as the
+  // per-phase loading bar: a conic-gradient ring filled by --p (stepRingProgress
+  // over the phase's expected duration), ticked IN PLACE each second via
+  // data-ring — never a rebuild. The time column narrates pace: pending "~30s"
+  // (the plan), active "12s · ~30s" (live, ticked via data-time), done/failed
+  // the real elapsed. A `next` row (see markNextStep) keeps the pending dot but
+  // pulses + spins so the between-steps window never reads frozen. The verify
+  // gate's probe lines render as a checklist under their step.
   function newStepsHtml(rows) {
     return '<ul class="new-steps">' + rows.map(function (row) {
       var cls = row.role === "ok" ? "done" : row.role === "failed" ? "failed" : row.role === "active" ? "active" : "pending";
@@ -5305,6 +5331,11 @@
       var capHtml = cap
         ? '<span class="new-step-detail" data-cap="' + esc(cap) + '">' + esc(cap) + "</span>"
         : "";
+      var probesHtml = (row.probes && row.probes.length)
+        ? '<ul class="new-step-probes">' + row.probes.map(function (p) {
+            return '<li class="new-step-probe">' + esc(p) + "</li>";
+          }).join("") + "</ul>"
+        : "";
       var time = "";
       if (row.role === "active") time = fmtDur(row.elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
       else if (row.role === "pending") time = expected ? "~" + fmtDur(expected) : "";
@@ -5317,6 +5348,7 @@
         '<span class="new-step-body">' +
           '<span class="new-step-label">' + esc(row.label) + "</span>" +
           capHtml +
+          probesHtml +
         "</span>" +
         timeHtml +
         (row.role === "active" || row.next ? '<span class="new-step-spin" aria-hidden="true"></span>' : "") +
@@ -5328,33 +5360,15 @@
   // Pure string-builder over rows. opts: { failed, failureDetail }.
   function timelineHtml(rows, opts) {
     opts = opts || {};
-    var items = (rows || []).map(function (row) {
-      var mark = row.role === "ok" ? "&#10003;" : row.role === "failed" ? "&#10007;" : "";
-      var elapsed = '<span class="bp-tl-elapsed" data-step="' + esc(row.step) + '">' +
-        (row.elapsedMs != null ? fmtDur(row.elapsedMs) : "") + "</span>";
-      var capText = row.caption || (row.next ? "Starting…" : "");
-      var cap = capText ? '<div class="bp-tl-caption">' + esc(capText) + "</div>" : "";
-      var probes = (row.probes && row.probes.length)
-        ? '<ul class="bp-tl-probes">' + row.probes.map(function (p) {
-            return '<li class="bp-tl-probe">' + esc(p) + "</li>";
-          }).join("") + "</ul>"
-        : "";
-      // A `next` row spins too — the between-steps window shows motion here as
-      // well, dimmed by the --next class so it reads "about to", not "running".
-      var spin = (row.role === "active" || row.next) ? '<span class="bp-tl-spin" aria-hidden="true"></span>' : "";
-      return '<li class="bp-tl-step bp-tl-step--' + esc(row.role) + (row.next ? " bp-tl-step--next" : "") + '">' +
-          '<span class="bp-tl-dot" aria-hidden="true">' + mark + "</span>" +
-          '<div class="bp-tl-body">' +
-            '<div class="bp-tl-line"><span class="bp-tl-label">' + esc(row.label) + "</span>" + elapsed + "</div>" +
-            cap + probes +
-          "</div>" + spin +
-        "</li>";
-    }).join("");
+    // ONE component (unified-provision-view): the instance timeline renders the
+    // exact same rows as /new — ring, pace column, captions, probes, next pulse
+    // — via the shared newStepsHtml builder. Only the failure block is timeline-
+    // specific (the /new flow has its own failed screen).
     var fail = opts.failed
       ? '<div class="bp-tl-fail" role="alert"><b>Setup failed.</b> ' +
         esc(opts.failureDetail || "Provisioning didn't finish.") + "</div>"
       : "";
-    return '<ol class="bp-tl-steps">' + items + "</ol>" + fail;
+    return newStepsHtml(rows || []) + fail;
   }
 
   // Console body lines (shared with the timeline shell). Empty → a calm caption.
@@ -5393,14 +5407,55 @@
     return !removing && bp.deprovision_status !== "failed" && !bp.host && bp.provision_status !== "failed";
   }
 
+  // ── Instance-side pacing + patch state (unified-provision-view) ─────────────
+  // The same min-dwell presentation pacing the /new screen runs, per viewed
+  // instance (keyed by bp.id). Seeded on FIRST sight — opening a mid-provision
+  // instance renders its finished history done instantly; only transitions
+  // observed live get the ≥3s dwell. In-memory: a refresh reseeds. stepsSig /
+  // consoleSig are the region-patch caches (see patchInstanceTimeline).
+  var instanceTlState = {};
+
+  function instanceTlStateFor(id) {
+    id = String(id || "");
+    if (!instanceTlState[id]) {
+      instanceTlState[id] = { ledger: {}, seeded: false, stepsSig: null, consoleSig: null };
+    }
+    return instanceTlState[id];
+  }
+
+  // The instance timeline's DISPLAY rows: truth fold → min-dwell pacer.
+  function instanceDisplayRows(bp) {
+    var st = instanceTlStateFor(bp && bp.id);
+    var rows = provisionSteps(bp, Date.now());
+    if (!st.seeded) {
+      st.seeded = true;
+      seedPaceLedger(rows, st.ledger);
+    }
+    return paceSteps(rows, st.ledger, Date.now());
+  }
+
+  function instanceStepsSig(bp) {
+    return instanceDisplayRows(bp).map(function (r) {
+      return r.step + ":" + r.role + (r.completing ? "*" : "") + ":" + (r.caption || "") +
+        (r.next ? "+n" : "") + ":" + ((r.probes && r.probes.length) || 0);
+    }).join(",");
+  }
+
+  function instanceConsoleSig(bp) {
+    var lines = (bp && bp.provision_console) || [];
+    return lines.length + "|" + (lines.length ? (lines[lines.length - 1].at || "x") : "none");
+  }
+
   // The full instance-detail timeline section: header clock + steps + (failed)
   // verbatim detail & Retry + expandable console. Pure; the ticker + wiring add
   // liveness on top. opts.consoleCollapsed persists the user's toggle.
+  // data-tl-bp + data-tl-lc stamp WHAT is mounted so loadInstance's SSE fast
+  // path can prove "same instance, same phase" and patch instead of remounting.
   function instanceTimelineHtml(bp, now, opts) {
     opts = opts || {};
     now = (typeof now === "number") ? now : Date.now();
     var failed = isProvisionFailed(bp);
-    var rows = provisionSteps(bp, now);
+    var rows = instanceDisplayRows(bp);
     var total = provisionTotalMs(bp, now);
     var head = '<div class="bp-tl-head">' +
         '<h2 class="bp-tl-title">' + (failed ? "Setup failed" : "Provisioning") + "</h2>" +
@@ -5409,7 +5464,8 @@
     var retry = failed
       ? '<button class="btn btn-primary btn-sm bp-tl-retry" type="button" data-tl-retry>Retry setup</button>'
       : "";
-    return '<section class="bp-timeline" data-tl>' +
+    return '<section class="bp-timeline" data-tl data-tl-bp="' + esc((bp && bp.id) || "") +
+        '" data-tl-lc="' + (failed ? "failed" : "provisioning") + '">' +
         head +
         timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
         retry +
@@ -5435,24 +5491,79 @@
     instanceTickerBp = null;
   }
 
-  // Update only the elapsed text nodes (never rebuild) so the console scroll +
-  // the expand state survive; self-stops if the timeline left the DOM.
+  // The shared per-second ring/time patch for whichever scope holds the active
+  // row (the /new screen's body or the instance timeline section). A
+  // `completing` (dwelling) row sweeps its ring to full (+34/tick, smoothed by
+  // the 0.9s --p transition); a genuinely active row tracks truth elapsed
+  // against its estimate. Zero DOM rebuilds.
+  function tickActiveRing(scope, truthRows) {
+    if (!scope || !scope.querySelector) return;
+    var dot = scope.querySelector(".new-step-dot[data-ring]");
+    if (!dot) return;
+    var li = dot.parentNode;
+    if (li && li.className && li.className.indexOf("completing") !== -1) {
+      var cur = parseInt(dot.style.getPropertyValue("--p"), 10) || 0;
+      dot.style.setProperty("--p", Math.min(100, cur + 34) + "%");
+      return;
+    }
+    var step = dot.getAttribute("data-ring");
+    for (var i = 0; i < truthRows.length; i++) {
+      if (truthRows[i].step !== step || truthRows[i].role !== "active") continue;
+      var expected = SERVER_STEP_EXPECTED_MS[step];
+      dot.style.setProperty("--p", Math.round(stepRingProgress(truthRows[i].elapsedMs, expected) * 100) + "%");
+      var tEl = scope.querySelector('.new-step-time[data-time="' + step + '"]');
+      if (tEl) tEl.textContent = fmtDur(truthRows[i].elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
+      return;
+    }
+  }
+
+  // The instance timeline's 1s liveness tick: total clock + the active row's
+  // ring/time in place, and — because a dwell EXPIRING is a display change the
+  // server never signals — a steps-list rebuild when the paced sig moves.
+  // Self-stops if the timeline left the DOM.
   function tickInstanceTimeline() {
     var bp = instanceTickerBp;
     if (!bp) return;
     var section = document.querySelector("[data-tl]");
     if (!section) { stopInstanceTicker(); return; }
-    var now = Date.now();
-    var byStep = {};
-    provisionSteps(bp, now).forEach(function (r) { byStep[r.step] = r.elapsedMs; });
-    section.querySelectorAll(".bp-tl-elapsed").forEach(function (el) {
-      var step = el.getAttribute("data-step");
-      if (Object.prototype.hasOwnProperty.call(byStep, step)) {
-        el.textContent = byStep[step] != null ? fmtDur(byStep[step]) : "";
-      }
-    });
+    var st = instanceTlStateFor(bp.id);
+    var sig = instanceStepsSig(bp);
+    if (sig !== st.stepsSig) {
+      st.stepsSig = sig;
+      var ul = section.querySelector(".new-steps");
+      if (ul) ul.outerHTML = newStepsHtml(instanceDisplayRows(bp));
+    }
     var total = section.querySelector("[data-tl-total]");
-    if (total) { var t = provisionTotalMs(bp, now); total.textContent = t != null ? fmtDur(t) : ""; }
+    if (total) { var t = provisionTotalMs(bp, Date.now()); total.textContent = t != null ? fmtDur(t) : ""; }
+    tickActiveRing(section, provisionSteps(bp, Date.now()));
+  }
+
+  // The SSE fast path (unified-provision-view): a fresh fleet row for the SAME
+  // mounted instance in the SAME phase patches the three live regions in place
+  // — steps (on paced-sig change), console body (scroll + toggle survive), the
+  // total clock — instead of remounting #instance-body, which restarted every
+  // animation and flashed "Loading…" on each provisioning step/console line.
+  function patchInstanceTimeline(section, bp) {
+    var st = instanceTlStateFor(bp.id);
+    instanceTickerBp = bp; // the ticker's elapsed math follows the freshest row
+    var sig = instanceStepsSig(bp);
+    if (sig !== st.stepsSig) {
+      st.stepsSig = sig;
+      var ul = section.querySelector(".new-steps");
+      if (ul) ul.outerHTML = newStepsHtml(instanceDisplayRows(bp));
+    }
+    var csig = instanceConsoleSig(bp);
+    if (csig !== st.consoleSig) {
+      st.consoleSig = csig;
+      var body = section.querySelector(".bp-console-body");
+      if (body) {
+        body.innerHTML = consoleTail((bp && bp.provision_console) || []);
+        if (instanceConsoleStick && !instanceConsoleCollapsed) body.scrollTop = body.scrollHeight;
+      }
+    }
+    var total = section.querySelector("[data-tl-total]");
+    if (total) { var t = provisionTotalMs(bp, Date.now()); total.textContent = t != null ? fmtDur(t) : ""; }
+    tickActiveRing(section, provisionSteps(bp, Date.now()));
   }
 
   function startInstanceTicker(bp) {
@@ -5467,6 +5578,13 @@
   function wireInstanceTimeline(root, bp) {
     var section = root && root.querySelector ? root.querySelector("[data-tl]") : null;
     if (!section) return;
+    // A full render just painted current state — prime the region-patch caches
+    // so the next SSE fast path / tick only touches what actually changes.
+    if (bp && bp.id != null) {
+      var st = instanceTlStateFor(bp.id);
+      st.stepsSig = instanceStepsSig(bp);
+      st.consoleSig = instanceConsoleSig(bp);
+    }
     var toggle = section.querySelector("[data-tl-console-toggle]");
     if (toggle) toggle.addEventListener("click", function () {
       instanceConsoleCollapsed = !instanceConsoleCollapsed;
@@ -6026,27 +6144,12 @@
     var serverSteps = newState.serverSteps || [];
     var el = document.querySelector("#new-body .new-elapsed");
     if (el) el.textContent = newElapsedSeconds(serverSteps) + "s elapsed";
-    var dot = document.querySelector("#new-body .new-step-dot[data-ring]");
-    if (!dot) return;
-    var li = dot.parentNode;
-    if (li && li.className && li.className.indexOf("completing") !== -1) {
-      // A dwelling (truth-done) step: sweep the ring to full over the dwell —
-      // the satisfying "circle closes, check lands" beat. +34/tick ≈ full in 3s;
-      // the 0.9s --p transition smooths the jumps into a continuous sweep.
-      var cur = parseInt(dot.style.getPropertyValue("--p"), 10) || 0;
-      dot.style.setProperty("--p", Math.min(100, cur + 34) + "%");
-      return;
-    }
-    var step = dot.getAttribute("data-ring");
-    var rows = provisionSteps({ provision_steps: serverSteps }, Date.now());
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i].step !== step || rows[i].role !== "active") continue;
-      var expected = SERVER_STEP_EXPECTED_MS[step];
-      dot.style.setProperty("--p", Math.round(stepRingProgress(rows[i].elapsedMs, expected) * 100) + "%");
-      var t = document.querySelector('#new-body .new-step-time[data-time="' + step + '"]');
-      if (t) t.textContent = fmtDur(rows[i].elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
-      return;
-    }
+    // Ring + live time via the SHARED per-second patch (tickActiveRing — the
+    // same helper the instance timeline ticks with).
+    tickActiveRing(
+      document.querySelector("#new-body"),
+      provisionSteps({ provision_steps: serverSteps }, Date.now())
+    );
   }
 
   // The steps region's markup: the pre-first-event placeholder, else the PACED
