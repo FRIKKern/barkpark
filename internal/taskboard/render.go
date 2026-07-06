@@ -411,7 +411,13 @@ func renderNextBand(b Board, st UIState, width, maxLines int, now time.Time) []s
 		return []string{dimStyle.Render(truncate(
 			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", n), width))}
 	}
-	lines := []string{dimStyle.Render("NEXT")}
+	label := "NEXT"
+	if b.IndependentReady > 1 {
+		// The D66 capacity read: how many non-interfering neighborhoods hold
+		// ready work — the honest "we could send out N agents" number.
+		label = fmt.Sprintf("NEXT · %d independent", b.IndependentReady)
+	}
+	lines := []string{dimStyle.Render(truncate(label, width))}
 
 	// Rows take priority over the display-only "+N ready" tail. Show as many rows
 	// as fit under maxLines (reserving the label); fold the remainder to "+N intent".
