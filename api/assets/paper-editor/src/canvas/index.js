@@ -38,7 +38,8 @@ import Typography from "@tiptap/extension-typography";
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
-import { TextSelection, NodeSelection } from "@tiptap/pm/state";
+import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
+import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
 // reconcileServerEcho (S4a): the PURE own-echo reconciler — treats a live
@@ -419,10 +420,41 @@ class BpPaperCanvas extends HTMLElement {
     // blocks, not blockToTiptap of one; StarterKit's doc is block+, so the
     // siblings are native and cross-block caret/selection/split/merge come free.
     // (2) BpAttrs is in the extension list so getJSON() preserves bpId/bpType.
+    // pdd-t14: lexical handle for the lock-veto plugin below — `this` (the WC
+    // host) is not reachable from inside Extension.create's plugin factory.
+    const host = this;
+
     this._editor = new Editor({
       element: this._mount,
       editable: this._editable,
       extensions: [
+        // pdd-t2/t14: the doctrine template-lock veto as a REAL ProseMirror
+        // plugin. `filterTransaction` is a PLUGIN-spec option — as an
+        // editorProps entry it is silently ignored by the view (found live in
+        // the browser polish pass: Enter in the locked title split the doc).
+        // Returning false drops the whole tx: no local mutation, no op, no
+        // flash — the calm no-op the doctrine demands. Content edits inside a
+        // locked block pass; papers without locked blocks are untouched (D3).
+        // data-locked-tail is read LIVE off the host so hook/upgrade ordering
+        // can never race Editor construction.
+        Extension.create({
+          name: "bpLockVeto",
+          addProseMirrorPlugins: () => [
+            new Plugin({
+              filterTransaction: (tr, state) =>
+                // Programmatic applies (initial seed via the blocks setter,
+                // foreign-echo setContent) legitimately grow/replace the doc —
+                // the veto guards USER edits only (found live: the plugin
+                // vetoed its own initial content seed on locked-tail runs).
+                host._programmaticApply === true ||
+                !transactionVetoesLock(
+                  tr,
+                  state,
+                  host.getAttribute("data-locked-tail") === "true",
+                ),
+            }),
+          ],
+        }),
         StarterKit.configure({
           // Same as ../index.js: heading levels 1–3, lists, history on.
           heading: { levels: [1, 2, 3] },
@@ -563,12 +595,6 @@ class BpPaperCanvas extends HTMLElement {
         // run GROWTH, since a new node here would displace that locked
         // follower. Read live off the attribute so hook/upgrade ordering can
         // never race the Editor construction.
-        filterTransaction: (tr, state) =>
-          !transactionVetoesLock(
-            tr,
-            state,
-            this.getAttribute("data-locked-tail") === "true",
-          ),
       },
       onUpdate: () => {
         this._scheduleEmit();
@@ -1710,7 +1736,12 @@ class BpPaperCanvas extends HTMLElement {
     if (this._isEditingNow()) {
       this._queueServerBlocks(next);
     } else {
-      this._applyExternalContent(next);
+      this._programmaticApply = true;
+      try {
+        this._applyExternalContent(next);
+      } finally {
+        this._programmaticApply = false;
+      }
     }
   }
 
@@ -1853,7 +1884,12 @@ class BpPaperCanvas extends HTMLElement {
   set blocks(value) {
     this._blocks = Array.isArray(value) ? value : [];
     if (this._editor) {
-      this._editor.commands.setContent(runToTiptap(this._blocks), false);
+      this._programmaticApply = true;
+      try {
+        this._editor.commands.setContent(runToTiptap(this._blocks), false);
+      } finally {
+        this._programmaticApply = false;
+      }
     }
   }
 

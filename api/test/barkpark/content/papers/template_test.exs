@@ -169,3 +169,53 @@ defmodule Barkpark.Content.Papers.TemplateTest do
     refute Enum.any?(doc.content["blocks"], &Template.locked?/1)
   end
 end
+
+defmodule Barkpark.Content.Papers.TemplateStyleTest do
+  @moduledoc """
+  Live-polish fixes (pdd-t15 + the scoped-op finding, 2026-07-06):
+  template papers are ARTICLE papers (the reader's h1 must match the canvas'
+  h1 — rule 3), and block ops resolve the paper in the CALLER'S workspace.
+  """
+  use Barkpark.DataCase, async: false
+
+  alias Barkpark.Content
+  alias Barkpark.Content.Papers.Template
+  alias Barkpark.TenancyFixtures
+
+  test "stamp_article_style: template papers become article; explicit + legacy untouched" do
+    tpl = Template.template_blocks("t")
+    assert Template.stamp_article_style(%{}, tpl)["style"] == "article"
+    assert Template.stamp_article_style(%{"style" => "plain"}, tpl)["style"] == "plain"
+    refute Map.has_key?(Template.stamp_article_style(%{}, [%{"type" => "paragraph"}]), "style")
+  end
+
+  test "upsert_paper: a template-born paper renders its title as a real <h1> (rule 3)" do
+    slug = "art-#{System.unique_integer([:positive])}"
+    {:ok, doc} = Content.upsert_paper(%{slug: slug, blocks: [], title: "Article born"})
+    assert doc.content["style"] == "article"
+    assert doc.content["body_html"] =~ "<h1"
+    refute doc.content["body_html"] =~ ~s(font-weight:bold">Article born)
+  end
+
+  test "block ops honor the caller's workspace scope (the scoped-Studio fix)" do
+    ws = TenancyFixtures.create_workspace!()
+    slug = "scoped-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_paper(%{
+        slug: slug,
+        blocks: [%{"id" => "p1", "type" => "paragraph", "content" => []}],
+        workspace_id: ws.id
+      })
+
+    op = %{"op" => "patch-block", "id" => "p1", "patch" => %{"content" => ["edited"]}}
+
+    # WITH the caller's scope the op lands (what the LiveView now threads).
+    assert {:ok, _} =
+             Content.apply_paper_block_ops(slug, [op], "production", workspace_id: ws.id)
+
+    # WITHOUT scope it resolves the seeded Default workspace and must NOT
+    # silently mutate the other tenant's paper.
+    assert {:error, _} = Content.apply_paper_block_ops(slug, [op], "production")
+  end
+end
