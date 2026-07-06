@@ -162,7 +162,16 @@ defmodule Barkpark.Content.Writer do
               end
 
             _ ->
-              attrs = scaffold_or_initial_values(attrs, type, dataset)
+              attrs =
+                attrs
+                |> scaffold_or_initial_values(type, dataset)
+                # Doctrine (pdd-t16): a paper born through the RAW mutate/Writer
+                # path gets the same birth guarantee as upsert_paper — the
+                # forced template on an explicit empty block list, doc.title
+                # derived from the title block, and the article style stamp.
+                # Additive: non-papers and block-less/legacy shapes untouched.
+                |> maybe_apply_paper_template(type)
+
               # Encrypt AFTER scaffold/projection so the final projected field
               # values (the ciphertext-at-rest source of truth) are encrypted.
               with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
@@ -270,6 +279,46 @@ defmodule Barkpark.Content.Writer do
   # as Expectation-bearing here — a derived-default layout alone does not flip
   # an existing v1 type onto the block path (it would silently drop
   # initial_values keys that are not declared fields).
+  # pdd-t16 — the Writer half of the paper birth guarantee. Mirrors the
+  # upsert_paper chokepoint (block_ops.ex): seed on explicit [], derive title,
+  # stamp article. Blocks live under content["blocks"] on this path.
+  defp maybe_apply_paper_template(attrs, "paper") do
+    alias Barkpark.Content.Papers.Template
+
+    content = Map.get(attrs, "content") || %{}
+    blocks = Map.get(content, "blocks")
+
+    seeded = Template.maybe_seed(blocks, nil, %{"title" => Map.get(attrs, "title")})
+
+    if is_list(seeded) do
+      derived = Template.derive_title(%{"title" => Map.get(attrs, "title")}, seeded)
+      styled = Template.stamp_article_style(%{"style" => content["style"]}, seeded)
+
+      content =
+        content
+        |> Map.put("blocks", seeded)
+        |> then(fn c ->
+          case styled["style"] do
+            s when is_binary(s) -> Map.put(c, "style", s)
+            _ -> c
+          end
+        end)
+
+      attrs
+      |> Map.put("content", content)
+      |> then(fn a ->
+        case derived["title"] do
+          t when is_binary(t) and t != "" -> Map.put(a, "title", t)
+          _ -> a
+        end
+      end)
+    else
+      attrs
+    end
+  end
+
+  defp maybe_apply_paper_template(attrs, _type), do: attrs
+
   defp scaffold_or_initial_values(attrs, type, dataset)
        when is_binary(type) and is_binary(dataset) do
     case Content.get_schema(type, dataset) do

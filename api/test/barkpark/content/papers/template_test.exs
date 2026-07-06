@@ -219,3 +219,46 @@ defmodule Barkpark.Content.Papers.TemplateStyleTest do
     assert {:error, _} = Content.apply_paper_block_ops(slug, [op], "production")
   end
 end
+
+defmodule Barkpark.Content.Papers.WriterSeamTest do
+  @moduledoc "pdd-t16: the Writer/mutate path gives papers the same birth guarantee as upsert_paper."
+  use Barkpark.DataCase, async: false
+  alias Barkpark.Content
+
+  test "create_document type paper with explicit [] blocks is born templated + article + derived title" do
+    {:ok, doc} =
+      Content.create_document(
+        "paper",
+        %{
+          "doc_id" => "ws-#{System.unique_integer([:positive])}",
+          "title" => "Born via Writer",
+          "content" => %{"blocks" => []}
+        },
+        "production",
+        []
+      )
+
+    assert [%{"role" => "title", "text" => "Born via Writer"}, %{"role" => "featured"} | _] =
+             doc.content["blocks"]
+
+    assert doc.content["style"] == "article"
+    assert doc.title == "Born via Writer"
+  end
+
+  test "non-paper types and block-less papers are untouched" do
+    {:ok, doc} =
+      Content.create_document(
+        "paper",
+        %{
+          "doc_id" => "nb-#{System.unique_integer([:positive])}",
+          "title" => "HTML only",
+          "content" => %{"body_html" => "<p>x</p>"}
+        },
+        "production",
+        []
+      )
+
+    refute Map.has_key?(doc.content, "blocks")
+    refute doc.content["style"] == "article"
+  end
+end

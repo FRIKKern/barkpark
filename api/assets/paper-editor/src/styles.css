@@ -399,6 +399,12 @@ html[data-theme="dark"] .bp-wikilink-menu {
 .bp-canvas-readonly {
   margin: 1em 0;
   user-select: none;
+  /* pdd-t17: the server-painted fleet hole must never overflow the canvas
+   * column (cards clipped under the sidebar, found live) — contain and
+   * scroll horizontally inside the atom instead, like the reader does. */
+  max-width: 100%;
+  overflow-x: auto;
+  min-width: 0;
 }
 /* pdd-t12c: the read-only atoms are keyboard-focusable (tabindex on the node-view
  * wrapper) so a non-mouse user can reach + select them (→ Backspace deletes). The
