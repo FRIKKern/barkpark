@@ -52,12 +52,45 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
     end
   end
 
+  # A `conflict_fun` seam that records every dead-letter attrs map to the test
+  # pid and returns `{:ok, _}`. Stands in for slice-1's `Github.Conflicts.record/1`
+  # so this slice's test never needs the conflicts table/module in the tree.
+  defp recording_conflict_fun do
+    test_pid = self()
+
+    fn attrs ->
+      send(test_pid, {:conflict, attrs})
+      {:ok, %{id: 1}}
+    end
+  end
+
   # Base opts: scope + a stubbed repo + a recording comment seam.
   defp opts(scope) do
     scope
     |> Keyword.put(:dataset, @dataset)
     |> Keyword.put(:repo, "FRIKKern/barkpark")
     |> Keyword.put(:comment_fun, recording_comment_fun())
+  end
+
+  # Create a genuine (prev_doc-nil) task so a later look-alike birth is refused
+  # by the real `Tasks.Dedup` seam. Parentless + text-identical → `:cross` +
+  # near-identical → hard refuse. Mirrors the issue payload's title/body.
+  defp seed_lookalike!(doc_id, scope) do
+    {:ok, _} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => "Outsider found a bug",
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "description" => "Steps to reproduce: click the thing."
+          }
+        },
+        @dataset,
+        scope
+      )
   end
 
   defp opened_payload(number, overrides \\ %{}) do
@@ -252,6 +285,92 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       reloaded = fetch_task(31, scope)
       assert reloaded.title == "Adopted title"
       assert reloaded.content["labels"] == ["src:github"]
+    end
+  end
+
+  describe "dedup refusal — no outsider gets silence (D6/D7)" do
+    test "a look-alike issue is REFUSED: comment + dead-letter row + {:refused, id}, no task",
+         %{scope: scope} do
+      # An existing task the outsider issue looks like — so the Dedup seam
+      # (Tasks.Dedup, through Content.Writer) refuses the birth.
+      seed_lookalike!("existing-dup", scope)
+
+      o =
+        opts(scope)
+        |> Keyword.put(:conflict_fun, recording_conflict_fun())
+
+      assert {:refused, "gh-50"} = Intake.ingest(opened_payload(50), o)
+
+      # No task born for the refused issue — every re-delivery would re-refuse,
+      # so the refusal MUST be visible instead of silent.
+      assert task_rows(50) == []
+
+      # (1) a maintainer-visible comment, distinct from the birth backlink.
+      assert_receive {:comment, "FRIKKern/barkpark", 50, body}
+      assert body =~ "looks related to existing tracked work"
+      refute body =~ "tracked internally"
+
+      # (2) a findable dead-letter row carrying the dedup verdict.
+      assert_receive {:conflict, attrs}
+      assert attrs.kind == "dedup_refused"
+      assert attrs.issue == 50
+      assert attrs.repo == "FRIKKern/barkpark"
+      assert attrs.dataset == @dataset
+      # No task exists to point at — the row's doc_id is nil (the outcome
+      # carries the intended gh-<num>, the row does not).
+      assert attrs.doc_id == nil
+      # The verdict map is surfaced verbatim (D6 — never bypassed).
+      assert is_map(attrs.detail)
+      assert [%{id: "existing-dup"} | _] = attrs.detail.similar
+    end
+
+    test "re-delivery of a refused issue re-surfaces (still {:refused}, still no task)",
+         %{scope: scope} do
+      seed_lookalike!("existing-dup-2", scope)
+
+      o =
+        opts(scope)
+        |> Keyword.put(:conflict_fun, recording_conflict_fun())
+
+      assert {:refused, "gh-51"} = Intake.ingest(opened_payload(51), o)
+      assert_receive {:comment, _, 51, _}
+      assert_receive {:conflict, %{kind: "dedup_refused"}}
+
+      # Re-delivery: still refused, still no task. The slice-1 recorder DEDUPES
+      # the open {repo, issue, kind} row at the DB layer (tested in slice 1);
+      # the controller's 2xx keeps GitHub from redelivering on its own, so the
+      # comment posts exactly once per genuine delivery.
+      assert {:refused, "gh-51"} = Intake.ingest(opened_payload(51), o)
+      assert task_rows(51) == []
+      assert_receive {:conflict, %{kind: "dedup_refused"}}
+    end
+
+    test "the conflict recorder is best-effort — a raising recorder never crashes intake",
+         %{scope: scope} do
+      seed_lookalike!("existing-dup-3", scope)
+
+      raising = fn _attrs -> raise "recorder down" end
+
+      o =
+        opts(scope)
+        |> Keyword.put(:conflict_fun, raising)
+
+      # Even though the recorder blew up, the refusal outcome + comment stand.
+      assert {:refused, "gh-52"} = Intake.ingest(opened_payload(52), o)
+      assert_receive {:comment, _, 52, _}
+      assert task_rows(52) == []
+    end
+
+    test "a genuine (non-look-alike) birth never touches the conflict recorder",
+         %{scope: scope} do
+      o =
+        opts(scope)
+        |> Keyword.put(:conflict_fun, recording_conflict_fun())
+
+      assert {:ok, :born, _doc} = Intake.ingest(opened_payload(53), o)
+      # The dead-letter seam only fires on a dedup refusal — a normal birth
+      # leaves it untouched (fail-open preserved).
+      refute_receive {:conflict, _attrs}
     end
   end
 
