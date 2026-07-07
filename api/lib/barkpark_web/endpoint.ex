@@ -109,7 +109,12 @@ defmodule BarkparkWeb.Endpoint do
           parsers: [:urlencoded, :multipart, :json],
           pass: ["*/*"],
           json_decoder: Phoenix.json_library(),
-          length: 100_000_000
+          length: 100_000_000,
+          # Tee the RAW body into conn.assigns[:raw_body] ONLY on the GitHub
+          # webhook path, so BarkparkWeb.Plugs.GithubWebhookSignature can verify
+          # the HMAC over the exact bytes GitHub signed. Every other path reads
+          # straight through with no buffering — see the plug's @moduledoc.
+          body_reader: {BarkparkWeb.Plugs.CacheBodyReader, :read_body, []}
         )
       )
     rescue
