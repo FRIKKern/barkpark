@@ -703,6 +703,317 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "Board group/filter facets (pure, wave 4)" do
+    test "group_keys are none/goal/priority/label" do
+      assert Board.group_keys() == [:none, :goal, :priority, :label]
+    end
+
+    test "facets are the DISTINCT, sorted values actually present in the board" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("open",
+              doc_id: "f1",
+              parent_id: "epic-b",
+              priority: 2,
+              labels: ["y", "x"],
+              worker: "w2"
+            ),
+            card("open",
+              doc_id: "f2",
+              parent_id: "epic-a",
+              priority: 0,
+              labels: ["y"],
+              worker: "w1"
+            ),
+            card("done", doc_id: "f3", updated_at: now)
+          ],
+          now: now
+        )
+
+      f = Board.facets(board)
+
+      assert f.goals == ["epic-a", "epic-b"]
+      # priorities are strings, numeric-sorted (0 before 2).
+      assert f.priorities == ["0", "2"]
+      # labels flattened + deduped + sorted; the empty done card contributes none.
+      assert f.labels == ["x", "y"]
+      assert f.workers == ["w1", "w2"]
+    end
+
+    test "card_matches? ANDs facets and intersects the multi-valued label set" do
+      c = card("open", parent_id: "epic-a", priority: 2, labels: ["x", "y"], worker: "w1")
+
+      # [] / missing facet is unconstrained.
+      assert Board.card_matches?(c, %{})
+      assert Board.card_matches?(c, %{goal: [], priority: [], label: [], worker: []})
+
+      assert Board.card_matches?(c, %{goal: ["epic-a"]})
+      refute Board.card_matches?(c, %{goal: ["epic-b"]})
+      assert Board.card_matches?(c, %{priority: ["2"]})
+      refute Board.card_matches?(c, %{priority: ["3"]})
+      # label facet = intersection: the card's {x,y} meets {y,z}.
+      assert Board.card_matches?(c, %{label: ["y", "z"]})
+      refute Board.card_matches?(c, %{label: ["z"]})
+      # facets AND together.
+      assert Board.card_matches?(c, %{goal: ["epic-a"], worker: ["w1"]})
+      refute Board.card_matches?(c, %{goal: ["epic-a"], worker: ["w2"]})
+    end
+  end
+
+  describe "Board.view/2 (pure, wave 4)" do
+    test "group_by :none with no filters is a byte-identical passthrough of the flat board" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("in_progress", doc_id: "v1", updated_at: now),
+            card("open", doc_id: "v2", blocker_statuses: ["in_progress"], updated_at: now),
+            card("done", doc_id: "v3", updated_at: now)
+          ],
+          now: now
+        )
+
+      v = Board.view(board, now: now)
+
+      refute v.grouped?
+      refute v.filtered?
+      assert length(v.lanes) == 1
+      lane = hd(v.lanes)
+      # the single lane wraps board.columns VERBATIM (zero-cost passthrough).
+      assert lane.columns == board.columns
+      assert lane.done_total == board.done_total
+      assert lane.counts[:done] == board.done_total
+      # momentum is board.momentum UNCHANGED (D13).
+      assert v.momentum == board.momentum
+    end
+
+    test "group_by :goal partitions into sorted swimlanes with the none-lane last" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("in_progress", doc_id: "g1", parent_id: "epic-b", updated_at: now),
+            card("in_progress", doc_id: "g2", parent_id: "epic-a", updated_at: now),
+            card("in_progress", doc_id: "g3", updated_at: now)
+          ],
+          now: now
+        )
+
+      v = Board.view(board, group_by: :goal, now: now)
+
+      assert v.grouped?
+      assert Enum.map(v.lanes, & &1.label) == ["↳epic-a", "↳epic-b", "none"]
+      # each lane holds exactly its one card in the in_progress column.
+      for lane <- v.lanes, do: assert(length(lane.columns.in_progress) == 1)
+    end
+
+    test "group_by :priority orders lanes numerically (P0 before P2), none last" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("in_progress", doc_id: "p2", priority: 2, updated_at: now),
+            card("in_progress", doc_id: "p0", priority: 0, updated_at: now),
+            card("in_progress", doc_id: "pnil", updated_at: now)
+          ],
+          now: now
+        )
+
+      v = Board.view(board, group_by: :priority, now: now)
+      assert Enum.map(v.lanes, & &1.label) == ["P0", "P2", "none"]
+    end
+
+    test "group_by :label places a multi-label card in EACH of its lanes" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build([card("in_progress", doc_id: "ml", labels: ["a", "b"], updated_at: now)],
+          now: now
+        )
+
+      v = Board.view(board, group_by: :label, now: now)
+
+      assert Enum.sort(Enum.map(v.lanes, & &1.label)) == ["#a", "#b"]
+
+      for lane <- v.lanes do
+        assert Enum.any?(lane.columns.in_progress, &(&1.doc_id == "ml"))
+      end
+    end
+
+    test "MOMENTUM HONESTY (D13): grouping alone preserves momentum; a filter recomputes it" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("in_progress", doc_id: "m1", worker: "w1", updated_at: now),
+            card("in_progress", doc_id: "m2", worker: "w2", updated_at: now),
+            card("done", doc_id: "m3", updated_at: now)
+          ],
+          now: now
+        )
+
+      # grouped but UNFILTERED → momentum is board.momentum verbatim.
+      assert Board.view(board, group_by: :priority, now: now).momentum == board.momentum
+
+      # filtered to w1 → only m1 survives: 1 in flight, 0 done → pct 0.
+      v = Board.view(board, filters: %{worker: ["w1"]}, now: now)
+      assert v.filtered?
+      assert v.momentum.in_flight == 1
+      assert v.momentum.done_today == 0
+      assert v.momentum.pct == 0
+    end
+
+    test "each lane's done sub-column is windowed at @done_window with an honest done_total" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      done_cards =
+        for i <- 1..13 do
+          card("done",
+            doc_id: "gd-#{i}",
+            parent_id: "epic-x",
+            updated_at: DateTime.add(now, -i * 60, :second)
+          )
+        end
+
+      board = Board.build(done_cards, now: now)
+      v = Board.view(board, group_by: :goal, now: now)
+
+      lane = Enum.find(v.lanes, &(&1.label == "↳epic-x"))
+      assert length(lane.columns.done) == 12
+      assert lane.done_total == 13
+      assert lane.counts[:done] == 13
+    end
+
+    test "view.empty? is true when a filter matches nothing" do
+      now = ~U[2026-07-07 12:00:00Z]
+      board = Board.build([card("open", doc_id: "e1", worker: "w1", updated_at: now)], now: now)
+
+      v = Board.view(board, filters: %{worker: ["nobody"]}, now: now)
+      assert v.empty?
+      assert v.filtered?
+    end
+  end
+
+  describe "group/filter controls at /admin/projects (wave 4, live)" do
+    test "the controls render a group selector + facet chips from the REAL corpus", %{conn: conn} do
+      task("cf1", "Wire the mirror",
+        lifecycle: "in_progress",
+        priority: 1,
+        parent_id: "epic-9",
+        labels: ["proj:board"],
+        assignee: "studio:doey"
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      assert html =~ ~s(data-role="controls")
+      assert html =~ ~s(data-role="group-select")
+      assert html =~ ~s(data-role="facet-goal")
+      assert html =~ ~s(data-role="facet-priority")
+      assert html =~ ~s(data-role="facet-label")
+      assert html =~ ~s(data-role="facet-worker")
+      # the chips carry the real values, prefixed.
+      assert html =~ "↳epic-9"
+      assert html =~ "#proj:board"
+      assert html =~ "@studio:doey"
+    end
+
+    test "toggling a worker chip narrows the board and marks the chip active", %{conn: conn} do
+      task("nd", "Doey ships it", lifecycle: "in_progress", assignee: "studio:doey")
+      task("na", "Agent ships it", lifecycle: "in_progress", assignee: "studio:agent")
+
+      {:ok, view, html} = live(conn, "/admin/projects")
+      assert html =~ "Doey ships it"
+      assert html =~ "Agent ships it"
+
+      html = render_click(view, "toggle-filter", %{"facet" => "worker", "value" => "studio:doey"})
+
+      assert html =~ "Doey ships it"
+      refute html =~ "Agent ships it"
+      # the active facet chip carries .is-active (the group None chip has an extra
+      # class between, so this substring matches only an active FACET chip).
+      assert html =~ ~s(bp-chip is-active)
+    end
+
+    test "the group selector renders swimlanes with labels", %{conn: conn} do
+      task("sw-a", "Alpha work",
+        lifecycle: "in_progress",
+        parent_id: "epic-a",
+        assignee: "studio:x"
+      )
+
+      task("sw-b", "Beta work",
+        lifecycle: "in_progress",
+        parent_id: "epic-b",
+        assignee: "studio:y"
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_click(view, "set-group", %{"group" => "goal"})
+
+      assert html =~ ~s(data-role="lane")
+      assert html =~ ~s(data-role="lane-label")
+      assert html =~ "↳epic-a"
+      assert html =~ "↳epic-b"
+      # both cards still on the board, now under their lanes.
+      assert html =~ "Alpha work"
+      assert html =~ "Beta work"
+    end
+
+    test "an over-narrow filter shows the honest filtered-empty state + clear-all", %{conn: conn} do
+      task("fe1", "The only task", lifecycle: "open", assignee: "studio:doey")
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      html =
+        render_click(view, "toggle-filter", %{"facet" => "worker", "value" => "studio:ghost"})
+
+      assert html =~ ~s(data-role="filtered-empty")
+      assert html =~ "No tasks match"
+      assert html =~ ~s(data-role="clear-all")
+      # distinct from the board-empty copy (the board is NOT empty).
+      refute html =~ ~s(data-role="board-empty")
+
+      # clear-all restores the whole board.
+      html = render_click(view, "clear-filters", %{})
+      refute html =~ ~s(data-role="filtered-empty")
+      assert html =~ "The only task"
+    end
+
+    test "a ?group=goal URL renders swimlanes on mount (shareable)", %{conn: conn} do
+      task("url-g", "Goal-scoped",
+        lifecycle: "in_progress",
+        parent_id: "epic-a",
+        assignee: "studio:x"
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+      assert html =~ ~s(data-role="lane")
+      assert html =~ "↳epic-a"
+    end
+
+    test "a ?worker= URL filters on mount (shareable), unknown group falls back to none",
+         %{conn: conn} do
+      task("uf-a", "Ada task", lifecycle: "in_progress", assignee: "studio:ada")
+      task("uf-b", "Bpp task", lifecycle: "in_progress", assignee: "studio:bpp")
+
+      {:ok, _view, html} = live(conn, "/admin/projects?worker=studio:ada&group=evil")
+
+      # the worker filter applied…
+      assert html =~ "Ada task"
+      refute html =~ "Bpp task"
+      # …and the bogus group whitelisted to :none — no swimlane chrome, no crash.
+      refute html =~ ~s(data-role="lane-label")
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   # A task persisted with an explicit workspace_id (D12): the fenced restage

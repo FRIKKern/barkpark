@@ -433,6 +433,294 @@ defmodule Barkpark.Tasks.Board do
 
   def restage_plan(_from, _to, _holder, _worker), do: :refuse
 
+  # ── wave 4: group-by + filter (charter D13/D14/D15) ────────────────────────
+  #
+  # A big board stays LEGIBLE and FOCUSED by FOLDING the ALREADY-FETCHED
+  # `cards_by_id` (the DB read already happened at snapshot/refresh — D3) through
+  # a few more PURE functions: `facets/1` enumerates the chip menu, `card_matches?/2`
+  # is the filter predicate, and `view/2` partitions the filtered corpus into
+  # swimlanes — each lane run through the SAME private `organize/1` the flat board
+  # uses (so `@done_window` caps EACH lane's done sub-column, D10 per-lane). NO
+  # re-query: this is a projection over the snapshot the LiveView already holds.
+
+  @group_keys [:none, :goal, :priority, :label]
+  @facet_keys [:goal, :priority, :label, :worker]
+
+  @doc "The swimlane group-by keys the chip menu offers: none · goal · priority · label."
+  @spec group_keys() :: [atom()]
+  def group_keys, do: @group_keys
+
+  @typedoc "The chip-menu facets present in the board (only values that actually exist)."
+  @type facets :: %{
+          goals: [String.t()],
+          priorities: [String.t()],
+          labels: [String.t()],
+          workers: [String.t()]
+        }
+
+  @doc """
+  The DISTINCT, sorted facet values present in the board's `cards_by_id`. PURE.
+
+  So the chip menu offers ONLY facets that exist: goals from `parent_id`,
+  priorities from `priority` (as strings, numeric-sorted), labels flattened from
+  every card's label list, workers from `worker`. Nils/blanks are dropped.
+  """
+  @spec facets(board()) :: facets()
+  def facets(board) do
+    cards = Map.values(board.cards_by_id)
+
+    %{
+      goals: cards |> Enum.map(& &1.parent_id) |> distinct_sorted(),
+      priorities:
+        cards |> Enum.map(&priority_string(&1.priority)) |> distinct_sorted_priorities(),
+      labels: cards |> Enum.flat_map(& &1.labels) |> distinct_sorted(),
+      workers: cards |> Enum.map(& &1.worker) |> distinct_sorted()
+    }
+  end
+
+  @doc """
+  Does a card satisfy the active filters? PURE.
+
+  `filters = %{goal: [str], priority: [str], label: [str], worker: [str]}`. A `[]`
+  (or missing) facet is UNCONSTRAINED; the facets AND together; WITHIN a facet the
+  card's value(s) need only intersect the requested set (so the label facet passes
+  when the card's label set intersects the requested labels).
+  """
+  @spec card_matches?(map(), map()) :: boolean()
+  def card_matches?(card, filters) do
+    facet_match?(filters[:goal], [card.parent_id]) and
+      facet_match?(filters[:priority], [priority_string(card.priority)]) and
+      facet_match?(filters[:label], card.labels) and
+      facet_match?(filters[:worker], [card.worker])
+  end
+
+  # A nil/[] request is unconstrained; otherwise at least one non-nil card value
+  # must be in the requested set (set intersection).
+  defp facet_match?(nil, _card_values), do: true
+  defp facet_match?([], _card_values), do: true
+
+  defp facet_match?(requested, card_values) when is_list(requested),
+    do: Enum.any?(card_values, fn v -> not is_nil(v) and v in requested end)
+
+  @typedoc "One swimlane in a `view/2`: its columns + counts, run through `organize/1`."
+  @type lane :: %{
+          key: atom() | String.t() | nil,
+          label: String.t() | nil,
+          columns: %{required(atom()) => [card()]},
+          counts: %{required(atom()) => non_neg_integer()},
+          done_total: non_neg_integer()
+        }
+
+  @typedoc "The filtered-and-grouped projection the LiveView renders."
+  @type view :: %{
+          lanes: [lane()],
+          momentum: map(),
+          facets: facets(),
+          filtered?: boolean(),
+          grouped?: boolean(),
+          empty?: boolean()
+        }
+
+  @doc """
+  Fold an already-built board into a filtered-and-grouped VIEW. PURE.
+
+  `opts`: `group_by: :none | :goal | :priority | :label` (default `:none`),
+  `filters: %{...}` (see `card_matches?/2`, default `%{}`), `now: DateTime` (dates
+  a narrowed `done_today`, default `DateTime.utc_now/0`).
+
+  It (1) filters `cards_by_id` by `card_matches?/2`, (2) partitions the survivors
+  by `group_by` (a `nil`/none lane holds cards with no value for the key; the
+  label facet is multi-valued so a card can appear in several lanes), and (3) runs
+  each lane through the SAME private `organize/1` — so `@done_window` caps EACH
+  lane's done sub-column and every lane carries per-column counts + a full
+  `done_total`.
+
+  `group_by == :none` with NO filters is a ZERO-COST passthrough: a single lane
+  wrapping `board.columns` verbatim, so the ungrouped board is byte-identical to
+  wave 3.
+
+  MOMENTUM HONESTY (D13): `momentum` is `board.momentum` UNCHANGED whenever the
+  filters are empty (grouping alone never moves the numbers — it preserves wave-2's
+  monotonic `done_today`). It is recomputed from the NARROWED columns only when a
+  filter actually narrows the board.
+  """
+  @spec view(board(), keyword()) :: view()
+  def view(board, opts \\ []) do
+    group_by = normalize_group(Keyword.get(opts, :group_by, :none))
+    filters = Keyword.get(opts, :filters, %{})
+    now = Keyword.get(opts, :now) || DateTime.utc_now()
+
+    filtered? = any_filter?(filters)
+    grouped? = group_by != :none
+    facets = facets(board)
+
+    if group_by == :none and not filtered? do
+      # Zero-cost passthrough — the ungrouped, unfiltered board verbatim (D15).
+      lane = %{
+        key: :all,
+        label: nil,
+        columns: board.columns,
+        counts: lane_counts(board.columns, board.done_total),
+        done_total: board.done_total
+      }
+
+      %{
+        lanes: [lane],
+        momentum: board.momentum,
+        facets: facets,
+        filtered?: false,
+        grouped?: false,
+        empty?: board.cards_by_id == %{}
+      }
+    else
+      filtered_cards =
+        board.cards_by_id
+        |> Map.values()
+        |> Enum.filter(&card_matches?(&1, filters))
+
+      momentum = if filtered?, do: narrowed_momentum(filtered_cards, now), else: board.momentum
+
+      %{
+        lanes: build_lanes(filtered_cards, group_by),
+        momentum: momentum,
+        facets: facets,
+        filtered?: filtered?,
+        grouped?: grouped?,
+        empty?: filtered_cards == []
+      }
+    end
+  end
+
+  defp normalize_group(g) when g in @group_keys, do: g
+  defp normalize_group(_), do: :none
+
+  defp any_filter?(filters) when is_map(filters) do
+    Enum.any?(@facet_keys, fn key ->
+      case Map.get(filters, key) do
+        list when is_list(list) -> list != []
+        _ -> false
+      end
+    end)
+  end
+
+  defp any_filter?(_), do: false
+
+  # A single lane (group_by == :none, but filtered): the narrowed board as one
+  # flat grid — no lane chrome (label nil).
+  defp build_lanes(cards, :none) do
+    {columns, done_full} = organize(cards)
+    [lane_of(:all, nil, columns, done_full)]
+  end
+
+  # Grouped: partition into swimlanes, ordered, none-lane last, each organized.
+  defp build_lanes(cards, group_by) do
+    cards
+    |> group_cards(group_by)
+    |> Enum.map(fn {key, lane_cards} ->
+      {columns, done_full} = organize(lane_cards)
+      lane_of(key, lane_label(group_by, key), columns, done_full)
+    end)
+  end
+
+  defp lane_of(key, label, columns, done_full) do
+    %{
+      key: key,
+      label: label,
+      columns: columns,
+      counts: lane_counts(columns, length(done_full)),
+      done_total: length(done_full)
+    }
+  end
+
+  # Per-column counts; the done count is the FULL (pre-window) total (D10) so a
+  # capped render never freezes the header.
+  defp lane_counts(columns, done_total) do
+    Map.new(@columns, fn
+      :done -> {:done, done_total}
+      col -> {col, length(Map.get(columns, col, []))}
+    end)
+  end
+
+  # Single-valued grouping (goal/priority): every card lands in exactly one lane
+  # (its value, or the nil none-lane). Multi-valued (label): a card appears in
+  # each of its label lanes, or the none-lane when it has no labels.
+  defp group_cards(cards, :goal),
+    do: cards |> Enum.group_by(fn c -> lane_key(c.parent_id) end) |> sort_lanes(:goal)
+
+  defp group_cards(cards, :priority),
+    do:
+      cards
+      |> Enum.group_by(fn c -> lane_key(priority_string(c.priority)) end)
+      |> sort_lanes(:priority)
+
+  defp group_cards(cards, :label) do
+    cards
+    |> Enum.flat_map(fn c ->
+      case c.labels do
+        [] -> [{nil, c}]
+        labels -> Enum.map(labels, fn l -> {l, c} end)
+      end
+    end)
+    |> Enum.group_by(fn {k, _} -> k end, fn {_, c} -> c end)
+    |> sort_lanes(:label)
+  end
+
+  defp lane_key(nil), do: nil
+  defp lane_key(""), do: nil
+  defp lane_key(v) when is_binary(v), do: v
+  defp lane_key(v), do: to_string(v)
+
+  # Non-none lanes sort ascending (priority numerically); the none-lane is always
+  # last so "unassigned" work reads as the tail, not the head.
+  defp sort_lanes(grouped, group_by) do
+    grouped
+    |> Map.to_list()
+    |> Enum.sort_by(fn {key, _cards} -> lane_sort_key(group_by, key) end)
+  end
+
+  defp lane_sort_key(_group_by, nil), do: {1, 0, ""}
+  defp lane_sort_key(:priority, key), do: {0, priority_from_string(key), key}
+  defp lane_sort_key(_group_by, key), do: {0, 0, key}
+
+  defp lane_label(_group_by, nil), do: "none"
+  defp lane_label(:goal, key), do: "↳" <> key
+  defp lane_label(:priority, key), do: "P" <> key
+  defp lane_label(:label, key), do: "#" <> key
+
+  # A narrowed board's honest momentum (D13): in_flight/ready/pct/done_total from
+  # the filtered columns, done_today from the filtered done cards vs the injected
+  # `now`. Cancelled cards never live in `cards_by_id`, so the filtered set is the
+  # non-cancelled denominator.
+  defp narrowed_momentum(cards, now) do
+    {columns, done_full} = organize(cards)
+
+    %{
+      in_flight: length(Map.get(columns, :in_progress, [])),
+      ready: length(Map.get(columns, :ready, [])),
+      done_today: Enum.count(done_full, &same_utc_day?(&1.updated_at, now)),
+      pct: round(length(done_full) / max(length(cards), 1) * 100)
+    }
+  end
+
+  defp priority_string(nil), do: nil
+  defp priority_string(p) when is_integer(p), do: Integer.to_string(p)
+  defp priority_string(p) when is_binary(p), do: p
+  defp priority_string(p), do: to_string(p)
+
+  defp distinct_sorted(values) do
+    values
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp distinct_sorted_priorities(values) do
+    values
+    |> Enum.reject(&(is_nil(&1) or &1 == ""))
+    |> Enum.uniq()
+    |> Enum.sort_by(&priority_from_string/1)
+  end
+
   # Bucketing (charter): in_progress/done are stored states; ready is the
   # derived overlay; open/blocked are the fall-through.
   defp bucket(%{lifecycle_status: "in_progress"}), do: :in_progress
