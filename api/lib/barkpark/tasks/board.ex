@@ -50,6 +50,13 @@ defmodule Barkpark.Tasks.Board do
 
   @columns [:open, :ready, :in_progress, :blocked, :done]
 
+  # The done column is WINDOWED (charter D10) so the board never becomes a dead
+  # wall of finished work (§0). `build/2` + `apply_change/3` render only the most
+  # recent @done_window done cards (newest-first); `momentum.pct`/`done_today`
+  # and `done_total` are always computed from the FULL done set BEFORE this cap
+  # so the maths stay honest. 12 mirrors the TUI FocusSet neighbourhood cap.
+  @done_window 12
+
   @typedoc "A normalized-then-enriched card as it leaves `build/2`."
   @type card :: %{
           doc_id: String.t(),
@@ -78,7 +85,26 @@ defmodule Barkpark.Tasks.Board do
             done_today: non_neg_integer(),
             pct: non_neg_integer()
           },
+          done_total: non_neg_integer(),
           cards_by_id: %{optional(String.t()) => card()}
+        }
+
+  @typedoc """
+  The re-bucket delta `apply_change/3` returns for the LiveView to key its
+  flash/slide off. `kind`:
+
+    * `:moved`     — a known card changed column (e.g. open → in_progress)
+    * `:closed`    — a known card reached `:done` (bumps `done_today`)
+    * `:cancelled` — a known card left the columns to the cancelled tally
+    * `:entered`   — a previously-unseen card appeared in a column
+    * `:updated`   — a known card changed in place (same column)
+    * `:ignored`   — a no-op (e.g. a cancelled event for an already-gone card)
+  """
+  @type change :: %{
+          doc_id: String.t(),
+          from_col: atom() | nil,
+          to_col: atom(),
+          kind: :moved | :closed | :cancelled | :entered | :updated | :ignored
         }
 
   @doc "The status-ladder columns, in render order: open · ready · in_progress · blocked · done."
@@ -181,31 +207,180 @@ defmodule Barkpark.Tasks.Board do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
 
     {cancelled, live} = Enum.split_with(cards, &(&1.lifecycle_status == "cancelled"))
+    enriched = Enum.map(live, &enrich/1)
 
-    enriched =
-      Enum.map(live, fn card ->
-        col = bucket(card)
-        Map.merge(card, %{col: col, glyph: glyph_for(col), color_role: col})
-      end)
-
-    by_col = Enum.group_by(enriched, & &1.col)
-    columns = Map.new(@columns, fn col -> {col, order(col, Map.get(by_col, col, []))} end)
-
-    total_non_cancelled = length(enriched)
-    done = Map.get(columns, :done, [])
+    {columns, done_full} = organize(enriched)
 
     momentum = %{
       in_flight: length(Map.get(columns, :in_progress, [])),
       ready: length(Map.get(columns, :ready, [])),
-      done_today: Enum.count(done, &same_utc_day?(&1.updated_at, now)),
-      pct: round(length(done) / max(total_non_cancelled, 1) * 100)
+      # done_today + pct are computed from the FULL, uncapped done set (D10) so
+      # the tally and bar never silently shrink when the column render caps.
+      done_today: Enum.count(done_full, &same_utc_day?(&1.updated_at, now)),
+      pct: round(length(done_full) / max(length(enriched), 1) * 100)
     }
 
     %{
       columns: columns,
       cancelled_count: length(cancelled),
       momentum: momentum,
+      done_total: length(done_full),
+      # cards_by_id is the FULL, uncapped live set (every column incl. all done)
+      # — apply_change/3 treats it as the source of truth it re-buckets against,
+      # so it must never carry the windowed done list.
       cards_by_id: Map.new(enriched, fn c -> {c.doc_id, c} end)
+    }
+  end
+
+  # Enrich a normalized card with its bucket + §1 glyph/color_role.
+  defp enrich(card) do
+    col = bucket(card)
+    Map.merge(card, %{col: col, glyph: glyph_for(col), color_role: col})
+  end
+
+  # Group + order enriched live cards into the five render columns, capping the
+  # done column at @done_window (newest-first). Returns `{columns, done_full}`
+  # where `done_full` is the UNCAPPED, ordered done list for honest momentum
+  # maths (D10).
+  defp organize(enriched) do
+    by_col = Enum.group_by(enriched, & &1.col)
+    ordered = Map.new(@columns, fn col -> {col, order(col, Map.get(by_col, col, []))} end)
+    done_full = Map.get(ordered, :done, [])
+    columns = Map.put(ordered, :done, Enum.take(done_full, @done_window))
+    {columns, done_full}
+  end
+
+  # ── wave 2: realtime re-bucket (charter D9/D10) ────────────────────────────
+
+  @doc """
+  Project a broadcast `doc` map into a normalized card. PURE.
+
+  The broadcast (`Content.Broadcast`) carries only `%{doc_id, title, status,
+  content, updated_at}` for the ONE changed doc — never the dependency graph. So
+  this is byte-parallel to `snapshot`'s private `to_card/3` with one difference:
+  it **carries `prev_card.blocker_statuses` forward** (the event has none) so an
+  already-known card keeps its readiness inputs. An unseen card gets `[]` and is
+  placed by raw lifecycle (open/blocked/in_progress/done) — its `ready`
+  correctness waits for the next `:refresh` reconcile (D9).
+
+  `Content.published_id/1` collapses the draft/published twin to the same logical
+  id `snapshot` keys on, so a draft-shadow event updates the one canonical card.
+  """
+  @spec card_from_broadcast(map(), card() | nil) :: map()
+  def card_from_broadcast(msg_doc, prev_card) do
+    content = msg_doc.content || %{}
+    doc_id = Content.published_id(msg_doc.doc_id)
+
+    # A synthesized Document fed to the SAME pure github reads snapshot uses, so
+    # a broadcast card's github/github_synced projection matches a fetched one.
+    synthetic = %Document{
+      doc_id: doc_id,
+      content: content,
+      status: msg_doc.status,
+      updated_at: msg_doc.updated_at
+    }
+
+    %{
+      doc_id: doc_id,
+      title: msg_doc.title,
+      priority: Map.get(content, "priority"),
+      parent_id: Map.get(content, "parent_id"),
+      labels: normalize_labels(Map.get(content, "labels")),
+      worker: Map.get(content, "assignee") || get_in(content, ["claim", "worker"]),
+      lifecycle_status: Map.get(content, "lifecycle_status") || "open",
+      criteria: Tasks.criteria_progress(content),
+      github: Link.get(synthetic),
+      github_synced: Link.synced?(synthetic),
+      blocker_statuses: (prev_card && prev_card.blocker_statuses) || [],
+      updated_at: msg_doc.updated_at
+    }
+  end
+
+  @doc """
+  Re-bucket ONE card into an existing board and report the delta. PURE.
+
+  `card` is a normalized card (typically from `card_from_broadcast/2`). Returns
+  `{board, change}` where `change` (see `t:change/0`) tells the LiveView which
+  card moved and how, so it can flash/slide it.
+
+  The board's `cards_by_id` is treated as the full, uncapped source of truth: we
+  upsert (or, for a cancelled card, drop) the one card, re-derive every column +
+  `momentum.{in_flight, ready, pct}` + `done_total` from it, and re-cap the done
+  column at @done_window. `momentum.done_today` is **monotonic within a session**
+  (D9): it bumps by exactly 1 on a genuine new close (`to_col == :done` and the
+  card was not already `:done`) and is NEVER recomputed from the capped column —
+  a `:refresh` snapshot resets it to the authoritative windowed value.
+  """
+  @spec apply_change(board(), map(), keyword()) :: {board(), change()}
+  def apply_change(board, card, opts \\ []) do
+    prev = Map.get(board.cards_by_id, card.doc_id)
+    from_col = prev && prev.col
+
+    if card.lifecycle_status == "cancelled" do
+      apply_cancel(board, card, prev, from_col)
+    else
+      apply_live(board, card, prev, from_col, opts)
+    end
+  end
+
+  # A cancelled card LEAVES the columns and bumps `cancelled_count` — but only
+  # when it was actually present (an event for an already-gone/unseen cancelled
+  # card is a no-op; :refresh owns the authoritative cancelled total).
+  defp apply_cancel(board, card, nil, _from_col) do
+    {board, %{doc_id: card.doc_id, from_col: nil, to_col: :cancelled, kind: :ignored}}
+  end
+
+  defp apply_cancel(board, card, _prev, from_col) do
+    cards = Map.delete(board.cards_by_id, card.doc_id)
+    new_board = reassemble(cards, board.cancelled_count + 1, board.momentum.done_today)
+    {new_board, %{doc_id: card.doc_id, from_col: from_col, to_col: :cancelled, kind: :cancelled}}
+  end
+
+  # `opts` is accepted for signature symmetry with `build/2`/`snapshot/1`; a
+  # re-bucket dates nothing (done_today is monotonic, not clock-derived), so no
+  # `:now` is read here.
+  defp apply_live(board, card, prev, from_col, _opts) do
+    enriched = enrich(card)
+    to_col = enriched.col
+
+    fresh_close? = to_col == :done and from_col != :done
+
+    kind =
+      cond do
+        is_nil(prev) -> :entered
+        fresh_close? -> :closed
+        to_col != from_col -> :moved
+        true -> :updated
+      end
+
+    done_today = board.momentum.done_today + if(fresh_close?, do: 1, else: 0)
+    cards = Map.put(board.cards_by_id, card.doc_id, enriched)
+    new_board = reassemble(cards, board.cancelled_count, done_today)
+
+    {new_board, %{doc_id: card.doc_id, from_col: from_col, to_col: to_col, kind: kind}}
+  end
+
+  # Rebuild the board projection from a (already-enriched) cards_by_id map. Every
+  # column + in_flight/ready/pct/done_total is re-derived from the full uncapped
+  # set (accurate); `done_today` is passed through UNCHANGED (monotonic, D9).
+  defp reassemble(cards_by_id, cancelled_count, done_today) do
+    enriched = Map.values(cards_by_id)
+    {columns, done_full} = organize(enriched)
+    total = map_size(cards_by_id)
+
+    momentum = %{
+      in_flight: length(Map.get(columns, :in_progress, [])),
+      ready: length(Map.get(columns, :ready, [])),
+      done_today: done_today,
+      pct: round(length(done_full) / max(total, 1) * 100)
+    }
+
+    %{
+      columns: columns,
+      cancelled_count: cancelled_count,
+      momentum: momentum,
+      done_total: length(done_full),
+      cards_by_id: cards_by_id
     }
   end
 
