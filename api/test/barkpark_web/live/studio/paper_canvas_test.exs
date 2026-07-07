@@ -254,6 +254,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs([task_board("b1")]) == [{:run, [task_board("b1")]}]
     end
 
+    # ── S10: the `columns` CONTAINER is now CANVAS-ELIGIBLE (recursive nested-block) ──
+
+    test "S10: a columns block INSIDE prose keeps the run whole (was a boundary)" do
+      # `columns` is the first canvas CONTAINER — a recursive nested-block node
+      # (bpColumns > bpColumn+ > child). It rides the prose run rather than splitting.
+      cols = %{
+        "id" => "c1",
+        "type" => "columns",
+        "columns" => [[%{"type" => "paragraph"}], [%{"type" => "paragraph"}]]
+      }
+
+      blocks = [para("p1"), cols, para("p2")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+      assert PaperCanvas.canvas?(cols)
+    end
+
+    test "S10: a lone columns block is a single run, not a boundary" do
+      cols = %{"id" => "c1", "type" => "columns", "columns" => [[%{"type" => "paragraph"}]]}
+      assert PaperCanvas.partition_runs([cols]) == [{:run, [cols]}]
+    end
+
+    test "S10: section/table stay boundaries (container-in-container not yet copied)" do
+      # Only `columns` gained the container recursion; `section`/`table` remain run
+      # boundaries until they copy it.
+      for boundary <- [%{"id" => "b", "type" => "section"}, %{"id" => "b", "type" => "table"}] do
+        blocks = [para("p1"), boundary, para("p2")]
+
+        assert PaperCanvas.partition_runs(blocks) == [
+                 {:run, [para("p1")]},
+                 {:block, boundary},
+                 {:run, [para("p2")]}
+               ],
+               "expected #{boundary["type"]} to stay a boundary"
+      end
+    end
+
     # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
 
     test "S3.5: a native field block INSIDE prose keeps the run whole (was split by the field)" do

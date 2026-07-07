@@ -163,6 +163,17 @@
 .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
 .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
 .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+/* S10: columns CONTAINER grid — the hand-copied mirror of the single-source
+ * .bp-paper-surface .bp-cols/.bp-cols__c rules (paper-surface.css:499-503) for the
+ * STANDALONE embedder bundle (which has no .bp-paper-surface ancestor). In Studio the
+ * canvas mounts inside .bp-paper-surface, so the grid is inherited there for free; this
+ * mirror only paints the embedder host. bpColumns emits `--bp-cols:N` off the projected
+ * column count, and the reader's own grid rule reads it. Keep byte-aligned with
+ * paper-surface.css. */
+.bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
+.bp-paper-editor-body .bp-cols__c { min-width: 0; }
+.bp-paper-editor-body .bp-cols__c > :first-child { margin-top: 0; }
 .bp-paper-editor-body code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
@@ -469,6 +480,18 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-weight: 500;
   line-height: 1.2;
 }
+
+/* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so they
+ * do NOT trip the view↔edit parity byte-compare, which only locksteps rules that
+ * exist on BOTH surfaces — the shared .bp-cols/.bp-cols__c grid pair). An empty
+ * column gets a min-height + a subtle dashed outline so it is visible and clickable
+ * (a caret target); the read-only bpColumnAtom renders a "· <bpType> ·" chip for a
+ * non-first-class child carried verbatim. Bound to the --paper-* token vocabulary
+ * (rule/ink-soft/font-serif) already used across this bundle. Keep BYTE-IDENTICAL
+ * with the root.html.heex copy. */
+.bp-canvas-cols__c:empty,
+.bp-cols__c:has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
+.bp-cols__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
 
 /* ── doctrine template locks (pdd-t2): the calm lock cue ──────────────────────
  * A mandated template block (locked title @0, featured image @1) can't be moved
