@@ -91,6 +91,31 @@ function isCanvasRoleType(t) {
   return CANVAS_ROLE_TYPES.has(t);
 }
 
+// The `table` block as FOUR hand-rolled NESTED nodes (bpTable > bpTableRow >
+// bpTableHeaderCell|bpTableCell; see table-node.js). UNLIKE every other canvas node,
+// the TABLE is a container of PM structure, not a leaf/atom/inline body — its data
+// lives in child nodes, not attrs. The bpTable NODE name differs from its bpType
+// ("table"), like the code/diagram attr-atoms, so runToTiptap maps block.type →
+// node.type and runToOps/classifyNode read the bpType back off node.attrs.bpType.
+// A cell body is INLINE runs (compose.ex:406-425 feeds each cell through
+// compose_inline_children → the shared serializer), so the cell↔portable-doc mapping
+// REUSES inlineArrayToTiptap / tiptapInlineToPd verbatim (the callout precedent).
+//
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_table_types and table-node.js.
+const CANVAS_TABLE_TYPES = new Set(["table"]);
+const CANVAS_TABLE_NODE_NAME = "bpTable";
+
+// True when a portable-doc BLOCK type is the table (runToTiptap dispatch).
+function isCanvasTableType(t) {
+  return CANVAS_TABLE_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas table container. runToOps/classifyNode
+// read node.type off a getJSON node (the NODE name, not the bpType).
+function isCanvasTableNode(nodeType) {
+  return nodeType === CANVAS_TABLE_NODE_NAME;
+}
+
 // S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
 // (no PM-managed interior, like the divider) whose body text rides in an ATTR and
 // is edited by a NON-PM control (a <textarea> island; see code-node.js). The code
@@ -456,6 +481,15 @@ export function runToTiptap(blocks) {
       return roleBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasTableType(bpType)) {
+      // The table as a NESTED node tree (bpTable > bpTableRow > cells). Its rows/head
+      // live in PM child nodes (each cell body = inline runs), NOT attrs — which is
+      // what earns free inline-mark editing. table-node.js declares the four nodes so
+      // getJSON() round-trips the whole grid. node.type is the NODE name (bpTable),
+      // not the bpType (table).
+      return tableBlockToNode(block, bpId, bpType);
+    }
+
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
     return {
       type: "bpOpaque",
@@ -573,6 +607,115 @@ function stableCalloutKey(node) {
     collapsed: a.collapsed === true,
     content: node.content || null,
   });
+}
+
+// ── table ⇄ canvas nested node tree ──────────────────────────────────────────
+//
+// The `table` block ⇄ the bpTable > bpTableRow > bpTableHeaderCell|bpTableCell node
+// tree. Block shape (compose.ex:406-425): { type:"table", rows:[[cell,…],…], head:[cell,
+// …]? }. `rows` is a list of body rows; `head` is an OPTIONAL single header row (a list
+// of cells). A cell is an INLINE array — the SAME shape a paragraph/callout body carries
+// — so cell↔node uses inlineArrayToTiptap / tiptapInlineToPd verbatim. The header row is
+// modeled as a bpTableRow of bpTableHeaderCell; body rows are bpTableRow of bpTableCell.
+// The bpTable node carries bpId/bpType; rows/cells carry NO bpId (one id per table).
+
+// Normalize a cell to an inline array before the shared serializer. A scalar cell
+// (string/number — upstream paper_to_blocks.py emits text-only cells as plain strings;
+// inline.ex:25-27 tolerates them) becomes a single text run; an inline array passes
+// through; anything else → empty (defensive; renders an empty cell).
+function cellToInline(cell) {
+  if (Array.isArray(cell)) return cell;
+  if (cell == null) return [];
+  if (typeof cell === "string" || typeof cell === "number")
+    return [{ type: "text", value: String(cell) }];
+  return [];
+}
+
+// One cell block → a bpTableHeaderCell|bpTableCell node. Omit the `content` key when
+// the inline array is empty (empty-body fidelity, callout precedent).
+function cellToNode(nodeName, cell) {
+  const node = { type: nodeName };
+  const inline = inlineArrayToTiptap(cellToInline(cell));
+  if (inline.length) node.content = inline;
+  return node;
+}
+
+// tableBlockToNode(block) → { type:"bpTable", attrs:{bpId,bpType},
+//   content:[ headRow?, ...bodyRows ] }. The header row (only when block.head is present
+// & non-empty) leads with bpTableHeaderCell cells; body rows follow with bpTableCell.
+// Guards keep the node schema-valid (bpTableRow+ ; each row (cell)+) for a degenerate
+// empty table — real tables always carry rows, so the guards never fire on live data.
+function tableBlockToNode(block, bpId, bpType) {
+  const rowsSrc = Array.isArray(block && block.rows) ? block.rows : [];
+  const headSrc = block && block.head;
+  const content = [];
+
+  const mkRow = (nodeName, cells) => {
+    const list = Array.isArray(cells) ? cells : [];
+    const cellNodes = list.map((cell) => cellToNode(nodeName, cell));
+    if (!cellNodes.length) cellNodes.push({ type: nodeName });
+    return { type: "bpTableRow", content: cellNodes };
+  };
+
+  if (Array.isArray(headSrc) && headSrc.length) {
+    content.push(mkRow("bpTableHeaderCell", headSrc));
+  }
+  for (const row of rowsSrc) content.push(mkRow("bpTableCell", row));
+
+  if (!content.length) {
+    content.push({ type: "bpTableRow", content: [{ type: "bpTableCell" }] });
+  }
+
+  return { type: "bpTable", attrs: { bpId, bpType: bpType || "table" }, content };
+}
+
+// tableNodeToBlock(node, id) → { id, type:"table", rows:[…], head?:[…] }. Walk the row
+// nodes: a LEADING row whose cells are ALL bpTableHeaderCell → block.head; every other
+// row → a body row. Each cell → tiptapInlineToPd(cell.content||[]) (the shared
+// deserializer). head is OMITTED when there is no header row (byte-fidelity; the INSERT
+// path drops absent fields, like calloutNodeToBlock).
+function tableNodeToBlock(node, id) {
+  const rowNodes = (node && node.content) || [];
+  let head = null;
+  const rows = [];
+  rowNodes.forEach((rowNode, i) => {
+    const cells = (rowNode && rowNode.content) || [];
+    const isHeaderRow =
+      cells.length > 0 && cells.every((c) => c.type === "bpTableHeaderCell");
+    const mapped = cells.map((c) => tiptapInlineToPd((c && c.content) || []));
+    if (i === 0 && isHeaderRow) head = mapped;
+    else rows.push(mapped);
+  });
+  const block = { id, type: "table", rows };
+  if (head) block.head = head;
+  return block;
+}
+
+// The COARSE whole-table PATCH: { rows:<all body rows>, head:<header cells OR []> }.
+// CRITICAL (the calloutNodeToPatch removal contract): patch-block is a SHALLOW Map.merge
+// that can REPLACE but never DELETE a key — so head is emitted EXPLICITLY as `[]` when the
+// header row was removed, otherwise the stale old head survives and the header band
+// silently reappears on reload. compose.ex maps head:[] → no thead, so `head:[]`
+// round-trips clean. `rows` is always the full body (a whole-table replace — one cell
+// edit re-emits the entire rows/head, the v1 greenlit coarse round-trip).
+function tableNodeToPatch(node) {
+  const block = tableNodeToBlock(node, null);
+  return {
+    rows: block.rows,
+    head: block.head ? block.head : [],
+  };
+}
+
+// True when a table's grid/content changed. Canonical (key-order-insensitive) compare
+// of the header cells + body rows — a cell edit / add-remove row-col flips it, a pure
+// reorder (bpId only) emits nothing.
+function tableNodeChanged(prevNode, nextNode) {
+  return stableTableKey(prevNode) !== stableTableKey(nextNode);
+}
+
+function stableTableKey(node) {
+  const b = tableNodeToBlock(node, null);
+  return canonicalJSON({ head: b.head ? b.head : null, rows: b.rows });
 }
 
 // ── eyebrow / byline / ingress / pullquote ⇄ canvas role prose node ──────────
@@ -1207,6 +1350,8 @@ function classifyNode(node) {
   // Article-chrome role node — node.type IS the bpType (eyebrow/byline/ingress/
   // pullquote), so the bpType fallback below resolves it via `node.type`.
   const isRole = isCanvasRoleType(node.type);
+  // Table container node — node.type is bpTable, bpType resolves to "table" off attrs.
+  const isTable = isCanvasTableNode(node.type);
   const bpType =
     (node.attrs && node.attrs.bpType) ||
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
@@ -1223,6 +1368,7 @@ function classifyNode(node) {
     isReadOnlyAtom,
     isFleet,
     isRole,
+    isTable,
   };
 }
 
@@ -1437,6 +1583,21 @@ export function runToOps(prevBlocks, nextDoc) {
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
 
+    if (entry.isTable) {
+      // Canvas table (nested node tree): diff the grid; emit one COARSE whole-table
+      // patch-block (rows + head, head explicit-[] on header removal) when anything
+      // changed. prevNode is reconstructed via tableBlockToNode so the compare is
+      // apples-to-apples. An UNCHANGED table emits NO op.
+      if (tableNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: tableNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isContent) {
       // Canvas content node (callout): diff body + chrome; emit one patch-block
       // carrying ONLY the mutable fields when anything changed.
@@ -1610,6 +1771,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (serverNode.type !== liveNode.type) return false;
   const type = serverNode.type;
 
+  // Table (nested node tree): the header cells + body rows.
+  if (isCanvasTableNode(type)) {
+    return !tableNodeChanged(serverNode, liveNode);
+  }
   // Callout (content node): tone/title/collapsible/collapsed/body.
   if (isCanvasContentType(type)) {
     return !calloutNodeChanged(serverNode, liveNode);
@@ -1677,6 +1842,11 @@ function nextNodeToBlock(entry) {
     // Canvas atom insert (divider): a content-free leaf, fully described by its
     // type + the minted id. No body fields to reconstruct.
     return { id: entry.id, type: entry.bpType || node.type };
+  }
+  if (entry.isTable) {
+    // Canvas table insert: reconstruct the full table block (rows + optional head)
+    // from the nested node tree with the minted id, via the dedicated mapper.
+    return tableNodeToBlock(node, entry.id);
   }
   if (entry.isContent) {
     // Canvas content insert (callout): reconstruct the full callout block from

@@ -49,7 +49,12 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
   # The block elements that both surfaces style and that must stay in lock-step.
   # (`ul`/`ol` are handled separately — they carry an intentional divergence.)
-  @parity_elements ~w(h1 h2 h3 p li code img)
+  # The three `.bp-table*` CLASS tokens ride here too (editable-table): the canvas
+  # table node-view carries the reader's own `.bp-table` / `.bp-table__th` /
+  # `.bp-table__td` classes, and `declarations_for/3` accepts a class selector as the
+  # `element` (targeting ".bp-paper-surface .bp-table__th" vs ".bp-paper-editor-body
+  # .bp-table__th"), so a drift between the reader rule and the edit mirror trips §2.
+  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",

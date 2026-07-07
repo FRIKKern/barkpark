@@ -106,6 +106,18 @@ import { Sheet, Embed, Fleet } from "./embed-node.js";
 // PM derives the contentDOM from the content hole; getJSON round-trips the styled
 // element + bpId/bpType, and run-convert.js maps the block ⇄ node. See ./role-nodes.js.
 import { Eyebrow, Byline, Ingress, Pullquote } from "./role-nodes.js";
+// editable table: the `table` block as FOUR hand-rolled NESTED nodes (bpTable >
+// bpTableRow > bpTableHeaderCell|bpTableCell), NOT @tiptap/extension-table. Cell bodies
+// are PM `inline*` holes reusing the shared inline serializer (marks round-trip); the
+// bpTable node-view paints the reader <table> + add/remove row/col chrome around a
+// <tbody> contentDOM. run-convert.js maps the block ⇄ node tree. NO StarterKit collision
+// (StarterKit ships no table/tr/td/th node). See ./table-node.js.
+import {
+  BpTable,
+  BpTableRow,
+  BpTableCell,
+  BpTableHeaderCell,
+} from "./table-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -609,6 +621,17 @@ class BpPaperCanvas extends HTMLElement {
         Byline,
         Ingress,
         Pullquote,
+        // editable table: the four nested nodes (bpTable > bpTableRow >
+        // bpTableHeaderCell|bpTableCell). Registers the container + row/cell types so
+        // runToTiptap's { type:"bpTable", content:[rows…] } tree mounts with editable
+        // inline cell bodies that JOIN the run, and getJSON() round-trips the grid.
+        // The bpTable node-view paints the reader <table> + row/col chrome around a
+        // <tbody> contentDOM; rows/cells are plain nodes (renderHTML content holes, no
+        // node-view). NO StarterKit node is disabled (no table/tr/td/th collision).
+        BpTable,
+        BpTableRow,
+        BpTableCell,
+        BpTableHeaderCell,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
