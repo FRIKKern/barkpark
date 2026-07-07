@@ -251,21 +251,48 @@ defmodule Barkpark.Plugins.Github.Auth do
 
   defp extract_token(_), do: nil
 
-  defp extract_ttl(body) when is_map(body) do
-    case Map.get(body, "expires_in") do
-      n when is_integer(n) and n > 0 -> n
-      _ -> @default_expires_in
-    end
-  end
+  # Real GitHub returns `expires_at` (ISO8601), NOT `expires_in`; installation
+  # tokens live ~1 h. Prefer a valid `expires_in` (some mocks/proxies send it),
+  # then derive the TTL from `expires_at`, then fall back to the ~1 h default.
+  defp extract_ttl(body) when is_map(body), do: ttl_from_map(body)
 
   defp extract_ttl(body) when is_binary(body) do
     case Jason.decode(body) do
-      {:ok, %{"expires_in" => n}} when is_integer(n) and n > 0 -> n
+      {:ok, map} when is_map(map) -> ttl_from_map(map)
       _ -> @default_expires_in
     end
   end
 
   defp extract_ttl(_), do: @default_expires_in
+
+  defp ttl_from_map(map) do
+    cond do
+      is_integer(map["expires_in"]) and map["expires_in"] > 0 ->
+        map["expires_in"]
+
+      is_binary(map["expires_at"]) ->
+        ttl_from_expires_at(map["expires_at"])
+
+      true ->
+        @default_expires_in
+    end
+  end
+
+  defp ttl_from_expires_at(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _offset} ->
+        secs = DateTime.diff(dt, DateTime.utc_now())
+        # A positive span is trusted verbatim — the call-site safety margin
+        # self-heals a tiny remainder into an immediate refetch. A non-positive
+        # span means a broken/skewed timestamp with no usable TTL; fall back to
+        # the known ~1 h installation-token life rather than poison the cache
+        # with a negative expiry (the 401-refresh path recovers if truly dead).
+        if secs > 0, do: secs, else: @default_expires_in
+
+      _ ->
+        @default_expires_in
+    end
+  end
 
   # ---------------------------------------------------------------------------
   # Config helpers

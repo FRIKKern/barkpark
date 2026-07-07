@@ -4,9 +4,11 @@ defmodule Barkpark.Plugins.Github.Client do
 
   Every verb authenticates with a `Bearer <installation-token>` minted by
   `Barkpark.Plugins.Github.Auth` and targets
-  `<github_api_base>/repos/:owner/:repo/...`. `github_api_base` is read
-  from `Application.get_env(:barkpark, Barkpark.Plugins.Github)[:github_api_base]`
-  (defaults to `https://api.github.com`; tests inject a Bypass base). It
+  `<base>/repos/:owner/:repo/...`. The base is read from
+  `Application.get_env(:barkpark, Barkpark.Plugins.Github)`, preferring
+  `:github_api_base` and falling back to `:api_base` (the key `Auth` reads,
+  so one config key drives both the token exchange and the REST verbs) —
+  defaulting to `https://api.github.com`; tests inject a Bypass base. It
   may be overridden per call with the `:base_url` opt.
 
   ## Verbs
@@ -299,18 +301,26 @@ defmodule Barkpark.Plugins.Github.Client do
   # Config helpers
   # ---------------------------------------------------------------------------
 
+  # Base resolution order: explicit `:base_url` opt (tests) → configured
+  # `:github_api_base` → `:api_base` (the key `Auth` reads — accepting it here
+  # too means a single config key drives BOTH the token exchange and the REST
+  # verbs, so an operator can't silently split them) → api.github.com.
   defp base_url(opts) do
-    case Keyword.get(opts, :base_url) do
-      url when is_binary(url) and url != "" ->
-        String.trim_trailing(url, "/")
+    cfg = config()
 
-      _ ->
-        case config()[:github_api_base] do
-          url when is_binary(url) and url != "" -> String.trim_trailing(url, "/")
-          _ -> @default_api_base
-        end
+    with :error <- opt_base(opts),
+         :error <- cfg_base(cfg[:github_api_base]),
+         :error <- cfg_base(cfg[:api_base]) do
+      @default_api_base
+    else
+      url -> url
     end
   end
+
+  defp opt_base(opts), do: cfg_base(Keyword.get(opts, :base_url))
+
+  defp cfg_base(url) when is_binary(url) and url != "", do: String.trim_trailing(url, "/")
+  defp cfg_base(_), do: :error
 
   defp config, do: Application.get_env(:barkpark, @config_key, [])
 

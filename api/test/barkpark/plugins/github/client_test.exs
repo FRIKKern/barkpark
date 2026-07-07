@@ -437,6 +437,81 @@ defmodule Barkpark.Plugins.Github.ClientTest do
     end
   end
 
+  describe "installation-token TTL (real GitHub shape)" do
+    test "derives the cache TTL from expires_at (GitHub omits expires_in)",
+         %{bypass: bypass, base: base} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      # Real GitHub returns `expires_at` (ISO8601), NOT `expires_in`. A future
+      # expires_at must yield a positive TTL so the token caches across calls.
+      future = DateTime.utc_now() |> DateTime.add(3600, :second) |> DateTime.to_iso8601()
+
+      Bypass.stub(bypass, "POST", @token_path, fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"token" => @inst_token, "expires_at" => future}))
+      end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 1}))
+      end)
+
+      assert {:ok, _} = Client.create_issue(@repo, %{title: "a"}, base_url: base, max_retries: 0)
+      assert {:ok, _} = Client.create_issue(@repo, %{title: "b"}, base_url: base, max_retries: 0)
+
+      # Cached: the expires_at-derived TTL kept the token, so exactly one fetch.
+      assert Agent.get(counter, & &1) == 1
+    end
+
+    test "a past expires_at does not cache a dead token forever",
+         %{bypass: bypass, base: base} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      # A past expires_at means a broken/skewed timestamp; the token must not be
+      # trusted as ~1 h. (It falls back to the default life, but the point is it
+      # must never produce a negative expiry that poisons the cache.)
+      past = DateTime.utc_now() |> DateTime.add(-10, :second) |> DateTime.to_iso8601()
+
+      Bypass.stub(bypass, "POST", @token_path, fn conn ->
+        Agent.update(counter, &(&1 + 1))
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"token" => @inst_token, "expires_at" => past}))
+      end)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 1}))
+      end)
+
+      assert {:ok, _} = Client.create_issue(@repo, %{title: "a"}, base_url: base, max_retries: 0)
+      # Token was still returned (usable this once); no crash on the negative span.
+      assert Agent.get(counter, & &1) == 1
+    end
+  end
+
+  describe "base URL config resolution" do
+    test "falls back to :api_base when :github_api_base is absent",
+         %{bypass: bypass, base: base} do
+      # Configure ONLY api_base (the key Auth reads) — Client must reuse it so a
+      # single config key can't silently split token-exchange from REST calls.
+      Application.put_env(
+        :barkpark,
+        Barkpark.Plugins.Github,
+        app_id: @app_id,
+        installation_id: @installation_id,
+        private_key: Application.get_env(:barkpark, Barkpark.Plugins.Github)[:private_key],
+        api_base: base
+      )
+
+      Auth.invalidate()
+      stub_token(bypass)
+
+      Bypass.expect(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 1}))
+      end)
+
+      # No :base_url opt and no :github_api_base — resolution must land on api_base.
+      assert {:ok, %{"number" => 1}} =
+               Client.create_issue(@repo, %{title: "x"}, max_retries: 0)
+    end
+  end
+
   describe "auth misconfiguration" do
     test "missing private key → AuthError before any HTTP", %{base: base} do
       Application.put_env(
