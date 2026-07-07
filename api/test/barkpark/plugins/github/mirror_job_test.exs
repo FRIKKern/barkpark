@@ -814,6 +814,45 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       refute gh["projects_fingerprint"]
     end
 
+    test "(b'') a Projects RAISE is caught by isolate/3 — the issue is still mirrored", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Crash isolation"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 52, state: "synced"}, scope)
+
+      stub_get(bypass, 52)
+
+      {:ok, patched?} = Agent.start_link(fn -> false end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/52", fn conn ->
+        Agent.update(patched?, fn _ -> true end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 52, "state" => "open"}))
+      end)
+
+      # Projects RAISES (a bug in the eventual Projects module, an exhausted GraphQL
+      # decode, etc.) rather than returning {:error, _}. `isolate/3` MUST rescue it,
+      # log, and downgrade to :ok — the proven Issues loop is 100% unaffected. This
+      # is the flagship failure-isolation invariant via the rescue path (test (b)
+      # only exercises the returned-{:error} swallow path).
+      crash = fn _task, _repo, _num, _link -> raise "projects module exploded" end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: crash))
+
+      # Issue still PATCHed + stamped despite the projection crash.
+      assert Agent.get(patched?, & &1) == true
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+      assert is_integer(gh["synced_fingerprint"])
+      refute gh["projects_fingerprint"]
+
+      # Relations STILL ran after the isolated Projects crash (the crash is
+      # confined to the Projects sub-step, not the whole projections pass).
+      assert_received {:relations_called, 52}
+    end
+
     test "(b') a Projects rate-limit MAY snooze the whole reconcile (D9)", %{
       bypass: bypass,
       scope: scope
