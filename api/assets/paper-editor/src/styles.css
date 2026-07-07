@@ -479,6 +479,23 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
 .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
 
+/* ── notes-grid split: the `note` WIDGET edit chrome (bp-canvas-note*) ─────────
+ * UNLIKE callout/card, the note canvas node does NOT class-share with the reader
+ * (parity §3 forbids bp-notes / bp-note__ in the editor JS), so this rule set MIMICS
+ * the reader's `.bp-paper-surface .bp-note*` visuals (paper-surface.css:474-479):
+ * a mono label chip beside a soft-ink description holding a lead input + the editable
+ * body. Reader parity is proven by the compose byte-identity test, not this mirror —
+ * these are edit affordances only. Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-canvas-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; margin: 1.4rem 0; }
+.bp-canvas-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border: 0; border-radius: 5px; padding: 2px 7px; text-align: center; min-width: 0; }
+.bp-canvas-note__k::placeholder { color: var(--paper-accent); opacity: 0.5; }
+.bp-canvas-note__d { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; min-width: 0; }
+.bp-canvas-note__lead { font-family: inherit; font-size: inherit; font-weight: 600; color: var(--paper-ink); background: transparent; border: 0; padding: 0; min-width: 0; }
+.bp-canvas-note__lead::placeholder { color: var(--paper-ink-soft); opacity: 0.5; }
+.bp-canvas-note__body { min-width: 0; }
+.bp-canvas-note__k:focus, .bp-canvas-note__lead:focus { outline: 1px solid var(--paper-accent); outline-offset: 1px; border-radius: 4px; }
+@media (max-width: 520px) { .bp-canvas-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-canvas-note__k { justify-self: start; } }
+
 /* ── canvas section container node-view (loop-epic/editable-section) ──────────
  * `bp-canvas-section` is a THIN edit-only layout hook. PARITY rides the node-view's
  * INLINE styles hand-matching the reader (a flex-column PdBox, a bold title on its

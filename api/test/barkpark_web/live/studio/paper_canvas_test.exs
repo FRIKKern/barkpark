@@ -209,6 +209,23 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.partition_runs([card_widget("only")]) == [{:run, [card_widget("only")]}]
     end
 
+    test "notes-grid split: a NOTE widget rides a run (canvas content node), distinct from the `notes` fleet grid" do
+      # A note is a CONTENT node (@canvas_content_types, alongside callout) — it FOLDS
+      # INTO a run. The plural `notes` fleet grid ALSO rides (verbatim), so a note + a
+      # legacy notes grid + prose are ONE maximal run.
+      note = %{"id" => "nw1", "type" => "note", "label" => "l", "text" => "b"}
+      notes = %{"id" => "ns1", "type" => "notes", "items" => []}
+
+      blocks = [para("p1"), note, para("p2")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+
+      mixed = [para("p1"), note, notes, para("p2")]
+      assert PaperCanvas.partition_runs(mixed) == [{:run, mixed}]
+
+      # And a lone note is a single run, never a boundary.
+      assert PaperCanvas.partition_runs([note]) == [{:run, [note]}]
+    end
+
     test "section: a section INSIDE prose keeps the run whole (was a boundary split)" do
       blocks = [para("p1"), section("sec1"), para("p2")]
 

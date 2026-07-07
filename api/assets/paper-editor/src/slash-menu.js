@@ -21,6 +21,7 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "heading", label: "Heading", hint: "H", desc: "h1 — section title" },
   { group: "Text", type: "list", label: "List", hint: "•", desc: "bulleted or ordered" },
   { group: "Text", type: "callout", label: "Callout", hint: "!", desc: "warn or info card" },
+  { group: "Text", type: "note", label: "Note", hint: "❡", desc: "labelled annotation" },
   { group: "Text", type: "code", label: "Code", hint: "</>", desc: "monospace block" },
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
