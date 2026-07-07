@@ -1,0 +1,99 @@
+defmodule Barkpark.PortableDoc.Tiers do
+  @moduledoc """
+  The composition-doctrine **tier** of a block type — `:element | :widget |
+  :section` (plan paper `composition-doctrine-plan` §1, migration step 1).
+
+  The doctrine's containment ladder:
+
+    * `:element` — a single-purpose leaf (internally as complex as it needs to be),
+      standalone or filling a widget slot: prose, media, a field, a role atom.
+    * `:widget` — composes elements into ONE purposeful unit (a callout's toned
+      body, a figure's media + caption, a card grid, a task view).
+    * `:section` — owns the LAYOUT of its children (a `section`, `columns`).
+
+  This is called **tier** in code, not "kind", to avoid colliding with
+  `Barkpark.PortableDoc.Constraints.kind_of/1`, which is the block's *structural
+  role* (role → type) that constraint declarations match. The doctrine loosely
+  calls this discriminant "kind: element|widget|section"; `tier` is the
+  unambiguous name for it here.
+
+  **PURE classification — nothing depends on it yet (step 1).** Later steps drive
+  slots off `:widget`, the declarative layout engine off `:section`, and the
+  surface-parity gate off all three. The tier is derived from a block's `"type"`
+  ONLY — a block's `role` (e.g. a `"featured"` image, a `"title"` heading) never
+  changes its tier.
+
+  Completeness is a hard invariant: `tiers_test.exs` reads `render/compose.ex` and
+  fails if any renderable block type is unclassified (or if this module claims a
+  type the reader cannot produce). So a new block type MUST land here in the same
+  change — the classification can never silently drift from the render surface.
+  """
+
+  # ── the classification ──────────────────────────────────────────────────────
+  #
+  # Judgement calls worth recording (all defensible, revisitable):
+  #   * `terminal` / `table` → :widget. Both hold structure (a body / a cell grid)
+  #     but serve ONE purpose (show a terminal / tabular data), not free layout of
+  #     arbitrary children — that is what makes them widgets, not sections.
+  #   * `sheet` / `embed` / `asciicast` / `status-legend` → :widget. Embedded or
+  #     rendered display units, not editable leaves.
+  #   * `composite` / `arrayOf` / `codelist` / `localizedText` → :element. Schema-
+  #     bound FIELD atoms: internally structured, but a single bound field, edited
+  #     as one — they compose via the field system, not the slot system.
+  #   * the fleet grids `cards` / `notes` / `pipeline` / `task-board` / `roadmap`
+  #     are :widget TODAY (monolithic); migration step 4 SPLITS them into a
+  #     `:section` (grid) of card/note/stage `:widget`s built from elements.
+
+  @element ~w(
+    paragraph heading list divider code diagram image action
+    eyebrow byline ingress pullquote
+    field-string field-slug field-text field-boolean field-select field-datetime field-color
+    field-image field-reference
+    composite arrayOf codelist localizedText
+  )
+
+  @widget ~w(
+    callout figure terminal table
+    task-detail task-list tasks task-board roadmap
+    notes cards pipeline
+    form questionnaire
+    sheet embed asciicast status-legend
+  )
+
+  @section ~w(section columns)
+
+  @by_tier %{element: @element, widget: @widget, section: @section}
+  @tier_of (for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier})
+
+  @type tier :: :element | :widget | :section
+
+  @doc """
+  The tier of a block type (or a block map, read off its `"type"`). `nil` for an
+  unclassified / unknown type.
+  """
+  @spec tier_of(String.t() | map() | term()) :: tier() | nil
+  def tier_of(%{"type" => type}) when is_binary(type), do: tier_of(type)
+  def tier_of(type) when is_binary(type), do: Map.get(@tier_of, type)
+  def tier_of(_), do: nil
+
+  @doc "True when a block type is classified (has a tier)."
+  @spec classified?(String.t()) :: boolean()
+  def classified?(type) when is_binary(type), do: Map.has_key?(@tier_of, type)
+  def classified?(_), do: false
+
+  @doc "The classification, grouped by tier: `%{element: [...], widget: [...], section: [...]}`."
+  @spec by_tier() :: %{tier() => [String.t()]}
+  def by_tier, do: @by_tier
+
+  @doc "Every classified block type (flat)."
+  @spec known_types() :: [String.t()]
+  def known_types, do: Map.keys(@tier_of)
+
+  @doc """
+  Classify a block list → `[{block, tier}]`, tier `nil` for an unknown type. Pure;
+  the caller decides what to do with an unclassified block.
+  """
+  @spec classify([map()]) :: [{map(), tier() | nil}]
+  def classify(blocks) when is_list(blocks), do: Enum.map(blocks, &{&1, tier_of(&1)})
+  def classify(_), do: []
+end
