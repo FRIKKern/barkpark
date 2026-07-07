@@ -14,7 +14,7 @@ defmodule Barkpark.Plugins.Github.LinkTest do
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.MutationEvent
-  alias Barkpark.Plugins.Github.Link
+  alias Barkpark.Plugins.Github.{Link, Outbox}
 
   @dataset "production"
 
@@ -53,6 +53,13 @@ defmodule Barkpark.Plugins.Github.LinkTest do
     doc
   end
 
+  # A task that is CREATED then PUBLISHED — the collapse path's precondition.
+  defp mk_published_task!(doc_id, scope) do
+    _draft = mk_task!(doc_id, scope)
+    {:ok, published} = Content.publish_document(doc_id, "task", @dataset, scope)
+    published
+  end
+
   defp uniq(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
   defp github_events(doc_id) do
@@ -61,6 +68,10 @@ defmodule Barkpark.Plugins.Github.LinkTest do
         where: e.doc_id == ^doc_id and e.source == "github",
         order_by: e.id
     )
+  end
+
+  defp max_event_id(dataset) do
+    Repo.one(from(e in MutationEvent, where: e.dataset == ^dataset, select: max(e.id))) || 0
   end
 
   describe "get/1" do
@@ -116,6 +127,67 @@ defmodule Barkpark.Plugins.Github.LinkTest do
     test "returns {:error, :not_found} for an unknown task", %{scope: scope} do
       assert {:error, :not_found} =
                Link.put(uniq("ghost"), @dataset, %{repo: "x/y", issue: 1}, scope)
+    end
+
+    test "leaves a never-published task a DRAFT (no force-publish under a user)",
+         %{scope: scope} do
+      id = uniq("gh")
+      _draft = mk_task!(id, scope)
+
+      {:ok, _doc} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 11}, scope)
+
+      # No published row was conjured — the bookkeeping lives on the draft.
+      assert {:error, :not_found} =
+               Content.get_document(Content.published_id(id), "task", @dataset, scope)
+
+      {:ok, draft} = Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+      assert %{"repo" => "FRIKKern/barkpark", "issue" => 11} = Link.get(draft)
+    end
+
+    test "collapses the draft twin back into an ALREADY-published task (D12)",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_published_task!(id, scope)
+
+      {:ok, _doc} = Link.put(id, @dataset, %{repo: "FRIKKern/barkpark", issue: 9}, scope)
+
+      # No permanent draft twin remains — the stamp was collapsed into published.
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(id), "task", @dataset, scope)
+
+      # The bookkeeping landed on the surviving published row.
+      {:ok, published} = Content.get_document(Content.published_id(id), "task", @dataset, scope)
+      assert %{"repo" => "FRIKKern/barkpark", "issue" => 9} = Link.get(published)
+      assert published.status == "published"
+    end
+  end
+
+  describe "loop immunity (D12 capstone)" do
+    test "neither the stamp NOR the collapse-publish is drainable by the Outbox",
+         %{scope: scope} do
+      id = uniq("gh")
+      _published = mk_published_task!(id, scope)
+
+      # Everything the setup emitted is <= max_id; only the bookkeeping path's
+      # events fall strictly after it.
+      max_id = max_event_id(@dataset)
+
+      {:ok, _doc} =
+        Link.put(
+          id,
+          @dataset,
+          %{repo: "FRIKKern/barkpark", issue: 7, synced_rev: "rev-a", state: "synced"},
+          scope
+        )
+
+      # HARD invariant: every mutation_event the bookkeeping path emitted — the
+      # draft stamp AND the collapse publish — carries source="github", so the
+      # Outbox excludes them ALL. The mirror can never re-drain its own write.
+      assert Outbox.fetch(@dataset, max_id, 100) == []
+
+      # And the (formerly-published) task carries no permanent draft twin.
+      assert {:error, :not_found} =
+               Content.get_document(Content.draft_id(id), "task", @dataset, scope)
     end
   end
 

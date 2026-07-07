@@ -27,6 +27,29 @@ defmodule Barkpark.Plugins.Github.Link do
   echo back out as an outbound mirror. Combined with the `synced_rev`
   equality check (`synced?/1`, D4 cut #3), a no-op edit stays a no-op sync.
 
+  ## Draft-twin collapse (D12, loop-cut #2)
+
+  `Content.upsert_document/4` always writes the DRAFT row (it forces the id to
+  `drafts.<id>` and coerces `status → draft`). So for a task that was already
+  PUBLISHED, the bookkeeping stamp would otherwise leave a permanent unpublished
+  draft twin next to the published row — a phantom "pending changes" doc in
+  Studio that never came from a human edit.
+
+  `put/4` closes that: it records whether a published row existed BEFORE the
+  stamp, and if so collapses the draft back into the published row via
+  `Content.publish_document/4` — threaded `source: :github`. Because
+  `publish_document` passes `:source` → `tap_broadcast` → `save_event`
+  (`to_string(source)`), that publish `mutation_events` row is stamped exactly
+  `"github"`, so the wave-1 Outbox EXCLUDES it (loop-cut #2). Both writes the
+  bookkeeping path emits — the draft stamp AND the collapse publish — carry
+  `source="github"` and are un-drainable, so the mirror can never re-drain its
+  own write.
+
+  A task that has NEVER been published (draft-only) is LEFT a draft — `put/4`
+  never force-publishes under a user. A failed collapse publish is a harmless
+  leftover draft (the next reconcile converges it), not a correctness bug: it is
+  ignored and `put/4` still returns `{:ok, %Document{}}`.
+
   ## Absent, never fabricated
 
   When a task has never been mirrored, `content.github` is ABSENT and `get/1`
@@ -78,8 +101,16 @@ defmodule Barkpark.Plugins.Github.Link do
   (workspace/project scope, `:user_id`, …). `:source` defaults to `:github`
   (the D4 loop cut); an explicit `:source` in `opts` wins.
 
+  If the task was already PUBLISHED, the draft twin the upsert writes is
+  collapsed back into the published row via `Content.publish_document/4`
+  (threaded `:source`), so no phantom unpublished draft is left behind. A
+  never-published task is LEFT a draft — `put/4` never force-publishes under a
+  user. The collapse publish's `mutation_events` row is stamped `source="github"`
+  too, so the Outbox excludes it (loop-cut #2); see the moduledoc.
+
   Returns `{:ok, %Document{}}` or `{:error, term}` (`:not_found` when the task
-  doesn't exist).
+  doesn't exist). A failed collapse publish is ignored — the leftover draft is
+  harmless and `put/4` still returns the `{:ok, %Document{}}` upsert result.
   """
   @spec put(String.t(), String.t(), map(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
@@ -89,19 +120,25 @@ defmodule Barkpark.Plugins.Github.Link do
       prior = get(existing) || %{}
       merged_github = Map.merge(prior, stringify_keys(github))
       content = Map.put(existing.content || %{}, @content_key, merged_github)
+      pid = Content.published_id(existing.doc_id)
+
+      # Was this task already published? Capture BEFORE the upsert writes its
+      # draft twin, so a genuine never-published task is never force-published.
+      was_published? =
+        match?({:ok, _}, Content.get_document(pid, @task_type, dataset, opts))
 
       attrs = %{
-        "doc_id" => Content.published_id(existing.doc_id),
+        "doc_id" => pid,
         "title" => existing.title,
         "content" => content
       }
 
-      Content.upsert_document(
-        @task_type,
-        attrs,
-        dataset,
-        Keyword.put_new(opts, :source, :github)
-      )
+      source_opts = Keyword.put_new(opts, :source, :github)
+
+      with {:ok, upserted} <-
+             Content.upsert_document(@task_type, attrs, dataset, source_opts) do
+        {:ok, collapse_draft_twin(was_published?, upserted, pid, dataset, source_opts)}
+      end
     end
   end
 
@@ -124,6 +161,23 @@ defmodule Barkpark.Plugins.Github.Link do
 
       _ ->
         false
+    end
+  end
+
+  # Collapse the draft twin the upsert wrote (D12). Only when the task was
+  # ALREADY published: publish the fresh draft back into the published row so no
+  # phantom unpublished draft is left in Studio. The publish is threaded the same
+  # `source: :github` as the stamp, so its `mutation_events` row is excluded from
+  # the Outbox (loop-cut #2). A never-published task is left a draft (never
+  # force-published under a user). A failed publish is a harmless leftover draft,
+  # not a correctness bug — ignore it and return the upsert result unchanged so
+  # `put/4`'s `{:ok, %Document{}}` contract holds.
+  defp collapse_draft_twin(false, upserted, _pid, _dataset, _opts), do: upserted
+
+  defp collapse_draft_twin(true, upserted, pid, dataset, opts) do
+    case Content.publish_document(pid, @task_type, dataset, opts) do
+      {:ok, published} -> published
+      _ -> upserted
     end
   end
 
