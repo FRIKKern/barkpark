@@ -51,11 +51,33 @@ defmodule Barkpark.Plugins.GithubTest do
       assert Github.register_schemas([]) == []
     end
 
-    test "register_workers/1 supervises the Auth cache + the DrainWorker (AUTH START)" do
+    test "register_workers/1 supervises Auth + DrainWorker when drain is enabled (AUTH START)" do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: true)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      end)
+
       assert Github.register_workers(%{}) == [
                Barkpark.Plugins.Github.Auth,
                Barkpark.Plugins.Github.DrainWorker
              ]
+    end
+
+    test "register_workers/1 keeps the lazy Auth but omits the DrainWorker when drain is gated off" do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      end)
+
+      assert Github.register_workers(%{}) == [Barkpark.Plugins.Github.Auth]
     end
   end
 

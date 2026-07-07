@@ -217,10 +217,24 @@ defmodule Barkpark.Plugins.Github do
   """
   @impl Barkpark.Plugin
   def register_workers(_ctx) do
-    [
-      Barkpark.Plugins.Github.Auth,
-      Barkpark.Plugins.Github.DrainWorker
-    ]
+    [Barkpark.Plugins.Github.Auth | drain_worker_child()]
+  end
+
+  # Auth is a LAZY singleton (no boot DB, no timer — safe to supervise always,
+  # like onixedit's Bokbasen.Auth). The DrainWorker, by contrast, runs a periodic
+  # DB-touching tick; a boot-started instance in the test env fires against a
+  # process that owns no ExUnit sandbox connection, raising DBConnection.Ownership
+  # and cascading across the suite. So it is gated OFF in test (config/test.exs) —
+  # the `Barkpark.Sync.PushWorker`/`Sync.enabled?()` precedent (splice only when
+  # the engine should actually run). Defaults ON, so prod is unaffected. Tests that
+  # exercise the drain loop start their OWN anonymous instance with injected seams.
+  defp drain_worker_child do
+    enabled? =
+      :barkpark
+      |> Application.get_env(Barkpark.Plugins.Github.DrainWorker, [])
+      |> Keyword.get(:enabled, true)
+
+    if enabled?, do: [Barkpark.Plugins.Github.DrainWorker], else: []
   end
 
   # Blank = nil, non-binary, or all-whitespace string. A credential the
