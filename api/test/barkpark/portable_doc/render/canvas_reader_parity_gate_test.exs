@@ -332,10 +332,20 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # class here. A fleet DATA block (tasks/notes/cards/board) stays verbatim-carried
     # because editing a live-data mirror in-paper is meaningless; a layout/authored
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
+    #
+    # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
+    # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view
+    # MUST emit `bp-card__t`/`bp-card__d`/`bp-card__media`/`bp-card__action` to inherit
+    # the reader's own `.bp-paper-surface .bp-card*` paint — the callout precedent, ZERO
+    # second HTML producer. `bp-cards` (the legacy fleet GRID wrapper) STAYS forbidden
+    # below (via painted_fleet's `cards` sig) — the new path emits `bp-section__grid`,
+    # NEVER `bp-cards`, and `bp-card__t`/`bp-card__d` do NOT contain the substring
+    # `bp-cards` — so the still-verbatim-carried legacy `cards` fleet stays gated against
+    # a hand-mirrored second producer.
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__)
 
     offenders =
       reader_markup

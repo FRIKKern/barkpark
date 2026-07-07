@@ -226,6 +226,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (bpTerminal/bpTerminalAtom).
   @canvas_container_types ~w(columns section terminal)
 
+  # STEP 4: the card WIDGET — a slots-native block (media/title/body/action slots)
+  # the canvas mounts as its OWN node (bpCard) so a card FOLDS INTO a run instead of
+  # folding into a run/opaque boundary. UNLIKE a fleet grid (verbatim-carried, server-
+  # painted), the card is EDITABLE: body = an inline contentDOM, title = an attr island,
+  # tone/media/action = present-only attrs. Its body flattens to plain text
+  # (Slots.card_body_text/1) so the reader byte-matches ONE legacy `cards` grid item —
+  # the legacy `cards` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED.
+  # MUST stay in lockstep with run-convert.js (bpCard / isCanvasCard*) and card-node.js.
+  @canvas_widget_types ~w(card)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
@@ -253,7 +263,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_role_types ++
                   @canvas_table_types ++
                   @canvas_figure_types ++
-                  @canvas_container_types
+                  @canvas_container_types ++
+                  @canvas_widget_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**

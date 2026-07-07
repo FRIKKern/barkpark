@@ -521,6 +521,17 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-card--danger { border-top-color: var(--st-danger); }
 .bp-paper-surface .bp-card__t { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+/* STEP 4 card WIDGET — additive slots (bp-card/__t/__d/--* already exist above). */
+.bp-paper-surface .bp-card__media { margin: -13px -15px 10px; border-radius: 10px 10px 0 0; overflow: hidden; }
+.bp-paper-surface .bp-card__media img { display: block; width: 100%; height: auto; }
+.bp-paper-surface .bp-card__action { margin-top: 10px; }
+.bp-paper-surface .bp-card__action a { display: inline-block; font-size: 0.82rem; font-weight: 600; color: var(--paper-accent); text-decoration: none; }
+.bp-paper-surface .bp-card__action a:hover { text-decoration: underline; }
+/* STEP 4 canvas edit hook — a light hover-revealed control row; chrome only (bp-canvas-*). */
+.bp-paper-surface .bp-canvas-card { position: relative; }
+.bp-paper-surface .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
+.bp-paper-surface .bp-canvas-card:hover .bp-canvas-card__controls, .bp-paper-surface .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
+.bp-paper-surface .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
 
 /* ── pipeline: source → emit → gate flow ── */
 .bp-paper-surface .bp-pipe-scroll { overflow-x: auto; margin: 1.4rem 0; }

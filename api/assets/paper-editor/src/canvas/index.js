@@ -67,6 +67,12 @@ import { Divider } from "./divider-node.js";
 // callouts, body and all). A node-view renders the tone-framed chrome + fold
 // toggle around a contentDOM body hole. See ./callout-node.js.
 import { Callout } from "./callout-node.js";
+// STEP 4: the card WIDGET as a canvas node (bpCard) — a slots-native block whose
+// body slot is an editable inline contentDOM, with title (an attr island) + tone/
+// media/action (present-only attrs) as chrome. Its node-view carries the reader's
+// own bp-card/__t/__d classes so the reader cascade paints it for free (the callout
+// precedent). See ./card-node.js.
+import { Card } from "./card-node.js";
 // S3.3: the code block as a canvas ATTR-ATOM node — an atom (no PM-managed body,
 // like the divider) whose code TEXT rides in the `value` attr and is edited by a
 // NON-PM <textarea> island (stopEvent/ignoreMutation so PM never sees its
@@ -577,6 +583,12 @@ class BpPaperCanvas extends HTMLElement {
         // so runToTiptap's { type:"callout", content:[…] } node mounts with an
         // editable body that JOINS the run, and getJSON() round-trips body+chrome.
         Callout,
+        // STEP 4: the card WIDGET node + its node-view. Registers the `bpCard` node
+        // type (content:"inline*" body, title/tone/media/action data-* attrs, a
+        // NodeView painting the reader's bp-card chrome around a contentDOM body) so
+        // runToTiptap's { type:"bpCard", content:[…] } node mounts with an editable
+        // body that JOINS the run, and getJSON() round-trips body+chrome.
+        Card,
         // S3.3: the code attr-atom node + its node-view. Registers the `bpCode`
         // node type (atom, attrs value/lang via data-*, a NodeView rendering a
         // <pre> with a non-PM <textarea> island that uses stopEvent/ignoreMutation

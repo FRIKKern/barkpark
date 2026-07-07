@@ -97,6 +97,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp cards(id), do: %{"id" => id, "type" => "cards", "items" => []}
   defp fleet(id, type), do: %{"id" => id, "type" => type}
 
+  # STEP 4: the card WIDGET — a slots-native, EDITABLE block the canvas mounts as its
+  # own bpCard node, so it FOLDS INTO a run (unlike the legacy `cards` fleet grid,
+  # which is verbatim-carried but ALSO canvas-eligible). Distinct type from `cards`.
+  defp card_widget(id),
+    do: %{
+      "id" => id,
+      "type" => "card",
+      "tone" => "info",
+      "slots" => %{
+        "title" => [%{"type" => "heading", "text" => "Card"}],
+        "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}]
+      }
+    }
+
   # The stub fetcher the Studio wiring hands TaskResolver.preview/2 (Shared.
   # task_previews wires the real Tasks.Query fetcher; here we prove the two-
   # channel SEPARATION, not the DB).
@@ -180,6 +194,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     # ── the `section` CONTAINER is now CANVAS-ELIGIBLE — it folds INTO a run ──────
+
+    test "STEP 4: a card WIDGET rides a run (canvas-eligible), distinct from a fleet boundary" do
+      # A card folds INTO the run alongside prose (bpCard node), like the section
+      # container — NOT a run boundary. The legacy `cards` fleet also rides (verbatim),
+      # so a card + a legacy cards grid + prose are ONE maximal run.
+      blocks = [para("p1"), card_widget("cw1"), para("p2")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+
+      mixed = [para("p1"), card_widget("cw1"), cards("c1"), para("p2")]
+      assert PaperCanvas.partition_runs(mixed) == [{:run, mixed}]
+
+      # And a lone card is a single run, never a boundary.
+      assert PaperCanvas.partition_runs([card_widget("only")]) == [{:run, [card_widget("only")]}]
+    end
 
     test "section: a section INSIDE prose keeps the run whole (was a boundary split)" do
       blocks = [para("p1"), section("sec1"), para("p2")]

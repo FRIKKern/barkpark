@@ -713,6 +713,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.cards_html(b)}
   end
 
+  # STEP-4 CARD WIDGET — a NEW slots-native block: ONE card (media/title/body/action
+  # slots) that a grid `section` holds N of. Its compose clause defines the card's
+  # FLATTENING layout contract (the callout precedent): `card_html/1` projects the
+  # slots into the legacy per-card chrome (bp-card/__t/__d + tone), byte-aligning to
+  # ONE legacy `cards` item — so a section-of-cards renders == a legacy cards grid at
+  # item granularity. ADDITIVE: the legacy `cards` clause above is UNTOUCHED.
+  def compose_block(%{"type" => "card"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.card_html(b)}
+  end
+
   def compose_block(%{"type" => "pipeline"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
   end

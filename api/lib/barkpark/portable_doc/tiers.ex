@@ -41,8 +41,11 @@ defmodule Barkpark.PortableDoc.Tiers do
   #     bound FIELD atoms: internally structured, but a single bound field, edited
   #     as one — they compose via the field system, not the slot system.
   #   * the fleet grids `cards` / `notes` / `pipeline` / `task-board` / `roadmap`
-  #     are :widget TODAY (monolithic); migration step 4 SPLITS them into a
-  #     `:section` (grid) of card/note/stage `:widget`s built from elements.
+  #     are :widget (monolithic legacy grids, verbatim-carried). Migration step 4
+  #     LANDED the first split: a NEW `card` :widget (media/title/body/action slots)
+  #     that a grid `section` holds N of — ADDITIVE, the legacy `cards` grid is
+  #     UNTOUCHED (byte-for-byte). `notes`/`pipeline`/`task-board`/`roadmap` stay
+  #     monolithic for now.
 
   @element ~w(
     paragraph heading list divider code diagram image action
@@ -55,7 +58,7 @@ defmodule Barkpark.PortableDoc.Tiers do
   @widget ~w(
     callout figure terminal table
     task-detail task-list tasks task-board roadmap
-    notes cards pipeline
+    notes cards card pipeline
     form questionnaire
     sheet embed asciicast status-legend
   )

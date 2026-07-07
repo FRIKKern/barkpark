@@ -100,7 +100,7 @@ const gridTracks = (layout) => {
 // bpSectionChild"` on every allowed node + content:"bpSectionChild+") is cleaner
 // long-term but touches every node file + StarterKit globals — rejected for v1.
 export const BP_SECTION_CONTENT =
-  "(paragraph | heading | bulletList | orderedList | divider | callout | " +
+  "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | " +
   "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
   "eyebrow | byline | ingress | pullquote | bpOpaque)+";
 

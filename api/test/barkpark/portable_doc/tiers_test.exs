@@ -12,6 +12,10 @@ defmodule Barkpark.PortableDoc.TiersTest do
 
       assert Tiers.tier_of("callout") == :widget
       assert Tiers.tier_of("cards") == :widget
+      # STEP 4: the NEW `card` WIDGET (the cards-grid split) — distinct from the
+      # legacy `cards` fleet grid (also :widget). Both classify :widget; the
+      # completeness invariant below auto-covers the new compose_block(card) clause.
+      assert Tiers.tier_of("card") == :widget
       assert Tiers.tier_of("terminal") == :widget
       assert Tiers.tier_of("table") == :widget
 
