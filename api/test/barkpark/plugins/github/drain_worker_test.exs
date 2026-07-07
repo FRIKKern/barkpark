@@ -248,13 +248,17 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
       on_exit(fn -> if Process.alive?(active), do: Agent.stop(active) end)
 
       # Boots DARK (whitelisted but uncredentialed): handle_continue must NOT seed
-      # a cursor while inactive.
+      # a cursor while inactive. `active_ttl_ms: 0` disables the active? memoize so
+      # this test asserts the dark→active EDGE instantly (the memoize cadence is
+      # covered by its own test below); with a live TTL the transition is still
+      # picked up within one window.
       pid =
         boot!(
           datasets_fun: fn -> [ds] end,
           active_fun: fn -> Agent.get(active, & &1) end,
           enqueue_fun: ok_enqueue(test_pid),
-          tick_fun: silent_tick()
+          tick_fun: silent_tick(),
+          active_ttl_ms: 0
         )
 
       # Task events pile up while the operator provisions the GitHub App (dark).
@@ -277,6 +281,70 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
       assert_receive {:enqueued, "post-enable", ^ds}
       _ = :sys.get_state(pid)
       assert Cursor.get(ds) == d3.id
+    end
+  end
+
+  describe "active? memoize (wave-2.5 carry — read cadence, not semantics)" do
+    # A counting active_fun: bumps an Agent and reports true, so we can assert how
+    # often the (NOT free — DB read + audit row) resolver is actually hit.
+    defp counting_active(counter, value \\ true) do
+      fn ->
+        Agent.update(counter, &(&1 + 1))
+        value
+      end
+    end
+
+    test "a live TTL resolves active? at most once across boot + many ticks" do
+      ds = new_dataset()
+      test_pid = self()
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+
+      # Generous TTL (default 5 s) — every tick in this fast test lands inside it.
+      pid =
+        boot!(
+          datasets_fun: fn -> [ds] end,
+          active_fun: counting_active(counter),
+          enqueue_fun: ok_enqueue(test_pid),
+          tick_fun: silent_tick()
+        )
+
+      # boot's handle_continue resolved active? exactly once (cache miss).
+      assert Agent.get(counter, & &1) == 1
+
+      # Drive several ticks by hand — all cache HITS, so active_fun is NOT re-hit.
+      for _ <- 1..5 do
+        send(pid, :drain_tick)
+        _ = :sys.get_state(pid)
+      end
+
+      assert Agent.get(counter, & &1) == 1
+    end
+
+    test "active_ttl_ms: 0 re-resolves active? every tick (memoize disabled)" do
+      ds = new_dataset()
+      test_pid = self()
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      on_exit(fn -> if Process.alive?(counter), do: Agent.stop(counter) end)
+
+      pid =
+        boot!(
+          datasets_fun: fn -> [ds] end,
+          active_fun: counting_active(counter),
+          enqueue_fun: ok_enqueue(test_pid),
+          tick_fun: silent_tick(),
+          active_ttl_ms: 0
+        )
+
+      # boot = 1 resolve; then each of 3 ticks re-resolves (TTL 0 always misses).
+      assert Agent.get(counter, & &1) == 1
+
+      for _ <- 1..3 do
+        send(pid, :drain_tick)
+        _ = :sys.get_state(pid)
+      end
+
+      assert Agent.get(counter, & &1) == 4
     end
   end
 

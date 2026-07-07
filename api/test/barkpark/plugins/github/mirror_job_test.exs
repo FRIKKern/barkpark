@@ -218,6 +218,72 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Tenant scope threading (wave-2.5 carry)
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/3 — tenant scope threading" do
+    test "a task in a NON-default workspace is loaded + stamped under its OWN scope", %{
+      bypass: bypass
+    } do
+      stub_token(bypass)
+
+      # A task living in its own workspace/project, distinct from the default
+      # scope the rest of the suite uses.
+      ws = TenancyFixtures.create_workspace!()
+      project = TenancyFixtures.create_project!(ws)
+      tenant = [workspace_id: ws.id, project_id: project.id]
+      register_schemas!(tenant)
+
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Tenant task", "description" => "scoped"}, tenant)
+
+      Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 314, "state" => "open"}))
+      end)
+
+      # Scope is threaded reconcile → load_task + Link.put. WITHOUT the write
+      # scope the stamp would land in the seeded DEFAULT workspace (writes resolve
+      # nil→Default), so this ws-scoped read would see NO link — the exact pre-fix
+      # "mis-written" gap. The assertion below therefore only passes when the
+      # stamp lands under the task's own scope.
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast() ++ tenant)
+
+      gh = Link.get(reload(id, tenant))
+      assert gh["repo"] == @repo
+      assert gh["issue"] == 314
+      assert gh["state"] == "synced"
+      assert is_binary(gh["synced_rev"])
+    end
+
+    test "the {workspace_id, project_id} Oban args route through perform → scoped reconcile",
+         %{bypass: bypass} do
+      stub_token(bypass)
+
+      ws = TenancyFixtures.create_workspace!()
+      project = TenancyFixtures.create_project!(ws)
+      tenant = [workspace_id: ws.id, project_id: project.id]
+      register_schemas!(tenant)
+
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Via scoped Oban"}, tenant)
+
+      Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 271}))
+      end)
+
+      assert :ok =
+               perform_job(MirrorJob, %{
+                 "doc_id" => id,
+                 "dataset" => @dataset,
+                 "workspace_id" => ws.id,
+                 "project_id" => project.id
+               })
+
+      assert Link.get(reload(id, tenant))["issue"] == 271
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # UPDATE path
   # ---------------------------------------------------------------------------
 

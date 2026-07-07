@@ -90,20 +90,42 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   a burst of edits to the same task collapses into ONE reconcile (D2). The
   hand-off is fast — it only constructs and inserts the job; the actual GitHub
   work happens when the job runs and re-reads the task's current state.
+
+  Accepts either positional `doc_id`/`dataset` (the wave-2 shape) OR a map
+  `%{doc_id:, dataset:, workspace_id:, project_id:}` — the map form is what the
+  `DrainWorker` hands the `enqueue_fun` seam, and it carries the outbox event's
+  TENANT SCOPE so a non-default-workspace task is loaded and stamped under its
+  OWN scope. `workspace_id`/`project_id` are OPTIONAL: absent → the job runs
+  against the default workspace/project (back-compatible with the wave-2 args).
   """
   @spec enqueue(String.t()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def enqueue(doc_id) when is_binary(doc_id), do: enqueue(doc_id, "production")
+  def enqueue(doc_id) when is_binary(doc_id),
+    do: enqueue(%{doc_id: doc_id, dataset: "production"})
 
-  @spec enqueue(String.t(), String.t()) :: {:ok, Oban.Job.t()} | {:error, term()}
-  def enqueue(doc_id, dataset) when is_binary(doc_id) and is_binary(dataset) do
-    %{"doc_id" => doc_id, "dataset" => dataset}
+  @spec enqueue(map()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(%{doc_id: doc_id} = fields) when is_binary(doc_id) do
+    fields
+    |> build_args()
     |> new(schedule_in: @debounce_seconds)
     |> Oban.insert()
   end
 
+  @spec enqueue(String.t(), String.t()) :: {:ok, Oban.Job.t()} | {:error, term()}
+  def enqueue(doc_id, dataset) when is_binary(doc_id) and is_binary(dataset),
+    do: enqueue(%{doc_id: doc_id, dataset: dataset})
+
+  # Serialise the Oban args, carrying tenant scope ONLY when present so an
+  # absent workspace/project keeps the wave-2 default-scope behavior (the args
+  # map stays `%{"doc_id","dataset"}` exactly as before when no scope is threaded).
+  defp build_args(fields) do
+    %{"doc_id" => fields.doc_id, "dataset" => Map.get(fields, :dataset, "production")}
+    |> put_non_nil("workspace_id", Map.get(fields, :workspace_id))
+    |> put_non_nil("project_id", Map.get(fields, :project_id))
+  end
+
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"doc_id" => doc_id, "dataset" => dataset}}) do
-    reconcile(doc_id, dataset)
+  def perform(%Oban.Job{args: %{"doc_id" => doc_id, "dataset" => dataset} = args}) do
+    reconcile(doc_id, dataset, scope_opts(args))
   end
 
   @doc """
@@ -111,9 +133,16 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   outbound engine (see the module doc for the full step list and error map).
 
   Reads the task's CURRENT state, so a snoozed/retried job always converges to
-  the latest ledger truth — no intent is lost. `opts` are forwarded to the
-  `Client` HTTP verbs (tests inject `:max_retries`/`:retry_delay_ms`/`:base_url`);
-  the mirror repo and API base come from plugin config, not from `opts`.
+  the latest ledger truth — no intent is lost. `opts` are forwarded three ways,
+  each consumer ignoring the keys it does not use:
+
+    * TENANT SCOPE (`:workspace_id`/`:project_id`) → `load_task` + `Link.put`, so
+      a task living in a non-default workspace is found and stamped under its OWN
+      scope instead of the default workspace/project. Absent → default scope
+      (back-compatible with the wave-2 empty-opts behavior).
+    * HTTP tuning (`:max_retries`/`:retry_delay_ms`/`:base_url`) → the `Client`
+      verbs (tests inject these). The mirror repo and API base come from plugin
+      config, not from `opts`.
 
   Returns `:ok`, or an Oban control tuple: `{:snooze, s}`, `{:cancel, reason}`,
   or `{:error, reason}`.
@@ -122,7 +151,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           :ok | {:snooze, pos_integer()} | {:cancel, term()} | {:error, term()}
   # @canonical capability:github-mirror-reconcile aka:mirror,sync,issue-push,reconcile doc:.claude/workflows/bp-github-bridge-epic-charter.md
   def reconcile(doc_id, dataset, opts \\ []) when is_binary(doc_id) and is_binary(dataset) do
-    case load_task(doc_id, dataset) do
+    case load_task(doc_id, dataset, opts) do
       nil ->
         {:cancel, :task_gone}
 
@@ -179,7 +208,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         {:error, :missing_issue_number}
 
       {:error, err} ->
-        classify(err, :create, doc_id, dataset)
+        classify(err, :create, doc_id, dataset, opts)
     end
   end
 
@@ -190,12 +219,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # stamp write is `source: :github`, so it never re-enqueues to fix itself.
   # Record the issue number first (so a retry PATCHes, never re-CREATEs), then
   # converge `state` with a follow-up idempotent PATCH in the SAME reconcile.
-  defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, _opts) do
-    stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"})
+  defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, opts) do
+    stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"}, opts)
   end
 
   defp after_create(doc_id, dataset, repo, num, desired, rev, opts) do
-    case stamp(doc_id, dataset, %{repo: repo, issue: num, state: "synced"}) do
+    case stamp(doc_id, dataset, %{repo: repo, issue: num, state: "synced"}, opts) do
       :ok -> update(doc_id, dataset, repo, num, desired, rev, opts)
       err -> err
     end
@@ -213,10 +242,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
     case Client.update_issue(repo, num, params, opts) do
       {:ok, _} ->
-        stamp(doc_id, dataset, %{synced_rev: rev})
+        stamp(doc_id, dataset, %{synced_rev: rev}, opts)
 
       {:error, err} ->
-        classify(err, :update, doc_id, dataset)
+        classify(err, :update, doc_id, dataset, opts)
     end
   end
 
@@ -224,45 +253,46 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # Error classification (contract #3, D8/D9)
   # ---------------------------------------------------------------------------
 
-  defp classify(%RateLimitError{retry_after: s}, _mode, _doc_id, _dataset) do
+  defp classify(%RateLimitError{retry_after: s}, _mode, _doc_id, _dataset, _opts) do
     # D9: retryable, never dead-lettered. Level-triggered reconcile means the
     # snoozed job re-reads current state when it runs, so no intent is lost.
     {:snooze, max(s || 0, 1)}
   end
 
-  defp classify(%NetworkError{reason: {:http, status}} = _err, _mode, _doc_id, _dataset)
+  defp classify(%NetworkError{reason: {:http, status}} = _err, _mode, _doc_id, _dataset, _opts)
        when status in 400..499 do
     # A permanent client error (422 validation, 400 bad request). Retrying it
     # forever is pointless — dead-letter it (contract #3).
     {:cancel, {:client_error, status}}
   end
 
-  defp classify(%NetworkError{} = err, _mode, _doc_id, _dataset) do
+  defp classify(%NetworkError{} = err, _mode, _doc_id, _dataset, _opts) do
     # Transport failure or an exhausted 5xx — genuinely transient. Let Oban
     # apply its backoff (capped by max_attempts).
     {:error, err}
   end
 
-  defp classify(%NotFound{}, :update, doc_id, dataset) do
+  defp classify(%NotFound{}, :update, doc_id, dataset, opts) do
     # The issue was deleted/transferred out-of-band. Mark it detached and NEVER
-    # recreate it (D7 — recreating would fight a human).
-    _ = stamp(doc_id, dataset, %{state: "detached"})
+    # recreate it (D7 — recreating would fight a human). Stamp under the task's
+    # own tenant scope so a non-default-workspace task's detach lands correctly.
+    _ = stamp(doc_id, dataset, %{state: "detached"}, opts)
     {:cancel, :detached}
   end
 
-  defp classify(%NotFound{}, :create, _doc_id, _dataset) do
+  defp classify(%NotFound{}, :create, _doc_id, _dataset, _opts) do
     # 404 on CREATE means the mirror repo itself is missing/misconfigured —
     # there is nothing to detach; dead-letter until config is fixed.
     {:cancel, :repo_not_found}
   end
 
-  defp classify(%AuthError{} = err, _mode, _doc_id, _dataset) do
+  defp classify(%AuthError{} = err, _mode, _doc_id, _dataset, _opts) do
     # Auth may be transiently wrong (token refresh raced, install reprovisioned)
     # — retryable, capped by max_attempts.
     {:error, err}
   end
 
-  defp classify(other, _mode, _doc_id, _dataset), do: {:error, other}
+  defp classify(other, _mode, _doc_id, _dataset, _opts), do: {:error, other}
 
   # ---------------------------------------------------------------------------
   # Link stamp
@@ -272,8 +302,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # AFTER a successful issue write, surface `{:error, _}` so Oban retries — a
   # redundant idempotent PATCH on replay converges (D3 amended), which is safe
   # for UPDATE; a failed CREATE stamp risks one duplicate issue on retry, logged.
-  defp stamp(doc_id, dataset, github) do
-    case Link.put(doc_id, dataset, github) do
+  defp stamp(doc_id, dataset, github, opts) do
+    # Forward `opts` (tenant scope + any HTTP tuning) — `Link.put` threads them
+    # to `Content.*`, which reads only `:workspace_id`/`:project_id`/`:source`
+    # and ignores the HTTP keys, so the stamp lands under the task's OWN scope.
+    case Link.put(doc_id, dataset, github, opts) do
       {:ok, %Document{}} ->
         :ok
 
@@ -293,13 +326,13 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # would miss `github.issue` and re-CREATE the issue. `doc_id` is normalised to
   # its published form so the projection's `Task: <doc_id>` trailer and title
   # fallback never carry the `drafts.` prefix (a draft row stores the prefixed id).
-  defp load_task(doc_id, dataset) do
+  defp load_task(doc_id, dataset, opts) do
     published = Content.published_id(doc_id)
 
     doc =
-      case Content.get_document(Content.draft_id(published), @task_type, dataset, []) do
+      case Content.get_document(Content.draft_id(published), @task_type, dataset, opts) do
         {:ok, %Document{} = d} -> d
-        _ -> unwrap(Content.get_document(published, @task_type, dataset, []))
+        _ -> unwrap(Content.get_document(published, @task_type, dataset, opts))
       end
 
     case doc do
@@ -331,6 +364,19 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   defp put_non_nil(map, _key, nil), do: map
   defp put_non_nil(map, key, value), do: Map.put(map, key, value)
+
+  # Lift TENANT SCOPE out of the JSON Oban args (string keys) into keyword opts
+  # threaded to the task load + Link stamp so a non-default-workspace task is
+  # found and written under its own scope. Absent keys → default workspace/project
+  # (the wave-2 behavior), so an args map without scope is fully back-compatible.
+  defp scope_opts(args) when is_map(args) do
+    []
+    |> put_scope(:workspace_id, Map.get(args, "workspace_id"))
+    |> put_scope(:project_id, Map.get(args, "project_id"))
+  end
+
+  defp put_scope(opts, _key, nil), do: opts
+  defp put_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
   # The mirror repo ("owner/name"). Read directly from plugin config for now;
   # slice 2's `Github.Settings.repo/0` will centralise the env→DB resolution.
