@@ -57,6 +57,16 @@ defmodule Barkpark.Tasks.Board do
   # so the maths stay honest. 12 mirrors the TUI FocusSet neighbourhood cap.
   @done_window 12
 
+  # §1 white-ladder glyphs — the SINGLE SOURCE OF TRUTH (charter D17). The GUI
+  # board (`glyph_for/1` → the render) and the TUI (`internal/taskboard/
+  # components.go` `StatusGlyph`) both paint the IDENTICAL Unicode character,
+  # never a lookalike SVG. This map is the GUI's owner; the codepoint-parity
+  # test (`board_theme_parity_test.exs`) asserts it EQUALS the Go table so the
+  # twin surfaces can't drift. It carries `cancelled: "✕"` for SHARED-TRUTH
+  # parity even though the board FOLDS cancelled to a tally (the glyph is
+  # shared; its placement isn't — D17).
+  @glyphs %{open: "○", ready: "○", in_progress: "⠋", blocked: "!", done: "✓", cancelled: "✕"}
+
   @typedoc "A normalized-then-enriched card as it leaves `build/2`."
   @type card :: %{
           doc_id: String.t(),
@@ -110,6 +120,16 @@ defmodule Barkpark.Tasks.Board do
   @doc "The status-ladder columns, in render order: open · ready · in_progress · blocked · done."
   @spec columns() :: [atom()]
   def columns, do: @columns
+
+  @doc """
+  The §1 white-ladder glyph map — the SINGLE SOURCE OF TRUTH for the GUI board,
+  asserted codepoint-equal to the TUI's `StatusGlyph` table by the parity gate
+  (charter D17): `%{open: "○", ready: "○", in_progress: "⠋", blocked: "!",
+  done: "✓", cancelled: "✕"}`. Carries `cancelled` for shared truth even though
+  the board folds it to a tally.
+  """
+  @spec glyphs() :: %{atom() => String.t()}
+  def glyphs, do: @glyphs
 
   # ── snapshot/1 — the impure loader ─────────────────────────────────────────
 
@@ -769,13 +789,10 @@ defmodule Barkpark.Tasks.Board do
 
   defp same_utc_day?(_, _), do: false
 
-  # §1 white-ladder glyphs — the IDENTICAL Unicode the TUI paints, never an SVG.
-  # open/ready share `○` (opacity is the only difference, applied in CSS by
-  # color_role); in_progress is the Braille spinner (base frame here — the live
-  # frame-cycle is a pure-CSS `::before` animation in the render).
-  defp glyph_for(:open), do: "○"
-  defp glyph_for(:ready), do: "○"
-  defp glyph_for(:in_progress), do: "⠋"
-  defp glyph_for(:blocked), do: "!"
-  defp glyph_for(:done), do: "✓"
+  # §1 white-ladder glyphs — READ from the single-source `@glyphs` map (D17) so
+  # the GUI can never drift from `Board.glyphs/0` / the TUI. open/ready share `○`
+  # (opacity is the only difference, applied in CSS by color_role); in_progress
+  # is the Braille spinner base frame (the live frame-cycle is a pure-CSS
+  # `::before` animation in the render).
+  defp glyph_for(col), do: Map.fetch!(@glyphs, col)
 end

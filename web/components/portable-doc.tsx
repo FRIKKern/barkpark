@@ -4,6 +4,14 @@ import { SheetSnapshot, type DenseSnapshot } from "@/components/sheet-grid";
 import { PaperEditorMount } from "@/components/paper-editor-mount";
 import { safeHref } from "@/lib/safe-href";
 import { markHref } from "@/lib/mark-href";
+import {
+  taskBoardColumns,
+  TASK_BOARD_COLUMN_ORDER,
+  TASK_BOARD_COLUMN_LABELS,
+  TASK_BOARD_GLYPHS,
+  type TaskBoardColumnKey,
+  type TaskBoardRow,
+} from "@/lib/task-board-columns";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -256,6 +264,113 @@ function toneLabel(tone: string): string {
     default:
       return "Info";
   }
+}
+
+/* ── task-board embed (charter wave 5, D16) ───────────────────────────────── */
+
+/**
+ * Scoped, self-contained keyframes for the in_progress Braille spinner — the
+ * §0 "feels alive at rest" signal carried into the paper reader (D6). Pure CSS,
+ * no JS, no asset: the `::before` cycles the ten Braille frames
+ * (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) and FREEZES on ⠿ under `prefers-reduced-motion`. Byte-parallel
+ * to the LiveView board's inline spinner. Rendered with a stable `href` +
+ * `precedence` so React 19 HOISTS it to <head> and emits it exactly ONCE no
+ * matter how many boards a paper embeds (dedupe by href — the content is a
+ * constant, so the single survivor is byte-identical). Still inline CSS: no
+ * asset, CSP-safe.
+ */
+const TASK_BOARD_SPINNER_HREF = "bp-tbe-spin";
+const TASK_BOARD_SPINNER_CSS = `
+.bp-tbe-spin::before{content:"⠋";display:inline-block;animation:bp-tbe-spin 1s steps(1,end) infinite}
+@keyframes bp-tbe-spin{0%{content:"⠋"}10%{content:"⠙"}20%{content:"⠹"}30%{content:"⠸"}40%{content:"⠼"}50%{content:"⠴"}60%{content:"⠦"}70%{content:"⠧"}80%{content:"⠇"}90%{content:"⠏"}}
+@media (prefers-reduced-motion: reduce){.bp-tbe-spin::before{animation:none;content:"⠿"}}
+`;
+
+// §1 semantic colour per column (the tone the white ladder assigns each role;
+// the GLYPH itself is TASK_BOARD_GLYPHS — this only tints it).
+const TASK_BOARD_GLYPH_TONE: Record<TaskBoardColumnKey, string> = {
+  open: "text-zinc-400 dark:text-zinc-500",
+  ready: "text-zinc-700 dark:text-zinc-200",
+  in_progress: "text-blue-500 dark:text-blue-400",
+  blocked: "text-amber-600 dark:text-amber-400",
+  done: "text-teal-600 dark:text-teal-400",
+};
+
+/** The column's §1 glyph. `in_progress` is the pure-CSS Braille spinner (an
+ * empty span whose `::before` animates the frames); every other column is the
+ * static Unicode glyph, tinted by its role. */
+function taskBoardGlyph(col: TaskBoardColumnKey): ReactNode {
+  if (col === "in_progress") {
+    return (
+      <span
+        className={`bp-tbe-spin ${TASK_BOARD_GLYPH_TONE.in_progress}`}
+        aria-label="in progress"
+      />
+    );
+  }
+  return (
+    <span className={TASK_BOARD_GLYPH_TONE[col]} aria-hidden>
+      {TASK_BOARD_GLYPHS[col]}
+    </span>
+  );
+}
+
+/** A P-pip from a resolved `priority` string ("0".."4" or "P1"); absent → null. */
+function taskBoardPriorityPip(priority: unknown): ReactNode {
+  const s = str(priority).trim();
+  if (!s) return null;
+  const digits = s.replace(/[^0-9]/g, "");
+  const label = digits ? `P${digits}` : "P?";
+  return (
+    <span className="rounded bg-zinc-100 px-1 font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+      {label}
+    </span>
+  );
+}
+
+/** `met/total` when the criteria block carries a positive total, else null (the
+ * server prunes "0/0", but stay defensive). */
+function taskBoardCriteria(criteria: unknown): string | null {
+  if (!criteria || typeof criteria !== "object") return null;
+  const c = criteria as { met?: unknown; total?: unknown };
+  const total = num(c.total) ?? (typeof c.total === "number" ? c.total : NaN);
+  if (!Number.isFinite(total) || total <= 0) return null;
+  const metRaw = typeof c.met === "number" ? c.met : Number(c.met);
+  const met = Number.isFinite(metRaw) ? metRaw : 0;
+  return `${met}/${total}`;
+}
+
+/** One task card: title · priority pip · criteria · worker · phase chip. Absent
+ * segments are omitted (the resolved row is pre-pruned). */
+function taskBoardCard(row: TaskBoardRow, key: Key): ReactNode {
+  const title = str(row.title) || "Untitled task";
+  const pip = taskBoardPriorityPip(row.priority);
+  const criteria = taskBoardCriteria(row.criteria);
+  const worker = str(row.worker).trim();
+  const phase = str(row.phase).trim();
+  const hasMeta = pip !== null || criteria !== null || worker !== "" || phase !== "";
+  return (
+    <div
+      key={key}
+      className="rounded-md border border-zinc-200 bg-white px-2.5 py-2 text-sm dark:border-zinc-800 dark:bg-zinc-950/40"
+    >
+      <p className="font-medium leading-snug text-zinc-800 dark:text-zinc-100">
+        {title}
+      </p>
+      {hasMeta ? (
+        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.7rem] text-zinc-500 dark:text-zinc-400">
+          {pip}
+          {criteria ? <span className="tabular-nums">{criteria}</span> : null}
+          {worker ? <span className="truncate">{worker}</span> : null}
+          {phase ? (
+            <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+              {phase}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /* ── blocks ─────────────────────────────────────────────────────────────── */
@@ -532,6 +647,139 @@ export function renderBlock(block: Block, key: Key): ReactNode {
             </span>
           )}
         </p>
+      );
+    }
+    case "task-board": {
+      // Embedded LIVE task board (charter wave 5, D16). The `task-board`
+      // PortableDoc block resolves SERVER-SIDE into a flat `snapshot: [row]`,
+      // each row already carrying the honest white-ladder `status` — readiness
+      // is derived once on the wire, never re-computed here. This surface only
+      // BUCKETS the rows into the five ordered columns for a read-only embed.
+      // STAYS a Server Component (no drag/realtime — the live /admin/projects
+      // board owns interaction); a momentum line + a `prefers-reduced-motion`-
+      // honouring CSS Braille spinner keep it feeling alive at rest.
+      const snapshot = Array.isArray(block.snapshot)
+        ? (block.snapshot as TaskBoardRow[])
+        : null;
+      if (!snapshot) return null;
+      const caption = str(block.caption);
+      const { columns, cancelledCount, momentum } = taskBoardColumns(snapshot);
+      const liveTotal = TASK_BOARD_COLUMN_ORDER.reduce(
+        (n, k) => n + columns[k].length,
+        0,
+      );
+
+      // Honest empty state — a truly empty board says so instead of a dead wall.
+      if (liveTotal === 0 && cancelledCount === 0) {
+        return (
+          <figure key={key} className="flex flex-col gap-2">
+            <div className="rounded-lg border border-dashed border-zinc-200 px-4 py-6 text-center text-sm text-zinc-400 dark:border-zinc-800 dark:text-zinc-500">
+              No tasks on this board yet.
+            </div>
+            {caption ? (
+              <figcaption className="text-sm text-zinc-500">{caption}</figcaption>
+            ) : null}
+          </figure>
+        );
+      }
+
+      return (
+        <figure key={key} className="flex flex-col gap-3">
+          {/* Self-contained spinner keyframes (D6 — no asset, CSP-safe).
+              href+precedence → React 19 hoists + dedupes to a single <head>
+              tag across every embedded board. */}
+          <style href={TASK_BOARD_SPINNER_HREF} precedence="default">
+            {TASK_BOARD_SPINNER_CSS}
+          </style>
+
+          {/* Momentum header — the "always feel progress" read (§0). */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+              <span>
+                <span aria-hidden>◐</span>{" "}
+                <b className="font-semibold text-zinc-700 dark:text-zinc-200">
+                  {momentum.inFlight}
+                </b>{" "}
+                in flight
+              </span>
+              <span aria-hidden className="text-zinc-300 dark:text-zinc-700">
+                ·
+              </span>
+              <span>
+                <span aria-hidden>○</span>{" "}
+                <b className="font-semibold text-zinc-700 dark:text-zinc-200">
+                  {momentum.ready}
+                </b>{" "}
+                ready
+              </span>
+              <span aria-hidden className="text-zinc-300 dark:text-zinc-700">
+                ·
+              </span>
+              <span>
+                <span aria-hidden className="text-teal-600 dark:text-teal-400">
+                  ✓
+                </span>{" "}
+                <b className="font-semibold text-zinc-700 dark:text-zinc-200">
+                  {momentum.done}
+                </b>{" "}
+                done
+              </span>
+              <span className="ml-auto font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
+                {momentum.pct}%
+              </span>
+            </div>
+            {/* Thin fill bar — grows with pct; width-transitions for free. */}
+            <div className="h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+              <span
+                className="block h-full rounded-full bg-zinc-800 transition-[width] duration-500 dark:bg-zinc-200"
+                style={{ width: `${momentum.pct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Five white-ladder columns as a horizontal wrapping grid. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            {TASK_BOARD_COLUMN_ORDER.map((col) => {
+              const cards = columns[col];
+              return (
+                <div
+                  key={col}
+                  className="flex min-w-0 flex-col gap-2 rounded-lg border border-zinc-200 bg-zinc-50/60 p-2.5 dark:border-zinc-800 dark:bg-zinc-900/40"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                    <span className="flex items-center gap-1.5">
+                      {taskBoardGlyph(col)}
+                      {TASK_BOARD_COLUMN_LABELS[col]}
+                    </span>
+                    <span className="tabular-nums text-zinc-400 dark:text-zinc-500">
+                      {cards.length}
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {cards.length > 0 ? (
+                      cards.map((row, i) => taskBoardCard(row, i))
+                    ) : (
+                      <p className="px-0.5 text-xs text-zinc-300 dark:text-zinc-600">
+                        —
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Cancelled tally — folded, never a column (charter D-fold). */}
+          {cancelledCount > 0 ? (
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">
+              <span aria-hidden>✕</span> {cancelledCount} cancelled
+            </p>
+          ) : null}
+
+          {caption ? (
+            <figcaption className="text-sm text-zinc-500">{caption}</figcaption>
+          ) : null}
+        </figure>
       );
     }
     case "sheet": {

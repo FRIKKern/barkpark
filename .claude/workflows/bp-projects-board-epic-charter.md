@@ -213,6 +213,46 @@ always-a-next-step.
    `handle_params`, AND every `handle_info`/`handle_event` clause that reassigns `@board` — this
    is the one wiring discipline that keeps model (full) and view (filtered) coherent.
 
+16. **Web parity renders the ALREADY-RESOLVED `task-board` snapshot — it does NOT re-run the
+   organizer in JS (wave 5).** The `task-board` PortableDoc block already resolves server-side
+   (`TaskResolver.resolve/2` handles it — `task-board ∈ @snapshot_types`) into a FLAT
+   `snapshot: [row]`, each row already carrying the honest white-ladder `status` (an `open` task
+   with no unmet blocker is surfaced as `"ready"` by `row_from_task/status_of` — the readiness
+   derivation happens ONCE, server-side, exactly like the board's D3 overlay). So the web surface
+   receives readiness pre-computed and only BUCKETS the rows into the five ordered columns
+   (`open · ready · in_progress · blocked · done`, cancelled folded to a count) for display — it
+   never re-derives readiness (no dependency graph on the wire) and never re-queries. *Why:* the
+   organizer (`Board.build/snapshot`, D2) is Elixir core; the web demo consumes resolved blocks
+   over the existing paper/query routes (D8 — no new route, no openapi). Bucketing a resolved
+   snapshot is a pure `taskBoardColumns(snapshot)` TS helper (unit-tested with `node --test`),
+   byte-parallel to the organizer's bucket order but far simpler because readiness is already
+   decided. Glyphs are the §1 manifest verbatim, HARD-CODED with a comment pinning them to the
+   shared vocabulary (`○/○/⠋/!/✓/✕`) — identical Unicode, never an SVG (D6). Read-only embed for
+   v1 (no drag/realtime in a paper — the live `/admin/projects` board owns interaction); a small
+   momentum line + a `prefers-reduced-motion`-honoring CSS Braille spinner keep it FEELING ALIVE
+   at rest. **NO changeset:** `web/` is the unpublished Next.js demo (`"name":"web"`), not a `js/`
+   package — a `case "task-board"` in `web/components/portable-doc.tsx` changes no public API. If a
+   builder factors the render into a PUBLISHED `js/` package it MUST add a `js/.changeset/` entry
+   (correctness gate, never skipped) — so keep it in `web/` to stay changeset-free.
+
+17. **`Board.glyphs/0` is the ONE source of truth; the parity gate asserts GUI == TUI at the
+   codepoint (wave 5).** GUI (`board.ex`) and TUI (`internal/taskboard/components.go` `StatusGlyph`)
+   independently hard-code the §1 white-ladder glyphs — the anti-drift risk the wish's "same icons
+   as TUI precisely" forbids. Fix: expose a public `@glyphs`/`Board.glyphs/0`
+   (`%{open: "○", ready: "○", in_progress: "⠋", blocked: "!", done: "✓", cancelled: "✕"}`) and make
+   the existing private `glyph_for/1` READ from it (additive — `build/2`/`apply_change/3` bodies
+   otherwise byte-unchanged, so waves 1-4 stay intact). Note the map carries `cancelled: "✕"` for
+   SHARED-TRUTH parity even though the GUI FOLDS cancelled to a tally (no rendered column, D-fold) —
+   the glyph is shared, its placement isn't. Then an Elixir test parses the Go source's `StatusGlyph`
+   switch (`case "…" -> return "…"`, at `internal/taskboard/components.go`, read via
+   `../internal/taskboard/components.go` from the `api/` mix root) into a `{lifecycle => glyph}` map
+   and asserts it EQUALS `Board.glyphs/0` for the shared keys (`open/ready/in_progress/blocked/done/
+   cancelled`) — plus a hard-coded expected map as a triple-check so a Go refactor that DROPS a case
+   fails loudly, not silently. *Why:* a copy-paste of two glyph tables drifts the instant one side is
+   restyled; a codepoint-equality test is the tripwire that keeps the twin surfaces honest. Web (JS)
+   parity is NOT in this Elixir gate — it's covered by D16's §1-pinned comment; a cross-language
+   triple-parity assertion is out of scope for a SMALL slice (noted as a follow-up seam).
+
 10. **Done column is WINDOWED so the board never becomes a dead wall (§0).** `build/2` and
    `apply_change/3` render only the most-recent `@done_window` done cards (default 12,
    mirroring the TUI FocusSet cap) — newest-first, a fresh close prepended and the tail
@@ -254,18 +294,16 @@ always-a-next-step.
    shipped `BarkparkPaperSortable`) → `handle_event("restage")` through `claim_by_id`/`close`
    with `studio:<user>`, optimistic move + fence-refuse + snap-back. LARGE. ✅ DONE.
 
-**Wave 4 — group / filter** (THIS WAVE; 1 slice — see wave-4 plan in the log)
+**Wave 4 — group / filter** ✅ LANDED (#1273 `9dcd99f7`; 1 slice — see wave-4 log)
 5. `board-group-filter` — swimlane group-by (goal/priority/label) + filter chips, URL-param
-   shareable, all through the pure organizer. LARGE.
-   *(one builder owns `board.ex` (pure `view/2`+`facets/1`+`card_matches?/2`) + `board_live.ex`
-   (`handle_params` + chips + `push_patch`) + `board_live_test.exs` — no parallel split; a
-   second slice touching `board_live.ex` render/assigns would re-collide, as every wave so far.)*
+   shareable, all through the pure organizer. LARGE. ✅ DONE.
 
-**Wave 5 — reach & polish**
-6. `board-web-parity` — wire the snapshot into the existing `task-board` PortableDoc block +
-   web `portable-doc.tsx` for a live board embeddable in a paper. LARGE.
-7. `board-docs-parity-gate` — TASK-SYSTEM Studio section + design-spec build-status row +
-   a glyph/hue parity assertion vs `internal/taskboard/theme.go`. SMALL.
+**Wave 5 — reach & polish** (THIS WAVE — the LAST; 2 slices, PARALLEL, file-disjoint)
+6. `board-web-parity` — render the resolved `task-board` PortableDoc block in web
+   `portable-doc.tsx` so a live board embeds in a paper (read-only v1). LARGE. (web/ only.)
+7. `board-docs-parity-gate` — TASK-SYSTEM `/admin/projects` section + design-spec build-status
+   flip + an Elixir glyph parity assertion (`Board.glyphs/0` vs `internal/taskboard/
+   components.go`). SMALL. (docs + api/, disjoint from slice 6.)
 
 ## Pure organizer contract (slices depend on this)
 
@@ -800,3 +838,212 @@ web `portable-doc.tsx` for a live board embeddable in a paper, LARGE) → then `
 `internal/taskboard/theme.go`, SMALL). The interactive+legible core of the wish is DONE; wave 5 is
 REACH, not the spine. First integration action: merge the wave-4 branch (advisory Format/Lighthouse
 reds never block; required Elixir Test is the gate).
+
+### Wave 2026-07-07 — Wave 5 (reach & polish) — PLANNED, 2 slices (PARALLEL, the FINAL wave)
+
+**Reconciled first:** waves 1-4 are ALL on `main` — #1266 / #1270 (`5d9c71ab`) / #1271 (`d31aae1e`)
+/ **#1273 (`9dcd99f7`)**. The wave-4 branch merged since the last plan; nothing shipped outside the
+loop. The epic is still `api/lib/barkpark/tasks/board.ex` (pure) + `api/lib/barkpark/plugins/tasks/
+web/board_live.ex` (wiring) + `board_live_test.exs`. The `task-board` PortableDoc block ALREADY
+resolves server-side (`api/lib/barkpark/portable_doc/task_resolver.ex` — `task-board ∈
+@snapshot_types`, `row_from_task` maps a blocker-free `open` → `"ready"`); the ONLY missing reach is
+the WEB render + the cross-surface docs/glyph lock.
+
+**Why TWO parallel slices now (not one).** For the first time the two remaining pieces are on
+DIFFERENT surfaces with ZERO shared files — slice A is entirely `web/` (JS), slice B is `docs/` +
+`api/` (Elixir, additive `Board.glyphs/0` + a NEW parity test file). They cannot collide, so they
+run concurrently. This is REACH, not the spine — the interactive+legible core already ships.
+
+---
+
+**Slice A `board-web-parity` (LARGE — web/ only, JS).** Render the resolved `task-board` block in
+the web reader so a live board embeds IN A PAPER (read-only v1). Respects **D2** (organizer stays
+Elixir core — web never re-derives), **D6** (§1 glyphs verbatim, CSS-only motion,
+`prefers-reduced-motion`), **D8** (reuses existing paper/query routes — no new route, no openapi),
+**D16** (bucket the already-resolved flat snapshot; readiness pre-computed server-side; NO changeset
+— `web/` is unpublished).
+
+- **New pure helper `web/lib/task-board-columns.ts`:** `taskBoardColumns(snapshot: Row[])` →
+  `{columns: {open, ready, in_progress, blocked, done}, cancelledCount, momentum}`. Bucket each row
+  by its ALREADY-RESOLVED `status` string (open/ready/in_progress/blocked/done → its column;
+  cancelled → `cancelledCount`; unknown → open, fail-soft). Column ORDER mirrors the organizer
+  (`open · ready · in_progress · blocked · done`). `momentum = {inFlight: len(in_progress),
+  ready: len(ready), done: len(done), pct: round(len(done)/max(total_non_cancelled,1)*100)}` — pct
+  NEVER /0, cancelled OUT of the denominator (byte-parallel to `Board` D-momentum). Attach the §1
+  glyph per column from a HARD-CODED map with a comment pinning it to the shared vocabulary:
+  `open:"○" ready:"○" in_progress:"⠋" blocked:"!" done:"✓" cancelled:"✕"` — identical Unicode, never
+  an SVG. Pure, no React, no DOM — so it unit-tests under `node --test`.
+- **New test `web/__tests__/task-board-columns.test.ts`:** assert bucketing (a row per status lands
+  in the right column; cancelled → count, out of the pct denominator; unknown status → open);
+  momentum (inFlight/ready/done/pct; pct never /0 on an all-cancelled or empty snapshot); the glyph
+  map codepoints. Mirror the existing `sheets-snapshot-helpers.test.ts` style (`node:test` +
+  `node:assert`).
+- **Wire `web/components/portable-doc.tsx`:** add `case "task-board":` in `renderBlock`'s
+  `switch (block.type)` (beside `case "sheet":` at ~L537). Read `block.snapshot` (the resolved
+  rows); `if (!snapshot) return null`. It STAYS a Server Component (no `"use client"` — the board
+  embed is static, no client bundle). Render the five columns as a horizontal, wrapping grid
+  (Tailwind, matching the reader's existing zinc palette): a momentum line at the top
+  (`◐ N in flight · ○ N ready · ✓ N done · NN%` with a thin pure-CSS fill bar), then each column
+  with its §1 glyph header + count, and each card = title · priority pip · worker · criteria
+  `met/total` · phase chip (omit absent segments — the rows are already pruned). Honest empty state
+  ("No tasks match" when the snapshot is empty). A pure-CSS Braille spinner breathes on in_progress
+  glyphs AT REST — add a scoped `@keyframes` (mirror BoardLive's inline discipline: a `<style>` in
+  the component or a class in the web global stylesheet) FROZEN under `prefers-reduced-motion` (this
+  is D0's "feels alive" carried to the paper surface). Cover `task-list`/`tasks` with the SAME
+  render only if trivial (they share the `snapshot:[row]` contract) — `task-board` is the REQUIRED
+  deliverable; do not gold-plate.
+- **HARD RULES:** every edit inside `web/` (portable-doc.tsx + the new lib + the new test); NO
+  changeset (unpublished `web/`, no public API — D16); do NOT touch any `js/` published package (that
+  WOULD need a changeset); do NOT touch `api/` (slice B owns the one api/ edit). Server-Component
+  discipline: this file must never become `"use client"` (it statically imports the client
+  `SheetSnapshot`) — the board embed renders inline, no client component.
+
+**Gate A (exact):**
+```
+cd /Volumes/SATECHI/github/barkpark/web && pnpm typecheck && pnpm test
+```
+(If `node_modules` is absent in the worktree, `pnpm install` first — or symlink the main checkout's
+`web/node_modules`.) `pnpm typecheck` = `tsc --noEmit` (proves the new case + helper types);
+`pnpm test` = `node --test __tests__/*.test.ts` (picks up the new `task-board-columns.test.ts`).
+`next build` is NOT the gate (it reaches for fonts/network and is flaky offline) — typecheck+test is
+the deterministic local proof.
+
+---
+
+**Slice B `board-docs-parity-gate` (SMALL — docs/ + api/, disjoint from slice A).** Lock the design
+in: document the new Studio surface, flip the spec's build-status, and gate GUI↔TUI glyph drift.
+Respects **D6** (§1 glyphs verbatim), **D17** (`Board.glyphs/0` single source + codepoint parity
+test), and the **doc contract** (byte budgets, anchors).
+
+1. **`docs/setup/TASK-SYSTEM.md` — add a `/admin/projects` Projects-board subsection.** It's the new
+   Studio surface: a live kanban over the real `type:task` docs — five white-ladder columns
+   (open ○ · ready ○ · in_progress ⠋ · blocked ! · done ✓, cancelled folded), a momentum header,
+   realtime motion, drag-to-restage through the fenced claim/close primitives, and group/filter
+   swimlanes with shareable `?group=&…` URLs. Keep it TIGHT and cross-link the existing "Tasks pane"
+   row. **BYTE BUDGET IS THE TRAP:** the file is 15998B against a 16000B cap (2B headroom) — you MUST
+   trim/tighten existing prose to fit the new subsection. Preserve the `<!-- doc-tier | canonical-for
+   | budget -->` header line verbatim.
+2. **`.claude/workflows/bp-task-design-language-spec.md` — flip the build-status (line 3).** Change
+   `**Status:** design spec, awaiting build sign-off` → `**Status:** design spec — GUI board BUILT
+   (Studio /admin/projects, waves 1–5) · TUI \`bp tasks\` shipped`. Nothing else in that file.
+3. **Cross-surface glyph parity (D17).** In `api/lib/barkpark/tasks/board.ex`: add a public
+   `@glyphs %{open: "○", ready: "○", in_progress: "⠋", blocked: "!", done: "✓", cancelled: "✕"}` +
+   `def glyphs, do: @glyphs`, and make the existing private `glyph_for/1` READ from it (e.g.
+   `defp glyph_for(col), do: Map.fetch!(@glyphs, col)`) — ADDITIVE, `build/2`/`apply_change/3` bodies
+   otherwise byte-unchanged (waves 1-4 must stay green). Add a NEW pure test file
+   `api/test/barkpark/tasks/board_theme_parity_test.exs` (`use ExUnit.Case`, no ConnCase/DB) that:
+   reads `../internal/taskboard/components.go` (from the `api/` mix root), regex-parses the
+   `StatusGlyph` switch (`case "<life>"[, "<life2>"]:` → `return "<glyph>"`) into a
+   `{lifecycle => glyph}` map, and asserts it EQUALS `Board.glyphs/0` for the shared keys
+   `~w(open ready in_progress blocked done cancelled)` — PLUS a hard-coded expected map
+   (`%{"open"=>"○", "ready"=>"○", "in_progress"=>"⠋", "blocked"=>"!", "done"=>"✓", "cancelled"=>"✕"}`)
+   as a triple-check so a Go refactor that DROPS a case fails loudly. (Note the shared map carries
+   `cancelled: "✕"` even though the GUI folds cancelled to a tally — the glyph is shared, its
+   placement isn't; D17.)
+- **HARD RULES:** the ONLY api/ edit is the additive `Board.glyphs/0` + the new parity test file
+  (`internal/taskboard/components.go` is READ-ONLY, never edited); no route/config/openapi/bp-verb/
+  changeset; do NOT touch `board_live.ex`, `studio_live.ex`, or `pane_builder.ex`; no boot-started
+  process. Slice B never touches `web/` (slice A owns it).
+
+**Gate B (exact — all three must pass):**
+```
+scripts/docs-anchors-check.sh && scripts/check-doc-budgets.sh && \
+cd /Volumes/SATECHI/github/barkpark/api && CC=/usr/bin/clang mix test \
+  test/barkpark/tasks/board_theme_parity_test.exs \
+  test/barkpark/plugins/tasks/web/board_live_test.exs \
+  test/barkpark/plugins/tasks/ test/barkpark/tasks/ \
+  test/barkpark_web/controllers/mutate_controller_test.exs \
+  test/barkpark_web/controllers/query_controller_filter_test.exs
+```
+`check-doc-budgets.sh` proves TASK-SYSTEM.md stayed ≤16000B; `docs-anchors-check.sh` proves the doc
+contract + canonical markers hold. The `mix test` swath includes `board_live_test.exs` (it reads the
+enriched card `:glyph`, so a `glyph_for` refactor regression surfaces) + the BROAD ConnCase
+controllers (sandbox/endpoint safety). openapi is a no-op (D8 — no route change). Worktree recipe for
+the Elixir half: borrow `$MAIN/api/_build/test` + symlink `deps`, `export CC=/usr/bin/clang`.
+
+**Feels-alive bar for the FINAL wave (perfect alongside net-new):** the alive surface now reaches
+the PAPER — a `task-board` embed paints the momentum line + breathing Braille spinner + white-ladder
+columns the instant the reader loads, honoring the same §1 glyphs the TUI and Studio board paint.
+The parity test makes "same icons as TUI precisely" a MACHINE-CHECKED invariant, not a hope — the
+design is locked in across all three surfaces. Read-only embed is the honest v1 (the live
+`/admin/projects` board owns drag/realtime); a paper is a place to SEE momentum, not steer it.
+
+**Epic completion:** with waves 1-5 shipped, **Barkpark Projects is COMPLETE** — a native, live task
+board over the real `type:task` docs that feels alive (momentum header + breathing spinner + flash/
+slide realtime), moves by hand through the fenced primitives (drag-to-restage, never a corrupted
+claim), stays legible at scale (swimlanes + shareable filters), reaches the paper surface (web
+embed), and is drift-locked to the TUI at the codepoint (parity gate). The one open confidence step
+across the whole epic remains a SINGLE human browser session (profile lock + local `phx.server` OOM
+prevent an agent from a live pass) — every wave is `LiveViewTest`/`node --test` verified, not
+browser-verified.
+
+### Wave 2026-07-07 — Wave 5 (reach & polish), BOTH slices GREEN — the FINAL wave; epic COMPLETE
+
+**Landed (2 parallel, file-disjoint slices — as planned; zero collision, first true fan-out
+of the epic).** The alive surface now reaches the PAPER and is drift-locked to the TUI at the
+codepoint. Slice A is entirely `web/` (JS); slice B is `docs/` + one additive `api/` edit + a
+new parity test — no shared file, so they ran concurrently. This is REACH, not the spine — the
+interactive+legible core already shipped in waves 1-4.
+
+- **Slice A `board-web-parity` (web/, D16):** a live task board now embeds in the web paper
+  reader (read-only v1). New pure helper `web/lib/task-board-columns.ts` buckets the
+  ALREADY-server-resolved `task-board` snapshot (readiness pre-computed by `row_from_task`)
+  into the five white-ladder columns (open·ready·in_progress·blocked·done), folds cancelled to
+  a tally, and computes momentum (pct = done / non-cancelled total, never /0, cancelled out of
+  the denominator). §1 glyphs HARD-CODED + pinned to the shared vocabulary (`○/○/⠋/!/✓/✕`,
+  identical Unicode, never SVG). `portable-doc.tsx` gains `case "task-board":` beside
+  `case "sheet":`, staying a Server Component: momentum header + CSS fill bar, five zinc-palette
+  columns, cards (title·priority pip·criteria·worker·phase chip), honest empty state, cancelled
+  tally, and a scoped `@keyframes` Braille spinner that breathes on in_progress at rest and
+  freezes under `prefers-reduced-motion`. 12 `node:test` cases (bucketing, fail-soft
+  unknown→open, momentum /0 safety, round-half-up pct, glyph codepoints). No changeset
+  (unpublished `web/` demo, no public API — D16); no `api/`/`js/` touch.
+- **Slice B `board-docs-parity-gate` (docs/ + api/, D17):** (1) added a concise
+  `/admin/projects` Projects-board subsection to `docs/setup/TASK-SYSTEM.md` (five columns,
+  momentum header, realtime motion, drag-to-restage via the fenced primitives, group/filter
+  swimlanes + shareable `?group=&…` URLs) + cross-linked the Tasks-pane row; TRIMMED existing
+  prose to fit the 16000B cap (now **15987B** — dropped a second goal-naming example, a
+  raw-HTTP comment block, a board-summary closing sentence; cosmetic, no contract facts lost).
+  (2) Flipped the design-spec status line to "GUI board BUILT (waves 1–5) · TUI `bp tasks`
+  shipped". (3) Exposed `Board.glyphs/0` as the D17 single source of truth; `glyph_for/1` now
+  reads from it (additive — `build/2`/`apply_change/3` bodies byte-unchanged). (4) Added
+  `api/test/barkpark/tasks/board_theme_parity_test.exs` — a pure ExUnit gate that regex-parses
+  the TUI `StatusGlyph` switch (resolving in_progress from `spinner.go`'s `brailleFrames`) and
+  asserts codepoint equality with `Board.glyphs/0` for the shared keys, plus a hard-coded
+  manifest triple-check so a Go case-drop fails LOUDLY, not silently.
+
+**Correctness PROVEN (both perfecters — merge as-is): SHIPS.** Slice A: `tsc` clean, 194 tests
+pass, ESLint clean. Slice B: docs-anchors PASS, budgets PASS, 261 Elixir tests / 0 failures
+(parity 3/3), format clean. The parity gate is a REAL anti-drift tripwire, not a vacuous green —
+it resolves actual codepoints from BOTH surfaces.
+
+**Feels-alive verdict: MET, and carried to the PAPER.** A `task-board` embed paints the momentum
+line + breathing Braille spinner + white-ladder columns the instant the reader loads, honoring
+the same §1 glyphs the TUI and Studio board paint. The parity test makes "same icons as TUI
+precisely" a MACHINE-CHECKED invariant. Design locked in across all three surfaces (TUI · Studio
+· web paper). Read-only embed is the honest v1 — a paper is a place to SEE momentum, not steer it.
+
+**LEAD MUST KNOW / known non-blocking (charter-sanctioned, NOT defects):**
+- **`docs/setup/TASK-SYSTEM.md` now has only 13B budget headroom (15987/16000).** The NEXT edit
+  to that file MUST re-trim first, or `check-doc-budgets.sh` reds. Some prose detail was dropped
+  to fit (second goal-naming example, raw-HTTP comment block, board-summary closing sentence) —
+  cosmetic, no contract facts lost.
+- **The parity test regex-parses Go source.** A large unrelated Go refactor that renames
+  `StatusGlyph`/`brailleFrames` or drops the switch trips it — the fix is to RE-ALIGN the
+  surfaces, NEVER edit the test (that would defeat the tripwire).
+- **Web momentum `done` is TOTAL-done, not the live board's windowed `done_today`** — a
+  necessary honest divergence: the wire snapshot carries no timestamps, so the label reads
+  "done" not "today" (no lie). The live `/admin/projects` board owns the windowed tally.
+- **NOT browser-verified** (profile lock + local `phx.server` OOM) — the epic-wide confidence
+  gap, not specific to this wave. The web slice is `tsc`-clean + `node --test`-verified and
+  code-reviewed but never visually rendered; the `case "task-board"` precedence change is
+  documented React 19 API, low risk. A single human browser pass remains the ONE open step
+  across the whole epic — an agent cannot clear the profile lock / local OOM.
+
+**EPIC COMPLETE.** With waves 1-5 shipped, **Barkpark Projects is DONE** — a native, live task
+board over the real `type:task` docs that FEELS ALIVE (momentum header + breathing spinner +
+flash/slide realtime), moves by hand through the fenced primitives (drag-to-restage, never a
+corrupted claim), stays legible at scale (swimlanes + shareable filters), reaches the paper
+surface (web embed), and is drift-locked to the TUI at the codepoint (parity gate). No further
+loop wave is warranted. The single remaining confidence step is a human browser session — a
+product-validation pass, not loop work.
