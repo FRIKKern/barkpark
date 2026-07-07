@@ -38,17 +38,46 @@ defmodule Barkpark.Plugins.GithubTest do
     end
   end
 
-  describe "wave-1 inert surfaces" do
-    test "register_routes/1 returns [] (controllers land wave 2)" do
+  describe "surfaces" do
+    test "register_routes/1 returns [] (controllers land waves 3–4)" do
       assert Github.register_routes(%{}) == []
     end
 
-    test "oban_crontab/0 returns [] (drain worker lands wave 2)" do
+    test "oban_crontab/0 stays [] — the drain worker is supervised, not cron" do
       assert Github.oban_crontab() == []
     end
 
     test "register_schemas/1 returns [] (github adds no task schema, D3)" do
       assert Github.register_schemas([]) == []
+    end
+
+    test "register_workers/1 supervises Auth + DrainWorker when drain is enabled (AUTH START)" do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: true)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      end)
+
+      assert Github.register_workers(%{}) == [
+               Barkpark.Plugins.Github.Auth,
+               Barkpark.Plugins.Github.DrainWorker
+             ]
+    end
+
+    test "register_workers/1 keeps the lazy Auth but omits the DrainWorker when drain is gated off" do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.Github.DrainWorker, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.Github.DrainWorker)
+      end)
+
+      assert Github.register_workers(%{}) == [Barkpark.Plugins.Github.Auth]
     end
   end
 

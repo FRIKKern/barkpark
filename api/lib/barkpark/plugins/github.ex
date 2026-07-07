@@ -13,14 +13,21 @@ defmodule Barkpark.Plugins.Github do
   plugin is schemas + business logic, never UI — the host owns every route
   table, renderer, and console.
 
-  ## Wave 1 posture (this slice) — deliberately inert
+  ## Wave 2 posture (this slice) — the outbound mirror is wired
 
+    * `register_workers/1` → `[Auth, DrainWorker]`. Both start ONLY when the
+      plugin is whitelisted, so off-by-default is preserved. `Github.Auth` is the
+      singleton App-token cache; `Github.DrainWorker` is the supervised drain-tick
+      GenServer that pumps `mutation_events` → debounced `MirrorJob`s (mirrors
+      `onixedit.ex` supervising `Bokbasen.Auth`).
+    * `oban_crontab/0` → `[]` (the `use` default) STAYS empty. The drain worker is
+      a supervised GenServer, NOT cron — the `Barkpark.Sync.PushWorker` precedent.
+      The `github_mirror` Oban queue itself is declared statically in
+      `config/config.exs` (plugins can add crontab, not queues).
     * `register_routes/1` → `[]`. The webhook-intake and adopt controllers
-      don't exist yet (waves 2–4); naming a not-yet-compiled controller in a
+      don't exist yet (waves 3–4); naming a not-yet-compiled controller in a
       route tuple is unsafe for the router beam. Routes get wired the wave the
       controllers land.
-    * `oban_crontab/0` → `[]` (the `use` default). The cursor-drain worker that
-      enqueues debounced `MirrorJob`s lands in wave 2.
     * `register_schemas/1` → `[]` (the `use` default). GitHub adds NO task
       schema (decision D3): the bookkeeping field `github:{repo,issue,synced_rev}`
       rides the task's plain CONTENT via `Content.*`, never a declared
@@ -57,6 +64,15 @@ defmodule Barkpark.Plugins.Github do
   # `project_id` is intentionally absent — Projects v2 is optional (wave 5);
   # the Issues mirror works without a board.
   @required_creds ~w(repo app_id installation_id private_key webhook_secret)
+
+  @doc """
+  The credential keys (as flat `plugin_settings` strings) that MUST be present
+  and non-blank before the bridge may run. `Github.Settings.active?/0` reuses
+  this list so the settings-gate validator and the runtime creds resolver
+  agree on exactly one definition of "provisioned".
+  """
+  @spec required_creds() :: [String.t()]
+  def required_creds, do: @required_creds
 
   @doc """
   Declarative settings form for the admin Plugin Settings LiveView.
@@ -180,11 +196,46 @@ defmodule Barkpark.Plugins.Github do
     [%{type: :link, label: "GitHub Sync", path: "/admin/github", icon: "github"}]
   end
 
-  # Wave 1 keeps routes empty on purpose — see @moduledoc. The `use` default
-  # already returns `[]`; the explicit clause documents the intent at the call
-  # site so a wave-2 author knows exactly where the controllers wire in.
+  # Routes stay empty until the webhook/adopt controllers land (waves 3–4) — see
+  # @moduledoc. The `use` default already returns `[]`; the explicit clause
+  # documents the intent at the call site.
   @impl Barkpark.Plugin
   def register_routes(_ctx), do: []
+
+  @doc """
+  Supervised workers the host splices into the plugin supervision tree when
+  `github` is whitelisted (AUTH START contract #1). Both are singletons:
+
+    * `Barkpark.Plugins.Github.Auth` — the App installation-token cache. Without
+      it under supervision, `Auth.token/0` crashes no-process at mirror time.
+    * `Barkpark.Plugins.Github.DrainWorker` — the drain-tick GenServer that reads
+      the outbound cursor/outbox and enqueues debounced `MirrorJob`s. A supervised
+      GenServer, not cron (the `Barkpark.Sync.PushWorker` precedent).
+
+  They start ONLY here, so a non-whitelisted install runs neither — off by
+  default. Mirrors `onixedit.ex` returning `[Bokbasen.Auth]`.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [Barkpark.Plugins.Github.Auth | drain_worker_child()]
+  end
+
+  # Auth is a LAZY singleton (no boot DB, no timer — safe to supervise always,
+  # like onixedit's Bokbasen.Auth). The DrainWorker, by contrast, runs a periodic
+  # DB-touching tick; a boot-started instance in the test env fires against a
+  # process that owns no ExUnit sandbox connection, raising DBConnection.Ownership
+  # and cascading across the suite. So it is gated OFF in test (config/test.exs) —
+  # the `Barkpark.Sync.PushWorker`/`Sync.enabled?()` precedent (splice only when
+  # the engine should actually run). Defaults ON, so prod is unaffected. Tests that
+  # exercise the drain loop start their OWN anonymous instance with injected seams.
+  defp drain_worker_child do
+    enabled? =
+      :barkpark
+      |> Application.get_env(Barkpark.Plugins.Github.DrainWorker, [])
+      |> Keyword.get(:enabled, true)
+
+    if enabled?, do: [Barkpark.Plugins.Github.DrainWorker], else: []
+  end
 
   # Blank = nil, non-binary, or all-whitespace string. A credential the
   # operator typed as spaces is as good as missing.

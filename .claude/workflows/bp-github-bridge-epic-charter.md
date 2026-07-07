@@ -183,3 +183,65 @@ references `Barkpark.Plugins.Github`, so the fresh-install invariant holds; zero
 a drain worker (`oban_crontab`) + debounced per-task `MirrorJob` (unique on doc_id, schedule_in:30). Wire
 Auth into `register_workers`, wire routes/cron into `github.ex`. Land the 4xx/snooze classification and the
 `Link.get` draft-first read as first-class. `@canonical capability:github-mirror-reconcile` on the reconcile fn.
+
+> ⚠️ CHARTER DRIFT: this file was concurrently reverted to its pre-wave-2-cut state — the architect's Wave-2
+> amendments (**D12** publish-twin/creds-resolver, **D3 AMENDED**, the 4-slice Roadmap Wave 2 detail, and the
+> "Wave 2 CUT" log entry) were lost by a base-drift worktree write. Re-apply them from PR #1229's follow-on and
+> the wave-2 slice branch commit messages. The wave-2 facts survive in the log entry below.
+
+### Wave 2026-07-07 — Wave 2 outbound mirror engine BUILT (4/4 green on `-p` branches, NOT yet merged)
+
+The heart is assembled. All four slices built + perfected; each carries a `-p` (perfecter) branch. Real forward
+movement on the WISH — not micro-repair. Tasks→Issues now flows end-to-end drain→enqueue→reconcile→create/PATCH
+→stamp, with loop-immunity proven. Branches: `loop-epic/{mirrorjob-…-0, github-settings-…-1,
+link-publish-twin-…-2, drainworker-…-3}` (+ each `-p`).
+
+**Landed (on branches, pending integration):**
+1. **MirrorJob** (`github/mirror_job.ex`, 13 tests) — Oban worker on `github_mirror`, `unique` on `{doc_id,dataset}`
+   period:60 (D2 coalesce), `enqueue/1` `schedule_in:30`. `reconcile/2` carries
+   `@canonical capability:github-mirror-reconcile`; loads task DRAFT-FIRST (contract #2, normalises off the
+   `drafts.` prefix so the `Task:` trailer is clean), short-circuits on detached link (D7) + `synced?` coalesce
+   (D3 amended), projects, CREATE-or-idempotent-PATCH, stamps `Link.put`. Full D8 4-type error map incl. permanent
+   422 dead-letter + NotFound-on-update→`detached` never-recreate. Perfecter fixed a born-closed terminal-state
+   drift + nil-repo crash-loop guard.
+2. **`Github.Settings` + Auth rewire** (`github/settings.ex` + `auth.ex`, 53 tests) — Bokbasen-shaped env→DB creds
+   resolver: `get_credentials/0`, fail-closed `active?/0` (whitespace-trimmed), `repo/0`, `datasets/0` (env-only
+   `:github_mirror_datasets`, default `["production"]`). `required_creds/0` made public in `github.ex` = single
+   source driving both `validate_settings/1` and `Settings.required_keys/0`. `Auth.config/0` delegates
+   (keyword→map, verified no external caller). Wave-1 tests stay green.
+3. **Link publish-twin collapse (D12)** (`link.ex` +83 / `link_test.exs` +111) — already-published tasks re-publish
+   via `Content.publish_document(source: :github)`, collapsing the draft twin AND stamping the publish
+   `mutation_event` `source:"github"` (outbox-excluded, machine-checked immunity test). Perfecter fix: a genuine
+   never-published draft is LEFT a draft (never force-published under a human).
+4. **DrainWorker + wiring (integrator)** (`github/drain_worker.ex` + `github.ex` + `config.exs`, 23 tests; full
+   plugin suite 125/125) — supervised drain-tick GenServer on the `PushWorker` precedent: per-tick re-bootstraps
+   each whitelisted dataset's cursor to head (D1 backlog skip, closes a builder-latent flood bug), idle-gates on
+   `active?`, `Cursor.get`→`Outbox.fetch`(source≠github)→enqueue MirrorJob per event→write-then-advance,
+   HALT-not-skip + capped backoff on enqueue error. Seams injected (no Oban/net/sleep in tests).
+   `register_workers/1`→`[Auth, DrainWorker]` (AUTH START ✓); `oban_crontab` empty; static `github_mirror: 2`
+   queue added. Capstone proves drain-level loop-immunity. `Code.ensure_loaded?(Settings)` seam guard keeps a
+   pre-slice-2 boot dark.
+
+**Stalled** — nothing NOT-GREEN. Wave is code-complete.
+
+**BLOCKER before merge (base drift — sharpest risk):** the slice branches were cut off the wave-1 base, BEFORE
+#1228 (columns) and #1230 (autoupdate) merged. Naive merge of a `-p` branch REVERTS those PRs — slice 3's raw
+diff shows ~1400 phantom DELETIONS (`columns-node.js`, `autoupdate_rollout_worker.ex`, cloud registry, …).
+Integrator MUST rebase each `-p` onto current `origin/main` (or cherry-pick ONLY the `github/`+`config` hunks)
+before landing. Merge order: slices 1, 2, 3 (file-disjoint), THEN slice 4.
+
+**Cross-wave carries for wave 3+ (perfecter-flagged, not defects):**
+- **TENANT SCOPE (real gap).** `reconcile/2` uses EMPTY opts → default workspace/project only. DrainWorker threads
+  DATASET but not workspace/project, so a non-default-tenant task is silently not-found or mis-written. Wave 3 (or
+  a fast wave-2.5) MUST thread real tenant scope from the outbox event into `reconcile`.
+- **`active?/0` IS NOT FREE.** Each call = 1 DB read + 1 audit-row insert + telemetry. DrainWorker calls it every
+  tick — MUST memoize (short TTL) or it hammers the DB and buries genuine admin audit events.
+- **LOOP-CUT #2 IS AN EXACT STRING.** Wave-3 inbound MUST stamp `mutation_events.source` exactly `"github"`; any
+  namespacing (`"github:inbound"`) slips the outbox exclusion → mirror loop. (Carried from wave 1.)
+- **CONFLICT QUARANTINE (D7) is wave 4.** Out-of-band GitHub edits converge silently today; only
+  deleted/transferred issues get `detached`. Expected until wave 4.
+
+**Next wave: integrate + merge the 4 wave-2 `-p` branches (rebased), THEN Wave 3 — inbound intake.** Webhook
+controller + raw-body cache + signature plug (wave-1 verifier) + `[bot]`-identity drop + `Content` create through
+the `Tasks.Dedup` seam (deterministic `gh-<num>`, `src:github`+`needs-human`, `source: :github`) + backlink
+comment. Fold TENANT-SCOPE threading and `active?/0` memoization into wave 3's cut (or a fast wave-2.5 cleanup).

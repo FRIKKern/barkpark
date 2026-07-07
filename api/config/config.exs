@@ -129,6 +129,12 @@ config :barkpark, Oban,
   # statically here — without it every projection job sits `available` forever
   # and the graph silently goes stale. Own named queue (concurrency 2) so it
   # never competes with `:indx`.
+  # `github_mirror` drives Barkpark.Plugins.Github.MirrorJob (outbound task→Issue
+  # mirror). A plugin's oban-merge can add CRONTAB but NOT queues (same reason
+  # `indx`/`edge_projector` are static here), so the queue is declared statically
+  # even though `github` is a registered plugin. Low concurrency (2) is a
+  # deliberate secondary-rate-limit guard (epic D9): a snoozed job re-reads
+  # current state when it runs, so throttling loses no intent.
   queues: [
     default: 10,
     bokbasen: 4,
@@ -136,7 +142,8 @@ config :barkpark, Oban,
     tasks_ttl: 1,
     tasks_compact: 1,
     indx: 2,
-    edge_projector: 2
+    edge_projector: 2,
+    github_mirror: 2
   ],
   plugins: [
     {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7},

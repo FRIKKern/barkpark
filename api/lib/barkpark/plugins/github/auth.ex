@@ -24,10 +24,15 @@ defmodule Barkpark.Plugins.Github.Auth do
 
   ## Credential resolution
 
-  Reads `Application.get_env(:barkpark, Barkpark.Plugins.Github)`:
-  `app_id`, `installation_id`, `private_key` (PEM), and `api_base`
-  (the App API base — defaults to `https://api.github.com`; tests inject a
-  Bypass base). No credential is ever hardcoded.
+  Resolves creds through `Barkpark.Plugins.Github.Settings.get_credentials/0`:
+  `app_id`, `installation_id`, `private_key` (PEM), and `api_base` (the App API
+  base — defaults to `https://api.github.com`; tests inject a Bypass base). That
+  resolver reads the SAME `Application.get_env(:barkpark, Barkpark.Plugins.Github)`
+  key this GenServer always did (so env-provisioned creds and the wave-1 tests
+  are unaffected) and, when a key is blank there, falls back to the encrypted
+  `plugin_settings` "github" row so a maintainer who provisioned the App through
+  the admin Settings UI actually reaches the token exchange. No credential is
+  ever hardcoded.
 
   ## Lifecycle
 
@@ -39,8 +44,8 @@ defmodule Barkpark.Plugins.Github.Auth do
   use GenServer
 
   alias Barkpark.Plugins.Github.Errors.AuthError
+  alias Barkpark.Plugins.Github.Settings
 
-  @config_key Barkpark.Plugins.Github
   @default_api_base "https://api.github.com"
   @safety_margin_seconds 60
   @default_expires_in 3600
@@ -301,7 +306,10 @@ defmodule Barkpark.Plugins.Github.Auth do
   # ---------------------------------------------------------------------------
 
   @doc false
-  def config, do: Application.get_env(:barkpark, @config_key, [])
+  # Resolved creds map (env-wins → encrypted "github" plugin_settings row).
+  # Kept public + delegating so any caller/test that reached in for the raw
+  # config now transparently gets the DB-bridged resolution.
+  def config, do: Settings.get_credentials()
 
   defp api_base(cfg) do
     case cfg[:api_base] do

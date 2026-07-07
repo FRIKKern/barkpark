@@ -102,3 +102,10 @@ config :barkpark, :pulse_channels, %{
 # contract tests pin the demo posture; the lockdown tests flip it off
 # per-test (async: false) to pin the prod fail-closed behavior.
 config :barkpark, :public_demo_studio, true
+
+# The github-bridge DrainWorker runs a periodic DB-touching drain tick. Keep the
+# boot-started singleton dormant in test so it never fires against a process that
+# owns no ExUnit sandbox connection (DBConnection.OwnershipError cascade). Drain
+# tests start their own anonymous instance with injected seams. Mirrors the
+# Sync.PushWorker `enabled?` gate. (Auth is lazy and stays boot-started.)
+config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
