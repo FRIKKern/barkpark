@@ -526,6 +526,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       # the reconciled snapshot still paints the momentum header.
       assert html =~ ~s(data-role="momentum")
     end
+
+    test "the Done column count reports the FULL total even when the render is windowed",
+         %{conn: conn} do
+      # 13 done tasks — one past the @done_window (12) — so the rendered pile is
+      # capped but the header must still climb (§0 "you always feel progress":
+      # closing your 13th task grows Done, it does not freeze at 12).
+      for i <- 1..13, do: task("dw-#{i}", "Shipped #{i}", lifecycle: "done")
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # exactly 12 done cards render (the window), but the Done column count is 13.
+      done_cards =
+        html
+        |> String.split(~s(data-role="column" data-col="done"))
+        |> List.last()
+        |> String.split(~s(data-role="task-card"))
+        |> length()
+        |> Kernel.-(1)
+
+      assert done_cards == 12, "the done render is windowed at 12; got #{done_cards}"
+      assert done_count(html) == 13, "the Done column count must report the full total"
+    end
   end
 
   # ── helpers ─────────────────────────────────────────────────────────────────
@@ -570,6 +592,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       %{"lifecycle_status" => "done"},
       ~U[2026-07-07 13:05:00Z]
     )
+  end
+
+  # The integer the Done column header prints in its `col-count` span.
+  defp done_count(html) do
+    [_before, rest] = String.split(html, ~s(data-col="done"), parts: 2)
+    [_h, tail] = String.split(rest, ~s(data-role="col-count">), parts: 2)
+    tail |> String.trim_leading() |> Integer.parse() |> elem(0)
   end
 
   # Does the rendered board place `doc_id`'s card inside `col`'s <section>? We

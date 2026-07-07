@@ -322,7 +322,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
           <h2 class="bp-col-h">
             <%= col_label(col) %>
-            <span class="bp-col-n" data-role="col-count"><%= length(@board.columns[col]) %></span>
+            <span class="bp-col-n" data-role="col-count"><%= col_count(@board, col) %></span>
           </h2>
 
           <p :if={@board.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
@@ -399,6 +399,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # the climbing number is felt at the moment it climbs.
   defp done_bump_class(%{kind: :closed}), do: "m-bump"
   defp done_bump_class(_), do: ""
+
+  # The column count. Every column renders its live card count EXCEPT :done, whose
+  # rendered list is WINDOWED at @done_window (D10) — so it reports the FULL
+  # `done_total` instead, or the pile would freeze at 12 and closing your 13th
+  # task would not visibly grow "Done" (violating §0 "you always feel progress").
+  defp col_count(board, :done), do: board.done_total
+  defp col_count(board, col), do: length(board.columns[col])
 
   defp col_label(:open), do: "Open"
   defp col_label(:ready), do: "Ready"
