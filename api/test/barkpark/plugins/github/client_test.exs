@@ -308,6 +308,138 @@ defmodule Barkpark.Plugins.Github.ClientTest do
     end
   end
 
+  describe "graphql/3" do
+    test "POSTs query+variables to /graphql and returns the data payload",
+         %{bypass: bypass, base: base} do
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+      stub_token(bypass)
+
+      Bypass.expect(bypass, "POST", "/graphql", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{"data" => %{"addProjectV2ItemById" => %{"item" => %{"id" => "PVTI_x"}}}})
+        )
+      end)
+
+      assert {:ok, %{"addProjectV2ItemById" => %{"item" => %{"id" => "PVTI_x"}}}} =
+               Client.graphql(
+                 "mutation($id:ID!){ addProjectV2ItemById(input:{contentId:$id}){ item { id } } }",
+                 %{"id" => "I_abc"},
+                 base_url: base,
+                 max_retries: 0
+               )
+
+      body = Agent.get(body_ref, & &1)
+      assert body["query"] =~ "addProjectV2ItemById"
+      assert body["variables"] == %{"id" => "I_abc"}
+    end
+
+    test "defaults variables to an empty map", %{bypass: bypass, base: base} do
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+      stub_token(bypass)
+
+      Bypass.expect(bypass, "POST", "/graphql", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, Jason.encode!(%{"data" => %{"viewer" => %{"login" => "octocat"}}}))
+      end)
+
+      assert {:ok, %{"viewer" => %{"login" => "octocat"}}} =
+               Client.graphql("query { viewer { login } }", %{}, base_url: base, max_retries: 0)
+
+      assert Agent.get(body_ref, & &1)["variables"] == %{}
+    end
+
+    test "a 200 carrying a non-empty errors array → NetworkError{reason: {:graphql, _}}",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      errors = [%{"message" => "Field 'bogus' doesn't exist", "type" => "INVALID"}]
+
+      Bypass.stub(bypass, "POST", "/graphql", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        # GraphQL returns 200 OK even for a query-level error — the wrinkle.
+        |> Plug.Conn.resp(200, Jason.encode!(%{"data" => nil, "errors" => errors}))
+      end)
+
+      assert {:error, %NetworkError{reason: {:graphql, ^errors}, endpoint: endpoint}} =
+               Client.graphql("query { bogus }", %{}, base_url: base, max_retries: 0)
+
+      assert endpoint =~ "/graphql"
+    end
+
+    test "a 403 with rate headers → RateLimitError (classified as a REST verb)",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "POST", "/graphql", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("x-ratelimit-remaining", "0")
+        |> Plug.Conn.resp(403, ~s({"message":"secondary rate limit"}))
+      end)
+
+      assert {:error, %RateLimitError{}} =
+               Client.graphql("query { viewer { login } }", %{}, base_url: base, max_retries: 0)
+    end
+  end
+
+  describe "add_sub_issue/4" do
+    test "POSTs the sub_issue_id to the /sub_issues path", %{bypass: bypass, base: base} do
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+      stub_token(bypass)
+
+      Bypass.expect(bypass, "POST", "/repos/#{@repo}/issues/7/sub_issues", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(201, Jason.encode!(%{"number" => 7, "sub_issues_summary" => %{"total" => 1}}))
+      end)
+
+      # parent = number 7, child = its DATABASE id (not its number).
+      assert {:ok, %{"number" => 7}} =
+               Client.add_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+
+      assert Agent.get(body_ref, & &1) == %{"sub_issue_id" => 55_667_788}
+    end
+
+    test "a 422 (already a sub-issue) surfaces as NetworkError{reason: {:http, 422}}",
+         %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues/7/sub_issues", fn conn ->
+        Plug.Conn.resp(conn, 422, ~s({"message":"Sub-issue already added"}))
+      end)
+
+      # NOT special-cased here — the Relations caller maps 422 → :ok.
+      assert {:error, %NetworkError{reason: {:http, 422}}} =
+               Client.add_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+    end
+
+    test "a 403 with rate headers → RateLimitError", %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues/7/sub_issues", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "17")
+        |> Plug.Conn.resp(403, ~s({"message":"secondary rate limit"}))
+      end)
+
+      assert {:error, %RateLimitError{retry_after: 17}} =
+               Client.add_sub_issue(@repo, 7, 55_667_788, base_url: base, max_retries: 0)
+    end
+  end
+
   describe "token caching + refresh" do
     test "several REST calls share a single token fetch", %{bypass: bypass, base: base} do
       {:ok, counter} = Agent.start_link(fn -> 0 end)
