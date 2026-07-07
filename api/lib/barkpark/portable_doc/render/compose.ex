@@ -166,7 +166,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
-    body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+    # Body inline comes from the `body` slot (STEP 3 slot model): the slot's lone
+    # paragraph when materialized, else the legacy `content` array — the SAME inline
+    # array either way (Slots.callout_body_inline/1), so this composes a byte-
+    # identical single PdText. The callout FLATTENS its single-paragraph body slot to
+    # INLINE; it never composes the paragraph as a block <p> (that would add a wrapper
+    # + 12pt margin and break parity).
+    body = %{
+      "kind" => "PdText",
+      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_body_inline(b))
+    }
 
     tone = Map.get(b, "tone") || "info"
 

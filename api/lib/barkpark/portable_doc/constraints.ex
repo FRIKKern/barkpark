@@ -72,13 +72,22 @@ defmodule Barkpark.PortableDoc.Constraints do
     indexed = index_by_kind(blocks)
     total = length(blocks)
 
-    Enum.flat_map(declarations, fn decl ->
-      indices = Map.get(indexed, decl.kind, [])
+    decl_errors =
+      Enum.flat_map(declarations, fn decl ->
+        indices = Map.get(indexed, decl.kind, [])
 
-      presence_errors(decl, indices) ++
-        cardinality_errors(decl, indices) ++
-        position_errors(decl, indices, indexed, total)
-    end)
+        presence_errors(decl, indices) ++
+          cardinality_errors(decl, indices) ++
+          position_errors(decl, indices, indexed, total)
+      end)
+
+    # D1 slot gate (STEP 3): every widget's slot children must be element-tier.
+    # Additive and legacy-safe — a legacy callout (body synthesized from `content`)
+    # yields no slot error; only a slot holding a nested widget/section does.
+    # `Slots` is pure/Content-free, so this keeps the checker's layering purity.
+    slot_errors = Enum.flat_map(blocks, &Barkpark.PortableDoc.Slots.slot_type_errors/1)
+
+    decl_errors ++ slot_errors
   end
 
   def validate(_, _), do: []

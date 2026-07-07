@@ -879,11 +879,30 @@ function walkNodeIds(nodes, sink) {
 // maybe_put / maybe_put_true only thread these when present, so a callout that
 // never had a title must round-trip WITHOUT a title key (not title:"").
 
+// calloutBodyInline(block) → the callout body's inline array (STEP 3 slot model).
+//
+// The `body` slot is the source of truth: when the block carries a materialized
+// `slots.body` (a list whose lone element is a paragraph), read that paragraph's
+// `content`; otherwise fall back to the legacy `content` array. Both encodings of
+// the SAME body yield the SAME inline array, so a slot-form and a content-form
+// callout project to an IDENTICAL node — which is what keeps zero-op-on-load true
+// (stableCalloutKey keys on node.content, so a legacy-loaded callout and its
+// re-projection compare EQUAL). Mirrors Elixir Slots.callout_body_inline/1.
+function calloutBodyInline(block) {
+  const slotBody = block && block.slots && block.slots.body;
+  if (Array.isArray(slotBody) && slotBody.length) {
+    const first = slotBody[0];
+    return (first && first.content) || [];
+  }
+  return (block && block.content) || [];
+}
+
 // calloutBlockToNode(block) → { type:"callout", attrs:{…}, content:[inline…] }
 //
-// The body inline array (block.content) → TipTap inline nodes via the shared
-// serializer. Chrome fields → attrs (only the present ones; tone always present
-// with its "info" default so a tone swap is always diffable).
+// The body inline array (calloutBodyInline: slots.body[0].content else content) →
+// TipTap inline nodes via the shared serializer. Chrome fields → attrs (only the
+// present ones; tone always present with its "info" default so a tone swap is
+// always diffable). title/collapsible/collapsed stay WIDGET attrs OUTSIDE the slot.
 function calloutBlockToNode(block, bpId, bpType) {
   const attrs = {
     bpId,
@@ -897,7 +916,7 @@ function calloutBlockToNode(block, bpId, bpType) {
   if (block && block.collapsed === true) attrs.collapsed = true;
 
   const node = { type: bpType || "callout", attrs };
-  const inline = inlineArrayToTiptap((block && block.content) || []);
+  const inline = inlineArrayToTiptap(calloutBodyInline(block));
   if (inline.length) node.content = inline;
   return node;
 }
