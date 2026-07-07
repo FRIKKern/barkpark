@@ -248,8 +248,8 @@ func TestEnsureFresh_RebuildBoundedOnBox(t *testing.T) {
 	if len(r.outScripts) != 3 {
 		t.Fatalf("want check + diff + rebuild scripts, got %d: %v", len(r.outScripts), r.outScripts)
 	}
-	if want := "timeout 720 bash scripts/deploy-rebuild.sh"; !strings.Contains(r.outScripts[2], want) {
-		t.Errorf("rebuild script must bound deploy-rebuild.sh remotely with %q; got:\n%s", want, r.outScripts[2])
+	if want := "timeout 720 bash scripts/apply-update.sh"; !strings.Contains(r.outScripts[2], want) {
+		t.Errorf("rebuild script must bound apply-update.sh remotely with %q; got:\n%s", want, r.outScripts[2])
 	}
 }
 
@@ -267,8 +267,8 @@ func TestEnsureFresh_NoRemoteTimeoutWithoutBudget(t *testing.T) {
 	if strings.Contains(r.outScripts[2], "timeout ") {
 		t.Errorf("no remote timeout expected without a budget; got:\n%s", r.outScripts[2])
 	}
-	if !strings.Contains(r.outScripts[2], "bash scripts/deploy-rebuild.sh") {
-		t.Errorf("rebuild script must still invoke deploy-rebuild.sh; got:\n%s", r.outScripts[2])
+	if !strings.Contains(r.outScripts[2], "bash scripts/apply-update.sh") {
+		t.Errorf("rebuild script must still invoke apply-update.sh; got:\n%s", r.outScripts[2])
 	}
 }
 

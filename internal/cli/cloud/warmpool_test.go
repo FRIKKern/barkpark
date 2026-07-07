@@ -57,7 +57,7 @@ func (r *recordingRunner) Run(_ context.Context, s CaddyStep) error {
 // KEY=VALUE output (current by default, behind when r.behind) and the rebuild.
 func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, error) {
 	r.outScripts = append(r.outScripts, script)
-	if strings.Contains(script, "deploy-rebuild.sh") {
+	if strings.Contains(script, "apply-update.sh") {
 		r.rebuildRan = true
 		r.events = append(r.events, "out:freshen-rebuild")
 		if r.rebuildErr != nil {

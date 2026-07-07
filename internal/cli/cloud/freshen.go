@@ -92,7 +92,12 @@ printf 'FRESHEN_TO=%s\n' "$(git describe --tags --always origin/main 2>/dev/null
 // The caller's local context gets a small grace on top (see EnsureFresh) so the
 // remote timeout fires first and its output/exit 124 are captured.
 func freshenRebuildScript(budget time.Duration) string {
-	rebuild := "bash scripts/deploy-rebuild.sh"
+	// apply-update.sh prefers the CI-precompiled artifact for HEAD (fast fetch +
+	// swap, no on-box compile — task precompiled-artifacts) and falls back to
+	// deploy-rebuild.sh's full on-box compile when the artifact isn't usable. The
+	// SAME budget/timeout bounds it (a fetch is far under the compile budget; a
+	// fallback compile fits the existing headroom).
+	rebuild := "bash scripts/apply-update.sh"
 	if budget > 0 {
 		rebuild = fmt.Sprintf("timeout %d %s", int(budget.Seconds()), rebuild)
 	}
