@@ -147,9 +147,10 @@ const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = { bpCode: "code", bpDiagram: "diagram" 
 // picker aligned with field-node.js:(BP_NATIVE_FIELD_TYPES ∪ BP_PICKER_FIELD_TYPES) and
 // paper_canvas.ex:(@canvas_field_types ∪ @canvas_picker_field_types).
 //
-// STILL OUT (separate nested-structure increment): section / composite / object /
-// arrayOf / codelist / localizedText. Those are NOT in any canvas-field set and STILL
-// split a run.
+// STILL OUT (separate nested-structure increment): composite / object / arrayOf /
+// codelist / localizedText. Those are NOT in any canvas-field set and STILL split a
+// run. (`section` is NO LONGER here — it rides its own bpSection CONTAINER node; see
+// CANVAS_CONTAINER_TYPES below.)
 const CANVAS_NATIVE_FIELD_TYPES = new Set([
   "field-string",
   "field-slug",
@@ -241,6 +242,36 @@ const CANVAS_FLEET_TYPES = new Set([
   "questionnaire",
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
+
+// CONTAINER block kinds the canvas handles as EDITABLE CONTAINER nodes — a block
+// whose BODY is a nested `blocks` list of ordinary portable-doc blocks (compose.ex
+// nests + recurses; patch.ex:22 "sections nest arbitrarily"). `section` is the first:
+// a TOP-LEVEL section projects to the editable `bpSection` container (section-node.js),
+// its nested children joining the canvas doc as a block+ region. UNLIKE every prior
+// canvas kind a container FOLDS INTO a run (it no longer SPLITS one): a
+// [para, section, para] becomes ONE run.
+//
+// V1 forbids container-in-container: a section encountered as a CHILD (depth>=1)
+// projects to bpOpaque (verbatim read-only carry), NOT bpSection — see
+// sectionBlockToNode's depth-guard. The node NAME is `bpSection`, the bpType stays
+// "section". Keep aligned with section-node.js:BP_SECTION_NODE_NAME and
+// paper_canvas.ex:@canvas_container_types (partition-shape tests pin both).
+const CANVAS_CONTAINER_TYPES = new Set(["section"]);
+// The TipTap NODE name for a container block differs from its bpType: `section` →
+// `bpSection`. runToTiptap maps a block.type → its node.type; runToOps/classifyNode
+// map it back via bpType. Keep aligned with section-node.js.
+const CANVAS_CONTAINER_NODE_NAME = "bpSection";
+// Reverse: node.type "bpSection" → bpType "section".
+const CANVAS_CONTAINER_BP_TYPE_BY_NODE = { bpSection: "section" };
+
+// True when a portable-doc BLOCK type is a canvas container (`section`).
+function isCanvasContainerType(t) {
+  return CANVAS_CONTAINER_TYPES.has(t);
+}
+// True when a TipTap NODE type is a canvas container node (`bpSection`).
+function isCanvasContainerNode(nodeType) {
+  return nodeType === CANVAS_CONTAINER_NODE_NAME;
+}
 
 function isProseType(type) {
   return PROSE_TYPES.has(type);
@@ -370,7 +401,15 @@ function carryTemplateAttrs(block, attrs) {
 //       { type:"bpOpaque", attrs:{ bpId, bpType, bpBlock:<deep-cloned block> } }
 //     carrying the original block JSON verbatim so it round-trips untouched.
 export function runToTiptap(blocks) {
-  const content = (blocks || []).map((block) => {
+  return { type: "doc", content: (blocks || []).map(blockToNode) };
+}
+
+// blockToNode(block) → ONE ProseMirror node. The per-block dispatch runToTiptap maps
+// over its block list — factored out so a CONTAINER (section) can recurse it over its
+// nested children (sectionBlockToNode). The container branch is checked BEFORE the
+// opaque fallback so a top-level section projects to the editable bpSection.
+function blockToNode(block) {
+  {
     const bpId = block && block.id;
     const bpType = block && block.type;
 
@@ -456,14 +495,200 @@ export function runToTiptap(blocks) {
       return roleBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasContainerType(bpType)) {
+      // A canvas CONTAINER node (section): the block's `blocks` list becomes a nested
+      // block+ body of child nodes (each recursively projected via blockToNode), with
+      // the title on node.attrs. A nested (depth>=1) section child is carried opaque
+      // (V1 forbid-nesting) — see sectionBlockToNode. node.type is the NODE name
+      // (bpSection), not the bpType (section).
+      return sectionBlockToNode(block, bpId, bpType);
+    }
+
     // Opaque carry-through: the original block JSON, deep-cloned (no shared refs).
     return {
       type: "bpOpaque",
       attrs: { bpId, bpType, bpBlock: deepClone(block) },
     };
+  }
+}
+
+// ── section ⇄ canvas container node ─────────────────────────────────────────
+//
+// A `section` block { id, type:"section", title?, blocks:[child, …] } ⇄ a bpSection
+// node { type:"bpSection", attrs:{ bpId, bpType, title? }, content:[childNode, …] }.
+// Each child recurses through blockToNode; a nested section child is carried opaque
+// (V1 forbid-nesting). The title rides node.attrs, PRESENT-ONLY (a null/absent title
+// round-trips as ABSENT, byte-mirroring callout.title).
+
+// sectionBlockToNode(block, bpId, bpType) → the bpSection node.
+function sectionBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "section" };
+  if (block && block.title != null) attrs.title = block.title;
+
+  const children = (block && block.blocks) || [];
+  const content = children.map((child) => {
+    // DEPTH-GUARD (V1 forbid-nesting): a child of type "section" is carried VERBATIM
+    // as bpOpaque (read-only), NOT projected as another bpSection — so a legacy nested
+    // section round-trips byte-identical and is never restructured (the silent-lift
+    // trap). Every other child projects normally via blockToNode (which itself falls
+    // to bpOpaque for a non-canvas child like composite/codelist).
+    if (child && isCanvasContainerType(child.type)) {
+      return {
+        type: "bpOpaque",
+        attrs: {
+          bpId: child.id,
+          bpType: child.type,
+          bpBlock: deepClone(child),
+        },
+      };
+    }
+    return blockToNode(child);
   });
 
-  return { type: "doc", content };
+  const node = { type: CANVAS_CONTAINER_NODE_NAME, attrs };
+  if (content.length) node.content = content;
+  return node;
+}
+
+// sectionNodeToBlock(node, id, taken) → the reconstructed `section` block. Each child
+// keeps its bpId or is CLIENT-MINTED one from the CALL-SHARED `taken` set (so a nested
+// mint never collides with a nested prev id — the duplicate_id-abort guard). RECURSES:
+// a nested bpOpaque section child rebuilds verbatim via nextNodeToBlock's opaque path.
+function sectionNodeToBlock(node, id, taken) {
+  const seen = taken || new Set();
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "section" };
+  if (attrs.title != null) block.title = attrs.title;
+
+  const children = (node && node.content) || [];
+  block.blocks = children.map((child) => {
+    const cls = classifyNode(child);
+    const childBpId = child.attrs && child.attrs.bpId;
+    const cid = childBpId != null ? childBpId : mintId(seen);
+    return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+  });
+  return block;
+}
+
+// The child-id sequence of a section node (each child's bpId, or null for a
+// canvas-created child). Structural equality of this sequence is the coarse-path
+// pivot: ANY difference (add / remove / reorder / reparent / a null-id child) →
+// replace-block the whole rebuilt subtree; an IDENTICAL sequence → recurse per-child
+// fine-grained patches.
+function sectionChildIdSeq(node) {
+  return ((node && node.content) || []).map((c) =>
+    c && c.attrs && c.attrs.bpId != null ? c.attrs.bpId : null,
+  );
+}
+
+// True when two child-id sequences differ (length or any position). A null-id child
+// makes them differ (a null !== a real prev id), forcing the coarse replace path.
+function sectionChildSeqChanged(prevNode, nextNode) {
+  const a = sectionChildIdSeq(prevNode);
+  const b = sectionChildIdSeq(nextNode);
+  if (a.length !== b.length) return true;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return true;
+  }
+  return false;
+}
+
+// When a section's child-id sequence is IDENTICAL prev↔next (no structural change),
+// emit a fine-grained patch-block per child whose INTERIOR changed — keyed by the
+// childId (patch.ex resolves nested ids). Reuses the SAME per-kind change-detectors as
+// the top-level patch pass. Returns an ordered op list.
+function sectionChildPatchOps(prevNode, nextNode) {
+  const ops = [];
+  const prevChildren = (prevNode && prevNode.content) || [];
+  const nextChildren = (nextNode && nextNode.content) || [];
+  for (let i = 0; i < nextChildren.length; i++) {
+    const nextChild = nextChildren[i];
+    const prevChild = prevChildren[i];
+    const cid = nextChild && nextChild.attrs && nextChild.attrs.bpId;
+    if (cid == null) continue; // an identical seq means every child has an id
+    const cls = classifyNode(nextChild);
+    const patch = childInteriorPatch(cls, prevChild, nextChild, cid);
+    if (patch) ops.push({ op: "patch-block", id: cid, patch });
+  }
+  return ops;
+}
+
+// The mutable-fields patch for a nested child whose interior changed, dispatched by
+// its canvas KIND — the SAME detectors + patch builders the top-level patch pass uses.
+// Returns null when unchanged (or a no-interior kind: atom / read-only / fleet /
+// opaque never report an interior change). A nested container is impossible (v1
+// forbids it), so there is no recursive container case here.
+function childInteriorPatch(cls, prevChild, nextChild, cid) {
+  if (cls.isContent) {
+    return calloutNodeChanged(prevChild, nextChild)
+      ? calloutNodeToPatch(nextChild)
+      : null;
+  }
+  if (cls.isAttrAtom) {
+    if (nextChild.type === "bpDiagram") {
+      return diagramNodeChanged(prevChild, nextChild)
+        ? diagramNodeToPatch(nextChild)
+        : null;
+    }
+    return codeNodeChanged(prevChild, nextChild)
+      ? codeNodeToPatch(nextChild)
+      : null;
+  }
+  if (cls.isField) {
+    return fieldNodeChanged(prevChild, nextChild)
+      ? fieldNodeToPatch(nextChild)
+      : null;
+  }
+  if (cls.isRole) {
+    return roleNodeChanged(prevChild, nextChild)
+      ? roleNodeToPatch(nextChild)
+      : null;
+  }
+  if (cls.isAtom || cls.isReadOnlyAtom || cls.isFleet || cls.isOpaque) {
+    // No interior to patch — a divider / sheet / embed / fleet / opaque child never
+    // reports a content change (identical child-id sequence + verbatim carry).
+    return null;
+  }
+  // Prose child (paragraph / heading / list).
+  if (proseNodeChanged(prevChild, nextChild)) {
+    const bpType =
+      cls.bpType || (prevChild && prevChild.attrs && prevChild.attrs.bpType);
+    return buildPatchBlockOp(nodeToDocEnvelope(nextChild), cid, bpType).patch;
+  }
+  return null;
+}
+
+// ── the duplicate_id-abort guard: recursive id seeds (the make-or-break) ─────
+//
+// runToOps / docToBlocks mint ids for canvas-created (null-id) blocks. mintId keys
+// collision-freedom off a `taken` set. If that set is seeded from TOP-LEVEL ids only,
+// a nested child id (living inside block.blocks / a bpSection body's content) is
+// INVISIBLE to the seed → a mint can collide with it → patch.ex duplicate_id
+// (patch.ex:182/191) ABORTS THE WHOLE ATOMIC BATCH, losing every co-batched edit. The
+// two walkers below seed `taken` from the ENTIRE tree (top-level + section bodies at
+// any depth), closing that gap.
+
+// Walk a portable-doc BLOCK tree (descend section.blocks at any depth), adding every
+// id into `sink`.
+function walkBlockIds(blocks, sink) {
+  for (const block of blocks || []) {
+    if (!block) continue;
+    if (block.id != null) sink.add(block.id);
+    if (Array.isArray(block.blocks)) walkBlockIds(block.blocks, sink);
+  }
+}
+
+// Walk a canvas NODE tree (descend a bpSection node's content at any depth), adding
+// every node.attrs.bpId into `sink`.
+function walkNodeIds(nodes, sink) {
+  for (const node of nodes || []) {
+    if (!node) continue;
+    const id = node.attrs && node.attrs.bpId;
+    if (id != null) sink.add(id);
+    if (isCanvasContainerNode(node.type) && Array.isArray(node.content)) {
+      walkNodeIds(node.content, sink);
+    }
+  }
 }
 
 // ── callout ⇄ canvas content node (S3.2) ────────────────────────────────────
@@ -1207,10 +1432,14 @@ function classifyNode(node) {
   // Article-chrome role node — node.type IS the bpType (eyebrow/byline/ingress/
   // pullquote), so the bpType fallback below resolves it via `node.type`.
   const isRole = isCanvasRoleType(node.type);
+  // Container node (bpSection) — its bpType ("section") rides node.attrs.bpType, with
+  // a reverse-map fallback (bpSection → section).
+  const isContainer = isCanvasContainerNode(node.type);
   const bpType =
     (node.attrs && node.attrs.bpType) ||
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
+    CANVAS_CONTAINER_BP_TYPE_BY_NODE[node.type] ||
     (isField ? "field-string" : isFleet ? "tasks" : node.type);
   return {
     node,
@@ -1223,6 +1452,7 @@ function classifyNode(node) {
     isReadOnlyAtom,
     isFleet,
     isRole,
+    isContainer,
   };
 }
 
@@ -1247,17 +1477,15 @@ export function docToBlocks(doc) {
   const nodes = (doc && doc.content) || [];
   const taken = new Set();
   // Seed `taken` with every id ALREADY on a node so a mint can never collide with a
-  // surviving id (two nodes can't legitimately share an id post-normalize, but a
-  // belt-and-braces seed keeps minting collision-free regardless).
-  for (const node of nodes) {
-    const id = node && node.attrs && node.attrs.bpId;
-    if (id != null) taken.add(id);
-  }
+  // surviving id. RECURSIVE (descend bpSection bodies at any depth) — the make-or-break
+  // duplicate_id-abort guard: a nested child id is invisible to a top-level-only seed,
+  // so a mint could collide with it and abort the whole atomic batch.
+  walkNodeIds(nodes, taken);
   return nodes.map((node) => {
     const cls = classifyNode(node);
     const bpId = node.attrs && node.attrs.bpId;
     const id = bpId != null ? bpId : mintId(taken);
-    return nextNodeToBlock({ ...cls, id, isNew: bpId == null });
+    return nextNodeToBlock({ ...cls, id, isNew: bpId == null }, taken);
   });
 }
 
@@ -1300,8 +1528,15 @@ export function runToOps(prevBlocks, nextDoc) {
   //
   // `taken` seeds with every prev id so a minted id can never collide with a
   // surviving block (patch.ex rejects duplicate ids on append/insert-after).
+  // RECURSIVE (descend section.blocks at any depth) — the make-or-break
+  // duplicate_id-abort guard: a NESTED prev child id is invisible to a top-level-only
+  // seed, so a mint (for a new top-level block OR a new nested section child) could
+  // collide with it and patch.ex duplicate_id (patch.ex:182/191) would abort the whole
+  // atomic batch, silently dropping every co-batched edit. prevIndex/prevById stay
+  // TOP-LEVEL (they key the top-level structural diff); only `taken` walks the full
+  // tree.
   const taken = new Set();
-  prevById.forEach((_block, id) => taken.add(id));
+  walkBlockIds(prev, taken);
 
   // Classify each node into its canvas KIND + resolved bpType via the SHARED
   // classifyNode (the same path docToBlocks uses), then resolve the id HERE: a
@@ -1363,7 +1598,9 @@ export function runToOps(prevBlocks, nextDoc) {
   let firstSurvivor = running.length > 0 ? running[0] : null;
   for (const entry of nextSeq) {
     if (!entry.isNew) continue;
-    const block = nextNodeToBlock(entry);
+    // Pass the CALL-SHARED `taken` so a NEW section's nested null-id children mint ids
+    // that never collide with any tree id (the duplicate_id-abort guard).
+    const block = nextNodeToBlock(entry, taken);
     if (firstSurvivor == null) {
       // No anchor yet: append the first new block at the end, then use it as the
       // anchor for the rest so every later insert has a present afterId.
@@ -1436,6 +1673,32 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     const prevBlock = prevById.get(entry.id);
     const prevNode = runToTiptap([prevBlock]).content[0];
+
+    if (entry.isContainer) {
+      // Canvas CONTAINER node (section). The op strategy hinges on whether the child-id
+      // SEQUENCE changed:
+      //   * DIFFERS (child add / remove / reorder / reparent, or any canvas-created
+      //     null-id child) → ONE coarse replace-block carrying the fully-rebuilt
+      //     section subtree (the greenlit V1 path). sectionNodeToBlock mints ids for
+      //     null children off the CALL-SHARED `taken`.
+      //   * IDENTICAL → recurse per-child fine-grained patch-block{id:childId, patch}
+      //     for each child whose INTERIOR changed (patch.ex resolves nested ids); an
+      //     unchanged section emits NOTHING.
+      // NEVER a move-block/append-block on a nested id (both are top-level only,
+      // patch.ex:42) — a nested reorder rides inside the rebuilt section.
+      if (sectionChildSeqChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "replace-block",
+          id: entry.id,
+          block: sectionNodeToBlock(entry.node, entry.id, taken),
+        });
+      } else {
+        for (const childOp of sectionChildPatchOps(prevNode, entry.node)) {
+          ops.push(childOp);
+        }
+      }
+      continue;
+    }
 
     if (entry.isContent) {
       // Canvas content node (callout): diff body + chrome; emit one patch-block
@@ -1644,8 +1907,30 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasRoleType(type)) {
     return !roleNodeChanged(serverNode, liveNode);
   }
+  // Container (bpSection): V1 does NOT recurse reconcile (product decision 1 defers
+  // recursive idWrites). We compare the WHOLE subtree canonically (title on attrs +
+  // the nested children incl. their bpIds). CONSEQUENCE: a section holding a
+  // canvas-CREATED child (a live child with bpId:null vs a server child with a minted
+  // id) never own-echo-matches, so each batch re-emits replace-block{wholeSection} —
+  // the accepted V1 churn. A section with all-stable children whose echoed interior
+  // edit matched DOES own-echo (its full content compares equal). bpId of the section
+  // itself is excluded (stableSectionKey ignores it), so a pure id-stamp echo matches.
+  if (isCanvasContainerNode(type)) {
+    return stableSectionKey(serverNode) === stableSectionKey(liveNode);
+  }
   // Prose (paragraph / heading / list nodes): type + level + content.
   return !proseNodeChanged(serverNode, liveNode);
+}
+
+// The byte-significant projection of a section node for echo-equality: its title +
+// the nested child content (each child's own bpId/content). The section's OWN bpId is
+// excluded (an id-stamp echo must still match). Canonical so key order never trips it.
+function stableSectionKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    title: a.title == null ? null : a.title,
+    content: node.content || null,
+  });
 }
 
 // Compare the WHOLE block carried on a read-only-atom / opaque node's bpBlock
@@ -1671,8 +1956,15 @@ function stripId(block) {
 // bpBlock verbatim, with the minted id stamped on (so move-block / later folds
 // can key it). Every inserted block carries an id — that is what makes a
 // front-insert / reorder expressible via move-block.
-function nextNodeToBlock(entry) {
+function nextNodeToBlock(entry, taken) {
   const node = entry.node;
+  if (entry.isContainer) {
+    // Canvas container insert (section): rebuild the WHOLE section subtree (title +
+    // nested children) with the minted id, via the dedicated mapper. Nested null-id
+    // children mint ids off the CALL-SHARED `taken` (the duplicate_id-abort guard) —
+    // a fresh Set is used only when no shared one is threaded (a standalone call).
+    return sectionNodeToBlock(node, entry.id, taken || new Set());
+  }
   if (entry.isAtom) {
     // Canvas atom insert (divider): a content-free leaf, fully described by its
     // type + the minted id. No body fields to reconstruct.

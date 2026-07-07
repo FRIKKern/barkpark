@@ -33,14 +33,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp divider(id), do: %{"id" => id, "type" => "divider"}
   # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* types (field-image /
   # field-reference) are now canvas-eligible too (their WCs are client-side — no
-  # LiveView dependency — so they mount inside the canvas as control-atoms). The ONLY
-  # remaining run boundaries are the NESTED-STRUCTURE fields (composite / arrayOf /
-  # codelist / localizedText / section), a separate increment. `boundary/1` therefore
+  # LiveView dependency — so they mount inside the canvas as control-atoms). `section`
+  # is now canvas-eligible too (its own bpSection CONTAINER node). The ONLY remaining
+  # run boundaries are the NESTED-STRUCTURE fields (composite / arrayOf / codelist /
+  # localizedText), a separate increment. `boundary/1` therefore
   # produces a `composite` (a still-splitting boundary); `boundary2/1` produces an
   # `arrayOf` (a SECOND distinct boundary, used where two adjacent boundaries are
   # needed). `picker/1` and `picker_ref/1` produce the now-canvas-eligible picker fields
-  # used to prove they RIDE a run. `native_field/1` produces a field-string.
+  # used to prove they RIDE a run. `native_field/1` produces a field-string. `section/1`
+  # produces the now-canvas-eligible container (with a nested child body).
   defp boundary(id), do: %{"id" => id, "type" => "composite", "fields" => [], "value" => %{}}
+  defp section(id),
+    do: %{"id" => id, "type" => "section", "title" => "S", "blocks" => [para(id <> "-c")]}
   defp boundary2(id), do: %{"id" => id, "type" => "arrayOf", "of" => %{}, "value" => []}
   defp picker(id), do: %{"id" => id, "type" => "field-image", "value" => ""}
   defp picker_ref(id), do: %{"id" => id, "type" => "field-reference", "value" => ""}
@@ -128,15 +132,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "TAIL: ONLY the NESTED-STRUCTURE fields STILL split a run" do
       # Everything common is canvas now (prose, divider, callout, code, diagram, the 7
-      # native field-* types, the 2 pickers, sheet, embed) — so the ONLY still-splitting
-      # boundaries are the nested-structure fields (composite / arrayOf / codelist /
-      # localizedText / section).
+      # native field-* types, the 2 pickers, sheet, embed, the fleet kinds, AND the
+      # `section` CONTAINER) — so the ONLY still-splitting boundaries are the remaining
+      # nested-structure fields (composite / arrayOf / codelist / localizedText).
+      # `section` is DELIBERATELY absent here — it rides its own bpSection container
+      # node now (see the section-rides-a-run test below).
       for boundary <- [
             %{"id" => "b", "type" => "composite", "fields" => [], "value" => %{}},
             %{"id" => "b", "type" => "arrayOf", "of" => %{}, "value" => []},
             %{"id" => "b", "type" => "codelist", "value" => ""},
-            %{"id" => "b", "type" => "localizedText", "value" => %{}},
-            %{"id" => "b", "type" => "section"}
+            %{"id" => "b", "type" => "localizedText", "value" => %{}}
           ] do
         blocks = [para("p1"), boundary, para("p2")]
 
@@ -147,6 +152,41 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
                ],
                "expected #{boundary["type"]} to split the run"
       end
+    end
+
+    # ── the `section` CONTAINER is now CANVAS-ELIGIBLE — it folds INTO a run ──────
+
+    test "section: a section INSIDE prose keeps the run whole (was a boundary split)" do
+      blocks = [para("p1"), section("sec1"), para("p2")]
+
+      # All three are canvas-eligible (prose ∪ the section container) ⇒ ONE maximal run.
+      # The section's OWN nested children ride inside the block (projected as the
+      # bpSection node's content by run-convert.js), not as separate run members.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "section: [heading, section, paragraph] is ONE run (the container no longer splits)" do
+      blocks = [heading("h1"), section("sec1"), para("p2")]
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    test "section: canvas? is true for a section, false for a still-boundary composite" do
+      assert PaperCanvas.canvas?(section("sec1"))
+      refute PaperCanvas.canvas?(boundary("b1"))
+    end
+
+    test "section: a lone section is a single run, not a boundary" do
+      assert PaperCanvas.partition_runs([section("only")]) == [{:run, [section("only")]}]
+    end
+
+    test "section: a nested-structure boundary still splits while a section rides each run" do
+      blocks = [para("p1"), section("sec1"), boundary("b1"), section("sec2"), para("p2")]
+
+      assert PaperCanvas.partition_runs(blocks) == [
+               {:run, [para("p1"), section("sec1")]},
+               {:block, boundary("b1")},
+               {:run, [section("sec2"), para("p2")]}
+             ]
     end
 
     # ── S3.6: sheet AND embed are now CANVAS-ELIGIBLE read-only atoms — no split ──
