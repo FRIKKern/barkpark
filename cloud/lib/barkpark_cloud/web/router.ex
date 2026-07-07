@@ -47,6 +47,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
+      PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
@@ -1536,6 +1537,57 @@ defmodule BarkparkCloud.Web.Router do
 
               {:error, _reason} ->
                 json(conn, 502, %{error: %{code: "instance_unreachable"}})
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # PATCH /v1/barkparks/:id/autoupdate {autoupdate_enabled?, autoupdate_paused?,
+  # pinned_release?} → 200 {ok, autoupdate: {enabled, paused, pinned_release}} —
+  # set the isu-w4 fleet-autoupdate POLICY (the opt-out / pause / pin escape
+  # hatch). Managed instances auto-ride blessed releases by default (opt-out);
+  # this is how a team disables, temporarily pauses, or pins one. Only the three
+  # team-facing policy fields are accepted — Registry.set_autoupdate → the narrow
+  # autoupdate_changeset can touch nothing else (never the in-flight marker,
+  # never identity). PATCH: absent keys are left unchanged (cast ignores them).
+  #
+  # ADMIN-gated: a policy that governs unattended production deploys is
+  # privileged, like self-update above — require_primary_team_admin halts 401 /
+  # 422 no_team / 403 for a plain member. TEAM-SCOPED fail-closed: wrong-team /
+  # nonexistent / malformed id is the SAME 404 (no existence leak).
+  patch "/v1/barkparks/:id/autoupdate" do
+    conn = Auth.require_primary_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            case Registry.set_autoupdate(bp, conn.body_params) do
+              {:ok, updated} ->
+                push_event(team.id, "fleet")
+
+                json(conn, 200, %{
+                  ok: true,
+                  autoupdate: %{
+                    enabled: updated.autoupdate_enabled,
+                    paused: updated.autoupdate_paused,
+                    pinned_release: updated.pinned_release
+                  }
+                })
+
+              {:error, %Ecto.Changeset{}} ->
+                json(conn, 422, %{error: %{code: "invalid"}})
             end
 
           _ ->
