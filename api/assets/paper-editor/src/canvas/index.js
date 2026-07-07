@@ -91,6 +91,12 @@ import { Diagram } from "./diagram-node.js";
 // exactly like the per-block BarkparkFieldBlockBridge. field-image/field-reference
 // (pickers) stay run boundaries (bpOpaque). See ./field-node.js.
 import { Field } from "./field-node.js";
+// editable-action: the CTA `action` block as a canvas CONTROL-ATOM node — a LEAF
+// (href/label/priority) edited by native controls in a stopEvent/ignoreMutation island,
+// byte-modelled on field-node.js's native branch. Its node-view renders the reader's own
+// bp-button anchor byte-identically as a live preview. ONE bpType ("action"), no
+// StarterKit collision. See ./action-node.js.
+import { Action } from "./action-node.js";
 // S3.6: the sheet + embed blocks as canvas READ-ONLY ATOM nodes — the FIFTH (and LAST
 // S3) node-view variant. Both are REFERENCES, NOT editable text: a sheet is edited in
 // its own surface (its cached snapshot renders read-only); an embed transcludes at
@@ -100,6 +106,7 @@ import { Field } from "./field-node.js";
 // embed reference) with contentEditable false, are selectable so Backspace deletes the
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
+import { Figure } from "./figure-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
 // canvas PROSE nodes (NO node-view — chrome-free, the reader emits one styled
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
@@ -136,6 +143,12 @@ import { Section } from "./section-node.js";
 // section, or a composite/codelist/localizedText) as a read-only verbatim carry
 // instead of PM lifting it out of the section. See ./opaque-node.js.
 import { Opaque } from "./opaque-node.js";
+// The terminal CONTAINER nodes (bpTerminal > body children + bpTerminalAtom). A
+// terminal block ⇄ a bpTerminal node: a SINGLE editable body wrapped in reader chrome
+// (title bar + optional live badge + optional footer); any non-first-class body child
+// rides a read-only bpTerminalAtom. bpTerminal's node-view references `document` lazily
+// (imports DOM-free). No StarterKit collision. See ./terminal-node.js.
+import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -601,6 +614,15 @@ class BpPaperCanvas extends HTMLElement {
         // its own <div data-bp-type='field'>. Only the nested-structure fields
         // (composite / arrayOf / codelist / localizedText / section) remain bpOpaque.
         Field,
+        // editable-action: the CTA `action` CONTROL-ATOM node + its node-view. Registers
+        // the `bpAction` node (atom, attrs href/label/priority via data-*, a NodeView
+        // rendering a live bp-button preview + label/href/priority native controls in a
+        // stopEvent/ignoreMutation island so PM never turns a keystroke/select into a
+        // transaction) so runToTiptap's { type:"bpAction", attrs:{href,label,priority} }
+        // node mounts as an editable CTA whose attrs round-trip through getJSON() and
+        // emit a COARSE patch-block on edit. ONE bpType; NO StarterKit collision. bpAction
+        // parses ONLY its own <div data-bp-type='action'>. See ./action-node.js.
+        Action,
         // S3.6: the sheet + embed READ-ONLY ATOM nodes + their node-views. Registers
         // the `bpSheet` and `bpEmbed` node types (atom, NO edit surface; the WHOLE
         // block rides the bpBlock attr via data-bp-block, a NodeView rendering a
@@ -627,6 +649,16 @@ class BpPaperCanvas extends HTMLElement {
         // ZERO value/content ops, participates only in structural ops. bpFleet parses
         // ONLY its own <div data-bp-fleet='true'>.
         Fleet,
+        // editable-figure: the SERVER-PAINTED read-only-child + editable-caption ATOM
+        // (`bpFigure`). Registers the single node so runToTiptap's { type:"bpFigure",
+        // attrs:{caption, bpChild} } mounts as a reader <figure> whose CHILD paint hole
+        // (data-bp-fleet-id/body, reusing the shipped bp:block-html hook — ZERO hook
+        // change) is filled server-side with the child's OWN reader HTML, and whose
+        // <figcaption> input is the SOLE edit affordance (patch-block{caption}).
+        // Structurally an atom (holds no PM children → cannot nest another canvas node
+        // by construction). Parses ONLY its own <figure data-bp-type='figure'>. See
+        // ./figure-node.js.
+        Figure,
         // Article-chrome ROLE prose nodes (eyebrow / byline / ingress / pullquote).
         // Registers the four node types so runToTiptap's { type:"eyebrow"|… } nodes
         // mount as styled prose (a `<p class="bp-role-*">` matching the reader) and
@@ -677,6 +709,16 @@ class BpPaperCanvas extends HTMLElement {
         // MOUNTS as a read-only carry inside a bpSection body instead of being lifted
         // out by PM. See ./opaque-node.js.
         Opaque,
+        // The terminal CONTAINER nodes (bpTerminal > body children + bpTerminalAtom).
+        // Registers the container + verbatim-carrier atom so runToTiptap's
+        // { type:"bpTerminal", content:[child…] } node mounts as an editable body wrapped
+        // in reader-shaped chrome (title bar / live badge / footer), and getJSON()
+        // round-trips the whole nested tree. bp-term* reader classes + paper-surface.css
+        // (ancestor .bp-paper-surface cascade) paint the frame; NO StarterKit collision.
+        // The doc's block+ accepts bpTerminal (group:"block"), never a bare bpTerminalAtom.
+        // See ./terminal-node.js.
+        Terminal,
+        TerminalAtom,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {

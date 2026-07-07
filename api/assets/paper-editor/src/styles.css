@@ -518,6 +518,30 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   line-height: 1.2;
 }
 
+/* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
+ * so it INHERITS the atom margin/overflow guard, :focus-visible ring, the
+ * .ProseMirror-selectednode wash, and the .bp-canvas-readonly-chip loading chip for
+ * free. Restore the reader figure margin (figure_html article margin:1.6rem 0),
+ * overriding the .bp-canvas-readonly 1em. The child paint hole is .bp-paper-surface
+ * (data-bp-fleet-body) — ALREADY the canonical paper-surface sink, so the injected
+ * child HTML styles itself identically to /papers with NO extra CSS (D8). Keep
+ * BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
+.bp-canvas-figure { margin: 1.6rem 0; }
+/* The editable caption matches the reader <figcaption> INLINE styles (compose.ex
+ * figure_html:924) — the reader figcaption has NO stylesheet rule (it is inline-
+ * styled), so reproduce those values + an input reset. The empty-caption resting-hide
+ * is JS (configControlHidden toggles the <figcaption> display), NOT CSS — same as the
+ * diagram caption. */
+.bp-canvas-figure-caption { margin: 0.8rem 0 0; }
+.bp-canvas-figure-caption-input {
+  display: block; width: 100%; box-sizing: border-box;
+  border: none; background: transparent; padding: 0; margin: 0;
+  color: var(--paper-ink-soft, #6a6a6a);
+  font-style: italic; font-size: 0.9rem;
+  font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+}
+.bp-canvas-figure-caption-input:focus { outline: none; }
+
 /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so they
  * do NOT trip the view↔edit parity byte-compare, which only locksteps rules that
  * exist on BOTH surfaces — the shared .bp-cols/.bp-cols__c grid pair). An empty
@@ -529,6 +553,24 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-cols__c:empty,
 .bp-cols__c:has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
 .bp-cols__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
+
+/* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
+ * counterpart, so they do NOT trip the view↔edit parity byte-compare — the reader
+ * `.bp-term*` paint already ships in paper-surface.css and is inherited through the
+ * ancestor .bp-paper-surface cascade). The title/footer inputs are de-chromed so they
+ * LOOK like the reader's mono/soft-ink spans; the live toggle + "+ footer" affordance
+ * are hover/focus-revealed (the table-rail precedent). Bound to the --paper- and --st-
+ * token vocabulary. Keep BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
+.bp-canvas-term { position: relative; }
+.bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+.bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
+.bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.bp-canvas-term__live-toggle { margin-left: auto; }
+.bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
+.bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
+.bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+.bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
+.bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
 
 /* ── doctrine template locks (pdd-t2): the calm lock cue ──────────────────────
  * A mandated template block (locked title @0, featured image @1) can't be moved
@@ -608,4 +650,55 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-size: 12px;
   font-weight: 500;
   color: var(--paper-ink-faint, #82918b);
+}
+
+/* ── canvas action node-view (editable-action: the CTA button) ────────────────
+ * The CTA `action` block edited in-canvas: a live bp-button PREVIEW (byte-matching
+ * the reader anchor classes below so it paints identically to /papers) above a
+ * label/href/priority control row. The preview `.bp-button` / `--primary` rules
+ * MIRROR paper-surface.css `.bp-paper-surface .bp-button` byte-for-byte, scoped under
+ * .bp-canvas-action so they reach the editor sink (.bp-paper-editor-body) — the reader's
+ * .bp-paper-surface-scoped rules do not. Keep BYTE-IDENTICAL with the root.html.heex
+ * copy (the paper-editor-mirror-check lockstep). */
+.bp-canvas-action {
+  margin: 1em 0;
+  padding: 12px;
+  border: 1px solid var(--paper-rule, #d8d8d2);
+  border-radius: 8px;
+  background: var(--paper-bg-deep, #f4f4ef);
+}
+.bp-canvas-action .bp-button {
+  display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+  color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
+}
+.bp-canvas-action .bp-button--primary {
+  border: none; background: var(--paper-accent); color: #ffffff;
+}
+.bp-canvas-action-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.bp-canvas-action-label,
+.bp-canvas-action-href {
+  flex: 1 1 160px;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--paper-rule, #d8d8d2);
+  border-radius: 6px;
+  background: var(--paper-bg, #ffffff);
+  color: var(--paper-ink, #1a1a17);
+  font: inherit;
+  font-size: 13px;
+}
+.bp-canvas-action-priority {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border: 1px solid var(--paper-rule, #d8d8d2);
+  border-radius: 6px;
+  background: var(--paper-bg, #ffffff);
+  color: var(--paper-ink, #1a1a17);
+  font: inherit;
+  font-size: 13px;
 }

@@ -1307,8 +1307,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
       <% _ -> %>
         <%!-- Genuinely-unhandled types are read-only in the MVP (view/delete/reorder).
-             `table` is now canvas-eligible (editable-table) and renders inside the run,
-             so it no longer reaches this per-block fallback. --%>
+             `table` (editable-table) and `action` (editable-action, the CTA button) are
+             now canvas-eligible and render inside the run, so they no longer reach this
+             per-block fallback. --%>
         <p class="bp-paper-edit-readonly">
           <%= @type %> blocks are not editable yet (view/delete/reorder only).
         </p>

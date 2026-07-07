@@ -107,6 +107,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # @canvas_container_types.)
   @canvas_picker_field_types ~w(field-image field-reference)
 
+  # editable-action: the CTA `action` block the canvas handles as a CONTROL-ATOM node
+  # (bpAction) — a LEAF whose href/label/priority ride attrs, edited by native controls
+  # (like the field-* set, but one bpType and no BarkparkFieldBlockBridge coercion). Its
+  # node-view renders the reader's own bp-button anchor byte-identically. No longer
+  # SPLITS a run. KEEP LOCKSTEP with run-convert.js CANVAS_ACTION_TYPES and action-node.js.
+  @canvas_action_types ~w(action)
+
   # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
   # atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
   # NOT editable text (run-convert.js CANVAS_READONLY_ATOM_TYPES). `sheet` (a cached
@@ -178,6 +185,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
   @canvas_table_types ~w(table)
 
+  # editable-figure: a `figure` wraps ONE child + a caption; the canvas handles it as
+  # a SERVER-PAINTED read-only-CHILD atom (`bpFigure`; run-convert.js
+  # CANVAS_FIGURE_TYPES → figure-node.js). The child rides VERBATIM (bpChild) and
+  # paints via the SAME `bp:block-html` hook the fleet atoms use (CHILD-only HTML,
+  # keyed by the figure id); the caption is the SINGLE editable attr
+  # (patch-block{caption}). Flipping `figure` from a run boundary (the per-block
+  # "not editable yet" stub) INTO a run is what makes the bpFigure atom mount.
+  #
+  # This is a THREE-way lockstep (mirroring the @canvas_fleet_types note): keep
+  # @canvas_figure_types ⇄ run-convert.js CANVAS_FIGURE_TYPES ⇄ shared/paper.ex
+  # @figure_render_types (plus figure-node.js BP_FIGURE_NODE_NAME) aligned.
+  @canvas_figure_types ~w(figure)
+
   # The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes
   # (run-convert.js CANVAS_CONTAINER_TYPES → an editable node whose interior is a
   # nested BLOCK tree, not inline runs). TWO members:
@@ -192,38 +212,47 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # carry (sheet/embed/fleet).
   #
   # V1 forbids container-in-container: a container encountered as a CHILD (depth>=1) is
-  # carried as a read-only bpOpaque/bpColumnAtom verbatim (NOT another editable
-  # container), enforced by the content expression — a legacy nested container
+  # carried as a read-only bpOpaque/bpColumnAtom/bpTerminalAtom verbatim (NOT another
+  # editable container), enforced by the content expression — a legacy nested container
   # round-trips byte-identical and is never restructured.
   #
+  # `terminal` (editable-terminal) is the THIRD container alongside columns + section:
+  # a bpTerminal holding prose/divider body children (+ a bpTerminalAtom verbatim
+  # carrier for any non-first-class child) wrapped in reader chrome (title bar + live
+  # badge + footer); EDITABLE, emitting a COARSE whole-body+chrome patch-block.
+  #
   # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES, columns-node.js
-  # (bpColumns/bpColumn/bpColumnAtom) and section-node.js (bpSection).
-  @canvas_container_types ~w(columns section)
+  # (bpColumns/bpColumn/bpColumnAtom), section-node.js (bpSection) and terminal-node.js
+  # (bpTerminal/bpTerminalAtom).
+  @canvas_container_types ~w(columns section terminal)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
   # atoms (t12a) ∪ canvas article-chrome ROLE prose ∪ the canvas TABLE node tree
-  # (editable-table) ∪ canvas CONTAINER nodes (columns, section). A run is a maximal
-  # contiguous stretch of these; any other kind is a run boundary. Keep this aligned
-  # with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪
-  # CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES[native ∪ picker] ∪
-  # CANVAS_READONLY_ATOM_TYPES ∪ CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪
-  # CANVAS_TABLE_TYPES ∪ CANVAS_CONTAINER_TYPES) so the Elixir partition and the JS
-  # projection agree on what a run may contain. With the fleet, the table AND the
-  # containers folded in, the ONLY remaining run boundaries are the nested-structure
-  # fields (composite / object / arrayOf / codelist / localizedText) — a typical
-  # paper's run now spans the WHOLE doc.
+  # (editable-table) ∪ the canvas FIGURE server-paint-child atom (editable-figure) ∪
+  # canvas CONTAINER nodes (columns, section). A run is a maximal contiguous stretch of
+  # these; any other kind is a run boundary. Keep this aligned with run-convert.js
+  # (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪
+  # CANVAS_FIELD_TYPES[native ∪ picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪
+  # CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪ CANVAS_TABLE_TYPES ∪ CANVAS_FIGURE_TYPES ∪
+  # CANVAS_CONTAINER_TYPES) so the Elixir partition and the JS projection agree on what
+  # a run may contain. With the fleet, the table, the figure AND the containers folded
+  # in, the ONLY remaining run boundaries are the nested-structure fields (composite /
+  # object / arrayOf / codelist / localizedText) — a typical paper's run now spans the
+  # WHOLE doc.
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
                   @canvas_content_types ++
                   @canvas_field_types ++
                   @canvas_picker_field_types ++
+                  @canvas_action_types ++
                   @canvas_readonly_atom_types ++
                   @canvas_fleet_types ++
                   @canvas_role_types ++
                   @canvas_table_types ++
+                  @canvas_figure_types ++
                   @canvas_container_types
 
   @doc """
