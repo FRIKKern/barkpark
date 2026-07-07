@@ -273,9 +273,13 @@ function toneLabel(tone: string): string {
  * §0 "feels alive at rest" signal carried into the paper reader (D6). Pure CSS,
  * no JS, no asset: the `::before` cycles the ten Braille frames
  * (⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏) and FREEZES on ⠿ under `prefers-reduced-motion`. Byte-parallel
- * to the LiveView board's inline spinner. Emitting it once per board is
- * harmless (identical `@keyframes` de-dupe in every engine).
+ * to the LiveView board's inline spinner. Rendered with a stable `href` +
+ * `precedence` so React 19 HOISTS it to <head> and emits it exactly ONCE no
+ * matter how many boards a paper embeds (dedupe by href — the content is a
+ * constant, so the single survivor is byte-identical). Still inline CSS: no
+ * asset, CSP-safe.
  */
+const TASK_BOARD_SPINNER_HREF = "bp-tbe-spin";
 const TASK_BOARD_SPINNER_CSS = `
 .bp-tbe-spin::before{content:"⠋";display:inline-block;animation:bp-tbe-spin 1s steps(1,end) infinite}
 @keyframes bp-tbe-spin{0%{content:"⠋"}10%{content:"⠙"}20%{content:"⠹"}30%{content:"⠸"}40%{content:"⠼"}50%{content:"⠴"}60%{content:"⠦"}70%{content:"⠧"}80%{content:"⠇"}90%{content:"⠏"}}
@@ -681,8 +685,12 @@ export function renderBlock(block: Block, key: Key): ReactNode {
 
       return (
         <figure key={key} className="flex flex-col gap-3">
-          {/* Self-contained spinner keyframes (D6 — no asset, CSP-safe). */}
-          <style>{TASK_BOARD_SPINNER_CSS}</style>
+          {/* Self-contained spinner keyframes (D6 — no asset, CSP-safe).
+              href+precedence → React 19 hoists + dedupes to a single <head>
+              tag across every embedded board. */}
+          <style href={TASK_BOARD_SPINNER_HREF} precedence="default">
+            {TASK_BOARD_SPINNER_CSS}
+          </style>
 
           {/* Momentum header — the "always feel progress" read (§0). */}
           <div className="flex flex-col gap-1.5">
