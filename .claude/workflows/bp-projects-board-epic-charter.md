@@ -96,6 +96,42 @@ always-a-next-step.
    run `mix barkpark.openapi` as belt-and-braces and commit ONLY if it diffs (expected
    no-op).
 
+9. **Realtime is a LIGHT optimistic re-bucket + a heavy `:refresh` reconcile — split into
+   two PURE organizer functions (wave 2).** The broadcast carries only the ONE changed doc
+   (`msg.doc = %{doc_id, title, status, content, updated_at}`), never the dependency graph —
+   so a single event cannot re-derive the global `ready` overlay or the cascade-unblock of
+   the tasks this one was blocking. Therefore:
+   - `Board.card_from_broadcast(msg_doc, prev_card)` — PURE. Projects a broadcast `doc` map
+     into a normalized card, byte-parallel to `snapshot`'s private `to_card`: reads
+     `content["lifecycle_status"|"priority"|"parent_id"|"labels"]`, `worker =
+     content["assignee"] || content["claim"]["worker"]`, `Tasks.criteria_progress(content)`,
+     and github via a synthesized `%Document{doc_id, content, status, updated_at}` fed to
+     `Link.get/1` + `Link.synced?/1`. **Carries `prev_card.blocker_statuses` forward** (the
+     event has none) so an already-known card keeps its readiness inputs; an unseen card gets
+     `[]` and is placed by raw lifecycle (open/blocked/in_progress/done) — its `ready`
+     correctness waits for the next `:refresh`.
+   - `Board.apply_change(board, card, opts) :: {board, change}` — PURE. Re-buckets that one
+     card, updates `cards_by_id` + `columns`, recomputes `momentum.{in_flight, ready, pct}`
+     from the new columns, and returns a `change = %{doc_id, from_col, to_col, kind}` where
+     `kind ∈ {:moved, :entered, :closed, :cancelled, :updated, :ignored}` (the LiveView keys
+     its flash/slide off this). `done_today` is **monotonic within a session** — bump it by 1
+     only on a genuine new close (`to_col == :done` and the card was not already `:done`),
+     never recompute it from the (capped) done column; a `:refresh` snapshot resets it to the
+     authoritative windowed value. *Why:* delivers §0's "watch momentum" instantly and
+     honestly — the eye sees the right card move now; the every-N-seconds full `snapshot/1`
+     reconcile silently corrects ready/cascades/windowed-stats without a flicker. Backend
+     ALSO broadcasts each cascade-unblocked dep as its own `task.mutated` event
+     (`close.ex` emits one per unblocked dep), so those cards animate on their own events too.
+
+10. **Done column is WINDOWED so the board never becomes a dead wall (§0).** `build/2` and
+   `apply_change/3` render only the most-recent `@done_window` done cards (default 12,
+   mirroring the TUI FocusSet cap) — newest-first, a fresh close prepended and the tail
+   dropped. **`momentum.pct` and `momentum.done_today` are computed from the FULL done set
+   BEFORE truncation** (never the capped render list) so the bar and tally stay honest. A
+   `done_total` count is retained for the column header. *Why:* the wish's acceptance test is
+   "never a dead wall of text" — an unbounded done pile (the wave-1 banked blind spot) is
+   exactly that wall; the momentum maths must not silently shrink when the render caps.
+
 ## The criterion — how each wave serves "feels alive"
 
 - **Wave 1 (read-only baseline):** the momentum header IS the always-on progress read; the
@@ -110,14 +146,15 @@ always-a-next-step.
 
 ## Roadmap (integration order)
 
-**Wave 1 — read-only feels-alive baseline** (this wave; 2 slices)
-1. `board-organizer` — pure `Barkpark.Tasks.Board` (`build/2` + thin `snapshot/1`). MEDIUM.
+**Wave 1 — read-only feels-alive baseline** ✅ LANDED (#1266; 2 slices)
+1. `board-organizer` — pure `Barkpark.Tasks.Board` (`build/2` + thin `snapshot/1`). ✅ DONE.
 2. `board-liveview-readonly` — `BoardLive` + `:ops` route + desk item + inline CSS vocabulary
-   + GitHub badge render. MEDIUM. *(sequenced after slice 1; builds against its API.)*
+   + GitHub badge render. ✅ DONE.
 
-**Wave 2 — realtime motion** (after wave 1)
-3. `board-realtime` — subscribe `documents:#{dataset}`, re-bucket + flash + climb done-today
-   (seen-set guard) + `:refresh` reconcile. MEDIUM. *(touches board_live.ex — after slice 2.)*
+**Wave 2 — realtime motion** (THIS WAVE; 1 slice — see wave-2 plan in the log)
+3. `board-realtime` — subscribe `documents:#{dataset}`, light optimistic re-bucket (D9) +
+   flash/slide + monotonic climbing done-today + windowed done (D10) + `:refresh` reconcile,
+   seen-set guard. LARGE. *(one builder owns both board files — no parallel split.)*
 
 **Wave 3 — drag write-through** (after wave 2)
 4. `board-drag-restage` — CSP-safe drag hook → `handle_event("restage")` through
@@ -185,18 +222,12 @@ folded out of both column and denominator, done_today respects injected-now UTC 
 Feels-alive baseline MET for a read-only wave: momentum header + fill bar + always-on
 Ready column + at-rest CSS spinner + honest empty state; GitHub badge (D7) present.
 
-**Stalled / must reconcile at integration — Board module COLLISION (confirmed, not
-hypothetical).** Both slices authored `Barkpark.Tasks.Board`; slice 2's builder wrote
-its own copy because slice 1's wasn't in its worktree base. They diverge:
-- (a) slice 1 lacks `github_synced` → every mirrored card's sync dot reads "detached"
-  until `normalize` adds `github_synced: Link.synced?(doc)`.
-- (b) worker: slice 1 reads ONLY `content.claim.worker`; builder reads
-  `content.assignee || claim.worker` → the assignee-only "shows its worker" test FAILS
-  under slice 1's Board.
-- (c) `:bucket` (slice 1) vs `:col` (builder) — no impact, BoardLive uses neither.
-- (d) blocker-default `open` vs `unknown` — both fail-closed, equivalent.
-Integrator MUST keep exactly one. **Recommendation: take the builder's Board (superset —
-reads assignee+claim, carries github_synced), OR port those two fields into slice 1's.**
+**Board module COLLISION — RESOLVED at integration (#1266).** The merged `board.ex` took
+the superset per the recommendation: `worker = content["assignee"] || claim.worker`,
+`github_synced: Link.synced?(doc)` present on every card, `:col` (not `:bucket`) as the
+bucket key, blocker-default `"unknown"` (fail-closed). Both organizer (`build/2`) and
+LiveView tests live in ONE file, `test/barkpark/plugins/tasks/web/board_live_test.exs`
+(ConnCase). No open reconciliation remains from wave 1.
 
 **Blind spots banked for later slices (charter-sanctioned fail-safes, NOT bugs):**
 - Cross-dataset/dangling blockers resolve to `open` (card stays blocked) whereas Queue
@@ -209,6 +240,122 @@ reads assignee+claim, carries github_synced), OR port those two fields into slic
 - `ready` tiebreak is `updated_at` (charter contract): editing a ready task pushes it
   toward the back of the queue — intended, but a product-behavior choice.
 
-**Next.** Wave 2 `board-realtime` (subscribe `documents:#{dataset}`, re-bucket + flash +
-climb done-today + `:refresh` reconcile) — this is where "you watch momentum" (§0)
-becomes real. Do it AFTER the Board collision is resolved in the integration branch.
+**Next.** Wave 2 `board-realtime` — see the wave-2 plan below.
+
+### Wave 2026-07-07 — Wave 2 (realtime motion) — PLANNED, 1 slice
+
+**Why one slice, not a parallel fan-out.** The entire epic is TWO files so far
+(`api/lib/barkpark/tasks/board.ex` + `api/lib/barkpark/plugins/tasks/web/board_live.ex`)
+with ONE test file (`board_live_test.exs`). Realtime inherently owns BOTH the pure
+organizer (new `card_from_broadcast` + `apply_change` + done-window, D9/D10) and the
+LiveView wiring (subscribe + handle_info + flash/slide + `:refresh`). Splitting into two
+parallel builders would recreate the exact wave-1 collision (slice 2 needing slice 1's
+not-yet-merged API → a rewrite). ONE builder in ONE worktree owns both files and both test
+suites — zero interface-timing gap, and the two functions D9 names are unit-testable
+without a socket in the same ConnCase. "Up to 5" → a focused 1 is the honest, lowest-risk
+cut toward "make it literally move."
+
+**Slice 3 `board-realtime` (LARGE).** Deliver §0's "you open the board and something is
+moving" for real, riding the EXISTING broadcast — NO boot-started worker (the github-bridge
+CI landmine that breaks the full ExUnit sandbox). Respects D1/D2 (plugin wires, core owns
+machinery), D5 (existing broadcast, no new process), D6 (pure-CSS/LiveView motion, CSP-safe,
+`prefers-reduced-motion`), D8 (no openapi, `:ops :live` route unchanged), D9 (light
+optimistic re-bucket + heavy `:refresh` reconcile), D10 (windowed done column).
+
+- **In `board.ex` (pure, D9/D10):** add `card_from_broadcast/2`, `apply_change/3`, and the
+  `@done_window` cap in `build/2` (+ `apply_change/3`) with pct/done_today computed from the
+  full done set before truncation. Reuse the existing private normalization vocabulary so a
+  broadcast-projected card is byte-parallel to a `snapshot` card.
+- **In `board_live.ex` (wiring):** on `connected?(socket)`, `Phoenix.PubSub.subscribe(
+  Barkpark.PubSub, "documents:#{dataset}")` and schedule a periodic `:refresh`
+  (`Process.send_after`, ~15s); `handle_info({:document_changed, %{type: "task"} = msg}, …)`
+  → `card_from_broadcast(msg.doc, board.cards_by_id[id])` → `apply_change` → assign + drive
+  the flash/slide off the returned `change` (a `data-flash`/`data-just-moved` attr the CSS
+  `@keyframes` in the render keys off, and/or `phx-mounted={JS.transition(...)}` on the
+  re-inserted card — LiveView-core JS, CSP-safe); `handle_info(:refresh, …)` → full
+  `Board.snapshot/1` re-assign (reconciles ready overlay, cascades, windowed done_today) and
+  reschedule. A **seen-set/dedup guard** ignores an event whose `{doc_id, updated_at}` is
+  already reflected (the mount snapshot + our own re-render can echo). Non-`task` events and
+  events for the wrong dataset are dropped. The momentum bar already CSS-transitions its
+  width, so a climbing pct animates for free; add a brief tally-bump animation on `done_today`.
+- **Tests (all in `board_live_test.exs`, ConnCase, `Phoenix.LiveViewTest` — NEVER
+  phx.server):** (1) pure — `card_from_broadcast` projects worker/labels/priority/github and
+  carries prev blocker_statuses; `apply_change` moves a card open→in_progress, bumps
+  in_flight, returns `change.kind==:moved`; a new close bumps done_today monotonically and
+  prepends to a capped done column; pct uses the full (pre-cap) count. (2) live — mount
+  `live(conn, "/admin/projects")` connected, `send(view.pid, {:document_changed, msg})` for a
+  `task.claimed`/`task.closed`, assert `render(view)` re-buckets the card, the momentum count
+  changes, and a flash marker (`data-flash`/`data-just-moved`) appears; assert an unknown
+  non-task event is ignored; assert dedup drops a repeat. (3) `handle_info(:refresh, …)`
+  re-renders without crashing.
+- **HARD RULES:** no boot-started process anywhere (subscribe happens in `mount` under
+  `connected?`, per-socket only); if for any reason a boot-started helper is added, gate it
+  OFF in `config/test.exs` (it will not be — this rides the socket). Keep every edit inside
+  the two board files; file-disjoint from all other epics.
+
+**Gate (exact):**
+```
+cd api && CC=/usr/bin/clang mix test \
+  test/barkpark/plugins/tasks/web/board_live_test.exs \
+  test/barkpark/plugins/tasks/ test/barkpark/tasks/ \
+  test/barkpark_web/controllers/mutate_controller_test.exs \
+  test/barkpark_web/controllers/query_controller_filter_test.exs
+```
+The controller files are the BROAD ConnCase swath — they exercise the endpoint + full
+mutation/broadcast path, so a sandbox or broadcast regression surfaces here (a board-only run
+would hide it). openapi is a no-op (D8): run `mix barkpark.openapi` belt-and-braces, commit
+only if it diffs (it won't).
+
+### Wave 2026-07-07 — Wave 2 (board-realtime), GREEN — the board literally moves
+
+**Landed (1 slice, 1 builder, 1 worktree — as planned; no parallel split, no collision).**
+The board now moves for real off the existing task broadcast — NO boot-started process (D5),
+so the ExUnit sandbox stays intact. Every edit stayed inside the two board files + their one
+test file; file-disjoint from all other epics.
+
+- **Pure organizer (`board.ex`, D9/D10):**
+  - `card_from_broadcast/2` — projects a broadcast `doc` (`%{doc_id,title,status,content,
+    updated_at}`) into a card byte-parallel to the private `to_card/3` (worker =
+    `assignee||claim.worker`, criteria via `Tasks.criteria_progress`, github via a synthesized
+    `%Document{}` → `Link.get`/`synced?`), **carries `prev_card.blocker_statuses` forward**;
+    an unseen card gets `[]` and is placed by raw lifecycle until the next `:refresh`.
+  - `apply_change/3` — re-buckets one card, recomputes `in_flight/ready/pct/done_total` from
+    the full uncapped `cards_by_id`, returns `change=%{doc_id,from_col,to_col,kind}` with
+    `kind ∈ {:moved,:closed,:cancelled,:entered,:updated,:ignored}`. `done_today` is
+    **monotonic** (bumps only on a genuine fresh close, never recomputed from the capped
+    column); cancelled leaves the columns and bumps `cancelled_count`.
+  - `@done_window` (12) caps the rendered done pile in `build/2` + `apply_change/3`;
+    **`pct`/`done_today`/`done_total` are computed from the FULL done set BEFORE truncation.**
+    `build/2` stays backward-compatible (wave-1 tests unchanged; only `:done` capped + an
+    additive `:done_total`). — **This closes the wave-1 UNBOUNDED-DONE blind spot** (the
+    "dead wall" §0 explicitly forbids); the perfecter's fix also made the Done header count
+    climb past 12 so progress never *looks* frozen.
+
+- **LiveView (`board_live.ex`):** `mount` subscribes to `documents:production` under
+  `connected?` + schedules a 15s `:refresh`; a per-socket seen-set of `{doc_id,updated_at}`
+  drops echoes/repeats. `{:document_changed, %{type:"task"}}` → project → `apply_change` →
+  assign + flash; `:refresh` does a full `Board.snapshot` reconcile and resets the
+  `done_today` baseline; a catch-all clause ignores stray/non-task messages without crashing.
+  Motion is CSP-safe: a `bp-flash` `@keyframes` on the just-changed card (`data-just-moved`),
+  a done-today scale bump, and the already-width-transitioned momentum bar — all frozen under
+  `prefers-reduced-motion`. openapi regen a no-op (D8), `:ops :live` route unchanged.
+
+**Feels-alive verdict (perfecter-confirmed):** the criterion is now materially met, not just
+static — at rest the CSS Braille spinner breathes on in_progress; on an event the changed
+card flashes, the done-today tally climbs monotonically with a scale bump, and the momentum
+bar grows. GitHub badge never fabricated; honest empty state preserved.
+
+**Known, non-blocking (charter-sanctioned, NOT defects):**
+- **NOT browser-verified** — profile-locked + `phx.server` OOMs locally (codelist-seed
+  gotcha), so this is `LiveViewTest` render/mount/handle_info only (the prescribed path). Real
+  WebSocket delivery to a live socket is not asserted, though the subscribe topic matches the
+  broadcaster byte-for-byte. A human live pass is the remaining confidence step.
+- **Seen-set MapSet grows for the socket lifetime** — negligible (KB over a workday on an
+  admin board); left untouched to avoid a re-flash-on-refresh regression for no real gain.
+- **Dataset is inherent to the topic subscription** (the broadcast carries no dataset field) —
+  correct by construction, but a multi-dataset board would need a topic-per-dataset revisit.
+
+**Next.** Wave 3 `board-drag-restage` — completion by hand through the fenced
+`claim_by_id`/`close` primitives (D4), fence-refuse + snap-back. Wave 4 `board-group-filter`
+can parallel it (disjoint handler). The one open confidence gap for the whole realtime path
+is a single human browser session (an agent can't clear the profile lock / local OOM).
