@@ -247,17 +247,13 @@ defmodule Barkpark.Plugins.Github.Intake do
         :ok
 
       other ->
-        Logger.warning(
-          "github intake: backlink comment on ##{number} failed: #{inspect(other)}"
-        )
+        Logger.warning("github intake: backlink comment on ##{number} failed: #{inspect(other)}")
 
         :ok
     end
   rescue
     e ->
-      Logger.warning(
-        "github intake: backlink comment on ##{number} raised: #{inspect(e)}"
-      )
+      Logger.warning("github intake: backlink comment on ##{number} raised: #{inspect(e)}")
 
       :ok
   end

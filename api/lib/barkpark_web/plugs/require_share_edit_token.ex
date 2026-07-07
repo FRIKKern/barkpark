@@ -74,13 +74,13 @@ defmodule BarkparkWeb.Plugs.RequireShareEditToken do
   # Every condition must hold. Fail-closed: a nil/garbage slug, an absent token,
   # a scope mismatch, or a share that is no longer :edit all yield false.
   defp grant?(token, surface, ws, proj, dataset) do
+    # Ticket-key audit (Barkpark Tickets, charter Decision 1): `token` here is
+    # already `verify_token/1`-filtered to `kind == "api"` (OptionalToken /
+    # RequireBearerOrSessionToken set the assign), so a ticket key never
+    # reaches this plug as an %ApiToken{}. This explicit `kind == "api"` check
+    # is belt-and-suspenders — a ticket key must never satisfy an edit-share.
     is_binary(ws) and is_binary(proj) and is_binary(dataset) and
       match?(%ApiToken{}, token) and
-      # Ticket-key audit (Barkpark Tickets, charter Decision 1): `token` here is
-      # already `verify_token/1`-filtered to `kind == "api"` (OptionalToken /
-      # RequireBearerOrSessionToken set the assign), so a ticket key never
-      # reaches this plug as an %ApiToken{}. This explicit `kind == "api"` check
-      # is belt-and-suspenders — a ticket key must never satisfy an edit-share.
       token.kind == "api" and
       "share-edit-#{surface}" in (token.permissions || []) and
       token.share_scope == "#{ws}/#{proj}/#{dataset}" and
