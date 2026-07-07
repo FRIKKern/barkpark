@@ -26,13 +26,15 @@ defmodule Barkpark.Plugins.Github do
       `config/config.exs` (plugins can add crontab, not queues).
     * `register_routes/1` → the inbound webhook route (Wave 3,
       `POST /v1/plugins/github/webhook` → `BarkparkWeb.GithubWebhookController`
-      on the signature-verified `:github_webhook` bucket) PLUS the adopt route
+      on the signature-verified `:github_webhook` bucket), the adopt route
       (Wave 4, `POST /v1/plugins/github/adopt/:id` →
-      `BarkparkWeb.GithubAdoptController` on the bearer-gated `:token` bucket).
-      Off-by-default is unaffected: a route only resolves a live handler when
-      `github` is whitelisted.
+      `BarkparkWeb.GithubAdoptController` on the bearer-gated `:token` bucket),
+      and the read-only sync-health status route (Wave 6,
+      `GET /v1/plugins/github/status` → `BarkparkWeb.GithubStatusController` on
+      the SAME `:token` bucket). Off-by-default is unaffected: a route only
+      resolves a live handler when `github` is whitelisted.
     * `cli_commands/0` → merge-safe delegate to `Github.CLI` (the `github adopt`
-      operator verb the `/v1/capabilities` manifest exposes).
+      and `github status` operator verbs the `/v1/capabilities` manifest exposes).
     * `resolve_doc_actions/2` + `action_handlers/0` → the Studio "Adopt from
       GitHub" button, surfaced only for a `task` with
       `content.github.state == "intake"`, dispatching `Github.Adopt.adopt/3`.
@@ -218,6 +220,11 @@ defmodule Barkpark.Plugins.Github do
   #     `plugin_routes(scope: :ops)` block (the pulse `{:live, "/pulse", …}`
   #     shape). The `:ops` on_mount admin gate always guards it — never
   #     public_demo, never anonymous. The `desk_items/1` link already points here.
+  #   * `GET /v1/plugins/github/status` (Wave 6) — read-only sync-health snapshot
+  #     (open conflicts by kind, per-dataset cursor lag, mirror queue depth). On
+  #     the SAME `:token` bucket — a bearer-gated operator READ (the read twin of
+  #     adopt), so `bp github status` runs with a normal operator token. Never
+  #     mutates (charter D5).
   #
   # Off-by-default is unaffected: a route only resolves a live handler when
   # `github` is whitelisted.
@@ -227,7 +234,8 @@ defmodule Barkpark.Plugins.Github do
       {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
        auth: :github_webhook},
       {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt, auth: :token},
-      {:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index, auth: :ops}
+      {:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index, auth: :ops},
+      {:get, "/github/status", BarkparkWeb.GithubStatusController, :status, auth: :token}
     ]
   end
 

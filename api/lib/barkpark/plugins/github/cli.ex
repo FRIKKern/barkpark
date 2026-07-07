@@ -10,15 +10,21 @@ defmodule Barkpark.Plugins.Github.CLI do
   `Code.ensure_loaded?(Github.CLI)`, so the two slices merge cleanly across
   worktrees even when only one of them has landed.
 
-  ## One verb (this wave): `github adopt`
+  ## Verbs
 
-  `adopt` flips a born-dark `src:github` intake task into Barkpark ownership —
-  strips `needs-human`, sets `content.github.state = "adopted"`, posts a
-  backlink comment on the source issue. It is `read`-tier and rides the `:token`
-  bucket at `POST /v1/plugins/github/adopt/:id`: a bearer-gated OPERATOR action,
-  NOT admin — an operator with a normal token runs it. `writes: true` (it mutates
-  the task). It NEVER auto-claims (charter D6); a human claims the adopted task
-  afterward through the normal `bp task` path.
+  * `github adopt` — flips a born-dark `src:github` intake task into Barkpark
+    ownership — strips `needs-human`, sets `content.github.state = "adopted"`,
+    posts a backlink comment on the source issue. It is `read`-tier and rides
+    the `:token` bucket at `POST /v1/plugins/github/adopt/:id`: a bearer-gated
+    OPERATOR action, NOT admin — an operator with a normal token runs it.
+    `writes: true` (it mutates the task). It NEVER auto-claims (charter D6); a
+    human claims the adopted task afterward through the normal `bp task` path.
+  * `github status` (Wave 6 — observability) — reports the current sync-health
+    snapshot: open conflicts by kind, per-dataset cursor lag, and mirror queue
+    depth. `read`-tier, `writes: false`, on the SAME `:token` bucket but a GET at
+    `/v1/plugins/github/status`. Read-only (charter D5) — it never mutates and
+    never reads a GitHub field back. An optional `--dataset` flag narrows the
+    snapshot to one dataset.
   """
 
   @doc """
@@ -50,6 +56,25 @@ defmodule Barkpark.Plugins.Github.CLI do
         paginated: false,
         dry_run: false,
         default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "github.status",
+        noun: "github",
+        verb: "status",
+        summary:
+          "Show GitHub sync health (open conflicts by kind, per-dataset cursor lag, mirror queue depth). Read-only.",
+        http: %{method: "GET", path_template: "/v1/plugins/github/status"},
+        auth_tier: "read",
+        args: [],
+        flags: [
+          %{name: "dataset", type: "string", summary: "Filter to one dataset.", default: nil}
+        ],
+        writes: false,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "table",
         scoped_prefix: nil
       }
     ]
