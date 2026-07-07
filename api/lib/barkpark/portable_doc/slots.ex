@@ -51,9 +51,9 @@ defmodule Barkpark.PortableDoc.Slots do
   Mirrors `Barkpark.PortableDoc.Constraints` style: no `Content`/DB dependency, plain
   block maps in, plain data / calm error strings out. Never raises on malformed input.
 
-  Until `Barkpark.PortableDoc.Tiers` lands (STEP 1/2), this module carries a MINIMAL
-  element|widget|section classifier (`tier/1`) that the D1 gate reuses. When Tiers
-  lands, `tier/1` should delegate to it.
+  The D1 slot gate keys off `tier/1`, which delegates to the one canonical
+  classifier `Barkpark.PortableDoc.Tiers.tier_of/1` (with a fallback to `:element`
+  and a lone `card` anticipation — see `tier/1`).
   """
 
   @typedoc "The three structural tiers a block can occupy."
@@ -66,24 +66,24 @@ defmodule Barkpark.PortableDoc.Slots do
           count: Barkpark.PortableDoc.Constraints.count()
         }
 
-  # Minimal tier classifier (Tiers not yet landed — see @moduledoc). WIDGETS declare
-  # slots; SECTIONS recurse; everything else is an ELEMENT (the slot-legal tier).
-  # `card` is listed ahead of its implementation so the D1 gate already rejects a
-  # nested card the day that widget lands.
-  @widget_types ~w(callout card)
-  @section_types ~w(section)
-
   @doc """
-  The structural tier of a block: `:widget` (declares slots), `:section` (recurses),
-  else `:element`. A non-map or type-less block classifies as `:element` (it carries
-  no slots and is legal slot content), so legacy docs never gain a new error.
+  The structural tier of a block, for the D1 slot gate: `:widget` / `:section` /
+  `:element`. Delegates to the one canonical classifier
+  `Barkpark.PortableDoc.Tiers.tier_of/1` (which knows all 45 renderable types);
+  an unknown / type-less block falls back to `:element` (it carries no slots and is
+  legal slot content, so legacy docs never gain a new error).
+
+  The lone exception is `"card"` — the anticipated card WIDGET from the cards-grid
+  split (migration step 4). It is not yet a renderable type, so it is absent from
+  `Tiers` (whose completeness invariant forbids a type with no `compose_block`
+  clause). It is special-cased here so the D1 gate already rejects a nested card the
+  day that widget lands; remove the special case once `card` is a real block type.
   """
   @spec tier(term()) :: tier()
   def tier(block) do
     case type_of(block) do
-      t when t in @widget_types -> :widget
-      t when t in @section_types -> :section
-      _ -> :element
+      "card" -> :widget
+      _ -> Barkpark.PortableDoc.Tiers.tier_of(block) || :element
     end
   end
 
