@@ -433,9 +433,20 @@ defmodule Barkpark.Plugins.Github.Projection do
   # ---- key-tolerant accessors ---------------------------------------------
 
   defp content(task_doc) do
-    case get(task_doc, "content") do
-      c when is_map(c) -> c
-      _ -> %{}
+    base =
+      case get(task_doc, "content") do
+        c when is_map(c) -> c
+        _ -> %{}
+      end
+
+    # A task's `title` is a TOP-LEVEL document column, not a content field (unlike
+    # description/lifecycle_status, which live in `content`). Merge it in so the
+    # projection reads it uniformly — otherwise every mirrored issue falls back to
+    # the "Task <doc_id>" placeholder instead of the real title. `put_new` keeps
+    # any content-level title winning if one is ever present.
+    case get(task_doc, "title") do
+      t when is_binary(t) and t != "" -> Map.put_new(base, "title", t)
+      _ -> base
     end
   end
 

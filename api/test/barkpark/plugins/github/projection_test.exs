@@ -78,6 +78,21 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
       issue = Projection.task_to_issue(task(%{}))
       assert issue.title == "Task task-abc"
     end
+
+    test "reads the TOP-LEVEL title column (real tasks store title outside content)" do
+      # A live task stores `title` as a top-level document column; only
+      # description/lifecycle_status live in `content`. Before the fix the
+      # projection read title from `content` only and every issue got the
+      # "Task <doc_id>" placeholder.
+      doc = %{
+        "doc_id" => "task-xyz",
+        "title" => "Real top-level title",
+        "content" => %{"lifecycle_status" => "open"}
+      }
+
+      issue = Projection.task_to_issue(doc)
+      assert issue.title == "Real top-level title"
+    end
   end
 
   describe "task_to_issue/1 — Task: trailer (D11, keeps pr-task-gate working)" do

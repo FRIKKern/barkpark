@@ -133,7 +133,14 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # absent workspace/project keeps the wave-2 default-scope behavior (the args
   # map stays `%{"doc_id","dataset"}` exactly as before when no scope is threaded).
   defp build_args(fields) do
-    %{"doc_id" => fields.doc_id, "dataset" => Map.get(fields, :dataset, "production")}
+    # Normalize to the PUBLISHED doc_id so the draft-create event (`drafts.X`)
+    # and the publish/edit events (`X`) coalesce onto ONE unique job. Without
+    # this the two distinct ids each enqueue a job and both create an issue —
+    # a duplicate mirror (the `unique` clause keys on the raw doc_id).
+    %{
+      "doc_id" => Content.published_id(fields.doc_id),
+      "dataset" => Map.get(fields, :dataset, "production")
+    }
     |> put_non_nil("workspace_id", Map.get(fields, :workspace_id))
     |> put_non_nil("project_id", Map.get(fields, :project_id))
     |> put_non_nil("relink", Map.get(fields, :relink))
