@@ -1,0 +1,76 @@
+name: release-artifact
+
+# Precompile api/_build ONCE per merge and publish it as a GitHub release keyed
+# by commit sha, so boxes SWAP the build in instead of compiling at deploy time
+# (task precompiled-artifacts). Only api/-touching pushes produce an artifact —
+# a non-api merge is box-inert, so the box just fast-forwards (no rebuild, no
+# artifact needed). A missing artifact simply makes the box fall back to an
+# on-box compile, so a gap here is never a breakage.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - ".tool-versions"
+      - "scripts/build-prebuilt.sh"
+      - ".github/workflows/release-artifact.yml"
+
+concurrency:
+  group: release-artifact
+  cancel-in-progress: false
+
+permissions:
+  contents: write # create/upload/delete build-<sha> releases
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The pinned OTP+Elixir MUST match the box runtime exactly (.tool-versions);
+      # the box's stamp gate refuses a mismatched build, so a drift here just
+      # means boxes fall back to compiling — but keeping them equal is the point.
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Install zstd
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
+      - name: Build the precompiled artifact
+        run: bash scripts/build-prebuilt.sh artifact
+
+      - name: Publish build-<sha> release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="${{ github.sha }}"
+          TAG="build-$SHA"
+          # Create the release (or upload into it if a re-run already made it).
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "build $SHA" \
+              --notes "Precompiled api/_build/prod for $SHA (elixir/otp pinned via .tool-versions). Consumed by scripts/fetch-prebuilt.sh." \
+              artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json
+          else
+            gh release upload "$TAG" \
+              artifact/api-build.tar.zst artifact/api-build.tar.zst.sha256 artifact/stamp.json --clobber
+          fi
+
+      - name: Prune old build-* releases (keep newest 15)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          gh release list --limit 300 --json tagName,createdAt \
+            | jq -r 'map(select(.tagName | startswith("build-"))) | sort_by(.createdAt) | reverse | .[15:] | .[].tagName' \
+            | while read -r tag; do
+                [ -n "$tag" ] || continue
+                echo "pruning $tag"
+                gh release delete "$tag" --yes --cleanup-tag || true
+              done

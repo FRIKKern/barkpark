@@ -64,7 +64,7 @@ func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
 // step type-asserts. It scripts the cheap-check output (current by default, behind
 // when r.behind) and the rebuild.
 func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, error) {
-	if strings.Contains(script, "deploy-rebuild.sh") {
+	if strings.Contains(script, "apply-update.sh") {
 		r.rebuildRan = true
 		if r.rebuildErr != nil {
 			return "rebuild failed on box", r.rebuildErr
