@@ -30,16 +30,21 @@ defmodule Barkpark.Plugins.Github.Intake do
        a pure function of the issue number, so a RE-DELIVERY of the same webhook
        resolves the SAME `gh-<num>` doc.
 
-    4. **Create through the normal path (D6).** `Content.create_document/4` with
-       `source: :github`. On FIRST delivery there is no `prev_doc`, so
+    4. **Create through the normal path (D6).** On a genuine FIRST delivery
+       (`gh-<num>` resolves to no existing task) call `Content.create_document/4`
+       with `source: :github`. There is no `prev_doc`, so
        `Tasks.Dedup.check_new_task/5` runs — a fresh outsider issue is not a
        duplicate, so the task is born. On RE-DELIVERY the `gh-<num>` doc already
-       exists → `prev_doc` is set → Dedup is skipped and the write is an
-       idempotent no-op (never a second task). Because the write is stamped
-       `source: :github`, `Broadcast.save_event` records the `mutation_events`
-       row `source = "github"` EXACTLY (D4 cut #2, never `"github:inbound"`), so
-       the wave-1 outbox reader (`source != "github"`) excludes it — no OUTBOUND
-       echo of an inbound birth.
+       exists, so intake SHORT-CIRCUITS to `{:ok, :exists, doc}` and never
+       touches the write path at all — the outsider issue is read EXACTLY ONCE,
+       at birth (ownership matrix). Re-running the create would find the row as
+       `prev_doc` and UPDATE it back to the birth attrs, clobbering any
+       post-birth Barkpark-side change; the short-circuit read forbids that.
+       Because the birth write is stamped `source: :github`,
+       `Broadcast.save_event` records the `mutation_events` row
+       `source = "github"` EXACTLY (D4 cut #2, never `"github:inbound"`), so the
+       wave-1 outbox reader (`source != "github"`) excludes it — no OUTBOUND echo
+       of an inbound birth.
 
     5. **Backlink comment (best-effort).** After a genuine BIRTH only (never a
        re-delivery no-op, a drop, or an ignore) post a "tracked internally"
@@ -135,39 +140,47 @@ defmodule Barkpark.Plugins.Github.Intake do
     doc_id = "gh-" <> to_string(number)
     dataset = Keyword.get(opts, :dataset, @default_dataset)
 
-    # Was this task already present BEFORE the create? Captured up front so a
-    # re-delivery (which the create path collapses into an idempotent no-op via
-    # `prev_doc`) is distinguished from a genuine birth — the backlink comment
-    # fires on birth ONLY.
-    existed? = task_exists?(doc_id, dataset, opts)
+    # The ownership matrix reads the outsider issue EXACTLY ONCE, at birth. A
+    # re-delivery resolves the same deterministic `gh-<num>` doc — so if a task
+    # already exists we RETURN it as-is and short-circuit. We deliberately do
+    # NOT re-run the create path: `Content.create_document` finds the existing
+    # row as `prev_doc` and takes the UPDATE branch, which would rewrite the row
+    # back to the birth attrs — clobbering any post-birth Barkpark-side change (a
+    # Studio edit, or a wave-4 adoption that stripped `needs-human`/flipped
+    # lifecycle). Idempotency is by short-circuit READ, never by rewrite.
+    case fetch_existing(doc_id, dataset, opts) do
+      {:ok, existing} ->
+        {:ok, :exists, existing}
 
-    attrs = build_attrs(doc_id, number, issue, payload)
-    create_opts = Keyword.put(opts, :source, :github)
+      :none ->
+        attrs = build_attrs(doc_id, number, issue, payload)
+        create_opts = Keyword.put(opts, :source, :github)
 
-    case Content.create_document(@task_type, attrs, dataset, create_opts) do
-      {:ok, doc} ->
-        if existed? do
-          {:ok, :exists, doc}
-        else
-          maybe_backlink(number, opts)
-          {:ok, :born, doc}
+        case Content.create_document(@task_type, attrs, dataset, create_opts) do
+          {:ok, doc} ->
+            maybe_backlink(number, opts)
+            {:ok, :born, doc}
+
+          {:error, reason} ->
+            {:error, reason}
         end
-
-      {:error, reason} ->
-        {:error, reason}
     end
   end
 
-  # Does a `gh-<num>` task already exist (draft OR published) in this dataset?
-  # A re-delivered webhook resolves the same deterministic id, so an existing
-  # row means "already born" — used purely to gate the one-time backlink comment.
-  defp task_exists?(doc_id, dataset, opts) do
-    exists?(Content.draft_id(doc_id), dataset, opts) or
-      exists?(Content.published_id(doc_id), dataset, opts)
+  # Resolve an already-born `gh-<num>` task (draft-first, then the published
+  # perspective for a task that was adopted+published) so a re-delivery is a
+  # read, never a rewrite. Returns `{:ok, doc}` or `:none`.
+  defp fetch_existing(doc_id, dataset, opts) do
+    with :none <- lookup(Content.draft_id(doc_id), dataset, opts) do
+      lookup(Content.published_id(doc_id), dataset, opts)
+    end
   end
 
-  defp exists?(id, dataset, opts) do
-    match?({:ok, _}, Content.get_document(id, @task_type, dataset, opts))
+  defp lookup(id, dataset, opts) do
+    case Content.get_document(id, @task_type, dataset, opts) do
+      {:ok, doc} -> {:ok, doc}
+      _ -> :none
+    end
   end
 
   # Build the born-dark task attrs. `src:github` + `needs-human` labels, born

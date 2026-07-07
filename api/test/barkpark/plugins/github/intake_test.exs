@@ -215,6 +215,44 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       # Exactly one task row family for gh-30 (draft only; never published twin).
       assert length(task_rows(30)) == 1
     end
+
+    test "re-delivery does NOT clobber a post-birth change (read ONCE at birth)",
+         %{scope: scope} do
+      o = opts(scope)
+      assert {:ok, :born, doc} = Intake.ingest(opened_payload(31), o)
+      # Drain the birth comment so the post-re-delivery refute is unambiguous.
+      assert_receive {:comment, _, 31, _}
+
+      # Simulate a wave-4-style adoption / Studio edit AFTER birth: strip
+      # `needs-human`, flip lifecycle, rename. The ownership matrix says the
+      # outsider issue is read ONCE at birth — a webhook re-delivery must never
+      # regress these Barkpark-owned edits back to the birth attrs.
+      adopted_content =
+        doc.content
+        |> Map.put("labels", ["src:github"])
+        |> Map.put("lifecycle_status", "in_progress")
+
+      {:ok, _} =
+        Content.upsert_document(
+          "task",
+          %{"doc_id" => "gh-31", "title" => "Adopted title", "content" => adopted_content},
+          @dataset,
+          scope
+        )
+
+      # Re-deliver the ORIGINAL opened webhook.
+      assert {:ok, :exists, existing} = Intake.ingest(opened_payload(31), o)
+
+      # The adopted state survives — no rewrite back to the birth attrs.
+      assert existing.title == "Adopted title"
+      assert existing.content["labels"] == ["src:github"]
+      assert existing.content["lifecycle_status"] == "in_progress"
+      refute_receive {:comment, _, _, _}
+
+      reloaded = fetch_task(31, scope)
+      assert reloaded.title == "Adopted title"
+      assert reloaded.content["labels"] == ["src:github"]
+    end
   end
 
   describe "backlink comment (best-effort, birth-only)" do
