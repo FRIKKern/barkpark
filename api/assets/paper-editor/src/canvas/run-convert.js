@@ -117,6 +117,29 @@ function isCanvasTableNode(nodeType) {
   return nodeType === CANVAS_TABLE_NODE_NAME;
 }
 
+// STEP 4: the card WIDGET — a NEW slots-native block (media/title/body/action slots).
+// It is a callout-shaped CONTENT node (an editable INLINE body contentDOM + chrome
+// attrs) but SLOTS-NATIVE: its title/tone/media/action ride node.attrs, its body is
+// the ONE contentDOM (the body slot's lone paragraph flattened to inline, the callout
+// precedent). UNLIKE callout, node.type is the NODE name `bpCard` (not the bpType
+// "card") — the section/code NODE_NAME indirection — and `tone` is PRESENT-ONLY (a
+// tone-less card must NOT gain "info"; card_html treats absent tone as no modifier,
+// matching the legacy cards item). KEEP LOCKSTEP with paper_canvas.ex
+// @canvas_widget_types and card-node.js.
+const CANVAS_CARD_TYPES = new Set(["card"]);
+const CANVAS_CARD_NODE_NAME = "bpCard";
+
+// True when a portable-doc BLOCK type is the card widget (runToTiptap dispatch).
+function isCanvasCardType(t) {
+  return CANVAS_CARD_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas card node. runToOps/classifyNode read
+// node.type off a getJSON node (the NODE name `bpCard`, not the bpType "card").
+function isCanvasCardNode(nodeType) {
+  return nodeType === CANVAS_CARD_NODE_NAME;
+}
+
 // S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
 // (no PM-managed interior, like the divider) whose body text rides in an ATTR and
 // is edited by a NON-PM control (a <textarea> island; see code-node.js). The code
@@ -559,6 +582,15 @@ function blockToNode(block) {
       return calloutBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasCardType(bpType)) {
+      // STEP 4: the card WIDGET — a slots-native node whose BODY slot becomes an
+      // editable inline contentDOM and whose title/tone/media/action ride attrs
+      // (present-only). card-node.js declares the bpCard node, so getJSON() round-
+      // trips the body + the chrome attrs. node.type is the NODE name (bpCard), not
+      // the bpType (card).
+      return cardBlockToNode(block, bpId, bpType);
+    }
+
     if (isCanvasAttrAtomType(bpType)) {
       // A canvas ATTR-ATOM node (S3.3: code; S3.4: diagram): an atom node whose body
       // TEXT rides in an attr (a plain string, edited by a non-PM textarea) plus an
@@ -680,11 +712,14 @@ function blockToNode(block) {
 // CELLS HOIST: prose/canvas child nodes DROP unknown keys on getJSON, so a child's
 // span/order can't ride the child node without touching ~10 node files. Instead we
 // hoist them into the section's OWN declared `cells` attr (a JSON data-attr,
-// getJSON-safe — the bpColumnAtom bpBlock precedent) as a positional array, ONLY
-// when some child actually carries span/order. RISK #1 (index-keyed cells): under a
-// canvas reorder (coarse replace rebuilds children in new order) the positional
-// cells would misassign — INVISIBLE in v1 (span/order unrendered) but a latent
-// fidelity bug; step 6 must re-key cells by child bpId BEFORE it renders them.
+// getJSON-safe — the bpColumnAtom bpBlock precedent), keyed BY CHILD bpId, ONLY
+// when some child actually carries span/order. STEP-6 (RISK #1 fix, LANDED): cells
+// is a bpId-keyed OBJECT map `{ [childBpId]: { span?, order? } }`, NOT a positional
+// array. A positional array misassigned span/order under a canvas reorder (the
+// coarse replace path rebuilds children in the new order but attrs.cells is
+// independent of content) — bpId keying is position-independent, so a reorder pulls
+// each child's OWN cell regardless of where it sits. Present-only: a section with no
+// child span/order adds NO cells attr (byte-identical to a plain section).
 function sectionBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType: bpType || "section" };
   if (block && block.title != null) attrs.title = block.title;
@@ -692,15 +727,19 @@ function sectionBlockToNode(block, bpId, bpType) {
 
   const children = (block && block.blocks) || [];
 
-  // Hoist child span/order into a positional cells array — present-only (omitted
-  // entirely when no child carries either key, so a plain section is unchanged).
-  const cells = children.map((child) => {
+  // Hoist child span/order into a bpId-keyed cells object — present-only (omitted
+  // entirely when no child carries either key, so a plain section is unchanged). A
+  // child with no id (should not happen for a persisted child) is skipped.
+  const cellsById = {};
+  for (const child of children) {
+    const cid = child && child.id;
+    if (cid == null) continue;
     const cell = {};
-    if (child && child.span != null) cell.span = child.span;
-    if (child && child.order != null) cell.order = child.order;
-    return cell;
-  });
-  if (cells.some((c) => Object.keys(c).length > 0)) attrs.cells = cells;
+    if (child.span != null) cell.span = child.span;
+    if (child.order != null) cell.order = child.order;
+    if (Object.keys(cell).length) cellsById[cid] = cell;
+  }
+  if (Object.keys(cellsById).length) attrs.cells = cellsById;
 
   const content = children.map((child) => {
     // DEPTH-GUARD (V1 forbid-nesting): a child of type "section" is carried VERBATIM
@@ -740,16 +779,24 @@ function sectionNodeToBlock(node, id, taken) {
   // live on children, hoisted into attrs.cells for canvas transport only).
   if (attrs.layout != null) block.layout = attrs.layout;
 
-  const cells = Array.isArray(attrs.cells) ? attrs.cells : null;
+  // STEP-6: cells is a bpId-keyed OBJECT map (not a positional array). Split each
+  // child's cell back BY THE CHILD'S OWN bpId, so a canvas reorder (which changes
+  // content order but leaves attrs.cells untouched) pulls the correct span/order
+  // onto each child regardless of position — the reorder-safety fix.
+  const cells =
+    attrs.cells && typeof attrs.cells === "object" && !Array.isArray(attrs.cells)
+      ? attrs.cells
+      : null;
 
   const children = (node && node.content) || [];
-  block.blocks = children.map((child, i) => {
+  block.blocks = children.map((child) => {
     const cls = classifyNode(child);
     const childBpId = child.attrs && child.attrs.bpId;
     const cid = childBpId != null ? childBpId : mintId(seen);
     const built = nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
-    // Split the positional cells array back onto the rebuilt children (present-only).
-    const cell = cells && cells[i];
+    // Key by the child's OWN bpId (present-only). A canvas-new (null-bpId) child has
+    // NO cell — correct, a freshly created child carries no span/order.
+    const cell = cells && childBpId != null ? cells[childBpId] : null;
     if (cell && cell.span != null) built.span = cell.span;
     if (cell && cell.order != null) built.order = cell.order;
     return built;
@@ -854,6 +901,11 @@ function childInteriorPatch(cls, prevChild, nextChild, cid) {
     return calloutNodeChanged(prevChild, nextChild)
       ? calloutNodeToPatch(nextChild)
       : null;
+  }
+  if (cls.isCard) {
+    // STEP 4: a card child of a grid section — diff body + chrome; emit the slots+tone
+    // patch when it changed (the same detector/builder the top-level pass uses).
+    return cardNodeChanged(prevChild, nextChild) ? cardNodeToPatch(nextChild) : null;
   }
   if (cls.isAttrAtom) {
     if (nextChild.type === "bpDiagram") {
@@ -1046,6 +1098,140 @@ function stableCalloutKey(node) {
     title: a.title == null ? null : a.title,
     collapsible: a.collapsible === true,
     collapsed: a.collapsed === true,
+    content: node.content || null,
+  });
+}
+
+// ── card ⇄ canvas content node (STEP 4) ──────────────────────────────────────
+//
+// The NEW slots-native `card` block ⇄ a bpCard node. Persisted shape (slots-native,
+// no legacy inline encoding):
+//   { id, type:"card", tone?, slots:{ title?:[{type:"heading",text}],
+//     body:[{type:"paragraph",content:[<inline>…]}], media?:[<image>], action?:[<action>] } }
+//
+// The body slot becomes the ONE editable inline contentDOM (the callout precedent —
+// a widget FLATTENS its body slot to inline); title/tone/media/action ride node.attrs.
+//   tone   — string, PRESENT-ONLY (DIVERGES from callout's always-"info" default: a
+//            tone-less card must NOT gain a tone on round-trip, or it emits a spurious
+//            op; card_html treats absent tone as NO modifier, matching a legacy item).
+//   title  — the title slot heading's `text`; PRESENT-ONLY (absent → no attr).
+//   media  — the OPTIONAL media slot's lone element, carried VERBATIM on attrs.media.
+//   action — the OPTIONAL action slot's lone element, carried VERBATIM on attrs.action.
+// Omitting absent chrome is the byte-fidelity contract: cardNodeToBlock threads each
+// field ONLY when present, so a card that never entered the canvas round-trips byte-
+// identical.
+
+// cardBodyInline(block) → the card body slot's inline array (slots.body[0].content).
+// A card has NO legacy `content` encoding (it is slots-native), so an absent/empty
+// body slot yields []. JS twin of Slots.card_body_text's SOURCE (the inline array
+// before it is flattened to plain text server-side).
+function cardBodyInline(block) {
+  const slotBody = block && block.slots && block.slots.body;
+  if (Array.isArray(slotBody) && slotBody.length) {
+    const first = slotBody[0];
+    return (first && first.content) || [];
+  }
+  return [];
+}
+
+// cardTitle(block) → the card title slot heading's `text`, or null when absent/empty.
+// JS twin of Slots.card_title_text (present-only; "" and absent both → null so a
+// title-less card round-trips WITHOUT a title attr).
+function cardTitle(block) {
+  const slotTitle = block && block.slots && block.slots.title;
+  if (Array.isArray(slotTitle) && slotTitle.length) {
+    const t = slotTitle[0] && slotTitle[0].text;
+    return t == null || t === "" ? null : t;
+  }
+  return null;
+}
+
+// The lone element of a card's OPTIONAL media/action slot (verbatim), or null.
+function cardMedia(block) {
+  const s = block && block.slots && block.slots.media;
+  return Array.isArray(s) && s.length && s[0] ? s[0] : null;
+}
+function cardAction(block) {
+  const s = block && block.slots && block.slots.action;
+  return Array.isArray(s) && s.length && s[0] ? s[0] : null;
+}
+
+// cardBlockToNode(block) → { type:"bpCard", attrs:{…}, content:[inline…] }
+// The body slot inline → TipTap inline nodes via the shared serializer (the callout
+// body path). Chrome → attrs, PRESENT-ONLY (tone/title/media/action omitted when
+// absent) so an untouched card's getJSON re-projection matches and emits zero ops.
+function cardBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "card" };
+  const title = cardTitle(block);
+  if (title != null) attrs.title = title;
+  if (block && block.tone != null) attrs.tone = block.tone; // PRESENT-ONLY (no default)
+  const media = cardMedia(block);
+  if (media != null) attrs.media = deepClone(media);
+  const action = cardAction(block);
+  if (action != null) attrs.action = deepClone(action);
+
+  const node = { type: CANVAS_CARD_NODE_NAME, attrs };
+  const inline = inlineArrayToTiptap(cardBodyInline(block));
+  if (inline.length) node.content = inline;
+  return node;
+}
+
+// cardNodeToSlots(node) → the reconstructed slots map. body ALWAYS present (a card is
+// slots-native, its body slot is the contentDOM); title/media/action threaded ONLY
+// when present so the rebuild is byte-identical to a card that never entered the canvas.
+function cardNodeToSlots(node) {
+  const attrs = (node && node.attrs) || {};
+  const slots = {};
+  if (attrs.title != null && attrs.title !== "") {
+    slots.title = [{ type: "heading", text: attrs.title }];
+  }
+  slots.body = [
+    { type: "paragraph", content: tiptapInlineToPd((node && node.content) || []) },
+  ];
+  if (attrs.media != null) slots.media = [deepClone(attrs.media)];
+  if (attrs.action != null) slots.action = [deepClone(attrs.action)];
+  return slots;
+}
+
+// cardNodeToBlock(node, id) → { id, type:"card", slots:{…}, tone? }
+// Reconstruct the portable-doc card block from a bpCard NODE (the inverse of
+// cardBlockToNode). tone threaded ONLY when present (present-only, byte-fidelity).
+function cardNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "card", slots: cardNodeToSlots(node) };
+  if (attrs.tone != null) block.tone = attrs.tone;
+  return block;
+}
+
+// The mutable-fields PATCH for a card. patch-block is a SHALLOW Map.merge (patch.ex
+// merge_block) — a top-level key is REPLACED wholesale or preserved, never deleted.
+// So we emit the WHOLE rebuilt `slots` map (a cleared title/media/action simply drops
+// that slot key ⇒ the removal LANDS via the wholesale replace) + `tone` EXPLICITLY
+// (null when cleared, so a tone-clear reverts to the no-modifier legacy look instead
+// of leaving the stale tone). The callout removal-safe precedent, adapted to a
+// slots-native block.
+function cardNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return {
+    slots: cardNodeToSlots(node),
+    tone: attrs.tone == null ? null : attrs.tone,
+  };
+}
+
+// True when a card node's body OR chrome (tone/title/media/action) changed — an
+// interior edit. Canonical (key-order-insensitive) compare so a body/tone/title/
+// media/action edit flips it but a pure reorder (bpId only) does not.
+function cardNodeChanged(prevNode, nextNode) {
+  return stableCardKey(prevNode) !== stableCardKey(nextNode);
+}
+
+function stableCardKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    tone: a.tone == null ? null : a.tone,
+    title: a.title == null || a.title === "" ? null : a.title,
+    media: a.media == null ? null : a.media,
+    action: a.action == null ? null : a.action,
     content: node.content || null,
   });
 }
@@ -2251,6 +2437,9 @@ function classifyNode(node) {
   const isOpaque = node.type === "bpOpaque";
   const isAtom = isCanvasAtomType(node.type);
   const isContent = isCanvasContentType(node.type);
+  // STEP 4: the card WIDGET (bpCard). A callout-shaped content node (inline body +
+  // chrome attrs) but slots-native, so it gets its OWN kind flag + diff path.
+  const isCard = isCanvasCardNode(node.type);
   const isAttrAtom = isCanvasAttrAtomNode(node.type);
   const isField = isCanvasFieldNode(node.type);
   // editable-action: a canvas control-atom node (bpAction). Its bpType resolves to
@@ -2274,13 +2463,22 @@ function classifyNode(node) {
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_CONTAINER_BP_TYPE_BY_NODE[node.type] ||
-    (isField ? "field-string" : isFleet ? "tasks" : isFigure ? "figure" : node.type);
+    (isField
+      ? "field-string"
+      : isFleet
+        ? "tasks"
+        : isFigure
+          ? "figure"
+          : isCard
+            ? "card"
+            : node.type);
   return {
     node,
     bpType,
     isOpaque,
     isAtom,
     isContent,
+    isCard,
     isAttrAtom,
     isField,
     isAction,
@@ -2626,6 +2824,22 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isCard) {
+      // STEP 4 card WIDGET: diff body + chrome (tone/title/media/action); emit ONE
+      // patch-block carrying the rebuilt slots map + explicit tone when anything
+      // changed. An UNCHANGED card emits NO op (canonical compare). The whole-slots
+      // replace makes a cleared title/media/action removal LAND; explicit tone makes
+      // a tone-clear land (patch-block can't delete a key otherwise).
+      if (cardNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: cardNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isAttrAtom) {
       // Canvas attr-atom node (S3.3: code; S3.4: diagram): diff the body + optional
       // field; emit one patch-block carrying the body (always) + the optional field
@@ -2810,6 +3024,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasContentType(type)) {
     return !calloutNodeChanged(serverNode, liveNode);
   }
+  // Card (STEP 4 widget, bpCard): tone/title/media/action/body.
+  if (isCanvasCardNode(type)) {
+    return !cardNodeChanged(serverNode, liveNode);
+  }
   // Code / diagram (attr-atom): value+lang / source+caption.
   if (isCanvasAttrAtomNode(type)) {
     if (type === "bpDiagram") return !diagramNodeChanged(serverNode, liveNode);
@@ -2946,6 +3164,11 @@ function nextNodeToBlock(entry, taken) {
     // Canvas content insert (callout): reconstruct the full callout block from
     // the node (body + chrome) with the minted id, via the dedicated mapper.
     return calloutNodeToBlock(node, entry.id);
+  }
+  if (entry.isCard) {
+    // STEP 4 card WIDGET insert: reconstruct the full slots-native card block (body
+    // slot + title/tone/media/action chrome) with the minted id, via the mapper.
+    return cardNodeToBlock(node, entry.id);
   }
   if (entry.isAttrAtom) {
     // Canvas attr-atom insert (S3.3: code; S3.4: diagram): reconstruct the block (body

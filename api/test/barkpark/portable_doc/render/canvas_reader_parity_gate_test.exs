@@ -332,10 +332,20 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # class here. A fleet DATA block (tasks/notes/cards/board) stays verbatim-carried
     # because editing a live-data mirror in-paper is meaningless; a layout/authored
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
+    #
+    # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
+    # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view
+    # MUST emit `bp-card__t`/`bp-card__d`/`bp-card__media`/`bp-card__action` to inherit
+    # the reader's own `.bp-paper-surface .bp-card*` paint — the callout precedent, ZERO
+    # second HTML producer. `bp-cards` (the legacy fleet GRID wrapper) STAYS forbidden
+    # below (via painted_fleet's `cards` sig) — the new path emits `bp-section__grid`,
+    # NEVER `bp-cards`, and `bp-card__t`/`bp-card__d` do NOT contain the substring
+    # `bp-cards` — so the still-verbatim-carried legacy `cards` fleet stays gated against
+    # a hand-mirrored second producer.
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-momentum bp-board__)
 
     offenders =
       reader_markup
@@ -412,5 +422,35 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
 
     assert String.contains?(drifted_blob, "bp-tasks"),
            "the JS scan's contains-check failed to see injected markup — §3 would be toothless"
+  end
+
+  # ── §6 STEP-6 layout-parity TEXTUAL PROXY (weak — NOT a render-parity proof) ──
+  #
+  # The pure-Node smoke harness cannot mount section-node.js's NodeView (paint
+  # references `document`/DOM), so the per-child grid-column/order paint is NOT
+  # unit-testable in-repo today — real parity is LIVE browser verify (or a future
+  # jsdom NodeView test). This is an EXPLICITLY WEAK text-scan that section-node.js's
+  # paint still READS the bpId-keyed cells map and mirrors placement onto the grid
+  # items via `el.style.gridColumn`/`order` keyed by `data-bp-id` — the SAME keys the
+  # reader (compose.ex cell_layout_attr) and run-convert use. It proves the paint
+  # path was not DELETED/renamed, NOT that the rendered pixels match the reader.
+  test "§6 section-node.js paint mirrors per-child placement (textual proxy, NOT render parity)" do
+    src =
+      "../../../../assets/paper-editor/src/canvas/section-node.js"
+      |> Path.expand(__DIR__)
+      |> File.read!()
+
+    assert String.contains?(src, "gridColumn"),
+           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (re-point §6 or it is a real regression)"
+
+    assert String.contains?(src, ".order"),
+           "section-node.js no longer writes el.style.order — the per-child order paint moved"
+
+    assert String.contains?(src, "data-bp-id"),
+           "section-node.js paint no longer keys child placement by data-bp-id — reorder-safety lost"
+
+    # The bpId-keyed cells map must be READ in paint (not the old positional array).
+    assert String.contains?(src, "cells"),
+           "section-node.js paint no longer reads the cells map"
   end
 end

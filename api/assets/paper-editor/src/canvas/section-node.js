@@ -82,12 +82,34 @@ const gapVar = (token) => GAP_VARS[token] || GAP_VARS.md;
 // ONLY when mode === "grid"; absence, null, or any other mode is stack (byte-parity).
 const isGridLayout = (layout) => !!(layout && layout.mode === "grid");
 
+// The EXACT JS twin of Elixir `Integer.parse/1` + the reader's `{i, ""}` remainder
+// guard: a string is accepted ONLY when it is a WHOLE integer (no trailing chars, no
+// trim — `"2px"` / `"2 "` / `" 2"` are DROPPED, matching the reader which requires an
+// empty remainder). A real number passes through iff integral. `parseInt` was too
+// lenient (`"2px" -> 2`), so the canvas applied a value the strict reader dropped —
+// breaking the reader↔canvas "resolve identically" invariant.
+export const strictInt = (v) => {
+  if (typeof v === "number") return Number.isInteger(v) ? v : null;
+  if (typeof v === "string" && /^-?\d+$/.test(v)) return parseInt(v, 10);
+  return null;
+};
+
 // tracks → a positive integer (default 2, matching the CSS --bp-tracks fallback).
 const gridTracks = (layout) => {
-  const t = layout && layout.tracks;
-  const n = typeof t === "string" ? parseInt(t, 10) : t;
-  return Number.isInteger(n) && n > 0 ? n : 2;
+  const n = strictInt(layout && layout.tracks);
+  return n !== null && n > 0 ? n : 2;
 };
+
+// STEP-6 per-child placement clamps — the JS twins of compose.ex span_int/order_int
+// (reader and canvas resolve IDENTICALLY, via strictInt above). A child `span` is a
+// POSITIVE int → CSS `grid-column: span N`; a child `order` is ANY int (0 / negatives
+// are legal CSS `order`). Anything else → null → NO inline style (fail-soft, exactly
+// as the reader drops a malformed value).
+const cellSpan = (v) => {
+  const n = strictInt(v);
+  return n !== null && n > 0 ? n : null;
+};
+const cellOrder = (v) => strictInt(v);
 
 // CONTENT EXPRESSION (V1 forbid nested containers). The allowed child roster is the
 // canvas node roster MINUS bpSection (so a section cannot hold a section), PLUS
@@ -100,7 +122,7 @@ const gridTracks = (layout) => {
 // bpSectionChild"` on every allowed node + content:"bpSectionChild+") is cleaner
 // long-term but touches every node file + StarterKit globals — rejected for v1.
 export const BP_SECTION_CONTENT =
-  "(paragraph | heading | bulletList | orderedList | divider | callout | " +
+  "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | " +
   "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
   "eyebrow | byline | ingress | pullquote | bpOpaque)+";
 
@@ -176,11 +198,13 @@ export const Section = Node.create({
         renderHTML: (attrs) =>
           attrs.layout != null ? { "data-layout": JSON.stringify(attrs.layout) } : {},
       },
-      // cells — a POSITIONAL array of { span?, order? } (one per body child), the
+      // cells — a bpId-keyed OBJECT map `{ [childBpId]: { span?, order? } }`, the
       // getJSON-safe transport for child span/order (prose/canvas child nodes drop
       // unknown keys). run-convert hoists/splits it; persisted layout stays cells-free.
-      // RISK #1: index-keyed, so a reorder misassigns — invisible in v1 (unrendered),
-      // step 6 must re-key by child bpId. null/absent round-trips ABSENT.
+      // STEP-6 (RISK #1 FIXED): keyed by child bpId — a canvas reorder leaves
+      // attrs.cells untouched, so bpId keying pulls each child's OWN cell regardless
+      // of position (a positional array misassigned on reorder). paint() reads this
+      // map and applies grid-column/order per child. null/absent round-trips ABSENT.
       cells: {
         default: null,
         parseHTML: (el) => {
@@ -304,6 +328,24 @@ export const Section = Node.create({
       // Guards the paint→titleEl write from re-entering the input listener.
       let syncingTitle = false;
 
+      // STEP-6: write per-child grid-column/order onto the DIRECT grid items from the
+      // bpId-keyed cells map. Passing a null/absent map CLEARS all placement (the
+      // grid→stack strip). These are `el.style.*` writes only — NO reader class
+      // literal is introduced, so the canvas⇄reader parity gate §3 stays green.
+      const applyCellPlacement = (cells) => {
+        const map =
+          cells && typeof cells === "object" && !Array.isArray(cells) ? cells : null;
+        for (const el of Array.from(body.children)) {
+          if (!el || !el.style) continue;
+          const id = el.getAttribute ? el.getAttribute("data-bp-id") : null;
+          const cell = map && id != null ? map[id] : null;
+          const span = cell ? cellSpan(cell.span) : null;
+          const order = cell ? cellOrder(cell.order) : null;
+          el.style.gridColumn = span != null ? `span ${span}` : "";
+          el.style.order = order != null ? String(order) : "";
+        }
+      };
+
       const paint = (n) => {
         // ── STEP-2: paint the body layout. Grid mode swaps the body to the SHARED
         // `bp-section__grid` class + sets --bp-tracks/--bp-grid-gap; stack mode keeps
@@ -321,6 +363,13 @@ export const Section = Node.create({
           tracksLabel.style.display = "";
           tracksDec.style.display = "";
           tracksInc.style.display = "";
+          // STEP-6: apply per-child grid-column/order from the bpId-keyed cells map
+          // onto the DIRECT grid items (body.children). Keyed by each child's own
+          // data-bp-id (the SAME key run-convert/reader use) → reorder-safe. The
+          // reader emits `grid-column:span N;order:K` on its .bp-section__cell wrapper;
+          // the canvas has no wrapper, so we mirror the placement onto the grid item
+          // itself — parity of the resolved geometry (RISK #5).
+          applyCellPlacement(n.attrs && n.attrs.cells);
         } else {
           body.className = "bp-section__body";
           body.style.removeProperty("--bp-tracks");
@@ -330,6 +379,9 @@ export const Section = Node.create({
           tracksLabel.style.display = "none";
           tracksDec.style.display = "none";
           tracksInc.style.display = "none";
+          // STEP-6: a grid→stack flip must STRIP any per-child placement left on the
+          // body children (else a stale grid-column/order survives into stack mode).
+          applyCellPlacement(null);
         }
         // Controls are edit-only: hidden entirely in view mode.
         controls.style.display = editor.isEditable ? "" : "none";
@@ -489,6 +541,18 @@ export const Section = Node.create({
           // bp-section__grid + --bp-tracks) — that is view-only chrome, NOT a content
           // edit, so PM must ignore attribute mutations on the body element itself.
           if (m.type === "attributes" && m.target === body) return true;
+          // STEP-6: applyCellPlacement writes `style` (grid-column/order) onto the
+          // body's DIRECT child elements — view-only placement chrome, NOT a content
+          // edit. Without this guard PM churns on every paint (the subtlest
+          // correctness point). Must sit BEFORE the final body.contains fall-through,
+          // which would otherwise let PM see the style mutation as a body edit.
+          if (
+            m.type === "attributes" &&
+            m.attributeName === "style" &&
+            m.target &&
+            m.target.parentElement === body
+          )
+            return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
           if (controls.contains(m.target)) return true; // layout controls are attr writes
           if (hrTop.contains(m.target) || hrBot.contains(m.target)) return true;

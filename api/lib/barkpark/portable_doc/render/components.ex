@@ -24,6 +24,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
   alias Barkpark.PortableDoc.Render.StatusVocab
+  alias Barkpark.PortableDoc.Slots
 
   @doc """
   Render a `tasks` block's snapshot as the upgraded task list: an optional
@@ -315,6 +316,72 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def cards_html(_), do: ""
+
+  @doc """
+  Render a `card` block (STEP 4): ONE card from its slots. Byte-aligns to a single
+  legacy `cards` grid item — the `title` slot → `bp-card__t`, the `body` slot
+  FLATTENED to plain text → `bp-card__d`, the top-level `tone` (legacy card vocab
+  info|ok|warn|danger — the SAME allowlist as `cards_html/1`, NOT the callout tone
+  vocab) → the `bp-card--<tone>` modifier. The OPTIONAL `media` slot PREPENDS a
+  `bp-card__media` <img>; the OPTIONAL `action` slot APPENDS a `bp-card__action`
+  link — ADDITIVE, never perturbing the title/body byte positions, so a card with
+  neither is byte-identical to a legacy `cards` item.
+  """
+  def card_html(block) when is_map(block) do
+    tone = block |> get("tone") |> stringish()
+    tone_cls = if tone in ~w(info ok warn danger), do: " bp-card--#{tone}", else: ""
+
+    title = block |> Slots.card_title_text() |> escape_html()
+    body = block |> Slots.card_body_text() |> escape_html()
+
+    media_html = card_media_html(block)
+    action_html = card_action_html(block)
+
+    title_html = if title == "", do: "", else: ~s|<div class="bp-card__t">#{title}</div>|
+    text_html = if body == "", do: "", else: ~s|<div class="bp-card__d">#{body}</div>|
+
+    ~s|<div class="bp-card#{tone_cls}">#{media_html}#{title_html}#{text_html}#{action_html}</div>|
+  end
+
+  def card_html(_), do: ""
+
+  # The card's OPTIONAL media slot → a leading <img> wrapper. "" when the slot is
+  # absent or carries no src (so the media-less card stays byte-exact to a legacy item).
+  defp card_media_html(block) do
+    case Slots.card_media(block) do
+      %{} = m ->
+        src = m |> get("src") |> stringish()
+
+        if src == "" do
+          ""
+        else
+          alt = m |> get("alt") |> stringish() |> escape_html()
+          ~s|<div class="bp-card__media"><img src="#{escape_html(src)}" alt="#{alt}"></div>|
+        end
+
+      _ ->
+        ""
+    end
+  end
+
+  # The card's OPTIONAL action slot → a trailing link styled as a button. "" when the
+  # slot is absent or carries neither label nor href (byte-exact media/action-less card).
+  defp card_action_html(block) do
+    case Slots.card_action(block) do
+      %{} = a ->
+        label = a |> get("label") |> stringish() |> escape_html()
+        href = a |> get("href") |> stringish()
+
+        if label == "" and href == "" do
+          ""
+        else
+          ~s|<div class="bp-card__action"><a href="#{escape_html(href)}">#{label}</a></div>|
+        end
+
+      _ ->
+        ""
+    end
+  end
 
   @doc """
   Render a `pipeline` block: a horizontal flow of labelled nodes joined by

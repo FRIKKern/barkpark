@@ -458,6 +458,27 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
+/* ── STEP 4 card WIDGET mirror (embedder only) ────────────────────────────────
+ * The standalone embedder has no `.bp-paper-surface` ancestor, so it carries a
+ * hand-copied `.bp-paper-editor-body .bp-card*` mirror of the reader
+ * (paper-surface.css) — the blessed callout-mirror pattern. Keep byte-aligned with
+ * the reader rules. bp-canvas-card* is the thin edit-only hook (chrome). */
+.bp-paper-editor-body .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
+.bp-paper-editor-body .bp-card--info { border-top-color: var(--st-info); }
+.bp-paper-editor-body .bp-card--ok { border-top-color: var(--st-ok); }
+.bp-paper-editor-body .bp-card--warn { border-top-color: var(--st-warn); }
+.bp-paper-editor-body .bp-card--danger { border-top-color: var(--st-danger); }
+.bp-paper-editor-body .bp-card__t { font-weight: 700; font-size: 0.9rem; color: var(--paper-ink); }
+.bp-paper-editor-body .bp-card__d { font-size: 0.85rem; color: var(--paper-ink-soft); line-height: 1.5; margin-top: 6px; }
+.bp-paper-editor-body .bp-card__media { margin: -13px -15px 10px; border-radius: 10px 10px 0 0; overflow: hidden; }
+.bp-paper-editor-body .bp-card__media img { display: block; width: 100%; height: auto; }
+.bp-paper-editor-body .bp-card__action { margin-top: 10px; }
+.bp-paper-editor-body .bp-card__action a { display: inline-block; font-size: 0.82rem; font-weight: 600; color: var(--paper-accent); text-decoration: none; }
+.bp-canvas-card { position: relative; }
+.bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
+.bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
+.bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+
 /* ── canvas section container node-view (loop-epic/editable-section) ──────────
  * `bp-canvas-section` is a THIN edit-only layout hook. PARITY rides the node-view's
  * INLINE styles hand-matching the reader (a flex-column PdBox, a bold title on its

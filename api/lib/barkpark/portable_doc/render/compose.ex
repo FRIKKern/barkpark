@@ -713,6 +713,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.cards_html(b)}
   end
 
+  # STEP-4 CARD WIDGET — a NEW slots-native block: ONE card (media/title/body/action
+  # slots) that a grid `section` holds N of. Its compose clause defines the card's
+  # FLATTENING layout contract (the callout precedent): `card_html/1` projects the
+  # slots into the legacy per-card chrome (bp-card/__t/__d + tone), byte-aligning to
+  # ONE legacy `cards` item — so a section-of-cards renders == a legacy cards grid at
+  # item granularity. ADDITIVE: the legacy `cards` clause above is UNTOUCHED.
+  def compose_block(%{"type" => "card"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.card_html(b)}
+  end
+
   def compose_block(%{"type" => "pipeline"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
   end
@@ -943,10 +953,18 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # token VAR (never px — D2). Each child renders through its own emitter via the
   # `render_blocks/2` compose→walk bridge (the same bridge columns/terminal use).
   #
-  # V1: span/order are CARRIED on children (persisted) but NOT rendered here —
-  # both surfaces render UNIFORM tracks so reader↔canvas parity stays EXACT (the
-  # canvas contentDOM can't easily style per-child grid-column). Rendering
-  # span/order lands in step 6 with the TUI/web breakpoint work.
+  # STEP-6: span/order are now RENDERED here as a present-only per-child style on
+  # the `.bp-section__cell` wrapper (`grid-column:span N;order:K`). A child with
+  # NEITHER key emits a bare `<div class="bp-section__cell">`, byte-identical to the
+  # pre-step-6 grid HTML (so a grid section with no cells still renders byte-for-byte
+  # unchanged — the frozen no-cells tripwire locks it). span/order are INT-validated
+  # (cell_layout_attr → span_int/order_int) so a malformed value falls safe (no style
+  # injection, D2: no px, only structural ints).
+  #
+  # DOCUMENTED FOLLOW-ON: the Go TUI (pdrender) + web (portable-doc.tsx) surfaces
+  # COLLAPSE grid→stack (a terminal/narrow surface has no grid) and render children
+  # in source order, ignoring tracks/span/order — a separate, filed follow-on, not
+  # this step.
   defp section_grid_html(b, layout, style) do
     tracks = grid_tracks(Map.get(layout, "tracks"))
     gap = gap_token_var(Map.get(layout, "gap"))
@@ -965,7 +983,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       Map.get(b, "blocks", [])
       |> List.wrap()
       |> Enum.map(fn child ->
-        ~s(<div class="bp-section__cell">) <> render_blocks([child], style) <> "</div>"
+        ~s(<div class="bp-section__cell"#{cell_layout_attr(child)}>) <>
+          render_blocks([child], style) <> "</div>"
       end)
       |> Enum.join("")
 
@@ -994,6 +1013,69 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp grid_tracks(_), do: 2
+
+  # STEP-6 per-child placement. Emits a PRESENT-ONLY ` style="…"` attr for a grid
+  # cell: `grid-column:span N` (span, positive int) and/or `order:K` (order, any
+  # int). A child carrying NEITHER → "" (the wrapper stays byte-identical to the
+  # pre-step-6 grid HTML). Parts are built order-then-span so the joined style is
+  # deterministically `grid-column:span N;order:K`. INT-VALIDATED (span_int/order_int)
+  # so a malformed value (a stringy `"2;background:url(x)"`, 0/neg span, non-int) is
+  # DROPPED — no style injection, D2: only structural ints, never a px literal.
+  defp cell_layout_attr(child) when is_map(child) do
+    parts =
+      []
+      |> put_order(Map.get(child, "order"))
+      |> put_span(Map.get(child, "span"))
+
+    case parts do
+      [] -> ""
+      ps -> ~s( style="#{Enum.join(ps, ";")}")
+    end
+  end
+
+  defp cell_layout_attr(_), do: ""
+
+  # span → `grid-column:span N` (positive int only; mirrors grid_tracks's guard but
+  # DROPS instead of defaulting). Prepends so span lands FIRST in the joined style.
+  defp put_span(parts, span) do
+    case span_int(span) do
+      nil -> parts
+      n -> ["grid-column:span #{n}" | parts]
+    end
+  end
+
+  # order → `order:K` (ANY int — 0 and negatives are legal CSS `order`).
+  defp put_order(parts, order) do
+    case order_int(order) do
+      nil -> parts
+      k -> ["order:#{k}" | parts]
+    end
+  end
+
+  # A positive int, or a stringy positive int (the WHOLE string must parse — a
+  # trailing `;background:url(x)` fails Integer.parse's "" remainder guard), else nil.
+  defp span_int(n) when is_integer(n) and n > 0, do: n
+
+  defp span_int(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} when i > 0 -> i
+      _ -> nil
+    end
+  end
+
+  defp span_int(_), do: nil
+
+  # Any int (0/negative legal), or a stringy int (whole-string), else nil.
+  defp order_int(n) when is_integer(n), do: n
+
+  defp order_int(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} -> i
+      _ -> nil
+    end
+  end
+
+  defp order_int(_), do: nil
 
   # gap TOKEN name → a CSS custom-property reference (never a px literal — D2).
   # The token vocabulary (none|sm|md|lg) is defined ONCE here + mirrored as the

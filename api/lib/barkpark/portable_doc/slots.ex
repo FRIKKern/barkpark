@@ -30,8 +30,10 @@ defmodule Barkpark.PortableDoc.Slots do
   reader / TUI / email bytes. The callout widget FLATTENS its single-paragraph body
   slot to INLINE — it never composes the body element as a block `<p>` (that would add
   a wrapper + a 12pt margin and break parity). "Render the body slot inline" is the
-  callout widget's own layout contract, distinct from a future `card` widget that
-  stacks its body slot as real blocks.
+  callout widget's own layout contract. The `card` widget (STEP 4) has its OWN
+  flattening contract: it flattens its `body` slot to the legacy `bp-card__d` PLAIN
+  text (marks dropped) — see `card_body_text/1` — so a card renders byte-identically
+  to one legacy `cards` grid item.
 
   ## Wire decision
 
@@ -41,19 +43,22 @@ defmodule Barkpark.PortableDoc.Slots do
   `content` and `slots.body[0].content` in sync (dual-write) if `slots` is ever
   persisted. That is precisely why callout is the correct REFERENCE slot: it proves
   the slot MODEL (declaration + typed container + node-view slot editing + validate
-  gate) WITHOUT forcing a cross-runtime wire change. A future `card` widget — whose
-  media/title/body/action slots have no legacy inline encoding — is where a genuinely
-  new persisted `slots` key + slot-aware `pdrender.go`/email renderers land; the model
-  shape is identical, callout is its arity-1 single-slot instance.
+  gate) WITHOUT forcing a cross-runtime wire change. The `card` widget (STEP 4) is the
+  first genuinely SLOTS-NATIVE type — its media/title/body/action slots have no legacy
+  inline encoding, so it persists a real `slots` key (no `content`/`slots` duality,
+  `normalize_widget/1` passes it through untouched). The HTML reader lands here
+  (`card_title_text/1` … `card_action/1` + `Components.card_html/1`); slot-aware
+  `pdrender.go`/email renderers are a filed follow-up (the card degrades to the
+  fallback renderer in the TUI/email until then).
 
   ## Layering
 
   Mirrors `Barkpark.PortableDoc.Constraints` style: no `Content`/DB dependency, plain
   block maps in, plain data / calm error strings out. Never raises on malformed input.
 
-  The D1 slot gate keys off `tier/1`, which delegates to the one canonical
+  The D1 slot gate keys off `tier/1`, which delegates FULLY to the one canonical
   classifier `Barkpark.PortableDoc.Tiers.tier_of/1` (with a fallback to `:element`
-  and a lone `card` anticipation — see `tier/1`).
+  for an unknown / type-less block).
   """
 
   @typedoc "The three structural tiers a block can occupy."
@@ -68,32 +73,37 @@ defmodule Barkpark.PortableDoc.Slots do
 
   @doc """
   The structural tier of a block, for the D1 slot gate: `:widget` / `:section` /
-  `:element`. Delegates to the one canonical classifier
-  `Barkpark.PortableDoc.Tiers.tier_of/1` (which knows all 45 renderable types);
-  an unknown / type-less block falls back to `:element` (it carries no slots and is
-  legal slot content, so legacy docs never gain a new error).
-
-  The lone exception is `"card"` — the anticipated card WIDGET from the cards-grid
-  split (migration step 4). It is not yet a renderable type, so it is absent from
-  `Tiers` (whose completeness invariant forbids a type with no `compose_block`
-  clause). It is special-cased here so the D1 gate already rejects a nested card the
-  day that widget lands; remove the special case once `card` is a real block type.
+  `:element`. Delegates FULLY to the one canonical classifier
+  `Barkpark.PortableDoc.Tiers.tier_of/1` (which knows every renderable type,
+  including `card` now that it is a real block); an unknown / type-less block falls
+  back to `:element` (it carries no slots and is legal slot content, so legacy docs
+  never gain a new error).
   """
   @spec tier(term()) :: tier()
-  def tier(block) do
-    case type_of(block) do
-      "card" -> :widget
-      _ -> Barkpark.PortableDoc.Tiers.tier_of(block) || :element
-    end
-  end
+  def tier(block), do: Barkpark.PortableDoc.Tiers.tier_of(block) || :element
 
   @doc """
-  The slot declarations for a widget block. Callout declares exactly one `body` slot
-  of element tier and arity `{:exactly, 1}`. A non-widget block declares no slots.
+  The slot declarations for a widget block.
+
+    * Callout declares exactly one `body` slot of element tier, arity `{:exactly, 1}`.
+    * Card (STEP 4) declares four element slots — `title` / `body` / `media` /
+      `action` — each arity `{:max, 1}` (`media` / `action` OPTIONAL, so an
+      absent slot is conforming). The D1 gate rejects a nested widget/section in
+      any of them the moment this declaration exists.
+
+  A non-widget block declares no slots.
   """
   @spec slot_decls(term()) :: [slot_decl()]
   def slot_decls(%{"type" => "callout"}),
     do: [%{name: "body", tier: :element, count: {:exactly, 1}}]
+
+  def slot_decls(%{"type" => "card"}),
+    do: [
+      %{name: "title", tier: :element, count: {:max, 1}},
+      %{name: "body", tier: :element, count: {:max, 1}},
+      %{name: "media", tier: :element, count: {:max, 1}},
+      %{name: "action", tier: :element, count: {:max, 1}}
+    ]
 
   def slot_decls(_), do: []
 
@@ -131,6 +141,80 @@ defmodule Barkpark.PortableDoc.Slots do
       _ -> []
     end
   end
+
+  # ── card widget accessors (STEP 4) ──────────────────────────────────────────
+  #
+  # Byte-identity accessors, the analogue of `callout_body_inline/1`. `Components.
+  # card_html/1` reads through these so a card renders byte-identically to one legacy
+  # `cards` grid item. The card FLATTENS: `title` → the heading element's plain
+  # `text`, `body` → the paragraph element's inline FLATTENED to plain text (marks
+  # dropped). `media` / `action` return the whole optional element (or nil).
+
+  @doc """
+  The title text of a card's `title` slot — the lone heading element's `text`, or
+  `""` when the slot is absent/empty. Byte-aligns to the legacy `bp-card__t` string.
+  """
+  @spec card_title_text(term()) :: String.t()
+  def card_title_text(block) do
+    case slot_elements(block, "title") do
+      [first | _] when is_map(first) -> first |> Map.get("text") |> to_text()
+      _ -> ""
+    end
+  end
+
+  @doc """
+  The body text of a card's `body` slot — the lone paragraph element's inline content
+  FLATTENED to CONCATENATED PLAIN TEXT (marks dropped), or `""` when absent/empty.
+  This is the card widget's layout contract (the callout FLATTENS its body to inline;
+  the card flattens its body to the legacy `bp-card__d` plain string), so escaping it
+  DIRECTLY (not through `compose_inline_children`) yields byte-identity with a legacy
+  cards item — inline marks authored in a card body round-trip in persistence but do
+  NOT render (a deliberate STEP-4 tradeoff, byte-compat over rich body).
+  """
+  @spec card_body_text(term()) :: String.t()
+  def card_body_text(block) do
+    case slot_elements(block, "body") do
+      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+      _ -> ""
+    end
+  end
+
+  @doc "The lone element of a card's OPTIONAL `media` slot (an image element), or nil."
+  @spec card_media(term()) :: map() | nil
+  def card_media(block), do: first_slot_element(block, "media")
+
+  @doc "The lone element of a card's OPTIONAL `action` slot (an action element), or nil."
+  @spec card_action(term()) :: map() | nil
+  def card_action(block), do: first_slot_element(block, "action")
+
+  defp first_slot_element(block, name) do
+    case slot_elements(block, name) do
+      [first | _] when is_map(first) -> first
+      _ -> nil
+    end
+  end
+
+  defp to_text(s) when is_binary(s), do: s
+  defp to_text(n) when is_integer(n), do: Integer.to_string(n)
+  defp to_text(_), do: ""
+
+  # Flatten a ProseMirror-style inline array to concatenated PLAIN text (marks
+  # dropped): a text / inline-code leaf contributes its `value`; a mark node
+  # (strong/em/link/…) contributes its children flattened; a bare string is itself.
+  defp flatten_inline_text(list) when is_list(list),
+    do: Enum.map_join(list, "", &flatten_inline_node/1)
+
+  defp flatten_inline_text(s) when is_binary(s), do: s
+  defp flatten_inline_text(_), do: ""
+
+  defp flatten_inline_node(%{"type" => "text"} = n), do: to_text(Map.get(n, "value", ""))
+  defp flatten_inline_node(%{"type" => "code"} = n), do: to_text(Map.get(n, "value", ""))
+
+  defp flatten_inline_node(%{"children" => children}) when is_list(children),
+    do: flatten_inline_text(children)
+
+  defp flatten_inline_node(s) when is_binary(s), do: s
+  defp flatten_inline_node(_), do: ""
 
   @doc """
   Normalize a widget block to its canonical dual form, keeping `content` and

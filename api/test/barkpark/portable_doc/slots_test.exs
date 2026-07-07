@@ -205,7 +205,58 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
-  describe "tier/1 classifier (minimal, until Tiers lands)" do
+  describe "card widget slots (STEP 4)" do
+    test "declares four element slots (title/body/media/action), each arity {:max,1}" do
+      decls = Slots.slot_decls(%{"type" => "card"})
+      assert Enum.map(decls, & &1.name) == ["title", "body", "media", "action"]
+      assert Enum.all?(decls, &(&1.tier == :element))
+      assert Enum.all?(decls, &(&1.count == {:max, 1}))
+    end
+
+    test "element slots (incl. present media/action) yield NO D1 errors" do
+      assert Slots.slot_type_errors(card()) == []
+
+      full =
+        card(%{
+          "slots" => %{
+            "title" => [%{"type" => "heading", "text" => "T"}],
+            "body" => [%{"type" => "paragraph", "content" => plain()}],
+            "media" => [%{"type" => "image", "src" => "/x.png", "alt" => "x"}],
+            "action" => [%{"type" => "action", "href" => "/go", "label" => "Go"}]
+          }
+        })
+
+      assert Slots.slot_type_errors(full) == []
+    end
+
+    test "a body slot holding a nested WIDGET (callout) yields the specific D1 error" do
+      nested = card(%{"slots" => %{"body" => [%{"type" => "callout", "content" => plain()}]}})
+      errors = Slots.slot_type_errors(nested)
+      refute errors == []
+      assert Enum.any?(errors, &(&1 =~ ~s(the "body" slot accepts only element blocks)))
+      assert Enum.any?(errors, &(&1 =~ "widget"))
+    end
+
+    test "a title slot holding a SECTION yields an error" do
+      nested =
+        card(%{
+          "slots" => %{
+            "title" => [%{"type" => "section", "children" => []}],
+            "body" => [%{"type" => "paragraph", "content" => plain()}]
+          }
+        })
+
+      assert Enum.any?(Slots.slot_type_errors(nested), &(&1 =~ "section"))
+    end
+
+    test "Constraints.validate/2 folds in the card D1 gate (clean card zero-error)" do
+      assert Constraints.validate([card()], []) == []
+      nested = card(%{"slots" => %{"body" => [%{"type" => "section", "children" => []}]}})
+      refute Constraints.validate([nested], []) == []
+    end
+  end
+
+  describe "tier/1 classifier (delegates FULLY to Tiers)" do
     test "callout is a widget, section is a section, paragraph is an element" do
       assert Slots.tier(%{"type" => "callout"}) == :widget
       assert Slots.tier(%{"type" => "card"}) == :widget
@@ -216,6 +267,30 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       assert Slots.tier(%{}) == :element
       assert Slots.tier("nope") == :element
     end
+
+    test "tier(card) resolves via the Tiers delegation (special-case removed)" do
+      # The old Slots.tier/1 "card" special case is GONE — `card` is now a real
+      # @widget type in Tiers, so tier/1 MUST agree with Tiers.tier_of/1 (proving the
+      # single-classifier delegation, not a lingering hard-coded branch).
+      assert Slots.tier(%{"type" => "card"}) == Barkpark.PortableDoc.Tiers.tier_of("card")
+    end
+  end
+
+  # A materialized-slot card fixture (STEP 4): a slots-native block, title + body
+  # (extra merges over the top, e.g. to swap the `slots` map for a D1-violation case).
+  defp card(extra \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "cw-1",
+        "type" => "card",
+        "tone" => "info",
+        "slots" => %{
+          "title" => [%{"type" => "heading", "text" => "Card"}],
+          "body" => [%{"type" => "paragraph", "content" => plain()}]
+        }
+      },
+      extra
+    )
   end
 
   defp plain, do: [%{"type" => "text", "value" => "plain"}]
