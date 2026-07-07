@@ -112,7 +112,10 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
         case Registry.trigger_self_update(bp) do
           {:ok, status, _body} when status in [202, 409] ->
             _ = Registry.mark_autoupdate_triggered(bp)
-            Logger.info("autoupdate: triggered #{bp.slug} (HTTP #{status}) → #{bp.update_latest_release}")
+
+            Logger.info(
+              "autoupdate: triggered #{bp.slug} (HTTP #{status}) → #{bp.update_latest_release}"
+            )
 
           {:ok, 503, _body} ->
             _ = Registry.pause_autoupdate(bp)
@@ -122,10 +125,14 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
             )
 
           {:ok, status, _body} ->
-            Logger.warning("autoupdate: #{bp.slug} trigger returned HTTP #{status} — will retry next tick")
+            Logger.warning(
+              "autoupdate: #{bp.slug} trigger returned HTTP #{status} — will retry next tick"
+            )
 
           {:error, reason} ->
-            Logger.warning("autoupdate: #{bp.slug} trigger failed (#{inspect(reason)}) — will retry next tick")
+            Logger.warning(
+              "autoupdate: #{bp.slug} trigger failed (#{inspect(reason)}) — will retry next tick"
+            )
         end
     end
   rescue

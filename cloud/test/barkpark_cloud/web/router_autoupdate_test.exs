@@ -34,7 +34,10 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
 
   defp barkpark_fixture(team, attrs \\ %{}) do
     n = System.unique_integer([:positive])
-    {:ok, bp} = Registry.register_barkpark(team, Enum.into(attrs, %{name: "BP #{n}", slug: "bp-#{n}"}))
+
+    {:ok, bp} =
+      Registry.register_barkpark(team, Enum.into(attrs, %{name: "BP #{n}", slug: "bp-#{n}"}))
+
     bp
   end
 
@@ -62,7 +65,12 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
       })
 
     assert conn.status == 200
-    assert json_body(conn)["autoupdate"] == %{"enabled" => false, "paused" => true, "pinned_release" => nil}
+
+    assert json_body(conn)["autoupdate"] == %{
+             "enabled" => false,
+             "paused" => true,
+             "pinned_release" => nil
+           }
 
     reloaded = Registry.get_barkpark(bp.id)
     assert reloaded.autoupdate_enabled == false
@@ -72,7 +80,10 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
 
   test "PATCH leaves absent keys unchanged" do
     {user, team} = user_with_team()
-    bp = barkpark_fixture(team) |> Ecto.Changeset.change(autoupdate_enabled: true) |> Repo.update!()
+
+    bp =
+      barkpark_fixture(team) |> Ecto.Changeset.change(autoupdate_enabled: true) |> Repo.update!()
+
     {:ok, token} = Accounts.create_user_session_token(user)
 
     conn = patch_autoupdate(bp.id, token, %{"pinned_release" => "v0.2.24"})
