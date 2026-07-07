@@ -1706,6 +1706,75 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/plugins/github/adopt/{id}": {
+      "post": {
+        "operationId": "github.adopt",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Adopt a src:github intake task into Barkpark (strip needs-human, flip ownership, post a backlink). Never auto-claims.",
+        "tags": [
+          "github"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/data/query/{dataset}/{type}": {
       "get": {
         "operationId": "doc.query",
@@ -8322,6 +8391,10 @@
     {
       "description": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers feature; now a first-party plugin built on the core portable-doc utilities.",
       "name": "bulldocs"
+    },
+    {
+      "description": "GitHub bridge — Barkpark (the guerrilla ledger) stays the single source of truth; this plugin mirrors tasks OUTBOUND to GitHub Issues (debounced, idempotent, App-authenticated), intakes only outsider-opened issues INBOUND as find-or-create tasks awaiting adoption, and projects a READ-ONLY Projects v2 dashboard. No field is ever bidirectional; claims/epochs/fencing/rail_rev never leave Barkpark. Off by default.",
+      "name": "github"
     },
     {
       "description": "ONIX 3.0 book metadata editor — Norwegian-publisher flavoured. Phase 4 skeleton (WI1) — book schema surface only; contributor / Thema / localizedText shapes are filled in by WI2 and codelist seeding lands in WI3.",
