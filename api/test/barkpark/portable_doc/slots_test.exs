@@ -256,6 +256,110 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
+  describe "stage widget slots (the pipeline-node twin)" do
+    test "declares three element slots — kind {:max,1}, title {:exactly,1}, detail {:max,1}" do
+      decls = Slots.slot_decls(%{"type" => "stage"})
+      assert Enum.map(decls, & &1.name) == ["kind", "title", "detail"]
+      assert Enum.all?(decls, &(&1.tier == :element))
+      assert Enum.find(decls, &(&1.name == "title")).count == {:exactly, 1}
+      assert Enum.find(decls, &(&1.name == "kind")).count == {:max, 1}
+      assert Enum.find(decls, &(&1.name == "detail")).count == {:max, 1}
+    end
+
+    test "stage_field_text/2 yields the SAME plain string for the scalar AND slot encodings" do
+      assert Slots.stage_field_text(stage_scalar(), "kind") == "source"
+      assert Slots.stage_field_text(stage_scalar(), "title") == "emit"
+      assert Slots.stage_field_text(stage_slotted(), "kind") == "source"
+      assert Slots.stage_field_text(stage_slotted(), "title") == "emit"
+
+      for name <- ["kind", "title", "detail"] do
+        assert Slots.stage_field_text(stage_scalar(), name) ==
+                 Slots.stage_field_text(stage_slotted(), name),
+               ~s(scalar and slot "#{name}" diverged)
+      end
+    end
+
+    test "stage_field_text/2 DROPS marks (plain text — a pasted <strong> must not survive)" do
+      marked =
+        stage_scalar(%{
+          "slots" => %{
+            "detail" => [
+              %{
+                "type" => "paragraph",
+                "content" => [
+                  %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold "}]},
+                  %{"type" => "text", "value" => "tail"}
+                ]
+              }
+            ]
+          }
+        })
+
+      assert Slots.stage_field_text(marked, "detail") == "bold tail"
+    end
+
+    test "an absent field is nil-safe (empty string)" do
+      assert Slots.stage_field_text(%{"type" => "stage"}, "kind") == ""
+      assert Slots.stage_field_text(%{"type" => "stage"}, "detail") == ""
+    end
+
+    test "scalar and slot encodings compose to byte-identical HTML (the reader proof)" do
+      assert Render.render_block(stage_scalar(), %{style: :article}) ==
+               Render.render_block(stage_slotted(), %{style: :article})
+    end
+
+    test "a stage renders the IDENTICAL pnode cell one legacy pipeline node emits (drift tripwire)" do
+      # A single-node pipeline wraps its ONE cell in bp-pipe-scroll/bp-pipe; a stage IS
+      # that inner cell. So stage_html == the pipeline's cell, byte for byte.
+      node = %{"kind" => "source", "title" => "emit", "detail" => "reads the queue", "source" => true}
+      pipeline = %{"type" => "pipeline", "nodes" => [node]}
+      stage = Map.merge(%{"type" => "stage"}, node)
+
+      cell = Compose.compose_block(stage, :article)["html"]
+
+      wrapped =
+        ~s(<div class="bp-pipe-scroll"><div class="bp-pipe">) <>
+          cell <> ~s(</div></div>)
+
+      assert Compose.compose_block(pipeline, :article)["html"] == wrapped,
+             "a stage cell no longer byte-matches one legacy pipeline node — reader drift"
+    end
+
+    test "element slots yield NO D1 errors; a nested widget/section yields the specific error" do
+      assert Slots.slot_type_errors(stage_scalar()) == []
+      assert Slots.slot_type_errors(stage_slotted()) == []
+
+      nested =
+        stage_scalar(%{"slots" => %{"detail" => [%{"type" => "callout", "content" => plain()}]}})
+
+      errors = Slots.slot_type_errors(nested)
+      assert Enum.any?(errors, &(&1 =~ ~s(the "detail" slot accepts only element blocks)))
+      assert Enum.any?(errors, &(&1 =~ "widget"))
+    end
+
+    test "normalize_widget/1 is idempotent + dual-writes scalars AND slots" do
+      once = Slots.normalize_widget(stage_scalar())
+      assert Slots.normalize_widget(once) == once
+      # Scalar-form and slot-form of the same stage normalize to the IDENTICAL map.
+      assert Slots.normalize_widget(stage_scalar()) == Slots.normalize_widget(stage_slotted())
+      # Dual-write: the scalar AND the slot entry are both present + in sync.
+      assert once["kind"] == "source"
+      assert once["slots"]["kind"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}]
+    end
+
+    test "normalize_widget/1 omits an EMPTY field from BOTH scalar and slots; keeps files/source chrome" do
+      normalized =
+        Slots.normalize_widget(%{"type" => "stage", "title" => "t", "detail" => "", "files" => "a.ex", "source" => true})
+
+      assert normalized["title"] == "t"
+      refute Map.has_key?(normalized, "detail")
+      refute Map.has_key?(normalized["slots"], "detail")
+      # files/source are chrome, NOT slots — pass through untouched.
+      assert normalized["files"] == "a.ex"
+      assert normalized["source"] == true
+    end
+  end
+
   describe "tier/1 classifier (delegates FULLY to Tiers)" do
     test "callout is a widget, section is a section, paragraph is an element" do
       assert Slots.tier(%{"type" => "callout"}) == :widget
@@ -294,4 +398,38 @@ defmodule Barkpark.PortableDoc.SlotsTest do
   end
 
   defp plain, do: [%{"type" => "text", "value" => "plain"}]
+
+  # A WIRE-canonical (scalar) stage fixture: three text fields + source chrome.
+  defp stage_scalar(extra \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "st-1",
+        "type" => "stage",
+        "kind" => "source",
+        "title" => "emit",
+        "detail" => "reads the queue",
+        "source" => true
+      },
+      extra
+    )
+  end
+
+  # The additive SLOTS encoding of the SAME stage (plain text runs, no marks).
+  defp stage_slotted(extra \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "st-1",
+        "type" => "stage",
+        "source" => true,
+        "slots" => %{
+          "kind" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}],
+          "title" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "emit"}]}],
+          "detail" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "reads the queue"}]}
+          ]
+        }
+      },
+      extra
+    )
+  end
 end

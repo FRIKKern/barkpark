@@ -479,6 +479,21 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
 .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
 
+/* ── stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin) ─
+ * UNLIKE the card (which emits the reader `bp-card*` to inherit the cascade), the stage
+ * does NOT emit the reader pipeline-cell class (it STAYS gate-forbidden to protect the
+ * legacy pipeline), so the cell look is hand-mirrored here from paper-surface.css's
+ * `.bp-pnode*` — keep BYTE-ALIGNED with those reader rules. Inputs are transparent so
+ * they read as the cell's own text, edited in place. */
+.bp-paper-editor-body .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-accent); }
+.bp-paper-editor-body .bp-canvas-stage__k, .bp-paper-editor-body .bp-canvas-stage__t, .bp-paper-editor-body .bp-canvas-stage__d, .bp-paper-editor-body .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
+.bp-paper-editor-body .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+.bp-paper-editor-body .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-editor-body .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+.bp-paper-editor-body .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-editor-body .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
+
 /* ── canvas section container node-view (loop-epic/editable-section) ──────────
  * `bp-canvas-section` is a THIN edit-only layout hook. PARITY rides the node-view's
  * INLINE styles hand-matching the reader (a flex-column PdBox, a bold title on its

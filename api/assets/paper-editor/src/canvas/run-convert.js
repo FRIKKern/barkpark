@@ -140,6 +140,26 @@ function isCanvasCardNode(nodeType) {
   return nodeType === CANVAS_CARD_NODE_NAME;
 }
 
+// The `stage` WIDGET — the editable per-node twin of ONE legacy `pipeline` node. UNLIKE
+// the card (a slots-native CONTENT node with an inline body), a stage is a CONTROL-ATOM:
+// five PLAIN scalars (kind/title/detail text + files/source chrome) ride node.attrs,
+// edited by native controls (stage-node.js) — no contentDOM. node.type is the NODE name
+// `bpStage`; the bpType stays "stage". KEEP LOCKSTEP with paper_canvas.ex
+// @canvas_widget_types and stage-node.js.
+const CANVAS_STAGE_TYPES = new Set(["stage"]);
+const CANVAS_STAGE_NODE_NAME = "bpStage";
+
+// True when a portable-doc BLOCK type is the stage widget (runToTiptap dispatch).
+function isCanvasStageType(t) {
+  return CANVAS_STAGE_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas stage node. runToOps/classifyNode read
+// node.type off a getJSON node (the NODE name `bpStage`, not the bpType "stage").
+function isCanvasStageNode(nodeType) {
+  return nodeType === CANVAS_STAGE_NODE_NAME;
+}
+
 // S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
 // (no PM-managed interior, like the divider) whose body text rides in an ATTR and
 // is edited by a NON-PM control (a <textarea> island; see code-node.js). The code
@@ -591,6 +611,14 @@ function blockToNode(block) {
       return cardBlockToNode(block, bpId, bpType);
     }
 
+    if (isCanvasStageType(bpType)) {
+      // The stage WIDGET — a control-atom whose five scalars ride node.attrs (kind/
+      // title/detail text + files/source chrome), edited by native controls. stage-
+      // node.js declares the bpStage node, so getJSON() round-trips the attrs. node.type
+      // is the NODE name (bpStage), not the bpType (stage).
+      return stageBlockToNode(block, bpId, bpType);
+    }
+
     if (isCanvasAttrAtomType(bpType)) {
       // A canvas ATTR-ATOM node (S3.3: code; S3.4: diagram): an atom node whose body
       // TEXT rides in an attr (a plain string, edited by a non-PM textarea) plus an
@@ -906,6 +934,11 @@ function childInteriorPatch(cls, prevChild, nextChild, cid) {
     // STEP 4: a card child of a grid section — diff body + chrome; emit the slots+tone
     // patch when it changed (the same detector/builder the top-level pass uses).
     return cardNodeChanged(prevChild, nextChild) ? cardNodeToPatch(nextChild) : null;
+  }
+  if (cls.isStage) {
+    // A stage child of a section (a pipeline flow) — diff the five scalars; emit the
+    // present-or-null patch when it changed (same detector/builder as the top-level pass).
+    return stageNodeChanged(prevChild, nextChild) ? stageNodeToPatch(nextChild) : null;
   }
   if (cls.isAttrAtom) {
     if (nextChild.type === "bpDiagram") {
@@ -1233,6 +1266,123 @@ function stableCardKey(node) {
     media: a.media == null ? null : a.media,
     action: a.action == null ? null : a.action,
     content: node.content || null,
+  });
+}
+
+// ── stage ⇄ canvas control-atom node (the pipeline-node twin) ────────────────
+//
+// The `stage` block ⇄ a bpStage node. WIRE-canonical (scalar) shape, byte-aligned with
+// one legacy pipeline `nodes[]` entry:
+//   { id, type:"stage", kind?, title?, detail?, files?, source? }
+// The three text fields ride via the slot API (slots OR scalar → the SAME plain string);
+// files/source are chrome scalars. Every field ATTR is PRESENT-ONLY (absence sentinel
+// null), so a stage that never entered the canvas round-trips byte-identical (zero ops).
+//   kind/title/detail — string, PRESENT-ONLY (empty/absent → no attr).
+//   files             — string chrome, PRESENT-ONLY.
+//   source            — chrome flag carried VERBATIM (true|"true"|1), PRESENT-ONLY, so a
+//                       hand-authored `source:"true"` round-trips byte-identical; the
+//                       accent + change key interpret it truthy.
+
+// The reader `truthy` (compose truthy/1): true | "true" | 1. Mirrors stage-node.js.
+function stageTruthy(v) {
+  return v === true || v === "true" || v === 1;
+}
+
+// stageFieldText(block, name) → the PLAIN string of a stage text slot. JS twin of
+// Slots.stage_field_text/2: the lone slot element's text-runs FLATTENED to plain text
+// (marks dropped) when a `slots` map carries it, ELSE the top-level scalar. A pasted
+// `<strong>` must NOT survive — plain text only, so byte-identity with the escaped-plain
+// reader holds.
+function stageFieldText(block, name) {
+  const slot = block && block.slots && block.slots[name];
+  if (Array.isArray(slot) && slot.length) {
+    return flattenInlineTextPlain((slot[0] && slot[0].content) || []);
+  }
+  const v = block && block[name];
+  return v == null ? "" : String(v);
+}
+
+// Flatten a ProseMirror-style inline array to concatenated PLAIN text (marks dropped):
+// a text/code leaf contributes its `value`; a mark node contributes its children
+// flattened; a bare string is itself. JS twin of Slots.flatten_inline_text/1.
+function flattenInlineTextPlain(list) {
+  if (typeof list === "string") return list;
+  if (!Array.isArray(list)) return "";
+  let out = "";
+  for (const n of list) {
+    if (typeof n === "string") out += n;
+    else if (n && (n.type === "text" || n.type === "code")) out += n.value == null ? "" : String(n.value);
+    else if (n && Array.isArray(n.children)) out += flattenInlineTextPlain(n.children);
+  }
+  return out;
+}
+
+// stageBlockToNode(block) → { type:"bpStage", attrs:{…} }. Every field PRESENT-ONLY:
+// an empty text field / absent chrome adds NO attr, so an untouched stage's getJSON
+// re-projection matches and emits zero ops. `source` is carried VERBATIM.
+function stageBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "stage" };
+  const kind = stageFieldText(block, "kind");
+  if (kind !== "") attrs.kind = kind;
+  const title = stageFieldText(block, "title");
+  if (title !== "") attrs.title = title;
+  const detail = stageFieldText(block, "detail");
+  if (detail !== "") attrs.detail = detail;
+  const files = block && block.files;
+  if (files != null && files !== "") attrs.files = String(files);
+  if (block && block.source != null) attrs.source = block.source; // VERBATIM present-only
+  return { type: CANVAS_STAGE_NODE_NAME, attrs };
+}
+
+// stageNodeToBlock(node, id) → { id, type:"stage", kind?, title?, detail?, files?,
+// source? }. The inverse of stageBlockToNode — PRESENT-ONLY (byte-fidelity), source
+// VERBATIM. This is the INSERT / reconstruct / docToBlocks path; a fresh-loaded stage
+// re-projects to the SAME present-only scalars ⇒ zero ops on open.
+function stageNodeToBlock(node, id) {
+  const a = (node && node.attrs) || {};
+  const block = { id, type: "stage" };
+  if (a.kind != null && a.kind !== "") block.kind = a.kind;
+  if (a.title != null && a.title !== "") block.title = a.title;
+  if (a.detail != null && a.detail !== "") block.detail = a.detail;
+  if (a.files != null && a.files !== "") block.files = a.files;
+  if (a.source != null) block.source = a.source; // VERBATIM
+  return block;
+}
+
+// The mutable-fields PATCH for a stage. patch-block is a SHALLOW Map.merge that CANNOT
+// delete a key, so — the card `tone:null` precedent generalized — emit the WHOLE
+// scalar field set EXPLICITLY: a cleared text field / unchecked source rides `null`
+// (renders as an absent/empty cell — reader parity), a set field rides its value.
+// source rides VERBATIM when truthy (a title-only edit preserves the original `"true"`),
+// else null. So a removal LANDS despite the shallow merge.
+function stageNodeToPatch(node) {
+  const a = (node && node.attrs) || {};
+  const norm = (v) => (v == null || v === "" ? null : v);
+  return {
+    kind: norm(a.kind),
+    title: norm(a.title),
+    detail: norm(a.detail),
+    files: norm(a.files),
+    source: stageTruthy(a.source) ? a.source : null,
+  };
+}
+
+// True when a stage node's fields changed — a canonical (absence-insensitive) compare
+// so a real edit flips it but a pure reorder (bpId only) or a null≡""≡absent flip does
+// not. Mirrors stage-node.js:stageKey (kept in lockstep by construction).
+function stageNodeChanged(prevNode, nextNode) {
+  return stableStageKey(prevNode) !== stableStageKey(nextNode);
+}
+
+function stableStageKey(node) {
+  const a = (node && node.attrs) || {};
+  const s = (v) => (v == null || v === "" ? "" : String(v));
+  return canonicalJSON({
+    kind: s(a.kind),
+    title: s(a.title),
+    detail: s(a.detail),
+    files: s(a.files),
+    source: stageTruthy(a.source),
   });
 }
 
@@ -2440,6 +2590,9 @@ function classifyNode(node) {
   // STEP 4: the card WIDGET (bpCard). A callout-shaped content node (inline body +
   // chrome attrs) but slots-native, so it gets its OWN kind flag + diff path.
   const isCard = isCanvasCardNode(node.type);
+  // The stage WIDGET (bpStage). A control-atom (five scalar attrs, no interior), so it
+  // gets its OWN kind flag + diff path — like bpAction but multi-field + slots-aware.
+  const isStage = isCanvasStageNode(node.type);
   const isAttrAtom = isCanvasAttrAtomNode(node.type);
   const isField = isCanvasFieldNode(node.type);
   // editable-action: a canvas control-atom node (bpAction). Its bpType resolves to
@@ -2471,7 +2624,9 @@ function classifyNode(node) {
           ? "figure"
           : isCard
             ? "card"
-            : node.type);
+            : isStage
+              ? "stage"
+              : node.type);
   return {
     node,
     bpType,
@@ -2479,6 +2634,7 @@ function classifyNode(node) {
     isAtom,
     isContent,
     isCard,
+    isStage,
     isAttrAtom,
     isField,
     isAction,
@@ -2840,6 +2996,21 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isStage) {
+      // The stage WIDGET: diff the five scalars; emit ONE patch-block carrying the
+      // present-or-null field set when anything changed. An UNCHANGED stage emits NO op
+      // (canonical compare). The explicit-null fields make a cleared text/source removal
+      // LAND (patch-block can't delete a key otherwise — the card `tone:null` precedent).
+      if (stageNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: stageNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isAttrAtom) {
       // Canvas attr-atom node (S3.3: code; S3.4: diagram): diff the body + optional
       // field; emit one patch-block carrying the body (always) + the optional field
@@ -3028,6 +3199,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasCardNode(type)) {
     return !cardNodeChanged(serverNode, liveNode);
   }
+  // Stage (widget, bpStage): the five scalars, canonically compared.
+  if (isCanvasStageNode(type)) {
+    return !stageNodeChanged(serverNode, liveNode);
+  }
   // Code / diagram (attr-atom): value+lang / source+caption.
   if (isCanvasAttrAtomNode(type)) {
     if (type === "bpDiagram") return !diagramNodeChanged(serverNode, liveNode);
@@ -3169,6 +3344,11 @@ function nextNodeToBlock(entry, taken) {
     // STEP 4 card WIDGET insert: reconstruct the full slots-native card block (body
     // slot + title/tone/media/action chrome) with the minted id, via the mapper.
     return cardNodeToBlock(node, entry.id);
+  }
+  if (entry.isStage) {
+    // The stage WIDGET insert: reconstruct the WIRE-canonical scalar stage block
+    // (kind/title/detail + files/source, present-only) with the minted id, via the mapper.
+    return stageNodeToBlock(node, entry.id);
   }
   if (entry.isAttrAtom) {
     // Canvas attr-atom insert (S3.3: code; S3.4: diagram): reconstruct the block (body

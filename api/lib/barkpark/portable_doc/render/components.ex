@@ -419,6 +419,32 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def pipeline_html(_), do: ""
 
   @doc """
+  Render a `stage` block (the editable per-node twin of ONE legacy `pipeline` node):
+  the IDENTICAL pnode cell a single `pipeline` node emits (`Components.pipeline_html/1`'s
+  per-node loop), so a stage carrying the same scalars renders byte-identically. The
+  three text fields `kind`/`title`/`detail` read through `Slots.stage_field_text/2`
+  (slots OR scalar — both yield the same PLAIN string); `files`/`source` are chrome
+  scalars (a `source`-truthy stage gets the `bp-pnode--src` accent, the SAME `truthy`
+  the pipeline uses). ADDITIVE: the legacy `pipeline` clause + `pipeline_html/1` are
+  UNTOUCHED — this is a SEPARATE emitter. A stage is ONE cell, so there is no
+  `bp-pipe-scroll`/`bp-pipe` wrapper (a `section` of stages composes the flow).
+  """
+  def stage_html(block) when is_map(block) do
+    k = block |> Slots.stage_field_text("kind") |> escape_html()
+    t = block |> Slots.stage_field_text("title") |> escape_html()
+    d = block |> Slots.stage_field_text("detail") |> escape_html()
+    f = block |> get("files") |> stringish() |> escape_html()
+    src = if truthy(get(block, "source")), do: " bp-pnode--src", else: ""
+    k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
+    t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
+    d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
+    f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
+    ~s|<div class="bp-pnode#{src}">#{k_html}#{t_html}#{d_html}#{f_html}</div>|
+  end
+
+  def stage_html(_), do: ""
+
+  @doc """
   Render a `notes` block: an annotated list — a short label chip beside a line
   of prose (an optional bold `lead` + `text`). The "what upgraded / why it
   matters" column that rides beside a demo. `items: [%{label, lead, text}]`.

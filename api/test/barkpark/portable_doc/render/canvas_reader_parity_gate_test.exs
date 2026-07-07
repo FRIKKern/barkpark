@@ -453,4 +453,40 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert String.contains?(src, "cells"),
            "section-node.js paint no longer reads the cells map"
   end
+
+  # ── §7 STAGE-WIDGET exemption (DESIGN 1 — the editable pipeline-node twin) ────
+  #
+  # The `stage` widget is EDITABLE (a bpStage control-atom node, stage-node.js), NOT a
+  # server-painted verbatim fleet block — so it is DELIBERATELY absent from
+  # painted_fleet (like `card`). It sidesteps the fleet gate by rendering into a
+  # `bp-canvas-stage` cell whose look is hand-mirrored by CSS, NOT by emitting the
+  # reader `bp-pnode` cell class. `bp-pnode` therefore STAYS in the §3 forbidden list
+  # (above) so the still-verbatim-carried legacy `pipeline` fleet keeps its gate
+  # protection. This test PINS that exemption: `stage` is not painted-fleet, and
+  # stage-node.js introduces NONE of the forbidden reader-cell literals.
+
+  test "§7 stage is EXEMPT from painted_fleet (editable widget, not a server-painted mirror)" do
+    labels = Enum.map(painted_fleet(), fn {l, _, _, _} -> l end)
+
+    refute "stage" in labels,
+           "stage must NOT be in painted_fleet — it is an EDITABLE widget (bpStage), not a verbatim-carried fleet block"
+
+    # The legacy pipeline stays painted-fleet + its cell class stays forbidden.
+    assert "pipeline" in labels, "legacy pipeline must remain a painted-fleet block"
+  end
+
+  test "§7 stage-node.js does NOT emit the reader pipeline-cell class (bp-pnode stays gate-forbidden)" do
+    src =
+      "../../../../assets/paper-editor/src/canvas/stage-node.js"
+      |> Path.expand(__DIR__)
+      |> File.read!()
+
+    assert byte_size(src) > 0, "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
+
+    refute String.contains?(src, "bp-pnode"),
+           "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
+
+    assert String.contains?(src, "bp-canvas-stage"),
+           "stage-node.js no longer uses the bp-canvas-stage chrome — the DESIGN-1 hook moved"
+  end
 end

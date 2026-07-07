@@ -155,7 +155,7 @@ check("section content-expression LOCKSTEP: forbids bpSection, allows the child 
   // The canvas child roster (node NAMES) that MUST be insertable in a section body.
   const roster = [
     "paragraph", "heading", "bulletList", "orderedList",
-    "divider", "callout", "bpCard", "bpCode", "bpDiagram", "bpField",
+    "divider", "callout", "bpCard", "bpStage", "bpCode", "bpDiagram", "bpField",
     "bpSheet", "bpEmbed", "bpFleet",
     "eyebrow", "byline", "ingress", "pullquote",
   ];

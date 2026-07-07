@@ -234,7 +234,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (Slots.card_body_text/1) so the reader byte-matches ONE legacy `cards` grid item —
   # the legacy `cards` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED.
   # MUST stay in lockstep with run-convert.js (bpCard / isCanvasCard*) and card-node.js.
-  @canvas_widget_types ~w(card)
+  #
+  # `stage` is the SECOND widget: the editable per-node twin of ONE legacy `pipeline`
+  # node (kind/title/detail text + files/source chrome), mounted as bpStage (an atom
+  # whose fields ride attrs, edited by native controls). Its reader `stage_html/1` emits
+  # the identical pnode cell, so it renders == one legacy pipeline node; the legacy
+  # `pipeline` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED. MUST
+  # stay in lockstep with run-convert.js (isCanvasStage*) and stage-node.js.
+  @canvas_widget_types ~w(card stage)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
