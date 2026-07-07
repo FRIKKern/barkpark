@@ -498,6 +498,30 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   line-height: 1.2;
 }
 
+/* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
+ * so it INHERITS the atom margin/overflow guard, :focus-visible ring, the
+ * .ProseMirror-selectednode wash, and the .bp-canvas-readonly-chip loading chip for
+ * free. Restore the reader figure margin (figure_html article margin:1.6rem 0),
+ * overriding the .bp-canvas-readonly 1em. The child paint hole is .bp-paper-surface
+ * (data-bp-fleet-body) — ALREADY the canonical paper-surface sink, so the injected
+ * child HTML styles itself identically to /papers with NO extra CSS (D8). Keep
+ * BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
+.bp-canvas-figure { margin: 1.6rem 0; }
+/* The editable caption matches the reader <figcaption> INLINE styles (compose.ex
+ * figure_html:924) — the reader figcaption has NO stylesheet rule (it is inline-
+ * styled), so reproduce those values + an input reset. The empty-caption resting-hide
+ * is JS (configControlHidden toggles the <figcaption> display), NOT CSS — same as the
+ * diagram caption. */
+.bp-canvas-figure-caption { margin: 0.8rem 0 0; }
+.bp-canvas-figure-caption-input {
+  display: block; width: 100%; box-sizing: border-box;
+  border: none; background: transparent; padding: 0; margin: 0;
+  color: var(--paper-ink-soft, #6a6a6a);
+  font-style: italic; font-size: 0.9rem;
+  font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+}
+.bp-canvas-figure-caption-input:focus { outline: none; }
+
 /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so they
  * do NOT trip the view↔edit parity byte-compare, which only locksteps rules that
  * exist on BOTH surfaces — the shared .bp-cols/.bp-cols__c grid pair). An empty

@@ -397,7 +397,7 @@ function selectAtomNode(editor, getPos) {
 // painted links/inputs/scrollers work natively) — this only ADDS the keyboard path
 // to the WHOLE-block affordance, and only when the wrapper itself is the key target
 // (an interior link/input owns its own keys).
-function wireAtomAccessibility(dom, { block, chipText, editor, getPos }) {
+export function wireAtomAccessibility(dom, { block, chipText, editor, getPos }) {
   dom.setAttribute("tabindex", "0");
   dom.setAttribute("role", "group");
   dom.setAttribute("aria-label", atomAriaLabel(chipText, block));

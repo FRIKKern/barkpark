@@ -3244,6 +3244,25 @@
       font-weight: 500;
       line-height: 1.2;
     }
+    /* editable-figure: the bpFigure atom wears "bp-canvas-readonly bp-canvas-figure",
+       inheriting the atom margin/overflow guard, focus ring, selectednode wash, and
+       loading chip. Restore the reader figure margin (figure_html article
+       margin:1.6rem 0), overriding .bp-canvas-readonly's 1em. The child paint hole is
+       .bp-paper-surface (data-bp-fleet-body), the canonical paper-surface sink, so the
+       injected child HTML styles itself identically to /papers with NO extra CSS (D8).
+       The editable caption reproduces the reader <figcaption> INLINE styles (compose.ex
+       figure_html:924) + an input reset; the empty-caption resting-hide is JS, not CSS.
+       MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-figure { margin: 1.6rem 0; }
+    .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
+    .bp-canvas-figure-caption-input {
+      display: block; width: 100%; box-sizing: border-box;
+      border: none; background: transparent; padding: 0; margin: 0;
+      color: var(--paper-ink-soft, #6a6a6a);
+      font-style: italic; font-size: 0.9rem;
+      font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
+    }
+    .bp-canvas-figure-caption-input:focus { outline: none; }
     /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so
        they do NOT trip the view↔edit parity byte-compare). An empty column gets a
        min-height + a subtle dashed outline so it is visible and clickable; the

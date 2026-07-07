@@ -268,6 +268,33 @@ const CANVAS_FLEET_TYPES = new Set([
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
 
+// editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED
+// read-only-CHILD + editable-CAPTION ATOM (`bpFigure`; figure-node.js). A figure
+// wraps ONE child block + a caption. Structurally it is a HYBRID of the fleet atom
+// and the diagram attr-atom: the CHILD rides VERBATIM/immutable on `bpChild` and is
+// PAINTED read-only via the SAME `bp:block-html` hook fleet uses (child-only HTML,
+// keyed by the figure id), while the CAPTION is the SOLE editable datum (a non-PM
+// input island, exactly like the diagram caption) that emits patch-block{caption}.
+// Carrying ONLY the child (NOT the whole figure on a bpBlock) keeps the editable
+// caption the single source of truth, so echo-equality compares child-only.
+//
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_figure_types, figure-node.js
+// BP_FIGURE_NODE_NAME, and shared/paper.ex @figure_render_types (the server
+// child-paint push).
+const CANVAS_FIGURE_TYPES = new Set(["figure"]);
+const CANVAS_FIGURE_NODE_NAME = "bpFigure";
+
+// True when a portable-doc BLOCK type is the figure (runToTiptap dispatch).
+function isCanvasFigureType(t) {
+  return CANVAS_FIGURE_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas figure atom ("bpFigure"). runToOps /
+// classifyNode read node.type off a getJSON node (the NODE name, not the bpType).
+function isCanvasFigureNode(nodeType) {
+  return nodeType === CANVAS_FIGURE_NODE_NAME;
+}
+
 // S10: the CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes —
 // the FIRST canvas node whose interior is a NESTED BLOCK TREE (child blocks with their
 // own type/content), not inline runs (callout) nor a verbatim opaque carry (sheet/
@@ -516,6 +543,15 @@ export function runToTiptap(blocks) {
       // HTML (bp:block-html) rather than a client-computed chip. NOTE the node.type
       // is the NODE name (bpFleet), not the bpType.
       return fleetBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasFigureType(bpType)) {
+      // A canvas FIGURE atom (editable-figure: figure): a SERVER-PAINTED
+      // read-only-child + editable-caption atom. The CHILD rides VERBATIM
+      // (deep-cloned) on `bpChild` and paints read-only via the fleet hook; the
+      // CAPTION is the sole editable attr (patch-block{caption}). NOTE the node.type
+      // is the NODE name (bpFigure), not the bpType (figure).
+      return figureBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasContainerType(bpType)) {
@@ -1288,6 +1324,84 @@ function fleetNodeToBlock(node, id) {
   return { id, type: attrs.bpType || "tasks" };
 }
 
+// ── figure ⇄ canvas server-painted-child + editable-caption atom ─────────────
+//
+// The `figure` block { id, type:"figure", caption?:<string>, child:<BLOCK> } ⇄ the
+// TipTap `bpFigure` ATOM (figure-node.js). UNLIKE the fleet/sheet read-only atoms
+// (whole block verbatim on bpBlock, ZERO ops) OR the diagram attr-atom (a fully
+// self-describing source+caption), a figure is a HYBRID: the CHILD rides VERBATIM/
+// immutable on `bpChild` (deep-cloned, no shared ref) AND is server-painted
+// read-only, while the CAPTION is the SOLE editable datum and emits a
+// patch-block{caption}. Carrying ONLY the child (NOT the whole figure) keeps the
+// editable caption the single source of truth, so echo-equality compares child-only
+// (no stale-caption-in-a-carried-block misdetect). node.type is `bpFigure` (the NODE
+// name), NOT `figure` (the bpType).
+
+// figureBlockToNode(block) → { type:"bpFigure", attrs:{ bpId, bpType, caption, bpChild } }
+//
+// caption → the `caption` attr ONLY when non-empty (byte-fidelity: ""/absent → null,
+// mirrors the diagram caption). bpChild → the deep-cloned child block (VERBATIM), or
+// null when the figure carries no child.
+function figureBlockToNode(block, bpId, bpType) {
+  const attrs = {
+    bpId,
+    bpType,
+    // "" → null so a caption-less figure round-trips with no caption key.
+    caption:
+      block && block.caption != null && block.caption !== ""
+        ? block.caption
+        : null,
+    bpChild: block && block.child != null ? deepClone(block.child) : null,
+  };
+  return { type: CANVAS_FIGURE_NODE_NAME, attrs };
+}
+
+// figureNodeToBlock(node, id) → { id, type:"figure", child, ...(caption?) }
+//
+// Reconstruct the portable-doc figure block from a bpFigure NODE (the inverse of
+// figureBlockToNode). `child` is the deep-cloned bpChild VERBATIM (so callers never
+// share a ref with the node attr); `caption` is threaded ONLY when non-empty so an
+// absent caption reconstructs byte-identically (no stray caption:"").
+function figureNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "figure",
+    child: attrs.bpChild != null ? deepClone(attrs.bpChild) : null,
+  };
+  if (attrs.caption != null && attrs.caption !== "") block.caption = attrs.caption;
+  return block;
+}
+
+// The mutable-fields PATCH for a figure block. The caption is the WHOLE editable
+// interior; the child is immutable in v1. patch.ex's patch-block is a SHALLOW
+// Map.merge, so emitting ONLY { caption } leaves the stored `child` untouched. The
+// value is null when cleared/absent (compose/walk treat ""/absent the same, and the
+// merge stores null → render-equivalent to a caption-less figure). Extend to
+// { caption, child } only if a future editable child lands (harmless additive).
+function figureNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return { caption: attrs.caption == null ? null : attrs.caption };
+}
+
+// True when a figure node's caption changed. Canonical (key-order-insensitive)
+// compare of the diff-relevant fields — caption + child — so a caption edit flips it
+// but a pure reorder (bpId/bpType only) does not. The child rides the key so a future
+// editable child would be detected too; today it is immutable, so only the caption
+// ever moves. An absent caption normalizes to null so a caption-less node and one
+// carrying caption:"" / caption:null compare EQUAL (they persist render-identically).
+function figureNodeChanged(prevNode, nextNode) {
+  return stableFigureKey(prevNode) !== stableFigureKey(nextNode);
+}
+
+function stableFigureKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    caption: a.caption == null || a.caption === "" ? null : a.caption,
+    child: a.bpChild != null ? a.bpChild : null,
+  });
+}
+
 // ── columns ⇄ canvas container node (S10) ────────────────────────────────────
 //
 // The `columns` block { id, type:"columns", columns:[ [childBlock,…], [childBlock,…] ] }
@@ -1556,6 +1670,9 @@ function classifyNode(node) {
   const isField = isCanvasFieldNode(node.type);
   const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
   const isFleet = isCanvasFleetNode(node.type);
+  // editable-figure: a canvas figure atom (bpFigure). Its bpType resolves to "figure"
+  // off node.attrs.bpType (the isFigure fallback below).
+  const isFigure = isCanvasFigureNode(node.type);
   // S10: a canvas container node (bpColumns). Its bpType resolves to "columns" via
   // CANVAS_CONTAINER_BP_TYPE_BY_NODE below.
   const isContainer = isCanvasContainerNode(node.type);
@@ -1569,7 +1686,7 @@ function classifyNode(node) {
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_CONTAINER_BP_TYPE_BY_NODE[node.type] ||
-    (isField ? "field-string" : isFleet ? "tasks" : node.type);
+    (isField ? "field-string" : isFleet ? "tasks" : isFigure ? "figure" : node.type);
   return {
     node,
     bpType,
@@ -1580,6 +1697,7 @@ function classifyNode(node) {
     isField,
     isReadOnlyAtom,
     isFleet,
+    isFigure,
     isContainer,
     isRole,
     isTable,
@@ -1829,6 +1947,21 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isFigure) {
+      // Canvas figure atom (editable-figure): the caption is the WHOLE editable
+      // interior (the child is immutable in v1). Emit ONE patch-block{caption} when
+      // the caption changed; the shallow patch-block merge leaves `child` untouched.
+      // An UNEDITED figure emits NO op (canonical compare on caption + child).
+      if (figureNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: figureNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isContent) {
       // Canvas content node (callout): diff body + chrome; emit one patch-block
       // carrying ONLY the mutable fields when anything changed.
@@ -2032,6 +2165,12 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasFleetNode(type)) {
     return carriedBlockEqual(serverNode, liveNode);
   }
+  // Figure (editable-figure: bpFigure): caption + child (child immutable in v1). The
+  // own-echo of a caption edit — and the id-wildcard for a just-minted figure — is
+  // recognized by the SAME stable-key compare runToOps uses.
+  if (isCanvasFigureNode(type)) {
+    return !figureNodeChanged(serverNode, liveNode);
+  }
   // Opaque carry-through: the whole carried block, id excluded.
   if (type === "bpOpaque") {
     return carriedBlockEqual(serverNode, liveNode);
@@ -2115,6 +2254,13 @@ function nextNodeToBlock(entry) {
     // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
     // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
     return fleetNodeToBlock(node, entry.id);
+  }
+  if (entry.isFigure) {
+    // Figure insert/move (editable-figure): reconstruct the figure block (its
+    // verbatim child + optional caption) with the minted id. The caption is OMITTED
+    // when absent/empty (mirrors the persist default: a caption-less figure has no
+    // caption key); the child rides VERBATIM.
+    return figureNodeToBlock(node, entry.id);
   }
   if (entry.isContainer) {
     // Canvas container insert (S10: columns): reconstruct the full columns block (its

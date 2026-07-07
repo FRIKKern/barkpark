@@ -173,6 +173,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # Keep aligned with run-convert.js:CANVAS_FLEET_TYPES.
   @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
+  # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet
+  # block (keep it OUT of @fleet_render_types so it never drags through
+  # task_previews/apply_preview OR renders the WHOLE figure). Instead the canvas
+  # bpFigure atom paints ONLY the figure's CHILD, via the SAME `bp:block-html` hook,
+  # keyed by the FIGURE id — so `push_block_renders` emits a child-only render for
+  # every top-level figure.
+  #
+  # Keep aligned with run-convert.js:CANVAS_FIGURE_TYPES and
+  # paper_canvas.ex:@canvas_figure_types.
+  @figure_render_types ~w(figure)
+
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
   # block, render the reader's OWN HTML (`Render.render_block(block, %{style:
@@ -190,12 +201,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       blocks = paper_top_level_blocks(socket)
       previews = Map.new(task_previews(blocks, socket), &{&1["block_id"], &1})
 
-      renders =
+      fleet_renders =
         blocks
         |> Enum.filter(&fleet_block?/1)
         |> Enum.map(fn block ->
           %{"block_id" => Map.get(block, "id"), "html" => fleet_block_html(block, previews)}
         end)
+
+      # editable-figure: the CHILD-only render for every top-level figure, on the SAME
+      # bp:block-html channel, keyed by the FIGURE id (so the bpFigure atom's paint
+      # hole finds it with ZERO hook change). Concatenated with the fleet renders.
+      figure_renders =
+        blocks
+        |> Enum.filter(&figure_block?/1)
+        |> Enum.map(&figure_render/1)
+
+      renders =
+        (fleet_renders ++ figure_renders)
         |> Enum.reject(&(&1["block_id"] in [nil, ""]))
 
       push_event(socket, "bp:block-html", %{renders: renders})
@@ -208,6 +230,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     do: Map.get(block, "type") in @fleet_render_types
 
   defp fleet_block?(_), do: false
+
+  defp figure_block?(block) when is_map(block),
+    do: Map.get(block, "type") in @figure_render_types
+
+  defp figure_block?(_), do: false
+
+  @doc false
+  # editable-figure — the CHILD-only reader render for one figure block, keyed by the
+  # FIGURE id. `Render.render_block(child, %{style: :article})` is BYTE-IDENTICAL to
+  # figure_html's `child_html` (both compose_block(child,:article) |> Walk.render_body
+  # at the article palette width; render_block additionally resolves
+  # ref-title/code-label/redacts — no-ops on the common image/code children). A
+  # non-map child (or a figure carrying no child) paints "" (an honest chip), matching
+  # figure_html's `_ -> ""` branch — never the WHOLE figure (no <figcaption> leaks in,
+  # which would double the editable caption).
+  def figure_render(block) do
+    html =
+      case Map.get(block, "child") do
+        child when is_map(child) ->
+          case Render.render_block(child, %{style: :article}) do
+            html when is_binary(html) -> html
+            _ -> ""
+          end
+
+        _ ->
+          ""
+      end
+
+    %{"block_id" => Map.get(block, "id"), "html" => html}
+  end
 
   # Render one fleet block's reader HTML. A query-carrying task block is resolved
   # against its session-scoped preview (rows merged onto a COPY); every other fleet

@@ -100,6 +100,7 @@ import { Field } from "./field-node.js";
 // embed reference) with contentEditable false, are selectable so Backspace deletes the
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
+import { Figure } from "./figure-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
 // canvas PROSE nodes (NO node-view — chrome-free, the reader emits one styled
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
@@ -617,6 +618,16 @@ class BpPaperCanvas extends HTMLElement {
         // ZERO value/content ops, participates only in structural ops. bpFleet parses
         // ONLY its own <div data-bp-fleet='true'>.
         Fleet,
+        // editable-figure: the SERVER-PAINTED read-only-child + editable-caption ATOM
+        // (`bpFigure`). Registers the single node so runToTiptap's { type:"bpFigure",
+        // attrs:{caption, bpChild} } mounts as a reader <figure> whose CHILD paint hole
+        // (data-bp-fleet-id/body, reusing the shipped bp:block-html hook — ZERO hook
+        // change) is filled server-side with the child's OWN reader HTML, and whose
+        // <figcaption> input is the SOLE edit affordance (patch-block{caption}).
+        // Structurally an atom (holds no PM children → cannot nest another canvas node
+        // by construction). Parses ONLY its own <figure data-bp-type='figure'>. See
+        // ./figure-node.js.
+        Figure,
         // Article-chrome ROLE prose nodes (eyebrow / byline / ingress / pullquote).
         // Registers the four node types so runToTiptap's { type:"eyebrow"|… } nodes
         // mount as styled prose (a `<p class="bp-role-*">` matching the reader) and
