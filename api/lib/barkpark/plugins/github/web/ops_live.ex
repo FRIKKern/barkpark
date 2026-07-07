@@ -47,10 +47,17 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
 
   # The ONLY control on the page: clear one open quarantine row, then re-read so
   # the resolved row drops out of `open`. `Conflicts.resolve/1` is idempotent and
-  # side-table only — a missing/already-resolved id is a harmless no-op.
+  # side-table only — a missing/already-resolved id is a harmless no-op. The id
+  # is parsed defensively: our own buttons always render an integer, but a
+  # malformed/stale phx-value must never crash the LV process (parse failure is a
+  # silent no-op re-read, not a raise).
   @impl true
   def handle_event("resolve", %{"id" => id}, socket) do
-    _ = Conflicts.resolve(String.to_integer(id))
+    case parse_id(id) do
+      {:ok, n} -> _ = Conflicts.resolve(n)
+      :error -> :noop
+    end
+
     {:noreply, assign(socket, :health, Health.snapshot())}
   end
 
@@ -178,6 +185,19 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   # ---------------------------------------------------------------------------
 
   defp conflict_kinds, do: @conflict_kinds
+
+  # phx-value ids arrive as strings. Accept only a clean integer; anything else
+  # (garbage, empty, a float, trailing junk) is rejected so the handler no-ops
+  # instead of raising.
+  defp parse_id(id) when is_binary(id) do
+    case Integer.parse(id) do
+      {n, ""} -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp parse_id(id) when is_integer(id), do: {:ok, id}
+  defp parse_id(_), do: :error
 
   # Group the (already newest-first, capped) open rows by kind for display, in a
   # stable kind order.
