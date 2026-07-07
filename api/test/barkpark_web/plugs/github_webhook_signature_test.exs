@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignatureTest do
   import Plug.Conn
 
   alias BarkparkWeb.Plugs.GithubWebhookSignature
-  alias Barkpark.Plugins.Github.Signature
+  alias Barkpark.Plugins.Github.{Settings, Signature}
 
   @secret "test-github-webhook-secret-123"
   @body ~s({"action":"opened","issue":{"number":42},"sender":{"type":"User"}})
@@ -20,9 +20,15 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignatureTest do
 
   setup do
     prior = Application.get_env(:barkpark, @config_key)
-    Application.put_env(:barkpark, @config_key, webhook_secret: @secret)
+    # TTL 0 forces the memoized secret reader to re-resolve on every call so a
+    # per-test config change (incl. the dark-plugin case) is never masked by a
+    # stale cache entry; also clear the persistent_term between cases.
+    Application.put_env(:barkpark, @config_key, webhook_secret: @secret, webhook_secret_ttl_ms: 0)
+    Settings.reset_webhook_secret_cache()
 
     on_exit(fn ->
+      Settings.reset_webhook_secret_cache()
+
       if prior,
         do: Application.put_env(:barkpark, @config_key, prior),
         else: Application.delete_env(:barkpark, @config_key)

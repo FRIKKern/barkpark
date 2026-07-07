@@ -178,6 +178,84 @@ defmodule Barkpark.Plugins.Github.SettingsTest do
     end
   end
 
+  describe "webhook_secret_cached/0" do
+    setup do
+      GH.reset_webhook_secret_cache()
+      on_exit(&GH.reset_webhook_secret_cache/0)
+      :ok
+    end
+
+    # A resolver that tracks how many times it was invoked, so we can prove the
+    # DB (get_credentials) is touched at most once per TTL.
+    defp counting_resolver(secret) do
+      {:ok, agent} = start_supervised({Agent, fn -> 0 end})
+      resolver = fn ->
+        Agent.update(agent, &(&1 + 1))
+        %{webhook_secret: secret}
+      end
+
+      {resolver, fn -> Agent.get(agent, & &1) end}
+    end
+
+    test "memoizes within the TTL — many reads, one resolve" do
+      put_env(webhook_secret_ttl_ms: 5_000)
+      {resolver, count} = counting_resolver("cached-secret")
+
+      assert GH.webhook_secret_cached(resolver) == "cached-secret"
+      assert GH.webhook_secret_cached(resolver) == "cached-secret"
+      assert GH.webhook_secret_cached(resolver) == "cached-secret"
+
+      assert count.() == 1
+    end
+
+    test "TTL 0 re-resolves on every read (test determinism)" do
+      put_env(webhook_secret_ttl_ms: 0)
+      {resolver, count} = counting_resolver("s")
+
+      GH.webhook_secret_cached(resolver)
+      GH.webhook_secret_cached(resolver)
+
+      assert count.() == 2
+    end
+
+    test "caches a nil secret (dark plugin) without re-touching within the TTL" do
+      put_env(webhook_secret_ttl_ms: 5_000)
+      {resolver, count} = counting_resolver(nil)
+
+      assert GH.webhook_secret_cached(resolver) == nil
+      assert GH.webhook_secret_cached(resolver) == nil
+
+      assert count.() == 1
+    end
+
+    test "a blank secret resolves to nil (fail-closed)" do
+      put_env(webhook_secret_ttl_ms: 0)
+      {resolver, _count} = counting_resolver("   ")
+
+      assert GH.webhook_secret_cached(resolver) == nil
+    end
+
+    test "expiry re-resolves and picks up a rotated secret" do
+      put_env(webhook_secret_ttl_ms: 0)
+      {:ok, agent} = start_supervised({Agent, fn -> "first" end})
+      resolver = fn -> %{webhook_secret: Agent.get(agent, & &1)} end
+
+      assert GH.webhook_secret_cached(resolver) == "first"
+      Agent.update(agent, fn _ -> "rotated" end)
+      assert GH.webhook_secret_cached(resolver) == "rotated"
+    end
+
+    test "the arity-0 default resolves the real webhook_secret from config" do
+      put_env(webhook_secret: "real-secret", webhook_secret_ttl_ms: 0)
+      assert GH.webhook_secret_cached() == "real-secret"
+    end
+
+    test "the arity-0 default returns nil when unconfigured (fail-closed dark plugin)" do
+      put_env(webhook_secret_ttl_ms: 0)
+      assert GH.webhook_secret_cached() == nil
+    end
+  end
+
   describe "required_keys/0" do
     test "reuses Github.required_creds/0 (single source of truth)" do
       expected = Enum.map(Barkpark.Plugins.Github.required_creds(), &String.to_existing_atom/1)

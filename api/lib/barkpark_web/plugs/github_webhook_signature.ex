@@ -13,7 +13,11 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignature do
     * `conn.assigns[:raw_body]` — the exact bytes GitHub signed, teed in by
       `BarkparkWeb.Plugs.CacheBodyReader` at the endpoint's parse step;
     * the `x-hub-signature-256` request header;
-    * the `:webhook_secret` from `Barkpark.Plugins.Github.Settings.get_credentials/0`.
+    * the `:webhook_secret` from
+      `Barkpark.Plugins.Github.Settings.webhook_secret_cached/0` — a short-TTL
+      memoized reader, so a burst of unauthenticated probes carrying a bogus
+      signature can no longer force a DB read + audit row on every request
+      before the HMAC is checked (it touches the DB at most once per TTL).
 
   It delegates the comparison to the pure, constant-time
   `Barkpark.Plugins.Github.Signature.verify/3`. On `:ok` the request passes
@@ -37,7 +41,7 @@ defmodule BarkparkWeb.Plugs.GithubWebhookSignature do
   def call(conn, _opts) do
     with raw_body when is_binary(raw_body) <- conn.assigns[:raw_body],
          [header | _] <- get_req_header(conn, @header),
-         secret when is_binary(secret) <- Settings.get_credentials()[:webhook_secret],
+         secret when is_binary(secret) <- Settings.webhook_secret_cached(),
          :ok <- Signature.verify(raw_body, header, secret) do
       conn
     else
