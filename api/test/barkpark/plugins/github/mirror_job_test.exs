@@ -16,7 +16,7 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
   use Oban.Testing, repo: Barkpark.Repo
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
-  alias Barkpark.Plugins.Github.{Auth, Link, MirrorJob}
+  alias Barkpark.Plugins.Github.{Auth, Conflicts, Link, MirrorJob}
 
   @dataset "production"
   @app_id "123456"
@@ -112,6 +112,17 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
     {Jason.decode!(body), conn}
   end
 
+  # The pre-PATCH drift GET (charter D7). Every update-path reconcile reads the
+  # issue's current state before it PATCHes, so an update test must stub it.
+  # Defaults to a minimal open issue; pass a body to simulate a hand-edited issue.
+  defp stub_get(bypass, num, body \\ nil) do
+    resp = body || %{"number" => num, "state" => "open", "title" => "gh-#{num}"}
+
+    Bypass.stub(bypass, "GET", "/repos/#{@repo}/issues/#{num}", fn conn ->
+      Plug.Conn.resp(conn, 200, Jason.encode!(resp))
+    end)
+  end
+
   # Fast client opts so the 5xx-retry path doesn't sleep the whole suite.
   defp fast, do: [max_retries: 1, retry_delay_ms: 5]
 
@@ -178,6 +189,10 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
         Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 55, "state" => "open"}))
       end)
+
+      # The born-closed follow-up PATCH runs through the update path, so it reads
+      # the freshly created (open) issue first.
+      stub_get(bypass, 55)
 
       {:ok, body_ref} = Agent.start_link(fn -> nil end)
 
@@ -297,6 +312,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       _task = mk_task!(id, %{"title" => "Ongoing", "lifecycle_status" => "in_progress"}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 7, state: "synced"}, scope)
 
+      stub_get(bypass, 7)
+
       {:ok, body_ref} = Agent.start_link(fn -> nil end)
 
       Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/7", fn conn ->
@@ -316,6 +333,11 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       gh = Link.get(reload(id, scope))
       assert gh["issue"] == 7
       assert is_binary(gh["synced_rev"])
+      # First update with no prior fingerprint stamps one for next-reconcile drift
+      # detection (charter D7 — rolls forward without backfill).
+      assert is_integer(gh["synced_fingerprint"])
+      # No prior fingerprint existed, so this pass records nothing.
+      assert Conflicts.list(kind: "out_of_band_edit") == []
     end
   end
 
@@ -325,6 +347,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       id = uniq("gh")
       _task = mk_task!(id, %{"lifecycle_status" => "done"}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 11, state: "synced"}, scope)
+
+      stub_get(bypass, 11)
 
       {:ok, body_ref} = Agent.start_link(fn -> nil end)
 
@@ -346,6 +370,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       id = uniq("gh")
       _task = mk_task!(id, %{"lifecycle_status" => "cancelled"}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 12, state: "synced"}, scope)
+
+      stub_get(bypass, 12)
 
       {:ok, body_ref} = Agent.start_link(fn -> nil end)
 
@@ -377,6 +403,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       _task = mk_task!(id, %{}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 8, state: "synced"}, scope)
 
+      stub_get(bypass, 8)
+
       Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/8", fn conn ->
         Plug.Conn.resp(conn, 422, ~s({"message":"Validation Failed"}))
       end)
@@ -389,6 +417,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       id = uniq("gh")
       _task = mk_task!(id, %{}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 9, state: "synced"}, scope)
+
+      stub_get(bypass, 9)
 
       Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/9", fn conn ->
         conn
@@ -404,6 +434,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       id = uniq("gh")
       _task = mk_task!(id, %{}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 10, state: "synced"}, scope)
+
+      stub_get(bypass, 10)
 
       Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/10", fn conn ->
         Plug.Conn.resp(conn, 503, "{}")
@@ -422,6 +454,9 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       _task = mk_task!(id, %{}, scope)
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 13, state: "synced"}, scope)
 
+      # The drift GET succeeds; the PATCH is what discovers the issue is gone.
+      stub_get(bypass, 13)
+
       Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/13", fn conn ->
         Plug.Conn.resp(conn, 404, ~s({"message":"Not Found"}))
       end)
@@ -432,6 +467,159 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert gh["state"] == "detached"
       # The issue number is preserved (merge), just marked detached.
       assert gh["issue"] == 13
+
+      # The detach is now VISIBLE (D7) — a quarantine row was recorded.
+      assert [conflict] = Conflicts.list(kind: "detached")
+      assert conflict.repo == @repo
+      assert conflict.issue == 13
+      assert conflict.doc_id == id
+      assert conflict.detail["reason"] =~ "deleted or transferred"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Conflict quarantine (D7 — record out-of-band drift before converging)
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/2 — conflict quarantine (D7)" do
+    test "an issue drifted out-of-band since our last write → records before it PATCHes", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Ledger title"}, scope)
+
+      # A stored fingerprint from a prior write. The sentinel is deliberately
+      # OUTSIDE phash2's 0..2^27-1 range, so the observed fingerprint can NEVER
+      # equal it — the drift branch is guaranteed to fire.
+      {:ok, _} =
+        Link.put(
+          id,
+          @dataset,
+          %{repo: @repo, issue: 30, state: "synced", synced_fingerprint: 9_999_999_999},
+          scope
+        )
+
+      # The issue as a human left it — a hand-edited title + an extra label.
+      stub_get(bypass, 30, %{
+        "number" => 30,
+        "state" => "open",
+        "title" => "Hand-edited by a human",
+        "labels" => [%{"name" => "wontfix"}]
+      })
+
+      {:ok, patched?} = Agent.start_link(fn -> false end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/30", fn conn ->
+        Agent.update(patched?, fn _ -> true end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 30, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      # Ledger still wins — the PATCH fired AFTER the record.
+      assert Agent.get(patched?, & &1) == true
+
+      # The drift is now VISIBLE: one open out_of_band_edit conflict, carrying the
+      # observed GitHub field values + the observed fingerprint (D7). The GET read
+      # those values ONLY to fingerprint the record — never into a task (D5).
+      assert [conflict] = Conflicts.list(kind: "out_of_band_edit")
+      assert conflict.repo == @repo
+      assert conflict.issue == 30
+      assert conflict.doc_id == id
+      assert conflict.detail["github_fields"]["title"] == "Hand-edited by a human"
+      assert conflict.detail["github_fields"]["state"] == "open"
+      assert conflict.detail["github_fields"]["labels"] == ["wontfix"]
+      assert is_integer(conflict.detail["observed_fp"])
+
+      # A fresh fingerprint of the DESIRED shape is stamped for next time.
+      assert is_integer(Link.get(reload(id, scope))["synced_fingerprint"])
+    end
+
+    test "an issue matching the stored fingerprint → NO conflict recorded", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Steady", "description" => "unchanged"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 31, state: "synced"}, scope)
+
+      # The GET reflects back exactly what we last PATCHed. We can't compute the
+      # projected body by hand, so capture the first PATCH body and feed it to the
+      # GET on the SECOND reconcile — a faithful GitHub echo of our own write.
+      {:ok, echo} = Agent.start_link(fn -> %{"number" => 31, "state" => "open"} end)
+
+      Bypass.stub(bypass, "GET", "/repos/#{@repo}/issues/31", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(Agent.get(echo, & &1)))
+      end)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/31", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(echo, fn _ -> json end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(json))
+      end)
+
+      # First pass: no stored fingerprint yet → records nothing, stamps the fp and
+      # (via the PATCH stub) makes the echo equal to what we wrote.
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+      # Second pass: the GET now echoes our own last write → fingerprints match →
+      # no drift recorded.
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      assert Conflicts.list(kind: "out_of_band_edit") == []
+    end
+
+    test "GET 404 (issue vanished between drain and reconcile) → detached, never recreated", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 32, state: "synced"}, scope)
+
+      # The drift GET itself 404s. No PATCH stub at all — if a PATCH (recreate/
+      # write) were attempted, Bypass would fail the test.
+      Bypass.stub(bypass, "GET", "/repos/#{@repo}/issues/32", fn conn ->
+        Plug.Conn.resp(conn, 404, ~s({"message":"Not Found"}))
+      end)
+
+      assert {:cancel, :detached} = MirrorJob.reconcile(id, @dataset, fast())
+
+      gh = Link.get(reload(id, scope))
+      assert gh["state"] == "detached"
+      assert gh["issue"] == 32
+
+      assert [conflict] = Conflicts.list(kind: "detached")
+      assert conflict.issue == 32
+      assert conflict.doc_id == id
+    end
+
+    test "first-ever update (no stored fingerprint) → records nothing, stamps a fingerprint", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Fresh"}, scope)
+      # Linked but never fingerprinted (a pre-slice task, or a born-open create).
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 33, state: "synced"}, scope)
+      refute Link.get(reload(id, scope))["synced_fingerprint"]
+
+      stub_get(bypass, 33, %{"number" => 33, "state" => "open", "title" => "anything at all"})
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/33", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 33, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      # Nothing to compare against yet → no conflict, but the fingerprint is now
+      # stamped so the NEXT reconcile can detect drift (rolls forward, no backfill).
+      assert Conflicts.list(kind: "out_of_band_edit") == []
+      assert is_integer(Link.get(reload(id, scope))["synced_fingerprint"])
     end
   end
 

@@ -172,6 +172,47 @@ defmodule Barkpark.Plugins.Github.ClientTest do
     end
   end
 
+  describe "get_issue/2" do
+    test "GETs the issue and returns its current state", %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.expect(bypass, "GET", "/repos/#{@repo}/issues/42", fn conn ->
+        # A GET carries no request body — the verb must not send JSON.
+        assert {:ok, "", _conn} = Plug.Conn.read_body(conn)
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          Jason.encode!(%{
+            "number" => 42,
+            "title" => "Current title",
+            "state" => "open",
+            "labels" => [%{"name" => "bug"}]
+          })
+        )
+      end)
+
+      assert {:ok, issue} =
+               Client.get_issue(@repo, 42, base_url: base, max_retries: 0)
+
+      assert issue["number"] == 42
+      assert issue["title"] == "Current title"
+      assert issue["state"] == "open"
+    end
+
+    test "404 → NotFound (issue deleted/transferred)", %{bypass: bypass, base: base} do
+      stub_token(bypass)
+
+      Bypass.stub(bypass, "GET", "/repos/#{@repo}/issues/999", fn conn ->
+        Plug.Conn.resp(conn, 404, ~s({"message":"Not Found"}))
+      end)
+
+      assert {:error, %NotFound{status: 404}} =
+               Client.get_issue(@repo, 999, base_url: base, max_retries: 0)
+    end
+  end
+
   describe "update_issue/3" do
     test "PATCHes the issue with the given fields", %{bypass: bypass, base: base} do
       {:ok, body_ref} = Agent.start_link(fn -> nil end)

@@ -14,6 +14,8 @@ defmodule Barkpark.Plugins.Github.Client do
   ## Verbs
 
     * `create_issue/2`  — `POST   /repos/:repo/issues`
+    * `get_issue/2`     — `GET    /repos/:repo/issues/:n` (read the issue's
+      CURRENT state so the mirror can fingerprint out-of-band drift; charter D7)
     * `update_issue/3`  — `PATCH  /repos/:repo/issues/:n` (a field-set PATCH
       is naturally idempotent — re-applying the same desired state is a no-op)
     * `close_issue/3`   — `PATCH` `state: "closed"` + `state_reason`
@@ -63,6 +65,25 @@ defmodule Barkpark.Plugins.Github.Client do
   @spec create_issue(String.t(), map(), keyword()) :: {:ok, map()} | {:error, struct()}
   def create_issue(repo, params, opts \\ []) when is_binary(repo) and is_map(params) do
     request(:post, "/repos/#{repo}/issues", params, opts)
+  end
+
+  @doc """
+  Read (GET) a single issue's CURRENT state.
+
+  A thin sibling of `update_issue/3` — same auth, base resolution and error
+  classification. The mirror uses it to fingerprint the ledger-owned fields
+  (`title`/`body`/`labels`/`state`) BEFORE it PATCHes, so an out-of-band human
+  edit is RECORDED as a quarantine conflict before the ledger overwrites it
+  (charter D7). A 404/410 → `%NotFound{}`, which the mirror routes to the
+  `detached` branch (the issue vanished between drain and reconcile).
+
+  This read is used ONLY to fingerprint for the conflict record — it NEVER
+  writes a GitHub value back into a task field (charter D5).
+  """
+  @spec get_issue(String.t(), integer() | String.t(), keyword()) ::
+          {:ok, map()} | {:error, struct()}
+  def get_issue(repo, number, opts \\ []) when is_binary(repo) do
+    request(:get, "/repos/#{repo}/issues/#{number}", nil, opts)
   end
 
   @doc """

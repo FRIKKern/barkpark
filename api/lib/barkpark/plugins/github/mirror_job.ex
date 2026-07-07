@@ -32,10 +32,20 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
        stamp `Link.put(repo, issue, synced_rev, state: "synced")`. A new issue
        is always born `open`; if the ledger wants it closed, a follow-up PATCH
        converges `state` in the same reconcile (create alone can't birth closed).
-    6. A stored integer `issue` → one idempotent `Client.update_issue/4`
-       field-set PATCH (title/body/labels/state[/state_reason]) that covers
-       open/reopen/close in a single call, then stamp `Link.put(synced_rev:)`
-       (the merge preserves repo/issue).
+    6. A stored integer `issue` → BEFORE the PATCH, `Client.get_issue/3` reads
+       the issue's CURRENT state and fingerprints its ledger-owned fields
+       (title/body/labels-sorted/state). If a `synced_fingerprint` was stored on
+       the last write AND the observed fingerprint differs, the issue drifted
+       out-of-band since we last wrote it → RECORD an `out_of_band_edit` conflict
+       (ledger wins, but the drift is VISIBLE — D7). This GET reads GitHub values
+       ONLY to fingerprint for the record; it NEVER writes a GitHub value into a
+       task field (D5). THEN one idempotent `Client.update_issue/4` field-set
+       PATCH (title/body/labels/state[/state_reason]) covering open/reopen/close
+       in a single call, then stamp `Link.put(synced_rev:, synced_fingerprint:)`
+       with the fingerprint of the DESIRED shape (the merge preserves repo/issue)
+       so the NEXT reconcile can detect the next drift. Absent a stored
+       fingerprint (first-ever mirror, or a pre-slice task) → record nothing this
+       pass, just PATCH + stamp the fingerprint (rolls forward, no backfill).
 
   ## Error classification (contract #3, D8's fixed 4-type set, D9)
 
@@ -43,8 +53,9 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     * `NetworkError{reason: {:http, 4xx}}`   → `{:cancel, {:client_error, s}}`
       (a 422/validation error is PERMANENT — dead-letter it, never retry forever)
     * other `NetworkError` (transport / exhausted 5xx) → `{:error, err}` (Oban retries)
-    * `NotFound` on UPDATE → stamp `state: "detached"`, then `{:cancel, :detached}`
-      (deleted/transferred issue — never recreated, D7)
+    * `NotFound` on UPDATE (from the pre-PATCH GET or the PATCH itself) → RECORD
+      a `detached` conflict, stamp `state: "detached"`, then `{:cancel, :detached}`
+      (deleted/transferred issue — surfaced + never recreated, D7)
     * `NotFound` on CREATE → `{:cancel, :repo_not_found}` (misconfigured repo)
     * `AuthError`                            → `{:error, err}` (retryable, capped by max_attempts)
 
@@ -69,7 +80,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.Github.{Link, Projection}
+  alias Barkpark.Plugins.Github.{Conflicts, Link, Projection}
   alias Barkpark.Plugins.Github.Client
 
   alias Barkpark.Plugins.Github.Errors.{
@@ -182,8 +193,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         rev = rev_of(task_doc)
 
         case issue_number(link) do
-          nil -> create(doc_id, dataset, repo, desired, rev, opts)
-          num when is_integer(num) -> update(doc_id, dataset, repo, num, desired, rev, opts)
+          nil ->
+            create(doc_id, dataset, repo, desired, rev, opts)
+
+          num when is_integer(num) ->
+            update(doc_id, dataset, repo, num, desired, rev, link, opts)
         end
 
       _ ->
@@ -208,7 +222,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         {:error, :missing_issue_number}
 
       {:error, err} ->
-        classify(err, :create, doc_id, dataset, opts)
+        classify(err, :create, repo, nil, doc_id, dataset, opts)
     end
   end
 
@@ -225,12 +239,30 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   defp after_create(doc_id, dataset, repo, num, desired, rev, opts) do
     case stamp(doc_id, dataset, %{repo: repo, issue: num, state: "synced"}, opts) do
-      :ok -> update(doc_id, dataset, repo, num, desired, rev, opts)
+      # The issue is one HTTP call old and carries no stored fingerprint yet, so
+      # there is nothing to drift from — pass a nil link so `update` records no
+      # spurious conflict and just PATCHes state + stamps the first fingerprint.
+      :ok -> update(doc_id, dataset, repo, num, desired, rev, nil, opts)
       err -> err
     end
   end
 
-  defp update(doc_id, dataset, repo, num, desired, rev, opts) do
+  # BEFORE the PATCH, read the issue's CURRENT state and fingerprint its
+  # ledger-owned fields; if it drifted out-of-band since our last write, RECORD
+  # the conflict (ledger still wins — D7). A GET 404/410 → the issue vanished
+  # between drain and reconcile → route to the detached branch via `classify`.
+  defp update(doc_id, dataset, repo, num, desired, rev, link, opts) do
+    case Client.get_issue(repo, num, opts) do
+      {:ok, issue} ->
+        maybe_record_drift(repo, num, doc_id, dataset, issue, stored_fingerprint(link))
+        patch(doc_id, dataset, repo, num, desired, rev, opts)
+
+      {:error, err} ->
+        classify(err, :update, repo, num, doc_id, dataset, opts)
+    end
+  end
+
+  defp patch(doc_id, dataset, repo, num, desired, rev, opts) do
     params =
       %{
         title: desired.title,
@@ -242,57 +274,171 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
     case Client.update_issue(repo, num, params, opts) do
       {:ok, _} ->
-        stamp(doc_id, dataset, %{synced_rev: rev}, opts)
+        # Stamp the DESIRED fingerprint alongside the rev, so the next reconcile
+        # compares the issue's future state against exactly what we just wrote.
+        stamp(
+          doc_id,
+          dataset,
+          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)},
+          opts
+        )
 
       {:error, err} ->
-        classify(err, :update, doc_id, dataset, opts)
+        classify(err, :update, repo, num, doc_id, dataset, opts)
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Out-of-band drift fingerprint (D7 — record before converging; D5 — the GET
+  # reads GitHub values ONLY to fingerprint for the record, never into a task)
+  # ---------------------------------------------------------------------------
+
+  # Record an `out_of_band_edit` conflict ONLY when a fingerprint was stored on
+  # the last write AND the issue's current fingerprint differs. Absent a stored
+  # fingerprint (first-ever mirror, or a task mirrored before this slice) → there
+  # is nothing to compare against, so record nothing and let the PATCH+stamp roll
+  # the feature forward with no backfill.
+  defp maybe_record_drift(repo, num, doc_id, dataset, issue, stored)
+       when is_integer(stored) do
+    current = issue_fingerprint(issue)
+
+    if current != stored do
+      _ =
+        Conflicts.record(%{
+          repo: repo,
+          issue: num,
+          doc_id: doc_id,
+          dataset: dataset,
+          kind: "out_of_band_edit",
+          detail: %{
+            "github_fields" => %{
+              "title" => Map.get(issue, "title"),
+              "state" => Map.get(issue, "state"),
+              "labels" => issue |> Map.get("labels") |> label_names()
+            },
+            "observed_fp" => current
+          }
+        })
+    end
+
+    :ok
+  end
+
+  defp maybe_record_drift(_repo, _num, _doc_id, _dataset, _issue, _stored), do: :ok
+
+  defp stored_fingerprint(link) when is_map(link) do
+    case Map.get(link, "synced_fingerprint") do
+      n when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
+  defp stored_fingerprint(_), do: nil
+
+  # Fingerprint the GitHub GET response over ONLY the ledger-owned projected
+  # fields (title, body, labels-SORTED, state). Applied identically to the
+  # desired projection (`desired_fingerprint/1`) so the two hashes are comparable.
+  defp issue_fingerprint(issue) when is_map(issue) do
+    :erlang.phash2({
+      to_str(Map.get(issue, "title")),
+      to_str(Map.get(issue, "body")),
+      issue |> Map.get("labels") |> label_names() |> Enum.sort(),
+      to_str(Map.get(issue, "state"))
+    })
+  end
+
+  # Fingerprint the DESIRED issue shape (the projection we are about to PATCH),
+  # so the value we STAMP equals what the next GET should fingerprint to when no
+  # human touches the issue in between.
+  defp desired_fingerprint(desired) do
+    :erlang.phash2({
+      to_str(desired.title),
+      to_str(desired.body),
+      desired.labels |> List.wrap() |> Enum.sort(),
+      to_str(desired.state)
+    })
+  end
+
+  # GitHub returns labels as `[%{"name" => ...}, ...]`; tolerate bare strings too.
+  defp label_names(labels) when is_list(labels) do
+    labels
+    |> Enum.map(fn
+      %{"name" => n} when is_binary(n) -> n
+      n when is_binary(n) -> n
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp label_names(_), do: []
+
+  defp to_str(nil), do: ""
+  defp to_str(s) when is_binary(s), do: s
+  defp to_str(other), do: to_string(other)
 
   # ---------------------------------------------------------------------------
   # Error classification (contract #3, D8/D9)
   # ---------------------------------------------------------------------------
 
-  defp classify(%RateLimitError{retry_after: s}, _mode, _doc_id, _dataset, _opts) do
+  defp classify(%RateLimitError{retry_after: s}, _mode, _repo, _num, _doc_id, _dataset, _opts) do
     # D9: retryable, never dead-lettered. Level-triggered reconcile means the
     # snoozed job re-reads current state when it runs, so no intent is lost.
     {:snooze, max(s || 0, 1)}
   end
 
-  defp classify(%NetworkError{reason: {:http, status}} = _err, _mode, _doc_id, _dataset, _opts)
+  defp classify(
+         %NetworkError{reason: {:http, status}} = _err,
+         _mode,
+         _repo,
+         _num,
+         _doc_id,
+         _dataset,
+         _opts
+       )
        when status in 400..499 do
     # A permanent client error (422 validation, 400 bad request). Retrying it
     # forever is pointless — dead-letter it (contract #3).
     {:cancel, {:client_error, status}}
   end
 
-  defp classify(%NetworkError{} = err, _mode, _doc_id, _dataset, _opts) do
+  defp classify(%NetworkError{} = err, _mode, _repo, _num, _doc_id, _dataset, _opts) do
     # Transport failure or an exhausted 5xx — genuinely transient. Let Oban
     # apply its backoff (capped by max_attempts).
     {:error, err}
   end
 
-  defp classify(%NotFound{}, :update, doc_id, dataset, opts) do
-    # The issue was deleted/transferred out-of-band. Mark it detached and NEVER
-    # recreate it (D7 — recreating would fight a human). Stamp under the task's
-    # own tenant scope so a non-default-workspace task's detach lands correctly.
+  defp classify(%NotFound{}, :update, repo, num, doc_id, dataset, opts) do
+    # The issue was deleted/transferred out-of-band (caught by the pre-PATCH GET
+    # or the PATCH itself). RECORD the detach so it is VISIBLE (D7), mark the link
+    # detached, and NEVER recreate it (recreating would fight a human). Stamp
+    # under the task's own tenant scope so a non-default-workspace detach lands.
+    _ =
+      Conflicts.record(%{
+        repo: repo,
+        issue: num,
+        doc_id: doc_id,
+        dataset: dataset,
+        kind: "detached",
+        detail: %{"reason" => "issue deleted or transferred; not recreated"}
+      })
+
     _ = stamp(doc_id, dataset, %{state: "detached"}, opts)
     {:cancel, :detached}
   end
 
-  defp classify(%NotFound{}, :create, _doc_id, _dataset, _opts) do
+  defp classify(%NotFound{}, :create, _repo, _num, _doc_id, _dataset, _opts) do
     # 404 on CREATE means the mirror repo itself is missing/misconfigured —
     # there is nothing to detach; dead-letter until config is fixed.
     {:cancel, :repo_not_found}
   end
 
-  defp classify(%AuthError{} = err, _mode, _doc_id, _dataset, _opts) do
+  defp classify(%AuthError{} = err, _mode, _repo, _num, _doc_id, _dataset, _opts) do
     # Auth may be transiently wrong (token refresh raced, install reprovisioned)
     # — retryable, capped by max_attempts.
     {:error, err}
   end
 
-  defp classify(other, _mode, _doc_id, _dataset, _opts), do: {:error, other}
+  defp classify(other, _mode, _repo, _num, _doc_id, _dataset, _opts), do: {:error, other}
 
   # ---------------------------------------------------------------------------
   # Link stamp
