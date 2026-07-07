@@ -13,7 +13,7 @@ defmodule Barkpark.Plugins.Github do
   plugin is schemas + business logic, never UI — the host owns every route
   table, renderer, and console.
 
-  ## Wave 2 posture (this slice) — the outbound mirror is wired
+  ## Posture — outbound mirror (Wave 2) + inbound webhook route (Wave 3)
 
     * `register_workers/1` → `[Auth, DrainWorker]`. Both start ONLY when the
       plugin is whitelisted, so off-by-default is preserved. `Github.Auth` is the
@@ -24,10 +24,12 @@ defmodule Barkpark.Plugins.Github do
       a supervised GenServer, NOT cron — the `Barkpark.Sync.PushWorker` precedent.
       The `github_mirror` Oban queue itself is declared statically in
       `config/config.exs` (plugins can add crontab, not queues).
-    * `register_routes/1` → `[]`. The webhook-intake and adopt controllers
-      don't exist yet (waves 3–4); naming a not-yet-compiled controller in a
-      route tuple is unsafe for the router beam. Routes get wired the wave the
-      controllers land.
+    * `register_routes/1` → the ONE inbound webhook route (Wave 3). It mounts
+      `POST /v1/plugins/github/webhook` → `BarkparkWeb.GithubWebhookController`
+      on the `:github_webhook` bucket (signature-verified pipeline, slice 1).
+      The adopt controller is still a later wave (4). Off-by-default is
+      unaffected: the route only resolves a live handler when `github` is
+      whitelisted AND the router carries the `:github_webhook` scope block.
     * `register_schemas/1` → `[]` (the `use` default). GitHub adds NO task
       schema (decision D3): the bookkeeping field `github:{repo,issue,synced_rev}`
       rides the task's plain CONTENT via `Content.*`, never a declared
@@ -196,11 +198,17 @@ defmodule Barkpark.Plugins.Github do
     [%{type: :link, label: "GitHub Sync", path: "/admin/github", icon: "github"}]
   end
 
-  # Routes stay empty until the webhook/adopt controllers land (waves 3–4) — see
-  # @moduledoc. The `use` default already returns `[]`; the explicit clause
-  # documents the intent at the call site.
+  # The single inbound webhook route (Wave 3). Lands at
+  # `POST /v1/plugins/github/webhook` via the `:github_webhook` scope block the
+  # router carries (slice 1), which pipes it through the signature-verify
+  # pipeline — signature is the sole auth. The adopt controller is a later wave.
   @impl Barkpark.Plugin
-  def register_routes(_ctx), do: []
+  def register_routes(_ctx) do
+    [
+      {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
+       auth: :github_webhook}
+    ]
+  end
 
   @doc """
   Supervised workers the host splices into the plugin supervision tree when

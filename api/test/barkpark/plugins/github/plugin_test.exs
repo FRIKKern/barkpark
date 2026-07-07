@@ -39,8 +39,11 @@ defmodule Barkpark.Plugins.GithubTest do
   end
 
   describe "surfaces" do
-    test "register_routes/1 returns [] (controllers land waves 3–4)" do
-      assert Github.register_routes(%{}) == []
+    test "register_routes/1 mounts the inbound webhook route (Wave 3)" do
+      assert Github.register_routes(%{}) == [
+               {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
+                auth: :github_webhook}
+             ]
     end
 
     test "oban_crontab/0 stays [] — the drain worker is supervised, not cron" do
