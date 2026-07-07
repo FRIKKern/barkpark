@@ -53,23 +53,78 @@ defmodule Barkpark.Plugins.Github.Fields do
   @matrix %{
     # --- Barkpark-owned, outbound_only: the ledger authors, GitHub reflects. ---
     title: %{owner: :barkpark, direction: :outbound_only, issue_attr: :title, projects_field: nil},
-    description: %{owner: :barkpark, direction: :outbound_only, issue_attr: :body, projects_field: nil},
-    lifecycle_status: %{owner: :barkpark, direction: :outbound_only, issue_attr: :state, projects_field: nil},
-    priority: %{owner: :barkpark, direction: :outbound_only, issue_attr: :labels, projects_field: :priority},
-    worker: %{owner: :barkpark, direction: :outbound_only, issue_attr: :labels, projects_field: :worker},
+    description: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :body,
+      projects_field: nil
+    },
+    lifecycle_status: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :state,
+      projects_field: nil
+    },
+    priority: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :labels,
+      projects_field: :priority
+    },
+    worker: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :labels,
+      projects_field: :worker
+    },
     # `status` is DERIVED from lifecycle_status + claim, not stored — charter
     # marks it "(derived)"; still strictly outbound_only.
-    status: %{owner: :derived, direction: :outbound_only, issue_attr: :labels, projects_field: :status},
-    parent_id: %{owner: :barkpark, direction: :outbound_only, issue_attr: :sub_issue, projects_field: :goal},
+    status: %{
+      owner: :derived,
+      direction: :outbound_only,
+      issue_attr: :labels,
+      projects_field: :status
+    },
+    parent_id: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :sub_issue,
+      projects_field: :goal
+    },
     blocks: %{owner: :barkpark, direction: :outbound_only, issue_attr: :body, projects_field: nil},
-    acceptance_criteria: %{owner: :barkpark, direction: :outbound_only, issue_attr: :body, projects_field: nil},
+    acceptance_criteria: %{
+      owner: :barkpark,
+      direction: :outbound_only,
+      issue_attr: :body,
+      projects_field: nil
+    },
 
     # --- GitHub-origin, inbound_intake_only: read ONCE at birth, then owned by
     # Barkpark forever. No entry here is ever written back to GitHub as a field.
-    src_labels: %{owner: :github, direction: :inbound_intake_only, issue_attr: nil, projects_field: nil},
-    outsider_title: %{owner: :github, direction: :inbound_intake_only, issue_attr: nil, projects_field: nil},
-    outsider_body: %{owner: :github, direction: :inbound_intake_only, issue_attr: nil, projects_field: nil},
-    outsider_author: %{owner: :github, direction: :inbound_intake_only, issue_attr: nil, projects_field: nil},
+    src_labels: %{
+      owner: :github,
+      direction: :inbound_intake_only,
+      issue_attr: nil,
+      projects_field: nil
+    },
+    outsider_title: %{
+      owner: :github,
+      direction: :inbound_intake_only,
+      issue_attr: nil,
+      projects_field: nil
+    },
+    outsider_body: %{
+      owner: :github,
+      direction: :inbound_intake_only,
+      issue_attr: nil,
+      projects_field: nil
+    },
+    outsider_author: %{
+      owner: :github,
+      direction: :inbound_intake_only,
+      issue_attr: nil,
+      projects_field: nil
+    },
 
     # --- Ledger-only primitives: NEVER represented on GitHub, in any direction.
     # These are the invariants the whole seam exists to protect.

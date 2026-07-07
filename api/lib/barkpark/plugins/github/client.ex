@@ -169,7 +169,9 @@ defmodule Barkpark.Plugins.Github.Client do
   # ---------------------------------------------------------------------------
 
   defp handle_response({:ok, resp}, m, u, b, o, a, ar), do: classify(resp, m, u, b, o, a, ar)
-  defp handle_response(%{status: _} = resp, m, u, b, o, a, ar), do: classify(resp, m, u, b, o, a, ar)
+
+  defp handle_response(%{status: _} = resp, m, u, b, o, a, ar),
+    do: classify(resp, m, u, b, o, a, ar)
 
   defp classify(%{status: status} = resp, _m, _u, _b, _o, _a, _ar)
        when status >= 200 and status < 300 do

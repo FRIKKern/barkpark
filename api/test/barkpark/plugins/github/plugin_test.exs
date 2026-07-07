@@ -16,7 +16,8 @@ defmodule Barkpark.Plugins.GithubTest do
         "repo" => "FRIKKern/barkpark",
         "app_id" => "123456",
         "installation_id" => "987654",
-        "private_key" => "-----BEGIN RSA PRIVATE KEY-----\nMIIfake\n-----END RSA PRIVATE KEY-----",
+        "private_key" =>
+          "-----BEGIN RSA PRIVATE KEY-----\nMIIfake\n-----END RSA PRIVATE KEY-----",
         "webhook_secret" => "s3cr3t-hmac",
         "project_id" => "PVT_kwFAKE"
       }

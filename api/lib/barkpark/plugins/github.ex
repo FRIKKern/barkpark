@@ -102,7 +102,8 @@ defmodule Barkpark.Plugins.Github do
         required: true,
         masked: true,
         group: "GitHub",
-        hint: "RS256 signing key for the App JWT. Stored encrypted at rest via BARKPARK_CLOAK_KEY."
+        hint:
+          "RS256 signing key for the App JWT. Stored encrypted at rest via BARKPARK_CLOAK_KEY."
       },
       %{
         name: "github.webhook_secret",
@@ -119,7 +120,8 @@ defmodule Barkpark.Plugins.Github do
         label: "Projects v2 node ID (optional)",
         required: false,
         group: "GitHub",
-        hint: "GraphQL node ID of the read-only dashboard board. Leave blank to disable Projects sync."
+        hint:
+          "GraphQL node ID of the read-only dashboard board. Leave blank to disable Projects sync."
       }
     ]
   end

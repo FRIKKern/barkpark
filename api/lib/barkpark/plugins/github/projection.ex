@@ -261,8 +261,11 @@ defmodule Barkpark.Plugins.Github.Projection do
       |> Enum.reject(&is_nil/1)
 
     case items do
-      [] -> nil
-      lines -> "#{@accept_start}\n### Acceptance criteria\n#{Enum.join(lines, "\n")}\n#{@accept_end}"
+      [] ->
+        nil
+
+      lines ->
+        "#{@accept_start}\n### Acceptance criteria\n#{Enum.join(lines, "\n")}\n#{@accept_end}"
     end
   end
 

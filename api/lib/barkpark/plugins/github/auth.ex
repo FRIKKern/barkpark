@@ -124,8 +124,12 @@ defmodule Barkpark.Plugins.Github.Auth do
 
       true ->
         case build_app_jwt(cfg[:app_id], cfg[:private_key]) do
-          {:ok, jwt} -> exchange(jwt, cfg)
-          :error -> {:error, %AuthError{status: 0, endpoint: nil, message: "GitHub App private key invalid"}}
+          {:ok, jwt} ->
+            exchange(jwt, cfg)
+
+          :error ->
+            {:error,
+             %AuthError{status: 0, endpoint: nil, message: "GitHub App private key invalid"}}
         end
     end
   end
@@ -165,12 +169,10 @@ defmodule Barkpark.Plugins.Github.Auth do
         end
 
       {:ok, %{status: status}} when status in [401, 403] ->
-        {:error,
-         %AuthError{status: status, endpoint: url, message: "App JWT rejected"}}
+        {:error, %AuthError{status: status, endpoint: url, message: "App JWT rejected"}}
 
       {:ok, %{status: 404}} ->
-        {:error,
-         %AuthError{status: 404, endpoint: url, message: "installation not found"}}
+        {:error, %AuthError{status: 404, endpoint: url, message: "installation not found"}}
 
       {:ok, %{status: status}} ->
         {:error,

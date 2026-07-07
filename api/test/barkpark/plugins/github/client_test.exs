@@ -448,7 +448,12 @@ defmodule Barkpark.Plugins.Github.ClientTest do
 
       Bypass.stub(bypass, "POST", @token_path, fn conn ->
         Agent.update(counter, &(&1 + 1))
-        Plug.Conn.resp(conn, 201, Jason.encode!(%{"token" => @inst_token, "expires_at" => future}))
+
+        Plug.Conn.resp(
+          conn,
+          201,
+          Jason.encode!(%{"token" => @inst_token, "expires_at" => future})
+        )
       end)
 
       Bypass.stub(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
@@ -558,7 +563,9 @@ defmodule Barkpark.Plugins.Github.ClientTest do
 
       log =
         capture_log(fn ->
-          {:error, err} = Client.create_issue(@repo, %{title: "x"}, base_url: base, max_retries: 0)
+          {:error, err} =
+            Client.create_issue(@repo, %{title: "x"}, base_url: base, max_retries: 0)
+
           require Logger
           Logger.error("github client error: #{inspect(err)}")
         end)
