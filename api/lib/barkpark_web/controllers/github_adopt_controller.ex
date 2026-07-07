@@ -1,0 +1,82 @@
+defmodule BarkparkWeb.GithubAdoptController do
+  @moduledoc """
+  Adopt an intake task into Barkpark (design paper `bp-github-bridge-epic-charter`,
+  Wave 4 — adoption). Mounted by the github plugin's `register_routes/1` on the
+  `:token` bucket at `POST /v1/plugins/github/adopt/:id` — a bearer-gated
+  OPERATOR action (NOT `:admin`), so `bp github adopt <task>` runs with a normal
+  operator token.
+
+  ## Contract (D6)
+
+  `adopt/2` reads the `:id` path param (the `gh-<num>` task) and the optional
+  `dataset` param (default `"production"`), then hands off to
+  `Barkpark.Plugins.Github.Adopt.adopt/3`. That service strips `needs-human`,
+  flips `content.github.state` `"intake" → "adopted"`, and posts a best-effort
+  backlink — it NEVER auto-claims a worker (adoption clears the gate only; the
+  operator claims the adopted task through the normal `bp task` path afterward).
+
+  ## Status mapping
+
+    * `{:ok, _doc}`            → `200 {ok: true, task: id, state: "adopted"}`
+    * `{:error, :not_intake}`  → `409` — the task exists but is not an adoptable
+      intake (already adopted-and-re-hit returns `{:ok,_}`, so a `:not_intake`
+      here is a plain/mirrored/detached task, an operator error, not transient)
+    * `{:error, :not_found}`   → `404`
+    * `{:error, _}`            → `422` — the ledger write failed
+
+  ## Adopt seam
+
+  `adopt/2` calls the service through a private seam so a controller test can
+  assert dispatch + status mapping without a live adoption path (which would
+  otherwise reach the real `Client.create_comment` backlink). Override with
+  `config :barkpark, :github_adopt_fun, fun/3` in test (the webhook controller's
+  `:github_webhook_intake_fun` precedent). Absent → the real Adopt module.
+  """
+
+  use BarkparkWeb, :controller
+
+  @doc """
+  Adopt the `:id` intake task. See the moduledoc for the status mapping.
+  """
+  def adopt(conn, %{"id" => id} = params) do
+    dataset = Map.get(params, "dataset", "production")
+
+    case adopt_fun().(id, dataset, []) do
+      {:ok, _doc} ->
+        json(conn, %{ok: true, task: id, state: "adopted"})
+
+      {:error, :not_intake} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{
+            code: "not_intake",
+            message: "task is not a src:github intake awaiting adoption"
+          }
+        })
+
+      {:error, :not_found} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{error: %{code: "not_found", message: "no such task"}})
+
+      {:error, _reason} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "adopt_failed", message: "could not adopt task"}})
+    end
+  end
+
+  # Adopt seam: overridable in test via app env, else the real module. The
+  # module is resolved dynamically so a build without the sibling Adopt module
+  # present still compiles clean — the call resolves at request time, by which
+  # point the module is loaded.
+  defp adopt_fun do
+    Application.get_env(:barkpark, :github_adopt_fun) || (&default_adopt/3)
+  end
+
+  defp default_adopt(id, dataset, opts) do
+    mod = Module.concat(Barkpark.Plugins.Github, Adopt)
+    mod.adopt(id, dataset, opts)
+  end
+end
