@@ -502,6 +502,16 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-cols__c { min-width: 0; }
 .bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }
 
+/* ── section grid — the step-2 layout engine (mode:grid). Shared class so the
+   reader AND the canvas node-view paint the SAME grid (parity by construction).
+   `--bp-tracks` is a structural column count; `--bp-grid-gap` is a token VAR
+   (never px — D2). Keep BYTE-IDENTICAL with the styles.css + root.html.heex
+   mirrors (the .bp-cols trio precedent). */
+.bp-paper-surface .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+@media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
+.bp-paper-surface .bp-section__cell { min-width: 0; }
+.bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
+
 /* ── cards: titled rule/feature card grid ── */
 .bp-paper-surface .bp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin: 1.4rem 0; }
 .bp-paper-surface .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-top: 3px solid var(--paper-chrome-border); }
