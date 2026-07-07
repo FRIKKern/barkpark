@@ -298,29 +298,44 @@ function isCanvasFigureNode(nodeType) {
 
 // The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes —
 // canvas nodes whose interior is a NESTED BLOCK TREE (child blocks with their own
-// type/content), not inline runs (callout) nor a verbatim opaque carry. TWO members:
+// type/content), not inline runs (callout) nor a verbatim opaque carry. THREE members:
 //   * `columns` ⇄ `bpColumns` (content "bpColumn+"): columns become editable PM
 //     regions (prose+divider); non-first-class children ride a read-only bpColumnAtom.
 //   * `section` ⇄ `bpSection`: a nested block+ body wrapped by two rules + an editable
 //     title; a TOP-LEVEL section is editable, a CHILD (depth>=1) section is carried
 //     verbatim as bpOpaque (V1 forbid-nesting — sectionBlockToNode's depth-guard).
+//   * `terminal` ⇄ `bpTerminal`: a nested block+ body wrapped in reader chrome (title
+//     bar + optional live badge + optional footer); non-first-class body children ride
+//     a read-only bpTerminalAtom. terminal-node.js.
 // A container FOLDS INTO a run (it no longer SPLITS one). V1: FORBID container-in-
-// container. Keep aligned with columns-node.js, section-node.js and paper_canvas.ex
-// @canvas_container_types (partition-shape tests pin all three).
-const CANVAS_CONTAINER_TYPES = new Set(["columns", "section"]);
+// container. Keep aligned with columns-node.js, section-node.js, terminal-node.js and
+// paper_canvas.ex @canvas_container_types (partition-shape tests pin all four).
+const CANVAS_CONTAINER_TYPES = new Set(["columns", "section", "terminal"]);
 
-// block.type → its TipTap NODE name (they differ): columns→bpColumns, section→bpSection.
-// runToTiptap maps a block.type → node.type; runToOps/classifyNode map back via bpType.
-const CANVAS_CONTAINER_NODE_NAMES = { columns: "bpColumns", section: "bpSection" };
+// block.type → its TipTap NODE name (they differ): columns→bpColumns, section→bpSection,
+// terminal→bpTerminal. runToTiptap maps block.type → node.type; runToOps/classifyNode
+// map back via bpType.
+const CANVAS_CONTAINER_NODE_NAMES = {
+  columns: "bpColumns",
+  section: "bpSection",
+  terminal: "bpTerminal",
+};
 // The section container's NODE name (singular alias used by sectionBlockToNode).
 const CANVAS_CONTAINER_NODE_NAME = "bpSection";
 // Reverse: node.type → bpType. Used by classifyNode/isCanvasContainerNode to resolve
 // the bpType off a getJSON node (the NODE name, not the bpType).
-const CANVAS_CONTAINER_BP_TYPE_BY_NODE = { bpColumns: "columns", bpSection: "section" };
+const CANVAS_CONTAINER_BP_TYPE_BY_NODE = {
+  bpColumns: "columns",
+  bpSection: "section",
+  bpTerminal: "terminal",
+};
 
 // The per-column node name + the verbatim child-carrier atom node name (columns-node.js).
 const BP_COLUMN_NODE_NAME = "bpColumn";
 const BP_COLUMN_ATOM_NODE_NAME = "bpColumnAtom";
+// The terminal verbatim child-carrier atom node name (terminal-node.js). The terminal
+// container has NO per-column wrapper — its body children mount directly.
+const BP_TERMINAL_ATOM_NODE_NAME = "bpTerminalAtom";
 
 // editable-action: the CTA `action` block the canvas handles as a CONTROL-ATOM node —
 // a LEAF (href/label/priority; no children, no inline body) whose editable attrs ride
@@ -606,15 +621,18 @@ function blockToNode(block) {
     }
 
     if (isCanvasContainerType(bpType)) {
-      // A canvas CONTAINER node — sub-route by bpType (both fold into a run):
+      // A canvas CONTAINER node — sub-route by bpType (all fold into a run):
       //   * section → bpSection: nested block+ body + editable title; a nested
       //     (depth>=1) section child is carried opaque (V1 forbid-nesting) — see
       //     sectionBlockToNode's depth-guard.
+      //   * terminal → bpTerminal: a nested block+ body wrapped in reader chrome
+      //     (title/live/footer); non-first-class body children ride a bpTerminalAtom.
       //   * columns → bpColumns: a recursive nested-block node whose column
       //     child-block trees become editable PM regions (prose+divider); any
       //     non-first-class child rides a read-only bpColumnAtom (columns-node.js).
-      // node.type is the NODE name (bpSection/bpColumns), not the bpType.
+      // node.type is the NODE name (bpSection/bpTerminal/bpColumns), not the bpType.
       if (bpType === "section") return sectionBlockToNode(block, bpId, bpType);
+      if (bpType === "terminal") return terminalBlockToNode(block, bpId, bpType);
       return columnsBlockToNode(block, bpId, bpType);
     }
 
@@ -1892,6 +1910,157 @@ function columnsNodeChanged(prevNode, nextNode) {
   );
 }
 
+// ── terminal ⇄ canvas container node ─────────────────────────────────────────
+//
+// The `terminal` block { id, type:"terminal", title?, footer?, live?, children:[BLOCK…]
+// (or legacy `blocks`) } ⇄ the TipTap `bpTerminal` CONTAINER node (terminal-node.js).
+// UNLIKE columns (a list-of-lists) a terminal has a SINGLE body child array + THREE
+// chrome scalars (title/footer/live). Each body child maps like a column child: a
+// prose/divider child → its NORMAL editable node, ANY other kind (callout/code/sheet/
+// fleet/image/nested-container/table) → a VERBATIM read-only `bpTerminalAtom` (else PM
+// would DROP it = DATA LOSS). Reader source: compose.ex:708-727 + container_children
+// (compose.ex:902 — `children || blocks || []`; canonical key = "children").
+//
+// V1 COARSE round-trip (mirrors calloutNodeToPatch — EXPLICIT chrome, omit-on-insert):
+// any interior change re-emits ONE `patch-block` carrying the whole body child array +
+// the three chrome scalars EXPLICITLY (title/footer null, live false) so a title-CLEAR
+// / live-OFF actually LANDS through patch.ex's shallow Map.merge (a shallow merge can't
+// DELETE a key — so we send explicit null/false, which compose renders byte-identically
+// to absent: Map.get(b,"title","") and the live-in-[…] gate — VERIFIED compose.ex).
+//
+// node.type is `bpTerminal` (the NODE name), NOT `terminal` (the bpType).
+
+// Project ONE terminal body child block → its canvas node. IDENTICAL to childBlockToNode
+// (columns) but routes a non-first-class child to a bpTerminalAtom. Prose → native
+// editable node; divider → the leaf atom; EVERYTHING ELSE → the verbatim carrier.
+function terminalChildBlockToNode(child) {
+  const bpType = child && child.type;
+  if (isProseType(bpType)) return blockToTiptap(child).content[0];
+  if (isCanvasAtomType(bpType)) return { type: bpType };
+  return terminalAtomBlockToNode(child);
+}
+
+// terminalAtomBlockToNode(child) → { type:"bpTerminalAtom", attrs:{ bpType, bpId?, bpBlock } }
+// The whole child block deep-cloned onto bpBlock (no shared ref) so an UNCHANGED child
+// round-trips deep-equal. IDENTICAL to columnAtomBlockToNode, only the node name differs.
+function terminalAtomBlockToNode(child) {
+  const attrs = { bpType: child && child.type, bpBlock: deepClone(child) };
+  if (child && child.id != null) attrs.bpId = child.id;
+  return { type: BP_TERMINAL_ATOM_NODE_NAME, attrs };
+}
+
+// Reconstruct ONE terminal body child NODE → its portable-doc block (inverse of
+// terminalChildBlockToNode). bpTerminalAtom → the carried bpBlock VERBATIM; divider →
+// { type:"divider" }; prose → the per-type block via tiptapToBlock (NO id — child ids
+// are omitted for byte-parity with id-less fixtures).
+function terminalChildNodeToBlock(childNode) {
+  const type = childNode && childNode.type;
+  if (type === BP_TERMINAL_ATOM_NODE_NAME) {
+    const bpBlock = childNode.attrs && childNode.attrs.bpBlock;
+    if (bpBlock != null) return deepClone(bpBlock);
+    return { type: (childNode.attrs && childNode.attrs.bpType) || "paragraph" };
+  }
+  if (type === "divider") return { type: "divider" };
+  const env = nodeToDocEnvelope(childNode);
+  if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
+  if (type === "bulletList" || type === "orderedList") {
+    return { type: "list", ...tiptapToBlock(env, null, "list") };
+  }
+  return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
+}
+
+// terminalBlockToNode(block) → { type:"bpTerminal", attrs:{ bpId, bpType, title, footer,
+//   live }, content:[child…] }. An EMPTY body is seeded with one paragraph so bpTerminal's
+// `…+` content is satisfiable (stripped on the way back via the isEmptyParagraphBlock
+// sentinel — the columns/featured-placeholder pattern). title/footer normalize to null
+// when null; live normalizes the compose [true,"true","live"] gate to a strict boolean.
+function terminalBlockToNode(block, bpId, bpType) {
+  const src = (block && (block.children || block.blocks)) || [];
+  const kids = (Array.isArray(src) ? src : []).map(terminalChildBlockToNode);
+  return {
+    type: CANVAS_CONTAINER_NODE_NAMES[bpType] || "bpTerminal",
+    attrs: {
+      bpId,
+      bpType,
+      title: block && block.title != null ? block.title : null,
+      footer: block && block.footer != null ? block.footer : null,
+      live: !!(
+        block &&
+        (block.live === true || block.live === "true" || block.live === "live")
+      ),
+    },
+    content: kids.length ? kids : [{ type: "paragraph" }],
+  };
+}
+
+// terminalNodeChildren(node) → the body child BLOCK array. A lone empty-paragraph
+// sentinel (an empty source body's seed) collapses back to []. The SAME derivation the
+// coarse diff (terminalNodeChanged), the patch, and the insert reconstruction share, so
+// an UNEDITED terminal is byte-stable (→ ZERO ops).
+function terminalNodeChildren(node) {
+  const kids = ((node && node.content) || []).map(terminalChildNodeToBlock);
+  if (kids.length === 1 && isEmptyParagraphBlock(kids[0])) return [];
+  return kids;
+}
+
+// terminalNodeToBlock(node, id) → { id, type:"terminal", children:[…], title?, footer?,
+//   live? } — the INSERT path (a genuinely-NEW terminal, no unknown sibling keys). OMITS
+// absent chrome: title/footer only when != null, live only when true (byte-parity with
+// the reader emitting nothing for absent chrome).
+function terminalNodeToBlock(node, id) {
+  const a = (node && node.attrs) || {};
+  const block = { id, type: "terminal", children: terminalNodeChildren(node) };
+  if (a.title != null) block.title = a.title;
+  if (a.footer != null) block.footer = a.footer;
+  if (a.live === true) block.live = true;
+  return block;
+}
+
+// terminalNodeToPatch(node) → the COARSE patch (EXPLICIT chrome — the shallow-merge-
+// can't-delete contract). Explicit null title/footer + false live so a title-CLEAR /
+// live-OFF actually lands; null/false render as absent in compose, so byte-parity holds.
+// patch.ex shallow-merges { children, title, footer, live }, overwriting those keys and
+// leaving any unknown sibling key (a legacy `blocks`, a custom prop) intact.
+function terminalNodeToPatch(node) {
+  const a = (node && node.attrs) || {};
+  return {
+    title: a.title == null ? null : a.title,
+    footer: a.footer == null ? null : a.footer,
+    live: a.live === true,
+    children: terminalNodeChildren(node),
+  };
+}
+
+// The stable diff key: chrome scalars (normalized) + the RECONSTRUCTED children (→
+// blocks, ignoring depth>0 phantom bpId/bpType attrs) so an UNEDITED terminal emits
+// ZERO ops (the columns immunity).
+function stableTerminalKey(node) {
+  const a = (node && node.attrs) || {};
+  return {
+    title: a.title == null ? null : a.title,
+    footer: a.footer == null ? null : a.footer,
+    live: a.live === true,
+    children: terminalNodeChildren(node),
+  };
+}
+
+// True when a terminal node's interior OR chrome changed. CRITICAL: an UNEDITED terminal
+// must emit ZERO ops. Canonical (key-order-insensitive) compare on the reconstructed key.
+function terminalNodeChanged(prevNode, nextNode) {
+  return (
+    canonicalJSON(stableTerminalKey(prevNode)) !==
+    canonicalJSON(stableTerminalKey(nextNode))
+  );
+}
+
+// NOTE: `columns`, `section` and `terminal` containers do NOT share a single generic
+// dispatcher — each has a materially different op strategy (columns = coarse
+// {columns:[…]}; section = seq-changed replace-block else fine-grained child+title
+// patches; terminal = coarse whole-body+chrome patch). The op-branch / echo / insert
+// paths sub-route by bpType directly and call the per-container round-trip fns
+// (columnsNode* / sectionNode* / terminalNode*). Keep in lockstep with
+// CANVAS_CONTAINER_TYPES + CANVAS_CONTAINER_BP_TYPE_BY_NODE.
+
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
 
 // Strip our { bpId, bpType } stamp back off a prose node so the node is the
@@ -2279,7 +2448,7 @@ export function runToOps(prevBlocks, nextDoc) {
     }
 
     if (entry.isContainer) {
-      // Canvas container node — sub-route by bpType.
+      // Canvas container node — sub-route by bpType (section | terminal | columns).
       if (entry.bpType === "section") {
         // section: op strategy hinges on whether the child-id SEQUENCE changed:
         //   * DIFFERS (child add/remove/reorder/reparent, or a canvas-created null-id
@@ -2310,6 +2479,19 @@ export function runToOps(prevBlocks, nextDoc) {
           for (const childOp of sectionChildPatchOps(prevNode, entry.node)) {
             ops.push(childOp);
           }
+        }
+      } else if (entry.bpType === "terminal") {
+        // terminal: the V1 COARSE whole-body+chrome round-trip. ANY interior change
+        // (a body keystroke, a child add/delete/reorder, a title/footer/live edit)
+        // re-emits ONE patch-block replacing children + chrome scalars. An UNEDITED
+        // terminal emits NO op. patch.ex shallow-merges, leaving unknown sibling keys
+        // (a legacy `blocks` key) intact.
+        if (terminalNodeChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: terminalNodeToPatch(entry.node),
+          });
         }
       } else {
         // columns: the V1 COARSE round-trip. ANY interior change (a keystroke in a
@@ -2578,6 +2760,7 @@ function nodeContentEqual(serverNode, liveNode) {
   }
   // Container node — sub-route by bpType (node.type → bpType via the reverse map):
   //   * columns (bpColumns): the reconstructed columns array (child attrs excluded).
+  //   * terminal (bpTerminal): the reconstructed body + chrome (child attrs excluded).
   //   * section (bpSection): V1 does NOT recurse reconcile (product decision 1 defers
   //     recursive idWrites) — compare the WHOLE subtree canonically (title on attrs +
   //     the nested children incl. bpIds). A section holding a canvas-CREATED child (a
@@ -2586,8 +2769,12 @@ function nodeContentEqual(serverNode, liveNode) {
   //     all-stable children whose echoed interior edit matched DOES own-echo. bpId of
   //     the section itself is excluded (stableSectionKey ignores it).
   if (isCanvasContainerNode(type)) {
-    if (CANVAS_CONTAINER_BP_TYPE_BY_NODE[type] === "section") {
+    const bp = CANVAS_CONTAINER_BP_TYPE_BY_NODE[type];
+    if (bp === "section") {
       return stableSectionKey(serverNode) === stableSectionKey(liveNode);
+    }
+    if (bp === "terminal") {
+      return !terminalNodeChanged(serverNode, liveNode);
     }
     return !columnsNodeChanged(serverNode, liveNode);
   }
@@ -2640,10 +2827,15 @@ function nextNodeToBlock(entry, taken) {
     //   * section → rebuild the WHOLE section subtree (title + nested children) with
     //     the minted id; nested null-id children mint ids off the CALL-SHARED `taken`
     //     (the duplicate_id-abort guard) — a fresh Set only when none is threaded.
+    //   * terminal → reconstruct the full terminal block (body children + chrome) with
+    //     the minted id; a NEW terminal carries no unknown sibling keys, lossless.
     //   * columns → reconstruct the full columns block (its column child-block trees)
     //     with the minted id; a NEW columns carries no unknown sibling keys, lossless.
     if (entry.bpType === "section") {
       return sectionNodeToBlock(node, entry.id, taken || new Set());
+    }
+    if (entry.bpType === "terminal") {
+      return terminalNodeToBlock(node, entry.id);
     }
     return columnsNodeToBlock(node, entry.id);
   }

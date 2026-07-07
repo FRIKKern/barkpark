@@ -372,6 +372,35 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
       refute html =~ "bp-term__foot"
       assert html =~ "&lt;x&gt;"
     end
+
+    # editable-terminal: the canvas node-view (terminal-node.js) mirrors these EXACT
+    # bytes to inherit paper-surface.css paint. Lock the full compose string so a future
+    # compose edit that silently drifts the shape reds here (guards the coarse-patch
+    # round-trip the node-view depends on).
+    test "compose_block emits the EXACT terminal chrome bytes (title+footer+live)" do
+      assert Compose.compose_block(
+               %{
+                 "type" => "terminal",
+                 "title" => "build",
+                 "footer" => "^C to quit",
+                 "live" => true,
+                 "children" => []
+               },
+               :article
+             ) == %{
+               "kind" => "_raw",
+               "html" =>
+                 ~s|<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title">build</span><span class="bp-term__live">live</span></div><div class="bp-term__body"></div><div class="bp-term__foot">^C to quit</div></div>|
+             }
+    end
+
+    test "compose_block: absent live + footer emit NOTHING (exact empty-chrome bytes)" do
+      assert Compose.compose_block(%{"type" => "terminal", "children" => []}, :article) == %{
+               "kind" => "_raw",
+               "html" =>
+                 ~s|<div class="bp-term"><div class="bp-term__bar"><span class="bp-term__dots"><i></i><i></i><i></i></span><span class="bp-term__title"></span></div><div class="bp-term__body"></div></div>|
+             }
+    end
   end
 
   describe "columns" do

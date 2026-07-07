@@ -212,13 +212,19 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # carry (sheet/embed/fleet).
   #
   # V1 forbids container-in-container: a container encountered as a CHILD (depth>=1) is
-  # carried as a read-only bpOpaque/bpColumnAtom verbatim (NOT another editable
-  # container), enforced by the content expression — a legacy nested container
+  # carried as a read-only bpOpaque/bpColumnAtom/bpTerminalAtom verbatim (NOT another
+  # editable container), enforced by the content expression — a legacy nested container
   # round-trips byte-identical and is never restructured.
   #
+  # `terminal` (editable-terminal) is the THIRD container alongside columns + section:
+  # a bpTerminal holding prose/divider body children (+ a bpTerminalAtom verbatim
+  # carrier for any non-first-class child) wrapped in reader chrome (title bar + live
+  # badge + footer); EDITABLE, emitting a COARSE whole-body+chrome patch-block.
+  #
   # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES, columns-node.js
-  # (bpColumns/bpColumn/bpColumnAtom) and section-node.js (bpSection).
-  @canvas_container_types ~w(columns section)
+  # (bpColumns/bpColumn/bpColumnAtom), section-node.js (bpSection) and terminal-node.js
+  # (bpTerminal/bpTerminalAtom).
+  @canvas_container_types ~w(columns section terminal)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
