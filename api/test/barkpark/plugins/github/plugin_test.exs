@@ -46,8 +46,7 @@ defmodule Barkpark.Plugins.GithubTest do
                {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt,
                 auth: :token},
                {:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index, auth: :ops},
-               {:get, "/github/status", BarkparkWeb.GithubStatusController, :status,
-                auth: :token}
+               {:get, "/github/status", BarkparkWeb.GithubStatusController, :status, auth: :token}
              ]
     end
 

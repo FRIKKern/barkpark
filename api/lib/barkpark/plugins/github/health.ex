@@ -82,7 +82,8 @@ defmodule Barkpark.Plugins.Github.Health do
             available: non_neg_integer(),
             scheduled: non_neg_integer(),
             executing: non_neg_integer(),
-            retryable: non_neg_integer()
+            retryable: non_neg_integer(),
+            total: non_neg_integer()
           }
         }
 
@@ -234,16 +235,21 @@ defmodule Barkpark.Plugins.Github.Health do
           |> Repo.all()
           |> Map.new()
 
-        Map.new(@queue_states, fn state ->
-          {String.to_atom(state), Map.get(counts, state, 0)}
-        end)
+        by_state =
+          Map.new(@queue_states, fn state ->
+            {String.to_atom(state), Map.get(counts, state, 0)}
+          end)
+
+        Map.put(by_state, :total, by_state |> Map.values() |> Enum.sum())
       end,
       zero_queue()
     )
   end
 
   defp zero_queue do
-    Map.new(@queue_states, fn state -> {String.to_atom(state), 0} end)
+    @queue_states
+    |> Map.new(fn state -> {String.to_atom(state), 0} end)
+    |> Map.put(:total, 0)
   end
 
   # ---------------------------------------------------------------------------

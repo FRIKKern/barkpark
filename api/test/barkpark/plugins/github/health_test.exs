@@ -121,7 +121,7 @@ defmodule Barkpark.Plugins.Github.HealthTest do
                    pending_capped: false
                  }
                ],
-               queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0}
+               queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0}
              } = snap
     end
 
@@ -327,7 +327,14 @@ defmodule Barkpark.Plugins.Github.HealthTest do
 
     test "empty queue is all zeros" do
       restore_config(nil)
-      assert Health.snapshot().queue == %{available: 0, scheduled: 0, executing: 0, retryable: 0}
+
+      assert Health.snapshot().queue == %{
+               available: 0,
+               scheduled: 0,
+               executing: 0,
+               retryable: 0,
+               total: 0
+             }
     end
   end
 end
