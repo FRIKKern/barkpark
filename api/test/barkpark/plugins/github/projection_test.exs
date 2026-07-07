@@ -273,6 +273,7 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
         )
 
       issue = Projection.task_to_issue(doc)
+
       assert issue.body =~
                ~r/Brief\..*barkpark:acceptance:start.*barkpark:blocks:start.*Task: task-abc/s
     end
@@ -355,7 +356,11 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
 
   describe "synced_rev/1 — pure bookkeeping read" do
     test "reads content.github.synced_rev" do
-      doc = task(%{"github" => %{"repo" => "FRIKKern/barkpark", "issue" => 5, "synced_rev" => "rev-9"}})
+      doc =
+        task(%{
+          "github" => %{"repo" => "FRIKKern/barkpark", "issue" => 5, "synced_rev" => "rev-9"}
+        })
+
       assert Projection.synced_rev(doc) == "rev-9"
       assert Projection.task_to_issue(doc).synced_rev == "rev-9"
     end
@@ -367,7 +372,12 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
 
   describe "key tolerance" do
     test "accepts atom-keyed content" do
-      issue = Projection.task_to_issue(%{doc_id: "t1", content: %{title: "Atom keyed", lifecycle_status: "done"}})
+      issue =
+        Projection.task_to_issue(%{
+          doc_id: "t1",
+          content: %{title: "Atom keyed", lifecycle_status: "done"}
+        })
+
       assert issue.title == "Atom keyed"
       assert issue.state == "closed"
     end
