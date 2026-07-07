@@ -339,6 +339,89 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
       refute html =~ "<b>x</b>"
       assert html =~ "&lt;script&gt;"
     end
+
+    # REGRESSION (the notes_html refactor byte-guard): pin the EXACT bytes of a
+    # multi-item grid — the lead trailing-space, `<b>…</b> ` only when nonempty, the
+    # trim-then-escape(lead) order — so the parity gate's `notes` rows stay green after
+    # notes_html was refactored to Enum.map(&note_item_html/1).
+    test "notes_html emits BYTE-EXACT grid HTML (multi-item, lead present + absent)" do
+      html =
+        Components.notes_html(%{
+          "items" => [
+            %{"label" => "a<b>", "lead" => " Lead & co ", "text" => "body <x>"},
+            %{"label" => "two", "text" => "no lead"}
+          ]
+        })
+
+      assert html ==
+               ~s(<div class="bp-notes">) <>
+                 ~s(<div class="bp-note"><span class="bp-note__k">a&lt;b&gt;</span>) <>
+                 ~s(<div class="bp-note__d"><b>Lead &amp; co</b> body &lt;x&gt;</div></div>) <>
+                 ~s(<div class="bp-note"><span class="bp-note__k">two</span>) <>
+                 ~s(<div class="bp-note__d">no lead</div></div>) <>
+                 ~s(</div>)
+    end
+  end
+
+  # ── the notes-grid split: the singular `note` WIDGET ────────────────────────────
+  describe "note widget — byte-align to a legacy notes row" do
+    # A note in the flat wire form.
+    defp note(extra \\ %{}) do
+      Map.merge(%{"type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"}, extra)
+    end
+
+    test "note_item_html/1 == the inner row of a single-item notes grid (grid MINUS wrapper)" do
+      item = %{"label" => "alive", "lead" => "Kept", "text" => "the body"}
+      row = Components.note_item_html(item)
+
+      # The lone-item grid is exactly the wrapper + this row.
+      assert Components.notes_html(%{"items" => [item]}) ==
+               ~s(<div class="bp-notes">) <> row <> ~s(</div>)
+
+      # And the row itself carries NO grid wrapper (a lone note is one row).
+      refute row =~ "bp-notes"
+      assert row =~ ~s(<span class="bp-note__k">alive</span>)
+      assert row =~ ~s(<b>Kept</b> the body)
+    end
+
+    test "compose_block(note, :article) `_raw` html == note_item_html == the notes row (lead PRESENT)" do
+      composed = Compose.compose_block(note(), :article)
+      assert composed == %{"kind" => "_raw", "html" => Components.note_item_html(note())}
+
+      # Byte-identical to a single-item notes grid MINUS the `bp-notes` wrapper.
+      grid = Components.notes_html(%{"items" => [%{"label" => "alive", "lead" => "Kept", "text" => "the body"}]})
+      assert composed["html"] == String.replace_prefix(grid, ~s(<div class="bp-notes">), "") |> String.replace_suffix("</div>", "")
+    end
+
+    test "compose_block(note, :article) byte-aligns for a lead-ABSENT note (no <b> run)" do
+      n = %{"type" => "note", "label" => "solo", "text" => "just a line"}
+      composed = Compose.compose_block(n, :article)
+
+      assert composed["html"] ==
+               ~s(<div class="bp-note"><span class="bp-note__k">solo</span>) <>
+                 ~s(<div class="bp-note__d">just a line</div></div>)
+
+      refute composed["html"] =~ "<b>"
+    end
+
+    test "a MATERIALIZED note composes byte-identically to its flat twin (the byte-align claim)" do
+      flat = note()
+
+      slotted = %{
+        "type" => "note",
+        "slots" => %{
+          "label" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}],
+          "lead" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}],
+          "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+        }
+      }
+
+      assert Compose.compose_block(slotted, :article) == Compose.compose_block(flat, :article)
+    end
+
+    test "note render goes through walk `_raw` verbatim (reader passes it through)" do
+      assert render(note()) =~ ~s(<div class="bp-note">)
+    end
   end
 
   describe "terminal chrome" do

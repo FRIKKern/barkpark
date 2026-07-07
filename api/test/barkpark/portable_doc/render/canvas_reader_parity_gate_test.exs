@@ -231,6 +231,37 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
            "questionnaire lost its kind discriminator class — the alias fixture no longer exercises the form emitter"
   end
 
+  test "§1 a legacy snapshot-only task-list renders byte-identically to its tasks emitter (backward-compat freeze)" do
+    # The live-data task-list WIDGET is ADDITIVE: it never touches the reader clause
+    # (compose.ex:688 + Components.tasks_html). A LEGACY author-pinned task-list (a
+    # literal `snapshot`, NO `query`) must render EXACTLY as before. Freeze that: the
+    # legacy block routes through the ONE tasks emitter byte for byte, AND is
+    # byte-identical to the equivalent `tasks` block (a live task-list resolves
+    # query→snapshot BEFORE this clause, so the snapshot form is a pure alias).
+    legacy = %{
+      "type" => "task-list",
+      "title" => "Frozen",
+      "snapshot" => [
+        %{"title" => "Row one", "status" => "ready", "priority" => 1},
+        %{"title" => "Row two", "status" => "done"}
+      ]
+    }
+
+    reader = Render.render_block(legacy, @article)
+
+    assert reader == Components.tasks_html(legacy),
+           "legacy task-list no longer routes through the ONE tasks emitter byte for byte"
+
+    # Non-vacuous: real rows made it through the emitter.
+    assert String.contains?(reader, "bp-tasks"), "the frozen render is missing its row markup"
+    assert String.contains?(reader, "Row one"), "the frozen render dropped a snapshot row"
+
+    # Alias property: a snapshot-only task-list == the equivalent `tasks` block, byte
+    # for byte — the widget did not fork the legacy alias.
+    assert reader == Render.render_block(%{legacy | "type" => "tasks"}, @article),
+           "the task-list ⇄ tasks alias drifted — the legacy render is no longer byte-identical"
+  end
+
   test "§1 render_block(:article) is deterministic — the canvas and reader cannot differ per call" do
     # The canvas and the reader both call render_block(:article) on the SAME
     # source block. Determinism ⇒ identical input yields byte-identical output,
@@ -332,6 +363,16 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # class here. A fleet DATA block (tasks/notes/cards/board) stays verbatim-carried
     # because editing a live-data mirror in-paper is meaningless; a layout/authored
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
+    #
+    # `task-list` GRADUATED to EDITABLE (live-data widget, bpTaskList; task-list-node.js)
+    # but STILL carries NO reader markup here: unlike columns/terminal/card (which emit
+    # their own structural chrome to edit INSIDE), the task-list ROWS remain SERVER-
+    # PAINTED (the query is the authored datum, the rows are the one server producer via
+    # TaskResolver). The node-view writes ONLY `bp-canvas-tasklist-*` edit chrome and
+    # paints the reader HTML into its hole — so `bp-tasks` (the reader row markup, in
+    # painted_fleet's `task-list (alias)` sig) STAYS forbidden below and §3 stays green.
+    # It is the figure precedent (editable caption + server-painted child), applied to a
+    # LIVE QUERY + server-painted rows.
     #
     # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
     # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view
@@ -452,5 +493,41 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # The bpId-keyed cells map must be READ in paint (not the old positional array).
     assert String.contains?(src, "cells"),
            "section-node.js paint no longer reads the cells map"
+  end
+
+  # ── §7 STAGE-WIDGET exemption (DESIGN 1 — the editable pipeline-node twin) ────
+  #
+  # The `stage` widget is EDITABLE (a bpStage control-atom node, stage-node.js), NOT a
+  # server-painted verbatim fleet block — so it is DELIBERATELY absent from
+  # painted_fleet (like `card`). It sidesteps the fleet gate by rendering into a
+  # `bp-canvas-stage` cell whose look is hand-mirrored by CSS, NOT by emitting the
+  # reader `bp-pnode` cell class. `bp-pnode` therefore STAYS in the §3 forbidden list
+  # (above) so the still-verbatim-carried legacy `pipeline` fleet keeps its gate
+  # protection. This test PINS that exemption: `stage` is not painted-fleet, and
+  # stage-node.js introduces NONE of the forbidden reader-cell literals.
+
+  test "§7 stage is EXEMPT from painted_fleet (editable widget, not a server-painted mirror)" do
+    labels = Enum.map(painted_fleet(), fn {l, _, _, _} -> l end)
+
+    refute "stage" in labels,
+           "stage must NOT be in painted_fleet — it is an EDITABLE widget (bpStage), not a verbatim-carried fleet block"
+
+    # The legacy pipeline stays painted-fleet + its cell class stays forbidden.
+    assert "pipeline" in labels, "legacy pipeline must remain a painted-fleet block"
+  end
+
+  test "§7 stage-node.js does NOT emit the reader pipeline-cell class (bp-pnode stays gate-forbidden)" do
+    src =
+      "../../../../assets/paper-editor/src/canvas/stage-node.js"
+      |> Path.expand(__DIR__)
+      |> File.read!()
+
+    assert byte_size(src) > 0, "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
+
+    refute String.contains?(src, "bp-pnode"),
+           "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
+
+    assert String.contains?(src, "bp-canvas-stage"),
+           "stage-node.js no longer uses the bp-canvas-stage chrome — the DESIGN-1 hook moved"
   end
 end

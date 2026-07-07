@@ -71,6 +71,21 @@ defmodule Barkpark.PortableDoc.Slots do
           count: Barkpark.PortableDoc.Constraints.count()
         }
 
+  @typedoc """
+  A widget's declaration of one SCALAR editable datum (an attr, not a slot child).
+  `kind` is the datum's shape (`:query` map / `:string` / `:config` map); `required`
+  is `:when_live` (required only when the widget is in its live/editable encoding),
+  `true`, or `false`. The LIVE `task-list` widget declares these — its editable data
+  are scalar attrs (query/title/config), NOT element-tier slot children, so it needs
+  a PARALLEL declaration surface to `slot_decls/1` (figure/diagram/table are widgets
+  with no `slot_decls` entry for the same reason).
+  """
+  @type query_field_decl :: %{
+          name: String.t(),
+          kind: :query | :string | :config,
+          required: :when_live | boolean()
+        }
+
   @doc """
   The structural tier of a block, for the D1 slot gate: `:widget` / `:section` /
   `:element`. Delegates FULLY to the one canonical classifier
@@ -105,7 +120,54 @@ defmodule Barkpark.PortableDoc.Slots do
       %{name: "action", tier: :element, count: {:max, 1}}
     ]
 
+  # Note (the notes-grid split) declares THREE element slots — `label` /
+  # `lead` / `body` — mirroring the three fields of ONE legacy `notes` item.
+  # `label` and `body` are REQUIRED ({:exactly, 1}); `lead` is OPTIONAL
+  # ({:max, 1}, the arity twin of "at most one") so an absent lead is
+  # conforming. The D1 gate rejects a nested widget/section in any of them.
+  def slot_decls(%{"type" => "note"}),
+    do: [
+      %{name: "label", tier: :element, count: {:exactly, 1}},
+      %{name: "lead", tier: :element, count: {:max, 1}},
+      %{name: "body", tier: :element, count: {:exactly, 1}}
+    ]
+
+  # Stage — the editable per-node twin of ONE legacy `pipeline` node. THREE PLAIN-TEXT
+  # element slots (the `title` is the required one, arity {:exactly, 1}); `files` and
+  # `source` stay WIDGET chrome (like callout `title`/`collapsible`), NOT slots — that
+  # keeps the slot count at three and preserves the byte-fidelity of the pnode cell.
+  def slot_decls(%{"type" => "stage"}),
+    do: [
+      %{name: "kind", tier: :element, count: {:max, 1}},
+      %{name: "title", tier: :element, count: {:exactly, 1}},
+      %{name: "detail", tier: :element, count: {:max, 1}}
+    ]
+
   def slot_decls(_), do: []
+
+  @doc """
+  The SCALAR editable-data declarations for a widget block whose editable surface is
+  attrs, not slot children. The LIVE `task-list` widget declares three:
+
+    * `query` — kind `:query` (the filter map), `required: :when_live` (a task-list in
+      its LIVE encoding must carry a query; a legacy snapshot-only task-list is the
+      author-pinned encoding and declares nothing to require here).
+    * `title` — kind `:string`, optional.
+    * `config` — kind `:config` (a `%{limit, fields}` map), optional.
+
+  This is the contract the canvas node-view (`task-list-node.js`) and the JS round-trip
+  (`taskListBlockToNode`/`taskListNodeToBlock`) agree on. Every other block declares
+  none (an empty list).
+  """
+  @spec query_decl(term()) :: [query_field_decl()]
+  def query_decl(%{"type" => "task-list"}),
+    do: [
+      %{name: "query", kind: :query, required: :when_live},
+      %{name: "title", kind: :string, required: false},
+      %{name: "config", kind: :config, required: false}
+    ]
+
+  def query_decl(_), do: []
 
   @doc """
   The element-tier children of the named slot. Returns `block["slots"][name]` when a
@@ -126,7 +188,51 @@ defmodule Barkpark.PortableDoc.Slots do
   defp legacy_slot(%{"type" => "callout"} = block, "body"),
     do: [%{"type" => "paragraph", "content" => Map.get(block, "content") || []}]
 
+  # A note's `label`/`lead`/`body` slots are its flat `label`/`lead`/`text`
+  # fields wrapped as ONE implicit paragraph each (the compat-read: no `slots`
+  # key ⇒ synthesize the three paragraphs). The flat field maps to the slot as
+  # label→label, lead→lead, body→TEXT (the legacy `notes` item vocab: `text`).
+  # An EMPTY lead synthesizes `[]` (arity {:max, 1}: an absent optional slot),
+  # so `note_lead_text/1` reads the empty legacy field, never a stray paragraph.
+  defp legacy_slot(%{"type" => "note"} = block, "label"),
+    do: [note_para(note_flat(block, "label"))]
+
+  defp legacy_slot(%{"type" => "note"} = block, "body"),
+    do: [note_para(note_flat(block, "text"))]
+
+  defp legacy_slot(%{"type" => "note"} = block, "lead") do
+    case note_flat(block, "lead") do
+      "" -> []
+      lead -> [note_para(lead)]
+    end
+  end
+
+  # A stage's `kind`/`title`/`detail` slot is its SCALAR string wrapped as ONE implicit
+  # PLAIN-TEXT paragraph (one text run). A PRESENT key (even "") synthesizes ONE element;
+  # an ABSENT key synthesizes []. `stage_field_text/2` flattens it BACK to the scalar
+  # string, so a scalar-only stage reads through the slot API byte-identically to a
+  # slots-materialized stage.
+  defp legacy_slot(%{"type" => "stage"} = block, name) when name in ["kind", "title", "detail"] do
+    case Map.fetch(block, name) do
+      {:ok, scalar} ->
+        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => scalar}]}]
+
+      :error ->
+        []
+    end
+  end
+
   defp legacy_slot(_block, _name), do: []
+
+  # A plain-text implicit paragraph: an empty string wraps to `content: []`, a
+  # non-empty string to a single inline text node (the flatten-to-plain twin).
+  defp note_para(""), do: %{"type" => "paragraph", "content" => []}
+  defp note_para(text), do: %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+
+  # A note's flat field as a plain string (nil-safe, non-map-safe): the legacy
+  # `notes` item vocab where `body` lives under the `text` key.
+  defp note_flat(block, key) when is_map(block), do: block |> Map.get(key) |> to_text()
+  defp note_flat(_block, _key), do: ""
 
   @doc """
   The inline array of a callout's single body element — from the slot's lone
@@ -194,6 +300,63 @@ defmodule Barkpark.PortableDoc.Slots do
     end
   end
 
+  # ── note widget accessors (the notes-grid split) ─────────────────────────────
+  #
+  # THE load-bearing byte-identity invariants — the `callout_body_inline/1` analog,
+  # one per field. Each returns the PLAIN string of the slot (the lone paragraph's
+  # inline FLATTENED to plain text, marks dropped) when materialized, else the
+  # legacy flat field. Both encodings of the same note yield the SAME three strings
+  # ⟹ `Components.note_item_html/1` emits byte-identical HTML. These ALSO read a
+  # bare legacy `notes` ITEM (a `%{label,lead,text}` map with no `"type"` key —
+  # slot_elements synthesizes nothing for it, so it falls straight to the flat
+  # field), which is what lets `notes_html/1` reuse `note_item_html/1` per item and
+  # stay byte-identical. The body flattens to plain text (marks dropped) to match
+  # the legacy `escape_html(text)` contract — a DELIBERATE lossy-inline tradeoff.
+
+  @doc "The plain label string of a note's `label` slot, else the legacy flat `label` field."
+  @spec note_label_text(term()) :: String.t()
+  def note_label_text(block), do: note_slot_text(block, "label", "label")
+
+  @doc "The plain lead string of a note's `lead` slot, else the legacy flat `lead` field (\"\" when absent)."
+  @spec note_lead_text(term()) :: String.t()
+  def note_lead_text(block), do: note_slot_text(block, "lead", "lead")
+
+  @doc "The plain body string of a note's `body` slot, else the legacy flat `text` field."
+  @spec note_body_text(term()) :: String.t()
+  def note_body_text(block), do: note_slot_text(block, "body", "text")
+
+  # Flatten the slot's lone paragraph inline to plain text (marks dropped); when no
+  # element is present (a bare legacy item, or an empty optional slot), read the flat
+  # field. The SAME plain string either encoding, so reader bytes never move.
+  defp note_slot_text(block, slot_name, flat_key) do
+    case slot_elements(block, slot_name) do
+      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+      _ -> note_flat(block, flat_key)
+    end
+  end
+
+  # ── stage widget accessor ────────────────────────────────────────────────────
+
+  @doc """
+  The PLAIN string of a stage's named text field (`"kind"` / `"title"` / `"detail"`)
+  — the stage analogue of `callout_body_inline/1`. Reads the lone slot element's
+  text-runs FLATTENED to plain text (marks dropped) when a `slots` map carries it, ELSE
+  the top-level scalar via the compat synthesis. THE load-bearing invariant: both
+  encodings yield the SAME string ⟹ `Components.stage_html/1` escapes the same bytes ⟹
+  a byte-identical reader. Always a string (nil-safe).
+
+  Stage slot text is PLAIN (unlike the callout's rich `inline*` body): the reader
+  escapes it as flat text with no inline markup, so the serializer joins the text-runs
+  and DROPS marks — a pasted `<strong>` must NOT survive or byte-identity breaks.
+  """
+  @spec stage_field_text(term(), String.t()) :: String.t()
+  def stage_field_text(block, name) do
+    case slot_elements(block, name) do
+      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+      _ -> ""
+    end
+  end
+
   defp to_text(s) when is_binary(s), do: s
   defp to_text(n) when is_integer(n), do: Integer.to_string(n)
   defp to_text(_), do: ""
@@ -241,7 +404,80 @@ defmodule Barkpark.PortableDoc.Slots do
     |> put_callout_body(inline)
   end
 
+  def normalize_widget(%{"type" => "task-list"} = block) do
+    # A LIVE task-list persists its `query` map DIRECTLY (like `card`, it is genuinely
+    # slots-free on the wire — no `content`/`slots` duality to reconcile). This clause
+    # is idempotent + lossless: a map query is preserved EXACTLY (coerced to a plain
+    # map when it is one — a no-op), and a snapshot-only author-pinned block (no query)
+    # passes through UNTOUCHED. It NEVER adds a snapshot to a query block (nor a query
+    # to a snapshot block), so the two encodings never co-exist. Persistence-side only
+    # (NOT on the read/compose path — the reader byte-identity is via compose.ex:688).
+    case Map.get(block, "query") do
+      q when is_map(q) -> Map.put(block, "query", Map.new(q))
+      _ -> block
+    end
+  end
+
+  # A note dual-writes its three flat fields ⇄ a `slots` map, idempotently. label +
+  # body (both required) are ALWAYS written on both sides; `lead` (optional) is
+  # OMITTED entirely — flat key AND slot — when empty/absent (byte-fidelity: an
+  # absent lead round-trips ABSENT, never `""`, mirroring the callout title
+  # maybe_put + the empty-body omit). The plain field ⇄ one-paragraph-slot mapping
+  # goes through the SAME `note_*_text/1` accessors + `note_para/1` synthesis, so
+  # `normalize_widget(normalize_widget(x)) == normalize_widget(x)`.
+  def normalize_widget(%{"type" => "note"} = block) do
+    label = note_label_text(block)
+    lead = note_lead_text(block)
+    body = note_body_text(block)
+
+    slots =
+      %{"label" => [note_para(label)], "body" => [note_para(body)]}
+      |> put_note_lead_slot(lead)
+
+    block
+    |> Map.drop(["label", "lead", "text", "slots"])
+    |> Map.put("label", label)
+    |> Map.put("text", body)
+    |> put_note_lead_field(lead)
+    |> Map.put("slots", slots)
+  end
+
+  # Stage — idempotent dual-write of the three text scalars ⇄ `slots`. An EMPTY field
+  # (flattened text == "") omits BOTH the scalar AND the slot entry (the callout empty-
+  # body precedent); `files`/`source` chrome pass through untouched. Persistence-side
+  # ONLY (not on the read/compose path), so stored bytes are never force-backfilled.
+  def normalize_widget(%{"type" => "stage"} = block) do
+    fields = ["kind", "title", "detail"]
+
+    {scalars, slots} =
+      Enum.reduce(fields, {%{}, %{}}, fn name, {sc, sl} ->
+        case stage_field_text(block, name) do
+          "" ->
+            {sc, sl}
+
+          text ->
+            {Map.put(sc, name, text),
+             Map.put(sl, name, [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+             ])}
+        end
+      end)
+
+    block
+    |> Map.drop(fields ++ ["slots"])
+    |> Map.merge(scalars)
+    |> put_stage_slots(slots)
+  end
+
   def normalize_widget(block), do: block
+
+  defp put_note_lead_slot(slots, ""), do: slots
+  defp put_note_lead_slot(slots, lead), do: Map.put(slots, "lead", [note_para(lead)])
+
+  defp put_note_lead_field(block, ""), do: block
+  defp put_note_lead_field(block, lead), do: Map.put(block, "lead", lead)
+  defp put_stage_slots(block, slots) when map_size(slots) == 0, do: block
+  defp put_stage_slots(block, slots), do: Map.put(block, "slots", slots)
 
   # Empty body: omit both keys (precedent). Non-empty: dual-write content + slots.
   defp put_callout_body(block, []), do: block
@@ -286,4 +522,35 @@ defmodule Barkpark.PortableDoc.Slots do
 
   defp type_of(%{"type" => t}) when is_binary(t) and t != "", do: t
   defp type_of(_), do: nil
+
+  @doc """
+  The LIVE-DATA gate for the `task-list` widget's `query` datum — LEGACY-SAFE. Returns
+  `[]` for:
+
+    * a snapshot-only / author-pinned task-list (NO `query` key) — the legacy encoding
+      is valid, so no existing paper ever gains an error; AND
+    * a well-formed LIVE task-list (`query` is a map).
+
+  Returns a single calm error ONLY when a `query` key IS present but is NOT a map (a
+  malformed live query). It NEVER requires a query unconditionally — that would red
+  every legacy block. This is "the query is a real, validated editable datum" WITHOUT
+  breaking author-pinned rows. Every non-task-list block yields `[]`. Never raises.
+  """
+  @spec query_type_errors(term()) :: [String.t()]
+  def query_type_errors(%{"type" => "task-list"} = block) do
+    case Map.fetch(block, "query") do
+      :error ->
+        []
+
+      {:ok, q} when is_map(q) ->
+        []
+
+      {:ok, _} ->
+        [
+          ~s|the "task-list" query must be a map (a filter like %{"label" => "proj:x"}), got a non-map value|
+        ]
+    end
+  end
+
+  def query_type_errors(_), do: []
 end

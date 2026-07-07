@@ -256,6 +256,110 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
+  describe "stage widget slots (the pipeline-node twin)" do
+    test "declares three element slots — kind {:max,1}, title {:exactly,1}, detail {:max,1}" do
+      decls = Slots.slot_decls(%{"type" => "stage"})
+      assert Enum.map(decls, & &1.name) == ["kind", "title", "detail"]
+      assert Enum.all?(decls, &(&1.tier == :element))
+      assert Enum.find(decls, &(&1.name == "title")).count == {:exactly, 1}
+      assert Enum.find(decls, &(&1.name == "kind")).count == {:max, 1}
+      assert Enum.find(decls, &(&1.name == "detail")).count == {:max, 1}
+    end
+
+    test "stage_field_text/2 yields the SAME plain string for the scalar AND slot encodings" do
+      assert Slots.stage_field_text(stage_scalar(), "kind") == "source"
+      assert Slots.stage_field_text(stage_scalar(), "title") == "emit"
+      assert Slots.stage_field_text(stage_slotted(), "kind") == "source"
+      assert Slots.stage_field_text(stage_slotted(), "title") == "emit"
+
+      for name <- ["kind", "title", "detail"] do
+        assert Slots.stage_field_text(stage_scalar(), name) ==
+                 Slots.stage_field_text(stage_slotted(), name),
+               ~s(scalar and slot "#{name}" diverged)
+      end
+    end
+
+    test "stage_field_text/2 DROPS marks (plain text — a pasted <strong> must not survive)" do
+      marked =
+        stage_scalar(%{
+          "slots" => %{
+            "detail" => [
+              %{
+                "type" => "paragraph",
+                "content" => [
+                  %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold "}]},
+                  %{"type" => "text", "value" => "tail"}
+                ]
+              }
+            ]
+          }
+        })
+
+      assert Slots.stage_field_text(marked, "detail") == "bold tail"
+    end
+
+    test "an absent field is nil-safe (empty string)" do
+      assert Slots.stage_field_text(%{"type" => "stage"}, "kind") == ""
+      assert Slots.stage_field_text(%{"type" => "stage"}, "detail") == ""
+    end
+
+    test "scalar and slot encodings compose to byte-identical HTML (the reader proof)" do
+      assert Render.render_block(stage_scalar(), %{style: :article}) ==
+               Render.render_block(stage_slotted(), %{style: :article})
+    end
+
+    test "a stage renders the IDENTICAL pnode cell one legacy pipeline node emits (drift tripwire)" do
+      # A single-node pipeline wraps its ONE cell in bp-pipe-scroll/bp-pipe; a stage IS
+      # that inner cell. So stage_html == the pipeline's cell, byte for byte.
+      node = %{"kind" => "source", "title" => "emit", "detail" => "reads the queue", "source" => true}
+      pipeline = %{"type" => "pipeline", "nodes" => [node]}
+      stage = Map.merge(%{"type" => "stage"}, node)
+
+      cell = Compose.compose_block(stage, :article)["html"]
+
+      wrapped =
+        ~s(<div class="bp-pipe-scroll"><div class="bp-pipe">) <>
+          cell <> ~s(</div></div>)
+
+      assert Compose.compose_block(pipeline, :article)["html"] == wrapped,
+             "a stage cell no longer byte-matches one legacy pipeline node — reader drift"
+    end
+
+    test "element slots yield NO D1 errors; a nested widget/section yields the specific error" do
+      assert Slots.slot_type_errors(stage_scalar()) == []
+      assert Slots.slot_type_errors(stage_slotted()) == []
+
+      nested =
+        stage_scalar(%{"slots" => %{"detail" => [%{"type" => "callout", "content" => plain()}]}})
+
+      errors = Slots.slot_type_errors(nested)
+      assert Enum.any?(errors, &(&1 =~ ~s(the "detail" slot accepts only element blocks)))
+      assert Enum.any?(errors, &(&1 =~ "widget"))
+    end
+
+    test "normalize_widget/1 is idempotent + dual-writes scalars AND slots" do
+      once = Slots.normalize_widget(stage_scalar())
+      assert Slots.normalize_widget(once) == once
+      # Scalar-form and slot-form of the same stage normalize to the IDENTICAL map.
+      assert Slots.normalize_widget(stage_scalar()) == Slots.normalize_widget(stage_slotted())
+      # Dual-write: the scalar AND the slot entry are both present + in sync.
+      assert once["kind"] == "source"
+      assert once["slots"]["kind"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}]
+    end
+
+    test "normalize_widget/1 omits an EMPTY field from BOTH scalar and slots; keeps files/source chrome" do
+      normalized =
+        Slots.normalize_widget(%{"type" => "stage", "title" => "t", "detail" => "", "files" => "a.ex", "source" => true})
+
+      assert normalized["title"] == "t"
+      refute Map.has_key?(normalized, "detail")
+      refute Map.has_key?(normalized["slots"], "detail")
+      # files/source are chrome, NOT slots — pass through untouched.
+      assert normalized["files"] == "a.ex"
+      assert normalized["source"] == true
+    end
+  end
+
   describe "tier/1 classifier (delegates FULLY to Tiers)" do
     test "callout is a widget, section is a section, paragraph is an element" do
       assert Slots.tier(%{"type" => "callout"}) == :widget
@@ -273,6 +377,78 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       # @widget type in Tiers, so tier/1 MUST agree with Tiers.tier_of/1 (proving the
       # single-classifier delegation, not a lingering hard-coded branch).
       assert Slots.tier(%{"type" => "card"}) == Barkpark.PortableDoc.Tiers.tier_of("card")
+    end
+  end
+
+  describe "live-data task-list: query_decl/1 + normalize_widget/1 + query_type_errors/1" do
+    defp live_tl(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "t-1", "type" => "task-list", "query" => %{"label" => "proj:x"}, "title" => "Plan"},
+        extra
+      )
+    end
+
+    defp snap_tl(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "t-2", "type" => "task-list", "snapshot" => [%{"title" => "Pinned", "status" => "open"}]},
+        extra
+      )
+    end
+
+    test "query_decl/1 declares query(:when_live) + optional title/config for a task-list" do
+      assert Slots.query_decl(%{"type" => "task-list"}) == [
+               %{name: "query", kind: :query, required: :when_live},
+               %{name: "title", kind: :string, required: false},
+               %{name: "config", kind: :config, required: false}
+             ]
+    end
+
+    test "query_decl/1 is [] for every non-task-list block" do
+      assert Slots.query_decl(%{"type" => "callout"}) == []
+      assert Slots.query_decl(%{"type" => "paragraph"}) == []
+      assert Slots.query_decl(%{}) == []
+    end
+
+    test "normalize_widget/1 on a live task-list is idempotent AND lossless (query preserved exactly)" do
+      block = live_tl(%{"config" => %{"limit" => 10, "fields" => ["title", "status"]}})
+      once = Slots.normalize_widget(block)
+      # lossless: same map back
+      assert once == block
+      # idempotent
+      assert Slots.normalize_widget(once) == once
+      # the query map survives byte-for-byte
+      assert once["query"] == %{"label" => "proj:x"}
+    end
+
+    test "normalize_widget/1 passes a snapshot-only task-list through UNTOUCHED" do
+      block = snap_tl()
+      assert Slots.normalize_widget(block) == block
+      # never gains a query key
+      refute Map.has_key?(Slots.normalize_widget(block), "query")
+    end
+
+    test "query_type_errors/1 is [] for a snapshot-only (author-pinned) task-list" do
+      assert Slots.query_type_errors(snap_tl()) == []
+    end
+
+    test "query_type_errors/1 is [] for a well-formed live query map" do
+      assert Slots.query_type_errors(live_tl()) == []
+      # an empty map is still a map → legal (the fetcher's tenant scoping owns row selection)
+      assert Slots.query_type_errors(live_tl(%{"query" => %{}})) == []
+    end
+
+    test "query_type_errors/1 returns ONE calm error for a present-but-non-map query" do
+      errors = Slots.query_type_errors(live_tl(%{"query" => "proj:x"}))
+      assert length(errors) == 1
+      assert hd(errors) =~ "task-list"
+      assert hd(errors) =~ "must be a map"
+    end
+
+    test "query_type_errors/1 NEVER requires a query (no unconditional error) + is [] for non-task-list" do
+      # a task-list with neither query nor snapshot still yields [] (never forced)
+      assert Slots.query_type_errors(%{"id" => "t", "type" => "task-list"}) == []
+      assert Slots.query_type_errors(%{"type" => "callout"}) == []
+      assert Slots.query_type_errors(%{"type" => "paragraph"}) == []
     end
   end
 
@@ -294,4 +470,165 @@ defmodule Barkpark.PortableDoc.SlotsTest do
   end
 
   defp plain, do: [%{"type" => "text", "value" => "plain"}]
+
+  describe "note widget — slot round-trip + compat-read + byte-identity accessors" do
+    # A note in the FLAT wire form (label + lead + body `text`).
+    defp note_flat(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "nw-1", "type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"},
+        extra
+      )
+    end
+
+    # The MATERIALIZED twin — the additive slots encoding of the SAME three strings.
+    defp note_slotted(extra \\ %{}) do
+      Map.merge(
+        %{
+          "id" => "nw-1",
+          "type" => "note",
+          "slots" => %{
+            "label" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}],
+            "lead" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}],
+            "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+          }
+        },
+        extra
+      )
+    end
+
+    test "note_{label,lead,body}_text/1 yield the SAME three strings for BOTH encodings" do
+      for enc <- [note_flat(), note_slotted()] do
+        assert Slots.note_label_text(enc) == "alive"
+        assert Slots.note_lead_text(enc) == "Kept"
+        assert Slots.note_body_text(enc) == "the body"
+      end
+    end
+
+    test "compat-read: a flat note with NO slots key synthesizes the 3 implicit paragraphs" do
+      assert Slots.slot_elements(note_flat(), "label") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
+
+      assert Slots.slot_elements(note_flat(), "body") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+
+      assert Slots.slot_elements(note_flat(), "lead") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
+    end
+
+    test "a bare legacy `notes` ITEM (no type key) reads through the flat fallback" do
+      item = %{"label" => "x", "lead" => "L", "text" => "y"}
+      assert Slots.note_label_text(item) == "x"
+      assert Slots.note_lead_text(item) == "L"
+      assert Slots.note_body_text(item) == "y"
+    end
+
+    test "an EMPTY lead synthesizes [] (arity {:max,1}) and reads back \"\"" do
+      n = note_flat(%{"lead" => ""})
+      assert Slots.slot_elements(n, "lead") == []
+      assert Slots.note_lead_text(n) == ""
+      # An absent lead key is likewise "" (nil-safe).
+      assert Slots.note_lead_text(%{"type" => "note", "label" => "a", "text" => "b"}) == ""
+    end
+
+    test "the body slot FLATTENS inline marks to plain text (the lossy legacy contract)" do
+      marked = [
+        %{"type" => "text", "value" => "Be "},
+        %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold"}]}
+      ]
+
+      n = %{"type" => "note", "slots" => %{"body" => [%{"type" => "paragraph", "content" => marked}]}}
+      assert Slots.note_body_text(n) == "Be bold"
+    end
+
+    test "normalize_widget dual-writes flat ⇄ slots and is IDEMPOTENT" do
+      n = Slots.normalize_widget(note_flat())
+      assert n["label"] == "alive"
+      assert n["text"] == "the body"
+      assert n["lead"] == "Kept"
+      assert n["slots"]["label"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
+      assert n["slots"]["body"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+      assert n["slots"]["lead"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
+      # Idempotent, and a flat-form and slot-form note normalize to the SAME map.
+      assert Slots.normalize_widget(n) == n
+      assert Slots.normalize_widget(note_slotted()) == n
+    end
+
+    test "normalize_widget OMITS an empty/absent lead entirely (flat key AND slot), never \"\"" do
+      n = Slots.normalize_widget(note_flat(%{"lead" => ""}))
+      refute Map.has_key?(n, "lead")
+      refute Map.has_key?(n["slots"], "lead")
+      # Idempotent on the lead-less shape.
+      assert Slots.normalize_widget(n) == n
+
+      absent = Slots.normalize_widget(%{"type" => "note", "label" => "a", "text" => "b"})
+      refute Map.has_key?(absent, "lead")
+      refute Map.has_key?(absent["slots"], "lead")
+    end
+
+    test "slot_decls/1: 3 element slots — label exactly-1, lead max-1, body exactly-1" do
+      assert Slots.slot_decls(%{"type" => "note"}) == [
+               %{name: "label", tier: :element, count: {:exactly, 1}},
+               %{name: "lead", tier: :element, count: {:max, 1}},
+               %{name: "body", tier: :element, count: {:exactly, 1}}
+             ]
+    end
+
+    test "D1 gate: a clean note is error-free; a nested widget in a slot reds" do
+      assert Slots.slot_type_errors(note_flat()) == []
+      assert Slots.slot_type_errors(note_slotted()) == []
+
+      nested = %{
+        "type" => "note",
+        "slots" => %{
+          "label" => [%{"type" => "callout", "content" => plain()}],
+          "body" => [%{"type" => "paragraph", "content" => plain()}]
+        }
+      }
+
+      errors = Slots.slot_type_errors(nested)
+      refute errors == []
+      assert Enum.any?(errors, &(&1 =~ ~s(the "label" slot accepts only element blocks)))
+      assert Enum.any?(errors, &(&1 =~ "widget"))
+    end
+
+    test "Constraints.validate/2 folds in the note D1 gate (clean note zero-error)" do
+      assert Constraints.validate([note_flat()], []) == []
+      nested = %{"type" => "note", "slots" => %{"body" => [%{"type" => "section", "children" => []}]}}
+      refute Constraints.validate([nested], []) == []
+    end
+  end
+
+  # A WIRE-canonical (scalar) stage fixture: three text fields + source chrome.
+  defp stage_scalar(extra \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "st-1",
+        "type" => "stage",
+        "kind" => "source",
+        "title" => "emit",
+        "detail" => "reads the queue",
+        "source" => true
+      },
+      extra
+    )
+  end
+
+  # The additive SLOTS encoding of the SAME stage (plain text runs, no marks).
+  defp stage_slotted(extra \\ %{}) do
+    Map.merge(
+      %{
+        "id" => "st-1",
+        "type" => "stage",
+        "source" => true,
+        "slots" => %{
+          "kind" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}],
+          "title" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "emit"}]}],
+          "detail" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "reads the queue"}]}
+          ]
+        }
+      },
+      extra
+    )
+  end
 end

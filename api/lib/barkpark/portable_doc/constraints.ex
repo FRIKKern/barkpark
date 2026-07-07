@@ -118,7 +118,14 @@ defmodule Barkpark.PortableDoc.Constraints do
     # `Slots` is pure/Content-free, so this keeps the checker's layering purity.
     slot_errors = Enum.flat_map(blocks, &Barkpark.PortableDoc.Slots.slot_type_errors/1)
 
-    decl_errors ++ slot_errors
+    # LIVE-DATA gate (task-list widget): a present-but-malformed `query` (a non-map)
+    # yields a calm error. Additive and legacy-safe — a snapshot-only / author-pinned
+    # task-list (no `query`) and a well-formed live query both yield nothing, so no
+    # existing paper gains an error. `Slots` is pure/Content-free, so this keeps the
+    # checker's layering purity (same posture as `slot_type_errors` above).
+    query_errors = Enum.flat_map(blocks, &Barkpark.PortableDoc.Slots.query_type_errors/1)
+
+    decl_errors ++ slot_errors ++ query_errors
   end
 
   def validate(_, _), do: []

@@ -723,8 +723,27 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.card_html(b)}
   end
 
+  # The notes-grid split — a NEW singular `note` :widget: ONE annotated item
+  # (label/lead/body slots) that renders byte-identically to ONE legacy `notes`
+  # grid item, WITHOUT the `bp-notes` grid wrapper (a lone note is one row; the
+  # grid/section owns the wrapper). `note_item_html/1` is the SAME per-item
+  # expression `notes_html/1` maps over, so a note byte-aligns to a `notes` row by
+  # construction. ADDITIVE: the legacy `notes` clause above is UNTOUCHED.
+  def compose_block(%{"type" => "note"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.note_item_html(b)}
+  end
+
   def compose_block(%{"type" => "pipeline"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
+  end
+
+  # STAGE WIDGET — a NEW block: the editable per-node twin of ONE legacy `pipeline`
+  # node (kind/title/detail text slots + files/source chrome). `stage_html/1` emits the
+  # IDENTICAL pnode cell one pipeline node emits, so a `section` of stages renders ==
+  # a legacy pipeline flow at cell granularity. ADDITIVE: the legacy `pipeline` clause
+  # above + `pipeline_html/1` are UNTOUCHED (byte-for-byte).
+  def compose_block(%{"type" => "stage"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.stage_html(b)}
   end
 
   # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping

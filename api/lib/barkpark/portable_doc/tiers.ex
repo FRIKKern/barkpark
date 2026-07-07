@@ -44,8 +44,15 @@ defmodule Barkpark.PortableDoc.Tiers do
   #     are :widget (monolithic legacy grids, verbatim-carried). Migration step 4
   #     LANDED the first split: a NEW `card` :widget (media/title/body/action slots)
   #     that a grid `section` holds N of — ADDITIVE, the legacy `cards` grid is
-  #     UNTOUCHED (byte-for-byte). `notes`/`pipeline`/`task-board`/`roadmap` stay
-  #     monolithic for now.
+  #     UNTOUCHED (byte-for-byte). The SAME split now lands for notes: a NEW singular
+  #     `note` :widget (label/lead/body slots) byte-identical to ONE legacy `notes`
+  #     item, ADDITIVE alongside the UNTOUCHED plural `notes` grid.
+  #     `pipeline`/`task-board`/`roadmap` stay monolithic for now.
+  #     UNTOUCHED (byte-for-byte). The `stage` :widget is the SECOND split — the
+  #     editable per-node twin of ONE legacy `pipeline` node (kind/title/detail slots
+  #     + files/source chrome), rendering the identical pnode cell; the legacy
+  #     `pipeline` grid stays monolithic + verbatim-carried, UNTOUCHED.
+  #     `notes`/`task-board`/`roadmap` stay monolithic for now.
 
   @element ~w(
     paragraph heading list divider code diagram image action
@@ -58,7 +65,7 @@ defmodule Barkpark.PortableDoc.Tiers do
   @widget ~w(
     callout figure terminal table
     task-detail task-list tasks task-board roadmap
-    notes cards card pipeline
+    notes note cards card pipeline stage
     form questionnaire
     sheet embed asciicast status-legend
   )

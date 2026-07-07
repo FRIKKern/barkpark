@@ -66,7 +66,20 @@ const CANVAS_ATOM_TYPES = new Set(["divider"]);
 //
 // A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
 // a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
-const CANVAS_CONTENT_TYPES = new Set(["callout"]);
+//
+// The notes-grid split adds `note` (the singular annotated-item WIDGET) to this
+// SAME set: like callout it is a CONTENT node whose BODY is an editable inline
+// contentDOM, but a SUPERSET — it ALSO exposes label + lead as non-PM input islands
+// (see note-node.js). node.type is "note" (no NODE_NAME indirection, the callout
+// convention), so the isContent branches below sub-route note vs callout by node
+// type. KEEP LOCKSTEP with paper_canvas.ex @canvas_content_types and index.js (Note).
+const CANVAS_CONTENT_TYPES = new Set(["callout", "note"]);
+
+// True when a CONTENT node/block is the `note` widget (sub-routing within the shared
+// isContent kind: note.type === "note" vs callout.type === "callout").
+function isNoteType(t) {
+  return t === "note";
+}
 
 // Article-chrome ROLE prose: eyebrow / byline / ingress / pullquote. UNLIKE every
 // other canvas node these need NO NODE_NAME map — node.type === bpType for all four
@@ -138,6 +151,26 @@ function isCanvasCardType(t) {
 // node.type off a getJSON node (the NODE name `bpCard`, not the bpType "card").
 function isCanvasCardNode(nodeType) {
   return nodeType === CANVAS_CARD_NODE_NAME;
+}
+
+// The `stage` WIDGET — the editable per-node twin of ONE legacy `pipeline` node. UNLIKE
+// the card (a slots-native CONTENT node with an inline body), a stage is a CONTROL-ATOM:
+// five PLAIN scalars (kind/title/detail text + files/source chrome) ride node.attrs,
+// edited by native controls (stage-node.js) — no contentDOM. node.type is the NODE name
+// `bpStage`; the bpType stays "stage". KEEP LOCKSTEP with paper_canvas.ex
+// @canvas_widget_types and stage-node.js.
+const CANVAS_STAGE_TYPES = new Set(["stage"]);
+const CANVAS_STAGE_NODE_NAME = "bpStage";
+
+// True when a portable-doc BLOCK type is the stage widget (runToTiptap dispatch).
+function isCanvasStageType(t) {
+  return CANVAS_STAGE_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas stage node. runToOps/classifyNode read
+// node.type off a getJSON node (the NODE name `bpStage`, not the bpType "stage").
+function isCanvasStageNode(nodeType) {
+  return nodeType === CANVAS_STAGE_NODE_NAME;
 }
 
 // S3.3: non-prose block kinds the canvas handles as ATTR-ATOM nodes — ATOM nodes
@@ -319,6 +352,41 @@ function isCanvasFigureNode(nodeType) {
   return nodeType === CANVAS_FIGURE_NODE_NAME;
 }
 
+// live-data task-list: the `task-list` block the canvas handles as an EDITABLE-QUERY
+// + server-painted-ROWS ATOM (`bpTaskList`; task-list-node.js). UNLIKE the fleet atom
+// (whole block verbatim on bpBlock, ZERO ops) a LIVE task-list carries ONLY its
+// editable data as typed attrs — `query` (the filter, JSON, like figure's bpChild),
+// `title` (string, "" → absent) and `config` (JSON, verbatim) — NEVER a snapshot (the
+// rows are a resolve-at-read PROJECTION the server paints, never persisted on the
+// node). The QUERY is the sole authored datum: an edit emits patch-block{query} and
+// the server RE-RESOLVES + repaints the rows (the LIVE binding through TaskResolver).
+//
+// The DISCRIMINANT (mirrors task_resolver.ex:139-159): presence-of-`query`. A
+// task-list block WITH a `query` map is this LIVE widget (bpTaskList); a snapshot-only
+// task-list (no `query`) is the legacy author-pinned form and falls through to the
+// read-only bpFleet atom (CANVAS_FLEET_TYPES still holds "task-list" — additive, no
+// alias fork). `tasks` stays fleet-read-only in v1.
+//
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_task_list_types, task-list-node.js
+// BP_TASK_LIST_NODE_NAME, and shared/paper.ex @fleet_render_types (task-list's query
+// is resolved through the SAME task_previews/apply_preview server-paint channel).
+const CANVAS_TASK_LIST_NODE_NAME = "bpTaskList";
+
+// True when a portable-doc BLOCK is a LIVE task-list (a `task-list` type carrying a
+// `query` MAP). A snapshot-only task-list returns false (→ the bpFleet fallback). This
+// is the runToTiptap dispatch guard — the presence-of-query discriminant.
+function isLiveTaskListBlock(block) {
+  return (
+    block && block.type === "task-list" && isPlainObject(block.query)
+  );
+}
+
+// True when a TipTap NODE type is the canvas task-list widget ("bpTaskList").
+// runToOps / classifyNode read node.type off a getJSON node (the NODE name).
+function isCanvasTaskListNode(nodeType) {
+  return nodeType === CANVAS_TASK_LIST_NODE_NAME;
+}
+
 // The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes —
 // canvas nodes whose interior is a NESTED BLOCK TREE (child blocks with their own
 // type/content), not inline runs (callout) nor a verbatim opaque carry. THREE members:
@@ -492,6 +560,13 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// True for a plain (non-array, non-null) object — the presence-of-query discriminant
+// for the LIVE task-list widget (a `query` MAP → bpTaskList; anything else → the
+// bpFleet fallback). Mirrors task_resolver.ex's `is_map(query)` guard.
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 // ── doctrine template attrs (pdd-t2): locked / role round-trip ───────────────
 //
 // A mandated template block carries `locked: true` + a `role` ("title" |
@@ -575,10 +650,12 @@ function blockToNode(block) {
     }
 
     if (isCanvasContentType(bpType)) {
-      // A canvas CONTENT node (S3.2: callout): a native node of that type whose
-      // BODY is editable inline content and whose chrome (tone/title/collapsible/
-      // collapsed) rides node attrs. The canvas schema (callout-node.js) declares
-      // it, so getJSON() round-trips both the body and the chrome attrs.
+      // A canvas CONTENT node (S3.2: callout; notes-grid split: note): a native node
+      // of that type whose BODY is editable inline content. callout chrome (tone/
+      // title/collapsible/collapsed) rides node attrs; note chrome (label/lead) rides
+      // node attrs too (edited via input islands). The canvas schema declares each, so
+      // getJSON() round-trips the body + chrome attrs. Sub-route by bpType.
+      if (isNoteType(bpType)) return noteBlockToNode(block, bpId, bpType);
       return calloutBlockToNode(block, bpId, bpType);
     }
 
@@ -589,6 +666,14 @@ function blockToNode(block) {
       // trips the body + the chrome attrs. node.type is the NODE name (bpCard), not
       // the bpType (card).
       return cardBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasStageType(bpType)) {
+      // The stage WIDGET — a control-atom whose five scalars ride node.attrs (kind/
+      // title/detail text + files/source chrome), edited by native controls. stage-
+      // node.js declares the bpStage node, so getJSON() round-trips the attrs. node.type
+      // is the NODE name (bpStage), not the bpType (stage).
+      return stageBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasAttrAtomType(bpType)) {
@@ -630,6 +715,17 @@ function blockToNode(block) {
       // node-view (embed-node.js) instead of the generic opaque placeholder. NOTE the
       // node.type is the NODE name (bpSheet / bpEmbed), not the bpType (sheet / embed).
       return readOnlyAtomBlockToNode(block, bpId, bpType);
+    }
+
+    if (isLiveTaskListBlock(block)) {
+      // A LIVE task-list WIDGET (a `task-list` carrying a `query` map): an
+      // EDITABLE-QUERY + server-painted-ROWS atom (bpTaskList). Checked BEFORE the
+      // fleet branch — a snapshot-only task-list (no query) falls through to bpFleet
+      // (read-only), the additive presence-of-query discriminant. It carries ONLY the
+      // editable data (query/title/config) as typed attrs; the rows are NEVER on the
+      // node (server-painted projection). NOTE the node.type is the NODE name
+      // (bpTaskList), not the bpType (task-list).
+      return taskListBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasFleetType(bpType)) {
@@ -898,6 +994,12 @@ function sectionChildPatchOps(prevNode, nextNode) {
 // forbids it), so there is no recursive container case here.
 function childInteriorPatch(cls, prevChild, nextChild, cid) {
   if (cls.isContent) {
+    // callout OR note (the notes-grid split) — sub-route by node type.
+    if (isNoteType(nextChild && nextChild.type)) {
+      return noteNodeChanged(prevChild, nextChild)
+        ? noteNodeToPatch(nextChild)
+        : null;
+    }
     return calloutNodeChanged(prevChild, nextChild)
       ? calloutNodeToPatch(nextChild)
       : null;
@@ -906,6 +1008,11 @@ function childInteriorPatch(cls, prevChild, nextChild, cid) {
     // STEP 4: a card child of a grid section — diff body + chrome; emit the slots+tone
     // patch when it changed (the same detector/builder the top-level pass uses).
     return cardNodeChanged(prevChild, nextChild) ? cardNodeToPatch(nextChild) : null;
+  }
+  if (cls.isStage) {
+    // A stage child of a section (a pipeline flow) — diff the five scalars; emit the
+    // present-or-null patch when it changed (same detector/builder as the top-level pass).
+    return stageNodeChanged(prevChild, nextChild) ? stageNodeToPatch(nextChild) : null;
   }
   if (cls.isAttrAtom) {
     if (nextChild.type === "bpDiagram") {
@@ -1102,6 +1209,147 @@ function stableCalloutKey(node) {
   });
 }
 
+// ── note ⇄ canvas content node (the notes-grid split) ────────────────────────
+//
+// The NEW singular `note` block ⇄ a native `note` content node. Persisted shape
+// (COMPAT/wire form — the callout precedent, flat strings the default):
+//   { id, type:"note", label, lead?, text }
+// (or, MATERIALIZED/additive: { …, slots:{ label:[<p>], lead?:[<p>], body:[<p>] } }).
+//
+// A note is a SUPERSET of callout: it exposes THREE editable fields, not one.
+//   body  → the ONE editable inline contentDOM (the callout body precedent — a widget
+//           FLATTENS its body slot to inline). The `text` flat field is its plain
+//           encoding; a note body persists as PLAIN TEXT (marks dropped) to match the
+//           legacy `escape_html(text)` reader contract (a DELIBERATE lossy tradeoff).
+//   label → a plain string on node.attrs, edited by a non-PM input island.
+//   lead  → a plain string on node.attrs, edited by a non-PM input island; ABSENT
+//           (null) round-trips as no `lead` field (byte-fidelity, the callout title
+//           precedent — an absent lead is never "").
+
+// noteBodyInline(block) → the note body's inline array (Elixir Slots.note_body_text's
+// SOURCE, before the plain flatten). slots.body[0].content when materialized, else the
+// flat `text` field wrapped as a single inline text run (the compat encoding).
+function noteBodyInline(block) {
+  const slotBody = block && block.slots && block.slots.body;
+  if (Array.isArray(slotBody) && slotBody.length) {
+    const first = slotBody[0];
+    return (first && first.content) || [];
+  }
+  const t = block && block.text;
+  if (typeof t === "string" && t !== "") return [{ type: "text", value: t }];
+  if (typeof t === "number") return [{ type: "text", value: String(t) }];
+  return [];
+}
+
+// noteFieldText(block, slotName, flatKey) → a note field as a plain string. The slot's
+// lone paragraph inline FLATTENED to plain text (marks dropped) when materialized, else
+// the flat field. JS twin of Elixir Slots.note_{label,lead}_text/1.
+function noteFieldText(block, slotName, flatKey) {
+  const slot = block && block.slots && block.slots[slotName];
+  if (Array.isArray(slot) && slot.length) {
+    const first = slot[0];
+    return flattenInlineText((first && first.content) || []);
+  }
+  const v = block && block[flatKey];
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return "";
+}
+
+function noteLabelText(block) {
+  return noteFieldText(block, "label", "label");
+}
+function noteLeadText(block) {
+  return noteFieldText(block, "lead", "lead");
+}
+
+// Flatten a portable-doc inline array to plain text, marks dropped — the JS twin of
+// Elixir Slots.flatten_inline_text/1. A text / inline-code leaf contributes its
+// `value`; a mark wrapper (strong/em/link/…) contributes its `children` flattened.
+function flattenInlineText(arr) {
+  if (typeof arr === "string") return arr;
+  if (!Array.isArray(arr)) return "";
+  return arr.map(flattenInlineNode).join("");
+}
+function flattenInlineNode(n) {
+  if (typeof n === "string") return n;
+  if (!n || typeof n !== "object") return "";
+  if (n.type === "text" || n.type === "code")
+    return n.value == null ? "" : String(n.value);
+  if (Array.isArray(n.children)) return flattenInlineText(n.children);
+  return "";
+}
+
+// The plain-text body string of a note NODE — its inline content (via the shared
+// deserializer) flattened to plain text (marks dropped), matching the reader's
+// note_body_text plain contract. This is what the flat `text` field persists.
+function noteNodeBodyText(node) {
+  return flattenInlineText(tiptapInlineToPd((node && node.content) || []));
+}
+
+// noteBlockToNode(block) → { type:"note", attrs:{ bpId, bpType, label?, lead? },
+//   content:[inline…] }. body slot inline → contentDOM via the shared serializer;
+// label/lead → attrs, PRESENT-ONLY ("" and absent both → no attr) so an untouched
+// note's getJSON re-projection matches and emits zero ops (stableNoteKey).
+function noteBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "note" };
+  const label = noteLabelText(block);
+  if (label !== "") attrs.label = label;
+  const lead = noteLeadText(block);
+  if (lead !== "") attrs.lead = lead;
+
+  const node = { type: bpType || "note", attrs };
+  const inline = inlineArrayToTiptap(noteBodyInline(block));
+  if (inline.length) node.content = inline;
+  return node;
+}
+
+// noteNodeToBlock(node, id) → { id, type:"note", label?, lead?, text }. Reconstruct
+// the FLAT wire form (the callout precedent — note keeps flat strings as the persisted
+// encoding, slots additive server-side). label/lead threaded ONLY when present; body
+// → the plain `text` field (always, even ""). Absent lead → ABSENT key (byte-fidelity).
+function noteNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "note" };
+  if (attrs.label != null && attrs.label !== "") block.label = attrs.label;
+  if (attrs.lead != null && attrs.lead !== "") block.lead = attrs.lead;
+  block.text = noteNodeBodyText(node);
+  return block;
+}
+
+// The mutable-fields PATCH for a note. patch-block is a SHALLOW Map.merge (patch.ex
+// merge_block) that REPLACES or PRESERVES a key but never DELETES one — so a cleared
+// label/lead must be emitted EXPLICITLY as null (else the stale value survives),
+// mirroring calloutNodeToPatch's removal-safe contract. `text` is emitted always. On
+// the reader, compose maybe_put/note_lead_text drops an empty lead, so lead:null and
+// an absent lead render identically.
+function noteNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return {
+    label: attrs.label == null || attrs.label === "" ? null : attrs.label,
+    lead: attrs.lead == null || attrs.lead === "" ? null : attrs.lead,
+    text: noteNodeBodyText(node),
+  };
+}
+
+// True when a note node's body OR chrome (label/lead) changed — an interior edit.
+// Canonical (key-order-insensitive) compare on the diff-relevant fields, so a body/
+// label/lead edit flips it but a pure reorder (bpId/bpType only) does not. Keys on
+// node.content so a legacy-loaded note and its re-projection compare EQUAL
+// (zero-op-on-load), the stableCalloutKey precedent.
+function noteNodeChanged(prevNode, nextNode) {
+  return stableNoteKey(prevNode) !== stableNoteKey(nextNode);
+}
+
+function stableNoteKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    label: a.label == null || a.label === "" ? null : a.label,
+    lead: a.lead == null || a.lead === "" ? null : a.lead,
+    content: (node && node.content) || null,
+  });
+}
+
 // ── card ⇄ canvas content node (STEP 4) ──────────────────────────────────────
 //
 // The NEW slots-native `card` block ⇄ a bpCard node. Persisted shape (slots-native,
@@ -1233,6 +1481,123 @@ function stableCardKey(node) {
     media: a.media == null ? null : a.media,
     action: a.action == null ? null : a.action,
     content: node.content || null,
+  });
+}
+
+// ── stage ⇄ canvas control-atom node (the pipeline-node twin) ────────────────
+//
+// The `stage` block ⇄ a bpStage node. WIRE-canonical (scalar) shape, byte-aligned with
+// one legacy pipeline `nodes[]` entry:
+//   { id, type:"stage", kind?, title?, detail?, files?, source? }
+// The three text fields ride via the slot API (slots OR scalar → the SAME plain string);
+// files/source are chrome scalars. Every field ATTR is PRESENT-ONLY (absence sentinel
+// null), so a stage that never entered the canvas round-trips byte-identical (zero ops).
+//   kind/title/detail — string, PRESENT-ONLY (empty/absent → no attr).
+//   files             — string chrome, PRESENT-ONLY.
+//   source            — chrome flag carried VERBATIM (true|"true"|1), PRESENT-ONLY, so a
+//                       hand-authored `source:"true"` round-trips byte-identical; the
+//                       accent + change key interpret it truthy.
+
+// The reader `truthy` (compose truthy/1): true | "true" | 1. Mirrors stage-node.js.
+function stageTruthy(v) {
+  return v === true || v === "true" || v === 1;
+}
+
+// stageFieldText(block, name) → the PLAIN string of a stage text slot. JS twin of
+// Slots.stage_field_text/2: the lone slot element's text-runs FLATTENED to plain text
+// (marks dropped) when a `slots` map carries it, ELSE the top-level scalar. A pasted
+// `<strong>` must NOT survive — plain text only, so byte-identity with the escaped-plain
+// reader holds.
+function stageFieldText(block, name) {
+  const slot = block && block.slots && block.slots[name];
+  if (Array.isArray(slot) && slot.length) {
+    return flattenInlineTextPlain((slot[0] && slot[0].content) || []);
+  }
+  const v = block && block[name];
+  return v == null ? "" : String(v);
+}
+
+// Flatten a ProseMirror-style inline array to concatenated PLAIN text (marks dropped):
+// a text/code leaf contributes its `value`; a mark node contributes its children
+// flattened; a bare string is itself. JS twin of Slots.flatten_inline_text/1.
+function flattenInlineTextPlain(list) {
+  if (typeof list === "string") return list;
+  if (!Array.isArray(list)) return "";
+  let out = "";
+  for (const n of list) {
+    if (typeof n === "string") out += n;
+    else if (n && (n.type === "text" || n.type === "code")) out += n.value == null ? "" : String(n.value);
+    else if (n && Array.isArray(n.children)) out += flattenInlineTextPlain(n.children);
+  }
+  return out;
+}
+
+// stageBlockToNode(block) → { type:"bpStage", attrs:{…} }. Every field PRESENT-ONLY:
+// an empty text field / absent chrome adds NO attr, so an untouched stage's getJSON
+// re-projection matches and emits zero ops. `source` is carried VERBATIM.
+function stageBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "stage" };
+  const kind = stageFieldText(block, "kind");
+  if (kind !== "") attrs.kind = kind;
+  const title = stageFieldText(block, "title");
+  if (title !== "") attrs.title = title;
+  const detail = stageFieldText(block, "detail");
+  if (detail !== "") attrs.detail = detail;
+  const files = block && block.files;
+  if (files != null && files !== "") attrs.files = String(files);
+  if (block && block.source != null) attrs.source = block.source; // VERBATIM present-only
+  return { type: CANVAS_STAGE_NODE_NAME, attrs };
+}
+
+// stageNodeToBlock(node, id) → { id, type:"stage", kind?, title?, detail?, files?,
+// source? }. The inverse of stageBlockToNode — PRESENT-ONLY (byte-fidelity), source
+// VERBATIM. This is the INSERT / reconstruct / docToBlocks path; a fresh-loaded stage
+// re-projects to the SAME present-only scalars ⇒ zero ops on open.
+function stageNodeToBlock(node, id) {
+  const a = (node && node.attrs) || {};
+  const block = { id, type: "stage" };
+  if (a.kind != null && a.kind !== "") block.kind = a.kind;
+  if (a.title != null && a.title !== "") block.title = a.title;
+  if (a.detail != null && a.detail !== "") block.detail = a.detail;
+  if (a.files != null && a.files !== "") block.files = a.files;
+  if (a.source != null) block.source = a.source; // VERBATIM
+  return block;
+}
+
+// The mutable-fields PATCH for a stage. patch-block is a SHALLOW Map.merge that CANNOT
+// delete a key, so — the card `tone:null` precedent generalized — emit the WHOLE
+// scalar field set EXPLICITLY: a cleared text field / unchecked source rides `null`
+// (renders as an absent/empty cell — reader parity), a set field rides its value.
+// source rides VERBATIM when truthy (a title-only edit preserves the original `"true"`),
+// else null. So a removal LANDS despite the shallow merge.
+function stageNodeToPatch(node) {
+  const a = (node && node.attrs) || {};
+  const norm = (v) => (v == null || v === "" ? null : v);
+  return {
+    kind: norm(a.kind),
+    title: norm(a.title),
+    detail: norm(a.detail),
+    files: norm(a.files),
+    source: stageTruthy(a.source) ? a.source : null,
+  };
+}
+
+// True when a stage node's fields changed — a canonical (absence-insensitive) compare
+// so a real edit flips it but a pure reorder (bpId only) or a null≡""≡absent flip does
+// not. Mirrors stage-node.js:stageKey (kept in lockstep by construction).
+function stageNodeChanged(prevNode, nextNode) {
+  return stableStageKey(prevNode) !== stableStageKey(nextNode);
+}
+
+function stableStageKey(node) {
+  const a = (node && node.attrs) || {};
+  const s = (v) => (v == null || v === "" ? "" : String(v));
+  return canonicalJSON({
+    kind: s(a.kind),
+    title: s(a.title),
+    detail: s(a.detail),
+    files: s(a.files),
+    source: stageTruthy(a.source),
   });
 }
 
@@ -2022,6 +2387,92 @@ function stableFigureKey(node) {
   });
 }
 
+// ── task-list ⇄ canvas editable-query + server-painted-rows atom ──────────────
+//
+// The LIVE `task-list` block { id, type:"task-list", query:{…}, title?, config? } ⇄
+// the TipTap `bpTaskList` ATOM (task-list-node.js). UNLIKE the fleet/sheet read-only
+// atoms (whole block verbatim on bpBlock, ZERO ops) the task-list carries ONLY its
+// EDITABLE data as typed attrs: `query` (the filter, JSON — the sole authored datum,
+// analogous to figure's caption over a server-painted child), an optional `title`
+// string, and an optional `config` JSON. There is NO snapshot on the node — the rows
+// are a resolve-at-read PROJECTION the server paints. An edit emits patch-block{query}
+// (a SHALLOW Map.merge replacing the stored query, leaving unknown sibling keys
+// intact); the server RE-RESOLVES + repaints. node.type is `bpTaskList` (the NODE
+// name), NOT `task-list` (the bpType). Mirrors figureBlockToNode..stableFigureKey.
+
+// taskListBlockToNode(block) → { type:"bpTaskList", attrs:{ bpId, bpType, query,
+//   title, config } }. query is deep-cloned (VERBATIM — non-label keys like parent_id
+//   /labels/status round-trip untouched); title "" → null; config passes through
+//   (null when absent).
+function taskListBlockToNode(block, bpId, bpType) {
+  const attrs = {
+    bpId,
+    bpType,
+    query: block && isPlainObject(block.query) ? deepClone(block.query) : {},
+    // "" → null so a title-less task-list round-trips with no title key.
+    title:
+      block && block.title != null && block.title !== "" ? block.title : null,
+    config: block && block.config != null ? deepClone(block.config) : null,
+  };
+  return { type: CANVAS_TASK_LIST_NODE_NAME, attrs };
+}
+
+// taskListNodeToBlock(node, id) → { id, type:"task-list", query, ...(title?),
+//   ...(config?) }. The inverse of taskListBlockToNode: query is the deep-cloned attr
+//   VERBATIM (so callers never share a ref); title/config are threaded ONLY when
+//   present so an absent key reconstructs byte-identically (no stray title:"" /
+//   config:null). NEVER emits a snapshot — a live task-list has none.
+function taskListNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "task-list",
+    query: isPlainObject(attrs.query) ? deepClone(attrs.query) : {},
+  };
+  if (attrs.title != null && attrs.title !== "") block.title = attrs.title;
+  if (attrs.config != null) block.config = deepClone(attrs.config);
+  return block;
+}
+
+// The mutable-fields PATCH for a task-list block. The query is the WHOLE editable
+// datum; patch.ex's patch-block is a SHALLOW Map.merge, so { query } REPLACES the
+// stored query and leaves unknown sibling keys intact. `query` is ALWAYS present (an
+// emptied query is null → the reader shows the "configure me" empty state). `title`
+// rides as the string (or "" when cleared, so the shallow merge overwrites a stale
+// title — the code/diagram caption rule) ONLY when it changed; `config` likewise.
+function taskListNodeToPatch(node, prevNode) {
+  const a = (node && node.attrs) || {};
+  const patch = { query: isPlainObject(a.query) ? a.query : null };
+
+  const prev = (prevNode && prevNode.attrs) || {};
+  const prevTitle = prev.title == null || prev.title === "" ? null : prev.title;
+  const nextTitle = a.title == null || a.title === "" ? null : a.title;
+  if (prevTitle !== nextTitle) patch.title = nextTitle == null ? "" : nextTitle;
+
+  if (canonicalJSON(prev.config ?? null) !== canonicalJSON(a.config ?? null)) {
+    patch.config = a.config ?? null;
+  }
+  return patch;
+}
+
+// True when a task-list node's editable data changed. Canonical (key-order-
+// insensitive) compare of query + title + config, so an edit flips it but a pure
+// reorder (bpId/bpType only) does not — an UNEDITED task-list emits ZERO ops (D3). An
+// absent/"" title and an absent config normalize to null so absent ⇄ "" ⇄ null
+// compare EQUAL.
+function taskListNodeChanged(prevNode, nextNode) {
+  return stableTaskListKey(prevNode) !== stableTaskListKey(nextNode);
+}
+
+function stableTaskListKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    query: isPlainObject(a.query) ? a.query : null,
+    title: a.title == null || a.title === "" ? null : a.title,
+    config: a.config == null ? null : a.config,
+  });
+}
+
 // ── columns ⇄ canvas container node (S10) ────────────────────────────────────
 //
 // The `columns` block { id, type:"columns", columns:[ [childBlock,…], [childBlock,…] ] }
@@ -2440,6 +2891,9 @@ function classifyNode(node) {
   // STEP 4: the card WIDGET (bpCard). A callout-shaped content node (inline body +
   // chrome attrs) but slots-native, so it gets its OWN kind flag + diff path.
   const isCard = isCanvasCardNode(node.type);
+  // The stage WIDGET (bpStage). A control-atom (five scalar attrs, no interior), so it
+  // gets its OWN kind flag + diff path — like bpAction but multi-field + slots-aware.
+  const isStage = isCanvasStageNode(node.type);
   const isAttrAtom = isCanvasAttrAtomNode(node.type);
   const isField = isCanvasFieldNode(node.type);
   // editable-action: a canvas control-atom node (bpAction). Its bpType resolves to
@@ -2450,6 +2904,9 @@ function classifyNode(node) {
   // editable-figure: a canvas figure atom (bpFigure). Its bpType resolves to "figure"
   // off node.attrs.bpType (the isFigure fallback below).
   const isFigure = isCanvasFigureNode(node.type);
+  // live-data task-list: a canvas task-list widget (bpTaskList). Its bpType resolves
+  // to "task-list" off node.attrs.bpType (the isTaskList fallback below).
+  const isTaskList = isCanvasTaskListNode(node.type);
   // S10: a canvas container node (bpColumns). Its bpType resolves to "columns" via
   // CANVAS_CONTAINER_BP_TYPE_BY_NODE below.
   const isContainer = isCanvasContainerNode(node.type);
@@ -2469,9 +2926,15 @@ function classifyNode(node) {
         ? "tasks"
         : isFigure
           ? "figure"
+          : isTaskList
+            ? "task-list"
+            : isCard
+              ? "card"
           : isCard
             ? "card"
-            : node.type);
+            : isStage
+              ? "stage"
+              : node.type);
   return {
     node,
     bpType,
@@ -2479,12 +2942,14 @@ function classifyNode(node) {
     isAtom,
     isContent,
     isCard,
+    isStage,
     isAttrAtom,
     isField,
     isAction,
     isReadOnlyAtom,
     isFleet,
     isFigure,
+    isTaskList,
     isContainer,
     isRole,
     isTable,
@@ -2796,6 +3261,24 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isTaskList) {
+      // Canvas task-list widget (live-data): the QUERY is the WHOLE editable datum
+      // (+ optional title/config); the rows are server-painted, never on the node.
+      // Emit ONE patch-block{query,…} when the editable data changed; the shallow
+      // patch-block merge replaces the stored query and leaves unknown sibling keys
+      // intact. An UNEDITED task-list emits NO op (canonical compare on
+      // query+title+config). prevNode is passed so title/config only ride the patch
+      // when they actually changed.
+      if (taskListNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: taskListNodeToPatch(entry.node, prevNode),
+        });
+      }
+      continue;
+    }
+
     if (entry.isFigure) {
       // Canvas figure atom (editable-figure): the caption is the WHOLE editable
       // interior (the child is immutable in v1). Emit ONE patch-block{caption} when
@@ -2812,8 +3295,18 @@ export function runToOps(prevBlocks, nextDoc) {
     }
 
     if (entry.isContent) {
-      // Canvas content node (callout): diff body + chrome; emit one patch-block
-      // carrying ONLY the mutable fields when anything changed.
+      // Canvas content node (callout OR note): diff body + chrome; emit one patch-block
+      // carrying ONLY the mutable fields when anything changed. Sub-route by node type.
+      if (isNoteType(entry.node.type)) {
+        if (noteNodeChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: noteNodeToPatch(entry.node),
+          });
+        }
+        continue;
+      }
       if (calloutNodeChanged(prevNode, entry.node)) {
         ops.push({
           op: "patch-block",
@@ -2835,6 +3328,21 @@ export function runToOps(prevBlocks, nextDoc) {
           op: "patch-block",
           id: entry.id,
           patch: cardNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
+    if (entry.isStage) {
+      // The stage WIDGET: diff the five scalars; emit ONE patch-block carrying the
+      // present-or-null field set when anything changed. An UNCHANGED stage emits NO op
+      // (canonical compare). The explicit-null fields make a cleared text/source removal
+      // LAND (patch-block can't delete a key otherwise — the card `tone:null` precedent).
+      if (stageNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: stageNodeToPatch(entry.node),
         });
       }
       continue;
@@ -3020,13 +3528,19 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasTableNode(type)) {
     return !tableNodeChanged(serverNode, liveNode);
   }
-  // Callout (content node): tone/title/collapsible/collapsed/body.
+  // Content node — callout (tone/title/collapsible/collapsed/body) OR note
+  // (label/lead/body, the notes-grid split). Sub-route by node type.
   if (isCanvasContentType(type)) {
+    if (isNoteType(type)) return !noteNodeChanged(serverNode, liveNode);
     return !calloutNodeChanged(serverNode, liveNode);
   }
   // Card (STEP 4 widget, bpCard): tone/title/media/action/body.
   if (isCanvasCardNode(type)) {
     return !cardNodeChanged(serverNode, liveNode);
+  }
+  // Stage (widget, bpStage): the five scalars, canonically compared.
+  if (isCanvasStageNode(type)) {
+    return !stageNodeChanged(serverNode, liveNode);
   }
   // Code / diagram (attr-atom): value+lang / source+caption.
   if (isCanvasAttrAtomNode(type)) {
@@ -3059,6 +3573,12 @@ function nodeContentEqual(serverNode, liveNode) {
   // recognized by the SAME stable-key compare runToOps uses.
   if (isCanvasFigureNode(type)) {
     return !figureNodeChanged(serverNode, liveNode);
+  }
+  // Task-list (live-data: bpTaskList): query + title + config (rows server-painted,
+  // never on the node). The own-echo of a query edit — and the id-wildcard for a
+  // just-minted task-list — is recognized by the SAME stable-key compare runToOps uses.
+  if (isCanvasTaskListNode(type)) {
+    return !taskListNodeChanged(serverNode, liveNode);
   }
   // Opaque carry-through: the whole carried block, id excluded.
   if (type === "bpOpaque") {
@@ -3161,14 +3681,21 @@ function nextNodeToBlock(entry, taken) {
     return tableNodeToBlock(node, entry.id);
   }
   if (entry.isContent) {
-    // Canvas content insert (callout): reconstruct the full callout block from
-    // the node (body + chrome) with the minted id, via the dedicated mapper.
+    // Canvas content insert (callout OR note): reconstruct the full block from the
+    // node (body + chrome) with the minted id, via the dedicated mapper. Sub-route
+    // by node type — a note reconstructs its flat { label?, lead?, text } wire form.
+    if (isNoteType(node.type)) return noteNodeToBlock(node, entry.id);
     return calloutNodeToBlock(node, entry.id);
   }
   if (entry.isCard) {
     // STEP 4 card WIDGET insert: reconstruct the full slots-native card block (body
     // slot + title/tone/media/action chrome) with the minted id, via the mapper.
     return cardNodeToBlock(node, entry.id);
+  }
+  if (entry.isStage) {
+    // The stage WIDGET insert: reconstruct the WIRE-canonical scalar stage block
+    // (kind/title/detail + files/source, present-only) with the minted id, via the mapper.
+    return stageNodeToBlock(node, entry.id);
   }
   if (entry.isAttrAtom) {
     // Canvas attr-atom insert (S3.3: code; S3.4: diagram): reconstruct the block (body
@@ -3203,6 +3730,13 @@ function nextNodeToBlock(entry, taken) {
     // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
     // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
     return fleetNodeToBlock(node, entry.id);
+  }
+  if (entry.isTaskList) {
+    // Task-list insert/move (live-data): reconstruct the task-list block (its query
+    // + optional title/config) with the minted id. title/config are OMITTED when
+    // absent (mirrors the persist default); NO snapshot (a live task-list has none —
+    // the rows are server-resolved at read).
+    return taskListNodeToBlock(node, entry.id);
   }
   if (entry.isFigure) {
     // Figure insert/move (editable-figure): reconstruct the figure block (its

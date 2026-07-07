@@ -419,6 +419,32 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def pipeline_html(_), do: ""
 
   @doc """
+  Render a `stage` block (the editable per-node twin of ONE legacy `pipeline` node):
+  the IDENTICAL pnode cell a single `pipeline` node emits (`Components.pipeline_html/1`'s
+  per-node loop), so a stage carrying the same scalars renders byte-identically. The
+  three text fields `kind`/`title`/`detail` read through `Slots.stage_field_text/2`
+  (slots OR scalar — both yield the same PLAIN string); `files`/`source` are chrome
+  scalars (a `source`-truthy stage gets the `bp-pnode--src` accent, the SAME `truthy`
+  the pipeline uses). ADDITIVE: the legacy `pipeline` clause + `pipeline_html/1` are
+  UNTOUCHED — this is a SEPARATE emitter. A stage is ONE cell, so there is no
+  `bp-pipe-scroll`/`bp-pipe` wrapper (a `section` of stages composes the flow).
+  """
+  def stage_html(block) when is_map(block) do
+    k = block |> Slots.stage_field_text("kind") |> escape_html()
+    t = block |> Slots.stage_field_text("title") |> escape_html()
+    d = block |> Slots.stage_field_text("detail") |> escape_html()
+    f = block |> get("files") |> stringish() |> escape_html()
+    src = if truthy(get(block, "source")), do: " bp-pnode--src", else: ""
+    k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
+    t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
+    d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
+    f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
+    ~s|<div class="bp-pnode#{src}">#{k_html}#{t_html}#{d_html}#{f_html}</div>|
+  end
+
+  def stage_html(_), do: ""
+
+  @doc """
   Render a `notes` block: an annotated list — a short label chip beside a line
   of prose (an optional bold `lead` + `text`). The "what upgraded / why it
   matters" column that rides beside a demo. `items: [%{label, lead, text}]`.
@@ -431,23 +457,39 @@ defmodule Barkpark.PortableDoc.Render.Components do
         ""
 
       _ ->
-        rows =
-          items
-          |> Enum.map(fn it ->
-            label = it |> get("label") |> stringish() |> escape_html()
-            text = it |> get("text") |> stringish() |> escape_html()
-            lead = it |> get("lead") |> stringish() |> String.trim()
-            lead_html = if lead == "", do: "", else: ~s|<b>#{escape_html(lead)}</b> |
-
-            ~s|<div class="bp-note"><span class="bp-note__k">#{label}</span><div class="bp-note__d">#{lead_html}#{text}</div></div>|
-          end)
-          |> Enum.join("")
-
+        rows = items |> Enum.map(&note_item_html/1) |> Enum.join("")
         ~s|<div class="bp-notes">#{rows}</div>|
     end
   end
 
   def notes_html(_), do: ""
+
+  @doc """
+  Render ONE annotated note ROW — the inner `<div class="bp-note">…` of a `notes`
+  grid item, WITHOUT the `bp-notes` grid wrapper. This is the single per-item
+  expression lifted VERBATIM from the old `notes_html/1` loop, so `notes_html/1`
+  now `Enum.map`s it and stays byte-identical; the NEW singular `note` widget
+  (`Compose.compose_block(%{"type" => "note"})`) composes to a lone row of these
+  bytes — byte-identical to a single-item `notes` grid MINUS the wrapper.
+
+  Reads the three fields through the `Slots.note_{label,lead,body}_text/1`
+  byte-identity accessors, so BOTH a bare legacy `notes` item (`%{label,lead,text}`,
+  flat) AND a `note` widget (flat OR slot-materialized) yield the SAME bytes. The
+  lead is trim-then-escaped, wrapped in `<b>…</b> ` (a single trailing space) ONLY
+  when non-empty; label + body are escaped directly.
+
+  NO `is_map` guard: the `Slots.note_*_text/1` accessors are total (a non-map item
+  yields `""` for every field), so a malformed non-map item emits the SAME
+  empty-field row the old `notes_html/1` loop did (`get/2` → nil → `""`) — byte-fidelity.
+  """
+  def note_item_html(item) do
+    label = item |> Slots.note_label_text() |> escape_html()
+    text = item |> Slots.note_body_text() |> escape_html()
+    lead = item |> Slots.note_lead_text() |> String.trim()
+    lead_html = if lead == "", do: "", else: ~s|<b>#{escape_html(lead)}</b> |
+
+    ~s|<div class="bp-note"><span class="bp-note__k">#{label}</span><div class="bp-note__d">#{lead_html}#{text}</div></div>|
+  end
 
   @doc """
   Render a `status-legend` block: the shared glyph/colour vocabulary key — the

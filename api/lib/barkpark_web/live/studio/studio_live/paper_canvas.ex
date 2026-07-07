@@ -63,8 +63,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # CANVAS_CONTENT_TYPES). The callout is the first: its prose body becomes a real
   # editable PM region and its chrome (tone/title/fold) renders around it, so it
   # no longer SPLITS a run. field-* / sheet STILL split until their own S3
-  # increments.
-  @canvas_content_types ~w(callout)
+  # increments. The notes-grid split adds `note` (the singular annotated-item WIDGET):
+  # like callout it is a CONTENT node with an editable inline body, but a SUPERSET —
+  # it ALSO exposes label + lead as input islands. It FOLDS INTO a run (canvas-eligible),
+  # ADDITIVE alongside the still-verbatim-carried legacy `notes` grid (@canvas_fleet_types).
+  # THREE-WAY LOCKSTEP: run-convert.js CANVAS_CONTENT_TYPES ⇄ index.js (Note) ⇄ here.
+  @canvas_content_types ~w(callout note)
 
   # S3.3 / S3.4: the non-prose block kinds the canvas handles as ATTR-ATOM nodes —
   # atom nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr
@@ -198,6 +202,25 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # @figure_render_types (plus figure-node.js BP_FIGURE_NODE_NAME) aligned.
   @canvas_figure_types ~w(figure)
 
+  # live-data task-list: a `task-list` carrying a `query` map is the LIVE editable
+  # WIDGET (bpTaskList; run-convert.js CANVAS_TASK_LIST_NODE_NAME → task-list-node.js).
+  # Its QUERY is the sole authored datum (an <input> island, patch-block{query}); its
+  # ROWS are a resolve-at-read PROJECTION the server paints via the SAME
+  # `bp:block-html` channel the fleet atoms use (query → TaskResolver.preview →
+  # apply_preview → render_block, keyed by the block id — shared/paper.ex).
+  #
+  # DUAL-ENCODING NOTE (backward-compat): `task-list` ALSO stays in @canvas_fleet_types
+  # above — a SNAPSHOT-ONLY (author-pinned, no query) task-list falls through to the
+  # read-only bpFleet atom (the presence-of-query discriminant lives in run-convert.js's
+  # blockToNode). So @canvas_types carries `task-list` via BOTH sets; because
+  # @canvas_types feeds ONLY `canvas?/1` (a set-membership `in` check), the overlap is a
+  # harmless no-op — it never double-counts. task-list MUST remain in @canvas_fleet_types
+  # for the snapshot fallback AND for JS-lockstep with run-convert.js:CANVAS_FLEET_TYPES.
+  #
+  # KEEP LOCKSTEP with run-convert.js CANVAS_TASK_LIST_NODE_NAME / isLiveTaskListBlock
+  # and task-list-node.js BP_TASK_LIST_NODE_NAME.
+  @canvas_task_list_types ~w(task-list)
+
   # The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes
   # (run-convert.js CANVAS_CONTAINER_TYPES → an editable node whose interior is a
   # nested BLOCK tree, not inline runs). TWO members:
@@ -234,7 +257,14 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (Slots.card_body_text/1) so the reader byte-matches ONE legacy `cards` grid item —
   # the legacy `cards` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED.
   # MUST stay in lockstep with run-convert.js (bpCard / isCanvasCard*) and card-node.js.
-  @canvas_widget_types ~w(card)
+  #
+  # `stage` is the SECOND widget: the editable per-node twin of ONE legacy `pipeline`
+  # node (kind/title/detail text + files/source chrome), mounted as bpStage (an atom
+  # whose fields ride attrs, edited by native controls). Its reader `stage_html/1` emits
+  # the identical pnode cell, so it renders == one legacy pipeline node; the legacy
+  # `pipeline` fleet stays in @canvas_fleet_types, verbatim-carried and UNTOUCHED. MUST
+  # stay in lockstep with run-convert.js (isCanvasStage*) and stage-node.js.
+  @canvas_widget_types ~w(card stage)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
@@ -263,6 +293,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_role_types ++
                   @canvas_table_types ++
                   @canvas_figure_types ++
+                  @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types
 

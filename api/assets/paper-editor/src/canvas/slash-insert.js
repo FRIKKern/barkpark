@@ -41,6 +41,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "heading",
   "list",
   "callout",
+  "note",
   "code",
   "divider",
   "diagram",
@@ -50,6 +51,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "section",
   "terminal",
   "table",
+  "stage",
   "field-string",
   "field-slug",
   "field-text",
@@ -106,6 +108,10 @@ export function canvasDefaultBlock(type) {
         tone: "info",
         content: [{ type: "text", value: "" }],
       };
+    case "note":
+      // The notes-grid split widget: the flat wire form (label + body `text`; lead
+      // OPTIONAL, omitted). An empty body projects to no contentDOM (a placeholder).
+      return { id: null, type: "note", label: "Label", text: "" };
     case "code":
       return { id: null, type: "code", lang: "", value: "" };
     case "divider":
@@ -147,6 +153,11 @@ export function canvasDefaultBlock(type) {
         head: [[], []],
         rows: [[[], []]],
       };
+    case "stage":
+      // The minimal valid stage: just the required `title` scalar (the {:exactly,1}
+      // slot). PRESENT-ONLY so stageBlockToNode → stageNodeToBlock round-trips it byte-
+      // identical (zero spurious op on the next load — risk #6).
+      return { id: null, type: "stage", title: "New stage" };
     case "field-string":
       return { id: null, type: "field-string", label: "Text", value: "" };
     case "field-slug":
@@ -205,6 +216,9 @@ export const CANVAS_SLASH_TEXTABLE_NODES = new Set([
   "bulletList",
   "orderedList",
   "callout",
+  // note.type === "note" is a content node whose body is an editable inline hole —
+  // the caret should land in the body after insert (the callout precedent).
+  "note",
 ]);
 
 // slashTriggerAllowsParent(depth, parentTypeName) → may the `/` slash menu OR the

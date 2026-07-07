@@ -21,6 +21,7 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "heading", label: "Heading", hint: "H", desc: "h1 — section title" },
   { group: "Text", type: "list", label: "List", hint: "•", desc: "bulleted or ordered" },
   { group: "Text", type: "callout", label: "Callout", hint: "!", desc: "warn or info card" },
+  { group: "Text", type: "note", label: "Note", hint: "❡", desc: "labelled annotation" },
   { group: "Text", type: "code", label: "Code", hint: "</>", desc: "monospace block" },
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
@@ -36,6 +37,7 @@ export const SLASH_ITEMS = [
   { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
   { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },
   { group: "Visual", type: "action", label: "Action", hint: "➤", desc: "call-to-action button" },
+  { group: "Visual", type: "stage", label: "Stage", hint: "◆", desc: "pipeline stage node" },
 
   { group: "Basic fields", type: "field-string", label: "String", hint: "T", desc: "single-line value" },
   { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/", desc: "url-safe key" },
