@@ -164,6 +164,55 @@ always-a-next-step.
    row's `lifecycle_status`** — a fixture-only assertion hides a scope mismatch that would make
    every real drag a silent no-op.
 
+13. **Group/filter is a PURE VIEW-TRANSFORM over the already-built board — never a re-query
+   (wave 4).** The wish's "big board stays legible" is served by folding the ALREADY-FETCHED
+   `board.cards_by_id` through pure functions in `board.ex`, never a per-filter DB round-trip
+   (D3's global read happens once at snapshot/refresh). `build/2` and `apply_change/3` stay
+   BYTE-UNCHANGED so realtime motion (waves 2/3) is unaffected — grouping/filtering is a
+   downstream projection, not a re-plumb. New pure surface:
+   - `Board.facets(board) :: %{goals, priorities, labels, workers}` — the DISTINCT, sorted
+     values present in `cards_by_id`, so the chip menu offers only facets that exist (honest,
+     no empty chip).
+   - `Board.card_matches?(card, filters) :: boolean` — `filters` is `%{goal: [..], priority:
+     [..], label: [..], worker: [..]}` (lists of strings; `[]` = unconstrained). Facets AND
+     together; within a facet, membership (a card's label set intersects the requested labels).
+   - `Board.view(board, opts) :: %{lanes, momentum, facets, filtered?, grouped?, empty?}`,
+     `opts = [group_by: :none|:goal|:priority|:label, filters: %{..}, now: dt]`. It (1) filters
+     `cards_by_id` by `card_matches?`, (2) partitions by `group_by` (a `nil`/none lane holds
+     cards with no value for the key), (3) for each lane runs the SAME private `organize` →
+     capped 5 columns + counts + `done_total` (so `@done_window` applies PER LANE — a lane is
+     never a dead wall either). `lanes = [%{key, label, columns, counts, done_total}]`; when
+     `group_by == :none` a SINGLE lane holds the whole board so the render is byte-identical to
+     waves 1-3 (no visual regression when ungrouped).
+   **Momentum honesty:** `view/2` returns `board.momentum` UNCHANGED when `filters` is empty
+   (grouping alone doesn't change the card set — this preserves wave-2's monotonic session
+   `done_today`); it RECOMPUTES momentum from the filtered set (in_flight/ready/pct/done_total
+   from the narrowed columns, `done_today` from filtered done cards vs injected `now`) ONLY when
+   a filter narrows the board. *Why:* monotonic done_today is a whole-board session property, not
+   meaningful for an ad-hoc filtered subset; but a filtered view must still read the filtered
+   momentum, or the header lies about the focused set (the wish demands the momentum reflect the
+   filtered/grouped view).
+
+14. **The URL query string is the SINGLE SOURCE OF TRUTH for group + filters (wave 4).** A board
+   view is a SHAREABLE LINK that survives refresh + back/forward. `handle_params/3` parses
+   `?group=&goal=&priority=&label=&worker=` (comma-joined per facet); `group` is WHITELISTED
+   against `Board.group_keys/0` (`:none` fallback), filter values stay STRINGS matched by
+   `card_matches?` membership — **NEVER `String.to_atom/1` on wire input** (the atom-table-leak
+   trap `parse_col/1` already dodges). Chip toggles, the group selector, and clear-all all
+   `push_patch` the recomputed query — they never mutate assigns directly, so the URL and the
+   view can't drift and every state is a real link. Assigns `@group_by` (atom) + `@filters`
+   (map of string lists) are derived in `handle_params`; the view is recomputed there and after
+   every board change.
+
+15. **Realtime respects the active filter by DERIVATION, not suppression (wave 4).** `apply_change/3`
+   still updates the FULL `board.cards_by_id`; the render reads the DERIVED `@view` (filtered),
+   so a filtered-OUT card that mutates via broadcast updates the model but stays hidden — it can
+   never wrongly reappear (the lead's explicit hazard). A filtered-IN card still flashes/climbs.
+   The flash marker (`@last_change`) only fires for a card present in the filtered view. The
+   LiveView MUST recompute `@view` (via a single private `assign_view/1`) at the end of `mount`,
+   `handle_params`, AND every `handle_info`/`handle_event` clause that reassigns `@board` — this
+   is the one wiring discipline that keeps model (full) and view (filtered) coherent.
+
 10. **Done column is WINDOWED so the board never becomes a dead wall (§0).** `build/2` and
    `apply_change/3` render only the most-recent `@done_window` done cards (default 12,
    mirroring the TUI FocusSet cap) — newest-first, a fresh close prepended and the tail
@@ -182,8 +231,11 @@ always-a-next-step.
   bar — "you watch momentum"; movement is never silent (§0.3, §0.4, §0.6).
 - **Wave 3 (drag):** completion by hand is felt (done blink×3), and progress is one gesture —
   without ever corrupting a claim.
-- **Wave 4 (group/filter) & Wave 5 (badge polish/web parity):** keep momentum legible on a
-  big board and extend the alive surface to papers/web.
+- **Wave 4 (group/filter):** a big board stays LEGIBLE and FOCUSED — swimlanes by goal/
+  priority/label + shareable filter chips — while the momentum header recomputes for the
+  focused set, motion still lands only where it belongs, and an over-filtered board says so
+  honestly ("no tasks match — clear filters") instead of a silent void. Feels-alive at scale.
+- **Wave 5 (badge polish/web parity):** extend the alive surface to papers/web.
 
 ## Roadmap (integration order)
 
@@ -197,17 +249,17 @@ always-a-next-step.
    flash/slide + monotonic climbing done-today + windowed done (D10) + `:refresh` reconcile,
    seen-set guard. ✅ DONE. *(one builder owned both board files — no parallel split.)*
 
-**Wave 3 — drag write-through** (THIS WAVE; 1 slice — see wave-3 plan in the log)
+**Wave 3 — drag write-through** ✅ LANDED (#1271; 1 slice — see wave-3 log)
 4. `board-drag-restage` — CSP-safe drag hook (`Hooks.BarkparkBoardDrag`, mirrors the
    shipped `BarkparkPaperSortable`) → `handle_event("restage")` through `claim_by_id`/`close`
-   with `studio:<user>`, optimistic move + fence-refuse + snap-back. LARGE.
-   *(one builder owns `board_live.ex` + the root-layout hook + a small pure `board.ex`
-   helper — no parallel split; a second slice touching `board_live.ex` would re-collide.)*
+   with `studio:<user>`, optimistic move + fence-refuse + snap-back. LARGE. ✅ DONE.
 
-**Wave 4 — group / filter** (after wave 1; can parallel wave 3 if edits stay in Board + a
-   disjoint handler)
+**Wave 4 — group / filter** (THIS WAVE; 1 slice — see wave-4 plan in the log)
 5. `board-group-filter` — swimlane group-by (goal/priority/label) + filter chips, URL-param
-   shareable, all through the pure organizer. MEDIUM.
+   shareable, all through the pure organizer. LARGE.
+   *(one builder owns `board.ex` (pure `view/2`+`facets/1`+`card_matches?/2`) + `board_live.ex`
+   (`handle_params` + chips + `push_patch`) + `board_live_test.exs` — no parallel split; a
+   second slice touching `board_live.ex` render/assigns would re-collide, as every wave so far.)*
 
 **Wave 5 — reach & polish**
 6. `board-web-parity` — wire the snapshot into the existing `task-board` PortableDoc block +
@@ -518,9 +570,8 @@ collision).** Drag a card to a new column and the task's lifecycle flips through
 `claim_by_id`/`close` primitives `bp` uses — never a raw `Content` write, never a corrupted
 claim. Server edits stayed inside `board.ex` + `board_live.ex`; the only shared-file touch is
 the additive, opt-in `Hooks.BarkparkBoardDrag` block in `root.html.heex` (inert without the
-`.bp-board` attr — studio and every other LiveView untouched). Not yet on `main` (main HEAD is
-still #1270/wave 2); the perfecter branch
-`projects-board/board-drag-restage-drag-a-card-between-c-0-p` awaits integration/merge.
+`.bp-board` attr — studio and every other LiveView untouched). **MERGED to `main` as #1271**
+(commit `d31aae1e`); main HEAD carries all three waves.
 
 - **Pure organizer (`board.ex`, D11):** `restage_plan(from_col, to_col, holder, worker) ::
   {:claim} | {:close, String.t()} | :refuse` — the transition table as a pure, socket-free,
@@ -569,11 +620,183 @@ motion honored throughout. This is the wish's interactive payload — not micro-
   — still `LiveViewTest` render_hook only (profile lock + local `phx.server` OOM). A single
   human browser session remains the one open confidence step across waves 2+3 (an agent can't
   clear the profile lock / local OOM).
-- **Not yet merged to `main`** — integration/merge of the `-p` perfecter branch is the
-  remaining mechanical step; nothing shipped outside the loop.
+- **MERGED (#1271, `d31aae1e`)** — reconciled 2026-07-07; nothing shipped outside the loop.
 
 **Next.** Wave 4 `board-group-filter` (swimlane group-by goal/priority/label + shareable filter
-chips through the pure organizer, MEDIUM) — can proceed once wave 3 merges; its handler is
+chips through the pure organizer, LARGE) — can proceed once wave 3 merges; its handler is
 disjoint but it edits `board_live.ex` render+assigns, so serialize behind the wave-3 merge to
 avoid the same file-collision the single-slice cuts have avoided all epic. Wave 5 (web/PortableDoc
 parity + docs/glyph-parity gate) closes reach. The interactive core of the wish is now DONE.
+
+### Wave 2026-07-07 — Wave 4 (group / filter) — PLANNED, 1 slice
+
+**Reconciled first:** waves 1-3 are ALL on `main` (#1266 / #1270 / #1271 `d31aae1e`). The
+epic is still exactly two files (`api/lib/barkpark/tasks/board.ex` pure + `api/lib/barkpark/
+plugins/tasks/web/board_live.ex` wiring) + one test file (`board_live_test.exs`). Nothing
+shipped outside the loop.
+
+**Why one slice (again).** Group-by, filter chips, and URL-param share are one interlocking
+mechanism: the pure `view/2` the render reads, the `handle_params` that feeds it, the chips
+that `push_patch` the URL, and the realtime-respects-filter derivation all converge on
+`board.ex` + `board_live.ex` + `board_live_test.exs`. Splitting group↔filter or pure↔wiring
+into parallel builders recreates the wave-1 interface-timing collision (one half needs the
+other's not-yet-merged contract) and both halves edit the same render + assigns. ONE builder,
+ONE worktree owns all three files. "Up to 5" → a focused 1 is the honest, lowest-risk cut
+toward "a big board stays legible and focused."
+
+**Slice 5 `board-group-filter` (LARGE).** Make a big board LEGIBLE + FOCUSED without ever
+re-querying. Respects D1/D2 (plugin wires, core owns machinery — the organizer grows, the
+LiveView only wires), D3 (the global read already happened; filtering folds the in-memory
+corpus), D5 (no new process — chips ride per-socket events, no boot worker), D6 (pure-CSS/
+LiveView chips, CSP-safe, `prefers-reduced-motion`), D8 (SAME `:ops :live` route — `handle_params`
+on the existing path, no new route, no openapi regen, no bp verb), D9/D10 (`build`/`apply_change`
+UNCHANGED; `@done_window` now also caps PER LANE), **D13 (pure view-transform + momentum
+honesty), D14 (URL is source of truth), D15 (realtime respects filter by derivation)**.
+
+- **In `board.ex` (pure, D13):** add `group_keys/0` (`[:none, :goal, :priority, :label]`),
+  `facets/1`, `card_matches?/2`, and `view/2` (contract in D13). REUSE the existing private
+  `organize/1`, `order/2`, `enrich/1`, `same_utc_day?/2` — a lane's columns come from the SAME
+  machinery a full board's do, so a lane is byte-parallel to the flat board and `@done_window`
+  caps each lane's done sub-column. Do NOT touch `build/2`/`apply_change/3`/`snapshot/1` bodies
+  (only ADD functions) — the realtime path must stay identical. `group_by == :none` returns a
+  single lane wrapping `board.columns` verbatim (zero-cost passthrough so the ungrouped board
+  is unchanged). Momentum: pass `board.momentum` through when `filters` empty; recompute from
+  the filtered set otherwise (D13).
+- **In `board_live.ex` (wiring, D14/D15):**
+  * `handle_params/3` — parse `?group=&goal=&priority=&label=&worker=` → `@group_by`
+    (whitelist against `Board.group_keys/0`, `:none` fallback, NEVER `String.to_atom` on wire
+    input — mirror the existing `parse_col/1` whitelist discipline) + `@filters` (map of string
+    lists, comma-split, empty-dropped). Then `assign_view/1`.
+  * a single private `assign_view(socket)` — `assign(:view, Board.view(@board, group_by:
+    @group_by, filters: @filters))`. Call it at the END of `mount`, in `handle_params`, AND in
+    EVERY `handle_info`/`handle_event` clause that reassigns `@board` (the D15 discipline — the
+    realtime `{:document_changed,…}` clause, `:refresh`, and every `run_restage`/`optimistic_move`
+    /`rollback` path). Add `@group_by`/`@filters`/`@view` to the mount assigns (defaults
+    `:none` / `%{}`); `mount` no longer needs to call `Board.snapshot` for the view — it still
+    snapshots `@board`, then derives.
+  * chip UI — render `@view.facets` as toggle chips (goal/priority/label/worker) + a group
+    selector (None/Goal/Priority/Label); a chip/selector `phx-click` computes the new query and
+    `push_patch(to: ~p"/admin/projects?" <> encoded)` — URL is the ONLY mutation path (D14).
+    A clear-all `push_patch` to the bare path. Chips are `<button>`s (keyboard-operable),
+    active chips carry an `aria-pressed`/`.is-active` class; pure-CSS, CSP-safe, no inline JS.
+  * render — read `@view.lanes` (NOT `@board.columns` directly). `group_by == :none` → the one
+    lane renders exactly today's flat 5-column grid (no lane chrome — no visual regression).
+    Grouped → each lane is a horizontal band with its label (`↳ goal-id` / `P0` / `#label` /
+    `none`) + its 5 columns. Momentum header + bar read `@view.momentum` (filtered/grouped
+    honest). Flash/`data-just-moved` still keys off `@last_change` but only for a card present
+    in a lane (D15 — a filtered-out mutating card never appears). **Honest empty filtered
+    state:** when `@view.empty?` AND the board isn't empty → "No tasks match — clear filters"
+    with a clear-all button (distinct from the existing "no tasks yet" board-empty copy).
+- **Tests (all in `board_live_test.exs`, ConnCase, `Phoenix.LiveViewTest` — NEVER phx.server):**
+  (1) **pure** — `facets/1` returns distinct/sorted goals/priorities/labels/workers from a built
+      board; `card_matches?/2` ANDs facets + does label-set membership; `view/2` group=:goal
+      splits into lanes keyed by `parent_id` with a `none` lane for parentless cards; group=:none
+      + empty filters returns ONE lane == the flat board AND `momentum == board.momentum`
+      (monotonic done_today preserved); a `priority` filter narrows the columns AND recomputes
+      momentum (in_flight/pct reflect the subset); an over-filter yields `empty? == true`; a
+      lane's done sub-column respects `@done_window` (seed 13 done in one goal → lane shows 12,
+      `done_total == 13`).
+  (2) **live handle_params** — `live(conn, "/admin/projects?group=goal")` → `render` shows lane
+      bands; `?priority=0` → only P0 cards render, momentum count drops; `?group=goal` + a chip
+      → `render_click` a chip `push_patch`es and narrows; clear-all `push_patch` to bare path
+      resets to the full flat board; a second `live(conn, "?group=priority&label=bug")` proves a
+      shareable link replays state (refresh/back-forward equivalent).
+  (3) **realtime respects filter (D15)** — mount with `?priority=0`, `send(view.pid,
+      {:document_changed, msg})` for a P4 (filtered-out) card change → assert `render(view)` does
+      NOT show that card (updates `@board` silently); then a P0 card change DOES appear + flashes.
+  (4) **drag still works under a filter** — `render_hook "restage"` on a visible filtered card
+      flips the DB row (wave-3 path unbroken) and the card stays coherent in its lane.
+  Plus the BROAD ConnCase swath (query/mutate controllers) for sandbox/endpoint regressions.
+- **HARD RULES:** no boot-started process (chips + params ride per-socket events); every edit
+  inside the two board files + their one test file; the ONLY previously-shared touch
+  (`root.html.heex` drag hook) is NOT re-touched this wave; do NOT touch `studio_live.ex`/
+  `pane_builder.ex`; file-disjoint from all other epics. `:ops :live` route unchanged → no
+  openapi regen, no bp verb, no changeset (no `js/` package). Real task shape: TITLE is
+  top-level; `lifecycle_status`/`priority`/`parent_id`/`labels` live in `content` (facets read
+  the normalized card, which already lifts these — verify against a real seeded task, not just a
+  fixture).
+
+**Gate (exact):**
+```
+cd api && CC=/usr/bin/clang mix test \
+  test/barkpark/plugins/tasks/web/board_live_test.exs \
+  test/barkpark/plugins/tasks/ test/barkpark/tasks/ \
+  test/barkpark_web/controllers/mutate_controller_test.exs \
+  test/barkpark_web/controllers/query_controller_filter_test.exs
+```
+The controller files are the BROAD ConnCase swath (endpoint + full mutation/broadcast path — a
+sandbox/broadcast regression surfaces here, not in a board-only run). No openapi regen (D8),
+no bp verb, no changeset. Worktree recipe: borrow `$MAIN/api/_build/test` + symlink `deps`,
+`export CC=/usr/bin/clang`.
+
+**Feels-alive bar for this wave (perfect alongside net-new):** the board stays legible at scale
+— swimlanes make a 200-card wall scannable, chips focus it to one goal/worker, and the momentum
+header + bar recompute so the focused set still reads as live progress. Motion lands only on
+cards in view; an over-filtered board says "no tasks match — clear filters", never a silent
+void. Ungrouped/unfiltered, the board is byte-identical to wave 3 (no regression on the
+already-shipped alive surface).
+
+### Wave 2026-07-07 — Wave 4 (board-group-filter), GREEN in-branch — the big board stays legible
+
+**Built (1 slice, 1 builder, 1 worktree — as planned; no parallel split, no collision).**
+Group-by swimlanes + shareable filter chips fold through the pure organizer with NO re-query.
+Every edit stayed inside the two board files + their one test file (`board.ex` ADD-only,
+`board_live.ex` wiring, `board_live_test.exs`); `build/2`/`apply_change/3`/`card_from_broadcast/2`/
+`snapshot/1` bodies are byte-unchanged, so realtime motion (waves 2/3) is provably unaffected.
+The wave-3 shared touch (`root.html.heex` drag hook) was NOT re-touched. GREEN on branch
+`projects-board/board-group-filter-swimlane-group-by-sha-0`; **integration/merge pending** (main
+HEAD is still #1271 `d31aae1e`).
+
+- **Pure organizer (`board.ex`, D13):** `group_keys/0` (`[:none,:goal,:priority,:label]`);
+  `facets/1` (distinct+sorted goals/priorities/labels/workers actually present in `cards_by_id`
+  — no empty chip); `card_matches?/2` (facets AND together, set-intersection within a facet incl.
+  multi-valued labels); `view/2 → %{lanes, momentum, facets, filtered?, grouped?, empty?}` —
+  filters `cards_by_id`, partitions by `group_by` (nil/none lane LAST), runs EACH lane through
+  the SAME private `organize` so `@done_window` caps every lane's done sub-column (a lane is
+  never a dead wall either). `group_by == :none` + no filters is a **byte-identical passthrough**
+  of the flat board (asserted `lane.columns == board.columns` → no wave-3 regression).
+  D13 momentum honesty: `board.momentum` verbatim when filters empty (preserves wave-2's
+  monotonic session `done_today`), recomputed from the narrowed columns only when a filter
+  narrows the set.
+- **LiveView (`board_live.ex`, D14/D15):** `@group_by`/`@filters`/`@view` assigns;
+  `handle_params` parses `?group=&goal=&priority=&label=&worker=` (group whitelisted vs
+  `group_keys/0`, facet keys whitelisted — **never `String.to_atom` on wire input**). ONE private
+  `assign_view/1` called at end of `mount`, in `handle_params`, and in every handler that
+  reassigns `@board` (realtime re-bucket, `:refresh`, optimistic move, rollback) — the D15
+  coherence discipline that keeps model (full) and view (filtered) from drifting. Chips + group
+  selector are `<button>`s whose `phx-click` `push_patch`es the URL (the ONLY mutation path, D14):
+  CSP-safe, `aria-pressed`/`.is-active`, `prefers-reduced-motion` honored. Render reads
+  `@view.lanes`; grouped view stacks labelled swimlanes (`↳goal` / `P0` / `#label` / `none`),
+  each its own drag-hooked grid; honest filtered-empty state ("no tasks match — clear filters")
+  distinct from board-empty.
+
+**Correctness PROVEN (perfecter-confirmed, gate re-run on final state): SHIPS.** 258 tests / 0
+failures, warnings-as-errors clean, only the 3 permitted files touched, no route/config/openapi/
+bp-verb/changeset, subscription stays per-socket (the CI-sandbox landmine avoided). Whitelisted
+keys (no atom leak), HEEx auto-escaping, set-intersection labels, none-lane last, per-lane
+`@done_window` cap with honest `done_total`, byte-identical zero-cost passthrough. D13 momentum
+honesty + D15 `assign_view` coherence both implemented as documented. LiveViewTest proves
+chip→push_patch→handle_params→re-derive and shareable `?group=`/`?worker=` URLs end-to-end.
+
+**Feels-alive verdict: MET at scale.** Momentum header + bar read from `@view` (shareable/honest
+per-slice under filter), swimlanes re-bucket live via re-derive, flash marker survives grouping,
+honest board-empty vs filtered-empty states, clear-all always reachable. This is the wish's
+"big board stays legible and focused" payload — net-new legibility, not micro-repair.
+
+**LEAD MUST KNOW / known non-blocking (charter-sanctioned, NOT defects):**
+- **NOT browser-verified** — the ONLY unverified surface is real-mouse-drag × chip interplay.
+  Profile lock + local `phx.server` OOM (codelist-seed) is the epic-wide confidence gap, not
+  specific to this slice. A single human browser pass remains the one open step across waves 2–4.
+- **Grouped-by-label lane ids from a sanitizing slug could collide** for facet values differing
+  only in punctuation → degrades to a console warning; drag still resolves by `doc_id`
+  server-side (the hook never reads the grid id — confirmed). Non-corrupting.
+- **A comma inside a facet value breaks the URL round-trip** (comma is the per-facet join
+  delimiter); **a filter value whose chip later vanishes is clearable only via clear-all.** Both
+  graceful degradations, neither touches the core flow.
+
+**Next.** Wave 5 `board-web-parity` (wire the snapshot into the `task-board` PortableDoc block +
+web `portable-doc.tsx` for a live board embeddable in a paper, LARGE) → then `board-docs-parity-gate`
+(TASK-SYSTEM Studio section + design-spec build-status row + glyph/hue parity vs
+`internal/taskboard/theme.go`, SMALL). The interactive+legible core of the wish is DONE; wave 5 is
+REACH, not the spine. First integration action: merge the wave-4 branch (advisory Format/Lighthouse
+reds never block; required Elixir Test is the gate).
