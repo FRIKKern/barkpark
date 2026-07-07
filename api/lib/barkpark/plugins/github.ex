@@ -13,14 +13,21 @@ defmodule Barkpark.Plugins.Github do
   plugin is schemas + business logic, never UI — the host owns every route
   table, renderer, and console.
 
-  ## Wave 1 posture (this slice) — deliberately inert
+  ## Wave 2 posture (this slice) — the outbound mirror is wired
 
+    * `register_workers/1` → `[Auth, DrainWorker]`. Both start ONLY when the
+      plugin is whitelisted, so off-by-default is preserved. `Github.Auth` is the
+      singleton App-token cache; `Github.DrainWorker` is the supervised drain-tick
+      GenServer that pumps `mutation_events` → debounced `MirrorJob`s (mirrors
+      `onixedit.ex` supervising `Bokbasen.Auth`).
+    * `oban_crontab/0` → `[]` (the `use` default) STAYS empty. The drain worker is
+      a supervised GenServer, NOT cron — the `Barkpark.Sync.PushWorker` precedent.
+      The `github_mirror` Oban queue itself is declared statically in
+      `config/config.exs` (plugins can add crontab, not queues).
     * `register_routes/1` → `[]`. The webhook-intake and adopt controllers
-      don't exist yet (waves 2–4); naming a not-yet-compiled controller in a
+      don't exist yet (waves 3–4); naming a not-yet-compiled controller in a
       route tuple is unsafe for the router beam. Routes get wired the wave the
       controllers land.
-    * `oban_crontab/0` → `[]` (the `use` default). The cursor-drain worker that
-      enqueues debounced `MirrorJob`s lands in wave 2.
     * `register_schemas/1` → `[]` (the `use` default). GitHub adds NO task
       schema (decision D3): the bookkeeping field `github:{repo,issue,synced_rev}`
       rides the task's plain CONTENT via `Content.*`, never a declared
@@ -189,11 +196,32 @@ defmodule Barkpark.Plugins.Github do
     [%{type: :link, label: "GitHub Sync", path: "/admin/github", icon: "github"}]
   end
 
-  # Wave 1 keeps routes empty on purpose — see @moduledoc. The `use` default
-  # already returns `[]`; the explicit clause documents the intent at the call
-  # site so a wave-2 author knows exactly where the controllers wire in.
+  # Routes stay empty until the webhook/adopt controllers land (waves 3–4) — see
+  # @moduledoc. The `use` default already returns `[]`; the explicit clause
+  # documents the intent at the call site.
   @impl Barkpark.Plugin
   def register_routes(_ctx), do: []
+
+  @doc """
+  Supervised workers the host splices into the plugin supervision tree when
+  `github` is whitelisted (AUTH START contract #1). Both are singletons:
+
+    * `Barkpark.Plugins.Github.Auth` — the App installation-token cache. Without
+      it under supervision, `Auth.token/0` crashes no-process at mirror time.
+    * `Barkpark.Plugins.Github.DrainWorker` — the drain-tick GenServer that reads
+      the outbound cursor/outbox and enqueues debounced `MirrorJob`s. A supervised
+      GenServer, not cron (the `Barkpark.Sync.PushWorker` precedent).
+
+  They start ONLY here, so a non-whitelisted install runs neither — off by
+  default. Mirrors `onixedit.ex` returning `[Bokbasen.Auth]`.
+  """
+  @impl Barkpark.Plugin
+  def register_workers(_ctx) do
+    [
+      Barkpark.Plugins.Github.Auth,
+      Barkpark.Plugins.Github.DrainWorker
+    ]
+  end
 
   # Blank = nil, non-binary, or all-whitespace string. A credential the
   # operator typed as spaces is as good as missing.

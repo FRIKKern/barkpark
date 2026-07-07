@@ -58,8 +58,12 @@ defmodule Barkpark.Plugins.Github.ClientTest do
       github_api_base: base
     )
 
-    # Start a fresh singleton Auth for this test; stopped automatically on exit.
-    start_supervised!(Auth)
+    # The plugin's `register_workers/1` now boot-starts the singleton `Auth`
+    # (folded into the boot supervision tree via the plugin disk-walk, like
+    # `Bokbasen.Auth`). Reusing that live singleton — rather than
+    # `start_supervised!(Auth)`, which would clash on the registered name — and
+    # invalidating its token cache so this test's Bypass-backed credentials take
+    # effect is the established bokbasen `client_test` pattern.
     Auth.invalidate()
 
     on_exit(fn ->

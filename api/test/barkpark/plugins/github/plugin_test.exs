@@ -38,17 +38,24 @@ defmodule Barkpark.Plugins.GithubTest do
     end
   end
 
-  describe "wave-1 inert surfaces" do
-    test "register_routes/1 returns [] (controllers land wave 2)" do
+  describe "surfaces" do
+    test "register_routes/1 returns [] (controllers land waves 3–4)" do
       assert Github.register_routes(%{}) == []
     end
 
-    test "oban_crontab/0 returns [] (drain worker lands wave 2)" do
+    test "oban_crontab/0 stays [] — the drain worker is supervised, not cron" do
       assert Github.oban_crontab() == []
     end
 
     test "register_schemas/1 returns [] (github adds no task schema, D3)" do
       assert Github.register_schemas([]) == []
+    end
+
+    test "register_workers/1 supervises the Auth cache + the DrainWorker (AUTH START)" do
+      assert Github.register_workers(%{}) == [
+               Barkpark.Plugins.Github.Auth,
+               Barkpark.Plugins.Github.DrainWorker
+             ]
     end
   end
 
