@@ -510,6 +510,24 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-cols__c:has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
 .bp-cols__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
 
+/* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
+ * counterpart, so they do NOT trip the view↔edit parity byte-compare — the reader
+ * `.bp-term*` paint already ships in paper-surface.css and is inherited through the
+ * ancestor .bp-paper-surface cascade). The title/footer inputs are de-chromed so they
+ * LOOK like the reader's mono/soft-ink spans; the live toggle + "+ footer" affordance
+ * are hover/focus-revealed (the table-rail precedent). Bound to the --paper- and --st-
+ * token vocabulary. Keep BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
+.bp-canvas-term { position: relative; }
+.bp-canvas-term__title-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; min-width: 6ch; font: inherit; color: inherit; }
+.bp-canvas-term__title-input::placeholder { color: var(--paper-ink-faint); }
+.bp-canvas-term__live-toggle, .bp-canvas-term__add-foot { font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 1px 7px; cursor: pointer; opacity: 0; transition: opacity 0.12s ease; }
+.bp-canvas-term__live-toggle { margin-left: auto; }
+.bp-canvas-term__live-toggle.is-on { color: var(--st-ok); border-color: var(--st-ok); }
+.bp-canvas-term:hover .bp-canvas-term__live-toggle, .bp-canvas-term:focus-within .bp-canvas-term__live-toggle, .bp-canvas-term:hover .bp-canvas-term__add-foot, .bp-canvas-term:focus-within .bp-canvas-term__add-foot { opacity: 1; }
+.bp-canvas-term__foot-input { border: none; background: transparent; outline: none; padding: 0; margin: 0; width: 100%; font: inherit; color: inherit; }
+.bp-canvas-term__foot-input::placeholder { color: var(--paper-ink-faint); }
+.bp-canvas-term__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
+
 /* ── doctrine template locks (pdd-t2): the calm lock cue ──────────────────────
  * A mandated template block (locked title @0, featured image @1) can't be moved
  * or deleted (server backstop + the canvas filterTransaction veto). The cue is

@@ -188,9 +188,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # opaque carry (sheet/embed/fleet). `section` (also a container) rides the same
   # CANVAS_CONTAINER_TYPES recursion.
   #
-  # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES and
-  # columns-node.js (bpColumns/bpColumn/bpColumnAtom).
-  @canvas_container_types ~w(columns)
+  # `terminal` is the SECOND container: a `terminal` block the canvas handles as a
+  # RECURSIVE nested-block node (bpTerminal holding prose/divider body children + a
+  # bpTerminalAtom verbatim carrier for any non-first-class child; run-convert.js
+  # CANVAS_CONTAINER_TYPES → the bpTerminal node; terminal-node.js). UNLIKE the callout
+  # content node (ONE inline body) it is a CONTAINER of BLOCKS; UNLIKE the read-only
+  # sheet/embed it is EDITABLE and emits a COARSE whole-body+chrome patch-block. It joins
+  # the editable canvas (it stops being a standalone read-only stub) exactly like columns.
+  #
+  # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES,
+  # columns-node.js (bpColumns/bpColumn/bpColumnAtom) and terminal-node.js
+  # (bpTerminal/bpTerminalAtom).
+  @canvas_container_types ~w(columns terminal)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas

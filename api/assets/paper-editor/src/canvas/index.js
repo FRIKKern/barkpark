@@ -126,6 +126,12 @@ import {
 // node-view references `document` lazily. run-convert.js maps the block ⇄ nodes and
 // diffs the whole `columns` array coarsely. See ./columns-node.js.
 import { Columns, Column, ColumnAtom } from "./columns-node.js";
+// The terminal CONTAINER nodes (bpTerminal > body children + bpTerminalAtom). A
+// terminal block ⇄ a bpTerminal node: a SINGLE editable body wrapped in reader chrome
+// (title bar + optional live badge + optional footer); any non-first-class body child
+// rides a read-only bpTerminalAtom. bpTerminal's node-view references `document` lazily
+// (imports DOM-free). No StarterKit collision. See ./terminal-node.js.
+import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -652,6 +658,16 @@ class BpPaperCanvas extends HTMLElement {
         Columns,
         Column,
         ColumnAtom,
+        // The terminal CONTAINER nodes (bpTerminal > body children + bpTerminalAtom).
+        // Registers the container + verbatim-carrier atom so runToTiptap's
+        // { type:"bpTerminal", content:[child…] } node mounts as an editable body wrapped
+        // in reader-shaped chrome (title bar / live badge / footer), and getJSON()
+        // round-trips the whole nested tree. bp-term* reader classes + paper-surface.css
+        // (ancestor .bp-paper-surface cascade) paint the frame; NO StarterKit collision.
+        // The doc's block+ accepts bpTerminal (group:"block"), never a bare bpTerminalAtom.
+        // See ./terminal-node.js.
+        Terminal,
+        TerminalAtom,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
