@@ -1,0 +1,8 @@
+{
+  "plugin_name": "github",
+  "version": "0.1.0",
+  "description": "GitHub bridge — Barkpark (the guerrilla ledger) stays the single source of truth; this plugin mirrors tasks OUTBOUND to GitHub Issues (debounced, idempotent, App-authenticated), intakes only outsider-opened issues INBOUND as find-or-create tasks awaiting adoption, and projects a READ-ONLY Projects v2 dashboard. No field is ever bidirectional; claims/epochs/fencing/rail_rev never leave Barkpark. Off by default.",
+  "capabilities": ["routes", "workers", "settings"],
+  "module": "Barkpark.Plugins.Github",
+  "nouns": ["github"]
+}
