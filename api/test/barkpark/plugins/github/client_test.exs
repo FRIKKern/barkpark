@@ -322,7 +322,9 @@ defmodule Barkpark.Plugins.Github.ClientTest do
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(
           200,
-          Jason.encode!(%{"data" => %{"addProjectV2ItemById" => %{"item" => %{"id" => "PVTI_x"}}}})
+          Jason.encode!(%{
+            "data" => %{"addProjectV2ItemById" => %{"item" => %{"id" => "PVTI_x"}}}
+          })
         )
       end)
 
@@ -403,7 +405,10 @@ defmodule Barkpark.Plugins.Github.ClientTest do
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(201, Jason.encode!(%{"number" => 7, "sub_issues_summary" => %{"total" => 1}}))
+        |> Plug.Conn.resp(
+          201,
+          Jason.encode!(%{"number" => 7, "sub_issues_summary" => %{"total" => 1}})
+        )
       end)
 
       # parent = number 7, child = its DATABASE id (not its number).

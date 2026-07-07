@@ -40,7 +40,9 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
       do: {:ok, %{"addProjectV2ItemById" => %{"item" => %{"id" => "ITEM_default"}}}}
 
     defp default_graphql(:update),
-      do: {:ok, %{"updateProjectV2ItemFieldValue" => %{"projectV2Item" => %{"id" => "ITEM_default"}}}}
+      do:
+        {:ok,
+         %{"updateProjectV2ItemFieldValue" => %{"projectV2Item" => %{"id" => "ITEM_default"}}}}
 
     defp default_graphql(:fields), do: {:ok, %{"node" => %{"fields" => %{"nodes" => []}}}}
     defp default_graphql(_), do: {:ok, %{}}
@@ -87,7 +89,7 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
   end
 
   defp base_opts(extra) do
-    [client: StubClient, project_id: @project, test_pid: self()] ++ extra
+    [client: StubClient, github_project_id: @project, test_pid: self()] ++ extra
   end
 
   defp task(content), do: %{content: content}
@@ -97,7 +99,7 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
   # ==========================================================================
   describe "project_id gate (D10 isolation)" do
     test "blank project_id → :noop, zero client calls" do
-      opts = [client: StubClient, project_id: "", test_pid: self()]
+      opts = [client: StubClient, github_project_id: "", test_pid: self()]
 
       assert Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts) == :noop
 
@@ -106,7 +108,7 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
     end
 
     test "whitespace-only project_id → :noop" do
-      opts = [client: StubClient, project_id: "   ", test_pid: self()]
+      opts = [client: StubClient, github_project_id: "   ", test_pid: self()]
       assert Projects.sync(task(%{"priority" => 1}), @repo, 7, nil, opts) == :noop
       refute_received {:graphql, _, _}
     end
@@ -219,13 +221,16 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
       opts =
         base_opts(
           responses: %{
-            add: {:ok, %{"data" => %{"addProjectV2ItemById" => %{"item" => %{"id" => "ITEM_w"}}}}},
+            add:
+              {:ok, %{"data" => %{"addProjectV2ItemById" => %{"item" => %{"id" => "ITEM_w"}}}}},
             fields: {:ok, %{"data" => board_fields()}}
           }
         )
 
       assert {:ok, %{item_id: "ITEM_w"}} = Projects.sync(doc, @repo, 42, nil, opts)
-      assert_received {:graphql, :update, %{"fieldId" => "FIELD_status", "optionId" => "OPT_todo"}}
+
+      assert_received {:graphql, :update,
+                       %{"fieldId" => "FIELD_status", "optionId" => "OPT_todo"}}
     end
 
     test "a stored projects_item_id SKIPS the issue GET + addProjectV2ItemById" do
@@ -278,7 +283,9 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
   describe "honest failure (isolation is the caller's job)" do
     test "get_issue error bubbles as {:error, _}" do
       opts = base_opts(responses: %{get_issue: {:error, :boom}})
-      assert {:error, :boom} = Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts)
+
+      assert {:error, :boom} =
+               Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts)
     end
 
     test "an update GraphQL error bubbles as {:error, _}" do
@@ -290,11 +297,13 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
           }
         )
 
-      assert {:error, _} = Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts)
+      assert {:error, _} =
+               Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts)
     end
 
     test "a fields-query error bubbles as {:error, _}" do
       opts = base_opts(responses: %{fields: {:error, :graphql_down}})
+
       assert {:error, :graphql_down} =
                Projects.sync(task(%{"lifecycle_status" => "Todo"}), @repo, 7, nil, opts)
     end

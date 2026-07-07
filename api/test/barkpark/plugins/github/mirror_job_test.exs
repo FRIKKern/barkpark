@@ -757,10 +757,11 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
   # ---------------------------------------------------------------------------
 
   describe "reconcile/3 — projections wiring (slice 4)" do
-    test "(a) a normal create still mirrors the issue + stamps synced_rev while Projects :noop", %{
-      bypass: bypass,
-      scope: scope
-    } do
+    test "(a) a normal create still mirrors the issue + stamps synced_rev while Projects :noop",
+         %{
+           bypass: bypass,
+           scope: scope
+         } do
       stub_token(bypass)
       id = uniq("gh")
       _task = mk_task!(id, %{"title" => "Isolated"}, scope)

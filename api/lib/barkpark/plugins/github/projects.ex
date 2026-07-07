@@ -381,7 +381,12 @@ defmodule Barkpark.Plugins.Github.Projects do
 
   # The Projects gate (D10): opts override for tests, else the resolved cred.
   defp project_id(opts) do
-    raw = Keyword.get(opts, :project_id) || Settings.get_credentials()[:project_id]
+    # The GitHub Projects v2 board id is PLUGIN config (Settings), never a
+    # per-reconcile opt. Read a distinct `:github_project_id` test-injection seam
+    # — NOT `:project_id`, which MirrorJob overloads with the TENANCY project scope
+    # (a workspace-project UUID). Reading `:project_id` here made every scoped task
+    # mistake its tenancy UUID for the board id and fire a doomed GraphQL call.
+    raw = Keyword.get(opts, :github_project_id) || Settings.get_credentials()[:project_id]
 
     case raw do
       v when is_binary(v) -> if String.trim(v) == "", do: nil, else: v

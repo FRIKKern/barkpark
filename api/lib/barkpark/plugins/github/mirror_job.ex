@@ -721,7 +721,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
       handle_flatten(doc_id, dataset, Link.get(task_doc), parent_id, opts)
     else
       if is_binary(parent_id) and parent_id != "" do
-        _ = reenqueue(carry_scope(%{doc_id: parent_id, dataset: dataset}, opts), @debounce_seconds, opts)
+        _ =
+          reenqueue(
+            carry_scope(%{doc_id: parent_id, dataset: dataset}, opts),
+            @debounce_seconds,
+            opts
+          )
       end
 
       _ =
@@ -852,8 +857,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   defp parent_id_of(task_doc) do
     case content_of(task_doc) do
-      content when is_map(content) -> Map.get(content, "parent_id") || Map.get(content, :parent_id)
-      _ -> nil
+      content when is_map(content) ->
+        Map.get(content, "parent_id") || Map.get(content, :parent_id)
+
+      _ ->
+        nil
     end
   end
 

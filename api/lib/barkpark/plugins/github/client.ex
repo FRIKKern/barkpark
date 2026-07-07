@@ -155,7 +155,8 @@ defmodule Barkpark.Plugins.Github.Client do
 
     case request(:post, "/graphql", body, opts) do
       {:ok, %{"errors" => [_ | _] = errors}} ->
-        {:error, %NetworkError{reason: {:graphql, errors}, endpoint: base_url(opts) <> "/graphql"}}
+        {:error,
+         %NetworkError{reason: {:graphql, errors}, endpoint: base_url(opts) <> "/graphql"}}
 
       {:ok, %{"data" => data}} ->
         {:ok, data}
