@@ -11,6 +11,37 @@ Plugin surface, for reference: outbound mirror (task → issue), inbound intake 
 and a `/admin/github` console + `bp github status`. Single source of truth is the ledger; GitHub is a
 one-directional projection plus a low-trust intake funnel. Design: `.claude/workflows/bp-github-bridge-epic-charter.md`.
 
+## Fast path (scripted)
+
+Three helpers reduce this to two browser clicks. There is no `gh app create`, so App
+creation uses the **App Manifest flow** — the script pre-fills a manifest and captures the
+generated App ID / private key / webhook secret automatically.
+
+```bash
+# 1. Create the App (one browser click + pick the install repo). Writes creds to a file.
+python3 scripts/github-app-bootstrap.py \
+  --name "Barkpark Bridge FRIKKern" \
+  --webhook-url https://guerrilla.barkpark.cloud/v1/plugins/github/webhook \
+  --out ~/barkpark-github-app.json
+# Then install the App on FRIKKern/barkpark and note the Installation ID (in the install URL).
+
+# 2. (Optional) Projects v2 board + Status/Priority/Worker/Goal fields → prints the project_id.
+gh auth refresh -s project            # one-time scope add
+scripts/github-projects-setup.sh "Barkpark Bridge" @me
+
+# 3. Provision the creds into the instance + verify it goes active.
+scripts/github-provision-guerrilla.sh \
+  --creds ~/barkpark-github-app.json --install <INSTALLATION_ID> \
+  --repo FRIKKern/barkpark [--project <PVT_…>]
+```
+
+The two irreducible browser moments are inside step 1: clicking **Create GitHub App** on the
+manifest page, and choosing which repo to install on. Everything else is scripted. If the board
+lives on your user account, note that a GitHub App installation token can't write user-owned
+Projects v2 — the board is created with your own `gh` token and the plugin projects onto it
+(Projects failures are isolated; the mirror/intake/adopt loop is unaffected). The manual walkthrough
+below is the fallback if you'd rather not run the scripts.
+
 ## 0. Prerequisites
 
 - Admin on the target repo (**FRIKKern/barkpark**) and on the instance the ledger runs on
