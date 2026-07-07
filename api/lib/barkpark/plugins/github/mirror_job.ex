@@ -278,9 +278,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         :ok
 
       {:error, reason} = err ->
-        Logger.error(
-          "github mirror stamp failed for #{doc_id}/#{dataset}: #{inspect(reason)}"
-        )
+        Logger.error("github mirror stamp failed for #{doc_id}/#{dataset}: #{inspect(reason)}")
 
         err
     end

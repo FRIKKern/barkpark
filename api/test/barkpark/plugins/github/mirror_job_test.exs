@@ -52,7 +52,8 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       github_api_base: base
     )
 
-    start_supervised!(Auth)
+    # Auth is a boot-started singleton (register_workers/1); don't start a
+    # second one — just reset its token cache so this test's creds take effect.
     Auth.invalidate()
 
     on_exit(fn ->

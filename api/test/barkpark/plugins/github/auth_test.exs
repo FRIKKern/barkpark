@@ -65,13 +65,17 @@ defmodule Barkpark.Plugins.Github.AuthTest do
 
     test "returns :error on an unparseable key" do
       assert :error =
-               Auth.build_app_jwt(@app_id, "-----BEGIN RSA PRIVATE KEY-----\nnope\n-----END RSA PRIVATE KEY-----")
+               Auth.build_app_jwt(
+                 @app_id,
+                 "-----BEGIN RSA PRIVATE KEY-----\nnope\n-----END RSA PRIVATE KEY-----"
+               )
     end
   end
 
   describe "token/0 fail-closed on missing creds (no HTTP)" do
     setup %{pem: pem} do
-      start_supervised!(Auth)
+      # Auth is a boot-started singleton (register_workers/1); reset its cache
+      # rather than starting a second (name-colliding) instance.
       Auth.invalidate()
       {:ok, pem: pem}
     end
@@ -103,7 +107,6 @@ defmodule Barkpark.Plugins.Github.AuthTest do
 
   describe "invalidate/0" do
     test "returns :ok" do
-      start_supervised!(Auth)
       assert :ok = Auth.invalidate()
     end
   end
