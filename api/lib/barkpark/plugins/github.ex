@@ -204,7 +204,7 @@ defmodule Barkpark.Plugins.Github do
     [%{type: :link, label: "GitHub Sync", path: "/admin/github", icon: "github"}]
   end
 
-  # Plugin routes. Two so far:
+  # Plugin routes. Three so far:
   #
   #   * `POST /v1/plugins/github/webhook` (Wave 3) — inbound issue webhook via the
   #     `:github_webhook` scope block the router carries (signature-verify
@@ -213,6 +213,11 @@ defmodule Barkpark.Plugins.Github do
   #     task into Barkpark ownership. On the `:token` bucket — a bearer-gated
   #     OPERATOR action (NOT `:admin`), so `bp github adopt` runs with a normal
   #     operator token.
+  #   * `{:live, "/github", …, auth: :ops}` (Wave 6) — the read-only sync-health
+  #     console, mounted at `/admin/github` via the router's
+  #     `plugin_routes(scope: :ops)` block (the pulse `{:live, "/pulse", …}`
+  #     shape). The `:ops` on_mount admin gate always guards it — never
+  #     public_demo, never anonymous. The `desk_items/1` link already points here.
   #
   # Off-by-default is unaffected: a route only resolves a live handler when
   # `github` is whitelisted.
@@ -221,7 +226,8 @@ defmodule Barkpark.Plugins.Github do
     [
       {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
        auth: :github_webhook},
-      {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt, auth: :token}
+      {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt, auth: :token},
+      {:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index, auth: :ops}
     ]
   end
 

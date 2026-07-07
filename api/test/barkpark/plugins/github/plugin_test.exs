@@ -39,12 +39,13 @@ defmodule Barkpark.Plugins.GithubTest do
   end
 
   describe "surfaces" do
-    test "register_routes/1 mounts the inbound webhook route (Wave 3) + the adopt route (Wave 4)" do
+    test "register_routes/1 mounts webhook (W3) + adopt (W4) + the ops console (W6)" do
       assert Github.register_routes(%{}) == [
                {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
                 auth: :github_webhook},
                {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt,
-                auth: :token}
+                auth: :token},
+               {:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index, auth: :ops}
              ]
     end
 
