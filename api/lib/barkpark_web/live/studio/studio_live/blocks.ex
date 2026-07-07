@@ -263,6 +263,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def default_block("section", id),
     do: %{"id" => id, "type" => "section", "title" => "New section", "blocks" => []}
 
+  # ── canvas-insertable structural blocks (block-insertability) ──
+  # These mirror the canvas slash-menu defaults (slash-insert.js canvasDefaultBlock) so
+  # the LiveView add-block path and the canvas "/" pick build the SAME minimal block.
+  # Each shape matches the Render.Compose.compose_block/2 clause that reads it:
+  #   action   → PdButton {href, label, priority?}; empty href/label defaults.
+  #   figure   → figure_html(child, caption); a caption-less figure wrapping ONE child.
+  #   columns  → a list of columns, each a list of blocks; two empty columns.
+  #   terminal → chrome frame over `children`; empty body (the reader renders bare chrome).
+  #   table    → PdTable {rows, head?}; a headed 1-body 2-col grid with empty cells.
+  def default_block("action", id),
+    do: %{"id" => id, "type" => "action", "href" => "", "label" => ""}
+
+  def default_block("figure", id),
+    do: %{
+      "id" => id,
+      "type" => "figure",
+      "child" => %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => ""}]}
+    }
+
+  def default_block("columns", id),
+    do: %{"id" => id, "type" => "columns", "columns" => [[], []]}
+
+  def default_block("terminal", id),
+    do: %{"id" => id, "type" => "terminal", "children" => []}
+
+  def default_block("table", id),
+    do: %{"id" => id, "type" => "table", "head" => [[], []], "rows" => [[[], []]]}
+
   # ── leaf field-* blocks (P2.1) — Basic fields group ──
   # string / slug / text share the {label, value:""} shape; the field-text
   # editor also reads an optional "rows" but defaults to 3 when absent.

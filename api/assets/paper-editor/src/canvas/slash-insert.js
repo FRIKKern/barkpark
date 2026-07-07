@@ -18,16 +18,20 @@ import { runToTiptap } from "./run-convert.js";
 // ── the insertable-type allowlist ───────────────────────────────────────────
 //
 // A CANVAS slash pick inserts a default NODE into the live prose run — so it can
-// only offer types that (a) have a canvas node-view and (b) can be inserted EMPTY
-// into a run without a ref/picker and without SPLITTING the run. That set is exactly:
-// the 3 prose types (paragraph/heading/list), the 4 non-prose node-view blocks the
-// run can CONTAIN (callout/code/divider/diagram), and the 7 NATIVE field-* types
-// (string/slug/text/boolean/select/datetime/color).
+// only offer types that (a) have a canvas node-view and (b) can be inserted with a
+// MINIMAL valid default (no ref/picker, no run-split). That set is:
+//   * the 3 prose types (paragraph/heading/list),
+//   * the 4 non-prose node-view blocks the run can CONTAIN (callout/code/divider/diagram),
+//   * the CTA `action` control-atom (bpAction) + the `figure` caption-atom (bpFigure),
+//   * the 3 CONTAINERS whose node-view mounts a fresh editable body (columns/section/
+//     terminal — each seeds an empty paragraph so the `+`-content node is valid),
+//   * the `table` nested-node tree (bpTable — a headed 1-row default), and
+//   * the 7 NATIVE field-* types (string/slug/text/boolean/select/datetime/color).
 //
 // EXCLUDED on purpose (these EXIST in SLASH_ITEMS but cannot be DIRECT-inserted):
 //   * sheet / embed            — REFERENCES; need a target/ref a slash pick can't supply.
-//   * section + composite / arrayOf / codelist / localizedText
-//                              — run-splitting / object boundaries (no canvas node-view).
+//   * composite / arrayOf / codelist / localizedText
+//                              — object boundaries (no canvas node-view).
 //   * eyebrow / byline / ingress / pullquote
 //                              — article-chrome blocks with no canvas node-view (bpOpaque).
 //   * field-image / field-reference
@@ -40,6 +44,12 @@ export const CANVAS_SLASH_TYPES = new Set([
   "code",
   "divider",
   "diagram",
+  "action",
+  "figure",
+  "columns",
+  "section",
+  "terminal",
+  "table",
   "field-string",
   "field-slug",
   "field-text",
@@ -61,10 +71,21 @@ export const CANVAS_SLASH_TYPES = new Set([
 //   * list     → ordered:false, ONE empty item.
 //   * callout  → tone "info", ONE empty inline text run (the server default).
 //   * code     → lang "" + value "".  divider → bare {type}.  diagram → source/caption "".
+//   * action   → empty href/label (priority omitted — absence is the sentinel).
+//   * figure   → wraps ONE empty-paragraph child, no caption (the child rides bpChild
+//                verbatim; a fresh figure has no server paint yet).
+//   * columns  → 2 EMPTY columns; each bpColumn's node-view seeds an empty paragraph so
+//                the `+`-content node is valid, and the empty seed strips back to [].
+//   * section  → title "New section" + ONE empty-paragraph child so the bpSection
+//                `+`-content node is valid on insert (its child is kept + minted an id).
+//   * terminal → EMPTY body; bpTerminal's node-view seeds an empty paragraph (strips
+//                back to []). No chrome keys (title/footer/live) — absence is the default.
+//   * table    → a HEADED 1-body 2-col grid with empty cells (bpTable's minimal valid tree).
 //   * field-*  → the per-type {label, value} (+ options for select); value default is
 //                false for boolean, "#000000" for color, "" otherwise.
 // id is null so runToOps mints a fresh id (the new-block signal) — exactly the
-// Enter-split/typed-paragraph path.
+// Enter-split/typed-paragraph path. The CONTAINER children are id-less; runToOps mints
+// their ids on insert, seeded from the WHOLE tree (the duplicate_id-abort guard).
 export function canvasDefaultBlock(type) {
   switch (type) {
     case "heading":
@@ -91,6 +112,41 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "divider" };
     case "diagram":
       return { id: null, type: "diagram", source: "", caption: "" };
+    case "action":
+      return { id: null, type: "action", href: "", label: "" };
+    case "figure":
+      return {
+        id: null,
+        type: "figure",
+        child: { type: "paragraph", content: [{ type: "text", value: "" }] },
+      };
+    case "columns":
+      // Two EMPTY columns; each bpColumn node-view seeds an empty paragraph so the
+      // `+`-content node is valid, and the seed strips back to [] on the round-trip.
+      return { id: null, type: "columns", columns: [[], []] };
+    case "section":
+      // One empty-paragraph child so the bpSection `+`-content node is valid on insert
+      // (bpSection does NOT auto-seed like columns/terminal). The child is kept + minted
+      // an id by runToOps. Mirrors default_block("section", …)'s title.
+      return {
+        id: null,
+        type: "section",
+        title: "New section",
+        blocks: [{ type: "paragraph", content: [{ type: "text", value: "" }] }],
+      };
+    case "terminal":
+      // EMPTY body; bpTerminal's node-view seeds an empty paragraph (strips back to []).
+      // No chrome keys (title/footer/live) — absence is the reader default.
+      return { id: null, type: "terminal", children: [] };
+    case "table":
+      // A HEADED 1-body 2-col grid with empty cells — the minimal valid bpTable tree
+      // (bpTable > head row + one body row). Empty cells reconstruct as [].
+      return {
+        id: null,
+        type: "table",
+        head: [[], []],
+        rows: [[[], []]],
+      };
     case "field-string":
       return { id: null, type: "field-string", label: "Text", value: "" };
     case "field-slug":

@@ -46,6 +46,10 @@ function slashInsertOps(type) {
 
 // (a) Per-type: slashTypeToNode → ONE insert-after carrying { type, …default } whose
 //     reconstructed block matches default_block/2, AND the fold reproduces nextDoc.
+// NOTE: `section` is NOT in this generic byte-equal loop — its default SEEDS a nested
+// child paragraph that runToOps mints a FRESH id for on every call, so two independent
+// reconstructions differ in that (nondeterministic) nested id. Byte-equality can't pin
+// it; the dedicated "S-slash: /section …" check below asserts its shape + id-minting.
 const SLASH_INSERTABLE = [
   "paragraph",
   "heading",
@@ -54,6 +58,11 @@ const SLASH_INSERTABLE = [
   "code",
   "divider",
   "diagram",
+  "action",
+  "figure",
+  "columns",
+  "terminal",
+  "table",
   "field-string",
   "field-boolean",
 ];
@@ -140,6 +149,68 @@ check("S-slash: /field-string default value is empty string", () => {
   assert.equal(ins.block.label, "Text", "and the default label is Text");
 });
 
+// (a''') THE SIX STRUCTURAL BLOCKS (block-insertability): action / figure / columns /
+//        section / terminal / table each insert to their default block and classify
+//        correctly (the right NODE type + the right reconstructed shape). This pins the
+//        container id-minting (a section's child gets a canvas-minted id, seeded from the
+//        whole tree so it never collides) and the figure/action/table default shapes.
+check("S-slash: /action inserts a bpAction → { type:action, href, label }", () => {
+  const { ops } = slashInsertOps("action");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("action").type, "bpAction", "projects to bpAction");
+  assert.equal(ins.block.type, "action", "block is an action");
+  assert.equal(ins.block.href, "", "empty href default");
+  assert.equal(ins.block.label, "", "empty label default");
+  assert.ok(!("priority" in ins.block), "no stray priority (absence is the sentinel)");
+});
+
+check("S-slash: /figure inserts a bpFigure wrapping ONE child, no caption", () => {
+  const { ops } = slashInsertOps("figure");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("figure").type, "bpFigure", "projects to bpFigure");
+  assert.equal(ins.block.type, "figure", "block is a figure");
+  assert.equal(ins.block.child.type, "paragraph", "wraps a paragraph child");
+  assert.ok(!("caption" in ins.block), "a fresh figure has no caption");
+});
+
+check("S-slash: /columns inserts a bpColumns of two empty columns", () => {
+  const { ops } = slashInsertOps("columns");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("columns").type, "bpColumns", "projects to bpColumns");
+  assert.equal(ins.block.type, "columns", "block is columns");
+  assert.deepEqual(ins.block.columns, [[], []], "two empty columns");
+});
+
+check("S-slash: /section inserts a bpSection whose child gets a minted id", () => {
+  const { ops } = slashInsertOps("section");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("section").type, "bpSection", "projects to bpSection");
+  assert.equal(ins.block.type, "section", "block is a section");
+  assert.equal(ins.block.title, "New section", "default title");
+  assert.equal(ins.block.blocks.length, 1, "one seeded child");
+  assert.equal(ins.block.blocks[0].type, "paragraph", "the child is a paragraph");
+  assert.ok(ins.block.blocks[0].id != null, "the nested child got a canvas-minted id");
+  assert.notEqual(ins.block.blocks[0].id, ins.block.id, "child id != section id (no collision)");
+});
+
+check("S-slash: /terminal inserts a bpTerminal with an empty body", () => {
+  const { ops } = slashInsertOps("terminal");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("terminal").type, "bpTerminal", "projects to bpTerminal");
+  assert.equal(ins.block.type, "terminal", "block is a terminal");
+  assert.deepEqual(ins.block.children, [], "empty body (node-view seeds a paragraph)");
+  assert.ok(!("title" in ins.block), "no chrome keys on a fresh terminal");
+});
+
+check("S-slash: /table inserts a bpTable headed 1-body 2-col grid", () => {
+  const { ops } = slashInsertOps("table");
+  const ins = ops.find((o) => o.op === "insert-after");
+  assert.equal(slashTypeToNode("table").type, "bpTable", "projects to bpTable");
+  assert.equal(ins.block.type, "table", "block is a table");
+  assert.deepEqual(ins.block.head, [[], []], "a 2-cell header row");
+  assert.deepEqual(ins.block.rows, [[[], []]], "one 2-cell body row");
+});
+
 // (b) INSERT INTO AN EMPTY RUN — append-block (no surviving anchor). A divider into
 //     an empty doc appends and reconstructs as a divider block.
 check("S-slash: /divider into an EMPTY run → append-block of a divider", () => {
@@ -157,6 +228,7 @@ check("S-slash: /divider into an EMPTY run → append-block of a divider", () =>
 check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   for (const t of [
     "paragraph", "heading", "list", "callout", "code", "divider", "diagram",
+    "action", "figure", "columns", "section", "terminal", "table",
     "field-string", "field-slug", "field-text", "field-boolean",
     "field-select", "field-datetime", "field-color",
   ]) {
@@ -166,16 +238,18 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   // (sheet/embed) and the pickers (field-image/field-reference) DO ride the canvas now,
   // but a "/" pick can't DIRECT-insert them — sheet/embed are references with no empty
   // default, and the pickers need a fetch-scope (dataset/refType) the slash default
-  // can't supply. Also excluded: the nested-structure run-splitting boundaries
-  // (section/composite/arrayOf/codelist/localizedText) and the article-chrome blocks
-  // (eyebrow/byline/ingress/pullquote).
+  // can't supply. Also excluded: the object-boundary structured blocks
+  // (composite/arrayOf/codelist/localizedText) and the article-chrome blocks
+  // (eyebrow/byline/ingress/pullquote) — no canvas node-view. NOTE: section / columns /
+  // terminal / figure / action / table are NOW insertable (their node-views mount a
+  // minimal valid default), so they moved OUT of this excluded set.
   for (const t of [
-    "sheet", "embed", "section", "composite", "arrayOf", "codelist", "localizedText",
+    "sheet", "embed", "composite", "arrayOf", "codelist", "localizedText",
     "field-image", "field-reference", "eyebrow", "byline", "ingress", "pullquote",
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 14, "exactly 14 insertable types");
+  assert.equal(CANVAS_SLASH_TYPES.size, 20, "exactly 20 insertable types");
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
@@ -340,7 +414,10 @@ check("P5 palette: Format + Turn-into commands present (canvas StarterKit set)",
 // the inserted block is identical. This is the default_block parity the task demands.
 check("P5 palette: Insert command default block == slash-menu default block (parity)", () => {
   for (const type of [
+    // `section` is EXCLUDED — its seeded child mints a nondeterministic nested id per
+    // runToOps call, so two reconstructions are not byte-equal (see SLASH_INSERTABLE).
     "paragraph", "heading", "list", "callout", "code", "divider", "diagram",
+    "action", "figure", "columns", "terminal", "table",
     "field-string", "field-slug", "field-text", "field-boolean",
     "field-select", "field-datetime", "field-color",
   ]) {

@@ -24,6 +24,7 @@ export const SLASH_ITEMS = [
   { group: "Text", type: "code", label: "Code", hint: "</>", desc: "monospace block" },
   { group: "Text", type: "divider", label: "Divider", hint: "—", desc: "horizontal rule" },
   { group: "Text", type: "section", label: "Section", hint: "§", desc: "ruled group" },
+  { group: "Text", type: "columns", label: "Columns", hint: "▥", desc: "multi-column layout" },
 
   { group: "Article chrome", type: "eyebrow", label: "Eyebrow", hint: "▔", desc: "kicker over the title" },
   { group: "Article chrome", type: "byline", label: "Byline", hint: "✎", desc: "author / credit line" },
@@ -31,6 +32,10 @@ export const SLASH_ITEMS = [
   { group: "Article chrome", type: "pullquote", label: "Pullquote", hint: "❝", desc: "highlighted quote" },
 
   { group: "Visual", type: "diagram", label: "Diagram", hint: "⬡", desc: "Mermaid diagram" },
+  { group: "Visual", type: "figure", label: "Figure", hint: "▤", desc: "captioned block" },
+  { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
+  { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },
+  { group: "Visual", type: "action", label: "Action", hint: "➤", desc: "call-to-action button" },
 
   { group: "Basic fields", type: "field-string", label: "String", hint: "T", desc: "single-line value" },
   { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/", desc: "url-safe key" },
