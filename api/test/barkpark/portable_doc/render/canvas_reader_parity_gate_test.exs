@@ -231,6 +231,37 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
            "questionnaire lost its kind discriminator class — the alias fixture no longer exercises the form emitter"
   end
 
+  test "§1 a legacy snapshot-only task-list renders byte-identically to its tasks emitter (backward-compat freeze)" do
+    # The live-data task-list WIDGET is ADDITIVE: it never touches the reader clause
+    # (compose.ex:688 + Components.tasks_html). A LEGACY author-pinned task-list (a
+    # literal `snapshot`, NO `query`) must render EXACTLY as before. Freeze that: the
+    # legacy block routes through the ONE tasks emitter byte for byte, AND is
+    # byte-identical to the equivalent `tasks` block (a live task-list resolves
+    # query→snapshot BEFORE this clause, so the snapshot form is a pure alias).
+    legacy = %{
+      "type" => "task-list",
+      "title" => "Frozen",
+      "snapshot" => [
+        %{"title" => "Row one", "status" => "ready", "priority" => 1},
+        %{"title" => "Row two", "status" => "done"}
+      ]
+    }
+
+    reader = Render.render_block(legacy, @article)
+
+    assert reader == Components.tasks_html(legacy),
+           "legacy task-list no longer routes through the ONE tasks emitter byte for byte"
+
+    # Non-vacuous: real rows made it through the emitter.
+    assert String.contains?(reader, "bp-tasks"), "the frozen render is missing its row markup"
+    assert String.contains?(reader, "Row one"), "the frozen render dropped a snapshot row"
+
+    # Alias property: a snapshot-only task-list == the equivalent `tasks` block, byte
+    # for byte — the widget did not fork the legacy alias.
+    assert reader == Render.render_block(%{legacy | "type" => "tasks"}, @article),
+           "the task-list ⇄ tasks alias drifted — the legacy render is no longer byte-identical"
+  end
+
   test "§1 render_block(:article) is deterministic — the canvas and reader cannot differ per call" do
     # The canvas and the reader both call render_block(:article) on the SAME
     # source block. Determinism ⇒ identical input yields byte-identical output,
@@ -332,6 +363,16 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # class here. A fleet DATA block (tasks/notes/cards/board) stays verbatim-carried
     # because editing a live-data mirror in-paper is meaningless; a layout/authored
     # container does not, so it GRADUATES out of this list the moment it becomes editable.
+    #
+    # `task-list` GRADUATED to EDITABLE (live-data widget, bpTaskList; task-list-node.js)
+    # but STILL carries NO reader markup here: unlike columns/terminal/card (which emit
+    # their own structural chrome to edit INSIDE), the task-list ROWS remain SERVER-
+    # PAINTED (the query is the authored datum, the rows are the one server producer via
+    # TaskResolver). The node-view writes ONLY `bp-canvas-tasklist-*` edit chrome and
+    # paints the reader HTML into its hole — so `bp-tasks` (the reader row markup, in
+    # painted_fleet's `task-list (alias)` sig) STAYS forbidden below and §3 stays green.
+    # It is the figure precedent (editable caption + server-painted child), applied to a
+    # LIVE QUERY + server-painted rows.
     #
     # `bp-card__` GRADUATED out (STEP 4, same reasoning as `bp-cols__`/`bp-term__`): the
     # NEW `card` WIDGET is an EDITABLE canvas node (card-node.js bpCard) whose node-view

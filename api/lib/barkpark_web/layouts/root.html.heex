@@ -3303,6 +3303,32 @@
       font-family: system-ui, -apple-system, 'SF Pro Text', sans-serif;
     }
     .bp-canvas-figure-caption-input:focus { outline: none; }
+    /* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
+       bp-canvas-tasklist", inheriting the atom margin/overflow guard, focus ring,
+       selectednode wash, and loading chip. The ROWS paint hole is .bp-paper-surface
+       (data-bp-fleet-body), the canonical paper-surface sink, so the server-injected
+       resolved-rows HTML styles itself identically to /papers with NO extra CSS (D8).
+       The title/query <input> islands are EDIT-ONLY chrome (NO reader counterpart —
+       the reader shows resolved rows, never an editable filter — so they do NOT trip
+       the view↔edit byte-compare); the empty-input resting-hide is JS, not CSS. MUST
+       stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
+    .bp-canvas-tasklist-title {
+      display: block; width: 100%; box-sizing: border-box;
+      border: none; background: transparent; padding: 0; margin: 0 0 0.4rem;
+      color: var(--paper-ink, #1a1a1a);
+      font-weight: 600; font-size: 1.05rem;
+      font-family: var(--paper-font-serif, system-ui, -apple-system, sans-serif);
+    }
+    .bp-canvas-tasklist-query {
+      display: block; width: 100%; box-sizing: border-box;
+      border: 1px solid var(--paper-rule, #e0e0e0); border-radius: 4px;
+      background: transparent; padding: 0.2rem 0.4rem; margin: 0 0 0.6rem;
+      color: var(--paper-ink-soft, #6a6a6a);
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .bp-canvas-tasklist-title:focus, .bp-canvas-tasklist-query:focus { outline: none; }
+    .bp-canvas-tasklist-query:focus { border-color: var(--paper-ink-soft, #6a6a6a); }
     /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so
        they do NOT trip the view↔edit parity byte-compare). An empty column gets a
        min-height + a subtle dashed outline so it is visible and clickable; the

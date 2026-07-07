@@ -171,6 +171,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # render/forms.ex form). `diagram` is DELIBERATELY absent: it rides its own
   # editable `bpDiagram` attr-atom in the canvas, not the read-only server paint.
   # Keep aligned with run-convert.js:CANVAS_FLEET_TYPES.
+  #
+  # live-data task-list (bpTaskList) REUSES THIS CHANNEL unchanged: a query-carrying
+  # `task-list` is already resolved here (fleet_block_html → task_previews →
+  # apply_preview → render_block) and pushed on `bp:block-html` keyed by the block id.
+  # The bpTaskList node-view paints the SAME id-keyed HTML into its `[data-bp-fleet-body]`
+  # hole (identical selector to bpFleet) — so editing the query → patch-block{query} →
+  # save → this push re-resolves the NEW query → repaints the rows. ZERO change needed
+  # here: the widget only ADDS an editable query surface on top of the existing paint.
   @fleet_render_types ~w(tasks task-list task-detail task-board roadmap notes cards pipeline status-legend asciicast form questionnaire)
 
   # editable-figure — the CHILD-paint channel. A `figure` is NOT a component-fleet

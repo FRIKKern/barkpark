@@ -71,6 +71,21 @@ defmodule Barkpark.PortableDoc.Slots do
           count: Barkpark.PortableDoc.Constraints.count()
         }
 
+  @typedoc """
+  A widget's declaration of one SCALAR editable datum (an attr, not a slot child).
+  `kind` is the datum's shape (`:query` map / `:string` / `:config` map); `required`
+  is `:when_live` (required only when the widget is in its live/editable encoding),
+  `true`, or `false`. The LIVE `task-list` widget declares these — its editable data
+  are scalar attrs (query/title/config), NOT element-tier slot children, so it needs
+  a PARALLEL declaration surface to `slot_decls/1` (figure/diagram/table are widgets
+  with no `slot_decls` entry for the same reason).
+  """
+  @type query_field_decl :: %{
+          name: String.t(),
+          kind: :query | :string | :config,
+          required: :when_live | boolean()
+        }
+
   @doc """
   The structural tier of a block, for the D1 slot gate: `:widget` / `:section` /
   `:element`. Delegates FULLY to the one canonical classifier
@@ -106,6 +121,30 @@ defmodule Barkpark.PortableDoc.Slots do
     ]
 
   def slot_decls(_), do: []
+
+  @doc """
+  The SCALAR editable-data declarations for a widget block whose editable surface is
+  attrs, not slot children. The LIVE `task-list` widget declares three:
+
+    * `query` — kind `:query` (the filter map), `required: :when_live` (a task-list in
+      its LIVE encoding must carry a query; a legacy snapshot-only task-list is the
+      author-pinned encoding and declares nothing to require here).
+    * `title` — kind `:string`, optional.
+    * `config` — kind `:config` (a `%{limit, fields}` map), optional.
+
+  This is the contract the canvas node-view (`task-list-node.js`) and the JS round-trip
+  (`taskListBlockToNode`/`taskListNodeToBlock`) agree on. Every other block declares
+  none (an empty list).
+  """
+  @spec query_decl(term()) :: [query_field_decl()]
+  def query_decl(%{"type" => "task-list"}),
+    do: [
+      %{name: "query", kind: :query, required: :when_live},
+      %{name: "title", kind: :string, required: false},
+      %{name: "config", kind: :config, required: false}
+    ]
+
+  def query_decl(_), do: []
 
   @doc """
   The element-tier children of the named slot. Returns `block["slots"][name]` when a
@@ -241,6 +280,20 @@ defmodule Barkpark.PortableDoc.Slots do
     |> put_callout_body(inline)
   end
 
+  def normalize_widget(%{"type" => "task-list"} = block) do
+    # A LIVE task-list persists its `query` map DIRECTLY (like `card`, it is genuinely
+    # slots-free on the wire — no `content`/`slots` duality to reconcile). This clause
+    # is idempotent + lossless: a map query is preserved EXACTLY (coerced to a plain
+    # map when it is one — a no-op), and a snapshot-only author-pinned block (no query)
+    # passes through UNTOUCHED. It NEVER adds a snapshot to a query block (nor a query
+    # to a snapshot block), so the two encodings never co-exist. Persistence-side only
+    # (NOT on the read/compose path — the reader byte-identity is via compose.ex:688).
+    case Map.get(block, "query") do
+      q when is_map(q) -> Map.put(block, "query", Map.new(q))
+      _ -> block
+    end
+  end
+
   def normalize_widget(block), do: block
 
   # Empty body: omit both keys (precedent). Non-empty: dual-write content + slots.
@@ -286,4 +339,35 @@ defmodule Barkpark.PortableDoc.Slots do
 
   defp type_of(%{"type" => t}) when is_binary(t) and t != "", do: t
   defp type_of(_), do: nil
+
+  @doc """
+  The LIVE-DATA gate for the `task-list` widget's `query` datum — LEGACY-SAFE. Returns
+  `[]` for:
+
+    * a snapshot-only / author-pinned task-list (NO `query` key) — the legacy encoding
+      is valid, so no existing paper ever gains an error; AND
+    * a well-formed LIVE task-list (`query` is a map).
+
+  Returns a single calm error ONLY when a `query` key IS present but is NOT a map (a
+  malformed live query). It NEVER requires a query unconditionally — that would red
+  every legacy block. This is "the query is a real, validated editable datum" WITHOUT
+  breaking author-pinned rows. Every non-task-list block yields `[]`. Never raises.
+  """
+  @spec query_type_errors(term()) :: [String.t()]
+  def query_type_errors(%{"type" => "task-list"} = block) do
+    case Map.fetch(block, "query") do
+      :error ->
+        []
+
+      {:ok, q} when is_map(q) ->
+        []
+
+      {:ok, _} ->
+        [
+          ~s|the "task-list" query must be a map (a filter like %{"label" => "proj:x"}), got a non-map value|
+        ]
+    end
+  end
+
+  def query_type_errors(_), do: []
 end

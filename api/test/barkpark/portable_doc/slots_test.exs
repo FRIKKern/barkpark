@@ -276,6 +276,78 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
+  describe "live-data task-list: query_decl/1 + normalize_widget/1 + query_type_errors/1" do
+    defp live_tl(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "t-1", "type" => "task-list", "query" => %{"label" => "proj:x"}, "title" => "Plan"},
+        extra
+      )
+    end
+
+    defp snap_tl(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "t-2", "type" => "task-list", "snapshot" => [%{"title" => "Pinned", "status" => "open"}]},
+        extra
+      )
+    end
+
+    test "query_decl/1 declares query(:when_live) + optional title/config for a task-list" do
+      assert Slots.query_decl(%{"type" => "task-list"}) == [
+               %{name: "query", kind: :query, required: :when_live},
+               %{name: "title", kind: :string, required: false},
+               %{name: "config", kind: :config, required: false}
+             ]
+    end
+
+    test "query_decl/1 is [] for every non-task-list block" do
+      assert Slots.query_decl(%{"type" => "callout"}) == []
+      assert Slots.query_decl(%{"type" => "paragraph"}) == []
+      assert Slots.query_decl(%{}) == []
+    end
+
+    test "normalize_widget/1 on a live task-list is idempotent AND lossless (query preserved exactly)" do
+      block = live_tl(%{"config" => %{"limit" => 10, "fields" => ["title", "status"]}})
+      once = Slots.normalize_widget(block)
+      # lossless: same map back
+      assert once == block
+      # idempotent
+      assert Slots.normalize_widget(once) == once
+      # the query map survives byte-for-byte
+      assert once["query"] == %{"label" => "proj:x"}
+    end
+
+    test "normalize_widget/1 passes a snapshot-only task-list through UNTOUCHED" do
+      block = snap_tl()
+      assert Slots.normalize_widget(block) == block
+      # never gains a query key
+      refute Map.has_key?(Slots.normalize_widget(block), "query")
+    end
+
+    test "query_type_errors/1 is [] for a snapshot-only (author-pinned) task-list" do
+      assert Slots.query_type_errors(snap_tl()) == []
+    end
+
+    test "query_type_errors/1 is [] for a well-formed live query map" do
+      assert Slots.query_type_errors(live_tl()) == []
+      # an empty map is still a map → legal (the fetcher's tenant scoping owns row selection)
+      assert Slots.query_type_errors(live_tl(%{"query" => %{}})) == []
+    end
+
+    test "query_type_errors/1 returns ONE calm error for a present-but-non-map query" do
+      errors = Slots.query_type_errors(live_tl(%{"query" => "proj:x"}))
+      assert length(errors) == 1
+      assert hd(errors) =~ "task-list"
+      assert hd(errors) =~ "must be a map"
+    end
+
+    test "query_type_errors/1 NEVER requires a query (no unconditional error) + is [] for non-task-list" do
+      # a task-list with neither query nor snapshot still yields [] (never forced)
+      assert Slots.query_type_errors(%{"id" => "t", "type" => "task-list"}) == []
+      assert Slots.query_type_errors(%{"type" => "callout"}) == []
+      assert Slots.query_type_errors(%{"type" => "paragraph"}) == []
+    end
+  end
+
   # A materialized-slot card fixture (STEP 4): a slots-native block, title + body
   # (extra merges over the top, e.g. to swap the `slots` map for a D1-violation case).
   defp card(extra \\ %{}) do

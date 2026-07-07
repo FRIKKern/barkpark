@@ -319,6 +319,41 @@ function isCanvasFigureNode(nodeType) {
   return nodeType === CANVAS_FIGURE_NODE_NAME;
 }
 
+// live-data task-list: the `task-list` block the canvas handles as an EDITABLE-QUERY
+// + server-painted-ROWS ATOM (`bpTaskList`; task-list-node.js). UNLIKE the fleet atom
+// (whole block verbatim on bpBlock, ZERO ops) a LIVE task-list carries ONLY its
+// editable data as typed attrs — `query` (the filter, JSON, like figure's bpChild),
+// `title` (string, "" → absent) and `config` (JSON, verbatim) — NEVER a snapshot (the
+// rows are a resolve-at-read PROJECTION the server paints, never persisted on the
+// node). The QUERY is the sole authored datum: an edit emits patch-block{query} and
+// the server RE-RESOLVES + repaints the rows (the LIVE binding through TaskResolver).
+//
+// The DISCRIMINANT (mirrors task_resolver.ex:139-159): presence-of-`query`. A
+// task-list block WITH a `query` map is this LIVE widget (bpTaskList); a snapshot-only
+// task-list (no `query`) is the legacy author-pinned form and falls through to the
+// read-only bpFleet atom (CANVAS_FLEET_TYPES still holds "task-list" — additive, no
+// alias fork). `tasks` stays fleet-read-only in v1.
+//
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_task_list_types, task-list-node.js
+// BP_TASK_LIST_NODE_NAME, and shared/paper.ex @fleet_render_types (task-list's query
+// is resolved through the SAME task_previews/apply_preview server-paint channel).
+const CANVAS_TASK_LIST_NODE_NAME = "bpTaskList";
+
+// True when a portable-doc BLOCK is a LIVE task-list (a `task-list` type carrying a
+// `query` MAP). A snapshot-only task-list returns false (→ the bpFleet fallback). This
+// is the runToTiptap dispatch guard — the presence-of-query discriminant.
+function isLiveTaskListBlock(block) {
+  return (
+    block && block.type === "task-list" && isPlainObject(block.query)
+  );
+}
+
+// True when a TipTap NODE type is the canvas task-list widget ("bpTaskList").
+// runToOps / classifyNode read node.type off a getJSON node (the NODE name).
+function isCanvasTaskListNode(nodeType) {
+  return nodeType === CANVAS_TASK_LIST_NODE_NAME;
+}
+
 // The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes —
 // canvas nodes whose interior is a NESTED BLOCK TREE (child blocks with their own
 // type/content), not inline runs (callout) nor a verbatim opaque carry. THREE members:
@@ -492,6 +527,13 @@ function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+// True for a plain (non-array, non-null) object — the presence-of-query discriminant
+// for the LIVE task-list widget (a `query` MAP → bpTaskList; anything else → the
+// bpFleet fallback). Mirrors task_resolver.ex's `is_map(query)` guard.
+function isPlainObject(value) {
+  return value != null && typeof value === "object" && !Array.isArray(value);
+}
+
 // ── doctrine template attrs (pdd-t2): locked / role round-trip ───────────────
 //
 // A mandated template block carries `locked: true` + a `role` ("title" |
@@ -630,6 +672,17 @@ function blockToNode(block) {
       // node-view (embed-node.js) instead of the generic opaque placeholder. NOTE the
       // node.type is the NODE name (bpSheet / bpEmbed), not the bpType (sheet / embed).
       return readOnlyAtomBlockToNode(block, bpId, bpType);
+    }
+
+    if (isLiveTaskListBlock(block)) {
+      // A LIVE task-list WIDGET (a `task-list` carrying a `query` map): an
+      // EDITABLE-QUERY + server-painted-ROWS atom (bpTaskList). Checked BEFORE the
+      // fleet branch — a snapshot-only task-list (no query) falls through to bpFleet
+      // (read-only), the additive presence-of-query discriminant. It carries ONLY the
+      // editable data (query/title/config) as typed attrs; the rows are NEVER on the
+      // node (server-painted projection). NOTE the node.type is the NODE name
+      // (bpTaskList), not the bpType (task-list).
+      return taskListBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasFleetType(bpType)) {
@@ -2022,6 +2075,92 @@ function stableFigureKey(node) {
   });
 }
 
+// ── task-list ⇄ canvas editable-query + server-painted-rows atom ──────────────
+//
+// The LIVE `task-list` block { id, type:"task-list", query:{…}, title?, config? } ⇄
+// the TipTap `bpTaskList` ATOM (task-list-node.js). UNLIKE the fleet/sheet read-only
+// atoms (whole block verbatim on bpBlock, ZERO ops) the task-list carries ONLY its
+// EDITABLE data as typed attrs: `query` (the filter, JSON — the sole authored datum,
+// analogous to figure's caption over a server-painted child), an optional `title`
+// string, and an optional `config` JSON. There is NO snapshot on the node — the rows
+// are a resolve-at-read PROJECTION the server paints. An edit emits patch-block{query}
+// (a SHALLOW Map.merge replacing the stored query, leaving unknown sibling keys
+// intact); the server RE-RESOLVES + repaints. node.type is `bpTaskList` (the NODE
+// name), NOT `task-list` (the bpType). Mirrors figureBlockToNode..stableFigureKey.
+
+// taskListBlockToNode(block) → { type:"bpTaskList", attrs:{ bpId, bpType, query,
+//   title, config } }. query is deep-cloned (VERBATIM — non-label keys like parent_id
+//   /labels/status round-trip untouched); title "" → null; config passes through
+//   (null when absent).
+function taskListBlockToNode(block, bpId, bpType) {
+  const attrs = {
+    bpId,
+    bpType,
+    query: block && isPlainObject(block.query) ? deepClone(block.query) : {},
+    // "" → null so a title-less task-list round-trips with no title key.
+    title:
+      block && block.title != null && block.title !== "" ? block.title : null,
+    config: block && block.config != null ? deepClone(block.config) : null,
+  };
+  return { type: CANVAS_TASK_LIST_NODE_NAME, attrs };
+}
+
+// taskListNodeToBlock(node, id) → { id, type:"task-list", query, ...(title?),
+//   ...(config?) }. The inverse of taskListBlockToNode: query is the deep-cloned attr
+//   VERBATIM (so callers never share a ref); title/config are threaded ONLY when
+//   present so an absent key reconstructs byte-identically (no stray title:"" /
+//   config:null). NEVER emits a snapshot — a live task-list has none.
+function taskListNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = {
+    id,
+    type: "task-list",
+    query: isPlainObject(attrs.query) ? deepClone(attrs.query) : {},
+  };
+  if (attrs.title != null && attrs.title !== "") block.title = attrs.title;
+  if (attrs.config != null) block.config = deepClone(attrs.config);
+  return block;
+}
+
+// The mutable-fields PATCH for a task-list block. The query is the WHOLE editable
+// datum; patch.ex's patch-block is a SHALLOW Map.merge, so { query } REPLACES the
+// stored query and leaves unknown sibling keys intact. `query` is ALWAYS present (an
+// emptied query is null → the reader shows the "configure me" empty state). `title`
+// rides as the string (or "" when cleared, so the shallow merge overwrites a stale
+// title — the code/diagram caption rule) ONLY when it changed; `config` likewise.
+function taskListNodeToPatch(node, prevNode) {
+  const a = (node && node.attrs) || {};
+  const patch = { query: isPlainObject(a.query) ? a.query : null };
+
+  const prev = (prevNode && prevNode.attrs) || {};
+  const prevTitle = prev.title == null || prev.title === "" ? null : prev.title;
+  const nextTitle = a.title == null || a.title === "" ? null : a.title;
+  if (prevTitle !== nextTitle) patch.title = nextTitle == null ? "" : nextTitle;
+
+  if (canonicalJSON(prev.config ?? null) !== canonicalJSON(a.config ?? null)) {
+    patch.config = a.config ?? null;
+  }
+  return patch;
+}
+
+// True when a task-list node's editable data changed. Canonical (key-order-
+// insensitive) compare of query + title + config, so an edit flips it but a pure
+// reorder (bpId/bpType only) does not — an UNEDITED task-list emits ZERO ops (D3). An
+// absent/"" title and an absent config normalize to null so absent ⇄ "" ⇄ null
+// compare EQUAL.
+function taskListNodeChanged(prevNode, nextNode) {
+  return stableTaskListKey(prevNode) !== stableTaskListKey(nextNode);
+}
+
+function stableTaskListKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    query: isPlainObject(a.query) ? a.query : null,
+    title: a.title == null || a.title === "" ? null : a.title,
+    config: a.config == null ? null : a.config,
+  });
+}
+
 // ── columns ⇄ canvas container node (S10) ────────────────────────────────────
 //
 // The `columns` block { id, type:"columns", columns:[ [childBlock,…], [childBlock,…] ] }
@@ -2450,6 +2589,9 @@ function classifyNode(node) {
   // editable-figure: a canvas figure atom (bpFigure). Its bpType resolves to "figure"
   // off node.attrs.bpType (the isFigure fallback below).
   const isFigure = isCanvasFigureNode(node.type);
+  // live-data task-list: a canvas task-list widget (bpTaskList). Its bpType resolves
+  // to "task-list" off node.attrs.bpType (the isTaskList fallback below).
+  const isTaskList = isCanvasTaskListNode(node.type);
   // S10: a canvas container node (bpColumns). Its bpType resolves to "columns" via
   // CANVAS_CONTAINER_BP_TYPE_BY_NODE below.
   const isContainer = isCanvasContainerNode(node.type);
@@ -2469,9 +2611,11 @@ function classifyNode(node) {
         ? "tasks"
         : isFigure
           ? "figure"
-          : isCard
-            ? "card"
-            : node.type);
+          : isTaskList
+            ? "task-list"
+            : isCard
+              ? "card"
+              : node.type);
   return {
     node,
     bpType,
@@ -2485,6 +2629,7 @@ function classifyNode(node) {
     isReadOnlyAtom,
     isFleet,
     isFigure,
+    isTaskList,
     isContainer,
     isRole,
     isTable,
@@ -2796,6 +2941,24 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isTaskList) {
+      // Canvas task-list widget (live-data): the QUERY is the WHOLE editable datum
+      // (+ optional title/config); the rows are server-painted, never on the node.
+      // Emit ONE patch-block{query,…} when the editable data changed; the shallow
+      // patch-block merge replaces the stored query and leaves unknown sibling keys
+      // intact. An UNEDITED task-list emits NO op (canonical compare on
+      // query+title+config). prevNode is passed so title/config only ride the patch
+      // when they actually changed.
+      if (taskListNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: taskListNodeToPatch(entry.node, prevNode),
+        });
+      }
+      continue;
+    }
+
     if (entry.isFigure) {
       // Canvas figure atom (editable-figure): the caption is the WHOLE editable
       // interior (the child is immutable in v1). Emit ONE patch-block{caption} when
@@ -3060,6 +3223,12 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasFigureNode(type)) {
     return !figureNodeChanged(serverNode, liveNode);
   }
+  // Task-list (live-data: bpTaskList): query + title + config (rows server-painted,
+  // never on the node). The own-echo of a query edit — and the id-wildcard for a
+  // just-minted task-list — is recognized by the SAME stable-key compare runToOps uses.
+  if (isCanvasTaskListNode(type)) {
+    return !taskListNodeChanged(serverNode, liveNode);
+  }
   // Opaque carry-through: the whole carried block, id excluded.
   if (type === "bpOpaque") {
     return carriedBlockEqual(serverNode, liveNode);
@@ -3203,6 +3372,13 @@ function nextNodeToBlock(entry, taken) {
     // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
     // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
     return fleetNodeToBlock(node, entry.id);
+  }
+  if (entry.isTaskList) {
+    // Task-list insert/move (live-data): reconstruct the task-list block (its query
+    // + optional title/config) with the minted id. title/config are OMITTED when
+    // absent (mirrors the persist default); NO snapshot (a live task-list has none —
+    // the rows are server-resolved at read).
+    return taskListNodeToBlock(node, entry.id);
   }
   if (entry.isFigure) {
     // Figure insert/move (editable-figure): reconstruct the figure block (its

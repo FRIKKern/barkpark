@@ -343,4 +343,38 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       assert Constraints.validate(doc, paper_decls()) == []
     end
   end
+
+  describe "live-data task-list query gate (additive, legacy-safe)" do
+    # Validate against `[]` decls to ISOLATE the additive query gate from
+    # presence/cardinality (a bare doc has no title, which paper_decls would flag).
+    test "a legacy snapshot-only task-list validates clean (no new error)" do
+      doc = [typed("task-list", %{"snapshot" => [%{"title" => "Pinned", "status" => "open"}]})]
+      assert Constraints.validate(doc, []) == []
+    end
+
+    test "a legacy snapshot-only task-list PAPER (conforming title) validates clean" do
+      # Wired into a real paper (title at index 0) it still adds NO error — the gate is
+      # legacy-safe end-to-end, not just against an empty decl set.
+      doc = [block("title"), typed("task-list", %{"snapshot" => []})]
+      assert Constraints.validate(doc, paper_decls()) == []
+    end
+
+    test "a well-formed LIVE task-list (query map) validates clean" do
+      doc = [typed("task-list", %{"query" => %{"label" => "proj:x"}, "title" => "Plan"})]
+      assert Constraints.validate(doc, []) == []
+    end
+
+    test "a task-list with a present-but-non-map query surfaces ONE calm error" do
+      doc = [typed("task-list", %{"query" => "proj:x"})]
+      errors = Constraints.validate(doc, [])
+      assert length(errors) == 1
+      assert hd(errors) =~ "task-list"
+      assert hd(errors) =~ "must be a map"
+    end
+
+    test "the query gate never fires on non-task-list blocks (mixed legacy doc stays clean)" do
+      doc = [block("title"), typed("callout"), typed("tasks", %{"snapshot" => []})]
+      assert Constraints.validate(doc, paper_decls()) == []
+    end
+  end
 end

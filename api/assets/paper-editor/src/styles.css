@@ -582,6 +582,34 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 }
 .bp-canvas-figure-caption-input:focus { outline: none; }
 
+/* live-data task-list: the bpTaskList widget wears "bp-canvas-readonly
+ * bp-canvas-tasklist", so it INHERITS the atom margin/overflow guard, :focus-visible
+ * ring, the .ProseMirror-selectednode wash, and the .bp-canvas-readonly-chip loading
+ * chip for free. The ROWS paint hole is .bp-paper-surface (data-bp-fleet-body) — the
+ * canonical paper-surface sink, so the server-injected resolved-rows HTML styles
+ * itself identically to /papers with NO extra CSS (D8). The title/query <input>
+ * islands are EDIT-ONLY chrome (NO reader counterpart — the reader shows resolved
+ * rows, never an editable filter — so they do NOT trip the view↔edit byte-compare).
+ * The empty-input resting-hide is JS (configControlHidden toggles display), NOT CSS.
+ * Keep BYTE-IDENTICAL with the root.html.heex copy (mirror-check). */
+.bp-canvas-tasklist-title {
+  display: block; width: 100%; box-sizing: border-box;
+  border: none; background: transparent; padding: 0; margin: 0 0 0.4rem;
+  color: var(--paper-ink, #1a1a1a);
+  font-weight: 600; font-size: 1.05rem;
+  font-family: var(--paper-font-serif, system-ui, -apple-system, sans-serif);
+}
+.bp-canvas-tasklist-query {
+  display: block; width: 100%; box-sizing: border-box;
+  border: 1px solid var(--paper-rule, #e0e0e0); border-radius: 4px;
+  background: transparent; padding: 0.2rem 0.4rem; margin: 0 0 0.6rem;
+  color: var(--paper-ink-soft, #6a6a6a);
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.bp-canvas-tasklist-title:focus, .bp-canvas-tasklist-query:focus { outline: none; }
+.bp-canvas-tasklist-query:focus { border-color: var(--paper-ink-soft, #6a6a6a); }
+
 /* S10: columns EDIT-ONLY layout hooks (edit-chrome; NO reader counterpart, so they
  * do NOT trip the view↔edit parity byte-compare, which only locksteps rules that
  * exist on BOTH surfaces — the shared .bp-cols/.bp-cols__c grid pair). An empty

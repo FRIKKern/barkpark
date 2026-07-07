@@ -198,6 +198,25 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # @figure_render_types (plus figure-node.js BP_FIGURE_NODE_NAME) aligned.
   @canvas_figure_types ~w(figure)
 
+  # live-data task-list: a `task-list` carrying a `query` map is the LIVE editable
+  # WIDGET (bpTaskList; run-convert.js CANVAS_TASK_LIST_NODE_NAME → task-list-node.js).
+  # Its QUERY is the sole authored datum (an <input> island, patch-block{query}); its
+  # ROWS are a resolve-at-read PROJECTION the server paints via the SAME
+  # `bp:block-html` channel the fleet atoms use (query → TaskResolver.preview →
+  # apply_preview → render_block, keyed by the block id — shared/paper.ex).
+  #
+  # DUAL-ENCODING NOTE (backward-compat): `task-list` ALSO stays in @canvas_fleet_types
+  # above — a SNAPSHOT-ONLY (author-pinned, no query) task-list falls through to the
+  # read-only bpFleet atom (the presence-of-query discriminant lives in run-convert.js's
+  # blockToNode). So @canvas_types carries `task-list` via BOTH sets; because
+  # @canvas_types feeds ONLY `canvas?/1` (a set-membership `in` check), the overlap is a
+  # harmless no-op — it never double-counts. task-list MUST remain in @canvas_fleet_types
+  # for the snapshot fallback AND for JS-lockstep with run-convert.js:CANVAS_FLEET_TYPES.
+  #
+  # KEEP LOCKSTEP with run-convert.js CANVAS_TASK_LIST_NODE_NAME / isLiveTaskListBlock
+  # and task-list-node.js BP_TASK_LIST_NODE_NAME.
+  @canvas_task_list_types ~w(task-list)
+
   # The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes
   # (run-convert.js CANVAS_CONTAINER_TYPES → an editable node whose interior is a
   # nested BLOCK tree, not inline runs). TWO members:
@@ -263,6 +282,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_role_types ++
                   @canvas_table_types ++
                   @canvas_figure_types ++
+                  @canvas_task_list_types ++
                   @canvas_container_types ++
                   @canvas_widget_types
 

@@ -113,6 +113,8 @@ import { Action } from "./action-node.js";
 // atom → remove-block, and DO participate in structural ops. See ./embed-node.js.
 import { Sheet, Embed, Fleet } from "./embed-node.js";
 import { Figure } from "./figure-node.js";
+// live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
+import { TaskList } from "./task-list-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
 // canvas PROSE nodes (NO node-view — chrome-free, the reader emits one styled
 // element with a bp-role-* class). Each renders `["p", {class:"bp-role-*"}, 0]` so
@@ -671,6 +673,17 @@ class BpPaperCanvas extends HTMLElement {
         // by construction). Parses ONLY its own <figure data-bp-type='figure'>. See
         // ./figure-node.js.
         Figure,
+        // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom
+        // (`bpTaskList`). Registers the single node so runToTiptap's { type:"bpTaskList",
+        // attrs:{query, title, config} } mounts as a widget whose ROWS paint hole
+        // (data-bp-fleet-id/body, reusing the shipped bp:block-html hook — ZERO hook
+        // change) is filled server-side with the reader's OWN resolved-rows HTML
+        // (query → TaskResolver.preview → apply_preview → render_block), and whose
+        // query/title <input> islands are the edit affordance (patch-block{query}).
+        // MOUNTS ONLY for a query-carrying task-list; a snapshot-only task-list falls
+        // through to the read-only bpFleet atom (the additive discriminant). Parses
+        // ONLY its own <div data-bp-tasklist='true'>. See ./task-list-node.js.
+        TaskList,
         // Article-chrome ROLE prose nodes (eyebrow / byline / ingress / pullquote).
         // Registers the four node types so runToTiptap's { type:"eyebrow"|… } nodes
         // mount as styled prose (a `<p class="bp-role-*">` matching the reader) and
