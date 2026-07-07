@@ -46,13 +46,18 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   ## Injected seams (invariant: no Oban, no network, no sleeps in tests)
 
-    * `enqueue_fun`  — default `&MirrorJob.enqueue/1`; `%{doc_id, dataset}` in,
-      `:ok` / `{:ok, _}` = success, anything else = halt-this-batch.
+    * `enqueue_fun`  — default `&MirrorJob.enqueue/1`; `%{doc_id, dataset,
+      workspace_id, project_id}` in, `:ok` / `{:ok, _}` = success, anything else
+      = halt-this-batch. The scope keys thread the task's tenant into the job.
     * `tick_fun`     — default `Process.send_after/3`; `(pid, delay_ms)`.
     * `datasets_fun` — default `&Settings.datasets/0`; the whitelisted datasets.
-    * `active_fun`   — default `&Settings.active?/0`; the idle gate.
+    * `active_fun`   — default `&Settings.active?/0`; the idle gate. Its result is
+      MEMOIZED for `active_ttl_ms` (~5 s) so a tight backoff/idle loop does not
+      re-hit the DB + audit table every tick (`Settings.active?/0` is NOT free).
     * `backoff_fun`  — default `&backoff_ms/1`; halt-retry timing.
     * `batch_size` / `idle_ms` — drain window + idle poll cadence.
+    * `active_ttl_ms` — `active_fun` memoize window (default #{5_000} ms). `0`
+      disables the memo (re-resolve every tick).
 
   ## Lifecycle
 
@@ -79,6 +84,16 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
   # cursor fresh without hammering the outbox query.
   @default_idle_ms 15_000
 
+  # `active_fun` (default `Settings.active?/0`) is NOT free: each call resolves the
+  # credentials, which reads the DB `plugin_settings` fallback row and writes a
+  # `"read"` audit row + telemetry. During a backoff storm (halt-retry ticks 1 s
+  # apart) or any sub-idle tick, calling it every tick hammers the DB and buries
+  # genuine admin audit events. Memoize the boolean for a short TTL — the idle gate
+  # then re-resolves at most once per window, NOT once per tick. This changes only
+  # the READ CADENCE, not the enable/disable semantics: a dark→active transition is
+  # still picked up within one TTL (well inside the ~30 s latency budget).
+  @default_active_ttl_ms 5_000
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -103,6 +118,9 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
       backoff_fun: Keyword.get(opts, :backoff_fun, &backoff_ms/1),
       batch_size: Keyword.get(opts, :batch_size, @default_batch_size),
       idle_ms: Keyword.get(opts, :idle_ms, @default_idle_ms),
+      active_ttl_ms: Keyword.get(opts, :active_ttl_ms, @default_active_ttl_ms),
+      # Memoized `active_fun` result: `{boolean, monotonic_ms}` or nil (unresolved).
+      active_cache: nil,
       attempt: 0,
       draining?: false,
       # Datasets already seeded to head this process lifetime. Guards the
@@ -124,8 +142,10 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
     # head at THAT moment (`ensure_bootstrapped/2`), so backlog accumulated while
     # dark is never mass-mirrored on enable — regardless of how `Settings.datasets/0`
     # behaves (or whether it raises) when inactive.
+    {active?, state} = resolve_active?(state)
+
     state =
-      if state.active_fun.() do
+      if active? do
         Enum.reduce(state.datasets_fun.(), state, &ensure_bootstrapped/2)
       else
         state
@@ -142,8 +162,9 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   def handle_info(:drain_tick, state) do
     state = %{state | draining?: true}
+    {active?, state} = resolve_active?(state)
 
-    if state.active_fun.() do
+    if active? do
       # Thread `state` through the fold so each dataset's one-time bootstrap is
       # recorded in `state.bootstrapped`; OR the per-dataset halt flags.
       {state, halted?} =
@@ -169,6 +190,27 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Resolve the idle gate, memoized for `active_ttl_ms` (D9-safe: read cadence
+  # only, never enable/disable semantics). On a cache HIT within the TTL, reuse
+  # the stored boolean WITHOUT calling `active_fun` — so a backoff/idle loop stops
+  # hammering `Settings.active?/0`'s DB read + audit-row insert. On a MISS (first
+  # call, or past the TTL) re-resolve and restamp the cache with the current
+  # monotonic clock. `active_ttl_ms: 0` always misses (re-resolve every tick).
+  # Returns `{active?, state}` — the caller MUST thread the returned state so the
+  # refreshed cache survives to the next tick.
+  defp resolve_active?(state) do
+    now = System.monotonic_time(:millisecond)
+
+    case state.active_cache do
+      {value, ts} when is_integer(ts) and now - ts < state.active_ttl_ms ->
+        {value, state}
+
+      _ ->
+        value = state.active_fun.()
+        {value, %{state | active_cache: {value, now}}}
+    end
+  end
 
   # Seed a dataset's cursor to head EXACTLY ONCE per process lifetime — the first
   # time this worker sees it while active — then remember it so no later tick
@@ -204,9 +246,21 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
   # Enqueue events in strict id order, halting at the first failure. Returns
   # `{last_ok_id, halted?}` where `last_ok_id` is the highest id whose enqueue
   # (and every prior enqueue) succeeded — or `since` if the very first failed.
+  #
+  # Each event carries the TENANT SCOPE (`workspace_id`/`project_id`) of the task
+  # that mutated it; threading it into the enqueued job lets the MirrorJob load
+  # and stamp a non-default-workspace task under its OWN scope (both are `nil` for
+  # a default-scope task, which MirrorJob reads as "default workspace/project").
   defp enqueue_batch(events, dataset, since, enqueue_fun) do
     Enum.reduce_while(events, {since, false}, fn event, {last_ok, _halted} ->
-      case enqueue_fun.(%{doc_id: event.doc_id, dataset: dataset}) do
+      args = %{
+        doc_id: event.doc_id,
+        dataset: dataset,
+        workspace_id: event.workspace_id,
+        project_id: event.project_id
+      }
+
+      case enqueue_fun.(args) do
         :ok -> {:cont, {event.id, false}}
         {:ok, _} -> {:cont, {event.id, false}}
         _error -> {:halt, {last_ok, true}}

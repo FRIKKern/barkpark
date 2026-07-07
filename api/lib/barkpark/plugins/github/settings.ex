@@ -104,8 +104,10 @@ defmodule Barkpark.Plugins.Github.Settings do
 
   NOT free: each call resolves `get_credentials/0`, which reads the DB fallback
   row via `Settings.get/1` — and that logs a `"read"` audit row + telemetry per
-  call. A wave-2 drain worker that ticks `active?/0` in a tight loop should
-  memoize the result (short TTL) rather than hammer the DB + audit table.
+  call. A caller that ticks `active?/0` in a tight loop MUST memoize the result
+  (short TTL) rather than hammer the DB + audit table. `Github.DrainWorker` does
+  exactly this: it caches the boolean for `active_ttl_ms` (~5 s) so a backoff/idle
+  loop re-resolves at most once per window, not once per tick.
   """
   @spec active?() :: boolean()
   def active? do

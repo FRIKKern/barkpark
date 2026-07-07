@@ -94,18 +94,18 @@ human gate and it blocks nothing in code.
 
 ## Roadmap
 
-**Wave 1 — foundation (this wave, 5 parallel, all mocked/pure):**
+**Wave 1 — foundation — ✅ DONE (#1229).**
 1. Plugin skeleton (off by default) + settings_schema/validate_settings — `github.ex` + `plugin.json`
 2. Field-ownership matrix + pure task→issue projection — `github/fields.ex` + `github/projection.ex`
 3. GitHub App auth + REST client (Bypass) — `github/auth.ex` + `github/client.ex` + `github/errors.ex`
 4. Durable cursor + outbox reader + `source="github"` exclusion (DB-only) — `github/cursor.ex` + `github/outbox.ex`
 5. `content.github` Link helper + inbound HMAC signature verifier (pure) — `github/link.ex` + `github/signature.ex`
 
-**Wave 2 — outbound mirror engine (the heart):** debounced per-task Oban `MirrorJob` assembling
+**Wave 2 — outbound mirror engine (the heart) — ✅ DONE (#1232):** debounced per-task Oban `MirrorJob` assembling
 cursor→outbox→projection→client→Link idempotency; no-op on `rev==synced_rev`; `{:snooze}` on 429;
 lifecycle close mapping; drain worker on `oban_crontab`; wire routes/cron into `github.ex`.
 
-**Wave 3 — inbound intake:** webhook controller + endpoint raw-body cache + signature plug (from
+**Wave 3 — inbound intake — ✅ BUILT (4/4 green, on branches — see wave log):** webhook controller + endpoint raw-body cache + signature plug (from
 wave-1 verifier) + `[bot]`-identity drop + intake via `Content` create through the `Tasks.Dedup`
 seam (deterministic `gh-<num>`, `src:github`+`needs-human`, `source: :github`) + "tracked
 internally" backlink comment.
@@ -189,7 +189,18 @@ Auth into `register_workers`, wire routes/cron into `github.ex`. Land the 4xx/sn
 > "Wave 2 CUT" log entry) were lost by a base-drift worktree write. Re-apply them from PR #1229's follow-on and
 > the wave-2 slice branch commit messages. The wave-2 facts survive in the log entry below.
 
-### Wave 2026-07-07 — Wave 2 outbound mirror engine BUILT (4/4 green on `-p` branches, NOT yet merged)
+### Wave 2026-07-07 — Wave 2 outbound mirror engine MERGED (#1232)
+
+**RECONCILED (this architect pass):** Wave 2 landed on `main` as a single squash — commit `bb547f57`
+`feat(github): wave-2 outbound mirror engine — DrainWorker + MirrorJob + creds bridge (#1232)`. The
+base-drift blocker below was resolved by the integrator (rebased onto `origin/main`, past #1228/#1230).
+The github plugin now ships 12 modules under `api/lib/barkpark/plugins/github/`
+(auth, client, cursor, drain_worker, errors, fields, link, mirror_job, outbox, projection, settings,
+signature) + `plugins/github.ex` wiring. `github_mirror: 2` Oban queue is declared in `config/config.exs`;
+`DrainWorker enabled: false` in `config/test.exs`. Waves 1+2 are DONE. The two cross-wave carries
+(TENANT SCOPE, `active?/0` memoize) are folded into Wave 3's cut below.
+
+### Wave 2026-07-07 — Wave 2 outbound mirror engine BUILT (superseded by the MERGED entry above)
 
 The heart is assembled. All four slices built + perfected; each carries a `-p` (perfecter) branch. Real forward
 movement on the WISH — not micro-repair. Tasks→Issues now flows end-to-end drain→enqueue→reconcile→create/PATCH
@@ -245,3 +256,221 @@ before landing. Merge order: slices 1, 2, 3 (file-disjoint), THEN slice 4.
 controller + raw-body cache + signature plug (wave-1 verifier) + `[bot]`-identity drop + `Content` create through
 the `Tasks.Dedup` seam (deterministic `gh-<num>`, `src:github`+`needs-human`, `source: :github`) + backlink
 comment. Fold TENANT-SCOPE threading and `active?/0` memoization into wave 3's cut (or a fast wave-2.5 cleanup).
+
+### Wave 2026-07-07 — Wave 3 inbound intake BUILT (4/4 green, merge-ready)
+
+The full outsider journey is assembled end-to-end: `issues.opened` webhook → signature-verified request edge →
+born-dark `gh-<num>` task through the Dedup seam → best-effort backlink comment. Real WISH movement (the second
+of the two directions the vision promised), not micro-repair. All 4 slices GREEN, every perfecter SHIP IT, zero
+NOT-GREEN. Both wave-2.5 carries closed in the same wave. `@canonical capability:github-inbound-intake` on
+`Intake.ingest/2`.
+
+**Landed (on branches, pending integration):**
+1. **Request plumbing (slice 1)** — `BarkparkWeb.Plugs.CacheBodyReader.read_body/2` tees RAW bytes into
+   `conn.assigns[:raw_body]` ONLY on `/v1/plugins/github/webhook` (path-scoped, every other path reads through
+   at zero cost, byte-identical to Plug.Parsers default → no route regresses); `endpoint.ex` wires
+   `body_reader:` into the existing `Plug.Parsers.init`. `GithubWebhookSignature` plug reads raw_body +
+   `x-hub-signature-256` + `Settings.get_credentials()[:webhook_secret]`, delegates to the wave-1 constant-time
+   `Signature.verify/3`. FAIL CLOSED via a single `reject/1`: nil/non-binary raw_body, missing header,
+   blank/absent secret (dark plugin), tampered sig → 401+halt. New `:github_webhook` pipeline (accepts json +
+   sig plug, the ONLY auth — no token, no CORS) + dormant `/v1/plugins` bucket. Companion edit: registered
+   `:github_webhook` in the `plugin_routes` allow-list (`router/plugins.ex`) or the bucket raises at compile.
+   10 tests, full 607-file compile clean.
+2. **Intake service (slice 2)** — `Barkpark.Plugins.Github.Intake.ingest/2`, five ordered gates: event filter
+   (`action=="opened"`+issue else `:ignored`); bot drop (`sender.type=="Bot"` → `:dropped` BEFORE any Content
+   write, loop-cut #1); deterministic `gh-<num>` doc_id; `Content.create_document(..., source: :github)` so
+   first delivery runs Dedup and re-delivery is an idempotent no-op AND `mutation_events.source` stamps EXACTLY
+   `"github"` (loop-cut #2, tested against `Outbox.fetch`); best-effort backlink via injectable `comment_fun`
+   (logged-and-swallowed on failure). Born open+UNCLAIMED, `src:github`+`needs-human`, never touches
+   synced_rev/claim/worker/epoch. 15 tests (0 failures), anchors gate PASS.
+3. **Controller + wiring (slice 3)** — `BarkparkWeb.GithubWebhookController.receive/2`: `X-GitHub-Event:
+   issues` → `Intake.ingest/2` (dataset from `Settings.datasets/0`); `ping` → 200; other → 202 no-op. Every
+   verified-but-unactionable delivery is 2xx (no retry storm); only a genuine intake `{:error,_}` is 5xx
+   (retryable, idempotent via `gh-<num>`). `register_routes/1` returns `{:post,"/github/webhook",…,auth:
+   :github_webhook}`. App-env seam (`:github_webhook_intake_fun`) makes dispatch unit-testable without slices
+   1+2. 24 tests (with plugin_test), clean compile.
+4. **Wave-2.5 carry cleanup (slice 4)** — (a) TENANT SCOPE: thread workspace_id/project_id from the drained
+   outbox MutationEvent → MirrorJob args → `reconcile` opts → load_task + Link.put, so a non-default-tenant
+   task is read/stamped under its OWN scope (was mis-writing bookkeeping into seeded Default → re-CREATE loop).
+   Back-compat: absent keys keep wave-2 default-scope; Oban unique keys unchanged. Also fixed a real latent bug
+   (default_enqueue passed a map to a binary-only enqueue — FunctionClauseError, masked by the always-injected
+   seam). (b) `active?/0` MEMOIZE: ~5s monotonic-TTL cache in DrainWorker state (injectable `active_ttl_ms`),
+   D9-safe — idle_ms(15s) > TTL(5s) so steady-state idle always re-resolves; memo only bites sub-5s backoff
+   storms; bootstrap guard intact. Targeted 28/0, full github dir 177/0, `--warnings-as-errors` clean.
+
+**Stalled** — nothing NOT-GREEN. Wave is code-complete on branches; same base-drift integration discipline as
+wave 2 applies (rebase each `-p` onto current origin/main; land slices 1,2,4 then 3).
+
+**Cross-wave carries for wave 4 (perfecter-flagged, not defects):**
+- **DEDUP-REFUSAL SILENT DROP (design edge, wave 4 owns).** A FIRST-delivery outsider issue the Dedup seam
+  judges a look-alike returns `{:error,{:duplicate_task,_}}` — no task, no backlink, no linkage — and because
+  nothing persisted, EVERY re-delivery re-refuses (no future `adopt` can find the issue). Faithful to D6 but
+  the outsider gets total silence. Wave 4 (adopt/quarantine) MUST decide how to surface a swallowed intake
+  (comment? label? dead-letter?).
+- **DB-AUDIT AMPLIFICATION on the live route.** The signature plug calls `Settings.get_credentials()` per
+  request (after cheap raw_body+header checks, before sig verify), which logs a "read" audit row + telemetry
+  by design — so any unauth POST carrying an `x-hub-signature-256` header forces a DB write before the sig is
+  checked (mild flood primitive on a probed endpoint). Inherent (can't verify without the secret); fix is a
+  short-TTL secret memoization at the Settings layer (mind webhook-secret rotation staleness). Wave 4 decision.
+- **INTEGRATION-ONLY WIRING.** The endpoint tee surviving into the router pipeline is exercised end-to-end only
+  by slice 3's ConnCase (parse_body L71 before Router L85 — provably correct by inspection). Keep a ConnCase
+  that POSTs a real signed body through the full stack; confirm GitHub's `Accept: */*` resolves to json and
+  isn't 406'd before the sig gate. Double-backlink race (concurrent first-delivery) collapses to ONE task row
+  via the unique constraint — negligible.
+- **LOOP-CUT #2 STAYS AN EXACT STRING.** (carried) any future inbound path must stamp source exactly `"github"`.
+- **CONFLICT QUARANTINE (D7) + `detached` handling remain wave 4.** Unchanged from wave 2.
+
+**Next wave: Wave 4 — adoption + conflict quarantine.** `adopt` action (Studio doc_action + `bp github adopt`)
+strips `needs-human`/flips ownership into Barkpark/posts a backlink, keyed on `github.state=="intake"` (the
+value this wave stamps). `github_sync_conflicts` record-then-converge on out-of-band GitHub edits; deleted/
+transferred issue → `github.state=detached`, never recreated. Fold in the two intake design edges above:
+surface a dedup-refused intake (don't leave the outsider silent) and memoize the webhook secret to kill the
+pre-verify audit amplification. `@canonical` on the adopt entry point.
+
+---
+
+## Wave 3 CUT — inbound intake (2026-07-07, architect pass)
+
+**Wish increment:** an outsider who cannot see guerrilla opens an issue on public FRIKKern/barkpark →
+within ~a minute a task `gh-<num>` lands (labeled `src:github`+`needs-human`), born DARK through the
+existing `Tasks.Dedup` find-or-create seam, plus a "tracked internally" backlink comment on the issue.
+No auto-claim (adoption is wave 4). Loop stays broken by construction.
+
+**Hard contracts every slice must respect:** D3 (deterministic `gh-<num>` doc_id is the idempotency
+anchor), D4 cut #1 (drop `[bot]`-sender webhooks BEFORE any mutation), D4 cut #2 (`mutation_events.source`
+stamped EXACTLY `"github"` = `to_string(:github)` — NEVER `"github:inbound"`), D6 (reuse the Dedup seam
+via the normal Content create path, deterministic `gh-<num>`, NEVER a bespoke create; intake NEVER
+auto-claims a worker slot — adoption is an explicit wave-4 action). Signature is verified over the RAW
+request body with the wave-1 `Github.Signature` verifier (constant-time, fail-closed). Intake is
+`issues.opened` ONLY (not edited/closed/labeled/reopened).
+
+### Slice 1 — request plumbing: raw-body cache + signature plug + webhook bucket
+- **Surface:** `BarkparkWeb.Plugs.CacheBodyReader` (new) · `BarkparkWeb.Plugs.GithubWebhookSignature`
+  (new) · `endpoint.ex` (body_reader wiring) · `router.ex` (new `:github_webhook` pipeline + bucket).
+- **Build:**
+  - `CacheBodyReader.read_body/2` wraps `Plug.Conn.read_body/2` and, ONLY when
+    `conn.request_path == "/v1/plugins/github/webhook"` (the plugin's webhook path — never global),
+    appends the read chunk to `conn.assigns[:raw_body]` (accumulate across chunks). Every other path
+    reads through untouched (no assign, zero cost). This is the standard Phoenix cache-body-reader
+    idiom scoped by path so the 100 MB JSON parser doesn't buffer every request.
+  - Wire it into `endpoint.ex` `parse_body/2`: add `body_reader: {BarkparkWeb.Plugs.CacheBodyReader,
+    :read_body, []}` to the existing `Plug.Parsers.init(...)` opts (line ~108). Do NOT change parsers,
+    length, or the rescue branches.
+  - `GithubWebhookSignature` plug: reads `conn.assigns[:raw_body]` (the exact bytes GitHub signed),
+    the `x-hub-signature-256` request header, and the secret from
+    `Barkpark.Plugins.Github.Settings.get_credentials()[:webhook_secret]`; calls
+    `Github.Signature.verify(raw_body, header, secret)`. On `:ok` pass through; on ANYTHING else
+    (bad/missing signature, missing raw_body, blank secret, plugin not active) respond `401` with the
+    canonical `{error:{code:"unauthorized",message:...}}` JSON envelope and `halt`. FAIL CLOSED — never
+    accept when it cannot verify.
+  - `router.ex`: add a `pipeline :github_webhook` = `plug :accepts, ["json"]` +
+    `plug BarkparkWeb.Plugs.GithubWebhookSignature`, and a scope block
+    `scope "/v1/plugins", BarkparkWeb do pipe_through :github_webhook; plugin_routes(scope:
+    :github_webhook) end` (mirror the `:public_api`/`:ingest` dormant-bucket blocks — dormant until
+    slice 3's `register_routes` contributes the route). Body is already parsed at the endpoint, so this
+    pipeline only asserts content type + verifies the signature; signature is the ONLY auth (no token,
+    no CORS — this is a server-to-server GitHub callback, not a browser origin).
+- **Decisions respected:** D4 cut #1-prep (raw-body + signature edge), signature-over-RAW-body,
+  fail-closed.
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark_web/plugs/github_webhook_signature_test.exs
+  test/barkpark_web/plugs/cache_body_reader_test.exs` — ConnCase; craft a conn with `assigns.raw_body`
+  set + a real `Signature.sign/2` header + a stubbed webhook secret (set `config :barkpark,
+  :github, webhook_secret: ...` or the env key `Settings.get_credentials` reads, in test setup) →
+  assert pass; tamper the body → 401 halt; missing raw_body → 401. For the reader, assert a github-path
+  conn accumulates `assigns.raw_body` and a non-github path does not.
+- **Size:** medium.
+
+### Slice 2 — intake service: born-dark task through the Dedup seam
+- **Surface:** `Barkpark.Plugins.Github.Intake` (new: `github/intake.ex`) + test.
+- **Build:** `ingest/2` (or `handle_delivery/2`) takes the decoded webhook `payload` (a map) + `opts`.
+  - **Event filter:** act ONLY on `payload["action"] == "opened"` with an `"issue"` present. Any other
+    action (edited/closed/labeled/reopened/…) → `:ignored`. (`X-GitHub-Event: issues` is asserted by the
+    controller; Intake defends on `action` too.)
+  - **Bot drop (D4 cut #1):** if `payload["sender"]["type"] == "Bot"` (the App's own writes always carry
+    a `[bot]` sender of type `"Bot"`), return `:dropped` BEFORE any Content write. This is the structural
+    loop cut — a webhook the App itself caused never mints a task.
+  - **Deterministic doc_id (D3/D6):** `doc_id = "gh-" <> to_string(payload["issue"]["number"])`. Build
+    task attrs: `title` = issue title; `content` = `%{"kind" => "task", "description" => issue body,
+    "labels" => ["src:github", "needs-human"], "lifecycle_status" => "open", "github" => %{"repo" =>
+    <owner/name>, "issue" => number, "state" => "intake"}}` (source-of-outsider bookkeeping; do NOT set
+    `synced_rev` — this task is inbound-born, not outbound-mirrored). NEVER set a claim/worker/epoch.
+  - **Create via the normal path (D6):** call `Barkpark.Content.create_document("task", attrs, dataset,
+    Keyword.put(opts, :source, :github))` with the deterministic `doc_id` in attrs. This routes through
+    `Content.Writer` → `Tasks.Dedup.check_new_task/5`. On FIRST delivery there is no `prev_doc` so Dedup
+    runs (a fresh outsider issue is not a dup of internal tasks → `:ok`, task is born). On RE-DELIVERY the
+    `gh-<num>` doc already exists → `prev_doc` is set → Dedup is skipped and the upsert is an idempotent
+    no-op (never a second task). `source: :github` → `Broadcast.save_event` stamps
+    `mutation_events.source = to_string(:github) = "github"` EXACTLY (D4 cut #2) so the wave-1 Outbox
+    (`source != "github"`) excludes it and it NEVER echoes back OUTBOUND.
+  - **Backlink comment:** after a successful birth (NOT on re-delivery no-op, NOT on drop/ignore), post a
+    "tracked internally" comment via an injectable seam `comment_fun` (default
+    `&Barkpark.Plugins.Github.Client.create_comment/4`), best-effort — a failed comment is logged, never
+    fails the intake (the task already exists; loop-safety doesn't depend on the comment). Follow the
+    DrainWorker seam-injection precedent so the test asserts the call without live HTTP.
+  - Repo string comes from `Settings.repo()`; dataset from `opts` (default the first `Settings.datasets()`
+    — but thread it explicitly, see Slice 4). Adoption/auto-claim: NONE (wave 4).
+- **Decisions respected:** D3, D4 cut #1 + cut #2, D6.
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/intake_test.exs` — `Barkpark.DataCase`,
+  NEVER boot phx.server. Assert: (a) opened issue → exactly ONE `gh-<num>` task, labeled
+  `src:github`+`needs-human`, unclaimed; (b) re-delivery of the SAME payload → still ONE task (idempotent,
+  Dedup-seam no-op); (c) `sender.type=="Bot"` → `:dropped`, zero tasks; (d) `action != "opened"` →
+  `:ignored`, zero tasks; (e) the birth `mutation_events` row has `source == "github"` EXACTLY (query the
+  row — this is the loop-cut #2 machine check); (f) `comment_fun` seam is invoked once on birth, not on
+  re-delivery/drop. Mock the backlink via the `comment_fun` seam (no Bypass needed) OR the mirror_job_test
+  Bypass pattern if calling `Client` directly.
+- **Size:** medium.
+
+### Slice 3 — webhook controller + route wiring (ties slices 1+2 together)
+- **Surface:** `BarkparkWeb.GithubWebhookController` (new) + `plugins/github.ex` `register_routes/1`.
+- **Build:**
+  - Controller `receive/2` (action name): read `X-GitHub-Event` header. For `"issues"` → decode is
+    already done (parsed params); hand `params` (the parsed payload) to `Github.Intake.ingest/2` with the
+    dataset threaded (Slice 4). For `"ping"` → `200 {ok: true}` (GitHub's install handshake). Any other
+    event → `202` no-op (accepted, ignored). Always return `2xx` on a verified-but-unactionable delivery
+    so GitHub doesn't retry-storm. Signature was already verified by the Slice-1 plug in the pipeline, so
+    reaching the controller means the delivery is authentic.
+  - `github.ex` `register_routes/1`: return `[{:post, "/github/webhook",
+    BarkparkWeb.GithubWebhookController, :receive, auth: :github_webhook}]` (was `[]`). The
+    `plugin_routes(scope: :github_webhook)` block from Slice 1 expands this to
+    `POST /v1/plugins/github/webhook` under the signature pipeline. Update the `github.ex` @moduledoc
+    "Wave 2 posture" note that says routes stay `[]` — Wave 3 wires the webhook route.
+- **Decisions respected:** D6 (issues.opened only, enforced jointly by controller event-gate + Intake
+  action-gate), D4 (the plug+drop chain is now live end-to-end).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark_web/controllers/github_webhook_controller_test.exs`
+  — ConnCase, full end-to-end: build a real `issues.opened` JSON body, sign it with
+  `Github.Signature.sign(body, secret)`, POST to `/v1/plugins/github/webhook` with
+  `x-hub-signature-256` + `x-github-event: issues` headers and `raw_body` primed (in ConnCase the
+  endpoint body_reader runs — put the raw body via `Plug.Conn.put_req_header("content-type",
+  "application/json")` + `conn(:post, path, body)` so the cache reader captures it) → assert 2xx + task
+  born; bad signature → 401 + zero tasks; `ping` → 200; `x-github-event: issues` with a bot sender → 2xx
+  + zero tasks. Depends on Slices 1+2 being present in the tree.
+- **Size:** medium.
+
+### Slice 4 — wave-2.5 carry cleanup: tenant scope + `active?/0` memoize
+- **Surface:** `github/mirror_job.ex` + `github/drain_worker.ex` + `github/settings.ex` (+ tests).
+- **Build:** (a) **TENANT SCOPE** — thread real workspace/project scope from the drained outbox event
+  into `MirrorJob` args and on into `reconcile/3` opts, so a non-default-tenant task is loaded and
+  written under its own scope instead of the default workspace/project. Add `workspace_id`/`project_id`
+  to the `MirrorJob` args map (kept back-compatible: absent → current default behavior) and forward them
+  as opts to `load_task`/`Link.*`. (b) **`active?/0` MEMOIZE** — the DrainWorker calls
+  `Settings.active?/0` every tick = 1 DB read + 1 audit-row insert + telemetry each time; memoize with a
+  short TTL (e.g. cache the boolean + a monotonic timestamp in DrainWorker state, re-resolve only past
+  ~5s) so a dark install's idle ticks stop hammering the DB + burying genuine admin audit rows. Do NOT
+  change the enable/disable semantics — only the read cadence.
+- **Decisions respected:** D2 (level-triggered reconcile still reads CURRENT state), D9 (no behavior
+  change to snooze/retry). File-disjoint from slices 1-3, so it can build in parallel.
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/mirror_job_test.exs
+  test/barkpark/plugins/github/drain_worker_test.exs` — assert reconcile honors threaded scope opts
+  (a task in a non-default workspace is found/written) and the memoized `active_fun` is called at most
+  once within the TTL window across N ticks (seam-injected counter).
+- **Size:** small.
+
+**Integration order:** Slices 1, 2, 4 are file-disjoint and build in parallel. Slice 3 depends on 1+2
+(it wires their route + calls Intake) — land it AFTER 1+2 merge. Test-DB contention: re-run a gate once
+before declaring failure. All agents on Opus. `@canonical capability:github-inbound-intake` marker goes on
+`Intake.ingest/2` (public entry, aka:`webhook,issues.opened,gh-birth`) — the wave-7 runbook backlinks it.
+
+**Carried to wave 4+ (not this wave):** adoption action (`bp github adopt` + Studio doc_action strips
+`needs-human`/flips ownership/posts a backlink), conflict quarantine (D7 `github_sync_conflicts`
+record-then-converge), deleted-issue → `detached`. The `github.state == "intake"` bookkeeping value this
+wave stamps is the wave-4 adopt action's find-key.

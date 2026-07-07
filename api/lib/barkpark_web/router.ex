@@ -391,6 +391,18 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PublicCors)
   end
 
+  # Inbound GitHub webhook (github-bridge Wave 3). A server-to-server GitHub App
+  # callback — NOT a browser origin, so NO token, NO session, NO CORS. The ONLY
+  # auth is the HMAC signature: GithubWebhookSignature verifies X-Hub-Signature-256
+  # over the RAW request body (teed into conn.assigns[:raw_body] at the endpoint by
+  # CacheBodyReader) and fails closed on anything it cannot positively verify. The
+  # body is already parsed at the endpoint, so this pipeline only asserts JSON +
+  # verifies the signature.
+  pipeline :github_webhook do
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.GithubWebhookSignature)
+  end
+
   pipeline :require_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireAdmin)
@@ -650,6 +662,21 @@ defmodule BarkparkWeb.Router do
     pipe_through(:public_api)
 
     plugin_routes(scope: :public_api)
+  end
+
+  # ── Plugin-contributed routes — GitHub webhook (`auth: :github_webhook`) ──
+  # The signature-gated, server-to-server sibling of `:public_api` (github-bridge
+  # Wave 3). Same `/v1/plugins/<slug>/…` mount, but on the `:github_webhook`
+  # pipeline (JSON + GithubWebhookSignature) instead of PublicCors — the inbound
+  # GitHub App callback authenticates by HMAC over the raw body, never a token or
+  # a browser origin. No `BarkparkWeb` scope alias: plugin route specs
+  # fully-qualify their controllers (same rationale as `:ingest`/`:public_api`).
+  # Dormant until the `github` plugin's `register_routes/1` contributes the
+  # `POST /github/webhook` route (Wave 3 Slice 3) — expands to nothing today.
+  scope "/v1/plugins" do
+    pipe_through(:github_webhook)
+
+    plugin_routes(scope: :github_webhook)
   end
 
   # ── Plugin-contributed routes — token-gated, ROOT-mounted (`auth: :token_root`) ─

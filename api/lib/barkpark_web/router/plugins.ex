@@ -50,6 +50,7 @@ defmodule BarkparkWeb.Router.Plugins do
   | `:ingest`  | `:ingest`                 | `pipe_through :ingest` (RequireIngestToken; controller routes) |
   | `:public_root` | `:public_root`        | `pipe_through :browser`; macro emits a per-route `live_session` with the spec's `root_layout:` |
   | `:public_api` | `:public_api`          | `pipe_through :public_api` (JSON, NO auth, `PublicCors`; controller routes), under `/v1/plugins` |
+  | `:github_webhook` | `:github_webhook`  | `pipe_through :github_webhook` (JSON + `GithubWebhookSignature` HMAC gate; controller routes), under `/v1/plugins` |
 
   The `:ingest` bucket gates controller routes with the shared-secret ingest
   token (`RequireIngestToken`) instead of an `api_tokens` bearer — for ingest
@@ -140,6 +141,8 @@ defmodule BarkparkWeb.Router.Plugins do
     * `:public_root`     — routes that opted in to `auth: :public_root`
                            (carry a `root_layout:` opt; each is wrapped in its
                            own live_session applying that layout)
+    * `:github_webhook`  — routes that opted in to `auth: :github_webhook`
+                           (HMAC-gated inbound GitHub webhook, under `/v1/plugins`)
 
   Reads `Barkpark.Plugins.Registry.collect_routes/1` at compile time
   and filters by the requested scope. The caller is responsible for
@@ -160,10 +163,11 @@ defmodule BarkparkWeb.Router.Plugins do
              :ticket_key,
              :ingest,
              :public_root,
-             :public_api
+             :public_api,
+             :github_webhook
            ] do
       raise ArgumentError,
-            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :token_root | :session_token_root | :ticket_key | :ingest | :public_root | :public_api, got #{inspect(scope)}"
+            "plugin_routes(scope: ...) requires :admin | :ops | :public | :api | :token | :token_root | :session_token_root | :ticket_key | :ingest | :public_root | :public_api | :github_webhook, got #{inspect(scope)}"
     end
 
     ctx = %{scope: scope, phase: :compile}
