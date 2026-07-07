@@ -74,21 +74,41 @@ defmodule Barkpark.Plugins.Tasks do
   `Barkpark.Plugins.Registry.collect_desk_items/1` after the host's
   built-in groups — see `Barkpark.Structure.build_desk_items/3`).
 
-  One `:document_list` entry for the `task` type, gated on the `task`
-  schema actually existing in the requested dataset — mirroring how the
-  host groups gate on `Map.has_key?(schemas, name)`, so a dataset that
-  never registered the task schema (e.g. a clean `bp setup` profile on a
-  non-production dataset) gets no dead "Tasks" row. The list pane opens
-  each task in the regular Studio form editor
-  (`PaneBuilder`'s `:plugin_document_list` branch).
+  Two entries:
+
+    * a `:document_list` for the `task` type, gated on the `task` schema
+      actually existing in the requested dataset — mirroring how the host
+      groups gate on `Map.has_key?(schemas, name)`, so a dataset that never
+      registered the task schema (e.g. a clean `bp setup` profile on a
+      non-production dataset) gets no dead "Tasks" row. The list pane opens
+      each task in the regular Studio form editor (`PaneBuilder`'s
+      `:plugin_document_list` branch).
+    * a `:link` to **Projects** (`/admin/projects`) — the Barkpark Projects
+      BOARD (`Barkpark.Plugins.Tasks.Web.BoardLive`). Ungated by schema
+      presence: the board reads the task corpus globally, so it is reachable
+      from any dataset's desk. `/admin/*` (not `/studio/*`) so the desk-link
+      scoper leaves the path intact — the pulse dashboard precedent.
   """
   @impl Barkpark.Plugin
   def desk_items(dataset) do
-    if task_schema_present?(dataset) do
-      [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
-    else
-      []
-    end
+    # The Barkpark Projects board link — the visual kanban over type:task docs
+    # (BoardLive at /admin/projects). Ungated by schema presence: the board
+    # reads the task corpus GLOBALLY, so it is reachable from any dataset's desk
+    # (the pulse dashboard precedent — a plain `:link` to an `/admin/*` ops
+    # path, left untouched by the `/studio/<x>` desk-link scoper). The Tasks
+    # document-list below stays schema-gated so a dataset that never registered
+    # the task schema gets no dead "Tasks" list — but it keeps the Projects
+    # link.
+    projects_link = %{type: :link, label: "Projects", path: "/admin/projects", icon: "columns"}
+
+    task_list =
+      if task_schema_present?(dataset) do
+        [%{type: :document_list, label: "Tasks", doc_type: "task", icon: "✅"}]
+      else
+        []
+      end
+
+    task_list ++ [projects_link]
   end
 
   # Failure-safe schema probe. The rescue/catch matters beyond defensive
@@ -160,7 +180,14 @@ defmodule Barkpark.Plugins.Tasks do
       {:post, "/tasks/:doc_id/close", BarkparkWeb.TasksController, :close, auth: :token_root},
       {:post, "/tasks/:doc_id/labels", BarkparkWeb.TasksController, :relabel, auth: :token_root},
       {:post, "/tasks/:doc_id/papers", BarkparkWeb.TasksController, :papers, auth: :token_root},
-      {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root}
+      {:post, "/tasks/:doc_id/move", BarkparkWeb.TasksController, :move, auth: :token_root},
+      # Barkpark Projects — the native task BOARD (read-only :ops LiveView),
+      # mounted at /admin/projects (the :ops bucket). /admin (not /studio) so
+      # the desk-link scoper leaves the path intact — see desk_items/1 and the
+      # pulse dashboard precedent. This is the GUI realization of the task
+      # design-language spec; the tasks plugin owns type:task, so the board
+      # belongs in its namespace.
+      {:live, "/projects", Barkpark.Plugins.Tasks.Web.BoardLive, :index, auth: :ops}
       # NOTE: the content-graph reads (/graph/orphans, /graph/dangling,
       # /graph/:id) are NO LONGER declared here. They moved to CORE
       # (router.ex `scope "/v1" … get("/graph/…")`) because the graph roots on
