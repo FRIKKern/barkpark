@@ -112,6 +112,14 @@ defmodule Barkpark.Plugins.GithubTest do
     test "rejects a non-map argument fail-closed" do
       assert {:error, _} = Github.validate_settings(nil)
     end
+
+    test "rejects a present-but-non-map github row fail-closed (no crash)" do
+      # The admin LiveView rescues any raise from validate_settings into :ok,
+      # so a BadMapError on a junk row would be treated as VALID (fail-open).
+      # A non-map row must instead surface every required credential as missing.
+      assert {:error, errors} = Github.validate_settings(%{"github" => "junk"})
+      assert length(errors) == 5
+    end
   end
 
   describe "desk_items/1" do

@@ -138,7 +138,17 @@ defmodule Barkpark.Plugins.Github do
   """
   @impl Barkpark.Plugin
   def validate_settings(settings) when is_map(settings) do
-    row = Map.get(settings, @settings_row, %{})
+    # A present-but-non-map `github` row (e.g. `%{"github" => "junk"}`) must
+    # fail CLOSED, not crash: `Map.get(non_map, key)` raises BadMapError, and
+    # the admin LiveView's `run_plugin_validation/2` rescues any raise into
+    # `:ok` — so a crash here would be silently treated as VALID (fail-open),
+    # the exact opposite of the intent. Coerce a non-map row to empty so every
+    # required credential reads blank and the settings are rejected.
+    row =
+      case Map.get(settings, @settings_row) do
+        m when is_map(m) -> m
+        _ -> %{}
+      end
 
     errors =
       Enum.reduce(@required_creds, [], fn key, acc ->
