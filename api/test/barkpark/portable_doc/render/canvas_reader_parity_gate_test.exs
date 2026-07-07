@@ -319,12 +319,22 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     # Reader class literals that identify a HAND-WRITTEN fleet render. The canvas
     # may only carry the block verbatim + paint server html, so none may appear.
     # The trailing list adds inner/child class families the corpus sigs don't
-    # cover, plus the inline-producer container fleet (terminal → bp-term__,
-    # columns → bp-cols__) whose one producer is compose.ex itself.
+    # cover, plus the inline-producer terminal fleet (bp-term__) whose one
+    # producer is compose.ex itself.
+    #
+    # `bp-cols__` is deliberately NOT here: `columns` is an EDITABLE structural
+    # container (bpColumns/bpColumn node-views, editable-columns), NOT a
+    # server-painted data mirror. Like `table` (bp-table, editable-table) and
+    # callout/code, the canvas legitimately produces its `bp-cols*` markup so the
+    # user can edit inside the columns — reader parity is enforced by byte-aligning
+    # the node-view DOM to compose.ex, not by forbidding the class here. A fleet
+    # data block (tasks/notes/cards/board/terminal) stays verbatim-carried because
+    # editing a live-data mirror in-paper is meaningless; a layout container does
+    # not, so it graduates out of this list the moment it becomes editable.
     reader_markup =
       Enum.map(painted_fleet(), fn {_l, _b, _e, sig} -> sig end) ++
         Enum.map(chip_carry(), fn {_l, _b, sig} -> sig end) ++
-        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__ bp-term__ bp-cols__)
+        ~w(bp-tdetail bp-bcard bp-rm__ bp-pnode bp-note__ bp-card__ bp-momentum bp-board__ bp-term__)
 
     offenders =
       reader_markup
