@@ -137,8 +137,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "#42"
       assert html =~ ~s(data-role="github-state")
       assert html =~ "synced"
-      # synced_rev matches the doc rev → the synced (not detached) dot.
-      assert html =~ "is-synced"
+      # synced_rev matches the doc rev → the synced (not detached) dot. Match
+      # the element class, not the bare token (the <style> block defines
+      # `.bp-gh-dot.is-synced`, so a substring check would be vacuous).
+      assert html =~ ~s(class="bp-gh-dot is-synced")
     end
 
     test "an unmirrored card shows NO GitHub badge (exactly one badge on the board)",
@@ -161,6 +163,47 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ ~s(data-role="cancelled-tally")
       assert html =~ "1 cancelled"
       refute html =~ ~s(data-col="cancelled")
+    end
+  end
+
+  describe "GitHub badge edge cases" do
+    test "a github stamp with no issue number renders NO badge (never a fabricated #)",
+         %{conn: conn} do
+      # A bare `detached` stamp can carry a state but no issue; the badge must
+      # not paint a numberless `#` with a dead link.
+      task("gh-noissue", "Detached, no issue",
+        lifecycle: "open",
+        github: %{"repo" => "FRIKKern/barkpark", "state" => "detached"}
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      refute html =~ ~s(data-role="github-badge")
+    end
+
+    test "a mirrored card whose synced_rev lags the live rev shows the detached dot",
+         %{conn: conn} do
+      task("gh-stale", "Mirror lags the current rev",
+        lifecycle: "in_progress",
+        rev: "rev-current",
+        github: %{
+          "repo" => "FRIKKern/barkpark",
+          "issue" => 7,
+          "state" => "synced",
+          "synced_rev" => "rev-OLD"
+        }
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # The badge still renders (real issue), but the dot reads detached.
+      # Match the element's class attribute, not the bare token — the inline
+      # <style> block defines `.bp-gh-dot.is-synced`, so a substring check
+      # would be vacuously true.
+      assert html =~ ~s(data-role="github-badge")
+      assert html =~ "#7"
+      assert html =~ ~s(class="bp-gh-dot is-detached")
+      refute html =~ ~s(class="bp-gh-dot is-synced")
     end
   end
 

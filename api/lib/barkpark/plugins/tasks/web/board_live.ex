@@ -226,7 +226,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             data-doc-id={card.doc_id}
           >
             <div class="bp-card-top">
-              <span class={"gi gi--#{card.color_role}"} data-role="glyph" data-status={card.lifecycle_status}>
+              <span
+                class={"gi gi--#{card.color_role}"}
+                data-role="glyph"
+                data-status={card.lifecycle_status}
+                aria-hidden="true"
+              >
                 <%= glyph_text(card) %>
               </span>
               <span class="bp-title" data-role="card-title"><%= card.title %></span>
@@ -244,7 +249,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               </span>
 
               <a
-                :if={card.github}
+                :if={github_badge?(card.github)}
                 class="bp-gh"
                 data-role="github-badge"
                 data-issue={card.github["issue"]}
@@ -253,7 +258,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                 rel="noopener"
               >
                 <span
-                  class={"bp-gh-dot " <> if(card.github_synced, do: "is-synced", else: "is-detached")}
+                  class={"bp-gh-dot " <> if(github_synced?(card), do: "is-synced", else: "is-detached")}
                   data-role="github-dot"
                 >
                 </span>
@@ -290,6 +295,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        do: "https://github.com/#{repo}/issues/#{issue}"
 
   defp gh_href(_), do: "#"
+
+  # A badge is shown only when the mirror carries an actual issue number — the
+  # moduledoc/D7 promise is "the mirror-issue #number", so a partial `github`
+  # stamp with no `issue` (e.g. a bare `%{"state" => "detached"}`) renders NO
+  # badge rather than a fabricated `#`-with-no-number and a dead `#` link.
+  defp github_badge?(%{"issue" => issue}) when not is_nil(issue), do: true
+  defp github_badge?(_), do: false
+
+  # The sync dot. `github_synced` is the organizer's derived `synced_rev == rev`
+  # flag; read it via Access (never a dot-access KeyError) so a card projection
+  # that omits the field degrades to the conservative "detached" dot instead of
+  # crashing the whole board render.
+  defp github_synced?(card), do: card[:github_synced] == true
 
   defp empty_board?(board) do
     board.cancelled_count == 0 and
