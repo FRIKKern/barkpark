@@ -63,8 +63,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # CANVAS_CONTENT_TYPES). The callout is the first: its prose body becomes a real
   # editable PM region and its chrome (tone/title/fold) renders around it, so it
   # no longer SPLITS a run. field-* / sheet STILL split until their own S3
-  # increments.
-  @canvas_content_types ~w(callout)
+  # increments. The notes-grid split adds `note` (the singular annotated-item WIDGET):
+  # like callout it is a CONTENT node with an editable inline body, but a SUPERSET —
+  # it ALSO exposes label + lead as input islands. It FOLDS INTO a run (canvas-eligible),
+  # ADDITIVE alongside the still-verbatim-carried legacy `notes` grid (@canvas_fleet_types).
+  # THREE-WAY LOCKSTEP: run-convert.js CANVAS_CONTENT_TYPES ⇄ index.js (Note) ⇄ here.
+  @canvas_content_types ~w(callout note)
 
   # S3.3 / S3.4: the non-prose block kinds the canvas handles as ATTR-ATOM nodes —
   # atom nodes (no PM-managed body, like the divider) whose body TEXT rides in an attr

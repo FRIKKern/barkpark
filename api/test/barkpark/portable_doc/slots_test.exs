@@ -276,6 +276,134 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     end
   end
 
+  # ── the notes-grid split: the `note` WIDGET slot model ─────────────────────────
+  describe "note widget — slot round-trip + compat-read + byte-identity accessors" do
+    # A note in the FLAT wire form (label + lead + body `text`).
+    defp note_flat(extra \\ %{}) do
+      Map.merge(
+        %{"id" => "nw-1", "type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"},
+        extra
+      )
+    end
+
+    # The MATERIALIZED twin — the additive slots encoding of the SAME three strings.
+    defp note_slotted(extra \\ %{}) do
+      Map.merge(
+        %{
+          "id" => "nw-1",
+          "type" => "note",
+          "slots" => %{
+            "label" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}],
+            "lead" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}],
+            "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+          }
+        },
+        extra
+      )
+    end
+
+    test "note_{label,lead,body}_text/1 yield the SAME three strings for BOTH encodings" do
+      for enc <- [note_flat(), note_slotted()] do
+        assert Slots.note_label_text(enc) == "alive"
+        assert Slots.note_lead_text(enc) == "Kept"
+        assert Slots.note_body_text(enc) == "the body"
+      end
+    end
+
+    test "compat-read: a flat note with NO slots key synthesizes the 3 implicit paragraphs" do
+      assert Slots.slot_elements(note_flat(), "label") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
+
+      assert Slots.slot_elements(note_flat(), "body") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+
+      assert Slots.slot_elements(note_flat(), "lead") ==
+               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
+    end
+
+    test "a bare legacy `notes` ITEM (no type key) reads through the flat fallback" do
+      item = %{"label" => "x", "lead" => "L", "text" => "y"}
+      assert Slots.note_label_text(item) == "x"
+      assert Slots.note_lead_text(item) == "L"
+      assert Slots.note_body_text(item) == "y"
+    end
+
+    test "an EMPTY lead synthesizes [] (arity {:max,1}) and reads back \"\"" do
+      n = note_flat(%{"lead" => ""})
+      assert Slots.slot_elements(n, "lead") == []
+      assert Slots.note_lead_text(n) == ""
+      # An absent lead key is likewise "" (nil-safe).
+      assert Slots.note_lead_text(%{"type" => "note", "label" => "a", "text" => "b"}) == ""
+    end
+
+    test "the body slot FLATTENS inline marks to plain text (the lossy legacy contract)" do
+      marked = [
+        %{"type" => "text", "value" => "Be "},
+        %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold"}]}
+      ]
+
+      n = %{"type" => "note", "slots" => %{"body" => [%{"type" => "paragraph", "content" => marked}]}}
+      assert Slots.note_body_text(n) == "Be bold"
+    end
+
+    test "normalize_widget dual-writes flat ⇄ slots and is IDEMPOTENT" do
+      n = Slots.normalize_widget(note_flat())
+      assert n["label"] == "alive"
+      assert n["text"] == "the body"
+      assert n["lead"] == "Kept"
+      assert n["slots"]["label"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
+      assert n["slots"]["body"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+      assert n["slots"]["lead"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
+      # Idempotent, and a flat-form and slot-form note normalize to the SAME map.
+      assert Slots.normalize_widget(n) == n
+      assert Slots.normalize_widget(note_slotted()) == n
+    end
+
+    test "normalize_widget OMITS an empty/absent lead entirely (flat key AND slot), never \"\"" do
+      n = Slots.normalize_widget(note_flat(%{"lead" => ""}))
+      refute Map.has_key?(n, "lead")
+      refute Map.has_key?(n["slots"], "lead")
+      # Idempotent on the lead-less shape.
+      assert Slots.normalize_widget(n) == n
+
+      absent = Slots.normalize_widget(%{"type" => "note", "label" => "a", "text" => "b"})
+      refute Map.has_key?(absent, "lead")
+      refute Map.has_key?(absent["slots"], "lead")
+    end
+
+    test "slot_decls/1: 3 element slots — label exactly-1, lead max-1, body exactly-1" do
+      assert Slots.slot_decls(%{"type" => "note"}) == [
+               %{name: "label", tier: :element, count: {:exactly, 1}},
+               %{name: "lead", tier: :element, count: {:max, 1}},
+               %{name: "body", tier: :element, count: {:exactly, 1}}
+             ]
+    end
+
+    test "D1 gate: a clean note is error-free; a nested widget in a slot reds" do
+      assert Slots.slot_type_errors(note_flat()) == []
+      assert Slots.slot_type_errors(note_slotted()) == []
+
+      nested = %{
+        "type" => "note",
+        "slots" => %{
+          "label" => [%{"type" => "callout", "content" => plain()}],
+          "body" => [%{"type" => "paragraph", "content" => plain()}]
+        }
+      }
+
+      errors = Slots.slot_type_errors(nested)
+      refute errors == []
+      assert Enum.any?(errors, &(&1 =~ ~s(the "label" slot accepts only element blocks)))
+      assert Enum.any?(errors, &(&1 =~ "widget"))
+    end
+
+    test "Constraints.validate/2 folds in the note D1 gate (clean note zero-error)" do
+      assert Constraints.validate([note_flat()], []) == []
+      nested = %{"type" => "note", "slots" => %{"body" => [%{"type" => "section", "children" => []}]}}
+      refute Constraints.validate([nested], []) == []
+    end
+  end
+
   # A materialized-slot card fixture (STEP 4): a slots-native block, title + body
   # (extra merges over the top, e.g. to swap the `slots` map for a D1-violation case).
   defp card(extra \\ %{}) do

@@ -723,6 +723,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.card_html(b)}
   end
 
+  # The notes-grid split — a NEW singular `note` :widget: ONE annotated item
+  # (label/lead/body slots) that renders byte-identically to ONE legacy `notes`
+  # grid item, WITHOUT the `bp-notes` grid wrapper (a lone note is one row; the
+  # grid/section owns the wrapper). `note_item_html/1` is the SAME per-item
+  # expression `notes_html/1` maps over, so a note byte-aligns to a `notes` row by
+  # construction. ADDITIVE: the legacy `notes` clause above is UNTOUCHED.
+  def compose_block(%{"type" => "note"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.note_item_html(b)}
+  end
+
   def compose_block(%{"type" => "pipeline"} = b, _style) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
   end

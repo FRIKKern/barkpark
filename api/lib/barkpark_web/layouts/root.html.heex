@@ -3238,6 +3238,20 @@
     .bp-canvas-card__controls { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; opacity: 0; transition: opacity 0.12s ease; }
     .bp-canvas-card:hover .bp-canvas-card__controls, .bp-canvas-card:focus-within .bp-canvas-card__controls { opacity: 1; }
     .bp-canvas-card__input { flex: 1 1 120px; min-width: 0; font-size: 0.75rem; padding: 3px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 6px; background: var(--paper-bg); color: var(--paper-ink); }
+    <%!-- notes-grid split: the `note` WIDGET edit chrome. UNLIKE card, note does NOT
+         class-share with the reader (parity §3 forbids bp-notes / bp-note__ in the
+         editor JS), so these rules MIMIC the inlined `.bp-paper-surface .bp-note*`
+         visuals — reader parity is proven by the compose byte-identity test, not this
+         mirror. Keep BYTE-IDENTICAL with styles.css. --%>
+    .bp-canvas-note { display: grid; grid-template-columns: 5.5rem 1fr; gap: 0.9rem; align-items: baseline; margin: 1.4rem 0; }
+    .bp-canvas-note__k { font-family: var(--paper-font-mono); font-size: 0.68rem; font-weight: 700; text-transform: lowercase; letter-spacing: 0.02em; color: var(--paper-accent); background: color-mix(in srgb, var(--paper-accent) 12%, transparent); border: 0; border-radius: 5px; padding: 2px 7px; text-align: center; min-width: 0; }
+    .bp-canvas-note__k::placeholder { color: var(--paper-accent); opacity: 0.5; }
+    .bp-canvas-note__d { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.92rem; color: var(--paper-ink-soft); line-height: 1.55; min-width: 0; }
+    .bp-canvas-note__lead { font-family: inherit; font-size: inherit; font-weight: 600; color: var(--paper-ink); background: transparent; border: 0; padding: 0; min-width: 0; }
+    .bp-canvas-note__lead::placeholder { color: var(--paper-ink-soft); opacity: 0.5; }
+    .bp-canvas-note__body { min-width: 0; }
+    .bp-canvas-note__k:focus, .bp-canvas-note__lead:focus { outline: 1px solid var(--paper-accent); outline-offset: 1px; border-radius: 4px; }
+    @media (max-width: 520px) { .bp-canvas-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-canvas-note__k { justify-self: start; } }
     /* The generic read-only bpOpaque carry chip (a nested section / composite /
        codelist carried verbatim inside a section body) reuses `.bp-canvas-readonly`
        for the chip frame; `.bp-canvas-opaque` is a marker hook. */

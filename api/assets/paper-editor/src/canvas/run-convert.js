@@ -66,7 +66,20 @@ const CANVAS_ATOM_TYPES = new Set(["divider"]);
 //
 // A node is "canvas-handled" if it is PROSE, a canvas ATOM, a canvas ATTR-ATOM, or
 // a canvas CONTENT node; only a truly-unknown non-prose kind stays bpOpaque.
-const CANVAS_CONTENT_TYPES = new Set(["callout"]);
+//
+// The notes-grid split adds `note` (the singular annotated-item WIDGET) to this
+// SAME set: like callout it is a CONTENT node whose BODY is an editable inline
+// contentDOM, but a SUPERSET — it ALSO exposes label + lead as non-PM input islands
+// (see note-node.js). node.type is "note" (no NODE_NAME indirection, the callout
+// convention), so the isContent branches below sub-route note vs callout by node
+// type. KEEP LOCKSTEP with paper_canvas.ex @canvas_content_types and index.js (Note).
+const CANVAS_CONTENT_TYPES = new Set(["callout", "note"]);
+
+// True when a CONTENT node/block is the `note` widget (sub-routing within the shared
+// isContent kind: note.type === "note" vs callout.type === "callout").
+function isNoteType(t) {
+  return t === "note";
+}
 
 // Article-chrome ROLE prose: eyebrow / byline / ingress / pullquote. UNLIKE every
 // other canvas node these need NO NODE_NAME map — node.type === bpType for all four
@@ -575,10 +588,12 @@ function blockToNode(block) {
     }
 
     if (isCanvasContentType(bpType)) {
-      // A canvas CONTENT node (S3.2: callout): a native node of that type whose
-      // BODY is editable inline content and whose chrome (tone/title/collapsible/
-      // collapsed) rides node attrs. The canvas schema (callout-node.js) declares
-      // it, so getJSON() round-trips both the body and the chrome attrs.
+      // A canvas CONTENT node (S3.2: callout; notes-grid split: note): a native node
+      // of that type whose BODY is editable inline content. callout chrome (tone/
+      // title/collapsible/collapsed) rides node attrs; note chrome (label/lead) rides
+      // node attrs too (edited via input islands). The canvas schema declares each, so
+      // getJSON() round-trips the body + chrome attrs. Sub-route by bpType.
+      if (isNoteType(bpType)) return noteBlockToNode(block, bpId, bpType);
       return calloutBlockToNode(block, bpId, bpType);
     }
 
@@ -898,6 +913,12 @@ function sectionChildPatchOps(prevNode, nextNode) {
 // forbids it), so there is no recursive container case here.
 function childInteriorPatch(cls, prevChild, nextChild, cid) {
   if (cls.isContent) {
+    // callout OR note (the notes-grid split) — sub-route by node type.
+    if (isNoteType(nextChild && nextChild.type)) {
+      return noteNodeChanged(prevChild, nextChild)
+        ? noteNodeToPatch(nextChild)
+        : null;
+    }
     return calloutNodeChanged(prevChild, nextChild)
       ? calloutNodeToPatch(nextChild)
       : null;
@@ -1099,6 +1120,147 @@ function stableCalloutKey(node) {
     collapsible: a.collapsible === true,
     collapsed: a.collapsed === true,
     content: node.content || null,
+  });
+}
+
+// ── note ⇄ canvas content node (the notes-grid split) ────────────────────────
+//
+// The NEW singular `note` block ⇄ a native `note` content node. Persisted shape
+// (COMPAT/wire form — the callout precedent, flat strings the default):
+//   { id, type:"note", label, lead?, text }
+// (or, MATERIALIZED/additive: { …, slots:{ label:[<p>], lead?:[<p>], body:[<p>] } }).
+//
+// A note is a SUPERSET of callout: it exposes THREE editable fields, not one.
+//   body  → the ONE editable inline contentDOM (the callout body precedent — a widget
+//           FLATTENS its body slot to inline). The `text` flat field is its plain
+//           encoding; a note body persists as PLAIN TEXT (marks dropped) to match the
+//           legacy `escape_html(text)` reader contract (a DELIBERATE lossy tradeoff).
+//   label → a plain string on node.attrs, edited by a non-PM input island.
+//   lead  → a plain string on node.attrs, edited by a non-PM input island; ABSENT
+//           (null) round-trips as no `lead` field (byte-fidelity, the callout title
+//           precedent — an absent lead is never "").
+
+// noteBodyInline(block) → the note body's inline array (Elixir Slots.note_body_text's
+// SOURCE, before the plain flatten). slots.body[0].content when materialized, else the
+// flat `text` field wrapped as a single inline text run (the compat encoding).
+function noteBodyInline(block) {
+  const slotBody = block && block.slots && block.slots.body;
+  if (Array.isArray(slotBody) && slotBody.length) {
+    const first = slotBody[0];
+    return (first && first.content) || [];
+  }
+  const t = block && block.text;
+  if (typeof t === "string" && t !== "") return [{ type: "text", value: t }];
+  if (typeof t === "number") return [{ type: "text", value: String(t) }];
+  return [];
+}
+
+// noteFieldText(block, slotName, flatKey) → a note field as a plain string. The slot's
+// lone paragraph inline FLATTENED to plain text (marks dropped) when materialized, else
+// the flat field. JS twin of Elixir Slots.note_{label,lead}_text/1.
+function noteFieldText(block, slotName, flatKey) {
+  const slot = block && block.slots && block.slots[slotName];
+  if (Array.isArray(slot) && slot.length) {
+    const first = slot[0];
+    return flattenInlineText((first && first.content) || []);
+  }
+  const v = block && block[flatKey];
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  return "";
+}
+
+function noteLabelText(block) {
+  return noteFieldText(block, "label", "label");
+}
+function noteLeadText(block) {
+  return noteFieldText(block, "lead", "lead");
+}
+
+// Flatten a portable-doc inline array to plain text, marks dropped — the JS twin of
+// Elixir Slots.flatten_inline_text/1. A text / inline-code leaf contributes its
+// `value`; a mark wrapper (strong/em/link/…) contributes its `children` flattened.
+function flattenInlineText(arr) {
+  if (typeof arr === "string") return arr;
+  if (!Array.isArray(arr)) return "";
+  return arr.map(flattenInlineNode).join("");
+}
+function flattenInlineNode(n) {
+  if (typeof n === "string") return n;
+  if (!n || typeof n !== "object") return "";
+  if (n.type === "text" || n.type === "code")
+    return n.value == null ? "" : String(n.value);
+  if (Array.isArray(n.children)) return flattenInlineText(n.children);
+  return "";
+}
+
+// The plain-text body string of a note NODE — its inline content (via the shared
+// deserializer) flattened to plain text (marks dropped), matching the reader's
+// note_body_text plain contract. This is what the flat `text` field persists.
+function noteNodeBodyText(node) {
+  return flattenInlineText(tiptapInlineToPd((node && node.content) || []));
+}
+
+// noteBlockToNode(block) → { type:"note", attrs:{ bpId, bpType, label?, lead? },
+//   content:[inline…] }. body slot inline → contentDOM via the shared serializer;
+// label/lead → attrs, PRESENT-ONLY ("" and absent both → no attr) so an untouched
+// note's getJSON re-projection matches and emits zero ops (stableNoteKey).
+function noteBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType: bpType || "note" };
+  const label = noteLabelText(block);
+  if (label !== "") attrs.label = label;
+  const lead = noteLeadText(block);
+  if (lead !== "") attrs.lead = lead;
+
+  const node = { type: bpType || "note", attrs };
+  const inline = inlineArrayToTiptap(noteBodyInline(block));
+  if (inline.length) node.content = inline;
+  return node;
+}
+
+// noteNodeToBlock(node, id) → { id, type:"note", label?, lead?, text }. Reconstruct
+// the FLAT wire form (the callout precedent — note keeps flat strings as the persisted
+// encoding, slots additive server-side). label/lead threaded ONLY when present; body
+// → the plain `text` field (always, even ""). Absent lead → ABSENT key (byte-fidelity).
+function noteNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "note" };
+  if (attrs.label != null && attrs.label !== "") block.label = attrs.label;
+  if (attrs.lead != null && attrs.lead !== "") block.lead = attrs.lead;
+  block.text = noteNodeBodyText(node);
+  return block;
+}
+
+// The mutable-fields PATCH for a note. patch-block is a SHALLOW Map.merge (patch.ex
+// merge_block) that REPLACES or PRESERVES a key but never DELETES one — so a cleared
+// label/lead must be emitted EXPLICITLY as null (else the stale value survives),
+// mirroring calloutNodeToPatch's removal-safe contract. `text` is emitted always. On
+// the reader, compose maybe_put/note_lead_text drops an empty lead, so lead:null and
+// an absent lead render identically.
+function noteNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  return {
+    label: attrs.label == null || attrs.label === "" ? null : attrs.label,
+    lead: attrs.lead == null || attrs.lead === "" ? null : attrs.lead,
+    text: noteNodeBodyText(node),
+  };
+}
+
+// True when a note node's body OR chrome (label/lead) changed — an interior edit.
+// Canonical (key-order-insensitive) compare on the diff-relevant fields, so a body/
+// label/lead edit flips it but a pure reorder (bpId/bpType only) does not. Keys on
+// node.content so a legacy-loaded note and its re-projection compare EQUAL
+// (zero-op-on-load), the stableCalloutKey precedent.
+function noteNodeChanged(prevNode, nextNode) {
+  return stableNoteKey(prevNode) !== stableNoteKey(nextNode);
+}
+
+function stableNoteKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    label: a.label == null || a.label === "" ? null : a.label,
+    lead: a.lead == null || a.lead === "" ? null : a.lead,
+    content: (node && node.content) || null,
   });
 }
 
@@ -2812,8 +2974,18 @@ export function runToOps(prevBlocks, nextDoc) {
     }
 
     if (entry.isContent) {
-      // Canvas content node (callout): diff body + chrome; emit one patch-block
-      // carrying ONLY the mutable fields when anything changed.
+      // Canvas content node (callout OR note): diff body + chrome; emit one patch-block
+      // carrying ONLY the mutable fields when anything changed. Sub-route by node type.
+      if (isNoteType(entry.node.type)) {
+        if (noteNodeChanged(prevNode, entry.node)) {
+          ops.push({
+            op: "patch-block",
+            id: entry.id,
+            patch: noteNodeToPatch(entry.node),
+          });
+        }
+        continue;
+      }
       if (calloutNodeChanged(prevNode, entry.node)) {
         ops.push({
           op: "patch-block",
@@ -3020,8 +3192,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasTableNode(type)) {
     return !tableNodeChanged(serverNode, liveNode);
   }
-  // Callout (content node): tone/title/collapsible/collapsed/body.
+  // Content node — callout (tone/title/collapsible/collapsed/body) OR note
+  // (label/lead/body, the notes-grid split). Sub-route by node type.
   if (isCanvasContentType(type)) {
+    if (isNoteType(type)) return !noteNodeChanged(serverNode, liveNode);
     return !calloutNodeChanged(serverNode, liveNode);
   }
   // Card (STEP 4 widget, bpCard): tone/title/media/action/body.
@@ -3161,8 +3335,10 @@ function nextNodeToBlock(entry, taken) {
     return tableNodeToBlock(node, entry.id);
   }
   if (entry.isContent) {
-    // Canvas content insert (callout): reconstruct the full callout block from
-    // the node (body + chrome) with the minted id, via the dedicated mapper.
+    // Canvas content insert (callout OR note): reconstruct the full block from the
+    // node (body + chrome) with the minted id, via the dedicated mapper. Sub-route
+    // by node type — a note reconstructs its flat { label?, lead?, text } wire form.
+    if (isNoteType(node.type)) return noteNodeToBlock(node, entry.id);
     return calloutNodeToBlock(node, entry.id);
   }
   if (entry.isCard) {

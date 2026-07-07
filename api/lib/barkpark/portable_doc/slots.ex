@@ -105,6 +105,18 @@ defmodule Barkpark.PortableDoc.Slots do
       %{name: "action", tier: :element, count: {:max, 1}}
     ]
 
+  # Note (the notes-grid split) declares THREE element slots — `label` /
+  # `lead` / `body` — mirroring the three fields of ONE legacy `notes` item.
+  # `label` and `body` are REQUIRED ({:exactly, 1}); `lead` is OPTIONAL
+  # ({:max, 1}, the arity twin of "at most one") so an absent lead is
+  # conforming. The D1 gate rejects a nested widget/section in any of them.
+  def slot_decls(%{"type" => "note"}),
+    do: [
+      %{name: "label", tier: :element, count: {:exactly, 1}},
+      %{name: "lead", tier: :element, count: {:max, 1}},
+      %{name: "body", tier: :element, count: {:exactly, 1}}
+    ]
+
   def slot_decls(_), do: []
 
   @doc """
@@ -126,7 +138,36 @@ defmodule Barkpark.PortableDoc.Slots do
   defp legacy_slot(%{"type" => "callout"} = block, "body"),
     do: [%{"type" => "paragraph", "content" => Map.get(block, "content") || []}]
 
+  # A note's `label`/`lead`/`body` slots are its flat `label`/`lead`/`text`
+  # fields wrapped as ONE implicit paragraph each (the compat-read: no `slots`
+  # key ⇒ synthesize the three paragraphs). The flat field maps to the slot as
+  # label→label, lead→lead, body→TEXT (the legacy `notes` item vocab: `text`).
+  # An EMPTY lead synthesizes `[]` (arity {:max, 1}: an absent optional slot),
+  # so `note_lead_text/1` reads the empty legacy field, never a stray paragraph.
+  defp legacy_slot(%{"type" => "note"} = block, "label"),
+    do: [note_para(note_flat(block, "label"))]
+
+  defp legacy_slot(%{"type" => "note"} = block, "body"),
+    do: [note_para(note_flat(block, "text"))]
+
+  defp legacy_slot(%{"type" => "note"} = block, "lead") do
+    case note_flat(block, "lead") do
+      "" -> []
+      lead -> [note_para(lead)]
+    end
+  end
+
   defp legacy_slot(_block, _name), do: []
+
+  # A plain-text implicit paragraph: an empty string wraps to `content: []`, a
+  # non-empty string to a single inline text node (the flatten-to-plain twin).
+  defp note_para(""), do: %{"type" => "paragraph", "content" => []}
+  defp note_para(text), do: %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+
+  # A note's flat field as a plain string (nil-safe, non-map-safe): the legacy
+  # `notes` item vocab where `body` lives under the `text` key.
+  defp note_flat(block, key) when is_map(block), do: block |> Map.get(key) |> to_text()
+  defp note_flat(_block, _key), do: ""
 
   @doc """
   The inline array of a callout's single body element — from the slot's lone
@@ -194,6 +235,41 @@ defmodule Barkpark.PortableDoc.Slots do
     end
   end
 
+  # ── note widget accessors (the notes-grid split) ─────────────────────────────
+  #
+  # THE load-bearing byte-identity invariants — the `callout_body_inline/1` analog,
+  # one per field. Each returns the PLAIN string of the slot (the lone paragraph's
+  # inline FLATTENED to plain text, marks dropped) when materialized, else the
+  # legacy flat field. Both encodings of the same note yield the SAME three strings
+  # ⟹ `Components.note_item_html/1` emits byte-identical HTML. These ALSO read a
+  # bare legacy `notes` ITEM (a `%{label,lead,text}` map with no `"type"` key —
+  # slot_elements synthesizes nothing for it, so it falls straight to the flat
+  # field), which is what lets `notes_html/1` reuse `note_item_html/1` per item and
+  # stay byte-identical. The body flattens to plain text (marks dropped) to match
+  # the legacy `escape_html(text)` contract — a DELIBERATE lossy-inline tradeoff.
+
+  @doc "The plain label string of a note's `label` slot, else the legacy flat `label` field."
+  @spec note_label_text(term()) :: String.t()
+  def note_label_text(block), do: note_slot_text(block, "label", "label")
+
+  @doc "The plain lead string of a note's `lead` slot, else the legacy flat `lead` field (\"\" when absent)."
+  @spec note_lead_text(term()) :: String.t()
+  def note_lead_text(block), do: note_slot_text(block, "lead", "lead")
+
+  @doc "The plain body string of a note's `body` slot, else the legacy flat `text` field."
+  @spec note_body_text(term()) :: String.t()
+  def note_body_text(block), do: note_slot_text(block, "body", "text")
+
+  # Flatten the slot's lone paragraph inline to plain text (marks dropped); when no
+  # element is present (a bare legacy item, or an empty optional slot), read the flat
+  # field. The SAME plain string either encoding, so reader bytes never move.
+  defp note_slot_text(block, slot_name, flat_key) do
+    case slot_elements(block, slot_name) do
+      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+      _ -> note_flat(block, flat_key)
+    end
+  end
+
   defp to_text(s) when is_binary(s), do: s
   defp to_text(n) when is_integer(n), do: Integer.to_string(n)
   defp to_text(_), do: ""
@@ -241,7 +317,37 @@ defmodule Barkpark.PortableDoc.Slots do
     |> put_callout_body(inline)
   end
 
+  # A note dual-writes its three flat fields ⇄ a `slots` map, idempotently. label +
+  # body (both required) are ALWAYS written on both sides; `lead` (optional) is
+  # OMITTED entirely — flat key AND slot — when empty/absent (byte-fidelity: an
+  # absent lead round-trips ABSENT, never `""`, mirroring the callout title
+  # maybe_put + the empty-body omit). The plain field ⇄ one-paragraph-slot mapping
+  # goes through the SAME `note_*_text/1` accessors + `note_para/1` synthesis, so
+  # `normalize_widget(normalize_widget(x)) == normalize_widget(x)`.
+  def normalize_widget(%{"type" => "note"} = block) do
+    label = note_label_text(block)
+    lead = note_lead_text(block)
+    body = note_body_text(block)
+
+    slots =
+      %{"label" => [note_para(label)], "body" => [note_para(body)]}
+      |> put_note_lead_slot(lead)
+
+    block
+    |> Map.drop(["label", "lead", "text", "slots"])
+    |> Map.put("label", label)
+    |> Map.put("text", body)
+    |> put_note_lead_field(lead)
+    |> Map.put("slots", slots)
+  end
+
   def normalize_widget(block), do: block
+
+  defp put_note_lead_slot(slots, ""), do: slots
+  defp put_note_lead_slot(slots, lead), do: Map.put(slots, "lead", [note_para(lead)])
+
+  defp put_note_lead_field(block, ""), do: block
+  defp put_note_lead_field(block, lead), do: Map.put(block, "lead", lead)
 
   # Empty body: omit both keys (precedent). Non-empty: dual-write content + slots.
   defp put_callout_body(block, []), do: block

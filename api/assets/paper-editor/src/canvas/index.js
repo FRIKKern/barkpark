@@ -73,6 +73,12 @@ import { Callout } from "./callout-node.js";
 // own bp-card/__t/__d classes so the reader cascade paints it for free (the callout
 // precedent). See ./card-node.js.
 import { Card } from "./card-node.js";
+// The notes-grid split: the singular `note` WIDGET as a canvas CONTENT node — a
+// callout SUPERSET whose body is an editable inline contentDOM, with label + lead as
+// non-PM <input> islands (all three fields editable, P2). Its node-view uses
+// `bp-canvas-note*` chrome ONLY (the DELIBERATE non-class-share; reader parity is
+// proven by compose byte-identity, not shared classes). See ./note-node.js.
+import { Note } from "./note-node.js";
 // S3.3: the code block as a canvas ATTR-ATOM node — an atom (no PM-managed body,
 // like the divider) whose code TEXT rides in the `value` attr and is edited by a
 // NON-PM <textarea> island (stopEvent/ignoreMutation so PM never sees its
@@ -589,6 +595,12 @@ class BpPaperCanvas extends HTMLElement {
         // runToTiptap's { type:"bpCard", content:[…] } node mounts with an editable
         // body that JOINS the run, and getJSON() round-trips body+chrome.
         Card,
+        // The notes-grid split: the `note` WIDGET node + its node-view. Registers the
+        // `note` node type (content:"inline*" body, label/lead data-* attrs, a NodeView
+        // with two <input> islands around a contentDOM body) so runToTiptap's
+        // { type:"note", content:[…] } node mounts with an editable body that JOINS the
+        // run + label/lead islands, and getJSON() round-trips body+label+lead.
+        Note,
         // S3.3: the code attr-atom node + its node-view. Registers the `bpCode`
         // node type (atom, attrs value/lang via data-*, a NodeView rendering a
         // <pre> with a non-PM <textarea> island that uses stopEvent/ignoreMutation
