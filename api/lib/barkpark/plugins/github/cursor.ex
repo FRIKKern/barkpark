@@ -4,7 +4,7 @@ defmodule Barkpark.Plugins.Github.Cursor do
 
   This is the at-least-once SOURCE for the outbound Barkpark→GitHub Issues
   mirror (epic D1/D2): it tracks the largest LOCAL `mutation_events.id` that the
-  mirror has already consumed for a dataset. A wave-2 drain worker reads `get/2`,
+  mirror has already consumed for a dataset. A wave-2 drain worker reads `get/1`,
   drains `id > cursor` task events from `Barkpark.Plugins.Github.Outbox`, enqueues
   a debounced per-task MirrorJob, and only then advances the cursor — never past
   an un-drained event on a transient failure (write-then-advance discipline).
@@ -22,10 +22,6 @@ defmodule Barkpark.Plugins.Github.Cursor do
   exists, so first enable NEVER mass-mirrors the pre-enable backlog to GitHub.
   """
 
-  import Ecto.Query
-
-  alias Barkpark.Content.MutationEvent
-  alias Barkpark.Repo
   alias Barkpark.Sync.PushCursor
 
   @source "github:outbound"
@@ -68,14 +64,5 @@ defmodule Barkpark.Plugins.Github.Cursor do
   @spec bootstrap_if_absent(String.t()) :: :ok
   def bootstrap_if_absent(dataset) when is_binary(dataset) do
     PushCursor.bootstrap_if_absent(@source, dataset)
-  end
-
-  @doc false
-  # Exposed for symmetry with PushCursor; the head is computed identically inside
-  # PushCursor.bootstrap_if_absent/2. Kept private-ish (doc:false) as a read helper.
-  @spec head_event_id(String.t()) :: non_neg_integer()
-  def head_event_id(dataset) when is_binary(dataset) do
-    from(e in MutationEvent, where: e.dataset == ^dataset, select: max(e.id))
-    |> Repo.one() || 0
   end
 end
