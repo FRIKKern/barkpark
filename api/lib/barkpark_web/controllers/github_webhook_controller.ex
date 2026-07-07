@@ -71,7 +71,11 @@ defmodule BarkparkWeb.GithubWebhookController do
   # 2xx (verified + handled), a real error is 5xx (retryable, idempotent).
   defp handle_issues(conn, params) do
     case intake_fun().(params, ingest_opts()) do
-      {:ok, _doc} ->
+      # Intake reports `{:ok, :born, doc}` on a fresh birth and `{:ok, :exists,
+      # doc}` on an idempotent re-delivery — both are 2xx handled deliveries.
+      # Match the TAG explicitly: a bare `{:ok, _doc}` (2-tuple) would miss the
+      # real 3-tuple shape and CaseClauseError → a perpetual 500 GitHub retries.
+      {:ok, _tag, _doc} ->
         json(conn, %{ok: true, ingested: true})
 
       :dropped ->
