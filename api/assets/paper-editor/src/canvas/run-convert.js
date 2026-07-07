@@ -295,6 +295,35 @@ const CANVAS_CONTAINER_BP_TYPE_BY_NODE = { bpColumns: "columns", bpSection: "sec
 const BP_COLUMN_NODE_NAME = "bpColumn";
 const BP_COLUMN_ATOM_NODE_NAME = "bpColumnAtom";
 
+// editable-action: the CTA `action` block the canvas handles as a CONTROL-ATOM node —
+// a LEAF (href/label/priority; no children, no inline body) whose editable attrs ride
+// NATIVE controls (like the field-* set, but ONE bpType and no BarkparkFieldBlockBridge
+// coercion; see action-node.js). Its node-view renders the reader's own bp-button anchor
+// byte-identically. UNLIKE code/diagram (fully described by value+lang / source+caption)
+// an action carries THREE optional payload keys, each threaded onto attrs / the block
+// ONLY when present (attr default null = the absence sentinel), so `{type:"action"}`
+// round-trips to exactly `{id,type:"action"}` and `{href,label}` with no priority
+// round-trips with no priority key. priority is a TRI-STATE at rest that the reader
+// (walk.ex button/2) collapses to BINARY: primary iff =="primary", else secondary — so
+// the change-detector normalizes nil≡secondary and selecting "Secondary" on a never-set
+// block is a ZERO-op.
+//
+// KEEP LOCKSTEP with paper_canvas.ex @canvas_action_types and
+// action-node.js:BP_ACTION_NODE_NAME.
+const CANVAS_ACTION_TYPES = new Set(["action"]);
+const CANVAS_ACTION_NODE_NAME = "bpAction";
+
+// True when a portable-doc BLOCK type is the CTA action (runToTiptap dispatch).
+function isCanvasActionType(t) {
+  return CANVAS_ACTION_TYPES.has(t);
+}
+
+// True when a TipTap NODE type is the canvas action control-atom ("bpAction").
+// runToOps/classifyNode read node.type off a getJSON node (the NODE name).
+function isCanvasActionNode(nt) {
+  return nt === CANVAS_ACTION_NODE_NAME;
+}
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
@@ -508,6 +537,15 @@ function blockToNode(block) {
       // canvas must not lose. field-image/field-reference are NOT in this set; they
       // fall through to bpOpaque below (pickers stay boundaries).
       return fieldBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasActionType(bpType)) {
+      // A canvas CONTROL-ATOM node (editable-action): a LEAF whose href/label/priority
+      // ride attrs, edited by native controls. It projects to the `bpAction` node
+      // (node.type !== bpType "action"). Each payload key is threaded ONLY when present
+      // (null = absence) so an untouched action's getJSON re-projection matches and
+      // emits zero ops.
+      return actionBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasReadOnlyAtomType(bpType)) {
@@ -1416,6 +1454,91 @@ function stableFieldKey(node) {
   return canonicalJSON({ value: normalizeFieldValue(bpType, a.value) });
 }
 
+// ── action ⇄ canvas control-atom node (editable-action) ──────────────────────
+//
+// The CTA action block { id, type:"action", href?, label?, priority? } ⇄ the TipTap
+// `bpAction` CONTROL-ATOM node. UNLIKE the field control-atom (one `value`, coerced by
+// field type) an action carries THREE optional payload keys edited by native controls,
+// and serves ONE bpType. UNLIKE code/diagram (droppable optional field emitted "" on
+// clear) the V1 coarse re-emit threads each key ONLY when present — a user edit sets
+// href+label via the inputs (both present after a touch) and priority when non-nil.
+//
+// priority is a TRI-STATE at rest that the reader (walk.ex button/2 :article) collapses
+// to BINARY: primary iff =="primary", else secondary. normalizeActionPriority mirrors
+// that collapse so nil≡secondary — selecting "Secondary" on a never-set-priority block
+// is a ZERO-op and only href/label text or a primary↔secondary flip emits.
+//
+// node.type is `bpAction` (the NODE name), NOT `action` (the bpType).
+
+// Collapse a tri-state priority to the reader's binary value (walk.ex button/2).
+function normalizeActionPriority(p) {
+  return p === "primary" ? "primary" : "secondary";
+}
+
+// actionBlockToNode(block) → { type:"bpAction", attrs:{ bpId, bpType, href?, label?,
+//   priority? } }
+//
+// Each payload key rides an attr ONLY when present (null = the absence sentinel), so an
+// untouched action's getJSON re-projection matches and emits zero ops. Doctrine
+// template attrs (locked/role) carried when set (an action could be a mandated block).
+function actionBlockToNode(block, bpId, bpType) {
+  const attrs = { bpId, bpType };
+  if (block && block.href != null) attrs.href = block.href;
+  if (block && block.label != null) attrs.label = block.label;
+  if (block && block.priority != null) attrs.priority = block.priority;
+  stampTemplateAttrs(attrs, block);
+  return { type: CANVAS_ACTION_NODE_NAME, attrs };
+}
+
+// actionNodeToBlock(node, id) → { id, type:"action", href?, label?, priority? }
+//
+// The inverse of actionBlockToNode — absence preserved. block.type is the FIXED
+// "action" (the node serves one bpType); each payload key is threaded ONLY when present
+// so the reconstructed block is byte-identical to one that round-tripped through
+// compose.ex (no stray href:"" / null priority).
+function actionNodeToBlock(node, id) {
+  const attrs = (node && node.attrs) || {};
+  const block = { id, type: "action" };
+  if (attrs.href != null) block.href = attrs.href;
+  if (attrs.label != null) block.label = attrs.label;
+  if (attrs.priority != null) block.priority = attrs.priority;
+  carryTemplateAttrs(block, attrs);
+  return block;
+}
+
+// The COARSE whole-attrs PATCH for an action block. href/label/priority are threaded
+// when !=null. Since any user edit sets href+label via the inputs, both are present
+// after a touch; priority is present when non-nil. This is the v1 coarse re-emit
+// (the greenlit coarse round-trip).
+function actionNodeToPatch(node) {
+  const attrs = (node && node.attrs) || {};
+  const patch = {};
+  if (attrs.href != null) patch.href = attrs.href;
+  if (attrs.label != null) patch.label = attrs.label;
+  if (attrs.priority != null) patch.priority = attrs.priority;
+  return patch;
+}
+
+// The canonical (order/absence-insensitive) key of an action node's diff-relevant
+// attrs — href/label as their display strings ("" when absent), priority collapsed to
+// its binary value. The normalize collapses nil≡secondary so selecting "Secondary" on a
+// never-set block is a ZERO-op (matches the reader). Mirrors action-node.js:actionKey.
+function stableActionKey(node) {
+  const a = (node && node.attrs) || {};
+  return canonicalJSON({
+    href: a.href == null ? "" : a.href,
+    label: a.label == null ? "" : a.label,
+    priority: normalizeActionPriority(a.priority),
+  });
+}
+
+// True when an action node's href/label/priority changed (a control edit). Canonical
+// compare so a pure reorder (bpId/bpType only) does not flip it, and a nil→secondary
+// select is a no-op.
+function actionNodeChanged(prevNode, nextNode) {
+  return stableActionKey(prevNode) !== stableActionKey(nextNode);
+}
+
 // ── sheet / embed ⇄ canvas read-only atom node (S3.6) ────────────────────────
 //
 // The sheet { id, type:"sheet", ref?, snapshot:<cached value-grid> } and embed
@@ -1768,6 +1891,9 @@ function classifyNode(node) {
   const isContent = isCanvasContentType(node.type);
   const isAttrAtom = isCanvasAttrAtomNode(node.type);
   const isField = isCanvasFieldNode(node.type);
+  // editable-action: a canvas control-atom node (bpAction). Its bpType resolves to
+  // "action" via the node.attrs.bpType default below.
+  const isAction = isCanvasActionNode(node.type);
   const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
   const isFleet = isCanvasFleetNode(node.type);
   // S10: a canvas container node (bpColumns). Its bpType resolves to "columns" via
@@ -1792,6 +1918,7 @@ function classifyNode(node) {
     isContent,
     isAttrAtom,
     isField,
+    isAction,
     isReadOnlyAtom,
     isFleet,
     isContainer,
@@ -2139,6 +2266,22 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isAction) {
+      // Canvas control-atom node (editable-action): diff href/label/priority; emit ONE
+      // COARSE whole-attrs patch-block (href/label/priority threaded when set) when it
+      // changed. prevNode is reconstructed via runToTiptap([prevBlock]) so the compare
+      // is apples-to-apples. An UNCHANGED action (incl. a nil→secondary re-select)
+      // emits NO op (canonical compare collapses nil≡secondary).
+      if (actionNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: actionNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
     if (entry.isRole) {
       // Article-chrome role node (eyebrow/byline/ingress/pullquote): diff the single
       // mutable body (text/items/content); emit one patch-block carrying only that
@@ -2273,6 +2416,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (isCanvasFieldNode(type)) {
     return !fieldNodeChanged(serverNode, liveNode);
   }
+  // Action (control-atom): href/label/priority (priority collapsed nil≡secondary).
+  if (isCanvasActionNode(type)) {
+    return !actionNodeChanged(serverNode, liveNode);
+  }
   // Divider (content-free atom leaf): same type with no interior → equal.
   if (isCanvasAtomType(type)) {
     return true;
@@ -2391,6 +2538,12 @@ function nextNodeToBlock(entry, taken) {
     // present, mirroring the per-type persist default. The value is normalized to its
     // per-type stored form.
     return fieldNodeToBlock(node, entry.id);
+  }
+  if (entry.isAction) {
+    // Canvas control-atom insert (editable-action): reconstruct the full action block
+    // (href/label/priority, each only when present) with the minted id, via the
+    // dedicated mapper. block.type is the fixed "action".
+    return actionNodeToBlock(node, entry.id);
   }
   if (entry.isReadOnlyAtom) {
     // Read-only atom insert (S3.6: sheet / embed): the carried WHOLE block, deep-cloned

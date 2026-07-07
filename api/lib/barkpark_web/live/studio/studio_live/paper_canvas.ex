@@ -107,6 +107,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # @canvas_container_types.)
   @canvas_picker_field_types ~w(field-image field-reference)
 
+  # editable-action: the CTA `action` block the canvas handles as a CONTROL-ATOM node
+  # (bpAction) — a LEAF whose href/label/priority ride attrs, edited by native controls
+  # (like the field-* set, but one bpType and no BarkparkFieldBlockBridge coercion). Its
+  # node-view renders the reader's own bp-button anchor byte-identically. No longer
+  # SPLITS a run. KEEP LOCKSTEP with run-convert.js CANVAS_ACTION_TYPES and action-node.js.
+  @canvas_action_types ~w(action)
+
   # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
   # atom nodes (no PM-managed body, like the divider/code/field) that are REFERENCES,
   # NOT editable text (run-convert.js CANVAS_READONLY_ATOM_TYPES). `sheet` (a cached
@@ -220,6 +227,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_content_types ++
                   @canvas_field_types ++
                   @canvas_picker_field_types ++
+                  @canvas_action_types ++
                   @canvas_readonly_atom_types ++
                   @canvas_fleet_types ++
                   @canvas_role_types ++

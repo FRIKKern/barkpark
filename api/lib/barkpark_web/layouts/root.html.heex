@@ -3311,6 +3311,57 @@
       color: var(--paper-ink-faint, #82918b);
     }
 
+    /* ── canvas action node-view (editable-action: the CTA button) ────────────
+       The CTA `action` block edited in-canvas: a live bp-button PREVIEW (byte-
+       matching the reader anchor classes below so it paints identically to /papers)
+       above a label/href/priority control row. The preview `.bp-button` / `--primary`
+       rules MIRROR paper-surface.css `.bp-paper-surface .bp-button` byte-for-byte,
+       scoped under .bp-canvas-action so they reach the editor sink
+       (.bp-paper-editor-body). Keep BYTE-IDENTICAL with the styles.css copy (the
+       paper-editor-mirror-check lockstep). */
+    .bp-canvas-action {
+      margin: 1em 0;
+      padding: 12px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 8px;
+      background: var(--paper-bg-deep, #f4f4ef);
+    }
+    .bp-canvas-action .bp-button {
+      display: inline-block; padding: 10px 20px; border: 2px solid var(--paper-accent);
+      color: var(--paper-accent); text-decoration: none; font-weight: bold; border-radius: 0;
+    }
+    .bp-canvas-action .bp-button--primary {
+      border: none; background: var(--paper-accent); color: #ffffff;
+    }
+    .bp-canvas-action-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .bp-canvas-action-label,
+    .bp-canvas-action-href {
+      flex: 1 1 160px;
+      min-width: 0;
+      padding: 6px 10px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 6px;
+      background: var(--paper-bg, #ffffff);
+      color: var(--paper-ink, #1a1a17);
+      font: inherit;
+      font-size: 13px;
+    }
+    .bp-canvas-action-priority {
+      flex: 0 0 auto;
+      padding: 6px 10px;
+      border: 1px solid var(--paper-rule, #d8d8d2);
+      border-radius: 6px;
+      background: var(--paper-bg, #ffffff);
+      color: var(--paper-ink, #1a1a17);
+      font: inherit;
+      font-size: 13px;
+    }
+
     /* ── pdd-t20c: GHOST SLOTS — an absent optional block's calm affordance ────
        The t13 featured-placeholder generalized: each optional declaration whose
        kind is absent (featured / ingress) is offered as an evergreen ghost in its

@@ -57,6 +57,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
   defp embed(id), do: %{"id" => id, "type" => "embed", "target" => "Some Note"}
   defp code(id), do: %{"id" => id, "type" => "code", "value" => ""}
   defp diagram(id), do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
+  # editable-action: the CTA `action` block is now a CANVAS-ELIGIBLE control-atom
+  # (bpAction) — a LEAF (href/label/priority) edited by native controls, so it no
+  # longer splits a run.
+  defp action(id),
+    do: %{"id" => id, "type" => "action", "href" => "https://x.test", "label" => "Go", "priority" => "primary"}
+
+  # Extract + normalize a CSS selector's declaration body: the text between its `{` and
+  # the next `}`, split on `;`, trimmed, empties dropped, re-joined "; ". Whitespace /
+  # line-wrap insensitive, so a 2-line editor rule compares EQUAL to a wrapped reader
+  # rule. Used by the view↔reader button parity assertion below.
+  defp button_decls(css, selector) do
+    escaped = Regex.escape(selector)
+
+    case Regex.run(~r/#{escaped}\s*\{([^}]*)\}/, css) do
+      [_, body] ->
+        body
+        |> String.split(";")
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.join("; ")
+
+      _ ->
+        flunk("selector not found in CSS: #{selector}")
+    end
+  end
 
   # t12a: a task-list (like every fleet kind) is now CANVAS-ELIGIBLE — it rides a
   # run as a server-painted read-only atom (bpFleet), carrying the whole block
@@ -416,6 +441,20 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
       # All three are canvas-eligible (prose ∪ diagram attr-atom) ⇒ ONE maximal run.
       assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+    end
+
+    # ── editable-action: the CTA action block is now CANVAS-ELIGIBLE — no split ──
+
+    test "editable-action: an action block INSIDE prose keeps the run whole (was a boundary)" do
+      blocks = [para("p1"), action("a1"), para("p2")]
+
+      # All three are canvas-eligible (prose ∪ action control-atom) ⇒ ONE maximal run.
+      assert PaperCanvas.partition_runs(blocks) == [{:run, blocks}]
+      assert PaperCanvas.canvas?(action("a1"))
+    end
+
+    test "editable-action: a lone action block is a single run, not a boundary" do
+      assert PaperCanvas.partition_runs([action("a1")]) == [{:run, [action("a1")]}]
     end
 
     test "S3.2: mixed callout + divider in ONE run (both canvas-eligible)" do
@@ -1412,6 +1451,40 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "a malformed payload is a safe no-op" do
       s0 = materialize_socket([])
       assert {:noreply, ^s0} = P.paper_materialize_slot(%{}, s0)
+    end
+  end
+
+  describe "view↔reader button parity (editable-action)" do
+    # The reader emits the CTA anchor with .bp-button / .bp-button--primary, styled by
+    # paper-surface.css (.bp-paper-surface-scoped). The canvas action node-view renders a
+    # LIVE PREVIEW anchor carrying the SAME classes, styled by the editor mirrors under
+    # .bp-canvas-action so they reach the editor sink (.bp-paper-editor-body). The
+    # paper-editor-mirror-check tripwire only checks class-token PRESENCE, NOT declaration
+    # byte-equality, and the reader .bp-button tokens are NOT .bp-canvas-* — so this is the
+    # gate that closes the ungoverned reader↔editor .bp-button parity: it asserts the
+    # DECLARATIONS match the reader byte-for-byte in BOTH editor sinks.
+    @reader_css Path.expand("../../../../assets/paper-surface/paper-surface.css", __DIR__)
+    @bundle_css Path.expand("../../../../assets/paper-editor/src/styles.css", __DIR__)
+    @heex_css Path.expand("../../../../lib/barkpark_web/layouts/root.html.heex", __DIR__)
+
+    test ".bp-button + .bp-button--primary match the reader in BOTH editor sinks" do
+      reader = File.read!(@reader_css)
+      reader_btn = button_decls(reader, ".bp-paper-surface .bp-button")
+      reader_primary = button_decls(reader, ".bp-paper-surface .bp-button--primary")
+
+      # distrust-vacuous-green: the reader rules are real + non-empty.
+      assert reader_btn =~ "border: 2px solid var(--paper-accent)"
+      assert reader_primary =~ "background: var(--paper-accent)"
+
+      for {sink, path} <- [{"styles.css", @bundle_css}, {"root.html.heex", @heex_css}] do
+        css = File.read!(path)
+
+        assert button_decls(css, ".bp-canvas-action .bp-button") == reader_btn,
+               "#{sink}: .bp-canvas-action .bp-button diverged from the reader .bp-button"
+
+        assert button_decls(css, ".bp-canvas-action .bp-button--primary") == reader_primary,
+               "#{sink}: .bp-canvas-action .bp-button--primary diverged from the reader --primary"
+      end
     end
   end
 end

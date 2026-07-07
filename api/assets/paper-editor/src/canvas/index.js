@@ -91,6 +91,12 @@ import { Diagram } from "./diagram-node.js";
 // exactly like the per-block BarkparkFieldBlockBridge. field-image/field-reference
 // (pickers) stay run boundaries (bpOpaque). See ./field-node.js.
 import { Field } from "./field-node.js";
+// editable-action: the CTA `action` block as a canvas CONTROL-ATOM node — a LEAF
+// (href/label/priority) edited by native controls in a stopEvent/ignoreMutation island,
+// byte-modelled on field-node.js's native branch. Its node-view renders the reader's own
+// bp-button anchor byte-identically as a live preview. ONE bpType ("action"), no
+// StarterKit collision. See ./action-node.js.
+import { Action } from "./action-node.js";
 // S3.6: the sheet + embed blocks as canvas READ-ONLY ATOM nodes — the FIFTH (and LAST
 // S3) node-view variant. Both are REFERENCES, NOT editable text: a sheet is edited in
 // its own surface (its cached snapshot renders read-only); an embed transcludes at
@@ -601,6 +607,15 @@ class BpPaperCanvas extends HTMLElement {
         // its own <div data-bp-type='field'>. Only the nested-structure fields
         // (composite / arrayOf / codelist / localizedText / section) remain bpOpaque.
         Field,
+        // editable-action: the CTA `action` CONTROL-ATOM node + its node-view. Registers
+        // the `bpAction` node (atom, attrs href/label/priority via data-*, a NodeView
+        // rendering a live bp-button preview + label/href/priority native controls in a
+        // stopEvent/ignoreMutation island so PM never turns a keystroke/select into a
+        // transaction) so runToTiptap's { type:"bpAction", attrs:{href,label,priority} }
+        // node mounts as an editable CTA whose attrs round-trip through getJSON() and
+        // emit a COARSE patch-block on edit. ONE bpType; NO StarterKit collision. bpAction
+        // parses ONLY its own <div data-bp-type='action'>. See ./action-node.js.
+        Action,
         // S3.6: the sheet + embed READ-ONLY ATOM nodes + their node-views. Registers
         // the `bpSheet` and `bpEmbed` node types (atom, NO edit surface; the WHOLE
         // block rides the bpBlock attr via data-bp-block, a NodeView rendering a
