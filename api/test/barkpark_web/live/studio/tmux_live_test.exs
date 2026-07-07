@@ -147,6 +147,21 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
     end
   end
 
+  describe "hook wiring regression guard" do
+    # A stale-branch merge once dropped these lines from root.html.heex, so the
+    # TmuxTerminal hook never registered → xterm never mounted → silent black
+    # terminal on every host. This guards the exact wiring.
+    test "root layout loads the tmux hook script AND registers it" do
+      root = File.read!("lib/barkpark_web/layouts/root.html.heex")
+
+      assert root =~ "/assets/bp-tmux-terminal.js",
+             "root.html.heex must <script src> the tmux hook, else the console is a black screen"
+
+      assert root =~ "Hooks.TmuxTerminal",
+             "root.html.heex must register the TmuxTerminal hook in the LiveSocket Hooks map"
+    end
+  end
+
   describe "enabled + admin" do
     setup %{conn: conn} do
       enable_fake_console()

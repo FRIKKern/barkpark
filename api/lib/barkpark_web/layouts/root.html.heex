@@ -4323,6 +4323,15 @@
     })();
   </script>
   <script src="/assets/bp-graph.js"></script>
+  <%!-- tmux console hook (Studio /studio/tmux). TINY — only defines the hook;
+        the heavy xterm.js (~290KB) is lazy-loaded from /assets/xterm.bundle.js
+        the first time the hook mounts, so non-tmux pages never fetch it
+        (Golden Rule #4). Non-defer so window.BarkparkTmuxTerminal exists before
+        the Hooks registration and LiveSocket connect below.
+        (Re-added after a stale-branch merge dropped this line — see
+        docs / the tmux console; without it the hook never registers → black
+        terminal.) --%>
+  <script src="/assets/bp-tmux-terminal.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -4348,6 +4357,12 @@
     // BEFORE `new LiveSocket(...)` below, or window.BarkparkGraph would be
     // undefined when the LiveSocket connects.
     Hooks.GraphPane = window.BarkparkGraph;
+
+    // TmuxTerminal — the /studio/tmux console client half. Defined in
+    // /assets/bp-tmux-terminal.js (loaded non-defer just above); it lazy-loads
+    // xterm.js on first mount. Guarded so a missing global never breaks the
+    // Hooks map / LiveSocket. (Re-added after a stale-branch merge dropped it.)
+    if (window.BarkparkTmuxTerminal) Hooks.TmuxTerminal = window.BarkparkTmuxTerminal;
 
     Hooks.PresenceIdentity = {
       mounted() {
