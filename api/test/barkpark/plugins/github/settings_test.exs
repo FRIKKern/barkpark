@@ -189,6 +189,7 @@ defmodule Barkpark.Plugins.Github.SettingsTest do
     # DB (get_credentials) is touched at most once per TTL.
     defp counting_resolver(secret) do
       {:ok, agent} = start_supervised({Agent, fn -> 0 end})
+
       resolver = fn ->
         Agent.update(agent, &(&1 + 1))
         %{webhook_secret: secret}

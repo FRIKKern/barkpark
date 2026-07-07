@@ -246,7 +246,9 @@ defmodule Barkpark.Plugins.Github.Intake do
     end
   rescue
     e ->
-      Logger.warning("github intake: recording dedup_refused for ##{number} raised: #{inspect(e)}")
+      Logger.warning(
+        "github intake: recording dedup_refused for ##{number} raised: #{inspect(e)}"
+      )
 
       :ok
   end
