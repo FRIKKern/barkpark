@@ -74,7 +74,13 @@ defmodule Barkpark.Plugins.Github.CLI do
         batch: false,
         paginated: false,
         dry_run: false,
-        default_output: "table",
+        # The health snapshot is maps-of-maps (conflicts by kind, cursor lag by
+        # dataset, queue depth) — not row-shaped. A "table" default would fall
+        # through the CLI's list/single-object envelopes and cram the whole
+        # nested map into ONE truncated key/value cell (table.go's documented
+        # "valid output, zero information" degradation). JSON is the honest,
+        # legible default for a nested observability payload.
+        default_output: "json",
         scoped_prefix: nil
       }
     ]
