@@ -113,15 +113,18 @@ internally" backlink comment. Wave-2.5 carries folded in (tenant scope threaded 
 `Intake.ingest/2` short-circuits a re-delivery to `{:ok, :exists, doc}` (reads the outsider issue
 EXACTLY ONCE at birth); born-dark task stamps `content.github.state = "intake"` (the wave-4 adopt find-key).
 
-**Wave 4 — adoption + conflict quarantine — ⏳ ACTIVE (cut below):** adopt action (Studio doc_action + `bp github adopt`)
+**Wave 4 — adoption + conflict quarantine — ✅ DONE (#1236):** adopt action (Studio doc_action + `bp github adopt`)
 strips `needs-human`/flips ownership/posts backlink; `github_sync_conflicts` record-then-converge
 on out-of-band edits; deleted issue → `detached`, never recreated; dedup-refusal surfaced (no silence);
-webhook secret memoized (kill pre-verify audit amplification). **See the "Wave 4 CUT" section at the
-bottom for the 5-slice build plan.**
+webhook secret memoized (kill pre-verify audit amplification). The plugin dir now ships **18 modules**
+(adds adopt, cli, conflict, conflicts + the `github_adopt_controller` + `github_sync_conflicts` migration).
 
-**Wave 5 — Projects v2 + relations:** one-directional GraphQL auto-add + custom fields (diffed);
-`parent_id`→sub-issues (deferred-retry when parent unmirrored, cap-flatten past 8-level/100-child);
-`blocks`→body marker block.
+**Wave 5 — Projects v2 + relations — ⏳ DISPATCHED (architect pass 2026-07-07, seams verified live vs HEAD 09229948; cut below):** one-directional GraphQL auto-add + custom fields
+(diffed against a stored `projects_fingerprint` so an unchanged task writes ZERO GraphQL);
+`parent_id`→native sub-issues (deferred-retry when parent unmirrored, cap-flatten past 8-level/100-child);
+`blocks`→`<!-- barkpark:blocks -->` body marker (projection already renders it; wire the `blocker_issue_refs`
+hydration). Isolated LAST so it can't destabilize the proven Issues loop. **See the "Wave 5 CUT" section for
+the 4-slice build plan.**
 
 **Wave 6 — observability (optional):** sync-health state (cursor/lag/last-error/queue-depth) +
 `/admin/github` `:ops` console (pulse precedent) + `bp github status` verb.
@@ -437,6 +440,359 @@ past 8-level/100-child); `blocks`→`<!-- barkpark:blocks -->` marker block in t
 `github_sync_conflicts` table now carries real data that NOTHING renders yet — Wave 6's `/admin/github` console +
 `bp github status` (reading conflicts + cursor lag, `Conflicts.resolve/1` wired to a button) is the natural home and a
 strong alternative if the human wants operators to SEE the quarantine before Projects v2 polish.
+
+### Wave 2026-07-07 — Wave 4 adoption + conflict quarantine MERGED (#1236) — RECONCILED (architect pass)
+
+Wave 4 landed on `main` as squash `09229948 feat(github): wave-4 adoption + conflict quarantine (D7) — the
+intake→adopt journey closes (#1236)`. Verified against the tree: the plugin dir ships **18 modules** (waves 1-4:
+adopt, auth, cli, client, conflict, conflicts, cursor, drain_worker, errors, fields, intake, link, mirror_job,
+outbox, projection, settings, signature + `plugins/github.ex`). New host-side: `GithubAdoptController` on
+`POST /v1/plugins/github/adopt/:id` (`:token` bucket); migration `20260707120000_create_github_sync_conflicts.exs`
+LIVE. `MirrorJob.update/7` now GET+fingerprints ledger-owned fields before the PATCH → `Conflicts.record` on drift
+(`out_of_band_edit`) / detach (`detached`) / dedup-refusal (`dedup_refused`); `Link.put` stamps `synced_fingerprint`
+for next-pass drift detection (mirror_job.ex L254-327 confirmed). `bp github adopt` falls out of `/v1/capabilities`
+via `Github.CLI.commands/0` (no Go change). The single substrate-built-twice integration risk (slice 1 vs slice 4
+both shipping the migration) resolved cleanly — ONE migration on main. Waves 1+2+3+4 DONE. Wave 5 is the last MAJOR
+feature wave — the "one board" payoff.
+
+**Confirmed live seams Wave 5 builds on:** (1) `Github.Settings` already surfaces `:project_id` (`get_credentials()[:project_id]`,
+optional cred) — the Projects gate; (2) `Projection` already RESERVES the `blocks` marker and hydrates `"blocker_issue_refs"`
+(a caller-provided list of issue numbers) — Wave 5 wires the hydration source (projection.ex L55-59, L240-245); (3)
+`Github.Fields` already carries `projects_field:` per field (`:status`/`:priority`/`:worker`/`:goal`) and `issue_attr: :sub_issue`
+for `parent_id` — the Projects field map + sub-issue direction are already declared, machine-checkable; (4) `Link.put` merges
+ARBITRARY github-map keys — `projects_fingerprint`/`projects_item_id`/`sub_issue_parent` stamp with NO link.ex change (same
+pattern as w4's `synced_fingerprint`); (5) `Client.request/4` is REST-path shaped — GraphQL needs a sibling that POSTs to
+`<base>/graphql`, reusing `Auth.token/0` + the exact error classifier; (6) `MirrorJob.converge/5` (mirror_job.ex L189-209) is
+the wiring keystone — hydrate blocker refs BEFORE `Projection.task_to_issue`, run Projects/Relations AFTER create/PATCH.
+
+### Wave 2026-07-07 — Wave 5 CUT FIRED (architect reconciliation pass)
+
+Reconciled against `main` HEAD `09229948` (wave-4 merge). Waves 1-4 DONE + merged (#1229/#1232/#1234/#1236);
+the plugin dir ships **18 modules**; no work landed OUTSIDE the loop that touches the github plugin (the
+interleaved #1227/#1228/#1231/#1233/#1235 are all paper-editor, disjoint). Wave 5 files (`projects.ex`,
+`relations.ex`) do NOT yet exist — this is a clean start.
+
+**All Wave 5 seams VERIFIED LIVE (architect grep pass, so the 4 slices build without surprise):**
+- `Settings` surfaces `:project_id` (settings.ex L63) — the D10 Projects gate (blank → whole path no-ops).
+- `Client.get_issue/3` LIVE (client.ex L85); base resolution `@default_api_base`+`cfg_base` (L328-337) is the
+  spot slice-1 `graphql/2` reuses (`<base>/graphql`); `graphql`/`add_sub_issue` are pure ADDITIONS (absent today).
+- `Projection` renders the `blocks` fence from `blocker_issue_refs` (L241) via `upsert_fenced` (L173) and
+  `neutralize_sentinels` scrub (L306) — slice 3 SUPPLIES the hydration + adds ONLY a `barkpark:parent` marker.
+- `Fields.matrix` carries `projects_field:` (`:priority`/`:worker`/`:status`/`:goal`) + `issue_attr: :sub_issue`
+  on goal (fields.ex L55-92) — the Projects field map + sub-issue direction are already machine-declared.
+- `Link.put` merges arbitrary github-map keys, defaults `source: :github` (link.ex L117-140) —
+  `projects_fingerprint`/`projects_item_id`/`sub_issue_parent` stamp with NO link.ex change (w4 `synced_fingerprint` twin).
+- `MirrorJob`: `converge/5` L189 (hydrate BEFORE `Projection.task_to_issue` L192), `after_create` L236,
+  `update/7` L254, `reconcile/3` L164, `Link.synced?` short-circuit L176 (the `relink` bypass point).
+
+**Cut CONFIRMED unchanged: the 4 file-disjoint slices below.** Land order 1 → (2 ∥ 3) → 4. Slice 1 solely owns
+`client.ex`; slice 4 solely owns `mirror_job.ex`; slices 2/3 are new files (+ slice 3 appends one marker to
+`projection.ex`). Every GraphQL/REST edge Bypass-mocked or seam-injected; NEVER live, NEVER boot phx.server.
+Projects is OUTBOUND → NO new inbound route → do NOT regenerate `docs/openapi.json`. No new bp verb → no Go gate.
+ALL agents on Opus. The flagship gate-invariants: **unchanged task → ZERO GraphQL** (slice 2/4) and **a Projects
+error NEVER fails the issue mirror** (slice 4 failure-isolation).
+
+### Wave 2026-07-07 — Wave 5 Projects v2 + relations BUILT (4/4 green, merge-ready)
+
+The ledger and the repo become ONE BOARD. This is the last MAJOR feature wave and it delivers the wish's stated
+w5 payoff, not micro-repair: a configured Projects v2 board auto-populates as a READ-ONLY Status/Priority/Worker/
+Goal dashboard nobody edits back, the issue tree mirrors the task tree (`parent_id`→native sub-issue, `blocks`→
+body marker), and the whole Projects/relations layer is quarantined LAST + failure-isolated so it can NEVER
+destabilize the proven Issues loop. All 4 file-disjoint slices GREEN, every perfecter SHIP IT / READY TO MERGE,
+zero NOT-GREEN. Both flagship gate-invariants are built + tested: an UNCHANGED task writes ZERO GraphQL
+(fingerprint diff), and a Projects/relations failure returns the issue-mirror's `:ok` unchanged (log+continue).
+
+**Landed (on branches, pending integration):**
+1. **Client GraphQL + sub-issue transport (slice 1, `client.ex`)** — two PURE additions reusing the proven
+   `request`/`do_request`/classify pipeline verbatim. `graphql/3` POSTs `%{"query","variables"}` to `<base>/graphql`;
+   a 200-with-`errors` surfaces as `%NetworkError{reason:{:graphql,errors}}` (NO 5th error type — D8's 4-type set
+   held); clean 2xx → `{:ok, data|body}`; all transport/4xx/5xx/rate paths classify identically to REST.
+   `add_sub_issue/4` POSTs `sub_issue_id` to `/repos/:repo/issues/:n/sub_issues`, a 422 left as `{:http,422}` for the
+   Relations caller to map→`:ok`. 6 Bypass tests; gate 245/0.
+2. **`Github.Projects` (slice 2, D10, new file)** — one-directional Projects v2 GraphQL, `project_id`-gated (blank →
+   `:noop`, ZERO GraphQL, Issues loop untouched) and fingerprint-diffed (`:erlang.phash2(desired)` == stored →
+   `:noop` = the flagship unchanged→zero-writes invariant). On a changed fingerprint: resolve node id via
+   `get_issue`, `addProjectV2ItemById` (skipped when `projects_item_id` stored), query board fields once, write each
+   non-nil field (`singleSelectOptionId` for Status/Priority/Worker matched case-insensitively, text for Goal);
+   missing field / unmatched option → log+skip that ONE field. Desired values read off `Fields.matrix` exactly as
+   the projection derives labels. No reverse writer exists (D5). `@canonical capability:github-projects-sync`.
+3. **`Github.Relations` (slice 3, D11, new file + `projection.ex` marker)** — `hydrate_blocker_refs/3` gathers blocks
+   blockers from BOTH substrate views (content.blocked_by + the authoritative `Tasks.dependencies` graph),
+   draft-first-loads each, reads `content.github.issue` via `Link.get`, decorates the doc with `blocker_issue_refs`
+   (the exact key projection.ex L241 renders); an unmirrored blocker is OMITTED, never fabricated — reads DB, writes
+   nothing. `sync/5` mirrors `parent_id`→native sub-issue: no parent→`:noop`; parent unmirrored→`{:defer,
+   :parent_unmirrored}`; depth past cap→`{:flatten, parent_id}`; else `get_issue`→child db id→`add_sub_issue`, 422
+   tolerated as `:ok`. Adds a `<!-- barkpark:parent -->` fenced marker to projection.ex (caller-hydrated
+   `parent_marker` key, blocks-discipline: sentinel-scrubbed, idempotent, absent→no marker). Mutates no task (D4).
+   Gate 259/0, docs-anchors PASS.
+4. **Wiring (slice 4, `mirror_job.ex`, failure-isolated)** — `converge` hydrates `blocker_issue_refs` (+cap-flatten
+   `parent_marker`) onto the in-memory doc BEFORE `Projection.task_to_issue` (pure decoration, no new GitHub call).
+   After the issue exists + its mirror converged, a new `sync_projections` step runs Projects.sync then
+   Relations.sync, EACH wrapped so any `{:error,_}`/raise is logged+swallowed and the reconcile still returns the
+   issue-mirror's `:ok`; only a `RateLimitError` MAY `{:snooze,s}` the whole reconcile (D9). Projects `{:ok}` stamps
+   `Link.put` (`source:github`, outbox-excluded) so an unchanged task writes ZERO GraphQL next pass. Relations
+   `{:defer,:parent_unmirrored}` enqueues the parent MirrorJob + a bounded relink child (60s, cap 3 → cap-flatten);
+   `{:flatten,id}` stamps the marker + re-enqueues once; `relink:true` bypasses the `Link.synced?` short-circuit.
+   Projects/Relations resolve through an injected seam that no-ops via `Code.ensure_loaded?` when the module isn't
+   loaded — an absent projection module IS the isolation invariant. Existing non-relink behavior byte-identical.
+   8 isolation/snooze/defer/flatten/hydration/zero-GraphQL/relink tests; gate github dir 248/0 + `barkpark_web/`
+   2410/0, warnings-as-errors clean.
+
+**Stalled** — nothing NOT-GREEN. Wave is code-complete on branches; standard base-drift integration discipline
+applies (rebase each `-p` onto current `origin/main` before landing; land 1 → (2 ∥ 3) → 4).
+
+**INTEGRATION CONTRACTS the integrator MUST verify end-to-end (every perfecter verified return-shapes against the
+CHARTER, not sibling real code — the seam no-op is the only safety net until slices meet):**
+- **GraphQL error shape is the linchpin.** Slice 2 assumes a Projects success has NO top-level `errors`; slice 1
+  DOES surface a 200-with-`errors` as `{:error, %NetworkError{reason:{:graphql,_}}}` — so the contract HOLDS. But
+  confirm at integration that slice 1 never returns `{:ok, %{"data"=>nil,"errors"=>…}}` on a permission/add error,
+  or slice 2 mis-reads it as `:projects_item_add_failed`/empty-fields instead of bubbling.
+- **GraphQL RATE_LIMITED is a 200-body error**, surfaced as `{:graphql,errors}` on `NetworkError` — it is NOT a
+  `RateLimitError`, so slice-4's snooze will NOT fire on it; it is log+continued (safe) and re-attempted on the
+  task's next change (no fingerprint stamped on failure). Acceptable per one-directional/level-triggered design;
+  a quiescent task will not self-heal a rate-limited repaint. Slice-4 wiring MUST still classify+snooze a plain
+  403/429 bubbled from the extra `get_issue`/`add_sub_issue` (REST rate-limit → `RateLimitError`).
+- **Pass the link MAP, not a `%Document{}`, into `Projects.sync`/`Relations.sync`** (the `Link.get` result, plain
+  map|nil) — a struct would raise on Access. In-contract callers are fine; this is a slice-4 wiring note.
+- **hydrate returns a struct-tagged map** (`Map.put(%Document{}, string_key, v)`); `Projection.get/2` reads
+  string-key-first so it works, but the real Projects/Relations must not strictly reshape the struct.
+- **cap-flatten `parent_marker` render** now ships in slice-3's projection.ex — confirm slice 3's projection edge
+  lands WITH slice 4's cap-flatten stamp (slice-4 perfecter worked in isolation and saw the w1 projection, which
+  does not render it; slice 3 supplies the render — forward-compatible, verify they meet).
+
+**Cross-wave carries / deferrals (perfecter-flagged, not defects — Wave 6 territory):**
+- **`add_sub_issue` blanket-tolerates ALL 422 as `:ok`** — right for the steady-state already-linked replay, but
+  silently swallows a 422 from another cause (max-sub-issues, cycle) with NO cap-flatten marker. Distinguish in a
+  follow-up.
+- **Child-count cap (>100 children) NOT built** — only the depth cap (default 8) ships; a parent with many shallow
+  children still native-links. Builder TODO'd for wave 6.
+- **Fingerprint hashes only task desired-state, not board state** — a board field/option ADDED after a task's
+  fingerprint was stamped won't repaint until the task itself changes. Acceptable per one-directional design; a
+  board edit is not a resync trigger.
+- **Priority form divergence (by design):** Projects writes the RAW value (`"2"`); the issue LABEL uses
+  `priority:p2`. Operators must name board Priority options for the raw values. Architect's settled choice.
+- **Minor perf:** the immediate parent is loaded twice per relations sync (isolation-preserving). Left as-is.
+
+**Next wave: Wave 6 — observability (the natural + strongest next cut).** The system now carries substantial hidden
+sync state that NOTHING renders: `github_sync_conflicts` rows (out_of_band_edit/detached/dedup_refused, since wave
+4), cursor lag / queue depth, and now projects fingerprints + relation defer chains + cap-flattens. Wave 6's
+`/admin/github` `:ops` console (pulse precedent) + `bp github status` verb (reading conflicts + cursor lag, with
+`Conflicts.resolve/1` wired to a button) is the last loop-buildable wave and the home for the two above deferrals
+(distinguish real 422s; add the child-count cap). Then Wave 7 is the human gate (GitHub App creation, Projects v2
+board + single-select fields, secret provisioning, whitelist) — blocks NO code and lights the whole epic up.
+
+## Wave 5 CUT — Projects v2 + relations (2026-07-07, architect pass)
+
+**Wish increment:** the ledger and the repo finally become ONE BOARD. A maintainer with a configured Projects v2 board
+sees every mirrored task auto-populate as a READ-ONLY executive dashboard — Status/Priority/Worker/Goal painted via
+one-directional GraphQL that NOBODY edits back — and the issue tree mirrors the task tree: `parent_id`→native GitHub
+sub-issues, `blocks`→a fenced marker block in the body. An UNCHANGED task writes ZERO GraphQL (diffed against a stored
+`projects_fingerprint`, same lever as w4's drift fingerprint). Projects v2 is quarantined LAST + failure-isolated: a
+Projects GraphQL error or a relations hiccup must NEVER fail the Issues mirror — the issue is the source of truth, Projects
++ relations are projections that log+continue. This is the fiddliest API surface in the epic; it ships behind `project_id`
+being configured (absent → the whole Projects path is a no-op, the proven Issues loop is untouched).
+
+**Hard contracts every slice MUST respect (charter decisions):**
+- **D10 — Projects v2 is strictly ONE-DIRECTIONAL GraphQL, isolated.** Auto-add + Status/Priority/Worker/Goal writes ONLY,
+  DIFFED against the stored `projects_fingerprint` so an unchanged task writes ZERO GraphQL. NO code path reads a Projects
+  field value back into a task (the reverse writer must not exist). Gate the ENTIRE Projects path behind
+  `Settings` `project_id` being present+non-blank — absent → no-op, Issues loop unaffected.
+- **D11 — relations.** `parent_id`→native sub-issues; `blocks`→`<!-- barkpark:blocks:start -->`-fenced body marker (the
+  projection ALREADY renders this from a caller-hydrated `blocker_issue_refs` — Wave 5 supplies the hydration, never
+  re-implements the marker). PR linkage (`Task:` trailer) is UNCHANGED — do not touch it.
+- **D11-retry (this-wave refinement).** When a `parent_id`'s parent task is NOT mirrored yet (no `content.github.issue`),
+  the sub-issue link DEFERS — it never errors and never fabricates. Mechanism: `Relations.sync` returns `{:defer,
+  :parent_unmirrored}`; the wiring (slice 4) enqueues the PARENT's `MirrorJob` immediately (so the parent gets an issue) AND
+  re-enqueues the CHILD with `schedule_in: 60` + a `relink` arg + a bounded `relink_attempt` counter (cap 3). A `relink`
+  reconcile BYPASSES the `Link.synced?` short-circuit (else a synced child never re-links) but still no-ops the issue
+  create/PATCH when nothing changed — Projects/Relations are the point. On cap exhaustion OR when depth > 8 levels / a parent
+  has > 100 children, CAP-FLATTEN: skip the native sub-issue and record a `<!-- barkpark:parent -->` body marker naming the
+  parent task id instead (projection renders it, same fence discipline as `blocks`).
+- **D5 — NO bidirectional field editing.** GraphQL/REST reads (issue node_id, parent/blocker issue numbers, project field
+  metadata) are used ONLY to WRITE the projection — NEVER to write a GitHub value into a task field.
+- **D4 cut #2 — the exact string.** Any bookkeeping write that mutates a task (the `projects_fingerprint`/`projects_item_id`/
+  sub-issue-link stamp via `Link.put`) stamps `mutation_events.source` EXACTLY `"github"` (`Link.put` already defaults
+  `source: :github`) so it stays outbox-excluded — no new loop surface.
+- **D9 — rate safety.** Every extra GraphQL/REST call rides the SAME low-concurrency `github_mirror` Oban queue; a 403/429
+  on a Projects/relations call surfaces `retry_after` and the wiring may `{:snooze, s}` (level-triggered re-read loses no intent)
+  OR, for a failure-isolated projection call, log+continue. A Projects error MUST NOT dead-letter the issue mirror.
+- **NO boot-started DB-touching worker** (CI sandbox lesson). Wave 5 adds NO new worker; if tempted, gate OFF in
+  `config/test.exs`. Every slice runs its targeted github tests PLUS a broad `DataCase`/`ConnCase` swath (a bare plugin-dir
+  run hides sandbox/endpoint regressions). ALL GitHub HTTP (REST **and** GraphQL) is Bypass-mocked or seam-injected — NEVER
+  live, NEVER boot `phx.server` (codelist seed OOMs). Projects is OUTBOUND to github.com → it adds NO inbound route, so
+  `docs/openapi.json` is unchanged (do NOT regenerate). No new bp verb this wave → no Go gate.
+
+**Integration order + disjointness:** Slice 1 (Client GraphQL + sub-issue transport) touches the HOT `client.ex` — it is the
+ONLY slice that touches it, and it lands FIRST. Slices 2 (`Github.Projects`, new file) and 3 (`Github.Relations`, new file +
+`projection.ex` for the parent-marker) are file-disjoint from each other and from slice 1; they call `Client` through an
+INJECTED seam (`@client Application.get_env(...) || Client`, dynamic-dispatched `client_mod().graphql(...)`) so they COMPILE and
+TEST without slice 1 in the tree (tests stub the client; runtime resolves to the real Client slice 1 extends). Slice 4 (wiring)
+touches the HOT `mirror_job.ex` — the ONLY slice that touches it — and depends on 1+2+3 existing; it lands LAST. So: land 1 →
+then 2 + 3 (parallel) → 4. Sequence anything touching `client.ex`/`mirror_job.ex` (each is one slice's sole owner). Test-DB
+contention: re-run a gate once before declaring failure. ALL agents on Opus — never Fable, never Haiku.
+
+### Slice 1 — Client transport: `graphql/2` + `add_sub_issue/4` (the GraphQL + sub-issue edge)
+- **Surface:** `api/lib/barkpark/plugins/github/client.ex` (add two verbs, reuse the existing `request`/`do_request` pipeline)
+  + `test/barkpark/plugins/github/client_test.exs`.
+- **Build:**
+  - `Client.graphql(query, variables \\ %{}, opts) :: {:ok, map} | {:error, struct}` — POST to `<base>/graphql` (NOT
+    `/repos/...`; the GraphQL endpoint is the api base + `/graphql`) with JSON body `%{"query" => query, "variables" =>
+    variables}`, reusing `Auth.token/0`, the base resolution, headers, timeouts and the EXACT error classifier already in
+    `request/4`. Add ONE post-2xx wrinkle GraphQL needs: a GraphQL response is `200 OK` even when it carries a top-level
+    `"errors"` array — so after the normal 2xx decode, if the decoded body has a non-empty `"errors"` list, return
+    `{:error, %NetworkError{reason: {:graphql, errors}, endpoint: url}}` (reuse the existing `NetworkError` — do NOT add a 5th
+    error type; D8's 4-type set is fixed). A clean 2xx with `"data"` → `{:ok, data_or_body}`.
+  - `Client.add_sub_issue(repo, parent_number, child_issue_id, opts) :: {:ok, map} | {:error, struct}` — the native sub-issue
+    REST edge `POST /repos/:repo/issues/:parent_number/sub_issues` with body `%{"sub_issue_id" => child_issue_id}` (GitHub's
+    sub-issues API keys on the child's DATABASE id, not its number — the caller resolves it from `Client.get_issue`'s `"id"`).
+    Thin sibling of `add_labels/3`; same auth/base/classification. Idempotent-tolerant: a 422 "already a sub-issue" is a
+    permanent non-retryable outcome the caller treats as success (classify leaves it `%NetworkError{reason:{:http,422}}` —
+    the Relations caller maps 422 to `:ok`).
+  - Do NOT change any existing verb, the base resolver, or the retry/snooze semantics. `graphql` and `add_sub_issue` are pure
+    additions.
+- **Decisions respected:** D8 (fixed 4-error set — GraphQL errors ride `NetworkError`), D9 (same snooze-safe classification),
+  D10 (the GraphQL transport Projects needs).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/client_test.exs test/barkpark/plugins/github/` (worktree
+  recipe: copy `_build/test` + link `deps` first; `export CC=/usr/bin/clang`). Bypass-stub `POST /graphql`: assert (a) a clean
+  `{"data":{...}}` → `{:ok, data}`; (b) a `200` with `{"errors":[...]}` → `{:error, %NetworkError{reason: {:graphql, _}}}`;
+  (c) `add_sub_issue` POSTs the exact `sub_issue_id` body to the exact `/sub_issues` path and a 422 surfaces as
+  `%NetworkError{reason:{:http,422}}`; (d) a 403 with rate headers on either verb → `%RateLimitError{}` (classifier reused).
+  Run the full github dir to prove no existing client/mirror test regressed.
+- **Size:** medium.
+
+### Slice 2 — `Github.Projects` (D10): one-directional Projects v2 GraphQL, diffed
+- **Surface:** new `api/lib/barkpark/plugins/github/projects.ex` + `test/barkpark/plugins/github/projects_test.exs`. Calls
+  `Client` through an injected seam (default `Barkpark.Plugins.Github.Client`), so it compiles/tests without slice 1 landed.
+- **Build:**
+  - `Projects.sync(task_doc, repo, issue_number, link, opts) :: {:ok, %{fingerprint: term, item_id: String.t()}} | :noop |
+    {:error, term}`. Contract:
+    - **Gate:** if `Settings` `project_id` (`get_credentials()[:project_id]`) is blank → `:noop` immediately (zero GraphQL).
+    - **Desired field values (pure):** derive the Status/Priority/Worker/Goal values from the SAME source the labels come from —
+      read `Fields.matrix/0` entries whose `projects_field` is non-nil (`:status`/`:priority`/`:worker`/`:goal`) and pull the
+      corresponding value off the task content (status = derived from lifecycle_status+claim exactly like the projection's
+      status label; priority = `content.priority`; worker = `content.claim.worker`||`content.worker`; goal = `content.parent_id`).
+      Build a `%{status: ..., priority: ..., worker: ..., goal: ...}` desired map (nils allowed — a nil field is simply not written).
+    - **Diff (D10 — zero GraphQL when unchanged):** `fingerprint = :erlang.phash2(desired)`. Read the stored
+      `Link.get(task_doc)["projects_fingerprint"]`. If it EQUALS `fingerprint` → `:noop` (write NOTHING). Only a changed
+      fingerprint proceeds to GraphQL.
+    - **GraphQL sequence (only on a changed fingerprint):** (1) resolve the issue's GraphQL node id — `Client.get_issue(repo,
+      issue_number, opts)` returns `"node_id"` (REST already gives it; do NOT add a verb); (2) `addProjectV2ItemById(projectId,
+      contentId: node_id)` → item id (idempotent: re-adding an existing item returns its id; a stored `projects_item_id` off the
+      link lets you SKIP the add on subsequent syncs); (3) query the project's fields ONCE to map field NAME→{fieldId, and for a
+      single-select, optionName→optionId}: `node(id:$projectId){... on ProjectV2 { fields(first:50){ nodes {
+      ... on ProjectV2SingleSelectField { id name options { id name } } ... on ProjectV2FieldCommon { id name } } } } }`;
+      (4) per non-nil desired field, `updateProjectV2ItemFieldValue(projectId, itemId, fieldId, value:{singleSelectOptionId:
+      <id>})` for Status/Priority/Worker single-selects (match the desired value to an option by name; an UNMATCHED option name →
+      log+skip that ONE field, never crash), and `value:{text: <goal>}` for Goal if it is a text field. Field/option NAMES are
+      operator-configured on their board — match case-insensitively; a missing field name → skip that field (the board may not
+      define it), never error.
+    - Return `{:ok, %{fingerprint: fingerprint, item_id: item_id}}` so the wiring stamps `Link.put` with `projects_fingerprint`
+      + `projects_item_id`. Any GraphQL `{:error, _}` from `Client` bubbles as `{:error, _}` — the WIRING (slice 4) is what
+      swallows it (log+continue); `Projects.sync` itself must be honest about failure so tests can assert it.
+  - NEVER read a Projects field value back into `task_doc` (D5) — this module only ever WRITES to GraphQL and RETURNS a
+    fingerprint/item-id to stamp. No reverse path exists.
+- **Decisions respected:** D10 (one-directional, diffed, `project_id`-gated, isolated), D5 (no read-back), D4 (the stamp the
+  caller makes is `source:"github"`).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/projects_test.exs test/barkpark/plugins/github/` — Bypass
+  the GraphQL endpoint via the injected client seam (or a real Bypass `POST /graphql`). Assert: (a) blank `project_id` → `:noop`,
+  ZERO client calls; (b) a stored `projects_fingerprint` EQUAL to the current desired fingerprint → `:noop`, ZERO GraphQL
+  (the flagship "unchanged → zero writes" invariant); (c) a CHANGED fingerprint → `addProjectV2ItemById` then
+  `updateProjectV2ItemFieldValue` fired with the exact fieldId+optionId for a mapped single-select, and `{:ok,%{fingerprint,
+  item_id}}` returned; (d) an unmatched option name → that field skipped, others still written, no crash; (e) a client
+  `{:error,_}` → `{:error,_}` returned (isolation is the caller's job). Verify no reverse-write helper exists (a grep-style
+  assertion or a moduledoc note is fine; the property test in `fields.ex` already guards bidirectionality at the matrix level).
+- **Size:** large.
+
+### Slice 3 — `Github.Relations` (D11): sub-issues + blocker-ref hydration + cap-flatten marker
+- **Surface:** new `api/lib/barkpark/plugins/github/relations.ex` + `api/lib/barkpark/plugins/github/projection.ex` (add ONLY a
+  `<!-- barkpark:parent -->` cap-flatten marker, mirroring the existing `blocks` fence discipline) + tests
+  (`test/barkpark/plugins/github/relations_test.exs` + extend `projection_test.exs`). Calls `Client`/`Link` through injected
+  seams so it compiles/tests without slice 1.
+- **Build:**
+  - `Relations.hydrate_blocker_refs(task_doc, dataset, opts) :: map` — resolve the task's `blocks`/blocker edges (read the
+    task's blocker task ids the same way the task substrate exposes them — `content.blocked_by` / task edges), load each blocker
+    task DRAFT-FIRST via `Content.get_document`, read its `content.github.issue` (via `Link.get`), collect the mirrored issue
+    NUMBERS into a list, and return `task_doc` with `"blocker_issue_refs"` merged onto it (the exact key the projection reads at
+    projection.ex L240). A blocker with no mirrored issue is simply omitted (never fabricate — projection's rule). This is the
+    hydration source the w1 projection left as a caller-provided key; it does NOT write to GitHub or the DB — it only decorates
+    the in-memory doc the projection body render consumes.
+  - `Relations.sync(task_doc, repo, issue_number, dataset, opts) :: :ok | :noop | {:defer, :parent_unmirrored} | {:error, term}`
+    — native `parent_id`→sub-issue linking:
+    - No `content.parent_id` → `:noop`.
+    - Resolve the parent task's mirrored issue via `Link.get(parent_task)["issue"]` (load the parent DRAFT-FIRST). Parent
+      unmirrored (`nil`) → `{:defer, :parent_unmirrored}` (the wiring handles the retry per D11-retry — NEVER error, NEVER guess).
+    - **Cap-flatten (D11):** if the parent chain depth > 8 OR the parent already has > 100 children (bound the walk/count with a
+      cheap query; if the count is impractical, cap on depth alone and TODO the child-count) → do NOT create a native sub-issue;
+      instead return `{:flatten, parent_task_id}` and let the projection's new `<!-- barkpark:parent -->` marker carry it (the
+      wiring hydrates a `"parent_marker"` key onto the doc, symmetric to `blocker_issue_refs`). Keep this path simple — a body
+      marker is a graceful degradation, not a second linking system.
+    - Otherwise: resolve the CHILD issue's database id via `Client.get_issue(repo, issue_number, opts)["id"]`, then
+      `Client.add_sub_issue(repo, parent_issue_number, child_db_id, opts)`. A 422 "already linked" → `:ok` (idempotent). Stamp
+      nothing here beyond returning `:ok` — the wiring records `sub_issue_parent` in the link if it wants dedup (optional).
+  - `projection.ex`: add a `<!-- barkpark:parent:start -->…<!-- barkpark:parent:end -->` fenced marker rendered from a
+    caller-hydrated `"parent_marker"` key (a parent task id string), EXACTLY like the `blocks` marker — scrub the sentinel from
+    human prose first (reuse the existing sentinel-scrub), idempotent upsert, absent key → no marker. This is the cap-flatten
+    fallback surface; it does not change any existing `blocks`/acceptance/trailer behavior.
+- **Decisions respected:** D11 (native sub-issues + `blocks` marker via the reserved hydration key + cap-flatten to a body
+  marker), D11-retry (defer, never error), D5 (reads issue ids ONLY to write links, never into a task field), D4 (no task
+  mutation in this module — it decorates in-memory + calls GitHub; the link stamp is the wiring's `source:"github"` write).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/relations_test.exs
+  test/barkpark/plugins/github/projection_test.exs test/barkpark/plugins/github/` — `DataCase` + Bypass/seam. Assert: (a)
+  `hydrate_blocker_refs` on a task with two blockers (one mirrored, one not) → `blocker_issue_refs == [mirrored_num]`, and
+  `Projection.task_to_issue` on that doc renders the `blocks` marker with that number; (b) a task with a mirrored parent →
+  `add_sub_issue` called with the child's db id + parent number, 422 tolerated as `:ok`; (c) an UNMIRRORED parent →
+  `{:defer, :parent_unmirrored}`, no `add_sub_issue` call; (d) depth > 8 (or > 100 children) → `{:flatten, parent_id}` and the
+  projection renders the `<!-- barkpark:parent -->` marker; (e) no `parent_id` → `:noop`. Re-projection is idempotent (the new
+  parent marker upserts inside its own fence, human prose preserved).
+- **Size:** large.
+
+### Slice 4 — wiring: MirrorJob.converge → hydrate + Projects + Relations, failure-isolated
+- **Surface:** `api/lib/barkpark/plugins/github/mirror_job.ex` (the ONLY slice touching it) + extend
+  `test/barkpark/plugins/github/mirror_job_test.exs`. Depends on slices 1+2+3 existing.
+- **Build:**
+  - In `converge/5` (mirror_job.ex L189), BEFORE `Projection.task_to_issue`: `task_doc =
+    Relations.hydrate_blocker_refs(task_doc, dataset, opts)` (+ hydrate `"parent_marker"` when a prior relations pass flattened)
+    so the projected BODY carries the `blocks` (and cap-flatten parent) marker. This is a pure in-memory decoration — no new
+    GitHub call on the issue-mirror path.
+  - AFTER the issue exists and the issue mirror has converged (i.e. at the END of the successful `patch`/`after_create` path,
+    once the issue NUMBER is known and the issue create/PATCH returned `:ok`), run a NEW private `sync_projections/…` step that,
+    each independently and FAILURE-ISOLATED (wrap each in a `try`/`with` that logs and returns `:ok` on any `{:error,_}` — a
+    Projects GraphQL error or a relations error MUST NOT change the reconcile's `:ok`; the issue is the source of truth):
+    - `Projects.sync(task_doc, repo, num, link, opts)` → on `{:ok, %{fingerprint, item_id}}` stamp `Link.put(doc_id, dataset,
+      %{projects_fingerprint: fingerprint, projects_item_id: item_id}, opts)` (source:"github", outbox-excluded); on `:noop` do
+      nothing; on `{:error,_}` LOG + continue.
+    - `Relations.sync(task_doc, repo, num, dataset, opts)` → `:ok`/`:noop` continue; `{:flatten, parent_id}` → re-enqueue this
+      task once with a hydrated `parent_marker` (or stamp a link key the next converge reads) so the body marker lands; `{:defer,
+      :parent_unmirrored}` → per D11-retry: enqueue the PARENT's MirrorJob now + re-enqueue THIS child with `schedule_in: 60`,
+      `relink: true`, `relink_attempt: n+1` (cap 3, then flatten); `{:error,_}` → LOG + continue.
+  - Add the `relink` reconcile branch: when the job args carry `relink: true`, reconcile BYPASSES the `Link.synced?`
+    short-circuit (so a synced child still re-links) but the issue create/PATCH still no-ops when nothing changed; then runs
+    `Relations.sync` (+ Projects). Bound by `relink_attempt` so it can never loop forever. Keep the existing non-`relink`
+    behavior byte-identical.
+  - **Snooze vs swallow:** a Projects/relations RATE-LIMIT (`%RateLimitError{}`) MAY `{:snooze, s}` the whole reconcile (D9,
+    level-triggered — safe, the issue PATCH re-runs idempotently). Any OTHER Projects/relations error is SWALLOWED (log+continue,
+    reconcile returns the issue-mirror's `:ok`). NEVER dead-letter the issue mirror on a projection failure.
+- **Decisions respected:** D10 (Projects wired AFTER the issue exists, `project_id`-gated inside `Projects.sync`, failure-isolated),
+  D11 + D11-retry (relations wired after the issue exists; defer/flatten handled here), D9 (snooze only on rate-limit; swallow
+  otherwise), D4 (every `Link.put` stamp is `source:"github"`), D2 (reconcile still reads CURRENT state — the hydration + syncs
+  read the live task/link).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/mirror_job_test.exs test/barkpark/plugins/github/` — Bypass
+  the REST issue edge + the GraphQL edge (or inject Projects/Relations seams). Assert: (a) a normal mirror still creates/PATCHes
+  the issue AND stamps `synced_rev` even when `project_id` is blank (Projects `:noop`, issue loop 100% unaffected — the isolation
+  invariant); (b) a Projects GraphQL `{:error,_}` (Bypass 500 on `/graphql`) → reconcile STILL returns `:ok` and the issue is
+  still PATCHed + `synced_rev` stamped (failure isolation — the flagship safety property); (c) a task with a mirrored parent →
+  `add_sub_issue` fired after the issue exists; (d) an unmirrored parent → parent MirrorJob enqueued + a `relink` child job
+  enqueued (seam-count the enqueues), reconcile returns `:ok`; (e) `blocker_issue_refs` hydrated → the PATCH body carries the
+  `blocks` marker; (f) an UNCHANGED task on a second reconcile writes ZERO GraphQL (Projects fingerprint `:noop`). Run the full
+  github dir + a broad `mix test test/barkpark_web/` swath once to prove no endpoint/sandbox regression.
+- **Size:** large.
+
+**Carried to wave 6+ (not this wave):** the `/admin/github` sync-health console reading `github_sync_conflicts` + cursor lag +
+Projects/relations sync state (`bp github status`, `Conflicts.resolve/1` wired to a button) — wave 6 observability, now with
+Projects + relations state to render; and the wave-7 human App + Projects-board provisioning gate (create the board + the
+Status/Priority/Worker/Goal single-select fields, provision `project_id` into guerrilla). `@canonical
+capability:github-projects-sync` on `Projects.sync/5` and `capability:github-relations` on `Relations.sync/5`; the wave-7
+runbook backlinks both.
 
 ## Wave 4 CUT — adoption + conflict quarantine (2026-07-07, architect pass)
 
