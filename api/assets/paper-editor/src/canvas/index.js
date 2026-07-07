@@ -126,6 +126,16 @@ import {
 // node-view references `document` lazily. run-convert.js maps the block ⇄ nodes and
 // diffs the whole `columns` array coarsely. See ./columns-node.js.
 import { Columns, Column, ColumnAtom } from "./columns-node.js";
+// The section CONTAINER node — a top-level `section` block projects to this editable
+// bpSection (a nested block+ body wrapped by two rules + an editable title chrome).
+// A nested (depth>=1) section stays a verbatim bpOpaque carry (V1 forbid-nesting).
+// See ./section-node.js.
+import { Section } from "./section-node.js";
+// The MOUNTABLE bpOpaque carry — the schema twin of run-convert.js's opaque
+// projection. Needed so a bpSection body can hold a NON-canvas child (a nested
+// section, or a composite/codelist/localizedText) as a read-only verbatim carry
+// instead of PM lifting it out of the section. See ./opaque-node.js.
+import { Opaque } from "./opaque-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -652,6 +662,21 @@ class BpPaperCanvas extends HTMLElement {
         Columns,
         Column,
         ColumnAtom,
+        // The section CONTAINER node + its node-view. Registers `bpSection`
+        // (content: the canvas child roster MINUS bpSection PLUS bpOpaque; a NodeView
+        // rendering two `bp-hr` rules + an editable bold title around a contentDOM
+        // block+ body) so a top-level section block mounts as an editable container
+        // whose nested children JOIN the doc and round-trip through getJSON. isolating
+        // seals the boundary (Backspace/select-all stay inside); the content
+        // expression FORBIDS bpSection-in-bpSection (v1 no-nested-container). See
+        // ./section-node.js.
+        Section,
+        // The mountable bpOpaque verbatim carry. Registers `bpOpaque` (atom, bpBlock
+        // whole-block attr, a read-only chip) so run-convert's opaque projection —
+        // a section's non-canvas child (nested section / composite / codelist / …) —
+        // MOUNTS as a read-only carry inside a bpSection body instead of being lifted
+        // out by PM. See ./opaque-node.js.
+        Opaque,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {

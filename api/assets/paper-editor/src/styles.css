@@ -447,6 +447,26 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
 .bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
+/* ── canvas section container node-view (loop-epic/editable-section) ──────────
+ * `bp-canvas-section` is a THIN edit-only layout hook. PARITY rides the node-view's
+ * INLINE styles hand-matching the reader (a flex-column PdBox, a bold title on its
+ * OWN line, two `bp-hr` rules) — the section has NO reader class, so there is no
+ * cascade to inherit (route a). These rules add ONLY edit affordances (the body's
+ * column layout + a small child gap), kept visually inert so View == Edit. */
+.bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
+.bp-canvas-section > .bp-section__title { font-weight: 700; }
+/* The generic read-only bpOpaque carry chip (a nested section / composite / codelist
+ * carried verbatim inside a section body) reuses `.bp-canvas-readonly` for the chip
+ * frame; `.bp-canvas-opaque` is a marker hook for any future opaque-only tweak. */
+.bp-canvas-opaque { user-select: none; }
+
+/* ── section rule mirror (embedder only) ─────────────────────────────────────
+ * The section's two `bp-hr` rules inherit the reader's rule styling from
+ * `.bp-paper-surface .bp-hr` in Studio (paper-surface.css inlined), but a standalone
+ * embedder host has no `.bp-paper-surface` ancestor — so mirror the reader rule here,
+ * scoped to `.bp-paper-editor-body`, byte-matching paper-surface.css:309. */
+.bp-paper-editor-body .bp-hr { border: none; border-top: 1px solid var(--paper-rule); margin: 16px 0; }
+
 /* ── canvas read-only atom node-views (Phase-4 S3.6: sheet + embed) ──────────
  * sheet / embed are REFERENCES, not editable text — a read-only chip rendered by
  * the node-view (the sheet summary "Sheet · <ref> · NxM"; the embed reference

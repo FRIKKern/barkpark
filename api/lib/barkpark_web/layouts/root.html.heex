@@ -3202,6 +3202,18 @@
     /* Run-in ONLY on the non-collapsible <div> root — the collapsible <details>
        keeps a block body below its <summary>. */
     div.bp-canvas-callout > .bp-callout__body { display: inline; }
+    /* loop-epic/editable-section: `bp-canvas-section` is a thin edit-only layout
+       hook. Parity rides the node-view's INLINE styles hand-matching the reader (a
+       flex-column PdBox, a bold title on its own line, two `bp-hr` rules — Studio
+       inherits `.bp-paper-surface .bp-hr` from the inlined paper-surface.css). The
+       section has NO reader class, so these rules add ONLY edit affordances, kept
+       inert so View == Edit. Keep byte-aligned with styles.css. */
+    .bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
+    .bp-canvas-section > .bp-section__title { font-weight: 700; }
+    /* The generic read-only bpOpaque carry chip (a nested section / composite /
+       codelist carried verbatim inside a section body) reuses `.bp-canvas-readonly`
+       for the chip frame; `.bp-canvas-opaque` is a marker hook. */
+    .bp-canvas-opaque { user-select: none; }
 .bp-canvas-readonly {
       margin: 1em 0;
       user-select: none;

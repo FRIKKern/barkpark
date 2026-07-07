@@ -37,8 +37,7 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
       none SPLIT a run anymore. A run of
       one-or-more adjacent canvas blocks becomes one `{:run, [block, …]}`; every
       block that is NOT canvas-eligible (a deep nested-structure field — `composite` /
-      `arrayOf` / `codelist` / `localizedText` — or the still-boundary `section` /
-      `table`, until they copy the S10 container recursion) is a run boundary
+      `arrayOf` / `codelist` / `localizedText`) is a run boundary
       emitted as
       `{:block, block}`. The segment order matches the input order exactly. Pure:
       no socket, no I/O.
@@ -102,9 +101,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # SPLIT a run. Keep aligned with run-convert.js CANVAS_PICKER_FIELD_TYPES and
   # field-node.js BP_PICKER_FIELD_TYPES.
   #
-  # STILL EXCLUDED (a separate nested-structure increment): section / composite / object /
+  # STILL EXCLUDED (a separate nested-structure increment): composite / object /
   # arrayOf / codelist / localizedText — those are NOT in any canvas-field set and STILL
-  # split a run.
+  # split a run. (`section` is NO LONGER excluded — it rides its own CONTAINER node; see
+  # @canvas_container_types.)
   @canvas_picker_field_types ~w(field-image field-reference)
 
   # S3.6: the READ-ONLY ATOM block kinds the canvas handles as read-only atom nodes —
@@ -124,7 +124,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # After the run-splitter tail (part 1) the picker fields (field-image / field-reference)
   # ALSO ride the canvas (their WCs are client-side, no LiveView dependency), so the ONLY
   # remaining run boundaries are the NESTED-STRUCTURE fields
-  # (composite/object/arrayOf/codelist/localizedText/section) — a typical paper's run now
+  # (composite/object/arrayOf/codelist/localizedText) — `section` now rides its own
+  # CONTAINER node (see @canvas_container_types), so a typical paper's run now
   # spans the WHOLE doc. Keep aligned with run-convert.js CANVAS_READONLY_ATOM_TYPES
   # and embed-node.js BP_SHEET_NODE_NAME / BP_EMBED_NODE_NAME.
   @canvas_readonly_atom_types ~w(sheet embed)
@@ -177,33 +178,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
   @canvas_table_types ~w(table)
 
-  # S10: the CONTAINER block kinds the canvas handles as RECURSIVE nested-block
-  # nodes (run-convert.js CANVAS_CONTAINER_TYPES → bpColumns > bpColumn+ > child
-  # nodes). `columns` is the first: its column child-block trees become real
-  # editable PM regions (prose+divider) with non-first-class children carried
-  # verbatim/read-only (bpColumnAtom). V1: FORBID container-in-container.
+  # The CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes
+  # (run-convert.js CANVAS_CONTAINER_TYPES → an editable node whose interior is a
+  # nested BLOCK tree, not inline runs). TWO members:
+  #   * `columns` (S10) → bpColumns > bpColumn+ > child; column child-block trees are
+  #     real editable PM regions (prose+divider), non-first-class children carried
+  #     verbatim/read-only (bpColumnAtom). columns-node.js.
+  #   * `section` (editable-section) → bpSection: a nested block+ body wrapped by two
+  #     rules + an editable bold title; a container FOLDS INTO a run (no longer SPLITS
+  #     one). section-node.js / BP_SECTION_NODE_NAME.
+  # UNLIKE every prior canvas kind, a container's interior is a NESTED BLOCK TREE (child
+  # blocks with their own type/content), not inline runs (callout) nor a verbatim opaque
+  # carry (sheet/embed/fleet).
   #
-  # This is the FIRST canvas node whose interior is a NESTED BLOCK TREE (child
-  # blocks with their own type/content), not inline runs (callout) nor a verbatim
-  # opaque carry (sheet/embed/fleet). `section` (also a container) rides the same
-  # CANVAS_CONTAINER_TYPES recursion.
+  # V1 forbids container-in-container: a container encountered as a CHILD (depth>=1) is
+  # carried as a read-only bpOpaque/bpColumnAtom verbatim (NOT another editable
+  # container), enforced by the content expression — a legacy nested container
+  # round-trips byte-identical and is never restructured.
   #
-  # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES and
-  # columns-node.js (bpColumns/bpColumn/bpColumnAtom).
-  @canvas_container_types ~w(columns)
+  # MUST stay in LOCKSTEP with run-convert.js CANVAS_CONTAINER_TYPES, columns-node.js
+  # (bpColumns/bpColumn/bpColumnAtom) and section-node.js (bpSection).
+  @canvas_container_types ~w(columns section)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
   # atoms (t12a) ∪ canvas article-chrome ROLE prose ∪ the canvas TABLE node tree
-  # (editable-table). A run is a maximal contiguous stretch of these; any other kind is a
-  # run boundary. Keep this aligned with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES
-  # ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES[native ∪
-  # picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪ CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪
-  # CANVAS_TABLE_TYPES) so the Elixir partition and the JS projection agree on what a run
-  # may contain. With the fleet AND the table folded in, the ONLY remaining run
-  # boundaries are the nested-structure fields (section / composite / object / arrayOf /
-  # codelist / localizedText) — a typical paper's run now spans the WHOLE doc.
+  # (editable-table) ∪ canvas CONTAINER nodes (columns, section). A run is a maximal
+  # contiguous stretch of these; any other kind is a run boundary. Keep this aligned
+  # with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES ∪ CANVAS_ATTR_ATOM_TYPES ∪
+  # CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES[native ∪ picker] ∪
+  # CANVAS_READONLY_ATOM_TYPES ∪ CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪
+  # CANVAS_TABLE_TYPES ∪ CANVAS_CONTAINER_TYPES) so the Elixir partition and the JS
+  # projection agree on what a run may contain. With the fleet, the table AND the
+  # containers folded in, the ONLY remaining run boundaries are the nested-structure
+  # fields (composite / object / arrayOf / codelist / localizedText) — a typical
+  # paper's run now spans the WHOLE doc.
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -299,13 +309,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
   prose matching the reader) OR the canvas TABLE node tree (`table` as of
   editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
-  editable inline runs) OR a CONTAINER node (`columns` as of S10 — a recursive
-  nested-block node `bpColumns > bpColumn+ > child`, container-in-container FORBIDDEN
-  in v1). Canvas-eligible blocks
+  editable inline runs) OR a CONTAINER node (`columns` and `section` — a recursive
+  nested-block node whose interior is an editable block tree, container-in-container
+  FORBIDDEN in v1). Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
   `field-reference` RIDE a run too — only the DEEP nested-structure fields composite /
-  arrayOf / codelist / localizedText, and the still-boundary section / table until
-  they copy the S10 container recursion, stay boundaries) is a `{:block, …}`
+  arrayOf / codelist / localizedText stay boundaries) is a `{:block, …}`
   boundary. This is the predicate `partition_runs/1` chunks on.
   """
   @spec canvas?(map()) :: boolean()
