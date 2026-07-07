@@ -30,9 +30,13 @@ defmodule BarkparkWeb.GithubWebhookController do
 
   A verified-but-unactionable delivery (ping, non-`issues` event, non-`opened`
   action, bot-drop) returns 2xx so GitHub marks it delivered and does NOT
-  retry-storm. Only a genuine intake FAILURE (`{:error, _}` — e.g. a transient
-  DB error) returns 5xx, inviting GitHub to redeliver; the deterministic
-  `gh-<num>` doc_id makes that redelivery idempotent (no duplicate task).
+  retry-storm. A dedup-REFUSED intake (`{:refused, _}` — the outsider issue
+  looked like existing tracked work) is likewise 2xx: Intake already posted the
+  maintainer comment and recorded a findable dead-letter row, so a redelivery
+  would only double-post — GitHub must never retry it. Only a genuine intake
+  FAILURE (`{:error, _}` — e.g. a transient DB error) returns 5xx, inviting
+  GitHub to redeliver; the deterministic `gh-<num>` doc_id makes that
+  redelivery idempotent (no duplicate task).
 
   ## Intake seam
 
@@ -67,7 +71,11 @@ defmodule BarkparkWeb.GithubWebhookController do
   # 2xx (verified + handled), a real error is 5xx (retryable, idempotent).
   defp handle_issues(conn, params) do
     case intake_fun().(params, ingest_opts()) do
-      {:ok, _doc} ->
+      # Intake reports `{:ok, :born, doc}` on a fresh birth and `{:ok, :exists,
+      # doc}` on an idempotent re-delivery — both are 2xx handled deliveries.
+      # Match the TAG explicitly: a bare `{:ok, _doc}` (2-tuple) would miss the
+      # real 3-tuple shape and CaseClauseError → a perpetual 500 GitHub retries.
+      {:ok, _tag, _doc} ->
         json(conn, %{ok: true, ingested: true})
 
       :dropped ->
@@ -78,6 +86,13 @@ defmodule BarkparkWeb.GithubWebhookController do
       :ignored ->
         # action != "opened" (edited/closed/labeled/reopened/…). Accepted, no-op.
         conn |> put_status(:accepted) |> json(%{ok: true, ignored: "action"})
+
+      {:refused, _doc_id} ->
+        # Dedup judged the outsider issue a look-alike (D6). No task born, but
+        # Intake already posted a maintainer comment + recorded a findable
+        # dead-letter row. 2xx (accepted) so GitHub never redelivers — the
+        # comment must post exactly once.
+        conn |> put_status(:accepted) |> json(%{ok: true, refused: true})
 
       {:error, reason} ->
         # A genuine intake failure (transient DB, etc.). 5xx invites GitHub to

@@ -46,7 +46,9 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
 
   describe "issues event → Intake dispatch" do
     test "opened issue forwards the payload to Intake and answers 200" do
-      stub_intake({:ok, %{"_id" => "gh-42"}})
+      # The real Intake reports a 3-tuple (`{:ok, :born, doc}`) — stub that exact
+      # shape, not a 2-tuple, so this test can't pass while prod CaseClauseErrors.
+      stub_intake({:ok, :born, %{"_id" => "gh-42"}})
 
       conn = deliver("issues", @issue_opened)
 
@@ -70,7 +72,7 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
         github_mirror_datasets: ["staging", "production"]
       )
 
-      stub_intake({:ok, %{"_id" => "gh-42"}})
+      stub_intake({:ok, :born, %{"_id" => "gh-42"}})
 
       conn = deliver("issues", @issue_opened)
 
@@ -109,11 +111,34 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
     end
 
     test "the X-GitHub-Event value is matched case-insensitively" do
-      stub_intake({:ok, %{"_id" => "gh-42"}})
+      stub_intake({:ok, :born, %{"_id" => "gh-42"}})
 
       conn = deliver("Issues", @issue_opened)
 
       assert %{"ok" => true, "ingested" => true} = json_response(conn, 200)
+      assert_received {:intake_called, _payload, _opts}
+    end
+
+    test "an idempotent re-delivery (:exists 3-tuple) also answers 200" do
+      # A re-delivery short-circuits in Intake to `{:ok, :exists, doc}`; the
+      # controller must accept both `:ok` tags, not just `:born`.
+      stub_intake({:ok, :exists, %{"_id" => "gh-42"}})
+
+      conn = deliver("issues", @issue_opened)
+
+      assert %{"ok" => true, "ingested" => true} = json_response(conn, 200)
+      assert_received {:intake_called, _payload, _opts}
+    end
+
+    test "a dedup-refused intake ({:refused, _}) answers 202 — never a retry-storm" do
+      # The outsider issue looked like existing tracked work. Intake already
+      # posted the maintainer comment + recorded a findable dead-letter row, so
+      # a 5xx would only double-post — the controller must answer 2xx.
+      stub_intake({:refused, "gh-42"})
+
+      conn = deliver("issues", @issue_opened)
+
+      assert %{"ok" => true, "refused" => true} = json_response(conn, 202)
       assert_received {:intake_called, _payload, _opts}
     end
   end

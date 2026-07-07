@@ -24,12 +24,18 @@ defmodule Barkpark.Plugins.Github do
       a supervised GenServer, NOT cron — the `Barkpark.Sync.PushWorker` precedent.
       The `github_mirror` Oban queue itself is declared statically in
       `config/config.exs` (plugins can add crontab, not queues).
-    * `register_routes/1` → the ONE inbound webhook route (Wave 3). It mounts
+    * `register_routes/1` → the inbound webhook route (Wave 3,
       `POST /v1/plugins/github/webhook` → `BarkparkWeb.GithubWebhookController`
-      on the `:github_webhook` bucket (signature-verified pipeline, slice 1).
-      The adopt controller is still a later wave (4). Off-by-default is
-      unaffected: the route only resolves a live handler when `github` is
-      whitelisted AND the router carries the `:github_webhook` scope block.
+      on the signature-verified `:github_webhook` bucket) PLUS the adopt route
+      (Wave 4, `POST /v1/plugins/github/adopt/:id` →
+      `BarkparkWeb.GithubAdoptController` on the bearer-gated `:token` bucket).
+      Off-by-default is unaffected: a route only resolves a live handler when
+      `github` is whitelisted.
+    * `cli_commands/0` → merge-safe delegate to `Github.CLI` (the `github adopt`
+      operator verb the `/v1/capabilities` manifest exposes).
+    * `resolve_doc_actions/2` + `action_handlers/0` → the Studio "Adopt from
+      GitHub" button, surfaced only for a `task` with
+      `content.github.state == "intake"`, dispatching `Github.Adopt.adopt/3`.
     * `register_schemas/1` → `[]` (the `use` default). GitHub adds NO task
       schema (decision D3): the bookkeeping field `github:{repo,issue,synced_rev}`
       rides the task's plain CONTENT via `Content.*`, never a declared
@@ -198,17 +204,112 @@ defmodule Barkpark.Plugins.Github do
     [%{type: :link, label: "GitHub Sync", path: "/admin/github", icon: "github"}]
   end
 
-  # The single inbound webhook route (Wave 3). Lands at
-  # `POST /v1/plugins/github/webhook` via the `:github_webhook` scope block the
-  # router carries (slice 1), which pipes it through the signature-verify
-  # pipeline — signature is the sole auth. The adopt controller is a later wave.
+  # Plugin routes. Two so far:
+  #
+  #   * `POST /v1/plugins/github/webhook` (Wave 3) — inbound issue webhook via the
+  #     `:github_webhook` scope block the router carries (signature-verify
+  #     pipeline, signature is the sole auth).
+  #   * `POST /v1/plugins/github/adopt/:id` (Wave 4) — flip a `src:github` intake
+  #     task into Barkpark ownership. On the `:token` bucket — a bearer-gated
+  #     OPERATOR action (NOT `:admin`), so `bp github adopt` runs with a normal
+  #     operator token.
+  #
+  # Off-by-default is unaffected: a route only resolves a live handler when
+  # `github` is whitelisted.
   @impl Barkpark.Plugin
   def register_routes(_ctx) do
     [
       {:post, "/github/webhook", BarkparkWeb.GithubWebhookController, :receive,
-       auth: :github_webhook}
+       auth: :github_webhook},
+      {:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt, auth: :token}
     ]
   end
+
+  @doc """
+  Merge-safe CLI delegate: contributes the `github` operator verbs the
+  `/v1/capabilities` manifest exposes (`github adopt`), but only once the
+  sibling CLI slice's `Barkpark.Plugins.Github.CLI` module exists. Until then
+  this returns `[]`, so the plugin compiles and boots standalone in every
+  worktree (the Tickets precedent). The manifest picks the verbs up
+  dynamically — no Go source change.
+  """
+  @impl Barkpark.Plugin
+  def cli_commands do
+    if Code.ensure_loaded?(Barkpark.Plugins.Github.CLI),
+      do: Barkpark.Plugins.Github.CLI.commands(),
+      else: []
+  end
+
+  @doc """
+  Named action handlers the Studio editor dispatches. One entry: `github_adopt`
+  flips a `src:github` intake task into Barkpark ownership via
+  `Github.Adopt.adopt/3` (the mode flag is unused — adoption is not a
+  dry-run/real split). Paired with the `resolve_doc_actions/2` button below,
+  which only surfaces the action for an intake task.
+  """
+  @impl Barkpark.Plugin
+  def action_handlers do
+    %{
+      "github_adopt" => fn doc_id, dataset, _mode ->
+        Barkpark.Plugins.Github.Adopt.adopt(doc_id, dataset, [])
+      end
+    }
+  end
+
+  @doc """
+  Append an "Adopt from GitHub" doc action to the Studio editor header, but ONLY
+  for a `task` document whose `content.github.state == "intake"` — a born-dark
+  outsider issue awaiting adoption. Any other doc (a plain task, an already-
+  adopted task, a mirrored task, a non-task) is left untouched, so the button
+  appears exactly where adoption is meaningful.
+
+  Reads the intake state off `ctx.doc` string- AND atom-key safe (the onixedit
+  `hide_publish_action?` precedent — the doc may arrive as a `%Document{}` with
+  atom-keyed `:content` or a plain string-keyed map). If the CLI verb alone
+  satisfies the operator, this button is pure convenience — dropping it would
+  not regress the wish.
+  """
+  @impl Barkpark.Plugin
+  def resolve_doc_actions(prev, ctx) do
+    if adoptable_intake?(ctx) do
+      prev ++
+        [
+          %{
+            "name" => "github_adopt",
+            "label" => "Adopt from GitHub",
+            "kind" => "modal",
+            # The generic ConfirmModal is otherwise a bare title + unexplained
+            # "Confirm" (onixedit `publish_to_bokbasen` precedent supplies this
+            # payload). Adoption has no real dry-run — `Adopt.adopt/3` ignores the
+            # mode flag — so the body is honest that Confirm adopts immediately;
+            # the repeat is a safe idempotent no-op (already-adopted → `{:ok}`).
+            "modal" => %{
+              "title" => "Adopt from GitHub?",
+              "body" =>
+                "Adopting flips this GitHub intake task into Barkpark ownership: it drops the needs-human gate, keeps the src:github provenance, and posts a backlink on the source issue. It does NOT claim the task — a worker claims it afterward through the normal bp task path. Confirm to adopt (idempotent — repeating is a safe no-op)."
+            },
+            "icon" => "github"
+          }
+        ]
+    else
+      prev
+    end
+  end
+
+  # `content.github.state` lives under the doc's `content` map. The doc may
+  # arrive as a `%Document{}` struct (atom-keyed `:content`) or a plain map
+  # (string-keyed `"content"`). Read every shape; adoptable only when the state
+  # reads exactly `"intake"` on a `task`.
+  defp adoptable_intake?(%{doc_type: "task", doc: %{} = doc}) do
+    state =
+      get_in(doc, [Access.key(:content, %{}), "github", "state"]) ||
+        get_in(doc, ["content", "github", "state"]) ||
+        get_in(doc, [Access.key(:content, %{}), :github, :state])
+
+    state == "intake"
+  end
+
+  defp adoptable_intake?(_), do: false
 
   @doc """
   Supervised workers the host splices into the plugin supervision tree when

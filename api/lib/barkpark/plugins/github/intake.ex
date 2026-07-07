@@ -34,7 +34,18 @@ defmodule Barkpark.Plugins.Github.Intake do
        (`gh-<num>` resolves to no existing task) call `Content.create_document/4`
        with `source: :github`. There is no `prev_doc`, so
        `Tasks.Dedup.check_new_task/5` runs — a fresh outsider issue is not a
-       duplicate, so the task is born. On RE-DELIVERY the `gh-<num>` doc already
+       duplicate, so the task is born. If instead the Dedup seam judges the
+       issue a LOOK-ALIKE of existing tracked work, the create returns
+       `{:error, {:duplicate_task, verdict}}`. We do NOT swallow that silently
+       (silence would leave the outsider un-acknowledged, re-refuse on every
+       re-delivery, and never surface a row an `adopt` could find). Instead we
+       SURFACE the refusal (D7 spirit): a maintainer-visible comment on the
+       issue, a findable `dedup_refused` dead-letter row via `Github.Conflicts`,
+       and a DISTINCT `{:refused, doc_id}` outcome the controller maps to 2xx
+       (accepted — GitHub never re-delivers, so the comment posts exactly once).
+       A genuine NON-dedup create error stays `{:error, reason}` → the
+       controller answers 5xx (retryable — that transient IS worth retrying).
+       On RE-DELIVERY the `gh-<num>` doc already
        exists, so intake SHORT-CIRCUITS to `{:ok, :exists, doc}` and never
        touches the write path at all — the outsider issue is read EXACTLY ONCE,
        at birth (ownership matrix). Re-running the create would find the row as
@@ -64,7 +75,12 @@ defmodule Barkpark.Plugins.Github.Intake do
   ## Injected seams (DrainWorker precedent — no network in tests)
 
     * `:comment_fun` — default `&Client.create_comment/4`; `(repo, number, body,
-      opts)` in, `{:ok, _}` = posted, anything else = logged and swallowed.
+      opts)` in, `{:ok, _}` = posted, anything else = logged and swallowed. Used
+      for BOTH the birth backlink AND the dedup-refusal maintainer comment.
+    * `:conflict_fun` — default `&Github.Conflicts.record/1` (resolved
+      dynamically); `(attrs_map)` in. Records the `dedup_refused` dead-letter
+      row. Best-effort: a failure is logged and swallowed so a flaky recorder
+      never turns a delivered-and-commented refusal into a retry storm.
     * `:repo`        — the `owner/name` for the backlink comment; defaults to
       `Settings.repo/0`.
     * `:dataset`     — the dataset the task is born into; defaults to
@@ -86,18 +102,25 @@ defmodule Barkpark.Plugins.Github.Intake do
   @intake_labels ["src:github", "needs-human"]
   @backlink_body "This issue is now tracked internally in Barkpark. " <>
                    "Updates will be posted here."
+  @refused_comment_body "This issue looks related to existing tracked work; " <>
+                          "a maintainer will review it."
 
   @typedoc """
   Intake outcome:
 
     * `{:ok, :born, doc}`   — a fresh task was born (backlink comment attempted)
     * `{:ok, :exists, doc}` — re-delivery; the task already existed (idempotent no-op)
+    * `{:refused, doc_id}`  — the Dedup seam judged the issue a look-alike (D6):
+      no task born, but a maintainer comment was posted and a `dedup_refused`
+      dead-letter row recorded; the controller maps this to 2xx (accepted)
     * `:ignored`            — not an `issues.opened` event (D6)
     * `:dropped`            — the App's own `[bot]` sender (D4 cut #1)
-    * `{:error, reason}`    — the Content create failed (e.g. dedup refusal)
+    * `{:error, reason}`    — a genuine (non-dedup) Content create failure; the
+      controller maps this to 5xx so GitHub redelivers (idempotent via `gh-<num>`)
   """
   @type result ::
           {:ok, :born | :exists, Document.t()}
+          | {:refused, String.t()}
           | :ignored
           | :dropped
           | {:error, term()}
@@ -161,10 +184,81 @@ defmodule Barkpark.Plugins.Github.Intake do
             maybe_backlink(number, opts)
             {:ok, :born, doc}
 
+          # The Dedup seam (Tasks.Dedup, via Content.Writer) judged the outsider
+          # issue a look-alike of existing tracked work. Surface it — never
+          # silence (D6/D7 spirit): a maintainer comment + a findable dead-letter
+          # row + a DISTINCT outcome the controller answers 2xx.
+          {:error, {:duplicate_task, verdict}} ->
+            refused(doc_id, number, dataset, verdict, opts)
+
+          # A genuine, non-dedup failure (transient DB, etc.) stays an error so
+          # the controller answers 5xx and GitHub redelivers — the deterministic
+          # `gh-<num>` doc_id keeps that redelivery idempotent.
           {:error, reason} ->
             {:error, reason}
         end
     end
+  end
+
+  # ── dedup-refusal surfacing (no outsider gets silence) ─────────────────────
+
+  # The Dedup verdict refused a birth. Do the two visible things — comment +
+  # dead-letter row — then return the distinct `{:refused, doc_id}`. Neither
+  # side effect may crash intake or force a redelivery: both are best-effort so
+  # the maintainer comment posts EXACTLY ONCE (2xx, GitHub never re-delivers).
+  # `doc_id` rides the outcome (the intended `gh-<num>`), but the recorded row
+  # carries `doc_id: nil` — no task exists to point at.
+  defp refused(doc_id, number, dataset, verdict, opts) do
+    maybe_comment(number, @refused_comment_body, opts)
+    record_refusal(number, dataset, verdict, opts)
+    {:refused, doc_id}
+  end
+
+  # Dead-letter the refusal into `github_sync_conflicts` (slice-1 recorder) so
+  # it is FINDABLE — the wave-6 console lists it and a maintainer can reconcile
+  # by hand. Slice-1's recorder DEDUPES on the open `{repo, issue, kind}` row,
+  # so a re-delivery UPDATES the same row instead of piling duplicates. The
+  # recorder is out-of-band bookkeeping — it never touches `Content.*` or
+  # `mutation_events`, so it can never re-trigger sync (no loop surface).
+  defp record_refusal(number, dataset, verdict, opts) do
+    repo = Keyword.get(opts, :repo) || Settings.repo()
+    record_fun = Keyword.get(opts, :conflict_fun, &default_record/1)
+
+    attrs = %{
+      repo: repo,
+      issue: number,
+      doc_id: nil,
+      dataset: dataset,
+      kind: "dedup_refused",
+      detail: verdict
+    }
+
+    case record_fun.(attrs) do
+      {:ok, _} ->
+        :ok
+
+      other ->
+        Logger.warning(
+          "github intake: recording dedup_refused for ##{number} failed: #{inspect(other)}"
+        )
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "github intake: recording dedup_refused for ##{number} raised: #{inspect(e)}"
+      )
+
+      :ok
+  end
+
+  # Default conflict recorder, resolved dynamically (the controller's
+  # `default_ingest` precedent) so this compiles clean whether or not the
+  # slice-1 `Github.Conflicts` module is present in the tree yet.
+  defp default_record(attrs) do
+    mod = Module.concat(Barkpark.Plugins.Github, Conflicts)
+    mod.record(attrs)
   end
 
   # Resolve an already-born `gh-<num>` task (draft-first, then the published
@@ -224,36 +318,41 @@ defmodule Barkpark.Plugins.Github.Intake do
 
   # ── gate 5: best-effort backlink comment ───────────────────────────────────
 
-  # Post the "tracked internally" backlink on a fresh birth. Best-effort: a nil
-  # repo skips silently; a failed or raising comment is logged and swallowed so
-  # the durably-born task is never lost to a flaky GitHub comment API.
-  defp maybe_backlink(number, opts) do
+  # Post the "tracked internally" backlink on a fresh birth.
+  defp maybe_backlink(number, opts), do: maybe_comment(number, @backlink_body, opts)
+
+  # Post a maintainer-visible comment via the `:comment_fun` seam. Best-effort:
+  # a nil repo skips silently; a failed or raising comment is logged and
+  # swallowed so a durably-born task (or a durably-recorded refusal) is never
+  # lost to a flaky GitHub comment API. Shared by the birth backlink and the
+  # dedup-refusal notice (only the body differs).
+  defp maybe_comment(number, body, opts) do
     repo = Keyword.get(opts, :repo) || Settings.repo()
     comment_fun = Keyword.get(opts, :comment_fun, &Client.create_comment/4)
 
     cond do
       not is_binary(repo) ->
-        Logger.debug("github intake: no repo configured, skipping backlink comment")
+        Logger.debug("github intake: no repo configured, skipping comment on ##{number}")
         :ok
 
       true ->
-        post_comment(comment_fun, repo, number, opts)
+        post_comment(comment_fun, repo, number, body, opts)
     end
   end
 
-  defp post_comment(comment_fun, repo, number, opts) do
-    case comment_fun.(repo, number, @backlink_body, opts) do
+  defp post_comment(comment_fun, repo, number, body, opts) do
+    case comment_fun.(repo, number, body, opts) do
       {:ok, _} ->
         :ok
 
       other ->
-        Logger.warning("github intake: backlink comment on ##{number} failed: #{inspect(other)}")
+        Logger.warning("github intake: comment on ##{number} failed: #{inspect(other)}")
 
         :ok
     end
   rescue
     e ->
-      Logger.warning("github intake: backlink comment on ##{number} raised: #{inspect(e)}")
+      Logger.warning("github intake: comment on ##{number} raised: #{inspect(e)}")
 
       :ok
   end

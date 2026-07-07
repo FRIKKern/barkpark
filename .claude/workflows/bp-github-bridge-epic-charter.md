@@ -105,14 +105,19 @@ human gate and it blocks nothing in code.
 cursor→outbox→projection→client→Link idempotency; no-op on `rev==synced_rev`; `{:snooze}` on 429;
 lifecycle close mapping; drain worker on `oban_crontab`; wire routes/cron into `github.ex`.
 
-**Wave 3 — inbound intake — ✅ BUILT (4/4 green, on branches — see wave log):** webhook controller + endpoint raw-body cache + signature plug (from
+**Wave 3 — inbound intake — ✅ MERGED (#1234, `3fbd61ca`):** webhook controller + endpoint raw-body cache + signature plug (from
 wave-1 verifier) + `[bot]`-identity drop + intake via `Content` create through the `Tasks.Dedup`
 seam (deterministic `gh-<num>`, `src:github`+`needs-human`, `source: :github`) + "tracked
-internally" backlink comment.
+internally" backlink comment. Wave-2.5 carries folded in (tenant scope threaded into `reconcile`,
+`active?/0` memoized in DrainWorker). `@canonical capability:github-inbound-intake` on `Intake.ingest/2`.
+`Intake.ingest/2` short-circuits a re-delivery to `{:ok, :exists, doc}` (reads the outsider issue
+EXACTLY ONCE at birth); born-dark task stamps `content.github.state = "intake"` (the wave-4 adopt find-key).
 
-**Wave 4 — adoption + conflict quarantine:** adopt action (Studio doc_action + `bp github adopt`)
+**Wave 4 — adoption + conflict quarantine — ⏳ ACTIVE (cut below):** adopt action (Studio doc_action + `bp github adopt`)
 strips `needs-human`/flips ownership/posts backlink; `github_sync_conflicts` record-then-converge
-on out-of-band edits; deleted issue → `detached`, never recreated.
+on out-of-band edits; deleted issue → `detached`, never recreated; dedup-refusal surfaced (no silence);
+webhook secret memoized (kill pre-verify audit amplification). **See the "Wave 4 CUT" section at the
+bottom for the 5-slice build plan.**
 
 **Wave 5 — Projects v2 + relations:** one-directional GraphQL auto-add + custom fields (diffed);
 `parent_id`→sub-issues (deferred-retry when parent unmirrored, cap-flatten past 8-level/100-child);
@@ -326,6 +331,323 @@ value this wave stamps). `github_sync_conflicts` record-then-converge on out-of-
 transferred issue → `github.state=detached`, never recreated. Fold in the two intake design edges above:
 surface a dedup-refused intake (don't leave the outsider silent) and memoize the webhook secret to kill the
 pre-verify audit amplification. `@canonical` on the adopt entry point.
+
+### Wave 2026-07-07 — Wave 3 inbound intake MERGED (#1234) — RECONCILED (architect pass)
+
+Wave 3 landed on `main` as squash `3fbd61ca feat(github): wave-3 inbound intake — outsider issue → born-dark
+task (#1234)`. The plugin dir now ships **14 modules** (waves 1-3): auth, client, cursor, drain_worker, errors,
+fields, intake, link, mirror_job, outbox, projection, settings, signature (+ `plugins/github.ex`). New host-side:
+`BarkparkWeb.Plugs.CacheBodyReader`, `BarkparkWeb.Plugs.GithubWebhookSignature`, `BarkparkWeb.GithubWebhookController`,
+the `:github_webhook` router pipeline + `/v1/plugins` bucket, `endpoint.ex` body_reader wiring. `github.ex`
+`register_routes/1` now returns the one webhook route; `register_workers/1 → [Auth, DrainWorker]`. Waves 1+2+3 DONE.
+Verified against code (all four wave-4 carries confirmed live): (1) dedup-refusal `{:error,{:duplicate_task,_}}`
+from `Content.create_document` bubbles straight out of `Intake.birth/2` with NO comment/persist — silent (intake.ex
+L164-166); (2) MirrorJob `classify(%NotFound{}, :update, …)` stamps `state:"detached"` but records NO quarantine row
+(mirror_job.ex L275-281); (3) the signature plug reads full `Settings.get_credentials()` per request → audit-row +
+telemetry BEFORE sig verify; (4) `content.github.state == "intake"` is the adopt find-key. All four are the Wave 4 cut.
+
+### Wave 2026-07-07 — Wave 4 adoption + conflict quarantine BUILT (5/5 green, merge-ready)
+
+The intake→adopt journey CLOSES and D7 goes from doctrine to running code. Real WISH movement, not micro-repair:
+an operator now flips a born-dark `gh-<num>` intake into Barkpark ownership with one verb; no outsider is met with
+silence; out-of-band GitHub drift is RECORDED before the ledger overwrites it; a deleted/transferred issue detaches
+with a surfaced record and is never recreated; the live webhook endpoint stops amplifying an audit row per probe.
+All 5 file-disjoint slices GREEN, every perfecter SHIP IT, zero NOT-GREEN. Branches: `loop-epic/{quarantine-substrate-…-0,
+adopt-action-…-1, dedup-refusal-surfacing-…-2, conflict-quarantine-…-3, webhook-secret-memoize-…-4}` (+ each `-p`).
+
+**Landed (on branches, pending integration):**
+1. **Quarantine substrate (slice 1)** — new `github_sync_conflicts` side table (migration mirrors the `pulse_events`
+   plugin-owns-a-table precedent) + `Github.Conflict` schema + `Github.Conflicts` recorder. Columns repo/issue/doc_id
+   (nullable)/dataset/kind(`out_of_band_edit|detached|dedup_refused`)/detail(map)/resolved_at(nullable)/timestamps;
+   indexes `[:repo,:issue]` and `[:kind,:resolved_at]`. `record/1` DEDUPS an already-open `{repo,issue,kind}` by
+   update-in-place under `FOR UPDATE` (one open conflict per key, never a pile — now DB-enforced via a partial unique
+   index, not just a documented caveat); `list/1` open rows newest-first filtered by repo/kind; `resolve/1` clears +
+   lets the key re-open. DB-only, NEVER touches `Content.*`/`mutation_events` — no loop surface (asserted by a test).
+2. **Adopt action (slice 2)** — `Github.Adopt.adopt/3` (`@canonical capability:github-adopt`) loads draft-first, gates
+   STRICTLY on `content.github.state=="intake"` (already-`adopted` → idempotent `{:ok,doc}`; else `:not_intake`; missing
+   → `:not_found`), strips `needs-human` (keeps `src:github`), sets `github.state="adopted"`, persists via
+   `Content.upsert_document(source: :github)` with the `Link.put` draft-twin collapse so the mutation_events.source is
+   EXACTLY `"github"` (D4 cut #2, outbox-excluded). NEVER touches claim/worker/epoch (D6), never reads a GitHub field
+   back (D5); backlink rides an injectable `:comment_fun`. `Github.CLI.commands/0` + `github.ex` `cli_commands/0`
+   delegate (tickets merge-safe `Code.ensure_loaded?` pattern) so `bp github adopt` falls out of `/v1/capabilities`
+   with NO Go source change. `GithubAdoptController` on `POST /v1/plugins/github/adopt/:id` (`:token` bucket, seam-injectable).
+   Studio "Adopt from GitHub" doc_action surfaced only for an intake task (string+atom-key safe, onixedit precedent).
+3. **Dedup-refusal surfacing (slice 2/label-3)** — `Intake.birth/2`'s `{:error,{:duplicate_task,verdict}}` branch (was
+   a silent re-refuse-forever drop) now: posts a maintainer comment via `:comment_fun`; records a findable
+   `dedup_refused` dead-letter row via a NEW injectable `:conflict_fun` seam (resolves the slice-1 recorder dynamically
+   so it compiles before slice 1 lands); returns a DISTINCT `{:refused, doc_id}` mapped to 2xx by the webhook controller
+   (no GitHub retry-storm, comment posts once). Genuine non-dedup create errors stay `{:error,_}`→5xx retryable
+   (fail-open preserved). 4 tests trip the REAL `Tasks.Dedup` seam.
+4. **Conflict quarantine + detached visibility (slice 4)** — `Client.get_issue/3` (thin sibling of `update_issue`).
+   MirrorJob's UPDATE path now GETs+fingerprints ONLY the ledger-owned projected fields (title/body/labels-sorted/state
+   via `:erlang.phash2`) BEFORE the idempotent PATCH; a stored `synced_fingerprint` that differs → records an
+   `out_of_band_edit` conflict, THEN PATCHes (ledger wins), THEN stamps `Link.put` with `synced_rev`+`synced_fingerprint`
+   for next-pass drift detection. GET reads GitHub values ONLY to fingerprint the RECORD, never into a task field (D5).
+   Absent a stored fp → records nothing, just stamps (rolls forward, NO backfill). Detached branch records a `detached`
+   conflict before stamping `state:"detached"`+cancel; never recreated (D7). 403/429 on the extra GET snoozes via
+   `classify` (D9).
+5. **Webhook secret memoize (slice 5)** — `Settings.webhook_secret_cached/0` resolves ONLY the webhook_secret,
+   memoized in `:persistent_term` with a monotonic TTL (app-env `webhook_secret_ttl_ms`, default 5000ms). Cache hit
+   within TTL → zero DB touch; the signature plug reads the memoized value so an unauth probe carrying
+   `x-hub-signature-256` no longer forces a DB write + audit row before HMAC verify. Fail-closed 401 semantics
+   byte-for-byte unchanged; a dark plugin caches nil. Rotation staleness bounded to one TTL window.
+
+**Also caught + fixed (severe pre-existing bug, NOT wave-4 scope):** the wave-3 `GithubWebhookController` matched
+`{:ok, _doc}` (2-tuple) against `Intake`'s real `{:ok, :born|:exists, doc}` (3-tuple) — a PERPETUAL 500 on every
+successful inbound birth once the plugin is enabled; the controller test passed VACUOUSLY on 2-tuple stubs (classic
+vacuous-green trap). Fixed in isolated commit `4a4127c8` (+ test `9c221f1f`), zero-conflict with sibling slices.
+Without it, inbound intake is DEAD in prod — it SHOULD land (integrator may drop only if the fix is owned elsewhere).
+
+**Stalled** — nothing NOT-GREEN. Wave is code-complete on branches; same base-drift integration discipline applies
+(rebase each `-p` onto current origin/main — slice 4's `-p` was verified to fast-forward cleanly, but confirm the rest).
+Merge order: slice 1 (substrate) FIRST → then 3 (intake.ex) + 4 (mirror_job.ex) in parallel → 2 + 5 any time.
+
+**Integrator MUST resolve — substrate is built TWICE:** slice 1 AND slice 4 both ship `conflict.ex` / `conflicts.ex` /
+`priv/repo/migrations/20260707120000_create_github_sync_conflicts.exs` (slice 4 built them to run in isolation). The
+perfecter made them byte-identical to slice-1's `-p` tip, so keep ONE and the dedup is trivial — but if slice-1's `-p`
+gets further polish before landing, RE-SYNC slice 4's three copies to whatever ships as slice 1; do NOT let slice 4's
+copies win a divergent conflict.
+
+**Cross-wave carries / known edges (perfecter-flagged, not defects):**
+- **MIGRATION INDEX ON A SHARED TEST DB.** The partial-unique index was added to the (already-applied, still-max,
+  unmerged) migration file. On main / any fresh or prod DB it has NEVER run → applies clean first time. But a worktree
+  whose test DB already applied the old (indexless) version needs a drop-and-remigrate (or `mix ecto.reset`) to pick up
+  the index — it will NOT re-run on the same timestamp. CONFIRM the partial unique index exists post-deploy.
+- **`Conflicts.record/1` reconverge branch is not deterministically unit-tested** (true concurrent txns are impractical
+  under the SQL sandbox). Proven: the DB rejects a duplicate open row and the constraint surfaces as the exact
+  `constraint: :unique` shape the detector keys on. The reconverge is defense-in-depth; worst case the losing insert
+  errors and the Oban job / webhook retries + converges. No consumers depend on it today.
+- **persistent_term memoize has no single-flight.** A concurrent probe burst arriving exactly at the TTL boundary yields
+  O(concurrency-at-boundary) racing misses, each a DB read + a node-wide-GC `persistent_term.put`. Steady-state within
+  the window is still zero-DB — a large net reduction vs the per-request audit-write it kills. Acceptable for an
+  off-by-default single-node plugin; if a load test shows GC pressure the swap is persistent_term→ETS (out of scope).
+- **CARRY-FORWARD (blocks a future test).** When the wave-3 full-stack signed-body ConnCase is finally written it MUST
+  call `Settings.reset_webhook_secret_cache/0` or set `webhook_secret_ttl_ms: 0` in setup, or a cached secret bleeds
+  across cases and flips a 401/200.
+- **TENANCY (matches wave-3 posture, not new).** Adopt controller + Studio arity-3 handler adopt in the DEFAULT
+  workspace/project only; a non-default-tenant intake returns `not_found`. Same limit as onixedit arity-3 and wave-3 intake.
+- **INHERENT to D7:** every update-path reconcile now does GET+PATCH (doubles GitHub calls on the update path; the GET
+  doubles as the detachment probe, rate-safe via snooze). Drift on a QUIESCENT task's issue is only detected on that
+  task's NEXT edit (level-triggered — nothing schedules a job for an untouched task; polling is out of scope).
+
+**Next wave: Wave 5 — Projects v2 + relations** (the wish's stated w5): one-directional GraphQL auto-add + Status/
+Priority/Worker/Goal custom-field writes diffed against the stored projection (D10, isolated LAST so it can't
+destabilize the Issues loop); `parent_id`→native sub-issues (deferred-retry when the parent is unmirrored, cap-flatten
+past 8-level/100-child); `blocks`→`<!-- barkpark:blocks -->` marker block in the body (D11). NOTE: the
+`github_sync_conflicts` table now carries real data that NOTHING renders yet — Wave 6's `/admin/github` console +
+`bp github status` (reading conflicts + cursor lag, `Conflicts.resolve/1` wired to a button) is the natural home and a
+strong alternative if the human wants operators to SEE the quarantine before Projects v2 polish.
+
+## Wave 4 CUT — adoption + conflict quarantine (2026-07-07, architect pass)
+
+**Wish increment:** the intake→adopt journey CLOSES. An operator takes a born-dark `gh-<num>` intake task and, with one
+`bp github adopt <task>` (or a Studio button), flips ownership INTO Barkpark — `needs-human` stripped, `github.state`
+`intake→adopted`, a "Tracked as gh-<num> on the board" backlink posted. No outsider is ever met with SILENCE (a
+dedup-refused issue now gets a maintainer comment + a findable dead-letter row). Out-of-band GitHub drift is RECORDED
+before the ledger overwrites it (ledger-wins-but-VISIBLE), and a deleted/transferred issue detaches with a surfaced
+record and is NEVER recreated. The live webhook endpoint stops amplifying audit rows on every probe.
+
+**Hard contracts every slice MUST respect (charter decisions):**
+- **D5 — NO bidirectional field editing.** Adoption reads the issue only at intake BIRTH (already done in wave 3); it
+  NEVER re-reads GitHub field values into the task. Slice 4 may GET the issue to compute a drift *fingerprint* for a
+  quarantine RECORD (observability), but MUST NOT write any GitHub field value into a task field.
+- **D4 cut #2 — the exact string.** Any inbound/bookkeeping write that mutates a task stamps `mutation_events.source`
+  EXACTLY `"github"` (`to_string(:github)`), never `"github:inbound"` — else it slips the outbox exclusion → mirror loop.
+- **D4 cut #1 — bot drop.** Slice 4's inbound-drift handler MUST drop `sender.type == "Bot"` events BEFORE recording:
+  our OWN MirrorJob PATCH makes GitHub fire `issues.edited`/`closed` with a `[bot]` sender; recording those as
+  "conflicts" would false-positive on every mirror write. Drop them exactly like `Intake` does.
+- **D6 — adoption is EXPLICIT, never auto-claim.** Adopt flips ownership + clears the `needs-human` gate ONLY. It NEVER
+  sets a claim/worker/epoch (those NEVER leave Barkpark). A human/agent claims the adopted task through the normal
+  `bp task` path afterward.
+- **D7 — ledger wins, but VISIBLE.** Record drift BEFORE converging; detached issues surface + never recreate.
+- **CI LESSON (memory + wave log).** A boot-started DB-touching worker breaks the FULL ExUnit sandbox. No slice here
+  adds a boot-started worker; if one is tempted (it should not be), gate it OFF in `config/test.exs`. Every slice runs
+  its targeted github tests PLUS a broad `DataCase`/`ConnCase` swath locally before green (a bare plugin-dir run hides
+  sandbox + endpoint regressions). GitHub HTTP is Bypass-stubbed or seam-injected — NEVER live, NEVER boot phx.server.
+
+**Integration order + disjointness:** Slice 1 (quarantine substrate) is FOUNDATIONAL — slices 3 and 4 consume its
+`Github.Conflicts` recorder, so it lands FIRST. Slices 2 (adopt, touches `github.ex`) and 5 (memoize, touches
+`settings.ex` + plug) are file-disjoint from everything and build in parallel with slice 1. Slice 3 touches `intake.ex`,
+slice 4 touches `mirror_job.ex` + `client.ex` — disjoint from each other and from 2/5. So: land 1 → then 3 + 4 (parallel)
+→ 2 + 5 any time. Sequence anything touching `github.ex`/`intake.ex`/`mirror_job.ex` (each is one slice's sole owner).
+Test-DB contention: re-run a gate once before declaring failure. ALL agents on Opus.
+
+### Slice 1 — quarantine substrate: `github_sync_conflicts` table + `Github.Conflicts` recorder
+- **Surface:** new migration `priv/repo/migrations/<ts>_create_github_sync_conflicts.exs` · new
+  `api/lib/barkpark/plugins/github/conflict.ex` (Ecto schema) · new `api/lib/barkpark/plugins/github/conflicts.ex`
+  (recorder) · test.
+- **Build:**
+  - Migration (mirror the `pulse_events` precedent `priv/repo/migrations/20260705280000_create_pulse_events_and_counters.exs`
+    — a plugin owning its own non-document table is established): `create table(:github_sync_conflicts)` with
+    `repo :text null:false`, `issue :bigint null:false` (nullable-not — but a dedup-refused intake HAS an issue number,
+    so always set it), `doc_id :text` (nullable — a dedup-refused intake has no task yet), `dataset :text null:false`,
+    `kind :text null:false` (`"out_of_band_edit" | "detached" | "dedup_refused"`), `detail :map null:false default: %{}`
+    (the drift payload / dedup verdict), `resolved_at :utc_datetime_usec` (nullable — quarantine is "open" until cleared),
+    `timestamps(type: :utc_datetime_usec)`. Index `[:repo, :issue]` and a partial-ish index `[:kind, :resolved_at]`.
+  - `Github.Conflict` schema: plain Ecto schema over the table, `changeset/2` casting the fields, `kind` validated to
+    the three-value inclusion set.
+  - `Github.Conflicts` recorder: `record(attrs) :: {:ok, %Conflict{}} | {:error, cs}` — inserts a row via
+    `Barkpark.Repo`. DEDUP an already-open conflict: if an unresolved row for the same `{repo, issue, kind}` exists,
+    UPDATE its `detail`/`updated_at` instead of piling duplicates (a human editing an issue five times is ONE open
+    conflict). `list(opts \\ [])` → open conflicts (optionally filtered by repo/kind) newest-first, for the wave-6
+    console + tests. `resolve(id)` sets `resolved_at` (used later; ship it now so the console has it).
+  - This module is DB-only, NEVER touches `Content.*` or `mutation_events` (a conflict record is out-of-band bookkeeping,
+    NOT a task mutation — so it can never re-trigger sync). No loop surface.
+- **Decisions respected:** D7 (the visible quarantine substrate), D3-adjacent (side table is fine HERE — it is NOT task
+  content and never mutates the tasks schema).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/conflicts_test.exs` (worktree recipe: copy
+  `_build/test` + link `deps` first) — `Barkpark.DataCase`. Assert: record inserts a row; a second record for the same
+  `{repo,issue,kind}` UPDATES (still ONE open row); `list/1` returns open rows newest-first and filters by kind; `resolve/1`
+  sets `resolved_at` and drops the row from `list`. Run the migration in the test DB (DataCase runs against the migrated
+  schema — ensure `mix ecto.migrate` is reflected in the copied `_build`; if the copied build predates the migration, run
+  `CC=/usr/bin/clang mix ecto.migrate` in the worktree once).
+- **Size:** medium.
+
+### Slice 2 — adopt action: `bp github adopt <task>` + Studio doc_action
+- **Surface:** new `api/lib/barkpark/plugins/github/adopt.ex` · new `api/lib/barkpark/plugins/github/cli.ex` · new
+  `api/lib/barkpark_web/controllers/github_adopt_controller.ex` · `plugins/github.ex` (`register_routes/1` adds the adopt
+  route; add `cli_commands/0`; add `resolve_doc_actions/2` + `action_handlers/0`) · tests.
+- **Build:**
+  - `Github.Adopt.adopt(doc_id, dataset, opts) :: {:ok, %Document{}} | {:error, term}` — load the task DRAFT-FIRST
+    (mirror `Intake.fetch_existing`/`MirrorJob.load_task`). Gate: only a task whose `content.github.state == "intake"`
+    is adoptable; anything else → `{:error, :not_intake}` (idempotent-safe: a second adopt of an already-`adopted` task
+    → `{:error, :not_intake}` or `{:ok, doc}` no-op — pick `{:ok, doc}` so the CLI/UI is idempotent, document the choice).
+    On adopt: (1) strip `"needs-human"` from `content.labels` (keep `src:github`); (2) set `content.github.state` =
+    `"adopted"`; (3) persist via `Content.upsert_document(..., source: :github)` (D4 cut #2 — the stamp is EXACTLY
+    `"github"`; reuse the `Link.put` draft-twin-collapse pattern OR call `Link.put` for the github sub-map + a separate
+    label write — simplest: build the merged content and upsert once, then collapse the draft twin like `Link.put` does
+    if the task was published). NEVER touch claim/worker/epoch (D6). (4) Post the backlink via an injectable
+    `:comment_fun` seam (default `&Client.create_comment/4`), best-effort (logged-and-swallowed), body
+    `"Tracked as gh-<num> on the Barkpark board."` `@canonical capability:github-adopt aka:adopt,claim-issue,flip-ownership`
+    on `adopt/3`.
+  - `Github.CLI.commands/0` → the `cli_command()` map (frozen shape — copy `Barkpark.Plugins.Tickets.CLI.commands/0`):
+    `%{id: "github.adopt", noun: "github", verb: "adopt", summary: "Adopt a src:github intake task into Barkpark
+    (strip needs-human, flip ownership, post a backlink). Never auto-claims.", http: %{method: "POST", path_template:
+    "/v1/plugins/github/adopt/:id"}, auth_tier: "read", args: [%{name: "id", required: true, type: "string", summary:
+    "Task id (gh-<num>)."}], flags: [%{name: "dataset", type: "string", summary: "Dataset.", default: "production"}],
+    writes: true, batch: false, paginated: false, dry_run: false, default_output: "minimal", scoped_prefix: nil}`.
+    `github.ex` `cli_commands/0` delegates via `Code.ensure_loaded?(Github.CLI)` (the tickets merge-safe pattern) so the
+    manifest picks it up dynamically — NO Go code needed, `bp github adopt` falls out of `/v1/capabilities`.
+  - `GithubAdoptController.adopt/2`: read `:id` + `dataset` param → `Adopt.adopt/3` → 200 `{ok: true, task: id, state:
+    "adopted"}` or 4xx `{error:{code,message}}` (`:not_intake` → 409/422, `:not_found` → 404). `register_routes/1`
+    appends `{:post, "/github/adopt/:id", BarkparkWeb.GithubAdoptController, :adopt, auth: :token}` (the `:token` bucket —
+    bearer-gated operator action under `/v1/plugins/github/adopt/:id`; NOT `:admin`, so `bp` with an operator token runs it).
+  - Studio doc_action (secondary surface): `github.ex` `resolve_doc_actions(prev, ctx)` — when `ctx.doc_type == "task"`
+    and the doc's `content.github.state == "intake"`, APPEND `%{"name" => "github_adopt", "label" => "Adopt from GitHub",
+    "kind" => "modal", "icon" => "github"}` (read the intake state off `ctx.doc` string- AND atom-key safe, the onixedit
+    `hide_publish_action?` precedent). `action_handlers/0` → `%{"github_adopt" => fn doc_id, dataset, _mode ->
+    Adopt.adopt(doc_id, dataset, []) end}` (the `action_handler` type — `(doc_id, dataset, mode) -> {:ok,_}|{:error,_}`).
+    If the doc_action wiring proves costly, the CLI verb ALONE satisfies the wish — ship the CLI verb first, the button second.
+- **Decisions respected:** D6 (explicit, never auto-claim), D4 cut #2 (`source: "github"` stamp), D5 (does not read GitHub
+  fields back — it only WRITES ledger-owned bookkeeping + a comment).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/adopt_test.exs
+  test/barkpark_web/controllers/github_adopt_controller_test.exs test/barkpark/plugins/github_test.exs` — `DataCase`/`ConnCase`.
+  Assert: an `intake` task → `needs-human` stripped, `github.state == "adopted"`, `src:github` KEPT, claim/worker UNSET, the
+  `comment_fun` seam called once with a `gh-<num>` body; a non-intake task → `{:error, :not_intake}` (or idempotent no-op) and
+  NO comment; the birth `mutation_events` row for the adopt write has `source == "github"` EXACTLY; `resolve_doc_actions/2`
+  appends the adopt action ONLY for an intake task and NOT for a plain task. PLUS the Go smoke (a bp verb was added —
+  manifest-driven, no Go source change, but prove nothing broke): `CC=/usr/bin/clang go build ./... && go vet ./internal/cli/...
+  && go test ./internal/cli/...`. Do NOT regenerate `docs/cli/fixtures/full-manifest.json` — the Go tests look up their own
+  nouns (task/ticket), so a new `github` command breaks nothing.
+- **Size:** large.
+
+### Slice 3 — dedup-refusal surfacing: no outsider gets silence
+- **Surface:** `api/lib/barkpark/plugins/github/intake.ex` (the `{:error, {:duplicate_task, _}}` branch) + test.
+  Consumes `Github.Conflicts` (slice 1).
+- **Build:** In `Intake.birth/2`, the `Content.create_document` call returns `{:error, {:duplicate_task, verdict}}` when
+  `Tasks.Dedup.check_new_task` judges the outsider issue a look-alike (confirmed: `Content.Writer` bubbles it verbatim).
+  Today that drops to `{:error, reason}` — SILENT, and because nothing persists, every re-delivery re-refuses forever and no
+  future `adopt` can find the issue. Fix that ONE branch:
+  - Post a maintainer-visible comment via the SAME injectable `:comment_fun` seam (best-effort, logged-and-swallowed), body:
+    `"This issue looks related to existing tracked work; a maintainer will review it."` (distinct from the birth backlink).
+  - Record a dead-letter row: `Conflicts.record(%{repo: <repo>, issue: number, doc_id: nil, dataset: dataset, kind:
+    "dedup_refused", detail: <the duplicate_task verdict map>})` so the refusal is FINDABLE (wave-6 console + a maintainer can
+    manually reconcile). The dedup of slice 1's recorder means a re-delivery updates the same open row, never piles duplicates.
+  - Return a DISTINCT outcome `{:refused, doc_id}` (extend the `result` type + moduledoc). The wave-3 controller maps a
+    non-`{:error,_}` result to 2xx — make sure `{:refused, _}` lands as 2xx (accepted, NOT a 5xx retry-storm), so GitHub
+    never re-delivers and the maintainer comment posts exactly ONCE. If the controller currently only 2xx's `{:ok,_}`/`:ignored`/
+    `:dropped`, add `{:refused,_}` to its 2xx set (a one-line companion edit in `github_webhook_controller.ex` — note it as a
+    same-slice touch; it is NOT owned by another wave-4 slice).
+  - Preserve fail-open: a genuine NON-dedup create error still returns `{:error, reason}` → controller 5xx (retryable), because
+    that IS a transient failure worth retrying. Only `{:duplicate_task, _}` becomes `{:refused, _}`.
+- **Decisions respected:** D6 (Dedup seam unchanged — we surface its verdict, never bypass it), D4 cut #2 (no NEW task mutation;
+  the Conflicts row is not a task write), D7 spirit (the refusal is now VISIBLE).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/intake_test.exs` — `DataCase`. Assert: a dedup-refused
+  first delivery (inject a `Tasks.Dedup` that returns `{:error,{:duplicate_task,_}}`, or craft attrs that trip the real judge
+  seam the intake test already stubs) → ZERO tasks born, the `comment_fun` seam called ONCE with the maintainer body, a
+  `github_sync_conflicts` row with `kind == "dedup_refused"` and the verdict in `detail`, and the outcome is `{:refused, _}`;
+  a re-delivery → still ONE open conflict row, comment posted AT MOST once more (dedup by open row); a genuine `:ok` birth is
+  unaffected (existing tests stay green).
+- **Size:** medium.
+
+### Slice 4 — conflict quarantine: record out-of-band drift before converging + detached visibility
+- **Surface:** `api/lib/barkpark/plugins/github/mirror_job.ex` + `api/lib/barkpark/plugins/github/client.ex` (add
+  `get_issue/3`) + tests. Consumes `Github.Conflicts` (slice 1).
+- **Build:** The wave-2 MirrorJob does a BLIND idempotent PATCH; if a human hand-edited/closed the issue out-of-band the ledger
+  silently overwrites it with no trace (D7 violated). Make the UPDATE path RECORD drift before it converges — ledger still wins:
+  - Add `Client.get_issue(repo, number, opts) :: {:ok, map} | {:error, struct}` (`GET /repos/:repo/issues/:n`) — a thin sibling
+    of `update_issue`, same auth/error classification.
+  - In `MirrorJob.update/7`, BEFORE the PATCH: `Client.get_issue`. On `{:ok, issue}` compute a `current_fp` fingerprint over
+    ONLY the ledger-owned fields the projection controls (`title`, `body`, `labels`-sorted, `state`) — e.g. a `:erlang.phash2`
+    of that tuple. Read the stored `synced_fingerprint` off `Link.get(task_doc)["synced_fingerprint"]`. If a stored fp exists
+    AND `current_fp != stored` → the issue drifted out-of-band since our last write → `Conflicts.record(%{repo, issue: number,
+    doc_id, dataset, kind: "out_of_band_edit", detail: %{"github_fields" => <the drifted issue title/state/labels>, "observed_fp"
+    => current_fp}})`. This GET reads GitHub values ONLY to fingerprint for the quarantine RECORD — it NEVER writes a GitHub value
+    into a task field (D5 intact). THEN do the existing PATCH (ledger wins), THEN stamp `Link.put` with BOTH `synced_rev: rev`
+    AND `synced_fingerprint: fingerprint(desired)` (Link.put already merges arbitrary github-map keys — no link.ex change).
+    A `get_issue` `NotFound`/`410` → route to the detached branch below (the issue vanished between drain and reconcile).
+  - Detached visibility (build the record AROUND the existing stamp): in `classify(%NotFound{}, :update, …)` — the branch that
+    already stamps `state: "detached"` and returns `{:cancel, :detached}` — FIRST `Conflicts.record(%{repo, issue, doc_id,
+    dataset, kind: "detached", detail: %{"reason" => "issue deleted or transferred; not recreated"}})`, THEN stamp + cancel.
+    Do NOT recreate (unchanged — D7 carve-out). The repo/issue for the record come from the link (`issue_number(link)` + `repo()`).
+  - Keep the extra GET cheap + rate-safe: it rides the same debounced, low-concurrency `github_mirror` queue (D9); a 403/429 on
+    the GET snoozes exactly like the PATCH (reuse `classify`). Absent a stored `synced_fingerprint` (first-ever mirror, or a task
+    mirrored before this slice) → record NOTHING on that first pass (nothing to compare against), just PATCH + stamp the fp so
+    the NEXT reconcile can detect drift. This makes the feature roll forward without a backfill.
+- **Decisions respected:** D7 (record-then-converge; detached surfaced + never recreated), D5 (GET fingerprints for a record,
+  never writes GitHub values into task fields), D9 (extra GET on the same snooze-safe queue), D4 (the `Link.put` fp stamp is
+  `source: "github"`, outbox-excluded — no new loop surface).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/mirror_job_test.exs
+  test/barkpark/plugins/github/client_test.exs` — Bypass-stub GitHub (the existing mirror_job/client Bypass pattern). Assert:
+  (a) a task with a stored `synced_fingerprint`, whose Bypass `get_issue` returns a DIFFERENT title/state → a
+  `github_sync_conflicts` row `kind: "out_of_band_edit"` is written BEFORE the PATCH, the PATCH still fires (ledger wins), and
+  the new fp is stamped; (b) an issue whose `get_issue` fp MATCHES the stored fp → NO conflict row, PATCH proceeds only if the
+  ledger changed; (c) a `get_issue`/`update_issue` 404 → a `kind: "detached"` row is written, `state: "detached"` stamped,
+  `{:cancel, :detached}` returned, and NO recreate; (d) first-ever mirror (no stored fp) → no conflict row, fp stamped for next
+  time. Verify the extra GET does not break the existing snooze/dead-letter classification tests.
+- **Size:** large.
+
+### Slice 5 — webhook secret memoize: kill the pre-verify audit amplification
+- **Surface:** `api/lib/barkpark/plugins/github/settings.ex` (add a memoized secret reader) +
+  `api/lib/barkpark_web/plugs/github_webhook_signature.ex` (read the memoized value) + test.
+- **Build:** The live `POST /v1/plugins/github/webhook` signature plug calls `Settings.get_credentials()` per request (after the
+  cheap raw_body + header checks, before HMAC verify) — and `get_credentials/0` reads the DB fallback row, which logs a `"read"`
+  audit row + telemetry EVERY call. So any unauthenticated POST carrying an `x-hub-signature-256` header forces a DB write before
+  the signature is even checked — a mild flood primitive on a probed public endpoint.
+  - Add `Settings.webhook_secret_cached/0 :: String.t() | nil` — resolves ONLY the webhook_secret and memoizes it with a short
+    monotonic TTL. Back it with `:persistent_term` keyed `{Barkpark.Plugins.Github.Settings, :webhook_secret_cache}` storing
+    `{value, deadline_native}`; on a cache hit within TTL return the value with ZERO DB touch; on miss/expiry resolve via
+    `get_credentials()[:webhook_secret]`, store `{value, now + ttl}`, return it. TTL from app-env
+    `config :barkpark, Barkpark.Plugins.Github, webhook_secret_ttl_ms: <n>` default `5_000` (rotation staleness bounded to ~5s —
+    a secret rotation takes effect within one TTL window; document this tradeoff in the fn doc). persistent_term writes are rare
+    (≤ once per TTL) so the global-GC cost is negligible.
+  - The `GithubWebhookSignature` plug reads `Settings.webhook_secret_cached()` instead of `Settings.get_credentials()[:webhook_secret]`.
+    Behavior UNCHANGED: nil/blank secret → still fail-closed 401 halt (a dark plugin never verifies). Only the read cadence changes.
+  - Determinism for tests: expose a private-but-test-reachable reset (or read TTL from app-env so a test sets
+    `webhook_secret_ttl_ms: 0` to force re-resolve, and clears the persistent_term in setup). Inject the underlying resolver via a
+    seam (default `&get_credentials/0`) so the test can count DB reads.
+- **Decisions respected:** the wave-3 fail-closed signature contract (unchanged semantics), D8 (creds resolution stays the single
+  env→DB source — this only caches ONE field).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark_web/plugs/github_webhook_signature_test.exs
+  test/barkpark/plugins/github/settings_test.exs` — `ConnCase`/`DataCase`. Assert: N plug invocations within the TTL resolve the
+  secret with the underlying resolver called AT MOST once (seam counter); a valid signed body still passes, a tampered body still
+  401-halts, a blank/absent secret still 401-halts (fail-closed unchanged); past the TTL the resolver is re-called (rotation
+  eventually visible). Reset the persistent_term in `setup` so tests do not leak cache across each other.
+- **Size:** small.
+
+**Carried to wave 5+ (not this wave):** Projects v2 GraphQL dashboard (D10), `parent_id`→sub-issues + `blocks`→marker block (D11),
+the `/admin/github` sync-health console reading `github_sync_conflicts` + cursor lag (wave 6), `Conflicts.resolve/1` surfaced as an
+operator verb/button (shipped in slice 1, wired to UI in wave 6), and the wave-7 human App-provisioning gate.
 
 ---
 

@@ -33,6 +33,9 @@ defmodule Barkpark.Plugins.Github.Settings do
     * `repo/0` — the `owner/name` repo string, or `nil` if unset/blank.
     * `datasets/0` — the datasets whose tasks mirror to GitHub, from config
       `:github_mirror_datasets`, defaulting to `["production"]`.
+    * `webhook_secret_cached/0` — the `webhook_secret` ONLY, memoized with a
+      short monotonic TTL so the hot inbound-webhook signature plug stops
+      forcing a DB read + audit row on every probe.
   """
 
   alias Barkpark.Plugins.Settings
@@ -40,6 +43,13 @@ defmodule Barkpark.Plugins.Github.Settings do
   @app :barkpark
   @config_key Barkpark.Plugins.Github
   @plugin_name "github"
+
+  # persistent_term slot for the memoized webhook secret. Stores
+  # `{value :: String.t() | nil, deadline :: integer()}` in native monotonic
+  # units; writes happen at most once per TTL so global-GC churn is negligible.
+  @webhook_secret_cache_key {__MODULE__, :webhook_secret_cache}
+  @webhook_secret_ttl_key :webhook_secret_ttl_ms
+  @default_webhook_secret_ttl_ms 5_000
 
   # Every credential the resolver surfaces. `:project_id` (Projects v2, wave 5)
   # and `:api_base` (Bypass override) are optional; the required subset is
@@ -143,11 +153,79 @@ defmodule Barkpark.Plugins.Github.Settings do
     end
   end
 
+  @doc """
+  The `webhook_secret` ONLY, memoized with a short monotonic TTL.
+
+  The inbound-webhook signature plug runs on every `POST
+  /v1/plugins/github/webhook` — including unauthenticated probes carrying a
+  bogus `x-hub-signature-256` header. Resolving the full `get_credentials/0`
+  there forces a `plugin_settings` DB read (which logs a `"read"` audit row +
+  telemetry) BEFORE the HMAC is even checked — a mild flood primitive. This
+  reader caches just the one field so a burst of probes touches the DB at most
+  once per TTL window.
+
+  Backed by `:persistent_term` keyed `{#{inspect(__MODULE__)},
+  :webhook_secret_cache}` holding `{value, deadline_native}`:
+
+    * cache hit within TTL → return the value with ZERO DB touch;
+    * miss/expiry → resolve `get_credentials()[:webhook_secret]`, store
+      `{value, now + ttl}`, return it.
+
+  `nil` is a valid cached value: a dark plugin (no secret) caches `nil` and the
+  signature plug still fail-closes 401 — only the read cadence changes, never
+  the fail-closed semantics.
+
+  TTL comes from app-env `config :barkpark, Barkpark.Plugins.Github,
+  webhook_secret_ttl_ms: <n>` (default `#{@default_webhook_secret_ttl_ms}`).
+  TRADEOFF: a rotated webhook secret takes effect only within one TTL window —
+  stale for up to ~#{@default_webhook_secret_ttl_ms}ms after rotation. A test
+  can set `webhook_secret_ttl_ms: 0` to force a re-resolve on every read.
+  """
+  @spec webhook_secret_cached() :: String.t() | nil
+  def webhook_secret_cached, do: webhook_secret_cached(&get_credentials/0)
+
+  # Test seam: the underlying resolver defaults to `&get_credentials/0`, so a
+  # test can inject a counting resolver to assert the DB is touched at most
+  # once per TTL.
+  @doc false
+  @spec webhook_secret_cached((-> credentials())) :: String.t() | nil
+  def webhook_secret_cached(resolver) when is_function(resolver, 0) do
+    now = System.monotonic_time()
+
+    case :persistent_term.get(@webhook_secret_cache_key, nil) do
+      {value, deadline} when now < deadline ->
+        value
+
+      _ ->
+        value = present(resolver.()[:webhook_secret])
+        ttl_native = System.convert_time_unit(webhook_secret_ttl_ms(), :millisecond, :native)
+        :persistent_term.put(@webhook_secret_cache_key, {value, now + ttl_native})
+        value
+    end
+  end
+
+  @doc """
+  Drop the memoized webhook secret. For tests that need a deterministic
+  cache state between cases; no production caller.
+  """
+  @spec reset_webhook_secret_cache() :: :ok
+  def reset_webhook_secret_cache do
+    :persistent_term.erase(@webhook_secret_cache_key)
+    :ok
+  end
+
   # ---------------------------------------------------------------------------
   # Internal
   # ---------------------------------------------------------------------------
 
   defp env_config, do: Application.get_env(@app, @config_key, [])
+
+  defp webhook_secret_ttl_ms do
+    case env_config()[@webhook_secret_ttl_key] do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> @default_webhook_secret_ttl_ms
+    end
+  end
 
   defp load_db_settings do
     case Settings.get(@plugin_name) do
