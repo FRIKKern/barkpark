@@ -38,18 +38,101 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   `content.github` read attached in the organizer's card projection, safe even
   with the github plugin dark.
 
-  Purely observational — no writes, no controls. `mount/3` assigns the snapshot;
-  there is deliberately no subscribe/refresh/drag in this slice.
+  ## Realtime motion (charter §criterion, wave 2)
+
+  The board must not just paint alive — it must MOVE (§0: "you open the board and
+  something is moving"). It rides the EXISTING task broadcast, no new process
+  (charter D5): on `connected?/1`, `mount/3` subscribes to `documents:<dataset>`
+  (the global per-dataset stream `Content.Broadcast` fires on every CAS write)
+  and schedules a slow periodic `:refresh`. There is deliberately NO boot-started
+  worker — subscription is per-socket only (the github-bridge CI landmine that
+  breaks the full ExUnit sandbox).
+
+  When a `{:document_changed, %{type: "task"}}` arrives, `Board.card_from_broadcast/2`
+  projects the one changed doc, `Board.apply_change/3` re-buckets it (a LIGHT
+  optimistic move, D9) and reports a `change` the render keys its flash/slide off
+  (`data-just-moved` + a CSS `@keyframes`, CSP-safe). The done-today tally climbs
+  monotonically and the momentum bar (already width-transitioned) grows — "you
+  watch momentum". A slow `:refresh` full `Board.snapshot/1` reconcile (every 15s)
+  silently corrects the derived `ready` overlay, cascade-unblocks, and the
+  windowed `done_today` a single event cannot re-derive.
+
+  A per-socket **seen-set** of `{doc_id, updated_at}` drops the mount-snapshot
+  echo and exact-repeat events. Non-`task` events and anything else are ignored
+  by a catch-all `handle_info` clause — a stray message never crashes the socket.
+
+  Purely observational still — no writes; drag write-through lands in wave 3.
   """
 
   use BarkparkWeb, :live_view
 
+  alias Barkpark.Content
   alias Barkpark.Tasks.Board
+
+  # The slow reconcile cadence. Realtime motion is instant off the broadcast;
+  # this only re-derives what one event can't (ready overlay, cascade-unblocks,
+  # the windowed done_today) — so seconds, not milliseconds, is right.
+  @refresh_ms 15_000
+
+  @dataset "production"
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign(socket, :board, Board.snapshot(dataset: "production"))}
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+      Process.send_after(self(), :refresh, @refresh_ms)
+    end
+
+    {:ok,
+     socket
+     |> assign(:dataset, @dataset)
+     |> assign(:board, Board.snapshot(dataset: @dataset))
+     |> assign(:last_change, nil)
+     |> assign(:seen, MapSet.new())}
   end
+
+  # A task mutation on our dataset stream — the live heartbeat of the board.
+  # We only subscribe to `documents:#{@dataset}`, so every message here is for
+  # the right dataset by construction (the broadcast carries no dataset field to
+  # re-check; the topic IS the scope). Drop an exact-repeat/echo via the
+  # seen-set, else project → re-bucket → flash.
+  @impl true
+  def handle_info({:document_changed, %{type: "task", doc: doc}}, socket)
+      when is_map(doc) do
+    key = {doc.doc_id, doc.updated_at}
+
+    if MapSet.member?(socket.assigns.seen, key) do
+      {:noreply, socket}
+    else
+      board = socket.assigns.board
+      prev = board.cards_by_id[Content.published_id(doc.doc_id)]
+      card = Board.card_from_broadcast(doc, prev)
+      {board, change} = Board.apply_change(board, card)
+
+      {:noreply,
+       socket
+       |> assign(:board, board)
+       |> assign(:last_change, change)
+       |> update(:seen, &MapSet.put(&1, key))}
+    end
+  end
+
+  # Slow reconcile: a full snapshot re-derives the ready overlay + cascade
+  # unblocks + the windowed done_today that a single optimistic event cannot,
+  # and resets the done_today baseline to the authoritative value. Clear the
+  # last flash so a stale marker doesn't linger, and reschedule.
+  def handle_info(:refresh, socket) do
+    Process.send_after(self(), :refresh, @refresh_ms)
+
+    {:noreply,
+     socket
+     |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+     |> assign(:last_change, nil)}
+  end
+
+  # A non-task document event, or any other stray message — ignore it. NEVER
+  # crash the socket over an event we don't render.
+  def handle_info(_other, socket), do: {:noreply, socket}
 
   @impl true
   def render(assigns) do
@@ -97,6 +180,29 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         background: var(--card-background-color, rgba(127,127,127,0.04));
       }
       .bp-card--done { opacity: 0.62; }
+
+      /* Realtime flash (wave 2) — the just-changed card pulses its border + a
+         soft wash so the eye lands on the movement (§0 "you watch momentum").
+         Applied via a `.bp-flash` class the render adds ONLY to the one card in
+         `@last_change`; a class change replays the animation, and a moved card
+         is re-created in its new column so it animates on mount too. CSS-only,
+         CSP-safe. `phx-mounted` belt-and-braces re-runs it for a re-inserted
+         node in browsers. */
+      .bp-flash { animation: bp-flash 900ms ease-out 1; }
+      @keyframes bp-flash {
+        0%   { box-shadow: 0 0 0 0 rgba(37,99,235,0.55); background: rgba(37,99,235,0.14); }
+        60%  { box-shadow: 0 0 0 4px rgba(37,99,235,0.0); }
+        100% { box-shadow: 0 0 0 0 rgba(37,99,235,0.0); }
+      }
+
+      /* The done-today tally gives a brief scale bump on a fresh close so the
+         climbing number is felt, not just read. */
+      .m-bump { animation: bp-bump 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 1; display: inline-block; }
+      @keyframes bp-bump {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.28); color: #0d9488; }
+        100% { transform: scale(1); }
+      }
       .bp-card-top { display: flex; align-items: flex-start; gap: 0.5rem; }
       .bp-title { font-weight: 600; font-size: 0.92rem; line-height: 1.3; }
       .bp-meta {
@@ -183,6 +289,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       @media (prefers-reduced-motion: reduce) {
         .gi--in_progress::before { animation: none; content: "⠿"; }
         .bp-bar-fill { transition: none; }
+        .bp-flash { animation: none; }
+        .m-bump { animation: none; }
       }
     </style>
 
@@ -190,15 +298,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       <h1>▦ Projects</h1>
       <p>
         <small>
-          A live board over the real task documents. Columns are the status
-          ladder; drag &amp; realtime land in later waves. Read-only for now.
+          A live board over the real task documents — it MOVES: claim or close a
+          task anywhere and its card flashes, re-buckets, and the tally climbs.
+          Columns are the status ladder; drag lands in a later wave.
         </small>
       </p>
 
       <header class="bp-momentum" data-role="momentum">
         <span data-role="m-inflight">◐ <%= @board.momentum.in_flight %> in flight</span>
         <span data-role="m-ready">○ <%= @board.momentum.ready %> ready</span>
-        <span data-role="m-done-today">✓ <%= @board.momentum.done_today %> done today</span>
+        <span class={done_bump_class(@last_change)} data-role="m-done-today">✓ <%= @board.momentum.done_today %> done today</span>
         <span class="m-pct" data-role="m-pct"><%= @board.momentum.pct %>%</span>
       </header>
       <div class="bp-bar" data-role="momentum-bar">
@@ -213,17 +322,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
           <h2 class="bp-col-h">
             <%= col_label(col) %>
-            <span class="bp-col-n" data-role="col-count"><%= length(@board.columns[col]) %></span>
+            <span class="bp-col-n" data-role="col-count"><%= col_count(@board, col) %></span>
           </h2>
 
           <p :if={@board.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
 
           <article
             :for={card <- @board.columns[col]}
-            class={"bp-card bp-card--#{col}"}
+            class={["bp-card", "bp-card--#{col}", just_moved?(@last_change, card) && "bp-flash"]}
             data-role="task-card"
             data-col={col}
             data-doc-id={card.doc_id}
+            data-just-moved={just_moved?(@last_change, card) && "true"}
           >
             <div class="bp-card-top">
               <span
@@ -278,6 +388,24 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   end
 
   # ── Render helpers ──────────────────────────────────────────────────────────
+
+  # The one card the last realtime event touched — the render flashes it (a
+  # `bp-flash` class + a `data-just-moved` hook). nil `@last_change` (fresh mount
+  # or post-refresh) flashes nothing.
+  defp just_moved?(%{doc_id: id, kind: kind}, %{doc_id: id}) when kind != :ignored, do: true
+  defp just_moved?(_change, _card), do: false
+
+  # Bump the done-today tally only when the last event was a genuine close, so
+  # the climbing number is felt at the moment it climbs.
+  defp done_bump_class(%{kind: :closed}), do: "m-bump"
+  defp done_bump_class(_), do: ""
+
+  # The column count. Every column renders its live card count EXCEPT :done, whose
+  # rendered list is WINDOWED at @done_window (D10) — so it reports the FULL
+  # `done_total` instead, or the pile would freeze at 12 and closing your 13th
+  # task would not visibly grow "Done" (violating §0 "you always feel progress").
+  defp col_count(board, :done), do: board.done_total
+  defp col_count(board, col), do: length(board.columns[col])
 
   defp col_label(:open), do: "Open"
   defp col_label(:ready), do: "Ready"

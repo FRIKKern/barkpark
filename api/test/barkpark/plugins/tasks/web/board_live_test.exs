@@ -290,7 +290,330 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "Board.card_from_broadcast/2 (pure, wave 2)" do
+    test "projects worker/labels/priority/github and carries prev blocker_statuses" do
+      prev = card("open", doc_id: "bc-1", blocker_statuses: ["done", "open"])
+
+      doc =
+        msg_doc("bc-1", "Wire the mirror",
+          status: "published",
+          content: %{
+            "lifecycle_status" => "in_progress",
+            "priority" => 2,
+            "parent_id" => "epic-9",
+            "labels" => ["proj:board", "infra"],
+            "assignee" => "studio:doey",
+            "acceptance_criteria" => [%{"met" => true}, %{"met" => false}],
+            "github" => %{"repo" => "FRIKKern/barkpark", "issue" => 42, "state" => "synced"}
+          }
+        )
+
+      c = Board.card_from_broadcast(doc, prev)
+
+      assert c.doc_id == "bc-1"
+      assert c.title == "Wire the mirror"
+      assert c.lifecycle_status == "in_progress"
+      assert c.priority == 2
+      assert c.parent_id == "epic-9"
+      assert c.labels == ["proj:board", "infra"]
+      assert c.worker == "studio:doey"
+      assert c.criteria == %{met: 1, total: 2}
+      assert c.github["issue"] == 42
+      # the event carries no dependency graph → the prev card's readiness inputs
+      # are carried forward so an already-known card keeps its blocker statuses.
+      assert c.blocker_statuses == ["done", "open"]
+    end
+
+    test "worker falls back to the claim worker, and an unseen card gets [] blockers" do
+      doc =
+        msg_doc("bc-2", "Claimed by an agent",
+          content: %{
+            "lifecycle_status" => "in_progress",
+            "claim" => %{"worker" => "cmux-7"}
+          }
+        )
+
+      c = Board.card_from_broadcast(doc, nil)
+
+      assert c.worker == "cmux-7"
+      # unseen (prev == nil) → empty blockers; readiness waits for :refresh.
+      assert c.blocker_statuses == []
+    end
+  end
+
+  describe "Board.apply_change/3 (pure, wave 2)" do
+    test "moves a card open -> in_progress and bumps in_flight, kind == :moved" do
+      t = ~U[2026-07-07 09:00:00Z]
+      # an open card with a live (non-done) blocker sits in :open, not :ready.
+      board =
+        Board.build(
+          [card("open", doc_id: "mv1", blocker_statuses: ["in_progress"], updated_at: t)],
+          now: t
+        )
+
+      assert board.momentum.in_flight == 0
+      prev = board.cards_by_id["mv1"]
+
+      moved =
+        Board.card_from_broadcast(
+          msg_doc("mv1", "Now working", content: %{"lifecycle_status" => "in_progress"}),
+          prev
+        )
+
+      {board, change} = Board.apply_change(board, moved)
+
+      assert change.kind == :moved
+      assert change.from_col == :open
+      assert change.to_col == :in_progress
+      assert board.momentum.in_flight == 1
+      assert Enum.map(board.columns.in_progress, & &1.doc_id) == ["mv1"]
+      assert board.columns.open == []
+    end
+
+    test "a fresh close bumps done_today monotonically, prepends to a windowed done column, and pct uses the full pre-cap count" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      # 12 already-done cards (dated today) fill the window exactly, plus one
+      # in_progress card about to close.
+      done_cards =
+        for i <- 1..12 do
+          card("done",
+            doc_id: "d-#{i}",
+            updated_at: DateTime.add(now, -i * 60, :second)
+          )
+        end
+
+      wip = card("in_progress", doc_id: "wip", updated_at: DateTime.add(now, -1, :hour))
+
+      board = Board.build(done_cards ++ [wip], now: now)
+
+      assert board.momentum.done_today == 12
+      assert length(board.columns.done) == 12
+      assert board.done_total == 12
+      # 13 non-cancelled, 12 done → round(12/13*100) = 92.
+      assert board.momentum.pct == 92
+
+      prev = board.cards_by_id["wip"]
+
+      closed =
+        Board.card_from_broadcast(
+          # newest updated_at → prepended to the head of the done column.
+          msg_doc("wip", "Shipped it",
+            content: %{"lifecycle_status" => "done"},
+            updated_at: now
+          ),
+          prev
+        )
+
+      {board, change} = Board.apply_change(board, closed)
+
+      assert change.kind == :closed
+      assert change.from_col == :in_progress
+      assert change.to_col == :done
+      # monotonic +1, never recomputed from the capped column.
+      assert board.momentum.done_today == 13
+      # the done column stays windowed at 12, the fresh close at its head, and
+      # the oldest done card falls off the tail.
+      assert length(board.columns.done) == 12
+      assert hd(board.columns.done).doc_id == "wip"
+      refute Enum.any?(board.columns.done, &(&1.doc_id == "d-12"))
+      # done_total counts the FULL uncapped set (13), and pct is derived from it:
+      # 13/13 = 100, NOT the capped 12/13 = 92.
+      assert board.done_total == 13
+      assert board.momentum.pct == 100
+    end
+
+    test "a cancelled event removes the card from the columns and bumps cancelled_count" do
+      t = ~U[2026-07-07 09:00:00Z]
+      board = Board.build([card("in_progress", doc_id: "cx1", updated_at: t)], now: t)
+
+      assert board.cancelled_count == 0
+      prev = board.cards_by_id["cx1"]
+
+      cancelled =
+        Board.card_from_broadcast(
+          msg_doc("cx1", "Abandoned", content: %{"lifecycle_status" => "cancelled"}),
+          prev
+        )
+
+      {board, change} = Board.apply_change(board, cancelled)
+
+      assert change.kind == :cancelled
+      assert board.cancelled_count == 1
+      assert board.columns.in_progress == []
+      refute Map.has_key?(board.cards_by_id, "cx1")
+    end
+  end
+
+  describe "realtime motion at /admin/projects (wave 2)" do
+    setup do
+      # a small live corpus the mount snapshot picks up: one claimable + one
+      # already in flight.
+      task("rt-open", "Claim me", lifecycle: "open", priority: 1)
+      task("rt-wip", "Already working", lifecycle: "in_progress", assignee: "studio:doey")
+      :ok
+    end
+
+    test "a task.claimed event re-buckets the card, climbs in-flight, and flashes it",
+         %{conn: conn} do
+      {:ok, view, html} = live(conn, "/admin/projects")
+      assert html =~ "1 in flight"
+
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      html = render(view)
+
+      # the card is now in the in_progress column, in-flight climbed to 2, and
+      # the moved card carries the realtime flash marker.
+      assert html =~ "2 in flight"
+      assert html =~ ~s(data-just-moved)
+      assert html =~ ~s(data-doc-id="rt-open")
+
+      # the moved card sits under the in_progress column now.
+      assert card_in_column?(html, "rt-open", "in_progress")
+    end
+
+    test "a task.closed event climbs done-today and flashes the closed card", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/admin/projects")
+      assert html =~ "0 done today"
+
+      send(view.pid, closed_event("rt-wip", "Already working"))
+      html = render(view)
+
+      assert html =~ "1 done today"
+      assert html =~ ~s(data-just-moved)
+      assert card_in_column?(html, "rt-wip", "done")
+    end
+
+    test "an unknown non-task event is ignored — no crash, no change", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      before = render(view)
+
+      # a post document changed, plus a totally unrelated message.
+      send(view.pid, {:document_changed, %{type: "post", doc: %{doc_id: "post-1"}}})
+      send(view.pid, :some_stray_message)
+      after_html = render(view)
+
+      assert Process.alive?(view.pid)
+      # the board is untouched — a non-task event never re-buckets anything.
+      assert after_html == before
+    end
+
+    test "the seen-set drops a repeated event", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      # process two distinct events; the second sets the live flash on rt-wip.
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      _ = render(view)
+      send(view.pid, closed_event("rt-wip", "Already working"))
+      after_two = render(view)
+
+      # re-send the FIRST event verbatim (same doc_id + updated_at) — it is in
+      # the seen-set, so it is dropped: the render is byte-identical (no state
+      # change, and the flash does NOT jump back to rt-open).
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      after_repeat = render(view)
+
+      assert after_repeat == after_two
+    end
+
+    test "the periodic :refresh re-snapshots without crashing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      send(view.pid, :refresh)
+      html = render(view)
+
+      assert Process.alive?(view.pid)
+      # the reconciled snapshot still paints the momentum header.
+      assert html =~ ~s(data-role="momentum")
+    end
+
+    test "the Done column count reports the FULL total even when the render is windowed",
+         %{conn: conn} do
+      # 13 done tasks — one past the @done_window (12) — so the rendered pile is
+      # capped but the header must still climb (§0 "you always feel progress":
+      # closing your 13th task grows Done, it does not freeze at 12).
+      for i <- 1..13, do: task("dw-#{i}", "Shipped #{i}", lifecycle: "done")
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # exactly 12 done cards render (the window), but the Done column count is 13.
+      done_cards =
+        html
+        |> String.split(~s(data-role="column" data-col="done"))
+        |> List.last()
+        |> String.split(~s(data-role="task-card"))
+        |> length()
+        |> Kernel.-(1)
+
+      assert done_cards == 12, "the done render is windowed at 12; got #{done_cards}"
+      assert done_count(html) == 13, "the Done column count must report the full total"
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # A broadcast `doc` map (atom keys) exactly as `Content.Broadcast` shapes it:
+  # `%{doc_id, title, status, content, updated_at}`.
+  defp msg_doc(doc_id, title, opts) do
+    %{
+      doc_id: doc_id,
+      title: title,
+      status: Keyword.get(opts, :status, "published"),
+      content: Keyword.get(opts, :content, %{}),
+      updated_at: Keyword.get(opts, :updated_at, ~U[2026-07-07 12:00:00Z])
+    }
+  end
+
+  # A full `{:document_changed, msg}` tuple as it arrives on the PubSub topic.
+  defp task_event(doc_id, title, mutation, content, updated_at) do
+    {:document_changed,
+     %{
+       type: "task",
+       mutation: mutation,
+       doc: msg_doc(doc_id, title, content: content, updated_at: updated_at)
+     }}
+  end
+
+  defp claimed_event(doc_id, title) do
+    task_event(
+      doc_id,
+      title,
+      "task.claimed",
+      %{"lifecycle_status" => "in_progress"},
+      ~U[2026-07-07 13:00:00Z]
+    )
+  end
+
+  defp closed_event(doc_id, title) do
+    task_event(
+      doc_id,
+      title,
+      "task.closed",
+      %{"lifecycle_status" => "done"},
+      ~U[2026-07-07 13:05:00Z]
+    )
+  end
+
+  # The integer the Done column header prints in its `col-count` span.
+  defp done_count(html) do
+    [_before, rest] = String.split(html, ~s(data-col="done"), parts: 2)
+    [_h, tail] = String.split(rest, ~s(data-role="col-count">), parts: 2)
+    tail |> String.trim_leading() |> Integer.parse() |> elem(0)
+  end
+
+  # Does the rendered board place `doc_id`'s card inside `col`'s <section>? We
+  # slice the HTML at the target column's marker and check the card lands before
+  # the next column boundary.
+  defp card_in_column?(html, doc_id, col) do
+    case String.split(html, ~s(data-role="column" data-col="#{col}")) do
+      [_before, rest] ->
+        segment = rest |> String.split(~s(data-role="column")) |> hd()
+        String.contains?(segment, ~s(data-doc-id="#{doc_id}"))
+
+      _ ->
+        false
+    end
+  end
 
   defp task(doc_id, title, opts) do
     content =
