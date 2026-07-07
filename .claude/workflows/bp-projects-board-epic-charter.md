@@ -123,6 +123,47 @@ always-a-next-step.
      ALSO broadcasts each cascade-unblocked dep as its own `task.mutated` event
      (`close.ex` emits one per unblocked dep), so those cards animate on their own events too.
 
+11. **Foreign-held refusal is a BOARD-LEVEL holder-identity guard, NOT an epoch fence
+   (wave 3).** `Tasks.close/3` fences on the **epoch only** (`check_fencing`:
+   `claim.epoch == observed_epoch → :ok`) — it does **NOT** check worker identity, and it
+   preserves the original `claim.worker` while stamping `closed_by`. So a same-epoch `close`
+   by a NON-holder would *succeed* and terminate the real holder's active work — exactly the
+   "steal/overwrite a claim" the wish forbids. Therefore the two write paths refuse
+   differently, and BOTH honor D4:
+   - **→in_progress = `Tasks.claim_by_id(doc_id, "studio:<user>", scope)`.** The primitive
+     itself fences: a foreign `in_progress` card is not in `{open,blocked}` → `:not_ready` →
+     refuse + snap back. A same-worker `in_progress` card is a lease **renewal** (`{:ok}`,
+     stays in_progress) → treat as an accepted no-op. `open|ready|blocked` held by nobody →
+     claims.
+   - **→done / →blocked = `Tasks.close(task.id, "studio:<user>", observed_epoch: …,
+     lifecycle_status: …)` — allowed ONLY when `studio:<user>` IS the current holder**
+     (`card.lifecycle_status == "in_progress"` AND `card.worker == "studio:<user>"`). A
+     non-holder → **refuse + snap back WITHOUT calling `close`** (calling it would corrupt the
+     claim). `:fenced_off`/`:stale_claim` from `close` is the belt-and-braces for the race
+     where the epoch moved between the board's fresh read and the write.
+   - **Allowed drop set is EXACTLY:** `{open, ready, blocked} → in_progress` (claim);
+     `in_progress → done` (close done, holder); `in_progress → blocked` (close blocked,
+     holder). Everything else refuses + snaps back: **`→open` (reopen — DEFERRED per D4, no
+     clean primitive)**, `→ready` (derived, non-drop per D3), `open→done` (unclaimed direct
+     close — deferred; must claim first), `done→*`, cancelled-as-target (folded, no column).
+   *Why:* the primitives already carry the fence; the ONE gap is that `close`'s epoch-fence
+   can't tell "the holder is closing" from "a supervisor is stealing," so the board adds the
+   holder-identity check that `bp` gets for free by convention. Worst case is a refused drop.
+
+12. **Restage scope MUST match the board's global read, or every drag silently `:not_found`
+   (wave 3).** The board reads the `type:task` corpus GLOBALLY (no workspace scope, D3), but
+   `claim_by_id`/`close`'s fetch is **fail-CLOSED on nil workspace** (`Scope.scope_to_workspace`
+   → `where: false` on nil). So the `restage` handler must resolve the SAME scope
+   `tasks_controller` uses for its `/v1/tasks/:doc_id/{claim,close}` actions — the Default-
+   workspace flat posture (`Barkpark.Tenancy.get_default_workspace/0`, the context LiveAuth
+   `:ops` already authorizes the board under). `close` also needs the task **UUID pk**
+   (`Repo.get(Document, task.id)`) + `observed_epoch` (`content.claim.epoch`), so the handler
+   **re-reads the live doc FRESH** by `doc_id` at event time (`Content.get_document/4` or the
+   same lookup `tasks_controller.find_task_by_doc_id` uses) — never trusts the possibly-stale
+   board card's epoch. **VERIFY with a live-DB test that a restage actually FLIPS the persisted
+   row's `lifecycle_status`** — a fixture-only assertion hides a scope mismatch that would make
+   every real drag a silent no-op.
+
 10. **Done column is WINDOWED so the board never becomes a dead wall (§0).** `build/2` and
    `apply_change/3` render only the most-recent `@done_window` done cards (default 12,
    mirroring the TUI FocusSet cap) — newest-first, a fresh close prepended and the tail
@@ -151,14 +192,17 @@ always-a-next-step.
 2. `board-liveview-readonly` — `BoardLive` + `:ops` route + desk item + inline CSS vocabulary
    + GitHub badge render. ✅ DONE.
 
-**Wave 2 — realtime motion** (THIS WAVE; 1 slice — see wave-2 plan in the log)
+**Wave 2 — realtime motion** ✅ LANDED (#1270; 1 slice — see wave-2 log)
 3. `board-realtime` — subscribe `documents:#{dataset}`, light optimistic re-bucket (D9) +
    flash/slide + monotonic climbing done-today + windowed done (D10) + `:refresh` reconcile,
-   seen-set guard. LARGE. *(one builder owns both board files — no parallel split.)*
+   seen-set guard. ✅ DONE. *(one builder owned both board files — no parallel split.)*
 
-**Wave 3 — drag write-through** (after wave 2)
-4. `board-drag-restage` — CSP-safe drag hook → `handle_event("restage")` through
-   `claim_by_id`/`close` with `studio:<user>`, fence-refuse + snap-back. LARGE.
+**Wave 3 — drag write-through** (THIS WAVE; 1 slice — see wave-3 plan in the log)
+4. `board-drag-restage` — CSP-safe drag hook (`Hooks.BarkparkBoardDrag`, mirrors the
+   shipped `BarkparkPaperSortable`) → `handle_event("restage")` through `claim_by_id`/`close`
+   with `studio:<user>`, optimistic move + fence-refuse + snap-back. LARGE.
+   *(one builder owns `board_live.ex` + the root-layout hook + a small pure `board.ex`
+   helper — no parallel split; a second slice touching `board_live.ex` would re-collide.)*
 
 **Wave 4 — group / filter** (after wave 1; can parallel wave 3 if edits stay in Board + a
    disjoint handler)
@@ -359,3 +403,177 @@ bar grows. GitHub badge never fabricated; honest empty state preserved.
 `claim_by_id`/`close` primitives (D4), fence-refuse + snap-back. Wave 4 `board-group-filter`
 can parallel it (disjoint handler). The one open confidence gap for the whole realtime path
 is a single human browser session (an agent can't clear the profile lock / local OOM).
+
+### Wave 2026-07-07 — Wave 3 (drag write-through) — PLANNED, 1 slice
+
+**Why one slice (again).** The epic is still exactly two files (`board.ex` + `board_live.ex`)
++ one test file, plus this wave's ONE additive JS hook in the shared root layout. Drag
+write-through is inherently cohesive: the drag hook's event shape, the `handle_event` that
+maps a drop to a fenced call, the optimistic move, and the snap-back-on-refuse are all one
+interlocking mechanism. Splitting hook↔handler or Board-helper↔LiveView into parallel
+builders recreates the wave-1 interface-timing collision (one half needs the other's
+not-yet-merged contract). A second slice touching `board_live.ex` (e.g. pulling wave-4
+group/filter forward) would file-collide on the same render + assigns. So: ONE builder, ONE
+worktree, owning `board_live.ex` + the root-layout hook + a small pure `board.ex` helper.
+"Up to 5" → a focused 1 is the honest, lowest-risk cut toward "drag flips the lifecycle."
+
+**Slice 4 `board-drag-restage` (LARGE).** Make the board INTERACTIVE: drag a card to a new
+column → the task's lifecycle flips THROUGH THE FENCED PRIMITIVES (the same claim/close path
+`bp` uses), worker = `studio:<current_user>`, never a raw `Content` write, never a corrupted
+claim. Respects D1/D2 (plugin wires, core owns machinery), D3 (ready is a NON-DROP target),
+D4 (write through `claim_by_id`/`close`; reopen deferred), D5 (no new process — rides the
+socket), D6 (CSP-safe hook, `prefers-reduced-motion`), D8 (no openapi, no bp verb), D9/D10
+(reuse `apply_change/3` for the optimistic move + windowed done), **D11 (board-level
+holder-identity guard — the crux)**, **D12 (Default-workspace scope + fresh UUID/epoch read)**.
+
+- **JS hook (`lib/barkpark_web/layouts/root.html.heex`, ADDITIVE):** add `Hooks.BarkparkBoardDrag`
+  right beside the existing `Hooks.BarkparkPaperSortable` (**copy its shape verbatim** — inline
+  in the same Hooks-registration `<script>` before `new LiveView.LiveSocket`, so it is
+  CSP-safe: NO new blocking `<head>` script (Golden Rule 4), NO `eval`/`onclick`, no bundler,
+  no changeset — root.html.heex is a compiled HEEx template served verbatim). HTML5
+  `dragstart`/`dragover`/`drop`/`dragend` on `this.el`; a card is `[data-role="task-card"]`
+  with `draggable="true"` + its `data-doc-id`; a drop target is the enclosing
+  `[data-role="column"]` with `data-col`. On drop, read the target column's `data-col` and
+  `this.pushEvent("restage", {doc_id, to_col})`; add a `.bp-drop-ok`/`.bp-drop-no` class on
+  `dragover` for a drop-target highlight (pure CSS). The board opts in by putting
+  `phx-hook="BarkparkBoardDrag"` on the `.bp-board` container (studio + every other LiveView
+  is untouched — the hook is inert without the attribute). `destroyed()` removes every
+  listener (mirror `BarkparkPaperSortable`).
+
+- **LiveView (`board_live.ex`):** `handle_event("restage", %{"doc_id" => doc_id, "to_col" =>
+  to_col}, socket)`:
+  1. **Resolve worker** = `"studio:" <> (socket.assigns.current_user ...)`; fall back to
+     `"studio:admin"` when the assign is nil/thin (test conns).
+  2. **Fresh read** the live doc by `doc_id` under the **Default-workspace scope** (D12 —
+     mirror `tasks_controller`'s lookup; `Barkpark.Tenancy.get_default_workspace/0`). This
+     gives `task.id` (UUID pk) + `observed_epoch = get_in(content, ["claim","epoch"]) || 0`
+     + the true current holder — never trust the board card's possibly-stale epoch.
+  3. **Compute the plan** via a PURE `board.ex` helper (below) from `(from_col, to_col,
+     holder, worker)`:
+       * `:claim` → `Tasks.claim_by_id(doc_id, worker, scope)`; `{:ok,_}` accept, any
+         `{:error, :not_ready | :blocked_by_unsatisfied_deps | {:resource_conflict,_} |
+         :stale_claim | :not_found}` → refuse.
+       * `{:close, status}` (`"done"`/`"blocked"`) → **only if `holder == worker`** →
+         `Tasks.close(task.id, worker, observed_epoch: epoch, lifecycle_status: status)`;
+         `{:ok,_}` accept, `{:error, :fenced_off | :stale_claim | {:doc_changed_since_claim,
+         _,_} | _}` → refuse. If `holder != worker` the plan is already `:refuse` (never call
+         close — D11).
+       * `:refuse` (foreign hold, `→open`, `→ready`, `open→done`, `done→*`, illegal) → snap
+         back + notice, NO primitive call.
+  4. **Optimistic UI (D9):** move the card to `to_col` immediately via `Board.apply_change/3`
+     + assign, THEN run the primitive; on accept keep it (the real `task.claimed`/`task.closed`
+     broadcast will also arrive and the D9 seen-set/idempotent `apply_change` de-dupes — no
+     double count); on refuse **roll back** by re-assigning `Board.snapshot/1` (authoritative)
+     and set a transient `@notice` ("`{holder}` is holding this — can't move it" / "Ready is
+     automatic" / "Reopening isn't supported yet"). Render the notice as a dismissible banner
+     (CSS fade, frozen under `prefers-reduced-motion`); snap-back is the card returning to its
+     origin column on the re-render.
+- **Pure helper (`board.ex`):** `restage_plan(from_col, to_col, holder, worker) :: {:claim} |
+  {:close, String.t()} | :refuse` — the D11 transition table, PURE + unit-tested (no socket,
+  no DB). Keep the allowed set EXACTLY `{open,ready,blocked}→in_progress`,
+  `in_progress→{done,blocked}` (holder only); all else `:refuse`.
+
+- **Tests (all in `board_live_test.exs`, ConnCase, `Phoenix.LiveViewTest` — NEVER
+  phx.server):**
+  (1) **pure** — `restage_plan` returns `{:claim}` for `open→in_progress`, `{:close,"done"}`
+      for holder `in_progress→done`, `:refuse` for foreign `in_progress→done`, `→ready`,
+      `→open`, `open→done`.
+  (2) **live ok-move (real DB flip, D12 proof)** — seed a REAL `open` task via the live path,
+      `live(conn, "/admin/projects")` connected, `render_hook(view, "restage", %{"doc_id"=>id,
+      "to_col"=>"in_progress"})` → assert the **persisted** row's `content["lifecycle_status"]
+      == "in_progress"` (re-read from Repo) AND `render(view)` shows the card in In Progress.
+  (3) **fenced-refuse-snapback** — seed an `in_progress` task whose `content.claim.worker` is
+      `"agent-x"` (NOT the studio worker); restage → `"done"` → assert **no close was called**
+      (DB row still `in_progress`), the card snaps back, a notice renders. (Also: restage a
+      foreign card → `"in_progress"` → `claim_by_id` returns `:not_ready` → same refuse.)
+  (4) **ready non-drop** — restage → `"ready"` → DB unchanged, snap back, notice.
+  (5) **illegal / reopen deferred** — restage a `done` card → `"open"` → DB unchanged, snap
+      back, notice.
+  (6) **dedup** — a successful claim followed by its own `task.claimed` broadcast does not
+      double-move / double-count (seen-set holds).
+- **HARD RULES:** no boot-started process (the write rides the socket event, per-socket only —
+  the github-bridge sandbox landmine stays clear); server edits confined to `board_live.ex` +
+  the pure `board.ex` helper; the ONLY shared-file touch is the additive `Hooks.BarkparkBoardDrag`
+  block in root.html.heex (surgical, inert without the opt-in attr — do NOT touch
+  `studio_live.ex`/`pane_builder.ex`). File-disjoint from all other epics.
+
+**Gate (exact):**
+```
+cd api && CC=/usr/bin/clang mix test \
+  test/barkpark/plugins/tasks/web/board_live_test.exs \
+  test/barkpark/plugins/tasks/ test/barkpark/tasks/ \
+  test/barkpark_web/controllers/mutate_controller_test.exs \
+  test/barkpark_web/controllers/query_controller_filter_test.exs
+```
+The controller files are the BROAD ConnCase swath (they exercise the endpoint + full
+mutation/broadcast path, so a sandbox/broadcast regression surfaces here, not just in a
+board-only run). No openapi regen (D8 — `:ops :live` route unchanged; belt-and-braces `mix
+barkpark.openapi` is a no-op), no bp verb (no Go build), no changeset (root.html.heex isn't a
+`js/` package — its inline hook is served verbatim by the app).
+
+### Wave 2026-07-07 — Wave 3 (board-drag-restage), GREEN — the board is now interactive
+
+**Landed in-branch (1 slice, 1 builder, 1 worktree — as planned; no parallel split, no
+collision).** Drag a card to a new column and the task's lifecycle flips through the FENCED
+`claim_by_id`/`close` primitives `bp` uses — never a raw `Content` write, never a corrupted
+claim. Server edits stayed inside `board.ex` + `board_live.ex`; the only shared-file touch is
+the additive, opt-in `Hooks.BarkparkBoardDrag` block in `root.html.heex` (inert without the
+`.bp-board` attr — studio and every other LiveView untouched). Not yet on `main` (main HEAD is
+still #1270/wave 2); the perfecter branch
+`projects-board/board-drag-restage-drag-a-card-between-c-0-p` awaits integration/merge.
+
+- **Pure organizer (`board.ex`, D11):** `restage_plan(from_col, to_col, holder, worker) ::
+  {:claim} | {:close, String.t()} | :refuse` — the transition table as a pure, socket-free,
+  DB-free function. Allowed set is EXACTLY `{open,ready,blocked}→in_progress ⇒ {:claim}`;
+  holder's `in_progress→done ⇒ {:close,"done"}`; holder's `in_progress→blocked ⇒
+  {:close,"blocked"}` (both guarded `when holder == worker`); a catch-all `:refuse`. **The
+  crux — the claim-steal gap is closed HERE, before any primitive call:** a foreign hold
+  (`holder != worker`) on `in_progress→done/blocked` falls to `:refuse`, so `Tasks.close/3`
+  (which fences on EPOCH, not identity, and would let a same-epoch non-holder close succeed and
+  terminate the real holder's work) is never reached.
+- **LiveView (`board_live.ex`, D12):** `handle_event("restage", …)` resolves the
+  Default-workspace scope (`Tenancy.get_default_workspace/0`, the same posture
+  `tasks_controller` uses), **FRESH-reads the live row** by `doc_id` for its UUID pk +
+  observed `content.claim.epoch` + true holder (never the card's possibly-stale epoch), asks
+  `restage_plan/4` for the verdict, then runs `Tasks.claim_by_id/3` or `Tasks.close/3`. On
+  refuse it rolls back to an authoritative `Board.snapshot/1` and raises a dismissible,
+  next-step notice (`@holder holds this task…` / Ready-is-automatic / reopen-not-supported).
+  A `with`-else + catch-all handler makes any resolution failure a clean notice, never a crash.
+- **JS hook (`root.html.heex`, D6):** `Hooks.BarkparkBoardDrag` inline beside
+  `BarkparkPaperSortable` — CSP-safe (no bundler/changeset/eval), HTML5 drag, `pushEvent`
+  `restage {doc_id, to_col}`, pure-CSS `drop-ok`/`drop-no` highlights + grab/grabbing cursors,
+  `prefers-reduced-motion` honored, listeners torn down on `destroyed()`.
+
+**Correctness PROVEN against the live DB (not fixtures):** `render_hook` restage flips the
+PERSISTED row (`dr-open→in_progress`, `dr-wip→done`, `dr-park→blocked`, all re-read via
+`Repo.get_by`); the D12 scope-mismatch trap (which would silently no-op every drag) is caught
+because these tasks carry an explicit `workspace_id`. `dr-foreign` (held by `agent-x`) →
+Done **leaves the row UNTOUCHED** — the D11 holder guard fires before `close`, proving the
+epoch-not-identity steal gap is shut. `→ready` and reopen (`done→open`) are non-drops (DB
+unchanged, snap-back + notice). Pure `restage_plan/4` cases cover claim/close/foreign/ready/
+reopen/unclaimed-done. Gate: 242 tests, 0 failures; format clean; docs-anchors PASS.
+
+**Feels-alive verdict (perfecter-confirmed): SHIPS.** Progress is now one gesture: grab/grabbing
+cursors, drop-ok/drop-no highlights, optimistic move + snap-back for momentum, done blink×3 on
+a real close, refusal notices phrased as the NEXT step ("claim first, then close"). Reduced-
+motion honored throughout. This is the wish's interactive payload — not micro-repair.
+
+**LEAD MUST KNOW / known non-blocking (charter-sanctioned, NOT defects):**
+- **Every real drag assumes production tasks live in the DEFAULT workspace.** A task with a
+  different/nil `workspace_id` REFUSES the drag with an honest notice — never a corrupt write,
+  but a silent no-op. Verified only for default-ws. If production `type:task` docs ever live
+  outside Default, the restage read must broaden to match the board's global read (D12 seam).
+- **Own-card → Blocked with no live blockers** lands optimistically in Ready (derived
+  semantics), reconciled on the 15s `:refresh` — an accepted charter tradeoff.
+- **HTML5 drag is mouse-only this wave** (no keyboard/touch reorder); **NOT browser-verified**
+  — still `LiveViewTest` render_hook only (profile lock + local `phx.server` OOM). A single
+  human browser session remains the one open confidence step across waves 2+3 (an agent can't
+  clear the profile lock / local OOM).
+- **Not yet merged to `main`** — integration/merge of the `-p` perfecter branch is the
+  remaining mechanical step; nothing shipped outside the loop.
+
+**Next.** Wave 4 `board-group-filter` (swimlane group-by goal/priority/label + shareable filter
+chips through the pure organizer, MEDIUM) — can proceed once wave 3 merges; its handler is
+disjoint but it edits `board_live.ex` render+assigns, so serialize behind the wave-3 merge to
+avoid the same file-collision the single-slice cuts have avoided all epic. Wave 5 (web/PortableDoc
+parity + docs/glyph-parity gate) closes reach. The interactive core of the wish is now DONE.
