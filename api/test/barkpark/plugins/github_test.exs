@@ -54,6 +54,11 @@ defmodule Barkpark.Plugins.GithubAdoptWiringTest do
       "name" => "github_adopt",
       "label" => "Adopt from GitHub",
       "kind" => "modal",
+      "modal" => %{
+        "title" => "Adopt from GitHub?",
+        "body" =>
+          "Adopting flips this GitHub intake task into Barkpark ownership: it drops the needs-human gate, keeps the src:github provenance, and posts a backlink on the source issue. It does NOT claim the task — a worker claims it afterward through the normal bp task path. Confirm to adopt (idempotent — repeating is a safe no-op)."
+      },
       "icon" => "github"
     }
 
