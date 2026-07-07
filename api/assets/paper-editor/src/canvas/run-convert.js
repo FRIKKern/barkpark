@@ -671,11 +671,37 @@ function blockToNode(block) {
 // round-trips as ABSENT, byte-mirroring callout.title).
 
 // sectionBlockToNode(block, bpId, bpType) → the bpSection node.
+//
+// STEP-2 LAYOUT ENGINE: a section MAY carry `layout` ({mode,tracks?,gap?,
+// breakpoints?}) and its children MAY carry span/order. Both are PRESENT-ONLY —
+// a no-layout section adds NOTHING new to attrs, so it projects byte-identically
+// to the pre-layout path (backward-compat: runToOps zero-ops on open/save).
+//
+// CELLS HOIST: prose/canvas child nodes DROP unknown keys on getJSON, so a child's
+// span/order can't ride the child node without touching ~10 node files. Instead we
+// hoist them into the section's OWN declared `cells` attr (a JSON data-attr,
+// getJSON-safe — the bpColumnAtom bpBlock precedent) as a positional array, ONLY
+// when some child actually carries span/order. RISK #1 (index-keyed cells): under a
+// canvas reorder (coarse replace rebuilds children in new order) the positional
+// cells would misassign — INVISIBLE in v1 (span/order unrendered) but a latent
+// fidelity bug; step 6 must re-key cells by child bpId BEFORE it renders them.
 function sectionBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType: bpType || "section" };
   if (block && block.title != null) attrs.title = block.title;
+  if (block && block.layout != null) attrs.layout = block.layout;
 
   const children = (block && block.blocks) || [];
+
+  // Hoist child span/order into a positional cells array — present-only (omitted
+  // entirely when no child carries either key, so a plain section is unchanged).
+  const cells = children.map((child) => {
+    const cell = {};
+    if (child && child.span != null) cell.span = child.span;
+    if (child && child.order != null) cell.order = child.order;
+    return cell;
+  });
+  if (cells.some((c) => Object.keys(c).length > 0)) attrs.cells = cells;
+
   const content = children.map((child) => {
     // DEPTH-GUARD (V1 forbid-nesting): a child of type "section" is carried VERBATIM
     // as bpOpaque (read-only), NOT projected as another bpSection — so a legacy nested
@@ -709,13 +735,24 @@ function sectionNodeToBlock(node, id, taken) {
   const attrs = (node && node.attrs) || {};
   const block = { id, type: "section" };
   if (attrs.title != null) block.title = attrs.title;
+  // STEP-2: lower the layout VERBATIM (present-only; NO cells inside — cells is a
+  // SEPARATE attr). The persisted layout stays cells-free (doctrine: span/order
+  // live on children, hoisted into attrs.cells for canvas transport only).
+  if (attrs.layout != null) block.layout = attrs.layout;
+
+  const cells = Array.isArray(attrs.cells) ? attrs.cells : null;
 
   const children = (node && node.content) || [];
-  block.blocks = children.map((child) => {
+  block.blocks = children.map((child, i) => {
     const cls = classifyNode(child);
     const childBpId = child.attrs && child.attrs.bpId;
     const cid = childBpId != null ? childBpId : mintId(seen);
-    return nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+    const built = nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
+    // Split the positional cells array back onto the rebuilt children (present-only).
+    const cell = cells && cells[i];
+    if (cell && cell.span != null) built.span = cell.span;
+    if (cell && cell.order != null) built.order = cell.order;
+    return built;
   });
   return block;
 }
@@ -762,6 +799,29 @@ function sectionTitleChanged(prevNode, nextNode) {
 function sectionTitlePatch(nextNode) {
   const t = nextNode && nextNode.attrs && nextNode.attrs.title;
   return { title: t == null || t === "" ? null : t };
+}
+
+// STEP-2: True when a section node's OWN `layout` attr changed prev↔next
+// (independent of its children / title). Compares canonicalJSON of the normalized
+// layout — cells are EXCLUDED (cells is not a layout key, it is a separate attr), so
+// a hypothetical span echo never masquerades as a layout change (RISK #4). A missing
+// layout normalizes to null, so absent ⇄ absent is NOT a change (zero-ops on an
+// unedited no-layout section).
+function normLayout(node) {
+  const l = node && node.attrs && node.attrs.layout;
+  return l == null ? null : l;
+}
+
+function sectionLayoutChanged(prevNode, nextNode) {
+  return canonicalJSON(normLayout(prevNode)) !== canonicalJSON(normLayout(nextNode));
+}
+
+// The layout patch for a section: { layout } when set, { layout: null } when cleared.
+// patch.ex merge_block shallow-merges {layout:{…}} onto the section; {layout:null}
+// merges null → compose grid_layout→nil→stack (reader parity, mirrors title:null).
+function sectionLayoutPatch(nextNode) {
+  const l = nextNode && nextNode.attrs && nextNode.attrs.layout;
+  return { layout: l == null ? null : l };
 }
 
 // When a section's child-id sequence is IDENTICAL prev↔next (no structural change),
@@ -879,11 +939,30 @@ function walkNodeIds(nodes, sink) {
 // maybe_put / maybe_put_true only thread these when present, so a callout that
 // never had a title must round-trip WITHOUT a title key (not title:"").
 
+// calloutBodyInline(block) → the callout body's inline array (STEP 3 slot model).
+//
+// The `body` slot is the source of truth: when the block carries a materialized
+// `slots.body` (a list whose lone element is a paragraph), read that paragraph's
+// `content`; otherwise fall back to the legacy `content` array. Both encodings of
+// the SAME body yield the SAME inline array, so a slot-form and a content-form
+// callout project to an IDENTICAL node — which is what keeps zero-op-on-load true
+// (stableCalloutKey keys on node.content, so a legacy-loaded callout and its
+// re-projection compare EQUAL). Mirrors Elixir Slots.callout_body_inline/1.
+function calloutBodyInline(block) {
+  const slotBody = block && block.slots && block.slots.body;
+  if (Array.isArray(slotBody) && slotBody.length) {
+    const first = slotBody[0];
+    return (first && first.content) || [];
+  }
+  return (block && block.content) || [];
+}
+
 // calloutBlockToNode(block) → { type:"callout", attrs:{…}, content:[inline…] }
 //
-// The body inline array (block.content) → TipTap inline nodes via the shared
-// serializer. Chrome fields → attrs (only the present ones; tone always present
-// with its "info" default so a tone swap is always diffable).
+// The body inline array (calloutBodyInline: slots.body[0].content else content) →
+// TipTap inline nodes via the shared serializer. Chrome fields → attrs (only the
+// present ones; tone always present with its "info" default so a tone swap is
+// always diffable). title/collapsible/collapsed stay WIDGET attrs OUTSIDE the slot.
 function calloutBlockToNode(block, bpId, bpType) {
   const attrs = {
     bpId,
@@ -897,7 +976,7 @@ function calloutBlockToNode(block, bpId, bpType) {
   if (block && block.collapsed === true) attrs.collapsed = true;
 
   const node = { type: bpType || "callout", attrs };
-  const inline = inlineArrayToTiptap((block && block.content) || []);
+  const inline = inlineArrayToTiptap(calloutBodyInline(block));
   if (inline.length) node.content = inline;
   return node;
 }
@@ -2465,10 +2544,19 @@ export function runToOps(prevBlocks, nextDoc) {
             block: sectionNodeToBlock(entry.node, entry.id, taken),
           });
         } else {
-          // Fine-grained path: the section's own TITLE is diffed separately from its
-          // children (a title-only edit leaves the child-id seq identical, so without
-          // this it would emit nothing and revert). Emit the title patch-block FIRST,
-          // then each changed child's interior patch.
+          // Fine-grained path: the section's own LAYOUT and TITLE are each diffed
+          // separately from its children (a layout- or title-only edit leaves the
+          // child-id seq identical, so without this it would emit nothing and revert).
+          // Emit the LAYOUT patch FIRST (step 2), THEN the title patch, THEN each
+          // changed child's interior patch. patch.ex shallow-merges {layout} onto the
+          // section; {layout:null} → compose stack path (reader parity, mirrors title).
+          if (sectionLayoutChanged(prevNode, entry.node)) {
+            ops.push({
+              op: "patch-block",
+              id: entry.id,
+              patch: sectionLayoutPatch(entry.node),
+            });
+          }
           if (sectionTitleChanged(prevNode, entry.node)) {
             ops.push({
               op: "patch-block",
@@ -2793,6 +2881,11 @@ function stableSectionKey(node) {
   const a = (node && node.attrs) || {};
   return canonicalJSON({
     title: a.title == null ? null : a.title,
+    // STEP-2: layout + cells join the echo key so a layout-only own-echo is
+    // recognized (no phantom replace-block). A layout-bearing section the server
+    // just confirmed must still match the live node.
+    layout: a.layout == null ? null : a.layout,
+    cells: a.cells == null ? null : a.cells,
     content: node.content || null,
   });
 }

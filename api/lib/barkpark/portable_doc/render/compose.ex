@@ -166,7 +166,16 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "callout"} = b, style) do
-    body = %{"kind" => "PdText", "children" => compose_inline_children(Map.get(b, "content", []))}
+    # Body inline comes from the `body` slot (STEP 3 slot model): the slot's lone
+    # paragraph when materialized, else the legacy `content` array — the SAME inline
+    # array either way (Slots.callout_body_inline/1), so this composes a byte-
+    # identical single PdText. The callout FLATTENS its single-paragraph body slot to
+    # INLINE; it never composes the paragraph as a block <p> (that would add a wrapper
+    # + 12pt margin and break parity).
+    body = %{
+      "kind" => "PdText",
+      "children" => compose_inline_children(Barkpark.PortableDoc.Slots.callout_body_inline(b))
+    }
 
     tone = Map.get(b, "tone") || "info"
 
@@ -198,19 +207,25 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     }
   end
 
+  # STEP-2 LAYOUT ENGINE: a `section` MAY carry an optional `layout` object
+  # ({mode, tracks?, gap?, breakpoints?}) + its children MAY carry span/order.
+  # `grid_layout/1` is the ONE predicate that gates the grid path across every
+  # surface: it returns the layout iff mode=="grid", else nil. The nil branch is
+  # `compose_section_stack/2` — the pre-layout body VERBATIM — so the legacy
+  # corpus AND every explicit-stack (or malformed-layout) section render
+  # byte-identically (the callout maybe_put_true precedent: absence and
+  # explicit-stack are indistinguishable at the bytes).
+  #
+  # STEP-6 SEAM (data-only note, no code): the `layout` object is shaped so
+  # pdrender (Go TUI) and portable-doc.tsx (web) can interpret it later. The TUI
+  # COLLAPSES grid→stack (renders children in source order, ignoring
+  # tracks/span/order) since a terminal has no grid. Breakpoints beyond the
+  # built-in ≤720px 1-col collapse are DATA-carried now, rendered in step 6.
   def compose_block(%{"type" => "section"} = b, style) do
-    leading = [%{"kind" => "PdHr"}]
-
-    title =
-      case Map.get(b, "title") do
-        nil -> []
-        t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
-      end
-
-    inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
-
-    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
-    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+    case grid_layout(b) do
+      nil -> compose_section_stack(b, style)
+      layout -> %{"kind" => "_raw", "html" => section_grid_html(b, layout, style)}
+    end
   end
 
   # Article mode: the doc.css `hr.section` look — a centered "§" glyph
@@ -889,6 +904,106 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp render_blocks(_, _), do: ""
+
+  # ── section layout engine (step 2) ─────────────────────────────────────────
+  #
+  # The pre-layout section body — the ONLY path the legacy corpus and every
+  # explicit-stack section ever reaches (grid_layout gates on mode=="grid" only).
+  # Extracted VERBATIM from the old `section` clause: leading PdHr, optional
+  # bold-title PdText, inner children via compose_block, trailing PdHr, wrapped in
+  # a flex-column PdBox. BYTE-IDENTICAL to the pre-layout engine.
+  defp compose_section_stack(b, style) do
+    leading = [%{"kind" => "PdHr"}]
+
+    title =
+      case Map.get(b, "title") do
+        nil -> []
+        t -> [%{"kind" => "PdText", "weight" => "bold", "children" => [t]}]
+      end
+
+    inner = Enum.map(Map.get(b, "blocks", []), &compose_block(&1, style))
+
+    children = leading ++ title ++ inner ++ [%{"kind" => "PdHr"}]
+    %{"kind" => "PdBox", "style" => %{"flexDirection" => "column"}, "children" => children}
+  end
+
+  # `grid_layout/1` — the ONE predicate gating the grid path everywhere. Returns
+  # the layout object iff its `mode` is exactly "grid"; ANY other shape (absent,
+  # null, a non-map layout, or a non-"grid" mode such as an explicit
+  # {"mode":"stack"}) → nil → the stack path. Pattern-matching keeps it fail-soft:
+  # a malformed non-map `layout` value can never raise here.
+  defp grid_layout(%{"layout" => %{"mode" => "grid"} = layout}), do: layout
+  defp grid_layout(_), do: nil
+
+  # The grid section render: a `_raw` HTML node the walker passes through
+  # verbatim. Shape mirrors the stack reader's chrome (leading rule, optional
+  # bold title, trailing rule) but lays the children into a CSS grid painted by
+  # the SHARED `.bp-section__grid` class (paper-surface.css) — the reader adds no
+  # inline pixels, only the structural `--bp-tracks` count + a `--bp-grid-gap`
+  # token VAR (never px — D2). Each child renders through its own emitter via the
+  # `render_blocks/2` compose→walk bridge (the same bridge columns/terminal use).
+  #
+  # V1: span/order are CARRIED on children (persisted) but NOT rendered here —
+  # both surfaces render UNIFORM tracks so reader↔canvas parity stays EXACT (the
+  # canvas contentDOM can't easily style per-child grid-column). Rendering
+  # span/order lands in step 6 with the TUI/web breakpoint work.
+  defp section_grid_html(b, layout, style) do
+    tracks = grid_tracks(Map.get(layout, "tracks"))
+    gap = gap_token_var(Map.get(layout, "gap"))
+
+    title_html =
+      case Map.get(b, "title") do
+        nil ->
+          ""
+
+        t ->
+          ~s(<div class="bp-section__title" style="font-weight:bold">) <>
+            Util.escape_html(stringish(t)) <> "</div>"
+      end
+
+    cells =
+      Map.get(b, "blocks", [])
+      |> List.wrap()
+      |> Enum.map(fn child ->
+        ~s(<div class="bp-section__cell">) <> render_blocks([child], style) <> "</div>"
+      end)
+      |> Enum.join("")
+
+    hr = ~s(<hr class="bp-hr">)
+
+    ~s(<div style="display:flex;flex-direction:column">) <>
+      hr <>
+      title_html <>
+      ~s(<div class="bp-section__grid" style="--bp-tracks:#{tracks};--bp-grid-gap:#{gap}">) <>
+      cells <>
+      "</div>" <>
+      hr <>
+      "</div>"
+  end
+
+  # tracks → a positive integer column count (structural, NOT a pixel). Default 2
+  # (matches the CSS `repeat(var(--bp-tracks,2),…)` fallback). Accepts an int or a
+  # stringy int; anything else falls to 2.
+  defp grid_tracks(n) when is_integer(n) and n > 0, do: n
+
+  defp grid_tracks(n) when is_binary(n) do
+    case Integer.parse(n) do
+      {i, ""} when i > 0 -> i
+      _ -> 2
+    end
+  end
+
+  defp grid_tracks(_), do: 2
+
+  # gap TOKEN name → a CSS custom-property reference (never a px literal — D2).
+  # The token vocabulary (none|sm|md|lg) is defined ONCE here + mirrored as the
+  # CSS `--bp-space-*` var defaults (paper-surface.css) so reader and canvas
+  # resolve gaps identically. Default (absent / unknown) → md.
+  defp gap_token_var("none"), do: "var(--bp-space-none,0)"
+  defp gap_token_var("sm"), do: "var(--bp-space-sm,0.8rem)"
+  defp gap_token_var("md"), do: "var(--bp-space-md,1.6rem)"
+  defp gap_token_var("lg"), do: "var(--bp-space-lg,2.4rem)"
+  defp gap_token_var(_), do: "var(--bp-space-md,1.6rem)"
 
   defp block_to_html(child, style) when is_map(child) do
     composed = compose_block(child, style)

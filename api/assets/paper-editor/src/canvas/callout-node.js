@@ -57,6 +57,19 @@
 //     handling). The chrome attrs (tone/title/collapsible/collapsed) ride node
 //     attrs and also feed the patch on change.
 //
+// ── SLOT FRAMING (STEP 3: widget slots) ──────────────────────────────────────
+//   The callout is a WIDGET declaring exactly ONE slot: `body` (element tier,
+//   arity {:exactly, 1}). This `contentDOM` hole IS that `body` slot's editing
+//   region — one contentDOM ⇔ one slot. Because the body is a single paragraph of
+//   inline runs, the widget FLATTENS its body slot to inline: the contentDOM is
+//   `inline*`, not a nested block editor. The body's persisted encoding is the
+//   legacy `content` inline array (the compat form of a one-paragraph body slot);
+//   run-convert.js `calloutBodyInline` reads `slots.body[0].content` when a doc
+//   materializes the slot, else `content` — projecting BOTH to this identical
+//   inline contentDOM. A future `card` widget (media/title/body/action slots with
+//   no legacy inline encoding) would expose ONE contentDOM PER slot and stack its
+//   body slot as real blocks — same slot model, higher arity.
+//
 // bpId / bpType / tone / title / collapsible / collapsed ride the node as attrs,
 // carried through the DOM round-trip on data-* attributes — IDENTICAL id contract
 // to BpAttrs (bp-attrs.js) + divider-node.js. data-bp-id is what makes getJSON()

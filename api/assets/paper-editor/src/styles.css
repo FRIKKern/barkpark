@@ -191,6 +191,17 @@
 @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
 .bp-paper-editor-body .bp-cols__c { min-width: 0; }
 .bp-paper-editor-body .bp-cols__c > :first-child { margin-top: 0; }
+/* S2 layout-engine: section grid — the hand-copied mirror of the single-source
+ * .bp-paper-surface .bp-section__grid rules (paper-surface.css) for the STANDALONE
+ * embedder bundle (no .bp-paper-surface ancestor). In Studio the canvas mounts
+ * inside .bp-paper-surface so the grid is inherited there for free; this mirror
+ * only paints the embedder host. The section node-view sets the body class
+ * `bp-section__grid` + a `--bp-tracks` style in grid mode. Keep byte-aligned with
+ * paper-surface.css + root.html.heex. */
+.bp-paper-editor-body .bp-section__grid { display: grid; grid-template-columns: repeat(var(--bp-tracks, 2), minmax(0, 1fr)); gap: var(--bp-grid-gap, 1.6rem); }
+@media (max-width: 720px) { .bp-paper-editor-body .bp-section__grid { grid-template-columns: 1fr; } }
+.bp-paper-editor-body .bp-section__cell { min-width: 0; }
+.bp-paper-editor-body .bp-section__cell > :first-child { margin-top: 0; }
 .bp-paper-editor-body code {
   font-family: var(--paper-font-mono); font-size: var(--bp-code-size);
   background: var(--paper-bg-deep); padding: var(--bp-code-pad); border-radius: var(--bp-code-radius);
@@ -455,6 +466,14 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * column layout + a small child gap), kept visually inert so View == Edit. */
 .bp-canvas-section > .bp-section__body { display: flex; flex-direction: column; }
 .bp-canvas-section > .bp-section__title { font-weight: 700; }
+/* S2 layout-engine: the hover-revealed layout controls (mode toggle + tracks stepper).
+ * EDIT-ONLY chrome (bp-canvas-* — the table/terminal rail precedent), hidden at rest,
+ * revealed on hover/focus-within; NO reader counterpart. Bound to the --paper-* token
+ * vocabulary. Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-canvas-section__controls { display: flex; gap: 4px; align-items: center; opacity: 0; transition: opacity 0.12s ease; margin: 4px 0; }
+.bp-canvas-section:hover > .bp-canvas-section__controls, .bp-canvas-section:focus-within > .bp-canvas-section__controls { opacity: 1; }
+.bp-canvas-section__btn { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); background: var(--paper-bg-deep); border: 1px solid var(--paper-rule); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+.bp-canvas-section__tracks { font-family: var(--paper-font-serif); font-size: 0.72rem; color: var(--paper-ink-soft); }
 /* The generic read-only bpOpaque carry chip (a nested section / composite / codelist
  * carried verbatim inside a section body) reuses `.bp-canvas-readonly` for the chip
  * frame; `.bp-canvas-opaque` is a marker hook for any future opaque-only tweak. */
@@ -553,6 +572,15 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-canvas-cols__c:empty,
 .bp-cols__c:has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
 .bp-cols__atom { display: block; font-size: 0.85em; color: var(--paper-ink-soft); padding: 0.3em 0.5em; border: 1px solid var(--paper-rule); border-radius: 4px; font-family: var(--paper-font-serif); }
+
+/* S2 layout-engine: section-grid EDIT-ONLY empty-cell guard (edit-chrome; NO reader
+ * counterpart, so it does NOT trip the view↔edit byte-compare — the analogous
+ * .bp-cols__c:empty hack above, RISK #2). When the section body is a grid the PM
+ * contentDOM lays children into grid tracks; an empty/placeholder cell (a lone
+ * trailing-break) gets a min-height + dashed outline so it stays a visible caret
+ * target. Keep BYTE-IDENTICAL with the root.html.heex copy. */
+.bp-canvas-section .bp-section__grid > :empty,
+.bp-canvas-section .bp-section__grid > :has(> .ProseMirror-trailingBreak:only-child) { min-height: 2.5em; outline: 1px dashed var(--paper-rule); outline-offset: 2px; }
 
 /* editable-terminal: `terminal` EDIT-ONLY chrome hooks (edit-chrome; NO reader
  * counterpart, so they do NOT trip the view↔edit parity byte-compare — the reader

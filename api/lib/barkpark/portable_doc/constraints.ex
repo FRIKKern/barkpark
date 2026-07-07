@@ -12,6 +12,8 @@ defmodule Barkpark.PortableDoc.Constraints do
       `{:max, n}`.
     * **position** — a list of position constraints, ALL of which must hold:
       * `{:index, n}` — pinned to an absolute index (every occurrence).
+      * `{:not_index, n}` — the mirror of `{:index, n}`: NO occurrence may sit at
+        absolute index `n` (e.g. "no widget at index 0").
       * `:top_group` / `:bottom_group` — occurrences form a contiguous run at
         the very top / bottom of the doc.
       * `{:before, kind}` / `{:after, kind}` **relations** — RELATIVE order
@@ -19,6 +21,28 @@ defmodule Barkpark.PortableDoc.Constraints do
         absent anchor never fails a present block). Relations compose, e.g.
         `[{:after, "title"}, {:before, "featured"}]`.
       * `:free` — no position constraint.
+
+  ## Kinds: role/type strings AND composition tiers
+
+  A declaration's `kind` is EITHER a role/type STRING (the block's structural
+  label, matched by `kind_of/1` — role→type) OR a composition **tier atom**
+  (`:element | :widget | :section`, matched by
+  `Barkpark.PortableDoc.Tiers.tier_of/1` — a type-only classifier). Both are
+  discriminated at match time by the same index, which keys every block under
+  BOTH its string kind AND its tier atom (string keys and atom keys never
+  collide, so the two vocabularies are independent):
+
+    * `count: {:max, 0}` on `:widget` — "forbid a widget entirely".
+    * `presence: :required` (or `count: {:min, 1}`) on `:section` — "require at
+      least one section".
+    * `position: [{:not_index, 0}]` on `:widget` — "no widget at the very top".
+
+  Because a tier atom anchors the index too, `{:after, :element}` /
+  `{:before, :section}` relations can anchor on a whole tier for free. A block is
+  indexed under both keys, so a decl set carrying BOTH a `"section"` type decl
+  and a `:section` tier decl evaluates them independently — the tier decl counts
+  the whole `:section` tier (a `section` AND a `columns` block), potentially
+  overlapping the type decl. That overlap is intended.
 
   `locked` on a declaration marks the kind as template-locked (the op-backstops in
   `Barkpark.PortableDoc.Patch` and the seed own that flag) — the checker itself is
@@ -34,7 +58,10 @@ defmodule Barkpark.PortableDoc.Constraints do
   the additive trigger; this owns the enforcement math.
   """
 
-  @type kind :: String.t()
+  alias Barkpark.PortableDoc.Tiers
+
+  @type tier :: :element | :widget | :section
+  @type kind :: String.t() | tier()
   @type presence :: :required | :optional
   @type count ::
           {:exactly, non_neg_integer()}
@@ -42,7 +69,11 @@ defmodule Barkpark.PortableDoc.Constraints do
           | {:max, non_neg_integer()}
   @type position_atom :: :top_group | :bottom_group | :free
   @type relation :: {:before, kind()} | {:after, kind()}
-  @type position_constraint :: {:index, non_neg_integer()} | position_atom() | relation()
+  @type position_constraint ::
+          {:index, non_neg_integer()}
+          | {:not_index, non_neg_integer()}
+          | position_atom()
+          | relation()
   @type position :: [position_constraint()]
   @type declaration :: %{
           kind: kind(),
@@ -69,16 +100,25 @@ defmodule Barkpark.PortableDoc.Constraints do
   """
   @spec validate(term(), term()) :: [String.t()]
   def validate(blocks, declarations) when is_list(blocks) and is_list(declarations) do
-    indexed = index_by_kind(blocks)
+    indexed = index_blocks(blocks)
     total = length(blocks)
 
-    Enum.flat_map(declarations, fn decl ->
-      indices = Map.get(indexed, decl.kind, [])
+    decl_errors =
+      Enum.flat_map(declarations, fn decl ->
+        indices = Map.get(indexed, decl.kind, [])
 
-      presence_errors(decl, indices) ++
-        cardinality_errors(decl, indices) ++
-        position_errors(decl, indices, indexed, total)
-    end)
+        presence_errors(decl, indices) ++
+          cardinality_errors(decl, indices) ++
+          position_errors(decl, indices, indexed, total)
+      end)
+
+    # D1 slot gate (STEP 3): every widget's slot children must be element-tier.
+    # Additive and legacy-safe — a legacy callout (body synthesized from `content`)
+    # yields no slot error; only a slot holding a nested widget/section does.
+    # `Slots` is pure/Content-free, so this keeps the checker's layering purity.
+    slot_errors = Enum.flat_map(blocks, &Barkpark.PortableDoc.Slots.slot_type_errors/1)
+
+    decl_errors ++ slot_errors
   end
 
   def validate(_, _), do: []
@@ -87,17 +127,24 @@ defmodule Barkpark.PortableDoc.Constraints do
   @spec satisfied?(term(), term()) :: boolean()
   def satisfied?(blocks, declarations), do: validate(blocks, declarations) == []
 
-  # kind => ascending list of the indices where a block of that kind sits.
-  defp index_by_kind(blocks) do
+  # key (string kind OR tier atom) => ascending list of the indices where a
+  # matching block sits. Each block is written under BOTH its `kind_of` (string)
+  # and its `Tiers.tier_of` (atom) so a declaration keyed by either vocabulary
+  # resolves uniformly. String keys and atom keys never collide, and `kind_of` is
+  # added first for every block, so every string-keyed index list is byte-
+  # identical to the kind-only index — existing (string-only) decls are unaffected.
+  defp index_blocks(blocks) do
     blocks
     |> Enum.with_index()
     |> Enum.reduce(%{}, fn {block, idx}, acc ->
-      case kind_of(block) do
-        nil -> acc
-        k -> Map.update(acc, k, [idx], &(&1 ++ [idx]))
-      end
+      acc
+      |> add_index(kind_of(block), idx)
+      |> add_index(Tiers.tier_of(block), idx)
     end)
   end
+
+  defp add_index(acc, nil, _idx), do: acc
+  defp add_index(acc, key, idx), do: Map.update(acc, key, [idx], &(&1 ++ [idx]))
 
   # ── presence ──────────────────────────────────────────────────────────────
   defp presence_errors(%{presence: :required, kind: kind}, []),
@@ -139,6 +186,7 @@ defmodule Barkpark.PortableDoc.Constraints do
        when is_list(position) do
     Enum.flat_map(position, fn
       {:index, n} -> index_errors(kind, indices, n)
+      {:not_index, n} -> not_index_errors(kind, indices, n)
       :free -> []
       :top_group -> top_group_errors(kind, indices)
       :bottom_group -> bottom_group_errors(kind, indices, total)
@@ -155,6 +203,13 @@ defmodule Barkpark.PortableDoc.Constraints do
       nil -> []
       off -> [~s(the "#{kind}" block must be at block #{n}, found at #{off})]
     end
+  end
+
+  # The mirror of `{:index, n}`: no occurrence of `kind` may sit at index `n`.
+  defp not_index_errors(kind, indices, n) do
+    if n in indices,
+      do: [~s(a "#{kind}" block may not be at block #{n})],
+      else: []
   end
 
   defp top_group_errors(kind, indices) do

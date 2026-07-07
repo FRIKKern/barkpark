@@ -15,6 +15,21 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     Map.merge(%{"role" => kind}, extra)
   end
 
+  # A block carrying only a "type" (no role) — so `Tiers.tier_of/1` resolves its
+  # composition tier. Used to exercise tier-atom declarations.
+  defp typed(type, extra \\ %{}), do: Map.merge(%{"type" => type}, extra)
+
+  # Replicated inline from Barkpark.Content.Papers.Template.paper_declarations/0
+  # (all string kinds, no tier atom, no {:not_index, ·}) — the LIVE paper set,
+  # used by the backward-compat describe to prove byte-identity.
+  defp paper_decls do
+    [
+      %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}], locked: true},
+      %{kind: "ingress", presence: :optional, count: {:max, 1}, position: [{:after, "title"}, {:before, "featured"}], locked: false},
+      %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}], locked: true}
+    ]
+  end
+
   # ── kind_of ────────────────────────────────────────────────────────────────
 
   describe "kind_of/1" do
@@ -204,6 +219,128 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     test "non-list inputs never raise" do
       assert Constraints.validate(nil, [%{kind: "x", presence: :optional, count: {:max, 1}, position: [:free], locked: false}]) == []
       assert Constraints.validate([block("x")], nil) == []
+    end
+  end
+
+  # ── tier-aware declarations (composition doctrine, step 5) ───────────────────
+
+  describe "tier-aware declarations (composition doctrine, step 5)" do
+    test "THE HEADLINE EXAMPLE — require a :section, forbid a :widget at index 0" do
+      decls = [
+        %{kind: :section, presence: :required, count: {:min, 0}, position: [:free], locked: false},
+        %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+      ]
+
+      # callout (tier :widget) at index 0, paragraph (tier :element) — no section.
+      bad = [typed("callout"), typed("paragraph")]
+      msgs = Constraints.validate(bad, decls)
+      assert Enum.any?(msgs, &(&1 =~ "section" and &1 =~ "missing"))
+      assert Enum.any?(msgs, &(&1 =~ "widget" and &1 =~ "block 0"))
+
+      # section present; callout (widget) now sits at index 2, not 0 → clean.
+      good = [typed("section"), typed("paragraph"), typed("callout")]
+      assert Constraints.validate(good, decls) == []
+    end
+
+    test "forbid a tier entirely — count {:max, 0} on :widget" do
+      decl = %{kind: :widget, count: {:max, 0}, presence: :optional, position: [:free], locked: false}
+
+      assert [msg] = Constraints.validate([typed("callout")], [decl])
+      assert msg =~ "at most 0" and msg =~ "widget" and msg =~ "found 1"
+
+      # a paragraph is tier :element, not :widget → passes.
+      assert Constraints.validate([typed("paragraph")], [decl]) == []
+    end
+
+    test "cardinality math runs over tier-classified counts — {:min, 2} on :element" do
+      decl = %{kind: :element, presence: :optional, count: {:min, 2}, position: [:free], locked: false}
+
+      assert [msg] = Constraints.validate([typed("paragraph")], [decl])
+      assert msg =~ "at least 2" and msg =~ "found 1"
+
+      # two element blocks (paragraph + heading are both tier :element) → passes.
+      assert Constraints.validate([typed("paragraph"), typed("heading")], [decl]) == []
+    end
+  end
+
+  # ── DISTRUST-VACUOUS-GREEN: tier matching is REAL, not string equality ───────
+
+  describe "tier matching routes through Tiers.tier_of (not string equality)" do
+    test "a :section tier decl COUNTS a columns block; a \"section\" STRING decl does NOT" do
+      columns = [typed("columns")]
+
+      tier_decl = %{kind: :section, presence: :required, count: {:min, 1}, position: [:free], locked: false}
+      string_decl = %{kind: "section", presence: :required, count: {:min, 1}, position: [:free], locked: false}
+
+      # columns is tier :section (type "columns" != "section") → the tier decl is
+      # satisfied, proving the match went through Tiers.tier_of, not kind_of.
+      assert Constraints.validate(columns, [tier_decl]) == []
+
+      # the STRING decl keys on "section"; a columns block's kind_of is "columns",
+      # so it is NOT counted → the required-section error fires. A mistyped tier
+      # atom (matching nothing) therefore cannot silently no-op.
+      refute Constraints.satisfied?(columns, [string_decl])
+    end
+
+    test "validate/2 is deterministic — the dual index appends in block order" do
+      decls = [
+        %{kind: :section, presence: :optional, count: {:min, 0}, position: [:free], locked: false},
+        %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+      ]
+
+      blocks = [typed("callout"), typed("columns"), typed("paragraph")]
+      assert Constraints.validate(blocks, decls) == Constraints.validate(blocks, decls)
+    end
+
+    test "a relation can anchor on a whole tier — {:after, :element}" do
+      decl = %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:after, :element}], locked: false}
+
+      # paragraph (element) then callout (widget) → widget is after the element.
+      assert Constraints.validate([typed("paragraph"), typed("callout")], [decl]) == []
+
+      # callout (widget) before the paragraph (element) → the tier relation fires.
+      assert [msg] = Constraints.validate([typed("callout"), typed("paragraph")], [decl])
+      assert msg =~ "widget" and msg =~ "after" and msg =~ "element"
+    end
+  end
+
+  # ── position: forbidden index ({:not_index, n}) — isolated from tiers ─────────
+
+  describe "position — forbidden index ({:not_index, n})" do
+    test "a plain role kind may not sit at the forbidden index" do
+      decl = %{kind: "banner", presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+
+      # banner at index 0 → error naming block 0.
+      assert [msg] = Constraints.validate([block("banner"), block("body")], [decl])
+      assert msg =~ "banner" and msg =~ "block 0"
+
+      # banner anywhere else → clean.
+      assert Constraints.validate([block("body"), block("banner")], [decl]) == []
+
+      # banner absent → position never fires on an empty occurrence set.
+      assert Constraints.validate([block("body")], [decl]) == []
+    end
+  end
+
+  # ── backward-compat: the live string-kind set is byte-identical ──────────────
+
+  describe "backward-compat — old shape still works" do
+    test "a conforming title/ingress/featured doc validates clean" do
+      doc = [block("title"), block("ingress"), block("featured")]
+      assert Constraints.validate(doc, paper_decls()) == []
+    end
+
+    test "a legacy title + body doc (zero sections/widgets) validates clean" do
+      # no tier decl in the set ⇒ the added atom keys are never consulted, so the
+      # result is byte-identical to the pre-dual-index checker.
+      assert Constraints.validate([block("title"), block("paragraph")], paper_decls()) == []
+    end
+
+    test "tier-classifiable blocks in a string-decl doc change nothing" do
+      # a callout (tier :widget) carries no role → its kind_of is "callout", which
+      # no string decl looks up; its :widget atom key is never consulted either.
+      doc = [block("title"), typed("callout")]
+      assert Constraints.validate(doc, paper_decls()) == []
     end
   end
 end
