@@ -51,6 +51,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "section",
   "terminal",
   "table",
+  "stage",
   "field-string",
   "field-slug",
   "field-text",
@@ -152,6 +153,11 @@ export function canvasDefaultBlock(type) {
         head: [[], []],
         rows: [[[], []]],
       };
+    case "stage":
+      // The minimal valid stage: just the required `title` scalar (the {:exactly,1}
+      // slot). PRESENT-ONLY so stageBlockToNode → stageNodeToBlock round-trips it byte-
+      // identical (zero spurious op on the next load — risk #6).
+      return { id: null, type: "stage", title: "New stage" };
     case "field-string":
       return { id: null, type: "field-string", label: "Text", value: "" };
     case "field-slug":

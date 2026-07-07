@@ -37,6 +37,7 @@ export const SLASH_ITEMS = [
   { group: "Visual", type: "table", label: "Table", hint: "▦", desc: "rows and columns" },
   { group: "Visual", type: "terminal", label: "Terminal", hint: "⌘", desc: "console frame" },
   { group: "Visual", type: "action", label: "Action", hint: "➤", desc: "call-to-action button" },
+  { group: "Visual", type: "stage", label: "Stage", hint: "◆", desc: "pipeline stage node" },
 
   { group: "Basic fields", type: "field-string", label: "String", hint: "T", desc: "single-line value" },
   { group: "Basic fields", type: "field-slug", label: "Slug", hint: "/", desc: "url-safe key" },

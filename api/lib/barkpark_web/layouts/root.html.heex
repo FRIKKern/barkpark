@@ -3252,6 +3252,19 @@
     .bp-canvas-note__body { min-width: 0; }
     .bp-canvas-note__k:focus, .bp-canvas-note__lead:focus { outline: 1px solid var(--paper-accent); outline-offset: 1px; border-radius: 4px; }
     @media (max-width: 520px) { .bp-canvas-note { grid-template-columns: 1fr; gap: 0.3rem; } .bp-canvas-note__k { justify-self: start; } }
+    <%!-- stage WIDGET canvas node-view (DESIGN 1 — the editable pipeline-node twin).
+         The stage does NOT emit the reader pipeline-cell class (it stays gate-forbidden
+         to protect the legacy pipeline), so its cell look is hand-mirrored from the
+         inlined paper-surface.css `.bp-pnode*` rules — keep BYTE-ALIGNED with the
+         styles.css + paper-surface.css copies (the card THREE-copy lockstep). --%>
+    .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
+    .bp-canvas-stage--src { border-color: var(--paper-accent); }
+    .bp-canvas-stage__k, .bp-canvas-stage__t, .bp-canvas-stage__d, .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
+    .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
+    .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
+    .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
+    .bp-canvas-stage__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+    .bp-canvas-stage__src-toggle { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; font-family: var(--paper-font-mono); font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); cursor: pointer; }
     /* The generic read-only bpOpaque carry chip (a nested section / composite /
        codelist carried verbatim inside a section body) reuses `.bp-canvas-readonly`
        for the chip frame; `.bp-canvas-opaque` is a marker hook. */

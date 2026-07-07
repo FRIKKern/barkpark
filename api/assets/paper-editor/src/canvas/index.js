@@ -79,6 +79,10 @@ import { Card } from "./card-node.js";
 // `bp-canvas-note*` chrome ONLY (the DELIBERATE non-class-share; reader parity is
 // proven by compose byte-identity, not shared classes). See ./note-node.js.
 import { Note } from "./note-node.js";
+// The stage WIDGET as a canvas node (bpStage) — the editable per-node twin of ONE
+// legacy `pipeline` node. A control-atom: five scalars (kind/title/detail text +
+// files/source chrome) ride node.attrs, edited by native controls. See ./stage-node.js.
+import { Stage } from "./stage-node.js";
 // S3.3: the code block as a canvas ATTR-ATOM node — an atom (no PM-managed body,
 // like the divider) whose code TEXT rides in the `value` attr and is edited by a
 // NON-PM <textarea> island (stopEvent/ignoreMutation so PM never sees its
@@ -603,6 +607,15 @@ class BpPaperCanvas extends HTMLElement {
         // { type:"note", content:[…] } node mounts with an editable body that JOINS the
         // run + label/lead islands, and getJSON() round-trips body+label+lead.
         Note,
+        // The stage WIDGET node + its node-view. Registers the `bpStage` node (atom,
+        // attrs kind/title/detail/files/source via data-*, a NodeView rendering a cell of
+        // native inputs + a source toggle in a stopEvent/ignoreMutation island so PM never
+        // turns a keystroke into a transaction) so runToTiptap's { type:"bpStage",
+        // attrs:{…} } node mounts as an editable pipeline-node twin whose scalars round-
+        // trip through getJSON() and emit a patch-block on edit. ONE bpType; NO StarterKit
+        // collision. bpStage parses ONLY its own <div data-bp-type='stage'>. See
+        // ./stage-node.js.
+        Stage,
         // S3.3: the code attr-atom node + its node-view. Registers the `bpCode`
         // node type (atom, attrs value/lang via data-*, a NodeView rendering a
         // <pre> with a non-PM <textarea> island that uses stopEvent/ignoreMutation

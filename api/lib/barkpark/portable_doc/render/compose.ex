@@ -737,6 +737,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.pipeline_html(b)}
   end
 
+  # STAGE WIDGET — a NEW block: the editable per-node twin of ONE legacy `pipeline`
+  # node (kind/title/detail text slots + files/source chrome). `stage_html/1` emits the
+  # IDENTICAL pnode cell one pipeline node emits, so a `section` of stages renders ==
+  # a legacy pipeline flow at cell granularity. ADDITIVE: the legacy `pipeline` clause
+  # above + `pipeline_html/1` are UNTOUCHED (byte-for-byte).
+  def compose_block(%{"type" => "stage"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.stage_html(b)}
+  end
+
   # Terminal chrome — traffic-light title bar (+ optional `live` dot) wrapping
   # any child blocks, with an optional keybind `footer`. Reusable frame; put a
   # task-list inside it and you get the `bp tasks` board look in a paper.

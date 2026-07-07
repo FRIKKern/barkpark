@@ -122,7 +122,7 @@ const cellOrder = (v) => strictInt(v);
 // bpSectionChild"` on every allowed node + content:"bpSectionChild+") is cleaner
 // long-term but touches every node file + StarterKit globals — rejected for v1.
 export const BP_SECTION_CONTENT =
-  "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | " +
+  "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | bpStage | " +
   "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
   "eyebrow | byline | ingress | pullquote | bpOpaque)+";
 

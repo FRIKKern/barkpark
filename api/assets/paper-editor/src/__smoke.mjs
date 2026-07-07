@@ -28,6 +28,7 @@ import "./smoke/node-views.mjs";
 import "./smoke/sections.mjs";
 import "./smoke/cards.mjs";
 import "./smoke/note.mjs";
+import "./smoke/stage.mjs";
 import "./smoke/field-pickers.mjs";
 import "./smoke/echo.mjs";
 import "./smoke/autocomplete-slash.mjs";

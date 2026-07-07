@@ -132,6 +132,17 @@ defmodule Barkpark.PortableDoc.Slots do
       %{name: "body", tier: :element, count: {:exactly, 1}}
     ]
 
+  # Stage — the editable per-node twin of ONE legacy `pipeline` node. THREE PLAIN-TEXT
+  # element slots (the `title` is the required one, arity {:exactly, 1}); `files` and
+  # `source` stay WIDGET chrome (like callout `title`/`collapsible`), NOT slots — that
+  # keeps the slot count at three and preserves the byte-fidelity of the pnode cell.
+  def slot_decls(%{"type" => "stage"}),
+    do: [
+      %{name: "kind", tier: :element, count: {:max, 1}},
+      %{name: "title", tier: :element, count: {:exactly, 1}},
+      %{name: "detail", tier: :element, count: {:max, 1}}
+    ]
+
   def slot_decls(_), do: []
 
   @doc """
@@ -193,6 +204,21 @@ defmodule Barkpark.PortableDoc.Slots do
     case note_flat(block, "lead") do
       "" -> []
       lead -> [note_para(lead)]
+    end
+  end
+
+  # A stage's `kind`/`title`/`detail` slot is its SCALAR string wrapped as ONE implicit
+  # PLAIN-TEXT paragraph (one text run). A PRESENT key (even "") synthesizes ONE element;
+  # an ABSENT key synthesizes []. `stage_field_text/2` flattens it BACK to the scalar
+  # string, so a scalar-only stage reads through the slot API byte-identically to a
+  # slots-materialized stage.
+  defp legacy_slot(%{"type" => "stage"} = block, name) when name in ["kind", "title", "detail"] do
+    case Map.fetch(block, name) do
+      {:ok, scalar} ->
+        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => scalar}]}]
+
+      :error ->
+        []
     end
   end
 
@@ -309,6 +335,28 @@ defmodule Barkpark.PortableDoc.Slots do
     end
   end
 
+  # ── stage widget accessor ────────────────────────────────────────────────────
+
+  @doc """
+  The PLAIN string of a stage's named text field (`"kind"` / `"title"` / `"detail"`)
+  — the stage analogue of `callout_body_inline/1`. Reads the lone slot element's
+  text-runs FLATTENED to plain text (marks dropped) when a `slots` map carries it, ELSE
+  the top-level scalar via the compat synthesis. THE load-bearing invariant: both
+  encodings yield the SAME string ⟹ `Components.stage_html/1` escapes the same bytes ⟹
+  a byte-identical reader. Always a string (nil-safe).
+
+  Stage slot text is PLAIN (unlike the callout's rich `inline*` body): the reader
+  escapes it as flat text with no inline markup, so the serializer joins the text-runs
+  and DROPS marks — a pasted `<strong>` must NOT survive or byte-identity breaks.
+  """
+  @spec stage_field_text(term(), String.t()) :: String.t()
+  def stage_field_text(block, name) do
+    case slot_elements(block, name) do
+      [first | _] when is_map(first) -> first |> Map.get("content") |> flatten_inline_text()
+      _ -> ""
+    end
+  end
+
   defp to_text(s) when is_binary(s), do: s
   defp to_text(n) when is_integer(n), do: Integer.to_string(n)
   defp to_text(_), do: ""
@@ -394,6 +442,33 @@ defmodule Barkpark.PortableDoc.Slots do
     |> Map.put("slots", slots)
   end
 
+  # Stage — idempotent dual-write of the three text scalars ⇄ `slots`. An EMPTY field
+  # (flattened text == "") omits BOTH the scalar AND the slot entry (the callout empty-
+  # body precedent); `files`/`source` chrome pass through untouched. Persistence-side
+  # ONLY (not on the read/compose path), so stored bytes are never force-backfilled.
+  def normalize_widget(%{"type" => "stage"} = block) do
+    fields = ["kind", "title", "detail"]
+
+    {scalars, slots} =
+      Enum.reduce(fields, {%{}, %{}}, fn name, {sc, sl} ->
+        case stage_field_text(block, name) do
+          "" ->
+            {sc, sl}
+
+          text ->
+            {Map.put(sc, name, text),
+             Map.put(sl, name, [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+             ])}
+        end
+      end)
+
+    block
+    |> Map.drop(fields ++ ["slots"])
+    |> Map.merge(scalars)
+    |> put_stage_slots(slots)
+  end
+
   def normalize_widget(block), do: block
 
   defp put_note_lead_slot(slots, ""), do: slots
@@ -401,6 +476,8 @@ defmodule Barkpark.PortableDoc.Slots do
 
   defp put_note_lead_field(block, ""), do: block
   defp put_note_lead_field(block, lead), do: Map.put(block, "lead", lead)
+  defp put_stage_slots(block, slots) when map_size(slots) == 0, do: block
+  defp put_stage_slots(block, slots), do: Map.put(block, "slots", slots)
 
   # Empty body: omit both keys (precedent). Non-empty: dual-write content + slots.
   defp put_callout_body(block, []), do: block
