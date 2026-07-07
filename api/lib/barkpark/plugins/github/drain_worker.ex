@@ -8,9 +8,13 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   Each `:drain_tick`, for EVERY whitelisted dataset:
 
-    1. `Cursor.bootstrap_if_absent/1` (idempotent) — a first-seen dataset seeds
-       its cursor to head so a newly-whitelisted dataset skips its pre-enable
-       backlog (D1), never mass-mirroring history. A no-op once a row exists.
+    1. `ensure_bootstrapped/2` — the FIRST time this worker sees a dataset while
+       active it seeds the cursor to head (`Cursor.bootstrap_if_absent/1`) so the
+       dataset skips ALL pre-activation backlog (D1), never mass-mirroring history,
+       then remembers it so no later tick repeats the `MAX(id)` scan. Because the
+       seed happens on the first ACTIVE sight (not at boot), a plugin that sat
+       whitelisted-but-dark for days while the operator provisioned the App does
+       NOT flood the dark-window backlog to GitHub when creds finally land.
     2. `since = Cursor.get(ds)`; `events = Outbox.fetch(ds, since, batch)` — the
        next `id > since`, non-`source="github"` (loop-cut #2, D4) TASK events.
     3. For each event, enqueue a debounced `MirrorJob` (`unique` on
@@ -100,7 +104,11 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
       batch_size: Keyword.get(opts, :batch_size, @default_batch_size),
       idle_ms: Keyword.get(opts, :idle_ms, @default_idle_ms),
       attempt: 0,
-      draining?: false
+      draining?: false,
+      # Datasets already seeded to head this process lifetime. Guards the
+      # `Cursor.bootstrap_if_absent/1` MAX(id) scan to ONCE per dataset instead of
+      # every tick (the DB layer is idempotent, but the scan is not free).
+      bootstrapped: MapSet.new()
     }
 
     {:ok, state, {:continue, :schedule}}
@@ -108,9 +116,21 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   @impl true
   def handle_continue(:schedule, state) do
-    # Seed every currently-whitelisted dataset's cursor to head so first enable
-    # skips ALL pre-enable backlog (D1). Idempotent — safe on every boot.
-    Enum.each(state.datasets_fun.(), &Cursor.bootstrap_if_absent/1)
+    # Seed cursors to head so first enable skips ALL pre-enable backlog (D1) — but
+    # ONLY when the plugin is already active at boot, anchoring the mirror at the
+    # boot-time head so events created AFTER boot mirror. A dark install
+    # (whitelisted-but-uncredentialed) seeds NOTHING here and does not even call
+    # `datasets_fun`; the first ACTIVE tick then bootstraps each dataset to its
+    # head at THAT moment (`ensure_bootstrapped/2`), so backlog accumulated while
+    # dark is never mass-mirrored on enable — regardless of how `Settings.datasets/0`
+    # behaves (or whether it raises) when inactive.
+    state =
+      if state.active_fun.() do
+        Enum.reduce(state.datasets_fun.(), state, &ensure_bootstrapped/2)
+      else
+        state
+      end
+
     schedule(state, 0)
     {:noreply, state}
   end
@@ -124,9 +144,12 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
     state = %{state | draining?: true}
 
     if state.active_fun.() do
-      halted? =
-        Enum.reduce(state.datasets_fun.(), false, fn dataset, acc ->
-          drain_dataset(dataset, state) or acc
+      # Thread `state` through the fold so each dataset's one-time bootstrap is
+      # recorded in `state.bootstrapped`; OR the per-dataset halt flags.
+      {state, halted?} =
+        Enum.reduce(state.datasets_fun.(), {state, false}, fn dataset, {st, acc} ->
+          st = ensure_bootstrapped(dataset, st)
+          {st, drain_dataset(dataset, st) or acc}
         end)
 
       {attempt, delay} =
@@ -147,14 +170,26 @@ defmodule Barkpark.Plugins.Github.DrainWorker do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # Drain one dataset. Returns true when the batch HALTED on an enqueue error
-  # (so the tick backs off), false on a clean (possibly empty) drain.
-  defp drain_dataset(dataset, state) do
-    # A dataset that appeared AFTER boot (creds provisioned later) has no cursor
-    # row yet; seed it to head so it too skips its pre-enable backlog (D1). A
-    # no-op for datasets already bootstrapped in handle_continue.
-    Cursor.bootstrap_if_absent(dataset)
+  # Seed a dataset's cursor to head EXACTLY ONCE per process lifetime — the first
+  # time this worker sees it while active — then remember it so no later tick
+  # repeats the `MAX(mutation_events.id)` scan. Catches BOTH a dataset whitelisted
+  # after boot AND the dark→active transition: in either case the seed anchors at
+  # the head AT FIRST ACTIVE SIGHT, so the pre-activation backlog is skipped (D1),
+  # never mass-mirrored. `bootstrap_if_absent/1` is a DB-level no-op once a row
+  # exists, so a restart cannot rewind an already-advanced cursor.
+  defp ensure_bootstrapped(dataset, state) do
+    if MapSet.member?(state.bootstrapped, dataset) do
+      state
+    else
+      Cursor.bootstrap_if_absent(dataset)
+      %{state | bootstrapped: MapSet.put(state.bootstrapped, dataset)}
+    end
+  end
 
+  # Drain one dataset. Returns true when the batch HALTED on an enqueue error
+  # (so the tick backs off), false on a clean (possibly empty) drain. The dataset
+  # is already bootstrapped (see `ensure_bootstrapped/2`) before this runs.
+  defp drain_dataset(dataset, state) do
     since = Cursor.get(dataset)
     events = Outbox.fetch(dataset, since, state.batch_size)
 

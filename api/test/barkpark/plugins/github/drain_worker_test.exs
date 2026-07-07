@@ -240,6 +240,46 @@ defmodule Barkpark.Plugins.Github.DrainWorkerTest do
     end
   end
 
+  describe "dark→active enable (D1 — skip dark-window backlog)" do
+    test "the first active tick seeds the cursor to head; the dark backlog never mirrors" do
+      ds = new_dataset()
+      test_pid = self()
+      {:ok, active} = Agent.start_link(fn -> false end)
+      on_exit(fn -> if Process.alive?(active), do: Agent.stop(active) end)
+
+      # Boots DARK (whitelisted but uncredentialed): handle_continue must NOT seed
+      # a cursor while inactive.
+      pid =
+        boot!(
+          datasets_fun: fn -> [ds] end,
+          active_fun: fn -> Agent.get(active, & &1) end,
+          enqueue_fun: ok_enqueue(test_pid),
+          tick_fun: silent_tick()
+        )
+
+      # Task events pile up while the operator provisions the GitHub App (dark).
+      _d1 = insert_event!(ds, "dark-1")
+      d2 = insert_event!(ds, "dark-2")
+
+      # Creds land — the plugin goes active. The FIRST active tick bootstraps the
+      # cursor to head-at-activation, so the entire dark backlog is skipped (D1),
+      # NOT flooded to GitHub.
+      Agent.update(active, fn _ -> true end)
+      send(pid, :drain_tick)
+      _ = :sys.get_state(pid)
+
+      refute_receive {:enqueued, _, _}
+      assert Cursor.get(ds) == d2.id
+
+      # A task mutated AFTER enable does mirror (proves the cursor isn't stuck).
+      d3 = insert_event!(ds, "post-enable")
+      send(pid, :drain_tick)
+      assert_receive {:enqueued, "post-enable", ^ds}
+      _ = :sys.get_state(pid)
+      assert Cursor.get(ds) == d3.id
+    end
+  end
+
   describe "capstone — loop-immune by construction (D4/D12)" do
     test "a github-stamped bookkeeping write is never re-enqueued on re-drain" do
       ds = new_dataset()
