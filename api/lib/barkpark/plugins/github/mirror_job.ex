@@ -582,11 +582,13 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp put_scope(opts, _key, nil), do: opts
   defp put_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
-  # The mirror repo ("owner/name"). Read directly from plugin config for now;
-  # slice 2's `Github.Settings.repo/0` will centralise the env→DB resolution.
-  # Reading the same config key here keeps this slice parallel-safe with slice 2.
+  # The mirror repo ("owner/name"). Resolves through `Github.Settings.repo/0` —
+  # the env→DB credentials resolver — NOT the bare `cfg()` env read. A live
+  # instance stores `repo` in the encrypted `plugin_settings` row (not app env),
+  # so an env-only read here made every drained MirrorJob cancel with
+  # `:repo_unconfigured` even though the plugin was fully provisioned + `active?`.
   defp repo do
-    cfg()[:repo]
+    Barkpark.Plugins.Github.Settings.repo()
   end
 
   # ---------------------------------------------------------------------------
