@@ -28,13 +28,17 @@ defmodule BarkparkWeb.PaperTasks do
 
   alias Barkpark.PortableDoc.Render.Util
 
-  # Warm parchment palette, matched to PaperBacklinks / the `.bp-paper-article`
-  # chrome (ink / muted / rule / accent). Inline so the section is
-  # self-contained.
-  @ink "#1a1a1a"
-  @muted "#6a6a6a"
-  @rule "#e6e2d8"
-  @accent "#a23925"
+  # Theme-aware chrome, matched to PaperBacklinks / the `.bp-paper-article`
+  # surface (ink / muted / rule / accent). The section renders INSIDE
+  # `.bp-paper-surface`, which defines the `--paper-*` tokens with light AND dark
+  # variants (paper-surface.css) — so we reference the tokens, with the original
+  # parchment hex as the fallback for any surface that doesn't define them. This is
+  # what keeps a driven-task TITLE visible in dark mode (a hardcoded `#1a1a1a`
+  # title was invisible on the dark reader — the #1217 dark-token bug class).
+  @ink "var(--paper-ink, #1a1a1a)"
+  @muted "var(--paper-ink-soft, #6a6a6a)"
+  @rule "var(--paper-rule, #e6e2d8)"
+  @accent "var(--paper-accent, #a23925)"
 
   @doc """
   Render the "Driven tasks" section for a `driven_tasks/2` result (or a bare
