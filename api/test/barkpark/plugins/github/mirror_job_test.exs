@@ -216,6 +216,34 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert is_binary(gh["synced_rev"])
     end
 
+    test "repo resolves from the DB plugin_settings row, not just app env (live-instance regression)",
+         %{bypass: bypass, scope: scope} do
+      # A provisioned instance stores `repo` in the encrypted plugin_settings row,
+      # NOT app env. Before the fix, reconcile read env-only `cfg()[:repo]` and
+      # every drained job cancelled `:repo_unconfigured` despite the plugin being
+      # active. Drop `repo` from env, put it in the DB, and assert the mirror still
+      # creates the issue (i.e. resolves via Settings.repo/0's env→DB fallback).
+      env = Application.get_env(:barkpark, Barkpark.Plugins.Github, [])
+      Application.put_env(:barkpark, Barkpark.Plugins.Github, Keyword.delete(env, :repo))
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Plugins.Github, env) end)
+
+      {:ok, _} = Barkpark.Plugins.Settings.put("github", %{"repo" => @repo})
+      on_exit(fn -> Barkpark.Plugins.Settings.delete("github") end)
+
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "DB-repo mirror"}, scope)
+
+      Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(201, Jason.encode!(%{"number" => 77, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+      assert Link.get(reload(id, scope))["issue"] == 77
+    end
+
     test "a task born closed (done) → create issue then PATCH it closed in one reconcile", %{
       bypass: bypass,
       scope: scope
