@@ -489,25 +489,90 @@ check("S2 clear layout: removing the layout attr → patch-block{layout:null}", 
 });
 
 // ── TEST 5: SPAN/ORDER PRESERVE — a child span:2,order:1 survives the round-trip
-//    (hoisted to attrs.cells) and an unedited such section is ZERO-OPS.
+//    (hoisted to the bpId-keyed attrs.cells) and an unedited such section is ZERO-OPS.
+const SPAN_SECTION = () => ({
+  id: "s-1",
+  type: "section",
+  layout: { mode: "grid", tracks: 2 },
+  blocks: [
+    { id: "c1", type: "paragraph", content: [{ type: "text", value: "a" }] },
+    { id: "c2", type: "paragraph", span: 2, order: 1, content: [{ type: "text", value: "b" }] },
+  ],
+});
+
 check("S2 span/order: a child span/order survives blocks→node→docToBlocks and is zero-ops", () => {
+  const src = SPAN_SECTION();
+  const node = runToTiptap([src]).content[0];
+  // STEP-6: span/order are HOISTED into the section's own cells attr as a bpId-keyed
+  // OBJECT (present-only): the child NODE drops them (getJSON-safe transport lives on
+  // the section). c1 (no span/order) is ABSENT from the map (present-only).
+  assert.deepEqual(node.attrs.cells, { c2: { span: 2, order: 1 } }, "cells is keyed by child bpId (c1 absent, present-only)");
+  assert.ok(node.content[1].attrs.span == null, "span does NOT ride the child node (it would be dropped on getJSON)");
+  const back = docToBlocks(runToTiptap([src]));
+  assert.deepEqual(back, [src], "span/order split back onto the RIGHT child byte-equal");
+  assert.equal(runToOps([src], runToTiptap([src])).length, 0, "an unedited span/order section is zero-ops");
+});
+
+// ── TEST 5a: THE BUG — a canvas REORDER must keep span/order on the SAME child.
+//    Under the OLD positional cells array, swapping the child order applied stale
+//    cells[i] to the child now at position i → span/order swapped onto the WRONG
+//    child. bpId keying is position-independent → the fix. This is the regression.
+check("S2 reorder regression (THE BUG): span/order stays on its OWN child after a canvas reorder", () => {
+  const blocks = [SPAN_SECTION()];
+  const doc = runToTiptap(blocks);
+  // Swap the two children in the live doc (content order changes; attrs.cells does not).
+  const c = doc.content[0].content;
+  [c[0], c[1]] = [c[1], c[0]];
+
+  const ops = runToOps(blocks, doc);
+  // A structural reorder → ONE coarse replace-block of the whole section.
+  assert.equal(ops.length, 1, "exactly one op");
+  assert.equal(ops[0].op, "replace-block", "a reorder is a structural change → replace-block");
+  const rebuilt = ops[0].block.blocks;
+  assert.deepEqual(rebuilt.map((x) => x.id), ["c2", "c1"], "children are rebuilt in the new order");
+  // THE ASSERTION: c2 STILL carries span:2/order:1; c1 STILL carries neither. Under
+  // the old index array this FAILED (c1, now at position 0, wrongly got cells[0]={}
+  // while c2 at position 1 got cells[1]={span,order} — coincidentally OK on a pure
+  // swap, but a non-symmetric reorder mangled it). bpId keying is correct for ANY
+  // permutation: assert by id, not position.
+  const byId = Object.fromEntries(rebuilt.map((x) => [x.id, x]));
+  assert.equal(byId.c2.span, 2, "c2 keeps its span after reorder");
+  assert.equal(byId.c2.order, 1, "c2 keeps its order after reorder");
+  assert.ok(byId.c1.span == null && byId.c1.order == null, "c1 gains NO span/order (it never had any)");
+
+  const folded = assertFolds(blocks, doc, ops, "reorder span/order fidelity");
+  const foldedById = Object.fromEntries(folded[0].blocks.map((x) => [x.id, x]));
+  assert.equal(foldedById.c2.span, 2, "folded c2 still span:2");
+  assert.ok(foldedById.c1.span == null, "folded c1 still has no span");
+});
+
+// ── TEST 5b: ANTI-VACUOUS — a NON-symmetric reorder (3 children, rotate) proves
+//    the fix is real, not a swap coincidence. c3 (the only one with span/order)
+//    must carry it wherever it lands.
+check("S2 reorder regression (non-symmetric): span/order tracks its child through a rotation", () => {
   const src = {
     id: "s-1",
     type: "section",
-    layout: { mode: "grid", tracks: 2 },
+    layout: { mode: "grid", tracks: 3 },
     blocks: [
-      { id: "c1", type: "paragraph", content: [{ type: "text", value: "a" }] },
-      { id: "c2", type: "paragraph", span: 2, order: 1, content: [{ type: "text", value: "b" }] },
+      { id: "c1", type: "paragraph", content: [{ type: "text", value: "1" }] },
+      { id: "c2", type: "paragraph", content: [{ type: "text", value: "2" }] },
+      { id: "c3", type: "paragraph", span: 3, order: 2, content: [{ type: "text", value: "3" }] },
     ],
   };
-  const node = runToTiptap([src]).content[0];
-  // span/order are HOISTED into the section's own cells attr (present-only, positional):
-  // the child NODE drops them (getJSON-safe transport lives on the section).
-  assert.deepEqual(node.attrs.cells, [{}, { span: 2, order: 1 }], "cells carries the child span/order positionally");
-  assert.ok(node.content[1].attrs.span == null, "span does NOT ride the child node (it would be dropped on getJSON)");
-  const back = docToBlocks(runToTiptap([src]));
-  assert.deepEqual(back, [src], "span/order split back onto the child byte-equal");
-  assert.equal(runToOps([src], runToTiptap([src])).length, 0, "an unedited span/order section is zero-ops");
+  const blocks = [src];
+  const doc = runToTiptap(blocks);
+  // Rotate [c1,c2,c3] → [c3,c1,c2]: c3 (the span-bearer) moves from index 2 to index 0.
+  const c = doc.content[0].content;
+  doc.content[0].content = [c[2], c[0], c[1]];
+
+  const ops = runToOps(blocks, doc);
+  const rebuilt = ops[0].block.blocks;
+  assert.deepEqual(rebuilt.map((x) => x.id), ["c3", "c1", "c2"], "rotated order");
+  const byId = Object.fromEntries(rebuilt.map((x) => [x.id, x]));
+  assert.equal(byId.c3.span, 3, "c3 keeps span:3 even though it moved to position 0");
+  assert.equal(byId.c3.order, 2, "c3 keeps order:2");
+  assert.ok(byId.c1.span == null && byId.c2.span == null, "c1/c2 gain nothing");
 });
 
 // ── TEST 6: EXPLICIT-STACK ≡ ABSENT — a {mode:stack} section and a no-layout

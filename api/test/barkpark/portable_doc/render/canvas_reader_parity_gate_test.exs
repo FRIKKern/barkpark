@@ -413,4 +413,34 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert String.contains?(drifted_blob, "bp-tasks"),
            "the JS scan's contains-check failed to see injected markup — §3 would be toothless"
   end
+
+  # ── §6 STEP-6 layout-parity TEXTUAL PROXY (weak — NOT a render-parity proof) ──
+  #
+  # The pure-Node smoke harness cannot mount section-node.js's NodeView (paint
+  # references `document`/DOM), so the per-child grid-column/order paint is NOT
+  # unit-testable in-repo today — real parity is LIVE browser verify (or a future
+  # jsdom NodeView test). This is an EXPLICITLY WEAK text-scan that section-node.js's
+  # paint still READS the bpId-keyed cells map and mirrors placement onto the grid
+  # items via `el.style.gridColumn`/`order` keyed by `data-bp-id` — the SAME keys the
+  # reader (compose.ex cell_layout_attr) and run-convert use. It proves the paint
+  # path was not DELETED/renamed, NOT that the rendered pixels match the reader.
+  test "§6 section-node.js paint mirrors per-child placement (textual proxy, NOT render parity)" do
+    src =
+      "../../../../assets/paper-editor/src/canvas/section-node.js"
+      |> Path.expand(__DIR__)
+      |> File.read!()
+
+    assert String.contains?(src, "gridColumn"),
+           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (re-point §6 or it is a real regression)"
+
+    assert String.contains?(src, ".order"),
+           "section-node.js no longer writes el.style.order — the per-child order paint moved"
+
+    assert String.contains?(src, "data-bp-id"),
+           "section-node.js paint no longer keys child placement by data-bp-id — reorder-safety lost"
+
+    # The bpId-keyed cells map must be READ in paint (not the old positional array).
+    assert String.contains?(src, "cells"),
+           "section-node.js paint no longer reads the cells map"
+  end
 end

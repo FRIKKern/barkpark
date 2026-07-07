@@ -680,11 +680,14 @@ function blockToNode(block) {
 // CELLS HOIST: prose/canvas child nodes DROP unknown keys on getJSON, so a child's
 // span/order can't ride the child node without touching ~10 node files. Instead we
 // hoist them into the section's OWN declared `cells` attr (a JSON data-attr,
-// getJSON-safe — the bpColumnAtom bpBlock precedent) as a positional array, ONLY
-// when some child actually carries span/order. RISK #1 (index-keyed cells): under a
-// canvas reorder (coarse replace rebuilds children in new order) the positional
-// cells would misassign — INVISIBLE in v1 (span/order unrendered) but a latent
-// fidelity bug; step 6 must re-key cells by child bpId BEFORE it renders them.
+// getJSON-safe — the bpColumnAtom bpBlock precedent), keyed BY CHILD bpId, ONLY
+// when some child actually carries span/order. STEP-6 (RISK #1 fix, LANDED): cells
+// is a bpId-keyed OBJECT map `{ [childBpId]: { span?, order? } }`, NOT a positional
+// array. A positional array misassigned span/order under a canvas reorder (the
+// coarse replace path rebuilds children in the new order but attrs.cells is
+// independent of content) — bpId keying is position-independent, so a reorder pulls
+// each child's OWN cell regardless of where it sits. Present-only: a section with no
+// child span/order adds NO cells attr (byte-identical to a plain section).
 function sectionBlockToNode(block, bpId, bpType) {
   const attrs = { bpId, bpType: bpType || "section" };
   if (block && block.title != null) attrs.title = block.title;
@@ -692,15 +695,19 @@ function sectionBlockToNode(block, bpId, bpType) {
 
   const children = (block && block.blocks) || [];
 
-  // Hoist child span/order into a positional cells array — present-only (omitted
-  // entirely when no child carries either key, so a plain section is unchanged).
-  const cells = children.map((child) => {
+  // Hoist child span/order into a bpId-keyed cells object — present-only (omitted
+  // entirely when no child carries either key, so a plain section is unchanged). A
+  // child with no id (should not happen for a persisted child) is skipped.
+  const cellsById = {};
+  for (const child of children) {
+    const cid = child && child.id;
+    if (cid == null) continue;
     const cell = {};
-    if (child && child.span != null) cell.span = child.span;
-    if (child && child.order != null) cell.order = child.order;
-    return cell;
-  });
-  if (cells.some((c) => Object.keys(c).length > 0)) attrs.cells = cells;
+    if (child.span != null) cell.span = child.span;
+    if (child.order != null) cell.order = child.order;
+    if (Object.keys(cell).length) cellsById[cid] = cell;
+  }
+  if (Object.keys(cellsById).length) attrs.cells = cellsById;
 
   const content = children.map((child) => {
     // DEPTH-GUARD (V1 forbid-nesting): a child of type "section" is carried VERBATIM
@@ -740,16 +747,24 @@ function sectionNodeToBlock(node, id, taken) {
   // live on children, hoisted into attrs.cells for canvas transport only).
   if (attrs.layout != null) block.layout = attrs.layout;
 
-  const cells = Array.isArray(attrs.cells) ? attrs.cells : null;
+  // STEP-6: cells is a bpId-keyed OBJECT map (not a positional array). Split each
+  // child's cell back BY THE CHILD'S OWN bpId, so a canvas reorder (which changes
+  // content order but leaves attrs.cells untouched) pulls the correct span/order
+  // onto each child regardless of position — the reorder-safety fix.
+  const cells =
+    attrs.cells && typeof attrs.cells === "object" && !Array.isArray(attrs.cells)
+      ? attrs.cells
+      : null;
 
   const children = (node && node.content) || [];
-  block.blocks = children.map((child, i) => {
+  block.blocks = children.map((child) => {
     const cls = classifyNode(child);
     const childBpId = child.attrs && child.attrs.bpId;
     const cid = childBpId != null ? childBpId : mintId(seen);
     const built = nextNodeToBlock({ ...cls, id: cid, isNew: childBpId == null }, seen);
-    // Split the positional cells array back onto the rebuilt children (present-only).
-    const cell = cells && cells[i];
+    // Key by the child's OWN bpId (present-only). A canvas-new (null-bpId) child has
+    // NO cell — correct, a freshly created child carries no span/order.
+    const cell = cells && childBpId != null ? cells[childBpId] : null;
     if (cell && cell.span != null) built.span = cell.span;
     if (cell && cell.order != null) built.order = cell.order;
     return built;
