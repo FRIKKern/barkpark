@@ -550,7 +550,181 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "Board.restage_plan/4 (pure, wave 3 — the D11 transition table)" do
+    test "{open,ready,blocked} -> in_progress is a claim" do
+      for from <- [:open, :ready, :blocked] do
+        assert Board.restage_plan(from, :in_progress, nil, "studio:admin") == {:claim}
+        # a foreign holder is irrelevant to a claim — the claim primitive itself
+        # fences a busy card; the plan simply routes to it.
+        assert Board.restage_plan(from, :in_progress, "someone", "studio:admin") == {:claim}
+      end
+    end
+
+    test "the holder's in_progress -> done/blocked is a close with that status" do
+      assert Board.restage_plan(:in_progress, :done, "studio:doey", "studio:doey") ==
+               {:close, "done"}
+
+      assert Board.restage_plan(:in_progress, :blocked, "studio:doey", "studio:doey") ==
+               {:close, "blocked"}
+    end
+
+    test "a NON-holder closing an in_progress card is refused (never corrupts the claim)" do
+      # close/3 fences on epoch, not identity, so a same-epoch close by a
+      # non-holder would corrupt the claim — the plan must refuse BEFORE close.
+      assert Board.restage_plan(:in_progress, :done, "studio:someone", "studio:doey") == :refuse
+
+      assert Board.restage_plan(:in_progress, :blocked, "studio:someone", "studio:doey") ==
+               :refuse
+
+      # an unclaimed in_progress card (holder nil) is likewise not the worker's.
+      assert Board.restage_plan(:in_progress, :done, nil, "studio:doey") == :refuse
+    end
+
+    test "ready is a non-drop target, reopen is deferred, unclaimed->done + done->* refuse" do
+      # -> ready (D3, derived column)
+      assert Board.restage_plan(:open, :ready, nil, "studio:doey") == :refuse
+      # -> open (reopen deferred, D4)
+      assert Board.restage_plan(:in_progress, :open, "studio:doey", "studio:doey") == :refuse
+      # unclaimed open -> done (must claim first)
+      assert Board.restage_plan(:open, :done, nil, "studio:doey") == :refuse
+      # done -> anything
+      assert Board.restage_plan(:done, :in_progress, nil, "studio:doey") == :refuse
+      assert Board.restage_plan(:done, :open, nil, "studio:doey") == :refuse
+    end
+  end
+
+  describe "drag restage write-through at /admin/projects (wave 3, live DB)" do
+    # D12: the fenced writes resolve the SAME Default-workspace scope the tasks
+    # controller uses, so a persisted live task MUST carry that workspace_id for
+    # the fresh-read + claim to find it. A test that flips a persisted row is the
+    # only proof this scope is right.
+    setup do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      assert ws, "the Default workspace must be seeded (backfill migration)"
+      {:ok, ws: ws}
+    end
+
+    test "dropping an open card on In Progress claims it through the fenced primitive",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-open", "Claim me by drag", ws.id, lifecycle: "open", priority: 1)
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-open", "to_col" => "in_progress"})
+
+      # the card re-buckets to in_progress in the render (optimistic move)…
+      assert card_in_column?(html, "dr-open", "in_progress")
+
+      # …and the PERSISTED row actually flipped through the claim primitive.
+      doc = Repo.get_by(Document, doc_id: "dr-open")
+      assert doc.content["lifecycle_status"] == "in_progress"
+      assert get_in(doc.content, ["claim", "worker"]) == "studio:admin"
+    end
+
+    test "dropping your own in_progress card on Done closes it (lifecycle flips to done)",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-wip", "Ship it by drag", ws.id,
+        lifecycle: "in_progress",
+        claim: %{"worker" => "studio:admin", "epoch" => 1}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-wip", "to_col" => "done"})
+
+      assert card_in_column?(html, "dr-wip", "done")
+
+      doc = Repo.get_by(Document, doc_id: "dr-wip")
+      assert doc.content["lifecycle_status"] == "done"
+    end
+
+    test "dropping your own in_progress card on Blocked parks it (lifecycle flips to blocked)",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-park", "Park it by drag", ws.id,
+        lifecycle: "in_progress",
+        claim: %{"worker" => "studio:admin", "epoch" => 4}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      _ = render_hook(view, "restage", %{"doc_id" => "dr-park", "to_col" => "blocked"})
+
+      doc = Repo.get_by(Document, doc_id: "dr-park")
+      assert doc.content["lifecycle_status"] == "blocked"
+    end
+
+    test "a card another worker holds REFUSES the drop — the claim is never corrupted",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-foreign", "Held by someone else", ws.id,
+        lifecycle: "in_progress",
+        claim: %{"worker" => "studio:someone-else", "epoch" => 9}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-foreign", "to_col" => "done"})
+
+      # a dismissible refusal notice appears…
+      assert html =~ ~s(data-role="notice")
+      # …and the persisted row is UNTOUCHED — same holder, same epoch, still WIP.
+      doc = Repo.get_by(Document, doc_id: "dr-foreign")
+      assert doc.content["lifecycle_status"] == "in_progress"
+      assert get_in(doc.content, ["claim", "worker"]) == "studio:someone-else"
+      assert get_in(doc.content, ["claim", "epoch"]) == 9
+    end
+
+    test "Ready is a non-drop target — a drop there refuses with no write",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-ready", "Ready to go", ws.id, lifecycle: "open", priority: 1)
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-ready", "to_col" => "ready"})
+
+      assert html =~ ~s(data-role="notice")
+      doc = Repo.get_by(Document, doc_id: "dr-ready")
+      assert doc.content["lifecycle_status"] == "open"
+      refute Map.has_key?(doc.content, "claim")
+    end
+
+    test "the refusal notice is dismissible", %{conn: conn, ws: ws} do
+      scoped_task("dr-dismiss", "Ready to go", ws.id, lifecycle: "open", priority: 1)
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-dismiss", "to_col" => "ready"})
+      assert html =~ ~s(data-role="notice")
+
+      html = render_click(view, "dismiss-notice", %{})
+      refute html =~ ~s(data-role="notice")
+    end
+
+    test "the board container opts into the drag hook and cards are draggable",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-hook", "Anything", ws.id, lifecycle: "open")
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+      assert html =~ ~s(phx-hook="BarkparkBoardDrag")
+      assert html =~ ~s(draggable="true")
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # A task persisted with an explicit workspace_id (D12): the fenced restage
+  # writes resolve the Default-workspace scope, so a claimable/closable row must
+  # carry that workspace_id to be found by the fresh-read + primitive.
+  defp scoped_task(doc_id, title, workspace_id, opts) do
+    content =
+      %{"lifecycle_status" => Keyword.fetch!(opts, :lifecycle)}
+      |> put_some("priority", opts[:priority])
+      |> put_some("claim", opts[:claim])
+
+    Repo.insert!(%Document{
+      doc_id: doc_id,
+      type: "task",
+      dataset: "production",
+      status: "published",
+      title: title,
+      rev: "rev-#{doc_id}",
+      workspace_id: workspace_id,
+      content: content
+    })
+  end
 
   # A broadcast `doc` map (atom keys) exactly as `Content.Broadcast` shapes it:
   # `%{doc_id, title, status, content, updated_at}`.
