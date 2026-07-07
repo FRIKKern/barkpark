@@ -8,9 +8,15 @@ defmodule Barkpark.Tasks.Close do
   import Ecto.Query, only: [from: 2]
 
   import Barkpark.Tasks.Internal,
-    only: [generate_rev: 0, insert_mutation_event!: 3, task_broadcast: 4, emit_broadcasts: 1]
+    only: [
+      generate_rev: 0,
+      insert_mutation_event!: 3,
+      insert_mutation_event!: 5,
+      task_broadcast: 4,
+      emit_broadcasts: 1
+    ]
 
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{Document, Scope}
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
@@ -18,6 +24,9 @@ defmodule Barkpark.Tasks.Close do
   @closed_lifecycle_statuses ~w(done cancelled blocked)
   @event_task_closed "task.closed"
   @event_task_mutated "task.mutated"
+  # Advisory cross-task notice (task-obsession layer 4): a task closed with a
+  # land digest whose files overlap another in-progress task's claimed scope.
+  @event_landed_under_you "task.landed_under_you"
 
   def close(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
@@ -101,9 +110,13 @@ defmodule Barkpark.Tasks.Close do
                        ) do
                   ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
                   unblocked = cascade_unblock_dependents!(updated)
+                  landed = notify_landed_under_you!(updated, worker_id)
 
                   {:ok, updated,
-                   [task_broadcast(updated, @event_task_closed, ev, observed_rev) | unblocked]}
+                   [
+                     task_broadcast(updated, @event_task_closed, ev, observed_rev)
+                     | unblocked ++ landed
+                   ]}
                 end
             end
         end
@@ -367,6 +380,72 @@ defmodule Barkpark.Tasks.Close do
   end
 
   defp cascade_unblock_dependents!(_non_done_parent), do: []
+
+  # Land-under-you notice (task-obsession layer 4, the genuinely-new half — the
+  # rest of "scope overlap" is already the claim.resources / resource_conflict
+  # machinery). When a task closes carrying a land digest, any IN-PROGRESS task
+  # whose claimed scope (content.claim.resources) intersects the landed files
+  # gets a `task.landed_under_you` mutation event so its worker knows to rebase.
+  #
+  # PURE NOTIFICATION — never mutates the affected task; it rides the existing
+  # mutation-event/broadcast channel (same as the unblock cascade). ADVISORY —
+  # emitted after the close has already committed. Tenant-scoped and fail-closed:
+  # an unscoped closer (nil workspace) emits nothing rather than blasting every
+  # tenant.
+  defp notify_landed_under_you!(%Document{content: content} = closed, by_worker) do
+    files =
+      content
+      |> get_in(["landed", "files"])
+      |> List.wrap()
+      |> Enum.filter(&is_binary/1)
+
+    ws = Map.get(closed, :workspace_id)
+
+    if files == [] or is_nil(ws) do
+      []
+    else
+      do_notify_landed(closed, files, ws, by_worker)
+    end
+  end
+
+  defp do_notify_landed(%Document{} = closed, files, ws, by_worker) do
+    project_id = Map.get(closed, :project_id)
+
+    from(d in Document,
+      where: d.type == "task",
+      where: fragment("?->>'kind'", d.content) == "task",
+      where: fragment("?->>'lifecycle_status'", d.content) == "in_progress",
+      # SQL-side overlap: the claim holds at least one of the landed files.
+      where: fragment("jsonb_exists_any(?->'claim'->'resources', ?)", d.content, ^files),
+      where: d.id != ^closed.id,
+      where: d.dataset == ^closed.dataset
+    )
+    |> Scope.scope_to_workspace(ws, project_id)
+    |> Repo.all()
+    |> Enum.map(fn %Document{} = affected ->
+      meta = %{
+        "landed_under_you" => %{
+          "landed_task" => closed.doc_id,
+          "files" => resource_overlap(affected, files),
+          "by_worker" => by_worker
+        }
+      }
+
+      ev =
+        insert_mutation_event!(affected, @event_landed_under_you, affected.rev, "api", meta)
+
+      task_broadcast(affected, @event_landed_under_you, ev, affected.rev)
+    end)
+  end
+
+  defp resource_overlap(%Document{content: content}, files) do
+    held =
+      content
+      |> get_in(["claim", "resources"])
+      |> List.wrap()
+
+    Enum.filter(files, &(&1 in held))
+  end
 
   defp all_blockers_done?(%Document{} = dep) do
     dep.id

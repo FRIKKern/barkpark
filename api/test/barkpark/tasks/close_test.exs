@@ -16,7 +16,7 @@ defmodule Barkpark.Tasks.CloseTest do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Tasks.{Close, Internal}
 
   @dataset "production"
@@ -609,6 +609,80 @@ defmodule Barkpark.Tasks.CloseTest do
                )
 
       assert Repo.get!(Document, task.id).content["lifecycle_status"] == "in_progress"
+    end
+  end
+
+  describe "close/3 — landed_under_you notice (task-obsession L4)" do
+    defp events(doc_id, mutation) do
+      Repo.all(
+        from e in MutationEvent,
+          where: e.doc_id == ^doc_id and e.mutation == ^mutation,
+          order_by: e.id
+      )
+    end
+
+    defp make_holder!(prefix, scope, resources) do
+      holder = mk_task!(uniq(prefix), scope)
+
+      foreign_patch_content!(holder.id, %{
+        "lifecycle_status" => "in_progress",
+        "claim" => %{"worker" => "holder-w", "resources" => resources, "epoch" => 1}
+      })
+
+      holder
+    end
+
+    test "an in-progress task whose claim scope overlaps the landed files is notified",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      holder = make_holder!("holder", scope, ["shared.ex"])
+      lander = mk_task!(uniq("lander"), scope)
+
+      {:ok, _} =
+        Close.close(lander.id, "lander-w",
+          observed_epoch: 0,
+          lifecycle_status: "done",
+          landed: %{"files" => ["shared.ex", "other.ex"]}
+        )
+
+      assert [ev] = events(holder.doc_id, "task.landed_under_you")
+      meta = ev.document["landed_under_you"]
+      assert meta["landed_task"] == lander.doc_id
+      # Only the OVERLAPPING file is reported, not the whole digest.
+      assert meta["files"] == ["shared.ex"]
+      assert meta["by_worker"] == "lander-w"
+
+      # Pure notification — the holder was never mutated.
+      assert Repo.get!(Document, holder.id).content["claim"]["resources"] == ["shared.ex"]
+    end
+
+    test "no notice when the claimed scope does not overlap the landed files",
+         %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      holder = make_holder!("holder-disjoint", scope, ["unrelated.ex"])
+      lander = mk_task!(uniq("lander-disjoint"), scope)
+
+      {:ok, _} =
+        Close.close(lander.id, "lander-w",
+          observed_epoch: 0,
+          lifecycle_status: "done",
+          landed: %{"files" => ["shared.ex"]}
+        )
+
+      assert events(holder.doc_id, "task.landed_under_you") == []
+    end
+
+    test "a close with no land digest emits no notice", %{scope: scope} do
+      Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+      holder = make_holder!("holder-nolanded", scope, ["shared.ex"])
+      lander = mk_task!(uniq("lander-nolanded"), scope)
+
+      {:ok, _} = Close.close(lander.id, "lander-w", observed_epoch: 0, lifecycle_status: "done")
+
+      assert events(holder.doc_id, "task.landed_under_you") == []
     end
   end
 end
