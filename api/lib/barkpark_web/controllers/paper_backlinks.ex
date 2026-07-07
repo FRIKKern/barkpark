@@ -57,12 +57,15 @@ defmodule BarkparkWeb.PaperBacklinks do
           optional(:plugin_source) => String.t() | nil
         }
 
-  # Warm parchment palette constants, matched to the `.bp-paper-article` chrome
-  # in `layouts/bulldocs.html.heex` (ink / muted / rule / accent). Inline so the
-  # section is self-contained.
-  @muted "#6a6a6a"
-  @rule "#e6e2d8"
-  @accent "#a23925"
+  # Theme-aware chrome, matched to the `.bp-paper-article` surface in
+  # `layouts/bulldocs.html.heex` (muted / rule / accent). The section renders
+  # INSIDE `.bp-paper-surface`, which defines the `--paper-*` tokens with light AND
+  # dark variants (paper-surface.css) — so reference the tokens, with the original
+  # parchment hex as the fallback for any surface that doesn't define them (keeps a
+  # linked-mention link legible in dark mode; the #1217 dark-token bug class).
+  @muted "var(--paper-ink-soft, #6a6a6a)"
+  @rule "var(--paper-rule, #e6e2d8)"
+  @accent "var(--paper-accent, #a23925)"
 
   @doc """
   Render the backlinks sections for a list of inbound referencers (the
