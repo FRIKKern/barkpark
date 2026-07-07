@@ -59,6 +59,15 @@ defmodule Barkpark.Plugins.Github do
   @required_creds ~w(repo app_id installation_id private_key webhook_secret)
 
   @doc """
+  The credential keys (as flat `plugin_settings` strings) that MUST be present
+  and non-blank before the bridge may run. `Github.Settings.active?/0` reuses
+  this list so the settings-gate validator and the runtime creds resolver
+  agree on exactly one definition of "provisioned".
+  """
+  @spec required_creds() :: [String.t()]
+  def required_creds, do: @required_creds
+
+  @doc """
   Declarative settings form for the admin Plugin Settings LiveView.
 
   Field names are dot-namespaced `github.<key>`: the leading `github` segment
