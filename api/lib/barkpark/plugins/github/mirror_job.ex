@@ -336,27 +336,51 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp stored_fingerprint(_), do: nil
 
   # Fingerprint the GitHub GET response over ONLY the ledger-owned projected
-  # fields (title, body, labels-SORTED, state). Applied identically to the
-  # desired projection (`desired_fingerprint/1`) so the two hashes are comparable.
+  # fields (title, body, labels-SORTED, state). Runs through the SAME `fingerprint/4`
+  # as the desired projection so the observed and desired hashes can never drift
+  # apart through a copy-paste divergence between two hand-kept functions.
   defp issue_fingerprint(issue) when is_map(issue) do
-    :erlang.phash2({
-      to_str(Map.get(issue, "title")),
-      to_str(Map.get(issue, "body")),
-      issue |> Map.get("labels") |> label_names() |> Enum.sort(),
-      to_str(Map.get(issue, "state"))
-    })
+    fingerprint(
+      Map.get(issue, "title"),
+      Map.get(issue, "body"),
+      issue |> Map.get("labels") |> label_names(),
+      Map.get(issue, "state")
+    )
   end
 
   # Fingerprint the DESIRED issue shape (the projection we are about to PATCH),
   # so the value we STAMP equals what the next GET should fingerprint to when no
   # human touches the issue in between.
   defp desired_fingerprint(desired) do
+    fingerprint(desired.title, desired.body, List.wrap(desired.labels), desired.state)
+  end
+
+  # The ONE hash both sides run through. `body` is newline-normalized and
+  # title/state trimmed because GitHub re-encodes an issue body's line endings to
+  # CRLF on write and echoes them back on read (and trims title/state whitespace):
+  # a body we PATCH as "x\ny" returns as "x\r\ny". WITHOUT this normalization the
+  # observed fingerprint would differ from the stored desired fingerprint on
+  # EVERY steady-state reconcile of a multi-line body (which every mirrored task
+  # has — the projection always appends a `Task:` trailer), flooding the
+  # quarantine with false `out_of_band_edit` rows. We fingerprint logical
+  # content, not GitHub's wire encoding.
+  defp fingerprint(title, body, labels, state) do
     :erlang.phash2({
-      to_str(desired.title),
-      to_str(desired.body),
-      desired.labels |> List.wrap() |> Enum.sort(),
-      to_str(desired.state)
+      title |> to_str() |> String.trim(),
+      normalize_body(body),
+      labels |> Enum.map(&to_str/1) |> Enum.sort(),
+      state |> to_str() |> String.trim()
     })
+  end
+
+  # Collapse CRLF/CR to LF and strip trailing whitespace so GitHub's line-ending
+  # re-encoding of a stored body is never mistaken for a human edit.
+  defp normalize_body(body) do
+    body
+    |> to_str()
+    |> String.replace("\r\n", "\n")
+    |> String.replace("\r", "\n")
+    |> String.trim_trailing()
   end
 
   # GitHub returns labels as `[%{"name" => ...}, ...]`; tolerate bare strings too.

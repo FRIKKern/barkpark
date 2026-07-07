@@ -557,8 +557,14 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
       Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/31", fn conn ->
         {json, conn} = read_json_body(conn)
-        Agent.update(echo, fn _ -> json end)
-        Plug.Conn.resp(conn, 200, Jason.encode!(json))
+        # Mimic GitHub FAITHFULLY: it re-encodes a stored issue body's newlines to
+        # CRLF and echoes them back on read. The steady-state fingerprint MUST see
+        # through this, else every reconcile of a multi-line body records a
+        # spurious out_of_band_edit. Without body-newline normalization in the
+        # fingerprint, this line makes the second-pass assertion below fail.
+        github_echo = Map.update(json, "body", nil, &String.replace(&1, "\n", "\r\n"))
+        Agent.update(echo, fn _ -> github_echo end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(github_echo))
       end)
 
       # First pass: no stored fingerprint yet → records nothing, stamps the fp and
