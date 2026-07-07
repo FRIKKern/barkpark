@@ -1,6 +1,4 @@
 barkpark · tasks                                        ⇄ guerrilla  ● live · 2m
-⠋ 3 in flight · ○ 2 ready · ✓ 41 done                                        85%
-████████████████████████████████████████████████████████████████████░░░░░░░░░░░░
 ▎ Cloud GUI epic ··························································· 7/9
    ○ Reconcile the #979 role seam                                             P2
    ! Cut over the canvas default                                      P2 blocked
@@ -43,6 +41,8 @@ barkpark · tasks                                        ⇄ guerrilla  ● live
 
 
 
+⠋ 3 in flight · ○ 2 ready · ✓ 41 done                                        85%
+████████████████████████████████████████████████████████████████████░░░░░░░░░░░░
 ────────────────────────────────────────────────────────────────────────────────
 ✓ closed 'sse-reconnect' · 2m
 jk move · enter open · esc back · c claim · x close · o studio

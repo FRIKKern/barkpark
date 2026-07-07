@@ -975,29 +975,30 @@ func (m *Model) clampCursor() {
 // the focus filter lives inside spineRows and cursor-parity stays structural.
 func (m Model) visibleRows() []row {
 	var rows []row
-	// The pinned NOW cards are the FIRST selectable stops (charter D14). The
-	// wave-7 READY TO CLAIM head is retired (charter D52 / wave-11 — ONE list):
-	// claim-forward stays via the cursor landing on any ready row in the spine.
-	for _, t := range m.board.Now {
-		rows = append(rows, row{kind: rowNow, docID: t.DocID})
-	}
-	// The NEXT intent strip follows NOW in the pinned band (charter wave-12 D63):
-	// each resumable / ready-head row is a cursor stop c can claim. Height-
-	// independent — always len(b.Next) rows; renderNextBand's fold is purely visual,
-	// so parity holds against flattenSpine's len(Now)+len(Next) pinned offset.
-	for i := range m.board.Next {
-		rows = append(rows, row{kind: rowNext, docID: m.board.Next[i].Task.DocID})
-	}
-	// The scrolling spine is the SELECTABLE subset of the ONE ordered producer
-	// (spineRows, charter D42) — the SAME list flattenSpine renders. Headers,
-	// nested children, cluster members and orphans consume an index in emission
-	// order; separators, "+K more" folds and phase sub-bands are Selectable:false
-	// and skipped here, so j/k never lands on a line that is not a cursor stop.
-	// Because both paths read this one producer, the cursor can no longer desync.
+	// Amendment 6 (charter D86): the scrolling list is the TOP region, so its
+	// selectable rows own the FIRST cursor indices [0, S). The SAME spineRows
+	// producer flattenSpine renders — headers, nested children, cluster members,
+	// orphans, and "+K more" folds are read in emission order; separators, phase
+	// bands and folds are Selectable:false and skipped, so j/k never lands on a
+	// line that is not a cursor stop. Because both paths read this one producer,
+	// the cursor can no longer desync.
 	for _, sr := range spineRows(m.board, m.ui) {
 		if sr.Selectable {
 			rows = append(rows, row{kind: sr.RK, docID: sr.Ref})
 		}
+	}
+	// Then the pinned BOTTOM band, the cursor flowing DOWN into it (charter D84):
+	// the NEXT intent rows (each a claimable cursor stop) ABOVE the NOW rows (live
+	// claims, at the very bottom). Height-independent — always len(Next)+len(Now)
+	// rows; the renderers' folds are purely visual, so parity holds against
+	// Render's S / S+len(Next) pinned bases (the band is now the TAIL of the index
+	// space). The wave-7 READY TO CLAIM head is retired (charter D52 / wave-11 —
+	// ONE list): claim-forward stays via the cursor landing on any ready row.
+	for i := range m.board.Next {
+		rows = append(rows, row{kind: rowNext, docID: m.board.Next[i].Task.DocID})
+	}
+	for _, t := range m.board.Now {
+		rows = append(rows, row{kind: rowNow, docID: t.DocID})
 	}
 	return rows
 }

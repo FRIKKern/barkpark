@@ -24,12 +24,16 @@ var Chrome = ChromeInfo{RepoName: "—", Branch: "—", Server: "—"}
 // gutter + indent + weight, never a border.
 const childIndent = 2
 
+// Render draws the whole portrait frame for a 60–100col × 100+row pane, INVERTED
+// (charter Amendment 6 / D83): a one-line identity strip pinned at the very top,
+// then the scrolling epic spine (a window around st.Cursor) filling the top
+// region, then the pinned band at the BOTTOM (NEXT above NOW), then the momentum
+// line + progress bar + ticker + footer as fixed bottom status chrome. Cursor
+// order follows the visual top→bottom order: spine rows first, then NEXT, then
+// NOW (charter D84/D86). It is pure — no I/O, no tea, no network — so goldens are
+// the primary gate. Below 60 cols rows shed their right-meta and keep glyph+title.
+//
 // @canonical capability:taskboard-render aka:portrait,tui,task board,glance pane doc:docs/cards/tui.md
-// Render draws the whole portrait frame for a 60–100col × 100+row pane: a
-// two-line header strip, the pinned NOW band, the scrolling epic spine
-// (a window around st.Cursor), then a fixed event ticker + footer hint pinned
-// to the bottom. It is pure — no I/O, no tea, no network — so goldens are the
-// primary gate. Below 60 cols rows shed their right-meta and keep glyph+title.
 func Render(b Board, st UIState, width, height int, now time.Time) string {
 	if width < 20 {
 		width = 20
@@ -38,39 +42,48 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		height = 8
 	}
 
-	bottom := renderTicker(b.Events, width, now)
+	// FIXED TOP: the identity/title strip only (charter D85). Momentum + progress
+	// descend to the bottom status chrome (D83). It is one line, always.
+	identityTop := renderIdentityTop(st, width, now)
+
+	// FIXED BOTTOM CHROME (always rendered, never sheddable): the relocated header
+	// block (momentum line + progress bar + optional "showing N of M" note, charter
+	// D83), then the ticker rule + last event, an optional action strip, and the
+	// footer hint. These are STATUS readouts — never sheddable, exactly as the header
+	// block was never sheddable up top.
+	var chrome []string
+	chrome = append(chrome, renderStatusFooter(b, st, width)...)
+	chrome = append(chrome, renderTicker(b.Events, width, now)...)
 	// The action strip sits directly above the footer, and only when there is
-	// something to say — an empty strip costs no line, so an idle board is byte
-	// -identical to before this slice (the goldens stay green).
+	// something to say — an empty strip costs no line.
 	if strip := renderActionStrip(st.Strip, width); strip != "" {
-		bottom = append(bottom, strip)
+		chrome = append(chrome, strip)
 	}
-	bottom = append(bottom, renderFooter(width))
+	chrome = append(chrome, renderFooter(width))
 
-	// The header is 2 lines, plus an optional third when the list was truncated,
-	// so measure it before budgeting rather than assuming a fixed height.
-	top := renderHeader(b, st, width, now)
+	// S is the number of SELECTABLE spine rows — the base offset the pinned band's
+	// cursor indices sit ABOVE now that the list is the top region (charter D86).
+	// Single source, computed once and read by both band renderers, so visibleRows
+	// (which walks the SAME spineRows) and flattenSpine agree by construction.
+	s := selectableSpineCount(b, st)
 
-	// The pinned band (WHO = NOW claims + INTENT = NEXT strip) sits between the
-	// header and the spine (charter wave-12 D58/D63). Budget it so a swarm of
-	// concurrent claims can never push the spine/ticker/footer off the pane: header
-	// + 2 blanks + bottom are fixed, and the spine keeps at least minSpine lines.
-	// NOW reserves its lines FIRST; NEXT gets the remainder and folds before the
-	// spine starves (NOW is last to shed). An empty NOW+NEXT collapses the band to
+	// SHEDDABLE PINNED BAND (NOW + NEXT), budgeted off the BOTTOM (charter D87):
+	// identity + 2 blanks + the fixed chrome are reserved, the spine keeps at least
+	// minSpine lines. NOW reserves FIRST (last to shed); NEXT gets the remainder and
+	// folds before the spine starves. An empty NOW+NEXT collapses the band to
 	// NOTHING — no labels, no blank spacers (the all-clear lives in the momentum
-	// header's "0 in flight").
+	// line's "0 in flight"), so an idle board stays byte-stable.
 	const minSpine = 4
+	var band []string
 	if len(b.Now) > 0 || len(b.Next) > 0 {
-		bandBudget := height - len(top) - 2 - len(bottom) - minSpine
+		bandBudget := height - len(identityTop) - 2 - len(chrome) - minSpine
 		if bandBudget < 2 {
 			bandBudget = 2 // one honest row, whatever the pane size
 		}
 		// Reserve NEXT its single collapse line BEFORE NOW spends the budget, so a
 		// greedy NOW can never orphan a NEXT cursor stop (charter D63: NEXT folds to
 		// "+N intent", it never silently vanishes while it owns rows). Under the very
-		// tightest budget both bands collapse to one catch line apiece (1 NOW + 1
-		// NEXT == the clamped floor), so every pinned cursor row stays markable. NOW
-		// keeps the full budget whenever NEXT is empty (unchanged path).
+		// tightest budget both bands collapse to one catch line apiece.
 		nowBudget := bandBudget
 		if len(b.Next) > 0 {
 			nowBudget = bandBudget - 1
@@ -78,22 +91,29 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 				nowBudget = 1
 			}
 		}
-		nowLines := renderNowBand(b, st, width, nowBudget, now)
+		// NOW's cursor base is AFTER the spine AND after NEXT (NOW is the very last
+		// selectable band; NEXT sits above it — charter D84/D86).
+		nowLines := renderNowBand(b, st, width, nowBudget, s+len(b.Next), now)
 		nextBudget := bandBudget - len(nowLines)
 		if nextBudget < 0 {
 			nextBudget = 0
 		}
-		nextLines := renderNextBand(b, st, width, nextBudget, now)
+		// NEXT's cursor base is immediately after the spine (charter D86).
+		nextLines := renderNextBand(b, st, width, nextBudget, s, now)
 
-		top = append(top, "")
-		top = append(top, nowLines...)
-		top = append(top, nextLines...)
-		top = append(top, "")
+		band = append(band, "")           // blank between the spine and the band
+		band = append(band, nextLines...) // NEXT ABOVE NOW (charter D84)
+		band = append(band, nowLines...)
+		band = append(band, "") // blank between the band and the status chrome
 	}
+
+	bottom := make([]string, 0, len(band)+len(chrome))
+	bottom = append(bottom, band...)
+	bottom = append(bottom, chrome...)
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
 
-	avail := height - len(top) - len(bottom)
+	avail := height - len(identityTop) - len(bottom)
 	if avail < 1 {
 		avail = 1
 	}
@@ -102,25 +122,36 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 		spine = append(spine, "")
 	}
 
-	all := make([]string, 0, len(top)+len(spine)+len(bottom))
-	all = append(all, top...)
+	all := make([]string, 0, len(identityTop)+len(spine)+len(bottom))
+	all = append(all, identityTop...)
 	all = append(all, spine...)
 	all = append(all, bottom...)
 	return strings.Join(all, "\n")
 }
 
-// ── Header ───────────────────────────────────────────────────────────────────
+// ── Header (split: identity pinned top, momentum+progress relocated bottom) ───
 
-func renderHeader(b Board, st UIState, width int, now time.Time) []string {
-	line1 := headerLine1(st, width, now)
+// renderIdentityTop is the pinned title strip (charter D85): the identity line
+// ONLY — "barkpark · tasks · ⇄ host · ● live · 2m". It answers "what am I looking
+// at / is it live", is ORIENTATION not activity, so it stays pinned at the very
+// top and never scrolls. The momentum line, the progress bar and the truncation
+// note (all live status/activity readouts) descend to the bottom status chrome
+// (charter D83). Always exactly one line.
+func renderIdentityTop(st UIState, width int, now time.Time) []string {
+	return []string{headerLine1(st, width, now)}
+}
 
-	// Line 2: the MOMENTUM header (spec §0, charter D40) — the always-on progress
-	// read: the in_progress spinner + in-flight/ready/done counts (icons + color,
-	// done teal), a warn "N stale" instrument, and a right-aligned overall %. Line
-	// 3 is the proportional progress BAR beneath it.
-	lines := []string{line1, momentumLine(b, st, width), progressBar(b, width)}
+// renderStatusFooter is the relocated header block (charter D83): the MOMENTUM
+// line (spec §0, D40 — spinner + in-flight/ready/done counts + right-aligned %),
+// the proportional progress BAR beneath it, and the honest "showing N of M" note
+// — now FIXED bottom chrome directly under the NOW rows and above the ticker
+// ("momentum nearest the footer like a status bar", charter D84). These are the
+// live progress readouts, so they live at the bottom with the ticker/footer, not
+// up top with the orienting title. Never sheddable (D87).
+func renderStatusFooter(b Board, st UIState, width int) []string {
+	lines := []string{momentumLine(b, st, width), progressBar(b, width)}
 
-	// Line 4 (only when the 1000-row list clamp truncated the corpus): an honest
+	// Only when the 1000-row list clamp truncated the corpus: an honest
 	// "showing N of M" note, so a partial board never masquerades as the whole.
 	if note := truncationNote(b); note != "" {
 		lines = append(lines, dimStyle.Render(truncate(note, width)))
@@ -347,12 +378,14 @@ func connGlyphWord(c ConnState) (string, string) {
 // renderNowBand renders the WHO half of the pinned band (charter wave-12 D59):
 // one agent-first line per live claim, within maxLines. An empty NOW returns nil
 // — NO "NOW" label, NO "nothing claimed" line: the empty band collapses and the
-// all-clear lives in the momentum header's "0 in flight". NOW cards are the FIRST
-// cursor rows (indexes [0, len(b.Now)) — the shell's visibleRows order), so the
-// row at st.Cursor wears the selection marker; when more claims exist than fit,
-// the rest fold into a dim "+N more claimed" line that CATCHES a folded-row
-// selection, never vanishing silently.
-func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
+// all-clear lives in the momentum line's "0 in flight". NOW cards are the LAST
+// selectable rows now that the list is the top region (charter D84/D86): base is
+// S+len(b.Next), so a NOW card is a cursor stop at [base, base+len(b.Now)) — the
+// very bottom of the index space, directly above the momentum status bar. The row
+// at st.Cursor wears the selection marker; when more claims exist than fit, the
+// rest fold into a dim "+N more claimed" line that CATCHES a folded-row selection,
+// never vanishing silently.
+func renderNowBand(b Board, st UIState, width, maxLines, base int, now time.Time) []string {
 	if len(b.Now) == 0 {
 		return nil
 	}
@@ -362,7 +395,7 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 	// into one dim "+N claimed" catch line that still marks a folded NOW-row cursor,
 	// so no claim cursor stop is ever left unmarked (the parity floor).
 	if maxLines < 2 {
-		sel := st.Cursor < n
+		sel := st.Cursor >= base && st.Cursor < base+n
 		return []string{dimStyle.Render(truncate(
 			SelectionMarker(sel)+fmt.Sprintf("  +%d claimed", n), width))}
 	}
@@ -377,10 +410,10 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 	for i, t := range b.Now[:shown] {
 		// flashTitle lights the title if this claim just changed; NowCard's ansi-
 		// aware truncation carries the emphasis through width-safely.
-		lines = append(lines, NowCard(flashTitle(t, st, now), st.Cursor == i, width, st.Frame, now)...)
+		lines = append(lines, NowCard(flashTitle(t, st, now), st.Cursor == base+i, width, st.Frame, now)...)
 	}
 	if folded := n - shown; folded > 0 {
-		sel := st.Cursor >= shown && st.Cursor < n
+		sel := st.Cursor >= base+shown && st.Cursor < base+n
 		lines = append(lines, dimStyle.Render(truncate(
 			SelectionMarker(sel)+fmt.Sprintf("  +%d more claimed", folded), width)))
 	}
@@ -388,19 +421,20 @@ func renderNowBand(b Board, st UIState, width, maxLines int, now time.Time) []st
 }
 
 // renderNextBand renders the INTENT half of the pinned band (charter wave-12
-// D60): a tiny NEXT strip directly under NOW showing what the system is ABOUT to
+// D60): a tiny NEXT strip directly ABOVE NOW showing what the system is ABOUT to
 // work on — resumables first, then the priority head of the ready queue. The
 // "NEXT" label is DIM (intent is subordinate to active work; NOW's label is bold,
-// so the weight difference encodes active > intent). Each row is a real cursor
-// stop at indexes [len(b.Now), len(b.Now)+len(b.Next)). When the rows don't fit
-// maxLines they fold to a dim "+N intent" catch line (the visual collapse of the
-// folded cursor rows, NOT a separate stop). A display-only "+N ready" tail points
-// at the spine below and sheds FIRST under height pressure. Empty NEXT => nil.
-func renderNextBand(b Board, st UIState, width, maxLines int, now time.Time) []string {
+// so the weight difference encodes active > intent). Now that the list is the top
+// region (charter D84/D86), NEXT sits immediately after the spine: base = S =
+// selectableSpineCount, so each row is a real cursor stop at [S, S+len(b.Next)),
+// with the NOW rows following below. When the rows don't fit maxLines they fold to
+// a dim "+N intent" catch line (the visual collapse of the folded cursor rows, NOT
+// a separate stop). A display-only "+N ready" tail points at the spine below and
+// sheds FIRST under height pressure. Empty NEXT => nil.
+func renderNextBand(b Board, st UIState, width, maxLines, base int, now time.Time) []string {
 	if len(b.Next) == 0 || maxLines < 1 {
 		return nil
 	}
-	base := len(b.Now)
 	n := len(b.Next)
 	// Fully collapsed: only one line fits (the tightest supported panes). Drop the
 	// "NEXT" label and fold EVERY intent row into one dim "+N intent" catch line that
@@ -467,23 +501,43 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
+// selectableSpineCount is the number of SELECTABLE rows the ONE spine producer
+// (spineRows, charter D42) emits — the base index the pinned NEXT/NOW band sits
+// ABOVE now that the list is the top region (charter Amendment 6 / D86). Render
+// computes it once and passes it to renderNextBand (base = S) and renderNowBand
+// (base = S+len(b.Next)); visibleRows walks the SAME spineRows Selectable subset,
+// so the two agree by construction and cursor-parity stays STRUCTURAL.
+func selectableSpineCount(b Board, st UIState) int {
+	n := 0
+	for _, sr := range spineRows(b, st) {
+		if sr.Selectable {
+			n++
+		}
+	}
+	return n
+}
+
 // flattenSpine renders every spine display line and reports the line index of
 // the cursor-selected row when it lives in the spine (-1 when the cursor is on
-// a pinned NOW card, which the spine window never needs to chase).
+// a pinned NEXT/NOW row, which the spine window never needs to chase).
 //
 // It consumes the ONE ordered spine producer (spineRows, charter D42): the shell
 // and the renderer read the SAME list, so the selection index space is
-// structural — NOW cards occupy [0, pinned), then each spineRow that is
-// Selectable consumes the next index in emission order (headers, then their
-// nested children, then clusters, then orphans). Separators, "+K more" folds and
-// phase sub-bands are Selectable:false and never touch the cursor. Any divergence
-// is now impossible: visibleRows filters the SAME producer to its Selectable set.
+// structural. Now that the list is the TOP region (charter Amendment 6 / D86),
+// the SPINE owns the FIRST indices [0, S): each spineRow that is Selectable
+// consumes the next index in emission order (headers, then their nested children,
+// then clusters, then orphans); the pinned band (NEXT then NOW) follows AFTER the
+// spine at [S, …). Separators, "+K more" folds and phase sub-bands are
+// Selectable:false and never touch the cursor. A cursor in the band is >= S, so
+// markSel never fires and cursorLine stays -1 — the spine window never chases a
+// pinned cursor (the SAME behavior as before, just re-based). Any divergence is
+// impossible: visibleRows filters the SAME producer to its Selectable set.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	// The pinned band owns the first indexes: the NOW cards (renderNowBand marks
-	// them), then the NEXT intent rows (renderNextBand marks them — charter wave-12
-	// D63). So the spine's first selectable row follows NOW + NEXT.
-	selIdx := len(b.Now) + len(b.Next)
+	// The spine owns the first indexes now (charter D86): its first selectable row
+	// is cursor 0. The pinned band (NEXT then NOW) follows at [S, …), where S =
+	// selectableSpineCount — so a band cursor is >= S and markSel below never fires.
+	selIdx := 0
 	emit := func(s string) { lines = append(lines, s) }
 	markSel := func() bool {
 		selected := selIdx == st.Cursor
