@@ -36,15 +36,21 @@ defmodule Barkpark.Plugins.Github.Relations do
   """
 
   require Logger
+  import Ecto.Query, only: [from: 2, subquery: 1]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
+  alias Barkpark.Repo
   alias Barkpark.Plugins.Github.{Client, Link}
 
   @task_type "task"
 
   # Cap-flatten thresholds (D11). Overridable per-call for testing.
   @default_max_depth 8
+  # Past this many DISTINCT children a parent cap-flattens instead of growing an
+  # unwieldy native sub-issue tree. Overridable per-call (`:max_children`).
+  @default_max_children 100
 
   # ---------------------------------------------------------------------------
   # Blocker-ref hydration
@@ -137,14 +143,19 @@ defmodule Barkpark.Plugins.Github.Relations do
     * Parent not mirrored yet (no `content.github.issue`) →
       `{:defer, :parent_unmirrored}` — the wiring mirrors the parent then retries
       the child (D11-retry). NEVER errors, NEVER guesses.
-    * Parent chain deeper than the depth cap (default #{@default_max_depth}) →
-      `{:flatten, parent_task_id}` — the wiring hydrates a `"parent_marker"` key
-      and the projection renders a `<!-- barkpark:parent -->` body marker instead
-      of a native link (graceful degradation, not a second linking system).
+    * Parent chain deeper than the depth cap (default #{@default_max_depth}) OR
+      the parent already carries more than #{@default_max_children} DISTINCT
+      children → `{:flatten, parent_task_id}` — the wiring hydrates a
+      `"parent_marker"` key and the projection renders a `<!-- barkpark:parent -->`
+      body marker instead of a native link (graceful degradation, not a second
+      linking system).
     * Otherwise: resolve the CHILD issue's database id via `Client.get_issue`
       (the sub-issues API keys on the child's db id, not its number) and
-      `Client.add_sub_issue(repo, parent_number, child_db_id)`. A `422`
-      ("already a sub-issue") is idempotent → `:ok`.
+      `Client.add_sub_issue(repo, parent_number, child_db_id)`. A `422` is
+      DISAMBIGUATED: an "already exists" body is idempotent → `:ok`; a real
+      rejection (any other legible 422 detail) → `{:error, {:sub_issue_rejected,
+      parent_num, child_db_id, detail}}` so the wiring RECORDS it. A 422 with no
+      legible detail stays conservatively idempotent → `:ok`.
 
   `opts` accepts `:max_parent_depth` (override the depth cap) and is threaded to
   `Content.get_document/4` (scope) and the `Client` verbs (HTTP tuning / test
@@ -173,7 +184,8 @@ defmodule Barkpark.Plugins.Github.Relations do
         {:defer, :parent_unmirrored}
 
       parent_num ->
-        if depth_exceeded?(task_doc, dataset, opts) do
+        if depth_exceeded?(task_doc, dataset, opts) or
+             child_count_exceeded?(parent_doc_id, dataset, opts) do
           {:flatten, parent_doc_id}
         else
           link_sub_issue(repo, parent_num, issue_number, opts)
@@ -222,10 +234,110 @@ defmodule Barkpark.Plugins.Github.Relations do
   defp add_sub_issue(repo, parent_num, child_db_id, opts) do
     case client_mod().add_sub_issue(repo, parent_num, child_db_id, opts) do
       {:ok, _} -> :ok
-      # 422 "already a sub-issue" — the link exists → idempotent success (D11).
-      {:error, %{reason: {:http, 422}}} -> :ok
+      {:error, %{reason: {:http, 422}} = err} -> classify_422(err, parent_num, child_db_id)
       {:error, err} -> {:error, err}
     end
+  end
+
+  # A 422 from the sub-issues API is AMBIGUOUS: GitHub returns it BOTH for
+  # "already a sub-issue" (idempotent — the link we wanted already exists) AND
+  # for a genuine rejection (the child can't be a sub-issue of that parent, a
+  # cycle, etc.). Distinguish on whatever legible detail the error surfaces:
+  #
+  #   * a message/errors body indicating the link already exists → `:ok`
+  #     (idempotent — re-linking is a no-op success);
+  #   * any OTHER legible detail → `{:error, {:sub_issue_rejected, …}}` so the
+  #     wiring RECORDS a quarantine row (an operator sees why the tree link never
+  #     formed — a real 422 was silently swallowed as success before);
+  #   * NO legible detail (the common case — the REST `Client` discards the 422
+  #     body, so a `%NetworkError{}` carries only `reason: {:http, 422}`) → stay
+  #     CONSERVATIVE and treat it as idempotent `:ok`, exactly as before. We never
+  #     fabricate a rejection we can't substantiate.
+  defp classify_422(err, parent_num, child_db_id) do
+    case error_detail_text(err) do
+      nil ->
+        :ok
+
+      detail ->
+        if already_exists?(detail) do
+          :ok
+        else
+          {:error, {:sub_issue_rejected, parent_num, child_db_id, detail}}
+        end
+    end
+  end
+
+  # Pull a human-readable detail string out of the error for the already/exists
+  # test. Reads the conventional GitHub error shapes DEFENSIVELY via a key-tolerant
+  # getter (atom or string), WITHOUT assuming the `NetworkError` struct grows a
+  # field it does not have today — a plain-map error (what tests inject, what a
+  # richer client might return) is tolerated too. `nil` when nothing legible is
+  # present, so `classify_422` falls to the conservative `:ok`.
+  defp error_detail_text(err) when is_map(err) do
+    [
+      err_get(err, :message),
+      body_text(err_get(err, :body)),
+      errors_text(err_get(err, :errors))
+    ]
+    |> Enum.reject(&blank?/1)
+    |> case do
+      [] -> nil
+      parts -> parts |> Enum.join(" ") |> String.trim()
+    end
+  end
+
+  defp error_detail_text(_), do: nil
+
+  # A body may be a raw string, or a decoded map carrying `message`/`errors`.
+  defp body_text(b) when is_binary(b), do: b
+
+  defp body_text(b) when is_map(b) do
+    [err_get(b, :message), errors_text(err_get(b, :errors))]
+    |> Enum.reject(&blank?/1)
+    |> Enum.join(" ")
+    |> nil_if_blank()
+  end
+
+  defp body_text(_), do: nil
+
+  # `errors` (GitHub's validation array) may be a list of maps or bare strings.
+  defp errors_text(list) when is_list(list) do
+    list
+    |> Enum.map(fn
+      m when is_map(m) -> err_get(m, :message) || err_get(m, :code) || err_get(m, :type)
+      s when is_binary(s) -> s
+      _ -> nil
+    end)
+    |> Enum.reject(&blank?/1)
+    |> Enum.join(" ")
+    |> nil_if_blank()
+  end
+
+  defp errors_text(_), do: nil
+
+  defp already_exists?(detail) do
+    d = String.downcase(detail)
+    String.contains?(d, "already") or String.contains?(d, "exist")
+  end
+
+  # Key-tolerant getter (atom key first — error structs/maps carry atom keys —
+  # then the string key a JSON-decoded body carries).
+  defp err_get(map, key) when is_map(map) and is_atom(key) do
+    case Map.get(map, key) do
+      nil -> Map.get(map, Atom.to_string(key))
+      v -> v
+    end
+  end
+
+  defp err_get(_, _), do: nil
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(s) when is_binary(s), do: String.trim(s) == ""
+  defp blank?(_), do: false
+
+  defp nil_if_blank(s) do
+    if blank?(s), do: nil, else: s
   end
 
   # ---------------------------------------------------------------------------
@@ -235,15 +347,45 @@ defmodule Barkpark.Plugins.Github.Relations do
   # True when the task's ANCESTOR chain (walking content.parent_id upward) is
   # deeper than the cap. The walk is bounded by `cap = max + 1` so it stops early
   # and a parent_id cycle can never spin.
-  #
-  # TODO(wave-6): also cap on parent child-count (> 100). A cheap, correct count
-  # must dedup the draft/published twin of each child (both rows carry the same
-  # content.parent_id) — impractical to do cheaply here, so per the charter we
-  # cap on DEPTH alone for now.
   defp depth_exceeded?(task_doc, dataset, opts) do
     max = max_depth(opts)
     ancestor_depth(parent_id(task_doc), dataset, opts, 0, max + 1) > max
   end
+
+  # True when the parent already carries MORE than the child cap of DISTINCT
+  # children. Both the draft (`drafts.<id>`) and published (`<id>`) row of a child
+  # carry the SAME `content.parent_id`, so a naive row count double-counts every
+  # child that has an open draft; we count DISTINCT prefix-normalized `doc_id`s
+  # (grouping collapses the twin). Bounded by a `LIMIT cap+1` subquery — we only
+  # need the ">cap?" answer, never the true total, so a parent with thousands of
+  # children never scans them all. Scoped fail-OPEN on an absent workspace,
+  # matching the draft-first reads elsewhere in this module (a default-scope run
+  # counts across the tenant exactly as `Content.get_document` reads it).
+  defp child_count_exceeded?(parent_doc_id, dataset, opts)
+       when is_binary(parent_doc_id) and parent_doc_id != "" do
+    max = max_children(opts)
+
+    distinct_children =
+      from(d in Document,
+        where: d.type == ^@task_type and d.dataset == ^dataset,
+        where:
+          fragment("regexp_replace(?->>'parent_id', '^drafts\\.', '')", d.content) ==
+            fragment("regexp_replace(?, '^drafts\\.', '')", ^parent_doc_id),
+        group_by: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        select: %{id: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)},
+        limit: ^(max + 1)
+      )
+      |> Scope.scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+
+    count = Repo.one(from(c in subquery(distinct_children), select: count()))
+
+    (count || 0) > max
+  end
+
+  defp child_count_exceeded?(_parent_doc_id, _dataset, _opts), do: false
 
   defp ancestor_depth(pid, dataset, opts, acc, cap)
        when is_binary(pid) and pid != "" and acc < cap do
@@ -262,6 +404,13 @@ defmodule Barkpark.Plugins.Github.Relations do
     case Keyword.get(opts, :max_parent_depth) do
       n when is_integer(n) and n >= 0 -> n
       _ -> @default_max_depth
+    end
+  end
+
+  defp max_children(opts) do
+    case Keyword.get(opts, :max_children) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> @default_max_children
     end
   end
 

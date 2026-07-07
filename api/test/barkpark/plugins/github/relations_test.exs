@@ -204,6 +204,110 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
 
       assert Relations.sync(task, @repo, 79, @dataset, opts) == {:error, :boom}
     end
+
+    # ---- 422 disambiguation (charter 4b): real reject vs idempotent ----------
+
+    test "a 422 whose body says the link ALREADY exists is idempotent → :ok",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{
+        add_sub_issue:
+          {:error, %{reason: {:http, 422}, message: "Sub-issue already exists on this issue"}}
+      })
+
+      task = mk_task!("child-idem", %{"parent_id" => "parent-mir"}, scope)
+      assert Relations.sync(task, @repo, 82, @dataset, opts) == :ok
+    end
+
+    test "a REAL 422 rejection returns a DISTINCT {:sub_issue_rejected, …} the wiring records",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{
+        add_sub_issue:
+          {:error, %{reason: {:http, 422}, message: "Issue may not be a sub-issue of itself"}}
+      })
+
+      task = mk_task!("child-reject", %{"parent_id" => "parent-mir"}, scope)
+
+      assert {:error, {:sub_issue_rejected, 55, 9001, detail}} =
+               Relations.sync(task, @repo, 83, @dataset, opts)
+
+      assert detail =~ "may not be a sub-issue"
+    end
+
+    test "a 422 rejection carried in a nested errors[] body is surfaced too",
+         %{scope: scope, opts: opts} do
+      stub_cfg(%{
+        add_sub_issue:
+          {:error,
+           %{
+             reason: {:http, 422},
+             body: %{"errors" => [%{"message" => "Reference is not a valid issue type"}]}
+           }}
+      })
+
+      task = mk_task!("child-reject2", %{"parent_id" => "parent-mir"}, scope)
+
+      assert {:error, {:sub_issue_rejected, 55, 9001, detail}} =
+               Relations.sync(task, @repo, 84, @dataset, opts)
+
+      assert detail =~ "not a valid issue type"
+    end
+
+    test "a 422 with NO legible detail stays conservatively idempotent → :ok",
+         %{scope: scope, opts: opts} do
+      # The real REST Client discards the 422 body, so a %NetworkError{} carries
+      # only reason:{:http,422}. Without a body to judge, we never fabricate a
+      # rejection — same conservative :ok as before this slice.
+      stub_cfg(%{add_sub_issue: :already_linked})
+      task = mk_task!("child-bare", %{"parent_id" => "parent-mir"}, scope)
+
+      assert Relations.sync(task, @repo, 85, @dataset, opts) == :ok
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # sync/5 — child-count cap (charter 4a)
+  # ---------------------------------------------------------------------------
+
+  describe "sync/5 — child-count cap past >100 children" do
+    setup %{scope: scope} do
+      mk_task!("cc-parent", %{}, scope)
+      {:ok, _} = Link.put("cc-parent", @dataset, %{repo: @repo, issue: 500}, scope)
+      :ok
+    end
+
+    test "a parent past the child cap flattens, no sub-issue call",
+         %{scope: scope, opts: opts} do
+      # Two DISTINCT children of cc-parent; with the cap dialed to 1 the parent
+      # is over-full → cap-flatten (no native link).
+      mk_task!("cc-child-1", %{"parent_id" => "cc-parent"}, scope)
+      task = mk_task!("cc-child-2", %{"parent_id" => "cc-parent"}, scope)
+
+      opts = Keyword.put(opts, :max_children, 1)
+      assert Relations.sync(task, @repo, 92, @dataset, opts) == {:flatten, "cc-parent"}
+      refute_received {:add_sub_issue, _, _, _}
+    end
+
+    test "a draft/published twin child counts ONCE (dedup) → still links natively",
+         %{scope: scope, opts: opts} do
+      # ONE logical child, present as BOTH a published row (cc-twin) and a draft
+      # row (drafts.cc-twin) — both carry parent_id cc-parent. A naive row count
+      # sees 2 and would flatten at cap 1; the DISTINCT count sees 1 and links.
+      mk_task!("cc-twin", %{"parent_id" => "cc-parent"}, scope)
+      {:ok, _} = Content.publish_document("cc-twin", "task", @dataset, scope)
+      task = mk_task!("cc-twin", %{"parent_id" => "cc-parent"}, scope)
+
+      opts = Keyword.put(opts, :max_children, 1)
+      assert Relations.sync(task, @repo, 93, @dataset, opts) == :ok
+      assert_received {:add_sub_issue, @repo, 500, 9001}
+    end
+
+    test "under the cap a normal parent links natively (default cap unaffected)",
+         %{scope: scope, opts: opts} do
+      task = mk_task!("cc-only", %{"parent_id" => "cc-parent"}, scope)
+      # default cap is 100 — one child is nowhere near it.
+      assert Relations.sync(task, @repo, 94, @dataset, opts) == :ok
+      assert_received {:add_sub_issue, @repo, 500, 9001}
+    end
   end
 
   describe "sync/5 — unmirrored parent → defer" do
