@@ -1081,5 +1081,101 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
       assert_received {:relinked, 95}
     end
+
+    test "(h) a Projects GraphQL rate-limit is RECORDED as a conflict, not swallowed silently",
+         %{bypass: bypass, scope: scope} do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "GraphQL rate-limited"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 53, state: "synced"}, scope)
+
+      stub_get(bypass, 53)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/53", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 53, "state" => "open"}))
+      end)
+
+      # A GraphQL rate-limit is a 200-body error array, NOT a %RateLimitError{} —
+      # Client.graphql/3 surfaces it as %NetworkError{reason: {:graphql, errors}}.
+      # Before this slice it fell to the bare Logger.warning and VANISHED. Now it
+      # is recorded as an out_of_band_edit conflict (source: "graphql") and the
+      # reconcile still returns :ok (failure isolation intact).
+      gql_rate = fn _task, _repo, _num, _link ->
+        {:error,
+         %Barkpark.Plugins.Github.Errors.NetworkError{
+           reason:
+             {:graphql, [%{"type" => "RATE_LIMITED", "message" => "API rate limit exceeded"}]}
+         }}
+      end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: gql_rate))
+
+      # The issue itself still mirrored (isolation).
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+
+      # …and the GraphQL rate-limit is now VISIBLE as a quarantine row.
+      assert [conflict] = Conflicts.list(kind: "out_of_band_edit")
+      assert conflict.issue == 53
+      assert conflict.doc_id == id
+      assert conflict.detail["source"] == "graphql"
+      assert [%{"type" => "RATE_LIMITED"}] = conflict.detail["errors"]
+    end
+
+    test "(i) a REAL sub-issue rejection from Relations is RECORDED, then swallowed",
+         %{bypass: bypass, scope: scope} do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Reject child", "parent_id" => "gh-parent"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 54, state: "synced"}, scope)
+
+      stub_get(bypass, 54)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/54", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 54, "state" => "open"}))
+      end)
+
+      # A real 422 rejection (NOT "already linked") bubbles from Relations as a
+      # distinct {:sub_issue_rejected, …}. The wiring RECORDS it before swallowing
+      # so the failed tree link is visible; the issue mirror still returns :ok.
+      reject = fn _task, _repo, _num, _dataset ->
+        {:error, {:sub_issue_rejected, 99, 12_345, "Issue may not be a sub-issue of itself"}}
+      end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(relations_impl: reject))
+
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+
+      assert [conflict] = Conflicts.list(kind: "out_of_band_edit")
+      assert conflict.issue == 54
+      assert conflict.doc_id == id
+      assert conflict.detail["source"] == "sub_issue_rejected"
+      assert conflict.detail["parent_issue"] == 99
+      assert conflict.detail["child_db_id"] == 12_345
+      assert conflict.detail["detail"] =~ "may not be a sub-issue"
+    end
+
+    test "(j) a non-rate GraphQL/atom projection error is still swallowed WITHOUT a conflict",
+         %{bypass: bypass, scope: scope} do
+      # A plain {:error, atom} projection failure (not a GraphQL NetworkError, not
+      # a rate-limit, not a sub-issue rejection) stays a log-and-continue — no
+      # quarantine row, exactly as before. Guards against over-recording.
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Plain boom"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 56, state: "synced"}, scope)
+
+      stub_get(bypass, 56)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/56", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 56, "state" => "open"}))
+      end)
+
+      boom = fn _task, _repo, _num, _link -> {:error, :graphql_boom} end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: boom))
+      assert Conflicts.list(kind: "out_of_band_edit") == []
+    end
   end
 end

@@ -639,7 +639,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
             :ok
 
           {:error, reason} ->
-            projection_error(:projects, doc_id, reason)
+            projection_error(:projects, repo, num, doc_id, dataset, reason)
         end
       else
         :ok
@@ -668,7 +668,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
             handle_defer(doc_id, dataset, task_doc, opts)
 
           {:error, reason} ->
-            projection_error(:relations, doc_id, reason)
+            projection_error(:relations, repo, num, doc_id, dataset, reason)
         end
       else
         :ok
@@ -679,12 +679,83 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # A projection error is SWALLOWED (log + return the issue-mirror's :ok) UNLESS
   # it is a rate-limit, which may snooze the whole reconcile (D9 — safe because
   # the issue PATCH re-runs idempotently on the level-triggered retry).
-  defp projection_error(_which, _doc_id, %RateLimitError{retry_after: s}) do
+  #
+  # A REST 403/429 surfaces as `%RateLimitError{}` and still snoozes — this
+  # branch is byte-identical to before.
+  defp projection_error(_which, _repo, _num, _doc_id, _dataset, %RateLimitError{retry_after: s}) do
     {:snooze, max(s || 0, 1)}
   end
 
-  defp projection_error(which, doc_id, reason) do
+  # A GraphQL rate-limit (Projects v2) is NOT a `%RateLimitError{}`: a GraphQL
+  # response is `200 OK` even when its `errors` array carries `RATE_LIMITED`, so
+  # `Client.graphql/3` surfaces it as `%NetworkError{reason: {:graphql, errors}}`.
+  # Left to the bare-log branch it vanishes INVISIBLY. Instead RECORD it as an
+  # `out_of_band_edit` conflict (the fixed inclusion set is out_of_band_edit /
+  # detached / dedup_refused — slice-1 Health buckets on the KIND, so we reuse it
+  # and discriminate with `detail.source`), then CONTINUE — the issue mirror
+  # already converged, and the level-triggered next edit re-runs the GraphQL
+  # write. NOT a snooze: a 200-body GraphQL error is record-and-continue, not a
+  # transport back-off.
+  defp projection_error(
+         _which,
+         repo,
+         num,
+         doc_id,
+         dataset,
+         %NetworkError{reason: {:graphql, errors}}
+       ) do
+    record_projection_conflict(repo, num, doc_id, dataset, %{
+      "source" => "graphql",
+      "errors" => errors
+    })
+
+    :ok
+  end
+
+  # A REAL (non-idempotent) sub-issue rejection surfaced by `Relations.sync`
+  # (charter 4b): the tree link was refused for a reason OTHER than "already
+  # linked". RECORD it (same fixed kind, distinct `detail.source`) so an operator
+  # sees the sub-issue never formed, then continue. Failure isolation is
+  # inviolate — the issue mirror still returns `:ok`.
+  defp projection_error(
+         _which,
+         repo,
+         num,
+         doc_id,
+         dataset,
+         {:sub_issue_rejected, parent_num, child_db_id, detail}
+       ) do
+    record_projection_conflict(repo, num, doc_id, dataset, %{
+      "source" => "sub_issue_rejected",
+      "parent_issue" => parent_num,
+      "child_db_id" => child_db_id,
+      "detail" => to_string(detail)
+    })
+
+    :ok
+  end
+
+  defp projection_error(which, _repo, _num, doc_id, _dataset, reason) do
     Logger.warning("github #{which} sync failed for #{doc_id}: #{inspect(reason)}")
+    :ok
+  end
+
+  # Record a projection-layer conflict under the reused `out_of_band_edit` kind
+  # with a `detail.source` discriminator. DB-only (Conflicts.record never touches
+  # Content/mutation_events — no loop surface, D4/D7). Best-effort: a record
+  # failure is ignored (the issue is already mirrored) and any raise is caught by
+  # the enclosing `isolate/3`, so the reconcile still returns the mirror's `:ok`.
+  defp record_projection_conflict(repo, num, doc_id, dataset, detail) do
+    _ =
+      Conflicts.record(%{
+        repo: repo,
+        issue: num,
+        doc_id: doc_id,
+        dataset: dataset,
+        kind: "out_of_band_edit",
+        detail: detail
+      })
+
     :ok
   end
 

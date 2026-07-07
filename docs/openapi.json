@@ -307,6 +307,53 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/v1/plugins/github/status": {
+      "get": {
+        "operationId": "github.status",
+        "parameters": [
+          {
+            "description": "Filter to one dataset.",
+            "in": "query",
+            "name": "dataset",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Show GitHub sync health (open conflicts by kind, per-dataset cursor lag, mirror queue depth). Read-only.",
+        "tags": [
+          "github"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/plugins/bulldocs/intents": {
       "get": {
         "operationId": "bulldocs.intents",

@@ -29,9 +29,9 @@ defmodule Barkpark.Plugins.GithubAdoptWiringTest do
 
   describe "cli_commands/0" do
     test "delegates the github adopt verb into the manifest" do
-      [cmd] = Github.cli_commands()
+      cmd = Enum.find(Github.cli_commands(), &(&1.id == "github.adopt"))
 
-      assert cmd.id == "github.adopt"
+      assert cmd
       assert cmd.noun == "github"
       assert cmd.verb == "adopt"
       assert cmd.http == %{method: "POST", path_template: "/v1/plugins/github/adopt/:id"}
@@ -39,6 +39,20 @@ defmodule Barkpark.Plugins.GithubAdoptWiringTest do
       assert cmd.writes == true
       assert [%{name: "id", required: true, type: "string"} | _] = cmd.args
       assert Enum.any?(cmd.flags, &(&1.name == "dataset" and &1.default == "production"))
+    end
+
+    test "delegates the read-only github status verb into the manifest (Wave 6)" do
+      cmd = Enum.find(Github.cli_commands(), &(&1.id == "github.status"))
+
+      assert cmd
+      assert cmd.noun == "github"
+      assert cmd.verb == "status"
+      assert cmd.http == %{method: "GET", path_template: "/v1/plugins/github/status"}
+      assert cmd.auth_tier == "read"
+      # Read-only — the flagship D5 invariant on the observability surface.
+      assert cmd.writes == false
+      assert cmd.args == []
+      assert Enum.any?(cmd.flags, &(&1.name == "dataset"))
     end
   end
 

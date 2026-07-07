@@ -119,15 +119,17 @@ on out-of-band edits; deleted issue → `detached`, never recreated; dedup-refus
 webhook secret memoized (kill pre-verify audit amplification). The plugin dir now ships **18 modules**
 (adds adopt, cli, conflict, conflicts + the `github_adopt_controller` + `github_sync_conflicts` migration).
 
-**Wave 5 — Projects v2 + relations — ⏳ DISPATCHED (architect pass 2026-07-07, seams verified live vs HEAD 09229948; cut below):** one-directional GraphQL auto-add + custom fields
+**Wave 5 — Projects v2 + relations — ✅ MERGED (#1237, `1069a8b7`):** one-directional GraphQL auto-add + custom fields
 (diffed against a stored `projects_fingerprint` so an unchanged task writes ZERO GraphQL);
 `parent_id`→native sub-issues (deferred-retry when parent unmirrored, cap-flatten past 8-level/100-child);
 `blocks`→`<!-- barkpark:blocks -->` body marker (projection already renders it; wire the `blocker_issue_refs`
 hydration). Isolated LAST so it can't destabilize the proven Issues loop. **See the "Wave 5 CUT" section for
 the 4-slice build plan.**
 
-**Wave 6 — observability (optional):** sync-health state (cursor/lag/last-error/queue-depth) +
-`/admin/github` `:ops` console (pulse precedent) + `bp github status` verb.
+**Wave 6 — observability — ⏳ DISPATCHED (architect pass 2026-07-07, seams verified live vs HEAD `1069a8b7`; cut below):**
+sync-health state (cursor/lag/queue-depth/open-conflicts) + `/admin/github` `:ops` console (pulse precedent) +
+`bp github status` verb + fold in the 3 wave-5 deferrals (child-count cap, real-422 distinction, GraphQL-RATE_LIMITED
+visibility). **See the "Wave 6 CUT" section for the 4-slice build plan.**
 
 **Wave 7 — needs-human:** GitHub App creation on FRIKKern/barkpark, install, generate private key +
 webhook secret, create Projects v2 board + single-select fields, provision secrets into guerrilla,
@@ -580,6 +582,313 @@ sync state that NOTHING renders: `github_sync_conflicts` rows (out_of_band_edit/
 `Conflicts.resolve/1` wired to a button) is the last loop-buildable wave and the home for the two above deferrals
 (distinguish real 422s; add the child-count cap). Then Wave 7 is the human gate (GitHub App creation, Projects v2
 board + single-select fields, secret provisioning, whitelist) — blocks NO code and lights the whole epic up.
+
+### Wave 2026-07-07 — Wave 5 Projects v2 + relations MERGED (#1237) — RECONCILED (architect pass)
+
+Wave 5 landed on `main` as squash `1069a8b7 feat(github): wave-5 Projects v2 dashboard + relations (D10/D11) —
+one board (#1237)`. Verified against the tree: the plugin dir now ships **20 modules** (waves 1-5: adopt, auth, cli,
+client, conflict, conflicts, cursor, drain_worker, errors, fields, intake, link, mirror_job, outbox, projection,
+**projects**, **relations**, settings, signature + `plugins/github.ex`). No github work landed OUTSIDE the loop.
+The four-major-feature-wave arc (outbound → inbound → adopt/quarantine → Projects/relations) is COMPLETE and merged;
+the ledger and the repo are one board. Wave 6 (observability) is the last loop-buildable wave — the human App gate
+(wave 7) lights the whole epic up but blocks no code.
+
+**Verified live seams Wave 6 builds on (architect grep pass vs HEAD `1069a8b7`):**
+- `Github.Conflicts` (conflicts.ex): `list(opts)` → open rows newest-first, filters `:repo`/`:kind`, default limit 100;
+  `resolve(id)` → `{:ok, %Conflict{}}` | `{:error, :not_found}`, idempotent; kinds =
+  `out_of_band_edit | detached | dedup_refused`. The console + `bp github status` read `list/1`; the console 'Resolve'
+  button wires `resolve/1` (already shipped — NO new mutation surface).
+- `Github.Cursor.get(dataset)` → outbound high-water mark (0 when none); `Github.Outbox.fetch(dataset, after_id, limit)`
+  → drainable task events (`type=="task"`, `source != "github"`, `id > after_id`) — Health computes pending backlog as
+  `length(Outbox.fetch(dataset, cursor, cap))` (reuses the exact drain filter, no outbox.ex change) and head as
+  `MAX(mutation_events.id)` for the dataset (raw `Repo` read on `Barkpark.Content.MutationEvent`, id is the PK).
+- `Github.Settings.datasets/0` (mirror datasets, default `["production"]`), `Settings.repo/0`, `Settings.active?/0`.
+- Oban queue `github_mirror` declared static in `config/config.exs:146` (concurrency 2) — depth = count `Oban.Job`
+  rows `where queue == "github_mirror" and state in ~w(available scheduled executing retryable)`.
+- Pulse `:ops` console precedent: `plugins/pulse.ex` `register_routes/1` returns
+  `{:live, "/pulse", Barkpark.Plugins.Pulse.Web.DashboardLive, :index, auth: :ops}` → the router's
+  `plugin_routes(scope: :ops)` block (router.ex L614-622, `live_session :plugin_ops`, `on_mount [{LiveAuth,:ops},…]`,
+  layout `{Layouts,:studio}`) mounts it at `/admin/pulse`. `desk_items/1` → `%{type: :link, path: "/admin/pulse", …}`.
+  github.ex `desk_items/1` ALREADY returns `%{type: :link, path: "/admin/github", …}` — wave 6 wires the real page.
+- `Github.CLI.commands/0` returns a `[cli_command()]`; `github.ex cli_commands/0` delegates via
+  `Code.ensure_loaded?` — the `bp github status` verb appends here with NO Go source change (the adopt precedent).
+- `GithubAdoptController` on `POST /v1/plugins/github/adopt/:id` (`:token` bucket, plugin route) is the shape the new
+  read-only `GET /v1/plugins/github/status` copies. `docs/openapi.json` DOES enumerate `/v1/plugins/github/*` +
+  `adopt` (verified) → a new `:token` route MUST regenerate it.
+- **Fold-in anchors:** `Relations.add_sub_issue/4` (relations.ex L222-229) blanket-tolerates ALL 422 as `:ok` (4b);
+  `Relations.depth_exceeded?` TODO (relations.ex L240-242) caps on DEPTH only, no child-count (4a);
+  `MirrorJob.projection_error/3` (mirror_job.ex L682-689) SWALLOWS a `%NetworkError{reason:{:graphql,errors}}` with a
+  bare `Logger.warning` — a rate-limited GraphQL repaint is invisible (4c); `sync_projects`/`sync_relations`
+  (L621-677) have `repo`+`num` in scope to thread into the conflict record.
+
+### Wave 2026-07-07 — Wave 6 observability BUILT (4/4 green, merge-ready)
+
+All four cut slices came back green; the last loop-buildable wave is done. What landed:
+- **Slice 1 — `Github.Health.snapshot/1`** (new `health.ex` + test, `@canonical capability:github-sync-health`): a pure,
+  network-free local-read aggregate — open conflicts bucketed by the fixed 3-kind set (+ newest-50 rows, repo-filtered
+  or repo-wide when dark), per-dataset cursor/head/lag/pending over the EXACT w2 `Outbox.fetch` drain window (task-only,
+  source≠github, cap 500 + `pending_capped`), and `github_mirror` Oban depth by the four live states. Every sub-read is
+  defensively wrapped → total on a dark plugin or missing table (degrades to zeros, never a 500). ZERO GitHub calls.
+- **Slice 2 — `/admin/github` `:ops` console** (`web/ops_live.ex` + `github.ex` `:live` route): pulse-pattern LiveView,
+  5s `send_after` poll (no PubSub), the ONE control is a per-row `data-role="github-resolve"` button wired to the
+  already-shipped `Conflicts.resolve/1`; renders the not-provisioned banner, per-dataset panel, queue depth, conflicts
+  by kind, empty-state. HEeX auto-escaped; `:ops` gated (admin/ops on_mount, anonymous→redirect proven), never public_demo.
+- **Slice 3 — `bp github status`** (`GET /v1/plugins/github/status` on `:token`): read-only `{ok, health: <snapshot>}`,
+  optional blank-coerced `?dataset=`, frozen `github.status` cli_command falls out of `/v1/capabilities` with NO Go
+  change, `docs/openapi.json` regenerated (clean single-op diff). Reaches Health via a `:github_status_fun` app-env seam
+  (adopt's `:github_adopt_fun` precedent) so it compiles green before/with the Health slice.
+- **Slice 4 — the 3 w5 deferrals folded into `relations.ex` + `mirror_job.ex`** (disjoint owner): a real sub-issues 422
+  now disambiguates already-exists (idempotent `:ok`) from a legible rejection (`{:sub_issue_rejected,…}`); the flatten
+  gate also fires on >100 DISTINCT children (prefix-normalized doc_id group-by, dedups the draft/published twin, LIMIT
+  cap+1, fail-open); `projection_error` now RECORDS a GraphQL 200-body RATE_LIMITED (previously swallowed) AND the
+  real-422 as an `out_of_band_edit` conflict (detail.source discriminator) — `RateLimitError`→`{:snooze}` byte-identical,
+  failure isolation intact, `Conflicts.record` stays DB-only.
+
+Gates green across slices (health/ops_live/github subdir + broad `barkpark_web` swath; 2712 tests 0 fail on slice 2;
+Go build/vet/test + openapi zero-drift on slice 3; docs-anchors PASS). Perfecter cleared all four adversarially: pure
+reads, no ledger writes, no `mutation_events`, no GitHub/Auth/Client call, no read-back of a GitHub field (D5/D7 clean),
+no injection (rendered values HEeX-escaped or plain data), idempotent resolve + re-read.
+
+**Integrator MUST action (from the perfecter notes, none block):**
+1. **ONE `health.ex`.** Slices 1 and 2 each ship a `health.ex` (twin-substrate: slice 2 shipped it as a dependency to
+   run in isolation). Keep ONE, confirm snapshot-SHAPE parity — OpsLive.render consumes
+   `:active/:repo/:conflicts{...}/:datasets[{dataset,cursor,head,lag,pending,pending_capped}]/:queue{available,scheduled,executing,retryable,total}`;
+   preserve the `@canonical capability:github-sync-health` marker's `doc:` backlink through the dedup (slug-uniqueness
+   holds — only one file today).
+2. **Sequence 2 then 3 on `github.ex` `register_routes/1`.** Both append; slice 3 branched off main and couldn't see
+   slice 2's `:live` route → resolve by keeping BOTH `:live` and `:status`, add `:live` to the plugin_test route-list
+   assertion. Slice 4 is file-disjoint (relations/mirror_job) — merge any time.
+3. **Health seam once whitelisted.** Slice 3's controller resolves `Health.snapshot/1` (1-arity) dynamically — until the
+   Health module lands the endpoint 500s when `github` is on; merge Health with-or-before slice 3, match arity exactly.
+
+**Deliberate non-blocking tradeoffs (builder/perfecter-flagged, for a future slice, NOT wave-6 rework):**
+- `Health.safe/2` swallows raises AND exits per the totality rule → a real DB outage reads as a "healthy zero" snapshot,
+  not a 500. Intentional no-500-on-a-probe; a separate liveness signal is a future nicety.
+- `lag` (max event id − cursor, ALL event types) can exceed `pending` (mirrorable task rows only) when non-task traffic
+  sits between cursor and head — honest per field names; the console renders BOTH so an operator doesn't misread
+  lag>0/pending=0 as a stall.
+- Blank `?dataset=` = whole-fleet health for any valid operator token (Health owns dataset scoping; consistent with the
+  charter's noted arity-3 dataset-only scope limit) — flag for a scoping slice if per-dataset isolation is wanted.
+- SHARED-KIND DETAIL COLLAPSE (slice 4): graphql + sub_issue_rejected reuse the frozen `out_of_band_edit` kind, and
+  `Conflicts.record` dedups by `{repo,issue,kind}` → a co-occurring drift + projection error on the SAME issue collapse
+  to one row (later detail.source wins). Convergence + PATCH unaffected, only the visible detail; a real fix (merge-not-
+  overwrite, or key on detail.source) belongs in slice-5's `conflicts.ex`, out of this slice's disjoint scope.
+
+**PRE-EXISTING latent bug re-flagged (NOT wave-6 code):** `github.ex resolve_doc_actions/2` raises "Document does not
+implement Access" on a `%Document{}` during the broad test swath (wave-4 code, rescued by the Registry so tests stay
+green). File a cleanup slice.
+
+**Gate-automation fix:** slice-3's gate named `test/barkpark/plugins/github/github_test.exs` — that path does NOT exist,
+`mix test` tolerates a missing path (exit 0), so the verb-count-pin never ran under the gate. The real file is the
+PARENT `test/barkpark/plugins/github_test.exs` (12/12 pass, verified explicitly). Fix the glob in any downstream loop
+automation so the pin actually runs.
+
+**Wave 6 = DONE (pending integration).** Only Wave 7 remains — the human GitHub App / Projects board / secret gate that
+lights the whole epic up but blocks NO further code. The loop has mined the epic out.
+
+## Wave 6 CUT — observability (2026-07-07, architect pass)
+
+**Wish increment:** the epic has been accumulating hidden sync state for four waves — open `github_sync_conflicts`
+(out_of_band_edit/detached/dedup_refused, since w4), the outbound cursor + its drain backlog, the `github_mirror`
+Oban queue, and now Projects fingerprints + relation defer/flatten chains (w5) — and NOTHING renders any of it. Wave 6
+gives operators EYES: a read-only sync-health aggregate, an `/admin/github` `:ops` console that paints it + the open
+conflicts (with the already-shipped `Conflicts.resolve/1` wired to a per-row 'Resolve' button), and a `bp github
+status` verb returning the same health as JSON. It also FOLDS IN the three wave-5 deferrals since this wave owns the
+visibility surface: a real 422 (max-sub-issues/cycle) becomes a recorded conflict instead of a silent `:ok`, a
+GraphQL RATE_LIMITED (a 200-body `{:graphql,errors}`, NOT a 403/429) becomes a recorded conflict instead of an
+invisible `Logger.warning`, and the child-count cap (>100) joins the depth cap in Relations. This is the LAST
+loop-buildable wave; wave 7 is the human App/board/secret gate that lights the epic up and blocks no code.
+
+**Hard contracts every slice MUST respect (charter decisions + lead rules):**
+- **READ-ONLY (D5/D7).** The observability surface NEVER edits a task or a GitHub value. The ONLY mutation it exposes
+  is `Conflicts.resolve/1` (already built in w4 — a maintainer clearing an open quarantine row; it touches only the
+  side table, never `Content.*`/`mutation_events`, so no loop surface). No new task-mutating or GitHub-writing path.
+- **NO GitHub calls in Health.** The health aggregate is PURE local reads (Postgres: conflicts, cursor, outbox,
+  mutation_events, oban_jobs). It never calls `Auth.token/0`/`Client`/GraphQL — a health read must work with the
+  plugin dark and NEVER hit the network. (Bypass isn't even needed for the Health test; there are no HTTP edges.)
+- **D4 cut #2 — the exact string.** The fold-in conflict records (slice 4) go through `Conflicts.record/1` — DB-only,
+  it emits NO `mutation_events` row, so there is no loop surface and no `source` stamp to get wrong. Do NOT route a
+  conflict record through `Content.*`/`Link.put`.
+- **`:ops`/`:token` gating, NOT public_demo.** The console is `auth: :ops` (admin/ops on_mount gate, the pulse
+  precedent) — NEVER `public_demo`, NEVER anonymous. `bp github status` rides the `:token` bucket (bearer-gated
+  operator read, `auth_tier: "read"`) exactly like `github adopt`.
+- **openapi regen (slice 3 only).** `GET /v1/plugins/github/status` is a new PUBLIC `:token` route → the slice MUST
+  run `cd api && mix barkpark.openapi` and COMMIT the regenerated `docs/openapi.json` (adopt is already in it; the
+  generator enumerates plugin routes even off-by-default). This is the ONLY slice that touches openapi.json.
+- **bp verb → Go smoke (slice 3 only).** A new manifest verb needs NO Go source change (the `Code.ensure_loaded?`
+  delegate), but prove nothing broke: `CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... && go test
+  ./internal/cli/...`. Do NOT hand-edit `docs/cli/fixtures/full-manifest.json` — the Go tests look up task/ticket
+  nouns, so a new `github` verb breaks nothing.
+- **NO boot-started DB-touching worker** (CI sandbox lesson). Wave 6 adds NO worker. A LiveView console needs a
+  `ConnCase`/`Phoenix.LiveViewTest`; the Health/fold-in modules run under `Barkpark.DataCase`. Every slice runs its
+  targeted github tests PLUS a broad `DataCase`/`ConnCase` swath (`mix test test/barkpark_web/` for the console) so a
+  bare plugin-dir run can't hide a sandbox/endpoint regression. NEVER boot `phx.server` (codelist seed OOMs). ALL
+  agents on Opus — never Fable, never Haiku.
+
+**Integration order + disjointness:** Slice 1 (`Github.Health`, new file) is FOUNDATIONAL — slices 2 and 3 both
+render it — so it lands FIRST. Slices 2 (console: new `web/ops_live.ex` + `github.ex` route) and 3 (status:
+new controller + `cli.ex` + `github.ex` route + openapi) BOTH append to `github.ex` `register_routes/1` → they are
+NOT file-disjoint on `github.ex`; land **2 then 3** and rebase 3 onto 2 (the same hot-file sequencing this epic runs
+every wave for client.ex/mirror_job.ex). Slice 4 (fold-ins) solely owns `relations.ex` + `mirror_job.ex` — disjoint
+from 1/2/3, lands any time. So: land 1 → 2 → 3 (sequential on github.ex) with 4 in parallel. Test-DB contention:
+re-run a gate once before declaring failure.
+
+### Slice 1 — `Github.Health`: pure sync-health aggregate (FOUNDATIONAL, new file)
+- **Surface:** new `api/lib/barkpark/plugins/github/health.ex` + `test/barkpark/plugins/github/health_test.exs`.
+- **Build:** `Health.snapshot(opts \\ []) :: map()` — a pure LOCAL-READ aggregate (NO GitHub call). Compose:
+  - **Conflicts:** `Github.Conflicts.list(repo: Settings.repo(), limit: 200)` bucketed by `kind` →
+    `%{out_of_band_edit: n, detached: n, dedup_refused: n, total: n, open: [<the rows as plain maps, newest-first,
+    capped e.g. 50>]}`. (Settings.repo() may be nil when the plugin is dark → pass no `:repo` filter in that case.)
+  - **Cursor + lag, per dataset** (`Settings.datasets/0`, default `["production"]`): for each dataset
+    `cursor = Cursor.get(ds)`; `head = MAX(mutation_events.id)` for that dataset (a bounded `Repo.aggregate` /
+    `Repo.one(from e in Barkpark.Content.MutationEvent, where: e.dataset == ^ds, select: max(e.id))`, nil→0);
+    `pending = length(Outbox.fetch(ds, cursor, 500))` (reuses the EXACT drain filter — task, source≠github, id>cursor;
+    cap 500 so the query is bounded, display "500+" when it hits the cap). Return
+    `%{dataset: ds, cursor: cursor, head: head, lag: max(head - cursor, 0), pending: pending, pending_capped: pending >= 500}`.
+  - **Queue depth:** count `Oban.Job` rows `where queue == "github_mirror" and state in
+    ~w(available scheduled executing retryable)`, grouped by state → `%{available: n, scheduled: n, executing: n,
+    retryable: n, total: n}`. Use `Repo.all(from j in Oban.Job, where: …, group_by: j.state, select: {j.state,
+    count(j.id)})` folded into a map (missing states → 0).
+  - **Active flag:** `active: Settings.active?()` and `repo: Settings.repo()` for the console header.
+  - Wrap each sub-read defensively (a missing table / dark plugin must yield zeros, never crash) — `snapshot/0` is
+    called from a LiveView mount and a controller; it must be total. Return a plain string-or-atom-keyed map that
+    both the LiveView (slice 2) and the JSON controller (slice 3) render.
+- **Decisions respected:** D5 (read-only, no GitHub read-back), D7 (surfaces the visible quarantine), the
+  no-network/no-worker rule (pure Postgres reads).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/health_test.exs
+  test/barkpark/plugins/github/` (worktree recipe: copy `_build/test` + link `deps`; `export CC=/usr/bin/clang`).
+  `Barkpark.DataCase`. Assert: with the DB empty → all zeros, `active: false`, never raises; after inserting two open
+  conflicts (one `out_of_band_edit`, one `detached`) via `Conflicts.record/1` → the bucket counts + `total` match and
+  the `detached` shows in `open`; after `Cursor.put(ds, N)` with a higher `MAX(mutation_events.id)` → `lag` is the
+  positive delta and `pending` counts only task/source≠github rows past the cursor; a `source: "github"` event past
+  the cursor does NOT inflate `pending`; queue depth reflects an inserted `github_mirror` Oban job. NO Bypass needed
+  (there are no HTTP edges — assert Health issues zero network calls by construction).
+- **Size:** medium.
+
+### Slice 2 — `/admin/github` `:ops` console: render health + open conflicts + Resolve button
+- **Surface:** new `api/lib/barkpark/plugins/github/web/ops_live.ex` (mirror `plugins/pulse/web/dashboard_live.ex`) +
+  `api/lib/barkpark/plugins/github.ex` (`register_routes/1` appends the `:live` route) +
+  `test/barkpark/plugins/github/web/ops_live_test.exs`.
+- **Build:**
+  - `Barkpark.Plugins.Github.Web.OpsLive` — `use BarkparkWeb, :live_view`. `mount/3`: `assign(socket, :health,
+    Github.Health.snapshot())`; on `connected?` schedule a slow `Process.send_after(self(), :refresh, 5_000)` periodic
+    re-read (pulse precedent — NO PubSub needed; health is a poll). `handle_info(:refresh, …)` re-reads + reschedules.
+  - `handle_event("resolve", %{"id" => id}, socket)` → `Github.Conflicts.resolve(String.to_integer(id))`, then
+    re-read `Health.snapshot()` into assigns (the resolved row drops out of `open`), `{:noreply, …}`. Put a
+    `data-role="github-resolve"` `phx-click="resolve" phx-value-id={row.id}` button on each open-conflict row. This
+    is the ONLY control on the page — everything else is read-only text.
+  - `render/1`: a header (repo + active flag + a warning banner when `active: false` — "plugin not provisioned"),
+    a per-dataset cursor/lag/pending/queue-depth panel (tabular-nums, pulse's inline-style aesthetic), a conflicts
+    section grouped by kind with the open rows (repo#issue, kind, doc_id, inserted_at, the Resolve button), and an
+    empty-state (`data-role="github-health-empty"`) when there are zero conflicts. Keep it a single `~H` block, no
+    external assets (CSP), theme-neutral inline styles like the pulse dashboard.
+  - `github.ex` `register_routes/1`: APPEND `{:live, "/github", Barkpark.Plugins.Github.Web.OpsLive, :index,
+    auth: :ops}` to the existing route list (the pulse `{:live, "/pulse", …, auth: :ops}` shape). This mounts it at
+    `/admin/github` via the router's `plugin_routes(scope: :ops)` block — the `desk_items/1` link already points there.
+    Do NOT touch the router (the `:plugin_ops` live_session already exists). Keep the webhook + adopt routes byte-identical.
+- **Decisions respected:** D5/D7 (read-only dashboard + the one already-built `Conflicts.resolve` control), `:ops`
+  gating (NOT public_demo), off-by-default (the route only resolves a live handler when `github` is whitelisted —
+  the `:ops` on_mount still admin-gates it regardless).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/web/ops_live_test.exs
+  test/barkpark/plugins/github/ test/barkpark_web/` — `ConnCase` + `Phoenix.LiveViewTest`. Assert: with two open
+  conflicts seeded, `live/2` (or `render/1` on a directly-mounted socket) shows both kinds + the counts + the
+  per-dataset cursor/lag panel; clicking the `github-resolve` button on a row calls `Conflicts.resolve` (the row is
+  gone from `list/1` afterward and drops out of the re-rendered `open`); the empty-state renders when there are none.
+  Mount the LiveView directly with a health-seeded DB (the `:ops` on_mount admin gate can be satisfied the way the
+  existing plugin-ops LiveView tests do — grep `test/barkpark_web/` for an `:ops`/`:admin` live_view test harness and
+  reuse it). Run the broad `test/barkpark_web/` swath to prove no router/endpoint regression from the new route.
+- **Size:** large.
+
+### Slice 3 — `bp github status` verb: health JSON on the `:token` bucket
+- **Surface:** new `api/lib/barkpark_web/controllers/github_status_controller.ex` (mirror `github_adopt_controller.ex`) +
+  `api/lib/barkpark/plugins/github/cli.ex` (APPEND a `github.status` command to `commands/0`) +
+  `api/lib/barkpark/plugins/github.ex` (`register_routes/1` appends the `:token` GET route) + regenerated
+  `docs/openapi.json` + tests. **Rebase onto slice 2 (both touch github.ex `register_routes/1`).**
+- **Build:**
+  - `GithubStatusController.status/2` — read-only: `json(conn, Github.Health.snapshot())` wrapped in a `200
+    {ok: true, health: <snapshot>}` envelope (mirror the adopt controller's success shape). No params required
+    (optional `?dataset=` filter is fine but not required). NEVER mutates.
+  - `github.ex` `register_routes/1`: APPEND `{:get, "/github/status", BarkparkWeb.GithubStatusController, :status,
+    auth: :token}` (the `:token` bucket — bearer-gated operator READ, like adopt but GET/read). Keep the console
+    `:live` route (slice 2) + webhook + adopt byte-identical.
+  - `Github.CLI.commands/0`: APPEND (do not replace the adopt map) `%{id: "github.status", noun: "github", verb:
+    "status", summary: "Show GitHub sync health (open conflicts by kind, per-dataset cursor lag, mirror queue
+    depth). Read-only.", http: %{method: "GET", path_template: "/v1/plugins/github/status"}, auth_tier: "read",
+    args: [], flags: [%{name: "dataset", type: "string", summary: "Filter to one dataset.", default: nil}], writes:
+    false, batch: false, paginated: false, dry_run: false, default_output: "table", scoped_prefix: nil}` — the frozen
+    `cli_command()` shape (copy the adopt map's field set exactly). `github.ex cli_commands/0` already delegates via
+    `Code.ensure_loaded?`, so `bp github status` falls out of `/v1/capabilities` with NO Go change.
+  - Regenerate openapi: `cd api && mix barkpark.openapi` and COMMIT `docs/openapi.json` (the new `:token` route MUST
+    appear; adopt already does).
+- **Decisions respected:** D5 (read-only, no GitHub read-back), D6-adjacent (operator-tier `:token`, not admin),
+  the openapi-regen + Go-smoke lead rules.
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark_web/controllers/github_status_controller_test.exs
+  test/barkpark/plugins/github/github_test.exs test/barkpark/plugins/github/` — `ConnCase`. Assert: an authenticated
+  `:token` GET returns 200 with the health envelope (seed a conflict → it appears in the body); an unauth GET is
+  401/403 (bucket-gated). PLUS the Go smoke: `CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... && go
+  test ./internal/cli/...`. PLUS confirm `docs/openapi.json` now contains `/v1/plugins/github/status` (a `grep`
+  assertion is fine). Do NOT hand-edit `docs/cli/fixtures/full-manifest.json`.
+- **Size:** medium.
+
+### Slice 4 — fold in the 3 wave-5 deferrals: real-422 + GraphQL-RATE_LIMITED visibility + child-count cap
+- **Surface:** `api/lib/barkpark/plugins/github/relations.ex` (child-count cap + real-422 distinction) +
+  `api/lib/barkpark/plugins/github/mirror_job.ex` (record the surfaced errors as conflicts) + extend
+  `relations_test.exs` + `mirror_job_test.exs`. The ONLY slice touching either file.
+- **Build:**
+  - **(4b) Real 422 vs idempotent already-linked (relations.ex `add_sub_issue/4`, L222-229).** Today ALL 422 →
+    `:ok`. GitHub's sub-issues API returns 422 for BOTH "already a sub-issue" (idempotent, correct `:ok`) AND a REAL
+    failure (max-sub-issues, would-create-cycle). Distinguish on the 422 body when available: if the error payload's
+    message/errors indicate "already"/"exists" (case-insensitive substring on the surfaced `%NetworkError{}` body) →
+    `:ok` (idempotent); otherwise return a DISTINCT `{:error, {:sub_issue_rejected, parent_num, child_db_id,
+    detail}}` so the wiring records it. If the body is not available to disambiguate, keep the conservative `:ok` but
+    prefer surfacing when the classifier preserved a body. (Check what `Client.add_sub_issue`'s `%NetworkError{}`
+    carries — `reason: {:http, 422}` plus any `:body`/`:message`; match on what's there.)
+  - **(4a) Child-count cap (relations.ex `depth_exceeded?` / the cap-flatten gate, L240-246).** Extend the cap: past
+    the depth cap OR when the parent already has > 100 CHILDREN → `{:flatten, parent_id}` (the existing cap-flatten
+    path). Count children with a bounded query that DEDUPS the draft/published twin: both the `drafts.<id>` and
+    `<id>` rows carry the same `content.parent_id`, so a naive count double-counts. Count DISTINCT published doc_ids —
+    e.g. count task docs whose `content.parent_id == parent_doc_id`, normalizing `drafts.`-prefixed ids to their
+    published id and `Enum.uniq`-ing (or a `SELECT count(DISTINCT …)` keyed on the published id). Cap the query
+    (`limit 101`) so a giant parent doesn't scan the world — you only need "> 100?", not the exact count. Reuse the
+    task substrate's existing child-query if one exists (grep `parent_id` in `tasks.ex`/content queries); otherwise a
+    scoped `Repo` query on the task documents table filtered by `content.parent_id`. Keep it cheap and correct-on-dedup.
+  - **(4c) GraphQL RATE_LIMITED visible (mirror_job.ex `projection_error/3`, L682-689 + the `sync_projects`/
+    `sync_relations` callers, L621-677).** A GraphQL rate-limit is a 200-body `%NetworkError{reason: {:graphql,
+    errors}}` (NOT a `%RateLimitError{}`), so it currently falls to the bare `Logger.warning` swallow — a quiescent
+    rate-limited repaint is invisible. Thread `repo` + `num` into the error handler (both are in scope at the
+    `sync_projects`/`sync_relations` call sites) and, when the swallowed reason is a `{:graphql, errors}` NetworkError
+    (detect a RATE_LIMITED/rate-limit token in the errors, OR record any `{:graphql,_}` as the safe superset), record
+    a conflict: `Conflicts.record(%{repo: repo, issue: num, doc_id: doc_id, dataset: dataset, kind:
+    "out_of_band_edit", detail: %{source: "graphql", errors: <errors>}})` — reuse the existing `out_of_band_edit`
+    kind (do NOT add a new kind; the three-value inclusion set in `Conflict.changeset` is fixed and slice 1's Health
+    buckets on it) OR, if a distinct label reads better, extend the `Conflict` inclusion set to add
+    `"projection_error"` and teach Health's buckets about it (charter-permitted since Health is slice 1 in the same
+    wave — but the SIMPLER path is to reuse `out_of_band_edit` with a `detail.source` discriminator). Also record the
+    real-422 from (4b): when `sync_relations` gets `{:error, {:sub_issue_rejected, …}}`, record a conflict the same
+    way BEFORE swallowing (so the issue mirror still returns `:ok` — failure isolation preserved). Keep the
+    `%RateLimitError{}` → `{:snooze}` branch byte-identical (a REST 403/429 still snoozes; a GraphQL 200-body
+    rate-limit records-and-continues, since it can't snooze without re-reading — level-triggered on next edit).
+  - **Failure isolation is inviolate:** every fold-in still returns the issue-mirror's `:ok` — recording a conflict
+    NEVER dead-letters the issue. `Conflicts.record/1` is DB-only (no `mutation_events`, no loop surface).
+- **Decisions respected:** D7 (record-then-continue, disagreement VISIBLE), D9 (REST rate-limit still snoozes;
+  GraphQL 200-body rate-limit records+continues), D11 (cap-flatten extended to child-count), D4 (conflict record is
+  DB-only, no `source` stamp, no loop surface), failure isolation (issue mirror `:ok` unchanged).
+- **Gate:** `CC=/usr/bin/clang mix test test/barkpark/plugins/github/relations_test.exs
+  test/barkpark/plugins/github/mirror_job_test.exs test/barkpark/plugins/github/` — `DataCase` + seam/Bypass. Assert:
+  (a) `add_sub_issue` 422 "already a sub-issue" → `:ok` (idempotent, no conflict); (b) a 422 max-sub-issues/cycle body
+  → `{:error, {:sub_issue_rejected, …}}` and the wiring records ONE `out_of_band_edit`/`sub_issue_rejected` conflict,
+  reconcile still `:ok`; (c) a parent with > 100 deduped children → `{:flatten, parent_id}` (a draft+published twin of
+  the same child counts ONCE — seed both rows, assert the count is not doubled); (d) a `Projects.sync` returning a
+  `%NetworkError{reason: {:graphql, [%{"type" => "RATE_LIMITED"}]}}` → a conflict recorded + reconcile returns `:ok`
+  (the issue is still PATCHed + `synced_rev` stamped — failure isolation intact); (e) a plain REST `%RateLimitError{}`
+  still `{:snooze, s}` (byte-identical). Run the full github dir to prove no w5 test regressed.
+- **Size:** large.
+
+**Carried to wave 7 (human gate, blocks no code):** GitHub App creation on FRIKKern/barkpark, install, generate
+private key + webhook secret, create the Projects v2 board + Status/Priority/Worker/Goal single-select fields,
+provision secrets into guerrilla, add `github` to the whitelist. Runbook `docs/ops/github-sync.md` (human-tier) +
+`@canonical capability:github-sync-health` on `Health.snapshot/1`. After wave 6 the whole epic is code-complete and
+dark — wave 7 flips one whitelist and the board lights up.
 
 ## Wave 5 CUT — Projects v2 + relations (2026-07-07, architect pass)
 

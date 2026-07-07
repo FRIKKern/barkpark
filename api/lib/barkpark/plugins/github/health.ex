@@ -1,0 +1,269 @@
+defmodule Barkpark.Plugins.Github.Health do
+  @moduledoc """
+  Pure LOCAL-READ sync-health aggregate for the `github` mirror plugin
+  (epic wave 6 — observability).
+
+  `snapshot/1` composes four cheap local reads into ONE plain map that both the
+  `/admin/github` `:ops` console LiveView (slice 2) and the JSON status
+  controller (slice 3) render, plus what `bp github status` (slice 4) prints:
+
+    1. **conflicts** — the open `github_sync_conflicts` quarantine (epic D7),
+       bucketed by the fixed 3-value `kind` set, with the newest rows as plain
+       maps for the console table.
+    2. **datasets** — per mirror dataset: the outbound cursor, the local
+       `mutation_events` head, their lag, and how many un-mirrored task events
+       are still pending (the EXACT drain window the wave-2 `Outbox` reader
+       uses).
+    3. **queue** — the `github_mirror` Oban queue depth by state.
+    4. **active / repo** — the settings gate + repo string for the console
+       header.
+
+  ## Rules it honors
+
+    * **ZERO GitHub calls.** No `Auth`, no `Client`, no GraphQL, no network —
+      this reads only local Postgres, so it works with the plugin DARK and is
+      safe to call from a LiveView `mount/3` AND a controller action. It NEVER
+      reads a GitHub field back into anything (D5: read-only, no GitHub
+      read-back).
+    * **Total, never raising.** Each sub-read is wrapped defensively: a missing
+      table, an unmigrated conflict store, or a dark/half-provisioned plugin
+      yields ZEROS for that section rather than crashing the caller. The map is
+      always fully shaped.
+    * **No worker, no mutation.** Pure reads through `Repo` — it never enqueues
+      an Oban job, never writes a `mutation_events` row, never touches
+      `Content.*`. It can never re-trigger sync.
+    * **Honest, not fabricated.** Unknown counts surface as `0`, not a guess.
+      It surfaces the visible quarantine (D7) rather than hiding drift.
+  """
+
+  import Ecto.Query
+
+  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Plugins.Github.{Conflict, Conflicts, Cursor, Outbox, Settings}
+  alias Barkpark.Repo
+
+  # How many open conflict rows to hand the console as plain maps (newest-first).
+  @open_conflicts_cap 50
+
+  # The Oban queue the wave-2 mirror engine drains on.
+  @queue "github_mirror"
+
+  # The Oban states that count as live queue depth (pending or in-flight work).
+  # `completed`/`cancelled`/`discarded` are terminal and NOT depth.
+  @queue_states ~w(available scheduled executing retryable)
+
+  # The outbox drain probe cap — matches the wave-2 drain batch size so `pending`
+  # measures the SAME window the drain worker sees, and `pending_capped` flags
+  # "there may be more than this".
+  @outbox_probe_limit 500
+
+  @typedoc "Fully-shaped sync-health snapshot; every field is always present."
+  @type t :: %{
+          active: boolean(),
+          repo: String.t() | nil,
+          conflicts: %{
+            out_of_band_edit: non_neg_integer(),
+            detached: non_neg_integer(),
+            dedup_refused: non_neg_integer(),
+            total: non_neg_integer(),
+            open: [map()]
+          },
+          datasets: [
+            %{
+              dataset: String.t(),
+              cursor: non_neg_integer(),
+              head: non_neg_integer(),
+              lag: non_neg_integer(),
+              pending: non_neg_integer(),
+              pending_capped: boolean()
+            }
+          ],
+          queue: %{
+            available: non_neg_integer(),
+            scheduled: non_neg_integer(),
+            executing: non_neg_integer(),
+            retryable: non_neg_integer(),
+            total: non_neg_integer()
+          }
+        }
+
+  @doc """
+  Aggregate the GitHub sync-health snapshot from LOCAL reads only.
+
+  Total by construction: any sub-read that fails (dark plugin, missing table,
+  transient DB error) degrades to zeros for its section, never a raise. `opts`
+  is accepted for forward-compatibility and currently unused — the snapshot
+  always reflects the plugin's OWN resolved settings (repo, datasets).
+  """
+  @spec snapshot(keyword()) :: t()
+  def snapshot(_opts \\ []) do
+    # Resolve the repo ONCE and thread it down. Each `Settings.repo/0` is a DB
+    # fallback read that logs an audit row, so a single read (vs one per section)
+    # both trims audit-table churn on a per-mount probe AND guarantees the header
+    # `repo` and the conflict repo-filter observe the SAME value.
+    repo = safe(fn -> Settings.repo() end, nil)
+
+    %{
+      active: safe(fn -> Settings.active?() end, false),
+      repo: repo,
+      conflicts: conflicts_snapshot(repo),
+      datasets: datasets_snapshot(),
+      queue: queue_snapshot()
+    }
+  end
+
+  # ---------------------------------------------------------------------------
+  # (1) Conflicts — the visible quarantine (D7)
+  # ---------------------------------------------------------------------------
+
+  defp conflicts_snapshot(repo) do
+    safe(
+      fn ->
+        counts = open_conflict_counts(repo)
+        rows = Conflicts.list(open_conflicts_list_opts(repo))
+
+        %{
+          out_of_band_edit: Map.get(counts, "out_of_band_edit", 0),
+          detached: Map.get(counts, "detached", 0),
+          dedup_refused: Map.get(counts, "dedup_refused", 0),
+          total: counts |> Map.values() |> Enum.sum(),
+          open: Enum.map(rows, &conflict_to_map/1)
+        }
+      end,
+      zero_conflicts()
+    )
+  end
+
+  # EXACT open-conflict counts grouped by kind — a `COUNT ... GROUP BY kind`,
+  # not a bounded row scan, so `total` and every bucket are honest even past a
+  # large backlog (no silent cap) while staying O(kinds) in memory. Filtered to
+  # the configured repo when one is set; NO :repo filter when the plugin is dark
+  # (repo nil) so a pre-provisioning snapshot still surfaces orphaned rows.
+  defp open_conflict_counts(repo) do
+    Conflict
+    |> where([c], is_nil(c.resolved_at))
+    |> maybe_repo(repo)
+    |> group_by([c], c.kind)
+    |> select([c], {c.kind, count(c.id)})
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp maybe_repo(query, repo) when is_binary(repo), do: where(query, [c], c.repo == ^repo)
+  defp maybe_repo(query, _repo), do: query
+
+  # Newest-first open rows for the console table, capped. Same repo-filter rule
+  # as the counts (dark → repo-wide) so the table and the counts agree.
+  defp open_conflicts_list_opts(repo) do
+    base = [limit: @open_conflicts_cap]
+    if is_binary(repo), do: [{:repo, repo} | base], else: base
+  end
+
+  defp conflict_to_map(%Conflict{} = c) do
+    %{
+      id: c.id,
+      repo: c.repo,
+      issue: c.issue,
+      doc_id: c.doc_id,
+      dataset: c.dataset,
+      kind: c.kind,
+      detail: c.detail,
+      inserted_at: c.inserted_at,
+      updated_at: c.updated_at
+    }
+  end
+
+  defp zero_conflicts do
+    %{out_of_band_edit: 0, detached: 0, dedup_refused: 0, total: 0, open: []}
+  end
+
+  # ---------------------------------------------------------------------------
+  # (2) Cursor + lag per dataset
+  # ---------------------------------------------------------------------------
+
+  defp datasets_snapshot do
+    datasets = safe(fn -> Settings.datasets() end, ["production"])
+    Enum.map(datasets, &dataset_snapshot/1)
+  end
+
+  defp dataset_snapshot(dataset) when is_binary(dataset) do
+    safe(
+      fn ->
+        cursor = Cursor.get(dataset)
+        head = head_id(dataset)
+        pending = length(Outbox.fetch(dataset, cursor, @outbox_probe_limit))
+
+        %{
+          dataset: dataset,
+          cursor: cursor,
+          head: head,
+          lag: max(head - cursor, 0),
+          pending: pending,
+          pending_capped: pending >= @outbox_probe_limit
+        }
+      end,
+      zero_dataset(dataset)
+    )
+  end
+
+  defp dataset_snapshot(dataset), do: zero_dataset(dataset)
+
+  # Largest local mutation_events.id for the dataset (the head the cursor chases);
+  # nil (no events yet) → 0.
+  defp head_id(dataset) do
+    Repo.one(from(e in MutationEvent, where: e.dataset == ^dataset, select: max(e.id))) || 0
+  end
+
+  defp zero_dataset(dataset) do
+    ds = if is_binary(dataset), do: dataset, else: to_string(dataset)
+    %{dataset: ds, cursor: 0, head: 0, lag: 0, pending: 0, pending_capped: false}
+  end
+
+  # ---------------------------------------------------------------------------
+  # (3) Queue depth
+  # ---------------------------------------------------------------------------
+
+  defp queue_snapshot do
+    safe(
+      fn ->
+        counts =
+          from(j in Oban.Job,
+            where: j.queue == @queue and j.state in @queue_states,
+            group_by: j.state,
+            select: {j.state, count(j.id)}
+          )
+          |> Repo.all()
+          |> Map.new()
+
+        by_state =
+          Map.new(@queue_states, fn state ->
+            {String.to_atom(state), Map.get(counts, state, 0)}
+          end)
+
+        Map.put(by_state, :total, by_state |> Map.values() |> Enum.sum())
+      end,
+      zero_queue()
+    )
+  end
+
+  defp zero_queue do
+    @queue_states
+    |> Map.new(fn state -> {String.to_atom(state), 0} end)
+    |> Map.put(:total, 0)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Defensive wrapper
+  # ---------------------------------------------------------------------------
+
+  # Run `fun`; on ANY raise/exit (missing table, dark plugin, transient DB
+  # error) fall back to `default`. Keeps the snapshot total so a LiveView mount
+  # or a controller action never 500s on a health probe.
+  defp safe(fun, default) when is_function(fun, 0) do
+    fun.()
+  rescue
+    _ -> default
+  catch
+    _, _ -> default
+  end
+end
