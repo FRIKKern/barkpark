@@ -97,6 +97,44 @@ defmodule Barkpark.Plugins.Github.ConflictsTest do
       assert {:ok, %Conflict{detail: %{}}} =
                Conflicts.record(base(%{detail: nil}))
     end
+
+    test "a numeric-string issue dedups against an integer issue (same key)" do
+      assert {:ok, first} = Conflicts.record(base(%{issue: 42}))
+      # a JSON/form caller handing issue as "42" must land on the SAME open row,
+      # not a second un-deduped pile.
+      assert {:ok, second} = Conflicts.record(base(%{issue: "42", detail: %{"n" => 9}}))
+
+      assert first.id == second.id
+      assert second.issue == 42
+      assert Repo.aggregate(Conflict, :count, :id) == 1
+    end
+  end
+
+  describe "open-key partial unique index (structural pile guard)" do
+    test "the DB rejects a second OPEN row for the same {repo,issue,kind}" do
+      assert {:ok, _} = Conflicts.record(base())
+
+      # A direct insert that bypasses the recorder's FOR-UPDATE dedup (i.e. the
+      # lost-race path) must be refused by the partial unique index, proving the
+      # invariant is enforced at the DB, not just in app code.
+      dup =
+        %Conflict{}
+        |> Conflict.changeset(base())
+        |> Repo.insert()
+
+      assert {:error, cs} = dup
+      assert Enum.any?(cs.errors, fn {_f, {_m, opts}} -> opts[:constraint] == :unique end)
+      assert Repo.aggregate(Conflict, :count, :id) == 1
+    end
+
+    test "a resolved row does NOT block a fresh open row for the same key" do
+      {:ok, c1} = Conflicts.record(base())
+      {:ok, _} = Conflicts.resolve(c1.id)
+
+      # partial index only covers resolved_at IS NULL, so re-opening is allowed
+      assert {:ok, c2} = Conflicts.record(base())
+      refute c1.id == c2.id
+    end
   end
 
   describe "list/1" do

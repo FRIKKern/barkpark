@@ -38,19 +38,52 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   def record(attrs) when is_map(attrs) do
     attrs = normalize(attrs)
 
-    result =
-      Repo.transaction(fn ->
-        case open_row(attrs) do
-          nil -> insert_new(attrs)
-          existing -> refresh(existing, attrs)
-        end
-      end)
+    result = Repo.transaction(fn -> upsert(attrs) end)
 
     case result do
       {:ok, {:ok, conflict}} -> {:ok, conflict}
       {:ok, {:error, cs}} -> {:error, cs}
       {:error, cs} -> {:error, cs}
     end
+  end
+
+  # Insert-or-update under a row lock. Fast path: an open row for the key is
+  # locked (FOR UPDATE) and refreshed in place. First-record path: insert. If a
+  # concurrent record won the insert race between our open_row read and our own
+  # insert, the partial unique index rejects ours as a matched constraint error
+  # (savepoint-scoped inside the transaction); we then re-read the winner — now
+  # lock-visible — and converge onto it, so the pile the FOR UPDATE alone could
+  # not prevent is impossible.
+  defp upsert(attrs) do
+    case open_row(attrs) do
+      nil ->
+        case insert_new(attrs) do
+          {:error, cs} = err ->
+            if open_key_conflict?(cs) do
+              case open_row(attrs) do
+                nil -> err
+                existing -> refresh(existing, attrs)
+              end
+            else
+              err
+            end
+
+          ok ->
+            ok
+        end
+
+      existing ->
+        refresh(existing, attrs)
+    end
+  end
+
+  defp open_key_conflict?(%Ecto.Changeset{errors: errors}) do
+    name = to_string(Conflict.open_key_constraint())
+
+    Enum.any?(errors, fn {_field, {_msg, opts}} ->
+      Keyword.get(opts, :constraint) == :unique and
+        Keyword.get(opts, :constraint_name) == name
+    end)
   end
 
   # Find + lock an open row for this dedup key (nil when there is none).
@@ -135,13 +168,26 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   defp normalize(attrs) do
     %{
       repo: fetch(attrs, :repo),
-      issue: fetch(attrs, :issue),
+      issue: coerce_issue(fetch(attrs, :issue)),
       doc_id: fetch(attrs, :doc_id),
       dataset: fetch(attrs, :dataset),
       kind: fetch(attrs, :kind),
       detail: fetch(attrs, :detail) || %{}
     }
   end
+
+  # A JSON/form caller may hand `issue` as a numeric string. Coerce it to an
+  # integer so the dedup key (open_row's `is_integer` guard) matches instead of
+  # silently falling through to a non-deduped insert. A non-numeric string is
+  # left as-is for the changeset to reject.
+  defp coerce_issue(issue) when is_binary(issue) do
+    case Integer.parse(issue) do
+      {n, ""} -> n
+      _ -> issue
+    end
+  end
+
+  defp coerce_issue(issue), do: issue
 
   defp fetch(attrs, key) do
     case Map.fetch(attrs, key) do

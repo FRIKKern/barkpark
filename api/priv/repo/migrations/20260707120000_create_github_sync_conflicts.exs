@@ -42,5 +42,18 @@ defmodule Barkpark.Repo.Migrations.CreateGithubSyncConflicts do
     create index(:github_sync_conflicts, [:repo, :issue])
     # The open-conflicts feed: WHERE resolved_at IS NULL, filtered by kind.
     create index(:github_sync_conflicts, [:kind, :resolved_at])
+
+    # STRUCTURAL dedup invariant: at most ONE open row per {repo, issue, kind}.
+    # A plain FOR UPDATE in the recorder cannot lock a not-yet-existing gap, so
+    # two genuinely-concurrent FIRST records for the same key (e.g. an
+    # at-least-once webhook REDELIVERY of the same issue) could both read nil
+    # and both insert. This partial unique index makes the pile impossible at
+    # the DB; the recorder catches the losing insert and converges onto the
+    # winner in place. Partial (resolved_at IS NULL) so a resolved key can
+    # legitimately re-open as a fresh row.
+    create unique_index(:github_sync_conflicts, [:repo, :issue, :kind],
+             where: "resolved_at IS NULL",
+             name: :github_sync_conflicts_open_key
+           )
   end
 end

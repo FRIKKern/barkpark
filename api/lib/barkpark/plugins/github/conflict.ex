@@ -36,10 +36,16 @@ defmodule Barkpark.Plugins.Github.Conflict do
 
   @fields [:repo, :issue, :doc_id, :dataset, :kind, :detail, :resolved_at]
 
+  @doc "Name of the partial unique index enforcing one OPEN row per dedup key."
+  def open_key_constraint, do: :github_sync_conflicts_open_key
+
   @doc """
   Cast + validate a conflict. `repo`, `issue`, `dataset` and `kind` are
   required; `kind` must be one of the three drift kinds; `detail` defaults to
-  an empty map (never null).
+  an empty map (never null). The `open_key` unique constraint converts a lost
+  insert race (two concurrent first-records for one key) into a matchable
+  `{:error, changeset}` rather than a raised `Ecto.ConstraintError`, so the
+  recorder can catch it and converge in place.
   """
   def changeset(conflict, attrs) do
     conflict
@@ -47,6 +53,7 @@ defmodule Barkpark.Plugins.Github.Conflict do
     |> validate_required([:repo, :issue, :dataset, :kind])
     |> validate_inclusion(:kind, @kinds)
     |> put_detail_default()
+    |> unique_constraint([:repo, :issue, :kind], name: open_key_constraint())
   end
 
   # detail is null:false default %{} at the DB level; keep the changeset honest
