@@ -15,6 +15,9 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
   # True when the issue body carries no acceptance fence.
   defp refute_fence(issue), do: not (issue.body =~ "barkpark:acceptance")
 
+  # True when the body carries no parent fence.
+  defp refute_parent(body), do: not (body =~ "barkpark:parent")
+
   describe "state_for/1 — exhaustive lifecycle → {state, state_reason}" do
     test "done closes as completed" do
       assert Projection.state_for("done") == {"closed", "completed"}
@@ -351,6 +354,85 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
       stripped = Projection.upsert_acceptance_marker(fenced, [])
       refute stripped =~ "barkpark:acceptance"
       assert stripped =~ "Prose."
+    end
+  end
+
+  describe "upsert_parent_marker/2 — cap-flatten fallback (D11), idempotent" do
+    test "applying twice equals applying once (idempotent)" do
+      once = Projection.upsert_parent_marker("Human.", "goal-xyz")
+      twice = Projection.upsert_parent_marker(once, "goal-xyz")
+      assert once == twice
+    end
+
+    test "preserves human prose, rewrites only inside the fence" do
+      body = "Original note.\n\n" <> Projection.upsert_parent_marker("", "p1")
+      updated = Projection.upsert_parent_marker(body, "p2")
+
+      assert updated =~ "Original note."
+      assert updated =~ "Parent: p2"
+      refute updated =~ "Parent: p1"
+      assert length(String.split(updated, "<!-- barkpark:parent:start -->")) == 2
+    end
+
+    test "nil / blank strips the fence entirely (no parent → no marker)" do
+      fenced = Projection.upsert_parent_marker("Prose.", "p1")
+      assert fenced =~ "barkpark:parent"
+
+      assert refute_parent(Projection.upsert_parent_marker(fenced, nil))
+      assert refute_parent(Projection.upsert_parent_marker(fenced, "  "))
+    end
+  end
+
+  describe "task_to_issue/1 — parent marker end to end" do
+    test "a hydrated parent_marker renders the fence before the trailer" do
+      doc =
+        task(%{"description" => "Brief."}, %{"parent_marker" => "goal-42"})
+
+      issue = Projection.task_to_issue(doc)
+
+      assert issue.body =~ "<!-- barkpark:parent:start -->"
+      assert issue.body =~ "Parent: goal-42"
+      assert issue.body =~ ~r/Brief\..*barkpark:parent:start.*Task: task-abc/s
+    end
+
+    test "no parent_marker → no parent fence (existing behavior unchanged)" do
+      issue = Projection.task_to_issue(task(%{"description" => "Brief."}))
+      assert refute_parent(issue.body)
+    end
+
+    test "blocks and parent fences coexist in reading order" do
+      doc =
+        task(
+          %{"description" => "Brief."},
+          %{"blocker_issue_refs" => [7], "parent_marker" => "goal-9"}
+        )
+
+      issue = Projection.task_to_issue(doc)
+
+      assert issue.body =~
+               ~r/Brief\..*barkpark:blocks:start.*barkpark:parent:start.*Task: task-abc/s
+    end
+
+    test "re-projecting with a parent_marker is idempotent, prose preserved" do
+      doc = task(%{"description" => "Human context."}, %{"parent_marker" => "p"})
+      once = Projection.task_to_issue(doc)
+      twice = Projection.task_to_issue(doc)
+      assert once.body == twice.body
+      assert once.body =~ "Human context."
+      assert length(String.split(once.body, "<!-- barkpark:parent:start -->")) == 2
+    end
+
+    test "a forged parent sentinel in the brief is scrubbed (no fence hijack)" do
+      doc =
+        task(%{"description" => "Note. <!-- barkpark:parent:start -->pwn"}, %{
+          "parent_marker" => "real-parent"
+        })
+
+      issue = Projection.task_to_issue(doc)
+      assert issue.body =~ "Note."
+      assert issue.body =~ "Parent: real-parent"
+      # Exactly one parent fence — the projection's own.
+      assert length(String.split(issue.body, "<!-- barkpark:parent:start -->")) == 2
     end
   end
 

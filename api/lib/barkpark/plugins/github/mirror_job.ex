@@ -93,6 +93,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   @config_key Barkpark.Plugins.Github
   @task_type "task"
   @debounce_seconds 30
+  # D11-retry: a deferred child re-links `@relink_delay_seconds` out, bounded to
+  # `@relink_cap` attempts before it cap-flattens to a body `parent` marker.
+  @relink_delay_seconds 60
+  @relink_cap 3
 
   @doc """
   Build and insert a debounced mirror job for `doc_id` in `dataset`.
@@ -132,6 +136,8 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     %{"doc_id" => fields.doc_id, "dataset" => Map.get(fields, :dataset, "production")}
     |> put_non_nil("workspace_id", Map.get(fields, :workspace_id))
     |> put_non_nil("project_id", Map.get(fields, :project_id))
+    |> put_non_nil("relink", Map.get(fields, :relink))
+    |> put_non_nil("relink_attempt", Map.get(fields, :relink_attempt))
   end
 
   @impl Oban.Worker
@@ -173,7 +179,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           detached?(link) ->
             {:cancel, :detached}
 
-          Link.synced?(task_doc) ->
+          # A `relink: true` job (D11-retry) BYPASSES the synced coalesce guard so
+          # a child that is already synced still re-runs to link its now-mirrored
+          # parent. The issue create/PATCH stays idempotent (nothing changed → a
+          # redundant no-op PATCH); the point of the re-run is the relations pass.
+          not relink?(opts) and Link.synced?(task_doc) ->
             :ok
 
           true ->
@@ -189,15 +199,23 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp converge(doc_id, dataset, task_doc, link, opts) do
     case repo() do
       repo when is_binary(repo) and repo != "" ->
-        desired = Projection.task_to_issue(task_doc)
+        # Capture the rev off the pristine Document BEFORE hydration decorates the
+        # in-memory doc with `blocker_issue_refs`/`parent_marker` (D11): those keys
+        # are read ONLY by the projection body render, never persisted, and must
+        # not shadow the row's `_rev`.
         rev = rev_of(task_doc)
+        # Hydrate the relations markers onto the in-memory doc so the projected
+        # BODY carries the `blocks` (and, when a prior pass cap-flattened, the
+        # `parent`) marker. Pure in-memory decoration — NO GitHub call here (D11).
+        task_doc = hydrate(task_doc, dataset, link, opts)
+        desired = Projection.task_to_issue(task_doc)
 
         case issue_number(link) do
           nil ->
-            create(doc_id, dataset, repo, desired, rev, opts)
+            create(doc_id, dataset, repo, desired, rev, opts, task_doc)
 
           num when is_integer(num) ->
-            update(doc_id, dataset, repo, num, desired, rev, link, opts)
+            update(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc)
         end
 
       _ ->
@@ -208,12 +226,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     end
   end
 
-  defp create(doc_id, dataset, repo, desired, rev, opts) do
+  defp create(doc_id, dataset, repo, desired, rev, opts, task_doc) do
     params = %{title: desired.title, body: desired.body, labels: desired.labels}
 
     case Client.create_issue(repo, params, opts) do
       {:ok, %{"number" => num}} when is_integer(num) ->
-        after_create(doc_id, dataset, repo, num, desired, rev, opts)
+        after_create(doc_id, dataset, repo, num, desired, rev, opts, task_doc)
 
       {:ok, other} ->
         # A 2xx with no issue number is a GitHub contract violation we can't
@@ -233,16 +251,24 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # stamp write is `source: :github`, so it never re-enqueues to fix itself.
   # Record the issue number first (so a retry PATCHes, never re-CREATEs), then
   # converge `state` with a follow-up idempotent PATCH in the SAME reconcile.
-  defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, opts) do
-    stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"}, opts)
+  defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, opts, task_doc) do
+    case stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"}, opts) do
+      # The issue mirror converged (created + stamped). NOW the issue number is
+      # known and the issue write returned :ok, so run the failure-isolated
+      # Projects + relations projections. A fresh create carries no prior link, so
+      # pass nil (no stored projects fingerprint → the first sync writes it).
+      :ok -> sync_projections(doc_id, dataset, repo, num, task_doc, nil, opts)
+      err -> err
+    end
   end
 
-  defp after_create(doc_id, dataset, repo, num, desired, rev, opts) do
+  defp after_create(doc_id, dataset, repo, num, desired, rev, opts, task_doc) do
     case stamp(doc_id, dataset, %{repo: repo, issue: num, state: "synced"}, opts) do
       # The issue is one HTTP call old and carries no stored fingerprint yet, so
       # there is nothing to drift from — pass a nil link so `update` records no
       # spurious conflict and just PATCHes state + stamps the first fingerprint.
-      :ok -> update(doc_id, dataset, repo, num, desired, rev, nil, opts)
+      # `update` runs the projections at the END of its PATCH (one place only).
+      :ok -> update(doc_id, dataset, repo, num, desired, rev, nil, opts, task_doc)
       err -> err
     end
   end
@@ -251,18 +277,18 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # ledger-owned fields; if it drifted out-of-band since our last write, RECORD
   # the conflict (ledger still wins — D7). A GET 404/410 → the issue vanished
   # between drain and reconcile → route to the detached branch via `classify`.
-  defp update(doc_id, dataset, repo, num, desired, rev, link, opts) do
+  defp update(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc) do
     case Client.get_issue(repo, num, opts) do
       {:ok, issue} ->
         maybe_record_drift(repo, num, doc_id, dataset, issue, stored_fingerprint(link))
-        patch(doc_id, dataset, repo, num, desired, rev, opts)
+        patch(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc)
 
       {:error, err} ->
         classify(err, :update, repo, num, doc_id, dataset, opts)
     end
   end
 
-  defp patch(doc_id, dataset, repo, num, desired, rev, opts) do
+  defp patch(doc_id, dataset, repo, num, desired, rev, link, opts, task_doc) do
     params =
       %{
         title: desired.title,
@@ -276,12 +302,18 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
       {:ok, _} ->
         # Stamp the DESIRED fingerprint alongside the rev, so the next reconcile
         # compares the issue's future state against exactly what we just wrote.
-        stamp(
-          doc_id,
-          dataset,
-          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)},
-          opts
-        )
+        case stamp(
+               doc_id,
+               dataset,
+               %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)},
+               opts
+             ) do
+          # Issue mirror converged (PATCH + stamp). NOW run the failure-isolated
+          # Projects + relations projections — pass the ORIGINAL link so Projects
+          # can diff its stored `projects_fingerprint` (D10 zero-write-when-unchanged).
+          :ok -> sync_projections(doc_id, dataset, repo, num, task_doc, link, opts)
+          err -> err
+        end
 
       {:error, err} ->
         classify(err, :update, repo, num, doc_id, dataset, opts)
@@ -543,6 +575,8 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
     []
     |> put_scope(:workspace_id, Map.get(args, "workspace_id"))
     |> put_scope(:project_id, Map.get(args, "project_id"))
+    |> put_scope(:relink, Map.get(args, "relink"))
+    |> put_scope(:relink_attempt, Map.get(args, "relink_attempt"))
   end
 
   defp put_scope(opts, _key, nil), do: opts
@@ -552,6 +586,290 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # slice 2's `Github.Settings.repo/0` will centralise the env→DB resolution.
   # Reading the same config key here keeps this slice parallel-safe with slice 2.
   defp repo do
-    Application.get_env(:barkpark, @config_key, [])[:repo]
+    cfg()[:repo]
   end
+
+  # ---------------------------------------------------------------------------
+  # Projections (Projects v2 + relations) — the Wave-5 wiring keystone.
+  #
+  # Run ONLY after the issue exists and its mirror converged (create/PATCH + the
+  # `Link.put` stamp returned :ok). Each sub-step is FAILURE-ISOLATED: the issue
+  # is the source of truth, so a Projects GraphQL error or a relations hiccup is
+  # LOGGED and swallowed — the reconcile still returns the issue-mirror's :ok
+  # (D10/D11). NEVER dead-letter the issue mirror on a projection failure.
+  #
+  # The ONE exception is a rate-limit (`%RateLimitError{}`), which MAY snooze the
+  # WHOLE reconcile (D9): the level-triggered re-run re-reads current state and
+  # re-PATCHes the issue idempotently, so no intent is lost.
+  #
+  # Projects/Relations are resolved through an injected seam (opts → plugin config
+  # → the real module). When the target module is not loaded (slices 2/3 not yet
+  # integrated), the step is a clean no-op — which is exactly the isolation
+  # invariant: no projection module ⇒ the proven Issues loop is 100% unaffected.
+  # ---------------------------------------------------------------------------
+  defp sync_projections(doc_id, dataset, repo, num, task_doc, link, opts) do
+    with :ok <- sync_projects(doc_id, dataset, repo, num, task_doc, link, opts) do
+      sync_relations(doc_id, dataset, repo, num, task_doc, link, opts)
+    end
+  end
+
+  # D10: one-directional Projects v2. On a changed fingerprint `Projects.sync`
+  # returns `{:ok, %{fingerprint, item_id}}` and we stamp it (source:"github",
+  # outbox-excluded) so the NEXT sync diffs against it and writes ZERO GraphQL
+  # when unchanged; `:noop` → nothing; `{:error, _}` → snooze on rate-limit,
+  # else log + continue.
+  defp sync_projects(doc_id, dataset, repo, num, task_doc, link, opts) do
+    mod = projects_mod(opts)
+
+    isolate(:projects, doc_id, fn ->
+      if available?(mod, :sync, 5) do
+        case mod.sync(task_doc, repo, num, link, opts) do
+          {:ok, %{fingerprint: fp, item_id: item_id}} ->
+            _ =
+              stamp(
+                doc_id,
+                dataset,
+                %{projects_fingerprint: fp, projects_item_id: item_id},
+                opts
+              )
+
+            :ok
+
+          :noop ->
+            :ok
+
+          {:error, reason} ->
+            projection_error(:projects, doc_id, reason)
+        end
+      else
+        :ok
+      end
+    end)
+  end
+
+  # D11: native `parent_id` → sub-issue linking. `:ok`/`:noop` → continue;
+  # `{:flatten, parent_id}` → stamp a `parent_marker` link key + re-enqueue once
+  # so the body marker lands (cap-flatten fallback); `{:defer, :parent_unmirrored}`
+  # → enqueue the parent's mirror + re-enqueue THIS child (relink, bounded);
+  # `{:error, _}` → snooze on rate-limit, else log + continue.
+  defp sync_relations(doc_id, dataset, repo, num, task_doc, link, opts) do
+    mod = relations_mod(opts)
+
+    isolate(:relations, doc_id, fn ->
+      if available?(mod, :sync, 5) do
+        case mod.sync(task_doc, repo, num, dataset, opts) do
+          ok when ok in [:ok, :noop] ->
+            :ok
+
+          {:flatten, parent_id} ->
+            handle_flatten(doc_id, dataset, link, parent_id, opts)
+
+          {:defer, :parent_unmirrored} ->
+            handle_defer(doc_id, dataset, task_doc, opts)
+
+          {:error, reason} ->
+            projection_error(:relations, doc_id, reason)
+        end
+      else
+        :ok
+      end
+    end)
+  end
+
+  # A projection error is SWALLOWED (log + return the issue-mirror's :ok) UNLESS
+  # it is a rate-limit, which may snooze the whole reconcile (D9 — safe because
+  # the issue PATCH re-runs idempotently on the level-triggered retry).
+  defp projection_error(_which, _doc_id, %RateLimitError{retry_after: s}) do
+    {:snooze, max(s || 0, 1)}
+  end
+
+  defp projection_error(which, doc_id, reason) do
+    Logger.warning("github #{which} sync failed for #{doc_id}: #{inspect(reason)}")
+    :ok
+  end
+
+  # Failure isolation: a projection sub-step must NEVER crash the reconcile (the
+  # issue is already mirrored). Any raise/throw is logged and downgraded to :ok.
+  defp isolate(which, doc_id, fun) do
+    fun.()
+  rescue
+    e ->
+      Logger.warning("github #{which} sync crashed for #{doc_id}: #{Exception.message(e)}")
+      :ok
+  catch
+    kind, reason ->
+      Logger.warning("github #{which} sync threw for #{doc_id}: #{inspect({kind, reason})}")
+      :ok
+  end
+
+  defp available?(mod, fun, arity) do
+    Code.ensure_loaded?(mod) and function_exported?(mod, fun, arity)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Relations retry / cap-flatten (D11-retry) — all bounded, loop-proof
+  # ---------------------------------------------------------------------------
+
+  # Parent not mirrored yet: enqueue the PARENT's MirrorJob now (so it gets an
+  # issue) and re-enqueue THIS child as a bounded `relink` job. Past the cap,
+  # give up on the native sub-issue and fall back to the body `parent` marker.
+  defp handle_defer(doc_id, dataset, task_doc, opts) do
+    attempt = relink_attempt(opts)
+    parent_id = parent_id_of(task_doc)
+
+    if attempt >= @relink_cap do
+      handle_flatten(doc_id, dataset, Link.get(task_doc), parent_id, opts)
+    else
+      if is_binary(parent_id) and parent_id != "" do
+        _ =
+          reenqueue(
+            carry_scope(%{doc_id: parent_id, dataset: dataset}, opts),
+            @debounce_seconds,
+            opts
+          )
+      end
+
+      _ =
+        reenqueue(
+          carry_scope(
+            %{doc_id: doc_id, dataset: dataset, relink: true, relink_attempt: attempt + 1},
+            opts
+          ),
+          @relink_delay_seconds,
+          opts
+        )
+
+      :ok
+    end
+  end
+
+  # Cap-flatten (D11): skip the native sub-issue, record a `parent_marker` link
+  # key (source:"github", outbox-excluded) and re-enqueue ONCE as a relink so the
+  # next converge hydrates + PATCHes the body marker. Idempotent + loop-proof: a
+  # marker already equal to this parent short-circuits (no re-stamp, no re-enqueue),
+  # and the re-enqueued job carries `relink_attempt: @relink_cap` so any further
+  # defer immediately re-flattens into this same no-op.
+  defp handle_flatten(doc_id, dataset, link, parent_id, opts) do
+    already? = is_map(link) and Map.get(link, "parent_marker") == parent_id
+
+    if is_binary(parent_id) and parent_id != "" and not already? do
+      _ = stamp(doc_id, dataset, %{parent_marker: parent_id}, opts)
+
+      _ =
+        reenqueue(
+          carry_scope(
+            %{doc_id: doc_id, dataset: dataset, relink: true, relink_attempt: @relink_cap},
+            opts
+          ),
+          @relink_delay_seconds,
+          opts
+        )
+    end
+
+    :ok
+  end
+
+  # Insert a follow-up MirrorJob. Injectable seam (`:enqueue_fun` in opts or plugin
+  # config) so tests count enqueues without touching Oban; default inserts a real
+  # debounced job. The seam receives `%{fields, schedule_in}`.
+  defp reenqueue(fields, schedule_in, opts) do
+    case opts[:enqueue_fun] || cfg()[:enqueue_fun] do
+      fun when is_function(fun, 1) ->
+        fun.(%{fields: fields, schedule_in: schedule_in})
+
+      _ ->
+        fields |> build_args() |> new(schedule_in: schedule_in) |> Oban.insert()
+    end
+  end
+
+  # Carry TENANT SCOPE onto a re-enqueued job's fields so a non-default-workspace
+  # child/parent stays in its own scope across the retry.
+  defp carry_scope(fields, opts) do
+    fields
+    |> maybe_put(:workspace_id, opts[:workspace_id])
+    |> maybe_put(:project_id, opts[:project_id])
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # ---------------------------------------------------------------------------
+  # Relations hydration (D11) — decorate the in-memory doc the projection reads
+  # ---------------------------------------------------------------------------
+
+  # Merge `blocker_issue_refs` (via the relations seam) and a `parent_marker`
+  # (from a prior cap-flatten stamp) onto the in-memory task doc BEFORE the
+  # projection renders the body. Pure decoration — never persisted, never a
+  # GitHub call. When the relations module is absent the doc is returned as-is.
+  defp hydrate(task_doc, dataset, link, opts) do
+    task_doc
+    |> hydrate_blocker_refs(dataset, opts)
+    |> hydrate_parent_marker(link)
+  end
+
+  defp hydrate_blocker_refs(task_doc, dataset, opts) do
+    mod = relations_mod(opts)
+
+    if available?(mod, :hydrate_blocker_refs, 3) do
+      try do
+        mod.hydrate_blocker_refs(task_doc, dataset, opts)
+      rescue
+        _ -> task_doc
+      catch
+        _, _ -> task_doc
+      end
+    else
+      task_doc
+    end
+  end
+
+  defp hydrate_parent_marker(task_doc, link) do
+    case parent_marker(link) do
+      m when is_binary(m) and m != "" -> Map.put(task_doc, "parent_marker", m)
+      _ -> task_doc
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Seams + small relations helpers
+  # ---------------------------------------------------------------------------
+
+  # Resolve the Projects/Relations modules through an injected seam so slice 4
+  # compiles + tests WITHOUT slices 2/3 in the tree (tests stub them; runtime
+  # resolves to the real modules once integrated). The default is a literal atom
+  # (never a remote call), so referencing a not-yet-existing module is warning-free.
+  defp projects_mod(opts),
+    do: opts[:projects_mod] || cfg()[:projects_mod] || Barkpark.Plugins.Github.Projects
+
+  defp relations_mod(opts),
+    do: opts[:relations_mod] || cfg()[:relations_mod] || Barkpark.Plugins.Github.Relations
+
+  defp cfg, do: Application.get_env(:barkpark, @config_key, [])
+
+  defp relink?(opts), do: opts[:relink] == true
+
+  defp relink_attempt(opts) do
+    case opts[:relink_attempt] do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp parent_id_of(task_doc) do
+    case content_of(task_doc) do
+      content when is_map(content) ->
+        Map.get(content, "parent_id") || Map.get(content, :parent_id)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp content_of(%Document{content: c}) when is_map(c), do: c
+  defp content_of(%{content: c}) when is_map(c), do: c
+  defp content_of(%{"content" => c}) when is_map(c), do: c
+  defp content_of(_), do: %{}
+
+  defp parent_marker(link) when is_map(link), do: Map.get(link, "parent_marker")
+  defp parent_marker(_), do: nil
 end

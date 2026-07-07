@@ -1,3 +1,40 @@
+# ---------------------------------------------------------------------------
+# Injected Projects/Relations seams (Wave-5 slices 2/3 are not in THIS worktree;
+# slice 4 resolves them through a seam so it compiles + tests standalone). Each
+# stub runs SYNCHRONOUSLY in the test process — `send(self(), …)` lands in the
+# test mailbox — and delegates to an optional impl fun threaded through `opts`.
+# ---------------------------------------------------------------------------
+defmodule Barkpark.Plugins.Github.MirrorJobTest.ProjectsStub do
+  @moduledoc false
+  def sync(task, repo, num, link, opts) do
+    send(self(), {:projects_called, num})
+
+    case opts[:projects_impl] do
+      fun when is_function(fun, 4) -> fun.(task, repo, num, link)
+      _ -> :noop
+    end
+  end
+end
+
+defmodule Barkpark.Plugins.Github.MirrorJobTest.RelationsStub do
+  @moduledoc false
+  def hydrate_blocker_refs(task, dataset, opts) do
+    case opts[:hydrate_impl] do
+      fun when is_function(fun, 2) -> fun.(task, dataset)
+      _ -> task
+    end
+  end
+
+  def sync(task, repo, num, dataset, opts) do
+    send(self(), {:relations_called, num})
+
+    case opts[:relations_impl] do
+      fun when is_function(fun, 4) -> fun.(task, repo, num, dataset)
+      _ -> :noop
+    end
+  end
+end
+
 defmodule Barkpark.Plugins.Github.MirrorJobTest do
   @moduledoc """
   Wave-2 slice-1: the outbound `MirrorJob.reconcile/2` heart (epic D2/D3/D7/D9).
@@ -17,6 +54,7 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Plugins.Github.{Auth, Conflicts, Link, MirrorJob}
+  alias Barkpark.Plugins.Github.MirrorJobTest.{ProjectsStub, RelationsStub}
 
   @dataset "production"
   @app_id "123456"
@@ -125,6 +163,11 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
   # Fast client opts so the 5xx-retry path doesn't sleep the whole suite.
   defp fast, do: [max_retries: 1, retry_delay_ms: 5]
+
+  # Wire the injected Projects/Relations seams (+ any per-test impl/enqueue funs).
+  defp seams(extra \\ []) do
+    fast() ++ [projects_mod: ProjectsStub, relations_mod: RelationsStub] ++ extra
+  end
 
   defp reload(doc_id, scope) do
     {:ok, doc} = Content.get_document(Content.draft_id(doc_id), "task", @dataset, scope)
@@ -705,6 +748,338 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
                perform_job(MirrorJob, %{"doc_id" => id, "dataset" => @dataset})
 
       assert Link.get(reload(id, scope))["issue"] == 77
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Projections + relations wiring (Wave 5 slice 4) — Projects v2 + sub-issues,
+  # each FAILURE-ISOLATED behind the issue mirror (D10/D11/D9).
+  # ---------------------------------------------------------------------------
+
+  describe "reconcile/3 — projections wiring (slice 4)" do
+    test "(a) a normal create still mirrors the issue + stamps synced_rev while Projects :noop",
+         %{
+           bypass: bypass,
+           scope: scope
+         } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Isolated"}, scope)
+
+      Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 42, "state" => "open"}))
+      end)
+
+      # No projects_impl → the stub returns :noop (the blank-project_id posture):
+      # the issue loop is 100% unaffected and NOTHING is stamped for projects.
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams())
+
+      gh = Link.get(reload(id, scope))
+      assert gh["issue"] == 42
+      assert is_binary(gh["synced_rev"])
+      refute gh["projects_fingerprint"]
+
+      # Both projections ran AFTER the issue existed (they carry the issue number).
+      assert_received {:projects_called, 42}
+      assert_received {:relations_called, 42}
+    end
+
+    test "(b) a Projects error is SWALLOWED — the issue is still PATCHed + synced_rev stamped", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Flagship isolation"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 50, state: "synced"}, scope)
+
+      stub_get(bypass, 50)
+
+      {:ok, patched?} = Agent.start_link(fn -> false end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/50", fn conn ->
+        Agent.update(patched?, fn _ -> true end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 50, "state" => "open"}))
+      end)
+
+      # Projects blows up (simulating a GraphQL 500) — the reconcile MUST still
+      # return :ok and the issue must still be mirrored (the flagship safety prop).
+      boom = fn _task, _repo, _num, _link -> {:error, :graphql_boom} end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: boom))
+
+      assert Agent.get(patched?, & &1) == true
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+      assert is_integer(gh["synced_fingerprint"])
+      refute gh["projects_fingerprint"]
+    end
+
+    test "(b'') a Projects RAISE is caught by isolate/3 — the issue is still mirrored", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Crash isolation"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 52, state: "synced"}, scope)
+
+      stub_get(bypass, 52)
+
+      {:ok, patched?} = Agent.start_link(fn -> false end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/52", fn conn ->
+        Agent.update(patched?, fn _ -> true end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 52, "state" => "open"}))
+      end)
+
+      # Projects RAISES (a bug in the eventual Projects module, an exhausted GraphQL
+      # decode, etc.) rather than returning {:error, _}. `isolate/3` MUST rescue it,
+      # log, and downgrade to :ok — the proven Issues loop is 100% unaffected. This
+      # is the flagship failure-isolation invariant via the rescue path (test (b)
+      # only exercises the returned-{:error} swallow path).
+      crash = fn _task, _repo, _num, _link -> raise "projects module exploded" end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: crash))
+
+      # Issue still PATCHed + stamped despite the projection crash.
+      assert Agent.get(patched?, & &1) == true
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+      assert is_integer(gh["synced_fingerprint"])
+      refute gh["projects_fingerprint"]
+
+      # Relations STILL ran after the isolated Projects crash (the crash is
+      # confined to the Projects sub-step, not the whole projections pass).
+      assert_received {:relations_called, 52}
+    end
+
+    test "(b') a Projects rate-limit MAY snooze the whole reconcile (D9)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Snooze me"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 51, state: "synced"}, scope)
+
+      stub_get(bypass, 51)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/51", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 51, "state" => "open"}))
+      end)
+
+      rate = fn _task, _repo, _num, _link ->
+        {:error, %Barkpark.Plugins.Github.Errors.RateLimitError{retry_after: 17}}
+      end
+
+      # The issue PATCH already ran (idempotent); the snooze re-runs it later.
+      assert {:snooze, 17} = MirrorJob.reconcile(id, @dataset, seams(projects_impl: rate))
+    end
+
+    test "(c) relations sync runs AFTER the issue exists (mirrored parent → sub-issue link)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Child", "parent_id" => "gh-parent"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 60, state: "synced"}, scope)
+
+      stub_get(bypass, 60)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/60", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 60, "state" => "open"}))
+      end)
+
+      # Simulate Relations linking the child under its mirrored parent — the
+      # issue number is only knowable because the issue already exists.
+      link_it = fn _task, _repo, num, _dataset ->
+        send(self(), {:sub_issue_linked, num})
+        :ok
+      end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(relations_impl: link_it))
+      assert_received {:sub_issue_linked, 60}
+    end
+
+    test "(d) an UNMIRRORED parent defers: enqueues the parent + a bounded relink child", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Orphan child", "parent_id" => "gh-parent"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 70, state: "synced"}, scope)
+
+      stub_get(bypass, 70)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/70", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 70, "state" => "open"}))
+      end)
+
+      defer = fn _task, _repo, _num, _dataset -> {:defer, :parent_unmirrored} end
+      enq = fn payload -> send(self(), {:enqueued, payload}) end
+
+      assert :ok =
+               MirrorJob.reconcile(id, @dataset, seams(relations_impl: defer, enqueue_fun: enq))
+
+      # The PARENT's mirror is enqueued NOW (default 30s debounce, no relink)…
+      assert_received {:enqueued, %{fields: %{doc_id: "gh-parent"}, schedule_in: 30}}
+      # …and THIS child re-enqueues as a bounded relink job (attempt 1, 60s out).
+      assert_received {:enqueued,
+                       %{
+                         fields: %{doc_id: ^id, relink: true, relink_attempt: 1},
+                         schedule_in: 60
+                       }}
+    end
+
+    test "(d') at the relink cap the defer cap-flattens to a parent_marker (no relink loop)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Deep child", "parent_id" => "gh-parent"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 71, state: "synced"}, scope)
+
+      stub_get(bypass, 71)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/71", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 71, "state" => "open"}))
+      end)
+
+      defer = fn _task, _repo, _num, _dataset -> {:defer, :parent_unmirrored} end
+      enq = fn payload -> send(self(), {:enqueued, payload}) end
+
+      # relink_attempt already at the cap → the deferred child cap-flattens: it
+      # stamps a parent_marker link key (never a native sub-issue) and re-enqueues
+      # ONCE more (attempt pinned at the cap, so it can never loop).
+      assert :ok =
+               MirrorJob.reconcile(
+                 id,
+                 @dataset,
+                 seams(relations_impl: defer, enqueue_fun: enq, relink: true, relink_attempt: 3)
+               )
+
+      assert Link.get(reload(id, scope))["parent_marker"] == "gh-parent"
+      assert_received {:enqueued, %{fields: %{relink: true, relink_attempt: 3}, schedule_in: 60}}
+      # NOT a fresh attempt-0 cycle and NOT a parent enqueue at the cap.
+      refute_received {:enqueued, %{fields: %{doc_id: "gh-parent"}}}
+    end
+
+    test "(e) hydrated blocker_issue_refs land in the PATCH body as a blocks marker", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Blocked task", "description" => "human brief"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 80, state: "synced"}, scope)
+
+      stub_get(bypass, 80)
+
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/80", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 80, "state" => "open"}))
+      end)
+
+      hyd = fn task, _dataset -> Map.put(task, "blocker_issue_refs", [99]) end
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(hydrate_impl: hyd))
+
+      body = Agent.get(body_ref, & &1)
+      assert body["body"] =~ "<!-- barkpark:blocks:start -->"
+      assert body["body"] =~ "Blocked by: #99"
+    end
+
+    test "(f) an UNCHANGED task on a second reconcile writes ZERO GraphQL (fingerprint :noop)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Steady projection"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 90, state: "synced"}, scope)
+
+      # Two reconciles fire GET + PATCH twice, so use stubs (not expect_once).
+      Bypass.stub(bypass, "GET", "/repos/#{@repo}/issues/90", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 90, "state" => "open"}))
+      end)
+
+      Bypass.stub(bypass, "PATCH", "/repos/#{@repo}/issues/90", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 90, "state" => "open"}))
+      end)
+
+      # Faithful Projects diff: fingerprint the task, compare to the stored
+      # projects_fingerprint off the link; equal → :noop (ZERO GraphQL), else emit
+      # one GraphQL "write" and return the fp to stamp. Proves the WIRING stamps
+      # projects_fingerprint so the next pass sees it and no-ops (D10).
+      diff = fn task, _repo, _num, link ->
+        fp = :erlang.phash2(Map.get(task.content, "title"))
+        stored = is_map(link) && Map.get(link, "projects_fingerprint")
+
+        if stored == fp do
+          :noop
+        else
+          send(self(), {:graphql_write, fp})
+          {:ok, %{fingerprint: fp, item_id: "PVTI_stub"}}
+        end
+      end
+
+      # First pass: no stored fingerprint → one GraphQL write, fingerprint stamped.
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: diff))
+      assert_received {:graphql_write, _fp}
+      assert is_integer(Link.get(reload(id, scope))["projects_fingerprint"])
+
+      # Second pass: the stored fingerprint now equals the desired one → :noop,
+      # ZERO GraphQL. The task never changed, so Projects writes nothing.
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams(projects_impl: diff))
+      refute_received {:graphql_write, _fp2}
+    end
+
+    test "(g) relink bypasses the synced short-circuit so a SYNCED child still re-links", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "Synced child", "parent_id" => "gh-parent"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 95, state: "synced"}, scope)
+
+      # Force synced_rev == current _rev so the ordinary reconcile would short out.
+      current = reload(id, scope)
+      github = Link.get(current) |> Map.put("synced_rev", current.rev)
+      content = Map.put(current.content, "github", github)
+      {:ok, _} = current |> Ecto.Changeset.change(content: content) |> Repo.update()
+
+      # Without relink this is a pure no-op (any HTTP would fail the test).
+      assert :ok = MirrorJob.reconcile(id, @dataset, seams())
+      refute_received {:relations_called, _}
+
+      # WITH relink the reconcile runs, re-PATCHes idempotently, and relations fire.
+      stub_get(bypass, 95)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/95", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 95, "state" => "open"}))
+      end)
+
+      link_it = fn _task, _repo, num, _dataset ->
+        send(self(), {:relinked, num})
+        :ok
+      end
+
+      assert :ok =
+               MirrorJob.reconcile(
+                 id,
+                 @dataset,
+                 seams(relations_impl: link_it, relink: true, relink_attempt: 1)
+               )
+
+      assert_received {:relinked, 95}
     end
   end
 end

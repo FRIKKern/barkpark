@@ -21,6 +21,11 @@ defmodule Barkpark.Plugins.Github.Client do
     * `close_issue/3`   — `PATCH` `state: "closed"` + `state_reason`
     * `add_labels/3`    — `POST   /repos/:repo/issues/:n/labels`
     * `create_comment/3`— `POST   /repos/:repo/issues/:n/comments`
+    * `add_sub_issue/4` — `POST   /repos/:repo/issues/:n/sub_issues` (native
+      sub-issue link, keyed on the child's DATABASE id; charter D11)
+    * `graphql/3`       — `POST   /graphql` (Projects v2; charter D10). A
+      GraphQL `200 OK` carrying a top-level `"errors"` array surfaces as
+      `%NetworkError{reason: {:graphql, errors}}`.
 
   `:repo` is `"owner/name"`. Each returns `{:ok, decoded_body}` on 2xx or
   an `{:error, struct}` from `Errors`.
@@ -123,6 +128,70 @@ defmodule Barkpark.Plugins.Github.Client do
   def create_comment(repo, number, body, opts \\ [])
       when is_binary(repo) and is_binary(body) do
     request(:post, "/repos/#{repo}/issues/#{number}/comments", %{"body" => body}, opts)
+  end
+
+  @doc """
+  Execute a GraphQL query/mutation against `<base>/graphql`.
+
+  POSTs `%{"query" => query, "variables" => variables}` through the SAME auth,
+  base resolution, timeout and error classification as the REST verbs — the
+  Projects v2 dashboard (charter D10) speaks GraphQL, not `/repos/...`.
+
+  One GraphQL-specific wrinkle: a GraphQL response is `200 OK` even when it
+  carries a top-level `"errors"` array. So AFTER the normal 2xx decode, a
+  non-empty `"errors"` list surfaces as
+  `%NetworkError{reason: {:graphql, errors}}` (reusing the existing
+  `NetworkError` — D8's 4-type error set is fixed, GraphQL errors ride it).
+  A clean 2xx returns `{:ok, data}` (the `"data"` value), falling back to the
+  whole decoded body when a response carries no `"data"` key.
+
+  Transport failures, `401`, `403`/`429` rate limits and `5xx` classify
+  EXACTLY as the REST verbs do (charter D9) — only the 2xx path differs.
+  """
+  @spec graphql(String.t(), map(), keyword()) :: {:ok, map()} | {:error, struct()}
+  def graphql(query, variables \\ %{}, opts \\ [])
+      when is_binary(query) and is_map(variables) do
+    body = %{"query" => query, "variables" => variables}
+
+    case request(:post, "/graphql", body, opts) do
+      {:ok, %{"errors" => [_ | _] = errors}} ->
+        {:error,
+         %NetworkError{reason: {:graphql, errors}, endpoint: base_url(opts) <> "/graphql"}}
+
+      {:ok, %{"data" => data}} ->
+        {:ok, data}
+
+      {:ok, other} ->
+        {:ok, other}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  @doc """
+  Link an existing issue as a NATIVE sub-issue of `parent_number`.
+
+  `POST /repos/:repo/issues/:parent_number/sub_issues` with
+  `%{"sub_issue_id" => child_issue_id}`. GitHub's sub-issues API keys on the
+  child's DATABASE id (the `"id"` field from `get_issue/3`), NOT its number —
+  the caller resolves it. A thin sibling of `add_labels/3`: same auth, base
+  resolution and error classification.
+
+  A `422` ("already a sub-issue") surfaces as `%NetworkError{reason: {:http,
+  422}}` like any other 4xx — it is NOT special-cased here; the Relations
+  caller maps `422 → :ok`.
+  """
+  @spec add_sub_issue(String.t(), integer() | String.t(), integer() | String.t(), keyword()) ::
+          {:ok, map()} | {:error, struct()}
+  def add_sub_issue(repo, parent_number, child_issue_id, opts \\ [])
+      when is_binary(repo) do
+    request(
+      :post,
+      "/repos/#{repo}/issues/#{parent_number}/sub_issues",
+      %{"sub_issue_id" => child_issue_id},
+      opts
+    )
   end
 
   defp state_reason(:completed), do: "completed"
