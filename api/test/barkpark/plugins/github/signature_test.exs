@@ -70,6 +70,26 @@ defmodule Barkpark.Plugins.Github.SignatureTest do
       assert Signature.verify(@body, forged, nil) == {:error, :bad_signature}
     end
 
+    test "a whitespace-only secret fails closed (blank after trim)" do
+      # Matches Dispatcher.blank_secret?/1: a whitespace-only secret is a
+      # misconfiguration, not a key — even its own self-signed header is rejected.
+      ws = "   "
+      forged = Signature.sign(@body, ws)
+      assert Signature.verify(@body, forged, ws) == {:error, :bad_signature}
+      assert Signature.verify(@body, forged, "\t\n") == {:error, :bad_signature}
+    end
+
+    test "a non-blank secret with surrounding whitespace HMACs exact bytes" do
+      # The trim gates the blank DECISION only; a real (non-blank) secret that
+      # happens to carry whitespace is signed/verified with its exact bytes so it
+      # still matches whatever GitHub signed with.
+      padded = " s3cr3t "
+      header = Signature.sign(@body, padded)
+      assert Signature.verify(@body, header, padded) == :ok
+      # Trimming the secret would change the key → must NOT verify.
+      assert Signature.verify(@body, header, "s3cr3t") == {:error, :bad_signature}
+    end
+
     test "a non-binary body fails closed" do
       header = Signature.sign(@body, @secret)
       assert Signature.verify(nil, header, @secret) == {:error, :bad_signature}

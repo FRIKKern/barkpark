@@ -25,7 +25,12 @@ defmodule Barkpark.Plugins.Github.Signature do
   A `nil`/blank secret, a malformed header, or a non-binary body returns
   `{:error, :bad_signature}` — never a raise, never an accept. An empty-key HMAC
   is deterministic and forgeable by anyone, so a blank secret is treated as
-  "cannot verify" rather than a match.
+  "cannot verify" rather than a match. "Blank" means blank AFTER trimming
+  (matching `Barkpark.Webhooks.Dispatcher.blank_secret?/1`): a whitespace-only
+  secret is a misconfiguration, not a usable key, so it also fails closed. The
+  trim gates the blank DECISION only — a non-blank secret is HMAC'd with its
+  exact bytes (leading/trailing whitespace included) so it matches whatever
+  GitHub signed with.
   """
 
   @prefix "sha256="
@@ -47,17 +52,24 @@ defmodule Barkpark.Plugins.Github.Signature do
 
   Returns `:ok` on an exact, constant-time match, else `{:error, :bad_signature}`.
   A tampered body, a wrong secret, a whitespace-different body, a malformed
-  header, or a nil/blank secret all fail closed.
+  header, or a nil/blank/whitespace-only secret all fail closed.
   """
   @spec verify(binary(), String.t(), binary()) :: :ok | {:error, :bad_signature}
   def verify(raw_body, header, secret)
-      when is_binary(raw_body) and is_binary(header) and is_binary(secret) and secret != "" do
-    expected = sign(raw_body, secret)
+      when is_binary(raw_body) and is_binary(header) and is_binary(secret) do
+    cond do
+      # Blank AFTER trimming — a whitespace-only secret is a misconfiguration,
+      # not a key. Gate the blank DECISION here, but HMAC below with the exact
+      # (untrimmed) secret so a legitimately whitespace-bearing key still matches
+      # GitHub's own signing bytes.
+      String.trim(secret) == "" ->
+        {:error, :bad_signature}
 
-    if Plug.Crypto.secure_compare(expected, header) do
-      :ok
-    else
-      {:error, :bad_signature}
+      Plug.Crypto.secure_compare(sign(raw_body, secret), header) ->
+        :ok
+
+      true ->
+        {:error, :bad_signature}
     end
   end
 
