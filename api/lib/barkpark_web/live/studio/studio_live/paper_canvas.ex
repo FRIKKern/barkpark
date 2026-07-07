@@ -160,17 +160,30 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # KEEP LOCKSTEP with run-convert.js CANVAS_ROLE_TYPES and role-nodes.js.
   @canvas_role_types ~w(eyebrow byline ingress pullquote)
 
+  # editable-table: the `table` block the canvas handles as FOUR hand-rolled NESTED
+  # ProseMirror nodes (bpTable > bpTableRow > bpTableHeaderCell|bpTableCell;
+  # run-convert.js CANVAS_TABLE_TYPES → the bpTable node tree; table-node.js). UNLIKE
+  # the callout content node (ONE inline body) or the fleet atoms (whole block verbatim),
+  # a table is a CONTAINER of PM structure — each cell body is an inline* hole reusing
+  # the shared inline serializer, so bold/italic/links round-trip. It CAN emit a
+  # patch-block on a cell/grid edit (a COARSE whole-table rows+head patch) and no longer
+  # SPLITS a run.
+  #
+  # KEEP LOCKSTEP with run-convert.js CANVAS_TABLE_TYPES and table-node.js.
+  @canvas_table_types ~w(table)
+
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
   # PICKER field control-atoms ∪ canvas read-only atoms ∪ canvas FLEET server-paint
-  # atoms (t12a). A run is a maximal contiguous stretch of these; any other kind is a
+  # atoms (t12a) ∪ canvas article-chrome ROLE prose ∪ the canvas TABLE node tree
+  # (editable-table). A run is a maximal contiguous stretch of these; any other kind is a
   # run boundary. Keep this aligned with run-convert.js (PROSE_TYPES ∪ CANVAS_ATOM_TYPES
   # ∪ CANVAS_ATTR_ATOM_TYPES ∪ CANVAS_CONTENT_TYPES ∪ CANVAS_FIELD_TYPES[native ∪
-  # picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪ CANVAS_FLEET_TYPES) so the Elixir partition
-  # and the JS projection agree on what a run may contain. With the fleet folded in, the
-  # ONLY remaining run boundaries are the nested-structure fields (section / composite /
-  # object / arrayOf / codelist / localizedText) — a typical paper's run now spans the
-  # WHOLE doc.
+  # picker] ∪ CANVAS_READONLY_ATOM_TYPES ∪ CANVAS_FLEET_TYPES ∪ CANVAS_ROLE_TYPES ∪
+  # CANVAS_TABLE_TYPES) so the Elixir partition and the JS projection agree on what a run
+  # may contain. With the fleet AND the table folded in, the ONLY remaining run
+  # boundaries are the nested-structure fields (section / composite / object / arrayOf /
+  # codelist / localizedText) — a typical paper's run now spans the WHOLE doc.
   @canvas_types @prose_types ++
                   @canvas_atom_types ++
                   @canvas_attr_atom_types ++
@@ -178,7 +191,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
                   @canvas_field_types ++
                   @canvas_picker_field_types ++
                   @canvas_readonly_atom_types ++
-                  @canvas_fleet_types ++ @canvas_role_types
+                  @canvas_fleet_types ++
+                  @canvas_role_types ++ @canvas_table_types
 
   @doc """
   The `BARKPARK_PAPER_CANVAS` feature flag. **Default TRUE (the D7/D9 cutover).**
@@ -261,7 +275,9 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   atom (the 12 `tasks`/`task-board`/`cards`/`form`/… kinds as of t12a, whole block
   verbatim on `bpFleet`, painted with the reader's own HTML) OR an article-chrome
   ROLE prose node (`eyebrow` / `byline` / `ingress` / `pullquote`, chrome-free styled
-  prose matching the reader). Canvas-eligible blocks
+  prose matching the reader) OR the canvas TABLE node tree (`table` as of
+  editable-table — a bpTable > bpTableRow > cell nested tree whose cell bodies are
+  editable inline runs). Canvas-eligible blocks
   make up a `{:run, …}` segment; anything else (the picker fields `field-image` /
   `field-reference` RIDE a run too — only the nested-structure fields composite /
   arrayOf / codelist / localizedText / section stay boundaries) is a `{:block, …}`
