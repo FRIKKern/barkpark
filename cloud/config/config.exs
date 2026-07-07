@@ -182,7 +182,12 @@ config :barkpark_cloud, Oban,
        # isu-6: the hourly self-update status sweep — mirrors each live
        # instance's OWN update verdict (GET /v1/admin/self-update) onto its
        # row. Offset to :17 so it never stampedes with the on-the-hour jobs.
-       {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker}
+       {"17 * * * *", BarkparkCloud.Workers.UpdateStatusWorker},
+       # isu-w4: the fleet autoupdate rollout — every 5 min, advance the
+       # opt-out auto-rollout by ONE health-gated instance (trigger a `behind`
+       # box, wait for it to settle `current`, then advance). Cheap per tick (≤1
+       # refresh or ≤1 trigger); rides the hourly :17 sweep's `behind` verdicts.
+       {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker}
      ]}
   ]
 

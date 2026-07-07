@@ -140,6 +140,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :update_latest_release, :string
     field :update_checked_at, :utc_datetime_usec
 
+    # isu-w4 fleet autoupdate policy — read by the AutoupdateRolloutWorker to
+    # decide whether a `behind` instance may be auto-updated. OPT-OUT:
+    # `autoupdate_enabled` defaults TRUE (ride new releases unless the team opts
+    # out). `autoupdate_paused` is the temporary escape hatch; `pinned_release`
+    # (any non-nil value) freezes the instance on its version. Policy fields are
+    # written ONLY through `autoupdate_changeset/2`; `autoupdate_triggered_at`
+    # (the in-flight marker the staged rollout health-gates on) ONLY through
+    # `autoupdate_trigger_changeset/2`.
+    field :autoupdate_enabled, :boolean, default: true
+    field :autoupdate_paused, :boolean, default: false
+    field :pinned_release, :string
+    field :autoupdate_triggered_at, :utc_datetime_usec
+
     # Zero-paste Vercel handoff (task-4e4a53b101a97051): the platform-deployed
     # project the user claims via vercel.com/claim-deployment. project id + url
     # are display state; the claim code is ENCRYPTED (it grants project
@@ -447,6 +460,33 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> validate_inclusion(:update_state, @update_states)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the isu-w4 autoupdate POLICY — only the three team-facing
+  policy fields are castable (never the in-flight marker), so setting a policy can
+  never rename a Barkpark, reassign its Team, or spoof an in-flight rollout. A
+  blank `pinned_release` is normalized to nil (unpinned) so "" and NULL can't
+  diverge. Written only by `Registry.set_autoupdate/2`.
+  """
+  def autoupdate_changeset(barkpark, attrs) do
+    barkpark
+    |> cast(attrs, [:autoupdate_enabled, :autoupdate_paused, :pinned_release])
+    |> update_change(:pinned_release, fn
+      v when is_binary(v) -> if String.trim(v) == "", do: nil, else: String.trim(v)
+      v -> v
+    end)
+    |> validate_length(:pinned_release, max: 255)
+  end
+
+  @doc """
+  Narrow changeset for the isu-w4 in-flight marker — ONLY `autoupdate_triggered_at`
+  is castable, so the rollout worker can stamp/clear "a self-update is in flight
+  for this instance" without touching policy or identity. Written only by
+  `Registry.mark_autoupdate_triggered/1` and `Registry.clear_autoupdate_triggered/1`.
+  """
+  def autoupdate_trigger_changeset(barkpark, attrs) do
+    cast(barkpark, attrs, [:autoupdate_triggered_at])
   end
 
   @doc """

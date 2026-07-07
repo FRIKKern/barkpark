@@ -2529,6 +2529,87 @@ defmodule BarkparkCloud.Registry do
 
   def trigger_self_update(_), do: {:error, :not_live}
 
+  ## Fleet autoupdate (isu-w4) — the control plane's OPT-OUT auto-rollout. The
+  ## isu-6 machinery above already (a) mirrors each instance's own `behind`
+  ## verdict onto its row and (b) relays a self-update trigger server-side. W4
+  ## adds the POLICY (who is eligible) and the CANDIDATE/IN-FLIGHT queries the
+  ## AutoupdateRolloutWorker uses to walk the fleet ONE health-gated instance at
+  ## a time: trigger a `behind` instance, wait until it settles `current` (or
+  ## times out → contain), then advance. Autonomous by design — no human step —
+  ## because a blessed release is what feeds it (release-curator, autonomous).
+
+  @doc """
+  Set an instance's autoupdate POLICY (team-facing): `autoupdate_enabled`
+  (opt-out master, default true), `autoupdate_paused` (temporary hold),
+  `pinned_release` (freeze on version). Narrow — can touch nothing else.
+  """
+  @spec set_autoupdate(Barkpark.t(), map()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def set_autoupdate(%Barkpark{} = bp, attrs) do
+    bp |> Barkpark.autoupdate_changeset(attrs) |> Repo.update()
+  end
+
+  @doc """
+  Contain an instance: pause its autoupdate (e.g. the rollout worker gave up on
+  a wave that never settled). Idempotent; never raises on a normal row.
+  """
+  @spec pause_autoupdate(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def pause_autoupdate(%Barkpark{} = bp), do: set_autoupdate(bp, %{autoupdate_paused: true})
+
+  @doc """
+  Instances with a self-update currently IN FLIGHT — the rollout worker stamped
+  `autoupdate_triggered_at` and is waiting for them to settle `current`. The
+  staged rollout refuses to start a new instance while this list is non-empty
+  (serial, health-gated). Oldest trigger first.
+  """
+  @spec autoupdate_in_flight() :: [Barkpark.t()]
+  def autoupdate_in_flight do
+    from(b in Barkpark,
+      where: not is_nil(b.autoupdate_triggered_at),
+      order_by: [asc: b.autoupdate_triggered_at]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
+  The NEXT instance eligible for an autoupdate, or nil. Eligible = live (`host`
+  set) · not billing-suspended · reporting `behind` · `autoupdate_enabled` · not
+  paused · not pinned · not already in flight. Oldest-behind first (a stable,
+  fair order), so the rollout drains the most-stale instances first.
+  """
+  @spec next_autoupdate_candidate() :: Barkpark.t() | nil
+  def next_autoupdate_candidate do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.update_state == "behind",
+      where: b.autoupdate_enabled == true,
+      where: b.autoupdate_paused == false,
+      where: is_nil(b.pinned_release),
+      where: is_nil(b.autoupdate_triggered_at),
+      order_by: [asc: b.update_checked_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  @doc "Stamp an instance as in-flight (a self-update was just triggered for it)."
+  @spec mark_autoupdate_triggered(Barkpark.t()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def mark_autoupdate_triggered(%Barkpark{} = bp) do
+    bp
+    |> Barkpark.autoupdate_trigger_changeset(%{autoupdate_triggered_at: DateTime.utc_now()})
+    |> Repo.update()
+  end
+
+  @doc "Clear the in-flight marker (the instance settled, or the wave was reaped)."
+  @spec clear_autoupdate_triggered(Barkpark.t()) ::
+          {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def clear_autoupdate_triggered(%Barkpark{} = bp) do
+    bp
+    |> Barkpark.autoupdate_trigger_changeset(%{autoupdate_triggered_at: nil})
+    |> Repo.update()
+  end
+
   ## Env vars — shared / per-instance secrets injected into a Team's instances.
   ##
   ## All reads/writes are Team-scoped: an env var belongs to a Team, and a write
