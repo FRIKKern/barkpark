@@ -118,6 +118,14 @@ import {
   BpTableCell,
   BpTableHeaderCell,
 } from "./table-node.js";
+// S10: the columns CONTAINER nodes — the FIRST canvas node whose interior is a
+// nested block tree. bpColumns (grid wrapper, content "bpColumn+") > bpColumn
+// (one column, content = prose+divider+bpColumnAtom, container-in-container
+// FORBIDDEN) > bpColumnAtom (verbatim read-only carrier for any non-first-class
+// child). bpColumns/bpColumn are DOM-free (renderHTML content holes); bpColumnAtom's
+// node-view references `document` lazily. run-convert.js maps the block ⇄ nodes and
+// diffs the whole `columns` array coarsely. See ./columns-node.js.
+import { Columns, Column, ColumnAtom } from "./columns-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
@@ -632,6 +640,18 @@ class BpPaperCanvas extends HTMLElement {
         BpTableRow,
         BpTableCell,
         BpTableHeaderCell,
+        // S10: the columns CONTAINER nodes (bpColumns > bpColumn+ > child). Registers
+        // the three node types so runToTiptap's { type:"bpColumns", content:[bpColumn…] }
+        // node mounts as an editable grid whose columns hold real editable prose/divider
+        // (any non-first-class child rides a read-only bpColumnAtom), and getJSON()
+        // round-trips the whole nested tree. bpColumns' `--bp-cols:N` + the reader's
+        // .bp-cols grid CSS (ancestor .bp-paper-surface cascade) paint the layout; NO
+        // StarterKit collision. Order after the role nodes; the doc's block+ accepts
+        // bpColumns (group:"block"), never a bare bpColumn/bpColumnAtom. See
+        // ./columns-node.js.
+        Columns,
+        Column,
+        ColumnAtom,
       ],
       content: runToTiptap(this._blocks),
       editorProps: {

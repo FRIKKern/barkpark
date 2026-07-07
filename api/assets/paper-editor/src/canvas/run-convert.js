@@ -40,6 +40,7 @@ import {
   buildPatchBlockOp,
   inlineArrayToTiptap,
   tiptapInlineToPd,
+  tiptapToBlock,
 } from "../convert.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
@@ -267,6 +268,28 @@ const CANVAS_FLEET_TYPES = new Set([
 ]);
 const CANVAS_FLEET_NODE_NAME = "bpFleet";
 
+// S10: the CONTAINER block kinds the canvas handles as RECURSIVE nested-block nodes —
+// the FIRST canvas node whose interior is a NESTED BLOCK TREE (child blocks with their
+// own type/content), not inline runs (callout) nor a verbatim opaque carry (sheet/
+// embed/fleet). `columns` is the first: a `columns` block ⇄ a `bpColumns` node
+// (content "bpColumn+") whose columns become real editable PM regions (prose + divider)
+// with any non-first-class child carried VERBATIM/read-only on a `bpColumnAtom`. V1:
+// FORBID container-in-container (a bpColumn's content allow-list omits bpColumns).
+// Keep aligned with columns-node.js and paper_canvas.ex @canvas_container_types.
+const CANVAS_CONTAINER_TYPES = new Set(["columns"]);
+
+// The TipTap NODE name for a container block differs from its bpType: for columns it
+// is `bpColumns`. runToTiptap maps a block.type → its node.type; runToOps maps it back
+// via bpType. Keep aligned with columns-node.js:BP_COLUMNS_NODE_NAME.
+const CANVAS_CONTAINER_NODE_NAMES = { columns: "bpColumns" };
+// Reverse: node.type "bpColumns" → bpType "columns". Used by classifyNode to resolve
+// the bpType off a getJSON node (the NODE name, not the bpType).
+const CANVAS_CONTAINER_BP_TYPE_BY_NODE = { bpColumns: "columns" };
+
+// The per-column node name + the verbatim child-carrier atom node name (columns-node.js).
+const BP_COLUMN_NODE_NAME = "bpColumn";
+const BP_COLUMN_ATOM_NODE_NAME = "bpColumnAtom";
+
 function isProseType(type) {
   return PROSE_TYPES.has(type);
 }
@@ -337,6 +360,29 @@ function isCanvasFleetType(type) {
 // (the same multiplexing bpField uses).
 function isCanvasFleetNode(nodeType) {
   return nodeType === CANVAS_FLEET_NODE_NAME;
+}
+
+// True when a portable-doc BLOCK type is a canvas container (S10: "columns"). These
+// ride INTO the canvas as recursive nested-block nodes (bpColumns > bpColumn+ > child
+// nodes); an interior change re-emits ONE coarse `columns` patch (V1 coarse round-trip).
+function isCanvasContainerType(type) {
+  return CANVAS_CONTAINER_TYPES.has(type);
+}
+
+// True when a TipTap NODE type is a canvas container (e.g. "bpColumns"). runToOps reads
+// node.type off a getJSON node (the NODE name, not the bpType).
+function isCanvasContainerNode(nodeType) {
+  return Object.prototype.hasOwnProperty.call(
+    CANVAS_CONTAINER_BP_TYPE_BY_NODE,
+    nodeType,
+  );
+}
+
+// True when a TipTap NODE type is the per-column verbatim child-carrier atom
+// ("bpColumnAtom"). Never a TOP-LEVEL node — always nested inside a bpColumn — so the
+// top-level classify/diff never sees it; used only by the column-child reconstruction.
+function isCanvasColumnAtomNode(nodeType) {
+  return nodeType === BP_COLUMN_ATOM_NODE_NAME;
 }
 
 // Structural deep clone, DOM-free and Node-API-free. structuredClone is a
@@ -470,6 +516,16 @@ export function runToTiptap(blocks) {
       // HTML (bp:block-html) rather than a client-computed chip. NOTE the node.type
       // is the NODE name (bpFleet), not the bpType.
       return fleetBlockToNode(block, bpId, bpType);
+    }
+
+    if (isCanvasContainerType(bpType)) {
+      // A canvas CONTAINER node (S10: columns): a recursive nested-block node whose
+      // interior is a NESTED BLOCK TREE. Its column child-block trees become real
+      // editable PM regions (prose + divider) with any non-first-class child carried
+      // VERBATIM/read-only on a bpColumnAtom. columns-node.js declares the bpColumns >
+      // bpColumn > child schema. NOTE the node.type is the NODE name (bpColumns), not
+      // the bpType (columns).
+      return columnsBlockToNode(block, bpId, bpType);
     }
 
     if (isCanvasRoleType(bpType)) {
@@ -1232,6 +1288,159 @@ function fleetNodeToBlock(node, id) {
   return { id, type: attrs.bpType || "tasks" };
 }
 
+// ── columns ⇄ canvas container node (S10) ────────────────────────────────────
+//
+// The `columns` block { id, type:"columns", columns:[ [childBlock,…], [childBlock,…] ] }
+// ⇄ the TipTap `bpColumns` CONTAINER node (columns-node.js). UNLIKE every other canvas
+// node, a columns block's interior is a NESTED BLOCK TREE: `columns` is a LIST OF
+// COLUMNS, each column a LIST OF BLOCKS (a list-of-lists — NOT `[{blocks:[…]}]`;
+// verified against compose.ex:731-743). Each column maps to a `bpColumn` node holding
+// its child blocks; a prose/divider child projects to its NORMAL editable node, and
+// ANY other kind (callout/code/sheet/fleet/image/terminal/nested-container/composite/
+// table) — none of which is a valid bpColumn child by NAME — is carried VERBATIM on a
+// read-only `bpColumnAtom` (else PM would DROP it = DATA LOSS).
+//
+// V1 COARSE round-trip: any interior change (a keystroke in a column, a child add/
+// delete, a column-child reorder) re-emits ONE `patch-block` REPLACING the whole
+// `columns` array. patch.ex merges the patch into the block content, so `{columns:[…]}`
+// overwrites `columns` and leaves sibling keys (an unknown top-level `children`/`gap`)
+// INTACT — byte-fidelity of unknown keys comes for free from patching only `columns`.
+//
+// node.type is `bpColumns` (the NODE name), NOT `columns` (the bpType).
+
+// True when a reconstructed child block is a lone empty-paragraph SENTINEL — the
+// placeholder an EMPTY source column is seeded with so bpColumn's `…+` content is
+// satisfiable (PM rejects a contentless container). Stripped on the way back ONLY when
+// it is the column's SOLE child, so a truly-empty column round-trips as `[]` while a
+// column that also holds real blocks keeps every child (mirrors the featured-
+// placeholder sentinel pattern).
+function isEmptyParagraphBlock(block) {
+  return (
+    block &&
+    block.type === "paragraph" &&
+    (!block.content || block.content.length === 0)
+  );
+}
+
+// Project ONE column child block → its canvas node. Prose (paragraph/heading/list) →
+// its native editable node (via blockToTiptap, the SAME per-block prose path); divider
+// → the divider atom; EVERYTHING ELSE → a bpColumnAtom carrying the whole child block
+// VERBATIM (deep-cloned) so it round-trips byte-identically and PM never drops it. NO
+// bpId/bpType stamp on prose/divider children — the reader ignores child ids, and an
+// unstamped node matches the depth>0-normalized live doc (index.js normalizeCanvasDoc
+// strips a child's phantom null bpId/bpType).
+function childBlockToNode(child) {
+  const bpType = child && child.type;
+  if (isProseType(bpType)) {
+    // The single prose node convert.js produces — the byte-identical per-block path.
+    return blockToTiptap(child).content[0];
+  }
+  if (isCanvasAtomType(bpType)) {
+    // divider — a content-free leaf, fully described by its type.
+    return { type: bpType };
+  }
+  // Any non-first-class child → the verbatim read-only carrier.
+  return columnAtomBlockToNode(child);
+}
+
+// columnAtomBlockToNode(child) → { type:"bpColumnAtom", attrs:{ bpType, bpId?, bpBlock } }
+//
+// The whole child block is deep-cloned onto bpBlock (no shared ref), so an UNCHANGED
+// child round-trips deep-equal to the original. bpType is the CARRIED child's kind (so
+// the chip can label it and the reverse read it back). bpId rides only when the child
+// carries one (child ids are not load-bearing; fixtures are id-less).
+function columnAtomBlockToNode(child) {
+  const attrs = { bpType: child && child.type, bpBlock: deepClone(child) };
+  if (child && child.id != null) attrs.bpId = child.id;
+  return { type: BP_COLUMN_ATOM_NODE_NAME, attrs };
+}
+
+// Reconstruct ONE column child NODE → its portable-doc block (the inverse of
+// childBlockToNode). bpColumnAtom → the carried bpBlock VERBATIM (deep-cloned). divider
+// → { type:"divider" }. prose → the per-type block via tiptapToBlock (NO id — child ids
+// are omitted for byte-parity with id-less fixtures).
+function childNodeToBlock(childNode) {
+  const type = childNode && childNode.type;
+  if (type === BP_COLUMN_ATOM_NODE_NAME) {
+    const bpBlock = childNode.attrs && childNode.attrs.bpBlock;
+    if (bpBlock != null) return deepClone(bpBlock);
+    return { type: (childNode.attrs && childNode.attrs.bpType) || "paragraph" };
+  }
+  if (type === "divider") return { type: "divider" };
+  const env = nodeToDocEnvelope(childNode);
+  if (type === "heading") return { type: "heading", ...tiptapToBlock(env, null, "heading") };
+  if (type === "bulletList" || type === "orderedList") {
+    return { type: "list", ...tiptapToBlock(env, null, "list") };
+  }
+  return { type: "paragraph", ...tiptapToBlock(env, null, "paragraph") };
+}
+
+// Reconstruct ONE bpColumn node → its column (a LIST OF blocks). A lone empty-paragraph
+// sentinel (the seed for an empty source column) collapses back to `[]`.
+function columnNodeChildren(colNode) {
+  const kids = ((colNode && colNode.content) || []).map(childNodeToBlock);
+  if (kids.length === 1 && isEmptyParagraphBlock(kids[0])) return [];
+  return kids;
+}
+
+// columnsBlockToNode(block) → { type:"bpColumns", attrs:{ bpId, bpType, cols }, content:[bpColumn…] }
+//
+// Each source column → a bpColumn node holding its child nodes; an EMPTY source column
+// is seeded with a single empty paragraph so bpColumn's `…+` content is satisfiable
+// (stripped on the way back). A columns block with no columns at all is seeded with one
+// empty column. `cols` = the rendered bpColumn count (= max(sourceColumns,1) = the
+// reader's own `n`), so `--bp-cols:N` matches the reader.
+function columnsBlockToNode(block, bpId, bpType) {
+  const srcCols = (block && block.columns) || [];
+  const cols = (Array.isArray(srcCols) ? srcCols : []).map((col) => {
+    const kids = (Array.isArray(col) ? col : []).map(childBlockToNode);
+    return {
+      type: BP_COLUMN_NODE_NAME,
+      content: kids.length ? kids : [{ type: "paragraph" }],
+    };
+  });
+  const content = cols.length
+    ? cols
+    : [{ type: BP_COLUMN_NODE_NAME, content: [{ type: "paragraph" }] }];
+  return {
+    type: CANVAS_CONTAINER_NODE_NAMES[bpType] || "bpColumns",
+    attrs: { bpId, bpType, cols: content.length },
+    content,
+  };
+}
+
+// columnsNodeToColumns(node) → the `columns` array of portable-doc blocks (a list of
+// columns, each a list of blocks). The projection columnsNodeToBlock uses minus id/type
+// — and the SAME derivation the coarse diff (columnsNodeChanged) and the patch use, so
+// an UNEDITED columns emits ZERO ops (the reconstruction is byte-stable).
+function columnsNodeToColumns(node) {
+  return ((node && node.content) || []).map(columnNodeChildren);
+}
+
+// columnsNodeToBlock(node, id) → { id, type:"columns", columns:[…] }
+//
+// Reconstruct the whole columns block from a bpColumns node (used by docToBlocks + the
+// insert path). NOTE: a SURVIVING columns block never rebuilds through this — its diff
+// emits ONLY a `{columns:[…]}` patch (patch.ex merges it, so unknown sibling keys
+// survive). This full rebuild is for a genuinely-NEW columns block (no unknown keys) and
+// the source-mode baseline.
+function columnsNodeToBlock(node, id) {
+  return { id, type: "columns", columns: columnsNodeToColumns(node) };
+}
+
+// True when a columns node's interior changed (any child edit / add / delete / reorder
+// in any column). CRITICAL: an UNEDITED columns must emit ZERO ops (else every mount
+// spuriously patches). We compare the canonical (key-order-insensitive) projection of
+// the reconstructed `columns` array — which reconstructs to BLOCKS and thus IGNORES
+// child node attrs (phantom null bpId/bpType a nested paragraph gains via BpAttrs), so
+// the coarse diff is immune to the depth>0 attr-presence gap.
+function columnsNodeChanged(prevNode, nextNode) {
+  return (
+    canonicalJSON(columnsNodeToColumns(prevNode)) !==
+    canonicalJSON(columnsNodeToColumns(nextNode))
+  );
+}
+
 // ── reverse diff: prev blocks + edited doc → ordered ops ────────────────────
 
 // Strip our { bpId, bpType } stamp back off a prose node so the node is the
@@ -1347,6 +1556,9 @@ function classifyNode(node) {
   const isField = isCanvasFieldNode(node.type);
   const isReadOnlyAtom = isCanvasReadOnlyAtomNode(node.type);
   const isFleet = isCanvasFleetNode(node.type);
+  // S10: a canvas container node (bpColumns). Its bpType resolves to "columns" via
+  // CANVAS_CONTAINER_BP_TYPE_BY_NODE below.
+  const isContainer = isCanvasContainerNode(node.type);
   // Article-chrome role node — node.type IS the bpType (eyebrow/byline/ingress/
   // pullquote), so the bpType fallback below resolves it via `node.type`.
   const isRole = isCanvasRoleType(node.type);
@@ -1356,6 +1568,7 @@ function classifyNode(node) {
     (node.attrs && node.attrs.bpType) ||
     CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE[node.type] ||
     CANVAS_READONLY_ATOM_BP_TYPE_BY_NODE[node.type] ||
+    CANVAS_CONTAINER_BP_TYPE_BY_NODE[node.type] ||
     (isField ? "field-string" : isFleet ? "tasks" : node.type);
   return {
     node,
@@ -1367,6 +1580,7 @@ function classifyNode(node) {
     isField,
     isReadOnlyAtom,
     isFleet,
+    isContainer,
     isRole,
     isTable,
   };
@@ -1598,6 +1812,23 @@ export function runToOps(prevBlocks, nextDoc) {
       continue;
     }
 
+    if (entry.isContainer) {
+      // Canvas container node (S10: columns): the V1 COARSE round-trip. ANY interior
+      // change (a keystroke in a column, a child add/delete, a column-child reorder)
+      // re-emits ONE patch-block REPLACING the whole `columns` array. An UNEDITED
+      // columns emits NO op (canonical compare on the reconstructed columns). patch.ex
+      // merges { columns:[…] } into the block content, overwriting `columns` and
+      // leaving unknown sibling keys (children/gap) intact.
+      if (columnsNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: { columns: columnsNodeToColumns(entry.node) },
+        });
+      }
+      continue;
+    }
+
     if (entry.isContent) {
       // Canvas content node (callout): diff body + chrome; emit one patch-block
       // carrying ONLY the mutable fields when anything changed.
@@ -1805,6 +2036,10 @@ function nodeContentEqual(serverNode, liveNode) {
   if (type === "bpOpaque") {
     return carriedBlockEqual(serverNode, liveNode);
   }
+  // Container (S10: bpColumns): the reconstructed columns array (child attrs excluded).
+  if (isCanvasContainerNode(type)) {
+    return !columnsNodeChanged(serverNode, liveNode);
+  }
   // Article-chrome role (eyebrow/byline/ingress/pullquote): the derived body.
   if (isCanvasRoleType(type)) {
     return !roleNodeChanged(serverNode, liveNode);
@@ -1880,6 +2115,12 @@ function nextNodeToBlock(entry) {
     // block, deep-cloned VERBATIM, with the minted id stamped on — identical to the
     // sheet/embed read-only-atom reconstruction (the whole block, not just a value).
     return fleetNodeToBlock(node, entry.id);
+  }
+  if (entry.isContainer) {
+    // Canvas container insert (S10: columns): reconstruct the full columns block (its
+    // column child-block trees) with the minted id. A NEW columns block carries no
+    // unknown sibling keys, so the full rebuild is lossless.
+    return columnsNodeToBlock(node, entry.id);
   }
   if (entry.isRole) {
     // Article-chrome role insert (eyebrow/byline/ingress/pullquote): reconstruct the
