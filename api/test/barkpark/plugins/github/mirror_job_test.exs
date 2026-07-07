@@ -777,6 +777,20 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
 
       assert Link.get(reload(id, scope))["issue"] == 77
     end
+
+    test "enqueue normalizes a drafts. doc_id → published form so create/publish coalesce" do
+      # The draft-create event carries `drafts.X`; the publish event carries `X`.
+      # Both must enqueue the SAME unique job or the mirror creates a DUPLICATE
+      # issue. build_args normalizes to the published id; Oban's unique clause
+      # (keyed on doc_id) then collapses the second insert.
+      {:ok, j1} = MirrorJob.enqueue(%{doc_id: "drafts.gh-dedup", dataset: @dataset})
+      assert j1.args["doc_id"] == "gh-dedup"
+
+      {:ok, j2} = MirrorJob.enqueue(%{doc_id: "gh-dedup", dataset: @dataset})
+      assert j2.args["doc_id"] == "gh-dedup"
+      # Same unique job (the publish insert is a no-op that returns the draft's job).
+      assert j2.id == j1.id
+    end
   end
 
   # ---------------------------------------------------------------------------
