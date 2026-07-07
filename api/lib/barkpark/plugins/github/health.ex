@@ -42,14 +42,6 @@ defmodule Barkpark.Plugins.Github.Health do
   alias Barkpark.Plugins.Github.{Conflict, Conflicts, Cursor, Outbox, Settings}
   alias Barkpark.Repo
 
-  # The fixed conflict-kind set (mirrors `Conflict.kinds/0`). Buckets are always
-  # keyed on these three so the console renders a stable header even at zero.
-  @conflict_kinds ~w(out_of_band_edit detached dedup_refused)
-
-  # How deep to scan open conflicts for the bucket counts (epic D7: a maintainer
-  # reconciles by hand; 200 is plenty of headroom over a healthy handful).
-  @conflict_scan_limit 200
-
   # How many open conflict rows to hand the console as plain maps (newest-first).
   @open_conflicts_cap 50
 
@@ -104,10 +96,16 @@ defmodule Barkpark.Plugins.Github.Health do
   """
   @spec snapshot(keyword()) :: t()
   def snapshot(_opts \\ []) do
+    # Resolve the repo ONCE and thread it down. Each `Settings.repo/0` is a DB
+    # fallback read that logs an audit row, so a single read (vs one per section)
+    # both trims audit-table churn on a per-mount probe AND guarantees the header
+    # `repo` and the conflict repo-filter observe the SAME value.
+    repo = safe(fn -> Settings.repo() end, nil)
+
     %{
       active: safe(fn -> Settings.active?() end, false),
-      repo: safe(fn -> Settings.repo() end, nil),
-      conflicts: conflicts_snapshot(),
+      repo: repo,
+      conflicts: conflicts_snapshot(repo),
       datasets: datasets_snapshot(),
       queue: queue_snapshot()
     }
@@ -117,47 +115,47 @@ defmodule Barkpark.Plugins.Github.Health do
   # (1) Conflicts — the visible quarantine (D7)
   # ---------------------------------------------------------------------------
 
-  defp conflicts_snapshot do
+  defp conflicts_snapshot(repo) do
     safe(
       fn ->
-        rows = Conflicts.list(conflicts_list_opts())
-        counts = bucket_kinds(rows)
+        counts = open_conflict_counts(repo)
+        rows = Conflicts.list(open_conflicts_list_opts(repo))
 
         %{
-          out_of_band_edit: Map.fetch!(counts, "out_of_band_edit"),
-          detached: Map.fetch!(counts, "detached"),
-          dedup_refused: Map.fetch!(counts, "dedup_refused"),
-          total: length(rows),
-          open: rows |> Enum.take(@open_conflicts_cap) |> Enum.map(&conflict_to_map/1)
+          out_of_band_edit: Map.get(counts, "out_of_band_edit", 0),
+          detached: Map.get(counts, "detached", 0),
+          dedup_refused: Map.get(counts, "dedup_refused", 0),
+          total: counts |> Map.values() |> Enum.sum(),
+          open: Enum.map(rows, &conflict_to_map/1)
         }
       end,
       zero_conflicts()
     )
   end
 
-  # Filter to the configured repo when one is set; pass NO :repo filter when the
-  # plugin is dark (Settings.repo/0 nil) so a pre-provisioning snapshot still
-  # surfaces any orphaned rows rather than filtering to nothing.
-  defp conflicts_list_opts do
-    base = [limit: @conflict_scan_limit]
-
-    case safe(fn -> Settings.repo() end, nil) do
-      repo when is_binary(repo) -> [{:repo, repo} | base]
-      _ -> base
-    end
+  # EXACT open-conflict counts grouped by kind — a `COUNT ... GROUP BY kind`,
+  # not a bounded row scan, so `total` and every bucket are honest even past a
+  # large backlog (no silent cap) while staying O(kinds) in memory. Filtered to
+  # the configured repo when one is set; NO :repo filter when the plugin is dark
+  # (repo nil) so a pre-provisioning snapshot still surfaces orphaned rows.
+  defp open_conflict_counts(repo) do
+    Conflict
+    |> where([c], is_nil(c.resolved_at))
+    |> maybe_repo(repo)
+    |> group_by([c], c.kind)
+    |> select([c], {c.kind, count(c.id)})
+    |> Repo.all()
+    |> Map.new()
   end
 
-  # Count rows into the fixed 3-kind bucket; unknown kinds (should never occur —
-  # the schema constrains them) are ignored so the shape stays stable.
-  defp bucket_kinds(rows) do
-    zero = Map.new(@conflict_kinds, &{&1, 0})
+  defp maybe_repo(query, repo) when is_binary(repo), do: where(query, [c], c.repo == ^repo)
+  defp maybe_repo(query, _repo), do: query
 
-    Enum.reduce(rows, zero, fn %Conflict{kind: kind}, acc ->
-      case acc do
-        %{^kind => n} -> %{acc | kind => n + 1}
-        _ -> acc
-      end
-    end)
+  # Newest-first open rows for the console table, capped. Same repo-filter rule
+  # as the counts (dark → repo-wide) so the table and the counts agree.
+  defp open_conflicts_list_opts(repo) do
+    base = [limit: @open_conflicts_cap]
+    if is_binary(repo), do: [{:repo, repo} | base], else: base
   end
 
   defp conflict_to_map(%Conflict{} = c) do
