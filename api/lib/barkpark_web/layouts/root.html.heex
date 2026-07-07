@@ -5237,8 +5237,8 @@
     // wave 3). Mounted on the `.bp-board` container (opt-in — inert without the
     // phx-hook attr, so studio + every other LiveView is untouched). Same
     // CSP-safe, dependency-free HTML5-drag shape as BarkparkPaperSortable: a
-    // card is a draggable [data-role~=task] carrying data-doc-id; a drop target
-    // is its enclosing [data-role~=column-slot] carrying data-col. The server
+    // card is a draggable [data-role=task-card] carrying data-doc-id; a drop
+    // target is its enclosing [data-role=column] carrying data-col. The server
     // owns the model (D1/D9) — we do NOT reorder the DOM optimistically;
     // on drop we pushEvent("restage", {doc_id, to_col}) and the LiveView does the
     // optimistic move + the real claim/close, snapping back on refusal. On
