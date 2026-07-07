@@ -45,6 +45,8 @@ defmodule BarkparkWeb.GithubWebhookController do
 
   use BarkparkWeb, :controller
 
+  require Logger
+
   alias Barkpark.Plugins.Github.Settings
 
   @doc """
@@ -77,9 +79,16 @@ defmodule BarkparkWeb.GithubWebhookController do
         # action != "opened" (edited/closed/labeled/reopened/…). Accepted, no-op.
         conn |> put_status(:accepted) |> json(%{ok: true, ignored: "action"})
 
-      {:error, _reason} ->
+      {:error, reason} ->
         # A genuine intake failure (transient DB, etc.). 5xx invites GitHub to
         # redeliver; the deterministic `gh-<num>` doc_id keeps that idempotent.
+        # Log it — a silently-500ing webhook that GitHub keeps redelivering is
+        # otherwise invisible. Include the issue number (small int, safe) but
+        # NEVER the attacker-controlled title/body (log-injection / spam).
+        Logger.error(
+          "github webhook: intake failed for issue ##{issue_number(params)}: #{inspect(reason)}"
+        )
+
         conn
         |> put_status(:internal_server_error)
         |> json(%{error: %{code: "intake_failed", message: "could not process delivery"}})
@@ -96,6 +105,15 @@ defmodule BarkparkWeb.GithubWebhookController do
     |> case do
       v when is_binary(v) -> v |> String.trim() |> String.downcase()
       _ -> ""
+    end
+  end
+
+  # The issue number if present, else "?" — for the failure log line only.
+  # Kept to the small integer GitHub assigns; never the free-text fields.
+  defp issue_number(params) do
+    case get_in(params, ["issue", "number"]) do
+      n when is_integer(n) -> n
+      _ -> "?"
     end
   end
 

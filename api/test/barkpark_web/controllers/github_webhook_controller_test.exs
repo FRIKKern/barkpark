@@ -57,6 +57,29 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
       assert Keyword.get(opts, :dataset) == "production"
     end
 
+    test "the configured mirror dataset (not the default) is threaded to Intake" do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Github)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.Github, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.Github)
+      end)
+
+      Application.put_env(:barkpark, Barkpark.Plugins.Github,
+        github_mirror_datasets: ["staging", "production"]
+      )
+
+      stub_intake({:ok, %{"_id" => "gh-42"}})
+
+      conn = deliver("issues", @issue_opened)
+
+      assert %{"ok" => true, "ingested" => true} = json_response(conn, 200)
+      assert_received {:intake_called, _payload, opts}
+      # first of the configured list — the controller owns the choice
+      assert Keyword.get(opts, :dataset) == "staging"
+    end
+
     test "bot-drop result (:dropped) answers 200 — never a retry-storm on a loop cut" do
       stub_intake(:dropped)
 
