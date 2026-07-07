@@ -171,6 +171,36 @@ defmodule Barkpark.Plugins.Github.ProjectsTest do
       assert update_vars["projectId"] == @project
     end
 
+    test "Priority single-select writes the raw value's matched optionId (0 is not dropped)" do
+      # A board with a Priority single-select whose option is named for the raw
+      # value ("0"). Guards the falsy-trap: priority 0 is the HIGHEST priority and
+      # must be written (the reject is is_nil/1, not truthiness), and the raw
+      # value is matched case-insensitively as a single-select — not a text write.
+      board = %{
+        "node" => %{
+          "fields" => %{
+            "nodes" => [
+              %{
+                "id" => "FIELD_priority",
+                "name" => "Priority",
+                "options" => [%{"id" => "OPT_p0", "name" => "0"}]
+              }
+            ]
+          }
+        }
+      }
+
+      doc = task(%{"priority" => 0})
+      opts = base_opts(responses: %{fields: {:ok, board}})
+
+      assert {:ok, %{item_id: "ITEM_default"}} = Projects.sync(doc, @repo, 11, nil, opts)
+
+      assert_received {:graphql, :update, vars}
+      assert vars["fieldId"] == "FIELD_priority"
+      assert vars["optionId"] == "OPT_p0"
+      refute Map.has_key?(vars, "text")
+    end
+
     test "Goal writes a text field (value:{text: parent_id})" do
       doc = task(%{"parent_id" => "epic-7"})
       opts = base_opts(responses: %{fields: {:ok, board_fields()}})
