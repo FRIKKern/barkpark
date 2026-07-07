@@ -102,6 +102,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   @dataset "production"
 
+  @facet_keys [:goal, :priority, :label, :worker]
+
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
@@ -115,7 +117,25 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      |> assign(:board, Board.snapshot(dataset: @dataset))
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
-     |> assign(:seen, MapSet.new())}
+     |> assign(:seen, MapSet.new())
+     |> assign(:group_by, :none)
+     |> assign(:filters, empty_filters())
+     |> assign_view()}
+  end
+
+  # The board's grouping + filtering ride the URL (D14 — the ONLY mutation path,
+  # so every view is shareable/bookmarkable). handle_params parses `?group=` +
+  # the comma-joined facet params, WHITELISTING the group against
+  # `Board.group_keys/0` (never `String.to_atom/1` on wire input — mirror
+  # `parse_col/1`), then re-derives the pure view. It runs on the initial mount
+  # and on every chip/selector push_patch.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply,
+     socket
+     |> assign(:group_by, parse_group(params["group"]))
+     |> assign(:filters, parse_filters(params))
+     |> assign_view()}
   end
 
   # A task mutation on our dataset stream — the live heartbeat of the board.
@@ -140,7 +160,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        socket
        |> assign(:board, board)
        |> assign(:last_change, change)
-       |> update(:seen, &MapSet.put(&1, key))}
+       |> update(:seen, &MapSet.put(&1, key))
+       |> assign_view()}
     end
   end
 
@@ -154,7 +175,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     {:noreply,
      socket
      |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
-     |> assign(:last_change, nil)}
+     |> assign(:last_change, nil)
+     |> assign_view()}
   end
 
   # A non-task document event, or any other stray message — ignore it. NEVER
@@ -206,6 +228,32 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # Dismiss the transient refusal banner.
   def handle_event("dismiss-notice", _params, socket) do
     {:noreply, assign(socket, :notice, nil)}
+  end
+
+  # ── wave 4: group-by + filter chips (charter D14 — URL is the mutation path) ─
+  #
+  # A chip/selector click never mutates assigns directly: it computes the NEXT
+  # query and `push_patch`es to it, so `handle_params/3` is the single source of
+  # truth (the view is always shareable/bookmarkable). Toggling a filter chip
+  # adds/removes its value; the group selector swaps the grouping; clear-all
+  # push_patches to the bare path.
+  def handle_event("toggle-filter", %{"facet" => facet, "value" => value}, socket) do
+    case facet_key(facet) do
+      nil ->
+        {:noreply, socket}
+
+      key ->
+        filters = toggle_filter(socket.assigns.filters, key, value)
+        {:noreply, patch_to(socket, socket.assigns.group_by, filters)}
+    end
+  end
+
+  def handle_event("set-group", %{"group" => group}, socket) do
+    {:noreply, patch_to(socket, parse_group(group), socket.assigns.filters)}
+  end
+
+  def handle_event("clear-filters", _params, socket) do
+    {:noreply, push_patch(socket, to: ~p"/admin/projects")}
   end
 
   # A legal claim: OPTIMISTICALLY move the card to in_progress (D9 — the board
@@ -261,6 +309,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     |> assign(:board, board)
     |> assign(:last_change, change)
     |> assign(:notice, nil)
+    |> assign_view()
   end
 
   # A refused/failed write snaps the board back to the authoritative DB state
@@ -270,6 +319,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
     |> assign(:last_change, nil)
     |> assign(:notice, message)
+    |> assign_view()
   end
 
   # The acting worker for a Studio-driven write: `studio:<current-user>` when an
@@ -344,6 +394,75 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   defp parse_col(_), do: nil
 
+  # ── wave 4: group/filter derivation + URL encoding (D14/D15) ────────────────
+
+  # Re-derive the pure `Board.view/2` from the current @board + @group_by +
+  # @filters. This is the D15 discipline: it is called at the END of mount, in
+  # handle_params, AND in EVERY handler that reassigns @board (the realtime
+  # re-bucket, the :refresh reconcile, and every optimistic-move/rollback path)
+  # so the full model and the filtered view never drift.
+  defp assign_view(socket) do
+    view =
+      Board.view(socket.assigns.board,
+        group_by: socket.assigns.group_by,
+        filters: socket.assigns.filters
+      )
+
+    assign(socket, :view, view)
+  end
+
+  defp empty_filters, do: Map.new(@facet_keys, fn key -> {key, []} end)
+
+  # Whitelist the group param against Board.group_keys/0 (mirror parse_col/1 —
+  # NEVER String.to_atom/1 on wire input), :none fallback.
+  defp parse_group(raw) when is_binary(raw),
+    do: Enum.find(Board.group_keys(), :none, fn g -> Atom.to_string(g) == raw end)
+
+  defp parse_group(_), do: :none
+
+  # Each facet param is comma-joined; split, trim, drop blanks. Always returns a
+  # map with all four keys → a (possibly empty) string list.
+  defp parse_filters(params) do
+    Map.new(@facet_keys, fn key -> {key, split_csv(params[Atom.to_string(key)])} end)
+  end
+
+  defp split_csv(raw) when is_binary(raw) do
+    raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
+
+  defp split_csv(_), do: []
+
+  # Whitelist a facet name to its atom key (never String.to_atom/1 on wire input).
+  defp facet_key(raw), do: Enum.find(@facet_keys, fn k -> Atom.to_string(k) == raw end)
+
+  defp toggle_filter(filters, key, value) do
+    current = Map.get(filters, key, [])
+    updated = if value in current, do: List.delete(current, value), else: current ++ [value]
+    Map.put(filters, key, updated)
+  end
+
+  defp facet_active?(filters, key, value), do: value in Map.get(filters, key, [])
+
+  # push_patch to the URL encoding this (group, filters) pair — the ONLY mutation
+  # path (D14). The bare path when nothing is selected keeps a clean, shareable URL.
+  defp patch_to(socket, group_by, filters) do
+    case board_query(group_by, filters) do
+      [] -> push_patch(socket, to: ~p"/admin/projects")
+      query -> push_patch(socket, to: ~p"/admin/projects?#{query}")
+    end
+  end
+
+  defp board_query(group_by, filters) do
+    group_params = if group_by == :none, do: [], else: [{"group", Atom.to_string(group_by)}]
+
+    facet_params =
+      for key <- @facet_keys, vals = Map.get(filters, key, []), vals != [] do
+        {Atom.to_string(key), Enum.join(vals, ",")}
+      end
+
+    group_params ++ facet_params
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -352,6 +471,49 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
          Self-contained + CSP-safe (pulse's inline discipline). Curly braces
          inside <style> are verbatim in HEEx 1.x — no interpolation here. */
       .bp-board-wrap { max-width: 82rem; }
+
+      /* ── group + filter chips (wave 4) ───────────────────────────────────
+         A big board stays legible: a group selector + filter chips fold the
+         already-fetched cards through the pure organizer. Each chip is a real
+         <button> that push_patches the URL (D14) — pure CSS, CSP-safe, no JS. */
+      .bp-controls {
+        display: flex; flex-wrap: wrap; align-items: center;
+        gap: 0.45rem 0.7rem; margin: 0 0 1.1rem;
+      }
+      .bp-chip-row {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
+      }
+      .bp-controls-label {
+        font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+        opacity: 0.55; font-weight: 600; margin-right: 0.15rem;
+      }
+      .bp-chip {
+        font: inherit; font-size: 0.78rem; line-height: 1.2;
+        padding: 0.2rem 0.55rem; border-radius: 999px; cursor: pointer;
+        color: inherit; border: 1px solid var(--muted-border-color, rgba(127,127,127,0.32));
+        background: var(--card-background-color, rgba(127,127,127,0.05));
+        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+      }
+      .bp-chip:hover { border-color: rgba(37,99,235,0.5); }
+      .bp-chip.is-active {
+        border-color: #2563eb; color: #fff;
+        background: linear-gradient(90deg, #2563eb, #0d9488);
+      }
+      .bp-clear { opacity: 0.75; margin-left: auto; }
+      .bp-clear:hover { opacity: 1; }
+
+      /* ── swimlanes (grouped view) ───────────────────────────────────────── */
+      .bp-lane { margin: 0 0 1.5rem; }
+      .bp-lane-h {
+        font-size: 0.82rem; letter-spacing: 0.04em; font-weight: 700;
+        margin: 0 0 0.55rem; padding-bottom: 0.3rem;
+        border-bottom: 1px solid var(--muted-border-color, rgba(127,127,127,0.2));
+        opacity: 0.85;
+      }
+      .bp-filtered-empty {
+        display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
+        margin: 1.2rem 0; opacity: 0.85; font-size: 0.95rem;
+      }
       .bp-momentum {
         display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap;
         font-variant-numeric: tabular-nums; margin: 0.4rem 0 0.2rem;
@@ -542,6 +704,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .bp-flash { animation: none; }
         .m-bump { animation: none; }
         .bp-notice { animation: none; }
+        .bp-chip { transition: none; }
       }
     </style>
 
@@ -557,14 +720,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       </p>
 
       <header class="bp-momentum" data-role="momentum">
-        <span data-role="m-inflight">◐ <%= @board.momentum.in_flight %> in flight</span>
-        <span data-role="m-ready">○ <%= @board.momentum.ready %> ready</span>
-        <span class={done_bump_class(@last_change)} data-role="m-done-today">✓ <%= @board.momentum.done_today %> done today</span>
-        <span class="m-pct" data-role="m-pct"><%= @board.momentum.pct %>%</span>
+        <span data-role="m-inflight">◐ <%= @view.momentum.in_flight %> in flight</span>
+        <span data-role="m-ready">○ <%= @view.momentum.ready %> ready</span>
+        <span class={done_bump_class(@last_change)} data-role="m-done-today">✓ <%= @view.momentum.done_today %> done today</span>
+        <span class="m-pct" data-role="m-pct"><%= @view.momentum.pct %>%</span>
       </header>
       <div class="bp-bar" data-role="momentum-bar">
-        <div class="bp-bar-fill" style={"width: #{@board.momentum.pct}%;"}></div>
+        <div class="bp-bar-fill" style={"width: #{@view.momentum.pct}%;"}></div>
       </div>
+
+      <%= render_controls(assigns) %>
 
       <div :if={@notice} class="bp-notice" data-role="notice" role="status">
         <span class="bp-notice-text"><%= @notice %></span>
@@ -582,77 +747,202 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       </div>
 
       <div
-        id="bp-projects-board"
-        class="bp-board"
-        data-role="board"
-        phx-hook="BarkparkBoardDrag"
+        :if={@view.empty? and not empty_board?(@board)}
+        class="bp-filtered-empty"
+        data-role="filtered-empty"
       >
-        <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
-          <h2 class="bp-col-h">
-            <%= col_label(col) %>
-            <span class="bp-col-n" data-role="col-count"><%= col_count(@board, col) %></span>
-          </h2>
-
-          <p :if={@board.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
-
-          <article
-            :for={card <- @board.columns[col]}
-            class={["bp-card", "bp-card--#{col}", just_moved?(@last_change, card) && "bp-flash"]}
-            data-role="task-card"
-            data-col={col}
-            data-doc-id={card.doc_id}
-            data-just-moved={just_moved?(@last_change, card) && "true"}
-            draggable="true"
-          >
-            <div class="bp-card-top">
-              <span
-                class={"gi gi--#{card.color_role}"}
-                data-role="glyph"
-                data-status={card.lifecycle_status}
-                aria-hidden="true"
-              >
-                <%= glyph_text(card) %>
-              </span>
-              <span class="bp-title" data-role="card-title"><%= card.title %></span>
-            </div>
-
-            <div class="bp-meta">
-              <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
-                P<%= card.priority %>
-              </span>
-              <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
-              <span :for={label <- card.labels} class="bp-label" data-role="label"><%= label %></span>
-              <span :if={card.worker} class="bp-worker" data-role="worker"><%= card.worker %></span>
-              <span :if={card.criteria} class="bp-crit" data-role="criteria">
-                <%= card.criteria.met %>/<%= card.criteria.total %>
-              </span>
-
-              <a
-                :if={github_badge?(card.github)}
-                class="bp-gh"
-                data-role="github-badge"
-                data-issue={card.github["issue"]}
-                href={gh_href(card.github)}
-                target="_blank"
-                rel="noopener"
-              >
-                <span
-                  class={"bp-gh-dot " <> if(github_synced?(card), do: "is-synced", else: "is-detached")}
-                  data-role="github-dot"
-                >
-                </span>
-                #<%= card.github["issue"] %>
-                <span class="bp-gh-state" data-role="github-state"><%= card.github["state"] %></span>
-              </a>
-            </div>
-          </article>
-        </section>
+        <p><em>No tasks match — clear the filters to see the whole board.</em></p>
+        <button type="button" class="bp-chip bp-clear" phx-click="clear-filters" data-role="clear-all">
+          Clear filters
+        </button>
       </div>
+
+      <%= unless @view.empty? and not empty_board?(@board) do %>
+        <%= if @view.grouped? do %>
+          <section
+            :for={lane <- @view.lanes}
+            class="bp-lane"
+            data-role="lane"
+            data-lane={lane_dom_id(lane.key)}
+          >
+            <h2 class="bp-lane-h" data-role="lane-label"><%= lane.label %></h2>
+            <.board_grid
+              lane={lane}
+              last_change={@last_change}
+              id={"bp-board-lane-" <> lane_dom_id(lane.key)}
+            />
+          </section>
+        <% else %>
+          <.board_grid lane={hd(@view.lanes)} last_change={@last_change} id="bp-projects-board" />
+        <% end %>
+      <% end %>
 
       <p :if={@board.cancelled_count > 0} class="bp-cancelled" data-role="cancelled-tally">
         ✕ <%= @board.cancelled_count %> cancelled
       </p>
     </main>
+    """
+  end
+
+  # ── the controls: group selector + filter chips (wave 4) ────────────────────
+  #
+  # A chip menu that offers ONLY the facets that exist (@view.facets), pure-CSS +
+  # CSP-safe: each chip is a <button> whose phx-click computes the next URL and
+  # push_patches (D14). Active chips carry aria-pressed + .is-active. No inline JS.
+  defp render_controls(assigns) do
+    ~H"""
+    <section class="bp-controls" data-role="controls">
+      <div class="bp-chip-row" data-role="group-select">
+        <span class="bp-controls-label">Group</span>
+        <button
+          :for={g <- Board.group_keys()}
+          type="button"
+          class={["bp-chip", "bp-group-chip", @group_by == g && "is-active"]}
+          aria-pressed={to_string(@group_by == g)}
+          phx-click="set-group"
+          phx-value-group={g}
+          data-role="group-option"
+          data-group={g}
+        >
+          <%= group_label(g) %>
+        </button>
+      </div>
+
+      <.chip_row
+        :if={@view.facets.goals != []}
+        facet={:goal}
+        title="Goal"
+        prefix="↳"
+        values={@view.facets.goals}
+        filters={@filters}
+      />
+      <.chip_row
+        :if={@view.facets.priorities != []}
+        facet={:priority}
+        title="Priority"
+        prefix="P"
+        values={@view.facets.priorities}
+        filters={@filters}
+      />
+      <.chip_row
+        :if={@view.facets.labels != []}
+        facet={:label}
+        title="Label"
+        prefix="#"
+        values={@view.facets.labels}
+        filters={@filters}
+      />
+      <.chip_row
+        :if={@view.facets.workers != []}
+        facet={:worker}
+        title="Worker"
+        prefix="@"
+        values={@view.facets.workers}
+        filters={@filters}
+      />
+
+      <button
+        :if={@view.filtered?}
+        type="button"
+        class="bp-chip bp-clear"
+        phx-click="clear-filters"
+        data-role="clear-all"
+      >
+        Clear filters
+      </button>
+    </section>
+    """
+  end
+
+  # One facet's row of toggle chips. `facet` is the atom key (`:goal` …); HEEx
+  # renders it to its string for the wire attrs.
+  defp chip_row(assigns) do
+    ~H"""
+    <div class="bp-chip-row" data-role={"facet-#{@facet}"}>
+      <span class="bp-controls-label"><%= @title %></span>
+      <button
+        :for={value <- @values}
+        type="button"
+        class={["bp-chip", facet_active?(@filters, @facet, value) && "is-active"]}
+        aria-pressed={to_string(facet_active?(@filters, @facet, value))}
+        phx-click="toggle-filter"
+        phx-value-facet={@facet}
+        phx-value-value={value}
+        data-role="chip"
+        data-facet={@facet}
+      >
+        <%= @prefix %><%= value %>
+      </button>
+    </div>
+    """
+  end
+
+  # One swimlane's 5-column grid — the SAME flat structure the ungrouped board
+  # renders (grouped mode stacks several of these, each with its own hook id).
+  defp board_grid(assigns) do
+    ~H"""
+    <div id={@id} class="bp-board" data-role="board" phx-hook="BarkparkBoardDrag">
+      <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
+        <h2 class="bp-col-h">
+          <%= col_label(col) %>
+          <span class="bp-col-n" data-role="col-count"><%= @lane.counts[col] %></span>
+        </h2>
+
+        <p :if={@lane.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
+
+        <article
+          :for={card <- @lane.columns[col]}
+          class={["bp-card", "bp-card--#{col}", just_moved?(@last_change, card) && "bp-flash"]}
+          data-role="task-card"
+          data-col={col}
+          data-doc-id={card.doc_id}
+          data-just-moved={just_moved?(@last_change, card) && "true"}
+          draggable="true"
+        >
+          <div class="bp-card-top">
+            <span
+              class={"gi gi--#{card.color_role}"}
+              data-role="glyph"
+              data-status={card.lifecycle_status}
+              aria-hidden="true"
+            >
+              <%= glyph_text(card) %>
+            </span>
+            <span class="bp-title" data-role="card-title"><%= card.title %></span>
+          </div>
+
+          <div class="bp-meta">
+            <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
+              P<%= card.priority %>
+            </span>
+            <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
+            <span :for={label <- card.labels} class="bp-label" data-role="label"><%= label %></span>
+            <span :if={card.worker} class="bp-worker" data-role="worker"><%= card.worker %></span>
+            <span :if={card.criteria} class="bp-crit" data-role="criteria">
+              <%= card.criteria.met %>/<%= card.criteria.total %>
+            </span>
+
+            <a
+              :if={github_badge?(card.github)}
+              class="bp-gh"
+              data-role="github-badge"
+              data-issue={card.github["issue"]}
+              href={gh_href(card.github)}
+              target="_blank"
+              rel="noopener"
+            >
+              <span
+                class={"bp-gh-dot " <> if(github_synced?(card), do: "is-synced", else: "is-detached")}
+                data-role="github-dot"
+              >
+              </span>
+              #<%= card.github["issue"] %>
+              <span class="bp-gh-state" data-role="github-state"><%= card.github["state"] %></span>
+            </a>
+          </div>
+        </article>
+      </section>
+    </div>
     """
   end
 
@@ -669,12 +959,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp done_bump_class(%{kind: :closed}), do: "m-bump"
   defp done_bump_class(_), do: ""
 
-  # The column count. Every column renders its live card count EXCEPT :done, whose
-  # rendered list is WINDOWED at @done_window (D10) — so it reports the FULL
-  # `done_total` instead, or the pile would freeze at 12 and closing your 13th
-  # task would not visibly grow "Done" (violating §0 "you always feel progress").
-  defp col_count(board, :done), do: board.done_total
-  defp col_count(board, col), do: length(board.columns[col])
+  # A group-selector option's label.
+  defp group_label(:none), do: "None"
+  defp group_label(:goal), do: "Goal"
+  defp group_label(:priority), do: "Priority"
+  defp group_label(:label), do: "Label"
+
+  # A DOM-safe id fragment for a lane's hook id / data-lane attr. The `:all`
+  # passthrough lane and the none-lane get stable slugs; a facet value is
+  # sanitized (non-alphanumerics → `-`) so a label like `proj:board` yields a
+  # valid element id.
+  defp lane_dom_id(:all), do: "all"
+  defp lane_dom_id(nil), do: "none"
+  defp lane_dom_id(key) when is_binary(key), do: String.replace(key, ~r/[^a-zA-Z0-9]+/, "-")
+  defp lane_dom_id(key), do: lane_dom_id(to_string(key))
 
   defp col_label(:open), do: "Open"
   defp col_label(:ready), do: "Ready"
