@@ -408,3 +408,129 @@ check("section node-name constant matches the projector", () => {
   assert.equal(BP_SECTION_NODE_NAME, "bpSection");
   assert.equal(runToTiptap([SECTION()]).content[0].type, BP_SECTION_NODE_NAME);
 });
+
+// ═══ STEP-2 LAYOUT ENGINE (grid mode + span/order transport) ═══════════════════
+//
+// A section MAY carry `layout` ({mode,tracks?,gap?,breakpoints?}); grid mode gates
+// the reader/canvas grid. Children MAY carry span/order (hoisted to attrs.cells for
+// getJSON-safe transport). BACKWARD-COMPAT is structural: a no-layout section adds
+// NO new attrs → zero-ops (proven by the existing untouched round-trip above and
+// re-asserted in test 1 below). distrust-vacuous-green: every grid assertion pairs
+// a round-trip with a zero-ops check so a spurious layout/cells diff reds.
+
+// A GRID section fixture: {mode:grid,tracks:2} over the same three children.
+const GRID_SECTION = () => ({
+  id: "s-1",
+  type: "section",
+  title: "Overview",
+  layout: { mode: "grid", tracks: 2 },
+  blocks: [
+    { id: "sc-h", type: "heading", level: 2, text: "Intro" },
+    { id: "sc-p", type: "paragraph", content: [{ type: "text", value: "body text" }] },
+    { id: "sc-c", type: "callout", tone: "info", content: [{ type: "text", value: "note" }] },
+  ],
+});
+
+// ── TEST 1: BACKWARD-COMPAT — a no-layout section projects with NO layout/cells
+//    attr and round-trips ZERO ops (the legacy path is structurally untouched).
+check("S2 backward-compat: a no-layout section adds NO layout/cells attr and is zero-ops", () => {
+  const sec = runToTiptap([SECTION()]).content[0];
+  assert.ok(sec.attrs.layout == null, "no layout attr on a no-layout section");
+  assert.ok(sec.attrs.cells == null, "no cells attr on a no-layout section");
+  const blocks = [SECTION()];
+  assert.equal(runToOps(blocks, runToTiptap(blocks)).length, 0, "legacy section is zero-ops");
+});
+
+// ── TEST 2: GRID round-trip is DEEP-EQUAL to source (a dropped layout key reds).
+check("S2 grid round-trip: a {mode:grid,tracks:2} section survives blocks→node→docToBlocks byte-equal", () => {
+  const src = GRID_SECTION();
+  const node = runToTiptap([src]).content[0];
+  assert.deepEqual(node.attrs.layout, { mode: "grid", tracks: 2 }, "layout rides node.attrs verbatim");
+  const back = docToBlocks(runToTiptap([src]));
+  assert.deepEqual(back, [src], "the whole grid section round-trips byte-equal (layout preserved)");
+});
+
+// ── TEST 3: ZERO-OPS — the anti-vacuous check: an unedited grid section emits nothing.
+check("S2 grid zero-ops: an untouched grid section round-trips with ZERO ops", () => {
+  const blocks = [GRID_SECTION()];
+  const doc = runToTiptap(blocks);
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 0, "no spurious layout/cells diff — an untouched grid section is zero-ops");
+  const folded = assertFolds(blocks, doc, ops, "grid section round-trip");
+  assert.deepEqual(folded[0], GRID_SECTION());
+});
+
+// ── TEST 4: MODE TOGGLE — flip grid→stack → EXACTLY one patch-block{layout}, folds.
+check("S2 mode toggle: grid→stack emits exactly ONE patch-block{layout:{mode:stack}} and folds", () => {
+  const blocks = [GRID_SECTION()];
+  const doc = runToTiptap(blocks);
+  // The node-view's toggle keeps tracks when flipping to stack: {mode:stack,tracks:2}.
+  doc.content[0].attrs = { ...doc.content[0].attrs, layout: { mode: "stack", tracks: 2 } };
+  const ops = runToOps(blocks, doc);
+  assert.equal(ops.length, 1, "exactly one op — the fine path, not a coarse replace");
+  assert.deepEqual(ops[0], {
+    op: "patch-block",
+    id: "s-1",
+    patch: { layout: { mode: "stack", tracks: 2 } },
+  });
+  const folded = assertFolds(blocks, doc, ops, "section mode toggle");
+  assert.deepEqual(folded[0].layout, { mode: "stack", tracks: 2 }, "the section now persists stack layout");
+});
+
+// ── TEST 4b: CLEAR LAYOUT → patch-block{layout:null} (compose grid_layout→nil→stack).
+check("S2 clear layout: removing the layout attr → patch-block{layout:null}", () => {
+  const blocks = [GRID_SECTION()];
+  const doc = runToTiptap(blocks);
+  doc.content[0].attrs = { ...doc.content[0].attrs, layout: null };
+  const ops = runToOps(blocks, doc);
+  const layoutOp = ops.find((o) => o.op === "patch-block" && o.patch && "layout" in o.patch);
+  assert.ok(layoutOp, "clearing the layout emits a patch-block");
+  assert.equal(layoutOp.patch.layout, null, "a cleared layout is null (compose → stack path)");
+});
+
+// ── TEST 5: SPAN/ORDER PRESERVE — a child span:2,order:1 survives the round-trip
+//    (hoisted to attrs.cells) and an unedited such section is ZERO-OPS.
+check("S2 span/order: a child span/order survives blocks→node→docToBlocks and is zero-ops", () => {
+  const src = {
+    id: "s-1",
+    type: "section",
+    layout: { mode: "grid", tracks: 2 },
+    blocks: [
+      { id: "c1", type: "paragraph", content: [{ type: "text", value: "a" }] },
+      { id: "c2", type: "paragraph", span: 2, order: 1, content: [{ type: "text", value: "b" }] },
+    ],
+  };
+  const node = runToTiptap([src]).content[0];
+  // span/order are HOISTED into the section's own cells attr (present-only, positional):
+  // the child NODE drops them (getJSON-safe transport lives on the section).
+  assert.deepEqual(node.attrs.cells, [{}, { span: 2, order: 1 }], "cells carries the child span/order positionally");
+  assert.ok(node.content[1].attrs.span == null, "span does NOT ride the child node (it would be dropped on getJSON)");
+  const back = docToBlocks(runToTiptap([src]));
+  assert.deepEqual(back, [src], "span/order split back onto the child byte-equal");
+  assert.equal(runToOps([src], runToTiptap([src])).length, 0, "an unedited span/order section is zero-ops");
+});
+
+// ── TEST 6: EXPLICIT-STACK ≡ ABSENT — a {mode:stack} section and a no-layout
+//    section project their children IDENTICALLY (byte-equal minus the layout attr).
+check("S2 explicit-stack ≡ absent: {mode:stack} and no-layout project children identically", () => {
+  const withStack = { ...SECTION(), layout: { mode: "stack" } };
+  const stackNode = runToTiptap([withStack]).content[0];
+  const bareNode = runToTiptap([SECTION()]).content[0];
+  // The ONLY difference is the layout attr — content + title + ids are identical.
+  const strip = (n) => {
+    const { layout, ...rest } = n.attrs;
+    return { ...n, attrs: rest };
+  };
+  assert.deepEqual(strip(stackNode), strip(bareNode), "explicit-stack projects children identically to absent");
+  assert.deepEqual(stackNode.attrs.layout, { mode: "stack" }, "the explicit-stack layout is carried verbatim");
+});
+
+// ── TEST 7: ECHO — reconcileServerEcho recognizes a layout-only own-echo
+//    (stableSectionKey includes layout) — no phantom replace-block.
+check("S2 echo: a layout-bearing section own-echoes (stableSectionKey includes layout)", () => {
+  const server = [GRID_SECTION()];
+  const liveDoc = runToTiptap(server);
+  const { ownEcho, idWrites } = reconcileServerEcho(server, liveDoc.content);
+  assert.equal(ownEcho, true, "an unchanged grid section is its own echo");
+  assert.equal(idWrites.length, 0);
+});

@@ -67,6 +67,28 @@ export const BP_SECTION_NODE_NAME = "bpSection";
 // The section's persisted bpType.
 export const BP_SECTION_BP_TYPE = "section";
 
+// STEP-2 LAYOUT ENGINE (canvas side). The gap token → CSS-var vocabulary MIRRORS
+// the ONE Elixir helper (compose.ex gap_token_var/1) so the reader and the canvas
+// resolve gaps identically (RISK #5). Default (absent/unknown) → md.
+const GAP_VARS = {
+  none: "var(--bp-space-none,0)",
+  sm: "var(--bp-space-sm,0.8rem)",
+  md: "var(--bp-space-md,1.6rem)",
+  lg: "var(--bp-space-lg,2.4rem)",
+};
+const gapVar = (token) => GAP_VARS[token] || GAP_VARS.md;
+
+// The grid predicate — the JS twin of compose.ex grid_layout/1. A layout is a grid
+// ONLY when mode === "grid"; absence, null, or any other mode is stack (byte-parity).
+const isGridLayout = (layout) => !!(layout && layout.mode === "grid");
+
+// tracks → a positive integer (default 2, matching the CSS --bp-tracks fallback).
+const gridTracks = (layout) => {
+  const t = layout && layout.tracks;
+  const n = typeof t === "string" ? parseInt(t, 10) : t;
+  return Number.isInteger(n) && n > 0 ? n : 2;
+};
+
 // CONTENT EXPRESSION (V1 forbid nested containers). The allowed child roster is the
 // canvas node roster MINUS bpSection (so a section cannot hold a section), PLUS
 // bpOpaque (the verbatim read-only carry for a non-canvas or nested-section child —
@@ -133,6 +155,46 @@ export const Section = Node.create({
         renderHTML: (attrs) =>
           attrs.title != null ? { "data-title": attrs.title } : {},
       },
+      // STEP-2 LAYOUT ENGINE — two PRESENT-ONLY JSON data-attrs (the bpColumnAtom
+      // bpBlock precedent: a JSON object survives setContent→getJSON because it rides
+      // a data-attr, not a dropped node key).
+      //
+      // layout — { mode:"stack"|"grid", tracks?, gap?, breakpoints? }. null/absent
+      // round-trips ABSENT (present-only). run-convert lowers it to block.layout and
+      // grid_layout(mode=="grid") gates the reader's grid path.
+      layout: {
+        default: null,
+        parseHTML: (el) => {
+          const raw = el.getAttribute("data-layout");
+          if (raw == null) return null;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (attrs) =>
+          attrs.layout != null ? { "data-layout": JSON.stringify(attrs.layout) } : {},
+      },
+      // cells — a POSITIONAL array of { span?, order? } (one per body child), the
+      // getJSON-safe transport for child span/order (prose/canvas child nodes drop
+      // unknown keys). run-convert hoists/splits it; persisted layout stays cells-free.
+      // RISK #1: index-keyed, so a reorder misassigns — invisible in v1 (unrendered),
+      // step 6 must re-key by child bpId. null/absent round-trips ABSENT.
+      cells: {
+        default: null,
+        parseHTML: (el) => {
+          const raw = el.getAttribute("data-cells");
+          if (raw == null) return null;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (attrs) =>
+          attrs.cells != null ? { "data-cells": JSON.stringify(attrs.cells) } : {},
+      },
     };
   },
 
@@ -197,18 +259,81 @@ export const Section = Node.create({
       titleEl.setAttribute("data-test-id", "paper-section-title");
 
       // The editable BODY: the contentDOM hole PM fills with the block+ children.
+      // In grid mode paint() swaps its class to `bp-section__grid` + sets --bp-tracks
+      // (the SHARED reader class — parity by construction, no competing producer).
       const body = document.createElement("div");
       body.className = "bp-section__body";
 
       const hrBot = hrTop.cloneNode();
 
-      // Reader column order: HR, title, children, HR.
-      dom.append(hrTop, titleEl, body, hrBot);
+      // ── STEP-2 layout controls (hover-revealed bp-canvas-* chrome; the table/
+      // terminal rail precedent). A mode toggle (stack⇄grid) + a tracks stepper,
+      // writing node.attrs.layout via the SAME debounced/re-entrancy-guarded
+      // setNodeMarkup the title uses. NOT PM content (stopEvent/ignoreMutation hide
+      // it). No new competing HTML producer — the grid itself is the shared CSS class.
+      const controls = document.createElement("div");
+      controls.className = "bp-canvas-section__controls";
+      controls.contentEditable = "false";
+
+      const modeBtn = document.createElement("button");
+      modeBtn.type = "button";
+      modeBtn.className = "bp-canvas-section__btn";
+      modeBtn.setAttribute("data-test-id", "paper-section-mode");
+
+      const tracksDec = document.createElement("button");
+      tracksDec.type = "button";
+      tracksDec.className = "bp-canvas-section__btn";
+      tracksDec.textContent = "−";
+      tracksDec.setAttribute("data-test-id", "paper-section-tracks-dec");
+
+      const tracksLabel = document.createElement("span");
+      tracksLabel.className = "bp-canvas-section__tracks";
+
+      const tracksInc = document.createElement("button");
+      tracksInc.type = "button";
+      tracksInc.className = "bp-canvas-section__btn";
+      tracksInc.textContent = "+";
+      tracksInc.setAttribute("data-test-id", "paper-section-tracks-inc");
+
+      controls.append(modeBtn, tracksDec, tracksLabel, tracksInc);
+
+      // Reader column order: HR, title, children, HR. Controls ride at the top,
+      // OUTSIDE the reader order (edit-only chrome, hidden at rest via CSS).
+      dom.append(controls, hrTop, titleEl, body, hrBot);
 
       // Guards the paint→titleEl write from re-entering the input listener.
       let syncingTitle = false;
 
       const paint = (n) => {
+        // ── STEP-2: paint the body layout. Grid mode swaps the body to the SHARED
+        // `bp-section__grid` class + sets --bp-tracks/--bp-grid-gap; stack mode keeps
+        // today's `bp-section__body` flex-column (byte-unchanged DOM). PM lays the
+        // block+ children into whichever the body class is.
+        const layout = n.attrs && n.attrs.layout;
+        const grid = isGridLayout(layout);
+        if (grid) {
+          const tracks = gridTracks(layout);
+          body.className = "bp-section__grid";
+          body.style.setProperty("--bp-tracks", String(tracks));
+          body.style.setProperty("--bp-grid-gap", gapVar(layout && layout.gap));
+          modeBtn.textContent = "grid";
+          tracksLabel.textContent = `${tracks} col`;
+          tracksLabel.style.display = "";
+          tracksDec.style.display = "";
+          tracksInc.style.display = "";
+        } else {
+          body.className = "bp-section__body";
+          body.style.removeProperty("--bp-tracks");
+          body.style.removeProperty("--bp-grid-gap");
+          modeBtn.textContent = "stack";
+          // The tracks stepper is meaningless in stack mode — hide it.
+          tracksLabel.style.display = "none";
+          tracksDec.style.display = "none";
+          tracksInc.style.display = "none";
+        }
+        // Controls are edit-only: hidden entirely in view mode.
+        controls.style.display = editor.isEditable ? "" : "none";
+
         const title = n.attrs && n.attrs.title;
         const hasTitle = title != null && title !== "";
         // Only write when the DOM disagrees, so we never clobber the caret mid-edit.
@@ -280,6 +405,52 @@ export const Section = Node.create({
       };
       titleEl.addEventListener("input", scheduleWrite);
 
+      // ── STEP-2: write node.attrs.layout via the SAME re-entrancy-guarded
+      // setNodeMarkup the title uses. `mutate` receives the current layout (or a
+      // stack default) and returns the next layout object (or null to clear → stack).
+      const writeLayout = (mutate) => {
+        if (!editor.isEditable) return;
+        if (typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        const cur = editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_SECTION_NODE_NAME) return;
+        const nextLayout = mutate(cur.attrs.layout || { mode: "stack" });
+        editor
+          .chain()
+          .command(({ tr }) => {
+            tr.setNodeMarkup(pos, undefined, { ...cur.attrs, layout: nextLayout });
+            return true;
+          })
+          .run();
+      };
+
+      // Mode toggle: stack ⇄ grid. Flipping TO grid seeds mode + tracks (2) so the
+      // grid paints immediately; flipping TO stack writes an explicit {mode:"stack"}
+      // (compose grid_layout gates on "grid" only, so this renders byte-identical to
+      // absent — the callout maybe_put_true precedent).
+      const onModeToggle = () => {
+        writeLayout((cur) =>
+          isGridLayout(cur)
+            ? { ...cur, mode: "stack" }
+            : { ...cur, mode: "grid", tracks: gridTracks(cur) },
+        );
+      };
+      modeBtn.addEventListener("click", onModeToggle);
+
+      // Tracks stepper (grid only): clamp to 1..6.
+      const stepTracks = (delta) => {
+        writeLayout((cur) => {
+          if (!isGridLayout(cur)) return cur;
+          const next = Math.min(6, Math.max(1, gridTracks(cur) + delta));
+          return { ...cur, mode: "grid", tracks: next };
+        });
+      };
+      const onTracksInc = () => stepTracks(1);
+      const onTracksDec = () => stepTracks(-1);
+      tracksInc.addEventListener("click", onTracksInc);
+      tracksDec.addEventListener("click", onTracksDec);
+
       // Read the current node at getPos (for the blur repaint).
       const currentNode = () => {
         if (typeof getPos !== "function") return node;
@@ -305,15 +476,21 @@ export const Section = Node.create({
         // PM must NOT treat chrome events/mutations as content edits, but MUST own the
         // body (contentDOM). Title keystrokes write the attr, not PM content.
         stopEvent: (e) => {
-          // Events originating in the editable title are handled by the island (they
-          // write node.attrs.title), NOT by PM — so PM must not turn them into
-          // transactions / caret jumps.
-          return !!(e && e.target && titleEl.contains(e.target));
+          // Events originating in the editable title OR the layout controls are handled
+          // by the islands (they write node.attrs.title / .layout), NOT by PM — so PM
+          // must not turn them into transactions / caret jumps.
+          const t = e && e.target;
+          return !!(t && (titleEl.contains(t) || controls.contains(t)));
         },
         ignoreMutation: (m) => {
           if (m.type === "selection") return false; // let PM own selection
           if (m.type === "attributes" && m.target === dom) return true;
+          // STEP-2: paint() rewrites the body's OWN class/style (bp-section__body ⇄
+          // bp-section__grid + --bp-tracks) — that is view-only chrome, NOT a content
+          // edit, so PM must ignore attribute mutations on the body element itself.
+          if (m.type === "attributes" && m.target === body) return true;
           if (titleEl.contains(m.target)) return true; // title edits are attr writes
+          if (controls.contains(m.target)) return true; // layout controls are attr writes
           if (hrTop.contains(m.target) || hrBot.contains(m.target)) return true;
           // Let PM handle mutations inside the editable body (contentDOM); ignore all
           // other chrome.
@@ -326,6 +503,9 @@ export const Section = Node.create({
           titleEl.removeEventListener("blur", onTitleBlur);
           titleEl.removeEventListener("keydown", onTitleKeydown);
           titleEl.removeEventListener("input", scheduleWrite);
+          modeBtn.removeEventListener("click", onModeToggle);
+          tracksInc.removeEventListener("click", onTracksInc);
+          tracksDec.removeEventListener("click", onTracksDec);
         },
       };
     };
