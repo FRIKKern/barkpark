@@ -1,6 +1,6 @@
 # Barkpark task design language — GUI & TUI parity + authoring ideals
 
-**Status:** design spec, awaiting build sign-off · **Date:** 2026-07-04 · **Companion artifacts:**
+**Status:** design spec — GUI board BUILT (Studio /admin/projects, waves 1–5) · TUI `bp tasks` shipped · **Date:** 2026-07-04 · **Companion artifacts:**
 the published design proposals (shared vocabulary + detailed components; GUI/TUI parity). This is the
 durable in-repo copy the build works from.
 
