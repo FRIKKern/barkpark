@@ -384,6 +384,55 @@ defmodule Barkpark.Tasks.Board do
     }
   end
 
+  # ── wave 3: drag restage (charter D4/D11) ──────────────────────────────────
+
+  @typedoc """
+  The fenced primitive a drop maps to (`restage_plan/4`):
+
+    * `{:claim}`            — a claimable card enters `in_progress`
+    * `{:close, "done"}`    — the holder closes their own card done
+    * `{:close, "blocked"}` — the holder parks their own card blocked
+    * `:refuse`             — no legal transition (snap the card back)
+  """
+  @type restage_plan :: {:claim} | {:close, String.t()} | :refuse
+
+  @doc """
+  The D11 transition table: which fenced primitive (if any) realizes a drag from
+  `from_col` to `to_col`, given the task's true claim `holder` and the acting
+  `worker`. PURE — no socket, no DB, no clock.
+
+  The ONLY legal set:
+
+    * `{open, ready, blocked} → in_progress` ⇒ `{:claim}` — the drop claims the
+      task through `Tasks.claim_by_id/3` (which re-checks readiness + deps + the
+      resource fence server-side; a foreign in-flight card naturally refuses
+      there with `:not_ready`).
+    * the holder's `in_progress → done` ⇒ `{:close, "done"}`.
+    * the holder's `in_progress → blocked` ⇒ `{:close, "blocked"}`.
+
+  EVERYTHING ELSE is `:refuse`:
+
+    * a foreign hold (`holder != worker`) can never be closed — `close/3` fences
+      on epoch, NOT identity, so a same-epoch close by a non-holder would corrupt
+      the claim; refuse it BEFORE the primitive is ever called.
+    * `→ open` (reopen) is deferred (D4); `→ ready` is a derived, non-drop column
+      (D3); an unclaimed `→ done` and any `done → *` are not legal drags.
+  """
+  @spec restage_plan(atom(), atom(), String.t() | nil, String.t()) :: restage_plan()
+  def restage_plan(from_col, to_col, holder, worker)
+
+  def restage_plan(from, :in_progress, _holder, _worker)
+      when from in [:open, :ready, :blocked],
+      do: {:claim}
+
+  def restage_plan(:in_progress, :done, holder, worker) when holder == worker,
+    do: {:close, "done"}
+
+  def restage_plan(:in_progress, :blocked, holder, worker) when holder == worker,
+    do: {:close, "blocked"}
+
+  def restage_plan(_from, _to, _holder, _worker), do: :refuse
+
   # Bucketing (charter): in_progress/done are stored states; ready is the
   # derived overlay; open/blocked are the fall-through.
   defp bucket(%{lifecycle_status: "in_progress"}), do: :in_progress

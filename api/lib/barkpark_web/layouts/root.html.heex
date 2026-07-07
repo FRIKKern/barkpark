@@ -5232,6 +5232,99 @@
       }
     };
 
+    // BarkparkBoardDrag — drag a Projects-board card between columns to flip its
+    // lifecycle through the FENCED claim/close primitives (Barkpark Projects,
+    // wave 3). Mounted on the `.bp-board` container (opt-in — inert without the
+    // phx-hook attr, so studio + every other LiveView is untouched). Same
+    // CSP-safe, dependency-free HTML5-drag shape as BarkparkPaperSortable: a
+    // card is a draggable [data-role=task-card] carrying data-doc-id; a drop
+    // target is its enclosing [data-role=column] carrying data-col. The server
+    // owns the model (D1/D9) — we do NOT reorder the DOM optimistically;
+    // on drop we pushEvent("restage", {doc_id, to_col}) and the LiveView does the
+    // optimistic move + the real claim/close, snapping back on refusal. On
+    // dragover we toggle a pure-CSS .bp-drop-ok / .bp-drop-no highlight on the
+    // hovered column (ready reads .bp-drop-no — it is a non-drop target, D3).
+    Hooks.BarkparkBoardDrag = {
+      mounted() {
+        this._dragDocId = null;
+        this._overCol = null;
+
+        const cardOf = (n) =>
+          n && n.closest ? n.closest("[data-role=task-card]") : null;
+        const colOf = (n) =>
+          n && n.closest ? n.closest("[data-role=column]") : null;
+
+        this._clearHighlight = () => {
+          const cols = this.el.querySelectorAll(".bp-drop-ok, .bp-drop-no");
+          cols.forEach((c) => c.classList.remove("bp-drop-ok", "bp-drop-no"));
+          this._overCol = null;
+        };
+
+        this._onDragStart = (e) => {
+          const card = cardOf(e.target);
+          if (!card) {
+            // A drag that did not start on a card (e.g. a text selection) — let
+            // the browser handle it; never begin a board drag.
+            return;
+          }
+          this._dragDocId = card.getAttribute("data-doc-id");
+          card.classList.add("bp-card-dragging");
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = "move";
+            // Firefox requires data to be set for a drag to begin.
+            try { e.dataTransfer.setData("text/plain", this._dragDocId || ""); } catch (_) {}
+          }
+        };
+
+        this._onDragOver = (e) => {
+          if (this._dragDocId == null) return;
+          const col = colOf(e.target);
+          if (!col) return;
+          e.preventDefault();
+          if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+          if (this._overCol && this._overCol !== col) {
+            this._overCol.classList.remove("bp-drop-ok", "bp-drop-no");
+          }
+          this._overCol = col;
+          // Ready is a derived, non-drop column (D3) — hatch it, never light it.
+          const ok = col.getAttribute("data-col") !== "ready";
+          col.classList.toggle("bp-drop-ok", ok);
+          col.classList.toggle("bp-drop-no", !ok);
+        };
+
+        this._onDrop = (e) => {
+          if (this._dragDocId == null) return;
+          e.preventDefault();
+          const col = colOf(e.target);
+          const docId = this._dragDocId;
+          const toCol = col ? col.getAttribute("data-col") : null;
+          this._clearDrag();
+          if (docId && toCol) {
+            this.pushEvent("restage", { doc_id: docId, to_col: toCol });
+          }
+        };
+
+        this._clearDrag = () => {
+          const dragging = this.el.querySelector(".bp-card-dragging");
+          if (dragging) dragging.classList.remove("bp-card-dragging");
+          this._clearHighlight();
+          this._dragDocId = null;
+        };
+        this._onDragEnd = this._clearDrag;
+
+        this.el.addEventListener("dragstart", this._onDragStart);
+        this.el.addEventListener("dragover", this._onDragOver);
+        this.el.addEventListener("drop", this._onDrop);
+        this.el.addEventListener("dragend", this._onDragEnd);
+      },
+      destroyed() {
+        this.el.removeEventListener("dragstart", this._onDragStart);
+        this.el.removeEventListener("dragover", this._onDragOver);
+        this.el.removeEventListener("drop", this._onDrop);
+        this.el.removeEventListener("dragend", this._onDragEnd);
+      }
+    };
+
     // BarkparkCalloutFold — persists a foldable callout's native <details> fold
     // state (article mode only). Attached to the per-block stream wrapper
     // <div id={dom_id} data-block-id={...}> (NOT the inner streamed <details>,

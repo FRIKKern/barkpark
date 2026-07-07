@@ -61,13 +61,39 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   echo and exact-repeat events. Non-`task` events and anything else are ignored
   by a catch-all `handle_info` clause — a stray message never crashes the socket.
 
-  Purely observational still — no writes; drag write-through lands in wave 3.
+  ## Drag restage (charter §criterion, wave 3)
+
+  The board is now INTERACTIVE. A card carries `draggable="true"`; the shared
+  `BarkparkBoardDrag` hook (opt-in on `.bp-board`, CSP-safe, no bundler) pushes a
+  `restage` event with the dragged card's `doc_id` and the target column's
+  `data-col`. `handle_event/3` flips the task's lifecycle THROUGH THE SAME FENCED
+  PRIMITIVES `bp` uses — never a raw `Content` write:
+
+    * it resolves the Default-workspace scope (D12) and FRESH-reads the live task
+      row for its uuid pk + observed epoch + true claim holder (never the board
+      card's possibly-stale epoch);
+    * the pure `Board.restage_plan/4` (D11) decides the primitive: a claimable
+      card → `Tasks.claim_by_id/3`; the holder's in-flight card → `Tasks.close/3`
+      (`done`/`blocked`); everything else refuses (a foreign hold, a `→ ready`
+      non-drop (D3), a deferred reopen);
+    * the move is OPTIMISTIC (D9) — the card re-buckets the instant you drop via
+      the same `apply_change/3` the broadcast rides — and ROLLS BACK to a fresh
+      `snapshot/1` with a dismissible notice if the fence refuses.
+
+  No new process — the write rides THIS per-socket event (D5).
   """
 
   use BarkparkWeb, :live_view
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Content
+  alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
+  alias Barkpark.Repo
+  alias Barkpark.Tasks
   alias Barkpark.Tasks.Board
+  alias Barkpark.Tenancy
 
   # The slow reconcile cadence. Realtime motion is instant off the broadcast;
   # this only re-derives what one event can't (ready overlay, cascade-unblocks,
@@ -88,6 +114,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      |> assign(:dataset, @dataset)
      |> assign(:board, Board.snapshot(dataset: @dataset))
      |> assign(:last_change, nil)
+     |> assign(:notice, nil)
      |> assign(:seen, MapSet.new())}
   end
 
@@ -133,6 +160,189 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # A non-task document event, or any other stray message — ignore it. NEVER
   # crash the socket over an event we don't render.
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  # ── wave 3: drag restage (charter D4/D11/D12) ──────────────────────────────
+  #
+  # The browser hook (`BarkparkBoardDrag`) pushes `restage` with the dragged
+  # card's `doc_id` and the target column's `data-col`. We NEVER take the card's
+  # possibly-stale board epoch on faith: we resolve the Default-workspace scope
+  # (D12 — the same scope `tasks_controller` writes through) and FRESH-read the
+  # live task row for its uuid pk, observed epoch, and true claim holder, then
+  # let the pure `Board.restage_plan/4` decide which fenced primitive (if any)
+  # the drop maps to. The write rides THIS per-socket event — no new process,
+  # no raw Content write (charter D1/D5): a claim goes through
+  # `Tasks.claim_by_id/3`, a close through `Tasks.close/3`, exactly as `bp` does.
+  @impl true
+  def handle_event("restage", %{"doc_id" => doc_id, "to_col" => to_col_raw}, socket) do
+    with to_col when not is_nil(to_col) <- parse_col(to_col_raw),
+         %{id: ws_id} <- Tenancy.get_default_workspace(),
+         {:ok, %Document{} = doc} <- fetch_live_task(doc_id, ws_id),
+         prev when not is_nil(prev) <- socket.assigns.board.cards_by_id[doc_id] do
+      content = doc.content || %{}
+      epoch = get_in(content, ["claim", "epoch"]) || 0
+      holder = get_in(content, ["claim", "worker"])
+      worker = worker_of(socket)
+      plan = Board.restage_plan(prev.col, to_col, holder, worker)
+
+      run_restage(socket, plan, %{
+        doc_id: doc_id,
+        task_id: doc.id,
+        prev: prev,
+        to_col: to_col,
+        from_col: prev.col,
+        holder: holder,
+        worker: worker,
+        epoch: epoch,
+        scope: [workspace_id: ws_id]
+      })
+    else
+      # No default workspace, an unknown column, a row that vanished, or a card
+      # not on this board — refuse silently-but-visibly (never a raw write, never
+      # a crash). The board is unchanged; a dismissible notice tells the user.
+      _ -> {:noreply, assign(socket, :notice, "That drop can't be applied right now.")}
+    end
+  end
+
+  # Dismiss the transient refusal banner.
+  def handle_event("dismiss-notice", _params, socket) do
+    {:noreply, assign(socket, :notice, nil)}
+  end
+
+  # A legal claim: OPTIMISTICALLY move the card to in_progress (D9 — the board
+  # feels instant), THEN run the fence. On accept keep it (the real
+  # `task.claimed` broadcast also arrives; the seen-set + idempotent
+  # `apply_change/3` de-dupe). On refuse (a foreign in-flight card fences here
+  # with `:not_ready`) roll back to the authoritative snapshot + notice.
+  defp run_restage(socket, {:claim}, ctx) do
+    socket = optimistic_move(socket, ctx.prev, "in_progress", ctx.worker)
+
+    case Tasks.claim_by_id(ctx.doc_id, ctx.worker, ctx.scope) do
+      {:ok, _} ->
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, rollback(socket, "Couldn't claim that task — it may be held or blocked.")}
+    end
+  end
+
+  # A legal close by the holder (`restage_plan/4` already guaranteed
+  # `holder == worker`, so `close/3` — which fences on epoch, not identity — is
+  # never called for a foreign hold). Optimistic move, then the fenced close.
+  defp run_restage(socket, {:close, status}, ctx) do
+    socket = optimistic_move(socket, ctx.prev, status, ctx.worker)
+
+    case Tasks.close(ctx.task_id, ctx.worker, observed_epoch: ctx.epoch, lifecycle_status: status) do
+      {:ok, _} ->
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, rollback(socket, "Couldn't close that task — its claim moved under you.")}
+    end
+  end
+
+  # No legal transition: never touch the model, never call a primitive — just
+  # surface WHY (the card stays where the server last rendered it; the hook does
+  # not reorder the DOM optimistically, so nothing needs snapping back).
+  defp run_restage(socket, :refuse, ctx) do
+    {:noreply,
+     assign(socket, :notice, refuse_notice(ctx.from_col, ctx.to_col, ctx.holder, ctx.worker))}
+  end
+
+  # Optimistically re-bucket the dragged card to its target lifecycle so the
+  # board moves the instant you drop (D9). We synthesize a normalized card off
+  # the previous projection with the new lifecycle + worker and fold it through
+  # the SAME pure `apply_change/3` the realtime broadcast uses, so the optimistic
+  # move and the eventual real event converge on one card, one column.
+  defp optimistic_move(socket, prev, lifecycle, worker) do
+    card = %{prev | lifecycle_status: lifecycle, worker: worker}
+    {board, change} = Board.apply_change(socket.assigns.board, card)
+
+    socket
+    |> assign(:board, board)
+    |> assign(:last_change, change)
+    |> assign(:notice, nil)
+  end
+
+  # A refused/failed write snaps the board back to the authoritative DB state
+  # (D9) so a rejected optimistic move never lingers, and raises the notice.
+  defp rollback(socket, message) do
+    socket
+    |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+    |> assign(:last_change, nil)
+    |> assign(:notice, message)
+  end
+
+  # The acting worker for a Studio-driven write: `studio:<current-user>` when an
+  # account session resolved a User (D11), else `studio:admin` for the thin
+  # api-token conns (Studio's default posture) and tests. The colon-prefixed
+  # namespace keeps a board-driven claim legible next to `cmux-*` / bp workers.
+  defp worker_of(socket) do
+    case socket.assigns[:current_user] do
+      %{email: email} when is_binary(email) and email != "" -> "studio:" <> email
+      _ -> "studio:admin"
+    end
+  end
+
+  # Fresh-read the live task row scoped to the Default workspace (D12 — the same
+  # scope `tasks_controller` writes through), with the exact/`drafts.` fallback
+  # `find_task_by_doc_id`/`claim_by_id` use so a mutate-created `drafts.<id>` row
+  # resolves from its published logical id.
+  defp fetch_live_task(doc_id, ws_id) do
+    case fetch_task_exact(doc_id, ws_id) do
+      {:ok, _} = hit ->
+        hit
+
+      :error ->
+        if String.starts_with?(doc_id, "drafts."),
+          do: :error,
+          else: fetch_task_exact("drafts." <> doc_id, ws_id)
+    end
+  end
+
+  defp fetch_task_exact(doc_id, ws_id) do
+    query =
+      from(d in Document, where: d.doc_id == ^doc_id and d.type == "task")
+      |> Scope.scope_to_workspace(ws_id, nil)
+
+    case Repo.one(query) do
+      nil -> :error
+      %Document{} = doc -> {:ok, doc}
+    end
+  end
+
+  # A plain-English reason for a refused drop — the always-a-next-step signal so
+  # a refusal reads as guidance, not a dead end (§0). Presentation-only; the
+  # legality itself is `Board.restage_plan/4`'s pure verdict.
+  defp refuse_notice(from_col, to_col, holder, worker) do
+    cond do
+      to_col == :ready ->
+        "Ready is derived from a task's dependencies — you can't drop a card there."
+
+      to_col == :open ->
+        "Reopening a task from the board isn't supported yet."
+
+      from_col == :done ->
+        "Done tasks stay put — drag lands one-way down the ladder."
+
+      from_col == :in_progress and holder not in [nil, worker] ->
+        "@#{holder} holds this task — only the holder can move it to Done or Blocked."
+
+      to_col in [:done, :blocked] and from_col != :in_progress ->
+        "Claim the task first (drop it on In Progress), then you can close it."
+
+      true ->
+        "That move isn't a valid step."
+    end
+  end
+
+  # A safe column parse — a whitelist off `Board.columns/0`, NEVER
+  # `String.to_atom/1` on wire input (that would leak the atom table to a
+  # crafted `to_col`). Returns the atom or nil.
+  defp parse_col(raw) when is_binary(raw) do
+    Enum.find(Board.columns(), fn col -> Atom.to_string(col) == raw end)
+  end
+
+  defp parse_col(_), do: nil
 
   @impl true
   def render(assigns) do
@@ -180,6 +390,46 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         background: var(--card-background-color, rgba(127,127,127,0.04));
       }
       .bp-card--done { opacity: 0.62; }
+
+      /* Drag restage (wave 3) — pure-CSS affordances (CSP-safe, no JS styling).
+         A card is draggable="true"; while dragging it dims + shows the grab
+         cursor, and the column under the pointer lights (ok) or hatches (no)
+         via a .bp-drop-ok/.bp-drop-no class the hook toggles on dragover. Ready
+         is a non-drop column (D3) → it always reads .bp-drop-no. */
+      .bp-card[draggable="true"] { cursor: grab; }
+      .bp-card.bp-card-dragging { opacity: 0.45; cursor: grabbing; }
+      .bp-col.bp-drop-ok {
+        border-radius: 10px;
+        box-shadow: inset 0 0 0 2px rgba(37,99,235,0.55);
+        background: rgba(37,99,235,0.06);
+      }
+      .bp-col.bp-drop-no {
+        border-radius: 10px;
+        box-shadow: inset 0 0 0 2px rgba(127,127,127,0.35);
+        background: rgba(127,127,127,0.06);
+      }
+
+      /* Refusal / rollback banner — a dismissible status line so a refused drop
+         reads as guidance, not a dead end (§0 "always a next step"). CSS fade-in
+         only; frozen under prefers-reduced-motion below. */
+      .bp-notice {
+        display: flex; align-items: center; gap: 0.6rem;
+        margin: 0 0 1rem; padding: 0.55rem 0.8rem; border-radius: 8px;
+        font-size: 0.9rem; border: 1px solid #d97706;
+        background: rgba(217,119,6,0.12);
+        animation: bp-notice-in 260ms ease-out 1;
+      }
+      .bp-notice-text { flex: 1 1 auto; }
+      .bp-notice-x {
+        flex: 0 0 auto; cursor: pointer; border: 0; background: transparent;
+        font-size: 1.15rem; line-height: 1; padding: 0 0.2rem; color: inherit;
+        opacity: 0.7;
+      }
+      .bp-notice-x:hover { opacity: 1; }
+      @keyframes bp-notice-in {
+        0%   { opacity: 0; transform: translateY(-4px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
 
       /* Realtime flash (wave 2) — the just-changed card pulses its border + a
          soft wash so the eye lands on the movement (§0 "you watch momentum").
@@ -291,6 +541,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .bp-bar-fill { transition: none; }
         .bp-flash { animation: none; }
         .m-bump { animation: none; }
+        .bp-notice { animation: none; }
       }
     </style>
 
@@ -300,7 +551,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <small>
           A live board over the real task documents — it MOVES: claim or close a
           task anywhere and its card flashes, re-buckets, and the tally climbs.
-          Columns are the status ladder; drag lands in a later wave.
+          Columns are the status ladder; drag a card to In&nbsp;Progress to claim
+          it, or drop your own onto Done or Blocked to close it.
         </small>
       </p>
 
@@ -314,11 +566,27 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <div class="bp-bar-fill" style={"width: #{@board.momentum.pct}%;"}></div>
       </div>
 
+      <div :if={@notice} class="bp-notice" data-role="notice" role="status">
+        <span class="bp-notice-text"><%= @notice %></span>
+        <button
+          type="button"
+          class="bp-notice-x"
+          data-role="notice-dismiss"
+          phx-click="dismiss-notice"
+          aria-label="Dismiss"
+        >×</button>
+      </div>
+
       <div :if={empty_board?(@board)} data-role="board-empty">
         <p><em>No tasks yet — file one with <code>bp task create</code> and it appears here.</em></p>
       </div>
 
-      <div class="bp-board" data-role="board">
+      <div
+        id="bp-projects-board"
+        class="bp-board"
+        data-role="board"
+        phx-hook="BarkparkBoardDrag"
+      >
         <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
           <h2 class="bp-col-h">
             <%= col_label(col) %>
@@ -334,6 +602,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             data-col={col}
             data-doc-id={card.doc_id}
             data-just-moved={just_moved?(@last_change, card) && "true"}
+            draggable="true"
           >
             <div class="bp-card-top">
               <span
