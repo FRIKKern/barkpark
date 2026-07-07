@@ -23,7 +23,10 @@ defmodule Barkpark.Plugins.Github.Settings do
 
     * `get_credentials/0` — resolved creds map (`:repo, :app_id,
       :installation_id, :private_key, :webhook_secret, :project_id, :api_base`).
-      Never raises; any unconfigured field is `nil`.
+      Never raises on missing/blank settings; any unconfigured field is `nil`.
+      (It DOES touch the DB for the fallback row, so a hard DB/Cloak failure
+      still propagates — deliberately un-rescued so a bad `BARKPARK_CLOAK_KEY`
+      surfaces loudly rather than silently darkening the bridge.)
     * `active?/0` — `true` only when ALL required creds (`repo`, `app_id`,
       `installation_id`, `private_key`, `webhook_secret` — reused from
       `Github.required_creds/0`) are present and non-blank. Fail-closed.
@@ -80,7 +83,9 @@ defmodule Barkpark.Plugins.Github.Settings do
 
   @doc """
   Resolved credentials map. Per-field: env wins, DB row falls back, otherwise
-  `nil`. Never raises — callers gate on `active?/0` before any network call.
+  `nil`. Never raises on missing/blank settings — callers gate on `active?/0`
+  before any network call. (A hard DB/Cloak failure on the fallback read still
+  propagates; see the moduledoc.)
   """
   @spec get_credentials() :: credentials()
   def get_credentials do
@@ -96,6 +101,11 @@ defmodule Barkpark.Plugins.Github.Settings do
   `true` only when every required credential is present and non-blank —
   fail-closed. A half-provisioned App (say a key but no installation id) is
   worse than a dark one, so the gate refuses it.
+
+  NOT free: each call resolves `get_credentials/0`, which reads the DB fallback
+  row via `Settings.get/1` — and that logs a `"read"` audit row + telemetry per
+  call. A wave-2 drain worker that ticks `active?/0` in a tight loop should
+  memoize the result (short TTL) rather than hammer the DB + audit table.
   """
   @spec active?() :: boolean()
   def active? do
