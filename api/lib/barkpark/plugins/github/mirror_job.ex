@@ -29,7 +29,9 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
        is broken structurally by the `source="github"` outbox exclusion (D4).
     4. `Projection.task_to_issue/1` → the desired issue shape (pure).
     5. No stored integer `issue` → CREATE via `Client.create_issue/3`, then
-       stamp `Link.put(repo, issue, synced_rev, state: "synced")`.
+       stamp `Link.put(repo, issue, synced_rev, state: "synced")`. A new issue
+       is always born `open`; if the ledger wants it closed, a follow-up PATCH
+       converges `state` in the same reconcile (create alone can't birth closed).
     6. A stored integer `issue` → one idempotent `Client.update_issue/4`
        field-set PATCH (title/body/labels/state[/state_reason]) that covers
        open/reopen/close in a single call, then stamp `Link.put(synced_rev:)`
@@ -145,13 +147,21 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # ---------------------------------------------------------------------------
 
   defp converge(doc_id, dataset, task_doc, link, opts) do
-    desired = Projection.task_to_issue(task_doc)
-    repo = repo()
-    rev = rev_of(task_doc)
+    case repo() do
+      repo when is_binary(repo) and repo != "" ->
+        desired = Projection.task_to_issue(task_doc)
+        rev = rev_of(task_doc)
 
-    case issue_number(link) do
-      nil -> create(doc_id, dataset, repo, desired, rev, opts)
-      num when is_integer(num) -> update(doc_id, dataset, repo, num, desired, rev, opts)
+        case issue_number(link) do
+          nil -> create(doc_id, dataset, repo, desired, rev, opts)
+          num when is_integer(num) -> update(doc_id, dataset, repo, num, desired, rev, opts)
+        end
+
+      _ ->
+        # No mirror repo configured — the client verbs would FunctionClause-crash
+        # on a nil repo and Oban would retry the crash forever. Dead-letter it
+        # until config is fixed (slice 2 centralises the env→DB resolution).
+        {:cancel, :repo_unconfigured}
     end
   end
 
@@ -160,7 +170,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
     case Client.create_issue(repo, params, opts) do
       {:ok, %{"number" => num}} when is_integer(num) ->
-        stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"})
+        after_create(doc_id, dataset, repo, num, desired, rev, opts)
 
       {:ok, other} ->
         # A 2xx with no issue number is a GitHub contract violation we can't
@@ -170,6 +180,24 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
       {:error, err} ->
         classify(err, :create, doc_id, dataset)
+    end
+  end
+
+  # A brand-new GitHub issue is ALWAYS born `open` — the REST create verb has no
+  # `state` parameter. When the ledger already wants the task closed (created
+  # `done`/`cancelled`, or closed inside the 30s debounce window so create+close
+  # coalesce into one reconcile), create alone would strand the issue `open`: the
+  # stamp write is `source: :github`, so it never re-enqueues to fix itself.
+  # Record the issue number first (so a retry PATCHes, never re-CREATEs), then
+  # converge `state` with a follow-up idempotent PATCH in the SAME reconcile.
+  defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, _opts) do
+    stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"})
+  end
+
+  defp after_create(doc_id, dataset, repo, num, desired, rev, opts) do
+    case stamp(doc_id, dataset, %{repo: repo, issue: num, state: "synced"}) do
+      :ok -> update(doc_id, dataset, repo, num, desired, rev, opts)
+      err -> err
     end
   end
 

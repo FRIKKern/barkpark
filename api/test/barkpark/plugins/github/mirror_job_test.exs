@@ -161,6 +161,43 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert is_binary(gh["synced_rev"])
     end
 
+    test "a task born closed (done) → create issue then PATCH it closed in one reconcile", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      # A create+close coalesced into one reconcile: the ledger already wants the
+      # task closed, but GitHub's create verb can only birth an OPEN issue. The
+      # reconcile must record the number, then close it with a follow-up PATCH —
+      # otherwise nothing re-enqueues (the stamp is source:github) and the issue
+      # is stranded open.
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"lifecycle_status" => "done"}, scope)
+
+      Bypass.expect_once(bypass, "POST", "/repos/#{@repo}/issues", fn conn ->
+        Plug.Conn.resp(conn, 201, Jason.encode!(%{"number" => 55, "state" => "open"}))
+      end)
+
+      {:ok, body_ref} = Agent.start_link(fn -> nil end)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/55", fn conn ->
+        {json, conn} = read_json_body(conn)
+        Agent.update(body_ref, fn _ -> json end)
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 55, "state" => "closed"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      body = Agent.get(body_ref, & &1)
+      assert body["state"] == "closed"
+      assert body["state_reason"] == "completed"
+
+      gh = Link.get(reload(id, scope))
+      assert gh["issue"] == 55
+      assert gh["state"] == "synced"
+      assert is_binary(gh["synced_rev"])
+    end
+
     test "404 on create → {:cancel, :repo_not_found} (repo missing, nothing to detach)", %{
       bypass: bypass,
       scope: scope
@@ -348,6 +385,23 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 20, state: "detached"}, scope)
 
       assert {:cancel, :detached} = MirrorJob.reconcile(id, @dataset, fast())
+    end
+
+    test "no mirror repo configured → {:cancel, :repo_unconfigured}, no HTTP", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      # An enabled-but-unconfigured plugin must dead-letter, not FunctionClause-
+      # crash the client on a nil repo and let Oban retry the crash forever.
+      Bypass.down(bypass)
+      cfg = Application.get_env(:barkpark, Barkpark.Plugins.Github)
+      Application.put_env(:barkpark, Barkpark.Plugins.Github, Keyword.delete(cfg, :repo))
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Plugins.Github, cfg) end)
+
+      id = uniq("gh")
+      _task = mk_task!(id, %{}, scope)
+
+      assert {:cancel, :repo_unconfigured} = MirrorJob.reconcile(id, @dataset, fast())
     end
 
     test "already-synced (synced_rev == _rev) → :ok, no HTTP", %{bypass: bypass, scope: scope} do
