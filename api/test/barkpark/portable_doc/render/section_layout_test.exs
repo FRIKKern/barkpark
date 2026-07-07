@@ -146,4 +146,147 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
     b = Map.put(stack_section(), "layout", nil)
     assert Render.render_block(b, @article) == @stack_html
   end
+
+  # ═══ STEP-6: per-child span/order emission on the grid cell ════════════════════
+  #
+  # A grid child MAY carry `span` (positive int → grid-column:span N) and/or `order`
+  # (any int → order:K). The reader emits these PRESENT-ONLY on the child's
+  # `.bp-section__cell` wrapper. A child with NEITHER emits a bare cell (byte-
+  # identical to pre-step-6), and children STILL route through their own emitters.
+
+  # A one-child grid section whose lone child carries the given placement keys.
+  defp grid_one(child_extra) do
+    child =
+      Map.merge(
+        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "x"}]},
+        child_extra
+      )
+
+    %{"type" => "section", "layout" => %{"mode" => "grid", "tracks" => 2}, "blocks" => [child]}
+  end
+
+  defp cell_style(html) do
+    case Regex.run(~r/<div class="bp-section__cell" style="([^"]*)">/, html) do
+      [_, style] -> style
+      _ -> nil
+    end
+  end
+
+  describe "STEP-6 per-child span/order emission" do
+    test "a child with span:2 → cell carries grid-column:span 2" do
+      html = Render.render_block(grid_one(%{"span" => 2}), @article)
+      assert cell_style(html) == "grid-column:span 2"
+    end
+
+    test "a child with order:1 → cell carries order:1" do
+      html = Render.render_block(grid_one(%{"order" => 1}), @article)
+      assert cell_style(html) == "order:1"
+    end
+
+    test "a child with BOTH → grid-column:span 2;order:1 (span first, deterministic)" do
+      html = Render.render_block(grid_one(%{"span" => 2, "order" => 1}), @article)
+      assert cell_style(html) == "grid-column:span 2;order:1"
+    end
+
+    test "a child with order:0 and negative order are legal (0 and -1 emit)" do
+      assert cell_style(Render.render_block(grid_one(%{"order" => 0}), @article)) == "order:0"
+      assert cell_style(Render.render_block(grid_one(%{"order" => -3}), @article)) == "order:-3"
+    end
+
+    test "children still route through their OWN emitters inside a styled cell" do
+      section = %{
+        "type" => "section",
+        "layout" => %{"mode" => "grid", "tracks" => 2},
+        "blocks" => [
+          %{
+            "type" => "callout",
+            "tone" => "info",
+            "span" => 2,
+            "content" => [%{"type" => "text", "value" => "note"}]
+          }
+        ]
+      }
+
+      html = Render.render_block(section, @article)
+      # The cell carries the placement AND wraps the callout's own emitter markup.
+      assert String.contains?(html, ~s(<div class="bp-section__cell" style="grid-column:span 2">))
+      assert String.contains?(html, "bp-callout"), "callout child renders through its own emitter"
+    end
+  end
+
+  # ── STEP-6 BACKWARD-COMPAT: a grid section with NO child span/order is byte-
+  #    identical to the pre-step-6 grid HTML. The frozen literal is the tripwire.
+  describe "STEP-6 no-cells grid byte-identity (the backward-compat tripwire)" do
+    # The exact bytes a two-child grid section (tracks:2, no title) emitted BEFORE
+    # step 6 — bare .bp-section__cell wrappers, no per-child style.
+    @grid_html_no_cells ~s(<div style="display:flex;flex-direction:column">) <>
+                          ~s(<hr class="bp-hr">) <>
+                          ~s|<div class="bp-section__grid" style="--bp-tracks:2;--bp-grid-gap:var(--bp-space-md,1.6rem)">| <>
+                          ~s(<div class="bp-section__cell"><p>a</p></div>) <>
+                          ~s(<div class="bp-section__cell"><p>b</p></div>) <>
+                          ~s(</div>) <>
+                          ~s(<hr class="bp-hr"></div>)
+
+    defp grid_no_cells do
+      %{
+        "type" => "section",
+        "layout" => %{"mode" => "grid", "tracks" => 2},
+        "blocks" => [
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "a"}]},
+          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "b"}]}
+        ]
+      }
+    end
+
+    test "a grid section with no child span/order renders BYTE-IDENTICALLY to pre-step-6" do
+      assert Render.render_block(grid_no_cells(), @article) == @grid_html_no_cells
+    end
+
+    test "the no-cells grid emits NO per-child style attr (bare cells only)" do
+      html = Render.render_block(grid_no_cells(), @article)
+      refute String.contains?(html, ~s(class="bp-section__cell" style=)),
+             "a child with no span/order must emit a BARE cell (byte-compat)"
+    end
+  end
+
+  # ── STEP-6 INT-GUARD / SECURITY + D2 — malformed span/order fall safe, no px ──
+  describe "STEP-6 int-guard (security) + D2 no-px" do
+    test "a malformed span emits NO grid-column (no style injection)" do
+      # A stringy value with trailing CSS, 0, -1, a float, and a non-numeric string
+      # must ALL drop the span (positive-int only, whole-string parse). The CSS
+      # injection probe is built by concatenation so the SOURCE never puts an
+      # `identifier:` adjacent (a 1.19 keyword-tokenizer ambiguity), while the
+      # RUNTIME value is exactly `2;background:url(x)`.
+      injection = "2;" <> "background" <> ":" <> "url(x)"
+
+      for bad <- [injection, 0, -1, 1.5, "abc", "  3  ", true] do
+        html = Render.render_block(grid_one(%{"span" => bad}), @article)
+
+        refute String.contains?(html, "grid-column"),
+               "span #{inspect(bad)} must NOT emit grid-column"
+
+        refute String.contains?(html, "background"),
+               "span #{inspect(bad)} must not leak an injected declaration"
+      end
+    end
+
+    test "a stringy positive-int span IS honored (mirror of grid_tracks)" do
+      html = Render.render_block(grid_one(%{"span" => "2"}), @article)
+      assert cell_style(html) == "grid-column:span 2"
+    end
+
+    test "a malformed order drops (non-int), but a stringy int is honored" do
+      assert cell_style(Render.render_block(grid_one(%{"order" => "1x"}), @article)) == nil
+      assert cell_style(Render.render_block(grid_one(%{"order" => 1.0}), @article)) == nil
+      assert cell_style(Render.render_block(grid_one(%{"order" => "2"}), @article)) == "order:2"
+    end
+
+    test "no per-child cell style ever carries a px literal (D2)" do
+      for extra <- [%{"span" => 2}, %{"order" => 3}, %{"span" => 4, "order" => -1}] do
+        style = grid_one(extra) |> Render.render_block(@article) |> cell_style()
+        assert style != nil
+        refute String.contains?(style, "px"), "cell style #{inspect(style)} must carry NO px (D2)"
+      end
+    end
+  end
 end
