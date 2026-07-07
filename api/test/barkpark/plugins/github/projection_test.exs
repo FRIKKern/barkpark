@@ -12,6 +12,9 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
     Map.merge(%{"doc_id" => "task-abc", "content" => content}, extra)
   end
 
+  # True when the issue body carries no acceptance fence.
+  defp refute_fence(issue), do: not (issue.body =~ "barkpark:acceptance")
+
   describe "state_for/1 — exhaustive lifecycle → {state, state_reason}" do
     test "done closes as completed" do
       assert Projection.state_for("done") == {"closed", "completed"}
@@ -182,6 +185,171 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
     test "no blocker refs → no marker block" do
       issue = Projection.task_to_issue(task(%{"description" => "Brief."}))
       refute issue.body =~ "barkpark:blocks"
+    end
+  end
+
+  describe "task_to_issue/1 — acceptance criteria checkboxes (flagship liveness signal)" do
+    test "renders a GitHub task list with met/unmet boxes, before the trailer" do
+      doc =
+        task(%{
+          "description" => "Brief.",
+          "acceptance_criteria" => [
+            %{"criterion" => "Loop is broken", "met" => true},
+            %{"criterion" => "Cursor advances", "met" => false}
+          ]
+        })
+
+      issue = Projection.task_to_issue(doc)
+
+      assert issue.body =~ "<!-- barkpark:acceptance:start -->"
+      assert issue.body =~ "### Acceptance criteria"
+      assert issue.body =~ "- [x] Loop is broken"
+      assert issue.body =~ "- [ ] Cursor advances"
+      assert issue.body =~ "<!-- barkpark:acceptance:end -->"
+      # Ordering: brief, then acceptance, then trailer.
+      assert issue.body =~ ~r/Brief\..*barkpark:acceptance:start.*Task: task-abc/s
+    end
+
+    test "a non-true met value is unchecked (only literal true checks the box)" do
+      doc =
+        task(%{
+          "acceptance_criteria" => [
+            %{"criterion" => "stringy met", "met" => "true"},
+            %{"criterion" => "missing met"}
+          ]
+        })
+
+      issue = Projection.task_to_issue(doc)
+      assert issue.body =~ "- [ ] stringy met"
+      assert issue.body =~ "- [ ] missing met"
+      refute issue.body =~ "- [x]"
+    end
+
+    test "tolerates bare-string criteria and skips blank/typeless rows" do
+      doc =
+        task(%{
+          "acceptance_criteria" => ["plain criterion", "", %{"criterion" => ""}, 42]
+        })
+
+      issue = Projection.task_to_issue(doc)
+      assert issue.body =~ "- [ ] plain criterion"
+      # Exactly one checklist item survived.
+      assert length(String.split(issue.body, "- [ ]")) == 2
+    end
+
+    test "empty or absent acceptance_criteria emits no acceptance fence" do
+      assert refute_fence(Projection.task_to_issue(task(%{"acceptance_criteria" => []})))
+      assert refute_fence(Projection.task_to_issue(task(%{})))
+    end
+
+    test "re-projecting a task with criteria is idempotent (one fence, stable body)" do
+      doc =
+        task(%{
+          "description" => "Brief.",
+          "acceptance_criteria" => [%{"criterion" => "c1", "met" => true}]
+        })
+
+      once = Projection.task_to_issue(doc)
+      twice = Projection.task_to_issue(doc)
+      assert once.body == twice.body
+      assert length(String.split(once.body, "<!-- barkpark:acceptance:start -->")) == 2
+    end
+
+    test "a multi-line criterion collapses to a single well-formed list line" do
+      doc = task(%{"acceptance_criteria" => [%{"criterion" => "line one\nline two"}]})
+      issue = Projection.task_to_issue(doc)
+      assert issue.body =~ "- [ ] line one line two"
+      refute issue.body =~ "line one\nline two"
+    end
+
+    test "acceptance and blocks fences coexist in reading order" do
+      doc =
+        task(
+          %{
+            "description" => "Brief.",
+            "acceptance_criteria" => [%{"criterion" => "c1"}]
+          },
+          %{"blocker_issue_refs" => [7]}
+        )
+
+      issue = Projection.task_to_issue(doc)
+      assert issue.body =~
+               ~r/Brief\..*barkpark:acceptance:start.*barkpark:blocks:start.*Task: task-abc/s
+    end
+  end
+
+  describe "sentinel safety — forged barkpark comments in human text are scrubbed" do
+    test "a forged acceptance sentinel in the brief is stripped (no fence hijack)" do
+      forged =
+        "Real note. <!-- barkpark:acceptance:start -->### Injected\n- [x] pwned<!-- barkpark:acceptance:end -->"
+
+      doc =
+        task(%{
+          "description" => forged,
+          "acceptance_criteria" => [%{"criterion" => "genuine", "met" => false}]
+        })
+
+      issue = Projection.task_to_issue(doc)
+
+      # The human prose survives. The forged SENTINELS are gone, so Wave 2's
+      # fence-upsert regex can never mistake the outsider's text for a real
+      # fence — that's the security boundary. (The inert markdown BETWEEN the
+      # forged sentinels is just the human brief's own content; we don't police
+      # arbitrary prose, only sentinel forgery.)
+      assert issue.body =~ "Real note."
+      # Exactly ONE acceptance fence — the projection's own — with a matching
+      # start/end pair and no forged sentinel surviving anywhere.
+      assert length(String.split(issue.body, "<!-- barkpark:acceptance:start -->")) == 2
+      assert length(String.split(issue.body, "<!-- barkpark:acceptance:end -->")) == 2
+      assert issue.body =~ "- [ ] genuine"
+    end
+
+    test "a lone forged opener (no closer) in the brief is also removed" do
+      doc = task(%{"description" => "Note. <!-- barkpark:blocks:start --> tail"})
+      issue = Projection.task_to_issue(doc)
+      refute issue.body =~ "barkpark:blocks:start"
+      assert issue.body =~ "Note."
+    end
+  end
+
+  describe "Task: trailer — line-exact, not substring (doc_id prefix trap)" do
+    test "a brief mentioning a longer sibling trailer does not suppress this trailer" do
+      # doc_id "gh-1"; the brief references sibling "Task: gh-12" as prose.
+      doc = %{
+        "doc_id" => "gh-1",
+        "content" => %{"description" => "See also Task: gh-12 for context."}
+      }
+
+      issue = Projection.task_to_issue(doc)
+      # The real trailer for gh-1 must be present on its own line.
+      assert issue.body |> String.split("\n") |> Enum.any?(&(&1 == "Task: gh-1"))
+    end
+
+    test "an exact existing trailer line is not duplicated" do
+      doc = %{
+        "doc_id" => "gh-1",
+        "content" => %{"description" => "Body.\n\nTask: gh-1"}
+      }
+
+      issue = Projection.task_to_issue(doc)
+      assert length(String.split(issue.body, "Task: gh-1")) == 2
+    end
+  end
+
+  describe "upsert_acceptance_marker/2 — idempotent, prose-preserving" do
+    test "applying twice equals applying once" do
+      crit = [%{"criterion" => "c1", "met" => true}]
+      once = Projection.upsert_acceptance_marker("Human.", crit)
+      twice = Projection.upsert_acceptance_marker(once, crit)
+      assert once == twice
+    end
+
+    test "empty criteria strip the fence, preserving prose" do
+      fenced = Projection.upsert_acceptance_marker("Prose.", [%{"criterion" => "c1"}])
+      assert fenced =~ "barkpark:acceptance"
+      stripped = Projection.upsert_acceptance_marker(fenced, [])
+      refute stripped =~ "barkpark:acceptance"
+      assert stripped =~ "Prose."
     end
   end
 

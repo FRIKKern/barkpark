@@ -29,6 +29,12 @@ defmodule Barkpark.Plugins.Github.Projection do
 
       <human brief>
 
+      <!-- barkpark:acceptance:start -->
+      ### Acceptance criteria
+      - [x] first criterion
+      - [ ] second criterion
+      <!-- barkpark:acceptance:end -->
+
       <!-- barkpark:blocks:start -->
       Blocked by: #12, #34
       <!-- barkpark:blocks:end -->
@@ -36,19 +42,35 @@ defmodule Barkpark.Plugins.Github.Projection do
       Task: <doc_id>
 
   The `Task: <doc_id>` trailer (D11) is what keeps `pr-task-gate` working from a
-  GitHub-side PR. The blocks marker is rewritten ONLY inside its fence — any
-  human prose above the fence is preserved — so re-projecting is idempotent:
+  GitHub-side PR. Each fenced marker (acceptance, blocks) is rewritten ONLY
+  inside its own fence — any human prose outside the fences is preserved — so
+  re-projecting is idempotent:
   `upsert_blocks_marker(upsert_blocks_marker(body, refs), refs) == upsert_blocks_marker(body, refs)`.
+
+  The acceptance-criteria checkboxes are the charter's flagship liveness signal:
+  each `acceptance_criteria` row (`%{"criterion" => …, "met" => bool}`) becomes a
+  GitHub task-list item (`- [x]`/`- [ ]`), so the issue's checkbox tally tracks
+  the ledger. Absent/empty criteria → no acceptance fence.
 
   Blocker issue refs are NOT discovered here (that needs the blockers' mirror
   state, which is DB-resident); the caller hydrates them onto the doc as
   `"blocker_issue_refs"` — a list of issue numbers — exactly like the edge
   projector hydrates `task_edges`. Absent → no marker block (leave it ABSENT
   when unknown; never fabricate a blocker).
+
+  ## Sentinel safety
+
+  Barkpark authors EVERY `<!-- barkpark:… -->` sentinel. The human brief (which,
+  for an adopted `gh-<num>` task, originated as outsider-controlled issue text)
+  is scrubbed of any `barkpark:` HTML comment before the projection lays down its
+  own fences — so an attacker cannot forge a fence sentinel to hijack the
+  idempotent-upsert region or corrupt human prose on a later PATCH.
   """
 
   @blocks_start "<!-- barkpark:blocks:start -->"
   @blocks_end "<!-- barkpark:blocks:end -->"
+  @accept_start "<!-- barkpark:acceptance:start -->"
+  @accept_end "<!-- barkpark:acceptance:end -->"
   @trailer_prefix "Task:"
 
   @typedoc "The desired GitHub Issue shape the mirror should converge to."
@@ -128,15 +150,34 @@ defmodule Barkpark.Plugins.Github.Projection do
   """
   @spec upsert_blocks_marker(String.t(), [integer() | String.t()]) :: String.t()
   def upsert_blocks_marker(body, refs) when is_binary(body) and is_list(refs) do
-    stripped = strip_marker(body)
+    upsert_fenced(body, marker_block(refs), @blocks_start, @blocks_end)
+  end
 
-    case marker_block(refs) do
-      nil -> stripped
-      block -> append_block(stripped, block)
-    end
+  @doc """
+  Insert or replace the fenced acceptance-criteria checklist inside `body`,
+  preserving every byte outside the fence. Idempotent, like
+  `upsert_blocks_marker/2`. `criteria` is a list of `%{"criterion"|"text" => …,
+  "met" => bool}` rows (plain strings tolerated). Empty/all-blank → strip the
+  fence entirely. This is the primitive Wave 2's outbound PATCH uses to keep the
+  liveness checkboxes in sync without clobbering hand-typed issue prose.
+  """
+  @spec upsert_acceptance_marker(String.t(), list()) :: String.t()
+  def upsert_acceptance_marker(body, criteria) when is_binary(body) and is_list(criteria) do
+    upsert_fenced(body, acceptance_block(criteria), @accept_start, @accept_end)
   end
 
   # ---- internals -----------------------------------------------------------
+
+  # Strip any existing fence for the given sentinels, then append the fresh block
+  # (or leave it stripped when the block is nil). Shared by every fenced marker.
+  defp upsert_fenced(body, block, start_sentinel, end_sentinel) do
+    stripped = strip_fence(body, fence_regex(start_sentinel, end_sentinel))
+
+    case block do
+      nil -> stripped
+      b -> append_block(stripped, b)
+    end
+  end
 
   defp title(content, doc_id) do
     case get(content, "title") do
@@ -150,11 +191,14 @@ defmodule Barkpark.Plugins.Github.Projection do
   defp body(content, doc_id, refs) do
     brief =
       case get(content, "description") do
-        d when is_binary(d) and d != "" -> String.trim_trailing(d)
+        # Scrub any forged barkpark sentinel out of the human brief BEFORE we lay
+        # down our own fences — Barkpark authors every sentinel (see moduledoc).
+        d when is_binary(d) and d != "" -> d |> neutralize_sentinels() |> String.trim_trailing()
         _ -> ""
       end
 
     brief
+    |> upsert_acceptance_marker(acceptance_criteria(content))
     |> upsert_blocks_marker(refs)
     |> append_trailer(doc_id)
   end
@@ -200,6 +244,68 @@ defmodule Barkpark.Plugins.Github.Projection do
     end
   end
 
+  defp acceptance_criteria(content) do
+    case get(content, "acceptance_criteria") do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  # ---- acceptance criteria -------------------------------------------------
+
+  # Build the fenced checklist, or nil when no row carries usable text.
+  defp acceptance_block(criteria) do
+    items =
+      criteria
+      |> Enum.map(&acceptance_item/1)
+      |> Enum.reject(&is_nil/1)
+
+    case items do
+      [] -> nil
+      lines -> "#{@accept_start}\n### Acceptance criteria\n#{Enum.join(lines, "\n")}\n#{@accept_end}"
+    end
+  end
+
+  # A row is either a map (`criterion`/`text` + `met`) or a bare string.
+  defp acceptance_item(%{} = row) do
+    text = get(row, "criterion") || get(row, "text")
+
+    case text do
+      t when is_binary(t) and t != "" ->
+        box = if get(row, "met") == true, do: "x", else: " "
+        "- [#{box}] #{criterion_line(t)}"
+
+      _ ->
+        nil
+    end
+  end
+
+  defp acceptance_item(t) when is_binary(t) do
+    case String.trim(t) do
+      "" -> nil
+      trimmed -> "- [ ] #{criterion_line(trimmed)}"
+    end
+  end
+
+  defp acceptance_item(_), do: nil
+
+  # Keep a criterion to a single well-formed list line: collapse newlines and
+  # scrub any barkpark sentinel it might carry (adopted-outsider text).
+  defp criterion_line(text) do
+    text
+    |> neutralize_sentinels()
+    |> String.replace(~r/\s*\n\s*/, " ")
+    |> String.trim()
+  end
+
+  # Remove any `<!-- barkpark:… -->` comment (complete or a lone opener) from
+  # human-authored text so only the projection can author a fence sentinel.
+  defp neutralize_sentinels(text) do
+    text
+    |> String.replace(~r/<!--\s*barkpark:.*?-->/s, "")
+    |> String.replace(~r/<!--\s*barkpark:[^\n]*/, "")
+  end
+
   # ---- body assembly -------------------------------------------------------
 
   # Build the fenced block body, or nil when there are no blockers.
@@ -232,9 +338,9 @@ defmodule Barkpark.Plugins.Github.Projection do
 
   # Remove an existing fence (and the blank whitespace that padded it), leaving
   # everything else exactly as it was.
-  defp strip_marker(body) do
+  defp strip_fence(body, regex) do
     body
-    |> String.replace(marker_regex(), "")
+    |> String.replace(regex, "")
     |> String.trim_trailing()
   end
 
@@ -245,22 +351,30 @@ defmodule Barkpark.Plugins.Github.Projection do
     end
   end
 
-  # Append `Task: <doc_id>` as the final trailer, once. If the body already ends
-  # with the trailer for THIS doc_id (idempotent re-projection), leave it.
+  # Append `Task: <doc_id>` as the final trailer, once. Idempotent: if the body
+  # already carries the trailer for THIS doc_id on its OWN line, leave it. The
+  # match is line-exact — a substring guard would suppress the real trailer for
+  # doc_id "gh-1" whenever the brief merely mentions "Task: gh-12".
   defp append_trailer(body, doc_id) do
     trailer = "#{@trailer_prefix} #{doc_id}"
 
     cond do
-      String.contains?(body, trailer) -> body
+      has_trailer_line?(body, trailer) -> body
       String.trim(body) == "" -> trailer
       true -> "#{String.trim_trailing(body)}\n\n#{trailer}"
     end
   end
 
+  defp has_trailer_line?(body, trailer) do
+    body
+    |> String.split("\n")
+    |> Enum.any?(&(String.trim(&1) == trailer))
+  end
+
   # Matches the fence and any leading blank lines so repeated strip/append never
   # accumulates whitespace. `(?s)` = dot matches newlines; non-greedy `.*?`.
-  defp marker_regex do
-    ~r/\n*#{Regex.escape(@blocks_start)}.*?#{Regex.escape(@blocks_end)}/s
+  defp fence_regex(start_sentinel, end_sentinel) do
+    ~r/\n*#{Regex.escape(start_sentinel)}.*?#{Regex.escape(end_sentinel)}/s
   end
 
   # ---- key-tolerant accessors ---------------------------------------------
