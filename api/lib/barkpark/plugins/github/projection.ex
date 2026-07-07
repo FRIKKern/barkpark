@@ -39,10 +39,17 @@ defmodule Barkpark.Plugins.Github.Projection do
       Blocked by: #12, #34
       <!-- barkpark:blocks:end -->
 
+      <!-- barkpark:parent:start -->
+      Parent: <parent_task_id>
+      <!-- barkpark:parent:end -->
+
       Task: <doc_id>
 
   The `Task: <doc_id>` trailer (D11) is what keeps `pr-task-gate` working from a
-  GitHub-side PR. Each fenced marker (acceptance, blocks) is rewritten ONLY
+  GitHub-side PR. The `parent` marker is the D11 cap-flatten fallback: when a
+  parent chain is too deep for a native sub-issue link, the caller hydrates a
+  `"parent_marker"` key and this fence carries the parent id instead. Each fenced
+  marker (acceptance, blocks, parent) is rewritten ONLY
   inside its own fence — any human prose outside the fences is preserved — so
   re-projecting is idempotent:
   `upsert_blocks_marker(upsert_blocks_marker(body, refs), refs) == upsert_blocks_marker(body, refs)`.
@@ -71,6 +78,8 @@ defmodule Barkpark.Plugins.Github.Projection do
   @blocks_end "<!-- barkpark:blocks:end -->"
   @accept_start "<!-- barkpark:acceptance:start -->"
   @accept_end "<!-- barkpark:acceptance:end -->"
+  @parent_start "<!-- barkpark:parent:start -->"
+  @parent_end "<!-- barkpark:parent:end -->"
   @trailer_prefix "Task:"
 
   @typedoc "The desired GitHub Issue shape the mirror should converge to."
@@ -100,7 +109,7 @@ defmodule Barkpark.Plugins.Github.Projection do
 
     %{
       title: title(content, doc_id),
-      body: body(content, doc_id, blocker_refs(task_doc)),
+      body: body(content, doc_id, blocker_refs(task_doc), parent_marker(task_doc)),
       labels: labels(content),
       state: state,
       state_reason: state_reason,
@@ -166,6 +175,26 @@ defmodule Barkpark.Plugins.Github.Projection do
     upsert_fenced(body, acceptance_block(criteria), @accept_start, @accept_end)
   end
 
+  @doc """
+  Insert or replace the fenced cap-flatten PARENT marker inside `body`,
+  preserving every byte outside the fence. Idempotent, like the blocks marker.
+
+  This is the D11 graceful-degradation surface: when the parent chain is too deep
+  to link natively (a native sub-issue would flatten past GitHub's practical
+  tree limits), the wiring hydrates the parent task id as a `"parent_marker"` key
+  and the projection renders it as a body marker instead of a native link.
+
+    * `parent_marker` a non-empty task-id string → upsert the fenced marker.
+    * `nil`/blank → strip any existing parent fence (no marker).
+
+  The parent id is scrubbed of any forged `barkpark:` sentinel first (same
+  discipline as every other fence), so only the projection authors the sentinel.
+  """
+  @spec upsert_parent_marker(String.t(), String.t() | nil) :: String.t()
+  def upsert_parent_marker(body, parent_marker) when is_binary(body) do
+    upsert_fenced(body, parent_block(parent_marker), @parent_start, @parent_end)
+  end
+
   # ---- internals -----------------------------------------------------------
 
   # Strip any existing fence for the given sentinels, then append the fresh block
@@ -188,7 +217,7 @@ defmodule Barkpark.Plugins.Github.Projection do
     end
   end
 
-  defp body(content, doc_id, refs) do
+  defp body(content, doc_id, refs, parent_marker) do
     brief =
       case get(content, "description") do
         # Scrub any forged barkpark sentinel out of the human brief BEFORE we lay
@@ -200,6 +229,7 @@ defmodule Barkpark.Plugins.Github.Projection do
     brief
     |> upsert_acceptance_marker(acceptance_criteria(content))
     |> upsert_blocks_marker(refs)
+    |> upsert_parent_marker(parent_marker)
     |> append_trailer(doc_id)
   end
 
@@ -241,6 +271,14 @@ defmodule Barkpark.Plugins.Github.Projection do
     case get(task_doc, "blocker_issue_refs") do
       refs when is_list(refs) -> refs
       _ -> []
+    end
+  end
+
+  # The cap-flatten parent task id the caller hydrated (D11), or nil.
+  defp parent_marker(task_doc) do
+    case get(task_doc, "parent_marker") do
+      pid when is_binary(pid) and pid != "" -> pid
+      _ -> nil
     end
   end
 
@@ -338,6 +376,18 @@ defmodule Barkpark.Plugins.Github.Projection do
   end
 
   defp format_ref(_), do: nil
+
+  # Build the fenced parent marker, or nil when there is no parent to flatten.
+  # The parent id is scrubbed of any forged sentinel (adopted-outsider text can
+  # never reach a task id, but the discipline is uniform across every fence).
+  defp parent_block(pid) when is_binary(pid) do
+    case pid |> neutralize_sentinels() |> String.trim() do
+      "" -> nil
+      clean -> "#{@parent_start}\nParent: #{clean}\n#{@parent_end}"
+    end
+  end
+
+  defp parent_block(_), do: nil
 
   # Remove an existing fence (and the blank whitespace that padded it), leaving
   # everything else exactly as it was.
