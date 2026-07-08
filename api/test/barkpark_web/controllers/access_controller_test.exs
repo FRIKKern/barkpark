@@ -18,6 +18,7 @@ defmodule BarkparkWeb.AccessControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Access
@@ -54,20 +55,6 @@ defmodule BarkparkWeb.AccessControllerTest do
     raw = "s-" <> Ecto.UUID.generate()
     {:ok, _} = Auth.create_token(raw, "stranger", "test", ["read", "write", "admin"])
     raw
-  end
-
-  # A real claimant is a CONFIRMED account — claim requires proven mailbox
-  # control (`confirmed_at`). Registration is self-serve; confirmation is the
-  # email round-trip.
-  defp register_user(email) do
-    user = register_unconfirmed_user(email)
-    Repo.update!(Accounts.User.confirm_changeset(user))
-  end
-
-  # Registered but never confirmed — the self-serve impersonation hole.
-  defp register_unconfirmed_user(email) do
-    {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    user
   end
 
   defp user_bearer(user) do

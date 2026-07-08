@@ -16,6 +16,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Access
@@ -25,16 +26,6 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
-
-  @password "correct-horse-battery"
-
-  # A real claimant is a CONFIRMED account — claim requires proven mailbox
-  # control (`confirmed_at`). Registration is self-serve; the email round-trip
-  # (or IdP provisioning) stamps confirmation via User.confirm_changeset.
-  defp register_user(email) do
-    {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    Repo.update!(Accounts.User.confirm_changeset(user))
-  end
 
   defp uniq_email(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}@example.com"
 
