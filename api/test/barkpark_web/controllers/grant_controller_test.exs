@@ -14,6 +14,7 @@ defmodule BarkparkWeb.GrantControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.AccountsFixtures
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Access
@@ -21,8 +22,6 @@ defmodule BarkparkWeb.GrantControllerTest do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Auth
-
-  @password "correct-horse-battery"
 
   # An API-token grantor made admin of `ws`, so Access.mint's no-escalation
   # gate passes (a grantor can only confer what it holds).
@@ -39,20 +38,6 @@ defmodule BarkparkWeb.GrantControllerTest do
 
     {:ok, _} = Auth.create_membership(ws.id, token.id, "admin", "api_token")
     token
-  end
-
-  # A real claimant is a CONFIRMED account — registration self-serve, then the
-  # email round-trip stamps `confirmed_at`. Claim now requires mailbox control.
-  defp register_user(email) do
-    user = register_unconfirmed_user(email)
-    Repo.update!(Barkpark.Accounts.User.confirm_changeset(user))
-  end
-
-  # An account that registered but never confirmed its mailbox — the hole a
-  # self-serve attacker would use to impersonate a grantee's email.
-  defp register_unconfirmed_user(email) do
-    {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    user
   end
 
   # Authenticate a browser user the way OptionalSessionToken reads it: a real
