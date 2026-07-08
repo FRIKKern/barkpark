@@ -107,7 +107,9 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
   # sequence from a list of `{slug, doc_count, webhook_count}`.
   defp program_instance(datasets) do
     ds_body = Jason.encode!(%{datasets: Enum.map(datasets, fn {s, _d, _w} -> %{slug: s} end)})
-    doc_resps = for {_s, d, _w} <- datasets, do: ok_json(200, Jason.encode!(%{total_documents: d}))
+
+    doc_resps =
+      for {_s, d, _w} <- datasets, do: ok_json(200, Jason.encode!(%{total_documents: d}))
 
     wh_resps =
       for {_s, _d, w} <- datasets,
@@ -271,11 +273,11 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       urls = Enum.map(Fake.requests(), & &1.url)
 
       # 1 dataset-list + 2 analytics + 2 webhook-list calls.
-      assert @instance_url <> "/api/workspaces/default/projects/default/datasets" in urls
-      assert @instance_url <> "/v1/data/analytics/production" in urls
-      assert @instance_url <> "/v1/data/analytics/staging" in urls
-      assert @instance_url <> "/v1/webhooks/production" in urls
-      assert @instance_url <> "/v1/webhooks/staging" in urls
+      assert (@instance_url <> "/api/workspaces/default/projects/default/datasets") in urls
+      assert (@instance_url <> "/v1/data/analytics/production") in urls
+      assert (@instance_url <> "/v1/data/analytics/staging") in urls
+      assert (@instance_url <> "/v1/webhooks/production") in urls
+      assert (@instance_url <> "/v1/webhooks/staging") in urls
 
       assert_token_custody(conn)
     end
