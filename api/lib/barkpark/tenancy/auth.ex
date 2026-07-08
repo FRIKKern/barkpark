@@ -190,7 +190,47 @@ defmodule Barkpark.Tenancy.Auth do
     end
   end
 
+  # CallerContext arm (airdrop-grants ag-enforcement). A folded caller is
+  # authorized when membership authorizes (existing logic, reconstructed from the
+  # ctx's principal so it stays byte-identical) OR any ACTIVE grant the ctx
+  # carries authorizes `action` at this workspace. Grants only ADD access — the
+  # membership check runs first and unchanged, so a member's decision is never
+  # altered. The grant check delegates to `Barkpark.Access.validate/3` (single
+  # source of scope/capability/expiry truth — never reimplemented here).
+  def authorize(%Barkpark.Content.CallerContext{} = ctx, workspace_id, action)
+      when is_binary(workspace_id) and action in [:read, :write, :admin] do
+    cond do
+      membership_authorizes?(ctx, workspace_id, action) == :ok -> :ok
+      grants_authorize?(ctx, workspace_id, action) -> :ok
+      true -> {:error, :forbidden}
+    end
+  end
+
   def authorize(_token, _workspace_id, _action), do: {:error, :forbidden}
+
+  # Reconstruct the bare principal from the ctx and run the EXISTING authorize
+  # arms, so a folded member's decision is byte-identical to today.
+  defp membership_authorizes?(%{principal_type: :user, user_id: uid}, workspace_id, action)
+       when is_binary(uid),
+       do: authorize(%User{id: uid}, workspace_id, action)
+
+  defp membership_authorizes?(
+         %{principal_type: :api_token, token_id: tid, roles: roles},
+         workspace_id,
+         action
+       )
+       when is_binary(tid) and is_list(roles),
+       do: authorize(%ApiToken{id: tid, permissions: roles}, workspace_id, action)
+
+  defp membership_authorizes?(_ctx, _workspace_id, _action), do: {:error, :forbidden}
+
+  defp grants_authorize?(%{grants: grants}, workspace_id, action) when is_list(grants) do
+    Enum.any?(grants, fn grant ->
+      Barkpark.Access.validate(grant, action, %{workspace_id: workspace_id}) == :ok
+    end)
+  end
+
+  defp grants_authorize?(_ctx, _workspace_id, _action), do: false
 
   @doc """
   True when the membership `role` grants `action` in `workspace_id`, for USER

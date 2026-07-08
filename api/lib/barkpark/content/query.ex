@@ -24,7 +24,7 @@ defmodule Barkpark.Content.Query do
   alias Barkpark.Content.{Document, DraftId}
 
   import Barkpark.Content.Scope,
-    only: [scope_to_workspace_or_global: 3, scope_to_owner: 2]
+    only: [scope_to_workspace_or_global: 3, scope_to_owner: 2, scope_to_grants: 3]
 
   @doc """
   List documents by type and dataset.
@@ -97,6 +97,7 @@ defmodule Barkpark.Content.Query do
       Keyword.get(opts, :project_id)
     )
     |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
     |> apply_filter_map(filter_map)
   end
 
@@ -111,6 +112,26 @@ defmodule Barkpark.Content.Query do
   defp maybe_scope_to_owner(query, type, dataset, opts) do
     if Barkpark.Content.owner_scoped?(type, dataset, opts) do
       scope_to_owner(query, Keyword.get(opts, :caller_context))
+    else
+      query
+    end
+  end
+
+  # Grant row-narrowing (airdrop-grants ag-enforcement, Layer 2). A NO-OP on
+  # every ordinary read: it fires ONLY when `opts[:grant_scoped]` is true — the
+  # flag `ResolveWorkspace` sets when it admits a grant-only caller and
+  # `ScopeHelpers.scope_opts/1` threads through. So members / tokens / anonymous
+  # reads are byte-identical (no clause added). When the flag IS present the read
+  # is restricted to the union of the caller's grant scopes, FAILING CLOSED
+  # (`where: false`) if the caller_context is absent or carries no covering grant
+  # — a grant-derived caller can never fall through to the whole workspace.
+  defp maybe_scope_to_grants(query, opts) do
+    if Keyword.get(opts, :grant_scoped, false) do
+      scope_to_grants(
+        query,
+        Keyword.get(opts, :caller_context),
+        Keyword.get(opts, :workspace_id)
+      )
     else
       query
     end
@@ -671,6 +692,7 @@ defmodule Barkpark.Content.Query do
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
     |> Repo.one()
     |> case do
       nil -> {:error, :not_found}
@@ -718,6 +740,7 @@ defmodule Barkpark.Content.Query do
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
     |> order_by(
       [d],
       asc: fragment("CASE WHEN lower(?) = lower(?) THEN 0 ELSE 1 END", d.title, ^target),
@@ -788,6 +811,7 @@ defmodule Barkpark.Content.Query do
       |> scope_to_dataset(dataset, opts)
       |> scope_to_workspace_or_global(workspace_id, project_id)
       |> maybe_scope_to_owner(type, dataset, opts)
+      |> maybe_scope_to_grants(opts)
       |> maybe_published_only(opts)
       |> order_by([d], asc: d.doc_id)
       |> Repo.all()
@@ -825,6 +849,7 @@ defmodule Barkpark.Content.Query do
         Keyword.get(opts, :project_id)
       )
       |> scope_to_owner(Keyword.get(opts, :caller_context))
+      |> maybe_scope_to_grants(opts)
       |> maybe_published_only(opts)
       |> order_by([d], asc: d.doc_id)
       |> Repo.all()
@@ -868,6 +893,7 @@ defmodule Barkpark.Content.Query do
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_scope_to_owner(type, dataset, opts)
+    |> maybe_scope_to_grants(opts)
     |> order_by([d], asc: d.title, asc: d.doc_id)
     |> Repo.all()
   end
@@ -900,6 +926,7 @@ defmodule Barkpark.Content.Query do
         |> scope_to_dataset(dataset, opts)
         |> scope_to_workspace_or_global(workspace_id, project_id)
         |> maybe_scope_to_owner(type, dataset, opts)
+        |> maybe_scope_to_grants(opts)
         |> order_by([d], asc: d.title, asc: d.doc_id)
         |> limit(^limit_n)
         |> Repo.all()
@@ -936,6 +963,7 @@ defmodule Barkpark.Content.Query do
       |> scope_to_dataset(dataset, opts)
       |> scope_to_workspace_or_global(workspace_id, project_id)
       |> maybe_scope_to_owner(type, dataset, opts)
+      |> maybe_scope_to_grants(opts)
       |> select([d], %{tag: fragment("jsonb_array_elements_text(?->'tags')", d.content)})
 
     outer =
@@ -987,6 +1015,7 @@ defmodule Barkpark.Content.Query do
     # effect: an owner_scoped hit owned by another user is dropped from a
     # non-owner's hydration, closing the leak through the search-expand path.
     |> scope_to_owner(Keyword.get(opts, :caller_context))
+    |> maybe_scope_to_grants(opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
   end
