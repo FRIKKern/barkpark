@@ -246,6 +246,11 @@ func paperFetchAll(client *apiclient.Client, perspective string) ([]paperRawDoc,
 	if perspective != "" {
 		params.Set("perspective", perspective)
 	}
+	// resolve=tasks (p-resolve-seam): the server swaps each task block's
+	// authored `query` for a live `snapshot`/`task` before responding, so the
+	// task widgets render live plans instead of "[task-list — unresolved]".
+	// Read-only: paperFetchAll feeds the render path, never a write-back.
+	params.Set("resolve", "tasks")
 	if qs := params.Encode(); qs != "" {
 		u += "?" + qs
 	}

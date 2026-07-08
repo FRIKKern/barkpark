@@ -38,6 +38,45 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
       assert length(board["snapshot"]) == 2
     end
 
+    test "recurses into a section's blocks" do
+      blocks = [
+        %{"type" => "section", "blocks" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]}
+      ]
+
+      [%{"blocks" => [list]}] = TaskResolver.resolve(blocks, &fetch/1)
+      assert length(list["snapshot"]) == 2
+      refute Map.has_key?(list, "query")
+    end
+
+    test "recurses into real columns (a list of lists), tolerating a junk column" do
+      blocks = [
+        %{
+          "type" => "columns",
+          "columns" => [
+            [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}],
+            "junk"
+          ]
+        }
+      ]
+
+      [%{"columns" => [[list], "junk"]}] = TaskResolver.resolve(blocks, &fetch/1)
+      assert length(list["snapshot"]) == 2
+    end
+
+    test "resolves a task widget nested two containers deep (section > terminal)" do
+      blocks = [
+        %{
+          "type" => "section",
+          "blocks" => [
+            %{"type" => "terminal", "children" => [%{"type" => "task-list", "query" => %{"parent_id" => "epic"}}]}
+          ]
+        }
+      ]
+
+      [%{"blocks" => [%{"children" => [list]}]}] = TaskResolver.resolve(blocks, &fetch/1)
+      assert length(list["snapshot"]) == 2
+    end
+
     test "non-list / non-fn inputs pass through" do
       assert TaskResolver.resolve("x", &fetch/1) == "x"
     end

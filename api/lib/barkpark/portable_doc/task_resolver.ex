@@ -114,9 +114,21 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     [preview_entry(id, @detail_type, query, fetch, :detail)]
   end
 
-  # A container block (columns/section/…) can nest task blocks in `children`.
+  # Container blocks nest task blocks under `children` (terminal-family),
+  # `blocks` (section) and `columns` (list of lists) — the same three shapes
+  # resolve_block/3 walks.
   defp preview_block(%{"children" => children}, fetch) when is_list(children) do
     collect_previews(children, fetch)
+  end
+
+  defp preview_block(%{"blocks" => blocks}, fetch) when is_list(blocks) do
+    collect_previews(blocks, fetch)
+  end
+
+  defp preview_block(%{"columns" => cols}, fetch) when is_list(cols) do
+    cols
+    |> Enum.filter(&is_list/1)
+    |> Enum.reduce(%{}, fn col, acc -> Map.merge(acc, collect_previews(col, fetch)) end)
   end
 
   defp preview_block(_block, _fetch), do: []
@@ -186,10 +198,28 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     end
   end
 
-  # A container block (columns/section/…) can nest task blocks in `children`.
+  # Container blocks nest task blocks under three shapes: `children`
+  # (terminal/figure-family), `blocks` (section), and `columns` (a LIST OF
+  # LISTS). Walk all three — a task-list inside a section or a column used to
+  # stay an unresolved query on every surface.
   defp resolve_block(%{"children" => children} = block, fetch, agg_fetch)
        when is_list(children) do
     Map.put(block, "children", resolve(children, fetch, agg_fetch))
+  end
+
+  defp resolve_block(%{"blocks" => blocks} = block, fetch, agg_fetch) when is_list(blocks) do
+    Map.put(block, "blocks", resolve(blocks, fetch, agg_fetch))
+  end
+
+  defp resolve_block(%{"columns" => cols} = block, fetch, agg_fetch) when is_list(cols) do
+    Map.put(
+      block,
+      "columns",
+      Enum.map(cols, fn
+        col when is_list(col) -> resolve(col, fetch, agg_fetch)
+        col -> col
+      end)
+    )
   end
 
   defp resolve_block(block, _fetch, _agg_fetch), do: block
