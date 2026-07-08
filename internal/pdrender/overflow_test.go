@@ -27,6 +27,12 @@ var overflowFixtures = []string{
 	// remove the gate (Fits→true) and the collapsed row overflows the target width
 	// (~w60), which is the anti-vacuity proof this fixture exists to make.
 	"sample_m8.json",
+	// sample_m9 is the W3 breakpoint reflow: a grid section carrying
+	// breakpoints [{100,3},{70,2}] + gap:"lg". As the width narrows the effective
+	// track count STEPS 3→2→1→1 across w120/w80/w60/w40. The collapsed tracks at
+	// the narrow widths must still hold their content — no line may overflow the
+	// target width once the grid drops to fewer (or one) tracks.
+	"sample_m9.json",
 }
 
 // TestNoLineOverflow is the P9/80-column guarantee and the anti-vacuity spine:
