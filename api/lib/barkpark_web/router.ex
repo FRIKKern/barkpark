@@ -360,6 +360,32 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
   end
 
+  # ag-bp-user-identity-auth: SOFT user-principal gate for the grantee surface
+  # (`/v1/access/claim`, `/v1/access/mine`). Unlike `:require_user` (a login
+  # session ONLY), this resolves `:current_user` from EITHER a login session OR
+  # an OWNED api_token, so a terminal `bp access claim`/`mine` (holding an owned
+  # token) works alongside the browser/JS session path:
+  #
+  #   * `OptionalToken` — a Bearer api_token → `:api_token` (bearer-only; no
+  #     cookie side effects), soft.
+  #   * `OptionalUserSession` — a login session (Bearer session-token OR
+  #     `user_session` cookie, with the cookie branch's CSRF check preserved) →
+  #     `:current_user`, soft. This keeps the pre-existing session-bearer claim
+  #     path byte-identical.
+  #   * `ResolveTokenOwner` — an OWNED `:api_token` → its owner user, ONLY when a
+  #     session did not already resolve one (login session wins). Non-halting.
+  #   * `RequirePrincipalUser` — 401 if `:current_user` is STILL nil (anonymous,
+  #     bad token, or an UN-OWNED token → fail closed).
+  #
+  # Requires `:fetch_session` upstream (`:user_auth` provides it). NEVER mounted
+  # on the grantor routes — those stay a pure api_token principal.
+  pipeline :access_principal do
+    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.OptionalUserSession)
+    plug(BarkparkWeb.Plugs.ResolveTokenOwner)
+    plug(BarkparkWeb.Plugs.RequirePrincipalUser)
+  end
+
   # Browser Studio uploads send `credentials: same-origin` with the session
   # cookie; API clients still use Bearer. Requires `:fetch_session` upstream.
   pipeline :media_mutate do
@@ -1020,6 +1046,12 @@ defmodule BarkparkWeb.Router do
 
     get("/me", AuthController, :me)
     delete("/logout", AuthController, :logout)
+    # Session-gated self-mint of a Personal Access Token that carries the
+    # caller's USER identity. owner_user_id is HARD-BOUND to current_user.id
+    # server-side (any body-supplied owner/user_id is ignored) — a user can
+    # ONLY mint a token owned by themselves (no-escalation). Raw token returned
+    # ONCE. Powers the terminal `bp access claim`/`mine` grantee verbs.
+    post("/tokens", AuthController, :create_token)
     get("/export", AuthController, :export)
     post("/erase", AuthController, :erase)
     post("/mfa/enroll", AuthController, :mfa_enroll)
@@ -1172,13 +1204,32 @@ defmodule BarkparkWeb.Router do
     get("/graph/:id/tasks", TasksController, :graph_tasks)
   end
 
+  # Airdrop-grant grantee surface (JSON) — CLAIM + MINE. The authenticated
+  # grantee binds a grant addressed to their email (claim) or lists the grants
+  # bound to them (mine). Gated by `[:user_auth, :access_principal]`: a
+  # `:current_user` from EITHER a login session OR an OWNED api_token (so a
+  # terminal `bp access claim` / `bp access mine` works). Claim is the JSON twin
+  # of the browser GrantController; both funnel through the SHARED
+  # Access.ClaimFlow no-oracle decision (email match still enforced there).
+  #
+  # DECLARED BEFORE the grantor `/access/:id` block: the STATIC `GET
+  # /access/mine` must win over the DYNAMIC `GET /access/:id` (else `mine` binds
+  # `:id = "mine"` → show/2 → 404), the same static/dynamic ordering idiom as
+  # `/graph` above.
+  scope "/v1/access", BarkparkWeb do
+    pipe_through([:user_auth, :access_principal])
+
+    post("/claim", AccessController, :claim)
+    get("/mine", AccessController, :mine)
+  end
+
   # ── Airdrop grants — the `access` noun (grantor-driven surface) ─────────────
   # CORE (survives the `config :barkpark, :plugins, []` kill switch) — mounted
   # under `[:api, :require_token]` (bearer-gated, NOT admin). The no-escalation
   # gate lives INSIDE Access.mint/2 (a token can only confer capabilities it
   # holds in the body's workspace); list/show/revoke authorize per-grant. The
-  # grantee CLAIM is NOT here — it needs a user session, so it sits in the
-  # session-gated `/v1/access/claim` block below.
+  # grantee CLAIM/MINE are NOT here — they need a USER identity (session or
+  # owned token), so they sit in the `/v1/access` grantee block ABOVE.
   scope "/v1", BarkparkWeb do
     pipe_through([:api, :require_token])
 
@@ -1186,16 +1237,6 @@ defmodule BarkparkWeb.Router do
     get("/access", AccessController, :index)
     get("/access/:id", AccessController, :show)
     delete("/access/:id", AccessController, :revoke)
-  end
-
-  # Airdrop-grant CLAIM (JSON, session path) — the authenticated grantee binds a
-  # grant addressed to their email. Session-gated (`[:user_auth, :require_user]`
-  # → :current_user), the JSON twin of the browser GrantController; both funnel
-  # through the SHARED Access.ClaimFlow no-oracle decision.
-  scope "/v1/access", BarkparkWeb do
-    pipe_through([:user_auth, :require_user])
-
-    post("/claim", AccessController, :claim)
   end
 
   scope "/v1/data", BarkparkWeb do

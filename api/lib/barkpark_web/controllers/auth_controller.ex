@@ -25,6 +25,7 @@ defmodule BarkparkWeb.AuthController do
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{UserNotifier, UserSession}
   alias Barkpark.Audit
+  alias Barkpark.Auth
 
   # ── Registration ───────────────────────────────────────────────────────────
 
@@ -169,6 +170,61 @@ defmodule BarkparkWeb.AuthController do
       }
     })
   end
+
+  @doc """
+  Session-gated self-mint of a Personal Access Token that carries the caller's
+  USER identity (`owner_user_id`).
+
+  ## No-escalation invariant (SECURITY)
+
+  `owner_user_id` is ALWAYS `current_user.id`, taken from the authenticated
+  session — NEVER from the request body. Any caller-supplied `owner_user_id` /
+  `user_id` in `params` is IGNORED: a user can only mint a token owned by
+  THEMSELVES. Permissions are fixed to `["read"]` (an identity token, not an
+  authority grant); the token confers no capability the user does not already
+  hold via a claimed grant.
+
+  The raw token is returned ONCE and never recoverable. Field hygiene: only the
+  token's non-secret fields are echoed — never the `token_hash`.
+  """
+  def create_token(conn, params) do
+    user = conn.assigns.current_user
+    name = token_name(params)
+
+    # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
+    # `user_id` is never read — this is the mint's no-escalation guarantee.
+    case Auth.create_personal_access_token(name, ["read"],
+           role: "member",
+           created_by: user.email,
+           owner_user_id: user.id
+         ) do
+      {:ok, {raw, token}} ->
+        conn
+        |> put_status(:created)
+        |> json(%{
+          token: raw,
+          personal_access_token: %{
+            id: token.id,
+            name: token.name,
+            owner_user_id: token.owner_user_id,
+            permissions: token.permissions,
+            expires_at: token.expires_at,
+            inserted_at: token.inserted_at
+          }
+        })
+
+      {:error, :forbidden} ->
+        error(conn, 403, "forbidden", "you may not mint a token with those permissions")
+
+      {:error, %Ecto.Changeset{}} ->
+        error(conn, 422, "unprocessable", "could not mint token")
+    end
+  end
+
+  # A user-facing token name. Whitelisted from the body (never an owner field);
+  # falls back to a stable default so the mint never depends on client input.
+  defp token_name(%{"name" => name}) when is_binary(name) and name != "", do: name
+  defp token_name(_), do: "personal access token"
 
   @doc """
   Session management (era-w7): the caller's active sessions — the "your

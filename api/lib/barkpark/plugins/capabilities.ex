@@ -1668,12 +1668,13 @@ defmodule Barkpark.Plugins.Capabilities do
       # revoke) → `scoped_admin` tier: visible to any authenticated token, the
       # server decides the per-workspace authority. ls/show are bearer reads.
       #
-      # There is deliberately NO `access claim` verb: the grantee claim
-      # (`POST /v1/access/claim`) needs a USER SESSION, and a plain api_token
-      # carries no user identity — a terminal `bp access claim` would be broken.
-      # The claim ROUTE still exists for the session/browser path; its terminal
-      # exposure is deferred to the auth follow-on (mirrors the session-only
-      # `auth.*` verbs that bp cannot drive either).
+      # The grantee CLAIM/MINE verbs (`access claim` / `access mine`) DO ship
+      # now (ag-bp-user-identity-auth): an api_token can carry a USER identity
+      # via `owner_user_id`, and the `:access_principal` pipeline resolves an
+      # OWNED token → `:current_user`, so `POST /v1/access/claim` +
+      # `GET /v1/access/mine` work from a terminal holding an owned token. Tier
+      # `read` — an authenticated (owned) token is required; anon is hidden. A
+      # NULL-owner token still fails closed (401) at the pipeline.
       core_cmd(
         "access.grant",
         "access",
@@ -1731,6 +1732,28 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Grant id.")],
         writes: true,
         default_output: "minimal"
+      ),
+      core_cmd(
+        "access.claim",
+        "access",
+        "claim",
+        "Claim an airdrop grant addressed to your account (requires an owned token or a login session).",
+        "POST",
+        "/v1/access/claim",
+        "read",
+        args: [arg("token", true, "string", "The raw airdrop link token to claim.")],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "access.mine",
+        "access",
+        "mine",
+        "List the active airdrop grants bound to your account.",
+        "GET",
+        "/v1/access/mine",
+        "read",
+        default_output: "table"
       )
     ]
   end
