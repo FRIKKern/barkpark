@@ -64,12 +64,13 @@ defmodule BarkparkCloud.Usage do
   # degraded meter still tells the operator which pipe went quiet.
   @src_documents "instance.documents"
   @src_datasets "instance.datasets"
-  # The webhook pipe is DATASET-SCOPED — the router counts the instance's
-  # `production` dataset list (the same default-dataset view the C5 webhook
-  # panel manages). The label says so: a multi-dataset instance's operator is
-  # never shown a production-only count posing as a whole-box total. C11's
-  # catalog rows are the path to a cross-dataset truth.
-  @src_webhooks "instance.webhooks.production"
+  # The webhook pipe is CROSS-DATASET (C11): the router enumerates the instance's
+  # datasets and SUMS every dataset's webhook list, so the operator sees a true
+  # whole-box total, not a `production`-only count posing as one. The label drops
+  # the old `.production` suffix now that the number is honest across datasets;
+  # any per-dataset fetch failure degrades the WHOLE meter to "unmetered" (a
+  # partial sum would silently undercount — a lie), source still named.
+  @src_webhooks "instance.webhooks"
   @src_db_size "telemetry.pg_size_bytes"
   @src_disk "telemetry.disk_used_percent"
   @src_seats "control-plane.team_members"
