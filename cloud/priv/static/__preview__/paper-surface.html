@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Paper surface — token preview</title>
+    <meta
+      name="description"
+      content="Standalone living preview of the paper-surface design tokens: --paper-* roles, --bp-tone-* pairs and the --bp-{h1,h2,h3,body} type scale, read straight from paper-surface.css."
+    />
+    <!--
+      The paper-surface stylesheet is normally INLINED into Studio's root
+      layout, so a standalone <link> is the honest preview. Tokens are scoped
+      to `.bp-paper-surface` and dark values switch on html[data-theme="dark"]
+      — the toggle below flips it. Path is 4 levels up to api/assets.
+      Nothing here hand-copies a value: swatches paint with var(--…), so if a
+      token in paper-surface.css moves, this page moves with it (W1.4 scaffold).
+    -->
+    <link
+      rel="stylesheet"
+      href="../../../../api/assets/paper-surface/paper-surface.css"
+    />
+    <style>
+      /* Page-local chrome only. */
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+        background: var(--paper-bg, #fff);
+        color: var(--paper-ink, #111);
+      }
+      .pv-wrap {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 24px 80px;
+      }
+      .pv-bar {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .pv-toggle {
+        font: inherit;
+        font-size: 13px;
+        padding: 6px 12px;
+        border: 1px solid var(--paper-rule);
+        border-radius: 6px;
+        background: var(--paper-bg-deep);
+        color: var(--paper-ink);
+        cursor: pointer;
+      }
+      .pv-sec {
+        margin: 0 0 40px;
+      }
+      .pv-sec > h2 {
+        font-size: 15px;
+        letter-spacing: 0.02em;
+        text-transform: uppercase;
+        color: var(--paper-ink-soft);
+        margin: 0 0 14px;
+      }
+      .pv-swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+        gap: 10px;
+      }
+      .pv-swatch {
+        border: 1px solid var(--paper-rule);
+        border-radius: 6px;
+        overflow: hidden;
+      }
+      .pv-chip {
+        height: 44px;
+      }
+      .pv-meta {
+        padding: 6px 8px;
+        background: var(--paper-bg-deep);
+      }
+      .pv-name {
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 11px;
+        color: var(--paper-ink);
+        word-break: break-all;
+      }
+      .pv-tones {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .pv-tone {
+        border-radius: 8px;
+        padding: 12px 16px;
+        font-family: ui-monospace, Menlo, monospace;
+        font-size: 13px;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Everything demonstrated must live inside .bp-paper-surface so the
+         scoped tokens resolve. -->
+    <div class="bp-paper-surface pv-wrap">
+      <div class="pv-bar">
+        <strong style="font-size: 14px;">Paper surface — token preview</strong>
+        <button class="pv-toggle" type="button" id="pv-theme">Toggle dark</button>
+      </div>
+
+      <section class="pv-sec">
+        <h2>Paper roles (--paper-*)</h2>
+        <div class="pv-swatches" id="pv-roles"></div>
+      </section>
+
+      <section class="pv-sec">
+        <h2>Callout tones (--bp-tone-*-bg / -fg)</h2>
+        <div class="pv-tones" id="pv-tone-list"></div>
+      </section>
+
+      <section class="pv-sec">
+        <h2>Type scale (--bp-{h1,h2,h3,body})</h2>
+        <h1 style="font-family: var(--paper-font-serif); font-weight: var(--bp-heading-weight); font-size: var(--bp-h1-size); line-height: var(--bp-h1-lh); letter-spacing: var(--bp-h1-tracking); margin: 0 0 .4em;">
+          Heading one — --bp-h1
+        </h1>
+        <h2 style="font-family: var(--paper-font-serif); font-weight: var(--bp-heading-weight); font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh); margin: 0 0 .4em; text-transform: none; letter-spacing: normal; color: var(--paper-ink);">
+          Heading two — --bp-h2
+        </h2>
+        <h3 style="font-family: var(--paper-font-serif); font-weight: var(--bp-heading-weight); font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 0 0 .6em;">
+          Heading three — --bp-h3
+        </h3>
+        <p style="font-family: var(--paper-font-serif); font-size: var(--bp-body-size); line-height: var(--bp-body-lh); letter-spacing: var(--bp-body-tracking); max-width: 60ch;">
+          Body prose — --bp-body. The park is quiet at dusk; the reader carries
+          the same serif face and measure the paper editor and reader both
+          resolve, because the numbers live once in paper-surface.css and every
+          surface inherits them.
+        </p>
+      </section>
+    </div>
+
+    <script>
+      // Dark/light toggle — flips html[data-theme], which is the switch the
+      // scoped --paper-* / --bp-tone-* dark blocks key on.
+      document.getElementById("pv-theme").addEventListener("click", function () {
+        var el = document.documentElement;
+        el.dataset.theme = el.dataset.theme === "dark" ? "light" : "dark";
+      });
+
+      // Paint the --paper-* role swatches, read live from the stylesheet.
+      var ROLES = [
+        "--paper-bg",
+        "--paper-bg-deep",
+        "--paper-ink",
+        "--paper-ink-soft",
+        "--paper-ink-faint",
+        "--paper-rule",
+        "--paper-accent",
+        "--paper-accent-soft",
+        "--paper-chrome-bg",
+        "--paper-chrome-border",
+      ];
+      var rolesGrid = document.getElementById("pv-roles");
+      ROLES.forEach(function (name) {
+        var cell = document.createElement("div");
+        cell.className = "pv-swatch";
+        var chip = document.createElement("div");
+        chip.className = "pv-chip";
+        chip.style.background = "var(" + name + ")";
+        var meta = document.createElement("div");
+        meta.className = "pv-meta";
+        var n = document.createElement("div");
+        n.className = "pv-name";
+        n.textContent = name;
+        meta.appendChild(n);
+        cell.appendChild(chip);
+        cell.appendChild(meta);
+        rolesGrid.appendChild(cell);
+      });
+
+      // Paint the callout tone pairs (bg + fg), read live from the stylesheet.
+      var TONES = ["info", "success", "warning", "danger", "neutral"];
+      var toneList = document.getElementById("pv-tone-list");
+      TONES.forEach(function (tone) {
+        var box = document.createElement("div");
+        box.className = "pv-tone";
+        box.style.background = "var(--bp-tone-" + tone + "-bg)";
+        box.style.color = "var(--bp-tone-" + tone + "-fg)";
+        box.textContent = tone + " — --bp-tone-" + tone;
+        toneList.appendChild(box);
+      });
+    </script>
+  </body>
+</html>
