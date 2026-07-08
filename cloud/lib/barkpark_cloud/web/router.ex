@@ -609,6 +609,13 @@ defmodule BarkparkCloud.Web.Router do
           two_factor_enabled: Accounts.two_factor_enabled?(user)
         },
         team: team && %{id: team.id, name: team.name, slug: team.slug},
+        # EVERY membership, so the SPA's team switcher can render — a user who
+        # accepted an invite into a second team is otherwise stranded on their
+        # oldest (signup) team with no way to reach the one they joined.
+        teams:
+          Enum.map(Accounts.list_user_teams(user), fn t ->
+            %{id: t.id, name: t.name, slug: t.slug, role: Accounts.team_role(user, t)}
+          end),
         # The caller's role in their current team — the SPA hides/shows the
         # invite + member-management controls on this. nil when teamless.
         role: team && Accounts.team_role(user, team),

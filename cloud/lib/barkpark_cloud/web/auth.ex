@@ -45,9 +45,25 @@ defmodule BarkparkCloud.Web.Auth do
          %{} = user <- Accounts.verify_user_session_token(token) do
       conn
       |> assign(:current_user, user)
-      |> assign(:current_team, Accounts.primary_team(user))
+      |> assign(:current_team, resolve_team(conn, user))
     else
       _ -> unauthorized(conn)
+    end
+  end
+
+  # Team resolution honors an explicit `x-barkpark-team` header when the caller
+  # is a MEMBER of that team (the SPA's team switcher — a user can belong to
+  # several teams but every route reads one `current_team`). Anything else —
+  # absent header, malformed id, a team the user was removed from — falls back
+  # to the primary (oldest) membership rather than hard-failing, so a stale
+  # switcher value degrades to a working dashboard instead of bricking it.
+  defp resolve_team(conn, user) do
+    with [team_id | _] <- Plug.Conn.get_req_header(conn, "x-barkpark-team"),
+         %{} = team <- Accounts.get_team(team_id),
+         %{} <- Accounts.get_membership(team.id, user.id) do
+      team
+    else
+      _ -> Accounts.primary_team(user)
     end
   end
 
@@ -92,7 +108,7 @@ defmodule BarkparkCloud.Web.Auth do
           user = Accounts.verify_user_session_token(token) ->
             conn
             |> assign(:current_user, user)
-            |> assign(:current_team, Accounts.primary_team(user))
+            |> assign(:current_team, resolve_team(conn, user))
             |> assign(:current_abilities, ["root"])
 
           result = Accounts.verify_personal_access_token(token) ->

@@ -63,6 +63,10 @@
     if (body !== undefined && body !== null) headers["Content-Type"] = "application/json";
     var s = session();
     if (s && s.token && !opts.noAuth) headers["Authorization"] = "Bearer " + s.token;
+    // Team switcher: pin every request to the chosen team. The server honors
+    // it only when the caller is a member (stale values degrade to primary).
+    var teamPin = localStorage.getItem("bp.active-team");
+    if (teamPin && !opts.noAuth) headers["x-barkpark-team"] = teamPin;
 
     return fetch(path, {
       method: method,
@@ -4920,6 +4924,37 @@
     var name = (team && team.name) || (email ? email.split("@")[0] : null) || "My team";
     setText($("#account-team"), name);
     setText($("#account-avatar"), (name[0] || "B").toUpperCase());
+    renderTeamSwitcher(team);
+  }
+
+  // Team switcher (multi-team accounts): a <select> replaces the static team
+  // name when /v1/me lists more than one membership. Choosing a team pins it
+  // in localStorage (api() sends it as x-barkpark-team) and reloads — a full
+  // reload is deliberate: every cache (fleet, subscription, members) is
+  // team-scoped and must repopulate.
+  function renderTeamSwitcher(active) {
+    var host = $("#account-team");
+    var teams = (meCache && meCache.teams) || [];
+    if (!host || teams.length < 2) return;
+    var activeId = (active && active.id) || "";
+    var sel = document.createElement("select");
+    sel.id = "team-switcher";
+    sel.setAttribute("aria-label", "Switch team");
+    sel.style.cssText =
+      "background:transparent;border:none;color:inherit;font:inherit;cursor:pointer;max-width:160px";
+    teams.forEach(function (t) {
+      var o = document.createElement("option");
+      o.value = t.id;
+      o.textContent = t.name + " (" + t.role + ")";
+      if (t.id === activeId) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", function () {
+      localStorage.setItem("bp.active-team", sel.value);
+      location.reload();
+    });
+    host.textContent = "";
+    host.appendChild(sel);
   }
 
   function loadMe() {
