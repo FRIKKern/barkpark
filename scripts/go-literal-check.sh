@@ -21,6 +21,9 @@
 #   • cmd/barkpark/**            (the bp TUI + CLI render surface)
 #   • internal/cli/setup/**      (the setup wizard)
 #   • internal/taskboard/theme.go (the portrait board palette)
+#   • internal/cli/style_cmd.go  (the `bp style` design-token sheet — W4.11)
+# (internal/cli at large is NOT yet scanned — a follow-up should extend it once
+# its pre-existing literals are threaded/annotated.)
 #
 # ALLOWLIST — the lead-approved chrome resisters (styles.go highlight/dim/borders/
 # ink/title/selection/toolbar/breadcrumb/publishBtn primary-CTA; the wizard chrome
@@ -43,7 +46,8 @@ root = sys.argv[1]
 # Directory subtrees walked wholesale (recursive), plus individual files.
 ROOTS = [os.path.join(root, "cmd", "barkpark"),
          os.path.join(root, "internal", "cli", "setup")]
-FILES = [os.path.join(root, "internal", "taskboard", "theme.go")]
+FILES = [os.path.join(root, "internal", "taskboard", "theme.go"),
+         os.path.join(root, "internal", "cli", "style_cmd.go")]
 
 # A 3/6/8-digit #hex colour literal. Go has no hsl().
 LITERAL = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")

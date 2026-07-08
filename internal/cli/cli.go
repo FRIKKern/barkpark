@@ -342,6 +342,13 @@ func Execute(args []string) int {
 		// file. A purely-local built-in (no network, no manifest): authoring a
 		// content type becomes fill-the-blanks instead of reading the contract.
 		return runMakeSchema(out, g, rest[1:])
+	case "style":
+		// `bp style` — render Barkpark's CLI/TUI design tokens (status roles,
+		// lifecycle glyphs, priority severity, spinner) to the terminal. A purely-
+		// local built-in (no network, no manifest): it reads the generated design
+		// tokens through internal/semrole + taskboard so the sheet can never drift
+		// from what the CLI/TUI actually paints. Honours NO_COLOR / a pipe.
+		return runStyle(out, g, rest[1:])
 	case "help":
 		// `barkpark help [noun]` — surface usage; manifest-driven below if loaded.
 	}
