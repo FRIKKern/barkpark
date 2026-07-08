@@ -60,17 +60,21 @@ func renderFlowchart(g *mmGraph, ctx RenderCtx) []string {
 	}
 
 	var out []string
+	var deferred []mmEdge
 	for li := range layers {
 		if li > 0 {
-			// Band carries only edges from rank li-1 into rank li.
-			band := renderBand(g, ranks, li-1, centers[li-1], centers[li], W, ctx)
+			// Band carries only edges from rank li-1 into rank li; it returns any
+			// bipartite crossers it declined to draw for the legend.
+			band, drop := renderBand(g, ranks, li-1, centers[li-1], centers[li], W, ctx)
 			out = append(out, band...)
+			deferred = append(deferred, drop...)
 		}
 		out = append(out, rows[li]...)
 	}
 
-	// Edges a band never drew (skip-rank / back / same-rank) become a legend.
-	if legend := renderEdgeLegend(g, ranks, W, ctx); len(legend) > 0 {
+	// Edges no band drew (skip-rank / back / same-rank) plus bipartite crossers a
+	// band deferred become a legend.
+	if legend := renderEdgeLegend(g, ranks, deferred, W, ctx); len(legend) > 0 {
 		out = append(out, "")
 		out = append(out, legend...)
 	}
@@ -348,15 +352,24 @@ var bandGlyph = map[int]rune{
 // their center columns) to rank pr+1 (children, arrow entries). Only edges from
 // pr to pr+1 are drawn; every band cell's glyph is derived from connectivity, so
 // junctions (tees, crosses, corners) resolve correctly and nothing misaligns.
-func renderBand(g *mmGraph, rank map[string]int, pr int, parents, children map[string]int, W int, ctx RenderCtx) []string {
-	// Collect the adjacent edges and whether any needs horizontal routing.
+//
+// A single ASCII bus can faithfully draw a fan-out (one parent → many children),
+// a fan-in (many → one), or parallel verticals — but NOT a bipartite MANY-to-MANY
+// mapping, where several parents each cross to several different children: the
+// shared bus row would merge them into an ambiguous tangle of ┼ that reads as
+// "everything connects to everything". So in a mixed band we draw only the
+// unambiguous edges (vertical, straight down) and RETURN the crossing edges for
+// the caller's legend — honest wiring over a misleading picture.
+func renderBand(g *mmGraph, rank map[string]int, pr int, parents, children map[string]int, W int, ctx RenderCtx) ([]string, []mmEdge) {
+	// Collect the adjacent edges (carrying their ids so crossers can be deferred).
 	type link struct {
 		xp, xc int
+		from   string
+		to     string
 		label  string
 		head   bool
 	}
 	var links []link
-	horizontal := false
 	for _, e := range g.edges {
 		if rank[e.from] != pr || rank[e.to] != pr+1 {
 			continue
@@ -366,13 +379,41 @@ func renderBand(g *mmGraph, rank map[string]int, pr int, parents, children map[s
 		if !okp || !okc {
 			continue
 		}
-		links = append(links, link{xp, xc, e.label, e.head})
-		if xp != xc {
-			horizontal = true
-		}
+		links = append(links, link{xp, xc, e.from, e.to, e.label, e.head})
 	}
 	if len(links) == 0 {
-		return []string{strings.Repeat(" ", W)} // one blank spacer row
+		return []string{strings.Repeat(" ", W)}, nil // one blank spacer row
+	}
+
+	// Classify: a band is cleanly drawable when it fans out from ONE source column
+	// or fans in to ONE target column. Otherwise it is bipartite — draw only the
+	// vertical edges (unambiguous) and defer every crossing edge to the legend.
+	srcCols, tgtCols := map[int]bool{}, map[int]bool{}
+	for _, lk := range links {
+		srcCols[lk.xp] = true
+		tgtCols[lk.xc] = true
+	}
+	mixed := len(srcCols) > 1 && len(tgtCols) > 1
+	var deferred []mmEdge
+	if mixed {
+		kept := links[:0]
+		for _, lk := range links {
+			if lk.xp == lk.xc {
+				kept = append(kept, lk)
+			} else {
+				deferred = append(deferred, mmEdge{from: lk.from, to: lk.to, label: lk.label, head: lk.head})
+			}
+		}
+		links = kept
+	}
+	if len(links) == 0 {
+		return []string{strings.Repeat(" ", W)}, deferred
+	}
+	horizontal := false
+	for _, lk := range links {
+		if lk.xp != lk.xc {
+			horizontal = true
+		}
 	}
 
 	H := 2
@@ -488,21 +529,19 @@ func renderBand(g *mmGraph, rank map[string]int, pr int, parents, children map[s
 	for r := 0; r < H; r++ {
 		rows[r] = ctx.Theme.Dim.Render(strings.TrimRight(string(grid[r]), " "))
 	}
-	return rows
+	return rows, deferred
 }
 
 // ── edge legend ──────────────────────────────────────────────────────────────
 
 // renderEdgeLegend lists edges no adjacent band drew — rank-skipping, back
-// (loop), or same-rank edges — as "A → B  label" lines, so every relationship in
-// the source is visible without routing spaghetti across the graph.
-func renderEdgeLegend(g *mmGraph, rank map[string]int, W int, ctx RenderCtx) []string {
+// (loop), or same-rank edges, plus the bipartite crossers a band deferred — as
+// "A → B  label" lines, so every relationship in the source is visible without
+// routing spaghetti (or an ambiguous many-to-many bus) across the graph.
+func renderEdgeLegend(g *mmGraph, rank map[string]int, deferred []mmEdge, W int, ctx RenderCtx) []string {
 	type item struct{ text string }
 	var items []item
-	for _, e := range g.edges {
-		if rank[e.to]-rank[e.from] == 1 {
-			continue // drawn by a band
-		}
+	emit := func(e mmEdge) {
 		arrow := "→"
 		if !e.head {
 			arrow = "—"
@@ -515,6 +554,15 @@ func renderEdgeLegend(g *mmGraph, rank map[string]int, W int, ctx RenderCtx) []s
 			line += "  " + sanitizeText(e.label)
 		}
 		items = append(items, item{line})
+	}
+	for _, e := range g.edges {
+		if rank[e.to]-rank[e.from] == 1 {
+			continue // adjacent — a band drew it (or deferred it below)
+		}
+		emit(e)
+	}
+	for _, e := range deferred { // bipartite crossers a band declined to draw
+		emit(e)
 	}
 	if len(items) == 0 {
 		return nil

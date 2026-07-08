@@ -202,7 +202,7 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 
 	out := cv.rows(ctx)
 	// Legend for edges no band drew.
-	if legend := renderEdgeLegend(g, rank, W, ctx); len(legend) > 0 {
+	if legend := renderEdgeLegend(g, rank, nil, W, ctx); len(legend) > 0 {
 		out = append(out, "")
 		out = append(out, legend...)
 	}
