@@ -91,6 +91,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   compacts to a one-line ledger (✓ title · age) with an honest "+N earlier"
   window note off `done_total` — history stays readable without competing with
   the active pipeline for the eye.
+
+  ## Settled lanes (wave 11)
+
+  A lane with done work and ZERO live pipeline earns a receipt, not five
+  columns of nothing: in grouped mode it collapses to a one-line `<details>`
+  summary (✓ label · all N done · last age) that expands to its done ledger;
+  a fully-settled flat board swaps the column skeleton for a "pipeline clear"
+  state (hero + ledger + window note). Empty columns stay ONLY while something
+  is live — they are drag drop-targets then; a settled lane has none.
   """
 
   use BarkparkWeb, :live_view
@@ -635,6 +644,56 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         margin: 0 0 10px; padding: 0 2px 8px; color: var(--text);
         border-bottom: 1px solid var(--border);
       }
+      /* ── settled lanes / settled board (wave 11) ────────────────────────
+         A group whose every task is done has NO pipeline — five columns of
+         nothing is clutter, not information. A settled lane collapses to a
+         one-line receipt (✓ label · all N done · last age) that expands to
+         its done ledger; a fully-settled flat board swaps the column skeleton
+         for a "pipeline clear" state. Native <details>: CSP-safe, no JS. */
+      .bp-lane--settled { margin: 0 0 10px; }
+      .bp-lane--settled > summary {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 14px; cursor: pointer; user-select: none; list-style: none;
+        border: 1px solid var(--border); border-radius: 10px;
+        background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
+        font-size: 13px; color: var(--muted-text);
+        transition: border-color 120ms ease, color 120ms ease;
+      }
+      .bp-lane--settled > summary:hover { color: var(--text); border-color: var(--ring); }
+      .bp-lane--settled > summary::-webkit-details-marker { display: none; }
+      .bp-lane--settled > summary::after {
+        content: "\25B8"; font-size: 10px; color: var(--muted-text);
+        transition: transform 140ms ease;
+      }
+      .bp-lane--settled[open] > summary::after { transform: rotate(90deg); }
+      .bp-settled-label { font-weight: 600; color: var(--text); }
+      .bp-settled-tally { font-variant-numeric: tabular-nums; }
+      .bp-lane--settled > summary .bp-age { line-height: 1.2; }
+      .bp-ledger {
+        display: flex; flex-direction: column; gap: 6px;
+        max-width: 560px; margin: 8px 0 4px;
+      }
+      .bp-settled {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto;
+        display: flex; flex-direction: column; align-items: center;
+        padding: 30px 16px 16px;
+      }
+      .bp-settled-hero { text-align: center; margin: 0 0 20px; }
+      .bp-settled-glyph.gi { display: block; width: auto; font-size: 26px; margin: 0 0 8px; }
+      .bp-settled-h {
+        margin: 0; font-size: 16px; font-weight: 600;
+        letter-spacing: -0.01em; color: var(--text);
+      }
+      .bp-settled-sub {
+        margin: 6px 0 0; font-size: 13px; color: var(--muted-text); max-width: 52ch;
+      }
+      .bp-settled-sub code {
+        font-size: 12px; background: var(--muted-surface);
+        border-radius: 5px; padding: 1px 6px;
+      }
+      .bp-settled .bp-ledger { width: min(560px, 100%); margin: 0; }
+      .bp-settled .bp-more { flex: 0 0 auto; }
+
       .bp-filtered-empty {
         display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
         margin: 18px 0; color: var(--muted-text); font-size: 13px;
@@ -994,28 +1053,62 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       <%= unless @view.empty? and not empty_board?(@board) do %>
         <%= if @view.grouped? do %>
           <div class="bp-lanes">
-            <section
-              :for={lane <- @view.lanes}
-              class="bp-lane"
-              data-role="lane"
-              data-lane={lane_dom_id(lane.key)}
-            >
-              <h2 class="bp-lane-h" data-role="lane-label"><%= lane.label %></h2>
-              <.board_grid
-                lane={lane}
-                last_change={@last_change}
-                done_overflow={0}
-                id={"bp-board-lane-" <> lane_dom_id(lane.key)}
-              />
-            </section>
+            <%= for lane <- @view.lanes do %>
+              <%= if lane_settled?(lane) do %>
+                <details
+                  class="bp-lane bp-lane--settled"
+                  data-role="lane-settled"
+                  data-lane={lane_dom_id(lane.key)}
+                >
+                  <summary>
+                    <span class="gi gi--done" aria-hidden="true">✓</span>
+                    <span class="bp-settled-label" data-role="lane-label"><%= lane.label %></span>
+                    <span class="bp-settled-tally" data-role="settled-tally">
+                      all <%= lane.counts[:done] %> done
+                    </span>
+                    <span :if={newest_done_at(lane)} class="bp-age">
+                      last <%= age_label(newest_done_at(lane)) %>
+                    </span>
+                  </summary>
+                  <.done_ledger cards={lane.columns[:done]} last_change={@last_change} />
+                </details>
+              <% else %>
+                <section class="bp-lane" data-role="lane" data-lane={lane_dom_id(lane.key)}>
+                  <h2 class="bp-lane-h" data-role="lane-label"><%= lane.label %></h2>
+                  <.board_grid
+                    lane={lane}
+                    last_change={@last_change}
+                    done_overflow={0}
+                    id={"bp-board-lane-" <> lane_dom_id(lane.key)}
+                  />
+                </section>
+              <% end %>
+            <% end %>
           </div>
         <% else %>
-          <.board_grid
-            lane={hd(@view.lanes)}
-            last_change={@last_change}
-            done_overflow={done_overflow(@view, @board)}
-            id="bp-projects-board"
-          />
+          <%= if lane_settled?(hd(@view.lanes)) do %>
+            <div class="bp-settled" data-role="board-settled">
+              <div class="bp-settled-hero">
+                <span class="gi gi--done bp-settled-glyph" aria-hidden="true">✓</span>
+                <h2 class="bp-settled-h">Pipeline clear</h2>
+                <p class="bp-settled-sub">
+                  <%= settled_total(@view, @board) %> tasks done — nothing open, ready,
+                  in flight, or blocked. File the next one with <code>bp task create</code>.
+                </p>
+              </div>
+              <.done_ledger cards={hd(@view.lanes).columns[:done]} last_change={@last_change} />
+              <p :if={done_overflow(@view, @board) > 0} class="bp-more" data-role="done-overflow">
+                + <%= done_overflow(@view, @board) %> earlier — newest shown
+              </p>
+            </div>
+          <% else %>
+            <.board_grid
+              lane={hd(@view.lanes)}
+              last_change={@last_change}
+              done_overflow={done_overflow(@view, @board)}
+              id="bp-projects-board"
+            />
+          <% end %>
         <% end %>
       <% end %>
 
@@ -1246,7 +1339,70 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     """
   end
 
+  # The compact done ledger — the SAME one-line row the Done column renders
+  # (glyph + title + age), reused by settled lanes and the settled board where
+  # there is no column chrome to live in. Not draggable: a done card refuses
+  # every move anyway, and there are no drop targets here.
+  defp done_ledger(assigns) do
+    ~H"""
+    <div class="bp-ledger" data-role="done-ledger">
+      <article
+        :for={card <- @cards}
+        class={["bp-card", "bp-card--done", just_moved?(@last_change, card) && "bp-flash"]}
+        data-role="task-card"
+        data-col="done"
+        data-doc-id={card.doc_id}
+      >
+        <div class="bp-card-top">
+          <span
+            class={"gi gi--#{card.color_role}"}
+            data-role="glyph"
+            data-status={card.lifecycle_status}
+            aria-hidden="true"
+          >
+            <%= glyph_text(card) %>
+          </span>
+          <span class="bp-title" data-role="card-title"><%= card.title %></span>
+          <span :if={card.updated_at} class="bp-age" data-role="age">
+            <%= age_label(card.updated_at) %>
+          </span>
+        </div>
+      </article>
+    </div>
+    """
+  end
+
   # ── Render helpers ──────────────────────────────────────────────────────────
+
+  # A lane (or the flat :all lane) is SETTLED when it has done work and zero
+  # live pipeline — nothing open, ready, in flight, or blocked. Settled lanes
+  # earn a receipt line instead of five columns of nothing. A lane with no
+  # cards at all is NOT settled (there is nothing to receipt); the board-empty
+  # state owns that.
+  defp lane_settled?(lane) do
+    live =
+      Enum.sum(for col <- [:open, :ready, :in_progress, :blocked], do: lane.counts[col] || 0)
+
+    live == 0 and (lane.counts[:done] || 0) > 0
+  end
+
+  # The newest done card's timestamp — the organizer orders done newest-first,
+  # so it is the head. Feeds the settled summary's "last <age>" stamp.
+  defp newest_done_at(lane) do
+    case lane.columns[:done] do
+      [%{updated_at: at} | _] -> at
+      _ -> nil
+    end
+  end
+
+  # The settled hero's headline count: the honest full done_total when the
+  # view is unfiltered, the visible slice's own count when a filter produced
+  # the settled view (comparing a filtered slice against the global total
+  # would overstate).
+  defp settled_total(%{filtered?: true} = view, _board),
+    do: view.lanes |> hd() |> Map.get(:columns, %{}) |> Map.get(:done, []) |> length()
+
+  defp settled_total(_view, board), do: board.done_total
 
   # The one card the last realtime event touched — the render flashes it (a
   # `bp-flash` class + a `data-just-moved` hook). nil `@last_change` (fresh mount

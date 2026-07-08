@@ -630,7 +630,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, view, _html} = live(conn, "/admin/projects")
       html = render_hook(view, "restage", %{"doc_id" => "dr-wip", "to_col" => "done"})
 
-      assert card_in_column?(html, "dr-wip", "done")
+      # dr-wip was the LAST live card, so closing it SETTLES the board (wave
+      # 11): the column skeleton gives way to the pipeline-clear state and the
+      # card lands in the done ledger instead of a done column.
+      assert html =~ ~s(data-role="board-settled")
+      assert html =~ ~s(data-doc-id="dr-wip")
 
       doc = Repo.get_by(Document, doc_id: "dr-wip")
       assert doc.content["lifecycle_status"] == "done"
@@ -1058,7 +1062,64 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "settled lanes (wave 11) — grouped" do
+    setup do
+      task("sl-live", "Live under goal-live", lifecycle: "open", parent_id: "goal-live")
+      task("sl-done", "Done under goal-live", lifecycle: "done", parent_id: "goal-live")
+      task("sd-one", "Shipped one", lifecycle: "done", parent_id: "goal-done")
+      task("sd-two", "Shipped two", lifecycle: "done", parent_id: "goal-done")
+      :ok
+    end
+
+    test "a fully-done lane collapses to a receipt; live lanes keep their board",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      # the settled lane is a receipt with tally + ledger, not a column grid…
+      assert html =~ ~s(data-role="lane-settled")
+      assert html =~ "all 2 done"
+      assert html =~ ~s(data-role="done-ledger")
+      assert html =~ "Shipped one"
+      # …so the ONLY columns on the page are the live lane's five.
+      assert occurrences(html, ~s(data-role="column")) == 5
+    end
+
+    test "the flat board with live work renders columns, never the settled state",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      refute html =~ ~s(data-role="board-settled")
+      assert occurrences(html, ~s(data-role="column")) == 5
+    end
+  end
+
+  describe "settled board (wave 11) — flat, everything done" do
+    setup do
+      task("fd-one", "First shipped", lifecycle: "done")
+      task("fd-two", "Second shipped", lifecycle: "done")
+      task("fc-one", "Dropped idea", lifecycle: "cancelled")
+      :ok
+    end
+
+    test "swaps the column skeleton for the pipeline-clear state", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      assert html =~ ~s(data-role="board-settled")
+      assert html =~ "Pipeline clear"
+      assert html =~ "2 tasks done"
+      # no columns, no empty-board state — the settled state owns the canvas…
+      refute html =~ ~s(data-role="column")
+      refute html =~ ~s(data-role="board-empty")
+      # …while the momentum header and the done ledger stay.
+      assert html =~ ~s(data-role="momentum")
+      assert html =~ ~s(data-role="done-ledger")
+      assert html =~ "First shipped"
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  defp occurrences(html, needle), do: html |> String.split(needle) |> length() |> Kernel.-(1)
 
   # A task persisted with an explicit workspace_id (D12): the fenced restage
   # writes resolve the Default-workspace scope, so a claimable/closable row must
