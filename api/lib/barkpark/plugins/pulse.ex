@@ -63,6 +63,11 @@ defmodule Barkpark.Plugins.Pulse do
     [%{type: :link, label: "Lightning Storm", path: "/admin/pulse", icon: "zap"}]
   end
 
+  # The live cost sampler (scheduler utilization, message rates) — supervised
+  # only when the plugin is on; with it off the hot-path bumps are no-ops.
+  @impl Barkpark.Plugin
+  def register_workers(_sup), do: [Barkpark.Pulse.Metrics]
+
   @impl Barkpark.Plugin
   def oban_crontab do
     # Hourly, off the hour-mark rush.

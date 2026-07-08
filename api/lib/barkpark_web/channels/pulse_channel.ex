@@ -94,6 +94,8 @@ defmodule BarkparkWeb.PulseChannel do
 
       broadcast_from!(socket, "cursor", %{sid: socket.assigns.sid, x: x, y: y, hue: hue, chg: chg})
 
+      Barkpark.Pulse.Metrics.bump(:cursor)
+
       {:noreply, assign(socket, :last_cursor_ms, now)}
     else
       {:noreply, socket}
