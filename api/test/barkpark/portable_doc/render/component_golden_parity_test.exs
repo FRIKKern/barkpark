@@ -32,6 +32,7 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render.Components
+  alias Barkpark.PortableDoc.Render.Compose
   alias Barkpark.PortableDoc.Render.StatusVocab
   alias Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity
 
@@ -47,7 +48,7 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
 
   # ── freshness ────────────────────────────────────────────────────────────────
 
-  for type <- ["task-board", "status-legend"] do
+  for type <- GenGoldenParity.types() do
     @type_slug type
 
     test "#{type}: committed api mirror equals a fresh build/1" do
@@ -126,5 +127,150 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
                "static glyph #{inspect(row["glyph"])} for #{role} missing"
       end
     end
+  end
+
+  # ── S2 realization: the View emitter/composer realizes each projection ───────
+
+  # `raw_html/1` renders the container types (columns/terminal) that compose to a
+  # `_raw` HTML node rather than a `Components.*` emitter.
+  defp raw_html(input), do: Compose.compose_block(input)["html"]
+
+  # Assert the substrings appear in `html` in the given order (an ordered-spine check).
+  defp assert_ordered(html, needles) do
+    Enum.reduce(needles, 0, fn needle, from ->
+      idx = :binary.match(html, needle)
+
+      assert idx != :nomatch and elem(idx, 0) >= from,
+             "expected #{inspect(needle)} at or after offset #{from} (ordered-spine)"
+
+      elem(idx, 0)
+    end)
+  end
+
+  test "notes: the emitter realizes the projection (container · per-row label/lead/text)" do
+    fx = decode!(@api_dir, "notes")
+    html = Components.notes_html(fx["input"])
+    assert String.starts_with?(html, ~s|<div class="bp-notes">|)
+
+    for row <- fx["expected"]["rows"] do
+      assert html =~ ~s|<span class="bp-note__k">#{row["label"]}</span>|, "label #{row["label"]}"
+      assert html =~ ~s|<b>#{row["lead"]}</b>|, "lead #{row["lead"]}"
+      assert html =~ row["text"], "text #{row["text"]}"
+    end
+  end
+
+  test "note: the emitter realizes the projection (single row · label/lead/text)" do
+    fx = decode!(@api_dir, "note")
+    html = Components.note_item_html(fx["input"])
+    ex = fx["expected"]
+    assert String.starts_with?(html, ~s|<div class="bp-note">|)
+    assert html =~ ~s|<span class="bp-note__k">#{ex["label"]}</span>|
+    assert html =~ ~s|<b>#{ex["lead"]}</b>|
+    assert html =~ ex["text"]
+  end
+
+  test "cards: the emitter realizes the projection (container · title/text/tone per card)" do
+    fx = decode!(@api_dir, "cards")
+    html = Components.cards_html(fx["input"])
+    assert String.starts_with?(html, ~s|<div class="bp-cards">|)
+
+    for card <- fx["expected"]["cards"] do
+      assert html =~ ~s|<div class="bp-card__t">#{card["title"]}</div>|, "title #{card["title"]}"
+      assert html =~ ~s|<div class="bp-card__d">#{card["text"]}</div>|, "text #{card["text"]}"
+
+      if card["tone"] != "",
+        do: assert(html =~ ~s|bp-card--#{card["tone"]}|, "tone #{card["tone"]}")
+    end
+  end
+
+  test "card: the emitter realizes the projection (title + flattened body)" do
+    fx = decode!(@api_dir, "card")
+    html = Components.card_html(fx["input"])
+    ex = fx["expected"]
+    assert String.starts_with?(html, ~s|<div class="bp-card|)
+    assert html =~ ~s|<div class="bp-card__t">#{ex["title"]}</div>|
+    assert html =~ ~s|<div class="bp-card__d">#{ex["body"]}</div>|
+  end
+
+  test "pipeline: the emitter realizes the projection (container · kind/title/detail per node)" do
+    fx = decode!(@api_dir, "pipeline")
+    html = Components.pipeline_html(fx["input"])
+    assert html =~ ~s|<div class="bp-pipe">|
+
+    for node <- fx["expected"]["nodes"] do
+      assert html =~ ~s|<div class="bp-pnode__k">#{node["kind"]}</div>|, "kind #{node["kind"]}"
+      assert html =~ ~s|<div class="bp-pnode__t">#{node["title"]}</div>|, "title #{node["title"]}"
+      assert html =~ ~s|<div class="bp-pnode__d">#{node["detail"]}</div>|, "detail #{node["detail"]}"
+    end
+  end
+
+  test "stage: the emitter realizes the projection (one pnode · kind/title/detail)" do
+    fx = decode!(@api_dir, "stage")
+    html = Components.stage_html(fx["input"])
+    ex = fx["expected"]
+    assert String.starts_with?(html, ~s|<div class="bp-pnode|)
+    assert html =~ ~s|<div class="bp-pnode__k">#{ex["kind"]}</div>|
+    assert html =~ ~s|<div class="bp-pnode__t">#{ex["title"]}</div>|
+    assert html =~ ~s|<div class="bp-pnode__d">#{ex["detail"]}</div>|
+  end
+
+  test "task-detail: the emitter realizes the projection (title · ordered sections · criteria)" do
+    fx = decode!(@api_dir, "task-detail")
+    html = Components.task_detail_html(fx["input"])
+    ex = fx["expected"]
+
+    assert html =~ ~s|<div class="bp-tdetail__title">#{ex["title"]}</div>|
+
+    crit = ex["criteria"]
+    assert html =~ ~s|Criteria · #{crit["met"]}/#{crit["total"]}|, "criteria rollup"
+
+    # The projected sections realize as their marker classes, IN the projected order.
+    marker = %{
+      "meta" => ~s|class="bp-tdetail__meta"|,
+      "criteria" => ~s|class="bp-tdetail__crit"|,
+      "labels" => ~s|class="bp-tdetail__labels"|
+    }
+
+    assert_ordered(html, Enum.map(ex["sections"], &Map.fetch!(marker, &1)))
+  end
+
+  test "roadmap: the emitter realizes the projection (scale axis · per-lane title/role/phase)" do
+    fx = decode!(@api_dir, "roadmap")
+    html = Components.roadmap_html(fx["input"])
+    ex = fx["expected"]
+
+    for cell <- ex["scale"], do: assert(html =~ ~s|<span>#{cell}</span>|, "scale #{cell}")
+
+    for lane <- ex["lanes"] do
+      assert html =~ ~s|<span class="bp-rm__lbl">#{lane["title"]}</span>|, "lane #{lane["title"]}"
+      assert html =~ ~s|bp-rm__bar--#{lane["role"]}|, "role #{lane["role"]}"
+      if lane["phase"], do: assert(html =~ ~s|bp-rm__lane--phase|, "phase lane")
+    end
+  end
+
+  test "columns: the composer realizes the projection (one .bp-cols__c per column · nested children)" do
+    fx = decode!(@api_dir, "columns")
+    html = raw_html(fx["input"])
+    cols = fx["expected"]["columns"]
+
+    assert String.starts_with?(html, ~s|<div class="bp-cols"|)
+    assert occurrences(html, ~s|class="bp-cols__c"|) == length(cols),
+           "column count diverged from the projection"
+
+    # Each column's child prose survives the nesting (input carries distinct text).
+    assert html =~ "Left column body."
+    assert html =~ "Right column body."
+  end
+
+  test "terminal: the composer realizes the projection (title · live · footer · nested child)" do
+    fx = decode!(@api_dir, "terminal")
+    html = raw_html(fx["input"])
+    ex = fx["expected"]
+
+    assert String.starts_with?(html, ~s|<div class="bp-term">|)
+    assert html =~ ~s|<span class="bp-term__title">#{ex["title"]}</span>|
+    if ex["live"], do: assert(html =~ ~s|<span class="bp-term__live">live</span>|)
+    assert html =~ ~s|<div class="bp-term__foot">#{ex["footer"]}</div>|
+    assert html =~ "Inside the frame."
   end
 end

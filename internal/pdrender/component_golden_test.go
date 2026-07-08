@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -201,4 +202,188 @@ func TestStatusLegendGoldenParity(t *testing.T) {
 			}
 		}
 	}
+}
+
+// ── S2 legs: the TUI renderer realizes each projection ───────────────────────
+//
+// Each leg renders the fixture's authored `input` through the real embed seam and
+// asserts the TUI output realizes the SHARED projection at the strictness the
+// terminal surface can hold (stripped-ANSI substring; role/tone colour that the
+// terminal expresses as style — not text — is asserted by the web/Elixir legs).
+
+// mustContain fails when needle is absent from the render.
+func mustContain(t *testing.T, out, needle, what string) {
+	t.Helper()
+	if needle == "" {
+		return
+	}
+	if !strings.Contains(out, needle) {
+		t.Errorf("%s %q missing from render:\n%s", what, needle, out)
+	}
+}
+
+// unmarshalExpected decodes the fixture's expected projection into dst.
+func unmarshalExpected(t *testing.T, fx componentGolden, dst any) {
+	t.Helper()
+	if err := json.Unmarshal(fx.Expected, dst); err != nil {
+		t.Fatalf("decode projection: %v", err)
+	}
+}
+
+func TestNotesGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "notes")
+	var proj struct {
+		Rows []struct{ Label, Lead, Text string } `json:"rows"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if len(proj.Rows) < 2 {
+		t.Fatalf("projection floor: %d rows, want >= 2", len(proj.Rows))
+	}
+	out := renderComponent(t, fx.Input)
+	for _, r := range proj.Rows {
+		mustContain(t, out, r.Label, "note label")
+		mustContain(t, out, r.Lead, "note lead")
+		mustContain(t, out, r.Text, "note text")
+	}
+}
+
+func TestNoteGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "note")
+	var proj struct{ Label, Lead, Text string }
+	unmarshalExpected(t, fx, &proj)
+	out := renderComponent(t, fx.Input)
+	mustContain(t, out, proj.Label, "note label")
+	mustContain(t, out, proj.Lead, "note lead")
+	mustContain(t, out, proj.Text, "note text")
+}
+
+func TestCardsGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "cards")
+	var proj struct {
+		Cards []struct{ Title, Text, Tone string } `json:"cards"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if len(proj.Cards) < 2 {
+		t.Fatalf("projection floor: %d cards, want >= 2", len(proj.Cards))
+	}
+	out := renderComponent(t, fx.Input)
+	for _, c := range proj.Cards {
+		mustContain(t, out, c.Title, "card title")
+		mustContain(t, out, c.Text, "card text")
+	}
+}
+
+func TestCardGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "card")
+	var proj struct{ Title, Body string }
+	unmarshalExpected(t, fx, &proj)
+	out := renderComponent(t, fx.Input)
+	mustContain(t, out, proj.Title, "card title")
+	mustContain(t, out, proj.Body, "card body")
+}
+
+func TestPipelineGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "pipeline")
+	var proj struct {
+		Nodes []struct{ Kind, Title, Detail string } `json:"nodes"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if len(proj.Nodes) < 2 {
+		t.Fatalf("projection floor: %d nodes, want >= 2", len(proj.Nodes))
+	}
+	out := renderComponent(t, fx.Input)
+	for _, n := range proj.Nodes {
+		// The stage renderer UPPERCASES the kind kicker.
+		mustContain(t, out, strings.ToUpper(n.Kind), "pipeline node kind")
+		mustContain(t, out, n.Title, "pipeline node title")
+		mustContain(t, out, n.Detail, "pipeline node detail")
+	}
+}
+
+func TestStageGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "stage")
+	var proj struct{ Kind, Title, Detail string }
+	unmarshalExpected(t, fx, &proj)
+	out := renderComponent(t, fx.Input)
+	mustContain(t, out, strings.ToUpper(proj.Kind), "stage kind")
+	mustContain(t, out, proj.Title, "stage title")
+	mustContain(t, out, proj.Detail, "stage detail")
+}
+
+func TestTaskDetailGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "task-detail")
+	var proj struct {
+		Title    string   `json:"title"`
+		Sections []string `json:"sections"`
+		Criteria struct {
+			Met, Total int
+		} `json:"criteria"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	out := renderComponent(t, fx.Input)
+	mustContain(t, out, proj.Title, "task-detail title")
+	// The criteria rollup label is shared verbatim across surfaces.
+	if proj.Criteria.Total > 0 {
+		mustContain(t, out, fmt.Sprintf("Criteria · %d/%d", proj.Criteria.Met, proj.Criteria.Total), "criteria rollup")
+	}
+}
+
+func TestRoadmapGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "roadmap")
+	var proj struct {
+		Lanes []struct {
+			Title string `json:"title"`
+			Role  string `json:"role"`
+			Phase bool   `json:"phase"`
+		} `json:"lanes"`
+		Scale []string `json:"scale"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if len(proj.Lanes) < 2 {
+		t.Fatalf("projection floor: %d lanes, want >= 2", len(proj.Lanes))
+	}
+	out := renderComponent(t, fx.Input)
+	for _, c := range proj.Scale {
+		mustContain(t, out, c, "roadmap scale cell")
+	}
+	// Lane label survives to the render; the lane's ROLE is a bar colour (not
+	// text) so the web/Elixir legs own the role assertion, not this TUI leg.
+	for _, ln := range proj.Lanes {
+		mustContain(t, out, ln.Title, "roadmap lane title")
+	}
+}
+
+func TestColumnsGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "columns")
+	var proj struct {
+		Columns [][]string `json:"columns"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	if len(proj.Columns) < 2 {
+		t.Fatalf("projection floor: %d columns, want >= 2", len(proj.Columns))
+	}
+	out := renderComponent(t, fx.Input)
+	// The nested child prose survives the container recursion (each column's
+	// paragraph carries distinct text in the fixture input).
+	mustContain(t, out, "Left column body.", "columns left child")
+	mustContain(t, out, "Right column body.", "columns right child")
+}
+
+func TestTerminalGoldenParity(t *testing.T) {
+	fx := loadComponentGolden(t, "terminal")
+	var proj struct {
+		Title    string   `json:"title"`
+		Live     bool     `json:"live"`
+		Footer   string   `json:"footer"`
+		Children []string `json:"children"`
+	}
+	unmarshalExpected(t, fx, &proj)
+	out := renderComponent(t, fx.Input)
+	mustContain(t, out, proj.Title, "terminal title")
+	mustContain(t, out, proj.Footer, "terminal footer")
+	if proj.Live {
+		mustContain(t, out, "live", "terminal live chip")
+	}
+	// The nested child block renders inside the frame.
+	mustContain(t, out, "Inside the frame.", "terminal child")
 }

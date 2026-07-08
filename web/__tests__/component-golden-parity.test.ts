@@ -159,7 +159,273 @@ test("web glyph chars match the shared manifest for non-spinner roles (legend fi
   }
 });
 
-// S2 FIRST ITEM: status-legend has no web reader case in portable-doc.tsx. When
-// S2 adds it, drop `{ skip: ... }` and assert the six-rung ladder realizes the
-// status-legend projection here.
-test("status-legend web reader case (S2 — not yet implemented)", { skip: "S2: portable-doc.tsx has no status-legend case yet" }, () => {});
+/* ══ S2: the task-tracking / composition component family ══════════════════════
+ *
+ * Each type's web PROJECTOR (`web/lib/component-projections.ts`, which
+ * portable-doc.tsx renders FROM) must produce the SAME structural projection the
+ * Elixir generator committed. deepEqual against the golden `expected` — EXACT,
+ * never substring — so a web divergence from the shared truth reds here (matching
+ * the task-board leg's exactness). status-legend leads (the S1 skip, now green);
+ * the recursive containers (columns / terminal) come last. */
+
+import {
+  statusLegendProjection,
+  notesProjection,
+  noteProjection,
+  cardsProjection,
+  cardProjection,
+  pipelineProjection,
+  stageProjection,
+  taskDetailProjection,
+  roadmapProjection,
+  columnsProjection,
+  terminalProjection,
+  type LegendProjection,
+  type NotesProjection,
+  type NoteProjection,
+  type CardsProjection,
+  type CardProjection,
+  type PipelineProjection,
+  type StageProjection,
+  type TaskDetailProjection,
+  type RoadmapProjection,
+  type ColumnsProjection,
+  type TerminalProjection,
+} from "../lib/component-projections.ts";
+
+/** Load a `<type>.golden.json` fixture (input + expected projection). */
+function loadFixture(type: string): { input: Record<string, unknown>; expected: unknown } {
+  return JSON.parse(
+    readFileSync(new URL(`./fixtures/${type}.golden.json`, import.meta.url), "utf8"),
+  );
+}
+
+/** Every S2 type: its web projector must realize the committed golden projection
+ * EXACTLY. `input` is ignored by status-legend (static ladder), read by the rest. */
+const S2_CASES: Array<{
+  type: string;
+  project: (input: Record<string, unknown>) => unknown;
+}> = [
+  { type: "status-legend", project: () => statusLegendProjection() },
+  { type: "notes", project: notesProjection },
+  { type: "note", project: noteProjection },
+  { type: "cards", project: cardsProjection },
+  { type: "card", project: cardProjection },
+  { type: "pipeline", project: pipelineProjection },
+  { type: "stage", project: stageProjection },
+  { type: "task-detail", project: taskDetailProjection },
+  { type: "roadmap", project: roadmapProjection },
+  // recursive containers last — their projection expresses child NESTING.
+  { type: "columns", project: columnsProjection },
+  { type: "terminal", project: terminalProjection },
+];
+
+for (const { type, project } of S2_CASES) {
+  test(`web ${type} projector realizes the golden projection (exact)`, () => {
+    const fx = loadFixture(type);
+    assert.deepEqual(project(fx.input), fx.expected);
+  });
+}
+
+/* ══ S2 (LOAD-BEARING): the REAL RENDER realizes the projection ═══════════════
+ *
+ * The deepEqual loop above proves projector == golden — a valid SECOND layer.
+ * THIS layer is the load-bearing one: it drives the ACTUAL reader render
+ * (`renderBlock` from portable-doc.tsx) to static HTML exactly as the app lowers
+ * it, then asserts the shared projection's fields (container role, labels, card
+ * titles, glyph-role, container NESTING) appear in that rendered DOM. A JSX
+ * regression — a dropped field, a mis-wired projector→DOM, a container that
+ * re-derives its own structure (columns/terminal never import the projector) —
+ * reds HERE even while the projector still matches the golden. Proven non-
+ * vacuous: three render tampers (status-legend role, card title-drop, columns
+ * nesting) each red this suite; each passed green under the projector-only leg.
+ *
+ * renderBlock is JSX + `@/` aliases behind a `next/script`/sheets import graph
+ * node can't load bare, so support/tsx-loader.mjs transpiles the REAL source
+ * with the app's `jsx: react-jsx` and stubs ONLY the two off-render-path client
+ * components. No render logic under test is stubbed — every one of the 12
+ * component cases runs for real. */
+
+import { register } from "node:module";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { Block } from "../lib/papers.ts";
+
+register("./support/tsx-loader.mjs", import.meta.url);
+const { renderBlock } = await import("../components/portable-doc.tsx");
+
+function renderHtml(input: Record<string, unknown>): string {
+  return renderToStaticMarkup(renderBlock(input as Block, "k"));
+}
+
+function present(html: string, needle: string, label: string): void {
+  assert.ok(
+    html.includes(needle),
+    `${label}: rendered DOM is missing ${JSON.stringify(needle)}`,
+  );
+}
+
+/** Leaf text of an authored child block (paragraph content / scalar) — used to
+ * assert that a container (columns / terminal) actually NESTS its children's
+ * rendered content, catching a dropped or mis-nested child. */
+function leafText(node: unknown): string {
+  if (!node || typeof node !== "object") return "";
+  const n = node as { content?: unknown; value?: unknown; text?: unknown };
+  if (Array.isArray(n.content)) return n.content.map(leafText).join("");
+  if (typeof n.value === "string") return n.value;
+  if (typeof n.text === "string") return n.text;
+  return "";
+}
+
+/* ── per-type render assertions: the projection's fields MUST appear in the
+ * rendered DOM. Field strings are exact (a rename/drop reds). ── */
+
+const CARD_TONE_STRIPE: Record<string, string> = {
+  info: "border-l-blue-400",
+  ok: "border-l-emerald-400",
+  warn: "border-l-amber-400",
+  danger: "border-l-red-400",
+};
+const ROADMAP_ROLE_BAR: Record<string, string> = {
+  open: "bg-zinc-400",
+  ready: "bg-zinc-500",
+  progress: "bg-blue-500",
+  blocked: "bg-amber-500",
+  done: "bg-teal-500",
+  cancel: "bg-zinc-300",
+};
+
+test("web status-legend RENDER realizes the legend projection (role + glyph)", () => {
+  const html = renderHtml({ type: "status-legend" });
+  const exp = loadFixture("status-legend").expected as LegendProjection;
+  for (const r of exp.rows) {
+    present(html, `>${r.role}</dt>`, `legend role ${r.role}`);
+    present(html, `>${r.spinner ? "⠋" : r.glyph}</span>`, `legend glyph ${r.role}`);
+  }
+});
+
+test("web notes RENDER realizes every note row (label · lead · text)", () => {
+  const input = loadFixture("notes").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("notes").expected as NotesProjection;
+  for (const row of exp.rows) {
+    present(html, `>${row.label}</span>`, `notes label ${row.label}`);
+    present(html, `>${row.lead}</b>`, `notes lead ${row.lead}`);
+    present(html, row.text, `notes text ${row.text}`);
+  }
+});
+
+test("web note RENDER realizes the single row (label · lead · text)", () => {
+  const input = loadFixture("note").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("note").expected as NoteProjection;
+  present(html, `>${exp.label}</span>`, "note label");
+  present(html, `>${exp.lead}</b>`, "note lead");
+  present(html, exp.text, "note text");
+});
+
+test("web cards RENDER realizes every card (title · text · tone stripe)", () => {
+  const input = loadFixture("cards").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("cards").expected as CardsProjection;
+  for (const c of exp.cards) {
+    present(html, `>${c.title}</p>`, `cards title ${c.title}`);
+    present(html, `>${c.text}</p>`, `cards text ${c.text}`);
+    if (c.tone) present(html, CARD_TONE_STRIPE[c.tone], `cards tone ${c.tone}`);
+  }
+});
+
+test("web card RENDER realizes title + body", () => {
+  const input = loadFixture("card").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("card").expected as CardProjection;
+  present(html, `>${exp.title}</p>`, "card title");
+  present(html, `>${exp.body}</p>`, "card body");
+});
+
+test("web pipeline RENDER realizes every node (kind · title · detail)", () => {
+  const input = loadFixture("pipeline").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("pipeline").expected as PipelineProjection;
+  for (const n of exp.nodes) {
+    present(html, `>${n.kind}</p>`, `pipeline kind ${n.kind}`);
+    present(html, `>${n.title}</p>`, `pipeline title ${n.title}`);
+    present(html, `>${n.detail}</p>`, `pipeline detail ${n.detail}`);
+  }
+});
+
+test("web stage RENDER realizes kind · title · detail", () => {
+  const input = loadFixture("stage").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("stage").expected as StageProjection;
+  present(html, `>${exp.kind}</p>`, "stage kind");
+  present(html, `>${exp.title}</p>`, "stage title");
+  present(html, `>${exp.detail}</p>`, "stage detail");
+});
+
+test("web task-detail RENDER realizes title + criteria tally", () => {
+  const input = loadFixture("task-detail").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("task-detail").expected as TaskDetailProjection;
+  present(html, `>${exp.title}</p>`, "task-detail title");
+  if (exp.sections.includes("criteria")) {
+    present(
+      html,
+      `Criteria · ${exp.criteria.met}/${exp.criteria.total}`,
+      "task-detail criteria tally",
+    );
+  }
+});
+
+test("web roadmap RENDER realizes scale + every lane (title · role bar)", () => {
+  const input = loadFixture("roadmap").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("roadmap").expected as RoadmapProjection;
+  for (const cell of exp.scale) present(html, `>${cell}</span>`, `roadmap scale ${cell}`);
+  for (const lane of exp.lanes) {
+    present(html, `>${lane.title}</span>`, `roadmap lane ${lane.title}`);
+    present(html, ROADMAP_ROLE_BAR[lane.role], `roadmap role bar ${lane.role}`);
+  }
+});
+
+test("web columns RENDER nests each column's children (count + content)", () => {
+  const input = loadFixture("columns").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("columns").expected as ColumnsProjection;
+  // Column count is expressed in the grid template — a flatten/mis-nest reds.
+  present(html, `repeat(${exp.columns.length}, `, "columns grid count");
+  const cols = Array.isArray(input.columns) ? (input.columns as unknown[][]) : [];
+  exp.columns.forEach((children, ci) => {
+    children.forEach((_type, cj) => {
+      const text = leafText(cols[ci]?.[cj]);
+      if (text) present(html, text, `columns[${ci}] child ${cj}`);
+    });
+  });
+});
+
+test("web terminal RENDER realizes chrome (title · live · footer) + nests children", () => {
+  const input = loadFixture("terminal").input;
+  const html = renderHtml(input);
+  const exp = loadFixture("terminal").expected as TerminalProjection;
+  present(html, `>${exp.title}</span>`, "terminal title");
+  present(html, exp.footer, "terminal footer");
+  if (exp.live) present(html, ">live</span>", "terminal live badge");
+  const kids = Array.isArray(input.children)
+    ? (input.children as unknown[])
+    : Array.isArray(input.blocks)
+      ? (input.blocks as unknown[])
+      : [];
+  exp.children.forEach((_type, ci) => {
+    const text = leafText(kids[ci]);
+    if (text) present(html, text, `terminal child ${ci}`);
+  });
+});
+
+test("web task-board RENDER realizes every projection column (label · card titles)", () => {
+  const html = renderHtml(fixture.input as Record<string, unknown>);
+  for (const col of fixture.expected.columns) {
+    present(html, `${col.label}</span>`, `board label ${col.label}`);
+    for (const card of col.cards) {
+      present(html, `>${card.title}</p>`, `board card ${card.title}`);
+    }
+  }
+});
