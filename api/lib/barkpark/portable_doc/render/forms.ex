@@ -41,9 +41,14 @@ defmodule Barkpark.PortableDoc.Render.Forms do
     rationale_line = form_muted_line(Map.get(q, "rationale"), "", style)
     recommendation_line = form_muted_line(Map.get(q, "recommendation"), "Recommendation: ", style)
 
-    control = form_control_html(type, id, q, style)
+    control =
+      ~s(<div class="bp-form-opts">) <> form_control_html(type, id, q, style) <> "</div>"
 
-    ~s(<fieldset class="bp-form-question">) <>
+    # The per-type modifier lets the stylesheet lay each control out natively
+    # (the scale as a segmented row, choices as option rows) without JS.
+    type_class = ~s( bp-form-q--#{escape_attr(type)})
+
+    ~s(<fieldset class="bp-form-question#{type_class}">) <>
       legend <> rationale_line <> recommendation_line <> control <> "</fieldset>"
   end
 
@@ -53,10 +58,12 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   defp form_muted_line(nil, _prefix, _style), do: ""
   defp form_muted_line("", _prefix, _style), do: ""
 
-  defp form_muted_line(text, prefix, style) when is_binary(text) do
-    color = if style == :article, do: "#6a6a6a", else: "#6b7280"
+  defp form_muted_line(text, prefix, :article) when is_binary(text) do
+    ~s(<p class="bp-form-note">#{escape_html(prefix)}#{escape_html(text)}</p>)
+  end
 
-    ~s(<p style="color:#{color};font-size:0.9em;margin:0.3rem 0">#{escape_html(prefix)}#{escape_html(text)}</p>)
+  defp form_muted_line(text, prefix, _style) when is_binary(text) do
+    ~s(<p style="color:#6b7280;font-size:0.9em;margin:0.3rem 0">#{escape_html(prefix)}#{escape_html(text)}</p>)
   end
 
   defp form_muted_line(text, prefix, style), do: form_muted_line(to_string(text), prefix, style)
@@ -101,12 +108,22 @@ defmodule Barkpark.PortableDoc.Render.Forms do
 
   defp form_radio_group(id, labels, style), do: form_choice_group(id, labels, "radio", style)
 
-  defp form_choice_group(id, labels, input_type, style) do
-    gap = if style == :article, do: "0.35rem", else: "0.2rem"
-
+  defp form_choice_group(id, labels, input_type, :article) do
+    # Article mode: classed option rows, zero inline layout — paper-surface.css
+    # owns the geometry (and the custom control faces).
     labels
     |> Enum.map(fn label ->
-      ~s(<label style="display:block;margin:#{gap} 0">) <>
+      ~s(<label class="bp-form-opt">) <>
+        ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(label)}"> ) <>
+        ~s(<span>#{escape_html(label)}</span></label>)
+    end)
+    |> Enum.join("")
+  end
+
+  defp form_choice_group(id, labels, input_type, _style) do
+    labels
+    |> Enum.map(fn label ->
+      ~s(<label style="display:block;margin:0.2rem 0">) <>
         ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(label)}"> ) <>
         ~s(<span>#{escape_html(label)}</span></label>)
     end)
