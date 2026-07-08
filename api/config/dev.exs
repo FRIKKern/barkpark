@@ -82,4 +82,9 @@ config :barkpark, :allow_private_outbound, true
 # Anonymous browsers may enter the Default workspace's Studio (the public
 # demo / no-login dev posture). OFF by default in prod — see runtime.exs
 # (BARKPARK_PUBLIC_DEMO_STUDIO) and config.exs for the fail-closed base.
-config :barkpark, :public_demo_studio, true
+# Set BARKPARK_PUBLIC_DEMO_STUDIO=0 to run the local Studio authenticated —
+# admin-gated surfaces that HARD-REFUSE public-demo hosts (tmux console,
+# Claude chat) are invisible in the default dev posture.
+config :barkpark,
+       :public_demo_studio,
+       System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO", "1") not in ["0", "false", "no", "off"]
