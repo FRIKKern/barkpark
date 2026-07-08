@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Coherence — four surfaces, one token source</title>
+    <meta
+      name="description"
+      content="The Unified Aesthetic sign-off instrument: Studio, web, paper and TUI vocabulary composed on ONE page with ONE light/dark toggle that cascades to every pane. Zero hand-copied hex — every swatch paints with a live var(--…) read from the shipped token source."
+    />
+    <!--
+      Standing coherence harness (Unified Aesthetic S5). Verify-via-standalone-
+      static-harness, not the dev server. Fully self-contained + same-origin:
+        - ../app.css is the shipped Studio/web token source (:root light,
+          [data-theme=dark] dark) AND its self-hosted Inter. Linking it means the
+          Studio + web panes read the REAL tokens — nothing here hand-copies a hex.
+        - ./paper-surface.html is reused verbatim as the paper pane (an iframe);
+          the one toggle stamps data-theme on ITS documentElement too.
+        - The TUI pane renders the committed Go golden fixtures (embedded verbatim
+          below, drift-guarded in __app.test.mjs) through coherenceFixtureToHtml.
+      This page renders whatever the surfaces currently produce; it gets MORE
+      coherent as the remaining adoption slices land. That is intended — it is the
+      human bar, not a mock.
+    -->
+    <link rel="stylesheet" href="../app.css" />
+    <style>
+      /* Page-local chrome only. Everything colored below uses a live token var. */
+      html,
+      body {
+        height: auto;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: var(--font);
+      }
+      .co-shell {
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 24px 20px 96px;
+      }
+      .co-bar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 14px;
+        padding-bottom: 18px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 24px;
+      }
+      .co-bar h1 {
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .co-bar .co-sub {
+        color: var(--muted-text);
+        font-size: var(--text-sm);
+        flex: 1 1 260px;
+      }
+      .co-toggle {
+        font: inherit;
+        font-size: var(--text-sm);
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 13px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+        color: var(--text);
+        cursor: pointer;
+      }
+      .co-toggle:hover {
+        background: var(--muted-surface);
+      }
+      .co-toggle .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: var(--primary);
+      }
+
+      /* 2×2 surface grid. */
+      .co-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 18px;
+      }
+      .co-pane {
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        background: var(--surface);
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .co-pane-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px;
+        border-bottom: 1px solid var(--border);
+        background: var(--muted-surface);
+      }
+      .co-pane-head .co-tag {
+        font-size: 11px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted-text);
+      }
+      .co-pane-head .co-name {
+        font-size: var(--text-sm);
+        font-weight: 600;
+      }
+      .co-pane-body {
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+        flex: 1 1 auto;
+      }
+
+      /* Shared swatch strip — chips paint with var(), never a literal. */
+      .co-swatches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+        gap: 8px;
+      }
+      .co-chip {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      .co-chip .co-fill {
+        height: 34px;
+      }
+      .co-chip .co-lab {
+        padding: 4px 6px;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--muted-text);
+        background: var(--surface);
+        word-break: break-all;
+      }
+
+      /* Studio pane chrome — reuses app.css .btn/.card/.badge vocabulary. */
+      .co-studio-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .co-wordmark {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: 600;
+        font-size: var(--text-sm);
+      }
+      .co-wordmark .co-mark {
+        width: 16px;
+        height: 16px;
+        color: var(--primary);
+      }
+      .co-statuses {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      .co-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        background: var(--surface);
+        color: var(--text);
+      }
+      .co-badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .dot-ok {
+        background: var(--ok);
+      }
+      .dot-info {
+        background: var(--info);
+      }
+      .dot-warn {
+        background: var(--warn);
+      }
+      .dot-danger {
+        background: var(--danger);
+      }
+
+      /* Web pane — marketing chrome on the same tokens. */
+      .co-hero {
+        border-radius: 12px;
+        padding: 18px;
+        background: var(--muted-surface);
+        border: 1px solid var(--border);
+      }
+      .co-hero h3 {
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        margin-bottom: 6px;
+      }
+      .co-hero p {
+        color: var(--muted-text);
+        font-size: var(--text-sm);
+        margin-bottom: 14px;
+      }
+      .co-cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .co-pill {
+        display: inline-flex;
+        align-items: center;
+        font-size: var(--text-xs);
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--ok-soft);
+        color: var(--ok);
+        border: 1px solid var(--ok);
+      }
+      .co-pill.accent {
+        background: transparent;
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      /* Paper pane — the reused harness in an iframe. */
+      .co-paper-frame {
+        width: 100%;
+        border: 0;
+        height: 340px;
+        display: block;
+        background: var(--surface);
+      }
+      .co-note {
+        padding: 10px 14px;
+        font-size: var(--text-xs);
+        color: var(--muted-text);
+        border-top: 1px solid var(--border);
+      }
+
+      /* TUI pane — golden fixtures as styled <pre>. */
+      .co-term {
+        margin: 0;
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: var(--muted-surface);
+        color: var(--text);
+        font-family: var(--mono);
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .co-term + .co-term {
+        margin-top: 12px;
+      }
+      /* Emitted lifecycle role classes — the same token vocabulary on-screen. */
+      .bp-lc-info {
+        color: var(--info);
+        font-weight: 600;
+      }
+      .bp-lc-warn {
+        color: var(--warn);
+        font-weight: 600;
+      }
+      .bp-lc-ok {
+        color: var(--ok);
+        font-weight: 600;
+      }
+      .bp-lc-danger {
+        color: var(--danger);
+        font-weight: 600;
+      }
+      .bp-lc-hex {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .bp-lc-hex::before {
+        content: "";
+        display: inline-block;
+        width: 9px;
+        height: 9px;
+        border-radius: 2px;
+        border: 1px solid var(--border);
+        background: var(--hex);
+      }
+
+      /* Token-manifest proof table — one source, resolved live. */
+      .co-manifest {
+        margin-top: 28px;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .co-manifest-head {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        background: var(--muted-surface);
+        font-size: var(--text-sm);
+        font-weight: 600;
+      }
+      .co-manifest table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-xs);
+      }
+      .co-manifest th,
+      .co-manifest td {
+        text-align: left;
+        padding: 8px 16px;
+        border-bottom: 1px solid var(--border);
+      }
+      .co-manifest th {
+        color: var(--muted-text);
+        font-weight: 600;
+      }
+      .co-manifest tr:last-child td {
+        border-bottom: 0;
+      }
+      .co-manifest .co-name-cell {
+        font-family: var(--mono);
+      }
+      .co-manifest .co-val-cell {
+        font-family: var(--mono);
+        color: var(--muted-text);
+      }
+      .co-manifest .co-swatch-cell {
+        width: 34px;
+      }
+      .co-manifest .co-swatch-cell span {
+        display: block;
+        width: 22px;
+        height: 22px;
+        border-radius: 5px;
+        border: 1px solid var(--border);
+      }
+      .co-manifest .co-empty {
+        color: var(--danger);
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="co-shell">
+      <div class="co-bar">
+        <h1>Coherence — four surfaces, one token source</h1>
+        <span class="co-sub"
+          >Studio · web · paper · TUI on one page. One toggle stamps
+          <code>data-theme</code> on every pane. Every color is a live
+          <code>var(--…)</code> — zero hand-copied hex.</span
+        >
+        <button class="co-toggle" type="button" id="co-theme" aria-live="polite">
+          <span class="dot"></span><span id="co-theme-label">Switch to dark</span>
+        </button>
+      </div>
+
+      <div class="co-grid">
+        <!-- ───────────────────────── Studio ───────────────────────── -->
+        <section class="co-pane" aria-label="Studio surface">
+          <div class="co-pane-head">
+            <span class="co-tag">Chrome</span>
+            <span class="co-name">Studio</span>
+          </div>
+          <div class="co-pane-body">
+            <div class="co-studio-top">
+              <span class="co-wordmark">
+                <svg
+                  class="co-mark"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  aria-hidden="true"
+                >
+                  <path d="M12 2 4 7v6c0 5 3.5 7.5 8 9 4.5-1.5 8-4 8-9V7z" />
+                </svg>
+                Barkpark
+              </span>
+              <button class="btn btn-primary btn-sm" type="button">New paper</button>
+            </div>
+            <div class="co-statuses">
+              <span class="co-badge"><span class="dot dot-ok"></span>Live</span>
+              <span class="co-badge"><span class="dot dot-info"></span>Running</span>
+              <span class="co-badge"><span class="dot dot-warn"></span>Blocked</span>
+              <span class="co-badge"><span class="dot dot-danger"></span>Failed</span>
+            </div>
+            <div class="co-swatches" id="co-studio-swatches"></div>
+          </div>
+        </section>
+
+        <!-- ───────────────────────── Web ───────────────────────── -->
+        <section class="co-pane" aria-label="Web surface">
+          <div class="co-pane-head">
+            <span class="co-tag">Chrome</span>
+            <span class="co-name">Web</span>
+          </div>
+          <div class="co-pane-body">
+            <div class="co-hero">
+              <h3>Ship content, not plumbing.</h3>
+              <p>One content model, every surface — the same evergreen brand.</p>
+              <div class="co-cta">
+                <button class="btn btn-primary btn-sm" type="button">Get started</button>
+                <span class="co-pill">Open source</span>
+                <span class="co-pill accent">Self-hosted</span>
+              </div>
+            </div>
+            <div class="co-swatches" id="co-web-swatches"></div>
+          </div>
+        </section>
+
+        <!-- ───────────────────────── Paper ───────────────────────── -->
+        <section class="co-pane" aria-label="Paper surface">
+          <div class="co-pane-head">
+            <span class="co-tag">Prose</span>
+            <span class="co-name">Paper / PortableDoc</span>
+          </div>
+          <iframe
+            class="co-paper-frame"
+            id="co-paper"
+            src="./paper-surface.html"
+            title="Paper surface token preview"
+            loading="lazy"
+          ></iframe>
+          <div class="co-note" id="co-paper-note">
+            Reused verbatim from <code>paper-surface.html</code>. The toggle above
+            stamps this frame's theme too.
+          </div>
+        </section>
+
+        <!-- ───────────────────────── TUI ───────────────────────── -->
+        <section class="co-pane" aria-label="TUI surface">
+          <div class="co-pane-head">
+            <span class="co-tag">Terminal</span>
+            <span class="co-name">TUI / pdrender</span>
+          </div>
+          <div class="co-pane-body">
+            <pre class="co-term" id="co-tui-lifecycle" aria-label="taskboard lifecycle golden fixture"></pre>
+            <pre class="co-term" id="co-tui-tokens" aria-label="pdrender tokens golden fixture"></pre>
+          </div>
+        </section>
+      </div>
+
+      <!-- Token-manifest proof: the one source, resolved live per theme. -->
+      <div class="co-manifest">
+        <div class="co-manifest-head">Token manifest — resolved live from the shipped source</div>
+        <table>
+          <thead>
+            <tr>
+              <th class="co-swatch-cell"></th>
+              <th>Token</th>
+              <th>Resolved value</th>
+            </tr>
+          </thead>
+          <tbody id="co-manifest-rows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Committed Go golden fixtures, embedded VERBATIM (byte-identical to the
+         source .txt — drift-guarded in __app.test.mjs). Rendered through the
+         shared coherenceFixtureToHtml transform, never re-typed by hand. -->
+    <script type="text/plain" id="co-fixture-lifecycle">Barkpark lifecycle vocabulary (emitted from design/tokens.json)
+state         glyph  ascii  role   light      dark
+-----------   -----  -----  -----  -------    -------
+in_progress   ⠋      ~      info   #2563eb    #60a5fa
+blocked       !      !      warn   #d97706    #fbbf24
+done          ✓      v      ok     #0d9488    #2dd4bf
+closed        ✓      v      ok     #0d9488    #2dd4bf
+cancelled     ✕      x      -      #a1a1aa    #71717a
+ready         ○      o      -      #18181b    #e7edf2
+open          ○      .      -      #71717a    #5f6b78
+
+spinner frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+reduced-motion still: ⠿
+</script>
+    <script type="text/plain" id="co-fixture-tokens">pdrender status tones (emitted from design/tokens.json)
+tone     light      dark
+------   -------    -------
+info     #3b82f6    #3b82f6
+ok       #137236    #45c474
+warn     #ba7008    #f8ab25
+danger   #b42222    #ef6161
+
+reading tokens
+font stack:     "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif
+heading weight: 600
+body size:      18px
+</script>
+
+    <script>
+(function () {
+  "use strict";
+
+  // esc — identical to app.js; the mirrored block below leans on it.
+  function esc(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
+  // >>> BEGIN coherence-helpers — MIRRORED VERBATIM into __preview__/coherence.html.
+  //     Drift is a test failure (see __app.test.mjs "coherence helper block is
+  //     byte-identical in app.js and coherence.html"). Depends only on esc(),
+  //     which is in scope in both files. Pure: no DOM, no globals. These back the
+  //     S5 four-surface coherence harness — the human sign-off gate for the
+  //     Unified Aesthetic. >>>
+  var COHERENCE_TOKENS = [
+    "--primary", "--primary-fg", "--accent",
+    "--ok", "--warn", "--danger", "--info",
+    "--bg", "--surface", "--text", "--muted-text", "--border",
+  ];
+
+  // The four lifecycle roles the TUI golden fixtures colorize, mapped to the one
+  // token vocabulary. "ok" is health-green; danger/warn/info round it out.
+  var COHERENCE_ROLES = ["info", "warn", "ok", "danger"];
+
+  // light/dark is a single bit — flip it. Kept a function so the toggle and the
+  // tests share one definition of "the other theme".
+  function coherenceNextTheme(cur) {
+    return cur === "dark" ? "light" : "dark";
+  }
+
+  // Stamp data-theme on every pane root so ONE toggle cascades to all surfaces —
+  // including a same-origin iframe's documentElement. Roots may be null (an
+  // iframe still loading, an absent pane): those are skipped, never thrown on.
+  // Returns the count actually stamped (honest: 0 while nothing is mounted yet).
+  function coherenceStampTheme(theme, roots) {
+    var stamped = 0;
+    (roots || []).forEach(function (root) {
+      if (!root) return;
+      if (typeof root.setAttribute === "function") {
+        root.setAttribute("data-theme", theme);
+        stamped++;
+      } else if (root.dataset) {
+        root.dataset.theme = theme;
+        stamped++;
+      }
+    });
+    return stamped;
+  }
+
+  // Build the token-manifest rows from a live reader (browser: a closure over
+  // getComputedStyle(root).getPropertyValue). Never hand-copies a hex — an
+  // unresolved var surfaces as { empty: true } so a missing token reads as a
+  // gap, not a fabricated color.
+  function coherenceTokenRows(readVar, names) {
+    var list = names || COHERENCE_TOKENS;
+    return list.map(function (name) {
+      var raw = readVar ? readVar(name) : "";
+      var value = String(raw == null ? "" : raw).trim();
+      return { name: name, value: value, empty: value === "" };
+    });
+  }
+
+  // Transform a committed TUI golden fixture (taskboard/pdrender styleguide .txt)
+  // into styled <pre> HTML: escape everything, then paint the emitted lifecycle
+  // role words with .bp-lc-<role> (the shared token classes) and wrap each
+  // #rrggbb cell in a color chip. Deterministic + escaping-safe so the terminal
+  // surface shows on-screen in the same vocabulary as the other three.
+  function coherenceFixtureToHtml(text) {
+    var out = esc(text == null ? "" : text);
+    out = out.replace(/\b(info|warn|ok|danger)\b/g, function (word) {
+      return '<span class="bp-lc-' + word + '">' + word + "</span>";
+    });
+    out = out.replace(/#[0-9a-fA-F]{6}\b/g, function (hex) {
+      return '<span class="bp-lc-hex" style="--hex:' + hex + '">' + hex + "</span>";
+    });
+    return out;
+  }
+  // <<< END coherence-helpers <<<
+
+  // ── page wiring ──────────────────────────────────────────────────────────
+  var root = document.documentElement;
+
+  // The paper pane is a same-origin iframe; reach its documentElement so the
+  // toggle themes it too. Null until (and unless) it loads.
+  function paperFrameRoot() {
+    var frame = document.getElementById("co-paper");
+    try {
+      return frame && frame.contentDocument
+        ? frame.contentDocument.documentElement
+        : null;
+    } catch (e) {
+      return null; // cross-origin guard — never applies here, but honest.
+    }
+  }
+
+  function allRoots() {
+    return [root, paperFrameRoot()];
+  }
+
+  function readVar(name) {
+    return getComputedStyle(root).getPropertyValue(name);
+  }
+
+  // Paint a swatch strip (chips paint with var(), the label shows the token name).
+  function paintSwatches(el) {
+    if (!el) return;
+    el.innerHTML = COHERENCE_TOKENS.map(function (name) {
+      return (
+        '<div class="co-chip">' +
+        '<div class="co-fill" style="background: var(' + esc(name) + ')"></div>' +
+        '<div class="co-lab">' + esc(name) + "</div>" +
+        "</div>"
+      );
+    }).join("");
+  }
+
+  // Render the token-manifest table from the live reader.
+  function paintManifest() {
+    var body = document.getElementById("co-manifest-rows");
+    if (!body) return;
+    body.innerHTML = coherenceTokenRows(readVar)
+      .map(function (row) {
+        var val = row.empty
+          ? '<span class="co-empty">unresolved</span>'
+          : esc(row.value);
+        return (
+          "<tr>" +
+          '<td class="co-swatch-cell"><span style="background: var(' +
+          esc(row.name) +
+          ')"></span></td>' +
+          '<td class="co-name-cell">' + esc(row.name) + "</td>" +
+          '<td class="co-val-cell">' + val + "</td>" +
+          "</tr>"
+        );
+      })
+      .join("");
+  }
+
+  // Render the embedded golden fixtures through the shared transform.
+  function paintTui() {
+    var pairs = [
+      ["co-fixture-lifecycle", "co-tui-lifecycle"],
+      ["co-fixture-tokens", "co-tui-tokens"],
+    ];
+    pairs.forEach(function (pair) {
+      var src = document.getElementById(pair[0]);
+      var dst = document.getElementById(pair[1]);
+      if (src && dst) dst.innerHTML = coherenceFixtureToHtml(src.textContent);
+    });
+  }
+
+  function applyTheme(theme) {
+    coherenceStampTheme(theme, allRoots());
+    var label = document.getElementById("co-theme-label");
+    if (label) {
+      label.textContent =
+        theme === "dark" ? "Switch to light" : "Switch to dark";
+    }
+    // Live vars change with the theme — re-read the manifest.
+    paintManifest();
+  }
+
+  document.getElementById("co-theme").addEventListener("click", function () {
+    applyTheme(coherenceNextTheme(root.getAttribute("data-theme") || "light"));
+  });
+
+  // Keep the paper iframe in sync once it loads (and if it fails, say so).
+  var frame = document.getElementById("co-paper");
+  frame.addEventListener("load", function () {
+    var themed = coherenceStampTheme(
+      root.getAttribute("data-theme") || "light",
+      [paperFrameRoot()],
+    );
+    if (!themed) {
+      // Cross-frame reach failed (mis-rooted server, cross-origin). Keep the
+      // paper's OWN toggle as the reviewer's escape hatch and say why.
+      var note = document.getElementById("co-paper-note");
+      if (note) {
+        note.textContent =
+          "Paper pane could not be reached — open paper-surface.html directly.";
+      }
+      return;
+    }
+    // The frame IS reachable, so the ONE outer toggle now drives it. Neutralize
+    // the reused surface's own toggle — a second control here could desync this
+    // pane from the other three and quietly break the single-source thesis this
+    // instrument exists to prove. Best-effort + guarded; the reused page is
+    // otherwise untouched (verbatim), and a null (renamed/absent) is a no-op.
+    try {
+      var innerToggle =
+        frame.contentDocument &&
+        frame.contentDocument.getElementById("pv-theme");
+      if (innerToggle) innerToggle.style.display = "none";
+    } catch (e) {
+      /* cross-origin — never applies same-origin, but never throw. */
+    }
+  });
+
+  paintSwatches(document.getElementById("co-studio-swatches"));
+  paintSwatches(document.getElementById("co-web-swatches"));
+  paintTui();
+  applyTheme(root.getAttribute("data-theme") || "light");
+})();
+    </script>
+  </body>
+</html>
