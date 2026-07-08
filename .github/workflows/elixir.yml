@@ -189,6 +189,33 @@ jobs:
           git diff --exit-code docs/openapi.json \
             || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
 
+      - name: Paper-component golden-parity freshness (3 mirrors must match the emitter)
+        # Same drift-gate shape as the OpenAPI check above, for the cross-surface
+        # PAPER-COMPONENT parity spine (Unified Aesthetic W5.c). Regenerates the
+        # structural-projection fixtures from the View emitter + shared status
+        # manifest and fails if ANY of the three committed mirrors drifted:
+        #   api/test/support/fixtures/*.golden.json
+        #   web/__tests__/fixtures/*.golden.json
+        #   internal/pdrender/testdata/*.golden.json
+        # A `Render.Components` emitter or design/status-manifest.json glyph/role
+        # edit that shipped WITHOUT a regen reds HERE (byte-level), complementing the
+        # term-level freshness + realization asserts in
+        # test/barkpark/portable_doc/render/component_golden_parity_test.exs. The gen
+        # writes byte-identically to all three trees; `git add -N` first so a
+        # brand-new untracked mirror is caught too. Runs from the repo root — the web
+        # + internal/pdrender mirrors live one level above api/.
+        run: |
+          mix barkpark.paper_components.gen_golden_parity
+          cd ..
+          git add -N 'api/test/support/fixtures/*.golden.json' \
+                     'web/__tests__/fixtures/*.golden.json' \
+                     'internal/pdrender/testdata/*.golden.json'
+          git diff --exit-code -- \
+            'api/test/support/fixtures/*.golden.json' \
+            'web/__tests__/fixtures/*.golden.json' \
+            'internal/pdrender/testdata/*.golden.json' \
+            || (echo "::error::paper-component golden fixtures are stale — run 'cd api && mix barkpark.paper_components.gen_golden_parity' and commit all three mirrors" && exit 1)
+
       - name: Test
         # CI-BLOCKING GATES ride this default `mix test` — no separate/advisory
         # job. Among them: the canvas⇄reader render-parity gate
