@@ -2714,3 +2714,140 @@ test("liveness chip: renderLivenessChip paints a data-state + label without thro
     sandbox.document = orig;
   }
 });
+
+// ── S5 four-surface coherence harness (__preview__/coherence.html) ──────────
+// The standing sign-off instrument composes Studio + web + paper + TUI on one
+// page under ONE light/dark toggle. Its pure logic lives in app.js (theme
+// propagation, token-manifest rows, fixture→styled-HTML) so this vm harness can
+// pin it; the page mirrors the same block byte-for-byte and a drift test below
+// keeps the two copies honest.
+
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const COHERENCE_HTML = new URL("./__preview__/coherence.html", import.meta.url);
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const LIFECYCLE_FIXTURE = path.join(REPO_ROOT, "internal/taskboard/testdata/styleguide_lifecycle.txt");
+const TOKENS_FIXTURE = path.join(REPO_ROOT, "internal/pdrender/testdata/styleguide_tokens.txt");
+
+test("coherence: the pure helpers are exported on the test hook", () => {
+  for (const name of ["coherenceNextTheme", "coherenceStampTheme",
+    "coherenceTokenRows", "coherenceFixtureToHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.ok(Array.isArray(hooks.coherenceTokens) && hooks.coherenceTokens.length > 0);
+  // The four semantic roles + the evergreen primary are the coherence spine.
+  assert.ok(hooks.coherenceTokens.includes("--primary"));
+  for (const t of ["--ok", "--warn", "--danger", "--info"]) {
+    assert.ok(hooks.coherenceTokens.includes(t), t + " must be in the manifest");
+  }
+  assert.deepEqual([...hooks.coherenceRoles], ["info", "warn", "ok", "danger"]);
+});
+
+test("coherence: nextTheme flips the single light/dark bit both ways", () => {
+  assert.equal(hooks.coherenceNextTheme("light"), "dark");
+  assert.equal(hooks.coherenceNextTheme("dark"), "light");
+  // Anything not "dark" is treated as light → toggling lands on dark.
+  assert.equal(hooks.coherenceNextTheme(""), "dark");
+  assert.equal(hooks.coherenceNextTheme(undefined), "dark");
+});
+
+test("coherence: stampTheme cascades to every root, skips nulls, returns the count", () => {
+  const mk = () => {
+    const attrs = {};
+    return { attrs, setAttribute: (k, v) => { attrs[k] = v; } };
+  };
+  const a = mk(), b = mk();
+  // Null roots (an iframe still loading) are skipped, never thrown on.
+  const stamped = hooks.coherenceStampTheme("dark", [a, null, b, undefined]);
+  assert.equal(stamped, 2);
+  assert.equal(a.attrs["data-theme"], "dark");
+  assert.equal(b.attrs["data-theme"], "dark");
+  // A dataset-only root (no setAttribute) still gets stamped.
+  const ds = { dataset: {} };
+  assert.equal(hooks.coherenceStampTheme("light", [ds]), 1);
+  assert.equal(ds.dataset.theme, "light");
+  // Honest empty state: nothing mounted yet → 0.
+  assert.equal(hooks.coherenceStampTheme("dark", []), 0);
+  assert.equal(hooks.coherenceStampTheme("dark", null), 0);
+});
+
+test("coherence: tokenRows reads live and flags unresolved tokens as gaps", () => {
+  // A fake live reader: resolves everything except --border (a missing token).
+  const reader = (name) => (name === "--border" ? "  " : "hsl(163 46% 22%)");
+  const rows = hooks.coherenceTokenRows(reader);
+  assert.equal(rows.length, hooks.coherenceTokens.length);
+  const primary = rows.find((r) => r.name === "--primary");
+  assert.equal(primary.value, "hsl(163 46% 22%)");
+  assert.equal(primary.empty, false);
+  // A blank/whitespace resolution reads as a gap, never a fabricated color.
+  const border = rows.find((r) => r.name === "--border");
+  assert.equal(border.value, "");
+  assert.equal(border.empty, true);
+  // No reader at all → every row is an honest gap, not a crash.
+  const blind = hooks.coherenceTokenRows(null);
+  assert.ok(blind.every((r) => r.empty === true));
+  // A custom name list is honored. (Field-wise, not deepEqual — the vm sandbox's
+  // object prototype is a different realm's, so structural deepEqual won't match.)
+  const custom = hooks.coherenceTokenRows(() => "x", ["--ok"]);
+  assert.equal(custom.length, 1);
+  assert.equal(custom[0].name, "--ok");
+  assert.equal(custom[0].value, "x");
+  assert.equal(custom[0].empty, false);
+});
+
+test("coherence: fixtureToHtml paints role words + hex chips and stays escape-safe", () => {
+  const golden = fs.readFileSync(LIFECYCLE_FIXTURE, "utf8");
+  const html = hooks.coherenceFixtureToHtml(golden);
+  // Emitted lifecycle roles are wrapped in the shared token classes.
+  assert.match(html, /<span class="bp-lc-info">info<\/span>/);
+  assert.match(html, /<span class="bp-lc-warn">warn<\/span>/);
+  assert.match(html, /<span class="bp-lc-ok">ok<\/span>/);
+  // Hex swatch cells become color chips carrying the literal value.
+  assert.match(html, /<span class="bp-lc-hex" style="--hex:#2563eb">#2563eb<\/span>/);
+  // Escaping first: markup in the fixture can never break out of the <pre>.
+  const evil = hooks.coherenceFixtureToHtml('<img src=x onerror=alert(1)> & "ok"');
+  assert.ok(!evil.includes("<img"));
+  assert.match(evil, /&lt;img/);
+  assert.match(evil, /&amp;/);
+  // "ok" inside the escaped text is still colorized as a role.
+  assert.match(evil, /<span class="bp-lc-ok">ok<\/span>/);
+  // No false positive: a substring like "workshop" is NOT a role word.
+  assert.ok(!hooks.coherenceFixtureToHtml("workshop broker").includes("bp-lc-"));
+});
+
+test("coherence: the helper block is byte-identical in app.js and coherence.html", () => {
+  const appSrc = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
+  const RE = /\/\/ >>> BEGIN coherence-helpers[\s\S]*?\/\/ <<< END coherence-helpers <<</;
+  const appBlock = appSrc.match(RE);
+  const pageBlock = pageSrc.match(RE);
+  assert.ok(appBlock, "app.js must carry the coherence-helpers block");
+  assert.ok(pageBlock, "coherence.html must mirror the coherence-helpers block");
+  assert.equal(
+    pageBlock[0],
+    appBlock[0],
+    "coherence.html drifted from app.js — re-mirror the block verbatim",
+  );
+});
+
+test("coherence: the embedded TUI fixtures are byte-identical to the committed goldens", () => {
+  const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
+  const embed = (id) => {
+    const m = pageSrc.match(
+      new RegExp('<script type="text/plain" id="' + id + '">([\\s\\S]*?)</script>'),
+    );
+    assert.ok(m, "coherence.html must embed the " + id + " fixture");
+    return m[1];
+  };
+  assert.equal(
+    embed("co-fixture-lifecycle"),
+    fs.readFileSync(LIFECYCLE_FIXTURE, "utf8"),
+    "lifecycle fixture drifted — re-embed styleguide_lifecycle.txt verbatim",
+  );
+  assert.equal(
+    embed("co-fixture-tokens"),
+    fs.readFileSync(TOKENS_FIXTURE, "utf8"),
+    "tokens fixture drifted — re-embed styleguide_tokens.txt verbatim",
+  );
+});
