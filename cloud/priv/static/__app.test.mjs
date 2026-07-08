@@ -1204,8 +1204,8 @@ test("C6: the tab codec + webhook builders + mount seam are exported", () => {
     "mountWebhooksTab"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  // C8 registered the Timeline tab between Overview and Webhooks.
-  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks"]);
+  // C8 registered the Timeline tab between Overview and Webhooks; C10 appended Usage.
+  assert.deepEqual([...hooks.instanceTabs], ["overview", "timeline", "webhooks", "usage"]);
 });
 
 // ── parseHash tab codec (D49/D14): #instance/<id>/<tab>, legacy hash → overview ─
@@ -2850,4 +2850,145 @@ test("coherence: the embedded TUI fixtures are byte-identical to the committed g
     fs.readFileSync(TOKENS_FIXTURE, "utf8"),
     "tokens fixture drifted — re-embed styleguide_tokens.txt verbatim",
   );
+});
+
+// ── C10: Usage sub-tab + Members settings panel ─────────────────────────────
+// Pure helpers only (the DOM mount/fetch wiring is browser-verified). These pin
+// the meter vocabulary, the honest freshness/unmetered states, the failure copy,
+// and the role-gated manage controls.
+
+const usageSpec = (key) => hooks.usageMeters.find((s) => s.key === key);
+
+test("C10: the Usage + Members helpers are exported", () => {
+  for (const name of ["c10FmtBytes", "usageMeterDisplay", "usageMeterHtml",
+    "usageMetersHtml", "usageTabShellHtml", "usageFailureCopy",
+    "assignableRoles", "membersFailureCopy", "memberRowHtml",
+    "invitationRowHtml", "membersPanelHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  // The fixed 8-meter vocabulary, in render order (mirrors Usage.compose/1).
+  assert.deepEqual([...hooks.usageMeters.map((m) => m.key)],
+    ["seats", "documents", "datasets", "webhooks", "db_size", "disk", "api_requests", "bandwidth"]);
+});
+
+test("C10: c10FmtBytes humanizes base-1024, echoes non-numbers", () => {
+  assert.equal(hooks.c10FmtBytes(0), "0 B");
+  assert.equal(hooks.c10FmtBytes(512), "512 B");
+  assert.equal(hooks.c10FmtBytes(1024), "1.0 KB");
+  assert.equal(hooks.c10FmtBytes(1048576), "1.0 MB");
+  // A surprise shape (e.g. the "unmetered" sentinel) is echoed, never crashes.
+  assert.equal(hooks.c10FmtBytes("unmetered"), "unmetered");
+  assert.equal(hooks.c10FmtBytes(-5), "-5");
+});
+
+test("C10: usageMeterDisplay — a real number formats by the meter's fmt", () => {
+  const seats = hooks.usageMeterDisplay(usageSpec("seats"), { value: 5, measured_at: null });
+  assert.equal(seats.unmetered, false);
+  assert.equal(seats.value, "5");
+  const db = hooks.usageMeterDisplay(usageSpec("db_size"), { value: 1048576, measured_at: null });
+  assert.equal(db.value, "1.0 MB"); // bytes fmt
+  const disk = hooks.usageMeterDisplay(usageSpec("disk"), { value: 42.6, measured_at: null });
+  assert.equal(disk.value, "43%"); // percent fmt, rounded
+});
+
+test("C10: usageMeterDisplay — 'unmetered' renders the designed empty state, never a fake zero", () => {
+  const d = hooks.usageMeterDisplay(usageSpec("documents"), { value: "unmetered" });
+  assert.equal(d.unmetered, true);
+  assert.equal(d.value, "Not yet metered");
+  assert.equal(d.freshness, "");
+  // A missing meter degrades to the same unmetered state (no throw).
+  const missing = hooks.usageMeterDisplay(usageSpec("documents"), undefined);
+  assert.equal(missing.unmetered, true);
+  assert.equal(missing.value, "Not yet metered");
+});
+
+test("C10: usageMeterDisplay — measured_at nil is a LIVE read, present is 'as of'", () => {
+  const live = hooks.usageMeterDisplay(usageSpec("documents"), { value: 12, measured_at: null });
+  assert.equal(live.freshness, "live"); // nil ≠ error (acceptance criterion 2)
+  const ts = "2026-07-08T06:00:00Z";
+  const asOf = hooks.usageMeterDisplay(usageSpec("documents"), { value: 12, measured_at: ts });
+  assert.equal(asOf.freshness, "as of " + hooks.relTime(ts));
+  assert.match(asOf.freshness, /^as of /);
+});
+
+test("C10: usageMeterDisplay — seats meter carries pending_invitations, pluralized", () => {
+  const two = hooks.usageMeterDisplay(usageSpec("seats"), { value: 3, pending_invitations: 2 });
+  assert.equal(two.pending, "2 pending invitations");
+  const one = hooks.usageMeterDisplay(usageSpec("seats"), { value: 3, pending_invitations: 1 });
+  assert.equal(one.pending, "1 pending invitation"); // singular
+  const none = hooks.usageMeterDisplay(usageSpec("seats"), { value: 3, pending_invitations: 0 });
+  assert.equal(none.pending, "");
+  // pending only rides the seats meter, never another.
+  const docs = hooks.usageMeterDisplay(usageSpec("documents"), { value: 3, pending_invitations: 9 });
+  assert.equal(docs.pending, "");
+});
+
+test("C10: usageMetersHtml renders the full grid; metered vs unmetered chrome differs", () => {
+  const empty = hooks.usageMetersHtml({});
+  // Every meter label present even with an empty payload — the grid is always full.
+  for (const spec of hooks.usageMeters) assert.ok(empty.includes(hooks.esc(spec.label)), spec.label + " missing");
+  assert.equal((empty.match(/Not yet metered/g) || []).length, 8);
+  const metered = hooks.usageMetersHtml({ documents: { value: 7, measured_at: null } });
+  assert.match(metered, /<strong>7<\/strong>/);          // real value is bold
+  assert.match(metered, /<span class="dim">Not yet metered<\/span>/); // still-empty meters stay dim
+});
+
+test("C10: usageFailureCopy — 404 is a distinct honest line, else a retryable one", () => {
+  assert.match(hooks.usageFailureCopy(404), /isn't in your team|has been removed/);
+  assert.match(hooks.usageFailureCopy(500), /couldn't load usage|Retry/i);
+  // The shell is a loading skeleton, not a blank panel.
+  assert.match(hooks.usageTabShellHtml(), /Loading usage/);
+});
+
+test("C10: assignableRoles — owner assigns all, admin can't grant owner, member none", () => {
+  assert.deepEqual([...hooks.assignableRoles("owner")], ["owner", "admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("admin")], ["admin", "member"]);
+  assert.deepEqual([...hooks.assignableRoles("member")], []);
+  assert.deepEqual([...hooks.assignableRoles("nonsense")], []);
+});
+
+test("C10: membersFailureCopy — network / forbidden / generic each get honest copy", () => {
+  assert.match(hooks.membersFailureCopy(0), /Network error/i);
+  assert.match(hooks.membersFailureCopy(403), /permission/i);
+  assert.match(hooks.membersFailureCopy(500), /couldn't load|Retry/i);
+});
+
+test("C10: memberRowHtml — manage controls are role-gated and self-hidden", () => {
+  const m = { user_id: "u2", email: "teammate@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" };
+  const admin = hooks.memberRowHtml(m, { role: "admin", userId: "u1" });
+  assert.match(admin, /data-member-role="u2"/);   // change role
+  assert.match(admin, /data-member-remove="u2"/); // remove
+  // A plain member sees no manage controls at all.
+  const member = hooks.memberRowHtml(m, { role: "member", userId: "u1" });
+  assert.ok(!member.includes("data-member-role"));
+  assert.ok(!member.includes("data-member-remove"));
+  // You can't demote/remove yourself: self row is tagged "(you)", controls hidden.
+  const self = hooks.memberRowHtml(m, { role: "admin", userId: "u2" });
+  assert.match(self, /\(you\)/);
+  assert.ok(!self.includes("data-member-remove"));
+});
+
+test("C10: invitationRowHtml — revoke is manager-gated", () => {
+  const inv = { id: "inv9", email: "invitee@x.io", role: "member", expires_at: "2026-07-15T00:00:00Z" };
+  const admin = hooks.invitationRowHtml(inv, { role: "admin" });
+  assert.match(admin, /data-invite-revoke="inv9"/);
+  assert.match(admin, /Pending/);
+  const member = hooks.invitationRowHtml(inv, { role: "member" });
+  assert.ok(!member.includes("data-invite-revoke"));
+});
+
+test("C10: membersPanelHtml — invitations section is manager-only and collapses when empty", () => {
+  const members = [{ user_id: "u2", email: "a@x.io", role: "member", joined_at: "2026-06-01T00:00:00Z" }];
+  const invitations = [{ id: "inv1", email: "b@x.io", role: "member", expires_at: "2026-07-15T00:00:00Z" }];
+  // Manager, empty invitations → heading present, quiet collapse line.
+  const emptyInv = hooks.membersPanelHtml(members, [], { role: "admin", userId: "u1" });
+  assert.match(emptyInv, /Pending invitations/);
+  assert.match(emptyInv, /No pending invitations\./);
+  // Manager, with invitations → the invitation row is rendered.
+  const withInv = hooks.membersPanelHtml(members, invitations, { role: "admin", userId: "u1" });
+  assert.match(withInv, /data-invite-revoke="inv1"/);
+  assert.ok(!withInv.includes("No pending invitations"));
+  // A plain member never sees the invitations section at all.
+  const plain = hooks.membersPanelHtml(members, invitations, { role: "member", userId: "u1" });
+  assert.ok(!plain.includes("Pending invitations"));
 });
