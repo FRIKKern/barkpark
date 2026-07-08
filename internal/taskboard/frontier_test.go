@@ -68,30 +68,37 @@ func TestInterferesTruthTable(t *testing.T) {
 	blockAB := buildCrossAdj(map[string][]string{"a": {"b"}})
 
 	cases := []struct {
-		name     string
-		ai, bi   areaInfo
-		nkA, nkB string
-		cross    crossAdj
-		want     interfereTier
+		name        string
+		ai, bi      areaInfo
+		nkA, nkB    string
+		cross       crossAdj
+		containment bool
+		want        interfereTier
 	}{
-		{"area overlap → HARD", studio, studioApi, "proj:x", "proj:y", nil, tierHard},
-		{"area disjoint → NONE", studio, cli, "proj:x", "proj:y", nil, tierNone},
-		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, "root:e", "root:e", nil, tierNone},
-		{"one area-less, same nbhd → HARD", studio, none, "root:e", "root:e", nil, tierHard},
-		{"one area-less, diff nbhd → UNKNOWN", studio, none, "proj:x", "proj:y", nil, tierUnknown},
-		{"both area-less, same nbhd → HARD", none, none, "root:e", "root:e", nil, tierHard},
-		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, "proj:x", "proj:y", nil, tierUnknown},
+		{"area overlap → HARD", studio, studioApi, "proj:x", "proj:y", nil, false, tierHard},
+		{"area disjoint → NONE", studio, cli, "proj:x", "proj:y", nil, false, tierNone},
+		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, "root:e", "root:e", nil, false, tierNone},
+		{"one area-less, same nbhd → HARD", studio, none, "root:e", "root:e", nil, false, tierHard},
+		{"one area-less, diff nbhd → UNKNOWN", studio, none, "proj:x", "proj:y", nil, false, tierUnknown},
+		{"both area-less, same nbhd → HARD", none, none, "root:e", "root:e", nil, false, tierHard},
+		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, "proj:x", "proj:y", nil, false, tierUnknown},
 		// slice-2: a cross-root block edge overrides even disjoint proven areas.
-		{"cross edge overrides disjoint areas → HARD", studio, cli, "proj:x", "proj:y", blockAB, tierHard},
-		{"cross edge overrides area-less diff nbhd → HARD", none, none, "proj:x", "proj:y", blockAB, tierHard},
+		{"cross edge overrides disjoint areas → HARD", studio, cli, "proj:x", "proj:y", blockAB, false, tierHard},
+		{"cross edge overrides area-less diff nbhd → HARD", none, none, "proj:x", "proj:y", blockAB, false, tierHard},
+		// df-exclude-epic-roots: a parent↔own-descendant pair in the SAME nbhd is
+		// containment, so the area-less proxy is LIFTED (root never displaces child).
+		{"area-less parent↔child same nbhd → UNKNOWN (containment lifts)", studio, none, "root:e", "root:e", nil, true, tierUnknown},
+		{"both area-less parent↔child same nbhd → UNKNOWN (containment lifts)", none, none, "root:e", "root:e", nil, true, tierUnknown},
+		// …but a REAL cross-root block edge still hard-conflicts even under containment.
+		{"cross edge beats containment → HARD", none, none, "root:e", "root:e", blockAB, true, tierHard},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := interferes(c.ai, c.bi, c.nkA, c.nkB, "a", "b", c.cross); got != c.want {
+			if got := interferes(c.ai, c.bi, c.nkA, c.nkB, "a", "b", c.cross, c.containment); got != c.want {
 				t.Errorf("interferes = %v, want %v", got, c.want)
 			}
 			// symmetry — the predicate must not depend on argument order
-			if got := interferes(c.bi, c.ai, c.nkB, c.nkA, "b", "a", c.cross); got != c.want {
+			if got := interferes(c.bi, c.ai, c.nkB, c.nkA, "b", "a", c.cross, c.containment); got != c.want {
 				t.Errorf("interferes (swapped) = %v, want %v", got, c.want)
 			}
 		})
@@ -413,6 +420,69 @@ func TestCrossRootBlockEdgesFold(t *testing.T) {
 	// No qualifying edge ⇒ nil (slice-1 behavior).
 	if CrossRootBlockEdges(Snapshot{Tasks: tasks}, []GraphEdge{{From: "a", To: "a2"}}) != nil {
 		t.Errorf("same-root-only fold should be nil")
+	}
+}
+
+// TestFrontierEpicRootDoesNotDisplaceChildren — the load-bearing fixture for
+// df-exclude-epic-roots. An area-less epic ROOT that is itself READY (and thus a
+// high-scored candidate) used to share its children's neighborhood key and, via
+// the area-less proxy, HARD-conflict — and displace — every disjoint-area child,
+// pinning proven at 0 and the frontier at 1 pick. The containment lift makes the
+// three children run in parallel: proven climbs 0 → 3.
+func TestFrontierEpicRootDoesNotDisplaceChildren(t *testing.T) {
+	tasks := []Task{
+		{DocID: "epic", Title: "epic root", Kind: kindGoal, Lifecycle: lifeReady, Priority: "0"},
+		{DocID: "s", Title: "studio bit", ParentID: "epic", Lifecycle: lifeReady, Priority: "1", Labels: []string{"area:studio"}},
+		{DocID: "c", Title: "cli bit", ParentID: "epic", Lifecycle: lifeReady, Priority: "1", Labels: []string{"area:cli"}},
+		{DocID: "w", Title: "web bit", ParentID: "epic", Lifecycle: lifeReady, Priority: "1", Labels: []string{"area:web"}},
+	}
+
+	// BEFORE/AFTER at the predicate: the SAME root↔child pair is tierHard without
+	// containment (the mechanism that displaced children) and tierUnknown with it.
+	byBare := frontierByBare(tasks)
+	rootAI, kidAI := areasOf(tasks[0]), areasOf(tasks[1])
+	if got := interferes(rootAI, kidAI, "root:epic", "root:epic", "epic", "s", nil, false); got != tierHard {
+		t.Fatalf("precondition: root↔child WITHOUT containment = %v, want tierHard (the bug)", got)
+	}
+	if got := interferes(rootAI, kidAI, "root:epic", "root:epic", "epic", "s", nil, true); got != tierUnknown {
+		t.Fatalf("fix: root↔child WITH containment = %v, want tierUnknown (no displacement)", got)
+	}
+	if !isAncestorBare(byBare, "epic", "s") {
+		t.Fatal("epic must be detected as an ancestor of s")
+	}
+
+	picks := Frontier(Snapshot{Tasks: tasks}, nil, nil, refNow, FrontierOpts{})
+	proven := 0
+	for _, p := range picks {
+		if p.Proven() {
+			proven++
+		}
+		if p.Task.DocID == "epic" && len(p.Displaced) != 0 {
+			t.Errorf("root displaced %+v — it must NEVER displace its own children", p.Displaced)
+		}
+	}
+	// BEFORE the fix: 1 pick (the root), proven 0. AFTER: the three disjoint-area
+	// children parallelize, proven 0 → 3.
+	if proven != 3 {
+		t.Errorf("proven = %d, want 3 (children parallelize; was 0 before the fix)", proven)
+	}
+	if len(picks) < 2 {
+		t.Fatalf("frontier = %d picks, want >1 (root no longer displaces its children)", len(picks))
+	}
+}
+
+// TestFrontierAreaLessSiblingsStillConflict — the peer guard: two area-less
+// NON-parent siblings must STILL hard-conflict via the conservative proxy. The
+// containment lift is strictly parent↔own-descendant; it must not leak to peers.
+func TestFrontierAreaLessSiblingsStillConflict(t *testing.T) {
+	tasks := []Task{
+		{DocID: "epic", Kind: kindGoal, Lifecycle: lifeOpen}, // parent, not a candidate
+		{DocID: "a", Title: "a", ParentID: "epic", Lifecycle: lifeReady, Priority: "1"},
+		{DocID: "b", Title: "b", ParentID: "epic", Lifecycle: lifeReady, Priority: "2"},
+	}
+	picks := Frontier(Snapshot{Tasks: tasks}, nil, nil, refNow, FrontierOpts{})
+	if len(picks) != 1 {
+		t.Fatalf("frontier = %d, want 1 (area-less siblings still conflict — proxy intact for peers)", len(picks))
 	}
 }
 

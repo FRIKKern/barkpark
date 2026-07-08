@@ -339,7 +339,17 @@ func (c crossAdj) has(a, b string) bool {
 // the precise area-disjoint test that would otherwise clear two tasks with
 // non-overlapping surfaces to run in parallel. With a nil/empty edge set the
 // consult is a no-op and behavior is identical to slice 1.
-func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj) interfereTier {
+//
+// `containment` (df-exclude-epic-roots) marks a pair that stands in an
+// ancestor↔descendant relationship (one is the other's parent/grandparent). For
+// such a pair the area-less neighborhood proxy is LIFTED: a goal/epic root is
+// area-less, high-scored, and shares its children's neighborhood key, so the
+// bare proxy made the root HARD-conflict — and thus DISPLACE — every labeled
+// child, capping intra-epic parallelism. A parent must never displace its own
+// descendant this way. Only the same-tree proxy conflict is lifted; a real
+// cross-root BLOCKS edge (consulted first) and a genuine area overlap still
+// hard-conflict, and peers (non-ancestor pairs) keep the conservative proxy.
+func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj, containment bool) interfereTier {
 	// A real cross-root block edge trumps everything below.
 	if cross.has(idA, idB) {
 		return tierHard
@@ -353,6 +363,11 @@ func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj) inte
 	}
 	// at least one is area-less — conservative neighborhood proxy
 	if nkA == nkB {
+		if containment {
+			// parent↔own-descendant: independent BY ASSUMPTION, never a hard
+			// conflict — the root must not displace its own child.
+			return tierUnknown
+		}
 		return tierHard
 	}
 	return tierUnknown
@@ -393,6 +408,10 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 	// Slice-2 seam: the real cross-root block edges the caller fetched from the
 	// graph API (nil on the board path → zero cost).
 	cross := buildCrossAdj(opts.CrossEdges)
+	// df-exclude-epic-roots: the set of goal/epic parents, so the admission loop
+	// can spot a parent↔own-child pair and never let the root displace its child
+	// through the area-less neighborhood proxy.
+	parents := parentSet(s)
 
 	// Candidates = the ready pool (the SAME set the old independentReady counted
 	// roots over), refined by the interference model below.
@@ -434,7 +453,14 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 		winner := -1
 		for k := range picks {
 			wID := bareID(picks[k].pick.Task.DocID)
-			if interferes(c.ai, picks[k].ai, c.nk, picks[k].pick.NeighborhoodKey, cID, wID, cross) == tierHard {
+			// A parent↔own-descendant pair is in containment, not peer conflict:
+			// the neighborhood proxy is lifted so a root never displaces its child.
+			// The parentSet guard skips the chain walk for the common leaf↔leaf case.
+			containment := false
+			if parents[cID] || parents[wID] {
+				containment = isAncestorBare(byBare, cID, wID) || isAncestorBare(byBare, wID, cID)
+			}
+			if interferes(c.ai, picks[k].ai, c.nk, picks[k].pick.NeighborhoodKey, cID, wID, cross, containment) == tierHard {
 				winner = k // first hard conflict owns the displacement
 				break
 			}
