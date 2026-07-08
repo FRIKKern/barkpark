@@ -81,47 +81,12 @@ defmodule Barkpark.Plugins.Github.Errors do
   @doc """
   Recursively redact bearer tokens out of a value.
 
-  Used by the `Inspect` impls below; exported for the test suite.
+  Delegates to `Barkpark.Redaction` (the one shared engine) with THIS module's
+  allowlists. Used by the `Inspect` impls below; exported for the test suite.
   """
   @spec redact(any()) :: any()
-  def redact(value), do: do_redact(value)
-
-  defp do_redact(map) when is_map(map) and not is_struct(map) do
-    Enum.into(map, %{}, fn {k, v} -> {k, redact_pair(k, v)} end)
-  end
-
-  defp do_redact(list) when is_list(list) do
-    Enum.map(list, fn
-      {k, v} -> {k, redact_pair(k, v)}
-      other -> do_redact(other)
-    end)
-  end
-
-  defp do_redact(bin) when is_binary(bin), do: redact_binary(bin)
-  defp do_redact(other), do: other
-
-  defp redact_pair(k, v) when is_binary(k) do
-    cond do
-      k in @sensitive_header_keys -> "[REDACTED]"
-      k in @sensitive_json_keys -> "[REDACTED]"
-      true -> do_redact(v)
-    end
-  end
-
-  defp redact_pair(k, v) when is_atom(k), do: redact_pair(Atom.to_string(k), v)
-  defp redact_pair(_k, v), do: do_redact(v)
-
-  # Best-effort scrub of JSON-looking strings — replace any
-  # `"<sensitive_key>":"..."` pair with `"<sensitive_key>":"[REDACTED]"`.
-  defp redact_binary(bin) do
-    Enum.reduce(@sensitive_json_keys, bin, fn key, acc ->
-      Regex.replace(
-        ~r/("#{Regex.escape(key)}"\s*:\s*)"[^"]*"/,
-        acc,
-        "\\1\"[REDACTED]\""
-      )
-    end)
-  end
+  def redact(value),
+    do: Barkpark.Redaction.redact(value, @sensitive_header_keys, @sensitive_json_keys)
 
   defimpl Inspect, for: AuthError do
     import Inspect.Algebra
