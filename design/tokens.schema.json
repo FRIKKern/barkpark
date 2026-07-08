@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://barkpark.cloud/design/tokens.schema.json",
+  "title": "Barkpark Unified Aesthetic Tokens",
+  "description": "Language-neutral single source of truth for the Barkpark aesthetic. Emitters (W1.2) fan this out to every surface. Keys prefixed with '_' are inline documentation and are allowed everywhere.",
+  "type": "object",
+  "required": ["version", "meta", "color", "font", "type", "space", "radius", "elevation", "motion", "zIndex", "lifecycle"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+    "meta": {
+      "type": "object",
+      "required": ["note", "provenance"],
+      "properties": {
+        "note": { "type": "string", "minLength": 1 },
+        "provenance": { "type": "object" }
+      }
+    },
+    "color": {
+      "type": "object",
+      "required": ["primary", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent", "status"],
+      "properties": {
+        "status": {
+          "type": "object",
+          "required": ["ok", "warn", "danger", "info"],
+          "properties": {
+            "ok": { "$ref": "#/$defs/hslPair" },
+            "warn": { "$ref": "#/$defs/hslPair" },
+            "danger": { "$ref": "#/$defs/hslPair" },
+            "info": { "$ref": "#/$defs/hslPair" }
+          }
+        }
+      },
+      "patternProperties": {
+        "^(primary|primary-fg|bg|surface|muted-surface|text|muted-text|border|ring|accent)$": { "$ref": "#/$defs/hslPair" }
+      }
+    },
+    "font": {
+      "type": "object",
+      "required": ["chrome", "mono", "reading"],
+      "properties": {
+        "chrome": {
+          "type": "object",
+          "required": ["stack", "selfHosted", "woff2", "weightRange"],
+          "properties": {
+            "stack": { "type": "string" },
+            "selfHosted": { "const": true },
+            "woff2": { "type": "string" },
+            "weightRange": { "type": "array", "items": { "type": "integer" }, "minItems": 2, "maxItems": 2 }
+          }
+        },
+        "mono": { "type": "object", "required": ["stack"] },
+        "reading": { "type": "object", "required": ["stack"] }
+      }
+    },
+    "type": {
+      "type": "object",
+      "required": ["chrome", "reading"],
+      "properties": {
+        "chrome": {
+          "type": "object",
+          "required": ["xs", "sm", "base", "lg", "xl", "2xl"]
+        },
+        "reading": {
+          "type": "object",
+          "required": ["headingWeight", "body", "h1", "h2", "h3"]
+        }
+      }
+    },
+    "space": {
+      "type": "object",
+      "required": ["1", "2", "3", "4", "5", "6", "7", "8"]
+    },
+    "radius": {
+      "type": "object",
+      "required": ["sm", "base", "lg", "pill"]
+    },
+    "elevation": {
+      "type": "object",
+      "required": ["0", "1", "2", "3"]
+    },
+    "motion": {
+      "type": "object",
+      "required": ["dur-1", "dur-2", "dur-3", "ease"]
+    },
+    "zIndex": {
+      "type": "object",
+      "required": ["tabnav", "topbar", "menu", "modal", "toast"]
+    },
+    "lifecycle": {
+      "type": "object",
+      "required": ["in_progress", "blocked", "done", "closed", "cancelled", "ready", "open"],
+      "patternProperties": {
+        "^(in_progress|blocked|done|closed|cancelled|ready|open)$": { "$ref": "#/$defs/lifecycleEntry" }
+      }
+    }
+  },
+  "$defs": {
+    "hslPair": {
+      "type": "object",
+      "required": ["light", "dark"],
+      "properties": {
+        "light": { "type": "string", "pattern": "^[0-9.]+ [0-9.]+% [0-9.]+%$" },
+        "dark": { "type": "string", "pattern": "^[0-9.]+ [0-9.]+% [0-9.]+%$" }
+      }
+    },
+    "hexPair": {
+      "type": "object",
+      "required": ["light", "dark"],
+      "properties": {
+        "light": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" },
+        "dark": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "lifecycleEntry": {
+      "type": "object",
+      "required": ["role", "glyph", "codepoint", "asciiGlyph", "color"],
+      "properties": {
+        "role": { "type": "string", "enum": ["ok", "info", "warn", "danger", ""] },
+        "glyph": { "type": "string", "minLength": 1 },
+        "codepoint": { "type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$" },
+        "asciiGlyph": { "type": "string", "minLength": 1 },
+        "color": { "$ref": "#/$defs/hexPair" },
+        "frames": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$" }
+        }
+      }
+    }
+  }
+}
