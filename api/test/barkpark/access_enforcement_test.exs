@@ -35,10 +35,28 @@ defmodule Barkpark.AccessEnforcementTest do
   # Insert a grant bound (claimed) to `grantee`, so
   # `Access.list_active_grants_for_grantee/1` (which `from_user/2` calls) loads
   # it. `overrides` set the scope ladder / capabilities / expiry / revocation.
+  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
+  # member of `ws` holding read+write+admin, so a grant it mints still confers
+  # (a grant only admits while its grantor still holds the capability).
+  defp grant_authority!(ws) do
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
+        label: "ag-grantor",
+        dataset: "test",
+        permissions: ["read", "write", "admin"]
+      })
+      |> Repo.insert()
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
+    token
+  end
+
   defp bind_grant!(ws, grantee, overrides) do
     attrs =
       %{
-        grantor_id: Ecto.UUID.generate(),
+        grantor_id: grant_authority!(ws).id,
         grantee_email: grantee.email,
         grantee_user_id: grantee.id,
         claimed_at: DateTime.utc_now(),

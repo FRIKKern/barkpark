@@ -311,9 +311,81 @@ defmodule Barkpark.Access do
       grant.single_use and not is_nil(grant.claimed_at) -> {:error, :forbidden}
       not action_allowed?(grant, action) -> {:error, :forbidden}
       not scope_contained?(grant, scope) -> {:error, :forbidden}
+      not grantor_authorizes?(grant, action) -> {:error, :forbidden}
       true -> :ok
     end
   end
+
+  @doc """
+  LIVE grantor re-validation — the privilege-persistence gate (finding ag-1).
+
+  A grant may only confer a capability while its GRANTOR still holds that
+  capability in the grant's workspace, RIGHT NOW. Enforcement re-resolves the
+  grantor principal from `grantor_id` and re-runs the SAME per-action
+  `Barkpark.Tenancy.Auth.authorize/3` check the mint-time no-escalation gate
+  (`authorize_capabilities/3`) used — so mint and enforcement AGREE: a grantor
+  that mint would still allow is admitted; a grantor whose authority was
+  removed (membership deleted), narrowed (role downgraded write→read), or
+  invalidated (token revoked) no longer confers, EXCLUDING every grant it
+  issued from that point on.
+
+  Per-action: a grantor that kept `read` but lost `write` still confers read
+  but not write. Fail-CLOSED: a grantor that can't be resolved to a live
+  principal, or that no longer authorizes the action, → `false`.
+
+  This is the ONE grantor predicate; it is the sole re-validation source shared
+  by BOTH enforcement families — the per-action admission path (`validate/3` /
+  `admits_desk?/3` via `do_validate`) AND the read-union row-narrowing path
+  (`Barkpark.Content.Scope.scope_to_grants/3`) — so no path can admit a grant
+  the other would deny.
+  """
+  @spec grantor_authorizes?(Grant.t(), action() | String.t()) :: boolean()
+  def grantor_authorizes?(%Grant{} = grant, action) do
+    with {:ok, act} <- normalize_action(action),
+         principal when not is_nil(principal) <- resolve_grantor(grant.grantor_id) do
+      Auth.authorize(principal, grant.workspace_id, act) == :ok
+    else
+      _ -> false
+    end
+  end
+
+  def grantor_authorizes?(_grant, _action), do: false
+
+  # Resolve the stored `grantor_id` back to the LIVE principal mint authorized
+  # against. There is no `grantor_type` discriminator on the grant — `mint/2`
+  # records only the id (via `principal_id/1`), for a User OR an ApiToken — so
+  # we resolve by loading the row: a User first, else an ApiToken. User and
+  # ApiToken carry independent random UUIDv4 primary keys in separate tables, so
+  # an id matches at most one; this reconstructs EXACTLY the struct mint passed
+  # to `Auth.authorize/3` (a User → membership role; an ApiToken → membership
+  # AND its `permissions[]`), keeping mint and enforcement byte-identical.
+  #
+  # Fail-CLOSED: a non-UUID id, a deleted user/token, or a REVOKED token → nil
+  # (grant excluded). A revoked token can no longer authenticate to mint at all
+  # (`verify_token/1` rejects `revoked_at`), so excluding it here mirrors "mint
+  # would no longer allow this grantor" — it is consistent with the mint gate,
+  # not a divergence from it.
+  defp resolve_grantor(grantor_id) when is_binary(grantor_id) do
+    case Repo.uuid_or_nil(grantor_id) do
+      nil -> nil
+      uuid -> Repo.get(User, uuid) || live_token(uuid)
+    end
+  end
+
+  defp resolve_grantor(_), do: nil
+
+  defp live_token(uuid) do
+    case Repo.get(ApiToken, uuid) do
+      %ApiToken{revoked_at: nil} = token -> token
+      _ -> nil
+    end
+  end
+
+  # Coerce a validate/3 action (atom OR string) to the atom `Auth.authorize/3`
+  # expects; anything else → :error → fail-closed deny.
+  defp normalize_action(action) when action in [:read, :write, :admin], do: {:ok, action}
+  defp normalize_action(action) when is_binary(action), do: cap_to_action(action)
+  defp normalize_action(_), do: :error
 
   defp action_allowed?(%Grant{capabilities: caps}, action) when is_atom(action) and is_list(caps),
     do: Atom.to_string(action) in caps

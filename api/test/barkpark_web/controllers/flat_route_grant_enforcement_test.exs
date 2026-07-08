@@ -83,10 +83,28 @@ defmodule BarkparkWeb.FlatRouteGrantEnforcementTest do
 
   # A grant CLAIMED by `user` (so `list_active_grants_for_grantee/1` loads it),
   # scoped to the Default workspace + project, dataset "granted", type "post".
+  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
+  # member of `ws` holding read+write+admin, so a grant it mints still confers
+  # (a grant only admits while its grantor still holds the capability).
+  defp grant_authority!(ws) do
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
+        label: "ag-grantor",
+        dataset: "test",
+        permissions: ["read", "write", "admin"]
+      })
+      |> Repo.insert()
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
+    token
+  end
+
   defp bind_grant!(ws, project, user, overrides \\ %{}) do
     attrs =
       %{
-        grantor_id: Ecto.UUID.generate(),
+        grantor_id: grant_authority!(ws).id,
         grantee_email: user.email,
         grantee_user_id: user.id,
         claimed_at: DateTime.utc_now(),

@@ -8,12 +8,14 @@ defmodule Barkpark.AccessTest do
   use Barkpark.DataCase, async: false
 
   import Barkpark.TenancyFixtures
+  import Ecto.Query
 
   alias Barkpark.Access
   alias Barkpark.Access.Grant
   alias Barkpark.Accounts
   alias Barkpark.Auth.ApiToken
-  alias Barkpark.Tenancy.Auth
+  alias Barkpark.Content.{CallerContext, Scope}
+  alias Barkpark.Tenancy.{Auth, Membership}
 
   @password "correct-horse-battery"
 
@@ -346,6 +348,150 @@ defmodule Barkpark.AccessTest do
       assert Access.list_grants_for_workspace(absent) == []
       assert Access.list_active_grants_for_grantee(absent) == []
       assert Access.get_grant(absent) == nil
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Grantor authority re-validated LIVE at enforcement (finding ag-1). A grant
+  # only confers a capability while its GRANTOR still holds that capability in
+  # the workspace, RE-CHECKED per action at read time. Both directions, paired:
+  # the NEGATIVE (grantor lost authority → grant no longer admits) and its
+  # explicit POSITIVE control (grantor still holds → grant still admits).
+  # ---------------------------------------------------------------------------
+  describe "grantor authority re-validation at enforcement (ag-1)" do
+    # Remove the grantor's membership row → grantor holds NOTHING in the ws.
+    defp remove_membership(ws, principal_id) do
+      from(m in Membership,
+        where: m.workspace_id == ^ws.id and m.principal_id == ^principal_id
+      )
+      |> Repo.delete_all()
+    end
+
+    # POSITIVE CONTROL (no over-deny): a grantor that STILL holds the capability
+    # admits normally — the re-validation gates ONLY on lost authority.
+    test "grantor still holds authority → grant STILL admits (no over-deny)" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read", "write"])
+
+      {:ok, %{grant: grant, token: raw}} =
+        Access.mint(grantor, base_attrs(ws, %{capabilities: ["read", "write"]}))
+
+      assert Access.grantor_authorizes?(grant, :write) == true
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == :ok
+      assert Access.validate(grant, :write, %{workspace_id: ws.id}) == :ok
+      assert Access.validate(raw, :write, %{workspace_id: ws.id}) == :ok
+    end
+
+    # NEGATIVE (the hole): grantor's membership is REMOVED after the grant is
+    # minted → the grant confers nothing thereafter.
+    test "grantor membership removed → grant no longer admits (hole closed)" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read", "write"])
+
+      {:ok, %{grant: grant}} =
+        Access.mint(grantor, base_attrs(ws, %{capabilities: ["read", "write"]}))
+
+      # admits while the grantor still holds authority
+      assert Access.validate(grant, :write, %{workspace_id: ws.id}) == :ok
+
+      # grantor loses ALL authority in the workspace
+      remove_membership(ws, grantor.id)
+
+      # the grant now confers nothing — denied by real behavior, not a flag
+      assert Access.grantor_authorizes?(grant, :read) == false
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == {:error, :forbidden}
+      assert Access.validate(grant, :write, %{workspace_id: ws.id}) == {:error, :forbidden}
+    end
+
+    # PARTIAL DOWNGRADE (per-action): token grantor downgraded write→read. A
+    # read grant still admits; the write action is denied — grantor authority is
+    # per-action, so the grant confers only what the grantor still holds.
+    test "grantor downgraded write→read → read admits, write denied (per-action)" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read", "write"])
+
+      {:ok, %{grant: grant}} =
+        Access.mint(grantor, base_attrs(ws, %{capabilities: ["read", "write"]}))
+
+      # downgrade the grantor's live capability: write→read
+      grantor |> Ecto.Changeset.change(permissions: ["read"]) |> Repo.update!()
+
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == :ok
+      assert Access.validate(grant, :write, %{workspace_id: ws.id}) == {:error, :forbidden}
+    end
+
+    # USER grantor path (proves User-principal resolution + per-action admin).
+    # An admin USER mints an admin-bearing grant, then is downgraded admin→member
+    # (member keeps read/write, loses admin): the grant loses admin, keeps read.
+    test "USER grantor downgraded admin→member → admin denied, read kept" do
+      ws = create_workspace!()
+      user = grantee_user()
+      {:ok, _} = Auth.create_membership(ws.id, user.id, "admin", "user")
+
+      {:ok, %{grant: grant}} =
+        Access.mint(user, base_attrs(ws, %{capabilities: ["read", "write", "admin"]}))
+
+      assert Access.validate(grant, :admin, %{workspace_id: ws.id}) == :ok
+
+      from(m in Membership,
+        where:
+          m.workspace_id == ^ws.id and m.principal_id == ^user.id and
+            m.principal_type == "user"
+      )
+      |> Repo.update_all(set: [role: "member"])
+
+      assert Access.validate(grant, :admin, %{workspace_id: ws.id}) == {:error, :forbidden}
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == :ok
+    end
+
+    # FAIL-CLOSED: a grant whose grantor_id resolves to no live principal
+    # (deleted / never-existed) is excluded — never fail-open.
+    test "fail-closed: unresolvable grantor → grant excluded" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read"])
+      {:ok, %{grant: grant}} = Access.mint(grantor, base_attrs(ws, %{capabilities: ["read"]}))
+
+      orphaned =
+        grant |> Ecto.Changeset.change(grantor_id: Ecto.UUID.generate()) |> Repo.update!()
+
+      assert Access.grantor_authorizes?(orphaned, :read) == false
+      assert Access.validate(orphaned, :read, %{workspace_id: ws.id}) == {:error, :forbidden}
+    end
+
+    # FAIL-CLOSED: a REVOKED grantor token can no longer authenticate to mint, so
+    # enforcement excludes its grants too (consistent with the mint gate).
+    test "fail-closed: revoked grantor token → grant excluded" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read", "write"])
+      {:ok, %{grant: grant}} = Access.mint(grantor, base_attrs(ws, %{capabilities: ["read"]}))
+
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == :ok
+
+      {:ok, _} = Barkpark.Auth.revoke_token(grantor)
+
+      assert Access.validate(grant, :read, %{workspace_id: ws.id}) == {:error, :forbidden}
+    end
+
+    # SECOND CHOKEPOINT (no bypass): the row-narrowing path scope_to_grants/3
+    # honors the SAME grantor gate — a grant whose grantor lost read authority
+    # drops out of the read-union → fail-closed zero rows, so the SQL path can't
+    # admit what the per-action path denies.
+    test "scope_to_grants excludes a grant whose grantor lost read authority" do
+      ws = create_workspace!()
+      grantor = grantor_token(ws, ["read"])
+      {:ok, %{grant: grant}} = Access.mint(grantor, base_attrs(ws, %{capabilities: ["read"]}))
+
+      ctx = %CallerContext{grants: [grant]}
+      base = from(d in "documents")
+
+      # grantor holds read → grant contributes a real union (not fail-closed)
+      q_ok = Scope.scope_to_grants(base, ctx, ws.id)
+      refute Enum.any?(q_ok.wheres, &(&1.expr == false))
+
+      # grantor loses authority → read-union excludes the grant → zero rows
+      remove_membership(ws, grantor.id)
+      q_denied = Scope.scope_to_grants(base, ctx, ws.id)
+      assert [%{expr: false}] = q_denied.wheres
     end
   end
 end
