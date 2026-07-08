@@ -185,18 +185,46 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     end
   end
 
-  test "card: the emitter realizes the projection (title + body present)" do
+  # The authored render marker for one card slot, DERIVED from the fixture input
+  # (never hand-typed): the media slot's image alt attr, the title heading text, the
+  # body paragraph's plain text, the action label. Used to assert each PROJECTED
+  # slot realizes IN the projection's slot ORDER.
+  defp card_slot_marker(input, "media"),
+    do: ~s|alt="#{input["slots"]["media"] |> List.first() |> Map.get("alt")}"|
+
+  defp card_slot_marker(input, "title"),
+    do: input["slots"]["title"] |> List.first() |> Map.get("text")
+
+  defp card_slot_marker(input, "body"),
+    do: input["slots"]["body"] |> List.first() |> Map.get("content") |> List.first() |> Map.get("value")
+
+  defp card_slot_marker(input, "action"),
+    do: input["slots"]["action"] |> List.first() |> Map.get("label")
+
+  test "card: the emitter realizes the MODEL-B projection (ordered slots · tone · image fast-path · action)" do
     fx = decode!(@api_dir, "card")
-    html = Components.card_html(fx["input"])
+    input = fx["input"]
+    html = Components.card_html(input)
     ex = fx["expected"]
-    assert String.starts_with?(html, ~s|<div class="bp-card|)
-    # Model B (au-w5-card-slot-parity) recurses title/body as semantic <h_>/<p>,
-    # dropping the bp-card__t/__d flatten wrappers — so this leg asserts the SHARED
-    # projection FLOOR (title/body TEXT present), mirroring Go's `mustContain`, NOT
-    # byte-exact chrome. The projection itself stays {container_role, title, body}
-    # this wave; substring-presence is aligning-to-floor, not projection graduation.
-    assert html =~ ex["title"]
-    assert html =~ ex["body"]
+
+    assert String.starts_with?(html, ~s|<div class="bp-card|), "card container role not realized"
+
+    # The projection's PRESENT slots realize IN ORDER — a reorder or a dropped slot
+    # in `card_html/2` reds the ordered-spine check (the non-vacuous graduation proof).
+    assert ex["slots"] == ["media", "title", "body", "action"],
+           "projection floor: card must exercise all four model-B slots"
+
+    assert_ordered(html, Enum.map(ex["slots"], &card_slot_marker(input, &1)))
+
+    # tone accent tints the card (info → bp-card--info) — dropping it reds this leg.
+    if ex["tone"] != "",
+      do: assert(html =~ ~s|bp-card--#{ex["tone"]}|, "tone accent #{ex["tone"]} missing")
+
+    # media fast-path: the image media child renders as a real <img> element.
+    if ex["media_fastpath"], do: assert(html =~ "<img", "media image fast-path (<img>) missing")
+
+    # the action slot renders as the button element (its label already ordered above).
+    assert html =~ ~s|class="bp-button"|, "action button chrome missing"
   end
 
   test "pipeline: the emitter realizes the projection (container · kind/title/detail per node)" do

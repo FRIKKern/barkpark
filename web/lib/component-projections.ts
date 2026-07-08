@@ -16,16 +16,14 @@
  * realization of THIS projection. Pure TS (no React / DOM) so it runs under
  * `node --test`, exactly like `task-board-columns.ts`.
  *
+ * COVERED — card (au-w5-card-slot-parity GRADUATED, all three surfaces render model
+ * B: Elixir View + this web reader #1529, Go pdrender #1535): the projection is the
+ * full model-B shape — the ORDERED present slots (media→title→body→action, the fixed
+ * render order), the tone accent, and a media-fastpath marker. The render leg asserts
+ * the authored slot text realizes IN that order, the tone tint, and the <img>.
+ *
  * SUBSET-PARITY (projection ⊆ native), honest scope — the divergent bits are
  * FILED, not papered over, and are simply NOT projected:
- *   • card — only title + flattened body are shared; tone accent, media/action
- *     slots, and slot ORDER differ across Elixir/Go (au-w5-card-slot-parity). The
- *     Elixir View + this web reader now RENDER model B (slots recursed in the order
- *     media→title→body→action, image media fast-pathed to <img>, tone accent), but
- *     the projection stays the {title, body} FLOOR this wave because Go/pdrender still
- *     renders the old card shape. GRADUATION TARGET (activated in the follow-up PR once
- *     Go conforms — see `CardProjection` below): ordered slot kinds
- *     ["media","title","body","action"] + tone + a media-fastpath marker.
  *   • pipeline — the `source` accent is Elixir-class vs Go-provenance-line, so
  *     only kind/title/detail are shared.
  *   • roadmap — bar geometry (left/width) is surface-local; only the structural
@@ -126,23 +124,15 @@ export interface CardsProjection {
   container_role: "cards";
   cards: Array<{ title: string; text: string; tone: string }>;
 }
+// CardProjection is the MODEL-B shape (au-w5-card-slot-parity GRADUATED — all three
+// surfaces render model B): the ORDERED present slot kinds, the tone accent, and a
+// media-fastpath marker. Byte-mirrors the Elixir `card_projection/1` golden.
 export interface CardProjection {
   container_role: "card";
-  title: string;
-  body: string;
+  slots: Array<"media" | "title" | "body" | "action">;
+  tone: "info" | "ok" | "warn" | "danger" | "";
+  media_fastpath: boolean;
 }
-// GRADUATION TARGET (au-w5-card-slot-parity, documented — NOT activated this wave).
-// After Go/pdrender's card leg conforms to model B, `CardProjection` graduates to the
-// full shape below and `cardProjection` emits it (the card golden is regenerated across
-// all three mirrors at that point). Kept as a doc-only type so the shape is committed
-// but unreferenced — it does not touch the frozen {title, body} projection today.
-//
-//   interface CardProjectionGraduated {
-//     container_role: "card";
-//     slots: Array<"media" | "title" | "body" | "action">; // ordered kinds present
-//     tone: "info" | "ok" | "warn" | "danger" | "";        // legacy card accent
-//     media_fastpath: boolean;                              // image media child ⇒ <img>
-//   }
 export interface PipelineProjection {
   container_role: "pipeline";
   nodes: Array<{ kind: string; title: string; detail: string }>;
@@ -230,13 +220,35 @@ export function cardsProjection(block: Block): CardsProjection {
   };
 }
 
+/** The card's FIXED render order (mirrors `Components.card_html/2` +
+ * `portable-doc.tsx` case "card" order). The projection filters this to the PRESENT
+ * slots — the structural render contract (a reorder reds the render legs). */
+const CARD_SLOT_ORDER = ["media", "title", "body", "action"] as const;
+
+/** Is the card's `name` slot present (a non-empty element array)? */
+function cardSlotPresent(block: Block, name: string): boolean {
+  const slots = block.slots;
+  if (!slots || typeof slots !== "object") return false;
+  const list = (slots as Record<string, unknown>)[name];
+  return Array.isArray(list) && list.length > 0;
+}
+
+/** Does the media slot fast-path to an image? True iff its lone element is a typed
+ * `image` OR a typeless `{src,...}` map (the emitters coerce the latter to image),
+ * mirroring the Elixir `card_media_fastpath?/1`. */
+function cardMediaFastpath(block: Block): boolean {
+  const el = slotElement(block, "media");
+  if (!el) return false;
+  if (el.type === "image") return true;
+  return el.type === undefined && el.src !== undefined;
+}
+
 export function cardProjection(block: Block): CardProjection {
-  const titleEl = slotElement(block, "title");
-  const bodyEl = slotElement(block, "body");
   return {
     container_role: "card",
-    title: titleEl ? str(titleEl.text) : "",
-    body: bodyEl ? flattenInline(bodyEl.content) : "",
+    slots: CARD_SLOT_ORDER.filter((name) => cardSlotPresent(block, name)),
+    tone: cardTone(block.tone) as CardProjection["tone"],
+    media_fastpath: cardMediaFastpath(block),
   };
 }
 
