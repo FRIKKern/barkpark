@@ -18,6 +18,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
   alias Barkpark.Auth
   alias Barkpark.Content.Document
+  alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
   alias Barkpark.Tasks.Board
   alias Barkpark.Tasks.Edge
@@ -1250,6 +1251,89 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       assert_patch(view, "/admin/projects?group=goal&task=pk-epic")
       assert render(view) =~ "Peek epic"
+    end
+  end
+
+  describe "peek context & insight (wave 14)" do
+    setup do
+      task("ctx-grand", "Grand goal", lifecycle: "open")
+      task("ctx-mid", "Mid parent", lifecycle: "open", parent_id: "ctx-grand")
+
+      t =
+        task("ctx-task", "The focused task",
+          lifecycle: "in_progress",
+          parent_id: "ctx-mid",
+          assignee: "w-hist"
+        )
+
+      task("ctx-c1", "Direct child", lifecycle: "open", parent_id: "ctx-task")
+      task("ctx-g1", "Grandchild shipped", lifecycle: "done", parent_id: "ctx-c1")
+
+      dependent = task("ctx-dep", "Waiting dependent", lifecycle: "blocked")
+      Repo.insert!(%Edge{from_id: dependent.id, to_id: t.id, kind: "blocks"})
+
+      Repo.insert!(%MutationEvent{
+        dataset: "production",
+        type: "task",
+        doc_id: "ctx-task",
+        mutation: "task.claimed",
+        rev: "r-ev-1",
+        document: %{"content" => %{"claim" => %{"worker" => "w-hist"}}},
+        inserted_at: DateTime.utc_now()
+      })
+
+      :ok
+    end
+
+    test "the breadcrumb walks ancestors root-first and hops", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/admin/projects?task=ctx-task")
+
+      assert html =~ ~s(data-role="peek-ancestors")
+      assert html =~ "Grand goal"
+      assert html =~ "Mid parent"
+
+      # root-first: within the crumb row (both titles also exist as board
+      # cards, so scope to the nav), the grand goal precedes the mid parent.
+      [_, crumbs] = String.split(html, ~s(data-role="peek-ancestors"), parts: 2)
+      crumbs = crumbs |> String.split("</nav>", parts: 2) |> hd()
+      {grand_at, _} = :binary.match(crumbs, "Grand goal")
+      {mid_at, _} = :binary.match(crumbs, "Mid parent")
+      assert grand_at < mid_at
+
+      view
+      |> element(~s{[data-role="peek-ancestor"]}, "Grand goal")
+      |> render_click()
+
+      assert_patch(view, "/admin/projects?task=ctx-grand")
+      assert render(view) =~ "Grand goal"
+    end
+
+    test "the subtasks header rolls up the FULL subtree, not just direct children",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=ctx-task")
+
+      # direct: 1 child, 0 done · subtree: child + grandchild, 1 done.
+      assert html =~ ~s(data-role="peek-subtree")
+      assert html =~ "subtree 1/2"
+    end
+
+    test "the Blocks section lists the reverse dependencies (the impact read)",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=ctx-task")
+
+      assert html =~ ~s(data-role="peek-blocks")
+      assert html =~ "Waiting dependent"
+    end
+
+    test "the Activity log renders the durable history plus the created stamp",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=ctx-task")
+
+      assert html =~ ~s(data-role="peek-activity")
+      assert html =~ ~s(data-role="peek-event")
+      assert html =~ "claimed"
+      assert html =~ "@w-hist"
+      assert html =~ ~s(data-role="peek-created")
     end
   end
 
