@@ -92,10 +92,10 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
-      POST    /v1/builder/claim    user      atomic next-queued deployment claim
-      POST    /v1/builder/deployments/:id/transition user fenced status update
-      POST    /v1/builder/deployments/:id/console user append a live build-console line {line} (capped, append-only) → SSE (gh-5)
-      POST    /v1/builder/deployments/:id/detail  user set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
+      POST    /v1/builder/claim    worker    atomic next-queued deployment claim
+      POST    /v1/builder/deployments/:id/transition worker fenced status update
+      POST    /v1/builder/deployments/:id/console worker append a live build-console line {line} (capped, append-only) → SSE (gh-5)
+      POST    /v1/builder/deployments/:id/detail  worker set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
@@ -4154,8 +4154,17 @@ defmodule BarkparkCloud.Web.Router do
   # 404 {error: "no_queued"} | 422 missing worker_id.
   # Atomic via Registry.claim_next_deployment/1 (FOR UPDATE SKIP LOCKED +
   # epoch bump in one transaction).
+  #
+  # WORKER-gated: claim_next_deployment/1 selects the oldest queued row
+  # FLEET-WIDE (no team filter), so this must NOT be reachable by an arbitrary
+  # logged-in user — any user of any team would otherwise claim another team's
+  # queued deployment (leaking git_ref/artifact_url) and drive its state
+  # machine. require_worker gates on the shared WORKER_TOKEN faceless principal
+  # (the off-box builder fleet presents it, same secret that gates
+  # /v1/internal/*), and fails closed when unset. A dedicated builder-token is a
+  # hardening follow-up.
   post "/v1/builder/claim" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_worker(conn, [])
 
     if conn.halted do
       conn
@@ -4190,8 +4199,13 @@ defmodule BarkparkCloud.Web.Router do
   # lease-swept worker writing after another worker re-claimed the row. The
   # from-status transition graph is enforced too: an illegal edge (e.g.
   # failed → live) → 409 illegal_transition.
+  #
+  # WORKER-gated: the (worker, epoch) fence only proves the caller holds the
+  # claim it was handed — it is NOT a tenant scope, so this must be gated to the
+  # shared WORKER_TOKEN builder principal (require_worker, same as claim above),
+  # never any logged-in user.
   post "/v1/builder/deployments/:id/transition" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_worker(conn, [])
 
     if conn.halted do
       conn
@@ -4258,16 +4272,17 @@ defmodule BarkparkCloud.Web.Router do
   # deployment's console, then push "deployments" so an open site view refetches
   # + streams the new line. Append-only + capped server-side (oldest dropped).
   #
-  # Auth mirrors the builder claim/transition routes (`require_user` — the
-  # builder carries a user/PAT bearer; a dedicated builder-token is a hardening
-  # follow-up, same as those routes). Best-effort telemetry: a console report
-  # NEVER affects the build's outcome; the builder treats any non-2xx as "log and
-  # continue".
+  # Auth mirrors the builder claim/transition routes (`require_worker` — the
+  # off-box builder fleet presents the shared WORKER_TOKEN; a dedicated
+  # builder-token is a hardening follow-up). A logged-in user must NOT be able to
+  # inject text into another team's SSE-broadcast build console. Best-effort
+  # telemetry: a console report NEVER affects the build's outcome; the builder
+  # treats any non-2xx as "log and continue".
   #   200 {ok: true}   — appended (or a late line after the deploy is terminal).
   #   404 {not_found}  — no deployment with that id.
   #   422 {invalid}    — missing/blank line.
   post "/v1/builder/deployments/:id/console" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_worker(conn, [])
 
     if conn.halted do
       conn
@@ -4292,14 +4307,15 @@ defmodule BarkparkCloud.Web.Router do
   # POST /v1/builder/deployments/:id/detail {detail} → dwb-19: SET the
   # deployment's LIVE sub-caption (latest-wins, not appended), then push
   # "deployments" so an open site view renders the caption under the status pill.
-  # The build-side twin of a provision step's `progress`. Same builder auth +
-  # best-effort posture as /console — a detail report NEVER affects the build's
-  # outcome; the builder treats any non-2xx as "log and continue".
+  # The build-side twin of a provision step's `progress`. Same builder auth
+  # (`require_worker`, shared WORKER_TOKEN) + best-effort posture as /console — a
+  # detail report NEVER affects the build's outcome; the builder treats any
+  # non-2xx as "log and continue".
   #   200 {ok: true}   — the caption was set (or a late one after the deploy is terminal).
   #   404 {not_found}  — no deployment with that id.
   #   422 {invalid}    — missing/blank detail.
   post "/v1/builder/deployments/:id/detail" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_worker(conn, [])
 
     if conn.halted do
       conn
