@@ -186,14 +186,11 @@ defmodule Barkpark.Accounts do
         where: is_nil(t.expires_at) or t.expires_at > ^now
 
     case Repo.one(query) do
-      %UserSession{user_id: uid} = session ->
-        stamped = DateTime.truncate(now, :microsecond)
-
-        from(t in UserSession, where: t.token_hash == ^hash)
-        |> Repo.update_all(set: [last_used_at: stamped])
+      %UserSession{user_id: uid, last_used_at: prev} = session ->
+        effective_last_used = maybe_touch_session_last_used(hash, prev, now)
 
         case Repo.get(User, uid) do
-          %User{} = user -> {user, %{session | last_used_at: stamped}}
+          %User{} = user -> {user, %{session | last_used_at: effective_last_used}}
           nil -> nil
         end
 
@@ -203,6 +200,31 @@ defmodule Barkpark.Accounts do
   end
 
   def verify_user_session(_), do: nil
+
+  # Throttled `last_used_at` stamp: RequireUserSession calls the verify on EVERY
+  # request, so an unthrottled write amplifies to one UPDATE per request. Mirror
+  # the API-token twin `Auth.touch_last_used/1` (60s window, same idiom) — skip
+  # the redundant write when the column was stamped within the window. This is a
+  # pure liveness/perf stamp, NOT security-relevant: the auth decision already
+  # happened above, so skipping it never changes a login/session outcome.
+  @session_last_used_throttle_seconds 60
+
+  defp maybe_touch_session_last_used(hash, prev, now) do
+    stale? =
+      is_nil(prev) or
+        DateTime.diff(now, prev, :second) > @session_last_used_throttle_seconds
+
+    if stale? do
+      stamped = DateTime.truncate(now, :microsecond)
+
+      from(t in UserSession, where: t.token_hash == ^hash)
+      |> Repo.update_all(set: [last_used_at: stamped])
+
+      stamped
+    else
+      prev
+    end
+  end
 
   @doc "Revoke a single session by plaintext (idempotent)."
   @spec revoke_user_session_token(binary()) :: :ok
@@ -576,16 +598,32 @@ defmodule Barkpark.Accounts do
   @doc """
   Consume a one-time recovery `code`: if its hash is in the user's list, remove
   it and return `{:ok, user}`; otherwise `:error`. Used as the MFA fallback.
+
+  Consumption is a single atomic DB `UPDATE` — `array_remove(...)` gated by a
+  `hash = ANY(recovery_codes_hashed)` membership predicate in the WHERE — NOT a
+  read-modify-write. This mirrors the `verify_totp` compare-and-swap and closes
+  the same TOCTOU: two concurrent logins with the SAME code both used to pass the
+  in-memory `hash in hashes` check and race to `Repo.update`, minting two
+  sessions; two DIFFERENT codes were a lost-update that could leave an
+  already-consumed code back in the array (reusable). Postgres serializes the row
+  UPDATE, so exactly ONE racer removes the hash (1 row) and the loser matches 0
+  rows → `:error`. One-time-use holds under concurrency; no login outcome changes.
   """
   @spec consume_recovery_code(User.t(), String.t()) :: {:ok, User.t()} | :error
-  def consume_recovery_code(%User{recovery_codes_hashed: hashes} = user, code)
+  def consume_recovery_code(%User{id: id, recovery_codes_hashed: hashes} = user, code)
       when is_binary(code) do
     hash = hash_recovery_code(code)
 
-    if hash in hashes do
-      user
-      |> User.totp_changeset(%{recovery_codes_hashed: List.delete(hashes, hash)})
-      |> Repo.update()
+    {count, _} =
+      from(u in User,
+        where: u.id == ^id,
+        where: fragment("? = ANY(?)", ^hash, u.recovery_codes_hashed),
+        update: [set: [recovery_codes_hashed: fragment("array_remove(?, ?)", u.recovery_codes_hashed, ^hash)]]
+      )
+      |> Repo.update_all([])
+
+    if count == 1 do
+      {:ok, %{user | recovery_codes_hashed: List.delete(hashes, hash)}}
     else
       :error
     end

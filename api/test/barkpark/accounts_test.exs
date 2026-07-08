@@ -90,6 +90,33 @@ defmodule Barkpark.AccountsTest do
 
       assert is_nil(Accounts.verify_user_session_token(token))
     end
+
+    test "last_used_at write is throttled to a 60s window (perf: no per-request stamp)" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      hash = UserSession.hash_token(token)
+
+      # Freeze last_used_at to 5s ago — well inside the 60s throttle window.
+      recent = DateTime.add(DateTime.utc_now(), -5, :second) |> DateTime.truncate(:microsecond)
+
+      from(s in UserSession, where: s.token_hash == ^hash)
+      |> Repo.update_all(set: [last_used_at: recent])
+
+      # A verify inside the window resolves the user but must NOT rewrite the stamp.
+      assert %User{} = Accounts.verify_user_session_token(token)
+      inside = Repo.one(from s in UserSession, where: s.token_hash == ^hash)
+      assert DateTime.compare(inside.last_used_at, recent) == :eq
+
+      # Push it outside the window → the next verify DOES refresh the stamp.
+      old = DateTime.add(DateTime.utc_now(), -120, :second) |> DateTime.truncate(:microsecond)
+
+      from(s in UserSession, where: s.token_hash == ^hash)
+      |> Repo.update_all(set: [last_used_at: old])
+
+      assert %User{} = Accounts.verify_user_session_token(token)
+      outside = Repo.one(from s in UserSession, where: s.token_hash == ^hash)
+      assert DateTime.compare(outside.last_used_at, old) == :gt
+    end
   end
 
   describe "UserSession expiry predicates (Phase 5, pure)" do
@@ -196,6 +223,38 @@ defmodule Barkpark.AccountsTest do
 
       assert {:ok, user} = Accounts.consume_recovery_code(user, code)
       assert :error = Accounts.consume_recovery_code(user, code)
+    end
+
+    test "TOCTOU: concurrent consumes of the SAME recovery code yield exactly one success" do
+      user = user_fixture()
+      secret = Accounts.totp_secret()
+
+      {:ok, user, [code | _]} =
+        Accounts.enable_totp(user, secret, NimbleTOTP.verification_code(secret))
+
+      # Two racers hold the SAME stale `user` struct — both pass the in-memory
+      # membership check; only the atomic array_remove UPDATE that lands first
+      # removes the hash (1 row), the other matches 0 rows and is rejected.
+      parent = self()
+
+      tasks =
+        for _ <- 1..2 do
+          Task.async(fn ->
+            Ecto.Adapters.SQL.Sandbox.allow(Barkpark.Repo, parent, self())
+            Accounts.consume_recovery_code(user, code)
+          end)
+        end
+
+      results = Enum.map(tasks, &Task.await/1)
+
+      assert Enum.count(results, &match?({:ok, _}, &1)) == 1
+      assert Enum.count(results, &(&1 == :error)) == 1
+
+      # The code was removed exactly once (10 → 9, no lost-update leaving it back)
+      # and is genuinely one-time: a subsequent consume fails.
+      fresh = Repo.get(User, user.id)
+      assert length(fresh.recovery_codes_hashed) == 9
+      assert :error = Accounts.consume_recovery_code(fresh, code)
     end
 
     test "MEDIUM-6: verify_totp consumes the step — a code cannot be replayed" do
