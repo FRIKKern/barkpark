@@ -23,6 +23,12 @@ var (
 	GenReadingAccent = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"}
 )
 
+// Generated code-block tones (design/tokens.json color.code → hex).
+var (
+	GenCodeFg = lipgloss.AdaptiveColor{Light: "#be123c", Dark: "#fda4af"}
+	GenCodeBg = lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#27272a"}
+)
+
 // Generated reading tokens (design/tokens.json font.reading / type.reading).
 const (
 	GenReadingFontStack     = "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"
