@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 /* Unified-aesthetic W1.4 scaffold — the living token spec for the web demo.
  * Every swatch is painted with `var(--color-…)`, resolving live from the
@@ -48,7 +49,19 @@ export function Styleguide() {
         color: "var(--color-text)",
       }}
     >
-      <h1 style={{ margin: "0 0 .25rem", fontSize: 26, fontWeight: 700 }}>Web style guide</h1>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 16,
+          margin: "0 0 .25rem",
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700 }}>Web style guide</h1>
+        {/* AC3 proof: explicit data-theme toggle — every swatch below flips live. */}
+        <ThemeToggle />
+      </div>
       <p style={{ color: "var(--color-muted-text)", maxWidth: "66ch", margin: "0 0 1.75rem" }}>
         The living token spec for the web demo. Every swatch is painted with{" "}
         <code style={mono}>var(--color-…)</code> straight from the GENERATED block in{" "}

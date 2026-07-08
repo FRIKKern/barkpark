@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Listing } from "@/lib/listings-data";
 import type { GraphMatch } from "@/lib/hovered-doc-context";
+import { canvas } from "@/lib/tokens.gen";
+
+/** Compose an alpha variant of an emitted `hsl(H S% L%)` token for Canvas2D
+ *  (`hsl(H S% L% / a)`), so no fixed rgba/hex literal lives in this file. */
+const withAlpha = (c: string, a: number) => c.replace(")", ` / ${a})`);
 
 /**
  * A self-contained slippy map of listing pins — the directory landing's right
@@ -33,8 +38,8 @@ const MAX_LAT = 85.05;
 /** Pointer-to-pin hit radius, in CSS px. */
 const HIT_RADIUS = 15;
 
-const MARKER = "#e11d48"; // rose — reads as "location pin" everywhere
-const MARKER_DIM = "#94a3b8"; // slate — a pin filtered out by the active search
+const MARKER = canvas.primary; // evergreen brand — the product-primary map pin
+const MARKER_DIM = canvas.mutedText; // muted — a pin filtered out by the search
 
 const TILE_URL =
   process.env.NEXT_PUBLIC_MAP_TILE_URL ||
@@ -225,7 +230,7 @@ export function ListingsMap({
       const scale = 2 ** (zoom - tz);
       const cx = lngToWorldX(lng, tz);
       const cy = latToWorldY(lat, tz);
-      ctx.strokeStyle = "rgba(100,116,139,0.18)";
+      ctx.strokeStyle = withAlpha(canvas.mutedText, 0.18);
       ctx.lineWidth = 1;
       ctx.beginPath();
       // Meridians/parallels every 5° — enough to read motion, not busy.
@@ -264,11 +269,11 @@ export function ListingsMap({
       if (ring) {
         ctx.beginPath();
         ctx.arc(x, y, r + 4, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(225,29,72,0.18)";
+        ctx.fillStyle = withAlpha(canvas.primary, 0.18);
         ctx.fill();
       }
       ctx.globalAlpha = dim ? 0.45 : 1;
-      ctx.shadowColor = "rgba(15,23,42,0.35)";
+      ctx.shadowColor = withAlpha(canvas.text, 0.35);
       ctx.shadowBlur = 4;
       ctx.shadowOffsetY = 1;
       ctx.beginPath();
@@ -277,7 +282,7 @@ export function ListingsMap({
       ctx.fill();
       ctx.shadowColor = "transparent";
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = "#ffffff";
+      ctx.strokeStyle = canvas.surface;
       ctx.stroke();
       ctx.restore();
     },
@@ -297,7 +302,7 @@ export function ListingsMap({
       const by = y - 14 - bh; // float above the pin
       const { w } = sizeRef.current;
       bx = clamp(bx, 4, Math.max(4, w - bw - 4));
-      ctx.fillStyle = "rgba(15,23,42,0.92)";
+      ctx.fillStyle = withAlpha(canvas.text, 0.92);
       const rr = 6;
       ctx.beginPath();
       ctx.moveTo(bx + rr, by);
@@ -307,7 +312,7 @@ export function ListingsMap({
       ctx.arcTo(bx, by, bx + bw, by, rr);
       ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = canvas.primaryFg;
       ctx.textBaseline = "middle";
       ctx.fillText(text, bx + padX, by + bh / 2 + 0.5);
       ctx.restore();
@@ -393,7 +398,7 @@ export function ListingsMap({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
     // Sea/landless fallback tint, always under the tiles.
-    ctx.fillStyle = "#e7edf2";
+    ctx.fillStyle = canvas.mutedSurface;
     ctx.fillRect(0, 0, w, h);
 
     if (TILES_ENABLED) drawTiles(ctx, w, h);
@@ -699,7 +704,7 @@ export function ListingsMap({
   return (
     <div
       ref={wrapRef}
-      className={`relative h-full w-full overflow-hidden bg-[#e7edf2] ${className ?? ""}`}
+      className={`relative h-full w-full overflow-hidden bg-muted-surface ${className ?? ""}`}
     >
       <canvas
         ref={canvasRef}
