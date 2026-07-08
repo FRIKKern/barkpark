@@ -3,15 +3,21 @@
 
 defmodule BarkparkWeb.Studio.TokensGen do
   @moduledoc """
-  Unified Aesthetic CATEGORICAL palettes for the Studio surface, generated
-  from design/tokens.json. Regenerate with `node design/emit.mjs --write`;
-  never hand-edit.
+  Unified Aesthetic Studio-surface tokens, generated from design/tokens.json.
+  Regenerate with `node design/emit.mjs --write`; never hand-edit.
 
-  These are categorical identity swatches (hex value lists), NOT status
-  roles and NOT CSS vars: presence hues index by a phash2 of the user id,
-  and the Sheets-CF swatches are PERSISTED DATA (stored on the cell/rule/tab,
-  compared for selection, echoed in data-test-id) — the concrete hex must
-  survive, so it lives here as returned values rather than in emitted CSS.
+  Two families live here, both as returned VALUES (not CSS vars):
+
+    * CATEGORICAL identity swatches (presence + Sheets-CF hex lists): presence
+      hues index by a phash2 of the user id, and the Sheets-CF swatches are
+      PERSISTED DATA (stored on the cell/rule/tab, compared for selection,
+      echoed in data-test-id) — the concrete hex must survive.
+    * The LIFECYCLE mirror (glyph / ascii / adaptive hue per state) — the
+      Studio twin of the ONE lifecycle source (tokens.lifecycle) the Go board
+      + paper-surface CSS also emit from. It feeds the living styleguide's
+      lifecycle row (glyph + braille + colour label); the applied glyph COLOUR
+      comes from the emitted --life-<state> CSS var, so no hex is ever painted
+      inline. design/check.mjs §6 gates this mirror against Go + CSS + tokens.
   """
 
   # Presence-avatar palette (presence_state.ex @colors) — 8 fixed categorical
@@ -35,4 +41,23 @@ defmodule BarkparkWeb.Studio.TokensGen do
 
   # Neutral gray fallback for an unrecognised / missing status.
   def status_health_unknown, do: "#6b7280"
+
+  # Lifecycle mirror — one row per state, canonical emission order. glyph +
+  # ascii are text CONTENT; light/dark are the adaptive hue LABELS (the applied
+  # colour is var(--life-<state>) from the GENERATED CSS block). Mirrors
+  # tokens.lifecycle 1:1; done/closed stay TEAL, distinct from status.ok green.
+  def lifecycle do
+    [
+      %{state: "in_progress", glyph: "⠋", ascii: "~", light: "#2563eb", dark: "#60a5fa"},
+      %{state: "blocked", glyph: "!", ascii: "!", light: "#d97706", dark: "#fbbf24"},
+      %{state: "done", glyph: "✓", ascii: "v", light: "#0d9488", dark: "#2dd4bf"},
+      %{state: "closed", glyph: "✓", ascii: "v", light: "#0d9488", dark: "#2dd4bf"},
+      %{state: "cancelled", glyph: "✕", ascii: "x", light: "#a1a1aa", dark: "#71717a"},
+      %{state: "ready", glyph: "○", ascii: "o", light: "#18181b", dark: "#e7edf2"},
+      %{state: "open", glyph: "○", ascii: ".", light: "#71717a", dark: "#5f6b78"}
+    ]
+  end
+
+  # in_progress braille spinner frames (spinner.go / tokens.lifecycle frames).
+  def lifecycle_frames, do: ~w(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
 end

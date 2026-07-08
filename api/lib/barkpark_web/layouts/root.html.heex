@@ -103,6 +103,19 @@
       --border-muted: var(--border);
       --fg-dim: hsl(240 4% 65%);
       --fg-accent: hsl(240 5.9% 10%);
+      --text-2xl: 26px; --text-2xl-lh: 1.2;
+      --text-xl: 20px; --text-xl-lh: 1.3;
+      --text-lg: 16px; --text-lg-lh: 1.4;
+      --text-base: 14px; --text-base-lh: 1.5;
+      --text-sm: 13px; --text-sm-lh: 1.45;
+      --text-xs: 12px; --text-xs-lh: 1.4;
+      --life-in_progress: #2563eb;
+      --life-blocked: #d97706;
+      --life-done: #0d9488;
+      --life-closed: #0d9488;
+      --life-cancelled: #a1a1aa;
+      --life-ready: #18181b;
+      --life-open: #71717a;
     }
     html[data-theme="dark"] {
       --primary: hsl(160 42% 62%);
@@ -126,6 +139,13 @@
       --border-muted: hsl(240 3.7% 11%);
       --fg-dim: hsl(240 5% 45%);
       --fg-accent: var(--text);
+      --life-in_progress: #60a5fa;
+      --life-blocked: #fbbf24;
+      --life-done: #2dd4bf;
+      --life-closed: #2dd4bf;
+      --life-cancelled: #71717a;
+      --life-ready: #e7edf2;
+      --life-open: #5f6b78;
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -4691,6 +4711,27 @@
       mounted() { this._apply(); },
       updated() { this._apply(); },
       destroyed() { delete document.documentElement.dataset.editorFocus; }
+    };
+
+    // SgTheme — mirrors the /studio/styleguide wrapper's server-driven
+    // data-theme onto <html> so the living style guide's swatches recolour
+    // using the emitted (html-scoped) token vars, letting one page prove BOTH
+    // light and dark. Same mirror pattern as EditorFocus: the LiveView renders
+    // data-theme={@theme} on this element; the phx-click toggle flips the assign
+    // (no reload), and this hook re-applies on every update. On destroy it
+    // restores the theme the rest of Studio was on, so the guide's toggle never
+    // leaks into the rest of the console.
+    Hooks.SgTheme = {
+      _apply() {
+        var t = this.el.dataset.theme;
+        if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+      },
+      mounted() { this._prev = document.documentElement.dataset.theme; this._apply(); },
+      updated() { this._apply(); },
+      destroyed() {
+        if (this._prev) document.documentElement.dataset.theme = this._prev;
+        else delete document.documentElement.dataset.theme;
+      }
     };
 
     // Server-pushed file-download trigger. A LiveView pushes a
