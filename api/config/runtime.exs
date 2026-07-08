@@ -228,6 +228,28 @@ case Barkpark.Plugins.EnvConfig.parse(System.get_env("BARKPARK_PLUGINS")) do
   plugins when is_list(plugins) -> config :barkpark, :plugins, plugins
 end
 
+# Task lease TTL override. The default (config.exs) is 2700 s (45 min), sized
+# to real agent work. Operators tune it per-fleet without a rebuild via
+# BARKPARK_TASK_LEASE_TTL_SECONDS — a positive integer number of seconds.
+# Unset / empty / non-positive / non-integer leaves the compiled default in
+# place (the TtlSweeper also falls back to its own default if config is nil).
+case System.get_env("BARKPARK_TASK_LEASE_TTL_SECONDS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {ttl, ""} when ttl > 0 ->
+        config :barkpark, :task_lease_ttl_seconds, ttl
+
+      _ ->
+        IO.warn(
+          "BARKPARK_TASK_LEASE_TTL_SECONDS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see

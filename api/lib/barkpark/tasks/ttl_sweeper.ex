@@ -84,8 +84,10 @@ defmodule Barkpark.Tasks.TtlSweeper do
     * **`done` / `cancelled` tasks are never swept** — the SELECT
       filters `lifecycle_status = 'in_progress'`.
 
-  Configuration: `Application.get_env(:barkpark, :task_lease_ttl_seconds, 300)`.
-  Tests override this to make the sweep deterministic at zero-time.
+  Configuration: `Application.get_env(:barkpark, :task_lease_ttl_seconds, 2700)`
+  (config.exs default 2700 s / 45 min; runtime override via
+  `BARKPARK_TASK_LEASE_TTL_SECONDS`). Tests override this to make the
+  sweep deterministic at zero-time.
   """
 
   use Oban.Worker, queue: :tasks_ttl, max_attempts: 3
@@ -101,7 +103,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
   # and listen endpoint surface lease expiries with zero schema work.
   @event_task_lease_expired "task.lease_expired"
 
-  @default_ttl_seconds 300
+  @default_ttl_seconds 2700
 
   @doc "The mutation_events kind this worker emits."
   @spec event_kind() :: String.t()
@@ -266,10 +268,16 @@ defmodule Barkpark.Tasks.TtlSweeper do
       doc.content
       |> Map.put("lifecycle_status", "open")
       |> Map.put("claim", new_claim)
-      # Clear assignee — the row is claimable by anyone again. Matches
-      # `Tasks.claim/2` which stamps `assignee` on claim; the inverse
-      # on reap.
-      |> Map.put("assignee", nil)
+
+    # NOTE: `content.assignee` is deliberately PRESERVED. A TTL reap
+    # releases the LEASE (the right to hold the row in_progress), not
+    # the ASSIGNMENT (who this task belongs to). Clearing assignee on
+    # reap wiped the board's ownership column every time an honest,
+    # slow-running worker's lease lapsed — the task read as unowned
+    # while work continued. The lease is `claim.worker` (now nil) +
+    # `claim.epoch` (bumped, the fencing kick); assignment survives so
+    # the same worker's re-claim lands back on its own task and the
+    # board keeps showing who is on it.
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)

@@ -174,15 +174,25 @@ config :barkpark, Oban,
 
 # W7-05 — TTL sweep tuning. Tests override `:task_lease_ttl_seconds`
 # (e.g. to 0 / 1) to make sweep-or-not deterministic. The default
-# 5-minute lease is the contract: any worker that hasn't refreshed
-# its claim.ts_iso in 300 s is considered crashed. Sweep cadence is
-# fixed by the Oban.Cron entry above — once per minute. Sub-minute
-# cadence is intentionally NOT supported: the task recovery SLO
-# is "minutes, not seconds," and the per-minute cron + per-task
-# advisory lock + fencing epoch already cover the crash path
-# without driving Oban poll pressure higher than the rest of the
-# fleet (Search.Crystallize / Prune are daily).
-config :barkpark, :task_lease_ttl_seconds, 300
+# 45-minute lease is the contract: any worker that hasn't refreshed
+# its claim.ts_iso in 2700 s is considered crashed. This is sized to
+# REAL agent work, not process liveness: an honestly-claimed task
+# routinely runs 10-30 min (worktree build + full mix suite + PR),
+# and nothing auto-renews the lease yet (no CLI heartbeat; the cmux
+# v2 heartbeat is filed-not-built). A 5-minute lease reaped every
+# live worker mid-task — board flipped to open, the row became
+# re-claimable (duplicate-work risk), and the honest close got
+# `:fenced_off`. 2700 s leaves generous headroom above the longest
+# real task while still bounding a genuine crash's recovery to well
+# under an hour. Runtime override: BARKPARK_TASK_LEASE_TTL_SECONDS
+# (see runtime.exs). Sweep cadence is fixed by the Oban.Cron entry
+# above — once per minute. Sub-minute cadence is intentionally NOT
+# supported: the task recovery SLO is "minutes, not seconds," and
+# the per-minute cron + per-task advisory lock + fencing epoch
+# already cover the crash path without driving Oban poll pressure
+# higher than the rest of the fleet (Search.Crystallize / Prune are
+# daily).
+config :barkpark, :task_lease_ttl_seconds, 2700
 
 # One-way PULL sync (Barkpark.Sync) — DORMANT default so a fresh install boots
 # with sync OFF. runtime.exs maps the BARKPARK_SYNC_* env vars and flips
