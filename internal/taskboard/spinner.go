@@ -12,12 +12,11 @@ import "os"
 // glyphs. NO_COLOR is handled for free by lipgloss (it drops the hue; the glyph
 // alone still carries state).
 
-// brailleFrames are the 10 spinner frames (spec §1/§2), cycled by Frame%10.
-var brailleFrames = [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
-
 // brailleStill is the single steady frame reduced-motion / NO_MOTION freezes on
-// (spec §2) — motion off, but the glyph still reads as "in progress".
-const brailleStill = "⠿"
+// (spec §2) — motion off, but the glyph still reads as "in progress". It aliases
+// the generated GenBrailleStill (tokens_gen.go) so the steady frame lives in ONE
+// place; the 10 animated frames are GenBrailleFrames, read directly below.
+var brailleStill = GenBrailleStill
 
 // spinnerGlyph is the in_progress glyph for a given heartbeat frame. Under
 // reduced motion it freezes on ⠿; under ASCII mode it uses a 1-column ASCII
@@ -30,7 +29,7 @@ func spinnerGlyph(frame int) string {
 	if reducedMotion() {
 		return brailleStill
 	}
-	return brailleFrames[((frame%10)+10)%10]
+	return GenBrailleFrames[((frame%10)+10)%10]
 }
 
 // asciiSpinner is the 1-column ASCII fallback spinner (`-\|/`), frozen on `*`
@@ -58,22 +57,10 @@ func boardGlyph(lifecycle string, frame int) string {
 // cancelled — collapsed to single columns so the fixed 2-col gutter never
 // shifts and nothing becomes tofu).
 func asciiGlyph(lifecycle string) string {
-	switch lifecycle {
-	case lifeInProgress:
-		return "~"
-	case lifeBlocked:
-		return "!"
-	case lifeDone, lifeClosed:
-		return "v"
-	case lifeCancelled:
-		return "x"
-	case lifeReady:
-		return "o"
-	case lifeOpen:
-		return "."
-	default:
-		return "."
+	if tok, ok := GenLifecycle[lifecycle]; ok {
+		return tok.ASCIIGlyph
 	}
+	return "."
 }
 
 // reducedMotion reports whether the spinner should freeze — honored via the
