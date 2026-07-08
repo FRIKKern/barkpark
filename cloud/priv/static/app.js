@@ -1577,7 +1577,7 @@
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: "configuring · 1m 42s"
-            : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+            : '<div class="fleet-url">' + esc(publicUrl(bp)) + "</div>";
 
     // Billing suspension (see router.ex barkpark_json): the box exists but the
     // platform stopped it — folded into statusOf()'s single pill below.
@@ -1948,6 +1948,12 @@
   // The persistent workspace header: title + one status pill + the actions, then
   // the instance-level banner (removal / teardown / suspension). These live ABOVE
   // the tab strip so they stay visible on every tab.
+  // The user-facing address: an attached custom host is THE address the
+  // operator chose; the provisioning FQDN stays the canonical row identity.
+  function publicUrl(bp) {
+    return bp.custom_host ? "https://" + bp.custom_host : bp.url;
+  }
+
   function instanceHeaderHtml(bp) {
     var lc = instanceLifecycle(bp);
 
@@ -1959,7 +1965,7 @@
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : lc.provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: live "configuring · 1m 42s"
-            : '<div class="fleet-url">' + esc(bp.url) + "</div>";
+            : '<div class="fleet-url">' + esc(publicUrl(bp)) + "</div>";
 
     // The header collapses to ONE pill (charter decision 6). The health / agent
     // breakdown that USED to be badge-soup now lives only in the Details rail.

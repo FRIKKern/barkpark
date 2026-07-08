@@ -2152,7 +2152,11 @@ defmodule BarkparkCloud.Registry do
           {:ok, %{status: 201, body: body}} ->
             case Jason.decode(body) do
               {:ok, %{"ticket" => ticket}} when is_binary(ticket) and ticket != "" ->
-                {:ok, base <> "/login/ticket/" <> ticket}
+                # Mint over the provisioning FQDN (canonical control traffic),
+                # LAND the user on the attached custom host when one exists —
+                # the operator chose it as THE address, and the single-use
+                # ticket redeems on any host the instance serves.
+                {:ok, public_base(bp) <> "/login/ticket/" <> ticket}
 
               _ ->
                 {:error, :instance_error}
@@ -2163,6 +2167,11 @@ defmodule BarkparkCloud.Registry do
         end
     end
   end
+
+  defp public_base(%Barkpark{custom_host: ch}) when is_binary(ch) and ch != "",
+    do: "https://" <> ch
+
+  defp public_base(%Barkpark{url: url}), do: String.trim_trailing(url, "/")
 
   def mint_studio_link(_, _), do: {:error, :not_live}
 
