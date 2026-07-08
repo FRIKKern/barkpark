@@ -1,0 +1,184 @@
+package cli
+
+import (
+	"bytes"
+	"encoding/json"
+	"strings"
+	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/taskboard"
+)
+
+// lintFixture exercises every lint branch in one snapshot:
+//   - epic-goal:    a ready PARENT (owns a child), no area — EXCLUDED (not a leaf)
+//   - leaf-child:   the epic's ready child, area-less leaf — FLAGGED (no suggestion)
+//   - tagged-leaf:  a ready leaf carrying an authored area: label — NOT flagged
+//   - derived-leaf: a ready area-less leaf whose phase band names a surface —
+//     FLAGGED with a "web" suggestion
+//   - done-leaf:    a leaf that is not ready — EXCLUDED (not workable)
+func lintFixture() taskboard.Snapshot {
+	return taskboard.Snapshot{
+		Tasks: []taskboard.Task{
+			{DocID: "drafts.epic-goal", Title: "big epic", Lifecycle: "ready"},
+			{DocID: "drafts.leaf-child", Title: "area-less child", Lifecycle: "ready", ParentID: "epic-goal"},
+			{DocID: "drafts.tagged-leaf", Title: "already tagged", Lifecycle: "ready", Labels: []string{"area:studio"}},
+			{DocID: "drafts.derived-leaf", Title: "phase-band leaf", Lifecycle: "ready", Labels: []string{"phase:2-web"}},
+			{DocID: "drafts.done-leaf", Title: "finished work", Lifecycle: "done"},
+		},
+	}
+}
+
+func TestAreaLintFindings(t *testing.T) {
+	findings, readyLeaves := areaLintFindings(lintFixture())
+
+	// leaf-child, tagged-leaf, derived-leaf are ready leaves; the epic (a parent)
+	// and the done task are not.
+	if readyLeaves != 3 {
+		t.Fatalf("readyLeaves = %d, want 3", readyLeaves)
+	}
+
+	got := map[string]string{}
+	for _, f := range findings {
+		got[f.ID] = f.Suggested
+	}
+
+	// (a) an area-less ready LEAF is flagged.
+	if _, ok := got["leaf-child"]; !ok {
+		t.Errorf("area-less ready leaf not flagged; findings=%v", got)
+	}
+	if got["leaf-child"] != "" {
+		t.Errorf("leaf-child suggestion = %q, want \"\" (no phase band)", got["leaf-child"])
+	}
+
+	// (b) a goal/epic (has children) is NOT flagged, even though it has no area.
+	if _, ok := got["epic-goal"]; ok {
+		t.Errorf("epic-goal (a parent) must not be flagged; findings=%v", got)
+	}
+
+	// (c) an already area:-tagged ready leaf is NOT flagged.
+	if _, ok := got["tagged-leaf"]; ok {
+		t.Errorf("authored-area leaf must not be flagged; findings=%v", got)
+	}
+
+	// derived phase-band area becomes a suggestion (not an authored tag → still flagged).
+	if got["derived-leaf"] != "web" {
+		t.Errorf("derived-leaf suggestion = %q, want \"web\"", got["derived-leaf"])
+	}
+
+	// a non-ready leaf is not even scanned.
+	if _, ok := got["done-leaf"]; ok {
+		t.Errorf("done leaf must not be flagged; findings=%v", got)
+	}
+
+	if len(findings) != 2 {
+		t.Fatalf("findings = %d, want 2 (leaf-child, derived-leaf)", len(findings))
+	}
+	// id-sorted, stable.
+	if findings[0].ID != "derived-leaf" || findings[1].ID != "leaf-child" {
+		t.Errorf("findings not id-sorted: %q, %q", findings[0].ID, findings[1].ID)
+	}
+}
+
+// TestAreaLintAdvisoryExit — the CRITICAL guarantee: both render paths return
+// exitOK even when findings EXIST. The nudge is never an error.
+func TestAreaLintAdvisoryExit(t *testing.T) {
+	findings, readyLeaves := areaLintFindings(lintFixture())
+	if len(findings) == 0 {
+		t.Fatal("fixture must produce findings to prove the advisory exit")
+	}
+
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	if code := renderAreaLintTable(w, findings, readyLeaves); code != exitOK {
+		t.Errorf("renderAreaLintTable with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
+	}
+
+	var jo, je bytes.Buffer
+	jw := newWriter(&jo, &je)
+	jw.output = "json"
+	if code := emitAreaLintJSON(jw, findings, readyLeaves); code != exitOK {
+		t.Errorf("emitAreaLintJSON with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
+	}
+}
+
+func TestRenderAreaLintTable(t *testing.T) {
+	findings, readyLeaves := areaLintFindings(lintFixture())
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	renderAreaLintTable(w, findings, readyLeaves)
+	got := so.String()
+
+	for _, want := range []string{
+		"LINT · 2 of 3 ready leaves carry no area: label",
+		"advisory",
+		"leaf-child", // bareID-stripped
+		"area-less child",
+		"derived-leaf",
+		"~web ?", // the derived suggestion, marked provisional + queried
+		"dispatch-areas.md",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing %q\n---\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderAreaLintTableClean(t *testing.T) {
+	// Every ready leaf is authored → no findings; the table says so and exits OK.
+	snap := taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "drafts.a", Title: "tagged", Lifecycle: "ready", Labels: []string{"area:cli"}},
+	}}
+	findings, readyLeaves := areaLintFindings(snap)
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	if code := renderAreaLintTable(w, findings, readyLeaves); code != exitOK {
+		t.Errorf("clean table exit = %d, want exitOK", code)
+	}
+	if !strings.Contains(so.String(), "every workable leaf is area-tagged") {
+		t.Errorf("clean table should confirm all tagged, got:\n%s", so.String())
+	}
+}
+
+func TestEmitAreaLintJSON(t *testing.T) {
+	findings, readyLeaves := areaLintFindings(lintFixture())
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	emitAreaLintJSON(w, findings, readyLeaves)
+
+	var payload struct {
+		OK          bool `json:"ok"`
+		Advisory    bool `json:"advisory"`
+		ReadyLeaves int  `json:"ready_leaves"`
+		AreaLess    int  `json:"area_less"`
+		Findings    []struct {
+			ID        string `json:"id"`
+			Title     string `json:"title"`
+			Suggested string `json:"suggested_area"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
+		t.Fatalf("json unmarshal: %v\n%s", err, so.String())
+	}
+	if !payload.OK || !payload.Advisory {
+		t.Errorf("ok/advisory = %v/%v, want true/true", payload.OK, payload.Advisory)
+	}
+	if payload.ReadyLeaves != 3 || payload.AreaLess != 2 {
+		t.Errorf("ready_leaves/area_less = %d/%d, want 3/2", payload.ReadyLeaves, payload.AreaLess)
+	}
+	if len(payload.Findings) != 2 {
+		t.Fatalf("findings = %d, want 2", len(payload.Findings))
+	}
+	byID := map[string]string{}
+	for _, f := range payload.Findings {
+		byID[f.ID] = f.Suggested
+	}
+	if byID["derived-leaf"] != "web" {
+		t.Errorf("derived-leaf suggested_area = %q, want web", byID["derived-leaf"])
+	}
+	if s, ok := byID["leaf-child"]; !ok || s != "" {
+		t.Errorf("leaf-child suggested_area = %q (present=%v), want empty", s, ok)
+	}
+}
