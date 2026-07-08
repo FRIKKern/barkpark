@@ -462,7 +462,7 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 	n := len(lanes)
 	const chrome = 4 // rounded border (2) + padding (2)
 	// The shared Flex solver resolves per-lane width + the degrade verdict
-	// (cellW := (W-(N-1)*gutter)/N; side-by-side when >1 lane clears MinWidth).
+	// (Measure owns the (W-(N-1)*gutter)/N divide; side-by-side when >1 lane clears MinWidth).
 	cellW, sideBySide := DefaultFlex.Measure(w, n)
 	if sideBySide {
 		// Side-by-side bordered lanes.

@@ -63,8 +63,8 @@ func (cr columnsRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	// Horizontal path: the shared Flex solver resolves per-cell width and the
-	// degrade verdict (cellW := (W-(N-1)*gutter)/N; side-by-side when >1 column
-	// clears MinWidth). Re-render each column at cellW (so wrapping is right — the
+	// degrade verdict (Measure owns the (W-(N-1)*gutter)/N divide; side-by-side
+	// when >1 column clears MinWidth). Re-render each column at cellW (so wrapping is right — the
 	// full-width groups above would overflow) and Arrange them side-by-side.
 	// Integer division may leave ≤N-1 columns of unused trailing slack; never overflows.
 	cellW, sideBySide := DefaultFlex.Measure(w, n)
