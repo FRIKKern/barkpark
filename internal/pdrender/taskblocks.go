@@ -460,15 +460,13 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	w := clampWidth(ctx.Width)
 	n := len(lanes)
-	const (
-		gutter = 2
-		chrome = 4 // rounded border (2) + padding (2)
-	)
-	cellW := (w - (n-1)*gutter) / n
-	if n > 1 && cellW >= MinWidth {
+	const chrome = 4 // rounded border (2) + padding (2)
+	// The shared Flex solver resolves per-lane width + the degrade verdict
+	// (Measure owns the (W-(N-1)*gutter)/N divide; side-by-side when >1 lane clears MinWidth).
+	cellW, sideBySide := DefaultFlex.Measure(w, n)
+	if sideBySide {
 		// Side-by-side bordered lanes.
-		groups := make([][]string, n)
-		widths := make([]int, n)
+		nodes := make([]Node, n)
 		for i, ln := range lanes {
 			innerW := clampWidth(cellW - chrome)
 			body := laneBody(ln.role, ln.label, ln.rows, ctx, innerW)
@@ -478,10 +476,9 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 				Padding(0, 1).
 				Width(innerW).
 				Render(lipgloss.JoinVertical(lipgloss.Left, body...))
-			groups[i] = strings.Split(box, "\n")
-			widths[i] = cellW
+			nodes[i] = Node{Lines: strings.Split(box, "\n"), Width: cellW, Span: 1}
 		}
-		return joinColumns(groups, widths, gutter)
+		return DefaultFlex.Arrange(nodes)
 	}
 
 	// Sub-MinWidth fallback (verbatim): stacked lanes.

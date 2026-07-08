@@ -26,6 +26,81 @@ import (
 // stays byte-identical to today. All width math is ANSI-aware (lipgloss.Width),
 // never len — child lines carry styled (colored) runs whose bytes ≠ cells.
 
+// ── the two-pass solver: Flex / Node / Measure / Arrange ─────────────────────
+//
+// One place owns the divide-formula. Before this seam the SAME arithmetic —
+// cellW := (W-(N-1)*gutter)/N plus the `N>1 && cellW>=MinWidth` degrade guard —
+// was copy-pasted into three renderers (columns, section-grid, board lanes).
+// Flex.Measure IS that arithmetic + the degrade DECISION; Flex.Arrange is the
+// pad-and-JoinHorizontal pass. The split is deliberate: a caller Measures FIRST
+// (the child width the verdict resolves is what the children are re-rendered at),
+// then builds Nodes, then Arranges. Byte-faithful — the formula, gutter=2,
+// integer division, and the sub-MinWidth verbatim-stack fallback are unchanged.
+
+// Flex is the shared side-by-side solver's config: the inter-cell Gutter and the
+// per-cell MinWidth floor below which a surface degrades to its vertical stack.
+type Flex struct {
+	Gutter   int
+	MinWidth int
+}
+
+// DefaultFlex is the gutter=2 / MinWidth solver every terminal side-by-side
+// surface uses (horizontal columns, N-up section grid, task-board lanes).
+var DefaultFlex = Flex{Gutter: 2, MinWidth: MinWidth}
+
+// Node is one child of a Flex layout: its already-rendered lines, the display
+// width it was rendered at, and its span (slot consumption — 1 for an equal
+// column, S for a section-grid cell spanning S tracks).
+type Node struct {
+	Lines []string
+	Width int
+	Span  int
+}
+
+// Measure is the FIRST pass — the divide-formula and the degrade verdict, the
+// one arithmetic the three callers used to each inline. Per-track cell width is
+// (avail-(tracks-1)*gutter)/tracks with integer division; `avail` is a DISPLAY
+// width (ANSI-aware, measured by the caller via lipgloss.Width). sideBySide is
+// true ONLY when tracks>1 AND cellW>=MinWidth — otherwise the caller keeps its
+// verbatim vertical-stack path, byte-identical to before. tracks<1 is clamped to
+// 1 (yields sideBySide=false) so a lone/empty surface never divides by zero.
+func (f Flex) Measure(avail, tracks int) (cellW int, sideBySide bool) {
+	if tracks < 1 {
+		tracks = 1
+	}
+	cellW = (avail - (tracks-1)*f.Gutter) / tracks
+	sideBySide = tracks > 1 && cellW >= f.MinWidth
+	return
+}
+
+// Arrange is the SECOND pass for equal-track surfaces (columns, board lanes):
+// pad each Node's lines to its width and join them side-by-side with Gutter
+// blank columns between. Delegates to joinColumns (the byte-faithful body).
+func (f Flex) Arrange(nodes []Node) []string {
+	cells := make([][]string, len(nodes))
+	widths := make([]int, len(nodes))
+	for i, nd := range nodes {
+		cells[i] = nd.Lines
+		widths[i] = nd.Width
+	}
+	return joinColumns(cells, widths, f.Gutter)
+}
+
+// ArrangeGrid is the SECOND pass for the spanning section grid: chunk the Nodes
+// into rows of `tracks` slots by span, then join each row. Delegates to gridRows
+// (the byte-faithful body); a Node's Span is its slot consumption.
+func (f Flex) ArrangeGrid(nodes []Node, tracks int) []string {
+	cells := make([][]string, len(nodes))
+	widths := make([]int, len(nodes))
+	spans := make([]int, len(nodes))
+	for i, nd := range nodes {
+		cells[i] = nd.Lines
+		widths[i] = nd.Width
+		spans[i] = nd.Span
+	}
+	return gridRows(cells, widths, spans, tracks, f.Gutter)
+}
+
 // joinColumns pads each group's lines to its width and joins the groups
 // side-by-side, row-wise, with `gutter` blank columns between them. Unequal
 // heights → lipgloss.JoinHorizontal(Top) bottom-pads the shorter columns with
