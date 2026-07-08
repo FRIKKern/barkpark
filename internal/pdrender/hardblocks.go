@@ -77,7 +77,15 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 		var art []string
 		switch doc.kind {
 		case "flowchart":
-			art = renderFlowchart(doc.graph, ctx)
+			// Direction is a responsive flex-direction: an LR/RL graph lays out
+			// left-to-right when it fits, and COLLAPSES to the top-down engine when
+			// it can't (renderFlowchartLR returns nil) — re-layout, not reflow.
+			if doc.graph.dir == "LR" || doc.graph.dir == "RL" {
+				art = renderFlowchartLR(doc.graph, ctx)
+			}
+			if art == nil {
+				art = renderFlowchart(doc.graph, ctx)
+			}
 		case "sequence":
 			art = renderSequence(doc.seq, ctx)
 		}
