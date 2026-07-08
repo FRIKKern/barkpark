@@ -19,11 +19,19 @@
 # SCOPE (production call sites only — test files carry hex as DATA fixtures, e.g.
 # a color-field default, and are out of scope by construction):
 #   • cmd/barkpark/**            (the bp TUI + CLI render surface)
-#   • internal/cli/setup/**      (the setup wizard)
+#   • internal/cli/**            (the WHOLE CLI: setup wizard, style_cmd, table,
+#                                 seed, every command surface — au-w4-cli-ratchet)
 #   • internal/taskboard/theme.go (the portrait board palette)
-#   • internal/cli/style_cmd.go  (the `bp style` design-token sheet — W4.11)
-# (internal/cli at large is NOT yet scanned — a follow-up should extend it once
-# its pre-existing literals are threaded/annotated.)
+#
+# AUDIT (au-w4-cli-ratchet, 2026-07-08): when the walk was broadened from the
+# narrow internal/cli/setup subtree to the whole internal/cli tree, the tree was
+# audited to ZERO semantic colour literals — nothing to thread onto a role, no
+# resisters, EXCEPT one color-field DATA default (seed_cmd.go's `color` fake
+# value, a field value not chrome — lit-allow'd, same class as tui-render.go's
+# color-picker default). Recorded here as honest evidence: the extension is a
+# genuine "audited → clean" broaden, NOT a silent blanket dir exemption.
+# (The `bp style` design-token sheet, internal/cli/style_cmd.go — W4.11 — is now
+# scanned as part of the whole internal/cli tree, no longer a standalone entry.)
 #
 # ALLOWLIST — the lead-approved chrome resisters (styles.go highlight/dim/borders/
 # ink/title/selection/toolbar/breadcrumb/publishBtn primary-CTA; the wizard chrome
@@ -39,15 +47,76 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# --selftest — the DURABLE tripwire (au-w4-cli-ratchet, AC5). Proves the gate
+# actually REDs on a planted literal, repeatably, planting NOTHING in the real
+# tree (a temp dir, cleaned on exit — so the self-test can never trip the real
+# gate). It drives the REAL scanner via GO_LIT_SELFTEST so a future edit that
+# weakens strip_comments/LITERAL/ALLOW_LINE is caught here, not just in prose.
+# CI wires this right after the main check (doc-gates.yml) so it can't rot.
+if [ "${1:-}" = "--selftest" ]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    # 1) A file with a planted #hex literal in a lipgloss call site MUST fail.
+    cat >"$tmp/planted_cmd.go" <<'GO'
+package demo
+
+import "github.com/charmbracelet/lipgloss"
+
+var planted = lipgloss.NewStyle().Foreground(lipgloss.Color("#ff0000"))
+GO
+    if out="$(GO_LIT_SELFTEST="$tmp/planted_cmd.go" bash "$0" 2>&1)"; then
+        echo "go-literal-check --selftest: FAIL — planted #ff0000 was NOT caught (gate is blind)."
+        echo "$out"
+        exit 1
+    fi
+    if ! printf '%s' "$out" | grep -q 'planted_cmd.go:5'; then
+        echo "go-literal-check --selftest: FAIL — RED did not name the planted file:line."
+        echo "$out"
+        exit 1
+    fi
+    # 2) A clean file (a variable colour, no hex) MUST pass.
+    cat >"$tmp/clean_cmd.go" <<'GO'
+package demo
+
+import "github.com/charmbracelet/lipgloss"
+
+func style(c string) lipgloss.Style { return lipgloss.NewStyle().Foreground(lipgloss.Color(c)) }
+GO
+    if ! GO_LIT_SELFTEST="$tmp/clean_cmd.go" bash "$0" >/dev/null 2>&1; then
+        echo "go-literal-check --selftest: FAIL — a clean file was wrongly flagged (gate over-triggers)."
+        exit 1
+    fi
+    # 3) A hex inside a comment (not a call site) MUST pass — the lexer must strip it.
+    cat >"$tmp/comment_cmd.go" <<'GO'
+package demo
+
+// palette note: brand accent is #ff0000 — documented, not applied.
+var x = 1
+GO
+    if ! GO_LIT_SELFTEST="$tmp/comment_cmd.go" bash "$0" >/dev/null 2>&1; then
+        echo "go-literal-check --selftest: FAIL — a #hex in a COMMENT was flagged (comment lexer broke)."
+        exit 1
+    fi
+    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex."
+    exit 0
+fi
+
 python3 - "$ROOT" <<'PY'
 import os, re, sys
 
 root = sys.argv[1]
 # Directory subtrees walked wholesale (recursive), plus individual files.
-ROOTS = [os.path.join(root, "cmd", "barkpark"),
-         os.path.join(root, "internal", "cli", "setup")]
-FILES = [os.path.join(root, "internal", "taskboard", "theme.go"),
-         os.path.join(root, "internal", "cli", "style_cmd.go")]
+# GO_LIT_SELFTEST override: when set, scan ONLY that one file (the --selftest
+# tripwire points the REAL scanner at a throwaway temp file — same lexer, same
+# LITERAL, same allow logic — so the tripwire proves the actual gate, not a fork).
+_selftest = os.environ.get("GO_LIT_SELFTEST")
+if _selftest:
+    ROOTS = []
+    FILES = [_selftest]
+else:
+    ROOTS = [os.path.join(root, "cmd", "barkpark"),
+             os.path.join(root, "internal", "cli")]  # au-w4: whole CLI tree (subsumes setup/ + style_cmd.go)
+    FILES = [os.path.join(root, "internal", "taskboard", "theme.go")]
 
 # A 3/6/8-digit #hex colour literal. Go has no hsl().
 LITERAL = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")

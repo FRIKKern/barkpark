@@ -316,7 +316,7 @@ func fakeValue(f seedField, n int) any {
 		}
 		return "option"
 	case "color":
-		return "#3366cc"
+		return "#3366cc" // lit-allow: color-field seed DATA default (a field value, not chrome) — au-w4-cli-chrome-tokens
 	case "image", "array":
 		// Best-effort: a media reference / array needs real targets we don't have.
 		// Leave an empty shape so a draft saves without a dangling pointer.
