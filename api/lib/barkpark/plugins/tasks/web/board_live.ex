@@ -477,12 +477,36 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
          already-fetched cards through the pure organizer. Each chip is a real
          <button> that push_patches the URL (D14) — pure CSS, CSP-safe, no JS. */
       .bp-controls {
-        display: flex; flex-wrap: wrap; align-items: center;
-        gap: 0.45rem 0.7rem; margin: 0 0 1.1rem;
+        display: flex; flex-direction: column; align-items: flex-start;
+        gap: 0.55rem; margin: 0 0 1.1rem;
       }
       .bp-chip-row {
         display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
       }
+      /* Filters fold behind a disclosure so the board — not a wall of every
+         label/worker in the dataset — is the hero directly under the momentum
+         bar. Native <details>: CSP-safe, no JS, keyboard-native. Opens itself
+         when a shared URL arrives pre-filtered so its active chips are visible. */
+      .bp-filters { width: 100%; }
+      .bp-filters > summary {
+        display: inline-flex; align-items: center; gap: 0.35rem; width: max-content;
+        cursor: pointer; user-select: none; list-style: none;
+        font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+        font-weight: 600; opacity: 0.55; padding: 0.15rem 0;
+      }
+      .bp-filters > summary:hover { opacity: 0.8; }
+      .bp-filters > summary::-webkit-details-marker { display: none; }
+      .bp-filters > summary::before {
+        content: "\25B8"; display: inline-block; transition: transform 140ms ease;
+      }
+      .bp-filters[open] > summary::before { transform: rotate(90deg); }
+      .bp-filters-active { color: #2563eb; opacity: 1; }
+      .bp-filters-body {
+        display: flex; flex-direction: column; gap: 0.45rem;
+        margin-top: 0.55rem; max-height: 42vh; overflow-y: auto;
+        padding-right: 0.2rem;
+      }
+      .bp-filters-body .bp-chip-row { max-height: 5.6rem; overflow-y: auto; }
       .bp-controls-label {
         font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
         opacity: 0.55; font-weight: 600; margin-right: 0.15rem;
@@ -808,50 +832,73 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         </button>
       </div>
 
-      <.chip_row
-        :if={@view.facets.goals != []}
-        facet={:goal}
-        title="Goal"
-        prefix="↳"
-        values={@view.facets.goals}
-        filters={@filters}
-      />
-      <.chip_row
-        :if={@view.facets.priorities != []}
-        facet={:priority}
-        title="Priority"
-        prefix="P"
-        values={@view.facets.priorities}
-        filters={@filters}
-      />
-      <.chip_row
-        :if={@view.facets.labels != []}
-        facet={:label}
-        title="Label"
-        prefix="#"
-        values={@view.facets.labels}
-        filters={@filters}
-      />
-      <.chip_row
-        :if={@view.facets.workers != []}
-        facet={:worker}
-        title="Worker"
-        prefix="@"
-        values={@view.facets.workers}
-        filters={@filters}
-      />
-
-      <button
-        :if={@view.filtered?}
-        type="button"
-        class="bp-chip bp-clear"
-        phx-click="clear-filters"
-        data-role="clear-all"
+      <details
+        :if={any_facets?(@view)}
+        class="bp-filters"
+        data-role="filters"
+        open={@view.filtered?}
       >
-        Clear filters
-      </button>
+        <summary class="bp-filters-summary" data-role="filters-toggle">
+          Filter<span
+            :if={@view.filtered?}
+            class="bp-filters-active"
+            data-role="filters-active"
+          > · active</span>
+        </summary>
+        <div class="bp-filters-body">
+          <.chip_row
+            :if={@view.facets.goals != []}
+            facet={:goal}
+            title="Goal"
+            prefix="↳"
+            values={@view.facets.goals}
+            filters={@filters}
+          />
+          <.chip_row
+            :if={@view.facets.priorities != []}
+            facet={:priority}
+            title="Priority"
+            prefix="P"
+            values={@view.facets.priorities}
+            filters={@filters}
+          />
+          <.chip_row
+            :if={@view.facets.labels != []}
+            facet={:label}
+            title="Label"
+            prefix="#"
+            values={@view.facets.labels}
+            filters={@filters}
+          />
+          <.chip_row
+            :if={@view.facets.workers != []}
+            facet={:worker}
+            title="Worker"
+            prefix="@"
+            values={@view.facets.workers}
+            filters={@filters}
+          />
+
+          <button
+            :if={@view.filtered?}
+            type="button"
+            class="bp-chip bp-clear"
+            phx-click="clear-filters"
+            data-role="clear-all"
+          >
+            Clear filters
+          </button>
+        </div>
+      </details>
     </section>
     """
+  end
+
+  # Any facet value at all present in the (already-fetched) corpus? Gates the
+  # whole filter disclosure — no chrome when there is nothing to filter.
+  defp any_facets?(view) do
+    f = view.facets
+    f.goals != [] or f.priorities != [] or f.labels != [] or f.workers != []
   end
 
   # One facet's row of toggle chips. `facet` is the atom key (`:goal` …); HEEx
