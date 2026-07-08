@@ -65,4 +65,46 @@ defmodule BarkparkWeb.Contract.FederatedSearchTest do
     assert map_size(body["results"]) == 1
     assert is_map(body["results"]["documents"])
   end
+
+  # Wiring proof: federated document hits are rendered through
+  # render_many_by_type(schema_resolver, caller_context), so a `private` field is
+  # DROPPED for the anonymous federated caller. Without the per-type schema
+  # resolver this multi-type surface would leak non-encrypted private fields (the
+  # schema-free guard alone only catches ciphertext).
+  test "anonymous federated search redacts a private field on a document hit",
+       %{conn: conn} do
+    Content.upsert_schema(
+      %{
+        "name" => "post",
+        "title" => "Post",
+        "visibility" => "public",
+        "fields" => [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "ssn", "type" => "string", "private" => true}
+        ]
+      },
+      "test"
+    )
+
+    Content.create_document(
+      "post",
+      %{"doc_id" => "drafts.fsec", "title" => "Redacted Falcon Post", "ssn" => "SSN-999"},
+      "test"
+    )
+
+    Content.publish_document("fsec", "post", "test")
+
+    body =
+      get(conn, "/v1/search/test", %{"q" => "falcon", "surfaces" => "documents"})
+      |> json_response(200)
+
+    hits = body["results"]["documents"]["hits"]
+    hit = Enum.find(hits, &(&1["_id"] == "fsec"))
+
+    assert hit, "expected the published post to appear in the federated hits"
+    assert hit["title"] == "Redacted Falcon Post"
+    refute Map.has_key?(hit, "ssn")
+    # Belt-and-braces: the secret value must not appear ANYWHERE in the payload.
+    refute body |> Jason.encode!() |> String.contains?("SSN-999")
+  end
 end

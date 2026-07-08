@@ -151,4 +151,32 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       assert [%{"userName" => "list@listco.com"}] = resp["Resources"]
     end
   end
+
+  # A raw path `:id` reaches `member_of_org?`, binding to Membership.principal_id
+  # (and User.id) — both `:binary_id`. Before the guard a non-UUID id raised
+  # Ecto.CastError → HTTP 500; now it folds into the not_found branch → SCIM 404.
+  describe "malformed id → 404, not 500 (Ecto.CastError #672 class)" do
+    test "GET /scim/v2/Users/:id with a non-UUID id → 404 (never a 500)" do
+      %{token: token} = org_with_ws("usr-cast")
+      assert scim(token) |> get("/scim/v2/Users/not-a-uuid") |> json_response(404)
+    end
+
+    test "DELETE /scim/v2/Users/:id with a non-UUID id → 404 (never a 500)" do
+      %{token: token} = org_with_ws("usr-cast-del")
+      assert scim(token) |> delete("/scim/v2/Users/not-a-uuid") |> json_response(404)
+    end
+
+    test "positive control: a valid-shape but unknown UUID → 404 (not 500)" do
+      %{token: token} = org_with_ws("usr-unknown")
+      assert scim(token) |> get("/scim/v2/Users/#{Ecto.UUID.generate()}") |> json_response(404)
+    end
+
+    test "positive control: a valid UUID of a provisioned user → 200" do
+      %{token: token} = org_with_ws("usr-ok")
+      provision(token, "real@usr-ok.com") |> json_response(201)
+      user = Accounts.get_user_by_email("real@usr-ok.com")
+
+      assert scim(token) |> get("/scim/v2/Users/#{user.id}") |> json_response(200)
+    end
+  end
 end

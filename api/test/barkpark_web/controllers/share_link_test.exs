@@ -194,6 +194,48 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert body["title"] == "A Post"
   end
 
+  # Wiring proof: `/s/:token` is an ANONYMOUS read — the doc is rendered through
+  # Envelope.render(doc, schema, CallerContext.from_conn(conn)), so a `private`
+  # field is DROPPED before the public link can serve it.
+  test "a DOC link redacts a private field for the anonymous reader",
+       %{conn: conn, scope_str: scope_str, ws: ws, proj: proj} do
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "ssn", "type" => "string", "private" => true}
+          ]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "postsec", "title" => "Secret Post", "ssn" => "SSN-777"},
+        @dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document("postsec", "post", @dataset, scope)
+
+    %{"token" => token} =
+      mint(conn, %{scope: scope_str, kind: "doc", ref_type: "post", ref_id: "postsec"})
+
+    body = get(build_conn(), "/s/#{token}") |> json_response(200)
+    assert body["_id"] == "postsec"
+    assert body["title"] == "Secret Post"
+    refute Map.has_key?(body, "ssn")
+    refute body |> Jason.encode!() |> String.contains?("SSN-777")
+  end
+
   # ── media link ──────────────────────────────────────────────────────────
 
   test "a MEDIA link serves the file bytes at /s/:token", %{

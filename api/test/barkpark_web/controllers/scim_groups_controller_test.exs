@@ -145,4 +145,36 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       assert scim(token_a) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
     end
   end
+
+  # A raw path `:id` binds to Group's `:binary_id` PK. Before the guard a
+  # non-UUID id raised Ecto.CastError → HTTP 500; now it folds into the not_found
+  # branch → SCIM 404. Positive control: a well-formed UUID still resolves.
+  describe "malformed id → 404, not 500 (Ecto.CastError #672 class)" do
+    test "GET /scim/v2/Groups/:id with a non-UUID id → 404 (never a 500)" do
+      %{token: token} = org_with_ws("grp-cast")
+      assert scim(token) |> get("/scim/v2/Groups/not-a-uuid") |> json_response(404)
+    end
+
+    test "PATCH /scim/v2/Groups/:id with a non-UUID id → 404 (never a 500)" do
+      %{token: token} = org_with_ws("grp-cast-patch")
+      assert scim(token) |> patch("/scim/v2/Groups/%2Fnope", member_op("add", "x")) |> json_response(404)
+    end
+
+    test "positive control: a valid-shape but unknown UUID → 404 (not 500)" do
+      %{token: token} = org_with_ws("grp-unknown")
+      assert scim(token) |> get("/scim/v2/Groups/#{Ecto.UUID.generate()}") |> json_response(404)
+    end
+
+    test "positive control: a valid UUID of an existing group → 200" do
+      %{token: token} = org_with_ws("grp-ok")
+
+      gid =
+        scim(token)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "Real", "role" => "member"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
+
+      assert scim(token) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
+    end
+  end
 end
