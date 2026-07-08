@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Task detail timeline parity"
+    },
+    {
+      "id": "td1",
+      "type": "task-detail",
+      "task": {
+        "title": "Render the task-detail timeline",
+        "status": "in_progress",
+        "priority": "1",
+        "kind": "task",
+        "worker": "grace",
+        "created": "2026-07-01",
+        "updated": "2026-07-08",
+        "description": "Add the timeline section to the Go pdrender task-detail renderer so a TUI reader sees the lifecycle history the Elixir emitter already renders.",
+        "timeline": [
+          { "status": "open", "label": "Filed" },
+          { "status": "ready", "label": "Groomed" },
+          { "status": "in_progress", "label": "Claimed" },
+          { "status": "blocked", "label": "Waiting on review" },
+          { "status": "done", "label": "Shipped" }
+        ],
+        "blocks": 1,
+        "blocked_by": 0,
+        "criteria": [
+          { "text": "Timeline renders between stamp and description", "met": true, "evidence": "taskblocks.go" },
+          { "text": "Glyphs match the Elixir emitter", "met": true },
+          { "text": "Absent timeline emits nothing", "met": false }
+        ],
+        "children": [
+          { "title": "author fixture", "status": "done" }
+        ],
+        "papers": ["pdrender block parity plan"],
+        "labels": ["pdrender", "parity", "wave-5"]
+      }
+    }
+  ]
+}
