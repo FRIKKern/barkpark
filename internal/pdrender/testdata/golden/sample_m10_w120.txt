@@ -1,0 +1,18 @@
+SIDE-BY-SIDE GRID WIDGETS                                                                                             
+─────────────────────────                                                                                             
+                                                                                                                      
+▌ First  Wide lays out The notes fan    ▌ Second  Each note wraps inside its    ▌ Third Narrow it below the floor and 
+▌ out into columns when the surface is  ▌ own cell at the shared cell width.    ▌ the row stacks again.               
+▌ wide.                                                                                                               
+                                                                                                                      
+INGEST                                  →                                       EMIT                                  
+Decode doc                                                                      Write out                             
+Parse the envelope into a block tree.                                           Flush the composed lines to the       
+source: cli                                                                     terminal.                             
+                                                                                source: tui                           
+                                                                                                                      
+╭──────────────────────────────────╮    ╭──────────────────────────────────╮    ╭──────────────────────────────────╮  
+│ Info card                        │    │ OK card                          │    │ Warn card                        │  
+│ The info tone tints the box      │    │ A success card carries the ok    │    │ A warning card draws the eye.    │  
+│ border.                          │    │ tone.                            │    ╰──────────────────────────────────╯  
+╰──────────────────────────────────╯    ╰──────────────────────────────────╯                                          
