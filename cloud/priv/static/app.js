@@ -5061,22 +5061,142 @@
   // disconnect toasts exactly ONCE (not on every retry) and a reconnect can
   // confirm recovery.
   var evtErrored = false;
+  // Epoch (ms) of the last confirmed sign of life on the stream — set on the
+  // initial connect/reconnect (onopen) and on every real data frame (onmessage).
+  // The heartbeat the server sends every 25s is an SSE COMMENT (": ping"), which
+  // EventSource NEVER surfaces to onmessage, so this only advances on genuine
+  // invalidations — it is the honest "as of Xs ago" the liveness chip reads.
+  var lastEventMs = null;
+
+  // ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ────────────
+  // Pure state machine for the topbar dot, driven ONLY by the existing
+  // EventSource signals (no second stream, no new SSE type). Three honest states:
+  //   reconnecting — onerror fired and we have not recovered (stream is DOWN);
+  //   stale        — stream is up but no data frame in LIVE_STALE_MS (we cannot
+  //                  PROVE currency, so we say so — a quiet fleet, not a lie);
+  //   live         — connected, recently confirmed (or freshly connected).
+  // The dot colour tracks up-vs-dropped exactly (green family vs amber); the
+  // "as of" label carries recency. Exported + unit-tested at the boundaries.
+  var LIVE_STALE_MS = 90000; // 90s of silence → "stale" (well past the 25s heartbeat)
+  function liveDotState(evtErrored, lastEventMs, nowMs) {
+    if (evtErrored) return "reconnecting";
+    if (lastEventMs == null) return "live"; // connected; sparse events ≠ trouble
+    if (nowMs - lastEventMs > LIVE_STALE_MS) return "stale";
+    return "live";
+  }
+  // Compact relative freshness for the chip's "as of" label (ms epochs, not ISO,
+  // so relTime() doesn't fit). Empty until the first confirmed event.
+  function liveFreshness(lastEventMs, nowMs) {
+    if (lastEventMs == null) return "";
+    var secs = Math.max(0, Math.round((nowMs - lastEventMs) / 1000));
+    if (secs < 5) return "just now";
+    if (secs < 60) return secs + "s ago";
+    var mins = Math.round(secs / 60);
+    if (mins < 60) return mins + "m ago";
+    var hrs = Math.round(mins / 60);
+    return hrs + "h ago";
+  }
+  var LIVE_CHIP_COPY = { live: "Live", stale: "Live", reconnecting: "Reconnecting…" };
+  var LIVE_CHIP_ARIA = {
+    live: "Live updates connected", stale: "Live updates connected but quiet",
+    reconnecting: "Live updates interrupted, reconnecting",
+  };
+
+  // Inject the chip into the persistent topbar exactly once (index.html is frozen
+  // this wave, so the SPA owns the node). Idempotent: a re-login reuses it.
+  function ensureLivenessChip() {
+    if (typeof document === "undefined" || !document.querySelector) return null;
+    var existing = document.getElementById("liveness-chip");
+    if (existing) return existing;
+    var right = document.querySelector(".topbar .topbar-right");
+    if (!right) return null;
+    var chip = document.createElement("span");
+    chip.id = "liveness-chip";
+    chip.className = "live-chip";
+    chip.setAttribute("role", "status");
+    chip.setAttribute("aria-live", "polite");
+    chip.innerHTML =
+      '<span class="live-dot" aria-hidden="true"></span>' +
+      '<span class="live-chip-label"></span>' +
+      '<span class="live-chip-ago" aria-hidden="true"></span>';
+    right.insertBefore(chip, right.firstChild);
+    return chip;
+  }
+
+  // Paint the chip from the current stream signals. Cheap + idempotent; called on
+  // every state transition AND once per second by the chip ticker (so the "as of"
+  // label counts up and a quiet stream ages honestly into "stale").
+  function renderLivenessChip() {
+    var chip = document.getElementById("liveness-chip");
+    if (!chip) return;
+    var now = Date.now();
+    var state = liveDotState(evtErrored, lastEventMs, now);
+    chip.setAttribute("data-state", state);
+    var ago = state === "reconnecting" ? "" : liveFreshness(lastEventMs, now);
+    var label = chip.querySelector(".live-chip-label");
+    if (label) label.textContent = LIVE_CHIP_COPY[state] || "Live";
+    var agoEl = chip.querySelector(".live-chip-ago");
+    if (agoEl) { agoEl.textContent = ago ? "· " + ago : ""; agoEl.hidden = !ago; }
+    // role="status" is a live region: keep the ANNOUNCED name to the stable
+    // per-state sentence (changes only on a real transition), so the per-second
+    // "as of" tick — aria-hidden in the span — never spams a screen reader. The
+    // ticking recency rides the title (a hover tooltip, not an announcement).
+    chip.setAttribute("aria-label", LIVE_CHIP_ARIA[state] || "Live updates");
+    chip.setAttribute("title",
+      (LIVE_CHIP_ARIA[state] || "Live updates") + (ago ? ", last event " + ago : ""));
+  }
+
+  // A fresh data frame arrived — snap the dot's one-shot ping so motion signals
+  // "data just changed" (never idle decoration; collapses under reduced-motion
+  // via CSS). Re-arm by clearing + forcing a reflow so the animation restarts.
+  function pingLivenessChip() {
+    var chip = document.getElementById("liveness-chip");
+    var dot = chip && chip.querySelector ? chip.querySelector(".live-dot") : null;
+    if (!dot) return;
+    dot.classList.remove("is-ping");
+    if (dot.offsetWidth != null) { void dot.offsetWidth; } // reflow → restart
+    dot.classList.add("is-ping");
+  }
+
+  // One shared 1s interval that ticks the "as of" label and ages a quiet stream
+  // into "stale". Dies with the session (closeEvents) — no orphaned timer.
+  var chipTicker = null;
+  function startChipTicker() {
+    if (chipTicker) return;
+    renderLivenessChip();
+    chipTicker = setInterval(renderLivenessChip, 1000);
+  }
+  function stopChipTicker() {
+    if (chipTicker) { clearInterval(chipTicker); chipTicker = null; }
+  }
 
   function connectEvents() {
     var s = session();
-    if (!s || !s.token || evtSource) return;
+    if (!s || !s.token) return;
+    // The chip lives whenever we're authed, even if the stream is already open
+    // (a re-render calls connectEvents again) — mount + tick it before the guard.
+    ensureLivenessChip();
+    startChipTicker();
+    if (evtSource) return;
     try {
       evtSource = new EventSource("/v1/events?token=" + encodeURIComponent(s.token));
     } catch (e) { return; }
     evtSource.onopen = function () {
-      // First connect (or a recovery after a drop). Only announce a RECONNECT —
-      // the initial connect is silent.
+      // First connect (or a recovery after a drop): a confirmed sign of life.
+      lastEventMs = Date.now();
+      // Only announce a RECONNECT — the initial connect is silent.
       if (evtErrored) {
         evtErrored = false;
         toast({ kind: "success", title: "Live updates reconnected", duration: 2500 });
       }
+      renderLivenessChip();
     };
     evtSource.onmessage = function (e) {
+      // A real data frame (not the invisible heartbeat comment): the stream is
+      // demonstrably current. Stamp it, pulse the dot, refresh the chip.
+      lastEventMs = Date.now();
+      pingLivenessChip();
+      renderLivenessChip();
       var ev;
       try { ev = JSON.parse(e.data); } catch (x) { return; }
       handleLiveEvent(ev && ev.type);
@@ -5091,12 +5211,16 @@
         evtErrored = true;
         toast({ kind: "info", title: "Live updates interrupted", body: "Reconnecting…", duration: 5000 });
       }
+      renderLivenessChip(); // dot → amber every retry (cheap + idempotent)
     };
   }
 
   function closeEvents() {
     if (evtSource) { try { evtSource.close(); } catch (e) {} evtSource = null; }
     evtErrored = false;
+    lastEventMs = null;
+    stopChipTicker();     // the topbar chip's clock dies with the session
+    renderLivenessChip(); // reset to a neutral "live/—" before the shell hides
     stopInstanceTicker(); // C3: no orphaned timeline ticker after logout
   }
 
@@ -7268,6 +7392,12 @@
       verifySummaryText: verifySummaryText, verifyChipHtml: verifyChipHtml,
       verifyCardHtml: verifyCardHtml, verifyNoteHtml: verifyNoteHtml,
       verifyProbes: VERIFY_PROBES.map(function (p) { return { name: p.name, label: p.label }; }),
+      // Liveness chip (OC6): topbar SSE health dot + honest "as of" freshness.
+      // Pure state helpers + the DOM seams (fake-DOM smoke drives the mount/paint,
+      // the same way mountInstanceTimeline is exercised — real browser is live).
+      liveDotState: liveDotState, liveFreshness: liveFreshness,
+      liveStaleMs: LIVE_STALE_MS,
+      ensureLivenessChip: ensureLivenessChip, renderLivenessChip: renderLivenessChip,
     });
   }
 })();
