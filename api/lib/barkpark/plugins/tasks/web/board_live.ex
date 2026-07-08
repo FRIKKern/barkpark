@@ -123,6 +123,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   per-task (the drill-down). Dragging a family card restages the ROOT task
   only — an escalated card's illegal drops refuse via the same fences.
 
+  ## The deck (wave 18)
+
+  The default view drops the status kanban entirely: status is a CHIP, not
+  architecture. One horizontal snap-rail of identical phone-frame (9:19.5)
+  context cards — in-flight families first, then ready, blocked, open — and
+  Done is the LAST card, a single ledger phone with the honest window note.
+  Cards are not draggable on the deck (there are no drop targets); a click
+  peeks. The grouped/filtered kanban remains the drag/drill-down surface
+  (claim, close, release all still one drop away via Group).
+
   ## Task peek (wave 13)
 
   A card click opens a read-only right-hand inspector over the live board —
@@ -1474,6 +1484,69 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         flex: 0 0 440px; width: 440px;
       }
 
+      /* ── the Deck (wave 18): phone-frame context cards on one rail ──────
+         Status is a CHIP, not architecture: one horizontal snap-rail of
+         identical 9:19.5 cards — in-flight first, then ready, blocked,
+         open; Done is the LAST card (a ledger phone). The card height is
+         the rail height; the aspect ratio derives the width, so every card
+         is exactly one "phone". */
+      .bp-deck {
+        flex: 1 1 auto; min-height: 0;
+        display: flex; flex-wrap: nowrap; align-items: stretch; gap: 16px;
+        overflow-x: auto; overflow-y: hidden;
+        padding: 4px 2px 12px;
+        scroll-snap-type: x proximity;
+        scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+      }
+      .bp-deck::-webkit-scrollbar { height: 10px; }
+      .bp-deck::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+      .bp-phone {
+        flex: 0 0 auto; height: 100%; aspect-ratio: 9 / 19.5;
+        min-width: 250px; max-width: 420px;
+        scroll-snap-align: start;
+        display: flex; flex-direction: column; gap: 10px;
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 20px; padding: 16px 15px 13px;
+        overflow: hidden; cursor: pointer;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
+      }
+      .bp-phone:hover {
+        border-color: color-mix(in srgb, var(--border) 45%, var(--muted-text));
+        box-shadow: 0 10px 30px rgb(0 0 0 / 0.10);
+      }
+      .bp-phone--in_progress {
+        border-color: color-mix(in srgb, var(--info) 40%, var(--border));
+      }
+      .bp-phone--blocked {
+        border-color: color-mix(in srgb, var(--warn) 40%, var(--border));
+      }
+      .bp-phone-head {
+        display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
+        font-size: 11px; color: var(--muted-text);
+      }
+      .bp-phone-state {
+        text-transform: uppercase; letter-spacing: 0.07em;
+        font-size: 10px; font-weight: 700;
+      }
+      .bp-phone-head .bp-age { margin-left: auto; padding-left: 0; }
+      .bp-phone-title {
+        margin: 0; flex: 0 0 auto;
+        font-size: 15px; font-weight: 600; letter-spacing: -0.01em;
+        line-height: 1.35; color: var(--text);
+      }
+      .bp-phone-body {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto;
+        scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+      }
+      .bp-phone-body .bp-fam { border-top: 0; padding-top: 0; margin-top: 0; gap: 6px; }
+      .bp-phone > .bp-focus { flex: 0 0 auto; margin-top: 0; }
+      .bp-phone > .bp-progress { flex: 0 0 auto; margin-top: 0; }
+      .bp-phone > .bp-meta {
+        flex: 0 0 auto; margin-top: 0; padding-top: 9px;
+        border-top: 1px solid var(--border);
+      }
+      .bp-phone--ledger .bp-phone-body .bp-ledger { max-width: none; margin: 0; }
+
       /* Honest window note — the done ledger shows the newest slice; the full
          count never silently disappears. */
       .bp-more {
@@ -1706,6 +1779,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       html[data-theme="dark"] .gi--cancelled { color: #71717a; }
       html[data-theme="dark"] .gi--in_progress { color: #60a5fa; }
       html[data-theme="dark"] .bp-card:hover { box-shadow: 0 2px 10px rgb(0 0 0 / 0.35); }
+      html[data-theme="dark"] .bp-phone:hover { box-shadow: 0 10px 30px rgb(0 0 0 / 0.45); }
 
       /* Motion is a signal, not decoration — honor the reader's preference. */
       @media (prefers-reduced-motion: reduce) {
@@ -1724,7 +1798,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <div class="bp-head-l">
           <h1 class="bp-h1">Projects</h1>
           <p class="bp-sub">
-            Every task, live — drag a card to claim it, block it, or close it.
+            Every family of work, live — click a card for the full story.
           </p>
         </div>
         <div class="bp-head-r">
@@ -1830,13 +1904,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               </p>
             </div>
           <% else %>
-            <.board_grid
-              lane={hd(@view.lanes)}
-              last_change={@last_change}
-              done_overflow={done_overflow(@view, @board)}
-              family={@view[:family?] == true}
-              id="bp-projects-board"
-            />
+            <%= if @view[:family?] == true do %>
+              <.deck
+                lane={hd(@view.lanes)}
+                last_change={@last_change}
+                done_overflow={done_overflow(@view, @board)}
+              />
+            <% else %>
+              <.board_grid
+                lane={hd(@view.lanes)}
+                last_change={@last_change}
+                done_overflow={done_overflow(@view, @board)}
+                family={false}
+                id="bp-projects-board"
+              />
+            <% end %>
           <% end %>
         <% end %>
       <% end %>
@@ -2134,6 +2216,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         data-role="task-card"
         data-col="done"
         data-doc-id={card.doc_id}
+        data-just-moved={just_moved?(@last_change, card) && "true"}
         phx-click="peek"
         phx-value-task={card.doc_id}
       >
@@ -2355,6 +2438,174 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     </aside>
     """
   end
+
+  # ── the Deck (wave 18): the default view ────────────────────────────────────
+  #
+  # The status kanban never fit the family principle: once a card carries its
+  # whole family, five columns force ONE dimension (status) to own the layout
+  # while wasting most of the canvas on near-empty buckets. The deck makes
+  # status a CHIP: one horizontal snap-rail of identical phone-frame (9:19.5)
+  # context cards, ordered by relevance — in-flight families first, then
+  # ready, blocked, open — and Done is the LAST card, a single ledger phone.
+  # Cards are not draggable here (there are no drop targets); a click peeks.
+  # Grouped/filtered views keep the kanban + drag — the drill-down.
+  @deck_order [:in_progress, :ready, :blocked, :open]
+
+  defp deck(assigns) do
+    ~H"""
+    <div class="bp-deck" data-role="deck">
+      <article
+        :for={card <- deck_cards(@lane)}
+        class={["bp-phone", "bp-phone--#{card.col}", just_moved?(@last_change, card) && "bp-flash"]}
+        data-role="task-card"
+        data-col={card.col}
+        data-doc-id={card.doc_id}
+        data-just-moved={just_moved?(@last_change, card) && "true"}
+        phx-click="peek"
+        phx-value-task={card.doc_id}
+      >
+        <header class="bp-phone-head">
+          <span
+            class={"gi gi--#{card.color_role}"}
+            data-role="glyph"
+            data-status={card.lifecycle_status}
+            aria-hidden="true"
+          ><%= glyph_text(card) %></span>
+          <span class="bp-phone-state" data-role="deck-state"><%= deck_state(card.col) %></span>
+          <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
+            P<%= card.priority %>
+          </span>
+          <span :if={card.updated_at} class="bp-age" data-role="age">
+            <%= age_label(card.updated_at) %>
+          </span>
+        </header>
+
+        <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
+
+        <p
+          :if={card.col == :in_progress && !card[:family] && focus_of(card)}
+          class="bp-focus"
+          data-role="focus"
+        >
+          <span class="bp-focus-k">now</span>
+          <span class="bp-focus-t"><%= focus_of(card).title %></span>
+          <span :if={focus_of(card).worker} class="bp-focus-w">
+            @<%= focus_of(card).worker %>
+          </span>
+        </p>
+
+        <div class="bp-phone-body">
+          <ul :if={card[:family]} class="bp-fam" data-role="family">
+            <li
+              :for={row <- card.family.rows}
+              class="bp-fam-row"
+              style={"--d: #{row.depth};"}
+              data-role="family-row"
+              data-doc-id={row.doc_id}
+            >
+              <span :if={row.depth > 1} class="bp-tree-twig" aria-hidden="true">└</span>
+              <span class={"gi gi--#{row.color_role}"} aria-hidden="true"><%= glyph_text(row) %></span>
+              <span class="bp-fam-t"><%= row.title || row.doc_id %></span>
+              <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
+            </li>
+            <li :if={card.family.more > 0} class="bp-fam-more" data-role="family-more">
+              + <%= card.family.more %> more inside
+            </li>
+          </ul>
+
+          <p :if={card.col == :blocked and open_blockers(card) > 0} class="bp-block-note" data-role="blockers">
+            waiting on <%= open_blockers(card) %> of <%= length(card.blocker_statuses) %> blockers
+          </p>
+        </div>
+
+        <div :if={card.criteria} class="bp-progress" data-role="progress">
+          <span class="bp-progress-track"><span
+            class="bp-progress-fill"
+            style={"width: #{crit_pct(card.criteria)}%;"}
+          ></span></span>
+          <span
+            class={["bp-crit", card.criteria.met == 0 && "bp-crit--zero"]}
+            data-role="criteria"
+          >
+            <%= card.criteria.met %>/<%= card.criteria.total %>
+          </span>
+        </div>
+
+        <div class="bp-meta">
+          <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
+          <span
+            :if={family_tally(card)}
+            class={[
+              "bp-sub",
+              family_tally(card).done == family_tally(card).total && "bp-sub--all-done"
+            ]}
+            data-role="subtasks"
+            title="subtasks done / total"
+          >
+            <%= family_tally(card).done %>/<%= family_tally(card).total %> sub
+          </span>
+          <span :for={label <- Enum.take(card.labels, 2)} class="bp-label" data-role="label">
+            <%= label %>
+          </span>
+          <span :if={length(card.labels) > 2} class="bp-label bp-label--more" data-role="label-more">
+            +<%= length(card.labels) - 2 %>
+          </span>
+
+          <a
+            :if={github_badge?(card.github)}
+            class="bp-gh"
+            data-role="github-badge"
+            data-issue={card.github["issue"]}
+            href={gh_href(card.github)}
+            target="_blank"
+            rel="noopener"
+          >
+            <span
+              class={"bp-gh-dot " <> if(github_synced?(card), do: "is-synced", else: "is-detached")}
+              data-role="github-dot"
+            >
+            </span>
+            #<%= card.github["issue"] %>
+            <span class="bp-gh-state" data-role="github-state"><%= card.github["state"] %></span>
+          </a>
+
+          <span :if={card.worker} class="bp-worker" data-role="worker" title={card.worker}>
+            <%= card.worker %>
+          </span>
+        </div>
+      </article>
+
+      <article
+        :if={(@lane.counts[:done] || 0) > 0}
+        class="bp-phone bp-phone--ledger"
+        data-role="deck-done"
+      >
+        <header class="bp-phone-head">
+          <span class="gi gi--done" aria-hidden="true">✓</span>
+          <span class="bp-phone-state">done</span>
+          <span class="bp-age" data-role="col-count"><%= @lane.counts[:done] %></span>
+        </header>
+        <h3 class="bp-phone-title">Shipped</h3>
+        <div class="bp-phone-body">
+          <.done_ledger cards={@lane.columns[:done]} last_change={@last_change} />
+          <p :if={@done_overflow > 0} class="bp-more" data-role="done-overflow">
+            + <%= @done_overflow %> earlier — newest shown
+          </p>
+        </div>
+      </article>
+    </div>
+    """
+  end
+
+  # The rail order: relevance, not buckets — the active continuum first
+  # (in-flight, then ready), then stuck, then backlog. Done rides the ledger
+  # card at the end.
+  defp deck_cards(lane) do
+    Enum.flat_map(@deck_order, fn col -> lane.columns[col] || [] end)
+  end
+
+  defp deck_state(:in_progress), do: "in flight"
+  defp deck_state(col), do: col |> Atom.to_string() |> String.replace("_", " ")
 
   # ── Render helpers ──────────────────────────────────────────────────────────
 
