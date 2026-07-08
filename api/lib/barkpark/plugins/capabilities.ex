@@ -488,6 +488,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "name" => "auth",
         "summary" => "User accounts — register, login, sessions, MFA.",
         "plugin" => nil
+      },
+      %{
+        "name" => "access",
+        "summary" => "Airdrop grants — time-boxed, account-bound scoped access links.",
+        "plugin" => nil
       }
     ]
   end
@@ -1653,6 +1658,79 @@ defmodule Barkpark.Plugins.Capabilities do
         "read",
         args: [arg("password", true, "string", "Account password (re-auth).")],
         default_output: "json"
+      ),
+      # ── Airdrop grants — the `access` noun (grantor surface) ──────────────
+      # CORE (survives `:plugins, []`). All four sit behind `[:api,
+      # :require_token]` at root `/v1/access` — the workspace comes from the
+      # body (grant) / query (ls) / the grant itself (show/revoke), NOT a path
+      # slug, so there is NO scoped_prefix. mint/revoke authorize per-workspace
+      # INSIDE Barkpark.Access (no-escalation on mint, grantor-or-admin on
+      # revoke) → `scoped_admin` tier: visible to any authenticated token, the
+      # server decides the per-workspace authority. ls/show are bearer reads.
+      #
+      # There is deliberately NO `access claim` verb: the grantee claim
+      # (`POST /v1/access/claim`) needs a USER SESSION, and a plain api_token
+      # carries no user identity — a terminal `bp access claim` would be broken.
+      # The claim ROUTE still exists for the session/browser path; its terminal
+      # exposure is deferred to the auth follow-on (mirrors the session-only
+      # `auth.*` verbs that bp cannot drive either).
+      core_cmd(
+        "access.grant",
+        "access",
+        "grant",
+        "Mint an airdrop grant — a time-boxed, account-bound scoped access link.",
+        "POST",
+        "/v1/access",
+        "scoped_admin",
+        args: [
+          arg("grantee_email", true, "string", "Who the link is FOR (claimed by a matching account)."),
+          arg("workspace_id", true, "string", "Workspace scope top (required)."),
+          arg("capabilities", true, "string", "Comma list — read|write|admin (only what you hold).")
+        ],
+        flags: [
+          flag("project_id", "string", "Narrow the scope to a project."),
+          flag("dataset", "string", "Narrow the scope to a dataset."),
+          flag("type", "string", "Narrow the scope to a document type."),
+          flag("doc_id", "string", "Narrow the scope to a single document."),
+          flag("single_use", "boolean", "Spend the grant on its first claim."),
+          flag("expires_at", "string", "ISO-8601 expiry instant.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "access.ls",
+        "access",
+        "ls",
+        "List active airdrop grants for a workspace (grantor-scoped).",
+        "GET",
+        "/v1/access",
+        "read",
+        flags: [flag("workspace_id", "string", "Workspace whose grants to list (required).")],
+        default_output: "table"
+      ),
+      core_cmd(
+        "access.show",
+        "access",
+        "show",
+        "Show one airdrop grant by id (grantor or workspace admin).",
+        "GET",
+        "/v1/access/:id",
+        "read",
+        args: [arg("id", true, "string", "Grant id.")],
+        default_output: "json"
+      ),
+      core_cmd(
+        "access.revoke",
+        "access",
+        "revoke",
+        "Revoke an airdrop grant by id (idempotent; grantor or admin).",
+        "DELETE",
+        "/v1/access/:id",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Grant id.")],
+        writes: true,
+        default_output: "minimal"
       )
     ]
   end

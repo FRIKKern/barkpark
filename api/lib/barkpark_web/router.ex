@@ -1172,6 +1172,32 @@ defmodule BarkparkWeb.Router do
     get("/graph/:id/tasks", TasksController, :graph_tasks)
   end
 
+  # ── Airdrop grants — the `access` noun (grantor-driven surface) ─────────────
+  # CORE (survives the `config :barkpark, :plugins, []` kill switch) — mounted
+  # under `[:api, :require_token]` (bearer-gated, NOT admin). The no-escalation
+  # gate lives INSIDE Access.mint/2 (a token can only confer capabilities it
+  # holds in the body's workspace); list/show/revoke authorize per-grant. The
+  # grantee CLAIM is NOT here — it needs a user session, so it sits in the
+  # session-gated `/v1/access/claim` block below.
+  scope "/v1", BarkparkWeb do
+    pipe_through([:api, :require_token])
+
+    post("/access", AccessController, :mint)
+    get("/access", AccessController, :index)
+    get("/access/:id", AccessController, :show)
+    delete("/access/:id", AccessController, :revoke)
+  end
+
+  # Airdrop-grant CLAIM (JSON, session path) — the authenticated grantee binds a
+  # grant addressed to their email. Session-gated (`[:user_auth, :require_user]`
+  # → :current_user), the JSON twin of the browser GrantController; both funnel
+  # through the SHARED Access.ClaimFlow no-oracle decision.
+  scope "/v1/access", BarkparkWeb do
+    pipe_through([:user_auth, :require_user])
+
+    post("/claim", AccessController, :claim)
+  end
+
   scope "/v1/data", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
