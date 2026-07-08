@@ -3,6 +3,7 @@ package taskboard
 import (
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/semrole"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -46,19 +47,34 @@ func genColor(key string) lipgloss.AdaptiveColor {
 	return lipgloss.AdaptiveColor{Light: tok.ColorLight, Dark: tok.ColorDark}
 }
 
+// statusTone lifts a semantic status role (ok/info/warn/danger) into a lipgloss
+// AdaptiveColor via the shared internal/semrole vocabulary (GenStatusTone, emitted
+// from design/tokens.json) — the status peer of genColor. It is the seam that makes
+// the board's STATUS hues READ the generated tone instead of re-typing their hex, so
+// a `bp` table's ok cell and the board's ok strip are the same design token. Panics
+// on an unknown role (a compile-time-constant programmer error).
+func statusTone(role string) lipgloss.AdaptiveColor {
+	c, ok := semrole.RoleColor(role)
+	if !ok {
+		panic("taskboard: unknown semrole role " + role)
+	}
+	return c
+}
+
 // Palette — the design-language spec §1 terminal values (charter D37). The
-// LIFECYCLE hues (info/warn/done/ready/open/cancel) are now SOURCED from
-// tokens_gen.go via genColor, so they can never drift from the shared manifest
-// the other surfaces read; refreshing them is a generation-time concern, never a
-// role remap (RoleFor is untouched). The remaining colors have NO lifecycle twin
-// and stay hand-authored: okColor is the DISTINCT green (cloud health / live-dot
-// / action-strip ok — the spec's teal completion hue is doneColor, so restyling
-// the done glyph never shifts deploy-table semantics), dangerColor is the
-// priority-severity red, and neutral/dim/title are chrome. A later ratchet slice
-// decides whether those graduate into the generated set.
+// LIFECYCLE hues (info/warn/done/ready/open/cancel) are SOURCED from tokens_gen.go
+// via genColor, and the STATUS hues (okColor/dangerColor) are now GRADUATED onto
+// the generated semrole status tones via statusTone (au-w4 W4.10) — both can no
+// longer drift from the shared manifest the other surfaces read, and refreshing
+// them is a generation-time concern, never a role remap (RoleFor is untouched).
+// okColor is the DISTINCT status.ok green (cloud health / live-dot / action-strip
+// ok — the spec's teal completion hue is doneColor, so restyling the done glyph
+// never shifts deploy-table semantics); dangerColor is the status.danger red
+// (P0/P1 severity). Only neutral/dim/title remain hand-authored — pure chrome with
+// no generated twin (earmarked for the au-w4-cli-chrome-tokens follow-up).
 var (
-	okColor     = lipgloss.AdaptiveColor{Light: "#10b981", Dark: "#34d399"} // greenDot — health/live/ok-strip; NO lifecycle twin (done is teal)
-	dangerColor = lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"} // P0/P1 red (spec §1); NO lifecycle twin
+	okColor     = statusTone("ok")     // GRADUATED: generated status.ok (was #10b981); distinct from doneColor teal
+	dangerColor = statusTone("danger") // GRADUATED: generated status.danger (was #dc2626); P0/P1 severity
 
 	infoColor   = genColor("in_progress") // in_progress blue (tokens_gen)
 	warnColor   = genColor("blocked")     // blocked amber (tokens_gen)
@@ -67,9 +83,9 @@ var (
 	openColor   = genColor("open")        // open ○ ≈ dim backlog (tokens_gen)
 	cancelColor = genColor("cancelled")   // cancelled ✕ dim (tokens_gen)
 
-	neutralColor = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"} // zinc mid — chrome, no lifecycle twin
-	dimColor     = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"} // zinc dim — chrome, no lifecycle twin
-	titleColor   = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"} // near-fg — chrome, no lifecycle twin
+	neutralColor = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"} // lit-allow: zinc mid chrome, no generated twin — au-w4-cli-chrome-tokens
+	dimColor     = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"} // lit-allow: zinc dim chrome, no generated twin — au-w4-cli-chrome-tokens
+	titleColor   = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"} // lit-allow: near-fg title chrome, no generated twin — au-w4-cli-chrome-tokens
 )
 
 var (

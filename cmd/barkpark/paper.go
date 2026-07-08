@@ -91,8 +91,8 @@ func barkparkPaperTheme() pdrender.Theme {
 		Accent: accent,
 		Rule:   rule,
 		InlineCode: lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#be123c", Dark: "#fda4af"}).
-			Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#27272a"}),
+			Foreground(lipgloss.AdaptiveColor{Light: "#be123c", Dark: "#fda4af"}). // lit-allow: code frame fg, no generated twin — au-w4-cli-chrome-tokens
+			Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#27272a"}), // lit-allow: code frame bg, no generated twin — au-w4-cli-chrome-tokens
 		Link: lipgloss.NewStyle().
 			Foreground(accent).
 			Underline(true),
@@ -136,7 +136,7 @@ func barkparkPaperTheme() pdrender.Theme {
 
 	// Ingress: brighter ink standfirst with a left accent bar; pullquote bar uses
 	// the same accent (the terminal substitutes a bar for the larger font size).
-	t.Ingress = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"})
+	t.Ingress = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}) // lit-allow: ingress ink chrome, no generated twin — au-w4-cli-chrome-tokens
 	t.IngressBar = lipgloss.NewStyle().Foreground(accent)
 	t.PullquoteBar = lipgloss.NewStyle().Foreground(accent)
 
@@ -150,7 +150,7 @@ func barkparkPaperTheme() pdrender.Theme {
 		case "warning":
 			c = amberDot
 		case "danger":
-			c = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#f87171"}
+			c = roleColor("danger") // danger role via semrole (design/tokens.json status.danger)
 		case "neutral":
 			c = dimText
 		default: // info + unknown

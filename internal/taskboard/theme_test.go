@@ -12,8 +12,9 @@ import (
 // the emitted token source (tokens_gen.go, from design/tokens.json). The values
 // are read via genColor, so this is the ratchet that fails if anyone re-hand-codes
 // one of these hex literals back into theme.go — the drift the unified-aesthetic
-// endgame forbids. okColor/dangerColor/neutral/dim/title are deliberately absent:
-// they have no lifecycle twin and stay hand-authored for a later ratchet slice.
+// endgame forbids. okColor/dangerColor are covered by TestStatusColorsSourceGeneratedTones
+// below (graduated onto semrole's status tones in au-w4 W4.10); neutral/dim/title
+// are deliberately absent — pure chrome with no generated twin.
 func TestLifecycleColorsSourceGeneratedTokens(t *testing.T) {
 	cases := []struct {
 		key   string
@@ -36,6 +37,31 @@ func TestLifecycleColorsSourceGeneratedTokens(t *testing.T) {
 		if c.got.Light != tok.ColorLight || c.got.Dark != tok.ColorDark {
 			t.Errorf("%s = {Light:%q Dark:%q}, want generated {Light:%q Dark:%q} for %q",
 				c.named, c.got.Light, c.got.Dark, tok.ColorLight, tok.ColorDark, c.key)
+		}
+	}
+}
+
+// TestStatusColorsSourceGeneratedTones is the STATUS peer of
+// TestLifecycleColorsSourceGeneratedTokens: it locks okColor/dangerColor to the
+// GENERATED semrole status tones (GenStatusTone, from design/tokens.json) after
+// their au-w4 W4.10 graduation. The expectation IS the generated value — a
+// re-hand-coded status hex (e.g. reverting okColor to #10b981) fails HERE, and the
+// visible graduation (okColor #10b981→#137236, dangerColor #dc2626→#b42222) is
+// asserted by ALIGNMENT to the shared manifest, never a hand-copied snapshot.
+func TestStatusColorsSourceGeneratedTones(t *testing.T) {
+	cases := []struct {
+		role  string
+		got   lipgloss.AdaptiveColor
+		named string
+	}{
+		{"ok", okColor, "okColor"},
+		{"danger", dangerColor, "dangerColor"},
+	}
+	for _, c := range cases {
+		want := semrole.GenStatusTone[c.role]
+		if c.got != want {
+			t.Errorf("%s = %+v, want generated status tone %+v for role %q",
+				c.named, c.got, want, c.role)
 		}
 	}
 }

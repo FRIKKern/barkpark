@@ -3,6 +3,8 @@ package semrole
 import (
 	"sort"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // cloudTokens is the pinned cloud/deploy/health half of the vocabulary — the
@@ -123,6 +125,60 @@ func TestRoles(t *testing.T) {
 	for r, code := range floor {
 		if GenANSI16[r] != code {
 			t.Errorf("ANSI-16 floor for %q = %d, want %d", r, GenANSI16[r], code)
+		}
+	}
+}
+
+// TestRoleColor pins the role→AdaptiveColor accessor the CLI/TUI paint through:
+// every semantic role returns EXACTLY its GenStatusTone entry (the unflattened
+// adaptive tone, so the profile degradation ladder is preserved), and any
+// non-role string returns the zero value with ok=false — never a guess. A
+// lifecycle state is NOT a role, so it too resolves !ok here (that is
+// LifecycleColor's job).
+func TestRoleColor(t *testing.T) {
+	for _, role := range Roles() {
+		got, ok := RoleColor(role)
+		if !ok {
+			t.Errorf("RoleColor(%q) ok=false, want true", role)
+			continue
+		}
+		if want := GenStatusTone[role]; got != want {
+			t.Errorf("RoleColor(%q) = %+v, want %+v (GenStatusTone)", role, got, want)
+		}
+	}
+	// Unknown strings, a lifecycle state, and a status TOKEN (not a role) all
+	// yield the zero value + ok=false — RoleColor keys on the role name only.
+	for _, bad := range []string{"", "banana", "in_progress", "live", "OK"} {
+		if got, ok := RoleColor(bad); ok || got != (lipgloss.AdaptiveColor{}) {
+			t.Errorf("RoleColor(%q) = %+v ok=%v, want zero/false", bad, got, ok)
+		}
+	}
+}
+
+// TestLifecycleColor pins the lifecycle-state→AdaptiveColor accessor: every
+// TaskLifecycles() token returns EXACTLY its GenLifecycleHue entry (unflattened),
+// done/closed stay TEAL, and any non-lifecycle string returns zero/false.
+func TestLifecycleColor(t *testing.T) {
+	for _, state := range TaskLifecycles() {
+		got, ok := LifecycleColor(state)
+		if !ok {
+			t.Errorf("LifecycleColor(%q) ok=false, want true", state)
+			continue
+		}
+		if want := GenLifecycleHue[state]; got != want {
+			t.Errorf("LifecycleColor(%q) = %+v, want %+v (GenLifecycleHue)", state, got, want)
+		}
+	}
+	// done/closed carry the teal lifecycle hue, distinct from status.ok green.
+	for _, state := range []string{"done", "closed"} {
+		if got, _ := LifecycleColor(state); got.Light != "#0d9488" || got.Dark != "#2dd4bf" {
+			t.Errorf("LifecycleColor(%q) = %+v, want teal #0d9488/#2dd4bf", state, got)
+		}
+	}
+	// Unknown strings and a status role (not a lifecycle state) yield zero/false.
+	for _, bad := range []string{"", "banana", "ok", "danger"} {
+		if got, ok := LifecycleColor(bad); ok || got != (lipgloss.AdaptiveColor{}) {
+			t.Errorf("LifecycleColor(%q) = %+v ok=%v, want zero/false", bad, got, ok)
 		}
 	}
 }
