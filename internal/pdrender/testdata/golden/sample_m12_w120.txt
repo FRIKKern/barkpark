@@ -1,0 +1,21 @@
+KPI / STAT CELLS                                                                                                        
+────────────────                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+1.24M                                                                                                                   
+Tokens this month                                                                                                       
+▁▂▃▃▅▆█                                                                                                                 
+                                                                                                                        
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  73
+Cache hit rate                                                                                                          
+                                                                                                                        
+ramp                                                                                                                    
+Eighth-block ladder (ascending)                                                                                         
+▁▂▃▄▅▆▇█                                                                                                                
+                                                                                                                        
+1.24M                         8,391                         $42.10                        73%                           
+Tokens                        Requests                      Cost                          Cache hit                     
+▁▁▃▂▆▇█                       ▃▁▅▆▆█▆                       ▁▂▂▄▅▆█                       █▁█▁▁▁▁                       
+                                                                                                                        
+[stat — unresolved]                                                                                                     

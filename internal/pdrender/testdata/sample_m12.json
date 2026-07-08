@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "KPI / stat cells"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "A big-number cell, a bullet-bar cell, a full eighth-block sparkline, a 4-up KPI grid, and a degraded placeholder."
+    },
+    {
+      "id": "stat-big",
+      "type": "stat",
+      "value": "1.24M",
+      "label": "Tokens this month",
+      "spark": [3, 4, 6, 5, 8, 9, 12]
+    },
+    {
+      "id": "stat-bar",
+      "type": "stat",
+      "value": "73",
+      "max": 100,
+      "label": "Cache hit rate"
+    },
+    {
+      "id": "stat-spark",
+      "type": "stat",
+      "value": "ramp",
+      "label": "Eighth-block ladder (ascending)",
+      "spark": [1, 2, 3, 4, 5, 6, 7, 8]
+    },
+    {
+      "id": "kpi-grid",
+      "type": "stats",
+      "items": [
+        {
+          "value": "1.24M",
+          "label": "Tokens",
+          "spark": [2, 2, 4, 3, 6, 7, 8]
+        },
+        {
+          "value": "8,391",
+          "label": "Requests",
+          "spark": [4, 3, 5, 6, 6, 7, 6]
+        },
+        {
+          "value": "$42.10",
+          "label": "Cost",
+          "spark": [1, 2, 2, 4, 5, 6, 8]
+        },
+        {
+          "value": "73%",
+          "label": "Cache hit",
+          "spark": [7, 6, 7, 6, 6, 6, 6]
+        }
+      ]
+    },
+    {
+      "id": "stat-degraded",
+      "type": "stat",
+      "label": "no value present"
+    }
+  ]
+}
