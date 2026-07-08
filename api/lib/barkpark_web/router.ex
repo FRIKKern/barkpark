@@ -439,6 +439,13 @@ defmodule BarkparkWeb.Router do
     pipe_through([:browser, :soft_token])
     get("/", PageController, :redirect_to_studio)
     get("/studio", PageController, :redirect_to_studio)
+
+    # Airdrop-grant claim (account-bound): the grantee opens the out-of-band
+    # link, and — once signed in (soft_token → :current_user) — the grant binds
+    # to their account and lands them in the scoped Studio. Anonymous → /login
+    # (return_to resumes the claim); every other failure is one no-oracle
+    # response. See BarkparkWeb.GrantController.
+    get("/grant/:token", GrantController, :claim)
   end
 
   # ── Session login (paste API token) ─────────────────────────────────
