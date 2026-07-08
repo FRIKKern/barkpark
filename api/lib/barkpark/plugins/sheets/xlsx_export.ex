@@ -57,7 +57,6 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   # Row heights: the model is px, xlsx wants POINTS (1px = 0.75pt at 96dpi).
   # The import half divides by the same factor, so heights round-trip.
   @pt_per_px 0.75
-  @hex_color ~r/^#[0-9a-fA-F]{6}$/
 
   # Determinism (QR-C). An xlsx binary has TWO wall-clock stamps that make two
   # exports of identical content differ byte-for-byte across a clock tick:
@@ -149,7 +148,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
 
   defp tab_color(tab) when is_map(tab) do
     case Map.get(tab, "color") do
-      c when is_binary(c) -> if Regex.match?(@hex_color, c), do: c, else: nil
+      c when is_binary(c) -> if CondFormat.valid_bg?(c), do: c, else: nil
       _ -> nil
     end
   end
@@ -585,7 +584,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
     List.flatten([
       if(Map.get(s, "b") == true, do: [bold: true], else: []),
       if(Map.get(s, "i") == true, do: [italic: true], else: []),
-      if(is_binary(bg) and Regex.match?(@hex_color, bg), do: [bg_color: bg], else: []),
+      if(is_binary(bg) and CondFormat.valid_bg?(bg), do: [bg_color: bg], else: []),
       if(al in ["left", "center", "right"],
         do: [align_horizontal: String.to_existing_atom(al)],
         else: []

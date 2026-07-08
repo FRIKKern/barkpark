@@ -136,6 +136,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   use BarkparkWeb, :live_component
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
@@ -156,13 +157,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # Per-tab color (QL-D2). The picker offers a saturated preset strip (tab
   # colors read best more vivid than the pastel CELL-bg swatches, so the list
-  # is inlined at the swatch loop like set-bg). `@tab_color_re` guards what the
-  # swatch/picker will actually render so a legacy/junk stored color (synthesis
-  # is lenient — the gate only fires on write) never lands in an inline `style`
-  # attribute. The write path is the NEW `set_tab_color` session op
-  # (S-SESSION), NOT a raw content patch, so every collaborator sees the same
-  # color through the single-writer session.
-  @tab_color_re ~r/^#[0-9a-fA-F]{6}$/
+  # is inlined at the swatch loop like set-bg). `CondFormat.valid_bg?/1` (the ONE
+  # `#rrggbb` owner, capability:sheets-bg-sanitizer) guards what the swatch/picker
+  # will actually render so a legacy/junk stored color (synthesis is lenient — the
+  # gate only fires on write) never lands in an inline `style` attribute. The write
+  # path is the NEW `set_tab_color` session op (S-SESSION), NOT a raw content
+  # patch, so every collaborator sees the same color through the single-writer
+  # session.
 
   @impl true
   def mount(socket) do
@@ -1687,7 +1688,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp cf_swatch_style(rule) do
     case cf_map(rule["style"])["bg"] do
       bg when is_binary(bg) ->
-        if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background: #{bg};", else: ""
+        if CondFormat.valid_bg?(bg), do: "background: #{bg};", else: ""
 
       _ ->
         ""
@@ -2345,9 +2346,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # that keeps a legacy/junk stored color (synthesis is lenient, so one can
   # survive on a pre-gate document) out of an inline `style` attribute. nil
   # for an absent, blank, or malformed color (the swatch/picker glyph simply
-  # doesn't paint). Mirrors the gate's regex so what stores is what renders.
+  # doesn't paint). Routes through the ONE `#rrggbb` owner so what stores is
+  # what renders, `\z`-anchored (a trailing-newline color is rejected).
   defp tab_color(%{"color" => c}) when is_binary(c) do
-    if Regex.match?(@tab_color_re, c), do: c, else: nil
+    if CondFormat.valid_bg?(c), do: c, else: nil
   end
 
   defp tab_color(_tab), do: nil

@@ -1205,7 +1205,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet_cell_html(cell, _pal), do: escape_html(cell)
 
   defp sheet_bg_style(bg) when is_binary(bg) do
-    if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: "background:#{bg};", else: ""
+    # Delegates to the ONE `#rrggbb` owner (capability:sheets-bg-sanitizer) —
+    # `\z`-anchored, so a stored "#rrggbb\n" is rejected here and can never
+    # smuggle a newline into this inline `style` attribute.
+    if Barkpark.Plugins.Sheets.CondFormat.valid_bg?(bg), do: "background:#{bg};", else: ""
   end
 
   defp sheet_bg_style(_), do: ""

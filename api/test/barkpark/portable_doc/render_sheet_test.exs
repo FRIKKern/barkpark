@@ -140,6 +140,43 @@ defmodule Barkpark.PortableDoc.RenderSheetTest do
       assert html =~ "a&amp;b"
       refute html =~ "<script>"
     end
+
+    test "a per-cell #rrggbb background is emitted into the td inline style" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["x"]],
+        "styles" => %{"0,0" => %{"bg" => "#aabbcc"}}
+      }
+
+      html = Render.render_html(node, @opts)
+      assert html =~ "background:#aabbcc"
+    end
+
+    test "a background with a trailing newline is REJECTED (no CSS-attr stowaway)" do
+      # The stored bg is emitted into the `<td style="…">` attribute. "#aabbcc\n"
+      # passes the old `$`-anchored copy but is rejected by the canonical `\z`
+      # owner (CondFormat.valid_bg?/1) this path now delegates to — the newline
+      # can never smuggle into the inline style attribute.
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["x"]],
+        "styles" => %{"0,0" => %{"bg" => "#aabbcc\n"}}
+      }
+
+      html = Render.render_html(node, @opts)
+      refute html =~ "background:#aabbcc"
+    end
+
+    test "an invalid background value is dropped" do
+      node = %{
+        "kind" => "PdSheet",
+        "rows" => [["x"]],
+        "styles" => %{"0,0" => %{"bg" => "#gggggg"}}
+      }
+
+      html = Render.render_html(node, @opts)
+      refute html =~ "background:"
+    end
   end
 
   # ── walk PdSheet → HTML (article mode) ─────────────────────────────────────
