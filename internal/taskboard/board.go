@@ -100,6 +100,52 @@ func rootOfBare(byBare map[string]Task, id string) string {
 	return cur
 }
 
+// parentSet is the ONE canonical parent detector for the taskboard package: the
+// set of bareIDs that some task in the snapshot names as its parent_id — i.e.
+// every goal/epic ROOT (or intermediate parent) that owns ≥1 child. Built once
+// from a snapshot, drafts.-prefix-agnostic on both sides.
+//
+// It exists so "what counts as a parent" has a SINGLE definition. The frontier's
+// parent↔own-child exclusion (frontier.go) reads it, and the df-lint area nudge
+// (branch #1315, unmerged) should converge on THIS helper instead of re-scanning
+// ParentID inline — one owner, no drift.
+func parentSet(s Snapshot) map[string]bool {
+	parents := make(map[string]bool)
+	for _, t := range s.Tasks {
+		if t.ParentID != "" {
+			parents[bareID(t.ParentID)] = true
+		}
+	}
+	return parents
+}
+
+// isAncestorBare reports whether anc is a STRICT ancestor of desc — it walks
+// desc's parent chain up (bareID-normalized, cycle-capped) looking for anc. A
+// task is never its own ancestor. Used by the frontier to spot a parent↔own-
+// descendant pair so an epic/goal root never displaces its own child via the
+// area-less neighborhood proxy.
+func isAncestorBare(byBare map[string]Task, anc, desc string) bool {
+	anc, desc = bareID(anc), bareID(desc)
+	if anc == "" || desc == "" || anc == desc {
+		return false
+	}
+	seen := map[string]bool{}
+	cur := desc
+	for !seen[cur] {
+		seen[cur] = true
+		t, ok := byBare[cur]
+		if !ok || t.ParentID == "" {
+			return false
+		}
+		p := bareID(t.ParentID)
+		if p == anc {
+			return true
+		}
+		cur = p
+	}
+	return false
+}
+
 // nextMax is the hard cap on the NEXT intent strip (charter wave-12 D60): at
 // most this many cursor rows total across resumables + the ready head, so the
 // strip stays a tiny 2-3 line glance, never the old READY-TO-CLAIM wall (D52).
