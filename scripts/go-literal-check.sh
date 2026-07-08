@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# go-literal-check.sh — the Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10).
+#
+# The CLI/TUI's SEMANTIC status/lifecycle/priority colours must resolve through
+# internal/semrole off the generated token artifact (design/tokens.json →
+# tokens_gen.go) — never an inline `lipgloss.AdaptiveColor{Light:"#…"}` or
+# `lipgloss.Color("#…")` at a call site. After the W4.10 sweep every semantic
+# colour literal in the scanned files was repointed onto a role (semrole.RoleColor
+# / statusTone / the roleColor helpers); this gate keeps it that way: it FAILS when
+# a NEW inline `#hex` colour literal appears in a scanned production file.
+#
+# It is the Go-scoped twin of scripts/studio-literal-check.sh / web-literal-check.sh.
+# Go source has NO "displayed hex content" (no styleguide markup), so ANY inline
+# colour literal outside the allowlist just fails — simpler than the CSS/markup case.
+# Every lipgloss colour literal carries a `#hex` string, so keying on `#hex` catches
+# both `AdaptiveColor{Light:"#…"}` and `Color("#…")`; a `lipgloss.Color(var)` (a
+# variable) or a zero `AdaptiveColor{}` carries no hex and passes by construction.
+#
+# SCOPE (production call sites only — test files carry hex as DATA fixtures, e.g.
+# a color-field default, and are out of scope by construction):
+#   • cmd/barkpark/**            (the bp TUI + CLI render surface)
+#   • internal/cli/setup/**      (the setup wizard)
+#   • internal/taskboard/theme.go (the portrait board palette)
+#
+# ALLOWLIST — the lead-approved chrome resisters (styles.go highlight/dim/borders/
+# ink/title/selection/toolbar/breadcrumb/publishBtn primary-CTA; the wizard chrome
+# wzTitle/wzDim/wzSel/wzLabel/wzBorder; paper.go code fg/bg + ingress; the
+# tui-render color-picker DATA default; the taskboard neutral/dim/title chrome) each
+# carry a `lit-allow:` annotation pointing at the au-w4-cli-chrome-tokens follow-up.
+# These are the honest-floor residual — colours with no generated Go twin (yet).
+#
+# It strips Go comments string-safely (a `#` in a `//` or `/* */` comment, e.g. a
+# palette note or a PR ref, never trips it; a `#hex` inside a string is still
+# detected). Usage: scripts/go-literal-check.sh   (check; CI + merge gate)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+python3 - "$ROOT" <<'PY'
+import os, re, sys
+
+root = sys.argv[1]
+# Directory subtrees walked wholesale (recursive), plus individual files.
+ROOTS = [os.path.join(root, "cmd", "barkpark"),
+         os.path.join(root, "internal", "cli", "setup")]
+FILES = [os.path.join(root, "internal", "taskboard", "theme.go")]
+
+# A 3/6/8-digit #hex colour literal. Go has no hsl().
+LITERAL = re.compile(r"#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
+
+# A flagged line is allowed only if it carries an explicit per-line resister
+# annotation earmarking the au-w4-cli-chrome-tokens follow-up.
+ALLOW_LINE = re.compile(r"lit-allow")
+
+
+def blank(m):
+    return re.sub(r"[^\n]", " ", m.group(0))
+
+
+def strip_comments(src):
+    # A length-preserving STRING-SAFE lexer for Go: it blanks //-line and /*…*/-
+    # block comments to spaces (keeping newlines) while leaving string CONTENTS
+    # intact, so a `#849` inside a comment is neutralised but a `#ff0000` inside a
+    # string is still visible to LITERAL. Go string delimiters ", ', and ` (raw)
+    # are honoured; backslash escapes are skipped inside "…"/'…' (a raw `…`
+    # backtick string has no escapes, so a stray backslash there is inert here —
+    # applied colour literals never live in a raw string anyway).
+    out = list(src)
+    i, n = 0, len(src)
+    NORMAL, STR, LINE, BLOCK = 0, 1, 2, 3
+    state = NORMAL
+    quote = ""
+    while i < n:
+        c = src[i]
+        nxt = src[i + 1] if i + 1 < n else ""
+        if state == NORMAL:
+            if c in "\"'`":
+                state, quote = STR, c
+            elif c == "/" and nxt == "/":
+                state = LINE
+                out[i] = " "
+                if i + 1 < n:
+                    out[i + 1] = " "
+                i += 2
+                continue
+            elif c == "/" and nxt == "*":
+                state = BLOCK
+                out[i] = " "
+                if i + 1 < n:
+                    out[i + 1] = " "
+                i += 2
+                continue
+        elif state == STR:
+            if quote != "`" and c == "\\":
+                i += 2
+                continue
+            if c == quote:
+                state = NORMAL
+        elif state == LINE:
+            if c == "\n":
+                state = NORMAL
+            else:
+                out[i] = " "
+        elif state == BLOCK:
+            if c == "*" and nxt == "/":
+                out[i] = " "
+                if i + 1 < n:
+                    out[i + 1] = " "
+                state = NORMAL
+                i += 2
+                continue
+            elif c != "\n":
+                out[i] = " "
+        i += 1
+    return "".join(out)
+
+
+def scan(path):
+    raw = open(path, encoding="utf-8").read()
+    raw_lines = raw.split("\n")
+    s = strip_comments(raw)
+    lines = s.split("\n")
+    hits = []
+    for i, stripped in enumerate(lines, 1):
+        if not LITERAL.search(stripped):
+            continue
+        if ALLOW_LINE.search(raw_lines[i - 1]):
+            continue
+        hits.append((i, raw_lines[i - 1].strip()))
+    return hits
+
+
+def go_files():
+    for base in ROOTS:
+        for dirpath, _dirs, files in os.walk(base):
+            for fn in sorted(files):
+                if fn.endswith(".go") and not fn.endswith("_test.go"):
+                    yield os.path.join(dirpath, fn)
+    for f in FILES:
+        yield f
+
+
+failures = []
+scanned = 0
+for path in go_files():
+    rel = os.path.relpath(path, root)
+    scanned += 1
+    for ln, text in scan(path):
+        failures.append((rel, ln, text))
+
+if not failures:
+    print(f"go-literal-check: PASS — {scanned} Go file(s) scanned, "
+          f"no inline color literals at call sites.")
+    sys.exit(0)
+
+print("go-literal-check: FAILED — inline color literal(s) in CLI/TUI Go source.\n")
+for rel, ln, text in sorted(failures):
+    print(f"  {rel}:{ln}:  {text}")
+print("\n  Resolve semantic colours through internal/semrole off the generated")
+print("  artifact instead of an inline hex: semrole.RoleColor(role) (or the local")
+print("  roleColor/statusTone helper) for a status role, semrole.LifecycleColor(state)")
+print("  for a lifecycle hue — the tones are emitted into tokens_gen.go from")
+print("  design/tokens.json (regenerate: node design/emit.mjs --write).")
+print("  Genuinely chrome with no generated twin? Add a `lit-allow: <reason>`")
+print("  comment on the line, earmarking the au-w4-cli-chrome-tokens follow-up.")
+sys.exit(1)
+PY

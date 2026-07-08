@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/semrole"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -39,16 +40,29 @@ func Wizard(opts Options) (SetupPlan, error) {
 // RunInteractive maps it to a clean exit (no error printed, nothing executed).
 var ErrWizardAborted = fmt.Errorf("setup wizard aborted")
 
-// ── styling (mirrors styles.go's palette: highlight #60a5fa / dim #52525b) ──
+// ── styling (mirrors styles.go's palette) ──
+
+// roleColor resolves a semantic role (ok/info/warn/danger) to its generated
+// adaptive tone via the shared internal/semrole vocabulary — the same seam the
+// TUI's status dots use, so a wizard check-mark means exactly what an ok status
+// means everywhere else. Panics on an unknown role (a compile-time-constant
+// programmer error, surfaced at startup rather than painted invisible).
+func roleColor(role string) lipgloss.AdaptiveColor {
+	c, ok := semrole.RoleColor(role)
+	if !ok {
+		panic("setup: unknown semrole role " + role)
+	}
+	return c
+}
 
 var (
-	wzTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"})
-	wzDim    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"})
-	wzSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#93c5fd"})
-	wzCheck  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#10b981", Dark: "#34d399"})
-	wzLabel  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"})
-	wzAmber  = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#f59e0b", Dark: "#fbbf24"})
-	wzBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).Padding(0, 1)
+	wzTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"})                                           // lit-allow: wizard title chrome, no generated twin — au-w4-cli-chrome-tokens
+	wzDim    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"})                                                      // lit-allow: wizard dim chrome, no generated twin — au-w4-cli-chrome-tokens
+	wzSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#93c5fd"})                                           // lit-allow: wizard selection chrome, no generated twin — au-w4-cli-chrome-tokens
+	wzCheck  = lipgloss.NewStyle().Foreground(roleColor("ok"))                                                                                                // ok role via semrole
+	wzLabel  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"})                                           // lit-allow: wizard label chrome, no generated twin — au-w4-cli-chrome-tokens
+	wzAmber  = lipgloss.NewStyle().Foreground(roleColor("warn"))                                                                                              // warn role via semrole
+	wzBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).Padding(0, 1) // lit-allow: wizard border chrome, no generated twin — au-w4-cli-chrome-tokens
 )
 
 // wizardStage enumerates the linear flow.

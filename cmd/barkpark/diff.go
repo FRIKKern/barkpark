@@ -31,11 +31,16 @@ func minInt(a, b int) int {
 	return b
 }
 
+// The diff add/delete signal reuses the status hues BY CONVENTION: a 2-value
+// add/delete signal aligns naturally with ok (added) / danger (removed), so the
+// diff paints through semrole's status tones rather than minting its own. If a
+// distinct colorblind-safe diff palette is ever wanted, split to diff-add/
+// diff-remove tokens THEN — do not mint separate diff tokens now.
 var (
 	diffDelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#dc2626", Dark: "#f87171"})
+			Foreground(roleColor("danger"))
 	diffAddStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#16a34a", Dark: "#4ade80"})
+			Foreground(roleColor("ok"))
 )
 
 // openDiffView builds the field diff for the doc in the editor. Inert (status

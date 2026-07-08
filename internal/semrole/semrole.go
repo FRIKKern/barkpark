@@ -15,6 +15,8 @@ package semrole
 import (
 	"sort"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // taskLifecycleRoles is the task-lifecycle half of the vocabulary (added by the
@@ -95,6 +97,31 @@ func For(status string) string {
 // has a generated adaptive tone (GenStatusTone) and a pinned ANSI-16 floor
 // (GenANSI16) in tokens_gen.go.
 func Roles() []string { return []string{"ok", "info", "warn", "danger"} }
+
+// RoleColor returns the generated adaptive tone for one of the four semantic
+// roles (ok/info/warn/danger), reading GenStatusTone directly — the role IS the
+// key, no status-token resolution. It returns the lipgloss.AdaptiveColor
+// UNFLATTENED (never a pre-baked hex) so lipgloss/termenv preserves the
+// truecolor→256→16→NO_COLOR degradation ladder through the active colour
+// profile. An unrecognised role yields the zero AdaptiveColor and ok=false —
+// callers must not paint on !ok (RoleColor never guesses). This is the surface
+// seam the CLI/TUI paint their status dots through, so an `ok` dot in a `bp`
+// table is byte-identically the same design token as the SPA's --ok.
+func RoleColor(role string) (color lipgloss.AdaptiveColor, ok bool) {
+	tone, found := GenStatusTone[role]
+	return tone, found
+}
+
+// LifecycleColor returns the generated adaptive glyph hue for a lifecycle state
+// (in_progress/blocked/done/closed/cancelled/ready/open), reading
+// GenLifecycleHue directly. Like RoleColor it returns the AdaptiveColor
+// UNFLATTENED so the profile ladder is preserved, and yields the zero value with
+// ok=false for any non-lifecycle string — never a guess. done/closed stay TEAL
+// here (their lifecycle hue), deliberately distinct from status.ok green.
+func LifecycleColor(state string) (color lipgloss.AdaptiveColor, ok bool) {
+	hue, found := GenLifecycleHue[state]
+	return hue, found
+}
 
 // Color resolves a coloured token to its light/dark hex pair, sourced from the
 // generated tokens_gen.go (design/tokens.json). Two paint layers, in order:

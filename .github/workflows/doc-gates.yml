@@ -47,6 +47,12 @@ on:
       # Web literal-color gate — the web/ demo must consume emitted tokens.
       - "web/**"
       - "scripts/web-literal-check.sh"
+      # Go (CLI/TUI) literal-color gate — the bp CLI/TUI must resolve semantic
+      # colours through internal/semrole off the generated token artifact.
+      - "cmd/barkpark/**"
+      - "internal/cli/setup/**"
+      - "internal/taskboard/theme.go"
+      - "scripts/go-literal-check.sh"
   pull_request:
     paths:
       - "**/*.md"
@@ -87,6 +93,12 @@ on:
       # Web literal-color gate — the web/ demo must consume emitted tokens.
       - "web/**"
       - "scripts/web-literal-check.sh"
+      # Go (CLI/TUI) literal-color gate — the bp CLI/TUI must resolve semantic
+      # colours through internal/semrole off the generated token artifact.
+      - "cmd/barkpark/**"
+      - "internal/cli/setup/**"
+      - "internal/taskboard/theme.go"
+      - "scripts/go-literal-check.sh"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -151,6 +163,18 @@ jobs:
       # resisters). See scripts/web-literal-check.sh for the full list.
       - name: Web literal-color gate (blocking)
         run: bash scripts/web-literal-check.sh
+
+      # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
+      # (cmd/barkpark/** + internal/cli/setup/** + internal/taskboard/theme.go)
+      # must resolve semantic status/lifecycle/priority colours through
+      # internal/semrole off the generated token artifact (tokens_gen.go, from
+      # design/tokens.json) — never an inline lipgloss color literal at a call
+      # site. The Go-scoped twin of the Studio/web gates: fails on any NEW inline
+      # #hex color literal outside the lead-approved chrome allowlist (annotated
+      # per-line resisters earmarking au-w4-cli-chrome-tokens). See
+      # scripts/go-literal-check.sh for the full list.
+      - name: Go literal-color gate (blocking)
+        run: bash scripts/go-literal-check.sh
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a

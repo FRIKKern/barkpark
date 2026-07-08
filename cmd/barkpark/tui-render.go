@@ -462,7 +462,7 @@ func (m model) buildEditorContent(width int) string {
 	var footerRight string
 	if m.dirty {
 		footerRight = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f59e0b")).Bold(true).
+			Foreground(amberDot).Bold(true). // warn role via semrole (amberDot=roleColor("warn"))
 			Render("* Unsaved") + "  " +
 			dimStyle.Render("Ctrl+S save")
 		if publishBtn != "" {
@@ -694,7 +694,7 @@ func (m model) renderField(field Field, width int, isFocused, isEditing bool) []
 	case FieldColor:
 		cv := val
 		if cv == "" {
-			cv = "#3b82f6"
+			cv = "#3b82f6" // lit-allow: color-picker DATA default (a field value, not chrome) — au-w4-cli-chrome-tokens
 		}
 		// The bordered value box is multi-line (border top/content/bottom), so the
 		// swatch must be joined as a column beside the whole box — not concatenated
