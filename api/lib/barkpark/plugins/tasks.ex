@@ -111,6 +111,31 @@ defmodule Barkpark.Plugins.Tasks do
     task_list ++ [projects_link]
   end
 
+  @doc """
+  Plugin-contributed top-menu tab — surfaces **Projects** in the Studio topbar
+  next to Structure / Media / API, pointing at the Barkpark Projects board
+  (`Barkpark.Plugins.Tasks.Web.BoardLive` at `/admin/projects`). Mirrors the
+  OnixEdit "Bokbasen" precedent: a plugin-contributed tab for an `/admin/*`
+  ops console — rendered in the chrome, route-enforced by the `:ops` gate
+  (`["ops", "admin"]`), and it disappears entirely when the Tasks plugin is
+  off (the fresh-install invariant). Active for any path under
+  `/admin/projects`. `order: 35` sits it just after the built-in API tab
+  (orders 10/20/30) and ahead of the flat admin singletons (tmux 40,
+  styleguide 50, Bokbasen 50).
+  """
+  @impl Barkpark.Plugin
+  def top_menu_entries do
+    [
+      %{
+        label: "Projects",
+        path: "/admin/projects",
+        icon: "columns",
+        order: 35,
+        active_when: "/admin/projects"
+      }
+    ]
+  end
+
   # Failure-safe schema probe. The rescue/catch matters beyond defensive
   # style: the Registry's `resolver_is_default_lift?/4` fingerprint RUNS
   # `desk_items("production")` once at registration time — a context with
