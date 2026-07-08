@@ -54,6 +54,8 @@ defmodule Barkpark.Plugins.Tasks do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
 
+  require Logger
+
   @doc """
   Declares the `task` document type by delegating to
   `Barkpark.Tasks.schema_definitions/1`.
@@ -66,6 +68,136 @@ defmodule Barkpark.Plugins.Tasks do
   def register_schemas(opts) do
     dataset = Keyword.get(opts, :dataset, "production")
     Barkpark.Tasks.schema_definitions(dataset)
+  end
+
+  @doc """
+  Authoring quality gate — a `before_save` structural gate on `type:task`
+  document writes (the sheets-gate precedent, `Barkpark.Plugins.Sheets`).
+
+  Three graduated responses, tuned so a well-formed task is the path of least
+  resistance (parity §6 layer 2 — a well-formed task is the path of least
+  resistance; empty-title tasks must not publish):
+
+    * **empty title → HALT (409).** A task whose resulting title is blank
+      (nil or whitespace-only) cannot be saved. The title is read from the
+      incoming write, falling back to the stored row on a partial update — so
+      a metadata-only patch of an already-titled task is never blocked; only a
+      genuine title-less create (or an explicit blanking) halts. Surfaces as
+      `{:error, {:halted, reason}}` → HTTP 409 (`content/errors.ex`).
+    * **zero acceptance_criteria on a fresh task → SOFT WARN.** A brand-new
+      task (no prior row) carrying no acceptance criteria still SAVES; it only
+      emits a `Logger.warning`. Never a hard stop — quick authoring and the
+      fresh-install invariant stay smooth (no trivial blocks).
+    * **malformed acceptance_criteria → HALT (409).** A write whose
+      `acceptance_criteria` is not a list, or is a list with a non-map
+      (non-`{criterion, met, evidence}`) entry, is rejected. Defense-in-depth
+      over `Barkpark.Tasks.Validation` (which rejects the same shapes earlier
+      with a 422) — the gate owns the structural contract at the `before_save`
+      boundary for any path that reaches it directly.
+
+  Non-task documents pass untouched.
+  """
+  @impl Barkpark.Plugin
+  def lifecycle_hooks do
+    %{before_save: [&quality_gate/1]}
+  end
+
+  # ── Authoring quality gate (before_save) ──────────────────────────────────
+
+  defp quality_gate(%{doc: %{"type" => "task"} = doc} = payload) do
+    prev = Map.get(payload, :prev_doc)
+
+    with :ok <- gate_title(doc, prev) do
+      gate_criteria(doc, prev)
+    end
+  end
+
+  defp quality_gate(_payload), do: :ok
+
+  # Empty-title hard stop. The effective title is what the row WILL carry: the
+  # incoming value when the write sets `title`, else the stored title on an
+  # update. Only a blank effective title halts — so a partial update of a
+  # titled task never trips the gate.
+  defp gate_title(doc, prev) do
+    title =
+      case fetch(doc, "title") do
+        :absent -> prev && prev.title
+        value -> value
+      end
+
+    if blank_title?(title) do
+      {:halt,
+       "task title is required — a task cannot be saved with an empty title " <>
+         "(authoring quality gate)"}
+    else
+      :ok
+    end
+  end
+
+  defp blank_title?(nil), do: true
+  defp blank_title?(t) when is_binary(t), do: String.trim(t) == ""
+  defp blank_title?(_), do: false
+
+  # Acceptance-criteria gate over the INCOMING write's content. Malformed
+  # (non-list, or a list with a non-map entry) → halt. Zero criteria (empty
+  # list, or key absent) on a genuine create → soft warn, save proceeds. A
+  # write that carries no `content` at all (pure metadata patch) is exempt.
+  defp gate_criteria(doc, prev) do
+    case fetch(doc, "content") do
+      content when is_map(content) ->
+        eval_criteria(fetch(content, "acceptance_criteria"), prev)
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp eval_criteria(:absent, prev), do: warn_if_create_zero(prev)
+  defp eval_criteria([], prev), do: warn_if_create_zero(prev)
+
+  defp eval_criteria(list, _prev) when is_list(list) do
+    if Enum.all?(list, &is_map/1) do
+      :ok
+    else
+      {:halt,
+       "acceptance_criteria entries must be {criterion, met, evidence} maps — " <>
+         "got a non-object entry"}
+    end
+  end
+
+  defp eval_criteria(_other, _prev) do
+    {:halt, "acceptance_criteria must be a list of {criterion, met, evidence} maps"}
+  end
+
+  # A fresh task (no prior row) with no criteria: warn, never block.
+  defp warn_if_create_zero(nil) do
+    Logger.warning(
+      "task quality gate: a new task is being saved with zero acceptance_criteria — " <>
+        "consider adding at least one measurable criterion (soft warning, save proceeds)"
+    )
+
+    :ok
+  end
+
+  defp warn_if_create_zero(_prev), do: :ok
+
+  # String-or-atom key fetch that distinguishes an ABSENT key from a present
+  # nil/false value (write paths string-key their attrs; the atom fallback is
+  # belt-and-braces for a struct/atom-keyed caller). Returns `:absent` when the
+  # key is missing entirely.
+  defp fetch(map, key) when is_map(map) do
+    case Map.fetch(map, key) do
+      {:ok, v} -> v
+      :error -> Map.get(map, safe_atom(key), :absent)
+    end
+  end
+
+  defp fetch(_map, _key), do: :absent
+
+  defp safe_atom(key) do
+    String.to_existing_atom(key)
+  rescue
+    ArgumentError -> :__quality_gate_nonexistent_key__
   end
 
   @doc """
