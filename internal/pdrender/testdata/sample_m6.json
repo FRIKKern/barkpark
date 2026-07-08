@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Task family widgets"
+    },
+    {
+      "id": "tl1",
+      "type": "task-list",
+      "title": "Sprint board",
+      "snapshot": [
+        {
+          "title": "Design the schema",
+          "status": "done",
+          "priority": "1",
+          "criteria": { "met": 3, "total": 3 },
+          "worker": "ada",
+          "phase": "Foundation"
+        },
+        {
+          "title": "Wire the resolver",
+          "status": "in_progress",
+          "priority": "0",
+          "criteria": { "met": 1, "total": 4 },
+          "worker": "grace",
+          "phase": "Foundation"
+        },
+        {
+          "title": "Sub-task: cache warmup",
+          "status": "ready",
+          "priority": "2",
+          "depth": 1,
+          "phase": "Foundation"
+        },
+        {
+          "title": "Ship the reader",
+          "status": "blocked",
+          "priority": "1",
+          "blocked_by": 2,
+          "worker": "linus",
+          "phase": "Delivery"
+        }
+      ]
+    },
+    {
+      "id": "tl-unresolved",
+      "type": "task-list",
+      "query": { "type": "task", "status": "ready" }
+    },
+    {
+      "id": "td1",
+      "type": "task-detail",
+      "task": {
+        "title": "Wire the resolver",
+        "status": "in_progress",
+        "priority": "0",
+        "kind": "task",
+        "worker": "grace",
+        "created": "2026-07-01",
+        "updated": "2026-07-08",
+        "description": "Replace the authored query with literal snapshot data at read time.",
+        "blocks": 2,
+        "blocked_by": 1,
+        "criteria": [
+          { "text": "Resolver replaces query with snapshot", "met": true, "evidence": "compose.ex:210" },
+          { "text": "Absent key degrades honestly", "met": true },
+          { "text": "Golden tests cover all four widgets", "met": false }
+        ],
+        "children": [
+          { "title": "cache warmup", "status": "ready" },
+          { "title": "eviction policy", "status": "done" }
+        ],
+        "papers": ["pdrender block parity plan", "task-family spec"],
+        "labels": ["pdrender", "parity", "wave-3"]
+      }
+    },
+    {
+      "id": "tb1",
+      "type": "task-board",
+      "snapshot": [
+        { "title": "Claim the next card", "status": "ready", "priority": "2" },
+        { "title": "Draft the fixture", "status": "in_progress", "priority": "1", "criteria": { "met": 1, "total": 2 } },
+        { "title": "Await review", "status": "blocked", "priority": "0", "blocked_by": 1 },
+        { "title": "Merge wave 2", "status": "done", "priority": "1" },
+        { "title": "Backfill goldens", "status": "done", "priority": "2" }
+      ]
+    },
+    {
+      "id": "rm1",
+      "type": "roadmap",
+      "today": 55,
+      "scale": ["Q1", "Q2", "Q3", "Q4"],
+      "snapshot": [
+        { "title": "Foundation", "phase_row": true, "status": "done", "left": 0, "width": 30 },
+        { "title": "Resolver", "status": "done", "left": 0, "width": 25 },
+        { "title": "Reader", "status": "in_progress", "left": 25, "width": 35 },
+        { "title": "Delivery", "phase_row": true, "status": "ready", "left": 60, "width": 40 },
+        { "title": "Rollout", "status": "blocked", "left": 70, "width": 30 }
+      ]
+    }
+  ]
+}

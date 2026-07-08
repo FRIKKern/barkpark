@@ -304,5 +304,17 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["cards"] = cardsRenderer{}
 	r.blocks["pipeline"] = pipelineRenderer{}
 	r.blocks["status-legend"] = statusLegendRenderer{}
+
+	// ── task widgets (task-list / task-detail / task-board / roadmap) ──────────
+	// Terminal counterparts of the web/Studio task widgets. All are pre-resolved
+	// leaf renderers (snapshot/task literal data in Attrs, no fetch); they share
+	// the status vocabulary (roleForStatus/glyphForRole) with status-legend and
+	// degrade honestly when the resolved key is absent. `tasks` is the canonical
+	// type, `task-list` its accepted alias (mirrors compose.ex).
+	r.blocks["tasks"] = taskListRenderer{}
+	r.blocks["task-list"] = taskListRenderer{}
+	r.blocks["task-detail"] = taskDetailRenderer{}
+	r.blocks["task-board"] = taskBoardRenderer{}
+	r.blocks["roadmap"] = roadmapRenderer{}
 	return r
 }
