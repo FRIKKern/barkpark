@@ -189,9 +189,15 @@ defmodule Barkpark.Content.Scope do
   carries the flag, so this clause never touches a member's read (grants only
   ADD access; members stay byte-identical).
 
+  Only grants that CONFER READ contribute their ladder to the read-union: a
+  grant must both cover `workspace_id` AND hold the `"read"` capability. A
+  workspace-covering write-only grant (`["write"]`, no read) is EXCLUDED — write
+  ⊅ read, so it can never widen a read (matching the read admission predicate
+  `Access.validate(grant, :read, …)`).
+
   Fail-CLOSED, always: a nil caller_context, an empty grant set, or NO grant
-  covering `workspace_id` all force `where: false` (zero rows) — never the whole
-  workspace. Per grant, the ladder BELOW workspace (`project_id → dataset →
+  covering `workspace_id` (with read) all force `where: false` (zero rows) —
+  never the whole workspace. Per grant, the ladder BELOW workspace (`project_id → dataset →
   type → doc_id`) is ANDed as equality on each non-NULL level, stopping at the
   first NULL (Grant's "null covers everything below" semantics, mirroring
   `Barkpark.Access.validate/3` — not reinvented). Grants OR together, so a
@@ -201,7 +207,7 @@ defmodule Barkpark.Content.Scope do
           Ecto.Query.t()
   def scope_to_grants(query, %CallerContext{grants: grants}, workspace_id)
       when is_binary(workspace_id) and is_list(grants) do
-    case Enum.filter(grants, &covers_workspace?(&1, workspace_id)) do
+    case Enum.filter(grants, &covers_workspace_read?(&1, workspace_id)) do
       [] ->
         where(query, false)
 
@@ -218,8 +224,21 @@ defmodule Barkpark.Content.Scope do
   # Fail CLOSED: no caller_context, wrong shape, or nil workspace → zero rows.
   def scope_to_grants(query, _caller_context, _workspace_id), do: where(query, false)
 
-  defp covers_workspace?(%Grant{workspace_id: ws}, workspace_id), do: ws == workspace_id
-  defp covers_workspace?(_grant, _workspace_id), do: false
+  # The READ-union covering set: a grant contributes its scope ladder to the
+  # read narrowing ONLY when it (a) covers this workspace AND (b) actually
+  # confers READ. A workspace-covering WRITE-ONLY grant (capabilities
+  # `["write"]`, no `"read"`) must NEVER widen a read — write ⊅ read. The
+  # read-cap check is LITERAL (`"read" in capabilities`), mirroring
+  # `Barkpark.Access.action_allowed?/2` (admin does NOT imply read), and it
+  # matches the read admission predicate `Access.validate(grant, :read, …)`.
+  # So this is a PURE TIGHTENING: every grant a read caller was already
+  # legitimately narrowed by confers read (it had to, to be admitted), and only
+  # the erroneously-contributing non-read grants drop out of the union.
+  defp covers_workspace_read?(%Grant{workspace_id: ws, capabilities: caps}, workspace_id)
+       when is_list(caps),
+       do: ws == workspace_id and "read" in caps
+
+  defp covers_workspace_read?(_grant, _workspace_id), do: false
 
   # AND of the non-NULL ladder levels below workspace, stopping at the first
   # NULL (null-covers-below). An all-NULL-below grant (workspace-wide) yields

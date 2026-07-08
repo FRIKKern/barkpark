@@ -77,9 +77,15 @@ defmodule Barkpark.AccessEnforcementTest do
       grantee = grantee_user()
 
       {:ok, _in} = create_document_in!(ws, proj_p, "post", %{"title" => "in-scope"}, @dataset)
-      {:ok, _wrong_type} = create_document_in!(ws, proj_p, "note", %{"title" => "wrong-type"}, @dataset)
-      {:ok, _wrong_ds} = create_document_in!(ws, proj_p, "post", %{"title" => "wrong-dataset"}, "other")
-      {:ok, _wrong_proj} = create_document_in!(ws, proj_q, "post", %{"title" => "other-project"}, @dataset)
+
+      {:ok, _wrong_type} =
+        create_document_in!(ws, proj_p, "note", %{"title" => "wrong-type"}, @dataset)
+
+      {:ok, _wrong_ds} =
+        create_document_in!(ws, proj_p, "post", %{"title" => "wrong-dataset"}, "other")
+
+      {:ok, _wrong_proj} =
+        create_document_in!(ws, proj_q, "post", %{"title" => "other-project"}, @dataset)
 
       # grant scoped to (project P, dataset test, type post), read capability
       bind_grant!(ws, grantee, %{
@@ -152,6 +158,54 @@ defmodule Barkpark.AccessEnforcementTest do
       # EXACTLY the granted-dataset row; the other dataset yields nothing.
       assert titles(read.("granted")) == ["granted-dataset-row"]
       assert read.("other") == []
+    end
+
+    test "a WRITE-ONLY grant never widens the read-union (write ⊅ read)" do
+      # The read-cap filter on the covering set. A caller holds TWO grants in the
+      # same workspace: (i) a READ grant narrowed to project P (scope Y), and
+      # (ii) a WRITE-ONLY grant (capabilities ["write"], no read) covering
+      # project Q (scope X). Layer-2 read narrowing must union ONLY the read
+      # grant's ladder — scope-X rows the caller holds only :write on must NOT
+      # leak into the read. Without the read-cap filter the write-only grant's
+      # ladder ORs into the read-union and scope-X rows leak.
+      ws = create_workspace!()
+      proj_y = create_project!(ws)
+      proj_x = create_project!(ws)
+      grantee = grantee_user()
+
+      {:ok, _y} = create_document_in!(ws, proj_y, "post", %{"title" => "read-scope-Y"}, @dataset)
+
+      {:ok, _x} =
+        create_document_in!(ws, proj_x, "post", %{"title" => "write-only-scope-X"}, @dataset)
+
+      # (i) read grant on project Y
+      bind_grant!(ws, grantee, %{project_id: proj_y.id, capabilities: ["read"]})
+      # (ii) write-only grant on project X — covers the workspace, confers NO read
+      bind_grant!(ws, grantee, %{project_id: proj_x.id, capabilities: ["write"]})
+
+      ctx = CallerContext.from_user(grantee.id)
+      assert length(ctx.grants) == 2
+
+      # ONLY the read-scope-Y row; the write-only-scope-X row must be invisible.
+      assert titles(grant_read("post", ws, ctx)) == ["read-scope-Y"]
+    end
+
+    test "a read+write grant still narrows normally (read cap present)" do
+      # The filter excludes ONLY grants lacking read. A ["read","write"] grant
+      # confers read, so it contributes its ladder unchanged — no regression.
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+
+      {:ok, _in} = create_document_in!(ws, proj, "post", %{"title" => "rw-in-scope"}, @dataset)
+
+      {:ok, _out} =
+        create_document_in!(ws, create_project!(ws), "post", %{"title" => "rw-out"}, @dataset)
+
+      bind_grant!(ws, grantee, %{project_id: proj.id, capabilities: ["read", "write"]})
+      ctx = CallerContext.from_user(grantee.id)
+
+      assert titles(grant_read("post", ws, ctx)) == ["rw-in-scope"]
     end
   end
 
@@ -248,7 +302,10 @@ defmodule Barkpark.AccessEnforcementTest do
     setup do
       ws = create_workspace!()
       proj = create_project!(ws)
-      {:ok, _doc} = create_document_in!(ws, proj, "post", %{"title" => "workspace-secret"}, @dataset)
+
+      {:ok, _doc} =
+        create_document_in!(ws, proj, "post", %{"title" => "workspace-secret"}, @dataset)
+
       {:ok, ws: ws}
     end
 
