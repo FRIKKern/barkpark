@@ -247,14 +247,19 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     # FRESH-INSTALL invariant: airdrop grants are the cross-surface access layer,
     # mounted from CORE (not a plugin), so the grantor verbs survive
     # `config :barkpark, :plugins, []` alongside the token/secret/share nouns.
-    test "access grant/ls/show/revoke are CORE verbs over /v1/access, and claim is NOT a verb" do
+    test "access grant/ls/show/revoke/claim/mine are CORE verbs over /v1/access" do
       manifest = Capabilities.manifest("admin", project: false)
       cmds = manifest["commands"]
 
       access_cmds = Enum.filter(cmds, fn c -> c["noun"] == "access" end)
       ids = MapSet.new(access_cmds, & &1["id"])
 
-      assert MapSet.equal?(ids, MapSet.new(~w(access.grant access.ls access.show access.revoke)))
+      assert MapSet.equal?(
+               ids,
+               MapSet.new(
+                 ~w(access.grant access.ls access.show access.revoke access.claim access.mine)
+               )
+             )
 
       for c <- access_cmds do
         assert c["source"] == "core"
@@ -262,9 +267,11 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
         assert String.starts_with?(c["http"]["path_template"], "/v1/access")
       end
 
-      # A terminal `access claim` is deliberately absent — the grantee claim
-      # needs a user session, which a plain api_token cannot carry.
-      refute Enum.any?(cmds, fn c -> c["id"] == "access.claim" end)
+      # ag-bp-user-identity-auth: the grantee CLAIM/MINE verbs now SHIP — an
+      # api_token can carry a USER identity via owner_user_id, so a terminal
+      # `bp access claim` / `bp access mine` resolves the owner and works.
+      assert Enum.any?(cmds, fn c -> c["id"] == "access.claim" end)
+      assert Enum.any?(cmds, fn c -> c["id"] == "access.mine" end)
 
       by_id = Map.new(access_cmds, fn c -> {c["id"], c} end)
       assert by_id["access.grant"]["http"] == %{"method" => "POST", "path_template" => "/v1/access"}
@@ -279,6 +286,23 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
              }
 
       assert by_id["access.revoke"]["auth_tier"] == "scoped_admin"
+
+      # The grantee verbs ride /v1/access/{claim,mine} at the `read` tier (an
+      # authenticated — owned — token is required; anon is existence-hidden).
+      assert by_id["access.claim"]["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/access/claim"
+             }
+
+      assert by_id["access.claim"]["auth_tier"] == "read"
+      assert by_id["access.claim"]["writes"] == true
+
+      assert by_id["access.mine"]["http"] == %{
+               "method" => "GET",
+               "path_template" => "/v1/access/mine"
+             }
+
+      assert by_id["access.mine"]["auth_tier"] == "read"
 
       # The `access` noun itself is CORE (plugin: nil).
       access_noun = Enum.find(manifest["nouns"], fn n -> n["name"] == "access" end)

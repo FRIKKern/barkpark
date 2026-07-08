@@ -140,6 +140,26 @@ defmodule BarkparkWeb.AccessController do
 
   def claim(conn, _params), do: conn |> no_store() |> invalid_grant()
 
+  # ── mine (grantee's own active grants) ──────────────────────────────────────
+
+  # List the ACTIVE grants bound to the authenticated grantee. `:current_user`
+  # is resolved by the `:access_principal` pipeline from EITHER a login session
+  # OR an OWNED api_token, so this lights up the terminal `bp access mine`. Each
+  # grant is field-WHITELISTED by render_grant/1 (never link_token_hash).
+  def mine(conn, _params) do
+    conn = no_store(conn)
+
+    case conn.assigns[:current_user] do
+      %User{id: user_id} ->
+        grants = Access.list_active_grants_for_grantee(user_id)
+        json(conn, %{grants: Enum.map(grants, &render_grant/1)})
+
+      _ ->
+        # The :access_principal pipeline gates this route, so this is defensive.
+        invalid_grant(conn)
+    end
+  end
+
   # ── internals ───────────────────────────────────────────────────────────────
 
   defp render_grant(%Access.Grant{} = grant) do

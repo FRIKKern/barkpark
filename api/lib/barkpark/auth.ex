@@ -307,7 +307,9 @@ defmodule Barkpark.Auth do
 
   `opts`: `:role` (default `"member"`), `:workspace_id`, `:dataset`
   (default `"production"`), `:created_by`, `:ttl` (seconds; `nil` = never;
-  default 30 days; capped at 1 year).
+  default 30 days; capped at 1 year), `:owner_user_id` (bind the token to a
+  USER identity — set ONLY by the session-gated self-mint, hard-bound to the
+  authenticated caller; never a client-supplied value).
   """
   @spec create_personal_access_token(binary(), [binary()], keyword()) ::
           {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
@@ -338,7 +340,11 @@ defmodule Barkpark.Auth do
         permissions: permissions,
         workspace_id: ws_id,
         created_by: Keyword.get(opts, :created_by),
-        expires_at: expires_at
+        expires_at: expires_at,
+        # ag-bp-user-identity-auth: optional owner USER binding. NULL for a
+        # machine PAT; set only by the session-gated self-mint, which HARD-BINDS
+        # it to current_user.id (never a caller-supplied param).
+        owner_user_id: Keyword.get(opts, :owner_user_id)
       }
 
       result =

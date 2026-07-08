@@ -43,6 +43,14 @@ defmodule Barkpark.Auth.ApiToken do
     # at exactly this scope (enforced by RequireShareEditToken).
     field :share_scope, :string
 
+    # ag-bp-user-identity-auth: optional USER identity for a token. NULL for
+    # every existing/machine token (they authenticate exactly as before —
+    # verify_token never reads this column). When set (only via the
+    # session-gated self-mint, HARD-BOUND to current_user.id), the token
+    # resolves to this %User{} on the grantee claim/mine surface, so a terminal
+    # `bp access claim` / `bp access mine` carries a user identity.
+    belongs_to :owner_user, Barkpark.Accounts.User, type: :binary_id
+
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
 
     # W2 additive seam. Association is `:dataset_entity` because the legacy
@@ -70,7 +78,8 @@ defmodule Barkpark.Auth.ApiToken do
       :last_used_at,
       :created_by,
       :kind,
-      :paused_at
+      :paused_at,
+      :owner_user_id
     ])
     |> validate_required([:token_hash])
     |> unique_constraint(:token_hash)
