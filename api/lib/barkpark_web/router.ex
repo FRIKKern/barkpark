@@ -1198,6 +1198,16 @@ defmodule BarkparkWeb.Router do
 
     get("/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/revision/:dataset/:id", HistoryController, :show)
+  end
+
+  # ── Revision restore — a WRITE (Revisions.restore_revision →
+  # Content.upsert_document), so it carries the same :require_write gate as
+  # /mutate. Split out of the token-only read scope above so a read/public-read
+  # token can no longer overwrite a document via restore, while the history +
+  # revision GET reads stay reachable by any member token.
+  scope "/v1/data", BarkparkWeb do
+    pipe_through([:api, :require_token, :require_write])
+
     post("/revision/:dataset/:id/restore", HistoryController, :restore)
   end
 
@@ -1572,6 +1582,16 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+  end
+
+  # Scoped revision restore — a WRITE, so it carries :require_write on top of the
+  # scoped-read pipeline, mirroring the flat restore split above. Kept out of the
+  # token-only scoped-read scope so a read/public-read token cannot overwrite a
+  # document via restore; the scoped history + revision GET reads stay open to
+  # any member token.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token, :require_write])
+
     post("/v1/data/revision/:dataset/:id/restore", HistoryController, :restore)
   end
 
@@ -1729,6 +1749,16 @@ defmodule BarkparkWeb.Router do
 
     get("/documents/:type", LegacyController, :index)
     get("/documents/:type/:id", LegacyController, :show)
+  end
+
+  # Legacy document WRITES (create/delete) — these call Content.upsert_document /
+  # delete_document directly with no in-controller permission check, so the
+  # :require_write gate is the write authorization (mirrors /v1/data/mutate). Kept
+  # in a separate scope from the legacy GET reads so a read/public-read token can
+  # no longer create or delete a document via the deprecated /api/documents surface.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_token, :require_write, BarkparkWeb.Plugs.LegacyDeprecation])
+
     post("/documents/:type", LegacyController, :create)
     delete("/documents/:type/:id", LegacyController, :delete)
   end
