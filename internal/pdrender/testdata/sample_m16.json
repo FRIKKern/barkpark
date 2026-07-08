@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "card16",
+      "type": "card",
+      "tone": "warn",
+      "slots": {
+        "media": {
+          "id": "m16img",
+          "type": "image",
+          "src": "https://barkpark.cloud/media/card-hero.png",
+          "alt": "A card hero image",
+          "width": 640,
+          "height": 360
+        },
+        "title": {
+          "id": "m16t",
+          "type": "heading",
+          "level": 2,
+          "text": "Warn-toned card with an image media slot"
+        },
+        "body": [
+          {
+            "id": "m16b",
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "value": "This card exercises the model-B shape: media first, a tone-tinted border, and the image fast-path box that a paragraph media slot lacks." }
+            ]
+          }
+        ],
+        "action": {
+          "id": "m16a",
+          "type": "action",
+          "label": "Open the card",
+          "href": "https://barkpark.cloud/papers/card",
+          "priority": "primary"
+        }
+      }
+    }
+  ]
+}

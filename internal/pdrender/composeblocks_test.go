@@ -55,6 +55,43 @@ func TestComposeBlocksNeverPanic(t *testing.T) {
 	}
 }
 
+// TestCardMediaImageFastPath checks the model-B image fast-path: a typed
+// `type:"image"` media child renders imageRenderer's box, a typeless `{src,alt}`
+// media element is coerced to an image (so it fast-paths instead of degrading),
+// and the coercion is scoped to the MEDIA slot only (a typeless `{src,alt}` in a
+// non-media slot is NOT coerced).
+func TestCardMediaImageFastPath(t *testing.T) {
+	reg := testRegistry()
+	ctx := RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}
+
+	// Typed image in the media slot → 🖼 box.
+	typed := Block{Type: "card", Attrs: map[string]any{"slots": map[string]any{
+		"media": map[string]any{"type": "image", "src": "u.png", "alt": "typed alt"},
+	}}}
+	gotTyped := ansi.Strip(strings.Join(reg.Render(typed, ctx), "\n"))
+	if !strings.Contains(gotTyped, "🖼") || !strings.Contains(gotTyped, "typed alt") {
+		t.Fatalf("typed image media should fast-path to the image box, got:\n%s", gotTyped)
+	}
+
+	// Typeless {src,alt} in the media slot → coerced to an image box.
+	bare := Block{Type: "card", Attrs: map[string]any{"slots": map[string]any{
+		"media": map[string]any{"src": "u.png", "alt": "bare alt"},
+	}}}
+	gotBare := ansi.Strip(strings.Join(reg.Render(bare, ctx), "\n"))
+	if !strings.Contains(gotBare, "🖼") || !strings.Contains(gotBare, "bare alt") {
+		t.Fatalf("typeless {src,alt} media should be coerced to the image box, got:\n%s", gotBare)
+	}
+
+	// Scope: a typeless {src,alt} in a NON-media slot is NOT coerced (no 🖼 box).
+	nonMedia := Block{Type: "card", Attrs: map[string]any{"slots": map[string]any{
+		"body": map[string]any{"src": "u.png", "alt": "body alt"},
+	}}}
+	gotNon := ansi.Strip(strings.Join(reg.Render(nonMedia, ctx), "\n"))
+	if strings.Contains(gotNon, "🖼") {
+		t.Errorf("typeless {src,alt} outside the media slot must NOT be coerced, got:\n%s", gotNon)
+	}
+}
+
 // TestNoteRendersNormally checks the definition row carries its label, bold lead
 // and body text, and that control bytes in the body are stripped (not spliced
 // into the terminal stream).
@@ -101,20 +138,34 @@ func TestStageRendersNormally(t *testing.T) {
 	}
 }
 
-// TestCardRendersNormally checks the box draws a rounded border and stacks the
-// title/body slots plus the labelled media/action slots (recursed content).
+// TestCardRendersNormally checks the model-B box: a rounded border, the slots
+// in media→title→body→action order, all four slots' recursed content present,
+// and NO per-slot label chrome (the `media`/`action` caption lines model B
+// dropped, #1529).
 func TestCardRendersNormally(t *testing.T) {
 	reg := testRegistry()
 	b := Block{Type: "card", Attrs: map[string]any{"slots": map[string]any{
-		"title": map[string]any{"type": "heading", "level": 2, "text": "The Title"},
-		"body":  map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "value": "the body prose"}}},
-		"media": map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "value": "media prose"}}},
+		"title":  map[string]any{"type": "heading", "level": 2, "text": "The Title"},
+		"body":   map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "value": "the body prose"}}},
+		"media":  map[string]any{"type": "paragraph", "content": []any{map[string]any{"type": "text", "value": "media prose"}}},
 		"action": map[string]any{"type": "action", "label": "Go", "href": "https://x.example", "priority": "primary"},
 	}}}
 	got := ansi.Strip(strings.Join(reg.Render(b, RenderCtx{Width: 60, Theme: DarkTheme(), Profile: NoColor}), "\n"))
-	for _, want := range []string{"╭", "╰", "The Title", "the body prose", "media", "action", "Go"} {
+	for _, want := range []string{"╭", "╰", "The Title", "the body prose", "media prose", "Go"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("card missing %q, got:\n%s", want, got)
+		}
+	}
+	// Model-B slot order: media renders before the title.
+	if strings.Index(got, "media prose") > strings.Index(got, "The Title") {
+		t.Errorf("card should render media before title (model-B order), got:\n%s", got)
+	}
+	// No per-slot label chrome: the muted `media`/`action` caption lines are gone.
+	// (The media/action *content* still shows; the standalone label lines do not.)
+	for _, line := range strings.Split(got, "\n") {
+		trimmed := strings.TrimSpace(strings.Trim(line, "│ "))
+		if trimmed == "media" || trimmed == "action" {
+			t.Errorf("card must drop the %q label caption (model B), got:\n%s", trimmed, got)
 		}
 	}
 
