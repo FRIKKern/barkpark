@@ -1,0 +1,118 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Layout blocks"
+    },
+    {
+      "id": "cols2",
+      "type": "columns",
+      "columns": [
+        [
+          {
+            "id": "c1h",
+            "type": "heading",
+            "level": 3,
+            "text": "Left column"
+          },
+          {
+            "id": "c1p",
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "value": "The left column stacks a heading above a paragraph that wraps at the narrower golden widths." }
+            ]
+          }
+        ],
+        [
+          {
+            "id": "c2h",
+            "type": "heading",
+            "level": 3,
+            "text": "Right column"
+          },
+          {
+            "id": "c2p",
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "value": "The right column is separated from the left by a light hairline rule between the two stacked groups." }
+            ]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "cols3",
+      "type": "columns",
+      "columns": [
+        [
+          {
+            "id": "t1",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "One." }]
+          }
+        ],
+        [
+          {
+            "id": "t2",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Two." }]
+          }
+        ],
+        [
+          {
+            "id": "t3",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Three." }]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "cols1",
+      "type": "columns",
+      "columns": [
+        [
+          {
+            "id": "sc1",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "A single column renders with no separator rule at all." }]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "term1",
+      "type": "terminal",
+      "title": "deploy.sh",
+      "live": true,
+      "children": [
+        {
+          "id": "tp1",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "A terminal frame wraps its child blocks in rounded chrome." }]
+        },
+        {
+          "id": "tc1",
+          "type": "code",
+          "language": "bash",
+          "code": "make deploy\ncurl -s localhost:4000/api/schemas | head"
+        }
+      ],
+      "footer": "exit 0 · 1.2s"
+    },
+    {
+      "id": "term2",
+      "type": "terminal",
+      "children": [
+        {
+          "id": "tp2",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "A bare terminal: no title, no live chip, no footer — just the dots bar." }]
+        }
+      ]
+    }
+  ]
+}

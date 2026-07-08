@@ -289,5 +289,11 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["note"] = noteRenderer{}
 	r.blocks["stage"] = stageRenderer{}
 	r.blocks["card"] = cardRenderer{reg: r}
+
+	// ── layout / container blocks (columns / terminal) ─────────────────────────
+	// Both recurse arbitrary child blocks through the registry, so each holds a
+	// back-reference like section/figure/card.
+	r.blocks["columns"] = columnsRenderer{reg: r}
+	r.blocks["terminal"] = terminalRenderer{reg: r}
 	return r
 }

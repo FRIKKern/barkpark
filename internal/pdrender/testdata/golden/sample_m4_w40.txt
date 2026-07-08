@@ -1,0 +1,41 @@
+LAYOUT BLOCKS                           
+─────────────                           
+                                        
+Left column                             
+                                        
+The left column stacks a heading above a
+paragraph that wraps at the narrower    
+golden widths.                          
+────────────────────────────────────────
+Right column                            
+                                        
+The right column is separated from the  
+left by a light hairline rule between   
+the two stacked groups.                 
+                                        
+One.                                    
+────────────────────────────────────────
+Two.                                    
+────────────────────────────────────────
+Three.                                  
+                                        
+A single column renders with no         
+separator rule at all.                  
+                                        
+╭────────────────────────────────────╮  
+│ ● ● ●  deploy.sh   live            │  
+│ A terminal frame wraps its child   │  
+│ blocks in rounded chrome.          │  
+│ ▌ BASH                             │  
+│ ▌ make deploy                      │  
+│ ▌ curl -s                          │  
+│ localhost:4000/api/schema…         │  
+│ exit 0 · 1.2s                      │  
+╰────────────────────────────────────╯  
+                                        
+╭────────────────────────────────────╮  
+│ ● ● ●                              │  
+│ A bare terminal: no title, no live │  
+│ chip, no footer — just the dots    │  
+│ bar.                               │  
+╰────────────────────────────────────╯  
