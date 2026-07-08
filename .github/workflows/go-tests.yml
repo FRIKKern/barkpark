@@ -26,6 +26,12 @@ on:
       # run the Go suite on THIS PR so the guard catches un-synced drift (the
       # #963→#969 class). Mirrors vendored-assets.yml.
       - "templates/**"
+      # Cross-surface paper-component golden fixtures (internal/pdrender/testdata/
+      # *.golden.json). component_golden_test.go asserts the TUI renderer realizes
+      # the committed projection; a fixture REGEN (emitter/manifest edit) can change
+      # these JSON mirrors with NO .go source change, so the Go realization leg must
+      # run on THIS PR to catch a TUI divergence from the new projection.
+      - "internal/pdrender/testdata/**"
   pull_request:
     paths:
       - "**/*.go"
@@ -33,6 +39,7 @@ on:
       - "go.sum"
       - ".github/workflows/go-tests.yml"
       - "templates/**"
+      - "internal/pdrender/testdata/**"
 
 concurrency:
   # Never cancel main (the 2026-06-10 starvation lesson); collapse superseded
