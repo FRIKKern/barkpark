@@ -56,11 +56,12 @@ func innerWidth(ctx RenderCtx) int {
 // analogue — no library draws mermaid — so the box IS the honest ceiling.
 //
 // The SEAM is now realized for the kinds we can draw well: a native, dependency-
-// free layout engine (mermaid.go + mermaidflow.go) turns `flowchart`/`graph`
-// source into responsive, always-rectangular terminal art (ranked boxes + a
-// box-drawing connector bus + a labelled legend for edges a bus can't carry).
-// Kinds we don't yet draw (sequence — wave 2 — and everything else) keep the
-// honest folded-source box below: a reader never sees a half-drawn diagram.
+// free layout engine turns `flowchart`/`graph` source into ranked boxes + a
+// box-drawing connector bus (mermaid.go + mermaidflow.go), and `sequenceDiagram`
+// source into a lifeline ladder on the shared Flex solver (mermaidseq.go) — both
+// responsive and always rectangular. Kinds we don't yet draw (and any diagram too
+// narrow to fit cleanly) keep the honest folded-source box below: a reader never
+// sees a half-drawn diagram.
 type diagramRenderer struct{}
 
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -70,8 +71,17 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	kind := mermaidKind(source)
 
 	// Drawable kinds render as real terminal art with a Figure caption beneath.
-	if doc := parseMermaid(source); doc.kind == "flowchart" {
-		if art := renderFlowchart(doc.graph, ctx); len(art) > 0 {
+	// renderFlowchart/renderSequence return nil when they can't draw cleanly at
+	// this width, so control falls through to the folded box below.
+	if doc := parseMermaid(source); doc.kind != "" {
+		var art []string
+		switch doc.kind {
+		case "flowchart":
+			art = renderFlowchart(doc.graph, ctx)
+		case "sequence":
+			art = renderSequence(doc.seq, ctx)
+		}
+		if len(art) > 0 {
 			return append(art, diagramCaption(n, caption, ctx))
 		}
 	}

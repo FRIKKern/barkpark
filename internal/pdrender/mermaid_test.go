@@ -154,10 +154,11 @@ func TestDiagramDispatch(t *testing.T) {
 		t.Errorf("flowchart render missing box/caption:\n%s", got)
 	}
 
-	seq := Block{Type: "diagram", Attrs: map[string]any{
-		"source": "sequenceDiagram\n A->>B: hi", "caption": "Seq."}}
-	got2 := ansi.Strip(strings.Join(diagramRenderer{}.Render(seq, ctx), "\n"))
-	if !strings.Contains(got2, "◇ Mermaid diagram (sequenceDiagram)") {
-		t.Errorf("sequence should still fold in wave 1:\n%s", got2)
+	// An unsupported kind still folds honestly (a reader never sees a half-draw).
+	other := Block{Type: "diagram", Attrs: map[string]any{
+		"source": "stateDiagram-v2\n [*] --> Idle\n Idle --> Busy", "caption": "St."}}
+	got2 := ansi.Strip(strings.Join(diagramRenderer{}.Render(other, ctx), "\n"))
+	if !strings.Contains(got2, "◇ Mermaid diagram (stateDiagram-v2)") {
+		t.Errorf("unsupported kind should fold:\n%s", got2)
 	}
 }
