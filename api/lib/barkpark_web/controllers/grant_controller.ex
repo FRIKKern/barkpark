@@ -30,10 +30,16 @@ defmodule BarkparkWeb.GrantController do
   flash, same redirect location. Token existence is unobservable: a wrong-grantee
   authenticated user and a nonexistent token get identical responses. Failures
   are never branched by reason, mirroring `SessionController.ticket/2`.
+
+  The claim DECISION itself (grantee-email match + atomic claim, collapsed to
+  one `:invalid`) lives in `Barkpark.Access.ClaimFlow` — the SAME module the
+  JSON `BarkparkWeb.AccessController.claim/2` uses, so there is exactly one
+  no-oracle contract. This controller only renders that outcome as a redirect.
   """
   use BarkparkWeb, :controller
 
   alias Barkpark.Access
+  alias Barkpark.Access.ClaimFlow
 
   @default_return_to "/studio"
 
@@ -60,35 +66,20 @@ defmodule BarkparkWeb.GrantController do
     |> invalid_grant()
   end
 
-  # Authenticated claim. The grantee-email match is enforced here (Access.claim
-  # does not); only an active grant addressed to THIS account is claimed. Every
-  # other outcome collapses to the one no-oracle failure.
+  # Authenticated claim. The grantee-email match + atomic claim (collapsed to
+  # one no-oracle outcome) live in the SHARED `Access.ClaimFlow.resolve/2` — the
+  # same decision the JSON API runs. This controller only renders the outcome.
   defp claim_for(conn, token, user) do
-    grant = Access.lookup_by_token(token)
+    case ClaimFlow.resolve(token, user) do
+      {:ok, claimed} ->
+        conn
+        |> put_flash(:info, "Access granted — you're all set.")
+        |> redirect(to: scoped_studio_target(claimed))
 
-    if grant && grantee?(grant, user) do
-      case Access.claim(token, user) do
-        {:ok, claimed} ->
-          conn
-          |> put_flash(:info, "Access granted — you're all set.")
-          |> redirect(to: scoped_studio_target(claimed))
-
-        {:error, _reason} ->
-          invalid_grant(conn)
-      end
-    else
-      invalid_grant(conn)
+      :invalid ->
+        invalid_grant(conn)
     end
   end
-
-  # Case-insensitive email match. User emails are stored downcased (citext);
-  # a grant's grantee_email is not normalized at mint, so downcase both sides.
-  defp grantee?(%Access.Grant{grantee_email: email}, %Barkpark.Accounts.User{email: user_email})
-       when is_binary(email) and is_binary(user_email) do
-    String.downcase(email) == String.downcase(user_email)
-  end
-
-  defp grantee?(_grant, _user), do: false
 
   # The single no-oracle failure. Byte-identical for every authenticated failure
   # kind — unknown token, wrong grantee, expired, revoked, already-claimed — so

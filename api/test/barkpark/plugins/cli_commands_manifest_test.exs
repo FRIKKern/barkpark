@@ -243,6 +243,71 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
   end
 
+  describe "core access (airdrop-grant) verbs" do
+    # FRESH-INSTALL invariant: airdrop grants are the cross-surface access layer,
+    # mounted from CORE (not a plugin), so the grantor verbs survive
+    # `config :barkpark, :plugins, []` alongside the token/secret/share nouns.
+    test "access grant/ls/show/revoke are CORE verbs over /v1/access, and claim is NOT a verb" do
+      manifest = Capabilities.manifest("admin", project: false)
+      cmds = manifest["commands"]
+
+      access_cmds = Enum.filter(cmds, fn c -> c["noun"] == "access" end)
+      ids = MapSet.new(access_cmds, & &1["id"])
+
+      assert MapSet.equal?(ids, MapSet.new(~w(access.grant access.ls access.show access.revoke)))
+
+      for c <- access_cmds do
+        assert c["source"] == "core"
+        assert c["noun"] == "access"
+        assert String.starts_with?(c["http"]["path_template"], "/v1/access")
+      end
+
+      # A terminal `access claim` is deliberately absent — the grantee claim
+      # needs a user session, which a plain api_token cannot carry.
+      refute Enum.any?(cmds, fn c -> c["id"] == "access.claim" end)
+
+      by_id = Map.new(access_cmds, fn c -> {c["id"], c} end)
+      assert by_id["access.grant"]["http"] == %{"method" => "POST", "path_template" => "/v1/access"}
+      assert by_id["access.grant"]["auth_tier"] == "scoped_admin"
+      assert by_id["access.grant"]["writes"] == true
+      assert by_id["access.ls"]["http"] == %{"method" => "GET", "path_template" => "/v1/access"}
+      assert by_id["access.ls"]["auth_tier"] == "read"
+      assert by_id["access.show"]["http"] == %{"method" => "GET", "path_template" => "/v1/access/:id"}
+      assert by_id["access.revoke"]["http"] == %{
+               "method" => "DELETE",
+               "path_template" => "/v1/access/:id"
+             }
+
+      assert by_id["access.revoke"]["auth_tier"] == "scoped_admin"
+
+      # The `access` noun itself is CORE (plugin: nil).
+      access_noun = Enum.find(manifest["nouns"], fn n -> n["name"] == "access" end)
+      assert access_noun
+      assert access_noun["plugin"] == nil
+    end
+
+    test "access verbs existence-hide from anon but show to an authenticated caller" do
+      anon = Capabilities.manifest("none")
+      read = Capabilities.manifest("read")
+
+      anon_ids = anon["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+      read_ids = read["commands"] |> Enum.map(& &1["id"]) |> MapSet.new()
+
+      # None of the access verbs are visible to an anonymous caller.
+      refute "access.grant" in anon_ids
+      refute "access.ls" in anon_ids
+      refute "access.show" in anon_ids
+      refute "access.revoke" in anon_ids
+
+      # A read+ caller sees the reads AND the scoped_admin verbs (scoped_admin is
+      # visible to any authenticated token — the server decides per-workspace).
+      assert "access.ls" in read_ids
+      assert "access.show" in read_ids
+      assert "access.grant" in read_ids
+      assert "access.revoke" in read_ids
+    end
+  end
+
   describe "core user-auth verbs (Phase 5, core-auth)" do
     # The /v1/auth/* verbs are CORE (pre-tenant, plugin: nil). The 5 public
     # verbs are tier "none" so an anon caller can discover login; the 4
