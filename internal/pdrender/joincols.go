@@ -73,6 +73,49 @@ func (f Flex) Measure(avail, tracks int) (cellW int, sideBySide bool) {
 	return
 }
 
+// spanWidth is a span-S cell's display width: S per-track cells plus the (S-1)
+// gutters those tracks subsume. The one place the section grid's span arithmetic
+// lives (was inlined at the grid caller); span<1 clamps to 1.
+func (f Flex) spanWidth(cellW, span int) int {
+	if span < 1 {
+		span = 1
+	}
+	return span*cellW + (span-1)*f.Gutter
+}
+
+// nodeWidth is a Node's realized min-content: the widest of its already-rendered
+// lines (lipgloss.Width — ANSI-aware, never len, since a styled line's bytes ≠
+// its cells). It is what the child could NOT shrink below at the width it was
+// rendered — a single unbreakable token wider than its allotted cell surfaces
+// here as a nodeWidth above the Node's Width.
+func nodeWidth(n Node) int {
+	w := 0
+	for _, ln := range n.Lines {
+		if d := lipgloss.Width(ln); d > w {
+			w = d
+		}
+	}
+	return w
+}
+
+// Fits is the SECOND half of "measure into arrange". Measure decides side-by-side
+// purely on the divide-formula (cellW>=MinWidth); it never asks how narrow each
+// child can actually go. Fits does: it returns false if any Node's realized
+// min-content (nodeWidth) exceeds its ALLOTTED cell Width — span-aware, since a
+// section-grid Node's Width already folds its span via spanWidth. A false verdict
+// means a wide unbreakable token would overflow its track, so the caller must
+// degrade to its verbatim vertical stack instead of emitting an over-wide row.
+// The current corpus never over-fills a side-by-side cell, so Fits is true for
+// every existing golden — the collapse fires only on genuine content-min overflow.
+func (f Flex) Fits(nodes []Node) bool {
+	for _, n := range nodes {
+		if nodeWidth(n) > n.Width {
+			return false
+		}
+	}
+	return true
+}
+
 // Arrange is the SECOND pass for equal-track surfaces (columns, board lanes):
 // pad each Node's lines to its width and join them side-by-side with Gutter
 // blank columns between. Delegates to joinColumns (the byte-faithful body).

@@ -478,10 +478,16 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 				Render(lipgloss.JoinVertical(lipgloss.Left, body...))
 			nodes[i] = Node{Lines: strings.Split(box, "\n"), Width: cellW, Span: 1}
 		}
-		return DefaultFlex.Arrange(nodes)
+		// Measure-into-arrange: only lay lanes side-by-side if every bordered box's
+		// realized min-content fits its cell. A card with a wide unbreakable token
+		// (nodeWidth > cellW) would overflow, so fall through to the stacked lanes.
+		if DefaultFlex.Fits(nodes) {
+			return DefaultFlex.Arrange(nodes)
+		}
 	}
 
-	// Sub-MinWidth fallback (verbatim): stacked lanes.
+	// Fallback (verbatim): stacked lanes — taken when a lane falls below MinWidth
+	// OR a lane's content min-width overflows its cell.
 	var out []string
 	for _, ln := range lanes {
 		if len(out) > 0 {

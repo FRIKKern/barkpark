@@ -273,8 +273,15 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 	nodes := make([]Node, len(items))
 	for i, child := range items {
 		s := cellSpan(child, tracks)
-		cw := s*cellW + (s-1)*DefaultFlex.Gutter
+		cw := DefaultFlex.spanWidth(cellW, s)
 		nodes[i] = Node{Lines: sr.reg.Render(child, childCtx.WithWidth(cw)), Width: cw, Span: s}
+	}
+
+	// Measure-into-arrange: if any cell's realized min-content overflows its
+	// (span-aware) allotted width, degrade — return nil so the caller takes the
+	// byte-identical stack path rather than emit an over-wide grid row.
+	if !DefaultFlex.Fits(nodes) {
+		return nil
 	}
 
 	rows := DefaultFlex.ArrangeGrid(nodes, tracks)
