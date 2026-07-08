@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
+  alias BarkparkWeb.Studio.TokensGen
 
   @admin_token "styleguide-admin-test-token"
 
@@ -45,6 +46,112 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
     test "non-admin is redirected off the admin-gated route", %{conn: conn} do
       conn = init_test_session(conn, %{})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/styleguide")
+    end
+  end
+
+  describe "living sources (every section renders from a generated source)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/styleguide")
+      {:ok, view: view, html: html, region: styleguide_region(html)}
+    end
+
+    test "palette / status / chrome render via var(--…), not applied hex", %{region: region} do
+      # base palette + derived soft tint
+      assert region =~ "background: var(--primary)"
+      assert region =~ "var(--primary-soft)"
+      # status role: solid fill + on-fill foreground pairing
+      assert region =~ "background: var(--ok)"
+      assert region =~ "color: var(--ok-fg)"
+      # zinc/chrome ladder
+      assert region =~ "background: var(--bg-accent)"
+      assert region =~ "var(--fg-dim)"
+    end
+
+    test "type ladder is sized from the emitted --text-* scale (no px literal)", %{region: region} do
+      for step <- ~w(2xl xl lg base sm xs) do
+        assert region =~ "font-size: var(--text-#{step})"
+        assert region =~ "var(--text-#{step}-lh)"
+      end
+    end
+
+    test "lifecycle row renders from TokensGen.lifecycle/0 + var(--life-*)", %{region: region} do
+      # every state's glyph is coloured by the emitted CSS var, never inline hex
+      for %{state: state, glyph: glyph} <- TokensGen.lifecycle() do
+        assert region =~ "color: var(--life-#{state})"
+        assert region =~ glyph
+      end
+
+      # braille frames come from the generated frame set
+      for f <- TokensGen.lifecycle_frames(), do: assert(region =~ f)
+
+      # the teal done/closed hue is shown as a CONTENT label (allowed) — and the
+      # applied-style assertion below proves it is NOT painted inline.
+      assert region =~ "#0d9488"
+    end
+
+    test "categorical swatches apply generated hex (the documented exception)", %{region: region} do
+      # presence + Sheets-CF hex is applied inline straight from TokensGen
+      for hex <- TokensGen.presence_palette(), do: assert(region =~ "background: #{hex}")
+    end
+
+    # AC2 — the non-vacuous drift gate. Every hex that appears in an APPLIED style
+    # attribute must be a generated CATEGORICAL value; a role colour painted with a
+    # literal hex (instead of var(--…)) would land here and fail. Hex-as-CONTENT
+    # (the doc value labels) lives outside style="…" and is intentionally allowed.
+    test "no role hex is applied inline — only generated categorical hex", %{region: region} do
+      applied =
+        Regex.scan(~r/style="([^"]*)"/, region)
+        |> Enum.flat_map(fn [_, style] ->
+          Regex.scan(~r/#[0-9a-fA-F]{6}/, style) |> Enum.map(fn [h] -> String.downcase(h) end)
+        end)
+
+      categorical =
+        (TokensGen.presence_palette() ++
+           TokensGen.sheet_cf_backgrounds() ++ TokensGen.sheet_tab_colors())
+        |> Enum.map(&String.downcase/1)
+
+      # non-vacuous: the categorical swatches DID apply hex inline
+      assert applied != []
+
+      Enum.each(applied, fn hex ->
+        assert hex in categorical,
+               "applied-style hex #{hex} is not a generated categorical value — role/status/lifecycle colours must render via var(--…)"
+      end)
+    end
+  end
+
+  describe "AC3 — both themes provable from one page" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/styleguide")
+      {:ok, view: view, html: html}
+    end
+
+    test "mounts in light and flips to dark via the wrapper toggle", %{view: view, html: html} do
+      # light on mount — the wrapper carries the theme + the SgTheme hook mirrors it
+      assert html =~ ~s(data-theme="light")
+      assert html =~ "phx-hook=\"SgTheme\""
+      assert render(view) =~ "background: var(--primary)"
+
+      # flip → dark, still renders every section
+      dark = view |> element("[data-test-id='sg-theme-toggle']") |> render_click()
+      assert dark =~ ~s(data-theme="dark")
+      assert dark =~ "background: var(--primary)"
+      assert dark =~ "var(--text-2xl)"
+
+      # flip back → light
+      light = view |> element("[data-test-id='sg-theme-toggle']") |> render_click()
+      assert light =~ ~s(data-theme="light")
+    end
+  end
+
+  # Isolate the styleguide subtree (everything from the wrapper on) so the
+  # applied-style scan doesn't see unrelated Studio chrome above it.
+  defp styleguide_region(html) do
+    case String.split(html, ~s(id="sg-root"), parts: 2) do
+      [_, tail] -> tail
+      _ -> html
     end
   end
 

@@ -405,8 +405,28 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ] ++ tmux_console_entry(admin?)
+    ] ++ tmux_console_entry(admin?) ++ styleguide_entry(admin?)
   end
+
+  # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
+  # Admin-only — mirrors the tmux-console gating precedent (the route itself is
+  # admin-gated in the router; this just keeps the tab out of non-admin chrome).
+  # Flat singleton path (not dataset-scoped): the token spec is per-host, not
+  # per-dataset. NOTE: /studio/styleguide is the STUDIO node of the future
+  # cross-surface design index (W3.9/W5.D) — not built here.
+  defp styleguide_entry(true) do
+    [
+      %{
+        label: "Style",
+        path: "/studio/styleguide",
+        icon: nil,
+        order: 50,
+        active_when: "/studio/styleguide"
+      }
+    ]
+  end
+
+  defp styleguide_entry(_), do: []
 
   # The tmux console tab. Shown ONLY to admins (`admin?`, from the
   # `shares_admin?` chrome flag) AND only where `TmuxConsole.enabled?/0` holds

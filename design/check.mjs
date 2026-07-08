@@ -8,7 +8,7 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, glyphOf, ARTIFACTS, repoRoot,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
 
@@ -90,27 +90,64 @@ for (const m of cssText.matchAll(/\.bp-lg--(\w+) \{ color: (#[0-9a-fA-F]{6}); \}
   (cssLife[m[1]] ||= []).push(m[2]);
 }
 
+// Parse the EMITTED Studio surface — the THIRD lifecycle mirror (Decision D1).
+// Two artifacts carry it: the root-layout CSS --life-<state> vars (colour, light
+// then dark) and the Studio TokensGen lifecycle/0 rows (glyph + ascii + hue) +
+// lifecycle_frames/0. Both must agree with tokens.lifecycle, so a Studio-vs-
+// Go/CSS lifecycle divergence trips this gate exactly like the paper surface does.
+const studioText = ARTIFACTS.find((a) => a.path.endsWith("layouts/root.html.heex")).build();
+const studioLife = {}; // state -> [lightHex, darkHex] (:root light first, dark block second)
+for (const m of studioText.matchAll(/--life-(\w+): (#[0-9a-fA-F]{6});/g)) {
+  (studioLife[m[1]] ||= []).push(m[2]);
+}
+
+const tgText = ARTIFACTS.find((a) => a.path.endsWith("studio/tokens_gen.ex")).build();
+const tgLife = {}; // state -> {glyph, light, dark} from lifecycle/0 rows
+for (const m of tgText.matchAll(
+  /%\{state: "(\w+)", glyph: "([^"]*)", ascii: "[^"]*", light: "(#[0-9a-fA-F]{6})", dark: "(#[0-9a-fA-F]{6})"\}/g,
+)) {
+  tgLife[m[1]] = { glyph: m[2], light: m[3], dark: m[4] };
+}
+const tgFramesM = tgText.match(/def lifecycle_frames, do: ~w\(([^)]*)\)/);
+const tgFrames = tgFramesM ? tgFramesM[1].trim().split(/\s+/) : [];
+
 // Assertions
 const goStates = Object.keys(goLife).sort();
 const cssStates = Object.keys(cssLife).sort();
+const studioStates = Object.keys(studioLife).sort();
+const tgStates = Object.keys(tgLife).sort();
 const want = [...LIFE_ORDER].sort();
 if (goStates.join(",") !== want.join(","))
   fail(`  §6 FAIL: Go lifecycle states ${JSON.stringify(goStates)} ≠ tokens ${JSON.stringify(want)}`);
 if (cssStates.join(",") !== want.join(","))
   fail(`  §6 FAIL: CSS .bp-lg-- states ${JSON.stringify(cssStates)} ≠ tokens ${JSON.stringify(want)}`);
+if (studioStates.join(",") !== want.join(","))
+  fail(`  §6 FAIL: Studio --life-* states ${JSON.stringify(studioStates)} ≠ tokens ${JSON.stringify(want)}`);
+if (tgStates.join(",") !== want.join(","))
+  fail(`  §6 FAIL: Studio TokensGen lifecycle/0 states ${JSON.stringify(tgStates)} ≠ tokens ${JSON.stringify(want)}`);
 
 for (const s of LIFE_ORDER) {
   const g = goLife[s] || {};
   const c = cssLife[s] || [];
+  const sl = studioLife[s] || [];
+  const t = tgLife[s] || {};
   if (g.glyph !== wantGlyph[s])
     fail(`  §6 FAIL: ${s} glyph — Go ${JSON.stringify(g.glyph)} ≠ tokens ${JSON.stringify(wantGlyph[s])}`);
   if (g.light !== wantLight[s] || g.dark !== wantDark[s])
     fail(`  §6 FAIL: ${s} Go colour {${g.light},${g.dark}} ≠ tokens {${wantLight[s]},${wantDark[s]}}`);
   if (c[0] !== wantLight[s] || c[1] !== wantDark[s])
     fail(`  §6 FAIL: ${s} CSS glyph-tone {${c[0]},${c[1]}} ≠ tokens {${wantLight[s]},${wantDark[s]}} (GUI/TUI divergence)`);
+  if (sl[0] !== wantLight[s] || sl[1] !== wantDark[s])
+    fail(`  §6 FAIL: ${s} Studio --life {${sl[0]},${sl[1]}} ≠ tokens {${wantLight[s]},${wantDark[s]}} (Studio divergence)`);
+  if (t.glyph !== wantGlyph[s])
+    fail(`  §6 FAIL: ${s} Studio TokensGen glyph ${JSON.stringify(t.glyph)} ≠ tokens ${JSON.stringify(wantGlyph[s])}`);
+  if (t.light !== wantLight[s] || t.dark !== wantDark[s])
+    fail(`  §6 FAIL: ${s} Studio TokensGen colour {${t.light},${t.dark}} ≠ tokens {${wantLight[s]},${wantDark[s]}}`);
 }
 if (goFrames.join("") !== wantFrames.join(""))
   fail(`  §6 FAIL: Go braille frame-set ≠ tokens.lifecycle.in_progress.frames`);
+if (tgFrames.join("") !== wantFrames.join(""))
+  fail(`  §6 FAIL: Studio TokensGen braille frame-set ≠ tokens.lifecycle.in_progress.frames`);
 
 // done/closed must stay TEAL, distinct from status.ok green (regression tripwire).
 if (wantLight.done === tokens.color.status.ok.light)
@@ -121,7 +158,31 @@ for (const s of ["done", "closed"]) {
 }
 
 if (!failed)
-  console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
+  console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + Studio (CSS var + TokensGen) + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
+
+// ── Part C: Studio chrome type-scale parity (Decision D2) ────────────────────
+// The emitted --text-<step> / --text-<step>-lh vars in the root layout must mirror
+// tokens.type.chrome exactly (size + line-height), so the styleguide type ladder —
+// which renders straight off those vars — can never drift from the source scale.
+console.log("\ndesign/check.mjs — Part C: Studio type-scale parity");
+let typeOk = true;
+for (const step of TYPE_STEPS) {
+  const spec = tokens.type.chrome[step];
+  const reSize = new RegExp(`--text-${step}: (\\d+(?:\\.\\d+)?)px;`);
+  const reLh = new RegExp(`--text-${step}-lh: (\\d+(?:\\.\\d+)?);`);
+  const mSize = studioText.match(reSize);
+  const mLh = studioText.match(reLh);
+  if (!mSize || Number(mSize[1]) !== spec.size) {
+    fail(`  Part C FAIL: --text-${step} size ${mSize ? mSize[1] : "MISSING"} ≠ tokens.type.chrome.${step}.size ${spec.size}`);
+    typeOk = false;
+  }
+  if (!mLh || Number(mLh[1]) !== spec.lineHeight) {
+    fail(`  Part C FAIL: --text-${step}-lh ${mLh ? mLh[1] : "MISSING"} ≠ tokens.type.chrome.${step}.lineHeight ${spec.lineHeight}`);
+    typeOk = false;
+  }
+}
+if (typeOk)
+  console.log(`  ok   ${TYPE_STEPS.length} chrome type steps emit --text-* vars matching tokens.type.chrome (size + line-height)`);
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {
