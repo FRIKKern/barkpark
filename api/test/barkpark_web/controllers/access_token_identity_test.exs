@@ -112,6 +112,12 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
     org
   end
 
+  # Enrol a factor so Accounts.mfa_enrolled?/1 returns true (totp_enabled arm),
+  # opening the org-MFA gate for this user.
+  defp enroll_mfa!(user) do
+    user |> Ecto.Changeset.change(%{totp_enabled: true}) |> Repo.update!()
+  end
+
   # ── 1. NULL-owner token → CANNOT claim ──────────────────────────────────────
 
   describe "case 1 — a NULL-owner token cannot claim (fail closed)" do
@@ -295,6 +301,42 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
         |> post("/v1/auth/tokens", %{"name" => "blocked"})
 
       assert json_response(conn, 403)["error"]["code"] == "mfa_enrolment_required"
+    end
+  end
+
+  # ── 9. positive control — the gate ALLOWS an ENROLLED require_mfa user ────────
+  # The direct mirror of cases 7/8: the org-MFA gate must BLOCK the unenrolled
+  # AND ALLOW the enrolled, both asserted directly (not via ungoverned proxies).
+
+  describe "case 9 — an ENROLLED require_mfa user is allowed on both paths" do
+    test "POST /v1/access/claim → 200 (grant binds) for an enrolled session-user",
+         %{conn: conn} do
+      ws = create_workspace!()
+      user = register_user(uniq_email("mfa-ok-claim"))
+      _org = govern_require_mfa!(user, "claim-ok-#{System.unique_integer([:positive])}")
+      user = enroll_mfa!(user)
+      {grant, raw} = mint_grant(ws, user.email)
+
+      conn = conn |> bearer(user_bearer(user)) |> post("/v1/access/claim", %{"token" => raw})
+
+      assert %{"grant" => body} = json_response(conn, 200)
+      assert body["grantee_user_id"] == user.id
+      assert Access.get_grant(grant.id).grantee_user_id == user.id
+    end
+
+    test "POST /v1/auth/tokens → 201 (mints an owned token) for an enrolled user",
+         %{conn: conn} do
+      user = register_user(uniq_email("mfa-ok-mint"))
+      _org = govern_require_mfa!(user, "mint-ok-#{System.unique_integer([:positive])}")
+      user = enroll_mfa!(user)
+
+      conn =
+        conn
+        |> bearer(user_bearer(user))
+        |> post("/v1/auth/tokens", %{"name" => "allowed"})
+
+      assert %{"personal_access_token" => pat} = json_response(conn, 201)
+      assert pat["owner_user_id"] == user.id
     end
   end
 end
