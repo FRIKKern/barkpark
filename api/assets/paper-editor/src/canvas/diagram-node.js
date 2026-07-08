@@ -288,6 +288,19 @@ export const Diagram = Node.create({
         captionInput.style.display = hide ? "none" : "";
       };
 
+      // Auto-grow the source textarea to its content. A <textarea> with no `rows`
+      // defaults to ~2 lines, which CLIPS a multi-line Mermaid source behind an
+      // internal scrollbar ("it won't show the full — it has a max height"). Sizing
+      // to scrollHeight makes the whole source visible at rest; `resize: vertical`
+      // still lets a user drag it. Guarded for a detached node (scrollHeight 0 →
+      // leave the default and let the rAF/focus/input passes re-fit once laid out).
+      const fitArea = () => {
+        const prev = area.style.height;
+        area.style.height = "auto";
+        const h = area.scrollHeight;
+        area.style.height = h > 0 ? h + "px" : prev;
+      };
+
       const paint = (n) => {
         const source = (n.attrs && n.attrs.source) || "";
         const caption = (n.attrs && n.attrs.caption) || "";
@@ -297,6 +310,10 @@ export const Diagram = Node.create({
         const editable = editor.isEditable;
         area.readOnly = !editable;
         captionInput.readOnly = !editable;
+        // Size to content now and again after layout (a freshly-inserted node view
+        // may not have a measurable scrollHeight until it is attached).
+        fitArea();
+        requestAnimationFrame(fitArea);
         syncChrome();
       };
 
@@ -376,6 +393,8 @@ export const Diagram = Node.create({
       };
 
       area.addEventListener("input", scheduleWrite);
+      area.addEventListener("input", fitArea); // grow as the source is typed
+      area.addEventListener("focus", fitArea); // re-fit once definitely attached
       captionInput.addEventListener("input", scheduleWrite);
       // Keep the resting-chrome gate in step as the caption is typed / cleared.
       captionInput.addEventListener("input", syncChrome);
