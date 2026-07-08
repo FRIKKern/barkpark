@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Overflow boundary"
+    },
+    {
+      "id": "colsM8",
+      "type": "columns",
+      "columns": [
+        [
+          {
+            "id": "cA",
+            "type": "action",
+            "label": "artifactchecksum9f8e7d6c5b4a3f2e1d0c9b",
+            "priority": "primary",
+            "href": ""
+          }
+        ],
+        [
+          {
+            "id": "cB",
+            "type": "paragraph",
+            "content": [{ "type": "text", "value": "Right." }]
+          }
+        ]
+      ]
+    },
+    {
+      "id": "gridM8",
+      "type": "section",
+      "title": "Grid cell overflow",
+      "layout": { "mode": "grid", "tracks": 2 },
+      "blocks": [
+        {
+          "id": "gA",
+          "type": "action",
+          "label": "artifactchecksum9f8e7d6c5b4a3f2e1d0c9b",
+          "priority": "primary",
+          "href": ""
+        },
+        {
+          "id": "gB",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "Second cell is short." }]
+        }
+      ]
+    },
+    {
+      "id": "boardM8",
+      "type": "task-board",
+      "snapshot": [
+        { "title": "artifactchecksum9f8e7d6c5b4a3f2e1d0c9b", "status": "ready", "priority": "2" },
+        { "title": "Draft the fixture", "status": "in_progress", "priority": "1", "criteria": { "met": 1, "total": 2 } },
+        { "title": "Await review", "status": "blocked", "priority": "0", "blocked_by": 1 },
+        { "title": "Merge wave 2", "status": "done", "priority": "1" }
+      ]
+    }
+  ]
+}

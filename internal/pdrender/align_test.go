@@ -16,7 +16,7 @@ import (
 // bottom corner a column short (the class of bug a hand-authored diagram hit).
 // This is the alignment complement of the no-overflow lock: overflow catches
 // "too wide", ragged catches "walls don't meet".
-var boxFixtures = []string{"sample_m4.json", "sample_m6.json", "sample_m7.json"}
+var boxFixtures = []string{"sample_m4.json", "sample_m6.json", "sample_m7.json", "sample_m8.json"}
 
 // raggedLines returns the indices of ANSI-stripped lines whose display width is
 // neither 0 (a blank rhythm line between blocks) nor exactly w. In a box render

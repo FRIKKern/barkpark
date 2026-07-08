@@ -21,6 +21,12 @@ var overflowFixtures = []string{
 	"sample_m4.json",
 	"sample_m6.json",
 	"sample_m7.json",
+	// sample_m8 is the W2 measure-aware boundary: a wide unbreakable action label
+	// that would overflow its side-by-side track at w40/w60/w80. The Fits gate
+	// collapses the columns + grid to their verbatim stacks so nothing overflows;
+	// remove the gate (Fits→true) and the collapsed row overflows the target width
+	// (~w60), which is the anti-vacuity proof this fixture exists to make.
+	"sample_m8.json",
 }
 
 // TestNoLineOverflow is the P9/80-column guarantee and the anti-vacuity spine:
