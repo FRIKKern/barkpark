@@ -60,6 +60,7 @@
 // NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { DEBOUNCE_MS } from "../contract.js";
 
 // The TipTap node NAMES are `bpSheet` / `bpEmbed` (the canvas naming convention, like
 // bpCode/bpDiagram/bpField). The portable-doc `bpType` stays "sheet" / "embed"
@@ -414,6 +415,180 @@ export function wireAtomAccessibility(dom, { block, chipText, editor, getPos }) 
   });
 }
 
+// ── pd-ee-fleet-editors: the fleet EDIT ISLAND ────────────────────────────────
+//
+// A fleet block's AUTHORED content is editable in-canvas via a STRUCTURED ISLAND —
+// the SAME contract as the code / task-list islands: a non-PM control tree kept
+// invisible to ProseMirror by the node-view's stopEvent/ignoreMutation. The island is
+// a SIBLING of the server-paint hole, so the `bp:block-html` hook's innerHTML write
+// (into [data-bp-fleet-body]) never touches it. It mutates the carried `bpBlock` (the
+// D8 single source): an edit → setNodeMarkup(bpBlock) → run-convert emits ONE
+// patch-block{items|nodes|query} → the server REPAINTS the hole. The editor NEVER
+// hand-renders fleet markup — the preview stays 100% server-painted (D8 / rule 3).
+
+// Item-array editors: cards/notes/pipeline carry an authored array the author edits.
+// Each descriptor names the block's AUTHORITATIVE array key — the exact key the reader
+// emitter reads (render/components.ex: cards_html/notes_html read "items"; pipeline_html
+// reads "nodes"), so an edit lands on the SAME key the server repaints from. Items are
+// objects (card {title,text,tone}; note {label,lead,text}; pipeline node
+// {kind,title,detail,files,source}), edited as structured JSON in ONE <textarea> island
+// (the code-node textarea pattern): add / remove / reorder / edit are ALL expressed by
+// editing text — NO edit-only <button> chrome (rule 6 / __atom_chrome guard).
+const FLEET_ITEM_EDITORS = {
+  cards: { arrayKey: "items" },
+  notes: { arrayKey: "items" },
+  pipeline: { arrayKey: "nodes" },
+};
+
+// task-* kinds edit their QUERY (filter label) + optional id ref, not an item array.
+const FLEET_QUERY_KINDS = new Set([
+  "tasks",
+  "task-list",
+  "task-detail",
+  "task-board",
+  "roadmap",
+]);
+
+// Is this fleet kind editable in-canvas? (status-legend has no authored data;
+// asciicast/form/questionnaire are ref/complex config, left read-only in v1.)
+export function fleetKindEditable(type) {
+  return !!FLEET_ITEM_EDITORS[type] || FLEET_QUERY_KINDS.has(type);
+}
+
+// A canvas-editor local deep clone (the carried block is plain JSON, so a round-trip
+// is exact and dependency-free — keeps embed-node.js importable in pure Node).
+function cloneFleetBlock(b) {
+  return b == null ? b : JSON.parse(JSON.stringify(b));
+}
+
+// Build the fleet edit island DOM for a block. Returns { el, refresh, destroy }.
+//   onEdit(nextBlock) — called (debounced) with a fresh mutated block clone; the
+//     node-view writes it to attrs.bpBlock via setNodeMarkup, which the diff turns
+//     into ONE patch-block{items|nodes|query} → server repaint.
+//   isEditable() — gates the control (view mode leaves it read-only + hidden).
+//
+// ── ONE <textarea> island, NO buttons (rule 6 / __atom_chrome guard) ──────────
+//
+// The whole authored payload rides a SINGLE non-PM <textarea> — the exact code-node
+// island shape (stopEvent/ignoreMutation come from the node-view, so PM never sees a
+// keystroke). Editing text IS add / remove / reorder / edit: a new line adds an item,
+// a deleted line removes one, moving lines reorders, typing edits — no edit-only
+// <button> chrome. On `input` (debounced) the text is PARSED back to the block; a
+// parse that fails (a half-typed JSON) simply doesn't commit, so the last valid state
+// stands. Item kinds (cards/pipeline) edit the array as pretty JSON; notes edit as
+// newline-separated lines; task-* kinds edit `query.label` + `query.id` as one small
+// JSON object. The DOM is built lazily inside the node-view factory (references
+// `document`), so this is never called in the pure-Node harness.
+function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
+  const type = (initialBlock && initialBlock.type) || "";
+  const itemEditor = FLEET_ITEM_EDITORS[type];
+  const el = document.createElement("div");
+  el.className = "bp-fleet-edit";
+  el.setAttribute("contenteditable", "false");
+  el.setAttribute("data-test-id", `paper-fleet-editor-${type}`);
+  el.style.marginTop = "0.5rem";
+  el.style.paddingTop = "0.5rem";
+  el.style.borderTop = "1px dashed currentColor";
+  el.style.fontSize = "0.85rem";
+
+  const hint = document.createElement("div");
+  hint.style.opacity = "0.65";
+  hint.style.marginBottom = "0.25rem";
+  hint.textContent = itemEditor
+    ? "Edit items as JSON — add / remove / reorder rows"
+    : "Edit query — filter label + task id";
+  el.appendChild(hint);
+
+  const area = document.createElement("textarea");
+  area.className = "bp-fleet-edit-area";
+  area.setAttribute("spellcheck", "false");
+  area.setAttribute("aria-label", `edit ${type} content`);
+  area.rows = 6;
+  area.style.width = "100%";
+  area.style.fontFamily = "var(--paper-font-mono, monospace)";
+  el.appendChild(area);
+
+  // Serialize the current block → the textarea's text representation.
+  function toText(block) {
+    if (itemEditor) {
+      const arr = Array.isArray(block[itemEditor.arrayKey])
+        ? block[itemEditor.arrayKey]
+        : [];
+      return JSON.stringify(arr, null, 2);
+    }
+    // query kind
+    const q =
+      block.query && typeof block.query === "object" && !Array.isArray(block.query)
+        ? block.query
+        : {};
+    return JSON.stringify(q, null, 2);
+  }
+
+  // Parse the textarea text → a mutated block clone, or null when the text is not yet
+  // valid (a mid-edit JSON) — null means "don't commit, keep the last good state".
+  function toBlock(text) {
+    const next = cloneFleetBlock(initialBlock) || { type };
+    if (itemEditor) {
+      let arr;
+      try {
+        arr = JSON.parse(text);
+      } catch (_) {
+        return null;
+      }
+      if (!Array.isArray(arr)) return null;
+      next[itemEditor.arrayKey] = arr;
+      return next;
+    }
+    // query kind
+    let q;
+    try {
+      q = text.trim() === "" ? {} : JSON.parse(text);
+    } catch (_) {
+      return null;
+    }
+    if (q == null || typeof q !== "object" || Array.isArray(q)) return null;
+    next.query = Object.keys(q).length ? q : null;
+    return next;
+  }
+
+  let textTimer = null;
+  const onInput = () => {
+    if (!isEditable()) return;
+    if (textTimer) clearTimeout(textTimer);
+    const text = area.value;
+    textTimer = setTimeout(() => {
+      textTimer = null;
+      const next = toBlock(text);
+      if (next != null) onEdit(next);
+    }, DEBOUNCE_MS);
+  };
+  area.addEventListener("input", onInput);
+
+  const paint = (block) => {
+    area.readOnly = !isEditable();
+    // Never clobber the field while the user is actively typing in it.
+    if (document.activeElement !== area) {
+      const text = toText(block || {});
+      if (area.value !== text) area.value = text;
+    }
+  };
+  paint(initialBlock || {});
+
+  return {
+    el,
+    // Re-seed from an echo / undo. Skips while the textarea is focused (mid-edit) via
+    // the paint() activeElement guard; `focusInside` is accepted for symmetry with the
+    // other islands but paint() already protects the active field.
+    refresh: (block) => {
+      paint(block || {});
+    },
+    destroy: () => {
+      if (textTimer) clearTimeout(textTimer);
+      area.removeEventListener("input", onInput);
+    },
+  };
+}
+
 // The `bpFleet` node. Shares the read-only atom SCHEMA (atom, group:"block",
 // selectable, defining, the id/type/bpBlock attrs, the data-bp-type parse anchor)
 // but overrides the NodeView to render a server-paint hole instead of a chip. The
@@ -480,6 +655,72 @@ export const Fleet = Node.create({
       body.appendChild(chip);
       dom.appendChild(body);
 
+      // pd-ee-fleet-editors: the structured EDIT ISLAND, a SIBLING of the paint hole
+      // (so the server hook's innerHTML write into [data-bp-fleet-body] never touches
+      // it). Built ONLY for an editable fleet kind (cards/notes/pipeline items, task-*
+      // query) that is NOT template-locked; other kinds stay purely read-only. An edit
+      // writes the mutated block to attrs.bpBlock via setNodeMarkup → run-convert emits
+      // ONE patch-block → the server repaints the hole (D8: still 100% server-painted).
+      // The editor is revealed on hover / focus (resting-chrome, editability-gated),
+      // exactly like the code / task-list config islands.
+      const isEditableKind = fleetKindEditable(bpType) && !isBlockLocked(block);
+      let fleetEditor = null;
+      let hovered = false;
+      let focused = false;
+      const syncReveal = () => {
+        if (!fleetEditor) return;
+        fleetEditor.el.style.display =
+          editor.isEditable && (hovered || focused) ? "" : "none";
+      };
+      const onEnter = () => {
+        hovered = true;
+        syncReveal();
+      };
+      const onLeave = () => {
+        hovered = false;
+        syncReveal();
+      };
+      const onFocusIn = () => {
+        focused = true;
+        syncReveal();
+      };
+      const onFocusOut = (e) => {
+        // Focus-within guard (code/task-list pattern): keep revealed while focus only
+        // MOVES within the atom (relatedTarget still inside).
+        if (e && e.relatedTarget && dom.contains(e.relatedTarget)) return;
+        focused = false;
+        syncReveal();
+      };
+      if (isEditableKind) {
+        fleetEditor = buildFleetEditor(block, {
+          isEditable: () => editor.isEditable,
+          onEdit: (nextBlock) => {
+            if (!editor.isEditable) return;
+            if (typeof getPos !== "function") return;
+            const pos = getPos();
+            if (pos == null) return;
+            const cur = editor.state.doc.nodeAt(pos);
+            if (!cur) return;
+            editor
+              .chain()
+              .command(({ tr }) => {
+                tr.setNodeMarkup(pos, undefined, {
+                  ...cur.attrs,
+                  bpBlock: nextBlock,
+                });
+                return true;
+              })
+              .run();
+          },
+        });
+        dom.appendChild(fleetEditor.el);
+        dom.addEventListener("mouseenter", onEnter);
+        dom.addEventListener("mouseleave", onLeave);
+        dom.addEventListener("focusin", onFocusIn);
+        dom.addEventListener("focusout", onFocusOut);
+        syncReveal();
+      }
+
       // pdd-t12c: keyboard + screen-reader parity — a tab stop with the fleet block's
       // human name + locked-state announcement, and Enter/Space → select (→ Backspace
       // deletes). The painted reader HTML keeps ALL its own interactivity: interior
@@ -510,6 +751,10 @@ export const Fleet = Node.create({
           dom.setAttribute("aria-label", atomAriaLabel(fleetChipLabel(b), b));
           if (isBlockLocked(b)) dom.setAttribute("data-bp-locked", "true");
           else dom.removeAttribute("data-bp-locked");
+          // Re-seed the editor from an echo / undo WITHOUT clobbering an in-progress
+          // edit (refresh no-ops when the block is content-equal or focus is inside).
+          if (fleetEditor) fleetEditor.refresh(b, focused);
+          syncReveal();
           return true;
         },
         // PM must NOT turn a click inside the painted body into a transaction — a
@@ -518,6 +763,15 @@ export const Fleet = Node.create({
         // PM must NOT read the body's DOM mutations back into the document — the
         // hook mutates the paint hole's innerHTML directly and PM must ignore it.
         ignoreMutation: () => true,
+        destroy: () => {
+          if (fleetEditor) {
+            fleetEditor.destroy();
+            dom.removeEventListener("mouseenter", onEnter);
+            dom.removeEventListener("mouseleave", onLeave);
+            dom.removeEventListener("focusin", onFocusIn);
+            dom.removeEventListener("focusout", onFocusOut);
+          }
+        },
       };
     };
   },

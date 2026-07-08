@@ -2309,6 +2309,41 @@ function fleetNodeToBlock(node, id) {
   return { id, type: attrs.bpType || "tasks" };
 }
 
+// The mutable-fields PATCH for an EDITABLE fleet block (pd-ee-fleet-editors). UNLIKE
+// the read-only sheet/embed atom (which never patches), a fleet block carries authored
+// content — cards/notes/pipeline items, task-* query/id config — on `bpBlock`, edited
+// by the node-view's structured island. patch.ex's patch-block is a SHALLOW Map.merge,
+// so we emit the block's EDITABLE PAYLOAD: every key EXCEPT the immutable `id`/`type`
+// (patch.ex re-pins both and strips locked/role anyway). The shallow merge REPLACES the
+// edited arrays/query (e.g. { cards:[…] } / { items:[…] } / { stages:[…] } /
+// { query:{…} }) and leaves unknown sibling keys intact. Deep-cloned so the emitted op
+// never shares a ref with the node attr.
+function fleetNodeToPatch(node) {
+  const block = (node && node.attrs && node.attrs.bpBlock) || {};
+  const patch = {};
+  for (const key of Object.keys(block)) {
+    if (key === "id" || key === "type") continue;
+    patch[key] = deepClone(block[key]);
+  }
+  return patch;
+}
+
+// True when a fleet block's carried content changed. Canonical (key-order-insensitive)
+// compare of the bpBlock with `id` STRIPPED (id is STRUCTURAL — a reorder/move changes
+// it, not the content), so an authored edit (a card added, a note's text changed, a
+// pipeline stage removed, a task query relabelled) flips it while a pure reorder does
+// NOT — an UNEDITED fleet block emits ZERO ops (D3 byte-stability). `type` stays in the
+// key (it never changes; keeping it self-documents the compared shape).
+function fleetNodeChanged(prevNode, nextNode) {
+  return stableFleetKey(prevNode) !== stableFleetKey(nextNode);
+}
+
+function stableFleetKey(node) {
+  const block = (node && node.attrs && node.attrs.bpBlock) || {};
+  const { id, ...rest } = block;
+  return canonicalJSON(rest);
+}
+
 // ── figure ⇄ canvas server-painted-child + editable-caption atom ─────────────
 //
 // The `figure` block { id, type:"figure", caption?:<string>, child:<BLOCK> } ⇄ the
@@ -3167,8 +3202,7 @@ export function runToOps(prevBlocks, nextDoc) {
       entry.isNew ||
       entry.isOpaque ||
       entry.isAtom ||
-      entry.isReadOnlyAtom ||
-      entry.isFleet
+      entry.isReadOnlyAtom
     )
       continue;
     const prevBlock = prevById.get(entry.id);
@@ -3289,6 +3323,30 @@ export function runToOps(prevBlocks, nextDoc) {
           op: "patch-block",
           id: entry.id,
           patch: figureNodeToPatch(entry.node),
+        });
+      }
+      continue;
+    }
+
+    if (entry.isFleet) {
+      // Canvas FLEET atom (pd-ee-fleet-editors): the authored content — cards/notes/
+      // pipeline items and the task-* query/id config — rides VERBATIM on `bpBlock`
+      // and is edited by the node-view's structured EDIT ISLAND (embed-node.js). This
+      // is the read-only-atom shape made EDITABLE (like task-list vs the snapshot
+      // fleet): the whole block still round-trips on bpBlock, but a structured edit
+      // mutates it via setNodeMarkup → this diff. Emit ONE patch-block carrying the
+      // block's EDITABLE PAYLOAD (every key EXCEPT the immutable id/type) when the
+      // carried block changed; patch.ex's SHALLOW Map.merge REPLACES the edited
+      // arrays/query and leaves unknown sibling keys intact, then the server repaints
+      // the fleet HTML (shared/paper.ex push_block_renders / @fleet_render_types — the
+      // ONE-producer contract / D8: the canvas never hand-renders fleet markup). An
+      // UNEDITED fleet block emits ZERO ops (canonical compare on bpBlock with id
+      // ignored — the D3 byte-stability guarantee).
+      if (fleetNodeChanged(prevNode, entry.node)) {
+        ops.push({
+          op: "patch-block",
+          id: entry.id,
+          patch: fleetNodeToPatch(entry.node),
         });
       }
       continue;

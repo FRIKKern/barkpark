@@ -84,16 +84,76 @@ check("runToOps: an unedited run of fleet + prose blocks emits ZERO ops (D3 byte
   assert.deepEqual(ops, [], "a doc that isn't edited produces zero ops");
 });
 
-check("runToOps: a fleet block NEVER rides a patch-block, even when its carried block is poked", () => {
-  const block = { id: "x", type: "cards", cards: [{ title: "orig" }] };
+// ── pd-ee-fleet-editors: a fleet block is now EDITABLE — a structured edit to its
+//    carried bpBlock (what the node-view island writes via setNodeMarkup) rides ONE
+//    patch-block carrying the edited payload; the server repaints the fleet HTML. ─────
+
+// Helper: project a fleet block to a doc, then apply the given bpBlock mutation to the
+// (sole) fleet node — EXACTLY what the node-view's structured island does on an edit
+// (setNodeMarkup writing the mutated block back onto attrs.bpBlock). Returns the ops.
+function editFleet(block, mutate) {
   const doc = runToTiptap([block]);
-  // Simulate an out-of-band bpBlock difference (the live editor never edits it, but
-  // prove the diff layer refuses to emit a value/content patch for a read-only atom).
-  doc.content[0].attrs.bpBlock = { type: "cards", cards: [{ title: "CHANGED" }] };
+  const next = JSON.parse(JSON.stringify(doc.content[0].attrs.bpBlock));
+  mutate(next);
+  doc.content[0].attrs.bpBlock = next;
+  return runToOps([block], doc);
+}
+
+// NOTE the authoritative content keys (render/components.ex): cards & notes read
+// `items`; pipeline reads `nodes` — an edit must land on the SAME key the reader
+// repaints from, so the fixtures use the real keys the emitters consume.
+check("runToOps: editing cards items emits ONE patch-block{items} (add/remove/edit persists)", () => {
+  const block = { id: "x", type: "cards", items: [{ title: "orig", text: "b" }] };
+  const ops = editFleet(block, (b) => {
+    b.items[0].title = "CHANGED";
+    b.items.push({ title: "added", text: "n" }); // add
+  });
+  const patches = ops.filter((o) => o.op === "patch-block");
+  assert.equal(patches.length, 1, "exactly one patch-block");
+  assert.equal(patches[0].id, "x", "keyed by the block id");
+  assert.deepEqual(
+    patches[0].patch.items,
+    [{ title: "CHANGED", text: "b" }, { title: "added", text: "n" }],
+    "the edited items array rides the patch verbatim"
+  );
+  // The immutable id/type are NEVER in the patch (patch.ex re-pins them).
+  assert.equal(patches[0].patch.id, undefined, "id is not patched");
+  assert.equal(patches[0].patch.type, undefined, "type is not patched");
+});
+
+check("runToOps: editing notes items emits patch-block{items}", () => {
+  const block = { id: "n", type: "notes", items: [{ label: "A", text: "one" }, { label: "B", text: "two" }] };
+  const ops = editFleet(block, (b) => b.items.splice(0, 1)); // remove first
+  const patch = ops.find((o) => o.op === "patch-block");
+  assert.ok(patch, "a patch-block is emitted");
+  assert.deepEqual(patch.patch.items, [{ label: "B", text: "two" }], "the shortened items array rides the patch");
+});
+
+check("runToOps: editing pipeline nodes emits patch-block{nodes}", () => {
+  const block = { id: "p", type: "pipeline", nodes: [{ kind: "gate", title: "Build" }] };
+  const ops = editFleet(block, (b) => (b.nodes[0].title = "Ship"));
+  const patch = ops.find((o) => o.op === "patch-block");
+  assert.ok(patch, "a patch-block is emitted");
+  assert.deepEqual(patch.patch.nodes, [{ kind: "gate", title: "Ship" }], "the edited nodes ride the patch");
+});
+
+check("runToOps: editing a task-* query/id config emits patch-block{query}", () => {
+  const block = { id: "t", type: "task-board", query: { label: "old" }, columns: [] };
+  const ops = editFleet(block, (b) => (b.query.label = "new"));
+  const patch = ops.find((o) => o.op === "patch-block");
+  assert.ok(patch, "a patch-block is emitted for a task-* config edit");
+  assert.deepEqual(patch.patch.query, { label: "new" }, "the edited query rides the patch");
+  // The shallow merge must not lose the sibling config it did not touch.
+  assert.deepEqual(patch.patch.columns, [], "untouched sibling keys still ride the coarse payload");
+});
+
+check("runToOps: an UNEDITED fleet block (even when its node is re-projected) emits ZERO patch-block (D3)", () => {
+  const block = { id: "x", type: "cards", cards: [{ title: "orig" }] };
+  const doc = runToTiptap([block]); // no mutation
   const ops = runToOps([block], doc);
   assert.ok(
     !ops.some((o) => o.op === "patch-block"),
-    "no patch-block is emitted for a fleet block (read-only, never patched)"
+    "an untouched fleet block still emits no patch-block"
   );
 });
 
