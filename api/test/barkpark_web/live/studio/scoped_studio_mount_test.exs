@@ -382,9 +382,12 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
   # (a signed-in USER who is NOT a tenancy member) mounts the scoped Studio with
   # the Layer-2 read-narrowing seam wired, and a read-only grant's writes gated.
   # Uses ws_a (NON-Default) so the anonymous-Default allowance can't mask the
-  # grant arm — the grant is the ONLY admission path. Admission requires the
-  # mounted scope ⊆ grant, so only a workspace-covering grant admits; narrower
-  # grants (project/type/doc) are fail-closed at the dead render.
+  # grant arm — the grant is the ONLY admission path. Admission validates the
+  # MOUNTED DESK scope (workspace + project + dataset from the URL) against the
+  # grant via `Access.admits_desk?/3` (ag-…-subscope): a project/dataset/type/
+  # doc-scoped grantee mounts the desk AT OR UNDER its grant, and
+  # `scope_to_grants` narrows the rows to the grant. Mounting a desk BROADER
+  # than the grant (a sibling/parent scope) is still fail-closed (no widen).
   describe "grant-scoped Studio access (airdrop-grants ag-enforcement)" do
     setup do
       # A global `post` schema so `new-document` has a type to create.
@@ -420,12 +423,11 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       ws_a: ws_a,
       proj_a: proj_a
     } do
-      # Desk-level document narrowing is UNOBSERVABLE by construction: admission
-      # requires the mounted scope ⊆ grant, so every row the desk reads is
-      # already inside the grant. The load-bearing wiring is therefore the
-      # `:grant_scoped_read` flag + grant-bearing `caller_context` on the socket
-      # — `ScopeHelpers.scope_opts/1` threads them into `Content.Query`, and
-      # `access_enforcement_test` proves the flag→row-narrowing correctness.
+      # The load-bearing wiring: the `:grant_scoped_read` flag + grant-bearing
+      # `caller_context` on the socket — `ScopeHelpers.scope_opts/1` threads them
+      # into `Content.Query`. The OBSERVABLE consequence (a sub-scoped grantee
+      # sees EXACTLY the grant's rows) is proven by real row identity in the
+      # "observable narrowing" test below; here we pin the seam is present.
       {user, conn} = grantee_session(conn)
       grant = bind_grant!(ws_a, user, %{capabilities: ["read"]})
 
@@ -453,26 +455,83 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       assert conn.status == 403
     end
 
-    test "narrower-than-workspace — a PROJECT-scoped grant on ws_A does NOT admit ws_A", %{
+    test "POSITIVE — a project/dataset/type-scoped grantee MOUNTS its own desk (200, not 403)", %{
       conn: conn,
       ws_a: ws_a,
       proj_a: proj_a
     } do
-      # The AC#2 reframe (desk narrowing unobservable) rests on this invariant:
-      # admission validates against the BARE workspace scope, so a grant with a
-      # non-nil sub-level (project/type) is NOT contained by `%{workspace_id}`
-      # and is denied — even in the SAME workspace it names. If admission is
-      # ever loosened to thread sub-scope into `Access.validate`, this test
-      # breaks LOUDLY (the grantee would be admitted → 200 instead of 403).
+      # The ag-…-subscope loosening: admission now validates the MOUNTED DESK
+      # scope (ws_A + proj_A + dataset) against the grant via
+      # `Access.admits_desk?/3`. A grant scoped to (proj_A, dataset, type post)
+      # admits proj_A's desk — the type is BELOW desk granularity, so it is
+      # auto-satisfied at admission and narrowed at read time. (Before the
+      # loosening this exact grant 403'd at the dead render.)
       {user, conn} = grantee_session(conn)
 
       bind_grant!(ws_a, user, %{
         project_id: proj_a.id,
+        dataset: @dataset,
         type: "post",
         capabilities: ["read"]
       })
 
-      conn = get(conn, scoped_url(ws_a, proj_a))
+      {:ok, _view, html} = live(conn, scoped_url(ws_a, proj_a))
+      assert html =~ "pane-layout"
+    end
+
+    test "OBSERVABLE NARROWING — the admitted sub-scoped grantee sees EXACTLY the grant's rows", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # The row-identity test #1398 deferred as unobservable-while-ws-wide is now
+      # MANDATORY: the desk is sub-scoped AND the grant is sub-scoped, so
+      # `scope_to_grants` is load-bearing. Grant = (proj_A, dataset, type post).
+      # Seed IN-grant + OUT-of-grant rows on every ladder axis, mount the desk,
+      # and read through the SOCKET's real scope seam.
+      {user, conn} = grantee_session(conn)
+      proj_other = create_project!(ws_a, "scoped-pa-narrow-other")
+
+      {:ok, doc_in} = create_document_in!(ws_a, proj_a, "post", %{"title" => "in"}, @dataset)
+      {:ok, _out_type} = create_document_in!(ws_a, proj_a, "note", %{"title" => "wrong-type"}, @dataset)
+      {:ok, _out_ds} = create_document_in!(ws_a, proj_a, "post", %{"title" => "wrong-ds"}, "other")
+      {:ok, _out_proj} = create_document_in!(ws_a, proj_other, "post", %{"title" => "wrong-proj"}, @dataset)
+
+      bind_grant!(ws_a, user, %{
+        project_id: proj_a.id,
+        dataset: @dataset,
+        type: "post",
+        capabilities: ["read"]
+      })
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+      opts = BarkparkWeb.ScopeHelpers.scope_opts(:sys.get_state(view.pid).socket)
+
+      # The granted type: EXACTLY the in-grant post, by real doc_id identity —
+      # the wrong-dataset and wrong-project posts are filtered out.
+      assert Enum.map(Content.list_documents("post", @dataset, opts), & &1.doc_id) ==
+               [doc_in.doc_id]
+
+      # The un-granted type: EMPTY. This is the load-bearing assertion — if
+      # `scope_to_grants` were a no-op the desk query would surface the note.
+      assert Content.list_documents("note", @dataset, opts) == []
+    end
+
+    test "NO WIDEN — a project-scoped grant does NOT admit a SIBLING project's desk (403)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # The former `narrower-than-workspace` tripwire, re-aimed: admission is at
+      # the mounted desk scope, so a grant scoped to proj_A admits proj_A's desk
+      # (the POSITIVE test above) but must NEVER admit a sibling project's desk —
+      # that desk is OUTSIDE the grant. Fail-closed at the dead render.
+      {user, conn} = grantee_session(conn)
+      proj_a2 = create_project!(ws_a, "scoped-pa-nowiden")
+
+      bind_grant!(ws_a, user, %{project_id: proj_a.id, capabilities: ["read"]})
+
+      conn = get(conn, scoped_url(ws_a, proj_a2))
       assert conn.status == 403
     end
 
