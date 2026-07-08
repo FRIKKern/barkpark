@@ -208,8 +208,35 @@ defmodule Barkpark.Tasks.Board do
       next_criterion: next_criterion(content),
       description_excerpt: excerpt(Map.get(content, "description")),
       design_doc: string_presence(Map.get(content, "design_doc")),
+      criteria_list: criteria_list(content),
       updated_at: doc.updated_at
     }
+  end
+
+  # The card-sized criteria CHECKLIST — text + met only (evidence stays in the
+  # peek), capped at projection so a criteria-heavy task never fattens
+  # cards_by_id. nil when the task has none.
+  @criteria_list_cap 8
+  defp criteria_list(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) and list != [] ->
+        list
+        |> Enum.take(@criteria_list_cap)
+        |> Enum.with_index(1)
+        |> Enum.map(fn
+          {%{} = entry, i} ->
+            %{
+              text: string_presence(entry["criterion"]) || "criterion #{i}",
+              met: entry["met"] == true
+            }
+
+          {_other, i} ->
+            %{text: "criterion #{i}", met: false}
+        end)
+
+      _ ->
+        nil
+    end
   end
 
   # The card-sized slice of a task's markdown description — enough to READ on
@@ -396,6 +423,7 @@ defmodule Barkpark.Tasks.Board do
       next_criterion: next_criterion(content),
       description_excerpt: excerpt(Map.get(content, "description")),
       design_doc: string_presence(Map.get(content, "design_doc")),
+      criteria_list: criteria_list(content),
       updated_at: msg_doc.updated_at
     }
   end
@@ -806,9 +834,10 @@ defmodule Barkpark.Tasks.Board do
         color_role: c.color_role,
         glyph: c.glyph,
         worker: c.worker,
-        # The ONGOING task's text reads on the card itself (wave 19): only
-        # in-flight rows carry their excerpt — anything more is noise.
-        desc: (c.col == :in_progress && c[:description_excerpt]) || nil
+        # The ONGOING task's text + criteria read on the card itself (waves
+        # 19-20): only in-flight rows carry them — anything more is noise.
+        desc: (c.col == :in_progress && c[:description_excerpt]) || nil,
+        crits: (c.col == :in_progress && c[:criteria_list]) || nil
       }
 
       [row | family_walk(index, c.doc_id, depth + 1, MapSet.put(seen, c.doc_id))]

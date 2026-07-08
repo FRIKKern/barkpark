@@ -1569,6 +1569,26 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         display: -webkit-box; -webkit-box-orient: vertical;
         -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere;
       }
+      /* Wave 20: the ongoing task's acceptance CHECKLIST inline — met rows
+         dim, open rows bright; the exact "what's left" without a click. */
+      .bp-crits {
+        list-style: none; margin: 0; padding: 0; flex: 0 0 auto;
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      .bp-crits li {
+        display: flex; align-items: flex-start; gap: 6px;
+        font-size: 11.5px; line-height: 1.45; color: var(--text);
+      }
+      .bp-crits li > .gi { font-size: 10.5px; margin-top: 1px; }
+      .bp-crits-t {
+        min-width: 0; overflow: hidden; display: -webkit-box;
+        -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+        overflow-wrap: anywhere;
+      }
+      .bp-crits li.is-met { color: var(--muted-text); }
+      .bp-crits li.is-met .bp-crits-t { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted-text) 45%, transparent); }
+      .bp-crits--row { margin: 3px 0 2px; padding-left: 20px; }
+
       .bp-paper { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, var(--border)); }
       .bp-paper:hover { color: var(--info); }
       .bp-peek-paper {
@@ -2540,6 +2560,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           no brief — add a description or link a design paper
         </p>
 
+        <ul
+          :if={card.lifecycle_status == "in_progress" && card[:criteria_list]}
+          class="bp-crits"
+          data-role="card-criteria"
+        >
+          <li :for={c <- card.criteria_list} class={c.met && "is-met"} data-role="card-criterion">
+            <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
+              <%= if c.met, do: "✓", else: "○" %>
+            </span>
+            <span class="bp-crits-t"><%= c.text %></span>
+          </li>
+        </ul>
+
         <p
           :if={card.col == :in_progress && !card[:family] && focus_of(card)}
           class="bp-focus"
@@ -2568,6 +2601,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                 <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
               </div>
               <p :if={row[:desc]} class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
+              <ul :if={row[:crits]} class="bp-crits bp-crits--row" data-role="family-criteria">
+                <li :for={c <- row.crits} class={c.met && "is-met"} data-role="family-criterion">
+                  <span
+                    class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")}
+                    aria-hidden="true"
+                  >
+                    <%= if c.met, do: "✓", else: "○" %>
+                  </span>
+                  <span class="bp-crits-t"><%= c.text %></span>
+                </li>
+              </ul>
             </li>
             <li :if={card.family.more > 0} class="bp-fam-more" data-role="family-more">
               + <%= card.family.more %> more inside
