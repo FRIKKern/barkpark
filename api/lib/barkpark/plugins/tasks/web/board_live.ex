@@ -110,6 +110,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   criterion. Any card with children shows a `done/total sub` lineage pill
   (organizer-derived from `parent_id` over the same corpus).
 
+  ## Family cards (wave 16)
+
+  The default (ungrouped, unfiltered) board folds every task whose parent is
+  on the board INTO its root's card — fewer, larger cards, zero duplication.
+  A family card carries its mini-tree (children + grandchildren, in-flight
+  first, capped with an explicit "+N more inside"), the whole-subtree tally
+  in its sub pill, and is PLACED by activity: a live root with any in-flight
+  descendant sits in In Progress while keeping its own honest glyph. Family
+  rows are display-only — the card click peeks the ROOT; the peek's tree is
+  where you hop. Momentum stays task-level; grouped/filtered views stay
+  per-task (the drill-down). Dragging a family card restages the ROOT task
+  only — an escalated card's illegal drops refuse via the same fences.
+
   ## Task peek (wave 13)
 
   A card click opens a read-only right-hand inspector over the live board —
@@ -1416,6 +1429,31 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         background: var(--muted-surface); color: var(--muted-text);
       }
       .bp-sub--all-done { color: var(--ok); background: var(--ok-soft); }
+      /* Family cards (wave 16): fewer, LARGER cards — the family's mini-tree
+         lives inside the root's card, so nothing renders twice. */
+      .bp-fam {
+        list-style: none; margin: 9px 0 0; padding: 8px 0 0;
+        border-top: 1px solid var(--border);
+        display: flex; flex-direction: column; gap: 4px;
+      }
+      .bp-fam-row {
+        display: flex; align-items: center; gap: 6px; min-width: 0;
+        padding-left: calc((var(--d) - 1) * 14px);
+        font-size: 12px;
+      }
+      .bp-fam-row .gi { font-size: 11px; }
+      .bp-fam-t {
+        flex: 1 1 auto; min-width: 0; color: var(--text); opacity: 0.9;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-fam-more {
+        padding-left: 20px; font-size: 11px; color: var(--muted-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .bp-board[data-family] > .bp-col { flex: 0 0 380px; width: 380px; }
+      .bp-board[data-family] > .bp-col[data-col="in_progress"] {
+        flex: 0 0 440px; width: 440px;
+      }
 
       /* Honest window note — the done ledger shows the newest slice; the full
          count never silently disappears. */
@@ -1749,6 +1787,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                     lane={lane}
                     last_change={@last_change}
                     done_overflow={0}
+                    family={false}
                     id={"bp-board-lane-" <> lane_dom_id(lane.key)}
                   />
                 </section>
@@ -1776,6 +1815,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               lane={hd(@view.lanes)}
               last_change={@last_change}
               done_overflow={done_overflow(@view, @board)}
+              family={@view[:family?] == true}
               id="bp-projects-board"
             />
           <% end %>
@@ -1916,7 +1956,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # renders (grouped mode stacks several of these, each with its own hook id).
   defp board_grid(assigns) do
     ~H"""
-    <div id={@id} class="bp-board" data-role="board" phx-hook="BarkparkBoardDrag">
+    <div
+      id={@id}
+      class="bp-board"
+      data-role="board"
+      data-family={@family && "true"}
+      phx-hook="BarkparkBoardDrag"
+    >
       <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
         <h2 class="bp-col-h">
           <span class={"gi gi--#{col}"} aria-hidden="true"><%= col_glyph(col) %></span>
@@ -1953,7 +1999,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             </span>
           </div>
 
-          <p :if={col == :in_progress && focus_of(card)} class="bp-focus" data-role="focus">
+          <p
+            :if={col == :in_progress && !card[:family] && focus_of(card)}
+            class="bp-focus"
+            data-role="focus"
+          >
             <span class="bp-focus-k">now</span>
             <span class="bp-focus-t"><%= focus_of(card).title %></span>
             <span :if={focus_of(card).worker} class="bp-focus-w">
@@ -1961,18 +2011,39 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             </span>
           </p>
 
+          <ul :if={col != :done && card[:family]} class="bp-fam" data-role="family">
+            <li
+              :for={row <- card.family.rows}
+              class="bp-fam-row"
+              style={"--d: #{row.depth};"}
+              data-role="family-row"
+              data-doc-id={row.doc_id}
+            >
+              <span :if={row.depth > 1} class="bp-tree-twig" aria-hidden="true">└</span>
+              <span class={"gi gi--#{row.color_role}"} aria-hidden="true"><%= glyph_text(row) %></span>
+              <span class="bp-fam-t"><%= row.title || row.doc_id %></span>
+              <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
+            </li>
+            <li :if={card.family.more > 0} class="bp-fam-more" data-role="family-more">
+              + <%= card.family.more %> more inside
+            </li>
+          </ul>
+
           <div :if={col != :done} class="bp-meta">
             <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
               P<%= card.priority %>
             </span>
             <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
             <span
-              :if={card[:sub]}
-              class={["bp-sub", card[:sub] && card.sub.done == card.sub.total && "bp-sub--all-done"]}
+              :if={family_tally(card)}
+              class={[
+                "bp-sub",
+                family_tally(card).done == family_tally(card).total && "bp-sub--all-done"
+              ]}
               data-role="subtasks"
               title="subtasks done / total"
             >
-              <%= card.sub.done %>/<%= card.sub.total %> sub
+              <%= family_tally(card).done %>/<%= family_tally(card).total %> sub
             </span>
             <span :for={label <- Enum.take(card.labels, 2)} class="bp-label" data-role="label">
               <%= label %>
@@ -2362,6 +2433,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp crit_pct(%{met: met, total: total}) when total > 0, do: round(met / total * 100)
   defp crit_pct(_), do: 0
 
+  # The card pill's tally: the WHOLE-subtree stats on a family card (wave 16),
+  # the direct-children sub summary otherwise.
+  defp family_tally(card) do
+    case card[:family] do
+      %{stats: stats} -> stats
+      _ -> card[:sub]
+    end
+  end
+
   # An in-flight card's focus line — the step being worked RIGHT NOW (wave 12,
   # the TUI activity-focus read): the in-flight subtask (title + its worker)
   # when one exists, else the first unmet acceptance criterion. Nil renders no
@@ -2393,9 +2473,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # honest at the column level: the window never silently shrinks history.
   defp done_overflow(%{filtered?: true}, _board), do: 0
 
-  defp done_overflow(view, board) do
-    shown = view.lanes |> hd() |> Map.get(:columns, %{}) |> Map.get(:done, []) |> length()
-    max(board.done_total - shown, 0)
+  defp done_overflow(view, _board) do
+    lane = hd(view.lanes)
+    shown = lane |> Map.get(:columns, %{}) |> Map.get(:done, []) |> length()
+    max((lane[:done_total] || 0) - shown, 0)
   end
 
   defp gh_href(%{"repo" => repo, "issue" => issue})

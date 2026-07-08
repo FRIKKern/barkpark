@@ -795,7 +795,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   end
 
   describe "Board.view/2 (pure, wave 4)" do
-    test "group_by :none with no filters is a byte-identical passthrough of the flat board" do
+    test "group_by :none with no filters is the family view — parentless corpus folds 1:1" do
       now = ~U[2026-07-07 12:00:00Z]
 
       board =
@@ -812,14 +812,85 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       refute v.grouped?
       refute v.filtered?
+      assert v.family?
       assert length(v.lanes) == 1
       lane = hd(v.lanes)
-      # the single lane wraps board.columns VERBATIM (zero-cost passthrough).
-      assert lane.columns == board.columns
+      # a corpus with NO parent links folds 1:1 — same buckets, every card a
+      # childless family root (family: nil), placement unchanged.
+      strip = fn cols ->
+        Map.new(cols, fn {k, cs} -> {k, Enum.map(cs, &Map.delete(&1, :family))} end)
+      end
+
+      assert strip.(lane.columns) == board.columns
       assert lane.done_total == board.done_total
       assert lane.counts[:done] == board.done_total
-      # momentum is board.momentum UNCHANGED (D13).
+      # momentum is board.momentum UNCHANGED (D13) — always task-level.
       assert v.momentum == board.momentum
+    end
+
+    test "the family view folds children into their root's card and escalates by activity" do
+      now = ~U[2026-07-07 12:00:00Z]
+
+      board =
+        Board.build(
+          [
+            card("open", doc_id: "epic", title: "The epic", updated_at: now),
+            card("in_progress",
+              doc_id: "kid-a",
+              parent_id: "epic",
+              title: "Kid A",
+              worker: "w1",
+              updated_at: now
+            ),
+            card("done", doc_id: "kid-b", parent_id: "epic", title: "Kid B", updated_at: now),
+            card("open",
+              doc_id: "grandkid",
+              parent_id: "kid-a",
+              title: "Grandkid",
+              updated_at: now
+            ),
+            card("open", doc_id: "loner", title: "Loner", updated_at: now),
+            card("done",
+              doc_id: "kid-of-ghost",
+              parent_id: "no-such-parent",
+              title: "Orphan",
+              updated_at: now
+            )
+          ],
+          now: now
+        )
+
+      v = Board.view(board, now: now)
+      lane = hd(v.lanes)
+      ids = fn col -> Enum.map(lane.columns[col], & &1.doc_id) end
+
+      # children never render as their own cards — ONE card per family…
+      assert "kid-a" not in ids.(:in_progress) and "kid-a" not in ids.(:open)
+      assert "kid-b" not in ids.(:done)
+      # …the open epic ESCALATES to in_progress (a descendant is in flight)…
+      assert "epic" in ids.(:in_progress)
+      epic = Enum.find(lane.columns[:in_progress], &(&1.doc_id == "epic"))
+      # …its own state stays honest on an escalated card (open + no blockers
+      # derives READY, and that stays its glyph/color even in in_progress)…
+      assert epic.color_role == :ready
+      # …and the card carries the family: subtree stats + in-flight-first rows.
+      assert epic.family.stats == %{total: 3, done: 1, in_flight: 1}
+
+      assert [
+               %{doc_id: "kid-a", depth: 1},
+               %{doc_id: "grandkid", depth: 2},
+               %{doc_id: "kid-b", depth: 1}
+             ] =
+               Enum.map(epic.family.rows, &Map.take(&1, [:doc_id, :depth]))
+
+      # an orphan (parent not on the board) is its OWN root, never hidden.
+      assert "kid-of-ghost" in ids.(:done)
+      # done_total counts done ROOTS (kid-of-ghost), not done children.
+      assert lane.done_total == 1
+      # childless roots stay put (open + no blockers ⇒ the ready overlay).
+      assert "loner" in ids.(:ready)
+      # momentum is still TASK-level: kid-a keeps in_flight honest.
+      assert v.momentum.in_flight == 1
     end
 
     test "group_by :goal partitions into sorted swimlanes with the none-lane last" do
@@ -1136,15 +1207,38 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute html =~ "compile the parser"
     end
 
-    test "lineage shows everywhere, but focus renders only on in-flight cards",
+    test "a child never duplicates as its own board card — it rides the family row",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # ex-c2 is in flight under epic-x: NO standalone card…
+      refute html =~
+               ~s(<article class="bp-card" data-role="task-card" data-col="in_progress" data-doc-id="ex-c2")
+
+      refute html =~ ~s(data-role="task-card"
+          data-col="in_progress"
+          data-doc-id="ex-c2")
+
+      # …but exactly one family row inside the epic's card carries it.
+      assert html =~ ~s(data-role="family-row")
+      [_, fam] = String.split(html, ~s(data-role="family"), parts: 2)
+      assert fam =~ ~s(data-doc-id="ex-c2")
+      assert fam =~ "Wire the resolver"
+    end
+
+    test "lineage shows everywhere; family rows supersede the focus line",
          %{conn: conn} do
       {:ok, _view, html} = live(conn, "/admin/projects")
 
       # the ready parent still carries its lineage pill…
       assert html =~ "1/1 sub"
-      # …but only the two in-flight cards carry a focus line (epic-x via its
-      # active child, solo-w via its unmet criterion; ex-c2 has neither).
-      assert occurrences(html, ~s(data-role="focus")) == 2
+      # …the epic's activity now lives in its FAMILY rows (wave 16) — the
+      # in-flight child renders inside the epic card with its worker…
+      assert html =~ ~s(data-role="family")
+      assert html =~ ~s(data-role="family-row")
+      # …so only the childless in-flight card (solo-w) keeps a NOW focus line
+      # (its unmet criterion; a family card never doubles the same signal).
+      assert occurrences(html, ~s(data-role="focus")) == 1
     end
   end
 

@@ -602,6 +602,7 @@ defmodule Barkpark.Tasks.Board do
           facets: facets(),
           filtered?: boolean(),
           grouped?: boolean(),
+          family?: boolean(),
           empty?: boolean()
         }
 
@@ -619,9 +620,10 @@ defmodule Barkpark.Tasks.Board do
   lane's done sub-column and every lane carries per-column counts + a full
   `done_total`.
 
-  `group_by == :none` with NO filters is a ZERO-COST passthrough: a single lane
-  wrapping `board.columns` verbatim, so the ungrouped board is byte-identical to
-  wave 3.
+  `group_by == :none` with NO filters is the FAMILY view (wave 16): tasks whose
+  parent is on the board fold INTO their root's card (`family_fold/1`) — fewer,
+  larger cards, no duplication; grouped/filtered views stay per-task (the
+  drill-down).
 
   MOMENTUM HONESTY (D13): `momentum` is `board.momentum` UNCHANGED whenever the
   filters are empty (grouping alone never moves the numbers — it preserves wave-2's
@@ -639,13 +641,18 @@ defmodule Barkpark.Tasks.Board do
     facets = facets(board)
 
     if group_by == :none and not filtered? do
-      # Zero-cost passthrough — the ungrouped, unfiltered board verbatim (D15).
+      # FAMILY view (wave 16) — the default board folds every task whose
+      # parent is on the board INTO its root's card, so a family renders as
+      # ONE larger card (fewer cards, no duplication) carrying its own
+      # mini-tree. Momentum stays board.momentum — TASK-level, honest.
+      {columns, family_done_total} = family_fold(board)
+
       lane = %{
         key: :all,
         label: nil,
-        columns: board.columns,
-        counts: lane_counts(board.columns, board.done_total),
-        done_total: board.done_total
+        columns: columns,
+        counts: lane_counts(columns, family_done_total),
+        done_total: family_done_total
       }
 
       %{
@@ -654,6 +661,7 @@ defmodule Barkpark.Tasks.Board do
         facets: facets,
         filtered?: false,
         grouped?: false,
+        family?: true,
         empty?: board.cards_by_id == %{}
       }
     else
@@ -670,10 +678,116 @@ defmodule Barkpark.Tasks.Board do
         facets: facets,
         filtered?: filtered?,
         grouped?: grouped?,
+        family?: false,
         empty?: filtered_cards == []
       }
     end
   end
+
+  # ── the family fold (wave 16) ───────────────────────────────────────────────
+  #
+  # ROOTS are cards whose parent is NOT on the board (nil parent_id or an
+  # unknown/cancelled one — an orphan is its own root, never hidden). Each root
+  # becomes one family card carrying `:family` — a depth-capped mini-tree of
+  # its descendants (in-flight first) + whole-subtree stats — and is PLACED by
+  # activity: a live root with ANY in-flight descendant escalates to the
+  # in_progress column ("the epic is being worked"), else it sits in its own
+  # bucket. The card's own glyph/color keep the root's true state, so an
+  # escalated card reads "open epic, work in flight" at a glance. Grouped and
+  # filtered views deliberately stay PER-TASK — they are the drill-down.
+  @family_order [:in_progress, :ready, :open, :blocked, :done]
+  @family_row_depth 2
+  @family_row_cap 6
+
+  defp family_fold(board) do
+    cards = Map.values(board.cards_by_id)
+    ids = board.cards_by_id
+
+    index =
+      cards
+      |> Enum.filter(&is_binary(&1.parent_id))
+      |> Enum.group_by(& &1.parent_id)
+
+    family_cards =
+      cards
+      |> Enum.reject(fn c -> is_binary(c.parent_id) and Map.has_key?(ids, c.parent_id) end)
+      |> Enum.map(fn root ->
+        stats = family_stats(index, root.doc_id)
+        {rows, more} = family_rows(index, root.doc_id)
+
+        root
+        |> Map.put(:col, family_col(root.col, stats))
+        |> Map.put(:family, family_meta(rows, more, stats))
+      end)
+
+    {columns, done_full} = organize(family_cards)
+    {columns, length(done_full)}
+  end
+
+  defp family_meta([], 0, _stats), do: nil
+  defp family_meta(rows, more, stats), do: %{rows: rows, more: more, stats: stats}
+
+  # Activity placement: a live (not done/cancelled) root with in-flight
+  # descendants belongs where the work is.
+  defp family_col(col, %{in_flight: n}) when n > 0 and col in [:open, :ready, :blocked],
+    do: :in_progress
+
+  defp family_col(col, _stats), do: col
+
+  # Whole-subtree stats (every depth, cycle-safe): total, done, in-flight.
+  defp family_stats(index, root_id) do
+    descendants = family_descendants(index, [root_id], MapSet.new([root_id]), [])
+
+    %{
+      total: length(descendants),
+      done: Enum.count(descendants, &(&1.col == :done)),
+      in_flight: Enum.count(descendants, &(&1.col == :in_progress))
+    }
+  end
+
+  defp family_descendants(_index, [], _seen, acc), do: acc
+
+  defp family_descendants(index, [id | rest], seen, acc) do
+    children =
+      index
+      |> Map.get(id, [])
+      |> Enum.reject(fn c -> MapSet.member?(seen, c.doc_id) end)
+
+    seen = Enum.reduce(children, seen, fn c, s -> MapSet.put(s, c.doc_id) end)
+    family_descendants(index, Enum.map(children, & &1.doc_id) ++ rest, seen, children ++ acc)
+  end
+
+  # The card's mini-tree rows: children + grandchildren (depth cap), in-flight
+  # first at every level, capped to a handful — the peek's full tree carries
+  # the rest, and the cap is an explicit "+N more" (never silent).
+  defp family_rows(index, root_id) do
+    rows = family_walk(index, root_id, 1, MapSet.new([root_id]))
+    shown = Enum.take(rows, @family_row_cap)
+    {shown, max(length(rows) - length(shown), 0)}
+  end
+
+  defp family_walk(_index, _id, depth, _seen) when depth > @family_row_depth, do: []
+
+  defp family_walk(index, id, depth, seen) do
+    index
+    |> Map.get(id, [])
+    |> Enum.reject(fn c -> MapSet.member?(seen, c.doc_id) end)
+    |> Enum.sort_by(fn c -> {family_rank(c.col), c.title || c.doc_id} end)
+    |> Enum.flat_map(fn c ->
+      row = %{
+        doc_id: c.doc_id,
+        title: c.title,
+        depth: depth,
+        color_role: c.color_role,
+        glyph: c.glyph,
+        worker: c.worker
+      }
+
+      [row | family_walk(index, c.doc_id, depth + 1, MapSet.put(seen, c.doc_id))]
+    end)
+  end
+
+  defp family_rank(col), do: Enum.find_index(@family_order, &(&1 == col)) || 99
 
   defp normalize_group(g) when g in @group_keys, do: g
   defp normalize_group(_), do: :none
