@@ -153,16 +153,22 @@ function paperBlock() {
 }
 
 // ── surface: Studio (api/lib/barkpark_web/layouts/root.html.heex inline style) ─
-// Additive, NOT adoption: base roles are overridden by the hand-authored
-// html[data-theme] blocks that follow (order/specificity), so live consumers keep
-// today's palette; status vars are a fresh stub. Emitted inside a <style>, hence
-// CSS comment syntax and an extra 4-space indent to sit in the block.
+// ADOPTION (W2.7): base roles now cascade to the hand-authored html[data-theme]
+// blocks that follow — they no longer redefine --primary/--ring, so the emitted
+// evergreen primary is live. Light base + status sit on :root; the DARK base is
+// keyed on html[data-theme="dark"] (NOT @media) because Studio themes via a
+// data-theme toggle, so the dark base must track the attribute (mirrors
+// cloudBlock). Status dark stays under @media (unchanged). Emitted inside a
+// <style>, hence CSS comment syntax and an extra 4-space indent to sit in block.
 function studioBlock() {
   const ind = "    ";
   return [
     ind + ":root {",
     baseVars("light", ind + "  "),
     statusVars("light", ind + "  "),
+    ind + "}",
+    ind + 'html[data-theme="dark"] {',
+    baseVars("dark", ind + "  "),
     ind + "}",
     ind + "@media (prefers-color-scheme: dark) {",
     ind + "  :root {",

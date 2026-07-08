@@ -25,10 +25,17 @@
     })();
   </script>
   <title>Barkpark Studio</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
+    /* ── Inter — self-hosted chrome font (variable woff2 in priv/static/fonts/,
+       served at /fonts/ by Plug.Static). One file carries weights 100–900;
+       italic is browser-synthesised. Replaces the fonts.googleapis.com CDN
+       (unified-aesthetic W2.7). Inter, SIL OFL 1.1 — see fonts/Inter-OFL.txt. */
+    @font-face {
+      font-family: 'Inter';
+      src: url('/fonts/Inter-var.woff2') format('woff2');
+      font-weight: 100 900; font-style: normal; font-display: swap;
+    }
+
     /* ── Source Serif 4 — self-hosted (TTFs in priv/static/fonts/,
        served at /fonts/ by Plug.Static; "fonts" is in static_paths).
        The Beta editor "paper" surface uses this as its body face;
@@ -86,6 +93,18 @@
       --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
       --warn-strong: hsl(var(--warn-hsl) / 0.28);
     }
+    html[data-theme="dark"] {
+      --primary: hsl(160 42% 62%);
+      --primary-fg: hsl(163 45% 8%);
+      --bg: hsl(240 10% 3.9%);
+      --surface: hsl(240 10% 5.5%);
+      --muted-surface: hsl(240 3.7% 12%);
+      --text: hsl(0 0% 95%);
+      --muted-text: hsl(240 5% 64.9%);
+      --border: hsl(240 3.7% 15.9%);
+      --ring: hsl(160 42% 62%);
+      --accent: hsl(33 92% 60%);
+    }
     @media (prefers-color-scheme: dark) {
       :root {
         --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
@@ -101,68 +120,63 @@
     :root,
     html[data-theme="dark"] {
       color-scheme: dark;
-      --bg:            hsl(240 10% 3.9%);
-      --bg-card:       hsl(240 10% 5.5%);
-      --bg-muted:      hsl(240 3.7% 10%);
+      /* --bg, --border, --ring, --primary, --primary-fg now cascade from the
+         GENERATED block above (evergreen primary/ring). Chrome aliases below
+         reference emitted tokens — no copied hex. */
+      --bg-card:       var(--surface);
+      --bg-muted:      var(--muted-surface);
       --bg-accent:     hsl(240 3.7% 13%);
       --bg-popover:    hsl(240 10% 5.5%);
 
-      --border:        hsl(240 3.7% 15.9%);
       --border-muted:  hsl(240 3.7% 11%);
       --input:         hsl(240 3.7% 15.9%);
-      --ring:          hsl(217.2 91.2% 59.8%);
 
-      --fg:            hsl(0 0% 95%);
-      --fg-muted:      hsl(240 5% 64.9%);
+      --fg:            var(--text);
+      --fg-muted:      var(--muted-text);
       --fg-accent:     hsl(0 0% 95%);
       --fg-dim:        hsl(240 5% 45%);
 
-      --primary:       hsl(217.2 91.2% 59.8%);
-      --primary-fg:    hsl(0 0% 100%);
       --primary-hover: hsl(217.2 91.2% 50%);
 
-      --destructive:       hsl(0 62.8% 50.6%);
+      --destructive:       var(--danger);
       --destructive-fg:    hsl(0 0% 100%);
 
       /* Tinted surfaces for status banners (settings flash). */
-      --success:       hsl(142 71% 45%);
-      --success-bg:    hsl(142 50% 12%);
-      --warning:       hsl(38 92% 50%);
-      --destructive-bg: hsl(0 50% 14%);
+      --success:       var(--ok);
+      --success-bg:    var(--ok-soft);
+      --warning:       var(--warn);
+      --destructive-bg: var(--danger-soft);
     }
 
     /* zinc-based LIGHT theme (shadcn). Every token from the dark set is
        re-authored — no token falls through to a dark value in light mode. */
     html[data-theme="light"] {
       color-scheme: light;
-      --bg:            hsl(0 0% 100%);
-      --bg-card:       hsl(0 0% 100%);
-      --bg-muted:      hsl(240 4.8% 95.9%);
+      /* --bg, --border, --ring, --primary, --primary-fg cascade from the
+         GENERATED block (evergreen). Chrome aliases reference emitted tokens. */
+      --bg-card:       var(--surface);
+      --bg-muted:      var(--muted-surface);
       --bg-accent:     hsl(240 4.8% 92%);
       --bg-popover:    hsl(0 0% 100%);
 
-      --border:        hsl(240 5.9% 90%);
       --border-muted:  hsl(240 5.9% 90%);
       --input:         hsl(240 5.9% 90%);
-      --ring:          hsl(217.2 91.2% 59.8%);
 
-      --fg:            hsl(240 10% 3.9%);
-      --fg-muted:      hsl(240 3.8% 46.1%);
+      --fg:            var(--text);
+      --fg-muted:      var(--muted-text);
       --fg-accent:     hsl(240 5.9% 10%);
       --fg-dim:        hsl(240 4% 65%);
 
-      --primary:       hsl(240 5.9% 10%);
-      --primary-fg:    hsl(0 0% 98%);
       --primary-hover: hsl(240 5.9% 22%);
 
-      --destructive:       hsl(0 72.2% 50.6%);
+      --destructive:       var(--danger);
       --destructive-fg:    hsl(0 0% 98%);
 
       /* Tinted surfaces for status banners (settings flash). */
-      --success:       hsl(142 71% 35%);
-      --success-bg:    hsl(142 60% 94%);
-      --warning:       hsl(38 92% 42%);
-      --destructive-bg: hsl(0 80% 96%);
+      --success:       var(--ok);
+      --success-bg:    var(--ok-soft);
+      --warning:       var(--warn);
+      --destructive-bg: var(--danger-soft);
     }
 
     /* ── Reset ────────────────────────────────────────────────────────── */
