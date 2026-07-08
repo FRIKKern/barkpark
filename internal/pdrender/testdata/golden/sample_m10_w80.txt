@@ -1,0 +1,20 @@
+SIDE-BY-SIDE GRID WIDGETS                                                      
+─────────────────────────                                                      
+                                                                               
+▌ First  Wide lays out     ▌ Second  Each note wraps  ▌ Third Narrow it below  
+▌ The notes fan out into   ▌ inside its own cell at   ▌ the floor and the row  
+▌ columns when the         ▌ the shared cell width.   ▌ stacks again.          
+▌ surface is wide.                                                             
+                                                                               
+INGEST                     →                          EMIT                     
+Decode doc                                            Write out                
+Parse the envelope into a                             Flush the composed lines 
+block tree.                                           to the terminal.         
+source: cli                                           source: tui              
+                                                                               
+╭─────────────────────╮    ╭─────────────────────╮    ╭─────────────────────╮  
+│ Info card           │    │ OK card             │    │ Warn card           │  
+│ The info tone tints │    │ A success card      │    │ A warning card      │  
+│ the box border.     │    │ carries the ok      │    │ draws               │  
+╰─────────────────────╯    │ tone.               │    │ the eye.            │  
+                           ╰─────────────────────╯    ╰─────────────────────╯  

@@ -41,11 +41,14 @@ func itemMaps(m map[string]any, key string) []map[string]any {
 }
 
 // ── notes ────────────────────────────────────────────────────────────────────
-// {items: [{label, lead, text}]}. A vertical list of note "definition rows":
-// each item is fed to the singular noteRenderer as a synthesized `note` Block,
-// and the rows stack with a blank line between them (the RenderDoc rhythm).
-// Rows that render nothing (all-empty item) are dropped so the rhythm never
-// doubles; no non-empty item → one blank line.
+// {items: [{label, lead, text}]}. A list of note "definition rows": each item is
+// fed to the singular noteRenderer as a synthesized `note` Block. By default the
+// rows STACK with a blank line between them (the RenderDoc rhythm). A block that
+// opts INTO the grid (layout:{mode:"grid"}, gridOptIn) lays the rows SIDE-BY-SIDE
+// when the surface is wide enough — the shared Flex solver owns the divide and the
+// degrade verdict, so a narrow surface (or a note wider than its cell) falls back
+// to the byte-identical vertical stack. Rows that render nothing (all-empty item)
+// are dropped so the rhythm never doubles; no non-empty item → one blank line.
 type notesRenderer struct{}
 
 func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -54,16 +57,40 @@ func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 
+	// Full-width pass: render each item as a synthesized note; drop blank rows.
+	// This IS the verbatim stack body (rhythm-joined below) AND the source the
+	// horizontal path re-renders at cellW — kept alongside so the two agree on N.
+	kept := make([]map[string]any, 0, len(items))
 	groups := make([][]string, 0, len(items))
 	for _, item := range items {
 		lines := noteRenderer{}.Render(Block{Type: "note", Attrs: item}, ctx)
 		if isBlankGroup(lines) {
 			continue
 		}
+		kept = append(kept, item)
 		groups = append(groups, lines)
 	}
 	if len(groups) == 0 {
 		return []string{""}
+	}
+
+	// Horizontal path (opt-in via layout:{mode:"grid"}): the shared Flex solver
+	// resolves per-cell width and the side-by-side verdict (Measure owns the
+	// (W-(N-1)*gutter)/N divide). Re-render each note at cellW so its prose wraps
+	// right, then Arrange side-by-side. Falls through to the verbatim stack when
+	// narrow (Measure says stack) or a note's min-content overflows its cell (Fits).
+	if gridOptIn(b) {
+		n := len(groups)
+		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), n); sideBySide {
+			cellCtx := ctx.Deeper().WithWidth(cellW)
+			nodes := make([]Node, n)
+			for i, item := range kept {
+				nodes[i] = Node{Lines: noteRenderer{}.Render(Block{Type: "note", Attrs: item}, cellCtx), Width: cellW, Span: 1}
+			}
+			if DefaultFlex.Fits(nodes) {
+				return DefaultFlex.Arrange(nodes)
+			}
+		}
 	}
 
 	out := make([]string, 0)
@@ -77,12 +104,17 @@ func (notesRenderer) Render(b Block, ctx RenderCtx) []string {
 }
 
 // ── pipeline ───────────────────────────────────────────────────────────────────
-// {nodes: [{kind, title, detail, files, source}]}. A vertical stack of stage
-// cells: each node is fed to the singular stageRenderer as a synthesized `stage`
-// Block, and a dim `↓` connector line sits between consecutive nodes (echoing
-// the reader's `→` arrows). No connector after the last node. Nodes that render
-// nothing are dropped so a connector never dangles; no non-empty node → one
-// blank line.
+// {nodes: [{kind, title, detail, files, source}]}. Each node is fed to the
+// singular stageRenderer as a synthesized `stage` Block. By default the stages
+// STACK vertically with a dim `↓` connector line between consecutive nodes. A
+// block that opts INTO the grid (layout:{mode:"grid"}, gridOptIn) lays the stages
+// LEFT-TO-RIGHT joined by dim `→` separator COLUMNS — the reader's arrow flow —
+// when the surface is wide enough. The arrows are their OWN Flex tracks (2N-1
+// total: N stages + N-1 arrows), so the shared solver owns ALL the width math (one
+// Measure over 2N-1 uniform tracks) — no bespoke arrow-width arithmetic. Falls
+// back to the verbatim ↓ stack when narrow (Measure says stack) or a stage's
+// min-content overflows its cell (Fits). No connector after the last node; nodes
+// that render nothing are dropped so a connector never dangles; none → one blank line.
 type pipelineRenderer struct{}
 
 func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -91,16 +123,40 @@ func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 
+	kept := make([]map[string]any, 0, len(nodes))
 	groups := make([][]string, 0, len(nodes))
 	for _, node := range nodes {
 		lines := stageRenderer{}.Render(Block{Type: "stage", Attrs: node}, ctx)
 		if isBlankGroup(lines) {
 			continue
 		}
+		kept = append(kept, node)
 		groups = append(groups, lines)
 	}
 	if len(groups) == 0 {
 		return []string{""}
+	}
+
+	// Horizontal path (opt-in via layout:{mode:"grid"}): 2N-1 uniform Flex tracks
+	// (stage, arrow, stage, …). One Measure sizes every track; the arrow tracks are
+	// dim `→` separator columns. Re-render each stage at cellW, then Arrange.
+	if gridOptIn(b) {
+		nStage := len(groups)
+		tracks := 2*nStage - 1
+		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), tracks); sideBySide {
+			cellCtx := ctx.Deeper().WithWidth(cellW)
+			arrow := ctx.Theme.Dim.Render("→")
+			seq := make([]Node, 0, tracks)
+			for i, node := range kept {
+				if i > 0 {
+					seq = append(seq, Node{Lines: []string{arrow}, Width: cellW, Span: 1})
+				}
+				seq = append(seq, Node{Lines: stageRenderer{}.Render(Block{Type: "stage", Attrs: node}, cellCtx), Width: cellW, Span: 1})
+			}
+			if DefaultFlex.Fits(seq) {
+				return DefaultFlex.Arrange(seq)
+			}
+		}
 	}
 
 	connector := ctx.Theme.Dim.Render("↓")
@@ -118,11 +174,14 @@ func (pipelineRenderer) Render(b Block, ctx RenderCtx) []string {
 // {items: [{title, text, tone}]}, tone ∈ info|ok|warn|danger. Unlike the
 // singular `card` (which recurses element slots), these items are FLAT scalars
 // with a meaningful tone, so each renders as its OWN rounded box: a bold title +
-// wrapped text body, the border tinted by the tone. Boxes stack vertically (the
-// terminal has no responsive grid). The box borrows figure/card's construction
-// idiom (RoundedBorder, Padding(0,1), chrome=4, flat-degrade below MinWidth) but
-// NOT the slot recursion. Empty item → dropped; no non-empty item → one blank
-// line.
+// wrapped text body, the border tinted by the tone. By default the boxes STACK
+// vertically; a block that opts INTO the grid (layout:{mode:"grid"}, gridOptIn)
+// lays them SIDE-BY-SIDE as equal cells when the surface is wide enough — the
+// shared Flex solver owns the divide + degrade verdict, so a narrow surface (or an
+// over-wide card) falls back to the byte-identical stack. The box borrows
+// figure/card's construction idiom (RoundedBorder, Padding(0,1), chrome=4,
+// flat-degrade below MinWidth) but NOT the slot recursion. Empty item → dropped;
+// no non-empty item → one blank line.
 type cardsRenderer struct{}
 
 func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -140,38 +199,42 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 	childWidth = clampWidth(childWidth)
 
+	// Full-width pass: build each item's box (the verbatim stack body AND the count
+	// the horizontal path re-sizes); drop all-empty items so N is honest.
+	kept := make([]map[string]any, 0, len(items))
 	groups := make([][]string, 0, len(items))
 	for _, item := range items {
-		title := sanitizeText(strings.TrimSpace(attrStr(item, "title")))
-		text := sanitizeText(strings.TrimSpace(attrStr(item, "text")))
-		if title == "" && text == "" {
+		box, ok := cardBox(ctx.Theme, item, childWidth, clampWidth(inner), flat)
+		if !ok {
 			continue
 		}
-
-		var lines []string
-		if title != "" {
-			lines = append(lines, wrapLines(ctx.Theme.Body.Bold(true).Render(title), childWidth)...)
-		}
-		if text != "" {
-			lines = append(lines, wrapLines(ctx.Theme.Body.Render(text), childWidth)...)
-		}
-
-		if flat {
-			groups = append(groups, lines)
-			continue
-		}
-
-		body := lipgloss.JoinVertical(lipgloss.Left, lines...)
-		box := lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(cardToneColor(ctx.Theme, attrStr(item, "tone"))).
-			Padding(0, 1).
-			Width(clampWidth(inner)).
-			Render(body)
-		groups = append(groups, strings.Split(box, "\n"))
+		kept = append(kept, item)
+		groups = append(groups, box)
 	}
 	if len(groups) == 0 {
 		return []string{""}
+	}
+
+	// Horizontal path (opt-in via layout:{mode:"grid"}): the shared Flex solver
+	// sizes each box to an equal cell (Measure owns the divide + verdict). Rebuild
+	// each box at the cell's inner width (cellW-chrome) and Arrange side-by-side.
+	// Falls through to the stack when narrow, when a cell can't hold the bordered
+	// box (inner below MinWidth), or when a card's min-content overflows (Fits).
+	if gridOptIn(b) {
+		n := len(groups)
+		if cellW, sideBySide := DefaultFlex.Measure(clampWidth(ctx.Width), n); sideBySide {
+			if cellInner := cellW - chrome; cellInner >= MinWidth {
+				nodes := make([]Node, n)
+				for i, item := range kept {
+					// Never the flat degrade in a cell: the cell holds the bordered box.
+					box, _ := cardBox(ctx.Theme, item, cellInner, cellInner, false)
+					nodes[i] = Node{Lines: box, Width: cellW, Span: 1}
+				}
+				if DefaultFlex.Fits(nodes) {
+					return DefaultFlex.Arrange(nodes)
+				}
+			}
+		}
 	}
 
 	out := make([]string, 0)
@@ -182,6 +245,47 @@ func (cardsRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, g...)
 	}
 	return out
+}
+
+// cardBox builds ONE `cards` item box: a bold title + wrapped text body, the
+// rounded border tinted by the item's tone. `wrapWidth` wraps the title/body;
+// `boxInner` is the border box's inner Width; `flat` drops the border (the narrow
+// degrade), returning the bare lines. ok=false for an all-empty item (dropped by
+// the caller). The full-width caller passes the pre-flat-resolved widths, so its
+// output is byte-identical to before this helper was lifted out.
+func cardBox(theme Theme, item map[string]any, wrapWidth, boxInner int, flat bool) (lines []string, ok bool) {
+	title := sanitizeText(strings.TrimSpace(attrStr(item, "title")))
+	text := sanitizeText(strings.TrimSpace(attrStr(item, "text")))
+	if title == "" && text == "" {
+		return nil, false
+	}
+	if title != "" {
+		lines = append(lines, wrapLines(theme.Body.Bold(true).Render(title), wrapWidth)...)
+	}
+	if text != "" {
+		lines = append(lines, wrapLines(theme.Body.Render(text), wrapWidth)...)
+	}
+	if flat {
+		return lines, true
+	}
+	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(cardToneColor(theme, attrStr(item, "tone"))).
+		Padding(0, 1).
+		Width(clampWidth(boxInner)).
+		Render(body)
+	return strings.Split(box, "\n"), true
+}
+
+// gridOptIn reports whether a grid widget (notes/pipeline/cards) opts INTO the
+// side-by-side horizontal layout via a `layout:{mode:"grid"}` object — the SAME
+// predicate the section grid uses (compose.ex grid_layout/1; blocks.go section).
+// ABSENT / any other layout shape → false, so the legacy corpus (which carries no
+// layout) keeps its verbatim vertical stack, byte-identical to before.
+func gridOptIn(b Block) bool {
+	layout, ok := b.Attrs["layout"].(map[string]any)
+	return ok && attrStr(layout, "mode") == "grid"
 }
 
 // cardToneColor maps a card item's flat tone (info|ok|warn|danger) onto the

@@ -649,7 +649,14 @@ func roadmapLane(r map[string]any, ctx RenderCtx, labelW, track, todayCell int) 
 
 	bar := renderTrack(ctx, role, track, start, fill, todayCell)
 	rail := ctx.Theme.Dim.Render("│")
-	return labelStyle.Render(label) + " " + rail + bar + rail
+	// Two UNEQUAL-width cells joined by joinColumns (the shared side-by-side body):
+	// the label cell (labelW) and the bordered track cell (│bar│, track+2 rails), the
+	// lane's single-space separator supplied as the gutter. Reuses the Node/join
+	// primitive — no bespoke width math — and is byte-identical to the old
+	// `label + " " + │bar│` concat (each cell is already exactly its width, so
+	// joinColumns' pad is a no-op and the gutter is the one separating space).
+	joined := joinColumns([][]string{{labelStyle.Render(label)}, {rail + bar + rail}}, []int{labelW, track + 2}, 1)
+	return firstLine(joined)
 }
 
 // renderTrack composes the track cells, run-grouping consecutive same-class

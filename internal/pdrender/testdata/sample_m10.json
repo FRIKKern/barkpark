@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Side-by-side grid widgets"
+    },
+    {
+      "id": "notes1",
+      "type": "notes",
+      "layout": { "mode": "grid" },
+      "items": [
+        {
+          "label": "First",
+          "lead": "Wide lays out",
+          "text": "The notes fan out into columns when the surface is wide."
+        },
+        {
+          "label": "Second",
+          "text": "Each note wraps inside its own cell at the shared cell width."
+        },
+        {
+          "lead": "Third",
+          "text": "Narrow it below the floor and the row stacks again."
+        }
+      ]
+    },
+    {
+      "id": "pipe1",
+      "type": "pipeline",
+      "layout": { "mode": "grid" },
+      "nodes": [
+        {
+          "kind": "ingest",
+          "title": "Decode doc",
+          "detail": "Parse the envelope into a block tree.",
+          "source": "cli"
+        },
+        {
+          "kind": "emit",
+          "title": "Write out",
+          "detail": "Flush the composed lines to the terminal.",
+          "source": "tui"
+        }
+      ]
+    },
+    {
+      "id": "cards1",
+      "type": "cards",
+      "layout": { "mode": "grid" },
+      "items": [
+        {
+          "title": "Info card",
+          "text": "The info tone tints the box border.",
+          "tone": "info"
+        },
+        {
+          "title": "OK card",
+          "text": "A success card carries the ok tone.",
+          "tone": "ok"
+        },
+        {
+          "title": "Warn card",
+          "text": "A warning card draws the eye.",
+          "tone": "warn"
+        }
+      ]
+    }
+  ]
+}

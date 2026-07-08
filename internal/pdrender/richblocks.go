@@ -15,6 +15,14 @@ import (
 // rows[0] promotion). `head` is a FLAT array of cell strings; `rows` is an array
 // of row arrays. Cells go through the InlineRenderer (bare strings coerce to
 // text). .Width(ctx.Width) auto-sizes columns to the available width.
+//
+// NOT on the shared Flex solver (BY DESIGN): a table is not a divide-formula
+// surface — it delegates to lipgloss/table's OWN measured column auto-sizer
+// (per-column min/max content widths + wrap), which the equal-cell Flex.Measure
+// divide can't reproduce. Force-porting it onto Flex would change the bytes AND
+// lose the content-aware wrap, so table stays on its native sizer. (Settled call —
+// left self-documented so a future "why isn't table on the solver?" audit doesn't
+// re-open it, same spirit as the section breakpoints no-mode note.)
 type tableRenderer struct{ ir InlineRenderer }
 
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
