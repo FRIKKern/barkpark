@@ -67,6 +67,18 @@ defmodule Barkpark.Tasks.QueueTest do
 
   defp ids_of(docs), do: Enum.map(docs, & &1.id)
 
+  # Build a genuine draft/published TWIN pair for `base_id`, the shape a
+  # published-task mutate leaves behind: a published row at the bare id +
+  # a `drafts.<id>` shadow. `create_document` always writes `drafts.<id>`, so we
+  # publish it to the bare id, then re-create the draft shadow. Returns
+  # `{published_doc, draft_doc}`.
+  defp mk_twin!(base_id, scope, dataset, content_extra) do
+    _first = mk_task!(base_id, scope, dataset, content_extra)
+    {:ok, published} = Content.publish_document(base_id, "task", dataset, scope)
+    draft = mk_task!(base_id, scope, dataset, content_extra)
+    {published, draft}
+  end
+
   # ─── (1) ready_query/1 returns a composable Ecto.Query ───────────────────
 
   describe "ready_query/1" do
@@ -138,6 +150,175 @@ defmodule Barkpark.Tasks.QueueTest do
 
     test "explicit nil workspace_id returns []", %{scope: _scope} do
       assert Queue.ready(workspace_id: nil, dataset: @dataset) == []
+    end
+  end
+
+  # ─── (5) draft/published twin collapse (published-wins) ──────────────────
+
+  describe "ready/1 — draft/published twin collapse" do
+    test "a twinned task yields exactly ONE ready row (the published/non-draft twin)",
+         %{scope: scope} do
+      phase_id = "phase-twin-#{System.unique_integer([:positive])}"
+      base_id = "twin-#{System.unique_integer([:positive])}"
+
+      {published, _draft} = mk_twin!(base_id, scope, @dataset, %{"parent_id" => phase_id})
+
+      results = Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id])
+
+      assert length(results) == 1, "a twin pair must collapse to a single ready row"
+      assert hd(results).id == published.id
+      assert hd(results).doc_id == base_id
+      refute String.starts_with?(hd(results).doc_id, "drafts.")
+    end
+
+    test "queue-claim on a twinned task claims the canonical (published) row", %{scope: scope} do
+      phase_id = "phase-twin-claim-#{System.unique_integer([:positive])}"
+      base_id = "twinc-#{System.unique_integer([:positive])}"
+
+      {published, _draft} = mk_twin!(base_id, scope, @dataset, %{"parent_id" => phase_id})
+
+      assert {:ok, claimed} =
+               Tasks.claim("twin-worker", scope ++ [dataset: @dataset, phase_id: phase_id])
+
+      assert claimed.id == published.id
+      assert claimed.doc_id == base_id
+
+      # The twin is now gone from ready (claimed row left open/blocked AND the
+      # draft was never claimable) — the logical task can't be claimed twice.
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]) == []
+    end
+
+    test "a lone draft (no published twin) is NOT suppressed — it is the canonical row",
+         %{scope: scope} do
+      phase_id = "phase-lone-draft-#{System.unique_integer([:positive])}"
+      base_id = "lone-#{System.unique_integer([:positive])}"
+
+      draft = mk_task!("drafts." <> base_id, scope, @dataset, %{"parent_id" => phase_id})
+
+      results = Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id])
+      assert ids_of(results) == [draft.id]
+    end
+  end
+
+  # ─── (6) phase filter normalizes the drafts. prefix on either side ───────
+
+  describe "ready/1 — phase filter is drafts.-prefix agnostic" do
+    test "child parented at drafts.<phase> is found by a phase-scoped ready for the bare phase",
+         %{scope: scope} do
+      bare_phase = "phase-norm-#{System.unique_integer([:positive])}"
+
+      child =
+        mk_task!("pn-child-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => "drafts." <> bare_phase
+        })
+
+      results = Queue.ready(scope ++ [dataset: @dataset, phase_id: bare_phase])
+      assert child.id in ids_of(results)
+    end
+
+    test "child parented at the bare phase is found by a phase-scoped ready for drafts.<phase>",
+         %{scope: scope} do
+      bare_phase = "phase-norm2-#{System.unique_integer([:positive])}"
+
+      child =
+        mk_task!("pn2-child-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => bare_phase
+        })
+
+      results = Queue.ready(scope ++ [dataset: @dataset, phase_id: "drafts." <> bare_phase])
+      assert child.id in ids_of(results)
+    end
+  end
+
+  # ─── (7) content.dependencies gates readiness (fail-closed) ──────────────
+
+  describe "ready/1 — content.dependencies gating" do
+    test "all dependencies done => ready", %{scope: scope} do
+      phase_id = "phase-dep-ok-#{System.unique_integer([:positive])}"
+      dep_id = "dep-done-#{System.unique_integer([:positive])}"
+      _dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "done"})
+
+      main =
+        mk_task!("main-dep-ok-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      assert main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+    end
+
+    test "one open dependency => NOT ready and NOT claimable via queue-claim", %{scope: scope} do
+      phase_id = "phase-dep-open-#{System.unique_integer([:positive])}"
+      dep_id = "dep-open-#{System.unique_integer([:positive])}"
+      # The dependency is deliberately parentless so the phase-scoped ready set
+      # contains ONLY `main` — an empty result then proves `main` is excluded.
+      _dep = mk_task!(dep_id, scope, @dataset, %{"lifecycle_status" => "open"})
+
+      main =
+        mk_task!("main-dep-open-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => [dep_id]
+        })
+
+      refute main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+      # Nothing else is in this phase, so queue-claim finds nothing to claim.
+      assert {:ok, nil} =
+               Tasks.claim("dep-worker", scope ++ [dataset: @dataset, phase_id: phase_id])
+    end
+
+    test "a dangling dependency doc_id fails CLOSED (not ready)", %{scope: scope} do
+      phase_id = "phase-dep-dangle-#{System.unique_integer([:positive])}"
+
+      main =
+        mk_task!("main-dep-dangle-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => ["no-such-task-#{System.unique_integer([:positive])}"]
+        })
+
+      assert Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]) == []
+      refute main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+    end
+
+    test "empty and absent dependencies are unaffected (ready)", %{scope: scope} do
+      phase_id = "phase-dep-empty-#{System.unique_integer([:positive])}"
+
+      empty =
+        mk_task!("main-dep-empty-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => []
+        })
+
+      absent =
+        mk_task!("main-dep-absent-#{System.unique_integer([:positive])}", scope, @dataset, %{
+          "parent_id" => phase_id
+        })
+
+      ready_ids = ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
+      assert empty.id in ready_ids
+      assert absent.id in ready_ids
+    end
+
+    test "dependency match tolerates a drafts. prefix on either side", %{scope: scope} do
+      phase_id = "phase-dep-prefix-#{System.unique_integer([:positive])}"
+      u = System.unique_integer([:positive])
+
+      # dep stored bare + done, referenced WITH the drafts. prefix.
+      bare_dep = "dep-bare-#{u}"
+      _bare = mk_task!(bare_dep, scope, @dataset, %{"lifecycle_status" => "done"})
+
+      # dep stored WITH drafts. + done, referenced bare.
+      drafts_dep_base = "dep-drafted-#{u}"
+
+      _drafted =
+        mk_task!("drafts." <> drafts_dep_base, scope, @dataset, %{"lifecycle_status" => "done"})
+
+      main =
+        mk_task!("main-dep-prefix-#{u}", scope, @dataset, %{
+          "parent_id" => phase_id,
+          "dependencies" => ["drafts." <> bare_dep, drafts_dep_base]
+        })
+
+      assert main.id in ids_of(Queue.ready(scope ++ [dataset: @dataset, phase_id: phase_id]))
     end
   end
 end

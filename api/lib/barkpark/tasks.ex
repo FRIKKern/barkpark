@@ -46,7 +46,7 @@ defmodule Barkpark.Tasks do
         "lifecycle_status" => "open",           # required, one of the 5 below
         "priority" => 0..4,                     # optional integer, 0..4 inclusive
         "assignee" => "<token-id>" | nil,       # optional string
-        "dependencies" => ["<doc_id>", ...],    # optional array of strings
+        "dependencies" => ["<doc_id>", ...],    # optional; GATES readiness (see below)
         "claim" => %{                           # optional map (claim primitives, W7-04)
           "worker" => "<id>",
           "ts_iso" => "2026-05-27T11:23:45Z",
@@ -59,6 +59,14 @@ defmodule Barkpark.Tasks do
   string fields; everything else is shape-checked permissively (the
   authoritative `task_edges` table arrives in W7-02). The plan calls this
   "the tightened contract — what the live readers actually consume."
+
+  `content.dependencies` **gates readiness**: `Barkpark.Tasks.Queue` excludes a
+  task from `ready`/atomic-claim until every doc_id in the list resolves to a
+  same-scope task with `lifecycle_status == "done"`. A `drafts.` prefix is
+  tolerated on either side; a missing/dangling id is treated as UNSATISFIED
+  (fail-closed). This is a READ-side gate alongside the authoritative
+  `task_edges` `blocks` graph (both gate) — there is no write-path
+  materialization of `content.dependencies` into edges.
 
   The **task-dossier** schema (see `task_schema/1`) additionally declares
   optional working-memory fields — `description`, `design`, `design_doc`,
