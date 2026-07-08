@@ -77,6 +77,9 @@ defmodule BarkparkWeb.Router do
   pipeline :scoped_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
+    # Parity with :api — baseline JSON security headers on the tenancy-aware
+    # mirror serving the same /w/:ws/p/:project/v1/data/{query,doc}/* reads.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalToken)
@@ -100,6 +103,9 @@ defmodule BarkparkWeb.Router do
   pipeline :shared_docs_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
+    # Parity with :api — this pipeline serves anonymous shared-scope reads, the
+    # surface where nosniff/referrer-policy matter most.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalToken)
@@ -280,12 +286,16 @@ defmodule BarkparkWeb.Router do
 
   pipeline :api_unlimited do
     plug(:accepts, ["json"])
+    # Parity with :api — baseline JSON security headers.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
   end
 
   pipeline :api_preview do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
+    # Parity with :api — baseline JSON security headers on the flat preview reads.
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.PreviewToken)
