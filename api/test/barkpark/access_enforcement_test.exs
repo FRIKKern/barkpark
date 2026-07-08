@@ -113,6 +113,46 @@ defmodule Barkpark.AccessEnforcementTest do
 
       assert titles(grant_read("post", ws, ctx)) == ["a", "b"]
     end
+
+    test "the DATASET ladder level is enforced independently (mutation-proof)" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantee = grantee_user()
+
+      # Two rows identical on EVERY ladder level EXCEPT dataset — same workspace,
+      # same project, same type. The only thing that can separate them is the
+      # grant's dataset clause, so this test is load-bearing on that clause: drop
+      # `x.dataset == grant.dataset` from grant_ladder_condition and the
+      # "granted-only" read would leak the other-dataset row.
+      {:ok, _granted} =
+        create_document_in!(ws, proj, "post", %{"title" => "granted-dataset-row"}, "granted")
+
+      {:ok, _other} =
+        create_document_in!(ws, proj, "post", %{"title" => "other-dataset-row"}, "other")
+
+      # Grant scoped to dataset "granted". project_id is SET (the ladder halts at
+      # the first NULL, so dataset only binds when project above it is non-null);
+      # type/doc_id left NULL → null-covers-below.
+      bind_grant!(ws, grantee, %{
+        project_id: proj.id,
+        dataset: "granted",
+        capabilities: ["read"]
+      })
+
+      ctx = CallerContext.from_user(grantee.id)
+
+      read = fn dataset ->
+        Content.list_documents("post", dataset,
+          workspace_id: ws.id,
+          caller_context: ctx,
+          grant_scoped: true
+        )
+      end
+
+      # EXACTLY the granted-dataset row; the other dataset yields nothing.
+      assert titles(read.("granted")) == ["granted-dataset-row"]
+      assert read.("other") == []
+    end
   end
 
   # ---------------------------------------------------------------------------
