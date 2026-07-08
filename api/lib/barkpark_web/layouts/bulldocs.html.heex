@@ -775,6 +775,12 @@
             this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
           );
           if (!nodes.length) return;
+          // Stash the raw source before the first run — mermaid replaces the
+          // <pre>'s text with the SVG, and the scheme-change re-render below
+          // needs the original source to re-run under the other palette.
+          nodes.forEach((n) => {
+            if (n.dataset.bpSrc == null) n.dataset.bpSrc = n.textContent;
+          });
           if (window.mermaid && window.mermaid.run) {
             window.mermaid.run({ nodes });
           } else {
@@ -881,13 +887,88 @@
 
     // Initialise the engine in manual mode (startOnLoad:false). Wrapped so it's
     // a no-op if the deferred script isn't present yet — the hook re-checks.
+    //
+    // THEME (gui-premium w1): mermaid's stock "default" theme is off-palette
+    // (trebuchet + pastel blue). We drive theme:"base" with themeVariables
+    // derived from the reader's `--paper-*` evergreen palette (the same values
+    // the CSS above sets for light and prefers-color-scheme dark), and label
+    // in the reader's mono — the diagrams read as kin to the TUI's box-art.
+    // The values are literals (not read from CSS vars) because mermaid bakes
+    // colors into the SVG at render time; the scheme listener below re-renders
+    // from the stashed source when the OS palette flips.
+    function mermaidThemeVariables(dark) {
+      const mono =
+        "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace";
+      if (dark) {
+        return {
+          fontFamily: mono, fontSize: "14px",
+          background: "#0e1614", mainBkg: "#131d19",
+          primaryColor: "#131d19", primaryTextColor: "#e7ede9",
+          primaryBorderColor: "#45b394", nodeBorder: "#45b394",
+          lineColor: "#9aaaa3", textColor: "#e7ede9", titleColor: "#e7ede9",
+          secondaryColor: "#1a2b25", tertiaryColor: "#131d19",
+          clusterBkg: "#0e1614", clusterBorder: "rgba(231,237,233,0.2)",
+          edgeLabelBackground: "#0e1614",
+          actorBkg: "#131d19", actorBorder: "#45b394",
+          actorTextColor: "#e7ede9", actorLineColor: "#6c7a74",
+          signalColor: "#9aaaa3", signalTextColor: "#e7ede9",
+          labelBoxBkgColor: "#131d19", labelBoxBorderColor: "#45b394",
+          labelTextColor: "#e7ede9", loopTextColor: "#e7ede9",
+          noteBkgColor: "#1c2620", noteBorderColor: "#6c7a74",
+          noteTextColor: "#e7ede9"
+        };
+      }
+      return {
+        fontFamily: mono, fontSize: "14px",
+        background: "#f6faf9", mainBkg: "#eaf1ee",
+        primaryColor: "#eaf1ee", primaryTextColor: "#15211d",
+        primaryBorderColor: "#1e5347", nodeBorder: "#1e5347",
+        lineColor: "#55635e", textColor: "#15211d", titleColor: "#15211d",
+        secondaryColor: "#d7e8e1", tertiaryColor: "#f6faf9",
+        clusterBkg: "#f6faf9", clusterBorder: "#dde7e2",
+        edgeLabelBackground: "#f6faf9",
+        actorBkg: "#eaf1ee", actorBorder: "#1e5347",
+        actorTextColor: "#15211d", actorLineColor: "#82918b",
+        signalColor: "#55635e", signalTextColor: "#15211d",
+        labelBoxBkgColor: "#eaf1ee", labelBoxBorderColor: "#1e5347",
+        labelTextColor: "#15211d", loopTextColor: "#15211d",
+        noteBkgColor: "#e6f0eb", noteBorderColor: "#82918b",
+        noteTextColor: "#15211d"
+      };
+    }
+    const mermaidScheme = window.matchMedia("(prefers-color-scheme: dark)");
     function initMermaid() {
       if (window.mermaid && window.mermaid.initialize) {
-        window.mermaid.initialize({ startOnLoad: false, theme: "default" });
+        window.mermaid.initialize({
+          startOnLoad: false,
+          theme: "base",
+          themeVariables: mermaidThemeVariables(mermaidScheme.matches),
+          flowchart: { useMaxWidth: true },
+          sequence: { useMaxWidth: true }
+        });
       }
     }
     if (document.readyState === "complete") initMermaid();
     else window.addEventListener("load", initMermaid, { once: true });
+    // Re-render every diagram from its stashed source when the OS scheme
+    // flips — mermaid bakes the palette into the SVG, so a live flip would
+    // otherwise strand light diagrams on a dark page (and vice versa).
+    mermaidScheme.addEventListener("change", () => {
+      initMermaid();
+      document.querySelectorAll("pre.mermaid[data-processed]").forEach((pre) => {
+        if (pre.dataset.bpSrc != null) {
+          pre.textContent = pre.dataset.bpSrc;
+          pre.removeAttribute("data-processed");
+        }
+      });
+      if (window.mermaid && window.mermaid.run) {
+        window.mermaid.run({
+          nodes: Array.from(
+            document.querySelectorAll('pre.mermaid:not([data-processed="true"])')
+          )
+        });
+      }
+    });
 
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {

@@ -791,6 +791,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.status_legend_html(b)}
   end
 
+  # ── data-viz slate (stat / stats / heatmap / chart) ─────────────────────────
+  # Browser twins of the TUI creative slate (pdrender stat.go/heatmap.go/
+  # chart.go). Pure snapshot emitters in Render.DataViz; `stat-grid` is the
+  # accepted alias of `stats` (mirrors the pdrender registry).
+  def compose_block(%{"type" => "stat"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stat_html(b)}
+  end
+
+  def compose_block(%{"type" => t} = b, _style) when t in ["stats", "stat-grid"] do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stats_html(b)}
+  end
+
+  def compose_block(%{"type" => "heatmap"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_html(b)}
+  end
+
+  def compose_block(%{"type" => "chart"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_html(b)}
+  end
+
   # Unknown / unregistered block type — degrade gracefully instead of crashing
   # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
   # every body_html rebuild 500, public /papers reader). Papers are schemaless,
