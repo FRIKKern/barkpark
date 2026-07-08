@@ -1334,15 +1334,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       :ok
     end
 
-    test "clicking a card opens the inspector with claim, description, evidence, lineage",
+    test "card → expand → details opens the inspector with claim, description, evidence, lineage",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, "/admin/projects")
 
+      # wave 21: the card click expands; the details button (or a gantt row)
+      # opens the inspector.
       view
       |> element(~s{[data-role="task-card"][data-doc-id="pk-epic"]})
       |> render_click()
 
-      assert_patch(view, "/admin/projects?task=pk-epic")
+      assert_patch(view, "/admin/projects?expand=pk-epic")
+
+      view |> element(~s{[data-role="expand-details"]}) |> render_click()
+
+      assert_patch(view, "/admin/projects?expand=pk-epic&task=pk-epic")
       html = render(view)
 
       assert html =~ ~s(data-role="peek")
@@ -1545,7 +1551,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "in flight"
     end
 
-    test "deck cards peek on click and are never drag surfaces", %{conn: conn} do
+    test "deck cards expand into the gantt on click and are never drag surfaces",
+         %{conn: conn} do
       {:ok, view, html} = live(conn, "/admin/projects")
 
       # scope to the deck markup (the page's inline hook JS mentions the
@@ -1555,12 +1562,31 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute deck =~ ~s(draggable="true")
       refute deck =~ ~s(phx-hook="BarkparkBoardDrag")
 
+      # click → the card widens in place into the family timeline (wave 21)…
       view
       |> element(~s{[data-role="task-card"][data-doc-id="dk-epic"]})
       |> render_click()
 
-      assert_patch(view, "/admin/projects?task=dk-epic")
+      assert_patch(view, "/admin/projects?expand=dk-epic")
+      html = render(view)
+      assert html =~ ~s(data-role="gantt")
+      assert html =~ ~s(data-role="gantt-bar")
+      # …the list IS the chart: root row first, family rows beneath.
+      [_, gantt] = String.split(html, ~s(data-role="gantt"), parts: 2)
+      assert gantt =~ ~s(data-doc-id="dk-epic")
+      assert gantt =~ ~s(data-doc-id="dk-child")
+
+      # a gantt row click peeks that task with the timeline still open.
+      view
+      |> element(~s{[data-role="gantt-row"][data-doc-id="dk-child"] button})
+      |> render_click()
+
+      assert_patch(view, "/admin/projects?expand=dk-epic&task=dk-child")
       assert render(view) =~ ~s(data-role="peek")
+
+      # × collapses back (peek stays).
+      view |> element(~s{[data-role="expand-close"]}) |> render_click()
+      assert_patch(view, "/admin/projects?task=dk-child")
     end
   end
 

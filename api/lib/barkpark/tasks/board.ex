@@ -209,6 +209,7 @@ defmodule Barkpark.Tasks.Board do
       description_excerpt: excerpt(Map.get(content, "description")),
       design_doc: string_presence(Map.get(content, "design_doc")),
       criteria_list: criteria_list(content),
+      created_at: doc.inserted_at,
       updated_at: doc.updated_at
     }
   end
@@ -424,6 +425,9 @@ defmodule Barkpark.Tasks.Board do
       description_excerpt: excerpt(Map.get(content, "description")),
       design_doc: string_presence(Map.get(content, "design_doc")),
       criteria_list: criteria_list(content),
+      # The broadcast carries no inserted_at — keep the previous projection's
+      # creation stamp (the :refresh reconcile re-reads it).
+      created_at: prev_card && prev_card[:created_at],
       updated_at: msg_doc.updated_at
     }
   end
@@ -837,7 +841,10 @@ defmodule Barkpark.Tasks.Board do
         # The ONGOING task's text + criteria read on the card itself (waves
         # 19-20): only in-flight rows carry them — anything more is noise.
         desc: (c.col == :in_progress && c[:description_excerpt]) || nil,
-        crits: (c.col == :in_progress && c[:criteria_list]) || nil
+        crits: (c.col == :in_progress && c[:criteria_list]) || nil,
+        # Gantt fuel (wave 21): the bar runs created → (done ? closed : now).
+        created_at: c[:created_at],
+        updated_at: c.updated_at
       }
 
       [row | family_walk(index, c.doc_id, depth + 1, MapSet.put(seen, c.doc_id))]

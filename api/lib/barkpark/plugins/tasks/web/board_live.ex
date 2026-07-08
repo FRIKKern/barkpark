@@ -130,8 +130,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   context cards — in-flight families first, then ready, blocked, open — and
   Done is the LAST card, a single ledger phone with the honest window note.
   Cards are not draggable on the deck (there are no drop targets); a click
-  peeks. The grouped/filtered kanban remains the drag/drill-down surface
-  (claim, close, release all still one drop away via Group).
+  EXPANDS (wave 21). The grouped/filtered kanban remains the drag/drill-down
+  surface (claim, close, release all still one drop away via Group).
+
+  ## Expand → gantt (wave 21)
+
+  A deck card click expands the card in place into its family timeline: the
+  list becomes the chart — the same rows as the left column, each with a bar
+  from its creation to its close (done) or to now (live), colored by state,
+  the now-line on the track's right edge. `?expand=<id>` rides the URL
+  beside the peek's `?task=`; a gantt row (or the details button) peeks with
+  the timeline still open; × collapses.
 
   ## Task peek (wave 13)
 
@@ -215,6 +224,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      |> assign(:group_by, parse_group(params["group"]))
      |> assign(:filters, parse_filters(params))
      |> assign_peek(params["task"])
+     |> assign_expanded(params["expand"])
      |> assign_view()}
   end
 
@@ -350,6 +360,34 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   def handle_event("peek-close", _params, socket) do
     {:noreply, patch_to(socket, socket.assigns.group_by, socket.assigns.filters, nil)}
+  end
+
+  # ── wave 21: expand a phone into its GANTT ──────────────────────────────────
+  #
+  # A deck card click widens the card in place into a family timeline (the
+  # list stays as the left column; bars run created → closed/now). The
+  # expanded id rides the URL (`?expand=<id>`, D14) beside the peek's
+  # `?task=` — a gantt row click peeks that task with the gantt still open.
+  def handle_event("expand", %{"task" => task_id}, socket) when is_binary(task_id) do
+    {:noreply,
+     patch_to(
+       socket,
+       socket.assigns.group_by,
+       socket.assigns.filters,
+       socket.assigns.peek && socket.assigns.peek.doc_id,
+       task_id
+     )}
+  end
+
+  def handle_event("expand-close", _params, socket) do
+    {:noreply,
+     patch_to(
+       socket,
+       socket.assigns.group_by,
+       socket.assigns.filters,
+       socket.assigns.peek && socket.assigns.peek.doc_id,
+       nil
+     )}
   end
 
   # A legal claim: OPTIMISTICALLY move the card to in_progress (D9 — the board
@@ -983,13 +1021,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   end
 
   defp patch_to(socket, group_by, filters, task_id) do
-    case board_query(group_by, filters, task_id) do
+    patch_to(socket, group_by, filters, task_id, socket.assigns[:expanded])
+  end
+
+  defp patch_to(socket, group_by, filters, task_id, expand_id) do
+    case board_query(group_by, filters, task_id, expand_id) do
       [] -> push_patch(socket, to: ~p"/admin/projects")
       query -> push_patch(socket, to: ~p"/admin/projects?#{query}")
     end
   end
 
-  defp board_query(group_by, filters, task_id) do
+  defp board_query(group_by, filters, task_id, expand_id \\ nil) do
     group_params = if group_by == :none, do: [], else: [{"group", Atom.to_string(group_by)}]
 
     facet_params =
@@ -999,8 +1041,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
     peek_params = if is_binary(task_id) and task_id != "", do: [{"task", task_id}], else: []
 
-    group_params ++ facet_params ++ peek_params
+    expand_params =
+      if is_binary(expand_id) and expand_id != "", do: [{"expand", expand_id}], else: []
+
+    group_params ++ facet_params ++ peek_params ++ expand_params
   end
+
+  # The expanded phone's id — presence-validated only (it is compared against
+  # card doc_ids, never interpolated anywhere).
+  defp assign_expanded(socket, expand_id) when is_binary(expand_id) and expand_id != "",
+    do: assign(socket, :expanded, expand_id)
+
+  defp assign_expanded(socket, _), do: assign(socket, :expanded, nil)
 
   @impl true
   def render(assigns) do
@@ -1547,6 +1599,60 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         border-top: 1px solid var(--border);
       }
       .bp-phone--ledger .bp-phone-body .bp-ledger { max-width: none; margin: 0; }
+      /* ── expand → gantt (wave 21): the card widens IN PLACE into a family
+         timeline — the list stays as the left column, bars run created →
+         closed/now. The phone aspect yields while expanded. */
+      .bp-phone.is-expanded {
+        aspect-ratio: auto; width: min(920px, 82vw); max-width: none;
+        cursor: default;
+      }
+      .bp-phone.is-expanded .bp-fam { display: none; }
+      .bp-phone.is-expanded .bp-phone-desc { -webkit-line-clamp: 2; }
+      .bp-x-details {
+        border: 1px solid var(--border); background: transparent;
+        color: var(--muted-text); font: inherit; font-size: 10.5px;
+        font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+        border-radius: 6px; padding: 2px 8px; cursor: pointer;
+        margin-left: auto;
+      }
+      .bp-x-details:hover { color: var(--text); border-color: var(--ring); }
+      .bp-phone.is-expanded .bp-phone-head .bp-age { margin-left: 0; }
+      .bp-phone.is-expanded .bp-phone-head .bp-peek-x { margin-left: 4px; }
+      .bp-gantt { display: flex; flex-direction: column; gap: 3px; padding-top: 4px; }
+      .bp-gantt-axis {
+        display: flex; justify-content: space-between;
+        font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
+        color: var(--muted-text); padding-left: 42%; margin-bottom: 2px;
+      }
+      .bp-gantt-row {
+        display: grid; grid-template-columns: 42% 1fr; gap: 10px;
+        align-items: center; min-width: 0;
+      }
+      .bp-gantt-label {
+        display: flex; align-items: center; gap: 6px; min-width: 0;
+        border: 0; background: transparent; font: inherit; font-size: 12px;
+        color: var(--text); text-align: left; cursor: pointer;
+        padding: 3px 4px 3px calc(var(--d) * 12px + 4px); border-radius: 6px;
+      }
+      .bp-gantt-label:hover { background: var(--muted-surface); }
+      .bp-gantt-label:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+      .bp-gantt-t {
+        flex: 1 1 auto; min-width: 0; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-gantt-track {
+        position: relative; height: 12px; border-radius: 999px;
+        background: var(--muted-surface);
+        border-right: 2px solid color-mix(in srgb, var(--muted-text) 55%, transparent);
+      }
+      .bp-gantt-bar {
+        position: absolute; top: 2px; bottom: 2px; border-radius: 999px;
+        background: var(--muted-text); opacity: 0.55;
+      }
+      .bp-gantt-bar.is-in_progress { background: var(--info); opacity: 1; }
+      .bp-gantt-bar.is-done { background: var(--ok); opacity: 0.9; }
+      .bp-gantt-bar.is-blocked { background: var(--warn); opacity: 0.9; }
+      .bp-gantt-bar.is-ready { background: var(--muted-text); opacity: 0.75; }
       /* Wave 19: the card READS, not just scans — the root's brief under the
          title, the ongoing task's text under its row, a paper chip when the
          detailed description lives as a PortableDoc design paper. */
@@ -1961,6 +2067,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                 lane={hd(@view.lanes)}
                 last_change={@last_change}
                 done_overflow={done_overflow(@view, @board)}
+                expanded={@expanded}
               />
             <% else %>
               <.board_grid
@@ -2522,12 +2629,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     <div class="bp-deck" data-role="deck">
       <article
         :for={card <- deck_cards(@lane)}
-        class={["bp-phone", "bp-phone--#{card.col}", just_moved?(@last_change, card) && "bp-flash"]}
+        class={[
+          "bp-phone",
+          "bp-phone--#{card.col}",
+          expanded?(@expanded, card) && "is-expanded",
+          just_moved?(@last_change, card) && "bp-flash"
+        ]}
         data-role="task-card"
         data-col={card.col}
         data-doc-id={card.doc_id}
         data-just-moved={just_moved?(@last_change, card) && "true"}
-        phx-click="peek"
+        phx-click={!expanded?(@expanded, card) && "expand"}
         phx-value-task={card.doc_id}
       >
         <header class="bp-phone-head">
@@ -2544,6 +2656,26 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           <span :if={card.updated_at} class="bp-age" data-role="age">
             <%= age_label(card.updated_at) %>
           </span>
+          <button
+            :if={expanded?(@expanded, card)}
+            type="button"
+            class="bp-x-details"
+            phx-click="peek"
+            phx-value-task={card.doc_id}
+            data-role="expand-details"
+          >
+            details
+          </button>
+          <button
+            :if={expanded?(@expanded, card)}
+            type="button"
+            class="bp-peek-x"
+            phx-click="expand-close"
+            data-role="expand-close"
+            aria-label="Collapse the timeline"
+          >
+            ×
+          </button>
         </header>
 
         <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
@@ -2621,6 +2753,49 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           <p :if={card.col == :blocked and open_blockers(card) > 0} class="bp-block-note" data-role="blockers">
             waiting on <%= open_blockers(card) %> of <%= length(card.blocker_statuses) %> blockers
           </p>
+
+          <%= if expanded?(@expanded, card) do %>
+            <% g = gantt_data(card) %>
+            <div class="bp-gantt" data-role="gantt">
+              <div class="bp-gantt-axis">
+                <span><%= if g.origin, do: age_label(g.origin) <> " ago", else: "" %></span>
+                <span>now</span>
+              </div>
+              <div
+                :for={row <- g.rows}
+                class="bp-gantt-row"
+                style={"--d: #{row.depth};"}
+                data-role="gantt-row"
+                data-doc-id={row.doc_id}
+              >
+                <button
+                  type="button"
+                  class="bp-gantt-label"
+                  phx-click="peek"
+                  phx-value-task={row.doc_id}
+                  data-role="gantt-label"
+                >
+                  <span :if={row.depth > 1} class="bp-tree-twig" aria-hidden="true">└</span>
+                  <span class={"gi gi--#{row.color_role}"} aria-hidden="true">
+                    <%= glyph_text(row) %>
+                  </span>
+                  <span class="bp-gantt-t"><%= row.title || row.doc_id %></span>
+                  <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
+                </button>
+                <div class="bp-gantt-track">
+                  <span
+                    class={"bp-gantt-bar is-#{row.color_role}"}
+                    data-role="gantt-bar"
+                    style={"left: #{row.left}%; width: #{row.width}%;"}
+                  >
+                  </span>
+                </div>
+              </div>
+              <p :if={card[:family] && card.family.more > 0} class="bp-fam-more">
+                + <%= card.family.more %> more inside
+              </p>
+            </div>
+          <% end %>
         </div>
 
         <div :if={card.criteria} class="bp-progress" data-role="progress">
@@ -2722,6 +2897,74 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   defp deck_state(:in_progress), do: "in flight"
   defp deck_state(col), do: col |> Atom.to_string() |> String.replace("_", " ")
+
+  defp expanded?(expanded, card), do: is_binary(expanded) and expanded == card.doc_id
+
+  # ── wave 21: the gantt maths (pure) ─────────────────────────────────────────
+  #
+  # The list IS the chart: the root + its family rows become gantt rows, each
+  # with a bar from its creation to its close (done/cancelled) or to NOW.
+  # Percentages are computed over the family's whole observed span, clamped so
+  # a bar never escapes its track; a row with no creation stamp (a cold
+  # broadcast projection) falls back to its update stamp — never a crash.
+  defp gantt_data(card) do
+    fam = (card[:family] && card.family.rows) || []
+
+    base = [
+      %{
+        doc_id: card.doc_id,
+        title: card.title,
+        depth: 0,
+        color_role: card.color_role,
+        glyph: card.glyph,
+        worker: card.worker,
+        created_at: card[:created_at],
+        updated_at: card.updated_at
+      }
+      | fam
+    ]
+
+    now = DateTime.utc_now() |> DateTime.to_unix(:millisecond)
+
+    starts =
+      for row <- base, t = gantt_ts(row[:created_at]) || gantt_ts(row[:updated_at]), do: t
+
+    origin_ts = Enum.min(starts, fn -> now end)
+    span = max(now - origin_ts, 1)
+
+    rows =
+      Enum.map(base, fn row ->
+        start_ts = gantt_ts(row[:created_at]) || gantt_ts(row[:updated_at]) || origin_ts
+
+        end_ts =
+          if row.color_role in [:done, :cancelled],
+            do: gantt_ts(row[:updated_at]) || now,
+            else: now
+
+        left = clamp_pct((start_ts - origin_ts) / span * 100, 0.0, 97.0)
+        width = clamp_pct(max((end_ts - start_ts) / span * 100, 2.0), 2.0, 100.0 - left)
+
+        Map.merge(row, %{left: Float.round(left, 2), width: Float.round(width, 2)})
+      end)
+
+    %{rows: rows, origin: gantt_origin(base, origin_ts)}
+  end
+
+  defp gantt_origin(base, origin_ts) do
+    Enum.find_value(base, fn row ->
+      dt = row[:created_at] || row[:updated_at]
+      if gantt_ts(dt) == origin_ts, do: dt
+    end)
+  end
+
+  defp gantt_ts(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
+
+  defp gantt_ts(%NaiveDateTime{} = dt),
+    do: dt |> DateTime.from_naive!("Etc/UTC") |> DateTime.to_unix(:millisecond)
+
+  defp gantt_ts(_), do: nil
+
+  defp clamp_pct(v, lo, hi), do: v |> max(lo) |> min(max(hi, lo)) |> Kernel.*(1.0)
 
   # ── Render helpers ──────────────────────────────────────────────────────────
 
