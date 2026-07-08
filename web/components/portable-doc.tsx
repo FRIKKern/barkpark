@@ -12,6 +12,17 @@ import {
   type TaskBoardColumnKey,
   type TaskBoardRow,
 } from "@/lib/task-board-columns";
+import {
+  statusLegendProjection,
+  notesProjection,
+  noteProjection,
+  cardsProjection,
+  cardProjection,
+  pipelineProjection,
+  stageProjection,
+  taskDetailProjection,
+  roadmapProjection,
+} from "@/lib/component-projections";
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -796,6 +807,345 @@ export function renderBlock(block: Block, key: Key): ReactNode {
             <figcaption className="text-sm text-zinc-500">{caption}</figcaption>
           ) : null}
         </figure>
+      );
+    }
+    // ── S2: task-tracking / composition component family ───────────────────
+    // Each case renders FROM its shared projection (component-projections.ts) so
+    // the golden-parity web leg locks the real render. Structure only — token /
+    // colour adoption is W5.14; Tailwind zinc classes for now.
+    case "status-legend": {
+      const { rows } = statusLegendProjection();
+      return (
+        <dl
+          key={key}
+          className="flex flex-col gap-1 text-sm text-zinc-600 dark:text-zinc-300"
+        >
+          {rows.map((r) => (
+            <div key={r.role} className="flex items-baseline gap-2">
+              <span
+                aria-hidden
+                className="w-4 text-center font-mono text-zinc-500 dark:text-zinc-400"
+              >
+                {r.spinner ? "⠋" : r.glyph}
+              </span>
+              <dt className="font-medium text-zinc-700 dark:text-zinc-200">
+                {r.role}
+              </dt>
+            </div>
+          ))}
+        </dl>
+      );
+    }
+    case "notes": {
+      const { rows } = notesProjection(block as Record<string, unknown>);
+      return (
+        <div key={key} className="flex flex-col gap-2">
+          {rows.map((r, i) => (
+            <div key={i} className="flex gap-2 text-sm">
+              {r.label ? (
+                <span className="shrink-0 font-medium text-zinc-500 dark:text-zinc-400">
+                  {r.label}
+                </span>
+              ) : null}
+              <div className="text-zinc-700 dark:text-zinc-300">
+                {r.lead ? <b className="font-semibold">{r.lead}</b> : null}
+                {r.lead && r.text ? " " : null}
+                {r.text}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "note": {
+      const r = noteProjection(block as Record<string, unknown>);
+      return (
+        <div key={key} className="flex gap-2 text-sm">
+          {r.label ? (
+            <span className="shrink-0 font-medium text-zinc-500 dark:text-zinc-400">
+              {r.label}
+            </span>
+          ) : null}
+          <div className="text-zinc-700 dark:text-zinc-300">
+            {r.lead ? <b className="font-semibold">{r.lead}</b> : null}
+            {r.lead && r.text ? " " : null}
+            {r.text}
+          </div>
+        </div>
+      );
+    }
+    case "cards": {
+      const { cards } = cardsProjection(block as Record<string, unknown>);
+      const toneStripe: Record<string, string> = {
+        info: "border-l-blue-400",
+        ok: "border-l-emerald-400",
+        warn: "border-l-amber-400",
+        danger: "border-l-red-400",
+      };
+      return (
+        <div key={key} className="grid gap-3 sm:grid-cols-2">
+          {cards.map((c, i) => (
+            <div
+              key={i}
+              className={`rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/40 ${
+                c.tone ? `border-l-2 ${toneStripe[c.tone] ?? ""}` : ""
+              }`}
+            >
+              {c.title ? (
+                <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                  {c.title}
+                </p>
+              ) : null}
+              {c.text ? (
+                <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+                  {c.text}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "card": {
+      const c = cardProjection(block as Record<string, unknown>);
+      return (
+        <div
+          key={key}
+          className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/40"
+        >
+          {c.title ? (
+            <p className="font-medium text-zinc-800 dark:text-zinc-100">
+              {c.title}
+            </p>
+          ) : null}
+          {c.body ? (
+            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+              {c.body}
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+    case "pipeline": {
+      const { nodes } = pipelineProjection(block as Record<string, unknown>);
+      return (
+        <div key={key} className="flex flex-wrap items-stretch gap-2 overflow-x-auto">
+          {nodes.map((n, i) => (
+            <div key={i} className="flex items-center gap-2">
+              {i > 0 ? (
+                <span aria-hidden className="text-zinc-400">
+                  →
+                </span>
+              ) : null}
+              <div className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+                {n.kind ? (
+                  <p className="text-xs uppercase tracking-widest text-zinc-400">
+                    {n.kind}
+                  </p>
+                ) : null}
+                {n.title ? (
+                  <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                    {n.title}
+                  </p>
+                ) : null}
+                {n.detail ? (
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                    {n.detail}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+    case "stage": {
+      const s = stageProjection(block as Record<string, unknown>);
+      return (
+        <div
+          key={key}
+          className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+        >
+          {s.kind ? (
+            <p className="text-xs uppercase tracking-widest text-zinc-400">
+              {s.kind}
+            </p>
+          ) : null}
+          {s.title ? (
+            <p className="font-medium text-zinc-800 dark:text-zinc-100">
+              {s.title}
+            </p>
+          ) : null}
+          {s.detail ? (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {s.detail}
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+    case "task-detail": {
+      const d = taskDetailProjection(block as Record<string, unknown>);
+      const task =
+        block.task && typeof block.task === "object"
+          ? (block.task as Record<string, unknown>)
+          : (block as Record<string, unknown>);
+      const criteria = Array.isArray(task.criteria)
+        ? (task.criteria as Array<Record<string, unknown>>)
+        : [];
+      const labels = Array.isArray(task.labels)
+        ? (task.labels as unknown[]).map(str).filter(Boolean)
+        : [];
+      return (
+        <div
+          key={key}
+          className="flex flex-col gap-2 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800"
+        >
+          <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            {d.title}
+          </p>
+          {d.sections.includes("meta") ? (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {[str(task.status), str(task.priority) ? `P${str(task.priority).replace(/[^0-9]/g, "")}` : "", str(task.kind), str(task.worker)]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          ) : null}
+          {d.sections.includes("criteria") ? (
+            <div>
+              <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                Criteria · {d.criteria.met}/{d.criteria.total}
+              </p>
+              <ul className="mt-1 flex flex-col gap-0.5 text-sm text-zinc-700 dark:text-zinc-300">
+                {criteria.map((c, i) => (
+                  <li key={i} className="flex items-baseline gap-1.5">
+                    <span aria-hidden className="text-zinc-400">
+                      {c.met === true ? "✓" : "○"}
+                    </span>
+                    {str(c.text) || str(c.criterion)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {d.sections.includes("labels") ? (
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              {labels.join(" · ")}
+            </p>
+          ) : null}
+        </div>
+      );
+    }
+    case "roadmap": {
+      const { lanes, scale } = roadmapProjection(
+        block as Record<string, unknown>,
+      );
+      const snapshot = Array.isArray(block.snapshot)
+        ? (block.snapshot as Array<Record<string, unknown>>)
+        : [];
+      const roleBar: Record<string, string> = {
+        open: "bg-zinc-400",
+        ready: "bg-zinc-500",
+        progress: "bg-blue-500",
+        blocked: "bg-amber-500",
+        done: "bg-teal-500",
+        cancel: "bg-zinc-300",
+      };
+      return (
+        <div key={key} className="flex flex-col gap-1.5">
+          {scale.length ? (
+            <div className="flex justify-between text-xs text-zinc-400">
+              {scale.map((cell, i) => (
+                <span key={i}>{cell}</span>
+              ))}
+            </div>
+          ) : null}
+          {lanes.map((lane, i) => {
+            const row = snapshot[i] ?? {};
+            const left = num(row.left) ?? 0;
+            const width = num(row.width) ?? 1;
+            return (
+              <div key={i} className="flex items-center gap-2 text-sm">
+                <span
+                  className={`w-32 shrink-0 truncate text-zinc-600 dark:text-zinc-300 ${
+                    lane.phase ? "font-semibold" : ""
+                  }`}
+                >
+                  {lane.title}
+                </span>
+                <div className="relative h-2 flex-1 rounded bg-zinc-100 dark:bg-zinc-800">
+                  <span
+                    className={`absolute h-full rounded ${roleBar[lane.role] ?? "bg-zinc-500"}`}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    case "columns": {
+      // Recursive container — recurse renderBlock over each column's children.
+      const cols = Array.isArray(block.columns)
+        ? (block.columns as unknown[])
+        : [];
+      return (
+        <div
+          key={key}
+          className="grid gap-4"
+          style={{ gridTemplateColumns: `repeat(${Math.max(cols.length, 1)}, minmax(0, 1fr))` }}
+        >
+          {cols.map((col, ci) => {
+            const kids = Array.isArray(col) ? (col as Block[]) : [];
+            return (
+              <div key={ci} className="flex flex-col gap-4">
+                {kids.map((b, i) => renderBlock(b, i))}
+              </div>
+            );
+          })}
+        </div>
+      );
+    }
+    case "terminal": {
+      // Recursive container — traffic-light chrome wrapping child blocks.
+      const kids = Array.isArray(block.children)
+        ? (block.children as Block[])
+        : Array.isArray(block.blocks)
+          ? (block.blocks as Block[])
+          : [];
+      const live =
+        block.live === true || block.live === "true" || block.live === "live";
+      const footer = str(block.footer);
+      return (
+        <div
+          key={key}
+          className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"
+        >
+          <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2 dark:border-zinc-800 dark:bg-zinc-900">
+            <span aria-hidden className="text-zinc-400">
+              ● ● ●
+            </span>
+            {block.title ? (
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">
+                {str(block.title)}
+              </span>
+            ) : null}
+            {live ? (
+              <span className="rounded bg-zinc-800 px-1.5 text-xs text-zinc-100 dark:bg-zinc-200 dark:text-zinc-900">
+                live
+              </span>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-4 p-3">
+            {kids.map((b, i) => renderBlock(b, i))}
+          </div>
+          {footer ? (
+            <div className="border-t border-zinc-200 px-3 py-1.5 text-xs text-zinc-400 dark:border-zinc-800">
+              {footer}
+            </div>
+          ) : null}
+        </div>
       );
     }
     default:

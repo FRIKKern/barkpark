@@ -159,7 +159,59 @@ test("web glyph chars match the shared manifest for non-spinner roles (legend fi
   }
 });
 
-// S2 FIRST ITEM: status-legend has no web reader case in portable-doc.tsx. When
-// S2 adds it, drop `{ skip: ... }` and assert the six-rung ladder realizes the
-// status-legend projection here.
-test("status-legend web reader case (S2 — not yet implemented)", { skip: "S2: portable-doc.tsx has no status-legend case yet" }, () => {});
+/* ══ S2: the task-tracking / composition component family ══════════════════════
+ *
+ * Each type's web PROJECTOR (`web/lib/component-projections.ts`, which
+ * portable-doc.tsx renders FROM) must produce the SAME structural projection the
+ * Elixir generator committed. deepEqual against the golden `expected` — EXACT,
+ * never substring — so a web divergence from the shared truth reds here (matching
+ * the task-board leg's exactness). status-legend leads (the S1 skip, now green);
+ * the recursive containers (columns / terminal) come last. */
+
+import {
+  statusLegendProjection,
+  notesProjection,
+  noteProjection,
+  cardsProjection,
+  cardProjection,
+  pipelineProjection,
+  stageProjection,
+  taskDetailProjection,
+  roadmapProjection,
+  columnsProjection,
+  terminalProjection,
+} from "../lib/component-projections.ts";
+
+/** Load a `<type>.golden.json` fixture (input + expected projection). */
+function loadFixture(type: string): { input: Record<string, unknown>; expected: unknown } {
+  return JSON.parse(
+    readFileSync(new URL(`./fixtures/${type}.golden.json`, import.meta.url), "utf8"),
+  );
+}
+
+/** Every S2 type: its web projector must realize the committed golden projection
+ * EXACTLY. `input` is ignored by status-legend (static ladder), read by the rest. */
+const S2_CASES: Array<{
+  type: string;
+  project: (input: Record<string, unknown>) => unknown;
+}> = [
+  { type: "status-legend", project: () => statusLegendProjection() },
+  { type: "notes", project: notesProjection },
+  { type: "note", project: noteProjection },
+  { type: "cards", project: cardsProjection },
+  { type: "card", project: cardProjection },
+  { type: "pipeline", project: pipelineProjection },
+  { type: "stage", project: stageProjection },
+  { type: "task-detail", project: taskDetailProjection },
+  { type: "roadmap", project: roadmapProjection },
+  // recursive containers last — their projection expresses child NESTING.
+  { type: "columns", project: columnsProjection },
+  { type: "terminal", project: terminalProjection },
+];
+
+for (const { type, project } of S2_CASES) {
+  test(`web ${type} projector realizes the golden projection (exact)`, () => {
+    const fx = loadFixture(type);
+    assert.deepEqual(project(fx.input), fx.expected);
+  });
+}
