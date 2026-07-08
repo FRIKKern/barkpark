@@ -77,15 +77,11 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 		var art []string
 		switch doc.kind {
 		case "flowchart":
-			// Direction is a responsive flex-direction: an LR/RL graph lays out
-			// left-to-right when it fits, and COLLAPSES to the top-down engine when
-			// it can't (renderFlowchartLR returns nil) — re-layout, not reflow.
-			if doc.graph.dir == "LR" || doc.graph.dir == "RL" {
-				art = renderFlowchartLR(doc.graph, ctx)
-			}
-			if art == nil {
-				art = renderFlowchart(doc.graph, ctx)
-			}
+			// Scenario heuristics (mermaidheur.go): measure the graph, choose the
+			// strategy — LR box-art (declared, or a chain auto-oriented sideways),
+			// the TD bus, or the indented tree view for graphs the boxes would
+			// crush or mislead. Direction stays a responsive flex-direction.
+			art = renderFlowchartAuto(doc.graph, ctx)
 		case "sequence":
 			art = renderSequence(doc.seq, ctx)
 		}

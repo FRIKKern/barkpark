@@ -23,6 +23,12 @@ import (
 // source.
 var seqFlex = Flex{Gutter: 2, MinWidth: 8}
 
+// seqFlexTight is the compaction fallback (scenario heuristics): when the roomy
+// solve doesn't fit — many participants, narrow terminal — the ladder shrinks
+// its gutter and lets boxes go narrower (names truncate) before giving up to
+// the folded-source box. Compact but legible beats absent.
+var seqFlexTight = Flex{Gutter: 1, MinWidth: 6}
+
 // renderSequence lays a parsed sequence into a participant header band + a
 // message ladder. Returns nil when it can't fit cleanly at ctx.Width (caller
 // keeps the folded-source box). Every returned line is exactly ctx.Width wide.
@@ -33,14 +39,21 @@ func renderSequence(s *mmSequence, ctx RenderCtx) []string {
 	W := clampWidth(ctx.Width)
 	n := len(s.actors)
 
-	cellW, sideBySide := seqFlex.Measure(W, n)
+	// Roomy solve first; compact solve before folding (the sequence ladder's rung
+	// of the box-art → compact → folded-source degradation ladder).
+	flex := seqFlex
+	cellW, sideBySide := flex.Measure(W, n)
 	if !sideBySide {
-		return nil // columns would collide — fall back to folded source
+		flex = seqFlexTight
+		cellW, sideBySide = flex.Measure(W, n)
+	}
+	if !sideBySide {
+		return nil // columns would collide even compacted — folded source
 	}
 
 	// Column geometry: slot i spans [i*(cellW+gutter), +cellW); the lifeline sits
 	// at the slot centre. The whole band is centered in W.
-	gutter := seqFlex.Gutter
+	gutter := flex.Gutter
 	total := n*cellW + (n-1)*gutter
 	leftPad := 0
 	if total < W {
