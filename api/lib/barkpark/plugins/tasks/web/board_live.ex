@@ -1031,7 +1031,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  defp board_query(group_by, filters, task_id, expand_id \\ nil) do
+  defp board_query(group_by, filters, task_id, expand_id) do
     group_params = if group_by == :none, do: [], else: [{"group", Atom.to_string(group_by)}]
 
     facet_params =
