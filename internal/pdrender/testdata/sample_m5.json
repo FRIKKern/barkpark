@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Grid & ladder widgets"
+    },
+    {
+      "id": "notes1",
+      "type": "notes",
+      "items": [
+        {
+          "label": "Rule 1",
+          "lead": "Clean first",
+          "text": "Never compile without nuking the whole _build/prod tree."
+        },
+        {
+          "label": "Rule 2",
+          "text": "A note with no lead run-in still renders its label chip and body."
+        },
+        {
+          "lead": "No label",
+          "text": "And a note with no label leads straight into its bold run-in."
+        }
+      ]
+    },
+    {
+      "id": "notes-empty",
+      "type": "notes",
+      "items": []
+    },
+    {
+      "id": "pipe1",
+      "type": "pipeline",
+      "nodes": [
+        {
+          "kind": "ingest",
+          "title": "Decode document",
+          "detail": "Parse the portable-doc envelope into a block tree.",
+          "files": "decode.go",
+          "source": "cli"
+        },
+        {
+          "kind": "render",
+          "title": "Stack the widgets",
+          "detail": "Each grid block collapses to a vertical stack."
+        },
+        {
+          "kind": "emit",
+          "title": "Write to the terminal",
+          "detail": "Flush the composed lines to stdout.",
+          "source": "tui"
+        }
+      ]
+    },
+    {
+      "id": "cards1",
+      "type": "cards",
+      "items": [
+        {
+          "title": "Info card",
+          "text": "An informational card carries the neutral-info tone border.",
+          "tone": "info"
+        },
+        {
+          "title": "OK card",
+          "text": "A success card is tinted with the ok/success tone.",
+          "tone": "ok"
+        },
+        {
+          "title": "Warn card",
+          "text": "A warning card draws attention with the warn tone border.",
+          "tone": "warn"
+        },
+        {
+          "title": "Danger card",
+          "text": "A danger card signals a destructive or failing state.",
+          "tone": "danger"
+        }
+      ]
+    },
+    {
+      "id": "legend1",
+      "type": "status-legend"
+    }
+  ]
+}
