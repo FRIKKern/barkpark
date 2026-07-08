@@ -87,6 +87,15 @@ hexList((color.presence || {}).palette, "color.presence.palette", 8);
 hexList((color.sheetCf || {}).background, "color.sheetCf.background", 6);
 hexList((color.sheetCf || {}).tab, "color.sheetCf.tab", 6);
 
+// --- categorical spectrum: match-quality (7 ordered HSL-channel stops) --------
+// A decorative data-viz gradient (fuzzy→exact), stored as HSL channels (feeds a
+// CSS linear-gradient, never compared for equality — unlike the hex palettes).
+const hslList = (arr, where, len) => {
+  ok(Array.isArray(arr) && arr.length === len, `${where} must be a ${len}-entry HSL-channel array, got ${JSON.stringify(arr)}`);
+  if (Array.isArray(arr)) arr.forEach((h, i) => ok(HSL.test(h), `${where}[${i}] must be HSL channels 'H S% L%', got ${JSON.stringify(h)}`));
+};
+hslList((color.matchQuality || {}).spectrum, "color.matchQuality.spectrum", 7);
+
 // --- font ------------------------------------------------------------------
 const font = tokens.font || {};
 ok(font.chrome && font.chrome.selfHosted === true, "font.chrome.selfHosted must be true (Inter is self-hosted)");

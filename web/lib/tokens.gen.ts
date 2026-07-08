@@ -10,3 +10,16 @@ export const canvas = {
   text: "hsl(240 10% 3.9%)",
   mutedSurface: "hsl(240 4.8% 95.9%)",
 } as const;
+
+/** Categorical match-quality spectrum (7 ordered stops, fuzzy→exact) for
+ *  finder.tsx's HighlightLegend gradient. Theme-invariant data-viz palette,
+ *  NOT a status role — mirrors the presence / Sheets-CF categorical sets. */
+export const matchQuality = [
+  "hsl(0 55% 60%)",
+  "hsl(24 70% 56%)",
+  "hsl(48 82% 50%)",
+  "hsl(72 86% 46%)",
+  "hsl(100 88% 42%)",
+  "hsl(130 90% 38%)",
+  "hsl(162 95% 34%)",
+] as const;

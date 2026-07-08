@@ -33,6 +33,7 @@ import { suggestCorrection } from "@/lib/did-you-mean";
 import { getSearchSessionId } from "@/lib/search-session";
 import { stemToken, queryStems } from "@/lib/stem";
 import { highlightSegments, words, termHitsWords } from "@/lib/fuzzy";
+import { matchQuality } from "@/lib/tokens.gen";
 
 /** Fire-and-forget feedback POST — never throws, never blocks the caller. */
 function recordFindEvent(body: {
@@ -283,8 +284,9 @@ function HighlightLegend() {
           aria-hidden
           className="h-2 w-24 rounded-full"
           style={{
-            backgroundImage:
-              "linear-gradient(to right, hsl(0 55% 60%), hsl(24 70% 56%), hsl(48 82% 50%), hsl(72 86% 46%), hsl(100 88% 42%), hsl(130 90% 38%), hsl(162 95% 34%))", // lit-allow: fuzzy→exact match-quality legend — a 7-stop decorative data-viz spectrum (the web analog of the Studio Sheets categorical CF palette), no single --color role applies
+            // Categorical fuzzy→exact match-quality spectrum, sourced from the
+            // emitted design token (design/tokens.json color.matchQuality).
+            backgroundImage: `linear-gradient(to right, ${matchQuality.join(", ")})`,
           }}
         />
         <span>exact</span>
