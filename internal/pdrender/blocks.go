@@ -254,13 +254,13 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 	if len(b.Children) == 0 {
 		return nil
 	}
-	const gutter = 2
 	tracks := gridTracks(layout["tracks"])
-	if tracks < 2 {
-		return nil
-	}
-	cellW := (inner - (tracks-1)*gutter) / tracks
-	if cellW < MinWidth {
+	// The shared Flex solver owns the divide-formula + degrade verdict: cellW :=
+	// (inner-(tracks-1)*gutter)/tracks; side-by-side only when tracks>1 AND
+	// cellW>=MinWidth. A false verdict (tracks<2 or any cell too narrow) → nil,
+	// signaling the caller to degrade to the byte-identical stack path.
+	cellW, sideBySide := DefaultFlex.Measure(inner, tracks)
+	if !sideBySide {
 		return nil
 	}
 
@@ -270,18 +270,14 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 	copy(items, b.Children)
 	sort.SliceStable(items, func(i, j int) bool { return cellOrder(items[i]) < cellOrder(items[j]) })
 
-	cells := make([][]string, len(items))
-	widths := make([]int, len(items))
-	spans := make([]int, len(items))
+	nodes := make([]Node, len(items))
 	for i, child := range items {
 		s := cellSpan(child, tracks)
-		spans[i] = s
-		cw := s*cellW + (s-1)*gutter
-		widths[i] = cw
-		cells[i] = sr.reg.Render(child, childCtx.WithWidth(cw))
+		cw := s*cellW + (s-1)*DefaultFlex.Gutter
+		nodes[i] = Node{Lines: sr.reg.Render(child, childCtx.WithWidth(cw)), Width: cw, Span: s}
 	}
 
-	rows := gridRows(cells, widths, spans, tracks, gutter)
+	rows := DefaultFlex.ArrangeGrid(nodes, tracks)
 	out := make([]string, 0, len(rows))
 	for _, line := range rows {
 		out = append(out, pad+line)

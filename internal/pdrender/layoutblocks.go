@@ -62,21 +62,19 @@ func (cr columnsRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 
-	// Horizontal path: per-cell width = (W-(N-1)*gutter)/N. When >1 column clears
-	// MinWidth, re-render each column at cellW (so wrapping is right — the
-	// full-width groups above would overflow) and JoinHorizontal them. Integer
-	// division may leave ≤N-1 columns of unused trailing slack; it NEVER overflows.
-	const gutter = 2
-	cellW := (w - (n-1)*gutter) / n
-	if n > 1 && cellW >= MinWidth {
+	// Horizontal path: the shared Flex solver resolves per-cell width and the
+	// degrade verdict (cellW := (W-(N-1)*gutter)/N; side-by-side when >1 column
+	// clears MinWidth). Re-render each column at cellW (so wrapping is right — the
+	// full-width groups above would overflow) and Arrange them side-by-side.
+	// Integer division may leave ≤N-1 columns of unused trailing slack; never overflows.
+	cellW, sideBySide := DefaultFlex.Measure(w, n)
+	if sideBySide {
 		cellCtx := ctx.Deeper().WithWidth(cellW)
-		groups := make([][]string, n)
-		widths := make([]int, n)
+		nodes := make([]Node, n)
 		for i, blocks := range kept {
-			groups[i] = cr.renderColumn(blocks, cellCtx)
-			widths[i] = cellW
+			nodes[i] = Node{Lines: cr.renderColumn(blocks, cellCtx), Width: cellW, Span: 1}
 		}
-		return joinColumns(groups, widths, gutter)
+		return DefaultFlex.Arrange(nodes)
 	}
 
 	// Sub-MinWidth fallback (verbatim): stack the columns with a hairline rule.
