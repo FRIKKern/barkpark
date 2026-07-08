@@ -31,6 +31,7 @@ defmodule Barkpark.Pulse.Metrics do
   use GenServer
 
   @tick_ms 2_000
+  @month_seconds 2_592_000
   @counters_key {__MODULE__, :counters}
   @snapshot_key {__MODULE__, :snapshot}
 
@@ -61,6 +62,7 @@ defmodule Barkpark.Pulse.Metrics do
       run_queue: 0,
       cursor_per_s: 0.0,
       strikes_per_min: 0.0,
+      cost_eur_total: 0.0,
       sampled: false
     })
   end
@@ -75,12 +77,23 @@ defmodule Barkpark.Pulse.Metrics do
     ref = :counters.new(2, [:write_concurrency])
     :persistent_term.put(@counters_key, ref)
 
+    cost0 =
+      try do
+        Barkpark.Pulse.cost_nanos()
+      rescue
+        _ -> 0
+      catch
+        :exit, _ -> 0
+      end
+
     state = %{
       ref: ref,
       swt: :erlang.statistics(:scheduler_wall_time),
       last_ms: now_ms(),
       ticks: 0,
-      storage: %{bytes: 0, rows: 0}
+      storage: %{bytes: 0, rows: 0},
+      cost_total_nanos: cost0,
+      cost_pending_nanos: 0
     }
 
     Process.send_after(self(), :tick, @tick_ms)
@@ -106,6 +119,28 @@ defmodule Barkpark.Pulse.Metrics do
       sampled: true
     }
 
+    # integrate this interval's compute cost (nano-euros) into the running
+    # total; flush the pending sum to the durable meter about once a minute.
+    price = host_eur_month()
+    tick_nanos = round(snap.cpu_util * price / @month_seconds * elapsed_s * 1_000_000_000)
+    cost_total = state.cost_total_nanos + tick_nanos
+    cost_pending = state.cost_pending_nanos + tick_nanos
+
+    cost_pending =
+      if cost_pending > 0 and rem(state.ticks, 30) == 0 do
+        try do
+          Barkpark.Pulse.add_cost_nanos(cost_pending)
+          0
+        rescue
+          _ -> cost_pending
+        catch
+          :exit, _ -> cost_pending
+        end
+      else
+        cost_pending
+      end
+
+    snap = Map.put(snap, :cost_eur_total, cost_total / 1_000_000_000)
     :persistent_term.put(@snapshot_key, snap)
 
     # storage is a DB read — refresh once a minute, keep the cached value between
@@ -126,7 +161,24 @@ defmodule Barkpark.Pulse.Metrics do
     broadcast_vitals(snap, storage)
 
     Process.send_after(self(), :tick, @tick_ms)
-    {:noreply, %{state | swt: swt1, last_ms: now_ms(), ticks: state.ticks + 1, storage: storage}}
+
+    {:noreply,
+     %{
+       state
+       | swt: swt1,
+         last_ms: now_ms(),
+         ticks: state.ticks + 1,
+         storage: storage,
+         cost_total_nanos: cost_total,
+         cost_pending_nanos: cost_pending
+     }}
+  end
+
+  defp host_eur_month do
+    case Application.get_env(:barkpark, :pulse_host_eur_month, 4.51) do
+      n when is_number(n) -> n * 1.0
+      _ -> 4.51
+    end
   end
 
   # the public face of the cost: pushed on every configured channel topic so
@@ -138,11 +190,7 @@ defmodule Barkpark.Pulse.Metrics do
   # and calls `handle_out/3`, which PulseChannel doesn't define → the channel
   # crashes. Guarded because the Endpoint may not be up on the very first tick.
   defp broadcast_vitals(snap, storage) do
-    price =
-      case Application.get_env(:barkpark, :pulse_host_eur_month, 4.51) do
-        n when is_number(n) -> n * 1.0
-        _ -> 4.51
-      end
+    price = host_eur_month()
 
     for name <- Map.keys(Barkpark.Pulse.channels()) do
       topic = "pulse:" <> name
@@ -163,6 +211,7 @@ defmodule Barkpark.Pulse.Metrics do
         spm: Float.round(snap.strikes_per_min, 1),
         online: online,
         eur: Float.round(snap.cpu_util * price, 5),
+        eur_total: Float.round(Map.get(snap, :cost_eur_total, 0.0), 9),
         host_eur: price,
         bytes: storage.bytes,
         rows: storage.rows

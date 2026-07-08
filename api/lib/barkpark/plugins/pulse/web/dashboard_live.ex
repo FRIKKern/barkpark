@@ -83,7 +83,11 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
     # broadcast fan-out: every relayed frame goes to (subscribers - 1) sockets
     fanout = (snap.cursor_per_s + snap.strikes_per_min / 60) * max(0, online - 1)
 
-    Map.merge(snap, %{online: online, fanout_per_s: fanout})
+    Map.merge(snap, %{
+      online: online,
+      fanout_per_s: fanout,
+      cost_so_far: Map.get(snap, :cost_eur_total, 0.0)
+    })
   end
 
   defp safe_storage do
@@ -112,6 +116,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
   defp pct(u), do: :erlang.float_to_binary(u * 100, decimals: 1)
   defp f1(x), do: :erlang.float_to_binary(x * 1.0, decimals: 1)
   defp mb(bytes), do: :erlang.float_to_binary(bytes / 1_048_576, decimals: 2)
+  defp f6(x), do: :erlang.float_to_binary(x * 1.0, decimals: 6)
 
   # thousands separators, no extra dep: 1317 -> "1,317"
   defp commas(n) when is_integer(n) do
@@ -147,8 +152,9 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
                style="border: 1px solid var(--muted-border-color, #ccc); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
         <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
           <strong>what the storm costs right now</strong>
-          <span data-role="cost-eur" style="font-size:1.6rem; font-weight:700; font-variant-numeric: tabular-nums;">
-            ≈ €<%= eur(@vitals.cpu_util) %>/mo
+          <span style="text-align:right; font-variant-numeric: tabular-nums;">
+            <span data-role="cost-eur" style="font-size:1.6rem; font-weight:700;">≈ €<%= eur(@vitals.cpu_util) %>/mo</span><br/>
+            <small data-role="cost-sofar" style="opacity:0.7;">€<%= f6(@vitals.cost_so_far) %> so far</small>
           </span>
         </div>
         <div style="display:flex; gap:1.6rem; margin-top:0.5rem; flex-wrap:wrap; opacity:0.8; font-variant-numeric: tabular-nums;">
