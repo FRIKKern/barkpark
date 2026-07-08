@@ -130,9 +130,13 @@ defmodule Barkpark.Pulse.Metrics do
   end
 
   # the public face of the cost: pushed on every configured channel topic so
-  # the storm clients render it live. Coarse + rounded on purpose. PubSub with
-  # a %Phoenix.Socket.Broadcast{} (what Endpoint.broadcast builds) so it works
-  # even while the Endpoint itself is still booting.
+  # the storm clients render it live. Coarse + rounded on purpose. MUST go
+  # through `Endpoint.broadcast` (not a raw `PubSub.broadcast` of a
+  # `%Broadcast{}`): the endpoint's channel dispatcher FASTLANES a
+  # non-intercepted event straight to the transport, exactly like "strike". A
+  # raw PubSub broadcast instead lands in each joined channel's `handle_info`
+  # and calls `handle_out/3`, which PulseChannel doesn't define → the channel
+  # crashes. Guarded because the Endpoint may not be up on the very first tick.
   defp broadcast_vitals(snap, storage) do
     price =
       case Application.get_env(:barkpark, :pulse_host_eur_month, 4.51) do
@@ -164,11 +168,13 @@ defmodule Barkpark.Pulse.Metrics do
         rows: storage.rows
       }
 
-      Phoenix.PubSub.broadcast(
-        Barkpark.PubSub,
-        topic,
-        %Phoenix.Socket.Broadcast{topic: topic, event: "vitals", payload: payload}
-      )
+      try do
+        BarkparkWeb.Endpoint.broadcast(topic, "vitals", payload)
+      rescue
+        _ -> :ok
+      catch
+        :exit, _ -> :ok
+      end
     end
   end
 
