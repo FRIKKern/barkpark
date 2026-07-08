@@ -6,10 +6,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def shares_open(params, socket) do
-    if socket.assigns[:shares_admin?] do
+    if Caps.admin?(socket) do
       surfaces = List.wrap(params["surface"]) |> Enum.filter(&(&1 in ~w(papers docs media)))
 
       {:noreply,
@@ -31,7 +32,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   end
 
   def shares_add(params, socket) do
-    if socket.assigns[:shares_admin?] do
+    if Caps.admin?(socket) do
       scope = params["scope"] |> to_string() |> String.trim()
       surfaces = params["surfaces"] |> List.wrap() |> Enum.join(",")
 
@@ -63,7 +64,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   end
 
   def shares_remove(%{"scope" => scope}, socket) do
-    if socket.assigns[:shares_admin?] do
+    if Caps.admin?(socket) do
       case Barkpark.Sharing.scope_triple(scope) do
         {:ok, {ws, proj, dataset}} ->
           {:ok, _count} = Barkpark.Sharing.remove_share(ws, proj, dataset)

@@ -8,11 +8,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
   alias Barkpark.Structure
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def item_share_open(%{"kind" => kind} = params, socket) do
-    if socket.assigns[:shares_admin?] do
+    if Caps.admin?(socket) do
       ref_id = params["ref-id"] |> to_string() |> String.replace_prefix("drafts.", "")
 
       item = %{
@@ -42,7 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
     item = socket.assigns[:item_share]
 
     cond do
-      not socket.assigns[:shares_admin?] ->
+      not Caps.admin?(socket) ->
         {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
 
       is_nil(item) or is_nil(socket.assigns[:current_workspace]) ->
@@ -64,7 +65,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   end
 
   def item_share_revoke(%{"id" => id}, socket) do
-    if socket.assigns[:shares_admin?] do
+    if Caps.admin?(socket) do
       Barkpark.Sharing.Links.revoke(id)
 
       {:noreply,

@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   import Phoenix.Component, only: [assign: 2, assign_new: 3]
   import Phoenix.LiveView, only: [get_connect_params: 1, stream: 3, allow_upload: 3]
 
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PresenceState
 
   @doc """
@@ -77,15 +78,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       user_color: user_color,
       presences: [],
       show_profile: false,
+      # ── Capability map (airdrop-grants ag-studio-capability-hide) ─────
+      # `caps` = %{read, write, admin} for the mounted desk: membership ∪
+      # active grants (grants never confer admin). It DRIVES the `:if`
+      # affordance hiding (`@caps.admin` etc.) AND — load-bearing — the
+      # server-side deny-gate attached in StudioLive.mount
+      # (`BarkparkWeb.Studio.Caps.attach/1`), which RE-DERIVES caps per
+      # event so mid-session grant expiry denies a forged event. Refreshed
+      # by the grant toast + the expiry tick.
+      caps: Caps.derive(socket),
       # ── Network shares panel (scoped-sharing P6) ─────────────────────
-      # Admin-only. `shares_admin?` is resolved ONCE from the mounted
-      # api_token (StudioLive runs in :studio_public, so the token may be
-      # nil or non-admin); it both hides the top-bar Share button and is
-      # re-checked in every shares-* handler (the hidden button is UX, the
-      # handler gate is the security boundary). The panel calls
+      # Admin-only. `shares_admin?` is DERIVED from `caps.admin` (an admin
+      # api_token OR an account with the workspace :admin role); it hides
+      # the top-bar Share button and is re-checked in every shares-*
+      # handler via `Caps.admin?/1` (the hidden button is UX, the handler
+      # gate + the deny-gate are the security boundary). The panel calls
       # Barkpark.Sharing.* in-process — the SAME registry the admin-only
       # /v1/shares API and `bp share` CLI write.
-      shares_admin?: shares_admin?(socket),
+      shares_admin?: Caps.admin?(socket),
       show_shares: false,
       shares_rows: [],
       shares_scope_prefill: "",
@@ -256,15 +266,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   end
 
   @doc """
-  The single authorization predicate for the shares panel. StudioLive runs in
-  :studio_public, so the mounted api_token may be nil or non-admin — a nil /
-  non-struct token denies (never raises). Re-evaluated in every shares-*
-  handler, not just at mount.
+  The single authorization predicate for the shares panel — now `caps.admin`
+  re-derived fresh (`Caps.admin?/1`): an admin api_token OR an account with the
+  workspace `:admin` role. Nil-safe (no principal denies, never raises).
+  Re-evaluated in every shares-* handler, not just at mount.
   """
-  def shares_admin?(socket) do
-    case socket.assigns[:api_token] do
-      %_{} = token -> Barkpark.Auth.has_permission?(token, "admin")
-      _ -> false
-    end
-  end
+  def shares_admin?(socket), do: Caps.admin?(socket)
 end
