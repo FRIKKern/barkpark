@@ -33,7 +33,7 @@ defmodule Barkpark.Content.Lifecycle do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Broadcast, Document, DraftId, Writer, WriteScope}
+  alias Barkpark.Content.{Broadcast, Document, DraftId, Sheets, Writer, WriteScope}
 
   @doc """
   Publish a document: copy draft content to published ID, delete draft.
@@ -126,6 +126,13 @@ defmodule Barkpark.Content.Lifecycle do
                 {:error, reason} ->
                   {:error, reason}
               end
+
+            # Publishing a SHEET refreshes its PUBLISHED embedders with the
+            # now-published content (the draft-save path deliberately skips
+            # them — see Sheets.refresh_sheet_embeds). Publish writes the
+            # published row directly (not through Writer's upsert tap), so
+            # the write-through must be invoked here explicitly.
+            Sheets.tap_sheet_writethrough(result)
 
             WriteScope.fire_after(result, :after_publish, payload)
         end

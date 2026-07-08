@@ -65,6 +65,14 @@ defmodule Barkpark.Content.Sheets do
 
     sheet
     |> sheet_embed_targets(refs)
+    # DRAFT-CONTENT BOUNDARY: a DRAFT sheet save must never rewrite a
+    # PUBLISHED embedder's snapshot — that would publish draft cell values to
+    # anonymous /papers readers. A published embedder's snapshot can only
+    # legitimately change when the SHEET itself is published, which routes
+    # the published row back through here (draft?/1 false → no filtering).
+    |> then(fn targets ->
+      if draft?(sheet.doc_id), do: Enum.filter(targets, &draft?(&1.doc_id)), else: targets
+    end)
     |> Enum.reduce(%{rewritten: 0, noop: 0}, fn doc, acc ->
       case refresh_doc_sheet_snapshots(doc, refs, sheet.content || %{}) do
         :rewritten -> %{acc | rewritten: acc.rewritten + 1}
