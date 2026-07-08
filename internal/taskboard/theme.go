@@ -83,9 +83,9 @@ var (
 	openColor   = genColor("open")        // open ○ ≈ dim backlog (tokens_gen)
 	cancelColor = genColor("cancelled")   // cancelled ✕ dim (tokens_gen)
 
-	neutralColor = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"} // lit-allow: zinc mid chrome, no generated twin — au-w4-cli-chrome-tokens
-	dimColor     = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"} // lit-allow: zinc dim chrome, no generated twin — au-w4-cli-chrome-tokens
-	titleColor   = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"} // lit-allow: near-fg title chrome, no generated twin — au-w4-cli-chrome-tokens
+	neutralColor = semrole.GenChromeTextSecondary // zinc mid chrome (chrome_gen)
+	dimColor     = semrole.GenChromeDim           // zinc dim chrome (chrome_gen)
+	titleColor   = semrole.GenChromeInk           // near-fg title chrome (chrome_gen)
 )
 
 var (
