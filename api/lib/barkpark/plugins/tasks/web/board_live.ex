@@ -601,6 +601,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           github: card && card.github,
           claim: peek_claim(content),
           description: presence(Map.get(content, "description")),
+          design_doc: presence(Map.get(content, "design_doc")),
           criteria: peek_criteria(content),
           ancestors: ancestors,
           subtree: subtree,
@@ -1546,6 +1547,37 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         border-top: 1px solid var(--border);
       }
       .bp-phone--ledger .bp-phone-body .bp-ledger { max-width: none; margin: 0; }
+      /* Wave 19: the card READS, not just scans — the root's brief under the
+         title, the ongoing task's text under its row, a paper chip when the
+         detailed description lives as a PortableDoc design paper. */
+      .bp-phone-desc {
+        margin: 0; flex: 0 0 auto;
+        font-size: 12px; line-height: 1.55; color: var(--muted-text);
+        display: -webkit-box; -webkit-box-orient: vertical;
+        -webkit-line-clamp: 5; overflow: hidden;
+        white-space: pre-line; overflow-wrap: anywhere;
+      }
+      .bp-phone-nobrief {
+        margin: 0; flex: 0 0 auto; font-size: 11px; font-style: italic;
+        color: var(--muted-text); opacity: 0.75;
+      }
+      .bp-fam-row.has-desc { display: block; }
+      .bp-fam-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .bp-fam-desc {
+        margin: 3px 0 2px; padding-left: 20px;
+        font-size: 11.5px; line-height: 1.5; color: var(--muted-text);
+        display: -webkit-box; -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere;
+      }
+      .bp-paper { color: var(--info); border-color: color-mix(in srgb, var(--info) 35%, var(--border)); }
+      .bp-paper:hover { color: var(--info); }
+      .bp-peek-paper {
+        display: inline-block; margin-top: 8px; font-size: 12px;
+        color: var(--info); text-decoration: none;
+        padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
+        border-radius: 7px;
+      }
+      .bp-peek-paper:hover { background: var(--info-soft); }
 
       /* Honest window note — the done ledger shows the newest slice; the full
          count never silently disappears. */
@@ -2347,9 +2379,23 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </ul>
         </section>
 
-        <section :if={@peek.description} class="bp-peek-sec" data-role="peek-description">
+        <section
+          :if={@peek.description || @peek.design_doc}
+          class="bp-peek-sec"
+          data-role="peek-description"
+        >
           <h3 class="bp-controls-label">Description</h3>
-          <p class="bp-peek-desc"><%= @peek.description %></p>
+          <p :if={@peek.description} class="bp-peek-desc"><%= @peek.description %></p>
+          <a
+            :if={@peek.design_doc}
+            class="bp-peek-paper"
+            data-role="peek-design-doc"
+            href={"/papers/" <> @peek.design_doc}
+            target="_blank"
+            rel="noopener"
+          >
+            ❡ Read the full design paper →
+          </a>
         </section>
 
         <section :if={@peek.criteria != []} class="bp-peek-sec" data-role="peek-criteria">
@@ -2482,6 +2528,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
         <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
 
+        <p :if={card[:description_excerpt]} class="bp-phone-desc" data-role="card-desc">
+          <%= card.description_excerpt %>
+        </p>
+
+        <p
+          :if={card[:family] && !card[:description_excerpt] && !card[:design_doc]}
+          class="bp-phone-nobrief"
+          data-role="brief-missing"
+        >
+          no brief — add a description or link a design paper
+        </p>
+
         <p
           :if={card.col == :in_progress && !card[:family] && focus_of(card)}
           class="bp-focus"
@@ -2498,15 +2556,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           <ul :if={card[:family]} class="bp-fam" data-role="family">
             <li
               :for={row <- card.family.rows}
-              class="bp-fam-row"
+              class={["bp-fam-row", row[:desc] && "has-desc"]}
               style={"--d: #{row.depth};"}
               data-role="family-row"
               data-doc-id={row.doc_id}
             >
-              <span :if={row.depth > 1} class="bp-tree-twig" aria-hidden="true">└</span>
-              <span class={"gi gi--#{row.color_role}"} aria-hidden="true"><%= glyph_text(row) %></span>
-              <span class="bp-fam-t"><%= row.title || row.doc_id %></span>
-              <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
+              <div class="bp-fam-line">
+                <span :if={row.depth > 1} class="bp-tree-twig" aria-hidden="true">└</span>
+                <span class={"gi gi--#{row.color_role}"} aria-hidden="true"><%= glyph_text(row) %></span>
+                <span class="bp-fam-t"><%= row.title || row.doc_id %></span>
+                <span :if={row.worker} class="bp-focus-w">@<%= row.worker %></span>
+              </div>
+              <p :if={row[:desc]} class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
             </li>
             <li :if={card.family.more > 0} class="bp-fam-more" data-role="family-more">
               + <%= card.family.more %> more inside
@@ -2567,6 +2628,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             </span>
             #<%= card.github["issue"] %>
             <span class="bp-gh-state" data-role="github-state"><%= card.github["state"] %></span>
+          </a>
+
+          <a
+            :if={card[:design_doc]}
+            class="bp-gh bp-paper"
+            data-role="design-doc"
+            href={"/papers/" <> card.design_doc}
+            target="_blank"
+            rel="noopener"
+          >
+            ❡ design paper
           </a>
 
           <span :if={card.worker} class="bp-worker" data-role="worker" title={card.worker}>

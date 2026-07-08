@@ -206,9 +206,27 @@ defmodule Barkpark.Tasks.Board do
       github_synced: Link.synced?(doc),
       blocker_statuses: blocker_statuses,
       next_criterion: next_criterion(content),
+      description_excerpt: excerpt(Map.get(content, "description")),
+      design_doc: string_presence(Map.get(content, "design_doc")),
       updated_at: doc.updated_at
     }
   end
+
+  # The card-sized slice of a task's markdown description — enough to READ on
+  # the board (the peek carries the full text; a linked design_doc paper
+  # carries the PortableDoc-rich version). Blank → nil, never "".
+  @excerpt_chars 420
+  defp excerpt(text) when is_binary(text) do
+    case String.trim(text) do
+      "" -> nil
+      trimmed -> String.slice(trimmed, 0, @excerpt_chars)
+    end
+  end
+
+  defp excerpt(_), do: nil
+
+  defp string_presence(v) when is_binary(v) and v != "", do: v
+  defp string_presence(_), do: nil
 
   # The first unmet acceptance criterion's text — the current STEP inside a
   # task with no in-flight subtask (the board's focus line falls back to it).
@@ -376,6 +394,8 @@ defmodule Barkpark.Tasks.Board do
       # re-derives it from the full corpus.
       sub: (prev_card && prev_card[:sub]) || nil,
       next_criterion: next_criterion(content),
+      description_excerpt: excerpt(Map.get(content, "description")),
+      design_doc: string_presence(Map.get(content, "design_doc")),
       updated_at: msg_doc.updated_at
     }
   end
@@ -701,8 +721,8 @@ defmodule Barkpark.Tasks.Board do
   # escalated card reads "open epic, work in flight" at a glance. Grouped and
   # filtered views deliberately stay PER-TASK — they are the drill-down.
   @family_order [:in_progress, :ready, :open, :blocked, :done]
-  @family_row_depth 2
-  @family_row_cap 6
+  @family_row_depth 3
+  @family_row_cap 24
 
   defp family_fold(board) do
     cards = Map.values(board.cards_by_id)
@@ -785,7 +805,10 @@ defmodule Barkpark.Tasks.Board do
         depth: depth,
         color_role: c.color_role,
         glyph: c.glyph,
-        worker: c.worker
+        worker: c.worker,
+        # The ONGOING task's text reads on the card itself (wave 19): only
+        # in-flight rows carry their excerpt — anything more is noise.
+        desc: (c.col == :in_progress && c[:description_excerpt]) || nil
       }
 
       [row | family_walk(index, c.doc_id, depth + 1, MapSet.put(seen, c.doc_id))]
