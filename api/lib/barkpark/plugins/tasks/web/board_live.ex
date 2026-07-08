@@ -100,6 +100,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   a fully-settled flat board swaps the column skeleton for a "pipeline clear"
   state (hero + ledger + window note). Empty columns stay ONLY while something
   is live — they are drag drop-targets then; a settled lane has none.
+
+  ## Focus & lineage (wave 12)
+
+  What's in focus gets the detail: the In Progress column is wider (400px vs
+  336px), and each in-flight card carries a `now:` focus line naming the step
+  being worked — its in-flight subtask (title + worker; the TUI
+  activity-focus) or, when it has no children, the first unmet acceptance
+  criterion. Any card with children shows a `done/total sub` lineage pill
+  (organizer-derived from `parent_id` over the same corpus).
   """
 
   use BarkparkWeb, :live_view
@@ -909,6 +918,37 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-variant-numeric: tabular-nums;
       }
 
+      /* ── focus (wave 12): what matters gets the detail ─────────────────────
+         In Progress is the board's centre of gravity — a wider panel, and each
+         in-flight card names the step being worked RIGHT NOW: its in-flight
+         subtask (the TUI activity-focus) or the first unmet criterion. */
+      .bp-board > .bp-col[data-col="in_progress"] { flex: 0 0 400px; width: 400px; }
+      .bp-focus {
+        display: flex; align-items: baseline; gap: 7px;
+        margin: 8px 0 0; padding: 6px 9px; border-radius: 7px;
+        background: var(--info-soft); font-size: 11.5px; color: var(--text);
+      }
+      .bp-focus-k {
+        flex: 0 0 auto; font-size: 10px; font-weight: 700;
+        letter-spacing: 0.08em; text-transform: uppercase; color: var(--info);
+      }
+      .bp-focus-t {
+        flex: 1 1 auto; min-width: 0; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-focus-w {
+        flex: 0 0 auto; color: var(--muted-text); font-size: 11px;
+        max-width: 14ch; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      /* Subtask lineage pill — done/total children, on any card that has them. */
+      .bp-sub {
+        padding: 1.5px 7px; border-radius: 5px; line-height: 1.5;
+        font-variant-numeric: tabular-nums; white-space: nowrap;
+        background: var(--muted-surface); color: var(--muted-text);
+      }
+      .bp-sub--all-done { color: var(--ok); background: var(--ok-soft); }
+
       /* Honest window note — the done ledger shows the newest slice; the full
          count never silently disappears. */
       .bp-more {
@@ -1277,11 +1317,27 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             </span>
           </div>
 
+          <p :if={col == :in_progress && focus_of(card)} class="bp-focus" data-role="focus">
+            <span class="bp-focus-k">now</span>
+            <span class="bp-focus-t"><%= focus_of(card).title %></span>
+            <span :if={focus_of(card).worker} class="bp-focus-w">
+              @<%= focus_of(card).worker %>
+            </span>
+          </p>
+
           <div :if={col != :done} class="bp-meta">
             <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
               P<%= card.priority %>
             </span>
             <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
+            <span
+              :if={card[:sub]}
+              class={["bp-sub", card[:sub] && card.sub.done == card.sub.total && "bp-sub--all-done"]}
+              data-role="subtasks"
+              title="subtasks done / total"
+            >
+              <%= card.sub.done %>/<%= card.sub.total %> sub
+            </span>
             <span :for={label <- Enum.take(card.labels, 2)} class="bp-label" data-role="label">
               <%= label %>
             </span>
@@ -1467,6 +1523,23 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # criteria projection contract, but guard the division anyway.
   defp crit_pct(%{met: met, total: total}) when total > 0, do: round(met / total * 100)
   defp crit_pct(_), do: 0
+
+  # An in-flight card's focus line — the step being worked RIGHT NOW (wave 12,
+  # the TUI activity-focus read): the in-flight subtask (title + its worker)
+  # when one exists, else the first unmet acceptance criterion. Nil renders no
+  # line — the focus is never fabricated.
+  defp focus_of(card) do
+    case {card[:sub], card[:next_criterion]} do
+      {%{active: %{title: title} = active}, _} when is_binary(title) ->
+        %{title: title, worker: active[:worker]}
+
+      {_, crit} when is_binary(crit) ->
+        %{title: crit, worker: nil}
+
+      _ ->
+        nil
+    end
+  end
 
   # How many of a blocked card's blockers are still live (not yet done). The
   # organizer always projects `blocker_statuses` (broadcast cards carry the
