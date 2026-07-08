@@ -1,0 +1,12 @@
+pdrender status tones (emitted from design/tokens.json)
+tone     light      dark
+------   -------    -------
+info     #3b82f6    #3b82f6
+ok       #137236    #45c474
+warn     #ba7008    #f8ab25
+danger   #b42222    #ef6161
+
+reading tokens
+font stack:     "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif
+heading weight: 600
+body size:      18px

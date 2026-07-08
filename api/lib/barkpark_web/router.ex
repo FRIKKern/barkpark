@@ -526,6 +526,9 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :studio} do
       live("/settings", SettingsLive)
       live("/org-admin", OrgAdminLive)
+      # Living token style guide (unified-aesthetic W1.4) — admin-gated; renders
+      # the emitted design tokens (var(--…) from root.html.heex GENERATED block).
+      live("/styleguide", StyleguideLive)
       # Dev-only tmux console — admin-gated here; TmuxLive.mount also hard-gates
       # on TmuxConsole.enabled? (dev-only PTY dep + config flag). Hidden in
       # prod/test where the flag is off and the backend isn't compiled.

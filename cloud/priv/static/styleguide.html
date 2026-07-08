@@ -71,6 +71,7 @@
       .sg-mark-demo { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
       .sg-mark-big { width: 72px; height: 72px; color: var(--primary); }
       .sg-kv { font-family: var(--mono); font-size: var(--text-xs); color: var(--muted-text); margin: 2px 0; }
+      .sg-lc { font-family: var(--mono); font-size: 20px; line-height: 1; width: 24px; text-align: center; flex: 0 0 24px; }
       .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
       .sg-modal-demo .modal-card { max-width: 420px; }
       .sg-forms { max-width: 380px; }
@@ -239,6 +240,30 @@
               <span class="dep-pill dep-queued">Queued</span>
               <span class="dep-pill dep-failed">Failed</span>
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Lifecycle vocabulary</h2>
+        <p class="sg-note">
+          The shared task-state vocabulary — the same seven states the Go TUI paints from
+          <code>internal/taskboard/tokens_gen.go</code> (<code>GenLifecycle</code> /
+          <code>GenLifecycleOrder</code>). The glyph and ordering are the design source; the
+          <em>hue</em> is a status role, so each state is colored live from
+          <code>--ok / --warn / --danger / --info</code> (plus <code>--text / --muted-text / --dim</code>
+          for the role-less states). Change a status hue in <code>tokens.json</code> and this row
+          re-tints in lock-step with the TUI.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--info);">⠋</span><span class="sg-type-tag">in_progress</span><span class="sg-kv">role info · --info</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--warn);">!</span><span class="sg-type-tag">blocked</span><span class="sg-kv">role warn · --warn</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--ok);">✓</span><span class="sg-type-tag">done</span><span class="sg-kv">role ok · --ok</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--ok);">✓</span><span class="sg-type-tag">closed</span><span class="sg-kv">role ok · --ok</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--dim);">✕</span><span class="sg-type-tag">cancelled</span><span class="sg-kv">neutral · --dim</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--text);">○</span><span class="sg-type-tag">ready</span><span class="sg-kv">--text</span></div>
+            <div class="sg-row"><span class="sg-lc" style="color: var(--muted-text);">○</span><span class="sg-type-tag">open</span><span class="sg-kv">--muted-text</span></div>
           </div>
         </div>
       </section>

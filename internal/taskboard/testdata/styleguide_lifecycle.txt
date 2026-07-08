@@ -1,0 +1,13 @@
+Barkpark lifecycle vocabulary (emitted from design/tokens.json)
+state         glyph  ascii  role   light      dark
+-----------   -----  -----  -----  -------    -------
+in_progress   ⠋      ~      info   #2563eb    #60a5fa
+blocked       !      !      warn   #d97706    #fbbf24
+done          ✓      v      ok     #0d9488    #2dd4bf
+closed        ✓      v      ok     #0d9488    #2dd4bf
+cancelled     ✕      x      -      #a1a1aa    #71717a
+ready         ○      o      -      #18181b    #e7edf2
+open          ○      .      -      #71717a    #5f6b78
+
+spinner frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+reduced-motion still: ⠿
