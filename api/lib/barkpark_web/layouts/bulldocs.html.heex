@@ -115,105 +115,11 @@
     .bp-paper-article [data-block-id]:first-child h2,
     .bp-paper-article [data-block-id]:first-child h3 { margin-top: 0; }
 
-    /* Native form block (grill / questionnaire). render.ex emits a render-only
-       <section class="bp-form bp-form-grill|bp-form-questionnaire"> of
-       <fieldset class="bp-form-question"> cards, each with a <legend> prompt,
-       optional muted <p> rationale/recommendation lines, and controls
-       (radio/checkbox <label> rows, <textarea>, scale radios). Scoped under
-       `.bp-paper-article` so email / non-article papers stay untouched. The
-       form reads the article TOKENS (--paper-*), so it follows the
-       prefers-color-scheme dark flip — hardcoded parchment values here were
-       the form-block-dark-mode white-box bug. Render-only: no JS, no
-       :focus scripting, pure CSS. */
-    .bp-paper-article .bp-form {
-      margin: 2rem 0;
-    }
-    .bp-paper-article .bp-form-grill::before,
-    .bp-paper-article .bp-form-questionnaire::before {
-      content: "Grill";
-      display: block;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 0.72rem;
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--paper-accent);
-      margin-bottom: 0.9rem;
-      padding-bottom: 0.5rem;
-      border-bottom: 1px solid var(--paper-rule);
-    }
-    .bp-paper-article .bp-form-questionnaire::before {
-      content: "Questionnaire";
-    }
-
-    .bp-paper-article .bp-form-question {
-      margin: 0 0 1.4rem;
-      padding: 1.1rem 1.3rem;
-      background: var(--paper-bg-deep);
-      border: 1px solid var(--paper-chrome-border);
-      border-left: 3px solid var(--paper-accent);
-      border-radius: 6px;
-    }
-    .bp-paper-article .bp-form-question > legend {
-      float: none;
-      width: auto;
-      padding: 0;
-      margin: 0 0 0.5rem;
-      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
-      font-size: 1.12rem;
-      font-weight: 600;
-      line-height: 1.4;
-      color: var(--paper-ink);
-    }
-
-    /* Muted rationale / recommendation lines. render.ex stamps these as
-       inline-styled <p> (color + font-size + margin); we lighten and italicize
-       to read as secondary article asides without fighting the inline rules. */
-    .bp-paper-article .bp-form-question > p {
-      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
-      font-style: italic;
-      color: var(--paper-ink-soft);
-      line-height: 1.5;
-    }
-
-    /* Choice rows — render.ex emits <label style="display:block;margin:…">
-       wrapping an <input type=radio|checkbox> + <span>. One option per line,
-       generous click target, subtle hover. */
-    .bp-paper-article .bp-form-question label {
-      display: flex;
-      align-items: baseline;
-      gap: 0.55rem;
-      margin: 0.15rem 0;
-      padding: 0.35rem 0.5rem;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.12s ease;
-    }
-    .bp-paper-article .bp-form-question label:hover {
-      background: var(--paper-accent-soft);
-    }
-    .bp-paper-article .bp-form-question label > input {
-      accent-color: var(--paper-accent);
-      margin: 0;
-      flex: 0 0 auto;
-    }
-
-    /* Free-text control — full reading-column width, article font. */
-    .bp-paper-article .bp-form-question textarea {
-      display: block;
-      width: 100%;
-      min-height: 4.5rem;
-      margin-top: 0.4rem;
-      padding: 0.6rem 0.7rem;
-      font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
-      font-size: 1rem;
-      line-height: 1.55;
-      color: var(--paper-ink);
-      background: var(--paper-bg);
-      border: 1px solid var(--paper-chrome-border);
-      border-radius: 5px;
-      resize: vertical;
-    }
+    /* Native form block styles moved to the canonical paper-surface source
+       (paper-surface.css §form/questionnaire, gui-premium w2) — the reader
+       article carries .bp-paper-surface, so it resolves them from the shared
+       sheet like every other component; a reader-local mirror here would
+       fight it on specificity (the form-block-dark-mode lesson). */
 
     /* P6.U5 action bar — the paper doc action buttons (Create plan /
        Grill / Build / Submit) rendered natively on the paper. A restrained

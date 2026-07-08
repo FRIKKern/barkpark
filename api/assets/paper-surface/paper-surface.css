@@ -673,17 +673,70 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-chart__key .bp-chart__s2 { background: var(--bp-tone-warning-fg, #b45309); }
 .bp-paper-surface .bp-chart__key .bp-chart__s3 { background: var(--bp-tone-danger-fg, #b91c1c); }
 
-/* ── form / questionnaire: token skin (gui-premium w1) ──
-   forms.ex emits bare fieldset/legend/input markup; without these rules the
-   browser default chrome renders as bright white boxes on the dark reader
-   (form-block-dark-mode). Same card voice as bp-card / bp-pnode. */
-.bp-paper-surface .bp-form { display: flex; flex-direction: column; gap: 10px; margin: 1.4rem 0; }
-.bp-paper-surface .bp-form fieldset { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; margin: 0; color: var(--paper-ink); }
-.bp-paper-surface .bp-form legend { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); padding: 0 6px; }
-.bp-paper-surface .bp-form label { font-size: 0.8rem; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-form input[type="text"], .bp-paper-surface .bp-form textarea { background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 6px; color: var(--paper-ink); padding: 6px 9px; font: inherit; font-size: 0.85rem; width: 100%; box-sizing: border-box; }
-.bp-paper-surface .bp-form input[type="radio"], .bp-paper-surface .bp-form input[type="checkbox"] { accent-color: var(--paper-accent); }
-.bp-paper-surface .bp-form p { color: var(--paper-ink-soft) !important; }
+/* ── form / questionnaire: the premium read (gui-premium w2) ──
+   forms.ex emits <fieldset class="bp-form-question bp-form-q--<type>"> cards
+   with classed option rows (article mode). The stylesheet owns ALL geometry:
+   numbered question cards, custom evergreen control faces (appearance:none),
+   the scale + yes/no as segmented rows. Everything resolves through the paper
+   tokens, so both schemes hold. */
+.bp-paper-surface .bp-form { display: flex; flex-direction: column; gap: 12px; margin: 2rem 0; counter-reset: bpq; }
+.bp-paper-surface .bp-form-grill::before,
+.bp-paper-surface .bp-form-questionnaire::before { content: "Grill"; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-questionnaire::before { content: "Questionnaire"; }
+
+.bp-paper-surface .bp-form-question { counter-increment: bpq; margin: 0; padding: 15px 17px 17px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 12px; }
+.bp-paper-surface .bp-form-question > legend { float: left; width: 100%; padding: 0; margin: 0; font-size: 1.02rem; font-weight: 650; line-height: 1.35; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-question > legend::before { content: counter(bpq, decimal-leading-zero); display: block; margin-bottom: 5px; font-family: var(--paper-font-mono); font-size: 0.62rem; font-weight: 500; letter-spacing: 0.09em; color: var(--paper-accent); }
+.bp-paper-surface .bp-form-note { clear: both; font-style: italic; font-size: 0.88rem; color: var(--paper-ink-soft); margin: 0.35rem 0 0; line-height: 1.5; }
+.bp-paper-surface .bp-form-opts { clear: both; display: flex; flex-direction: column; gap: 6px; padding-top: 12px; }
+
+/* option rows — the whole row is the control */
+.bp-paper-surface .bp-form-opt { display: flex; align-items: center; gap: 10px; margin: 0; padding: 9px 12px; border: 1px solid var(--paper-chrome-border); border-radius: 9px; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease; }
+.bp-paper-surface .bp-form-opt:hover { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt:has(input:checked) { border-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-form-opt > span { font-size: 0.92rem; color: var(--paper-ink); }
+.bp-paper-surface .bp-form-opt > input { appearance: none; -webkit-appearance: none; width: 16px; height: 16px; margin: 0; flex: none; border: 1.5px solid var(--paper-ink-faint); background: transparent; cursor: pointer; transition: border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease; }
+.bp-paper-surface .bp-form-opt > input[type="radio"] { border-radius: 50%; }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"] { border-radius: 4px; }
+.bp-paper-surface .bp-form-opt > input[type="radio"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); box-shadow: inset 0 0 0 3px var(--paper-bg-deep); }
+.bp-paper-surface .bp-form-opt > input[type="checkbox"]:checked { border-color: var(--paper-accent); background: var(--paper-accent); }
+.bp-paper-surface .bp-form-opt > input:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+
+/* the scale + yes/no read as segmented rows; the plain lists stay stacked */
+.bp-paper-surface .bp-form-q--scale .bp-form-opts,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opts { flex-direction: row; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt { flex: 1 1 0; justify-content: center; padding: 10px 0; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > input,
+.bp-paper-surface .bp-form-q--yesno .bp-form-opt > input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.bp-paper-surface .bp-form-q--scale .bp-form-opt > span { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; }
+.bp-paper-surface .bp-form-q--single .bp-form-opts,
+.bp-paper-surface .bp-form-q--multi .bp-form-opts { flex-direction: column; }
+
+.bp-paper-surface .bp-form-q--text textarea,
+.bp-paper-surface .bp-form textarea { display: block; width: 100%; box-sizing: border-box; min-height: 5rem; padding: 10px 12px; font: inherit; font-size: 0.92rem; line-height: 1.5; color: var(--paper-ink); background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 9px; resize: vertical; }
+.bp-paper-surface .bp-form textarea:focus { outline: none; border-color: var(--paper-accent); box-shadow: 0 0 0 3px var(--paper-accent-soft); }
+.bp-paper-surface .bp-form label { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-form fieldset { min-inline-size: 0; }
+
+/* ── field blocks: the aligned definition list (gui-premium w2) ──
+   The browser twin of the TUI's aligned field rows (#1497): a fixed-clamp dim
+   mono label column so CONSECUTIVE field blocks line up as one list, hairline
+   rules between adjacent rows, value affordances (swatch / preview / sub-rows)
+   in the value column. */
+.bp-paper-surface .bp-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; margin: 0; padding: 0.36rem 0; }
+.bp-paper-surface .bp-field + .bp-field { border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-field__l { font-family: var(--paper-font-mono); font-size: 0.7rem; letter-spacing: 0.02em; color: var(--paper-ink-faint); transform: translateY(-1px); }
+.bp-paper-surface .bp-field__v { color: var(--paper-ink); font-size: 0.98rem; line-height: 1.5; overflow-wrap: anywhere; }
+.bp-paper-surface .bp-field__mono { font-family: var(--paper-font-mono); font-size: 0.84em; }
+.bp-paper-surface .bp-field__none { color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-field__swatch { display: inline-block; width: 13px; height: 13px; border-radius: 3px; border: 1px solid var(--paper-chrome-border); margin-right: 7px; vertical-align: -1px; }
+.bp-paper-surface .bp-field__img { display: block; max-width: 220px; border-radius: 8px; border: 1px solid var(--paper-chrome-border); }
+.bp-paper-surface .bp-field__sub { display: flex; gap: 0.7rem; align-items: baseline; }
+.bp-paper-surface .bp-field__sub > b { font-family: var(--paper-font-mono); font-size: 0.7rem; font-weight: 500; color: var(--paper-ink-soft); min-width: 4.2rem; flex: none; }
+.bp-paper-surface .bp-field__list { margin: 0; padding-left: 1.2rem; }
+.bp-paper-surface .bp-field__list li::marker { color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.8em; }
+@media (max-width: 560px) { .bp-paper-surface .bp-field { grid-template-columns: 1fr; row-gap: 2px; } }
 
 /* ── mermaid diagram polish (gui-premium w1) ──
    The SVG palette is baked by the themed init in bulldocs.html.heex; this only

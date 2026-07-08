@@ -447,17 +447,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # kinds. All values flow through PdText, so they inherit `escape_html` at walk
   # time — no field-* clause emits raw HTML.
 
-  def compose_block(%{"type" => "field-string"} = b, _style),
-    do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-string"} = b, style),
+    do: field_row(b, field_value_text(b), style)
 
-  def compose_block(%{"type" => "field-slug"} = b, _style), do: field_row(b, field_value_text(b))
-  def compose_block(%{"type" => "field-text"} = b, _style), do: field_row(b, field_value_text(b))
+  def compose_block(%{"type" => "field-slug"} = b, style),
+    do: field_row(b, field_value_text(b), style)
 
-  def compose_block(%{"type" => "field-boolean"} = b, _style) do
-    field_row(b, if(Map.get(b, "value") == true, do: "Yes", else: "No"))
+  def compose_block(%{"type" => "field-text"} = b, style),
+    do: field_row(b, field_value_text(b), style)
+
+  def compose_block(%{"type" => "field-boolean"} = b, style) do
+    field_row(b, if(Map.get(b, "value") == true, do: "Yes", else: "No"), style)
   end
 
-  def compose_block(%{"type" => "field-select"} = b, _style) do
+  def compose_block(%{"type" => "field-select"} = b, style) do
     value = Map.get(b, "value")
 
     label =
@@ -468,11 +471,25 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         opt -> stringish(Map.get(opt, "label", Map.get(opt, "value", "")))
       end
 
-    field_row(b, label)
+    field_row(b, label, style)
   end
 
-  def compose_block(%{"type" => "field-datetime"} = b, _style) do
-    field_row(b, format_datetime(Map.get(b, "value", "")))
+  def compose_block(%{"type" => "field-datetime"} = b, style) do
+    field_row(b, format_datetime(Map.get(b, "value", "")), style)
+  end
+
+  def compose_block(%{"type" => "field-color"} = b, :article) do
+    hex = field_value_text(b)
+
+    value =
+      if hex == "" do
+        ~s|<span class="bp-field__none">—</span>|
+      else
+        ~s|<i class="bp-field__swatch" style="background:#{safe_hex(hex)}"></i>| <>
+          ~s|<span class="bp-field__mono">#{Util.escape_html(hex)}</span>|
+      end
+
+    field_row_article(b, value)
   end
 
   def compose_block(%{"type" => "field-color"} = b, _style) do
@@ -519,6 +536,20 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # and stashed on the transient `"_ref_title"` key; when no resolver is wired
   # (pure unit tests, no dataset in scope) the key is absent and View falls
   # back to the stored id — a no-fetch rendering of the raw datum.
+  def compose_block(%{"type" => "field-reference"} = b, :article) do
+    value = field_value_text(b)
+    resolved = b |> Map.get("_ref_title", "") |> to_string()
+
+    display =
+      cond do
+        value == "" -> "—"
+        resolved != "" -> resolved
+        true -> value
+      end
+
+    field_row_article(b, ~s|<span>#{Util.escape_html(display)}</span>|)
+  end
+
   def compose_block(%{"type" => "field-reference"} = b, _style) do
     value = field_value_text(b)
     resolved = b |> Map.get("_ref_title", "") |> to_string()
@@ -537,6 +568,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # else a "No image" placeholder. The src is funnelled through PdImage so it
   # inherits the renderer's `safe_url` scheme allowlist; the label stays bold
   # PdText. Empty value → a plain placeholder PdText line.
+  def compose_block(%{"type" => "field-image"} = b, :article) do
+    src = media_field_url(Map.get(b, "value", ""))
+
+    value =
+      if src == "" do
+        ~s|<span class="bp-field__none">No image</span>|
+      else
+        alt = b |> Map.get("label", "") |> stringish()
+
+        ~s|<img class="bp-field__img" src="#{Util.escape_attr(Util.safe_url(src))}" alt="#{Util.escape_attr(alt)}">|
+      end
+
+    field_row_article(b, value)
+  end
+
   def compose_block(%{"type" => "field-image"} = b, _style) do
     src = media_field_url(Map.get(b, "value", ""))
 
@@ -563,6 +609,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # time — no composite clause emits raw HTML.
 
   # composite → labelled box, one sub-row per subfield (name: stringified value).
+  def compose_block(%{"type" => "composite"} = b, :article) do
+    value = Map.get(b, "value", %{})
+    subfields = Map.get(b, "fields", [])
+
+    rows =
+      Enum.map_join(subfields, "", fn sub ->
+        name = Map.get(sub, "name", "")
+        sub_label = Map.get(sub, "title") || name
+        sub_value = composite_scalar(get_in_value(value, name))
+
+        ~s|<div class="bp-field__sub"><b>#{Util.escape_html(stringish(sub_label))}</b><span>#{Util.escape_html(sub_value)}</span></div>|
+      end)
+
+    field_row_article(b, rows)
+  end
+
   def compose_block(%{"type" => "composite"} = b, _style) do
     value = Map.get(b, "value", %{})
     subfields = Map.get(b, "fields", [])
@@ -591,6 +653,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   # arrayOf → labelled box, one PdText row per element (stringified).
+  def compose_block(%{"type" => "arrayOf"} = b, :article) do
+    elements = b |> Map.get("value", []) |> List.wrap()
+
+    value =
+      if elements == [] do
+        ~s|<span class="bp-field__none">—</span>|
+      else
+        ~s|<ol class="bp-field__list">| <>
+          Enum.map_join(elements, "", fn el ->
+            ~s|<li>#{Util.escape_html(composite_scalar(el))}</li>|
+          end) <> "</ol>"
+      end
+
+    field_row_article(b, value)
+  end
+
   def compose_block(%{"type" => "arrayOf"} = b, _style) do
     elements = Map.get(b, "value", [])
 
@@ -623,7 +701,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # (the caller wired a `:codelist_resolver`), else falls back to the raw code,
   # else an em-dash for an empty/unresolved value. Mirrors the field-reference
   # id→title resolution exactly.
-  def compose_block(%{"type" => "codelist"} = b, _style) do
+  def compose_block(%{"type" => "codelist"} = b, style) do
     code = field_value_text(b)
     label = b |> Map.get("_code_label", "") |> to_string()
 
@@ -634,10 +712,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         true -> code
       end
 
-    field_row(b, display)
+    field_row(b, display, style)
   end
 
   # localizedText → labelled box, one row per language (lang: text).
+  def compose_block(%{"type" => "localizedText"} = b, :article) do
+    value = Map.get(b, "value", %{})
+    languages = Map.get(b, "languages", [])
+
+    rows =
+      Enum.map_join(languages, "", fn lang ->
+        text = composite_scalar(get_in_value(value, lang))
+
+        ~s|<div class="bp-field__sub"><b>#{Util.escape_html(stringish(lang))}</b><span>#{Util.escape_html(text)}</span></div>|
+      end)
+
+    field_row_article(b, rows)
+  end
+
   def compose_block(%{"type" => "localizedText"} = b, _style) do
     value = Map.get(b, "value", %{})
     languages = Map.get(b, "languages", [])
@@ -862,6 +954,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "kind" => "PdBox",
       "style" => %{"flexDirection" => "column"},
       "children" => [field_label_node(b), %{"kind" => "PdText", "children" => [value_text]}]
+    }
+  end
+
+  # Style-aware field row: the :article render is the TUI-parity DEFINITION
+  # ROW — a dim mono label column beside the value (bp-field grid, gui-premium
+  # w2); every other style keeps the PdBox label-over-value stack (email has
+  # no stylesheet, so classes would render unstyled there).
+  defp field_row(b, value_text, :article) when is_binary(value_text) do
+    display = if String.trim(value_text) == "", do: "—", else: value_text
+    field_row_article(b, ~s|<span>#{Util.escape_html(display)}</span>|)
+  end
+
+  defp field_row(b, value_text, _style), do: field_row(b, value_text)
+
+  # value_html is PRE-ESCAPED by every caller (author strings flow through
+  # escape_html / escape_attr / safe_hex / safe_url before they reach here).
+  defp field_row_article(b, value_html) do
+    label = b |> Map.get("label", "") |> stringish()
+
+    %{
+      "kind" => "_raw",
+      "html" =>
+        ~s|<div class="bp-field"><span class="bp-field__l">#{Util.escape_html(label)}</span><div class="bp-field__v">#{value_html}</div></div>|
     }
   end
 
