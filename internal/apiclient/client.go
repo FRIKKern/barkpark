@@ -200,20 +200,31 @@ func (c *Client) Token() string { return c.token }
 // SetToken sets the API token for authenticated requests.
 func (c *Client) SetToken(token string) { c.token = token }
 
-// scopedURL builds a workspace/project-scoped /v1/ endpoint of the form
+// ScopedURL builds a workspace/project-scoped /v1/ endpoint of the form
 //
-//	<baseURL>/w/<Workspace>/p/<Project><suffix>
+//	<base>/w/<workspace>/p/<project><suffix>
 //
 // where suffix is a leading-slash path segment (e.g. "/v1/data/mutate/<dataset>").
-// This is the single place that knows the scoped URL scheme.
+// This is the single place that knows the scoped URL scheme — Client.scopedURL
+// and the CLI's migrateEndpoint.scopedURL both delegate here so the scheme has
+// exactly one owner.
+//
+// base is normalized with base so a base carrying a
+// trailing slash (e.g. "https://api.example.com/") does not splice a doubled
+// "//w/". The workspace/project slugs are PathEscaped — parity with the escaped
+// dataset/type/id segments in the suffix (and with the JS SDK's scope builder). A
+// slug carrying a space, '/', '#', '?', or non-ASCII would otherwise splice a
+// broken/ambiguous path. suffix is already-built (its dynamic segments are
+// PathEscaped at the call site), so it's passed through untouched.
 // @canonical capability:url-scoped-build aka:scopedURL,scoped_url doc:docs/cards/cli.md
+func ScopedURL(base, workspace, project, suffix string) string {
+	return fmt.Sprintf("%s/w/%s/p/%s%s", strings.TrimRight(base, "/"), url.PathEscape(workspace), url.PathEscape(project), suffix)
+}
+
+// scopedURL delegates to the package-level ScopedURL with the Client's configured
+// base URL and workspace/project scope.
 func (c *Client) scopedURL(suffix string) string {
-	// PathEscape the workspace/project slugs — parity with the escaped dataset/
-	// type/id segments in the suffix (and with the JS SDK's scope builder). A
-	// slug carrying a space, '/', '#', '?', or non-ASCII would otherwise splice a
-	// broken/ambiguous path. `suffix` is already-built (its dynamic segments are
-	// PathEscaped at the call site), so it's passed through untouched.
-	return fmt.Sprintf("%s/w/%s/p/%s%s", c.baseURL, url.PathEscape(c.Workspace), url.PathEscape(c.Project), suffix)
+	return ScopedURL(c.baseURL, c.Workspace, c.Project, suffix)
 }
 
 // authGet issues a GET to url with the Client's bearer token attached.
