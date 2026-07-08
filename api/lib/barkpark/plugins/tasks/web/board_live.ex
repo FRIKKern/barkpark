@@ -122,15 +122,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   live as the board behind it. Reads only — every write still goes through
   the fenced drag primitives or `bp`.
 
-  ## Context & insight (wave 14)
+  ## Context & insight (waves 14-15)
 
-  The peek carries the task's whole neighbourhood: a ROOT-FIRST ancestor
-  breadcrumb (walked over the board corpus, cycle-safe, dead parents render
-  as inert crumbs), a full-subtree rollup next to the direct-children count,
-  per-child sub counts, the REVERSE dependency list (what this task blocks —
-  the impact read), and an Activity log off the durable `mutation_events`
-  rows (claimed/closed/relabeled/lease-expired, with the acting worker from
-  each event's document snapshot) ending at `created`.
+  The peek carries the task's whole neighbourhood. Wave 15 renders it as ONE
+  FAMILY TREE: the ancestor spine (root goal → … → this task, walked over the
+  board corpus, cycle-safe, dead parents as inert rows), the SIBLINGS at
+  every spine level (the task's siblings AND the parent's siblings — any
+  shared real parent groups rows; nil-parent roots never do), and the focused
+  task's descendant subtree (children, grandchildren, … — depth/node capped
+  with explicit "+N more" rows). Every non-self row hops to re-peek. Plus the
+  full-subtree rollup in the Tree header, the REVERSE dependency list (what
+  this task blocks — the impact read), and an Activity log off the durable
+  `mutation_events` rows (claimed/closed/relabeled/lease-expired, with the
+  acting worker from each event's document snapshot) ending at `created`.
   """
 
   use BarkparkWeb, :live_view
@@ -541,6 +545,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         content = doc.content || %{}
         lid = Content.published_id(doc.doc_id)
         card = board.cards_by_id[lid]
+        ancestors = peek_ancestors(board, Map.get(content, "parent_id"))
+        subtree = peek_subtree(board, lid)
 
         %{
           doc_id: lid,
@@ -554,9 +560,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           claim: peek_claim(content),
           description: presence(Map.get(content, "description")),
           criteria: peek_criteria(content),
-          ancestors: peek_ancestors(board, Map.get(content, "parent_id")),
-          children: peek_children(board, lid),
-          subtree: peek_subtree(board, lid),
+          ancestors: ancestors,
+          subtree: subtree,
+          tree: peek_tree(board, lid, ancestors, subtree),
           blockers: peek_blockers(doc.id),
           blocks: peek_blocks(doc.id),
           events: peek_events(lid),
@@ -636,16 +642,146 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
-  # Children come from the board's OWN cards (same corpus, already projected,
-  # realtime-adjacent), in-flight first so the active work leads.
+  # Status order for tree rows — in-flight first so the active work leads.
   @peek_child_order [:in_progress, :ready, :open, :blocked, :done]
-  defp peek_children(board, lid) do
-    order = @peek_child_order |> Enum.with_index() |> Map.new()
 
+  # Family-tree caps: siblings shown per level, descendant depth below the
+  # focused task, and a global descendant node budget. Every truncation emits
+  # an explicit "+N more" row — never silent.
+  @tree_sibling_cap 8
+  @tree_desc_depth 3
+  @tree_desc_cap 30
+
+  # ── the family tree (wave 15) ───────────────────────────────────────────────
+  #
+  # One flat, depth-annotated node list covering the task's WHOLE family:
+  # the spine (root ancestor → … → this task), every spine node's children —
+  # which is exactly "the parent's siblings" and "the task's siblings" — and
+  # the focused task's full descendant subtree (children, grandchildren, …).
+  # Only spine nodes descend; siblings render as single hoppable rows; every
+  # cap truncation is an explicit "+N more" row (never silent). Root-level
+  # peers (nil parent) are NOT siblings — only a shared REAL parent groups
+  # rows.
+  defp peek_tree(board, lid, ancestors, subtree) do
+    index = children_index(board)
+    spine = Enum.map(ancestors, & &1.doc_id) ++ [lid]
+    tree_spine(board, index, spine, lid, 0, subtree_total(subtree), [])
+  end
+
+  defp subtree_total(%{total: total}), do: total
+  defp subtree_total(_), do: 0
+
+  defp children_index(board) do
     board.cards_by_id
     |> Map.values()
-    |> Enum.filter(&(&1.parent_id == lid))
+    |> Enum.filter(&is_binary(&1.parent_id))
+    |> Enum.group_by(& &1.parent_id)
+  end
+
+  defp sorted_children(index, id) do
+    order = @peek_child_order |> Enum.with_index() |> Map.new()
+
+    index
+    |> Map.get(id, [])
     |> Enum.sort_by(fn c -> {Map.get(order, c.col, 99), c.title || c.doc_id} end)
+  end
+
+  # Walk the spine. The LAST spine node is the focused task: emit it, then its
+  # capped descendant subtree. An inner spine node emits itself, then all its
+  # children in order — recursing INLINE when the child is the next spine node
+  # so the deeper family lands in document order.
+  defp tree_spine(board, index, [id], lid, depth, subtree_total, acc) do
+    acc = acc ++ [tree_node(board, id, depth, lid)]
+    {desc, emitted} = tree_desc(board, index, id, depth + 1, @tree_desc_depth, {[], 0})
+    acc = acc ++ desc
+
+    case max(subtree_total - emitted, 0) do
+      0 -> acc
+      hidden -> acc ++ [%{kind: :more, count: hidden, depth: depth + 1}]
+    end
+  end
+
+  defp tree_spine(board, index, [id, next | rest], lid, depth, subtree_total, acc) do
+    acc = acc ++ [tree_node(board, id, depth, lid)]
+    children = sorted_children(index, id)
+    {shown, extra} = cap_siblings(children, next)
+
+    acc =
+      Enum.reduce(shown, acc, fn child, a ->
+        if child.doc_id == next do
+          tree_spine(board, index, [next | rest], lid, depth + 1, subtree_total, a)
+        else
+          a ++ [tree_node(board, child.doc_id, depth + 1, lid)]
+        end
+      end)
+
+    case extra do
+      0 -> acc
+      n -> acc ++ [%{kind: :more, count: n, depth: depth + 1}]
+    end
+  end
+
+  # Cap a sibling row, but NEVER cap away the spine child — the lineage always
+  # renders even when it sorts past the window.
+  defp cap_siblings(children, spine_id) do
+    shown = Enum.take(children, @tree_sibling_cap)
+
+    shown =
+      if Enum.any?(shown, &(&1.doc_id == spine_id)) do
+        shown
+      else
+        spine_child = Enum.find(children, &(&1.doc_id == spine_id))
+        Enum.take(shown, @tree_sibling_cap - 1) ++ Enum.reject([spine_child], &is_nil/1)
+      end
+
+    {shown, max(length(children) - length(shown), 0)}
+  end
+
+  # The focused task's descendants — depth-capped, node-budgeted DFS so the
+  # tree shows children, grandchildren, … without unbounded growth.
+  defp tree_desc(_board, _index, _id, _depth, 0, state), do: state
+
+  defp tree_desc(board, index, id, depth, depth_left, {acc, n}) do
+    Enum.reduce(sorted_children(index, id), {acc, n}, fn child, {a, c} ->
+      if c >= @tree_desc_cap do
+        {a, c}
+      else
+        a = a ++ [tree_node(board, child.doc_id, depth, nil)]
+        tree_desc(board, index, child.doc_id, depth + 1, depth_left - 1, {a, c + 1})
+      end
+    end)
+  end
+
+  defp tree_node(board, id, depth, lid) do
+    case board.cards_by_id[id] do
+      nil ->
+        %{
+          kind: :node,
+          doc_id: id,
+          title: nil,
+          role: :open,
+          glyph: "○",
+          worker: nil,
+          sub: nil,
+          depth: depth,
+          self: id == lid,
+          missing: true
+        }
+
+      card ->
+        %{
+          kind: :node,
+          doc_id: id,
+          title: card.title,
+          role: card.color_role,
+          glyph: glyph_text(card),
+          worker: card.worker,
+          sub: card[:sub],
+          depth: depth,
+          self: id == lid,
+          missing: false
+        }
+    end
   end
 
   # Titled blockers off the blocks-edges (the card only carries statuses).
@@ -1392,22 +1528,41 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         background: var(--muted-surface); border-radius: 5px;
         padding: 1px 6px; font-size: 11px;
       }
-      /* Ancestry breadcrumb (wave 14) — root-first lineage, each level hops. */
-      .bp-peek-crumbs {
-        display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px;
-        margin: 0 0 10px; font-size: 11.5px; color: var(--muted-text);
+      /* Family tree (wave 15) — the task's whole neighbourhood in one map:
+         spine (root → this task), siblings at every spine level, and the
+         focused task's descendant subtree. Depth rides a --d custom prop. */
+      .bp-tree {
+        list-style: none; margin: 0; padding: 0;
+        display: flex; flex-direction: column; gap: 2px;
       }
-      .bp-crumb {
-        border: 0; background: transparent; padding: 1px 4px; border-radius: 5px;
-        font: inherit; font-size: 11.5px; color: var(--info); cursor: pointer;
-        max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      .bp-tree-row {
+        display: flex; align-items: center; gap: 6px; min-width: 0;
+        padding-left: calc(var(--d) * 14px); font-size: 12.5px;
       }
-      .bp-crumb:hover { background: var(--info-soft); }
-      .bp-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-      .bp-crumb.is-self { color: var(--muted-text); cursor: default; }
-      .bp-crumb.is-self:hover { background: transparent; }
-      .bp-crumb--gone { color: var(--muted-text); opacity: 0.7; cursor: default; }
-      .bp-crumb-sep { opacity: 0.55; font-size: 10px; }
+      .bp-tree-row > .bp-peek-hop { padding: 4px 6px; }
+      .bp-tree-twig { color: var(--border); flex: 0 0 auto; font-size: 10px; }
+      .bp-tree-row.is-self {
+        background: var(--info-soft);
+        border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+        border-radius: 7px; padding-top: 5px; padding-bottom: 5px;
+        padding-right: 8px;
+      }
+      .bp-tree-row.is-self .bp-tree-t { font-weight: 600; }
+      .bp-tree-t {
+        flex: 1 1 auto; min-width: 0; color: var(--text);
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-tree-self-tag {
+        flex: 0 0 auto; font-size: 9.5px; font-weight: 700;
+        letter-spacing: 0.07em; text-transform: uppercase; color: var(--info);
+      }
+      .bp-tree-row.is-gone { color: var(--muted-text); opacity: 0.7; }
+      .bp-tree-row.is-gone .bp-tree-t { color: var(--muted-text); }
+      .bp-tree-more {
+        padding-left: calc(var(--d) * 14px + 22px);
+        font-size: 11px; color: var(--muted-text);
+        font-variant-numeric: tabular-nums;
+      }
       .bp-peek-subtree {
         font-variant-numeric: tabular-nums; color: var(--muted-text);
         font-weight: 500; letter-spacing: 0; text-transform: none;
@@ -1943,26 +2098,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           >×</button>
         </div>
         <h2 class="bp-peek-title" data-role="peek-title"><%= @peek.title || @peek.doc_id %></h2>
-        <nav :if={@peek.ancestors != []} class="bp-peek-crumbs" data-role="peek-ancestors" aria-label="Ancestors">
-          <%= for {a, i} <- Enum.with_index(@peek.ancestors) do %>
-            <span :if={i > 0} class="bp-crumb-sep" aria-hidden="true">↳</span>
-            <button
-              :if={!a.missing}
-              type="button"
-              class="bp-crumb"
-              phx-click="peek"
-              phx-value-task={a.doc_id}
-              data-role="peek-ancestor"
-            >
-              <%= a.title || a.doc_id %>
-            </button>
-            <span :if={a.missing} class="bp-crumb bp-crumb--gone" data-role="peek-ancestor-gone">
-              <%= a.doc_id %>
-            </span>
-          <% end %>
-          <span class="bp-crumb-sep" aria-hidden="true">↳</span>
-          <span class="bp-crumb is-self">this task</span>
-        </nav>
         <div class="bp-meta">
           <span :if={@peek.parent_id && @peek.ancestors == []} class="bp-goal" data-role="peek-goal"><%= @peek.parent_id %></span>
           <span :for={label <- @peek.labels} class="bp-label"><%= label %></span>
@@ -1990,6 +2125,55 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </p>
         </section>
 
+        <section :if={@peek.tree != []} class="bp-peek-sec" data-role="peek-tree">
+          <h3 class="bp-controls-label">
+            Tree
+            <span :if={@peek.subtree} class="bp-peek-subtree" data-role="peek-subtree">
+              subtree <%= @peek.subtree.done %>/<%= @peek.subtree.total %>
+            </span>
+          </h3>
+          <ul class="bp-tree">
+            <%= for n <- @peek.tree do %>
+              <li
+                :if={n.kind == :more}
+                class="bp-tree-more"
+                style={"--d: #{n.depth};"}
+                data-role="tree-more"
+              >
+                + <%= n.count %> more
+              </li>
+              <li
+                :if={n.kind == :node}
+                class={["bp-tree-row", n.self && "is-self", n.missing && "is-gone"]}
+                style={"--d: #{n.depth};"}
+                data-role="tree-node"
+                data-doc-id={n.doc_id}
+              >
+                <span :if={n.depth > 0} class="bp-tree-twig" aria-hidden="true">└</span>
+                <%= if n.self or n.missing do %>
+                  <span class={"gi gi--#{n.role}"} aria-hidden="true"><%= n.glyph %></span>
+                  <span class="bp-tree-t"><%= n.title || n.doc_id %></span>
+                  <span :if={n.sub} class="bp-peek-hop-s"><%= n.sub.done %>/<%= n.sub.total %></span>
+                  <span :if={n.self} class="bp-tree-self-tag">this task</span>
+                <% else %>
+                  <button
+                    type="button"
+                    class="bp-peek-hop bp-tree-hop"
+                    phx-click="peek"
+                    phx-value-task={n.doc_id}
+                    data-role="tree-hop"
+                  >
+                    <span class={"gi gi--#{n.role}"} aria-hidden="true"><%= n.glyph %></span>
+                    <span class="bp-peek-hop-t"><%= n.title || n.doc_id %></span>
+                    <span :if={n.sub} class="bp-peek-hop-s"><%= n.sub.done %>/<%= n.sub.total %></span>
+                    <span :if={n.worker} class="bp-focus-w">@<%= n.worker %></span>
+                  </button>
+                <% end %>
+              </li>
+            <% end %>
+          </ul>
+        </section>
+
         <section :if={@peek.description} class="bp-peek-sec" data-role="peek-description">
           <h3 class="bp-controls-label">Description</h3>
           <p class="bp-peek-desc"><%= @peek.description %></p>
@@ -2013,42 +2197,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   <%= c.evidence %>
                 </p>
               </div>
-            </li>
-          </ul>
-        </section>
-
-        <section :if={@peek.children != []} class="bp-peek-sec" data-role="peek-children">
-          <h3 class="bp-controls-label">
-            Subtasks
-            <span class="bp-peek-count">
-              <%= Enum.count(@peek.children, &(&1.lifecycle_status == "done")) %>/<%= length(@peek.children) %>
-            </span>
-            <span
-              :if={@peek.subtree && @peek.subtree.total > length(@peek.children)}
-              class="bp-peek-subtree"
-              data-role="peek-subtree"
-            >
-              · subtree <%= @peek.subtree.done %>/<%= @peek.subtree.total %>
-            </span>
-          </h3>
-          <ul class="bp-peek-list">
-            <li :for={child <- @peek.children}>
-              <button
-                type="button"
-                class="bp-peek-hop"
-                phx-click="peek"
-                phx-value-task={child.doc_id}
-                data-role="peek-child"
-              >
-                <span class={"gi gi--#{child.color_role}"} aria-hidden="true">
-                  <%= glyph_text(child) %>
-                </span>
-                <span class="bp-peek-hop-t"><%= child.title || child.doc_id %></span>
-                <span :if={child[:sub]} class="bp-peek-hop-s" data-role="peek-child-sub">
-                  <%= child.sub.done %>/<%= child.sub.total %>
-                </span>
-                <span :if={child.worker} class="bp-focus-w">@<%= child.worker %></span>
-              </button>
             </li>
           </ul>
         </section>
