@@ -945,3 +945,158 @@ func (c *Client) GithubConnect(ctx context.Context, siteID, repo, branch, secret
 	}
 	return out, nil
 }
+
+// CloudRouteError is a refused control-plane route carrying its HTTP status and
+// the `error` code the body declared (e.g. 404 not_found, 403 forbidden). The
+// CLI maps each onto a human sentence + exit code; an unrecognised failure falls
+// back to cloudError so the shared auth handling (401 "unauthorized:") is kept.
+type CloudRouteError struct {
+	HTTPStatus int
+	Code       string
+}
+
+func (e *CloudRouteError) Error() string { return e.Code }
+
+// routeError classifies a non-2xx response for the routes whose refusals the CLI
+// discriminates by code (usage 404, members/invitations 403/404). A 401 stays a
+// cloudError so it keeps the "unauthorized:" prefix contract; a body carrying a
+// recognisable {"error":"<code>"} becomes a *CloudRouteError; anything else
+// falls back to cloudError so nothing is ever swallowed.
+func routeError(status int, body []byte) error {
+	if status == http.StatusUnauthorized {
+		return cloudError(status, body)
+	}
+	var env struct {
+		Error string `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil && env.Error != "" {
+		return &CloudRouteError{HTTPStatus: status, Code: env.Error}
+	}
+	return cloudError(status, body)
+}
+
+// UsageMeter is one meter of the console usage envelope (charter D48 / OC2).
+// Value is a number (float64) OR the string "unmetered" — the honest "no truth
+// here" state, never a fake zero. Quota/WarnAt are nil in v1 (display precedes
+// enforcement, OC7) and light up later with ZERO client change. MeasuredAt is
+// the RFC3339 snapshot time, or nil for a live/current read. PendingInvitations
+// rides only on the seats meter (a cheap detail, never a second meter).
+type UsageMeter struct {
+	Value              any      `json:"value"`
+	Quota              *float64 `json:"quota"`
+	WarnAt             *float64 `json:"warn_at"`
+	Source             string   `json:"source"`
+	MeasuredAt         *string  `json:"measured_at"`
+	PendingInvitations *int     `json:"pending_invitations,omitempty"`
+}
+
+// UsageResult is the parsed + raw usage envelope. Raw is the bytes VERBATIM so
+// `-o json` re-emits the contract without reshaping (D4). Meters is the parsed
+// meter map keyed by meter name; the CLI walks it in the committed fixture order.
+type UsageResult struct {
+	Raw    []byte
+	Meters map[string]UsageMeter
+}
+
+// Usage fetches an instance's usage meters via GET /v1/barkparks/:id/usage
+// (Bearer). The route is user-authed + TEAM-SCOPED with the no-existence-leak
+// 404 (a wrong-team / absent / malformed id are indistinguishable). It NEVER
+// blocks on the instance — control-plane meters return even when the box is
+// down — and never 500s on a sick box (a failed source degrades that ONE meter
+// to "unmetered"). A 404 surfaces as *CloudRouteError{Code:"not_found"}.
+func (c *Client) Usage(ctx context.Context, id string) (UsageResult, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/usage", true, nil)
+	if err != nil {
+		return UsageResult{}, err
+	}
+	if !ok(status) {
+		return UsageResult{}, routeError(status, body)
+	}
+	var env struct {
+		Usage struct {
+			Meters map[string]UsageMeter `json:"meters"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return UsageResult{}, fmt.Errorf("decode usage envelope: %w", err)
+	}
+	return UsageResult{Raw: body, Meters: env.Usage.Meters}, nil
+}
+
+// TeamMember is one seat on a team, as returned by GET /v1/teams/:id/members.
+type TeamMember struct {
+	UserID   string `json:"user_id"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	JoinedAt string `json:"joined_at"`
+}
+
+// TeamInvitation is one PENDING invitation, as returned by
+// GET /v1/teams/:id/invitations (the token_hash is never serialized).
+type TeamInvitation struct {
+	ID         string `json:"id"`
+	Email      string `json:"email"`
+	Role       string `json:"role"`
+	ExpiresAt  string `json:"expires_at"`
+	InsertedAt string `json:"inserted_at"`
+}
+
+// MembersResult is the parsed + raw members list. Raw is the `members` array
+// BYTES verbatim so `-o json` re-emits the contract without reshaping.
+type MembersResult struct {
+	Raw     json.RawMessage
+	Members []TeamMember
+}
+
+// InvitationsResult is the parsed + raw pending-invitations list. Raw is the
+// `invitations` array bytes verbatim.
+type InvitationsResult struct {
+	Raw         json.RawMessage
+	Invitations []TeamInvitation
+}
+
+// TeamMembers lists a team's seats via GET /v1/teams/:id/members (Bearer). The
+// route is member-gated + team-scoped; a non-member gets the same 404 as a
+// nonexistent team (no existence leak), surfaced as *CloudRouteError.
+func (c *Client) TeamMembers(ctx context.Context, teamID string) (MembersResult, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/teams/"+esc(teamID)+"/members", true, nil)
+	if err != nil {
+		return MembersResult{}, err
+	}
+	if !ok(status) {
+		return MembersResult{}, routeError(status, body)
+	}
+	var env struct {
+		Members json.RawMessage `json:"members"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return MembersResult{}, fmt.Errorf("decode members response: %w", err)
+	}
+	var members []TeamMember
+	_ = json.Unmarshal(env.Members, &members)
+	return MembersResult{Raw: env.Members, Members: members}, nil
+}
+
+// TeamInvitations lists a team's PENDING invitations via
+// GET /v1/teams/:id/invitations (Bearer). Unlike members this route is
+// ADMIN-gated: a plain member gets 403 forbidden (surfaced as
+// *CloudRouteError{Code:"forbidden"}), which the CLI degrades to an honest note
+// rather than failing the whole `members` view.
+func (c *Client) TeamInvitations(ctx context.Context, teamID string) (InvitationsResult, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/teams/"+esc(teamID)+"/invitations", true, nil)
+	if err != nil {
+		return InvitationsResult{}, err
+	}
+	if !ok(status) {
+		return InvitationsResult{}, routeError(status, body)
+	}
+	var env struct {
+		Invitations json.RawMessage `json:"invitations"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return InvitationsResult{}, fmt.Errorf("decode invitations response: %w", err)
+	}
+	var invitations []TeamInvitation
+	_ = json.Unmarshal(env.Invitations, &invitations)
+	return InvitationsResult{Raw: env.Invitations, Invitations: invitations}, nil
+}
