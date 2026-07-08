@@ -59,6 +59,34 @@ for (const role of ["ok", "warn", "danger", "info"]) {
   hslPair(status[role], `color.status.${role}`);
 }
 
+// --- on-status foregrounds: ok-fg/warn-fg/danger-fg/info-fg (Studio-only) ----
+const onStatus = color.onStatus || {};
+for (const role of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) {
+  ok(onStatus[role] != null, `color.onStatus.${role} is required (on-fill white foregrounds, Studio-only)`);
+  hslPair(onStatus[role], `color.onStatus.${role}`);
+}
+
+// --- Studio zinc/chrome ladder: HSL channels OR a var(--role) reference -------
+const HSL_OR_VAR = /^([0-9.]+ [0-9.]+% [0-9.]+%|var\(--[a-z-]+\))$/;
+const chrome = color.studioChrome || {};
+for (const role of ["bg-accent", "border-muted", "fg-dim", "fg-accent"]) {
+  const o = chrome[role];
+  ok(o && typeof o === "object", `color.studioChrome.${role} is required (Studio zinc alias)`);
+  if (o) {
+    ok(HSL_OR_VAR.test(o.light || ""), `color.studioChrome.${role}.light must be HSL channels or var(--role), got ${JSON.stringify(o.light)}`);
+    ok(HSL_OR_VAR.test(o.dark || ""), `color.studioChrome.${role}.dark must be HSL channels or var(--role), got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- categorical palettes: presence + sheet CF (hex value lists) -------------
+const hexList = (arr, where, len) => {
+  ok(Array.isArray(arr) && arr.length === len, `${where} must be a ${len}-hex array, got ${JSON.stringify(arr)}`);
+  if (Array.isArray(arr)) arr.forEach((h, i) => ok(HEX.test(h), `${where}[${i}] must be #rrggbb, got ${JSON.stringify(h)}`));
+};
+hexList((color.presence || {}).palette, "color.presence.palette", 8);
+hexList((color.sheetCf || {}).background, "color.sheetCf.background", 6);
+hexList((color.sheetCf || {}).tab, "color.sheetCf.tab", 6);
+
 // --- font ------------------------------------------------------------------
 const font = tokens.font || {};
 ok(font.chrome && font.chrome.selfHosted === true, "font.chrome.selfHosted must be true (Inter is self-hosted)");

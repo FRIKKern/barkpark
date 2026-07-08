@@ -12,9 +12,12 @@ defmodule BarkparkWeb.Studio.PresenceState do
   """
 
   alias BarkparkWeb.Presence
+  alias BarkparkWeb.Studio.TokensGen
 
   @topic "studio:presence"
-  @colors ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316)
+  # Categorical presence palette — the 8 fixed hues, sourced from the emitted
+  # Unified Aesthetic token module (design/tokens.json color.presence.palette).
+  @colors TokensGen.presence_palette()
 
   @doc """
   Studio presence PubSub topic, workspace-keyed.
