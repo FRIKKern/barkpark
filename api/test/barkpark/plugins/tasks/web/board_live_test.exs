@@ -1147,6 +1147,112 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "task peek (wave 13)" do
+    setup do
+      w =
+        task("pk-epic", "Peek epic",
+          lifecycle: "in_progress",
+          description: "The long body of the epic.",
+          claim: %{
+            "worker" => "studio:kalle",
+            "epoch" => 3,
+            "ts_iso" => DateTime.utc_now() |> DateTime.add(-7200) |> DateTime.to_iso8601()
+          },
+          criteria: [
+            %{
+              "criterion" => "solver behind a flag",
+              "met" => true,
+              "evidence" => "PR #1421 merged"
+            },
+            %{"criterion" => "goldens byte-identical", "met" => false}
+          ]
+        )
+
+      _child =
+        task("pk-child", "Peek child",
+          lifecycle: "in_progress",
+          parent_id: "pk-epic",
+          assignee: "studio:doey"
+        )
+
+      blocker = task("pk-blocker", "The blocking task", lifecycle: "open")
+      Repo.insert!(%Edge{from_id: w.id, to_id: blocker.id, kind: "blocks"})
+      :ok
+    end
+
+    test "clicking a card opens the inspector with claim, description, evidence, lineage",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      view
+      |> element(~s{[data-role="task-card"][data-doc-id="pk-epic"]})
+      |> render_click()
+
+      assert_patch(view, "/admin/projects?task=pk-epic")
+      html = render(view)
+
+      assert html =~ ~s(data-role="peek")
+      assert html =~ ~s(data-role="peek-title")
+      assert html =~ "Peek epic"
+      # claim lease
+      assert html =~ ~s(data-role="peek-claim")
+      assert html =~ "studio:kalle"
+      assert html =~ "epoch 3"
+      # description + criteria with close-time evidence
+      assert html =~ "The long body of the epic."
+      assert html =~ "solver behind a flag"
+      assert html =~ "goldens byte-identical"
+      assert html =~ ~s(data-role="peek-evidence")
+      assert html =~ "PR #1421 merged"
+      # lineage both ways
+      assert html =~ ~s(data-role="peek-child")
+      assert html =~ "Peek child"
+      assert html =~ ~s(data-role="peek-blocker")
+      assert html =~ "The blocking task"
+    end
+
+    test "a shared ?task= URL opens the peek directly", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=pk-epic")
+
+      assert html =~ ~s(data-role="peek")
+      assert html =~ "Peek epic"
+    end
+
+    test "close patches back to the bare board", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects?task=pk-epic")
+
+      view |> element(~s{[data-role="peek-close"]}) |> render_click()
+
+      assert_patch(view, "/admin/projects")
+      refute render(view) =~ ~s(data-role="peek")
+    end
+
+    test "hopping to a child re-peeks in place", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects?task=pk-epic")
+
+      view |> element(~s{[data-role="peek-child"]}) |> render_click()
+
+      assert_patch(view, "/admin/projects?task=pk-child")
+      assert render(view) =~ "Peek child"
+    end
+
+    test "an unknown task id peeks nothing and never crashes", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=no-such-task")
+
+      refute html =~ ~s(data-role="peek")
+      assert html =~ ~s(data-role="column")
+    end
+
+    test "changing the grouping preserves the open peek", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects?task=pk-epic")
+
+      view |> element(~s{[data-role="group-option"][data-group="goal"]}) |> render_click()
+
+      assert_patch(view, "/admin/projects?group=goal&task=pk-epic")
+      assert render(view) =~ "Peek epic"
+    end
+  end
+
   describe "settled lanes (wave 11) — grouped" do
     setup do
       task("sl-live", "Live under goal-live", lifecycle: "open", parent_id: "goal-live")
@@ -1299,6 +1405,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       |> put_some("assignee", opts[:assignee])
       |> put_some("acceptance_criteria", opts[:criteria])
       |> put_some("github", opts[:github])
+      |> put_some("description", opts[:description])
+      |> put_some("claim", opts[:claim])
 
     Repo.insert!(%Document{
       doc_id: doc_id,
