@@ -12,8 +12,9 @@
 # LEAD-APPROVED allowlists (see the au-w2-studio-sweep charter, Q1–Q3):
 #
 #   • the BEGIN/END GENERATED: tokens block (design/emit.mjs owns those literals)
-#   • rgb()/rgba() — elevation shadows / overlays (no emitted elevation token; out
-#     of the colour sweep)
+#   • rgb()/rgba() function VALUES are not scanned literals (the gate detects only
+#     hsl()/#hex) — elevation shadows / overlays pass inherently. A hex/hsl that
+#     shares a line with an rgba() is NOT masked by it: it needs its own lit-allow.
 #   • --paper-* / .bp-paper-* / .bp-canvas-* — the paper surface + paper editor
 #     (a separate surface, explicitly out of this task's scope)
 #   • --sheet-* / .sheet-* — the Sheets grid categorical CF palette (Q3)
@@ -77,10 +78,12 @@ def blank(m):
     # (used in the failure report) stay accurate.
     return re.sub(r"[^\n]", " ", m.group(0))
 
-# A flagged line is allowed if it references an allowlisted token family / shadow,
-# or carries an explicit per-line resister annotation.
+# A flagged line is allowed if it references an allowlisted token family, or
+# carries an explicit per-line resister annotation. Note: rgba() is NOT an allow
+# term — a hex/hsl sharing an rgba() line is still caught unless it carries its
+# own lit-allow (rgba function values themselves never match LITERAL).
 ALLOW_LINE = re.compile(
-    r"lit-allow|rgba?\(|--paper|\.bp-paper|\.bp-canvas|--sheet|\.sheet-|--st-")
+    r"lit-allow|--paper|\.bp-paper|\.bp-canvas|--sheet|\.sheet-|--st-")
 
 SKIP_BEGIN = "studio-literal-check: skip-begin"
 SKIP_END = "studio-literal-check: skip-end"
