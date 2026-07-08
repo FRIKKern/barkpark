@@ -12,6 +12,14 @@ defmodule Barkpark.Pulse.MetricsTest do
 
   @counters_key {Barkpark.Pulse.Metrics, :counters}
 
+  # DB-touching tests (durable cost meter) need a connection; shared mode so the
+  # globally-supervised Metrics process can reach it too if it flushes.
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+    :ok
+  end
+
   defp tick! do
     pid = Process.whereis(Metrics)
     assert is_pid(pid), "Metrics should be supervised via the pulse plugin"
@@ -49,8 +57,25 @@ defmodule Barkpark.Pulse.MetricsTest do
     assert_receive %Phoenix.Socket.Broadcast{event: "vitals", payload: p}, 500
     assert p.cpu >= 0.0 and p.cpu <= 1.0
     assert is_number(p.eur) and p.eur >= 0
+    assert is_number(p.eur_total) and p.eur_total >= 0
     assert is_integer(p.online)
     assert p.host_eur > 0
+  end
+
+  test "cost accrues into the durable meter and reads back" do
+    before = Barkpark.Pulse.cost_nanos()
+    :ok = Barkpark.Pulse.add_cost_nanos(12_345)
+    assert Barkpark.Pulse.cost_nanos() == before + 12_345
+    assert_in_delta Barkpark.Pulse.cost_so_far(), (before + 12_345) / 1_000_000_000, 1.0e-12
+  end
+
+  test "the snapshot carries a monotonic cost-so-far total" do
+    tick!()
+    a = Barkpark.Pulse.Metrics.snapshot().cost_eur_total
+    tick!()
+    b = Barkpark.Pulse.Metrics.snapshot().cost_eur_total
+    assert is_number(a) and is_number(b)
+    assert b >= a
   end
 
   test "bump is a no-op when no counters are registered" do

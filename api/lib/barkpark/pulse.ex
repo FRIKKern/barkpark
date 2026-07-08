@@ -232,6 +232,31 @@ defmodule Barkpark.Pulse do
   # ── Sweep ─────────────────────────────────────────────────────────────
 
   @doc """
+  The durable "cost so far": total accrued compute cost since telemetry
+  started, in EUROS (read from the nano-euro meter). Survives restarts.
+  """
+  def cost_so_far, do: cost_nanos() / 1_000_000_000
+
+  @doc "Raw nano-euro meter value (integer), 0 if never accrued."
+  def cost_nanos do
+    Repo.one(from m in "pulse_meters", where: m.name == "cost", select: m.nanos) || 0
+  end
+
+  @doc "Atomically add `nanos` nano-euros to the durable cost meter."
+  def add_cost_nanos(nanos) when is_integer(nanos) and nanos > 0 do
+    Repo.insert_all(
+      "pulse_meters",
+      [%{name: "cost", nanos: nanos, updated_at: DateTime.utc_now()}],
+      on_conflict: [inc: [nanos: nanos], set: [updated_at: DateTime.utc_now()]],
+      conflict_target: :name
+    )
+
+    :ok
+  end
+
+  def add_cost_nanos(_), do: :ok
+
+  @doc """
   On-disk cost of the pulse tables (events + counters), in bytes — the real
   `pg_total_relation_size`, and the retained event-row count. The events side
   breathes with the TTL sweep; the counters side is a handful of rows forever.
