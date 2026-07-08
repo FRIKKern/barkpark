@@ -453,6 +453,29 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       assert conn.status == 403
     end
 
+    test "narrower-than-workspace — a PROJECT-scoped grant on ws_A does NOT admit ws_A", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # The AC#2 reframe (desk narrowing unobservable) rests on this invariant:
+      # admission validates against the BARE workspace scope, so a grant with a
+      # non-nil sub-level (project/type) is NOT contained by `%{workspace_id}`
+      # and is denied — even in the SAME workspace it names. If admission is
+      # ever loosened to thread sub-scope into `Access.validate`, this test
+      # breaks LOUDLY (the grantee would be admitted → 200 instead of 403).
+      {user, conn} = grantee_session(conn)
+
+      bind_grant!(ws_a, user, %{
+        project_id: proj_a.id,
+        type: "post",
+        capabilities: ["read"]
+      })
+
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
     test "a signed-in NON-grantee is DENIED (fail-closed at the dead render)", %{
       conn: conn,
       ws_a: ws_a,
