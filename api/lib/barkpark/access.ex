@@ -107,9 +107,9 @@ defmodule Barkpark.Access do
   """
   @spec get_grant(String.t()) :: Grant.t() | nil
   def get_grant(id) when is_binary(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Grant, uuid)
-      :error -> nil
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Grant, uuid)
     end
   end
 
@@ -118,15 +118,15 @@ defmodule Barkpark.Access do
   @doc "List ACTIVE grants bound to a grantee user (active filtered in-query)."
   @spec list_active_grants_for_grantee(String.t()) :: [Grant.t()]
   def list_active_grants_for_grantee(user_id) when is_binary(user_id) do
-    case Ecto.UUID.cast(user_id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        []
+
+      uuid ->
         Grant
         |> active_where(DateTime.utc_now())
         |> where([g], g.grantee_user_id == ^uuid)
         |> Repo.all()
-
-      :error ->
-        []
     end
   end
 
@@ -135,15 +135,15 @@ defmodule Barkpark.Access do
   @doc "List ACTIVE grants scoped to a workspace (active filtered in-query)."
   @spec list_grants_for_workspace(String.t()) :: [Grant.t()]
   def list_grants_for_workspace(workspace_id) when is_binary(workspace_id) do
-    case Ecto.UUID.cast(workspace_id) do
-      {:ok, uuid} ->
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      uuid ->
         Grant
         |> active_where(DateTime.utc_now())
         |> where([g], g.workspace_id == ^uuid)
         |> Repo.all()
-
-      :error ->
-        []
     end
   end
 
