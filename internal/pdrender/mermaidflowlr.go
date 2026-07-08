@@ -192,12 +192,37 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 			stampBox(cv, rankX[li], by, boxes[li][n.id])
 		}
 	}
-	// Stamp horizontal connector bands for adjacent-rank edges; others → legend.
+	// Accumulate ALL adjacent-rank edges' connectivity into one bit grid, THEN
+	// resolve glyphs once — so several edges sharing a bus column compose into
+	// clean tees/crosses instead of overwriting each other (the transpose of the
+	// TD bus). Edges spanning >1 rank go to the legend.
+	bits := map[[2]int]int{}
+	arrows := map[[2]int]bool{}
+	var labels []lrLabelSpec
 	for _, e := range g.edges {
 		if rank[e.to]-rank[e.from] != 1 {
 			continue
 		}
-		routeLR(cv, xRight[e.from]+1, yc[e.from], xLeft[e.to]-1, yc[e.to], e.label, ctx)
+		markLR(bits, arrows, &labels, xRight[e.from]+1, yc[e.from], xLeft[e.to]-1, yc[e.to], e.label)
+	}
+	for pos, b := range bits {
+		if arrows[pos] {
+			continue // arrowheads stamped below
+		}
+		if cv.at(pos[0], pos[1]) != ' ' {
+			continue // never overwrite a box border
+		}
+		gl, ok := bandGlyph[b]
+		if !ok {
+			gl = '─'
+		}
+		cv.set(pos[0], pos[1], gl, kindWire)
+	}
+	for pos := range arrows {
+		cv.set(pos[0], pos[1], '▶', kindWire)
+	}
+	for _, lb := range labels {
+		placeLRLabel(cv, lb.text, lb.cx, lb.ly, ctx)
 	}
 
 	out := cv.rows(ctx)
@@ -212,57 +237,55 @@ func renderFlowchartLR(g *mmGraph, ctx RenderCtx) []string {
 	return out
 }
 
-// routeLR draws an orthogonal horizontal connector from a source right-edge
-// (sx,sy) to a target left-edge (tx,ty) with a ▶ arrowhead. Aligned rows draw a
-// straight ─ run; differing rows draw an elbow through a mid-x vertical bus whose
-// corner glyphs come from the same connectivity table the TD bus uses.
-func routeLR(cv *canvas, sx, sy, tx, ty int, label string, ctx RenderCtx) {
+// lrLabelSpec is a deferred edge-label placement (resolved after the bus glyphs
+// are laid so the all-or-nothing collision check sees them).
+type lrLabelSpec struct {
+	cx, ly int
+	text   string
+}
+
+// markLR marks one horizontal connector from a source right-edge (sx,sy) to a
+// target left-edge (tx,ty) into a SHARED bit grid: a source leg to the mid-x bus
+// column, an (endpoint-aware) vertical bus segment, and a target leg out to the
+// arrowhead. Because every edge in a rank-boundary shares the same mid-x column
+// (all boxes in a rank share a width), their bits compose there into correct
+// tees/corners — a fan-out reads ├, a merge reads ┤, a straight passthrough that
+// a bus crosses reads ┼. Arrowheads + labels are recorded for a later pass.
+func markLR(bits map[[2]int]int, arrows map[[2]int]bool, labels *[]lrLabelSpec, sx, sy, tx, ty int, label string) {
 	if tx < sx {
 		return
 	}
-	if sy == ty { // straight horizontal — no clean label row between aligned
-		for x := sx; x <= tx; x++ { // boxes, so the label defers to the TD render
-			cv.set(x, sy, '─', kindWire)
-		}
-		cv.set(tx, sy, '▶', kindWire)
-		return
-	}
-
 	midx := (sx + tx) / 2
-	bits := map[[2]int]int{}
 	mark := func(x, y, b int) { bits[[2]int{x, y}] |= b }
 
-	for x := sx; x < midx; x++ { // source leg (horizontal)
+	for x := sx; x < midx; x++ { // source leg → bus
 		mark(x, sy, cL|cR)
 	}
-	for x := midx + 1; x <= tx; x++ { // target leg (horizontal)
+	mark(midx, sy, cL)                // enters the bus column from the left
+	for x := midx + 1; x <= tx; x++ { // bus → target leg
 		mark(x, ty, cL|cR)
 	}
+	mark(midx, ty, cR) // leaves the bus column to the right
 	lo, hi := sy, ty
 	if lo > hi {
 		lo, hi = hi, lo
 	}
-	for y := lo + 1; y < hi; y++ { // interior vertical bus
-		mark(midx, y, cU|cD)
-	}
-	// Corners: source leg enters from the left; the bus turns toward the target.
-	if ty > sy {
-		mark(midx, sy, cL|cD) // ┐
-		mark(midx, ty, cU|cR) // └
-	} else {
-		mark(midx, sy, cL|cU) // ┘
-		mark(midx, ty, cD|cR) // ┌
-	}
-
-	for pos, b := range bits {
-		gl, ok := bandGlyph[b]
-		if !ok {
-			gl = '─'
+	if lo != hi { // vertical bus only when the rows differ
+		for y := lo; y <= hi; y++ {
+			b := cU | cD
+			if y == lo {
+				b = cD
+			}
+			if y == hi {
+				b = cU
+			}
+			mark(midx, y, b)
 		}
-		cv.set(pos[0], pos[1], gl, kindWire)
 	}
-	cv.set(tx, ty, '▶', kindWire)
-	placeLRLabel(cv, label, midx, lo-1, ctx)
+	arrows[[2]int{tx, ty}] = true
+	if lo > 0 {
+		*labels = append(*labels, lrLabelSpec{midx, lo - 1, label})
+	}
 }
 
 // placeLRLabel stamps an edge label centered at cx on row ly — but ALL-or-nothing:
@@ -284,21 +307,23 @@ func placeLRLabel(cv *canvas, label string, cx, ly int, ctx RenderCtx) {
 	}
 }
 
-// stampBox writes a plain box's runes onto the canvas, marking border cells as
-// wire and label cells as text.
+// stampBox writes a plain box's runes onto the canvas, classifying each cell by
+// POSITION (not glyph): the top/bottom rows and the first/last column are the
+// frame (dim wire); interior spaces are blank; everything else is the label
+// (body weight). Position-based so a label containing a frame-like char (`<`,
+// `(`) is never miscoloured.
 func stampBox(cv *canvas, x, y int, box []string) {
 	for dy, line := range box {
-		col := 0
-		for _, r := range line {
-			k := kindWire
-			if !strings.ContainsRune("┌┐└┘─│╭╮╰╯╱╲", r) && r != ' ' {
-				k = kindText
-			}
-			if r == ' ' {
+		runes := []rune(line)
+		last := len(runes) - 1
+		for col, r := range runes {
+			k := kindText
+			if dy == 0 || dy == len(box)-1 || col == 0 || col == last {
+				k = kindWire // frame: border rows + side columns
+			} else if r == ' ' {
 				k = kindNone
 			}
 			cv.set(x+col, y+dy, r, k)
-			col++
 		}
 	}
 }
@@ -306,16 +331,16 @@ func stampBox(cv *canvas, x, y int, box []string) {
 // renderNodeBoxPlain is renderNodeBox without styling — for the LR canvas, which
 // applies styling at readout via the kind mask. Same shape glyphs + wrapping.
 func renderNodeBoxPlain(n *mmNode, content int) []string {
-	tl, tr, bl, br, hz, vt := shapeGlyphs(n.shape)
+	g := shapeGlyphs(n.shape)
 	lines := wrapLines(sanitizeText(n.label), content)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
 	inner := content + 2
-	out := []string{string(tl) + strings.Repeat(string(hz), inner) + string(tr)}
+	out := []string{string(g.tl) + strings.Repeat(string(g.th), inner) + string(g.tr)}
 	for _, ln := range lines {
-		out = append(out, string(vt)+" "+padRight(ln, content)+" "+string(vt))
+		out = append(out, string(g.lv)+" "+padRight(ln, content)+" "+string(g.rv))
 	}
-	out = append(out, string(bl)+strings.Repeat(string(hz), inner)+string(br))
+	out = append(out, string(g.bl)+strings.Repeat(string(g.bh), inner)+string(g.br))
 	return out
 }
