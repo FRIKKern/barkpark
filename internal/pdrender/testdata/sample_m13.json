@@ -1,0 +1,48 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Braille chart block"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "A braille step-line plot: an auto-scaled series, the SAME series pinned to a tall axes.max (the curve compresses to the floor — proof min/max drives the render), a multi-series case with xLabels + legend, and a degraded empty series."
+    },
+    {
+      "id": "chart-auto",
+      "type": "chart",
+      "caption": "Weekly signups (auto-scaled)",
+      "series": [
+        { "label": "signups", "points": [0, 3, 6, 9, 12, 9, 6, 3, 0] }
+      ]
+    },
+    {
+      "id": "chart-pinned",
+      "type": "chart",
+      "caption": "Same series, axes.max=60 (compressed to the floor)",
+      "series": [
+        { "label": "signups", "points": [0, 3, 6, 9, 12, 9, 6, 3, 0] }
+      ],
+      "axes": { "min": 0, "max": 60 }
+    },
+    {
+      "id": "chart-multi",
+      "type": "chart",
+      "caption": "Desktop vs mobile",
+      "series": [
+        { "label": "desktop", "points": [1, 4, 3, 8, 6, 9] },
+        { "label": "mobile", "points": [8, 6, 5, 3, 4, 2] }
+      ],
+      "axes": { "xLabels": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] }
+    },
+    {
+      "id": "chart-degraded",
+      "type": "chart",
+      "series": []
+    }
+  ]
+}
