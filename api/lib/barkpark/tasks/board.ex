@@ -32,7 +32,7 @@ defmodule Barkpark.Tasks.Board do
 
       %{doc_id, title, priority, parent_id, labels, worker, lifecycle_status,
         criteria: %{met, total} | nil, github: map | nil, github_synced: boolean,
-        blocker_statuses: [String.t()], updated_at}
+        blocker_statuses: [String.t()], sub, next_criterion, updated_at}
 
   and `build/2` enriches each with a `:col` (its bucket), a `:glyph`, and a
   `:color_role` per the §1 shared white-ladder vocabulary
@@ -80,6 +80,8 @@ defmodule Barkpark.Tasks.Board do
           github: map() | nil,
           github_synced: boolean(),
           blocker_statuses: [String.t()],
+          sub: %{total: pos_integer(), done: non_neg_integer(), active: map() | nil} | nil,
+          next_criterion: String.t() | nil,
           updated_at: DateTime.t() | nil,
           col: atom(),
           glyph: String.t(),
@@ -203,8 +205,35 @@ defmodule Barkpark.Tasks.Board do
       github: Link.get(doc),
       github_synced: Link.synced?(doc),
       blocker_statuses: blocker_statuses,
+      next_criterion: next_criterion(content),
       updated_at: doc.updated_at
     }
+  end
+
+  # The first unmet acceptance criterion's text — the current STEP inside a
+  # task with no in-flight subtask (the board's focus line falls back to it).
+  # An unmet entry with no usable text is skipped rather than blanking the
+  # focus; no criteria (or all met) is nil, never "".
+  defp next_criterion(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) ->
+        Enum.find_value(list, fn
+          %{"met" => true} ->
+            nil
+
+          %{} = entry ->
+            case Map.get(entry, "criterion") do
+              text when is_binary(text) and text != "" -> text
+              _ -> nil
+            end
+
+          _ ->
+            nil
+        end)
+
+      _ ->
+        nil
+    end
   end
 
   defp normalize_labels(labels) when is_list(labels), do: Enum.filter(labels, &is_binary/1)
@@ -227,7 +256,7 @@ defmodule Barkpark.Tasks.Board do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
 
     {cancelled, live} = Enum.split_with(cards, &(&1.lifecycle_status == "cancelled"))
-    enriched = Enum.map(live, &enrich/1)
+    enriched = live |> Enum.map(&enrich/1) |> attach_subtasks()
 
     {columns, done_full} = organize(enriched)
 
@@ -256,6 +285,36 @@ defmodule Barkpark.Tasks.Board do
   defp enrich(card) do
     col = bucket(card)
     Map.merge(card, %{col: col, glyph: glyph_for(col), color_role: col})
+  end
+
+  # Subtask lineage (wave 12) — a card whose doc_id other live cards name as
+  # their `parent_id` carries a `:sub` summary: how many children, how many
+  # done, and the ONE in-flight child (title + worker) — the TUI's
+  # activity-focus read, "what is being worked right now inside this task".
+  # Cancelled children never count (they were split out before enrich);
+  # childless cards carry nil. Derived at build time from the same corpus —
+  # a realtime event refreshes it on the next :refresh reconcile.
+  defp attach_subtasks(cards) do
+    by_parent =
+      cards
+      |> Enum.filter(&is_binary(&1.parent_id))
+      |> Enum.group_by(& &1.parent_id)
+
+    Enum.map(cards, fn card ->
+      Map.put(card, :sub, sub_summary(Map.get(by_parent, card.doc_id, [])))
+    end)
+  end
+
+  defp sub_summary([]), do: nil
+
+  defp sub_summary(children) do
+    active = Enum.find(children, &(&1.lifecycle_status == "in_progress"))
+
+    %{
+      total: length(children),
+      done: Enum.count(children, &(&1.lifecycle_status == "done")),
+      active: active && %{title: active.title, worker: active.worker}
+    }
   end
 
   # Group + order enriched live cards into the five render columns, capping the
@@ -312,6 +371,11 @@ defmodule Barkpark.Tasks.Board do
       github: Link.get(synthetic),
       github_synced: Link.synced?(synthetic),
       blocker_statuses: (prev_card && prev_card.blocker_statuses) || [],
+      # The event names no children; carry the previous projection's sub
+      # summary forward (like blocker_statuses) — the slow :refresh reconcile
+      # re-derives it from the full corpus.
+      sub: (prev_card && prev_card[:sub]) || nil,
+      next_criterion: next_criterion(content),
       updated_at: msg_doc.updated_at
     }
   end

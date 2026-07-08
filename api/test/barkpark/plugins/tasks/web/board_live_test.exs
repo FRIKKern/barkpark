@@ -242,6 +242,32 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   end
 
   describe "Board.build/2 (pure organizer)" do
+    test "attaches subtask lineage summaries off parent_id (wave 12)" do
+      cards = [
+        card("in_progress", doc_id: "par", title: "Parent"),
+        card("done", doc_id: "kid-done", parent_id: "par"),
+        card("in_progress",
+          doc_id: "kid-wip",
+          parent_id: "par",
+          title: "Active child",
+          worker: "w1"
+        ),
+        card("cancelled", doc_id: "kid-gone", parent_id: "par"),
+        card("open", doc_id: "solo")
+      ]
+
+      board = Board.build(cards, now: ~U[2026-07-08 12:00:00Z])
+
+      # cancelled children never count; the in-flight child is the focus.
+      assert board.cards_by_id["par"].sub == %{
+               total: 2,
+               done: 1,
+               active: %{title: "Active child", worker: "w1"}
+             }
+
+      assert board.cards_by_id["solo"].sub == nil
+    end
+
     test "buckets, derives the ready overlay, folds cancelled, and computes momentum" do
       now = ~U[2026-07-07 12:00:00Z]
 
@@ -1059,6 +1085,65 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, _view, html} = live(conn, "/admin/projects")
       refute html =~ ~s(data-role="filters")
       assert html =~ ~s(data-role="board-empty")
+    end
+  end
+
+  describe "focus & lineage (wave 12)" do
+    setup do
+      task("epic-x", "Ship the epic", lifecycle: "in_progress", assignee: "lead")
+      task("ex-c1", "Design the schema", lifecycle: "done", parent_id: "epic-x")
+
+      task("ex-c2", "Wire the resolver",
+        lifecycle: "in_progress",
+        parent_id: "epic-x",
+        assignee: "studio:doey"
+      )
+
+      task("ex-c3", "Write the docs", lifecycle: "open", parent_id: "epic-x")
+
+      task("solo-w", "Solo in flight",
+        lifecycle: "in_progress",
+        assignee: "lead",
+        criteria: [
+          %{"criterion" => "compile the parser", "met" => true},
+          %{"criterion" => "green the golden tests", "met" => false}
+        ]
+      )
+
+      task("ready-p", "Parent merely ready", lifecycle: "open")
+      task("rp-c1", "Child of ready parent", lifecycle: "done", parent_id: "ready-p")
+      :ok
+    end
+
+    test "an in-flight parent shows its subtask tally and the active child as focus",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      assert html =~ ~s(data-role="subtasks")
+      assert html =~ "1/3 sub"
+      assert html =~ ~s(data-role="focus")
+      assert html =~ "Wire the resolver"
+      assert html =~ "@studio:doey"
+    end
+
+    test "an in-flight card without children focuses its first unmet criterion",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      assert html =~ "green the golden tests"
+      # a MET criterion is never the focus
+      refute html =~ "compile the parser"
+    end
+
+    test "lineage shows everywhere, but focus renders only on in-flight cards",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # the ready parent still carries its lineage pill…
+      assert html =~ "1/1 sub"
+      # …but only the two in-flight cards carry a focus line (epic-x via its
+      # active child, solo-w via its unmet criterion; ex-c2 has neither).
+      assert occurrences(html, ~s(data-role="focus")) == 2
     end
   end
 
