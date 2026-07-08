@@ -571,6 +571,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         >
           <:header_actions>
             <%= if pane[:type_name] do %>
+              <%!-- Post-type Share-access entry (airdrop-grants): mints a grant
+                    scoped to THIS post type. Gated on holding shareable access,
+                    not admin — the sheet's picker offers only held caps. --%>
+              <button
+                :if={@airdrop_can_share?}
+                class="pane-add-btn"
+                phx-click="airdrop-open"
+                phx-value-type={pane.type_name}
+                title={"Share access to #{pane.type_name}"}
+                data-test-id="airdrop-open-type"
+              ><.icon name="share-2" size={14} /></button>
               <button
                 class="pane-add-btn"
                 phx-click="new-document"
@@ -758,8 +769,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 media panel is hand-rolled (no document_header), so the Share
                 button rides a thin header row. Admin-only; opens the panel with
                 the media surface pre-selected. --%>
-          <div :if={@shares_admin?} class="media-explorer-bar">
+          <div :if={@shares_admin? or @airdrop_can_share?} class="media-explorer-bar">
             <button
+              :if={@shares_admin?}
               type="button"
               class="btn btn-ghost btn-sm"
               phx-click="shares-open"
@@ -768,6 +780,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               data-test-id="media-share"
             >
               <.icon name="share-2" size={14} /> Share media
+            </button>
+            <%!-- Workspace Share-access entry (airdrop-grants): a workspace-scoped
+                  grant (no post-type). Held-cap gated, not admin-only. --%>
+            <button
+              :if={@airdrop_can_share?}
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="airdrop-open"
+              title="Share scoped access to this workspace"
+              data-test-id="airdrop-open-workspace"
+            >
+              <.icon name="send" size={14} /> Share access
             </button>
           </div>
           <div style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
@@ -1035,6 +1059,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         title={(@item_share && @item_share.title) || "this item"}
         links={@item_share_links}
         error={@item_share_error}
+      />
+
+      <.airdrop_sheet
+        show={@airdrop_open}
+        type={@airdrop_type}
+        caps={@airdrop_caps}
+        link={@airdrop_link}
+        error={@airdrop_error}
       />
     </.pane_layout>
 

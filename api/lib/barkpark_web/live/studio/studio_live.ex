@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
+    Airdrop,
     Bulk,
     Delete,
     Discard,
@@ -59,6 +60,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    # Airdrop live toast: subscribe the mounted account to its OWN user topic so
+    # a grant minted for it while online lands as a flash (see the
+    # {:airdrop_granted} handle_info). Only an authenticated User has a stable
+    # id to key the topic; anonymous / token-only sessions skip it.
+    if connected?(socket) do
+      case socket.assigns[:current_user] do
+        %{id: uid} when is_binary(uid) ->
+          Phoenix.PubSub.subscribe(Barkpark.PubSub, "user:#{uid}")
+
+        _ ->
+          :ok
+      end
+    end
+
     {:ok, Mount.init(socket)}
   end
 
@@ -82,6 +97,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ── handle_info/2 routing heads ─────────────────────────────────────────────
 
   @impl true
+  # Airdrop live toast (airdrop-grants): a grantee with an account who is online
+  # when a grant is minted for them gets a minimal "you've been granted access"
+  # toast on their OWN user topic. The payload carries NO grant details — the
+  # authenticated LV fetches them itself; this only nudges them to look.
+  def handle_info({:airdrop_granted}, socket) do
+    {:noreply,
+     put_flash(socket, :info, "You've been granted access — check your email to claim it.")}
+  end
+
   def handle_info({:doc_updated, msg}, socket), do: Lifecycle.doc_updated(msg, socket)
   def handle_info({:paper_block, frame}, socket), do: Lifecycle.paper_block(frame, socket)
   def handle_info({:paper_updated, msg}, socket), do: Lifecycle.paper_updated(msg, socket)
@@ -191,6 +215,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     do: ItemShare.item_share_revoke(params, socket)
 
   def handle_event("jump-to-user", params, socket), do: ItemShare.jump_to_user(params, socket)
+
+  def handle_event("airdrop-open", params, socket), do: Airdrop.airdrop_open(params, socket)
+  def handle_event("airdrop-close", _params, socket), do: Airdrop.airdrop_close(socket)
+  def handle_event("airdrop-create", params, socket), do: Airdrop.airdrop_create(params, socket)
 
   def handle_event("open-secondary-picker", _params, socket),
     do: Secondary.open_secondary_picker(socket)
