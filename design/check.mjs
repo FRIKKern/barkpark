@@ -8,8 +8,9 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, glyphOf, ARTIFACTS,
+  evaluateAll, tokens, LIFE_ORDER, glyphOf, ARTIFACTS, repoRoot,
 } from "./emit.mjs";
+import { evaluateMirror } from "./paper-editor-mirror.mjs";
 
 let failed = false;
 const fail = (msg) => { console.error(msg); failed = true; };
@@ -35,6 +36,21 @@ for (const r of evaluateAll()) {
     console.error(firstDiff(r.current, r.expected));
   } else {
     console.log(`  ok   ${r.name} (${r.path})`);
+  }
+}
+
+// Paper-editor token mirror: a second generation hop (paper-surface.css → the
+// styles.css bundle's marked region). Same shared transform emit.mjs drives, so
+// a stale committed mirror trips HERE the same way a stale surface trips above.
+{
+  const mr = evaluateMirror(repoRoot);
+  if (mr.error) fail(`  FAIL ${mr.name}: ${mr.error}`);
+  else if (mr.current == null) fail(`  FAIL ${mr.name}: committed file ${mr.path} is missing`);
+  else if (mr.current !== mr.expected) {
+    fail(`  DRIFT ${mr.name} (${mr.path}) — the paper-editor mirror is STALE vs api/assets/paper-surface/paper-surface.css`);
+    console.error(firstDiff(mr.current, mr.expected));
+  } else {
+    console.log(`  ok   ${mr.name} (${mr.path})`);
   }
 }
 if (failed) console.error("\n  Fix: node design/emit.mjs --write\n");
