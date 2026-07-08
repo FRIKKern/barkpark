@@ -150,7 +150,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   def add_member(conn, %{"dataset" => dataset, "id" => id, "assetId" => asset_id}) do
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(asset_id),
+         {:ok, file} <- Media.get_file(asset_id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          {:ok, doc} <- Collections.add_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   def remove_member(conn, %{"dataset" => dataset, "id" => id, "asset_id" => asset_id}) do
     with :ok <- require_write(conn),
-         {:ok, file} <- Media.get_file(asset_id),
+         {:ok, file} <- Media.get_file(asset_id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
          {:ok, doc} <- Collections.remove_member(id, file, dataset, scope_opts(conn)) do
       json(conn, %{
