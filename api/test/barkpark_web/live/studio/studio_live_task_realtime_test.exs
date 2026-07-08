@@ -67,10 +67,14 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task"))
 
     # Pre-claim: the row is present with its `open` badge; nothing is
-    # in_progress yet.
-    assert html =~ "Wire the realtime bridge"
-    assert html =~ "open"
-    refute html =~ "in_progress"
+    # in_progress yet. Assert against the rendered BODY, not the inlined
+    # <style> — the design tokens ship `.bp-lg--<state>` lifecycle classes in
+    # paper-surface.css (inlined on every Studio page), so a raw
+    # `html =~ "in_progress"` would match the stylesheet, not the row badge.
+    body = strip_style(html)
+    assert body =~ "Wire the realtime bridge"
+    assert body =~ "open"
+    refute body =~ "in_progress"
 
     pid_before = view.pid
 
@@ -81,7 +85,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
 
     # render/1 is a call into the LV process, so the broadcast (already in
     # its mailbox) is handled first — no sleep, no remount.
-    rendered = render(view)
+    rendered = strip_style(render(view))
 
     assert rendered =~ "in_progress"
     assert rendered =~ "Wire the realtime bridge"
@@ -89,5 +93,14 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskRealtimeTest do
     # No remount, no redirect — the pane updated in place.
     assert view.pid == pid_before
     assert Process.alive?(view.pid)
+  end
+
+  # Drop <style>/<script> blocks so lifecycle-status string assertions test the
+  # rendered task-row badge, not the inlined design-token `.bp-lg--<state>` CSS
+  # classes (paper-surface.css) that ship on every Studio page.
+  defp strip_style(html) do
+    html
+    |> String.replace(~r/<style\b[^>]*>.*?<\/style>/is, "")
+    |> String.replace(~r/<script\b[^>]*>.*?<\/script>/is, "")
   end
 end
