@@ -716,7 +716,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_block_mode={@paper_block_mode}
           paper_edit_mode={@paper_edit_mode}
           task_previews={@paper_task_previews}
-          shares_admin?={@shares_admin?}
+          shares_admin?={@caps.admin}
           dataset={@dataset}
           streams={@streams}
           backlinks_used_by={@backlinks_used_by}
@@ -769,9 +769,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 media panel is hand-rolled (no document_header), so the Share
                 button rides a thin header row. Admin-only; opens the panel with
                 the media surface pre-selected. --%>
-          <div :if={@shares_admin? or @airdrop_can_share?} class="media-explorer-bar">
+          <div :if={@caps.admin or @airdrop_can_share?} class="media-explorer-bar">
             <button
-              :if={@shares_admin?}
+              :if={@caps.admin}
               type="button"
               class="btn btn-ghost btn-sm"
               phx-click="shares-open"
@@ -1046,7 +1046,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
       <.shares_modal
         show={@show_shares}
-        admin?={@shares_admin?}
+        admin?={@caps.admin}
         scope_prefill={@shares_scope_prefill}
         prefill_surfaces={@shares_prefill_surfaces}
         rows={@shares_rows}
@@ -1055,7 +1055,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
       <.item_share_popover
         show={@item_share_open}
-        admin?={@shares_admin?}
+        admin?={@caps.admin}
         title={(@item_share && @item_share.title) || "this item"}
         links={@item_share_links}
         error={@item_share_error}

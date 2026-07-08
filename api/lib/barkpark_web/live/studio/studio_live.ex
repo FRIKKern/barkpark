@@ -28,6 +28,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   require Logger
 
+  alias Barkpark.Access
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
@@ -74,8 +76,61 @@ defmodule BarkparkWeb.Studio.StudioLive do
       end
     end
 
-    {:ok, Mount.init(socket)}
+    # ag-studio-capability-hide: the LOAD-BEARING server-side deny-gate. Attach
+    # on EVERY Studio socket (member/anonymous/share/grant) so a forged event
+    # for a hidden affordance is server-DENIED (hidden ≠ denied). The gate
+    # re-derives caps per event → mid-session grant expiry denies at once.
+    socket =
+      socket
+      |> Mount.init()
+      |> Caps.attach()
+      |> load_access_grants()
+      |> schedule_access_expiry()
+
+    {:ok, socket}
   end
+
+  # ── Access grants + live expiry (airdrop-grants slice 3) ────────────────────
+
+  # The active grants bound to the signed-in account, for the Access panel +
+  # the expiry-tick refresh. Empty for token-only / anonymous sockets.
+  defp load_access_grants(socket) do
+    grants =
+      case socket.assigns[:current_user] do
+        %{id: uid} when is_binary(uid) -> Access.list_active_grants_for_grantee(uid)
+        _ -> []
+      end
+
+    Phoenix.Component.assign(socket, :access_grants, grants)
+  end
+
+  # Schedule a single server tick at the NEAREST grant expiry so access DROPS at
+  # expiry with no reload: the tick reloads grants + re-derives `caps`, so the
+  # hidden affordances update and the deny-gate reads live caps. Only when
+  # connected and a soonest expiry exists.
+  defp schedule_access_expiry(socket) do
+    with true <- connected?(socket),
+         %DateTime{} = soonest <- soonest_expiry(socket.assigns[:access_grants]) do
+      ms = max(DateTime.diff(soonest, DateTime.utc_now(), :millisecond) + 500, 250)
+      Process.send_after(self(), :access_expiry_tick, ms)
+    end
+
+    socket
+  end
+
+  defp soonest_expiry(grants) when is_list(grants) do
+    grants
+    |> Enum.map(& &1.expires_at)
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      list -> Enum.min_by(list, &DateTime.to_unix(&1))
+    end
+  end
+
+  defp soonest_expiry(_), do: nil
+
+  defp refresh_caps(socket), do: Phoenix.Component.assign(socket, :caps, Caps.derive(socket))
 
   @impl true
   def handle_params(params, uri, socket) do
@@ -102,8 +157,30 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # toast on their OWN user topic. The payload carries NO grant details — the
   # authenticated LV fetches them itself; this only nudges them to look.
   def handle_info({:airdrop_granted}, socket) do
+    # Reload grants + re-derive caps so a newly-granted affordance UNLOCKS live
+    # (hidden → shown) and the deny-gate reads the new caps — then re-arm the
+    # expiry tick against the (possibly sooner) new grant.
+    socket =
+      socket
+      |> load_access_grants()
+      |> refresh_caps()
+      |> schedule_access_expiry()
+
     {:noreply,
      put_flash(socket, :info, "You've been granted access — check your email to claim it.")}
+  end
+
+  # Expiry tick (airdrop-grants): a grant crossed its expiry. Reload active
+  # grants (expired ones drop in-query) + re-derive caps so access DROPS with no
+  # reload; re-arm for the next-soonest expiry.
+  def handle_info(:access_expiry_tick, socket) do
+    socket =
+      socket
+      |> load_access_grants()
+      |> refresh_caps()
+      |> schedule_access_expiry()
+
+    {:noreply, socket}
   end
 
   def handle_info({:doc_updated, msg}, socket), do: Lifecycle.doc_updated(msg, socket)
