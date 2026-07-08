@@ -1426,6 +1426,64 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
            }
   end
 
+  # ── right-click context menu (SF context-menu) ───────────────────────────────
+
+  test "right-click opens a positioned cell context menu; menu-close dismisses it; items fire real ops",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-ctx-menu",
+      one_tab(%{"A1" => %{"v" => "first"}, "A2" => %{"v" => "second"}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-ctx-menu")
+
+    # Select A1, then the JS contextmenu hook opens the menu at the cursor.
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "cell-menu-open", %{"x" => 210, "y" => 140})
+
+    menu = view |> element(~s([data-test-id="sheet-context-menu"])) |> render()
+    # role=menu, positioned at the cursor (position:fixed viewport coords), each
+    # of the eight actions a keyboard-reachable menuitem.
+    assert menu =~ ~s(role="menu")
+    assert menu =~ ~s(aria-label="Cell actions")
+    assert menu =~ "position: fixed"
+    assert menu =~ "left: 210px"
+    assert menu =~ "top: 140px"
+    assert menu =~ ~s(role="menuitem")
+
+    for id <- ~w(cut copy paste clear insert-row delete-row insert-col delete-col) do
+      assert menu =~ ~s(data-test-id="sheet-ctx-#{id}")
+    end
+
+    # Cut/Copy/Paste ride the OS clipboard client-side (data-menu-action, no
+    # phx-click); clear + structural items reuse the SAME server ops the keyboard
+    # path calls — the menu duplicates NO mutation logic.
+    assert menu =~ ~s(data-menu-action="copy")
+    assert menu =~ ~s(phx-click="clear-selection")
+    assert menu =~ ~s(phx-click="rowcol-key")
+
+    # menu-close (dead code before this feature — the header menus never wired
+    # it) now dismisses the context menu.
+    render_hook(target, "menu-close", %{})
+    refute render(view) =~ ~s(data-test-id="sheet-context-menu")
+
+    # An item is not decoration: "Insert row" inserts a row over the selection
+    # via the shared rowcol-key op (A1's value shifts down to A2) and closes the
+    # menu.
+    render_hook(target, "cell-menu-open", %{"x" => 10, "y" => 10})
+    assert render(view) =~ ~s(data-test-id="sheet-context-menu")
+
+    view |> element(~s([data-test-id="sheet-ctx-insert-row"])) |> render_click()
+
+    html = render(view)
+    # rowcol-key resets menu: nil, so the menu is gone…
+    refute html =~ ~s(data-test-id="sheet-context-menu")
+    # …and the op actually ran.
+    cells = peek_cells("sg-ctx-menu")
+    assert cells["A2"] == %{"v" => "first"}
+    refute Map.has_key?(cells, "A1")
+  end
+
   # ── merge / unmerge ────────────────────────────────────────────────────────
 
   test "merging a selection spans the anchor td and covers the rest; unmerge restores",
