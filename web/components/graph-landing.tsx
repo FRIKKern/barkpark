@@ -53,7 +53,7 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
   );
 
   return (
-    <div className="relative h-full w-full bg-[#16161a]">
+    <div className="relative h-full w-full bg-[#16161a]">{/* lit-allow: always-dark Obsidian graph canvas — a deliberately theme-independent dark panel (the graph reads as an Obsidian surface in BOTH light + dark), so no themed --color-* token matches. Follow-up: emit a --color-graph-canvas token (au-web-graph-canvas-token). */}
       {/* Caption — quiet top-left overlay in the dark Obsidian aesthetic. It sits
           above the canvas but lets pointer events through to the graph. */}
       <div className="pointer-events-none absolute left-5 top-5 z-20 max-w-xs select-none">

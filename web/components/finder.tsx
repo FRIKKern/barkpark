@@ -284,7 +284,7 @@ function HighlightLegend() {
           className="h-2 w-24 rounded-full"
           style={{
             backgroundImage:
-              "linear-gradient(to right, hsl(0 55% 60%), hsl(24 70% 56%), hsl(48 82% 50%), hsl(72 86% 46%), hsl(100 88% 42%), hsl(130 90% 38%), hsl(162 95% 34%))",
+              "linear-gradient(to right, hsl(0 55% 60%), hsl(24 70% 56%), hsl(48 82% 50%), hsl(72 86% 46%), hsl(100 88% 42%), hsl(130 90% 38%), hsl(162 95% 34%))", // lit-allow: fuzzy→exact match-quality legend — a 7-stop decorative data-viz spectrum (the web analog of the Studio Sheets categorical CF palette), no single --color role applies
           }}
         />
         <span>exact</span>

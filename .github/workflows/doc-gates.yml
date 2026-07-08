@@ -44,6 +44,9 @@ on:
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"
       - "scripts/studio-literal-check.sh"
+      # Web literal-color gate — the web/ demo must consume emitted tokens.
+      - "web/**"
+      - "scripts/web-literal-check.sh"
   pull_request:
     paths:
       - "**/*.md"
@@ -81,6 +84,9 @@ on:
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"
       - "scripts/studio-literal-check.sh"
+      # Web literal-color gate — the web/ demo must consume emitted tokens.
+      - "web/**"
+      - "scripts/web-literal-check.sh"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -135,6 +141,16 @@ jobs:
       # per-line resisters). See scripts/studio-literal-check.sh for the full list.
       - name: Studio literal-color gate (blocking)
         run: bash scripts/studio-literal-check.sh
+
+      # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
+      # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
+      # design tokens via var(--color-…) / Tailwind token utilities — never a
+      # copied hex / hsl() literal. The web-scoped twin of the Studio gate: fails
+      # on any NEW inline color literal outside the lead-approved allowlist (the
+      # GENERATED block, rgb()/rgba() overlay tints, and annotated per-line
+      # resisters). See scripts/web-literal-check.sh for the full list.
+      - name: Web literal-color gate (blocking)
+        run: bash scripts/web-literal-check.sh
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
