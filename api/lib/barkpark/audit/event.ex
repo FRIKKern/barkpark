@@ -9,7 +9,7 @@ defmodule Barkpark.Audit.Event do
 
   # High-level bucket; the per-category action vocabulary is validated at the
   # emit call site so a new subsystem never has to fight a global enum.
-  @categories ~w(content_mutation auth membership secret plugin_settings token)
+  @categories ~w(content_mutation auth membership secret plugin_settings token access)
 
   @type t :: %__MODULE__{}
 

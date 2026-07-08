@@ -25,6 +25,7 @@ defmodule Barkpark.Access do
       that escapes the grant's scope ladder.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.Repo
   alias Barkpark.Access.Grant
@@ -72,8 +73,22 @@ defmodule Barkpark.Access do
         |> Map.put("link_token_hash", hash_token(raw))
 
       case %Grant{} |> Grant.changeset(insert_attrs) |> Repo.insert() do
-        {:ok, grant} -> {:ok, %{grant: grant, token: raw}}
-        {:error, changeset} -> {:error, changeset}
+        {:ok, grant} ->
+          emit_grant_event("grant.minted", grant, principal, %{
+            "grantee_email" => grant.grantee_email,
+            "capabilities" => grant.capabilities,
+            "project_id" => grant.project_id,
+            "dataset" => grant.dataset,
+            "type" => grant.type,
+            "doc_id" => grant.doc_id,
+            "expires_at" => iso(grant.expires_at),
+            "single_use" => grant.single_use
+          })
+
+          {:ok, %{grant: grant, token: raw}}
+
+        {:error, changeset} ->
+          {:error, changeset}
       end
     else
       _ -> {:error, :forbidden}
@@ -164,7 +179,7 @@ defmodule Barkpark.Access do
   """
   @spec claim(String.t(), User.t()) ::
           {:ok, Grant.t()} | {:error, :not_found | :already_claimed | :expired}
-  def claim(raw_token, %User{id: user_id}) when is_binary(raw_token) do
+  def claim(raw_token, %User{} = user) when is_binary(raw_token) do
     hash = hash_token(raw_token)
 
     case Repo.one(from g in Grant, where: g.link_token_hash == ^hash) do
@@ -175,20 +190,30 @@ defmodule Barkpark.Access do
         {:error, :not_found}
 
       %Grant{} = grant ->
-        if expired?(grant), do: {:error, :expired}, else: do_claim(grant, user_id)
+        if expired?(grant), do: {:error, :expired}, else: do_claim(grant, user)
     end
   end
 
   def claim(_raw_token, _user), do: {:error, :not_found}
 
-  defp do_claim(%Grant{id: id}, user_id) do
+  defp do_claim(%Grant{id: id}, %User{id: user_id} = user) do
     now = DateTime.utc_now()
 
     query = from g in Grant, where: g.id == ^id and is_nil(g.claimed_at)
 
     case Repo.update_all(query, set: [grantee_user_id: user_id, claimed_at: now]) do
-      {1, _} -> {:ok, Repo.get(Grant, id)}
-      {0, _} -> {:error, :already_claimed}
+      {1, _} ->
+        grant = Repo.get(Grant, id)
+
+        emit_grant_event("grant.claimed", grant, user, %{
+          "grantee_user_id" => user_id,
+          "claimed_at" => iso(now)
+        })
+
+        {:ok, grant}
+
+      {0, _} ->
+        {:error, :already_claimed}
     end
   end
 
@@ -215,10 +240,16 @@ defmodule Barkpark.Access do
         with :ok <- authorize_revoke(principal, grant), do: {:ok, grant}
 
       %Grant{} = grant ->
-        with :ok <- authorize_revoke(principal, grant) do
-          grant
-          |> Ecto.Changeset.change(revoked_at: DateTime.utc_now())
-          |> Repo.update()
+        with :ok <- authorize_revoke(principal, grant),
+             {:ok, revoked_grant} <-
+               grant
+               |> Ecto.Changeset.change(revoked_at: DateTime.utc_now())
+               |> Repo.update() do
+          emit_grant_event("grant.revoked", revoked_grant, principal, %{
+            "revoked_at" => iso(revoked_grant.revoked_at)
+          })
+
+          {:ok, revoked_grant}
         end
     end
   end
@@ -461,6 +492,61 @@ defmodule Barkpark.Access do
   defp principal_id(%User{id: id}) when is_binary(id), do: {:ok, id}
   defp principal_id(%ApiToken{id: id}) when is_binary(id), do: {:ok, id}
   defp principal_id(_), do: {:error, :forbidden}
+
+  # ---------------------------------------------------------------------------
+  # audit
+  # ---------------------------------------------------------------------------
+
+  # Record a grant lifecycle transition on the tenant-wide, tamper-evident audit
+  # bus (finding #11). Grants are a privileged mint/claim/revoke surface, so —
+  # like SSO/SCIM/WebAuthn/MFA/token producers — each transition lands on the
+  # append-only hash chain. Side-record only: the emit return is IGNORED, so a
+  # failed audit write can never break the grant operation (matching every other
+  # `Audit.emit/1` producer, which discard the result). `workspace_id` is passed
+  # top-level so the event chains into the grant's own per-workspace chain.
+  #
+  # FULLY ISOLATED: emit is also wrapped in rescue/catch (mirroring
+  # `Barkpark.Audit.safe_bridge/1`), so an emit that RAISES at the infra layer
+  # (advisory-lock `Repo.query!`, a DB connection blip) is swallowed-and-logged,
+  # never propagated. The grant op still returns its normal `{:ok, grant}` even
+  # though the grant already persisted — the additive guarantee holds on BOTH
+  # the error-return AND the raise path.
+  #
+  # FIELD HYGIENE: metadata carries ONLY non-secret grant descriptors — NEVER
+  # the raw token or `link_token_hash`. The audit records the grant, not the
+  # secret.
+  defp emit_grant_event(action, %Grant{} = grant, actor_principal, metadata) do
+    {actor_type, actor_id} = actor_fields(actor_principal)
+
+    Barkpark.Audit.emit(%{
+      category: "access",
+      action: action,
+      subject: grant.id,
+      actor_type: actor_type,
+      actor_id: actor_id,
+      workspace_id: grant.workspace_id,
+      metadata: Map.put(metadata, "workspace_id", grant.workspace_id)
+    })
+
+    :ok
+  rescue
+    error ->
+      Logger.error("grant audit emit failed for #{action}: #{Exception.message(error)}")
+      :ok
+  catch
+    _, _ -> :ok
+  end
+
+  defp actor_fields(%User{id: id}), do: {"user", id}
+  defp actor_fields(%ApiToken{id: id}), do: {"token", id}
+  defp actor_fields(_), do: {nil, nil}
+
+  # Audit metadata is a jsonb map hashed into the tamper-evident chain, whose
+  # canonicaliser accepts only plain scalars/lists/maps — never a struct. So a
+  # DateTime is serialised to an ISO8601 string (nil-safe), matching the
+  # string-only convention of the other audit producers.
+  defp iso(nil), do: nil
+  defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp generate_token do
     :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
