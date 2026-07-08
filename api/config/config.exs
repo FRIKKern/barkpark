@@ -76,6 +76,14 @@ config :barkpark, :public_demo_studio, false
 # See BarkparkWeb.Studio.TmuxConsole for the full contract.
 config :barkpark, :tmux_console, enabled: true, backend: ExPTY
 
+# Studio Claude chat — admin-gated agent chat backed by the host's Claude Code
+# CLI (`claude`), OAuth inherited from the host's `claude auth login`; Barkpark
+# never stores a token. Same trust model as the tmux console: ON by default,
+# `enabled?/0` HARD-REFUSES public-demo hosts, per-host opt-out via
+# BARKPARK_CLAUDE_CHAT=0 (runtime.exs). Hidden automatically where the
+# `claude` binary is not installed.
+config :barkpark, :claude_chat, enabled: true
+
 config :barkpark, :media_cdn,
   base_url: nil,
   invalidation: [adapter: :noop]

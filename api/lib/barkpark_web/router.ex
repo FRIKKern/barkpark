@@ -612,6 +612,10 @@ defmodule BarkparkWeb.Router do
       # on TmuxConsole.enabled? (dev-only PTY dep + config flag). Hidden in
       # prod/test where the flag is off and the backend isn't compiled.
       live("/tmux", TmuxLive)
+      # Claude chat — admin-gated here; ChatLive.mount also hard-gates on
+      # ClaudeChat.enabled? (host `claude` binary + config flag; refused on
+      # public-demo hosts). Wave 1: pure chat in plan mode.
+      live("/chat", ChatLive)
     end
   end
 

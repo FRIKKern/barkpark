@@ -103,6 +103,10 @@ config :barkpark, :pulse_channels, %{
 # per-test (async: false) to pin the prod fail-closed behavior.
 config :barkpark, :public_demo_studio, true
 
+# Claude chat stays off in tests unless a test enables it with an explicit
+# fake command (no real `claude` on CI).
+config :barkpark, :claude_chat, enabled: false
+
 # The github-bridge DrainWorker runs a periodic DB-touching drain tick. Keep the
 # boot-started singleton dormant in test so it never fires against a process that
 # owns no ExUnit sandbox connection (DBConnection.OwnershipError cascade). Drain
