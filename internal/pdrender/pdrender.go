@@ -281,5 +281,13 @@ func DefaultRegistry(theme Theme) *Registry {
 	// through the same grid via the snapshot-lifting adapter (values only —
 	// see sheet.go for the documented merge/style/width losses).
 	r.blocks["sheet"] = sheetBlockRenderer{sr: sheetRenderer{ir: ir}}
+
+	// ── composition widgets (note / stage / card) ─────────────────────────────
+	// Terminal counterparts of the web/Studio composition widgets. note + stage
+	// are leaf renderers; card recurses its slots through the registry, so it
+	// holds a back-reference like section / figure.
+	r.blocks["note"] = noteRenderer{}
+	r.blocks["stage"] = stageRenderer{}
+	r.blocks["card"] = cardRenderer{reg: r}
 	return r
 }

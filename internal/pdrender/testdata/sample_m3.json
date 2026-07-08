@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "note1",
+      "type": "note",
+      "label": "NB",
+      "lead": "Definition rows",
+      "text": "compose a label chip, a bold lead run-in, and a wrapped body behind a muted left bar that repeats on every continuation line as the text runs long enough to wrap."
+    },
+    {
+      "id": "note2",
+      "type": "note",
+      "text": "A note with the optional label and lead omitted still renders its body behind the bar."
+    },
+    {
+      "id": "stage1",
+      "type": "stage",
+      "kind": "milestone",
+      "title": "Terminal renderers land",
+      "detail": "note, stage and card now render in the TUI instead of falling through to the unknown-block box.",
+      "files": "internal/pdrender/composeblocks.go",
+      "source": "pdrender-block-parity"
+    },
+    {
+      "id": "stage2",
+      "type": "stage",
+      "kind": "todo",
+      "title": "A stage with detail, files and source omitted"
+    },
+    {
+      "id": "card1",
+      "type": "card",
+      "slots": {
+        "title": {
+          "id": "ct1",
+          "type": "heading",
+          "level": 2,
+          "text": "Card title slot"
+        },
+        "body": [
+          {
+            "id": "cb1",
+            "type": "paragraph",
+            "content": [
+              { "type": "text", "value": "The body slot holds element blocks that stack inside the rounded border and wrap to the box inner width." }
+            ]
+          }
+        ],
+        "media": {
+          "id": "cm1",
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "value": "A media slot recursed through the registry beneath its muted label line." }
+          ]
+        },
+        "action": {
+          "id": "ca1",
+          "type": "action",
+          "label": "Open the card",
+          "href": "https://barkpark.cloud/papers/card",
+          "priority": "primary"
+        }
+      }
+    }
+  ]
+}

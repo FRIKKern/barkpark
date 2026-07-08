@@ -1,0 +1,27 @@
+▌ NB  Definition rows compose a label chip, a bold lead run-in, and a wrapped  
+▌ body behind a muted left bar that repeats on every continuation line as the  
+▌ text runs long enough to wrap.                                               
+                                                                               
+▌ A note with the optional label and lead omitted still renders its body behind
+▌ the bar.                                                                     
+                                                                               
+MILESTONE                                                                      
+Terminal renderers land                                                        
+note, stage and card now render in the TUI instead of falling through to the   
+unknown-block box.                                                             
+files: internal/pdrender/composeblocks.go                                      
+source: pdrender-block-parity                                                  
+                                                                               
+TODO                                                                           
+A stage with detail, files and source omitted                                  
+                                                                               
+╭────────────────────────────────────────────────────────────────────────────╮ 
+│ Card title slot                                                            │ 
+│ The body slot holds element blocks that stack inside the rounded border    │ 
+│ and                                                                        │ 
+│ wrap to the box inner width.                                               │ 
+│ media                                                                      │ 
+│ A media slot recursed through the registry beneath its muted label line.   │ 
+│ action                                                                     │ 
+│  Open the card  (https://barkpark.cloud/papers/card)                       │ 
+╰────────────────────────────────────────────────────────────────────────────╯ 
