@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
@@ -160,5 +161,73 @@ func TestEmitFrontierJSON(t *testing.T) {
 	}
 	if !payload.Picks[2].Proven || payload.Picks[2].Risk != "isolated" {
 		t.Errorf("pick[2] = %+v, want proven isolated", payload.Picks[2])
+	}
+}
+
+// fakeGraphShower counts GraphShow calls and returns canned results keyed by
+// root, so fetchCrossEdges' zero-fetch guard is testable without a network.
+type fakeGraphShower struct {
+	calls   int
+	results map[string]*apiclient.GraphResult
+}
+
+func (f *fakeGraphShower) GraphShow(id string) (*apiclient.GraphResult, error) {
+	f.calls++
+	if r, ok := f.results[id]; ok {
+		return r, nil
+	}
+	return &apiclient.GraphResult{OK: true, Root: id}, nil
+}
+
+// TestFetchCrossEdgesZeroCallGuard — the CRITICAL guard: a single-root ready set
+// can carry no cross-ROOT dependency, so fetchCrossEdges makes ZERO GraphShow
+// calls and returns nil (slice-1 behavior).
+func TestFetchCrossEdgesZeroCallGuard(t *testing.T) {
+	snap := taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "r1", Lifecycle: "open"},
+		{DocID: "a", ParentID: "r1", Lifecycle: "ready", Priority: "1"},
+		{DocID: "b", ParentID: "r1", Lifecycle: "ready", Priority: "2"},
+	}}
+	gs := &fakeGraphShower{}
+	edges := fetchCrossEdges(gs, snap)
+	if gs.calls != 0 {
+		t.Errorf("GraphShow calls = %d, want 0 (single-root ready set → no fetch)", gs.calls)
+	}
+	if edges != nil {
+		t.Errorf("edges = %v, want nil", edges)
+	}
+}
+
+// TestFetchCrossEdgesFetchesAndFolds — a multi-root ready set DOES fetch (once
+// per candidate root) and folds a returned cross-root `blocks` edge into the
+// CrossEdges shape. Non-`blocks` edges are ignored.
+func TestFetchCrossEdgesFetchesAndFolds(t *testing.T) {
+	snap := taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "r1", Lifecycle: "open"},
+		{DocID: "r2", Lifecycle: "open"},
+		{DocID: "a", ParentID: "r1", Lifecycle: "ready", Priority: "1"},
+		{DocID: "b", ParentID: "r2", Lifecycle: "ready", Priority: "1"},
+	}}
+	// r1's graph carries the real cross-root block edge a→b (drafts path: node
+	// id == doc_id) plus a noise ref edge that must be ignored.
+	gs := &fakeGraphShower{results: map[string]*apiclient.GraphResult{
+		"r1": {
+			OK:   true,
+			Root: "r1",
+			Nodes: []apiclient.GraphNode{
+				{ID: "a", DocID: "a"}, {ID: "b", DocID: "b"},
+			},
+			Edges: []apiclient.GraphEdgeWire{
+				{FromID: "a", ToID: "b", Kind: "blocks"},
+				{FromID: "a", ToID: "b", Kind: "references"}, // ignored
+			},
+		},
+	}}
+	edges := fetchCrossEdges(gs, snap)
+	if gs.calls != 2 {
+		t.Errorf("GraphShow calls = %d, want 2 (one per candidate root)", gs.calls)
+	}
+	if edges == nil || len(edges["a"]) != 1 || edges["a"][0] != "b" {
+		t.Fatalf("folded edges = %+v, want a→[b]", edges)
 	}
 }

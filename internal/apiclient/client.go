@@ -987,6 +987,62 @@ func (c *Client) TaskRelabel(docID string, add, remove []string) error {
 	return err
 }
 
+// GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join
+// the edge endpoints need. In the published path `id` is a UUID and `doc_id`
+// the slug; in the drafts path both are the slug. Only the two fields the
+// frontier fold reads are decoded.
+type GraphNode struct {
+	ID    string `json:"id"`
+	DocID string `json:"doc_id"`
+}
+
+// GraphEdgeWire is one edge of a GET /v1/graph/:id response. `from_id`/`to_id`
+// are in the node id-space (UUIDs on the published path, slugs on drafts); the
+// caller resolves them to doc_ids via the node list.
+type GraphEdgeWire struct {
+	FromID string `json:"from_id"`
+	ToID   string `json:"to_id"`
+	Kind   string `json:"kind"`
+}
+
+// GraphResult is the decoded subset of a GET /v1/graph/:id envelope.
+type GraphResult struct {
+	OK    bool            `json:"ok"`
+	Root  string          `json:"root"`
+	Nodes []GraphNode     `json:"nodes"`
+	Edges []GraphEdgeWire `json:"edges"`
+}
+
+// GraphShow fetches the content graph rooted at id via GET /v1/graph/:id — a
+// token-gated, NOT path-scoped endpoint (it lives under /v1 directly, its scope
+// derived from the token + the dataset query param, like ListWorkspaces). It
+// requests the `drafts` perspective (tasks live as drafts, the same view the
+// board reads), `direction=both`, and `kinds=blocks` so only dependency edges
+// come back. Used by `bp task frontier` to enrich the dispatch frontier with
+// REAL cross-root block edges (df-graph-crossdep) — the fetch happens here,
+// OUTSIDE the pure taskboard.Frontier model.
+func (c *Client) GraphShow(id string) (*GraphResult, error) {
+	u := c.baseURL + "/v1/graph/" + url.PathEscape(id) +
+		"?drafts=true&direction=both&kinds=blocks"
+	if c.Dataset != "" {
+		u += "&dataset=" + url.QueryEscape(c.Dataset)
+	}
+	resp, err := c.authGet(u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return nil, fmt.Errorf("graph.show %s error %d: %s", id, resp.StatusCode, string(raw))
+	}
+	var out GraphResult
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListWorkspaces fetches the workspaces the bearer token is a member of via
 // GET /api/workspaces. This is a token-gated, NOT path-scoped, endpoint — it
 // lives under /api directly, not under /w/:ws/p/:project.
