@@ -136,7 +136,13 @@ defmodule Barkpark.Scim do
   @doc "A user, only if they are a member of one of `org`'s workspaces; else nil."
   @spec get_org_user(Organization.t(), binary()) :: User.t() | nil
   def get_org_user(%Organization{} = org, user_id) when is_binary(user_id) do
-    if member_of_org?(org, user_id), do: Accounts.get_user(user_id), else: nil
+    # #672 class: `user_id` binds to `:binary_id` columns (Membership.principal_id,
+    # User.id). A non-UUID path param would raise Ecto.CastError → 500; guard the
+    # cast so a malformed id folds into the existing not_found (`nil`) branch → 404.
+    case Repo.uuid_or_nil(user_id) do
+      nil -> nil
+      uuid -> if member_of_org?(org, uuid), do: Accounts.get_user(uuid), else: nil
+    end
   end
 
   def get_org_user(_org, _), do: nil
@@ -241,7 +247,13 @@ defmodule Barkpark.Scim do
   @doc "A group in `org` by id, or nil."
   @spec get_org_group(Organization.t(), binary()) :: Group.t() | nil
   def get_org_group(%Organization{id: oid}, id) when is_binary(id) do
-    Repo.one(from g in Group, where: g.id == ^id and g.organization_id == ^oid)
+    # #672 class: `id` binds to Group's `:binary_id` PK. A non-UUID path param
+    # would raise Ecto.CastError → 500; guard the cast so a malformed id folds
+    # into the existing `nil` branch → SCIM 404.
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.one(from g in Group, where: g.id == ^uuid and g.organization_id == ^oid)
+    end
   end
 
   def get_org_group(_org, _), do: nil

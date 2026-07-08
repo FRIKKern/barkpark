@@ -184,6 +184,62 @@ defmodule Barkpark.Content.ExpandTest do
     assert expanded_restricted["author"] == "adraft"
   end
 
+  # Wiring proof: a `private` field on an EXPANDED reference is redacted through
+  # the caller_context threaded into resolve_ref → Envelope.render. Without this
+  # the private field of a referenced doc would leak into the parent's expansion.
+  test "expand/4 redacts a private field on an expanded reference for an anonymous caller" do
+    alias Barkpark.Content.CallerContext
+
+    # Re-declare `author` with a private `secret` field, and reference it.
+    Content.upsert_schema(
+      %{
+        "name" => "author",
+        "title" => "Author",
+        "visibility" => "public",
+        "fields" => [
+          %{"name" => "title", "type" => "string"},
+          %{"name" => "secret", "type" => "string", "private" => true}
+        ]
+      },
+      "exp"
+    )
+
+    {:ok, _} =
+      Content.create_document(
+        "author",
+        %{"_id" => "asec", "title" => "Secret Jane", "secret" => "SSN-123"},
+        "exp"
+      )
+
+    {:ok, _} = Content.publish_document("asec", "author", "exp")
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"_id" => "psec", "title" => "PrivRef", "author" => "asec"},
+        "exp"
+      )
+
+    {:ok, _} = Content.publish_document("psec", "post", "exp")
+
+    docs =
+      Content.list_documents("post", "exp",
+        perspective: :published,
+        filter_map: %{"title" => "PrivRef"}
+      )
+      |> Enum.map(&Envelope.render/1)
+
+    # Anonymous caller: the expanded author keeps `title` but DROPS `secret`.
+    [anon] = Expand.expand(docs, :all, "exp", caller_context: CallerContext.anonymous())
+    assert anon["author"]["title"] == "Secret Jane"
+    refute Map.has_key?(anon["author"], "secret")
+
+    # Positive control: the :internal sentinel bypasses redaction — proves the
+    # field is present in the source and it is the redaction that removes it.
+    [internal] = Expand.expand(docs, :all, "exp", caller_context: :internal)
+    assert internal["author"]["secret"] == "SSN-123"
+  end
+
   test "expand/4 with empty docs returns []" do
     assert Expand.expand([], :all, "exp") == []
   end
