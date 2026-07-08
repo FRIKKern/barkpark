@@ -197,12 +197,15 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   # ── data-viz shapers (pure): neutral count tally → ratified block Attrs ──────
 
   @doc """
-  Shape a `Barkpark.Tasks.Query.agg_for_query/2` count tally into the ratified
-  data-viz Attrs for `type`. COUNT-ONLY: every value is a count.
+  Shape a `Barkpark.Tasks.Query.agg_for_query/2` tally into the ratified data-viz
+  Attrs for `type`. Each value is a `count` OR a whitelisted measure reduction
+  (sum/avg/min/max); a measure cell/total that is k-anon SUPPRESSED (or a
+  zero-row measure) is `nil` — passed through untouched (never 0) so the renderer
+  paints its dim placeholder.
 
-    * `"stat"`  → `%{"value" => n, "spark" => [...]?}`
+    * `"stat"`  → `%{"value" => n | nil, "spark" => [...]?}`
     * `"chart"` → `%{"series" => [%{"label", "points" => [...]}]}` (one series
-      per primary groupBy value; points per `over` bucket, else a single count)
+      per primary groupBy value; points per `over` bucket, else a single value)
     * `"heatmap"` → `%{"cells" => [[...]], "max", "rowLabels", "colLabels"}`
   """
   def shape("stat", tally), do: stat_shape(tally)
@@ -210,7 +213,13 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   def shape("heatmap", tally), do: heatmap_shape(tally)
   def shape(_type, _tally), do: %{}
 
-  defp cell(tally, p, s), do: Map.get(tally.tally, {p, s}, 0)
+  # A finalized cell. `count` cells default to 0 for an absent {p,s} (a real
+  # zero-cardinality bucket — v1 behaviour). A MEASURE cell (sum/avg/min/max) is
+  # nil when absent OR k-anon suppressed — passed through as nil, NEVER coerced
+  # to 0 (a 0 would itself leak "few rows"); the renderer paints its dim
+  # placeholder for a nil cell.
+  defp cell(%{op: "count"} = tally, p, s), do: Map.get(tally.tally, {p, s}, 0)
+  defp cell(tally, p, s), do: Map.get(tally.tally, {p, s})
 
   defp stat_shape(%{buckets: buckets} = t) when is_list(buckets) and buckets != [] do
     %{"value" => t.total, "spark" => Enum.map(buckets, &cell(t, :__all__, &1))}
@@ -249,8 +258,9 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   defp heatmap_shape(%{labels1: rows, labels2: cols} = t) do
     cells = for r <- rows, do: for(c <- cols, do: cell(t, r, c))
 
+    # nil cells (suppressed / absent measure) don't participate in the scale.
     max =
-      case List.flatten(cells) do
+      case cells |> List.flatten() |> Enum.filter(&is_number/1) do
         [] -> 0
         flat -> Enum.max(flat)
       end
