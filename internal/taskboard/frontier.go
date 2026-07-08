@@ -191,6 +191,29 @@ func areasOf(t Task) areaInfo {
 	return ai
 }
 
+// AreaLint is the lint-facing surface summary of one task (df-lint-area-nudge):
+// whether it carries an AUTHORED area: label, whether it names any surface at
+// all, and the sorted display forms (a "~" prefix marks a phase-band-DERIVED
+// provisional area). It exists so `bp task lint` reads the SAME surface
+// derivation the frontier's interference model reads — no reimplementation of
+// area: parsing. See docs/contracts/dispatch-areas.md for the vocabulary.
+type AreaLint struct {
+	Authored bool     // ≥1 authored area: label
+	HasAny   bool     // any surface token at all (authored OR phase-band-derived)
+	Display  []string // sorted display forms; "~studio" = phase-band-derived
+}
+
+// AreaLintOf resolves a task's lint-facing surface summary by delegating to the
+// canonical areasOf, so the nudge can never drift from the frontier's model.
+func AreaLintOf(t Task) AreaLint {
+	ai := areasOf(t)
+	return AreaLint{
+		Authored: ai.authored,
+		HasAny:   !ai.empty(),
+		Display:  ai.display,
+	}
+}
+
 // phaseBandSlug extracts the surface slug from a `phase:<n>-<slug>` label:
 // "phase:2-studio" -> "studio", "phase:5-paper-components" -> "paper-components".
 // A band with no numeric-dash prefix ("phase:goal") yields the whole tail,

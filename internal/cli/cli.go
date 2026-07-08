@@ -153,6 +153,14 @@ func Execute(args []string) int {
 		if verb == "frontier" {
 			return runTaskFrontier(out, g, ctx, tail)
 		}
+		// `bp task lint` — an advisory metadata NUDGE (df-lint-area-nudge): every
+		// workable leaf (ready, no children) carrying no authored area: label, the
+		// gap that starves the frontier's interference model. Same client-side
+		// intercept as frontier (the manifest `task` noun has no `lint` verb), and
+		// it ALWAYS exits 0 — a nudge, never a gate.
+		if verb == "lint" {
+			return runTaskLint(out, g, ctx, tail)
+		}
 	case "cmux":
 		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
 		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
