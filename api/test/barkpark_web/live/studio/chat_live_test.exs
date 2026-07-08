@@ -80,6 +80,15 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view: view, html: html}
     end
 
+    # Regression: the CLI emits system/init only when the FIRST turn starts, so
+    # a composer gated on init can never be used — the tab must be ready (and
+    # the composer enabled) immediately after the connected mount.
+    test "composer is enabled immediately after mount (no init deadlock)", %{view: view} do
+      assert render(view) =~ "ready"
+      refute has_element?(view, "input[name=message][disabled]")
+      refute has_element?(view, "button[type=submit][disabled]")
+    end
+
     test "renders the composer and the chat tab in the top menu", %{html: html} do
       assert html =~ ~s(phx-submit="send")
       assert html =~ ~s(href="/studio/chat")

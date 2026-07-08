@@ -238,10 +238,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             name="message"
             autocomplete="off"
             placeholder={composer_placeholder(@status)}
-            disabled={@status == :starting}
             style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
           />
-          <button type="submit" class="btn btn-primary" disabled={@status == :starting}>
+          <button type="submit" class="btn btn-primary">
             <.icon name="send" size={14} />
           </button>
         </form>
@@ -259,7 +258,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case ClaudeChat.start_session(%{sink: self()}) do
       {:ok, session} ->
         Process.monitor(session)
-        assign(socket, session: session, status: :starting)
+        # Ready as soon as the subprocess is up. The CLI emits its init event
+        # only when the FIRST turn starts — gating the composer on init would
+        # deadlock the tab (nothing sent → no init → composer never enables).
+        assign(socket, session: session, status: :ready)
 
       {:error, reason} ->
         socket
