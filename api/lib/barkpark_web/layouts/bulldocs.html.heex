@@ -599,7 +599,10 @@
       }
 
       async function fetchBlocks(slug) {
-        var url = "/v1/data/query/production/paper?filter=" +
+        // resolve=tasks: the API resolve seam (p-resolve-seam) — without it the
+        // wasm renders raw `query` blocks as "[task-list — unresolved]" while
+        // the article view shows live tasks (tui-task-widget-resolution-parity).
+        var url = "/v1/data/query/production/paper?resolve=tasks&filter=" +
           encodeURIComponent('slug=="' + slug + '"');
         var r = await fetch(url, { headers: { accept: "application/json" } });
         var d = await r.json();
