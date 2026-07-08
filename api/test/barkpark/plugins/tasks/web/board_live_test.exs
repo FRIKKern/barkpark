@@ -1558,6 +1558,72 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "readable cards (wave 19)" do
+    setup do
+      task("rd-epic", "Epic with a brief",
+        lifecycle: "in_progress",
+        assignee: "lead",
+        description: "The epic exists to retire the divide formulas.\nSecond line of the brief.",
+        design_doc: "pd-layout-engine-paper"
+      )
+
+      task("rd-wip", "Child in flight",
+        lifecycle: "in_progress",
+        parent_id: "rd-epic",
+        assignee: "studio:doey",
+        description: "Porting the columns renderer to the two-pass solver."
+      )
+
+      task("rd-open", "Quiet child",
+        lifecycle: "open",
+        parent_id: "rd-epic",
+        description: "NEVER-ON-THE-ROW: only in-flight rows carry text."
+      )
+
+      task("rd-bare", "Bare epic", lifecycle: "in_progress")
+      task("rd-bare-c", "Bare child", lifecycle: "open", parent_id: "rd-bare")
+      :ok
+    end
+
+    test "the phone reads: root brief, ongoing task's text, paper chip, missing-brief hint",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # the root's own brief renders on the card…
+      assert html =~ ~s(data-role="card-desc")
+      assert html =~ "retire the divide formulas"
+      # …the ONGOING child's text rides its family row…
+      assert html =~ ~s(data-role="family-desc")
+      assert html =~ "Porting the columns renderer"
+      # …but a non-in-flight child's text never does.
+      refute html =~ "NEVER-ON-THE-ROW"
+      # the PortableDoc-powered detail: the design-paper chip links the reader.
+      assert html =~ ~s(data-role="design-doc")
+      assert html =~ ~s(href="/papers/pd-layout-engine-paper")
+      # a family card with NO brief at all says so.
+      assert html =~ ~s(data-role="brief-missing")
+    end
+
+    test "the whole family renders — a ten-child epic shows all ten rows",
+         %{conn: conn} do
+      for i <- 1..10,
+          do: task("rd-many-#{i}", "Wide child #{i}", lifecycle: "open", parent_id: "rd-epic")
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      for i <- 1..10, do: assert(html =~ "Wide child #{i}")
+      refute html =~ ~s(data-role="family-more")
+    end
+
+    test "the peek links the full design paper", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=rd-epic")
+
+      assert html =~ ~s(data-role="peek-design-doc")
+      assert html =~ ~s(href="/papers/pd-layout-engine-paper")
+      assert html =~ "Read the full design paper"
+    end
+  end
+
   describe "settled lanes (wave 11) — grouped" do
     setup do
       task("sl-live", "Live under goal-live", lifecycle: "open", parent_id: "goal-live")
@@ -1719,6 +1785,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       |> put_some("acceptance_criteria", opts[:criteria])
       |> put_some("github", opts[:github])
       |> put_some("description", opts[:description])
+      |> put_some("design_doc", opts[:design_doc])
       |> put_some("claim", opts[:claim])
 
     Repo.insert!(%Document{
