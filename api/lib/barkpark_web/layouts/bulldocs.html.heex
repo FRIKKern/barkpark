@@ -560,12 +560,14 @@
     #bp-terminal { display: none; }
     body.bp-tui #bp-terminal {
       display: block;
-      /* FIXED width — always exactly `--bp-cols` monospace columns + gutters,
-         the same regardless of viewport (a terminal has a stable column grid).
-         0.60rem ≈ one 14px monospace column; the ch value is inlined into the
-         calc so nothing can drop it. On a narrower screen the grid does NOT
-         shrink — the page scrolls horizontally, like a real terminal. */
-      width: calc(var(--bp-cols, 100) * 0.605rem + 48px);
+      /* SAME max width as the reader column (.bp-paper-shell.bp-paper-article's
+         max-width: 720px) — Reader view and TUI view occupy the identical
+         measure, so toggling never reflows the page. 720px happens to fit a
+         classic 80-column terminal exactly at this 14px monospace, so the wasm
+         renders at a FIXED 80 cols (TUI_COLS below must stay in lockstep). On a
+         narrower screen the box shrinks like the reader; the 80-col grid does
+         NOT reflow — .bp-term-scroll scrolls horizontally inside the window. */
+      width: min(720px, calc(100vw - 32px));
       margin: 26px auto 60px;
       background: #0b0e13;
       border: 1px solid #232a35;
@@ -589,7 +591,7 @@
     #bp-terminal .bp-term-title { flex: 1; text-align: center; letter-spacing: 0.02em; }
     #bp-terminal .bp-term-title b { color: #aab6c4; font-weight: 600; }
     #bp-terminal .bp-term-scroll { overflow-x: auto; overflow-y: hidden; }
-    #bp-terminal .bp-term-body { padding: 16px 24px 26px; width: max-content; min-width: 100%; }
+    #bp-terminal .bp-term-body { padding: 16px 20px 26px; width: max-content; min-width: 100%; }
     #bp-terminal .bp-term-body::before {
       content: "$ bp paper view " attr(data-slug);
       display: block; color: #5fcf9c; font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -701,9 +703,11 @@
       }
 
       // A FIXED terminal width — the render is always this many columns, regardless
-      // of screen size (a real terminal has a stable column grid). 100 is the
-      // classic wide-terminal default and matches `bp paper view` on a full window.
-      var TUI_COLS = 100;
+      // of screen size (a real terminal has a stable column grid). 80 is THE
+      // classic terminal width, and 80 cols of 14px monospace fit exactly inside
+      // the 720px window (#bp-terminal width — the reader column's max-width, so
+      // Reader and TUI occupy the identical measure). Keep in lockstep.
+      var TUI_COLS = 80;
 
       async function renderTUI() {
         if (!out) return;
