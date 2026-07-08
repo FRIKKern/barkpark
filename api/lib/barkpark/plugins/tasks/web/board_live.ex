@@ -374,6 +374,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
+  # A voluntary UNCLAIM (wave 17) — the holder drops their own in-flight card
+  # back on Open. Optimistic move to open (worker cleared so the card stops
+  # painting their name), then the fenced release; a refused fence (lease
+  # moved under you) rolls back to the authoritative snapshot.
+  defp run_restage(socket, {:release}, ctx) do
+    socket = optimistic_move(socket, ctx.prev, "open", nil)
+
+    case Tasks.release(ctx.task_id, ctx.worker, observed_epoch: ctx.epoch) do
+      {:ok, _} ->
+        {:noreply, socket}
+
+      {:error, _} ->
+        {:noreply, rollback(socket, "Couldn't release that task — its claim moved under you.")}
+    end
+  end
+
   # No legal transition: never touch the model, never call a primitive — just
   # surface WHY (the card stays where the server last rendered it; the hook does
   # not reorder the DOM optimistically, so nothing needs snapping back).
@@ -454,8 +470,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       to_col == :ready ->
         "Ready is derived from a task's dependencies — you can't drop a card there."
 
+      to_col == :open and from_col == :in_progress ->
+        "@#{holder} holds this task — only the holder can release it back to Open."
+
       to_col == :open ->
-        "Reopening a task from the board isn't supported yet."
+        "Only an in-flight task can be dropped on Open (that releases the claim)."
 
       from_col == :done ->
         "Done tasks stay put — drag lands one-way down the ladder."

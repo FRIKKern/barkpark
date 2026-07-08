@@ -83,7 +83,7 @@ defmodule Barkpark.Tasks do
   alias Barkpark.Tasks.Expectations
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.Fence
-  alias Barkpark.Tasks.{Claim, Close, Mutations, Queue}
+  alias Barkpark.Tasks.{Claim, Close, Mutations, Queue, Release}
   alias Barkpark.Tasks.Move
   alias Barkpark.Tasks.Prime
   alias Barkpark.Tasks.Rail
@@ -456,6 +456,20 @@ defmodule Barkpark.Tasks do
           {:ok, Document.t()}
           | {:error, :not_found | :fenced_off | :stale_claim | {:invalid_lifecycle, term()}}
   defdelegate close(task_id, worker_id, opts \\ []), to: Close
+
+  @doc """
+  Voluntarily RELEASE a claimed task — the on-demand unclaim (the TTL
+  sweeper's reap is the timeout twin). Holder-only + epoch-fenced: flips
+  `in_progress → open`, clears `claim.worker` and `assignee`, bumps the
+  epoch (monotonic across release-then-reclaim), stamps
+  `released_by`/`released_at`, emits `task.released`.
+
+      Tasks.release(task_uuid, "studio:kalle", observed_epoch: 4)
+
+  Errors: `:not_found`, `{:not_in_progress, status}`, `:not_holder`,
+  `:fenced_off`, `:stale_claim`.
+  """
+  defdelegate release(task_id, worker_id, opts \\ []), to: Release
 
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
