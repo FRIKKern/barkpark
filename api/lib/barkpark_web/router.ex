@@ -30,6 +30,21 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
   end
 
+  # Grant-fold overlay for the FLAT `/v1/data` READ routes (airdrop-grants
+  # ag-enforcement — flat-routes arm). Layered AFTER `:api` on the flat read
+  # scope ONLY — NEVER on write/admin/auth/plugin routes. `ResolveTokenOwner`
+  # resolves an OWNED api_token to its owner `:current_user` (non-halting, only
+  # sets :current_user); `AssignGrantScope` then folds that user's grants and,
+  # for a non-member grantee, flags `:grant_scoped_read` so `ScopeHelpers`
+  # threads Layer-2 row narrowing. Members + unowned/service tokens are
+  # byte-identical (the plug no-ops). Kept off writes because
+  # `CallerContext.from_conn/1` prefers an assigned `:caller_context` over the
+  # `:api_token` — setting it on a write could downgrade the caller.
+  pipeline :api_grant_read do
+    plug(BarkparkWeb.Plugs.ResolveTokenOwner)
+    plug(BarkparkWeb.Plugs.AssignGrantScope)
+  end
+
   # SCIM 2.0 directory-sync — org-scoped bearer, no tenancy shim (era-w4).
   pipeline :scim do
     plug(:accepts, ["json"])
@@ -1120,8 +1135,12 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Public API — read-only, respects schema visibility ──────────────────
+  # `:api_grant_read` layers the flat-path grant fold on top of `:api` — an
+  # owned-token grantee sees EXACTLY their grant's scope; everyone else is
+  # byte-identical. Reads only (blast-radius containment) — the write/admin
+  # blocks below stay on bare `:api`.
   scope "/v1/data", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :api_grant_read])
 
     get("/search/:dataset/suggestions", SearchController, :search_suggestions)
     post("/search/:dataset/interaction", SearchController, :search_interaction)
