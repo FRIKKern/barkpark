@@ -110,6 +110,36 @@ defmodule BarkparkWeb.Plugs.PreviewTokenTest do
     assert conn.status == 401
   end
 
+  test "dataset claim bound to route: token for A used on route B → 403 (forbidden)" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production"}, secret())
+
+    conn =
+      %{conn_for(jwt) | path_params: %{"dataset" => "staging", "type" => "post"}}
+      |> run_plug()
+
+    assert conn.halted
+    assert conn.status == 403
+    # The JTI must NOT be consumed by a wrong-dataset attempt — the check runs
+    # before record_jti, so the same token still works on its own dataset.
+    ok =
+      %{conn_for(jwt) | path_params: %{"dataset" => "production", "type" => "post"}}
+      |> run_plug()
+
+    refute ok.halted
+    assert ok.assigns.forced_perspective == "drafts"
+  end
+
+  test "dataset claim bound to route: token for A used on matching route A → 200" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production"}, secret())
+
+    conn =
+      %{conn_for(jwt) | path_params: %{"dataset" => "production", "type" => "post"}}
+      |> run_plug()
+
+    refute conn.halted
+    assert conn.assigns.preview_claims["dataset"] == "production"
+  end
+
   test "missing header → 401" do
     conn =
       build_conn(:get, "/v1/data/doc/production/post/p1")

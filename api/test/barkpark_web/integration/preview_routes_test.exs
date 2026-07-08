@@ -171,4 +171,59 @@ defmodule BarkparkWeb.Integration.PreviewRoutesTest do
       assert resp.status == 401
     end
   end
+
+  # ── Cross-dataset scope enforcement (SECURITY) ───────────────────────────
+  #
+  # A preview token minted for dataset A must not read drafts from dataset B
+  # just because the caller types B into the `:dataset` path segment. The
+  # token's `dataset` claim is bound to the route's `:dataset` param.
+  describe "dataset-claim enforcement" do
+    test "token minted for `production` used on `/…/staging/…` → 403", %{conn: conn} do
+      # dataset claim = production (mint_jwt default), route dataset = staging.
+      jwt = mint_jwt()
+
+      resp =
+        conn
+        |> with_preview(jwt)
+        |> get(~p"/v1/preview/query/staging/post")
+
+      assert resp.status == 403
+    end
+
+    test "cross-dataset attempt on the doc route → 403", %{conn: conn} do
+      jwt = mint_jwt()
+
+      resp =
+        conn
+        |> with_preview(jwt)
+        |> get(~p"/v1/preview/doc/staging/post/drafts.pp-2")
+
+      assert resp.status == 403
+    end
+
+    test "matching-dataset token still reads drafts → 200", %{conn: conn} do
+      jwt = mint_jwt(%{dataset: "production"})
+
+      resp =
+        conn
+        |> with_preview(jwt)
+        |> get(~p"/v1/preview/query/production/post")
+
+      assert resp.status == 200
+      assert json_response(resp, 200)["result"]["perspective"] == "drafts"
+    end
+
+    test "token with NO dataset claim → still denied (401, as before)", %{conn: conn} do
+      # Signed without a `dataset` claim: record_jti rejects it (:invalid) → 401,
+      # the pre-existing contract — the dataset check does not turn this into 403.
+      {jwt, _} = PreviewToken.sign(%{doc_ids: []}, @secret)
+
+      resp =
+        conn
+        |> with_preview(jwt)
+        |> get(~p"/v1/preview/query/production/post")
+
+      assert resp.status == 401
+    end
+  end
 end
