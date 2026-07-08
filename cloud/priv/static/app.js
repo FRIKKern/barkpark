@@ -2252,8 +2252,23 @@
     return isNaN(d.getTime()) ? "—" : d.toLocaleString();
   }
 
+  // Monotonic request ticket for loadInstanceSites. When the operator switches
+  // instances fast, two /v1/sites reads overlap; the LATE one must not paint
+  // instance A's sites into instance B's now-showing slot (charter wave-4 "Owed
+  // post-merge": A's sites can paint into B's slot). Each call captures the
+  // ticket at fire time; on resolve staleGuard drops the response if a newer
+  // call has since started.
+  var instanceSitesReq = 0;
+  // Pure: true when this response is STALE — a newer request superseded it, so
+  // its paint must be discarded. Exported for the harness (drop-stale/accept).
+  function staleGuard(reqId, currentId) { return reqId !== currentId; }
+
   function loadInstanceSites(bp) {
+    var reqId = ++instanceSitesReq;
     api("GET", "/v1/sites").then(function (r) {
+      // A newer instance switch won the race — discard this late response
+      // rather than paint the wrong instance's sites into the current slot.
+      if (staleGuard(reqId, instanceSitesReq)) return;
       var box = $("#instance-sites");
       if (!box) return;
       var all = (r.ok && r.data && r.data.sites) || [];
@@ -3432,10 +3447,16 @@
   // deploy (queued/building/pushing), collapsed for a terminal one.
   var deployConsoleOpen = {};
 
-  function loadSite(id) {
+  // opts.quiet skips the full-body "Loading site…" spinner. Used after the
+  // optimistic post-promote repaint: the reconciled list is already on screen,
+  // so wiping #site-body with a spinner would (a) throw the optimistic paint
+  // away before a single frame and (b) flash the whole detail view. Quiet keeps
+  // the optimistic list visible until the refetch resolves and repaints to
+  // server truth.
+  function loadSite(id, opts) {
     currentSiteId = id;
     var box = $("#site-body");
-    box.innerHTML = '<div class="loading">Loading site&hellip;</div>';
+    if (!(opts && opts.quiet)) box.innerHTML = '<div class="loading">Loading site&hellip;</div>';
     Promise.all([
       api("GET", "/v1/sites/" + encodeURIComponent(id)),
       api("GET", "/v1/sites/" + encodeURIComponent(id) + "/deployments"),
@@ -3506,9 +3527,7 @@
       : "—";
     var sub = (site.framework ? esc(site.framework) : "site") +
       (bp ? ' &middot; on <a href="#instance/' + esc(bp.id) + '">' + esc(bp.name) + "</a>" : "");
-    var list = deployments.length
-      ? deployments.map(function (d) { return deployRow(d, site.current_deployment_id); }).join("")
-      : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+    var list = deployListHtml(deployments, site.current_deployment_id);
     var githubLabel = auto ? "Change repo" : "Connect GitHub repo";
     // gh-6: branch previews render in their own section, distinct from the
     // production deploy list — one row per branch, each with a click-through to
@@ -3525,7 +3544,7 @@
           '<button class="btn btn-ghost btn-sm" id="site-github" type="button">' + githubLabel + "</button>" +
           '<button class="btn btn-primary btn-sm" id="site-deploy" type="button">Deploy</button></div></div>' +
       '<div class="detail-grid">' +
-        '<div class="detail-main"><h2>Deployments</h2><div class="deploys">' + list + "</div>" +
+        '<div class="detail-main"><h2>Deployments</h2><div class="deploys" id="site-deploys">' + list + "</div>" +
           previewSection + "</div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
           railRowCopy("Site ID", site.id) +
@@ -3731,7 +3750,51 @@
     return { message: friendly(data, "The new deployment couldn't be created."), recovery: "retry" };
   }
 
-  function confirmPromote(site, d, kind) {
+  // After a promote succeeds the server mints a FRESH queued production
+  // deployment (`optimisticRow`). Reconcile it into the on-screen list for an
+  // immediate optimistic repaint — BEFORE the "deployments" SSE tick / refetch
+  // lands: prepend it, deduped by id so a racing tick can't double it.
+  // CRUCIALLY the new row is QUEUED, not live, so the Current chip must STAY on
+  // the previously-live deployment; it only migrates to the new row once that
+  // build actually goes live (a later refetch). Returns { list, currentId } —
+  // currentId is the newest LIVE production row, which the new queued row is
+  // never. Pure; harness-tested.
+  function promoteReconcile(list, optimisticRow) {
+    var rows = Array.isArray(list) ? list.slice() : [];
+    if (optimisticRow && optimisticRow.id != null) {
+      rows = rows.filter(function (d) { return String(d.id) !== String(optimisticRow.id); });
+      rows.unshift(optimisticRow);
+    }
+    var currentId = null;
+    for (var i = 0; i < rows.length; i++) {
+      var d = rows[i];
+      if ((d.status || "") === "live" && (d.environment || "production") !== "preview") {
+        currentId = d.id;
+        break;
+      }
+    }
+    return { list: rows, currentId: currentId };
+  }
+
+  // The production deployment list markup — shared by the initial site render
+  // and the optimistic post-promote repaint so the empty state and the Current
+  // chip logic can never drift between the two paint paths.
+  function deployListHtml(deployments, currentId) {
+    return deployments && deployments.length
+      ? deployments.map(function (d) { return deployRow(d, currentId); }).join("")
+      : '<div class="empty-state"><h2>No deployments yet</h2><p>Trigger the first build with Deploy.</p></div>';
+  }
+
+  // Paint a deployment list into its container and (re)wire consoles + promote
+  // actions in one step — no dead-button window between the innerHTML swap and
+  // the wiring. Used by the optimistic post-promote repaint.
+  function renderDeployList(container, site, list, currentId) {
+    container.innerHTML = deployListHtml(list, currentId);
+    wireDeployConsoles(container);
+    wireDeployActions(container, site, list);
+  }
+
+  function confirmPromote(site, d, kind, deployments) {
     var copy = promoteConfirmCopy(kind, deployRefLabel(d));
     openConfirmModal({
       tier: "mutate",
@@ -3739,11 +3802,11 @@
       consequence: copy.consequence,
       confirmLabel: copy.confirmLabel,
       busyLabel: copy.busyLabel,
-      onConfirm: function (ctl) { runPromote(site, d, kind, ctl); },
+      onConfirm: function (ctl) { runPromote(site, d, kind, ctl, deployments); },
     });
   }
 
-  function runPromote(site, d, kind, ctl) {
+  function runPromote(site, d, kind, ctl, deployments) {
     api("POST", promotePath(site.id, d.id), {}).then(function (r) {
       if (r.status === 201) {
         ctl.succeed();
@@ -3752,16 +3815,31 @@
           title: kind === "redeploy" ? "Redeploy started" : "Rollback started",
           body: "A new production deployment pinned to " + deployRefLabel(d) + " is queued.",
         });
-        // The live "deployments" SSE tick repaints too; refetch immediately so
-        // the queued row appears without waiting on the broadcast round-trip.
-        if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        // Optimistic repaint: the 201 carries the freshly-minted queued row —
+        // reconcile it into the on-screen list so the queued deployment appears
+        // instantly (the Current chip stays on the still-live deployment). The
+        // loadSite refetch below then reconciles to server truth; the live
+        // "deployments" SSE tick repaints again as the build progresses.
+        if (String(currentSiteId) === String(site.id)) {
+          var optimistic = r.data && r.data.deployment;
+          var listBox = $("#site-deploys");
+          if (optimistic && listBox) {
+            var rec = promoteReconcile(deployments, optimistic);
+            renderDeployList(listBox, site, rec.list, rec.currentId);
+            // Quiet refetch: the optimistic list is already painted, so don't
+            // blow it away with a spinner — let it stand until server truth lands.
+            loadSite(site.id, { quiet: true });
+          } else {
+            loadSite(site.id);
+          }
+        }
         return;
       }
       var f = promoteFailure(r.status, r.data);
       if (f.recovery === "retry") {
         ctl.fail(f.message, "Try again", function (c) {
           c.busy();
-          runPromote(site, d, kind, c);
+          runPromote(site, d, kind, c, deployments);
         });
       } else {
         ctl.fail(f.message, "Refresh deployments", function () {
@@ -3780,7 +3858,7 @@
     scope.querySelectorAll(".dep-promote").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var d = byId[btn.getAttribute("data-dep-id")];
-        if (d) confirmPromote(site, d, btn.getAttribute("data-kind"));
+        if (d) confirmPromote(site, d, btn.getAttribute("data-kind"), deployments);
       });
     });
   }
@@ -7175,6 +7253,10 @@
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
+      // Rollback endgame: the post-promote reconcile (Current chip stays put
+      // until the new build is live) + the loadInstanceSites stale-paint guard.
+      promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
+      staleGuard: staleGuard,
       parseInviteToken: parseInviteToken, inviteLandingState: inviteLandingState,
       inviteTerminalFrom: inviteTerminalFrom, inviteStateHtml: inviteStateHtml,
       // C8 instance Timeline + golden-path verify chips (charter D10/D18/D25/D33/D53).
