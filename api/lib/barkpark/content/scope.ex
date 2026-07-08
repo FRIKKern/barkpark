@@ -43,6 +43,7 @@ defmodule Barkpark.Content.Scope do
 
   import Ecto.Query
 
+  alias Barkpark.Access.Grant
   alias Barkpark.Content.CallerContext
 
   @doc """
@@ -175,5 +176,60 @@ defmodule Barkpark.Content.Scope do
   def scope_to_workspace_including_global(query, workspace_id, _project_id)
       when is_binary(workspace_id) do
     where(query, [x], x.workspace_id == ^workspace_id or is_nil(x.workspace_id))
+  end
+
+  @doc """
+  Grant row-narrowing (airdrop-grants ag-enforcement, Layer 2 — the
+  containment-critical clause). Restrict a query to the UNION of the caller's
+  ACTIVE grants' scope ladders WITHIN `workspace_id`.
+
+  Applied ONLY on a GRANT-DERIVED read — the `ResolveWorkspace` read gate admits
+  a grant-only caller, flags `assigns[:grant_scoped_read]`, and `ScopeHelpers`
+  threads `grant_scoped: true` into the `Content.Query` opts. A member NEVER
+  carries the flag, so this clause never touches a member's read (grants only
+  ADD access; members stay byte-identical).
+
+  Fail-CLOSED, always: a nil caller_context, an empty grant set, or NO grant
+  covering `workspace_id` all force `where: false` (zero rows) — never the whole
+  workspace. Per grant, the ladder BELOW workspace (`project_id → dataset →
+  type → doc_id`) is ANDed as equality on each non-NULL level, stopping at the
+  first NULL (Grant's "null covers everything below" semantics, mirroring
+  `Barkpark.Access.validate/3` — not reinvented). Grants OR together, so a
+  caller with two grants sees the union of their scopes.
+  """
+  @spec scope_to_grants(Ecto.Queryable.t(), CallerContext.t() | nil, binary() | nil) ::
+          Ecto.Query.t()
+  def scope_to_grants(query, %CallerContext{grants: grants}, workspace_id)
+      when is_binary(workspace_id) and is_list(grants) do
+    case Enum.filter(grants, &covers_workspace?(&1, workspace_id)) do
+      [] ->
+        where(query, false)
+
+      covering ->
+        conditions =
+          Enum.reduce(covering, dynamic(false), fn grant, acc ->
+            dynamic([x], ^acc or ^grant_ladder_condition(grant))
+          end)
+
+        where(query, ^conditions)
+    end
+  end
+
+  # Fail CLOSED: no caller_context, wrong shape, or nil workspace → zero rows.
+  def scope_to_grants(query, _caller_context, _workspace_id), do: where(query, false)
+
+  defp covers_workspace?(%Grant{workspace_id: ws}, workspace_id), do: ws == workspace_id
+  defp covers_workspace?(_grant, _workspace_id), do: false
+
+  # AND of the non-NULL ladder levels below workspace, stopping at the first
+  # NULL (null-covers-below). An all-NULL-below grant (workspace-wide) yields
+  # `dynamic(true)` → every row in the already-workspace-scoped query.
+  defp grant_ladder_condition(%Grant{} = grant) do
+    Enum.reduce_while([:project_id, :dataset, :type, :doc_id], dynamic(true), fn level, acc ->
+      case Map.get(grant, level) do
+        nil -> {:halt, acc}
+        value -> {:cont, dynamic([x], ^acc and field(x, ^level) == ^value)}
+      end
+    end)
   end
 end

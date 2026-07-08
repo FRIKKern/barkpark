@@ -70,7 +70,17 @@ defmodule BarkparkWeb.ScopeHelpers do
     |> put_scope(:workspace_id, Map.get(assigns, :current_workspace))
     |> put_scope(:project_id, Map.get(assigns, :current_project))
     |> Keyword.put(:caller_context, CallerContext.from_conn(%{assigns: assigns}))
+    |> maybe_grant_scoped(assigns)
   end
+
+  # Grant row-narrowing flag (airdrop-grants ag-enforcement, Layer 2). Set ONLY
+  # when `ResolveWorkspace` admitted a GRANT-DERIVED caller (never for a member),
+  # it tells `Content.Query` to restrict the read to the caller's grant scopes.
+  # Absent → Content reads are byte-identical to today.
+  defp maybe_grant_scoped(opts, %{grant_scoped_read: true}),
+    do: Keyword.put(opts, :grant_scoped, true)
+
+  defp maybe_grant_scoped(opts, _assigns), do: opts
 
   defp put_scope(opts, _key, nil), do: opts
   defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)

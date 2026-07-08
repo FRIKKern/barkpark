@@ -26,14 +26,16 @@ defmodule Barkpark.Content.CallerContext do
           user_id: binary() | nil,
           token_id: binary() | nil,
           roles: [String.t()],
-          is_admin: boolean()
+          is_admin: boolean(),
+          grants: [Barkpark.Access.Grant.t()]
         }
 
   defstruct principal_type: :anonymous,
             user_id: nil,
             token_id: nil,
             roles: [],
-            is_admin: false
+            is_admin: false,
+            grants: []
 
   @doc "The anonymous baseline — no principal, sees only public/unowned content."
   @spec anonymous() :: t()
@@ -58,6 +60,16 @@ defmodule Barkpark.Content.CallerContext do
   Build a context from a verified user session. `roles` are the user's
   workspace roles; an `owner`/`admin` workspace role (or a global flag) sets
   `is_admin`.
+
+  ALSO folds in the user's ACTIVE access-grants
+  (`Barkpark.Access.list_active_grants_for_grantee/1` — already active-filtered
+  in-query: not revoked, not expired, single-use not spent). The grants ride
+  into `Content` scope opts so the tenancy gate + row narrowing can honour each
+  grant's `(scope, capabilities)`. Grants load ONCE per request here, which is
+  the "expired grant → zero access mid-session" granularity: a grant that
+  expires mid-session is gone on the next request's rebuild. Pass
+  `grants: [...]` to override (used by tests); pass `load_grants: false` to skip
+  the query entirely.
   """
   @spec from_user(binary(), keyword()) :: t()
   def from_user(user_id, opts \\ []) when is_binary(user_id) do
@@ -67,8 +79,17 @@ defmodule Barkpark.Content.CallerContext do
       principal_type: :user,
       user_id: user_id,
       roles: roles,
-      is_admin: Keyword.get(opts, :is_admin, "admin" in roles or "owner" in roles)
+      is_admin: Keyword.get(opts, :is_admin, "admin" in roles or "owner" in roles),
+      grants: resolve_grants(user_id, opts)
     }
+  end
+
+  defp resolve_grants(user_id, opts) do
+    cond do
+      Keyword.has_key?(opts, :grants) -> Keyword.fetch!(opts, :grants)
+      Keyword.get(opts, :load_grants, true) -> Barkpark.Access.list_active_grants_for_grantee(user_id)
+      true -> []
+    end
   end
 
   @doc """

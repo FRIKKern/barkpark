@@ -56,6 +56,8 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
   import Plug.Conn
 
+  alias Barkpark.Access
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -79,24 +81,42 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     token = conn.assigns[:api_token]
     user = conn.assigns[:current_user]
 
-    cond do
-      TenancyAuth.authorize(token, workspace.id, :read) == :ok ->
-        assign(conn, :current_workspace, workspace)
+    # MEMBERSHIP first, unchanged — a member's decision (token OR user role) is
+    # byte-identical to before, and NEVER carries the grant flag. Only a
+    # non-member user is offered the grant path below (grants only ADD access).
+    member? =
+      TenancyAuth.authorize(token, workspace.id, :read) == :ok or
+        (not is_nil(user) and TenancyAuth.authorize(user, workspace.id, :read) == :ok)
 
-      # studio-user-login: an account session is a User principal — same
-      # chokepoint, the membership ROLE is the grant. Token keeps precedence
-      # above; this arm only fires for cookie-only browser users.
-      not is_nil(user) and TenancyAuth.authorize(user, workspace.id, :read) == :ok ->
+    # Grant path (airdrop-grants ag-enforcement, Layer 1). ONLY a non-member USER
+    # with an ACTIVE grant that authorizes :read here is admitted — as a
+    # GRANT-DERIVED caller: we assign the grant-bearing CallerContext + the
+    # `:grant_scoped_read` flag so `ScopeHelpers` threads Layer-2 row narrowing
+    # into every Content read. Reuses `Access.validate/3` (scope/capability/
+    # expiry truth); no membership decision is altered.
+    grant_admit = if not member? and not is_nil(user), do: grant_read_ctx(user, workspace.id)
+
+    cond do
+      member? ->
         assign(conn, :current_workspace, workspace)
 
       # The Default-workspace public allowance keys on NO TOKEN (P3 posture).
       # A signed-in user without a Default membership still gets it — being
-      # signed in never grants less than anonymous.
+      # signed in never grants less than anonymous. Ordered ABOVE the grant arm
+      # so a grantee who ALSO qualifies for this broad demo access keeps it
+      # UNNARROWED (grants only ADD access — the grant must never REMOVE the
+      # public-demo visibility a plain anonymous visitor already has).
       is_nil(token) and anonymous_default_allowed?(opts) and
           default_workspace?(workspace) ->
         conn
         |> assign(:current_workspace, workspace)
         |> assign(:anonymous_default_read, true)
+
+      not is_nil(grant_admit) ->
+        conn
+        |> assign(:current_workspace, workspace)
+        |> assign(:caller_context, grant_admit)
+        |> assign(:grant_scoped_read, true)
 
       # Flag-off Studio: the anonymous browser isn't forbidden, it's just not
       # signed in — send it to the sign-in page rather than a 403 envelope.
@@ -112,6 +132,22 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         halt_envelope(conn, {:error, :forbidden})
     end
   end
+
+  # Build a grant-bearing CallerContext for `user` and admit it ONLY if some
+  # ACTIVE grant authorizes :read at this workspace. Returns the ctx (to assign)
+  # or nil. `from_user/2` loads the user's active grants in-query; `validate/3`
+  # applies scope+capability+expiry. Fail-closed: no covering grant → nil.
+  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, workspace_id) when is_binary(uid) do
+    ctx = CallerContext.from_user(uid)
+
+    if Enum.any?(ctx.grants, fn grant ->
+         Access.validate(grant, :read, %{workspace_id: workspace_id}) == :ok
+       end) do
+      ctx
+    end
+  end
+
+  defp grant_read_ctx(_user, _workspace_id), do: nil
 
   # `true` → unconditional (paper reader); `:studio_demo` → only while the
   # public-demo flag is on; absent/false → never.
