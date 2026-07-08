@@ -934,6 +934,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp render_blocks(_, _), do: ""
 
+  @doc """
+  Public compose→walk bridge for a slot's child blocks — the SAME
+  `render_blocks/2` helper terminal/columns/section use, exposed so the
+  slots-native widget emitters in `Render.Components` (model-B `card_html/2`)
+  can recurse ARBITRARY element children through the one composer instead of
+  hand-building per-slot chrome. Each child is `compose_block`'d then walked to
+  a body fragment; an `image` child fast-paths to a `PdImage` `<img>`, an
+  `action` child to a `PdButton` link — no card-specific media/action code.
+  """
+  def render_children(blocks, style \\ :email)
+  def render_children(blocks, style) when is_list(blocks), do: render_blocks(blocks, style)
+  def render_children(_, _), do: ""
+
   # ── section layout engine (step 2) ─────────────────────────────────────────
   #
   # The pre-layout section body — the ONLY path the legacy corpus and every

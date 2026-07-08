@@ -318,70 +318,74 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def cards_html(_), do: ""
 
   @doc """
-  Render a `card` block (STEP 4): ONE card from its slots. Byte-aligns to a single
-  legacy `cards` grid item — the `title` slot → `bp-card__t`, the `body` slot
-  FLATTENED to plain text → `bp-card__d`, the top-level `tone` (legacy card vocab
-  info|ok|warn|danger — the SAME allowlist as `cards_html/1`, NOT the callout tone
-  vocab) → the `bp-card--<tone>` modifier. The OPTIONAL `media` slot PREPENDS a
-  `bp-card__media` <img>; the OPTIONAL `action` slot APPENDS a `bp-card__action`
-  link — ADDITIVE, never perturbing the title/body byte positions, so a card with
-  neither is byte-identical to a legacy `cards` item.
+  Render a `card` block (MODEL B — au-w5-card-slot-parity): ONE card from its slots,
+  each slot recursed as ARBITRARY element children through the shared compose→walk
+  bridge (`Compose.render_children/2`), the SAME helper terminal/columns/section use.
+
+  Slots render in the ORDER `media, title, body, action`. An `image` media child
+  fast-paths to a proper `<img>` (via `compose_block(image)` → `PdImage`); an `action`
+  child fast-paths to a button link (`PdButton`); a `heading`/`paragraph` title/body
+  child renders as a semantic `<h_>`/`<p>` — no card-specific `bp-card__t/__d/__media/
+  __action` chrome anymore (model B drops the text-flatten wrappers). The top-level
+  `tone` (legacy card vocab info|ok|warn|danger — the SAME allowlist as `cards_html/1`,
+  NOT the callout tone vocab) → the `bp-card--<tone>` modifier is KEPT.
+
+  Empty-card guard: a card whose every slot is absent/empty renders as a blank
+  `<div class="bp-card">…</div>` container (no stray chrome).
+
+  BACK-COMPAT: persisted slot children are already typed element blocks, so generic
+  recursion renders them directly. DEFENSIVE: a media element persisted as a bare
+  `{src, alt}` map with NO `type` key is normalized to `type: "image"` before
+  recursion so it fast-paths to an `<img>` instead of the unknown-block degrade.
+
+  `style` defaults to `:article` (the reader/paper surface) so
+  `render_block(card, :article)` and a bare `card_html(card)` agree.
+
+  The shared cross-surface PROJECTION stays `{container_role, title, body}` this wave
+  (interim-green): the model-B slot order / tone / media fast-path are the GRADUATION
+  target, activated in the follow-up PR after the Go (pdrender) card leg conforms.
   """
-  def card_html(block) when is_map(block) do
+  def card_html(block, style \\ :article)
+
+  def card_html(block, style) when is_map(block) do
     tone = block |> get("tone") |> stringish()
     tone_cls = if tone in ~w(info ok warn danger), do: " bp-card--#{tone}", else: ""
 
-    title = block |> Slots.card_title_text() |> escape_html()
-    body = block |> Slots.card_body_text() |> escape_html()
+    inner =
+      card_slot_html(block, "media", style) <>
+        card_slot_html(block, "title", style) <>
+        card_slot_html(block, "body", style) <>
+        card_slot_html(block, "action", style)
 
-    media_html = card_media_html(block)
-    action_html = card_action_html(block)
-
-    title_html = if title == "", do: "", else: ~s|<div class="bp-card__t">#{title}</div>|
-    text_html = if body == "", do: "", else: ~s|<div class="bp-card__d">#{body}</div>|
-
-    ~s|<div class="bp-card#{tone_cls}">#{media_html}#{title_html}#{text_html}#{action_html}</div>|
+    ~s|<div class="bp-card#{tone_cls}">#{inner}</div>|
   end
 
-  def card_html(_), do: ""
+  def card_html(_, _), do: ""
 
-  # The card's OPTIONAL media slot → a leading <img> wrapper. "" when the slot is
-  # absent or carries no src (so the media-less card stays byte-exact to a legacy item).
-  defp card_media_html(block) do
-    case Slots.card_media(block) do
-      %{} = m ->
-        src = m |> get("src") |> stringish()
-
-        if src == "" do
-          ""
-        else
-          alt = m |> get("alt") |> stringish() |> escape_html()
-          ~s|<div class="bp-card__media"><img src="#{escape_html(src)}" alt="#{alt}"></div>|
-        end
-
-      _ ->
-        ""
-    end
+  # Recurse ONE named slot's element children through the shared compose→walk
+  # bridge. The `media` slot defensively normalizes a typeless `{src,alt}` element
+  # to `type:"image"` so it fast-paths to an <img> rather than degrading. An
+  # absent/empty slot yields "".
+  defp card_slot_html(block, "media", style) do
+    block
+    |> Slots.slot_elements("media")
+    |> Enum.map(&normalize_media_element/1)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
   end
 
-  # The card's OPTIONAL action slot → a trailing link styled as a button. "" when the
-  # slot is absent or carries neither label nor href (byte-exact media/action-less card).
-  defp card_action_html(block) do
-    case Slots.card_action(block) do
-      %{} = a ->
-        label = a |> get("label") |> stringish() |> escape_html()
-        href = a |> get("href") |> stringish()
-
-        if label == "" and href == "" do
-          ""
-        else
-          ~s|<div class="bp-card__action"><a href="#{escape_html(href)}">#{label}</a></div>|
-        end
-
-      _ ->
-        ""
-    end
+  defp card_slot_html(block, name, style) do
+    block
+    |> Slots.slot_elements(name)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
   end
+
+  # A media element persisted WITHOUT a `type` key (a bare `{src, alt}` map from an
+  # older writer) is normalized to an `image` element so generic recursion fast-paths
+  # it to an <img> instead of the unknown-block degrade path. A typed element (the
+  # persisted norm) and a non-map entry pass through untouched.
+  defp normalize_media_element(%{"type" => _} = el), do: el
+  defp normalize_media_element(el) when is_map(el), do: Map.put(el, "type", "image")
+  defp normalize_media_element(el), do: el
 
   @doc """
   Render a `pipeline` block: a horizontal flow of labelled nodes joined by

@@ -17,7 +17,6 @@ import {
   notesProjection,
   noteProjection,
   cardsProjection,
-  cardProjection,
   pipelineProjection,
   stageProjection,
   taskDetailProjection,
@@ -914,22 +913,35 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       );
     }
     case "card": {
-      const c = cardProjection(block as Record<string, unknown>);
+      // Slots-native card (au-w5-card-slot-parity, MODEL B): each slot holds
+      // ARBITRARY element children, recursed via `renderBlock` in the order
+      // media, title, body, action — an `image` media child fast-paths to <img>
+      // (the image case) and an `action` child to a button (the action case), no
+      // card-specific media/action code. The legacy `tone` accent
+      // (info|ok|warn|danger) tints the card; an all-empty card renders as a
+      // blank container. This mirrors the Elixir `Components.card_html/2` model-B
+      // render. (The shared golden projection stays {title, body} this wave — the
+      // model-B slots/order/tone are the GRADUATION target, not yet harness-
+      // asserted; the render↔render parity lock lands with graduation once Go
+      // conforms. `cardProjection` is still used by the frozen golden-parity leg.)
+      const slots = (block.slots ?? {}) as Record<string, unknown>;
+      const slotKids = (name: string): Block[] =>
+        Array.isArray(slots[name]) ? (slots[name] as Block[]) : [];
+      // Card tone vocab → the shared callout tint. `ok` has no callout key, so it
+      // maps to `success`; an unknown/absent tone gets no accent.
+      const tone = str(block.tone);
+      const tint = tone === "ok" ? calloutTone.success : (calloutTone[tone] ?? "");
+      const order = ["media", "title", "body", "action"] as const;
       return (
         <div
           key={key}
-          className="rounded-md border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950/40"
+          className={`flex flex-col gap-3 rounded-md p-3${
+            tint ? ` border ${tint}` : " border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950/40"
+          }`}
         >
-          {c.title ? (
-            <p className="font-medium text-zinc-800 dark:text-zinc-100">
-              {c.title}
-            </p>
-          ) : null}
-          {c.body ? (
-            <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-              {c.body}
-            </p>
-          ) : null}
+          {order.flatMap((name) =>
+            slotKids(name).map((b, i) => renderBlock(b, `${name}-${i}`)),
+          )}
         </div>
       );
     }

@@ -1,13 +1,18 @@
 defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
   @moduledoc """
-  STEP 4 (composition-doctrine FINALE) — the card WIDGET reader proof.
+  The card WIDGET reader proof — MODEL B (au-w5-card-slot-parity).
 
-  BACKWARD-COMPAT is the #1 gate: the legacy `cards` fleet grid MUST keep rendering
-  byte-for-byte (any drift reds). The card WIDGET is ADDITIVE — a section-of-cards
-  renders == a legacy cards grid at ITEM granularity, so `Components.card_html/1` is
-  byte-exact to ONE legacy `cards` item for every tone + the empty-title/body variants.
-  And there is ONE reader producer: `Render.render_block(card, :article)` routes
-  through `Components.card_html/1`.
+  The card's slots hold ARBITRARY element children, recursed through the ONE shared
+  compose→walk bridge (`Compose.render_children/2`, the same terminal/columns use):
+  an `image` media child fast-paths to a real `<img>`, an `action` child to a button
+  link, a `heading`/`paragraph` title/body child to a semantic `<h_>`/`<p>` — no
+  card-specific `bp-card__t/__d/__media/__action` chrome. Slots render in the order
+  `media, title, body, action`; the legacy `tone` accent (info|ok|warn|danger) is
+  KEPT; an all-empty card renders as a blank `bp-card` container.
+
+  The legacy `cards` FLEET grid (`cards_html/1`) is UNTOUCHED and stays byte-frozen
+  (it is a distinct emitter from the slots-native `card` widget). ONE reader producer:
+  `Render.render_block(card, :article)` routes through `Components.card_html/1`.
   """
   use ExUnit.Case, async: true
 
@@ -16,36 +21,33 @@ defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
 
   @article %{style: :article}
 
-  # A card WIDGET equivalent to one legacy `cards` item (title/body/tone).
+  # A card WIDGET with an OPTIONAL title heading + OPTIONAL body paragraph + tone.
+  # An empty title/body means the SLOT is absent (not a present-but-empty element).
   defp card(title, body, tone) do
     slots =
-      %{"body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => body}]}]}
+      %{}
       |> maybe_put_title(title)
+      |> maybe_put_body(body)
 
     %{"id" => "cw-1", "type" => "card", "slots" => slots}
     |> maybe_put_tone(tone)
   end
 
   defp maybe_put_title(slots, ""), do: slots
+
   defp maybe_put_title(slots, title),
     do: Map.put(slots, "title", [%{"type" => "heading", "text" => title}])
 
+  defp maybe_put_body(slots, ""), do: slots
+
+  defp maybe_put_body(slots, body),
+    do:
+      Map.put(slots, "body", [
+        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => body}]}
+      ])
+
   defp maybe_put_tone(block, nil), do: block
   defp maybe_put_tone(block, tone), do: Map.put(block, "tone", tone)
-
-  # One legacy `cards` item, sliced out of its `bp-cards` grid wrapper — the exact
-  # bytes a card must byte-match.
-  defp legacy_item(title, text, tone) do
-    grid =
-      Components.cards_html(%{
-        "type" => "cards",
-        "items" => [%{"title" => title, "text" => text, "tone" => tone}]
-      })
-
-    grid
-    |> String.replace_prefix(~s(<div class="bp-cards">), "")
-    |> String.replace_suffix("</div>", "")
-  end
 
   describe "backward-compat: the legacy `cards` fleet grid is byte-frozen" do
     test "a pinned two-item cards block renders to the EXACT expected string" do
@@ -72,36 +74,54 @@ defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
     end
   end
 
-  describe "the card WIDGET renders == one legacy cards item (item-granular proof)" do
-    test "byte-exact for every tone (info|ok|warn|danger) and an UNKNOWN tone" do
-      for tone <- ~w(info ok warn danger purple) do
-        assert Components.card_html(card("Title", "Body", tone)) ==
-                 legacy_item("Title", "Body", tone),
-               "card_html drifted from the legacy item for tone #{inspect(tone)}"
+  describe "the card WIDGET (model B): tone accent + semantic title/body" do
+    test "tone info|ok|warn|danger → the bp-card--<tone> modifier is kept" do
+      for tone <- ~w(info ok warn danger) do
+        html = Components.card_html(card("Title", "Body", tone))
+        assert html =~ ~s(<div class="bp-card bp-card--#{tone}">), "tone #{tone} modifier missing"
       end
     end
 
-    test "byte-exact with an EMPTY title (no bp-card__t)" do
-      html = Components.card_html(card("", "Body", "info"))
-      assert html == legacy_item("", "Body", "info")
-      refute html =~ "bp-card__t"
-      assert html =~ "bp-card__d"
+    test "an UNKNOWN tone (not in the allowlist) gets NO modifier" do
+      html = Components.card_html(card("Title", "Body", "purple"))
+      refute html =~ "bp-card--"
+      assert html =~ ~s(<div class="bp-card">)
     end
 
-    test "byte-exact with an EMPTY body (no bp-card__d)" do
-      html = Components.card_html(card("Title", "", "info"))
-      assert html == legacy_item("Title", "", "info")
-      assert html =~ "bp-card__t"
-      refute html =~ "bp-card__d"
-    end
-
-    test "a tone-less card gets NO modifier (byte-matches a tone-less legacy item)" do
+    test "a tone-less card gets NO modifier" do
       html = Components.card_html(card("Title", "Body", nil))
-      assert html == legacy_item("Title", "Body", "")
       refute html =~ "bp-card--"
     end
 
-    test "HTML-escapes title AND body (no XSS via slot text)" do
+    test "title recurses to a semantic <h_>, body to a <p> (no flatten wrappers)" do
+      html = Components.card_html(card("Card title", "Card body text.", "info"))
+      assert html =~ "<h2>Card title</h2>"
+      assert html =~ "<p>Card body text.</p>"
+      # Model B DROPPED the legacy flatten wrappers.
+      refute html =~ "bp-card__t"
+      refute html =~ "bp-card__d"
+    end
+
+    test "an EMPTY title omits the heading; an EMPTY body omits the paragraph" do
+      no_title = Components.card_html(card("", "Body", "info"))
+      refute no_title =~ "<h2>"
+      assert no_title =~ "<p>Body</p>"
+
+      no_body = Components.card_html(card("Title", "", "info"))
+      assert no_body =~ "<h2>Title</h2>"
+      refute no_body =~ "<p>"
+    end
+
+    test "an ALL-EMPTY card renders as a blank bp-card container (no stray chrome)" do
+      blank = Components.card_html(%{"type" => "card", "slots" => %{}})
+      assert blank == ~s(<div class="bp-card"></div>)
+
+      # tone is still honoured on an otherwise-empty card.
+      toned = Components.card_html(%{"type" => "card", "tone" => "warn", "slots" => %{}})
+      assert toned == ~s(<div class="bp-card bp-card--warn"></div>)
+    end
+
+    test "HTML-escapes title AND body text (no XSS via slot text)" do
       html = Components.card_html(card("A <b>", "x & y <s>", "info"))
       assert html =~ "A &lt;b&gt;"
       assert html =~ "x &amp; y &lt;s&gt;"
@@ -109,8 +129,8 @@ defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
     end
   end
 
-  describe "the card WIDGET's OPTIONAL media/action slots are additive" do
-    test "media PREPENDS a bp-card__media <img>; action APPENDS a bp-card__action link" do
+  describe "the card WIDGET's media/action slots recurse as elements (model B)" do
+    test "an image media child fast-paths to <img>; an action child to a button link" do
       block = %{
         "id" => "cw-2",
         "type" => "card",
@@ -124,18 +144,37 @@ defmodule Barkpark.PortableDoc.Render.CardWidgetTest do
       }
 
       html = Components.card_html(block)
-      assert html =~ ~s(<div class="bp-card__media"><img src="/pic.png" alt="pic"></div>)
-      assert html =~ ~s(<div class="bp-card__action"><a href="/go">Go</a></div>)
+      assert html =~ ~s(<img src="/pic.png" alt="pic")
+      assert html =~ ~s(<a href="/go" class="bp-button">Go</a>)
 
-      # media before title, action after body (compat byte positions preserved).
-      assert :binary.match(html, "bp-card__media") < :binary.match(html, "bp-card__t")
-      assert :binary.match(html, "bp-card__d") < :binary.match(html, "bp-card__action")
+      # Slot ORDER: media, title, body, action.
+      assert :binary.match(html, "/pic.png") < :binary.match(html, "<h2>T</h2>")
+      assert :binary.match(html, "<h2>T</h2>") < :binary.match(html, "<p>B</p>")
+      assert :binary.match(html, "<p>B</p>") < :binary.match(html, "bp-button")
+    end
+  end
+
+  describe "back-compat: persisted typed slots render; typeless media normalizes" do
+    test "a persisted card with typed image + action slots renders the image and the button" do
+      block = %{
+        "type" => "card",
+        "slots" => %{
+          "media" => [%{"type" => "image", "src" => "/a.png", "alt" => "a"}],
+          "action" => [%{"type" => "action", "href" => "/b", "label" => "B"}]
+        }
+      }
+
+      html = Components.card_html(block)
+      assert html =~ ~s(<img src="/a.png" alt="a")
+      assert html =~ ~s(<a href="/b" class="bp-button">B</a>)
     end
 
-    test "the title/body byte-window with media+action absent is unchanged (subset is exact)" do
-      # Same card minus media/action must be byte-identical to a legacy item.
-      block = card("T", "B", "info")
-      assert Components.card_html(block) == legacy_item("T", "B", "info")
+    test "a media element WITHOUT a type key normalizes to an image (fast-path, not degrade)" do
+      block = %{"type" => "card", "slots" => %{"media" => [%{"src" => "/x.png", "alt" => "z"}]}}
+      html = Components.card_html(block)
+      assert html =~ ~s(<img src="/x.png" alt="z")
+      refute html =~ "Unsupported block"
+      refute html =~ "bp-unknown-block"
     end
   end
 

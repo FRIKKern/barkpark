@@ -53,6 +53,26 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       the realization tests), NOT a single manifest source — folded into
       **au-w5-status-prose-parity**.
 
+    * card slot ORDER + tone accent + the media image fast-path (**au-w5-card-slot-parity**).
+      The Elixir View and the web reader now render MODEL B — the card's slots hold
+      arbitrary element children, recursed in the order `media, title, body, action`;
+      an `image` media child fast-paths to a real `<img>`; the legacy `tone`
+      (info|ok|warn|danger) tints the card. The shared `card_projection/1` below stays
+      the honest common FLOOR — `{container_role, title, body}` — this wave (interim
+      green: Go/pdrender still renders the OLD card shape, so graduating the projection
+      now would red the Go realization leg). The DOCUMENTED GRADUATION TARGET (activated
+      in the FOLLOW-UP PR, after the Go card leg conforms) is the full model-B projection:
+
+          %{"container_role" => "card",
+            "slots" => ["media", "title", "body", "action"],  # ordered slot kinds present
+            "tone" => "info|ok|warn|danger|"",                 # legacy card accent
+            "media_fastpath" => true}                          # an image media child ⇒ <img>
+
+      When it graduates, `card_projection/1` gains those keys, the `card` golden is
+      REGENERATED (all three mirrors move together once Go conforms), and the Elixir /
+      web realization legs assert slot order + tone + the image element — NOT the
+      substring floor. Until then the render is model B but the projection is frozen.
+
   ## Mirrors (byte-identical — the same JSON string is written to all three)
 
     * `api/test/support/fixtures/<type>.golden.json`
@@ -457,9 +477,15 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     %{"container_role" => "cards", "cards" => cards}
   end
 
-  # card: the SHARED subset — title + flattened plain-text body (via the same slot
-  # accessors `card_html/1` reads). tone/media/action + slot ORDER are surface-
-  # divergent and deliberately NOT projected (au-w5-card-slot-parity).
+  # card: the SHARED subset FLOOR — title + flattened plain-text body (via the slot
+  # accessors). FROZEN this wave (au-w5-card-slot-parity): the Elixir + web readers
+  # ship model B (arbitrary slot children recursed in media→title→body→action order,
+  # tone accent, image media fast-path), but Go/pdrender still renders the OLD card
+  # shape — so tone/media/action + slot ORDER stay OUT of the projection (adding them
+  # now reds the Go realization leg). The DOCUMENTED graduation target — ordered slot
+  # kinds ["media","title","body","action"] + tone + a media-fastpath marker — activates
+  # in the follow-up PR once Go conforms (see the moduledoc §"NOT COVERED"). Do NOT add
+  # those keys or regenerate the card golden here until then.
   defp card_projection(block) do
     %{
       "container_role" => "card",

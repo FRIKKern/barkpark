@@ -334,12 +334,19 @@ test("web cards RENDER realizes every card (title · text · tone stripe)", () =
   }
 });
 
-test("web card RENDER realizes title + body", () => {
+test("web card RENDER realizes title + body (model B: text present)", () => {
   const input = loadFixture("card").input;
   const html = renderHtml(input);
   const exp = loadFixture("card").expected as CardProjection;
-  present(html, `>${exp.title}</p>`, "card title");
-  present(html, `>${exp.body}</p>`, "card body");
+  // Model B (au-w5-card-slot-parity): the card recurses its title slot to a
+  // semantic <h_> and its body to a <p>, dropping the old flat <p> title chrome —
+  // so this leg asserts the shared projection FLOOR (title/body TEXT present),
+  // mirroring the Elixir substring relax in component_golden_parity_test.exs. The
+  // model-B slot order + tone + image fast-path are the GRADUATION target, not yet
+  // render-asserted here (the projection stays frozen this wave). Still reds if the
+  // title/body TEXT is dropped from the render.
+  present(html, exp.title, "card title");
+  present(html, exp.body, "card body");
 });
 
 test("web pipeline RENDER realizes every node (kind · title · detail)", () => {

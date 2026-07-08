@@ -19,7 +19,13 @@
  * SUBSET-PARITY (projection ⊆ native), honest scope — the divergent bits are
  * FILED, not papered over, and are simply NOT projected:
  *   • card — only title + flattened body are shared; tone accent, media/action
- *     slots, and slot ORDER differ across Elixir/Go (au-w5-card-slot-parity).
+ *     slots, and slot ORDER differ across Elixir/Go (au-w5-card-slot-parity). The
+ *     Elixir View + this web reader now RENDER model B (slots recursed in the order
+ *     media→title→body→action, image media fast-pathed to <img>, tone accent), but
+ *     the projection stays the {title, body} FLOOR this wave because Go/pdrender still
+ *     renders the old card shape. GRADUATION TARGET (activated in the follow-up PR once
+ *     Go conforms — see `CardProjection` below): ordered slot kinds
+ *     ["media","title","body","action"] + tone + a media-fastpath marker.
  *   • pipeline — the `source` accent is Elixir-class vs Go-provenance-line, so
  *     only kind/title/detail are shared.
  *   • roadmap — bar geometry (left/width) is surface-local; only the structural
@@ -125,6 +131,18 @@ export interface CardProjection {
   title: string;
   body: string;
 }
+// GRADUATION TARGET (au-w5-card-slot-parity, documented — NOT activated this wave).
+// After Go/pdrender's card leg conforms to model B, `CardProjection` graduates to the
+// full shape below and `cardProjection` emits it (the card golden is regenerated across
+// all three mirrors at that point). Kept as a doc-only type so the shape is committed
+// but unreferenced — it does not touch the frozen {title, body} projection today.
+//
+//   interface CardProjectionGraduated {
+//     container_role: "card";
+//     slots: Array<"media" | "title" | "body" | "action">; // ordered kinds present
+//     tone: "info" | "ok" | "warn" | "danger" | "";        // legacy card accent
+//     media_fastpath: boolean;                              // image media child ⇒ <img>
+//   }
 export interface PipelineProjection {
   container_role: "pipeline";
   nodes: Array<{ kind: string; title: string; detail: string }>;
