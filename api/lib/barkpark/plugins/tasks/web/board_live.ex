@@ -121,6 +121,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   the panel re-derives on every realtime event and reconcile so it is as
   live as the board behind it. Reads only — every write still goes through
   the fenced drag primitives or `bp`.
+
+  ## Context & insight (wave 14)
+
+  The peek carries the task's whole neighbourhood: a ROOT-FIRST ancestor
+  breadcrumb (walked over the board corpus, cycle-safe, dead parents render
+  as inert crumbs), a full-subtree rollup next to the direct-children count,
+  per-child sub counts, the REVERSE dependency list (what this task blocks —
+  the impact read), and an Activity log off the durable `mutation_events`
+  rows (claimed/closed/relabeled/lease-expired, with the acting worker from
+  each event's document snapshot) ending at `created`.
   """
 
   use BarkparkWeb, :live_view
@@ -129,6 +139,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.MutationEvent
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias Barkpark.Tasks
@@ -543,8 +554,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           claim: peek_claim(content),
           description: presence(Map.get(content, "description")),
           criteria: peek_criteria(content),
+          ancestors: peek_ancestors(board, Map.get(content, "parent_id")),
           children: peek_children(board, lid),
+          subtree: peek_subtree(board, lid),
           blockers: peek_blockers(doc.id),
+          blocks: peek_blocks(doc.id),
+          events: peek_events(lid),
+          created_at: doc.inserted_at,
           updated_at: doc.updated_at
         }
 
@@ -649,6 +665,110 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
     end)
   end
+
+  # The ancestor chain, ROOT-FIRST — walked over the board's own cards via
+  # parent_id, cycle-safe (seen-set) and depth-capped. A parent that is not on
+  # the board (cancelled / foreign) terminates the walk as a dead crumb so the
+  # lineage is never silently truncated.
+  @ancestor_cap 6
+  defp peek_ancestors(board, parent_id) do
+    walk_ancestors(board, parent_id, MapSet.new(), [])
+  end
+
+  defp walk_ancestors(_board, nil, _seen, acc), do: acc
+  defp walk_ancestors(_board, parent_id, _seen, acc) when not is_binary(parent_id), do: acc
+
+  defp walk_ancestors(board, parent_id, seen, acc) do
+    cond do
+      MapSet.member?(seen, parent_id) or MapSet.size(seen) >= @ancestor_cap ->
+        acc
+
+      card = board.cards_by_id[parent_id] ->
+        walk_ancestors(board, card.parent_id, MapSet.put(seen, parent_id), [
+          %{doc_id: parent_id, title: card.title, missing: false} | acc
+        ])
+
+      true ->
+        [%{doc_id: parent_id, title: nil, missing: true} | acc]
+    end
+  end
+
+  # The FULL descendant rollup (BFS over the board corpus) — total and done
+  # across every level, not just direct children. nil when childless.
+  defp peek_subtree(board, lid) do
+    by_parent =
+      board.cards_by_id
+      |> Map.values()
+      |> Enum.filter(&is_binary(&1.parent_id))
+      |> Enum.group_by(& &1.parent_id)
+
+    case collect_subtree(by_parent, [lid], MapSet.new([lid]), []) do
+      [] -> nil
+      cards -> %{total: length(cards), done: Enum.count(cards, &(&1.lifecycle_status == "done"))}
+    end
+  end
+
+  defp collect_subtree(_by_parent, [], _seen, acc), do: acc
+
+  defp collect_subtree(by_parent, [id | rest], seen, acc) do
+    children =
+      by_parent
+      |> Map.get(id, [])
+      |> Enum.reject(fn c -> MapSet.member?(seen, c.doc_id) end)
+
+    seen = Enum.reduce(children, seen, fn c, s -> MapSet.put(s, c.doc_id) end)
+    collect_subtree(by_parent, Enum.map(children, & &1.doc_id) ++ rest, seen, children ++ acc)
+  end
+
+  # The REVERSE dependency read — every task whose blocks-edge names this one:
+  # the work waiting on it. The impact half `blocker_statuses` can't show.
+  defp peek_blocks(pk) do
+    from(e in Edge,
+      join: t in Document,
+      on: t.id == e.from_id,
+      where: e.to_id == ^pk and e.kind == "blocks",
+      select: %{doc_id: t.doc_id, title: t.title, content: t.content}
+    )
+    |> Repo.all()
+    |> Enum.map(fn b ->
+      %{
+        doc_id: Content.published_id(b.doc_id),
+        title: b.title,
+        lifecycle_status: Map.get(b.content || %{}, "lifecycle_status") || "open"
+      }
+    end)
+  end
+
+  # The task's recent history off the durable mutation_events log (newest
+  # first, both draft/published twins). Each row projects to a friendly kind
+  # plus the acting worker read from the event's document snapshot.
+  @event_window 12
+  defp peek_events(lid) do
+    from(e in MutationEvent,
+      where: e.doc_id in ^[lid, "drafts." <> lid] and e.dataset == ^@dataset,
+      order_by: [desc: e.inserted_at],
+      limit: @event_window,
+      select: %{mutation: e.mutation, document: e.document, at: e.inserted_at}
+    )
+    |> Repo.all()
+    |> Enum.map(fn e ->
+      %{kind: event_label(e.mutation), worker: event_worker(e.mutation, e.document), at: e.at}
+    end)
+  end
+
+  defp event_label("task." <> rest), do: String.replace(rest, "_", " ")
+  defp event_label(other) when is_binary(other), do: other
+  defp event_label(_), do: "event"
+
+  defp event_worker("task.closed", doc) when is_map(doc) do
+    get_in(doc, ["content", "claim", "closed_by"]) || get_in(doc, ["content", "claim", "worker"])
+  end
+
+  defp event_worker(_kind, doc) when is_map(doc) do
+    get_in(doc, ["content", "claim", "worker"]) || get_in(doc, ["content", "assignee"])
+  end
+
+  defp event_worker(_kind, _doc), do: nil
 
   defp presence(value) when is_binary(value) and value != "", do: value
   defp presence(_), do: nil
@@ -1272,6 +1392,44 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         background: var(--muted-surface); border-radius: 5px;
         padding: 1px 6px; font-size: 11px;
       }
+      /* Ancestry breadcrumb (wave 14) — root-first lineage, each level hops. */
+      .bp-peek-crumbs {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px;
+        margin: 0 0 10px; font-size: 11.5px; color: var(--muted-text);
+      }
+      .bp-crumb {
+        border: 0; background: transparent; padding: 1px 4px; border-radius: 5px;
+        font: inherit; font-size: 11.5px; color: var(--info); cursor: pointer;
+        max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-crumb:hover { background: var(--info-soft); }
+      .bp-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+      .bp-crumb.is-self { color: var(--muted-text); cursor: default; }
+      .bp-crumb.is-self:hover { background: transparent; }
+      .bp-crumb--gone { color: var(--muted-text); opacity: 0.7; cursor: default; }
+      .bp-crumb-sep { opacity: 0.55; font-size: 10px; }
+      .bp-peek-subtree {
+        font-variant-numeric: tabular-nums; color: var(--muted-text);
+        font-weight: 500; letter-spacing: 0; text-transform: none;
+      }
+      /* Activity log (wave 14) — the task's durable history, newest first. */
+      .bp-peek-log {
+        list-style: none; margin: 0; padding: 0;
+        display: flex; flex-direction: column; gap: 6px;
+      }
+      .bp-peek-log li {
+        display: flex; align-items: baseline; gap: 8px; font-size: 12px;
+      }
+      .bp-peek-log li::before {
+        content: ""; width: 5px; height: 5px; border-radius: 999px;
+        background: var(--border); align-self: center; flex: 0 0 auto;
+      }
+      .bp-log-k { color: var(--text); font-weight: 500; }
+      .bp-log-w {
+        color: var(--muted-text); max-width: 20ch;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-peek-log .bp-age { margin-left: auto; padding-left: 8px; }
 
       /* ── §1 white-ladder glyph vocabulary ────────────────────────────── */
       .gi {
@@ -1785,8 +1943,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           >×</button>
         </div>
         <h2 class="bp-peek-title" data-role="peek-title"><%= @peek.title || @peek.doc_id %></h2>
+        <nav :if={@peek.ancestors != []} class="bp-peek-crumbs" data-role="peek-ancestors" aria-label="Ancestors">
+          <%= for {a, i} <- Enum.with_index(@peek.ancestors) do %>
+            <span :if={i > 0} class="bp-crumb-sep" aria-hidden="true">↳</span>
+            <button
+              :if={!a.missing}
+              type="button"
+              class="bp-crumb"
+              phx-click="peek"
+              phx-value-task={a.doc_id}
+              data-role="peek-ancestor"
+            >
+              <%= a.title || a.doc_id %>
+            </button>
+            <span :if={a.missing} class="bp-crumb bp-crumb--gone" data-role="peek-ancestor-gone">
+              <%= a.doc_id %>
+            </span>
+          <% end %>
+          <span class="bp-crumb-sep" aria-hidden="true">↳</span>
+          <span class="bp-crumb is-self">this task</span>
+        </nav>
         <div class="bp-meta">
-          <span :if={@peek.parent_id} class="bp-goal" data-role="peek-goal"><%= @peek.parent_id %></span>
+          <span :if={@peek.parent_id && @peek.ancestors == []} class="bp-goal" data-role="peek-goal"><%= @peek.parent_id %></span>
           <span :for={label <- @peek.labels} class="bp-label"><%= label %></span>
           <a
             :if={github_badge?(@peek.github)}
@@ -1845,6 +2023,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             <span class="bp-peek-count">
               <%= Enum.count(@peek.children, &(&1.lifecycle_status == "done")) %>/<%= length(@peek.children) %>
             </span>
+            <span
+              :if={@peek.subtree && @peek.subtree.total > length(@peek.children)}
+              class="bp-peek-subtree"
+              data-role="peek-subtree"
+            >
+              · subtree <%= @peek.subtree.done %>/<%= @peek.subtree.total %>
+            </span>
           </h3>
           <ul class="bp-peek-list">
             <li :for={child <- @peek.children}>
@@ -1859,6 +2044,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   <%= glyph_text(child) %>
                 </span>
                 <span class="bp-peek-hop-t"><%= child.title || child.doc_id %></span>
+                <span :if={child[:sub]} class="bp-peek-hop-s" data-role="peek-child-sub">
+                  <%= child.sub.done %>/<%= child.sub.total %>
+                </span>
                 <span :if={child.worker} class="bp-focus-w">@<%= child.worker %></span>
               </button>
             </li>
@@ -1884,6 +2072,42 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               </button>
             </li>
           </ul>
+        </section>
+
+        <section :if={@peek.blocks != []} class="bp-peek-sec" data-role="peek-blocks">
+          <h3 class="bp-controls-label">Blocks <span class="bp-peek-count"><%= length(@peek.blocks) %></span></h3>
+          <ul class="bp-peek-list">
+            <li :for={b <- @peek.blocks}>
+              <button
+                type="button"
+                class="bp-peek-hop"
+                phx-click="peek"
+                phx-value-task={b.doc_id}
+                data-role="peek-blocks-row"
+              >
+                <span class={"gi gi--#{safe_role(b.lifecycle_status)}"} aria-hidden="true">
+                  <%= role_glyph(safe_role(b.lifecycle_status)) %>
+                </span>
+                <span class="bp-peek-hop-t"><%= b.title || b.doc_id %></span>
+                <span class="bp-peek-hop-s"><%= b.lifecycle_status %></span>
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <section :if={@peek.events != [] or @peek.created_at} class="bp-peek-sec" data-role="peek-activity">
+          <h3 class="bp-controls-label">Activity</h3>
+          <ol class="bp-peek-log">
+            <li :for={e <- @peek.events} data-role="peek-event">
+              <span class="bp-log-k"><%= e.kind %></span>
+              <span :if={e.worker} class="bp-log-w">@<%= e.worker %></span>
+              <span :if={e.at} class="bp-age"><%= age_label(e.at) %></span>
+            </li>
+            <li :if={@peek.created_at} data-role="peek-created">
+              <span class="bp-log-k">created</span>
+              <span class="bp-age"><%= age_label(@peek.created_at) %></span>
+            </li>
+          </ol>
         </section>
 
         <p class="bp-peek-cli">
