@@ -3014,30 +3014,112 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Add `domain` to a Site's `domains` array. Domains are stored lowercase and
-  deduplicated. Returns `{:ok, site}` (already-present is a no-op) or a
-  validation `{:error, changeset}` for malformed domains.
+  Add `domain` to a Site's `domains` array. Domains are normalized (lower-cased,
+  trimmed, trailing-dot stripped) and deduplicated.
+
+  A domain resolves to exactly ONE owning site fleet-wide. Adding a domain that a
+  DIFFERENT site (any team) already owns is rejected with `{:error, :domain_taken}`
+  (→ 409) BEFORE it can reach the on-demand-TLS ask-gate. This closes the
+  cross-team domain collision / takeover vector: without it two teams could both
+  register `example.com`, the ask-gate would answer 200 for both, and cert
+  issuance / DNS pointing became ambiguous (team B could claim a domain team A
+  points DNS at).
+
+  Legit edges preserved:
+
+    * Idempotent — a site re-adding a domain it already owns is a no-op `{:ok, site}`.
+    * Apex ≠ subdomain — `example.com` and `www.example.com` are distinct names and
+      do not collide (normalization only case-folds/trims, it does not collapse labels).
+    * Reclaimable — a domain freed via `remove_site_domain/2` can later be claimed
+      by another site.
+
+  Returns `{:ok, site}`, `{:error, :domain_taken}`, or a validation
+  `{:error, changeset}` for a malformed domain.
   """
   @spec add_site_domain(Site.t(), String.t()) ::
-          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Site.t()} | {:error, :domain_taken} | {:error, Ecto.Changeset.t()}
   def add_site_domain(%Site{domains: existing} = site, domain) when is_binary(domain) do
-    new_domains = Enum.uniq(existing ++ [domain])
+    norm = normalize_domain(domain)
 
-    site
-    |> Site.changeset(%{domains: new_domains})
-    |> Repo.update()
+    cond do
+      # Idempotent: this site already owns the normalized domain.
+      norm in existing ->
+        {:ok, site}
+
+      # Owned by a DIFFERENT site (any team) — reject before the ask-gate can
+      # answer 200 for two owners.
+      domain_owned_by_other_site?(norm, site.id) ->
+        {:error, :domain_taken}
+
+      true ->
+        new_domains = Enum.uniq(existing ++ [norm])
+
+        # The DB-level uniqueness trigger (add_domain_cross_site_uniqueness
+        # migration) is the race backstop between the check above and this write;
+        # it raises a unique_violation, which we translate to the same friendly
+        # {:error, :domain_taken} rather than a 500.
+        try do
+          site
+          |> Site.changeset(%{domains: new_domains})
+          |> Repo.update()
+        rescue
+          e in Postgrex.Error ->
+            if e.postgres[:code] == :unique_violation do
+              {:error, :domain_taken}
+            else
+              reraise e, __STACKTRACE__
+            end
+        end
+    end
   end
 
   @doc "Remove `domain` from a Site's `domains` array. No-op if absent."
   @spec remove_site_domain(Site.t(), String.t()) ::
           {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
   def remove_site_domain(%Site{domains: existing} = site, domain) when is_binary(domain) do
-    norm = domain |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+    norm = normalize_domain(domain)
     new_domains = Enum.reject(existing, &(&1 == norm))
 
     site
     |> Site.changeset(%{domains: new_domains})
     |> Repo.update()
+  end
+
+  # Case-folded, trimmed, trailing-dot-stripped — the ONE normalization used for
+  # BOTH the cross-site uniqueness guard and the ask-gate lookup, so `Example.com`
+  # and `example.com` collide. Mirrors Site.normalize_domain/1 (the stored form).
+  defp normalize_domain(d) when is_binary(d) do
+    d |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+  end
+
+  # Is `norm` already registered to a site OTHER than `site_id`? (any team)
+  defp domain_owned_by_other_site?(norm, site_id) do
+    Site
+    |> where([s], s.id != ^site_id and fragment("? = ANY(?)", ^norm, s.domains))
+    |> select([s], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
+  end
+
+  @doc """
+  Resolve `domain` to its single owning Site, or `nil`. Case-folded lookup. With
+  the cross-site uniqueness guard in `add_site_domain/2`, a registered domain
+  belongs to exactly one site — this is the ask-gate's owner-resolution view of
+  the normalized-uniqueness model (a 200 from `domain_registered?/1` maps to this
+  one owner, never an ambiguous pair).
+  """
+  @spec domain_owner_site(String.t()) :: Site.t() | nil
+  def domain_owner_site(domain) when is_binary(domain) do
+    norm = normalize_domain(domain)
+
+    Site
+    |> where([s], fragment("? = ANY(?)", ^norm, s.domains))
+    |> limit(1)
+    |> Repo.one()
   end
 
   @doc """
@@ -3138,7 +3220,7 @@ defmodule BarkparkCloud.Registry do
   """
   @spec domain_registered?(String.t()) :: boolean()
   def domain_registered?(domain) when is_binary(domain) do
-    norm = domain |> String.downcase() |> String.trim() |> String.trim_trailing(".")
+    norm = normalize_domain(domain)
 
     registered_site_domain?(norm) or registered_preview_host?(norm) or
       registered_custom_host?(norm)
