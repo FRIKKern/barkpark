@@ -308,6 +308,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :caps, :list, default: []
   attr :link, :string, default: nil
   attr :error, :string, default: nil
+  attr :suggestions, :list, default: []
 
   def airdrop_sheet(assigns) do
     ~H"""
@@ -364,15 +365,24 @@ defmodule BarkparkWeb.StudioComponents.Modals do
           <form phx-submit="airdrop-create" class="airdrop-body">
             <label class="shares-field">
               <span class="shares-field-label">Recipient email</span>
+              <%!-- Free-text recipient. The <datalist> is ADVISORY typeahead of
+                    workspace members (phx-change → airdrop-suggest); emailing a
+                    stranger with no account is still valid, and mint validates. --%>
               <input
                 type="email"
                 name="grantee_email"
                 placeholder="person@example.com"
                 class="form-input"
                 autocomplete="off"
+                list="airdrop-email-options"
+                phx-change="airdrop-suggest"
+                phx-debounce="150"
                 data-test-id="airdrop-email"
                 required
               />
+              <datalist id="airdrop-email-options">
+                <option :for={e <- @suggestions} value={e} />
+              </datalist>
             </label>
 
             <div class="shares-field">
@@ -798,6 +808,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   # max_entries: 1, max_file_size: 10 MB).
   defp upload_error_to_string(:too_large), do: "That image is too large — the limit is 10 MB."
   defp upload_error_to_string(:too_many_files), do: "You can only upload one image at a time."
+
   defp upload_error_to_string(:not_accepted),
     do: "That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG."
 

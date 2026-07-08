@@ -219,6 +219,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("airdrop-open", params, socket), do: Airdrop.airdrop_open(params, socket)
   def handle_event("airdrop-close", _params, socket), do: Airdrop.airdrop_close(socket)
   def handle_event("airdrop-create", params, socket), do: Airdrop.airdrop_create(params, socket)
+  def handle_event("airdrop-suggest", params, socket), do: Airdrop.airdrop_suggest(params, socket)
 
   def handle_event("open-secondary-picker", _params, socket),
     do: Secondary.open_secondary_picker(socket)

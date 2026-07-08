@@ -30,6 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
   import Phoenix.LiveView
 
   alias Barkpark.Access
+  alias Barkpark.Accounts
 
   # Duration chip → seconds. "custom" reveals a datetime input instead.
   @durations %{"30m" => 1_800, "5h" => 18_000, "1d" => 86_400}
@@ -68,7 +69,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
            airdrop_type: type,
            airdrop_caps: held_capabilities(principal, ws.id),
            airdrop_error: nil,
-           airdrop_link: nil
+           airdrop_link: nil,
+           airdrop_suggestions: []
          )}
     end
   end
@@ -76,7 +78,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
   @doc "Close the sheet and DROP the raw link from assigns (never persisted)."
   def airdrop_close(socket) do
     {:noreply,
-     assign(socket, airdrop_open: false, airdrop_error: nil, airdrop_link: nil)}
+     assign(socket,
+       airdrop_open: false,
+       airdrop_error: nil,
+       airdrop_link: nil,
+       airdrop_suggestions: []
+     )}
+  end
+
+  @doc """
+  Recipient-email TYPEAHEAD (pure UX). On each change of the recipient field,
+  suggest up to a handful of CURRENT-workspace member emails matching the typed
+  prefix — surfaced to a native `<datalist>`. The field stays FREE-TEXT (airdrop
+  deliberately supports emailing a stranger with no account yet); this is
+  advisory only, and `mint/2` still validates the recipient server-side. Fails
+  closed to `[]` with no workspace in context.
+  """
+  def airdrop_suggest(params, socket) do
+    ws = socket.assigns[:current_workspace]
+    prefix = params["grantee_email"] || ""
+
+    suggestions =
+      if is_nil(ws),
+        do: [],
+        else: Accounts.search_by_email_prefix(prefix, ws.id)
+
+    {:noreply, assign(socket, airdrop_suggestions: suggestions)}
   end
 
   @doc """
@@ -112,8 +139,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
                )}
 
             {:error, :forbidden} ->
-              {:noreply,
-               assign(socket, airdrop_error: "You can only share access you hold.")}
+              {:noreply, assign(socket, airdrop_error: "You can only share access you hold.")}
 
             {:error, _changeset} ->
               {:noreply,
@@ -154,7 +180,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
     case params["grantee_email"] do
       e when is_binary(e) ->
         e = String.trim(e)
-        if e =~ ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/, do: {:ok, e}, else: {:error, "Enter a valid recipient email."}
+
+        if e =~ ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+          do: {:ok, e},
+          else: {:error, "Enter a valid recipient email."}
 
       _ ->
         {:error, "Enter a recipient email."}

@@ -112,6 +112,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       airdrop_caps: [],
       airdrop_link: nil,
       airdrop_error: nil,
+      airdrop_suggestions: [],
       validation_errors: %{},
       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
       # Populated after every autosave by `Barkpark.Content.CrossValidator

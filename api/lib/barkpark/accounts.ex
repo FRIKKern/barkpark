@@ -16,6 +16,7 @@ defmodule Barkpark.Accounts do
   import Ecto.Query, warn: false
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken}
+  alias Barkpark.Tenancy.Membership
 
   @rand_bytes 32
   @recovery_code_count 10
@@ -41,6 +42,61 @@ defmodule Barkpark.Accounts do
   @spec get_user_by_email(String.t()) :: User.t() | nil
   def get_user_by_email(email) when is_binary(email),
     do: Repo.get_by(User, email: String.downcase(email))
+
+  @doc """
+  Workspace-scoped recipient-email typeahead for the Share-access sheet. Returns
+  up to `opts[:limit]` (default 8) member emails whose address begins with
+  `prefix`, ordered by email. PURE UX — the mint path still validates the
+  recipient server-side.
+
+  SCOPING (load-bearing): the searchable population is the CURRENT workspace's
+  MEMBERS ONLY — an INNER JOIN to `workspace_memberships` on the `user`
+  principal (`m.principal_id == u.id AND m.principal_type == "user" AND
+  m.workspace_id == workspace_id`). NEVER the whole users table, NEVER
+  cross-tenant. Fails CLOSED: a blank prefix or a nil/blank `workspace_id`
+  returns `[]` (no member dump). The prefix's `%`/`_`/`\\` are escaped so a
+  typed `%` matches literally and cannot wildcard-dump the roster. Projects
+  EMAIL STRINGS ONLY — the User schema has no display name and no other column
+  is exposed.
+  """
+  @spec search_by_email_prefix(String.t(), binary(), keyword()) :: [String.t()]
+  def search_by_email_prefix(prefix, workspace_id, opts \\ [])
+
+  def search_by_email_prefix(prefix, workspace_id, opts)
+      when is_binary(prefix) and is_binary(workspace_id) and workspace_id != "" do
+    case String.trim(prefix) do
+      "" ->
+        []
+
+      trimmed ->
+        pattern = escape_like(String.downcase(trimmed)) <> "%"
+        limit = Keyword.get(opts, :limit, 8)
+
+        Repo.all(
+          from u in User,
+            join: m in Membership,
+            on:
+              m.principal_id == u.id and m.principal_type == "user" and
+                m.workspace_id == ^workspace_id,
+            where: ilike(u.email, ^pattern),
+            order_by: u.email,
+            limit: ^limit,
+            select: u.email
+        )
+    end
+  end
+
+  def search_by_email_prefix(_, _, _), do: []
+
+  # Escape LIKE/ILIKE wildcards so a user-typed "%"/"_" matches literally (never
+  # a roster dump). Backslash is Postgres' default LIKE escape char, so escape it
+  # first, then the metacharacters.
+  defp escape_like(str) do
+    str
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
+  end
 
   @doc """
   Return the user iff `email` + `password` match. Constant-time: an unknown
@@ -618,7 +674,11 @@ defmodule Barkpark.Accounts do
       from(u in User,
         where: u.id == ^id,
         where: fragment("? = ANY(?)", ^hash, u.recovery_codes_hashed),
-        update: [set: [recovery_codes_hashed: fragment("array_remove(?, ?)", u.recovery_codes_hashed, ^hash)]]
+        update: [
+          set: [
+            recovery_codes_hashed: fragment("array_remove(?, ?)", u.recovery_codes_hashed, ^hash)
+          ]
+        ]
       )
       |> Repo.update_all([])
 

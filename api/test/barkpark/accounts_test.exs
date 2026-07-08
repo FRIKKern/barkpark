@@ -4,6 +4,8 @@ defmodule Barkpark.AccountsTest do
 
   alias Barkpark.Accounts
   alias Barkpark.Accounts.{User, UserSession}
+  alias Barkpark.Tenancy.Auth
+  alias Barkpark.TenancyFixtures
 
   @password "correct-horse-battery"
 
@@ -330,6 +332,89 @@ defmodule Barkpark.AccountsTest do
 
       refute raw == secret
       assert is_binary(raw)
+    end
+  end
+
+  describe "search_by_email_prefix/3 (Share-access recipient typeahead)" do
+    # Register a user AND bind it as a `user`-principal member of `ws`.
+    defp member_of(ws, email) do
+      {:ok, user} = Accounts.register_user(%{email: email, password: @password})
+      {:ok, _m} = Auth.create_membership(ws.id, user.id, "member", "user")
+      user
+    end
+
+    test "returns matching workspace-member emails, ordered, email strings only" do
+      ws = TenancyFixtures.create_workspace!()
+      member_of(ws, "alice@example.com")
+      member_of(ws, "alan@example.com")
+      member_of(ws, "bob@example.com")
+
+      result = Accounts.search_by_email_prefix("al", ws.id)
+
+      # bare list of email STRINGS (no ids/structs/other columns), sorted
+      assert result == ["alan@example.com", "alice@example.com"]
+      assert Enum.all?(result, &is_binary/1)
+    end
+
+    test "case-insensitive prefix (downcases input)" do
+      ws = TenancyFixtures.create_workspace!()
+      member_of(ws, "carol@example.com")
+
+      assert Accounts.search_by_email_prefix("CAR", ws.id) == ["carol@example.com"]
+    end
+
+    test "LIMIT is respected (opts[:limit], default 8)" do
+      ws = TenancyFixtures.create_workspace!()
+      for n <- 1..10, do: member_of(ws, "user#{n}@example.com")
+
+      assert length(Accounts.search_by_email_prefix("user", ws.id)) == 8
+      assert length(Accounts.search_by_email_prefix("user", ws.id, limit: 3)) == 3
+    end
+
+    test "cross-workspace isolation — a member of ws_B is NOT returned when searching ws_A" do
+      ws_a = TenancyFixtures.create_workspace!()
+      ws_b = TenancyFixtures.create_workspace!()
+
+      member_of(ws_a, "insider@example.com")
+      # Same prefix, but only a member of ws_B — must NOT leak into ws_A results.
+      member_of(ws_b, "intruder@example.com")
+
+      result = Accounts.search_by_email_prefix("in", ws_a.id)
+
+      assert result == ["insider@example.com"]
+      refute "intruder@example.com" in result
+    end
+
+    test "a registered user with NO membership in the workspace is not returned" do
+      ws = TenancyFixtures.create_workspace!()
+      # Registered but never bound to the workspace.
+      {:ok, _} = Accounts.register_user(%{email: "orphan@example.com", password: @password})
+
+      assert Accounts.search_by_email_prefix("orphan", ws.id) == []
+    end
+
+    test "blank / whitespace prefix returns [] (no member dump)" do
+      ws = TenancyFixtures.create_workspace!()
+      member_of(ws, "dana@example.com")
+
+      assert Accounts.search_by_email_prefix("", ws.id) == []
+      assert Accounts.search_by_email_prefix("   ", ws.id) == []
+    end
+
+    test "nil / blank workspace_id returns [] (fail closed)" do
+      assert Accounts.search_by_email_prefix("a", nil) == []
+      assert Accounts.search_by_email_prefix("a", "") == []
+    end
+
+    test "LIKE wildcards in the prefix are escaped — a '%' does not dump the roster" do
+      ws = TenancyFixtures.create_workspace!()
+      member_of(ws, "eve@example.com")
+      member_of(ws, "frank@example.com")
+
+      # If '%' were unescaped it would match every member; escaped, it matches
+      # only an email that literally begins with '%' (none here).
+      assert Accounts.search_by_email_prefix("%", ws.id) == []
+      assert Accounts.search_by_email_prefix("_", ws.id) == []
     end
   end
 end
