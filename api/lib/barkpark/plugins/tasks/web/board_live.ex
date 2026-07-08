@@ -475,18 +475,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
          verbatim in HEEx 1.x — no interpolation here. NOTE: theme flips ride
          html[data-theme="dark"] (the Studio toggle), never prefers-color-scheme
          alone. */
+      /* The page is a flex CHILD of `.studio-shell` (height:100vh; overflow:
+         hidden; flex column, with the topbar above and the build-version
+         footer below). So it must FILL the remaining height and own its
+         scroll — otherwise its content is clipped by the shell and nothing
+         scrolls (the columns can't be reached). `flex: 1 1 auto` + `min-height:
+         0` lets the board area below shrink and scroll. Full width (no
+         max-width/auto-margin) so the kanban can scroll horizontally. */
       .bp-page {
-        max-width: 1720px; margin: 0 auto;
-        padding: 26px clamp(20px, 3.5vw, 44px) 72px;
+        flex: 1 1 auto; min-height: 0;
+        display: flex; flex-direction: column;
+        padding: 20px clamp(16px, 2.5vw, 34px) 10px;
         font-family: var(--font, 'Inter', -apple-system, sans-serif);
         font-size: 13px; color: var(--text);
         -webkit-font-smoothing: antialiased;
+        overflow: hidden;
       }
 
       /* ── page header: identity left, momentum right ───────────────────── */
       .bp-head {
+        flex: 0 0 auto;
         display: flex; align-items: flex-end; justify-content: space-between;
-        flex-wrap: wrap; gap: 18px 40px; margin: 2px 0 18px;
+        flex-wrap: wrap; gap: 18px 40px; margin: 2px 0 16px;
       }
       .bp-h1 {
         margin: 0; font-size: 20px; font-weight: 600;
@@ -521,8 +531,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
       /* ── toolbar: segmented group-by + filter disclosure + tally ────────── */
       .bp-controls {
+        flex: 0 0 auto;
         display: flex; align-items: center; flex-wrap: wrap;
-        gap: 10px 16px; margin: 0 0 16px;
+        gap: 10px 16px; margin: 0 0 14px;
       }
       .bp-group { display: inline-flex; align-items: center; gap: 10px; }
       .bp-controls-label {
@@ -603,7 +614,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
 
       /* ── swimlanes (grouped view) ───────────────────────────────────────── */
-      .bp-lane { margin: 0 0 24px; }
+      /* Grouped mode stacks several boards, so it scrolls VERTICALLY as a whole
+         (the flat mode's fill-and-h-scroll model doesn't apply). The scroll
+         wrapper takes the page's remaining height; each lane's board still
+         scrolls horizontally within it. */
+      .bp-lanes { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding-right: 2px; }
+      .bp-lane { margin: 0 0 22px; }
       .bp-lane-h {
         font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
         margin: 0 0 10px; padding: 0 2px 8px; color: var(--text);
@@ -621,16 +637,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
       .bp-board-empty p { margin: 0; }
 
-      /* ── the board: five status-ladder column panels ────────────────────── */
+      /* ── the board: a single horizontal row of status-ladder panels ──────
+         ALWAYS a horizontal-scroll kanban — never a reflowing grid. The five
+         columns sit in one flex row that never wraps; when they can't all fit
+         the board scrolls sideways (like Linear / GitHub Projects / Trello).
+         In flat mode the board fills the page's remaining height so each
+         column scrolls VERTICALLY on its own; horizontal scroll lives here. */
       .bp-board {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 12px; align-items: stretch;
+        flex: 1 1 auto; min-height: 0;
+        display: flex; flex-wrap: nowrap; align-items: stretch;
+        gap: 12px; overflow-x: auto; overflow-y: hidden;
+        padding-bottom: 8px;
+        scrollbar-width: thin; scrollbar-color: var(--border) transparent;
       }
-      @media (max-width: 1180px) { .bp-board { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-      @media (max-width: 760px) { .bp-board { grid-template-columns: 1fr; } }
+      .bp-board::-webkit-scrollbar { height: 10px; }
+      .bp-board::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+      /* Grouped lanes are shorter (auto height, page scrolls) — cap each
+         lane's column height so a tall lane doesn't run off the page. */
+      .bp-lane .bp-board { flex: 0 0 auto; }
+      .bp-lane .bp-col-scroll { max-height: 60vh; }
       .bp-col {
-        min-width: 0; display: flex; flex-direction: column;
+        flex: 0 0 336px; width: 336px; min-width: 0;
+        display: flex; flex-direction: column; min-height: 0;
         background: var(--muted-surface);
         background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
         border: 1px solid var(--border); border-radius: 12px; padding: 8px;
@@ -649,8 +677,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         border-radius: 999px; padding: 1px 8px;
       }
       .bp-col-scroll {
-        display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto;
-        overflow-y: auto; max-height: clamp(320px, calc(100vh - 330px), 900px);
+        display: flex; flex-direction: column; gap: 8px;
+        flex: 1 1 auto; min-height: 0; overflow-y: auto;
         padding: 1px; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
       }
       .bp-col-scroll::-webkit-scrollbar { width: 8px; }
@@ -896,19 +924,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
       <%= unless @view.empty? and not empty_board?(@board) do %>
         <%= if @view.grouped? do %>
-          <section
-            :for={lane <- @view.lanes}
-            class="bp-lane"
-            data-role="lane"
-            data-lane={lane_dom_id(lane.key)}
-          >
-            <h2 class="bp-lane-h" data-role="lane-label"><%= lane.label %></h2>
-            <.board_grid
-              lane={lane}
-              last_change={@last_change}
-              id={"bp-board-lane-" <> lane_dom_id(lane.key)}
-            />
-          </section>
+          <div class="bp-lanes">
+            <section
+              :for={lane <- @view.lanes}
+              class="bp-lane"
+              data-role="lane"
+              data-lane={lane_dom_id(lane.key)}
+            >
+              <h2 class="bp-lane-h" data-role="lane-label"><%= lane.label %></h2>
+              <.board_grid
+                lane={lane}
+                last_change={@last_change}
+                id={"bp-board-lane-" <> lane_dom_id(lane.key)}
+              />
+            </section>
+          </div>
         <% else %>
           <.board_grid lane={hd(@view.lanes)} last_change={@last_change} id="bp-projects-board" />
         <% end %>
