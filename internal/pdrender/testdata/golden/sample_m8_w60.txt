@@ -1,0 +1,26 @@
+OVERFLOW BOUNDARY                                           
+─────────────────                                           
+                                                            
+ artifactchecksum9f8e7d6c5b4a3f2e1d0c9b                     
+────────────────────────────────────────────────────────────
+Right.                                                      
+                                                            
+────────────────────────────────────────────────────────────
+Grid cell overflow                                          
+                                                            
+ artifactchecksum9f8e7d6c5b4a3f2e1d0c9b                     
+                                                            
+Second cell is short.                                       
+────────────────────────────────────────────────────────────
+                                                            
+Ready  1                                                    
+  ○ artifactchecksum9f8e7d6c5b4a3f2e1d0c9b  P2              
+                                                            
+In progress  1                                              
+  ⠋ Draft the fixture  P1 · 1/2                             
+                                                            
+Blocked  1                                                  
+  ! Await review  P0                                        
+                                                            
+Done  1                                                     
+  ✓ Merge wave 2  P1                                        

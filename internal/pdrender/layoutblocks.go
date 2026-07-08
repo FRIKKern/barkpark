@@ -74,10 +74,16 @@ func (cr columnsRenderer) Render(b Block, ctx RenderCtx) []string {
 		for i, blocks := range kept {
 			nodes[i] = Node{Lines: cr.renderColumn(blocks, cellCtx), Width: cellW, Span: 1}
 		}
-		return DefaultFlex.Arrange(nodes)
+		// Measure-into-arrange: only lay side-by-side if every column's realized
+		// min-content fits its cell. A wide unbreakable token (nodeWidth > cellW)
+		// would overflow the track, so fall through to the verbatim stack instead.
+		if DefaultFlex.Fits(nodes) {
+			return DefaultFlex.Arrange(nodes)
+		}
 	}
 
-	// Sub-MinWidth fallback (verbatim): stack the columns with a hairline rule.
+	// Fallback (verbatim): stack the columns with a hairline rule — taken when a
+	// cell falls below MinWidth OR a column's content min-width overflows its cell.
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 	out := make([]string, 0)
 	for i, g := range fullGroups {

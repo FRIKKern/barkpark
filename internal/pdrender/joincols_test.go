@@ -5,6 +5,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestFlexMeasure pins the two-pass solver's FIRST pass: the divide-formula
@@ -70,6 +72,64 @@ func TestFlexArrangeMatchesJoinColumns(t *testing.T) {
 	want := joinColumns(groups, widths, DefaultFlex.Gutter)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Arrange = %q, want %q", got, want)
+	}
+}
+
+// TestNodeWidthIsANSIAware proves nodeWidth measures DISPLAY cells, not bytes:
+// it returns the widest of a Node's lines via lipgloss.Width, so a styled
+// (colored) line whose escape bytes far outnumber its visible cells is measured
+// at its visible width, never its byte length. The load-bearing case is the
+// styled line: a naive len() would count the SGR bytes and wildly over-measure,
+// which would make the Fits gate collapse a surface that actually fits.
+func TestNodeWidthIsANSIAware(t *testing.T) {
+	// Force a real color profile so lipgloss actually emits SGR escapes; restore
+	// Ascii(3) after so later goldens strip clean.
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(0) // termenv.TrueColor → real escapes
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+
+	styled := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ff0000")).
+		Bold(true).
+		Render("hello") // 5 visible cells, but many more bytes of SGR
+	if len(styled) <= 5 {
+		t.Fatalf("test precondition: styled string should carry SGR bytes, got %q (len %d)", styled, len(styled))
+	}
+
+	n := Node{Lines: []string{"ab", styled, "abcd"}, Width: 10}
+	if got := nodeWidth(n); got != 5 {
+		t.Errorf("nodeWidth = %d, want 5 (widest line is the 5-cell styled run, measured ANSI-aware not by its %d bytes)",
+			got, len(styled))
+	}
+}
+
+// TestFlexFits pins the SECOND-pass measure verdict. A Node whose realized
+// min-content (nodeWidth) exceeds its allotted Width does NOT fit → Fits false
+// (the caller must degrade to its verbatim stack). A span-aware Node whose Width
+// is spanWidth(cellW, span) fits when its content sits inside that spanned width.
+func TestFlexFits(t *testing.T) {
+	// A single unbreakable token wider than its cell → overflow → Fits false.
+	overflow := Node{Lines: []string{strings.Repeat("x", 45)}, Width: 39, Span: 1}
+	if DefaultFlex.Fits([]Node{overflow}) {
+		t.Errorf("Fits = true for a node whose 45-cell content overflows its 39-cell width; want false")
+	}
+
+	// The SAME token in a span-2 cell: its allotted Width is spanWidth(cellW,2) =
+	// 2*39 + 1*gutter(2) = 80, which comfortably holds the 45-cell token → fits.
+	cellW := 39
+	spanW := DefaultFlex.spanWidth(cellW, 2)
+	spanned := Node{Lines: []string{strings.Repeat("x", 45)}, Width: spanW, Span: 2}
+	if !DefaultFlex.Fits([]Node{spanned}) {
+		t.Errorf("Fits = false for a 45-cell token in a span-2 cell of width %d; want true", spanW)
+	}
+
+	// A mixed set fits only if EVERY node fits — one overflowing node fails the set.
+	ok := Node{Lines: []string{"short", "lines"}, Width: 20, Span: 1}
+	if DefaultFlex.Fits([]Node{ok, overflow}) {
+		t.Errorf("Fits = true for a set containing an overflowing node; want false (all-or-nothing)")
+	}
+	if !DefaultFlex.Fits([]Node{ok, spanned}) {
+		t.Errorf("Fits = false for a set where every node fits; want true")
 	}
 }
 
