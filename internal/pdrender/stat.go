@@ -86,8 +86,7 @@ func sparkline(values []float64, width int) string {
 	top := float64(len(sparkLadder) - 1) // 7
 	var sb strings.Builder
 	for _, v := range values[:n] {
-		norm := (v - min) / span
-		idx := int(math.Round(norm * top))
+		idx := int(math.Round(sparkNorm(v, min, max) * top))
 		if idx < 0 {
 			idx = 0
 		}
@@ -97,6 +96,29 @@ func sparkline(values []float64, width int) string {
 		sb.WriteRune(sparkLadder[idx])
 	}
 	return sb.String()
+}
+
+// sparkNorm is the W2 min..max normaliser factored out of sparkline so W3's
+// braille chart rasteriser scales points through EXACTLY the same math:
+// (v-min)/(max-min) clamped to [0,1]. A zero/negative span (a flat series, or a
+// pinned axes.min >= axes.max after a partial pin) → 0, the floor — never a
+// divide-by-zero. The [0,1] clamp is the out-of-span rule the chart relies on:
+// a value beyond a PINNED axes.min/max lands on the plot edge rather than
+// expanding the scale. For a series scaled to its OWN min..max every value is
+// in-range, so the clamp is a no-op and sparkline stays byte-identical.
+func sparkNorm(v, min, max float64) float64 {
+	span := max - min
+	if span <= 0 {
+		return 0
+	}
+	n := (v - min) / span
+	if n < 0 {
+		return 0
+	}
+	if n > 1 {
+		return 1
+	}
+	return n
 }
 
 // parseSpark reads the `spark` field into []float64, tolerating non-numeric

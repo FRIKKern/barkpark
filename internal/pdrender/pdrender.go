@@ -330,5 +330,12 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["stat"] = statRenderer{}
 	r.blocks["stats"] = statsRenderer{}
 	r.blocks["stat-grid"] = statsRenderer{}
+	// chart: a braille step-line (or bar) plot of one or more numeric series,
+	// rasterised through the braille.go 2×4 dot-canvas. It reuses W2's sparkline
+	// normaliser (sparkNorm) for point scaling — honouring pinned axes.min/max,
+	// clamping out-of-span — and W1's truecolor auto-degrade (per-series colour
+	// only under a TrueColor profile; ANSI-plain braille otherwise, byte-stable).
+	// W3 of the slate — the capstone (see chart.go).
+	r.blocks["chart"] = chartRenderer{}
 	return r
 }
