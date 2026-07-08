@@ -495,17 +495,21 @@ defmodule Barkpark.Tasks.Schema do
             "Lease + fencing token. Read claim.epoch and pass it as observed_epoch on close. API is the single writer."
         },
 
-        # LEGACY, kept declared so old docs still render their data: the
-        # engine never reads this — task_edges is the only authoritative
-        # dependency store (ready/claim/unblock all query edges).
+        # GATES READINESS (read-side, Barkpark.Tasks.Queue): a doc_id list on
+        # the task itself. A task is NOT ready/claimable until every id here
+        # resolves to a same-scope task with lifecycle_status="done"; a
+        # missing/dangling id counts as unsatisfied (fail-closed). Complements —
+        # does not replace — the authoritative task_edges `blocks` graph; both
+        # gate. There is NO write-path materialization into edges: this is a pure
+        # read-side gate.
         %{
           "name" => "dependencies",
-          "title" => "Dependencies (legacy)",
+          "title" => "Dependencies",
           "type" => "array",
           "group" => "system",
           "visibleWhen" => %{"field" => "dependencies", "operator" => "non_empty"},
           "description" =>
-            "DEAD KEY — do not write. Real dependencies are task_edges rows: POST /v1/tasks/edges {from_id,to_id,kind:\"blocks\"}."
+            "Doc-id list that GATES readiness: the task is not ready/claimable until every id here is a task with lifecycle_status=done (missing/dangling = unsatisfied, fail-closed). For a graph edge you can add/remove independently, use task_edges: POST /v1/tasks/edges {from_id,to_id,kind:\"blocks\"}."
         },
 
         # PROMOTED from undeclared. Stays a v1 array (read-only in Studio):
