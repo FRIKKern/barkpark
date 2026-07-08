@@ -165,6 +165,7 @@ defmodule BarkparkWeb.TasksController do
         opts =
           []
           |> Params.put_opt(:phase_id, params["phase_id"])
+          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
           |> Keyword.merge(scope_opts(conn))
 
         case Tasks.claim(worker_id, opts) do
@@ -262,6 +263,7 @@ defmodule BarkparkWeb.TasksController do
         # (the bp `--set resources=a.go,b.go` path) — Tasks normalizes both.
         opts =
           [resources: params["resources"] || []]
+          |> Params.put_opt(:caller_token_id, caller_token_id(conn))
           |> Keyword.merge(scope_opts(conn))
 
         # Snapshot the rail BEFORE the claim so rail_changed compares
@@ -322,6 +324,7 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:reason, params["reason"])
         |> Params.put_opt(:criteria, if(criteria == [], do: nil, else: criteria))
         |> Params.put_opt(:landed, params["landed"])
+        |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close
       # task) so rail_changed reflects only concurrent actors, not this close.
@@ -637,7 +640,7 @@ defmodule BarkparkWeb.TasksController do
          {:ok, to_doc} <- find_task_by_doc_id(to_id, conn) do
       kind = params["kind"] || "blocks"
 
-      case Tasks.add_dep(from_doc.id, to_doc.id, kind) do
+      case Tasks.add_dep(from_doc.id, to_doc.id, kind, caller_token_id(conn)) do
         {:ok, %Edge{} = edge} ->
           json(conn, %{
             ok: true,
@@ -676,7 +679,7 @@ defmodule BarkparkWeb.TasksController do
 
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
-        case Tasks.relabel_by_id(task.id, add, remove) do
+        case Tasks.relabel_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
             json(conn, %{ok: true, doc: Params.render_doc(doc)})
 
@@ -701,7 +704,7 @@ defmodule BarkparkWeb.TasksController do
 
     case find_task_by_doc_id(doc_id, conn) do
       {:ok, task} ->
-        case Tasks.update_paper_refs_by_id(task.id, add, remove) do
+        case Tasks.update_paper_refs_by_id(task.id, add, remove, caller_token_id(conn)) do
           {:ok, %Document{} = doc} ->
             json(conn, %{ok: true, doc: Params.render_doc(doc)})
 
@@ -740,7 +743,7 @@ defmodule BarkparkWeb.TasksController do
 
         case resolve_new_parent(Map.get(params, "new_parent_id"), conn) do
           {:ok, new_parent_doc_id} ->
-            case Tasks.move_by_id(task.id, new_parent_doc_id) do
+            case Tasks.move_by_id(task.id, new_parent_doc_id, caller_token_id(conn)) do
               {:ok, %Document{} = doc} ->
                 scope = scope_opts(conn) |> Keyword.put(:dataset, doc.dataset)
 
@@ -944,6 +947,19 @@ defmodule BarkparkWeb.TasksController do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  # Audit hardening: the id of the api_token that authenticated this request,
+  # threaded into task-workflow mutation_events so the audit trail attributes
+  # each mutation to the CALLING TOKEN (distinct from the self-declared
+  # worker_id). `nil` for an anonymous / tokenless request — the stamp is then
+  # omitted, keeping events backward-compatible. Metadata only; it never
+  # affects authorization.
+  defp caller_token_id(conn) do
+    case conn.assigns[:api_token] do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
 
   defp maybe_put_notices(map, []), do: map
   defp maybe_put_notices(map, notices), do: Map.put(map, :notices, notices)

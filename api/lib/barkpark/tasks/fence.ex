@@ -23,6 +23,7 @@ defmodule Barkpark.Tasks.Fence do
       generate_rev: 0,
       current_epoch: 1,
       insert_mutation_event!: 5,
+      caller_stamp: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -43,9 +44,9 @@ defmodule Barkpark.Tasks.Fence do
   `{:ok, %Edge{}}` / `{:error, %Ecto.Changeset{}}` contract of the bare
   `Edges.add_dep/3` so every existing caller is untouched.
   """
-  @spec add_dep(binary(), binary(), atom() | String.t()) ::
+  @spec add_dep(binary(), binary(), atom() | String.t(), binary() | nil) ::
           {:ok, Barkpark.Tasks.Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_uuid, parent_uuid, kind \\ :blocks) do
+  def add_dep(child_uuid, parent_uuid, kind \\ :blocks, caller_token_id \\ nil) do
     result =
       Repo.transaction(fn ->
         # Advisory lock on the DEPENDENT — the task we may fence. Same key
@@ -56,10 +57,16 @@ defmodule Barkpark.Tasks.Fence do
         case Edges.add_dep(child_uuid, parent_uuid, kind) do
           {:ok, edge} ->
             bundle =
-              fence_in_progress(child_uuid, %{
-                "fenced" => "edge_added",
-                "edge" => %{"from" => edge.from_id, "to" => edge.to_id}
-              })
+              fence_in_progress(
+                child_uuid,
+                Map.merge(
+                  %{
+                    "fenced" => "edge_added",
+                    "edge" => %{"from" => edge.from_id, "to" => edge.to_id}
+                  },
+                  caller_stamp(caller_token_id)
+                )
+              )
 
             {:ok, edge, bundle}
 
