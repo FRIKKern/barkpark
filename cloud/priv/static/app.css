@@ -2204,3 +2204,88 @@ select.form-input {
   .tlv-head { flex-wrap: wrap; }
   .tlv-title { white-space: normal; }
 }
+
+/* ---------------------------------------------------------- liveness chip (OC6)
+   Topbar SSE health dot, injected into .topbar-right by the SPA. The dot colour
+   tracks stream up-vs-dropped exactly (green family vs amber) — the page never
+   lies about whether it is current — and the "as of" label carries recency.
+   Append-only; no token-block edits. Motion is state (reconnect pulse) or a
+   data-changed ping, never idle decoration — both collapse under reduced-motion. */
+.live-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--pill);
+  border: 1px solid var(--border);
+  background: var(--muted-surface);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-text);
+  white-space: nowrap;
+  user-select: none;
+}
+.live-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--pill);
+  background: var(--dim);
+  flex: 0 0 auto;
+}
+.live-chip-label { color: var(--text); }
+.live-chip-ago { color: var(--muted-text); font-variant-numeric: tabular-nums; }
+
+/* live — connected + recently confirmed. The ping ring fires once per data frame
+   (added by pingLivenessChip); it sits invisible until re-armed. */
+.live-chip[data-state="live"] .live-dot { background: var(--ok); }
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: var(--pill);
+  background: var(--ok);
+  opacity: 0;
+  pointer-events: none;
+}
+.live-chip[data-state="live"] .live-dot.is-ping::after {
+  animation: live-ping 1s ease-out 1;
+}
+@keyframes live-ping {
+  0%   { opacity: 0.45; transform: scale(0.6); }
+  100% { opacity: 0;    transform: scale(2.2); }
+}
+
+/* stale — stream is up but quiet (no data frame in 90s). Same green family as
+   live (the connection IS up), dimmed to say "can't prove currency"; the "as of"
+   label ages honestly. NOT amber — a quiet fleet is not an error. */
+.live-chip[data-state="stale"] .live-dot { background: hsl(var(--ok-hsl) / 0.55); }
+.live-chip[data-state="stale"] .live-chip-label { color: var(--muted-text); }
+
+/* reconnecting — onerror fired, EventSource is retrying. Amber, gently pulsing
+   to signal active state (like a spinner — state, not decoration). */
+.live-chip[data-state="reconnecting"] {
+  border-color: hsl(var(--warn-hsl) / 0.35);
+  background: var(--warn-soft);
+}
+.live-chip[data-state="reconnecting"] .live-dot { background: var(--warn); animation: live-breathe 1.4s ease-in-out infinite; }
+/* Label stays --text on --warn-soft (the legible pattern .vf-note uses) — the
+   amber dot + border already carry the "warning" tone. */
+@keyframes live-breathe {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Motion is redundant with colour + label here — drop it entirely. */
+  .live-chip[data-state="reconnecting"] .live-dot { animation: none; }
+  .live-chip[data-state="live"] .live-dot.is-ping::after { animation: none; }
+}
+
+/* On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
+   dot alone still carries the health signal. */
+@media (max-width: 720px) {
+  .live-chip-label, .live-chip-ago { display: none; }
+  .live-chip { padding: 0 7px; gap: 0; }
+}

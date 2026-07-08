@@ -2577,3 +2577,140 @@ test("staleGuard: drops a superseded response, accepts the current one", () => {
   // strict inequality means only an exact match paints (defensive).
   assert.equal(hooks.staleGuard(3, 2), true);
 });
+
+// ── Liveness chip (OC6): topbar SSE health dot, honest reconnect ─────────────
+// The chip's dot colour is a PURE function of the existing EventSource signals
+// (evtErrored + the last-confirmed-event epoch). We pin the three states at
+// their boundaries; the DOM paint + ticker are browser-coupled (exercised live).
+
+test("liveDotState: freshly connected (no event yet) reads live, not stale", () => {
+  // A connected stream with no DATA frame yet is healthy — events are sparse
+  // invalidations, not a feed, and the 25s heartbeat is an invisible comment.
+  assert.equal(hooks.liveDotState(false, null, 1_000_000), "live");
+});
+
+test("liveDotState: a recent event reads live", () => {
+  const now = 1_000_000;
+  assert.equal(hooks.liveDotState(false, now - 1_000, now), "live");
+  assert.equal(hooks.liveDotState(false, now - hooks.liveStaleMs + 1, now), "live");
+});
+
+test("liveDotState: evtErrored always wins → reconnecting (even with a fresh event)", () => {
+  const now = 1_000_000;
+  assert.equal(hooks.liveDotState(true, now, now), "reconnecting");
+  assert.equal(hooks.liveDotState(true, null, now), "reconnecting");
+  assert.equal(hooks.liveDotState(true, now - 10 * hooks.liveStaleMs, now), "reconnecting");
+});
+
+test("liveDotState: no event past the threshold reads stale (up, but can't prove currency)", () => {
+  const now = 1_000_000;
+  assert.equal(hooks.liveDotState(false, now - hooks.liveStaleMs - 1, now), "stale");
+  // Exactly AT the threshold is still live — strictly greater flips it.
+  assert.equal(hooks.liveDotState(false, now - hooks.liveStaleMs, now), "live");
+});
+
+test("liveFreshness: compact relative label, empty until the first event", () => {
+  const now = 1_000_000;
+  assert.equal(hooks.liveFreshness(null, now), "");
+  assert.equal(hooks.liveFreshness(now - 1_000, now), "just now"); // < 5s
+  assert.equal(hooks.liveFreshness(now - 12_000, now), "12s ago");
+  assert.equal(hooks.liveFreshness(now - 3 * 60_000, now), "3m ago");
+  assert.equal(hooks.liveFreshness(now - 2 * 3_600_000, now), "2h ago");
+  // A clock skew (event "in the future") never renders a negative age.
+  assert.equal(hooks.liveFreshness(now + 5_000, now), "just now");
+});
+
+// ── Liveness chip DOM wiring (fake-DOM smoke) ───────────────────────────────
+// The mount/paint is browser-coupled (real topbar exercised live), but a tiny
+// fake DOM pins the structural contract: ensureLivenessChip injects one chip
+// into .topbar-right, is idempotent, and renderLivenessChip paints a data-state
+// + label without throwing. The eval'd functions resolve `document` dynamically
+// off the vm global, so swapping sandbox.document drives the REAL code.
+function fakeDom() {
+  const all = [];
+  const cls = () => {
+    const s = new Set();
+    return { add: (c) => s.add(c), remove: (c) => s.delete(c),
+      contains: (c) => s.has(c), toggle: (c) => (s.has(c) ? s.delete(c) : s.add(c)) };
+  };
+  const findDesc = (el, want) => {
+    for (const c of el.children) {
+      if ((c._class || "").split(/\s+/).includes(want)) return c;
+      const deep = findDesc(c, want);
+      if (deep) return deep;
+    }
+    return null;
+  };
+  const make = (tag) => {
+    const el = {
+      tagName: tag, children: [], attrs: {}, _class: "", id: "",
+      textContent: "", hidden: false, offsetWidth: 10, classList: cls(),
+      setAttribute(k, v) { this.attrs[k] = v; if (k === "id") this.id = v; },
+      getAttribute(k) { return this.attrs[k] != null ? this.attrs[k] : null; },
+      get className() { return this._class; },
+      set className(v) { this._class = v; },
+      set innerHTML(html) {
+        this.children = [];
+        const re = /class="([^"]+)"/g; let m;
+        while ((m = re.exec(html))) { const c = make("span"); c._class = m[1]; this.children.push(c); all.push(c); }
+      },
+      insertBefore(node) { this.children.unshift(node); if (!all.includes(node)) all.push(node); return node; },
+      appendChild(node) { this.children.push(node); if (!all.includes(node)) all.push(node); return node; },
+      querySelector(sel) { return findDesc(this, sel.replace(/^\./, "")); },
+      get firstChild() { return this.children[0] || null; },
+    };
+    all.push(el);
+    return el;
+  };
+  const topbarRight = make("div"); topbarRight._class = "topbar-right";
+  return {
+    document: {
+      getElementById: (id) => all.find((e) => e.id === id) || null,
+      querySelector: (sel) => (sel === ".topbar .topbar-right" ? topbarRight : null),
+      createElement: (t) => make(t),
+    },
+    topbarRight,
+  };
+}
+
+test("liveness chip: ensureLivenessChip injects one chip into the topbar, idempotently", () => {
+  const orig = sandbox.document;
+  const { document: doc, topbarRight } = fakeDom();
+  sandbox.document = doc;
+  try {
+    const chip = hooks.ensureLivenessChip();
+    assert.ok(chip, "chip is created");
+    assert.equal(chip.id, "liveness-chip");
+    assert.equal(topbarRight.children.length, 1, "exactly one chip in the topbar");
+    assert.equal(topbarRight.children[0], chip);
+    // Structural contract: dot + label + ago spans exist.
+    assert.ok(chip.querySelector(".live-dot"));
+    assert.ok(chip.querySelector(".live-chip-label"));
+    assert.ok(chip.querySelector(".live-chip-ago"));
+    // Idempotent: a re-login / re-render reuses the SAME node, never a second.
+    const again = hooks.ensureLivenessChip();
+    assert.equal(again, chip);
+    assert.equal(topbarRight.children.length, 1);
+  } finally {
+    sandbox.document = orig;
+  }
+});
+
+test("liveness chip: renderLivenessChip paints a data-state + label without throwing", () => {
+  const orig = sandbox.document;
+  const { document: doc } = fakeDom();
+  sandbox.document = doc;
+  try {
+    const chip = hooks.ensureLivenessChip();
+    hooks.renderLivenessChip();
+    // Default module state (no error, no event yet) is honest "live".
+    assert.equal(chip.getAttribute("data-state"), "live");
+    assert.equal(chip.querySelector(".live-chip-label").textContent, "Live");
+    assert.match(chip.getAttribute("aria-label"), /Live updates/);
+    // A missing chip must be a silent no-op (logout tears the shell down).
+    sandbox.document = fakeDom().document; // fresh DOM with no chip
+    assert.doesNotThrow(() => hooks.renderLivenessChip());
+  } finally {
+    sandbox.document = orig;
+  }
+});
