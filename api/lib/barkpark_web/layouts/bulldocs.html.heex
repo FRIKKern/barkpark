@@ -121,8 +121,9 @@
        optional muted <p> rationale/recommendation lines, and controls
        (radio/checkbox <label> rows, <textarea>, scale radios). Scoped under
        `.bp-paper-article` so email / non-article papers stay untouched. The
-       form reuses the article palette — bp-theme surface, evergreen accent,
-       serif body, muted gray for secondary lines. Render-only: no JS, no
+       form reads the article TOKENS (--paper-*), so it follows the
+       prefers-color-scheme dark flip — hardcoded parchment values here were
+       the form-block-dark-mode white-box bug. Render-only: no JS, no
        :focus scripting, pure CSS. */
     .bp-paper-article .bp-form {
       margin: 2rem 0;
@@ -136,10 +137,10 @@
       font-weight: 600;
       letter-spacing: 0.08em;
       text-transform: uppercase;
-      color: #1e5347;
+      color: var(--paper-accent);
       margin-bottom: 0.9rem;
       padding-bottom: 0.5rem;
-      border-bottom: 1px solid rgba(162, 57, 37, 0.2);
+      border-bottom: 1px solid var(--paper-rule);
     }
     .bp-paper-article .bp-form-questionnaire::before {
       content: "Questionnaire";
@@ -148,9 +149,9 @@
     .bp-paper-article .bp-form-question {
       margin: 0 0 1.4rem;
       padding: 1.1rem 1.3rem;
-      background: #fdfcf8;
-      border: 1px solid rgba(26, 26, 26, 0.08);
-      border-left: 3px solid #1e5347;
+      background: var(--paper-bg-deep);
+      border: 1px solid var(--paper-chrome-border);
+      border-left: 3px solid var(--paper-accent);
       border-radius: 6px;
     }
     .bp-paper-article .bp-form-question > legend {
@@ -162,7 +163,7 @@
       font-size: 1.12rem;
       font-weight: 600;
       line-height: 1.4;
-      color: #15211d;
+      color: var(--paper-ink);
     }
 
     /* Muted rationale / recommendation lines. render.ex stamps these as
@@ -171,7 +172,7 @@
     .bp-paper-article .bp-form-question > p {
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
       font-style: italic;
-      color: #55635e;
+      color: var(--paper-ink-soft);
       line-height: 1.5;
     }
 
@@ -189,10 +190,10 @@
       transition: background 0.12s ease;
     }
     .bp-paper-article .bp-form-question label:hover {
-      background: rgba(162, 57, 37, 0.06);
+      background: var(--paper-accent-soft);
     }
     .bp-paper-article .bp-form-question label > input {
-      accent-color: #1e5347;
+      accent-color: var(--paper-accent);
       margin: 0;
       flex: 0 0 auto;
     }
@@ -207,9 +208,9 @@
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
       font-size: 1rem;
       line-height: 1.55;
-      color: #15211d;
-      background: #fbfaf6;
-      border: 1px solid rgba(26, 26, 26, 0.18);
+      color: var(--paper-ink);
+      background: var(--paper-bg);
+      border: 1px solid var(--paper-chrome-border);
       border-radius: 5px;
       resize: vertical;
     }
