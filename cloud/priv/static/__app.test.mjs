@@ -2445,3 +2445,135 @@ test("instance-login: fleet match is host equality, never substring", () => {
   assert.equal(hooks.studioLoginMatch([], "https://guerrilla.barkpark.cloud"), null);
   assert.equal(hooks.studioLoginMatch(fleet, "garbage"), null);
 });
+
+// ══ Rollback endgame — criteria-proof the shipped promote UI ═════════════════
+// The promote grammar (promoteActionFor / promoteFailure / confirm copy) shipped
+// in 58100d00; these tests PIN its acceptance criteria so a future edit can't
+// silently regress "rollback only for prior successes" or "every failure has one
+// recovery, never a dead spinner", plus the post-promote reconcile invariant and
+// the loadInstanceSites stale-paint guard.
+
+// ── Criterion 1: rollback is offered ONLY for prior successful deploys ───────
+test("promoteActionFor: rollback ⇔ a PRIOR live row — never the current one, never a failed one", () => {
+  // The current live row is Redeploy, not rollback (you don't roll back to now).
+  const cur = { id: "d9", status: "live", environment: "production" };
+  assert.equal(hooks.promoteActionFor(cur, "d9").kind, "redeploy");
+  // A prior live row (id ≠ current) is the only source of a rollback.
+  const prior = { id: "d1", status: "live", environment: "production" };
+  const a = hooks.promoteActionFor(prior, "d9");
+  assert.equal(a.kind, "rollback");
+  assert.equal(a.label, "Roll back to this");
+  // A FAILED prior deploy is never rollbackable — there is no proven artifact,
+  // even when it is NOT the current pointer. This is the "never a failed one".
+  assert.equal(hooks.promoteActionFor({ id: "d2", status: "failed", environment: "production" }, "d9"), null);
+  // Every non-terminal-live status yields no action (queued/building/pushing).
+  for (const st of ["queued", "building", "pushing", "canceled", "errored", ""]) {
+    assert.equal(hooks.promoteActionFor({ id: "dx", status: st, environment: "production" }, "d9"), null, "status=" + st);
+  }
+  // Id comparison is string-coerced, so a numeric current id still redeploys
+  // (never mis-classifies the current row as a rollback source).
+  assert.equal(hooks.promoteActionFor({ id: 9, status: "live", environment: "production" }, 9).kind, "redeploy");
+  assert.equal(hooks.promoteActionFor({ id: "9", status: "live", environment: "production" }, 9).kind, "redeploy");
+});
+
+// ── Criterion 3: every failure family → a human sentence + EXACTLY ONE recovery
+test("promoteFailure: every status family maps to a human sentence + exactly one recovery — never a dead spinner", () => {
+  // Every family the map DESIGNS for, incl. the generic 5xx and null-body cases.
+  const cases = [
+    [409, { error: "build_in_progress" }],
+    [404, { error: "not_found" }],
+    [422, { error: "not_promotable" }],
+    [422, { error: "no_build_source" }],
+    [0, { error: "network_error" }],
+    [500, {}],
+    [503, null],
+  ];
+  for (const [st, data] of cases) {
+    const f = hooks.promoteFailure(st, data);
+    // A non-empty sentence — never a blank/dead spinner — with whitespace, so
+    // it reads as English, not a bare machine token (these branches all carry
+    // hand-written copy).
+    assert.ok(typeof f.message === "string" && f.message.trim().length > 12, "message@" + st);
+    assert.match(f.message, /\s/, "message@" + st + " reads as a sentence");
+    // EXACTLY ONE recovery action, drawn from the closed {retry, refresh} set —
+    // the modal always offers a live way forward.
+    assert.ok(f.recovery === "retry" || f.recovery === "refresh", "recovery@" + st);
+    assert.equal(Object.prototype.hasOwnProperty.call(f, "recovery"), true, "has recovery@" + st);
+  }
+  // Even a garbage/unmapped server error still yields a non-empty message + one
+  // recovery: friendly() echoes the server's words, but the guarantee holds —
+  // never a dead end, always exactly one way forward.
+  for (const [st, data] of [[422, { error: "something_else" }], [418, { error: "teapot" }]]) {
+    const f = hooks.promoteFailure(st, data);
+    assert.ok(f.message.length > 0, "generic message@" + st);
+    assert.ok(f.recovery === "retry" || f.recovery === "refresh", "generic recovery@" + st);
+  }
+  // The recovery SPLIT is meaningful: transient/unknown failures retry the POST;
+  // "the state moved under us" (409/404/422) refreshes the list instead.
+  assert.equal(hooks.promoteFailure(0, {}).recovery, "retry");     // network → retry
+  assert.equal(hooks.promoteFailure(500, {}).recovery, "retry");   // server 5xx → retry
+  assert.equal(hooks.promoteFailure(409, {}).recovery, "refresh"); // conflict → refresh
+  assert.equal(hooks.promoteFailure(404, {}).recovery, "refresh"); // gone → refresh
+});
+
+// ── Criterion 2: a successful promote reconciles — the Current chip STAYS put ─
+test("promoteReconcile: the fresh queued row is prepended but the Current chip stays on the still-live deploy", () => {
+  const current = { id: "d-cur", status: "live", environment: "production" };
+  const prior = { id: "d-old", status: "live", environment: "production" };
+  const list = [current, prior]; // newest-first, as the endpoint returns
+  const optimistic = { id: "d-new", status: "queued", environment: "production" };
+  const rec = hooks.promoteReconcile(list, optimistic);
+  // The queued row is now on top of the list…
+  assert.equal(rec.list[0].id, "d-new");
+  assert.equal(rec.list.length, 3);
+  // …but it is NOT current — the Current chip stays on the still-live deploy
+  // (a queued build never serves traffic). This is the criterion: the chip does
+  // not jump to the new deployment until it actually goes live.
+  assert.equal(rec.currentId, "d-cur");
+  assert.notEqual(rec.currentId, optimistic.id);
+  // And deployRow paints that truth: the new row gets NO Current chip and NO
+  // promote action (queued rows aren't promotable); the live row keeps Current.
+  const newRowHtml = hooks.deployRow(optimistic, rec.currentId);
+  assert.doesNotMatch(newRowHtml, /dep-current/);
+  assert.doesNotMatch(newRowHtml, /dep-promote/);
+  const curRowHtml = hooks.deployRow(current, rec.currentId);
+  assert.match(curRowHtml, /dep-current/);
+});
+
+test("promoteReconcile: dedups a racing SSE tick and migrates Current only once the new row is live", () => {
+  const prior = { id: "d-old", status: "live", environment: "production" };
+  // The optimistic row arrives while an SSE tick already delivered the same id —
+  // reconcile must not double it.
+  const already = { id: "d-new", status: "queued", environment: "production" };
+  const optimistic = { id: "d-new", status: "queued", environment: "production" };
+  const rec = hooks.promoteReconcile([already, prior], optimistic);
+  assert.equal(rec.list.filter((d) => d.id === "d-new").length, 1);
+  assert.equal(rec.list[0], optimistic); // the fresh copy wins, on top
+  assert.equal(rec.currentId, "d-old");  // still on the prior live deploy
+  // Once that deployment goes live (a later refetch), Current MIGRATES to it —
+  // the chip's whole point. A preview row is never eligible to be current.
+  const live = { id: "d-new", status: "live", environment: "production" };
+  const migrated = hooks.promoteReconcile([live, prior], null);
+  assert.equal(migrated.currentId, "d-new");
+  const preview = { id: "d-pre", status: "live", environment: "preview" };
+  assert.equal(hooks.promoteReconcile([preview, prior], null).currentId, "d-old");
+  // Degenerate inputs never throw (assert fields, not deepEqual — the sandbox
+  // returns cross-realm objects whose prototype trips deepStrictEqual).
+  const empty = hooks.promoteReconcile(null, null);
+  assert.equal(empty.list.length, 0);
+  assert.equal(empty.currentId, null);
+  assert.equal(hooks.promoteReconcile([], { id: "x", status: "queued" }).list.length, 1);
+});
+
+// ── The stale-paint guard: A's late /v1/sites must not paint into B's slot ────
+test("staleGuard: drops a superseded response, accepts the current one", () => {
+  // reqId lags the current ticket → a newer instance switch won → DROP.
+  assert.equal(hooks.staleGuard(1, 2), true);
+  assert.equal(hooks.staleGuard(1, 5), true);
+  // reqId is the current ticket → this is the freshest load → ACCEPT (not stale).
+  assert.equal(hooks.staleGuard(2, 2), false);
+  assert.equal(hooks.staleGuard(0, 0), false);
+  // A stale reqId that somehow reads higher than current still isn't "current" —
+  // strict inequality means only an exact match paints (defensive).
+  assert.equal(hooks.staleGuard(3, 2), true);
+});

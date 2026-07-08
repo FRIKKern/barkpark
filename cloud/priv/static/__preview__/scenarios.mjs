@@ -315,6 +315,50 @@ const marketingSiteDeploys = Object.assign({}, marketingSite, {
   current_deployment_id: IDS.depCurrent,
 });
 
+// ── Rollback endgame: the three post-promote states (charter wave-4 owed) ────
+// (a) IN-FLIGHT: the promote just succeeded — a freshly-queued build sits on
+//     top with its console streaming, while the STILL-LIVE deploy keeps the
+//     Current chip (a queued build serves no traffic yet). Exactly the
+//     promoteReconcile result the SPA paints optimistically before the refetch.
+const depInFlight = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d4",
+  status: "building",
+  git_ref: depCurrent.git_ref, // same source as the current row → a redeploy
+  branch: "main",
+  became_live_at: null,
+  inserted_at: tMinus(30),
+  updated_at: tMinus(4),
+  detail: "building",
+  console: [
+    { line: "promote → new production deployment (pinned to 9c1f2ab)", at: tMinus(30) },
+    { line: "cloning acme/marketing @ 9c1f2ab", at: tMinus(26) },
+    { line: "npm ci — installing 214 packages", at: tMinus(9) },
+  ],
+});
+const inFlightDeployments = [depInFlight, depCurrent, depFailed, depPrior];
+// The marketing site DURING the promote: pointer still on the old live row, so
+// the Current chip has NOT jumped to the building deploy.
+const marketingSiteInFlight = Object.assign({}, marketingSite, {
+  current_deployment_id: IDS.depCurrent,
+});
+
+// (c) MIGRATED: the promoted build went live — the Current chip has MOVED to it
+//     and the previously-current row is now a prior live deploy offering "Roll
+//     back to this". Proves the chip migrates once the new deploy is live.
+const depNowLive = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d5",
+  status: "live",
+  git_ref: depCurrent.git_ref,
+  branch: "main",
+  became_live_at: tMinus(20),
+  inserted_at: tMinus(240),
+  updated_at: tMinus(20),
+});
+const migratedDeployments = [depNowLive, depCurrent, depFailed, depPrior];
+const marketingSiteMigrated = Object.assign({}, marketingSite, {
+  current_deployment_id: depNowLive.id,
+});
+
 // ── invitations (GET /v1/invitations/:token preview + POST accept) ──────────
 // Preview envelope from router.ex: {team:{name,slug}, email, role, expires_at}.
 // The accept POST answers 200 {team_id} | 404 invalid_or_expired | 403
@@ -699,6 +743,56 @@ export const SCENARIOS = {
       sites: [marketingSite, docsSite],
       audit: liveInstanceAudit,
       instanceEvents: { [IDS.liveInstance]: liveInstanceEventsNoVerify },
+    },
+  },
+  // ── Rollback endgame: the promote's own three states (charter wave-4 owed) ──
+  // IN-FLIGHT: the redeploy just succeeded — the fresh build streams on top while
+  // the still-live deploy keeps the Current chip (a queued build serves nothing
+  // yet). This is the optimistic promoteReconcile paint, frozen for the eye.
+  "promote-in-flight": {
+    label: "Promote in flight — the new build streams on top; Current stays on the live deploy",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSiteInFlight, docsSite],
+      audit: [],
+      deployments: inFlightDeployments,
+    },
+  },
+  // RETRY: unlike promote-failure (409 → Refresh), a transient 500 offers a live
+  // "Try again" — the retry recovery, never a dead spinner. Click an action,
+  // then Confirm, to see the inline failure + Try again.
+  "promote-retry": {
+    label: "Promote fails transiently — the confirm shows Try again (retry recovery)",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSiteDeploys, docsSite],
+      audit: [],
+      deployments: rollbackDeployments,
+      promote: { status: 500, body: { error: "internal", detail: "the control plane hit an unexpected error" } },
+    },
+  },
+  // MIGRATED: the promoted build went live — the Current chip has MOVED to the
+  // new row; the old current is now a prior live deploy offering "Roll back to
+  // this". The end of the promote story: the chip only migrates once live.
+  "promote-migrated": {
+    label: "Post-promote — the Current chip has migrated to the now-live deploy",
+    authed: true,
+    deepLink: "#site/" + IDS.siteMarketing,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [marketingSiteMigrated, docsSite],
+      audit: [],
+      deployments: migratedDeployments,
     },
   },
 };
