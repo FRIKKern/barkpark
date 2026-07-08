@@ -1,15 +1,12 @@
 LAYOUT BLOCKS                                               
 ─────────────                                               
                                                             
-Left column                                                 
+Left column                    Right column                 
                                                             
-The left column stacks a heading above a paragraph that     
-wraps at the narrower golden widths.                        
-────────────────────────────────────────────────────────────
-Right column                                                
-                                                            
-The right column is separated from the left by a light      
-hairline rule between the two stacked groups.               
+The left column stacks a       The right column is separated
+heading above a paragraph      from the left by a light     
+that wraps at the narrower     hairline rule between the two
+golden widths.                 stacked groups.              
                                                             
 One.                                                        
 ────────────────────────────────────────────────────────────

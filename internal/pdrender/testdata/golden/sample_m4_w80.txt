@@ -1,21 +1,13 @@
 LAYOUT BLOCKS                                                                   
 ─────────────                                                                   
                                                                                 
-Left column                                                                     
+Left column                              Right column                           
                                                                                 
-The left column stacks a heading above a paragraph that wraps at the narrower   
-golden widths.                                                                  
-────────────────────────────────────────────────────────────────────────────────
-Right column                                                                    
+The left column stacks a heading above   The right column is separated from the 
+a paragraph that wraps at the narrower   left by a light hairline rule between  
+golden widths.                           the two stacked groups.                
                                                                                 
-The right column is separated from the left by a light hairline rule between the
-two stacked groups.                                                             
-                                                                                
-One.                                                                            
-────────────────────────────────────────────────────────────────────────────────
-Two.                                                                            
-────────────────────────────────────────────────────────────────────────────────
-Three.                                                                          
+One.                       Two.                       Three.                    
                                                                                 
 A single column renders with no separator rule at all.                          
                                                                                 

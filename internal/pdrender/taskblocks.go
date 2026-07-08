@@ -68,6 +68,7 @@ func (taskListRenderer) Render(b Block, ctx RenderCtx) []string {
 		out = append(out, wrapLines(ctx.Theme.Body.Bold(true).Render(title), w)...)
 	}
 	out = append(out, momentumLine(rows, ctx, w))
+	out = append(out, momentumBar(rows, ctx, w))
 
 	order, byPhase := groupRowsByPhase(rows)
 	for _, phase := range order {
@@ -104,6 +105,29 @@ func momentumLine(rows []map[string]any, ctx RenderCtx, w int) string {
 		ctx.Theme.Dim.Render(strconv.Itoa(pct)+"%")
 	// The line is a single visual row; a narrow surface wraps it, first line wins.
 	return firstLine(wrapLines(line, w))
+}
+
+// momentumBar is the proportional progress bar paired with the momentum counts —
+// the house standard (internal/taskboard progressBar pairs momentumLine with a
+// bar). fill = done/total * w cells of ▓ in the done tone, the remainder ░ in
+// Dim, so the two pdrender task widgets (task-list here + roadmap) share the same
+// ▓ fill glyph. Exactly one full-width line, drawn directly under the counts.
+func momentumBar(rows []map[string]any, ctx RenderCtx, w int) string {
+	w = clampWidth(w)
+	total := len(rows)
+	done := countRole(rows, "done")
+	fill := 0
+	if total > 0 {
+		fill = done * w / total
+	}
+	if fill > w {
+		fill = w
+	}
+	if fill < 0 {
+		fill = 0
+	}
+	return statusGlyphStyle(ctx.Theme, "done").Render(strings.Repeat("▓", fill)) +
+		ctx.Theme.Dim.Render(strings.Repeat("░", w-fill))
 }
 
 // phaseHeader is a `name ──── done/total` band separating phase groups.
@@ -387,10 +411,14 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 
 // ── task-board ───────────────────────────────────────────────────────────────
 // {snapshot: [row]}. Group rows by roleForStatus(status) into the FIXED column
-// order ready · progress · blocked · done (empty columns omitted). A terminal has
-// no responsive grid, so lanes STACK vertically: each lane a `Label  count`
-// header then its cards as clean glyph+title+meta rows (indented under the
-// header). Absent snapshot → placeholder; empty → "No tasks yet."
+// order ready · progress · blocked · done (empty columns omitted). Where every
+// lane clears MinWidth the lanes draw SIDE-BY-SIDE as bordered columns (the P9
+// standard — the internal/taskboard lane look, ported into pdrender's
+// import-disciplined world via joinColumns): a role-tinted rounded box per lane
+// with a `glyph Label  count` header and its cards beneath. Below the per-cell
+// floor the lanes STACK vertically (the verbatim fallback): each lane a
+// `Label  count` header then its cards as glyph+title+meta rows. Absent snapshot
+// → placeholder; empty → "No tasks yet."
 type taskBoardRenderer struct{}
 
 var boardColumns = []struct{ role, label string }{
@@ -415,25 +443,86 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 		byRole[role] = append(byRole[role], r)
 	}
 
-	w := clampWidth(ctx.Width)
-	var out []string
+	// Collect non-empty lanes in the fixed column order.
+	type lane struct {
+		role, label string
+		rows        []map[string]any
+	}
+	var lanes []lane
 	for _, col := range boardColumns {
-		lane := byRole[col.role]
-		if len(lane) == 0 {
-			continue
+		if rs := byRole[col.role]; len(rs) > 0 {
+			lanes = append(lanes, lane{col.role, col.label, rs})
 		}
+	}
+	if len(lanes) == 0 {
+		return []string{ctx.Theme.Dim.Render("No tasks yet.")}
+	}
+
+	w := clampWidth(ctx.Width)
+	n := len(lanes)
+	const (
+		gutter = 2
+		chrome = 4 // rounded border (2) + padding (2)
+	)
+	cellW := (w - (n-1)*gutter) / n
+	if n > 1 && cellW >= MinWidth {
+		// Side-by-side bordered lanes.
+		groups := make([][]string, n)
+		widths := make([]int, n)
+		for i, ln := range lanes {
+			innerW := clampWidth(cellW - chrome)
+			body := laneBody(ln.role, ln.label, ln.rows, ctx, innerW)
+			box := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(laneBorderColor(ctx.Theme, ln.role)).
+				Padding(0, 1).
+				Width(innerW).
+				Render(lipgloss.JoinVertical(lipgloss.Left, body...))
+			groups[i] = strings.Split(box, "\n")
+			widths[i] = cellW
+		}
+		return joinColumns(groups, widths, gutter)
+	}
+
+	// Sub-MinWidth fallback (verbatim): stacked lanes.
+	var out []string
+	for _, ln := range lanes {
 		if len(out) > 0 {
 			out = append(out, "") // rhythm between lanes
 		}
-		out = append(out, ctx.Theme.FieldLabel.Render(col.label)+"  "+ctx.Theme.Dim.Render(strconv.Itoa(len(lane))))
-		for _, r := range lane {
-			out = append(out, boardCardLines(r, col.role, ctx, w)...)
+		out = append(out, ctx.Theme.FieldLabel.Render(ln.label)+"  "+ctx.Theme.Dim.Render(strconv.Itoa(len(ln.rows))))
+		for _, r := range ln.rows {
+			out = append(out, boardCardLines(r, ln.role, ctx, w)...)
 		}
 	}
 	if len(out) == 0 {
 		return []string{ctx.Theme.Dim.Render("No tasks yet.")}
 	}
 	return out
+}
+
+// laneBody builds a bordered lane's inner lines: a `glyph Label  count` header
+// (the role glyph via the shared statusGlyphStyle/glyphForRole seam, the label in
+// FieldLabel, the count dim) then each card via boardCardLines at innerW.
+func laneBody(role, label string, rows []map[string]any, ctx RenderCtx, innerW int) []string {
+	glyph := statusGlyphStyle(ctx.Theme, role).Render(glyphForRole(role))
+	header := glyph + " " + ctx.Theme.FieldLabel.Render(label) + "  " + ctx.Theme.Dim.Render(strconv.Itoa(len(rows)))
+	out := wrapLines(header, innerW)
+	for _, r := range rows {
+		out = append(out, boardCardLines(r, role, ctx, innerW)...)
+	}
+	return out
+}
+
+// laneBorderColor tints a lane's rounded border by its role, reusing the shared
+// statusGlyphStyle foreground (progress→info, done→success, blocked→warning,
+// ready→body, open/cancel→dim). Falls back to the rule color when the style
+// carries no foreground.
+func laneBorderColor(t Theme, role string) lipgloss.TerminalColor {
+	if c := statusGlyphStyle(t, role).GetForeground(); c != nil {
+		return c
+	}
+	return ruleColor(t)
 }
 
 // boardCardLines renders one board card as an indented `glyph title  meta` row

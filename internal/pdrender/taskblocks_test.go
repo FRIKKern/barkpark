@@ -134,6 +134,70 @@ func TestTaskBlocksDegradeHonestly(t *testing.T) {
 	}
 }
 
+// boardFixture builds a task-board block spanning all four lanes.
+func boardFixture() Block {
+	return Block{Type: "task-board", Attrs: map[string]any{"snapshot": []any{
+		map[string]any{"title": "claim it", "status": "ready", "priority": "2"},
+		map[string]any{"title": "in flight", "status": "in_progress", "priority": "1"},
+		map[string]any{"title": "await review", "status": "blocked", "priority": "0", "blocked_by": 1},
+		map[string]any{"title": "shipped", "status": "done", "priority": "1"},
+	}}}
+}
+
+// TestTaskBoardSideBySide proves the board draws bordered lanes SIDE-BY-SIDE when
+// every lane clears MinWidth (w120: 4 lanes, cellW=(120-6)/4=28), and STACKS them
+// (the verbatim fallback) when they cannot (w40: cellW=(40-6)/4=8).
+func TestTaskBoardSideBySide(t *testing.T) {
+	reg := testRegistry()
+	b := boardFixture()
+
+	wide := strings.Split(renderBlock(reg, b, 120), "\n")
+	// All four lane headers align on one row when the boxes sit side-by-side.
+	if !someLineHasBoth(wide, "Ready", "Done") {
+		t.Fatalf("w120: expected lanes side-by-side (Ready and Done on one line), got:\n%s", strings.Join(wide, "\n"))
+	}
+	if lineIndexOf(wide, "╭") < 0 {
+		t.Fatalf("w120: expected rounded lane borders, got:\n%s", strings.Join(wide, "\n"))
+	}
+
+	narrow := strings.Split(renderBlock(reg, b, 40), "\n")
+	if someLineHasBoth(narrow, "Ready", "Done") {
+		t.Fatalf("w40: expected lanes STACKED (cellW 8 < MinWidth), got:\n%s", strings.Join(narrow, "\n"))
+	}
+}
+
+// TestTaskListMomentumBar proves the task-list carries a proportional ▓/░ bar
+// directly under the momentum counts (the house-standard pairing).
+func TestTaskListMomentumBar(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "task-list", Attrs: map[string]any{"snapshot": []any{
+		map[string]any{"title": "a", "status": "done"},
+		map[string]any{"title": "b", "status": "done"},
+		map[string]any{"title": "c", "status": "ready"},
+		map[string]any{"title": "d", "status": "in_progress"},
+	}}}
+	lines := strings.Split(renderBlock(reg, b, 80), "\n")
+	barIdx := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "▓") && strings.Contains(ln, "░") {
+			barIdx = i
+			break
+		}
+	}
+	if barIdx < 0 {
+		t.Fatalf("expected a ▓/░ momentum bar, got:\n%s", strings.Join(lines, "\n"))
+	}
+	// The bar sits directly under the momentum counts (the "%" line).
+	if barIdx == 0 || !strings.Contains(lines[barIdx-1], "%") {
+		t.Fatalf("momentum bar should sit directly under the counts line, got:\n%s", strings.Join(lines, "\n"))
+	}
+	// 2 of 4 done → the bar is ~half filled: at w80 that is 40 ▓ cells.
+	fill := strings.Count(lines[barIdx], "▓")
+	if fill != 40 {
+		t.Errorf("expected 40 ▓ cells (2/4 of 80), got %d in:\n%s", fill, lines[barIdx])
+	}
+}
+
 // TestTaskGlyphsMatchLadder guards status-vocabulary drift: a done row must carry
 // ✓, an in_progress row ⠋, a blocked row !, a ready row ○. The task widgets share
 // the roleGlyph source with the status-legend, so this pins the two together — a

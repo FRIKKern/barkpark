@@ -3,6 +3,7 @@ TASK FAMILY WIDGETS
                                         
 Sprint board                            
 ⠋ 1 in flight   ○ 1 ready   ✓ 1 done    
+▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 Foundation ───────────────────────── 1/3
 ✓ Design the schema  P1 · 3/3 · ada     
 ⠋ Wire the resolver  P0 · 1/4 · grace   

@@ -1,6 +1,7 @@
 package pdrender
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -186,6 +187,14 @@ func (dividerRenderer) Render(_ Block, ctx RenderCtx) []string {
 // bold title + child blocks + a trailing PdHr. Children render through the
 // registry at ctx.Width-indent with ctx.Deeper(); the indent is 2 cols once
 // nested (depth>0). Below MinWidth the indent is dropped.
+//
+// GRID MODE: a section is a grid iff Attrs["layout"] is a map with mode=="grid"
+// (mirrors compose.ex grid_layout/1). Then — where every cell clears MinWidth —
+// children lay into rows of `tracks` cells SIDE-BY-SIDE (the reader's
+// section_grid_html), honoring per-child `span` (slot consumption) and `order`
+// (a stable CSS-order reorder). Below the per-cell floor, or tracks<2, it falls
+// through to the stack loop UNCHANGED — every legacy/explicit-stack section is
+// byte-identical to before (compose.ex's byte-identical guarantee).
 type sectionRenderer struct{ reg *Registry }
 
 func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -208,8 +217,20 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 		inner = ctx.Width
 	}
 	childCtx := ctx.Deeper().WithWidth(inner)
-
 	pad := strings.Repeat(" ", indent)
+
+	// Grid branch: only when layout.mode == "grid" AND the grid does not degrade
+	// (tracks>1, every cell ≥ MinWidth). A nil return means "degrade" → fall
+	// through to the byte-identical stack loop below.
+	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "grid" {
+		if grid := sr.gridBody(b, layout, childCtx, inner, pad); grid != nil {
+			out = append(out, grid...)
+			out = append(out, rule)
+			return out
+		}
+	}
+
+	// Stack path (verbatim — the sub-grid fallback and every non-grid section).
 	for i, child := range b.Children {
 		if i > 0 {
 			out = append(out, "")
@@ -220,6 +241,51 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	out = append(out, rule)
+	return out
+}
+
+// gridBody lays a grid-mode section's children into rows of `tracks` cells,
+// honoring span (a span-S child consumes S slots and is S*cellW+(S-1)*gutter
+// wide) and order (a stable sort by CSS order; a child with no order keeps its
+// source position, order default 0). cellW is computed off `inner` (post-indent)
+// so a nested grid never overflows the section rule. Returns nil to signal the
+// caller to degrade to the stack path (tracks<2, or any cell below MinWidth).
+func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx RenderCtx, inner int, pad string) []string {
+	if len(b.Children) == 0 {
+		return nil
+	}
+	const gutter = 2
+	tracks := gridTracks(layout["tracks"])
+	if tracks < 2 {
+		return nil
+	}
+	cellW := (inner - (tracks-1)*gutter) / tracks
+	if cellW < MinWidth {
+		return nil
+	}
+
+	// Stable CSS-order reorder: the reader emits `order:`, i.e. it DOES reorder,
+	// so a terminal stable-sort by order is parity-correct.
+	items := make([]Block, len(b.Children))
+	copy(items, b.Children)
+	sort.SliceStable(items, func(i, j int) bool { return cellOrder(items[i]) < cellOrder(items[j]) })
+
+	cells := make([][]string, len(items))
+	widths := make([]int, len(items))
+	spans := make([]int, len(items))
+	for i, child := range items {
+		s := cellSpan(child, tracks)
+		spans[i] = s
+		cw := s*cellW + (s-1)*gutter
+		widths[i] = cw
+		cells[i] = sr.reg.Render(child, childCtx.WithWidth(cw))
+	}
+
+	rows := gridRows(cells, widths, spans, tracks, gutter)
+	out := make([]string, 0, len(rows))
+	for _, line := range rows {
+		out = append(out, pad+line)
+	}
 	return out
 }
 
