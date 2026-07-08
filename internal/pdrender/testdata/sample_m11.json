@@ -1,0 +1,195 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Contribution heatmaps"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "A shade grid, an auto-degrading truecolor grid, and a degraded placeholder."
+    },
+    {
+      "id": "hm-shade",
+      "type": "heatmap",
+      "ramp": "shade",
+      "rowLabels": [
+        "Mon",
+        "Tue",
+        "Wed",
+        "Thu",
+        "Fri",
+        "Sat",
+        "Sun"
+      ],
+      "colLabels": [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec"
+      ],
+      "cells": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        [
+          2,
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ],
+        [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        [
+          5,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      ]
+    },
+    {
+      "id": "hm-true",
+      "type": "heatmap",
+      "ramp": "truecolor",
+      "max": 17,
+      "rowLabels": [
+        "A",
+        "B",
+        "C"
+      ],
+      "colLabels": [
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6"
+      ],
+      "cells": [
+        [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        [
+          6,
+          7,
+          8,
+          9,
+          10,
+          11
+        ],
+        [
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ]
+      ]
+    },
+    {
+      "id": "hm-degraded",
+      "type": "heatmap",
+      "ramp": "shade",
+      "cells": []
+    }
+  ]
+}
