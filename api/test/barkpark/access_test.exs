@@ -177,6 +177,66 @@ defmodule Barkpark.AccessTest do
     end
   end
 
+  describe "admits_desk?/3 — desk-granularity admission (ag-…-subscope)" do
+    test "a type/doc grant ADMITS its own project/dataset desk (below-desk levels auto-satisfied)" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantor = grantor_token(ws, ["admin"])
+
+      {:ok, %{grant: grant}} =
+        Access.mint(
+          grantor,
+          base_attrs(ws, %{
+            capabilities: ["read"],
+            project_id: proj.id,
+            dataset: "production",
+            type: "post"
+          })
+        )
+
+      desk = %{workspace_id: ws.id, project_id: proj.id, dataset: "production"}
+
+      # The desk cannot name a type, yet the type-scoped grant admits it —
+      # plain validate/3 (below) would DENY (the pinned type escapes the desk).
+      assert Access.admits_desk?(grant, :read, desk) == true
+      assert Access.validate(grant, :read, desk) == {:error, :forbidden}
+    end
+
+    test "NO WIDEN — a project grant does NOT admit a sibling or project-less desk" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      other = create_project!(ws)
+      grantor = grantor_token(ws, ["admin"])
+
+      {:ok, %{grant: grant}} =
+        Access.mint(grantor, base_attrs(ws, %{capabilities: ["read"], project_id: proj.id}))
+
+      # own desk → admit; sibling project's desk → deny; project-less (broader)
+      # desk → deny (the desk omits the project the grant pins → escape).
+      assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id, project_id: proj.id}) == true
+
+      assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id, project_id: other.id}) ==
+               false
+
+      assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id}) == false
+    end
+
+    test "fail-closed — capability + a foreign workspace are still enforced" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      grantor = grantor_token(ws, ["admin"])
+
+      {:ok, %{grant: grant}} =
+        Access.mint(grantor, base_attrs(ws, %{capabilities: ["read"], project_id: proj.id}))
+
+      desk = %{workspace_id: ws.id, project_id: proj.id, dataset: "production"}
+
+      # read-only grant → :write desk denied; a different workspace → denied.
+      assert Access.admits_desk?(grant, :write, desk) == false
+      assert Access.admits_desk?(grant, :read, %{workspace_id: Ecto.UUID.generate()}) == false
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # 5. revoke → subsequent validate → {:error, :revoked}; idempotent
   # ---------------------------------------------------------------------------

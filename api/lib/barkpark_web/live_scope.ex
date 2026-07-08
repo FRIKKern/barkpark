@@ -120,7 +120,11 @@ defmodule BarkparkWeb.LiveScope do
         # Access-grant admission (airdrop-grants ag-enforcement) — the socket
         # twin of ResolveWorkspace's grant path. Computed ONCE here (a DB load
         # of the user's active grants) and offered as the LAST cond clause.
-        grant_ctx = grant_read_ctx(socket.assigns[:current_user], ws.id)
+        # Validated against the MOUNTED DESK scope (workspace + project +
+        # dataset from the URL), NOT bare workspace — so a project/dataset/type/
+        # doc-scoped grantee can mount the desk AT OR UNDER its grant, and
+        # `scope_to_grants` narrows the rows to the grant (ag-…-subscope).
+        grant_ctx = grant_read_ctx(socket.assigns[:current_user], desk_scope(ws, proj, dataset))
 
         cond do
           # studio-user-login: an account session (:current_user, set by
@@ -160,21 +164,30 @@ defmodule BarkparkWeb.LiveScope do
   end
 
   # Build a grant-bearing CallerContext for `user` and admit it ONLY if some
-  # ACTIVE grant authorizes :read at this workspace. Returns the ctx (to ride
-  # the grade) or nil. Verbatim port of ResolveWorkspace.grant_read_ctx/2 —
-  # `from_user/2` loads active grants in-query; `Access.validate/3` applies
-  # scope+capability+expiry. Fail-closed: no covering grant → nil.
-  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, workspace_id) when is_binary(uid) do
+  # ACTIVE grant admits the MOUNTED DESK scope for :read. Returns the ctx (to
+  # ride the grade) or nil. Twin of ResolveWorkspace.grant_read_ctx/2 —
+  # `from_user/2` loads active grants in-query; `Access.admits_desk?/3` applies
+  # scope+capability+expiry at desk granularity (type/doc narrowed later by
+  # `scope_to_grants`). Fail-closed: no admitting grant → nil.
+  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, desk_scope)
+       when is_binary(uid) and is_map(desk_scope) do
     ctx = CallerContext.from_user(uid)
 
-    if Enum.any?(ctx.grants, fn grant ->
-         Access.validate(grant, :read, %{workspace_id: workspace_id}) == :ok
-       end) do
+    if Enum.any?(ctx.grants, &(Access.admits_desk?(&1, :read, desk_scope) == true)) do
       ctx
     end
   end
 
-  defp grant_read_ctx(_user, _workspace_id), do: nil
+  defp grant_read_ctx(_user, _desk_scope), do: nil
+
+  # The mounted desk scope (workspace/project/dataset granularity) — the URL the
+  # grantee is mounting. `proj` is always a resolved struct here (the caller's
+  # `with` matched it); `dataset` is the `/d/:dataset` segment. Fed to
+  # `Access.admits_desk?/3`, which compares it against each grant.
+  defp desk_scope(ws, proj, dataset) do
+    scope = %{workspace_id: ws.id, project_id: Map.get(proj, :id)}
+    if is_binary(dataset), do: Map.put(scope, :dataset, dataset), else: scope
+  end
 
   # Read-only shared Studio (P4): a `:docs` read share opens the FULL
   # Studio UI to an anonymous viewer, so the write boundary must be the

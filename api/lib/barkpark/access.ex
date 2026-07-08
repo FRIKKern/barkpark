@@ -271,6 +271,39 @@ defmodule Barkpark.Access do
 
   def validate(_grant, _action, _scope), do: {:error, :forbidden}
 
+  @doc """
+  Admission for a **desk mount** — the Studio surface's granularity is
+  `(workspace, project, dataset)`; a desk cannot name a `type` or `doc_id`.
+  So a grant scoped BELOW the desk (a type/doc grant) must still be allowed to
+  MOUNT its own project/dataset desk — the sub-desk narrowing then happens at
+  read time via `Barkpark.Content.Scope.scope_to_grants/3`. Plain `validate/3`
+  would DENY it (the grant's non-null `type`/`doc_id` escapes a desk request
+  that omits them), which is why bare-workspace admission left every sub-scoped
+  grantee locked out.
+
+  `admits_desk?/3` validates the desk's `(workspace, project, dataset)` against
+  the grant while treating the grant's OWN `type`/`doc_id` as satisfied (feeding
+  them into the request), so ONLY the desk-granularity levels constrain
+  admission. It REUSES `validate/3` — no parallel containment ladder.
+
+  Fail-closed and NO-WIDEN: the merge only auto-satisfies the levels a desk
+  cannot express (type/doc); the desk-granularity levels are still checked by
+  `scope_contained?`, so a desk BROADER than the grant at ws/project/dataset (a
+  `nil` where the grant is non-null — e.g. a project grant at a project-less or
+  sibling-project desk) still escapes → `false`.
+  """
+  @spec admits_desk?(Grant.t(), action() | String.t(), map()) :: boolean()
+  def admits_desk?(%Grant{} = grant, action, desk_scope) when is_map(desk_scope) do
+    scope =
+      desk_scope
+      |> Map.put(:type, grant.type)
+      |> Map.put(:doc_id, grant.doc_id)
+
+    do_validate(grant, action, scope) == :ok
+  end
+
+  def admits_desk?(_grant, _action, _desk_scope), do: false
+
   defp do_validate(%Grant{} = grant, action, scope) do
     cond do
       not is_nil(grant.revoked_at) -> {:error, :revoked}

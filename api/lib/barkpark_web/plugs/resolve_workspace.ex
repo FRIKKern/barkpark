@@ -94,7 +94,9 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     # `:grant_scoped_read` flag so `ScopeHelpers` threads Layer-2 row narrowing
     # into every Content read. Reuses `Access.validate/3` (scope/capability/
     # expiry truth); no membership decision is altered.
-    grant_admit = if not member? and not is_nil(user), do: grant_read_ctx(user, workspace.id)
+    grant_admit =
+      if not member? and not is_nil(user),
+        do: grant_read_ctx(user, desk_scope(conn, workspace))
 
     cond do
       member? ->
@@ -134,20 +136,48 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   end
 
   # Build a grant-bearing CallerContext for `user` and admit it ONLY if some
-  # ACTIVE grant authorizes :read at this workspace. Returns the ctx (to assign)
-  # or nil. `from_user/2` loads the user's active grants in-query; `validate/3`
-  # applies scope+capability+expiry. Fail-closed: no covering grant → nil.
-  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, workspace_id) when is_binary(uid) do
+  # ACTIVE grant admits the MOUNTED DESK scope for :read. Returns the ctx (to
+  # assign) or nil. `from_user/2` loads the user's active grants in-query;
+  # `Access.admits_desk?/3` applies scope+capability+expiry at desk granularity
+  # (type/doc narrowed later by `scope_to_grants`). Fail-closed: no admitting
+  # grant → nil.
+  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, desk_scope)
+       when is_binary(uid) and is_map(desk_scope) do
     ctx = CallerContext.from_user(uid)
 
-    if Enum.any?(ctx.grants, fn grant ->
-         Access.validate(grant, :read, %{workspace_id: workspace_id}) == :ok
-       end) do
+    if Enum.any?(ctx.grants, &(Access.admits_desk?(&1, :read, desk_scope) == true)) do
       ctx
     end
   end
 
-  defp grant_read_ctx(_user, _workspace_id), do: nil
+  defp grant_read_ctx(_user, _desk_scope), do: nil
+
+  # The mounted desk scope from the URL path params — workspace (resolved) +
+  # project (`:project_slug` → id, one extra read only on this non-member grant
+  # path) + `:dataset`. A route WITHOUT those params (a project-less scoped
+  # route) yields `%{workspace_id}` only → byte-identical to the old
+  # bare-workspace admission (a ws-wide grant still admits; a sub-scoped grant
+  # still denies). Fed to `Access.admits_desk?/3`.
+  defp desk_scope(conn, workspace) do
+    scope = %{workspace_id: workspace.id}
+
+    scope =
+      case conn.path_params["project_slug"] do
+        slug when is_binary(slug) ->
+          case Tenancy.get_project(workspace.slug, slug) do
+            %{id: pid} -> Map.put(scope, :project_id, pid)
+            _ -> scope
+          end
+
+        _ ->
+          scope
+      end
+
+    case conn.path_params["dataset"] do
+      ds when is_binary(ds) -> Map.put(scope, :dataset, ds)
+      _ -> scope
+    end
+  end
 
   # `true` → unconditional (paper reader); `:studio_demo` → only while the
   # public-demo flag is on; absent/false → never.
