@@ -1067,6 +1067,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         caps={@airdrop_caps}
         link={@airdrop_link}
         error={@airdrop_error}
+        suggestions={@airdrop_suggestions}
       />
     </.pane_layout>
 

@@ -48,7 +48,9 @@ defmodule BarkparkWeb.Studio.StudioLiveAirdropTest do
     # Grantors: an admin (holds read+write) and a read-only member. create_token
     # makes each a member of the default workspace; the ApiToken capability gate
     # is the token's permissions array (a ["read"] token can never confer write).
-    {:ok, _} = Auth.create_token(@admin_tok, "airdrop admin", @dataset, ["read", "write", "admin"])
+    {:ok, _} =
+      Auth.create_token(@admin_tok, "airdrop admin", @dataset, ["read", "write", "admin"])
+
     {:ok, _} = Auth.create_token(@reader_tok, "airdrop reader", @dataset, ["read"])
 
     {:ok, conn: conn, ws: ws}
@@ -229,6 +231,41 @@ defmodule BarkparkWeb.Studio.StudioLiveAirdropTest do
       # The security assertion: NO grant was minted.
       assert Access.list_grants_for_workspace(ws.id) == []
       refute_email_sent()
+    end
+  end
+
+  # ── Recipient-email typeahead (pure UX; datalist is advisory) ───────────────
+
+  describe "recipient typeahead (airdrop-suggest)" do
+    test "suggests workspace-member emails matching the prefix; a non-member does not appear",
+         %{conn: conn, ws: ws} do
+      # A member of THIS workspace and a user who is NOT a member.
+      {:ok, member} =
+        Accounts.register_user(%{
+          email: "teammate@example.com",
+          password: "correct-horse-battery"
+        })
+
+      {:ok, _m} = Barkpark.Tenancy.Auth.create_membership(ws.id, member.id, "member", "user")
+
+      {:ok, _outsider} =
+        Accounts.register_user(%{
+          email: "team-outsider@example.com",
+          password: "correct-horse-battery"
+        })
+
+      {:ok, view, _} = view_for(conn, @admin_tok)
+      view |> render_hook("airdrop-open", %{})
+
+      html = view |> render_hook("airdrop-suggest", %{"grantee_email" => "team"})
+
+      # The member surfaces as a <datalist> option; the non-member never does.
+      assert html =~ ~s(id="airdrop-email-options")
+      assert html =~ "teammate@example.com"
+      refute html =~ "team-outsider@example.com"
+
+      # Field stays free-text: still an email input (not a closed select).
+      assert html =~ ~s(name="grantee_email")
     end
   end
 end
