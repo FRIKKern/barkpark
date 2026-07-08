@@ -622,6 +622,88 @@
         window.addEventListener("mouseup", onUp);
       };
 
+      // Right-click context menu (SF context-menu). Suppresses the native
+      // browser menu and opens the SERVER-rendered .sheet-context-menu (the
+      // @menu {:cell,x,y} variant) at the cursor. A right-click OUTSIDE the
+      // current selection first re-anchors to the clicked cell (Excel parity,
+      // riding any open cell draft / dirty bar as a commit via _rideCommits so
+      // the #813/#858 no-silent-loss seal holds); a right-click INSIDE a
+      // multi-cell selection keeps it so "Copy" grabs the whole block. The menu
+      // items reuse the EXACT ops the keyboard path already calls — clear /
+      // insert / delete are phx-click server events (clear-selection, rowcol-key),
+      // cut / copy / paste ride the OS clipboard client-side (_onCtxClick).
+      this._onContextMenu = (e) => {
+        if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        const td = e.target.closest && e.target.closest("td[data-ref]");
+        if (!td) return;
+        e.preventDefault();
+        this._tabExits = false;
+        this.el.focus({ preventScroll: true });
+        const selected = !!(td.classList && td.classList.contains("sheet-sel"));
+        if (!selected) {
+          this.pushEventTo(this.el, "cell-click", this._rideCommits({ ref: td.dataset.ref, shift: false }));
+        }
+        this.pushEventTo(this.el, "cell-menu-open", { x: e.clientX || 0, y: e.clientY || 0 });
+        // updated() focuses the first item + viewport-clamps once the server
+        // has rendered the menu.
+        this._ctxWantFocus = true;
+      };
+
+      // Client-side cut/copy/paste from the context menu (the OS clipboard needs
+      // an in-gesture call the server round-trip can't give). Reuses the exact
+      // clipboard helpers the Cmd+C / Cmd+V path uses; clear / insert / delete
+      // are phx-click server events and never reach here. Bound on root (the menu
+      // is a sibling of the grid element), filtered to a menu-action button.
+      this._onCtxClick = (e) => {
+        const btn = e.target.closest && e.target.closest(".sheet-context-menu [data-menu-action]");
+        if (!btn) return;
+        const action = btn.dataset ? btn.dataset.menuAction : null;
+        if (action === "copy" || action === "cut") {
+          const tsv = this._selectionTsv();
+          if (tsv != null && typeof navigator !== "undefined" && navigator.clipboard) {
+            navigator.clipboard.writeText(tsv);
+            this._captureFormulaClip(tsv);
+          }
+          if (action === "cut") this.pushEventTo(this.el, "clear-selection", {});
+          this.pushEventTo(this.el, "menu-close", {});
+        } else if (action === "paste") {
+          if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.readText) {
+            navigator.clipboard.readText().then((text) => {
+              if (text) this._ctxPaste(text);
+            }).catch(() => {});
+          }
+          this.pushEventTo(this.el, "menu-close", {});
+        }
+      };
+
+      // Roving keyboard nav within the open context menu (WCAG menu pattern):
+      // Up/Down move focus between menuitems, Home/End jump to the ends, Escape
+      // closes the menu (menu-close) and returns focus to the grid. Enter/Space
+      // fall through to the button's native activation (phx-click / _onCtxClick).
+      // Bound on root; a keydown whose target is not inside the menu returns.
+      this._onCtxKeydown = (e) => {
+        const menu = e.target.closest && e.target.closest(".sheet-context-menu");
+        if (!menu) return;
+        const items = menu.querySelectorAll
+          ? Array.prototype.slice.call(menu.querySelectorAll("[role='menuitem']"))
+          : [];
+        const i = items.indexOf(e.target);
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          if (!items.length) return;
+          const next = i < 0 ? 0 : (i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length;
+          if (items[next] && items[next].focus) items[next].focus();
+        } else if (e.key === "Home" || e.key === "End") {
+          e.preventDefault();
+          const t = e.key === "Home" ? items[0] : items[items.length - 1];
+          if (t && t.focus) t.focus();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          this.pushEventTo(this.el, "menu-close", {});
+          this.el.focus({ preventScroll: true });
+        }
+      };
+
       this._onDblclick = (e) => {
         // Fill to the data extent: double-click the fill nub (Excel's idiom).
         // Must branch BEFORE the td lookup — the nub nests inside the corner
@@ -774,6 +856,12 @@
       this.el.addEventListener("mousedown", this._onCellMousedown);
       this.el.addEventListener("mousedown", this._onHeadMousedown);
       this.el.addEventListener("mousedown", this._onFillMousedown);
+      // contextmenu binds on the grid (cells live inside it); the menu's own
+      // click/keydown bind on root — the .sheet-context-menu is a SIBLING of the
+      // grid element, so a handler on this.el would never see them.
+      this.el.addEventListener("contextmenu", this._onContextMenu);
+      this.root.addEventListener("click", this._onCtxClick);
+      this.root.addEventListener("keydown", this._onCtxKeydown);
 
       this._presencePing();
     },
@@ -835,10 +923,33 @@
           this.el.focus({ preventScroll: true });
         }
       }
+      // A right-click just opened the context menu — focus its first item and
+      // clamp it inside the viewport so it never spills off a screen edge.
+      if (this._ctxWantFocus) {
+        this._ctxWantFocus = false;
+        this._focusAndClampCtxMenu();
+      }
       // The server re-render reflects every cursor/selection change
       // (cell-click, nav, tab-switch) — derive the presence frame from the
       // fresh DOM; the throttle + dedupe keep remote-delta re-renders quiet.
       this._presencePing();
+    },
+
+    // Focus the first context-menu item and nudge the menu back on-screen if the
+    // cursor sat near a viewport edge. Browser-only geometry — the node harness
+    // has no getBoundingClientRect, so it bails after the (also-absent) focus.
+    _focusAndClampCtxMenu() {
+      if (!this._dom()) return;
+      const menu = this.root && this.root.querySelector && this.root.querySelector(".sheet-context-menu");
+      if (!menu) return;
+      const first = menu.querySelector && menu.querySelector("[role='menuitem']");
+      if (first && first.focus) first.focus();
+      if (!menu.getBoundingClientRect || typeof window === "undefined") return;
+      const rect = menu.getBoundingClientRect();
+      const vw = window.innerWidth || 0;
+      const vh = window.innerHeight || 0;
+      if (vw && rect.right > vw) menu.style.left = Math.max(0, vw - rect.width) + "px";
+      if (vh && rect.bottom > vh) menu.style.top = Math.max(0, vh - rect.height) + "px";
     },
 
     destroyed() {
@@ -851,6 +962,8 @@
         this.root.removeEventListener("input", this._onInput);
         this.root.removeEventListener("submit", this._onBarSubmit);
         this.root.removeEventListener("mousedown", this._onToolbarMousedown);
+        this.root.removeEventListener("click", this._onCtxClick);
+        this.root.removeEventListener("keydown", this._onCtxKeydown);
       }
       if (this._menuEl && this._menuEl.remove) this._menuEl.remove();
       // Client-injected formula-UX chrome outlives morphdom on the ancestor
@@ -1574,6 +1687,24 @@
         c = Math.floor((c - 1) / 26);
       }
       return s;
+    },
+
+    // Paste text read from the OS clipboard by the context-menu "Paste" item —
+    // the same parse + cell-cap preflight + push tail as the Cmd+V handler
+    // (_onPaste), minus the synchronous clipboard event the menu click can't
+    // carry. Our-own-copy formulas rebase; a foreign block falls back to values.
+    _ctxPaste(text) {
+      const rows =
+        (this._formulaClip && text === this._formulaClip.sig &&
+          this._formulaPasteGrid(this._formulaClip)) ||
+        this._tsvParse(text);
+      let cells = 0;
+      for (let i = 0; i < rows.length; i++) cells += rows[i].length;
+      if (cells > this._pasteCellCap) {
+        this.pushEventTo(this.el, "paste-too-large", { cells: cells });
+        return;
+      }
+      this.pushEventTo(this.el, "paste", { rows: rows });
     },
 
     // Selection (server marks every selected td with .sheet-sel, the active

@@ -661,7 +661,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         %{"op" => "clear_cell", "tab" => socket.assigns.tab, "ref" => ref}
       end
 
-    {:noreply, send_ops(socket, ops)}
+    # menu: nil closes an open context menu when Clear is chosen from it (and is
+    # a harmless no-op on the Delete/Backspace keyboard path).
+    {:noreply, socket |> assign(menu: nil) |> send_ops(ops)}
   end
 
   # Fill down/right (Ctrl+D / Ctrl+R): the selection's first row (down) or
@@ -1004,6 +1006,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("menu-close", _params, socket) do
     {:noreply, assign(socket, menu: nil)}
+  end
+
+  # Right-click cell context menu (SF context-menu). The JS contextmenu hook
+  # re-anchors the selection (if the click landed outside it) via the existing
+  # cell-click path, then pushes this to open the floating menu at the cursor.
+  # x/y are viewport coordinates — the menu renders position:fixed and the hook
+  # viewport-clamps it in updated(). Rides the SAME @menu assign as the header
+  # menus: the {:cell, x, y} variant renders the floating menu, and every
+  # existing `menu: nil` reset (menu-close, rowcol-key, clear-selection,
+  # cell-click, nav, tab-switch…) dismisses it for free.
+  def handle_event("cell-menu-open", %{"x" => x, "y" => y}, socket) do
+    {:noreply, assign(socket, menu: {:cell, to_int(x), to_int(y)})}
   end
 
   def handle_event("rowcol-insert", %{"kind" => kind, "at" => at, "where" => where}, socket) do
@@ -2373,6 +2387,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     end
   end
 
+  # Inline position for the right-click context menu. x/y are viewport coords
+  # (position:fixed); the JS hook re-clamps against the real menu rect on open.
+  defp cell_menu_style({:cell, x, y}), do: "position: fixed; left: #{x}px; top: #{y}px; z-index: 20;"
+  defp cell_menu_style(_), do: nil
+
   # The presence overlay — absolutely positioned boxes inside .sheet-scroll,
   # painting cursor outlines (inset shadow + name tag) and selection rects
   # (translucent fill) OVER the table without ever touching its assigns.
@@ -2948,6 +2967,35 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             sels={@peer_sels}
           />
         </div>
+      </div>
+
+      <%!-- Right-click cell context menu (SF context-menu). Edit-only; the JS
+            contextmenu hook sets the @menu {:cell, x, y} variant and positions
+            it at the cursor (position:fixed + a viewport clamp in updated()). A
+            SIBLING of the grid-wrap so the hook's root-bound click/keydown
+            listeners can reach its items. Dismissal: click-away (phx-click-away)
+            + Escape (the hook pushes menu-close and refocuses the grid). Every
+            item reuses an EXISTING op — cut/copy/paste ride the OS clipboard
+            client-side (data-menu-action, bp-sheet-grid.js), clear/insert/delete
+            are the same phx-click server events the keyboard path calls. --%>
+      <div
+        :if={not @read_only and match?({:cell, _, _}, @menu)}
+        class="sheet-context-menu"
+        role="menu"
+        aria-label="Cell actions"
+        style={cell_menu_style(@menu)}
+        phx-click-away="menu-close"
+        phx-target={@myself}
+        data-test-id="sheet-context-menu"
+      >
+        <button type="button" role="menuitem" data-menu-action="cut" data-test-id="sheet-ctx-cut">Cut</button>
+        <button type="button" role="menuitem" data-menu-action="copy" data-test-id="sheet-ctx-copy">Copy</button>
+        <button type="button" role="menuitem" data-menu-action="paste" data-test-id="sheet-ctx-paste">Paste</button>
+        <button type="button" role="menuitem" phx-click="clear-selection" phx-target={@myself} data-test-id="sheet-ctx-clear">Clear</button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-row">Insert row</button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-row">Delete row</button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-col">Insert column</button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-col">Delete column</button>
       </div>
 
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving

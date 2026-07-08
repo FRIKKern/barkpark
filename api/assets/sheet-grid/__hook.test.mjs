@@ -2456,6 +2456,122 @@ check("copy with an empty selection clears the formula clip (a later stray paste
   assert.deepEqual(h._pushed, [{ event: "paste", payload: { rows: [["zzz-not-our-sig"]] } }]);
 });
 
+// ── right-click context menu (SF context-menu) ──────────────────────────────
+//
+// contextmenu on a cell suppresses the native browser menu, re-anchors the
+// selection if the click landed outside it, then pushes cell-menu-open with the
+// cursor's viewport coords. The menu's cut/copy/paste items ride the OS
+// clipboard client-side (clear/insert/delete are phx-click server events).
+
+// A contextmenu event whose target resolves to a cell td (no classList → the
+// cell is NOT in the current selection, so the handler re-anchors).
+function ctxEvent(ref, { clientX = 120, clientY = 80 } = {}) {
+  const t = td({ ref });
+  return {
+    clientX,
+    clientY,
+    target: t,
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+}
+
+// A menu-action button (Cut/Copy/Paste); closest(".sheet-context-menu [data-menu-action]") self.
+function menuActionEvent(action) {
+  const btn = { dataset: { menuAction: action } };
+  btn.closest = (sel) => (sel === ".sheet-context-menu [data-menu-action]" ? btn : null);
+  return { target: btn };
+}
+
+check("right-click outside the selection re-anchors, then opens the menu at the cursor", () => {
+  const h = mountHook();
+  const e = ctxEvent("C3", { clientX: 210, clientY: 140 });
+  h.el.dispatch("contextmenu", e);
+  assert.equal(e.prevented, true); // native browser menu suppressed
+  assert.deepEqual(h._pushed, [
+    { event: "cell-click", payload: { ref: "C3", shift: false } },
+    { event: "cell-menu-open", payload: { x: 210, y: 140 } },
+  ]);
+});
+
+check("right-click INSIDE a multi-cell selection keeps it (no re-anchor)", () => {
+  const h = mountHook();
+  const t = td({ ref: "B2" });
+  t.classList = { contains: (c) => c === "sheet-sel" };
+  const e = { clientX: 40, clientY: 40, target: t, preventDefault() {} };
+  h.el.dispatch("contextmenu", e);
+  assert.deepEqual(h._pushed, [{ event: "cell-menu-open", payload: { x: 40, y: 40 } }]);
+});
+
+check("right-click riding an open cell draft carries it as commit (no silent loss)", () => {
+  const h = mountHook();
+  const inp = { value: "half-typed" };
+  inp.closest = (sel) => (sel === ".sheet-cell-input" ? inp : null);
+  h.el._input = inp;
+  h.el.dispatch("contextmenu", ctxEvent("D4"));
+  assert.deepEqual(h._pushed.filter((p) => p.event === "cell-click"), [
+    { event: "cell-click", payload: { ref: "D4", shift: false, commit: "half-typed" } },
+  ]);
+});
+
+check("right-click off any cell (closest → null) opens nothing", () => {
+  const h = mountHook();
+  h.el.dispatch("contextmenu", { target: { closest: () => null, matches: () => false }, preventDefault() {} });
+  assert.deepEqual(h._pushed, []);
+});
+
+check("context-menu Copy writes nothing to the server, just closes the menu", () => {
+  const h = mountHook();
+  h.el._sel = [td({ r: "1", c: "1", v: "x" })];
+  h.root.dispatch("click", menuActionEvent("copy"));
+  assert.deepEqual(h._pushed, [{ event: "menu-close", payload: {} }]);
+});
+
+check("context-menu Cut clears the selection then closes the menu", () => {
+  const h = mountHook();
+  h.el._sel = [td({ r: "1", c: "1", v: "x" })];
+  h.root.dispatch("click", menuActionEvent("cut"));
+  assert.deepEqual(h._pushed, [
+    { event: "clear-selection", payload: {} },
+    { event: "menu-close", payload: {} },
+  ]);
+});
+
+check("Escape inside the context menu pushes menu-close + preventDefault", () => {
+  const h = mountHook();
+  const menu = { querySelectorAll: () => [] };
+  const item = { closest: (sel) => (sel === ".sheet-context-menu" ? menu : null) };
+  const e = keydown("Escape");
+  e.target = item;
+  h.root.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.deepEqual(h._pushed, [{ event: "menu-close", payload: {} }]);
+});
+
+check("ArrowDown inside the context menu moves focus to the next item (roving)", () => {
+  const h = mountHook();
+  let focused = null;
+  const items = [
+    { getAttribute: () => "menuitem", focus() { focused = "a"; } },
+    { getAttribute: () => "menuitem", focus() { focused = "b"; } },
+  ];
+  const menu = { querySelectorAll: (sel) => (sel === "[role='menuitem']" ? items : []) };
+  const e = keydown("ArrowDown");
+  e.target = Object.assign(items[0], { closest: (sel) => (sel === ".sheet-context-menu" ? menu : null) });
+  h.root.dispatch("keydown", e);
+  assert.equal(e.prevented, true);
+  assert.equal(focused, "b"); // moved from item 0 → item 1
+  assert.deepEqual(h._pushed, []); // focus move is client-only
+});
+
+check("a click NOT on a menu-action button pushes nothing (no interference)", () => {
+  const h = mountHook();
+  h.root.dispatch("click", { target: { closest: () => null } });
+  assert.deepEqual(h._pushed, []);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
