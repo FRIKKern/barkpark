@@ -111,18 +111,25 @@ func (stageRenderer) Render(b Block, ctx RenderCtx) []string {
 }
 
 // ── card ─────────────────────────────────────────────────────────────────────
-// A rounded-border box holding up to four named slots. `title` and `body` slots
-// stack (their element blocks render straight through the registry); `media` and
-// `action` slots get a muted label line above their recursed content. Each slot
-// value is either a single block map or an array of block maps (element blocks
-// like paragraph/heading), recursed via reg.Render at the box's inner width.
-// Below MinWidth the border is dropped and the slots render flat. No non-empty
-// slot → one blank line. The card holds a Registry back-reference (like section
-// / figure) so arbitrary slot content nests without a retained tree.
+// A rounded-border box holding up to four named slots rendered in model-B order:
+// media, title, body, action. Each slot's element blocks render straight through
+// the registry with NO per-slot label chrome (model B, #1529, dropped the muted
+// `media`/`action` caption lines). A slot value is either a single block map or
+// an array of block maps (element blocks like paragraph/heading), recursed via
+// reg.Render at the box's inner width. The MEDIA slot additionally fast-paths
+// imagery: a typed `type:"image"` child renders as the image box, and a typeless
+// `{src,alt}` media element is coerced to `type:"image"` (the Elixir
+// normalize_media_element seam, components.ex) so it fast-paths instead of
+// degrading to the unknown-block box. The border foreground is tinted by the
+// card's flat `tone` (info|ok|warn|danger); missing/other → today's neutral rule
+// color. Below MinWidth the border is dropped and the slots render flat. No
+// non-empty slot → one blank line. The card holds a Registry back-reference (like
+// section / figure) so arbitrary slot content nests without a retained tree.
 type cardRenderer struct{ reg *Registry }
 
 func (cr cardRenderer) Render(b Block, ctx RenderCtx) []string {
 	slots := cardSlots(b.Attrs)
+	tone := attrStr(b.Attrs, "tone")
 
 	const chrome = 4 // rounded border (2) + padding (2)
 	inner := ctx.Width - chrome
@@ -134,22 +141,21 @@ func (cr cardRenderer) Render(b Block, ctx RenderCtx) []string {
 	childCtx := ctx.Deeper().WithWidth(clampWidth(childWidth))
 
 	var lines []string
-	renderSlot := func(key, label string) {
+	renderSlot := func(key string, coerceImage bool) {
 		blocks := slotBlocks(slots[key])
-		if len(blocks) == 0 {
-			return
-		}
-		if label != "" {
-			lines = append(lines, childCtx.Theme.FieldLabel.Render(label))
+		if coerceImage {
+			coerceMediaImages(blocks)
 		}
 		for _, blk := range blocks {
 			lines = append(lines, cr.reg.Render(blk, childCtx)...)
 		}
 	}
-	renderSlot("title", "")
-	renderSlot("body", "")
-	renderSlot("media", "media")
-	renderSlot("action", "action")
+	// Model-B slot order (components.ex:355-358; portable-doc.tsx:934): media
+	// first, then title, body, action. No label chrome on any slot.
+	renderSlot("media", true)
+	renderSlot("title", false)
+	renderSlot("body", false)
+	renderSlot("action", false)
 
 	if len(lines) == 0 {
 		return []string{""}
@@ -161,11 +167,30 @@ func (cr cardRenderer) Render(b Block, ctx RenderCtx) []string {
 	body := lipgloss.JoinVertical(lipgloss.Left, lines...)
 	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ruleColor(ctx.Theme)).
+		BorderForeground(cardToneColor(ctx.Theme, tone)).
 		Padding(0, 1).
 		Width(clampWidth(inner)).
 		Render(body)
 	return strings.Split(card, "\n")
+}
+
+// coerceMediaImages implements the Elixir normalize_media_element seam
+// (components.ex:386-388) for the terminal: a media-slot child that is a bare
+// `{src,alt}` element with no explicit `type` is retyped to "image" so the
+// registry routes it to imageRenderer's fast-path box instead of degrading to
+// the unknown-block fallback. Typed children (including an explicit
+// `type:"image"`) are left untouched. Scoped to the MEDIA slot only — never a
+// global coercion. Mutates in place (blocks are freshly decoded per render).
+func coerceMediaImages(blocks []Block) {
+	for i := range blocks {
+		if blocks[i].Type != "" {
+			continue
+		}
+		if _, ok := blocks[i].Attrs["src"]; ok {
+			blocks[i].Type = "image"
+			blocks[i].Attrs["type"] = "image"
+		}
+	}
 }
 
 // cardSlots reads the `slots` object off a card block. Missing/wrong-typed →

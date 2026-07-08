@@ -1,0 +1,21 @@
+╭────────────────────────────────────╮
+│ ╭───────────────────────────────── │
+│ ─╮                                 │
+│ │ 🖼 A card hero image · 640×360    │
+│ │                                  │
+│ │ (view in Studio)                 │
+│ │                                  │
+│ ╰───────────────────────────────── │
+│ ─╯                                 │
+│ Warn-toned card with an image      │
+│ media                              │
+│ slot                               │
+│ This card exercises the model-B    │
+│ shape: media first, a tone-tinted  │
+│ border, and the image fast-path    │
+│ box                                │
+│ that a paragraph media slot lacks. │
+│  Open the card                     │
+│ (https://barkpark.cloud/papers/car │
+│ d)                                 │
+╰────────────────────────────────────╯
