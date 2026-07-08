@@ -3447,10 +3447,16 @@
   // deploy (queued/building/pushing), collapsed for a terminal one.
   var deployConsoleOpen = {};
 
-  function loadSite(id) {
+  // opts.quiet skips the full-body "Loading site…" spinner. Used after the
+  // optimistic post-promote repaint: the reconciled list is already on screen,
+  // so wiping #site-body with a spinner would (a) throw the optimistic paint
+  // away before a single frame and (b) flash the whole detail view. Quiet keeps
+  // the optimistic list visible until the refetch resolves and repaints to
+  // server truth.
+  function loadSite(id, opts) {
     currentSiteId = id;
     var box = $("#site-body");
-    box.innerHTML = '<div class="loading">Loading site&hellip;</div>';
+    if (!(opts && opts.quiet)) box.innerHTML = '<div class="loading">Loading site&hellip;</div>';
     Promise.all([
       api("GET", "/v1/sites/" + encodeURIComponent(id)),
       api("GET", "/v1/sites/" + encodeURIComponent(id) + "/deployments"),
@@ -3820,8 +3826,12 @@
           if (optimistic && listBox) {
             var rec = promoteReconcile(deployments, optimistic);
             renderDeployList(listBox, site, rec.list, rec.currentId);
+            // Quiet refetch: the optimistic list is already painted, so don't
+            // blow it away with a spinner — let it stand until server truth lands.
+            loadSite(site.id, { quiet: true });
+          } else {
+            loadSite(site.id);
           }
-          loadSite(site.id);
         }
         return;
       }

@@ -253,6 +253,31 @@ const EXPECTATIONS = {
     container: "site-body",
     includes: ['data-kind="redeploy"', ">Roll back to this<"],
   },
+  // Rollback endgame — the promote's own three states (charter wave-4 owed).
+  // IN-FLIGHT: a Building row streams on TOP while the still-live deploy keeps
+  // the Current chip (a queued build serves no traffic yet). The exact skeleton
+  // the optimistic promoteReconcile paints — frozen for the eye.
+  "promote-in-flight": {
+    what: "the new build streams on top; Current stays on the live deploy",
+    container: "site-body",
+    includes: ["dep-pill dep-building", "dep-current", ">Redeploy<", ">Roll back to this<"],
+  },
+  // RETRY: renders the rollback skeleton; the transient-500 → "Try again"
+  // (retry recovery) morph is click-driven (covered by the vm unit tests).
+  "promote-retry": {
+    what: "the deploy rows; the transient failure → Try again is click-driven",
+    container: "site-body",
+    includes: ['data-kind="redeploy"', ">Roll back to this<"],
+  },
+  // MIGRATED: the promoted build went live — the Current chip MOVED to it; the
+  // old current is now a prior live deploy offering "Roll back to this" (two
+  // rollbackable live rows now, no Building row).
+  "promote-migrated": {
+    what: "the Current chip has migrated to the now-live deploy",
+    container: "site-body",
+    includes: ["dep-current", ">Redeploy<", ">Roll back to this<"],
+    excludes: ["dep-pill dep-building"],
+  },
   // Invitation accept: each committed terminal renders its designed card with
   // exactly one [data-invite-act] action (esc() turns ' into &#39; in copy).
   "invite-joined": {
