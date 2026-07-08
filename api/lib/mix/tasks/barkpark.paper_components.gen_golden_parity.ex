@@ -177,15 +177,23 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   }
 
   # task-detail: the "open a task and SEE it" card. The projected sections are the
-  # SHARED ⊆ (meta · criteria · labels) every surface renders in this order; the
-  # `timeline` section is Elixir-only (Go's taskDetailRenderer omits it — see
-  # au-w5-task-detail-timeline-parity) so the input carries NO timeline.
+  # SHARED ⊆ (meta · timeline · criteria · labels) every surface renders in this
+  # order. The `timeline` section is now COVERED on all three surfaces (Elixir
+  # detail_timeline/1, Go detailTimeline #1509, web renderBlock) — so the input
+  # carries a lifecycle timeline whose glyph+label cells realize on every surface
+  # (au-w5-task-detail-timeline-parity). Labels are whitespace-clean so the derived
+  # projection text is byte-stable.
   @task_detail_input %{
     "type" => "task-detail",
     "task" => %{
       "title" => "Wire the harness",
       "status" => "in_progress",
       "priority" => "1",
+      "timeline" => [
+        %{"status" => "open", "label" => "Filed"},
+        %{"status" => "in_progress", "label" => "Building"},
+        %{"status" => "done", "label" => "Shipped"}
+      ],
       "criteria" => [
         %{"text" => "Gen emits fixtures", "met" => true},
         %{"text" => "Web realizes the projection", "met" => false}
@@ -487,15 +495,22 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   end
 
   # task-detail: title + the ORDERED present-section spine (the SHARED ⊆ every
-  # surface renders) + the criteria rollup. Section presence mirrors the emitter's
-  # conditional sections; `timeline` is Elixir-only so it is neither in the input
-  # nor the projection (au-w5-task-detail-timeline-parity).
+  # surface renders) + the ordered timeline entries + the criteria rollup. Section
+  # presence mirrors the emitter's conditional sections; `timeline` is now COVERED
+  # on all three surfaces (au-w5-task-detail-timeline-parity) — present iff the
+  # task carries timeline segments, drawn AFTER meta and BEFORE criteria (the
+  # emitter's `detail_timeline` slot in `task_detail_html/1`). Each entry's role is
+  # derived through the SAME `StatusVocab.role_for_status` the emitter's `role_of`
+  # uses (so a manifest edit re-derives here); `glyph_role` == role, exactly what
+  # `glyph_html(role)` keys off.
   defp task_detail_projection(%{"task" => t}) when is_map(t) do
     crit = t |> Map.get("criteria") |> as_list()
+    timeline = t |> Map.get("timeline") |> as_list()
 
     sections =
       [
         {"meta", true},
+        {"timeline", timeline != []},
         {"criteria", crit != []},
         {"labels", (t |> Map.get("labels") |> as_list()) != []}
       ]
@@ -508,8 +523,16 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       "container_role" => "task-detail",
       "title" => t |> Map.get("title") |> to_string(),
       "sections" => sections,
+      "timeline" => Enum.map(timeline, &timeline_entry/1),
       "criteria" => %{"met" => met, "total" => length(crit)}
     }
+  end
+
+  # One timeline cell: its ladder role (derived, never hand-typed) doubling as the
+  # glyph-role, plus the plain label text every surface prints.
+  defp timeline_entry(seg) do
+    role = seg |> Map.get("status") |> StatusVocab.role_for_status()
+    %{"role" => role, "glyph_role" => role, "label" => seg |> Map.get("label") |> to_string()}
   end
 
   # roadmap: the structural lane list (title · ladder-role · phase flag) + the

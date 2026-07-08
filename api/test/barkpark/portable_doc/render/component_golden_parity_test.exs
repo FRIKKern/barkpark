@@ -216,7 +216,7 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     assert html =~ ~s|<div class="bp-pnode__d">#{ex["detail"]}</div>|
   end
 
-  test "task-detail: the emitter realizes the projection (title · ordered sections · criteria)" do
+  test "task-detail: the emitter realizes the projection (title · ordered sections · timeline · criteria)" do
     fx = decode!(@api_dir, "task-detail")
     html = Components.task_detail_html(fx["input"])
     ex = fx["expected"]
@@ -229,11 +229,24 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     # The projected sections realize as their marker classes, IN the projected order.
     marker = %{
       "meta" => ~s|class="bp-tdetail__meta"|,
+      "timeline" => ~s|class="bp-tdetail__timeline"|,
       "criteria" => ~s|class="bp-tdetail__crit"|,
       "labels" => ~s|class="bp-tdetail__labels"|
     }
 
     assert_ordered(html, Enum.map(ex["sections"], &Map.fetch!(marker, &1)))
+
+    # Timeline is now COVERED (au-w5-task-detail-timeline-parity): one glyph+label
+    # cell per ordered segment, each keyed to its derived glyph-role.
+    timeline = ex["timeline"]
+    assert timeline != [], "projection floor: task-detail fixture carries no timeline"
+    assert occurrences(html, ~s|class="bp-tl__seg"|) == length(timeline),
+           "rendered timeline cell count diverged from the projection"
+
+    for seg <- timeline do
+      assert html =~ ~s|bp-g--#{seg["glyph_role"]}|, "timeline glyph-role #{seg["glyph_role"]} missing"
+      assert html =~ ~s|<span>#{seg["label"]}</span>|, "timeline label #{seg["label"]} missing"
+    end
   end
 
   test "roadmap: the emitter realizes the projection (scale axis · per-lane title/role/phase)" do

@@ -362,11 +362,19 @@ test("web stage RENDER realizes kind · title · detail", () => {
   present(html, `>${exp.detail}</p>`, "stage detail");
 });
 
-test("web task-detail RENDER realizes title + criteria tally", () => {
+test("web task-detail RENDER realizes title + timeline + criteria tally", () => {
   const input = loadFixture("task-detail").input;
   const html = renderHtml(input);
   const exp = loadFixture("task-detail").expected as TaskDetailProjection;
   present(html, `>${exp.title}</p>`, "task-detail title");
+  // Timeline is now COVERED: every ordered cell's label realizes in the render
+  // (a dropped/renamed timeline cell reds here even while the projector matches).
+  if (exp.sections.includes("timeline")) {
+    assert.ok(exp.timeline.length > 0, "timeline section present but no entries");
+    for (const seg of exp.timeline) {
+      present(html, `>${seg.label}</span>`, `task-detail timeline label ${seg.label}`);
+    }
+  }
   if (exp.sections.includes("criteria")) {
     present(
       html,

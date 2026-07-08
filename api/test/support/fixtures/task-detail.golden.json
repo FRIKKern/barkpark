@@ -8,8 +8,26 @@
     },
     "sections": [
       "meta",
+      "timeline",
       "criteria",
       "labels"
+    ],
+    "timeline": [
+      {
+        "glyph_role": "open",
+        "label": "Filed",
+        "role": "open"
+      },
+      {
+        "glyph_role": "progress",
+        "label": "Building",
+        "role": "progress"
+      },
+      {
+        "glyph_role": "done",
+        "label": "Shipped",
+        "role": "done"
+      }
     ],
     "title": "Wire the harness"
   },
@@ -31,6 +49,20 @@
       ],
       "priority": "1",
       "status": "in_progress",
+      "timeline": [
+        {
+          "label": "Filed",
+          "status": "open"
+        },
+        {
+          "label": "Building",
+          "status": "in_progress"
+        },
+        {
+          "label": "Shipped",
+          "status": "done"
+        }
+      ],
       "title": "Wire the harness"
     },
     "type": "task-detail"
