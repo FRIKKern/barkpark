@@ -231,3 +231,53 @@ func TestTaskGlyphsMatchLadder(t *testing.T) {
 		t.Errorf("in_progress role glyph drifted: got %q want ⠋", g)
 	}
 }
+
+// TestTaskDetailTimeline is the au-w5 content-parity guard: the task-detail
+// renderer emits the lifecycle timeline (one glyph+label cell per transition,
+// joined by a dim ` → ` arrow) mirroring the Elixir emitter's detail_timeline/1
+// — and emits NOTHING when the task carries no `timeline` key (conditional-nil,
+// which keeps timeline-less fixtures like sample_m6 byte-frozen). Asserting the
+// specific glyphs + arrow (not mere non-emptiness) makes both halves load-bearing.
+func TestTaskDetailTimeline(t *testing.T) {
+	reg := testRegistry()
+
+	// With a timeline: the row carries each ladder glyph, its label, and the
+	// dim arrow separator between cells.
+	withTL := renderBlock(reg, Block{Type: "task-detail", Attrs: map[string]any{"task": map[string]any{
+		"title": "has a timeline",
+		"timeline": []any{
+			map[string]any{"status": "open", "label": "Filed"},
+			map[string]any{"status": "ready", "label": "Groomed"},
+			map[string]any{"status": "in_progress", "label": "Claimed"},
+			map[string]any{"status": "blocked", "label": "Waiting"},
+			map[string]any{"status": "done", "label": "Shipped"},
+		},
+	}}}, 120)
+	if !strings.Contains(withTL, "→") {
+		t.Fatalf("timeline row missing the ` → ` arrow separator, got:\n%s", withTL)
+	}
+	for _, want := range []string{
+		"○ Filed", "○ Groomed", "⠋ Claimed", "! Waiting", "✓ Shipped",
+	} {
+		if !strings.Contains(withTL, want) {
+			t.Errorf("timeline row missing glyph+label %q, got:\n%s", want, withTL)
+		}
+	}
+
+	// Without a timeline: no arrow row at all (conditional-nil). A task-detail
+	// uses ` → ` nowhere else, so its absence proves the timeline emitted nothing.
+	noTL := renderBlock(reg, Block{Type: "task-detail", Attrs: map[string]any{"task": map[string]any{
+		"title":       "no timeline",
+		"description": "just a description, no lifecycle history",
+	}}}, 120)
+	if strings.Contains(noTL, "→") {
+		t.Errorf("task-detail without a `timeline` key must emit no arrow row, got:\n%s", noTL)
+	}
+
+	// And the underlying helper returns nil (not an empty-string line) when the
+	// key is absent — the precise conditional-nil contract.
+	ctx := RenderCtx{Width: 120, Theme: DarkTheme(), Profile: NoColor}
+	if got := detailTimeline(map[string]any{"title": "x"}, ctx, 120); got != nil {
+		t.Errorf("detailTimeline with no `timeline` key must return nil, got %#v", got)
+	}
+}
