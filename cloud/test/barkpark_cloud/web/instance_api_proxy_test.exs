@@ -495,7 +495,10 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     test "coded 404 (webhook_not_found) on deliveries → 502 webhook_gone, refresh hint" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}})))
+
+      program(
+        ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}}))
+      )
 
       conn =
         call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries",
@@ -530,7 +533,10 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     test "coded 404 (webhook_not_found) on rotate → 502 webhook_gone, no audit" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}})))
+
+      program(
+        ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}}))
+      )
 
       conn =
         call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: session_token(user))
