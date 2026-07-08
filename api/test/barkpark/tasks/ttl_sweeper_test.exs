@@ -126,7 +126,10 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
       assert reloaded.content["lifecycle_status"] == "open"
       assert reloaded.content["claim"]["epoch"] == 2
       assert reloaded.content["claim"]["worker"] == nil
-      assert reloaded.content["assignee"] == nil
+      # A TTL reap releases the LEASE, not the ASSIGNMENT: content.assignee
+      # survives so the board keeps showing who owns the task while the
+      # (slow / crashed) worker is off it. Only claim.worker is cleared.
+      assert reloaded.content["assignee"] == "worker-A"
       # The previous worker is preserved on the claim map for audit.
       assert reloaded.content["claim"]["previous_worker"] == "worker-A"
       assert is_binary(reloaded.content["claim"]["expired_at"])
@@ -176,8 +179,9 @@ defmodule Barkpark.Tasks.TtlSweeperTest do
 
       _ = age_claim!(claimed, 600)
 
+      original_ttl = Application.get_env(:barkpark, :task_lease_ttl_seconds)
       Application.put_env(:barkpark, :task_lease_ttl_seconds, 1)
-      on_exit(fn -> Application.put_env(:barkpark, :task_lease_ttl_seconds, 300) end)
+      on_exit(fn -> Application.put_env(:barkpark, :task_lease_ttl_seconds, original_ttl) end)
 
       assert {:ok, %{swept: 1, skipped: 0}} = TtlSweeper.perform(%Oban.Job{})
 
