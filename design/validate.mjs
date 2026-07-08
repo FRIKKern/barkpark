@@ -121,9 +121,14 @@ ok(Array.isArray(life.in_progress && life.in_progress.frames) && life.in_progres
 if (Array.isArray(life.in_progress && life.in_progress.frames)) {
   life.in_progress.frames.forEach((f, i) => ok(CP.test(f), `lifecycle.in_progress.frames[${i}] must be a codepoint, got ${JSON.stringify(f)}`));
 }
-// done teal must NOT equal status.ok green — the deliberate distinction
-ok(!(status.ok && life.done && life.done.color && life.done.color.light === status.ok.light),
-  "lifecycle.done color must stay distinct from status.ok (teal vs green)");
+// done teal must stay the deliberate teal literals, NOT the status.ok green.
+// (status.ok is HSL channels and done.color is hex, so a cross-format equality
+// would be vacuously false and never fire — pin the known teal hex instead so a
+// regression that overwrites done with the ok green is actually caught.)
+ok(life.done && life.done.color && life.done.color.light === "#0d9488",
+  `lifecycle.done.color.light must stay teal #0d9488 (distinct from status.ok green), got ${JSON.stringify(life.done && life.done.color && life.done.color.light)}`);
+ok(life.done && life.done.color && life.done.color.dark === "#2dd4bf",
+  `lifecycle.done.color.dark must stay teal #2dd4bf (distinct from status.ok green), got ${JSON.stringify(life.done && life.done.color && life.done.color.dark)}`);
 
 // --- report ----------------------------------------------------------------
 if (errors.length) {
