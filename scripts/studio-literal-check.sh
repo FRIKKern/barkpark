@@ -43,19 +43,13 @@ web = sys.argv[1]
 
 # Files skipped entirely, each with the lead-approved reason.
 EXEMPT = {
-    # Q2 — self-contained login layout, own <style>, root tokens don't cascade in.
-    "controllers/session_html.ex",
-    # Q2-analogous — standalone pages rendered WITHOUT the Studio layout, so the
-    # emitted :root tokens never cascade; they carry their own scoped palette.
-    "controllers/error_html.ex",
-    "controllers/status_controller.ex",
-    # Q3 — categorical palettes. presence_state.ex + sheet_grid.ex are now
-    # TOKENIZED: they consume the emitted VALUE lists from
-    # BarkparkWeb.Studio.TokensGen (presence_palette/sheet_cf_backgrounds/
-    # sheet_tab_colors) — categorical hex kept as data, no inline literal — so
-    # they are no longer exempt. sheets.html.heex is a self-contained reader page
-    # (role/info-blue in its own <style>) tracked by a separate follow-up.
-    "layouts/sheets.html.heex",
+    # NOTE: the four self-contained pages (session_html.ex login, error_html.ex,
+    # status_controller.ex, sheets.html.heex reader) were REMOVED from this list
+    # in au-w2-login-layout-tokens — each now de-literalizes onto design/tokens.json
+    # via its OWN page-scoped BEGIN/END GENERATED block (color.authButton /
+    # errorPage / statusChrome / readerInfo), and the status health-severity DATA
+    # tones moved to BarkparkWeb.Studio.TokensGen.status_health/0. They are SCANNED.
+    #
     # The GENERATED categorical token artifact itself — design/emit.mjs owns
     # these hex value lists (the single source presence_state.ex + sheet_grid.ex
     # now consume). Analogous to the BEGIN/END GENERATED CSS block exemption.
@@ -103,6 +97,19 @@ def scan(path, rel):
     # stripped copy (so hex in a /* … */ note never trips); the allow-annotation
     # and the region markers live in comments, so they're read from raw_lines.
     s = GEN_BLOCK.sub(blank, raw)
+    # Neutralise the CSS block-comment delimiters (/* … */) INSIDE single-line
+    # double-quoted string literals BEFORE the block-comment pass. Otherwise a
+    # `/*` living in an ordinary string — e.g. `embed_templates "session_html/*"`
+    # — is misread as a real comment OPENER and the DOTALL strip below blanks
+    # everything down to the next `*/`, silently exempting the intervening lines
+    # from the scan. We only rewrite the two-char delimiters (length-preserving),
+    # so a real inline literal like `style="color:#ff0000"` (no /* inside) is
+    # untouched and still detected, and a genuine CSS `/* … */` comment — which
+    # lives in bare heredoc/template text, not inside a "…" string — is left for
+    # the block-comment pass to strip normally.
+    def _neuter_str_delims(m):
+        return m.group(0).replace("/*", "/ ").replace("*/", " /")
+    s = re.sub(r'"[^"\n]*"', _neuter_str_delims, s)
     s = re.sub(r"/\*.*?\*/", blank, s, flags=re.S)
     s = re.sub(r"<!--.*?-->", blank, s, flags=re.S)
     s = re.sub(r"<%!--.*?--%>", blank, s, flags=re.S)

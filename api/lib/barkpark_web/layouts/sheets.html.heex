@@ -40,6 +40,15 @@
         --paper-accent:   #d97a5f;
       }
     }
+    /* Info-blue link + focus ring (color.readerInfo): WCAG-safe blue-600 on the
+       light parchment, lifting to info-role blue-500 on dark. --ring binds to
+       --info so the reader's focus rings stay blue. De-literalized onto
+       design/tokens.json via this page-scoped block; regenerate with
+       `node design/emit.mjs --write`, never hand-edit. */
+    /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+    :root { --info: #2563eb; --ring: var(--info); }
+    @media (prefers-color-scheme: dark) { :root { --info: #3b82f6; } }
+    /* END GENERATED: tokens */
     body {
       margin: 0; background: var(--paper-bg-deep); color: var(--paper-ink);
       font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Source Serif 4', serif;
@@ -85,7 +94,7 @@
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     .btn:hover { background: var(--bg-alt); }
-    .btn:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
+    .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .btn:disabled { opacity: 0.4; cursor: default; }
     .btn:disabled:hover { background: transparent; }
     .btn-ghost { border-color: transparent; color: var(--fg-dim, var(--fg)); }
@@ -102,7 +111,7 @@
        (root keys the same swap on data-theme). */
     .sheet-notice {
       display: flex; align-items: center; justify-content: space-between;
-      padding: 3px 12px; font-size: 12px; color: #b54708;
+      padding: 3px 12px; font-size: 12px; color: #b54708; /* lit-allow: warn-severity notice amber on the light parchment (dark twin below); bespoke amber-700, no exact reader token — out of this task's info-blue scope */
       background: rgba(247, 144, 9, 0.08); border-bottom: 1px solid var(--border);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
@@ -111,7 +120,7 @@
     }
     .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
     /* WCAG 2.4.7: visible keyboard-focus ring on the focusable grid wrapper. */
-    .sheet-grid-wrap:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
+    .sheet-grid-wrap:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     /* Visually-hidden polite SR status region (see the SheetGrid render). */
     .sheet-sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
     .sheet-scroll { flex: 1; overflow: auto; min-height: 0; }
@@ -136,12 +145,10 @@
     .sheet-rowhead { position: sticky; left: 0; z-index: 3; }
     .sheet-cell { background: transparent; }
     /* http(s) URL cells render as links in the read-only reader (mirrors the
-       Studio grid's display-time link detection). Light parchment base uses
-       #2563eb; the dark override lightens it below with the err rule. */
-    .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: #2563eb; text-decoration: underline; }
-    @media (prefers-color-scheme: dark) {
-      .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: #3b82f6; }
-    }
+       Studio grid's display-time link detection). Info-blue via --info: the
+       page-scoped token is already theme-tuned (blue-600 light / blue-500 dark),
+       so no dark override is needed. */
+    .sheet-cell.sheet-link-cell .sheet-cell-v, .sheet-cell .sheet-link { color: var(--info); text-decoration: underline; }
     .sheet-cell.sheet-err { color: #dc2626; font-weight: 600; }
     /* Dark parchment needs the lighter red to clear 4.5:1 (mirrors Studio). */
     @media (prefers-color-scheme: dark) {
@@ -183,7 +190,7 @@
       flex: none; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .sheet-tab:hover { background: var(--bg-accent, var(--bg-alt)); color: var(--fg); }
-    .sheet-tab:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: -2px; }
+    .sheet-tab:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .sheet-tab.is-active { border-color: var(--paper-accent); color: var(--fg); }
 
     /* ── Per-column FILTER funnel + editor (SF-AM4) ────────────────────────
@@ -210,7 +217,7 @@
     .sheet-filter-funnel:focus-visible,
     .sheet-filter-funnel.sheet-funnel-active { opacity: 0.85; }
     .sheet-filter-funnel.sheet-funnel-active { color: var(--paper-accent); opacity: 1; }
-    .sheet-filter-funnel:focus-visible { outline: 2px solid var(--ring, #3b82f6); outline-offset: 1px; }
+    .sheet-filter-funnel:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
     .sheet-filter-panel {
       top: calc(100% + 2px); left: 0; width: 220px; max-width: 92vw;
       padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
@@ -227,7 +234,7 @@
       background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
     }
     .sheet-filter-field > input:focus-visible, .sheet-filter-field > select:focus-visible {
-      outline: 2px solid var(--ring, #3b82f6); outline-offset: -1px;
+      outline: 2px solid var(--ring); outline-offset: -1px;
     }
     /* Light parchment base; the dark seal keys on prefers-color-scheme (the
        Studio twin keys the same swap on data-theme). */
@@ -239,7 +246,7 @@
 
     /* ── Print: unclip the grid, drop chrome, repeat column heads per page ─── */
     @media print {
-      body { background: #fff; }
+      body { background: #fff; } /* lit-allow: print reset — white paper, not a theme color */
       .bp-sheet-shell { max-width: none; padding: 0; }
       .sheet-reader { max-height: none; border: none; }
       .sheet-scroll { overflow: visible; }

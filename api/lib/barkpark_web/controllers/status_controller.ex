@@ -15,12 +15,16 @@ defmodule BarkparkWeb.StatusController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Status
+  alias BarkparkWeb.Studio.TokensGen
 
+  # Severity LABEL text only. The per-status health tone is DATA, looked up from
+  # BarkparkWeb.Studio.TokensGen.status_health/0 (design/tokens.json
+  # color.statusHealth) at render time — see page_html/0 + component_row/1.
   @labels %{
-    operational: {"All systems operational", "#16a34a"},
-    degraded: {"Degraded performance", "#d97706"},
-    partial_outage: {"Partial outage", "#ea580c"},
-    major_outage: {"Major outage", "#dc2626"}
+    operational: "All systems operational",
+    degraded: "Degraded performance",
+    partial_outage: "Partial outage",
+    major_outage: "Major outage"
   }
 
   # ── Public ────────────────────────────────────────────────────────────────────
@@ -87,7 +91,8 @@ defmodule BarkparkWeb.StatusController do
 
   defp page_html do
     health = Status.health()
-    {label, color} = Map.get(@labels, health.status, {"Unknown", "#6b7280"})
+    label = Map.get(@labels, health.status, "Unknown")
+    color = Map.get(TokensGen.status_health(), health.status, TokensGen.status_health_unknown())
     sla = Status.sla()
     incidents = Status.recent_incidents(20)
 
@@ -97,8 +102,16 @@ defmodule BarkparkWeb.StatusController do
     <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Barkpark — Status</title>
     <style>
-      :root { color-scheme: light dark; --bg:#fff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
+      :root { color-scheme: light dark; }
+      /* Self-contained page chrome — this page renders WITHOUT the Studio layout,
+         so the root tokens never cascade in. De-literalized onto design/tokens.json
+         (color.statusChrome) via the page-scoped block below; regenerate with
+         `node design/emit.mjs --write`, never hand-edit. The health-severity DATA
+         tones (inline style, below) are DATA from BarkparkWeb.Studio.TokensGen. */
+      /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+      :root { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
       @media (prefers-color-scheme: dark){ :root{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
+      /* END GENERATED: tokens */
       body{ margin:0; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
       .wrap{ max-width:760px; margin:0 auto; padding:2.5rem 1.25rem; }
       h1{ font-size:1.25rem; margin:0 0 1.5rem; }
@@ -137,7 +150,7 @@ defmodule BarkparkWeb.StatusController do
   end
 
   defp component_row(%{component: name, status: status}) do
-    {_, color} = Map.get(@labels, status, {"", "#6b7280"})
+    color = Map.get(TokensGen.status_health(), status, TokensGen.status_health_unknown())
 
     """
     <div class="row"><span>#{name |> to_string() |> String.capitalize()}</span>
