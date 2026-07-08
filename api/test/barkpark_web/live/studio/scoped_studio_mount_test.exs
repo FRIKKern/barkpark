@@ -579,6 +579,94 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       refute render_click(view, "new-document", %{"type" => "post"}) =~
                "Your access grant is read-only"
     end
+
+    # ── per-event write-scope narrowing (ag-enforcement-write-scope-narrowing) ──
+    # COMPLETENESS, not a safety fix. Before this: a PURELY sub-scoped write grant
+    # fails the workspace-level write check → the grantee falls to the read-only
+    # gate → can write NOWHERE (fail-closed OVER-restriction). The reachable case
+    # is a MULTI-GRANT grantee: Grant A (ws-wide READ) admits the mount — a lone
+    # project grant fails grant_read_ctx's bare-workspace check at the dead render
+    # — while Grant B (project-P READ+WRITE) must now let them write WITHIN
+    # project P and be DENIED everywhere else. Read-only grantees + members are
+    # unchanged (invariants (c)/(d)).
+
+    test "multi-grant sub-scoped write — a project-scoped write grant WRITES within its project",
+         %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {user, conn} = grantee_session(conn)
+      # Grant A: ws-wide READ (mount admission).
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+      # Grant B: project-P READ+WRITE — the sub-scope the old ws-level gate
+      # could not see, so it used to fall to the read-only gate (writes nowhere).
+      bind_grant!(ws_a, user, %{project_id: proj_a.id, capabilities: ["read", "write"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # LOAD-BEARING, NON-VACUOUS: the mutating event must REACH StudioLive's
+      # handler and PERSIST a row — assert the side-effect, not merely the
+      # absence of a flash. This FAILS before the per-event gate (the read-only
+      # gate halted every write → nothing persisted).
+      before_count = Repo.aggregate(Content.Document, :count)
+      html = render_click(view, "new-document", %{"type" => "post"})
+
+      assert Repo.aggregate(Content.Document, :count) > before_count
+      refute html =~ "Your access grant is read-only"
+      refute html =~ "outside your access grant"
+    end
+
+    test "multi-grant sub-scoped write — a write OUTSIDE the granted project is DENIED (out-of-scope, not read-only)",
+         %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      # A SECOND project in ws_a, reachable for MOUNT via Grant A's ws-wide read,
+      # but OUTSIDE Grant B's project-scoped write.
+      proj_a2 = create_project!(ws_a, "scoped-pa-write-out")
+
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+      bind_grant!(ws_a, user, %{project_id: proj_a.id, capabilities: ["read", "write"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a2))
+
+      before_count = Repo.aggregate(Content.Document, :count)
+      html = render_click(view, "new-document", %{"type" => "post"})
+
+      # NON-VACUOUS: assert the halt is for the RIGHT reason. The WRITE gate is
+      # attached (Grant B confers write SOMEWHERE in ws → not read-only), but P2
+      # is outside every write grant's ladder → the out-of-scope flash, NOT the
+      # read-only flash. Nothing persists.
+      assert html =~ "outside your access grant"
+      refute html =~ "Your access grant is read-only"
+      assert Repo.aggregate(Content.Document, :count) == before_count
+    end
+
+    test "invariant (c) — a read-only grantee (no write grant) is still halted by the read-only gate",
+         %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {user, conn} = grantee_session(conn)
+      # ONLY Grant A (ws-wide READ, no write) → has_write_grant? is false → the
+      # UNCHANGED read-only gate, never the per-event write gate.
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      before_count = Repo.aggregate(Content.Document, :count)
+      html = render_click(view, "new-document", %{"type" => "post"})
+
+      assert html =~ "Your access grant is read-only"
+      refute html =~ "outside your access grant"
+      assert Repo.aggregate(Content.Document, :count) == before_count
+    end
+
+    test "invariant (d) — a real member writes with NO gate (byte-identical: the event persists)",
+         %{member_conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # No grant gate of either kind is attached for a member; the write goes
+      # through exactly as before this arc — assert the persisted side-effect.
+      before_count = Repo.aggregate(Content.Document, :count)
+      html = render_click(view, "new-document", %{"type" => "post"})
+
+      refute html =~ "Your access grant is read-only"
+      refute html =~ "outside your access grant"
+      assert Repo.aggregate(Content.Document, :count) > before_count
+    end
   end
 
   # A signed-in USER who is NOT a tenancy member (users aren't tenancy

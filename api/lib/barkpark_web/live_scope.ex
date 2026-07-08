@@ -39,6 +39,7 @@ defmodule BarkparkWeb.LiveScope do
   import Phoenix.LiveView, only: [attach_hook: 4, redirect: 2, put_flash: 3]
 
   alias Barkpark.Access
+  alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
 
@@ -195,24 +196,151 @@ defmodule BarkparkWeb.LiveScope do
     do: attach_readonly_gate(socket, "This workspace is shared read-only")
 
   # Grant write-containment (airdrop-grants ag-enforcement). `scope_to_grants`
-  # narrows READS only — Studio write handlers do not gate on :write. So a
-  # grantee admitted via a read-only (or non-write) grant MUST have mutating
-  # events denied by the same @readonly_events allowlist. A grantee whose grant
-  # DOES confer :write at this workspace is NOT gated (their writes pass; row
-  # narrowing still applies to reads). The write check is workspace-level
-  # (`authorize(ctx, ws.id, :write)`) — a write-capable grantee writing OUTSIDE
-  # their sub-scope is the reported residual, not gated here.
+  # narrows READS only — Studio write handlers do not gate on :write. Three
+  # dispositions for a grant-admitted socket, decided ONCE here per workspace:
+  #
+  #   * NO write-capable grant in this workspace → read-only: the deny-by-default
+  #     `@readonly_events` allowlist halts every mutating event (unchanged).
+  #   * SOME write-capable grant (workspace-wide OR sub-scoped) → the per-event
+  #     write-narrowing gate: each mutating event's TARGET scope must be ⊆ one of
+  #     the ctx's write grants, reusing `Access.validate/3` (the same containment
+  #     the read narrowing uses — no parallel ladder). This is the follow-on to
+  #     #1353: it both NARROWS a write-capable grantee to its sub-scope (the
+  #     reported residual — writing OUTSIDE the grant is now denied) and, for a
+  #     PURELY sub-scoped write grant (e.g. project-scoped), lets it write WITHIN
+  #     that grant — the completeness case that previously fell to the read-only
+  #     gate and could not write anywhere.
+  #
+  # `has_write_grant?` is deliberately BROADER than `authorize(ctx, ws, :write)`
+  # (which only sees workspace-WIDE write): the difference is exactly the
+  # sub-scoped-write completeness case. A workspace-WIDE write grant still admits
+  # every in-workspace target (its ladder halts at the workspace level) → the
+  # narrowing gate is a byte-identical no-op for it.
   defp maybe_attach_readonly_gate(socket, {:grant, ctx}) do
     ws = socket.assigns[:current_workspace]
 
-    if Tenancy.Auth.authorize(ctx, ws.id, :write) == :ok do
-      socket
+    if has_write_grant?(ctx, ws.id) do
+      attach_write_gate(socket, ctx)
     else
       attach_readonly_gate(socket, "Your access grant is read-only")
     end
   end
 
   defp maybe_attach_readonly_gate(socket, _grade), do: socket
+
+  # True when `ctx` holds at least one ACTIVE grant conferring :write SOMEWHERE
+  # within `ws_id` — workspace-wide OR any sub-scope. Reuses `Access.validate/3`
+  # against each grant's OWN full scope (trivially contained), so revoked /
+  # expired / non-write grants are excluded by the same fail-closed logic the
+  # per-event gate uses.
+  defp has_write_grant?(%{grants: grants}, ws_id) when is_binary(ws_id) and is_list(grants) do
+    Enum.any?(grants, fn grant ->
+      grant.workspace_id == ws_id and
+        Access.validate(grant, :write, grant_scope(grant)) == :ok
+    end)
+  end
+
+  defp has_write_grant?(_ctx, _ws_id), do: false
+
+  defp grant_scope(grant) do
+    %{
+      workspace_id: grant.workspace_id,
+      project_id: grant.project_id,
+      dataset: grant.dataset,
+      type: grant.type,
+      doc_id: grant.doc_id
+    }
+  end
+
+  # Deny-by-default write-narrowing gate for a write-conferring grant ctx.
+  # Navigation/inspection events (@readonly_events) always pass. Every MUTATING
+  # event's TARGET scope must be ⊆ some write grant's ladder via `Access.validate/3`.
+  # Fail-closed: an unresolved target halts. Idempotent across re-resolves
+  # (a live patch re-runs this; attach_hook raises on a duplicate name). Like the
+  # read-only gate, a stale gate that later patches into a broader scope only
+  # over-restricts — never under-restricts — so we keep it once attached (the
+  # target is read from LIVE socket assigns, so same-user cross-scope patches are
+  # re-checked against the current mount; only the captured grant set is stale).
+  defp attach_write_gate(socket, ctx) do
+    if socket.assigns[:write_gate?] do
+      socket
+    else
+      socket
+      |> assign(:write_gate?, true)
+      |> attach_hook(:live_scope_write_scope, :handle_event, fn event, params, socket ->
+        cond do
+          event in @readonly_events ->
+            {:cont, socket}
+
+          write_target_permitted?(ctx, event, params, socket) ->
+            {:cont, socket}
+
+          true ->
+            {:halt, put_flash(socket, :error, "That action is outside your access grant's scope")}
+        end
+      end)
+    end
+  end
+
+  defp write_target_permitted?(ctx, event, params, socket) do
+    case write_target(event, params, socket) do
+      {:ok, target} ->
+        Enum.any?(ctx.grants, &(Access.validate(&1, :write, target) == :ok))
+
+      :error ->
+        false
+    end
+  end
+
+  # Resolve the TARGET scope a mutating `event` writes to, from the current mount
+  # + event params + the loaded editor doc. Broad→narrow ladder keys, fed straight
+  # into `Access.validate/3`. Fail-closed: an unresolvable mount → :error → HALT.
+  #
+  #   * create-workspace / create-project mint SIBLING tenancy — a workspace-level
+  #     target (no project) so ONLY a workspace-wide write grant admits them
+  #     (byte-identical to the old un-gated pass); any sub-scoped grant denies.
+  #   * new-document creates a doc of `params["type"]` in the current
+  #     project/dataset — type from params, doc_id nil (a type/project/dataset
+  #     grant admits; a doc-scoped grant can't create).
+  #   * every other mutating event acts on the CURRENTLY LOADED doc — its type +
+  #     canonical doc_id refine the target so a doc-scoped write grant admits its
+  #     own doc. With no doc loaded (bulk / schema / profile ops) the target stays
+  #     at project/dataset granularity.
+  defp write_target(event, params, socket) do
+    ws = socket.assigns[:current_workspace]
+    proj = socket.assigns[:current_project]
+    dataset = socket.assigns[:dataset]
+
+    cond do
+      not (is_map(ws) and is_binary(Map.get(ws, :id))) ->
+        :error
+
+      event in ~w(create-workspace create-project) ->
+        {:ok, %{workspace_id: ws.id}}
+
+      not (is_map(proj) and is_binary(Map.get(proj, :id)) and is_binary(dataset)) ->
+        :error
+
+      true ->
+        base = %{workspace_id: ws.id, project_id: proj.id, dataset: dataset}
+        {:ok, Map.merge(base, doc_scope(event, params, socket))}
+    end
+  end
+
+  # type/doc_id refinement of the target scope.
+  defp doc_scope("new-document", %{"type" => type}, _socket) when is_binary(type),
+    do: %{type: type}
+
+  defp doc_scope(_event, _params, socket) do
+    case socket.assigns do
+      %{editor_type: type, editor_doc: %{doc_id: doc_id}}
+      when is_binary(type) and is_binary(doc_id) ->
+        %{type: type, doc_id: Content.published_id(doc_id)}
+
+      _ ->
+        %{}
+    end
+  end
 
   # Deny-by-default write gate: only @readonly_events pass; every mutating
   # event is halted with a flash. Idempotent across re-resolves (a live patch
