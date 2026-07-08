@@ -254,12 +254,20 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 	if len(b.Children) == 0 {
 		return nil
 	}
-	tracks := gridTracks(layout["tracks"])
+	// effectiveTracks honors a data-carried `breakpoints` array (resolve DESC by
+	// minWidth against the available inner width; below every threshold → 1),
+	// else the fixed gridTracks(layout["tracks"]). The `gap` token selects the
+	// inter-cell gutter (none·sm·md·lg → 0·1·2·4; absent/unknown → md=2 =
+	// DefaultFlex.Gutter, keeping gap-less sections byte-identical). A per-section
+	// Flex threads that one gutter through the whole solve — divide, span, fit,
+	// arrange.
+	tracks := effectiveTracks(layout, inner)
+	flex := Flex{Gutter: gapGutter(layout["gap"]), MinWidth: MinWidth}
 	// The shared Flex solver owns the divide-formula + degrade verdict: cellW :=
 	// (inner-(tracks-1)*gutter)/tracks; side-by-side only when tracks>1 AND
 	// cellW>=MinWidth. A false verdict (tracks<2 or any cell too narrow) → nil,
 	// signaling the caller to degrade to the byte-identical stack path.
-	cellW, sideBySide := DefaultFlex.Measure(inner, tracks)
+	cellW, sideBySide := flex.Measure(inner, tracks)
 	if !sideBySide {
 		return nil
 	}
@@ -273,18 +281,18 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 	nodes := make([]Node, len(items))
 	for i, child := range items {
 		s := cellSpan(child, tracks)
-		cw := DefaultFlex.spanWidth(cellW, s)
+		cw := flex.spanWidth(cellW, s)
 		nodes[i] = Node{Lines: sr.reg.Render(child, childCtx.WithWidth(cw)), Width: cw, Span: s}
 	}
 
 	// Measure-into-arrange: if any cell's realized min-content overflows its
 	// (span-aware) allotted width, degrade — return nil so the caller takes the
 	// byte-identical stack path rather than emit an over-wide grid row.
-	if !DefaultFlex.Fits(nodes) {
+	if !flex.Fits(nodes) {
 		return nil
 	}
 
-	rows := DefaultFlex.ArrangeGrid(nodes, tracks)
+	rows := flex.ArrangeGrid(nodes, tracks)
 	out := make([]string, 0, len(rows))
 	for _, line := range rows {
 		out = append(out, pad+line)

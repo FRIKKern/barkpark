@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -237,6 +238,58 @@ func gridRows(cells [][]string, widths []int, spans []int, tracks, gutter int) [
 		out = append(out, joinColumns(groups, ws, gutter)...)
 	}
 	return out
+}
+
+// gapGutter maps a section's `gap` token to the inter-cell gutter cell count:
+// none·sm·md·lg → 0·1·2·4. Absent / unknown / non-string → md (2), which equals
+// DefaultFlex.Gutter, so a gap-less section stays byte-identical to today.
+func gapGutter(token any) int {
+	s, _ := token.(string)
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "none":
+		return 0
+	case "sm":
+		return 1
+	case "lg":
+		return 4
+	default: // "md", unknown, absent, non-string
+		return 2
+	}
+}
+
+// effectiveTracks resolves the section grid's track count for a given available
+// width. When `layout` carries a `breakpoints` array ([{minWidth, tracks}]) the
+// valid entries are sorted DESC by minWidth and the FIRST whose minWidth <= avail
+// wins (its tracks). When avail is below EVERY threshold the grid collapses to a
+// single stacked track (return 1 — the shared Flex.Measure/Fits machinery then
+// governs). Absent / empty / all-malformed breakpoints fall back to the fixed
+// gridTracks(layout["tracks"]), so a section without breakpoints is unchanged.
+func effectiveTracks(layout map[string]any, avail int) int {
+	raw := attrSlice(layout, "breakpoints")
+	type bp struct{ minWidth, tracks int }
+	var bps []bp
+	for _, e := range raw {
+		m, ok := e.(map[string]any)
+		if !ok {
+			continue // ignore malformed (non-object) entries
+		}
+		mw := attrInt(m, "minWidth", -1)
+		tr := attrInt(m, "tracks", -1)
+		if mw < 0 || tr < 1 {
+			continue // ignore entries missing a usable minWidth/tracks
+		}
+		bps = append(bps, bp{mw, tr})
+	}
+	if len(bps) == 0 {
+		return gridTracks(layout["tracks"])
+	}
+	sort.Slice(bps, func(i, j int) bool { return bps[i].minWidth > bps[j].minWidth })
+	for _, b := range bps {
+		if b.minWidth <= avail {
+			return b.tracks
+		}
+	}
+	return 1 // avail below every threshold → single stacked track
 }
 
 // gridTracks mirrors compose.ex grid_tracks/1: a positive integer column count,
