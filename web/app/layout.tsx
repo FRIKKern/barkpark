@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Geist_Mono } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import { LiveBridge } from "@/components/live-bridge";
 import { QuickSwitcher } from "@/components/quick-switcher";
 import { SITE_URL } from "@/lib/site-url";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Chrome sans = Inter, self-hosted by next/font (fonts are downloaded at build
+// and served from our own origin — no runtime Google CDN fetch). Geist sans is
+// retired from the chrome UI; Geist Mono stays for code spans (no mono token).
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
 });
 
@@ -40,8 +43,21 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Seed data-theme BEFORE first paint (no FOUC, no next-themes dep):
+            localStorage.theme wins; else the OS prefers-color-scheme. The
+            emitted [data-theme="dark"] block then flips every --color-* var.
+            The ThemeToggle island (styleguide) flips + persists this at runtime. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;}catch(e){}})();",
+          }}
+        />
+      </head>
       <body className="min-h-full flex flex-col">
         {children}
         {/* Obsidian-style quick-switcher (Cmd-O / Ctrl-O). Client island,

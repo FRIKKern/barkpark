@@ -1,9 +1,13 @@
 @import "tailwindcss";
 
+/* Chrome background/foreground now BRIDGE to the emitted design tokens (the
+   GENERATED block below): --color-bg / --color-text carry the light values and
+   flip under [data-theme="dark"]. --font-sans is self-hosted Inter (next/font);
+   Geist Mono stays for code spans (no mono token exists yet). */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-background: var(--color-bg);
+  --color-foreground: var(--color-text);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -24,37 +28,38 @@
   --color-danger: hsl(0 68% 42%);
   --color-info: hsl(217.2 91.2% 59.8%);
 }
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-primary: hsl(160 42% 62%);
-    --color-primary-fg: hsl(163 45% 8%);
-    --color-bg: hsl(240 10% 3.9%);
-    --color-surface: hsl(240 10% 5.5%);
-    --color-muted-surface: hsl(240 3.7% 12%);
-    --color-text: hsl(0 0% 95%);
-    --color-muted-text: hsl(240 5% 64.9%);
-    --color-border: hsl(240 3.7% 15.9%);
-    --color-ring: hsl(160 42% 62%);
-    --color-accent: hsl(33 92% 60%);
-    --color-ok: hsl(142 52% 52%);
-    --color-warn: hsl(38 94% 56%);
-    --color-danger: hsl(0 82% 66%);
-    --color-info: hsl(217.2 91.2% 59.8%);
-  }
+[data-theme="dark"] {
+  --color-primary: hsl(160 42% 62%);
+  --color-primary-fg: hsl(163 45% 8%);
+  --color-bg: hsl(240 10% 3.9%);
+  --color-surface: hsl(240 10% 5.5%);
+  --color-muted-surface: hsl(240 3.7% 12%);
+  --color-text: hsl(0 0% 95%);
+  --color-muted-text: hsl(240 5% 64.9%);
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(160 42% 62%);
+  --color-accent: hsl(33 92% 60%);
+  --color-ok: hsl(142 52% 52%);
+  --color-warn: hsl(38 94% 56%);
+  --color-danger: hsl(0 82% 66%);
+  --color-info: hsl(217.2 91.2% 59.8%);
 }
 /* END GENERATED: tokens */
 
+/* --background / --foreground are thin aliases onto the emitted tokens so the
+   body + ::selection consumers keep their names but track design/tokens.json
+   (and flip with the explicit data-theme toggle via --color-bg/--color-text —
+   no hand-authored light/dark hex here anymore). Scrollbar tints are not tokens
+   yet (rgba, no role); they stay OS-scheme-driven. */
 :root {
-  --background: #fafafa;
-  --foreground: #18181b;
+  --background: var(--color-bg);
+  --foreground: var(--color-text);
   --scrollbar-thumb: rgba(24, 24, 27, 0.22);
   --scrollbar-thumb-hover: rgba(24, 24, 27, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #09090b;
-    --foreground: #fafafa;
     --scrollbar-thumb: rgba(250, 250, 250, 0.18);
     --scrollbar-thumb-hover: rgba(250, 250, 250, 0.32);
   }
@@ -94,7 +99,7 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+  font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
