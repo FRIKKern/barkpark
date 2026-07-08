@@ -18,6 +18,7 @@
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
 :root {
   --primary: hsl(163 46% 22%);
+  --primary-hover: hsl(163 46% 16%);
   --primary-fg: hsl(0 0% 100%);
   --bg: hsl(0 0% 100%);
   --surface: hsl(0 0% 100%);
@@ -27,6 +28,8 @@
   --border: hsl(240 5.9% 90%);
   --ring: hsl(163 42% 30%);
   --accent: hsl(30 92% 42%);
+  --primary-hsl: 163 46% 22%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
   --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
@@ -34,6 +37,7 @@
 }
 [data-theme="dark"] {
   --primary: hsl(160 42% 62%);
+  --primary-hover: hsl(160 42% 70%);
   --primary-fg: hsl(163 45% 8%);
   --bg: hsl(240 10% 3.9%);
   --surface: hsl(240 10% 5.5%);
@@ -43,6 +47,8 @@
   --border: hsl(240 3.7% 15.9%);
   --ring: hsl(160 42% 62%);
   --accent: hsl(33 92% 60%);
+  --primary-hsl: 160 42% 62%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
   --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);

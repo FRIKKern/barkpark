@@ -40,6 +40,10 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # Studio literal-color gate — Studio chrome must consume emitted tokens.
+      - "api/lib/barkpark_web/**/*.ex"
+      - "api/lib/barkpark_web/**/*.heex"
+      - "scripts/studio-literal-check.sh"
   pull_request:
     paths:
       - "**/*.md"
@@ -73,6 +77,10 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # Studio literal-color gate — Studio chrome must consume emitted tokens.
+      - "api/lib/barkpark_web/**/*.ex"
+      - "api/lib/barkpark_web/**/*.heex"
+      - "scripts/studio-literal-check.sh"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -118,6 +126,15 @@ jobs:
         run: |
           node design/validate.mjs
           node design/check.mjs
+
+      # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
+      # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
+      # via var(--…) — never a copied hex / hsl() channel literal. Fails on any
+      # NEW inline color literal outside the lead-approved allowlist (the GENERATED
+      # block, rgb() shadows, the paper-surface/Sheets skip region, and annotated
+      # per-line resisters). See scripts/studio-literal-check.sh for the full list.
+      - name: Studio literal-color gate (blocking)
+        run: bash scripts/studio-literal-check.sh
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a

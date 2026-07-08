@@ -479,7 +479,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                       <%= category %>
                     </div>
                     <%= for sr <- cat_scenarios do %>
-                      <div style={"padding: 6px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center; font-size: 13px; #{if sr.result.verdict == :fail, do: "background: hsl(0 62.8% 50.6% / 0.05);", else: ""}"}>
+                      <div style={"padding: 6px 12px; border-bottom: 1px solid var(--border-muted); display: flex; justify-content: space-between; align-items: center; font-size: 13px; #{if sr.result.verdict == :fail, do: "background: hsl(var(--danger-hsl) / 0.05);", else: ""}"}>
                         <div>
                           <span style="color: var(--fg-dim);"><%= sr.endpoint_label %></span>
                           <span style="margin-left: 6px;"><%= sr.label %></span>
@@ -526,8 +526,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         border-radius: 4px; font-size: 10px; font-weight: 700;
         font-family: var(--font-mono); letter-spacing: 0.04em;
       }
-      .api-method-get { background: hsl(217.2 91.2% 59.8% / 0.14); color: var(--primary); }
-      .api-method-post { background: hsl(142 71% 45% / 0.14); color: var(--success); }
+      .api-method-get { background: var(--primary-soft); color: var(--primary); }
+      .api-method-post { background: var(--ok-soft); color: var(--success); }
       .api-url { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--fg); }
 
       /* Section headings inside the docs column */
@@ -600,9 +600,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
 
       /* Verdict badges — reuse .badge, provide colours */
-      .badge-verdict-pass { background: hsl(142 71% 45% / 0.12); color: var(--success); }
-      .badge-verdict-fail { background: hsl(0 62.8% 50.6% / 0.12); color: var(--destructive); }
-      .badge-verdict-error { background: hsl(38 92% 50% / 0.12); color: var(--warning); }
+      .badge-verdict-pass { background: var(--ok-soft); color: var(--success); }
+      .badge-verdict-fail { background: var(--danger-soft); color: var(--destructive); }
+      .badge-verdict-error { background: var(--warn-soft); color: var(--warning); }
 
       /* Slim the verdict badge when it sits in place of a chevron in a pane-item row */
       .pane-item .badge {
@@ -805,7 +805,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
   defp schema_browser_card(assigns) do
     ~H"""
-    <details class="api-schema-card" style="margin: 8px 0; border: 1px solid var(--border, #e5e5e5); border-radius: 6px; padding: 8px 12px;">
+    <details class="api-schema-card" style="margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px;">
       <summary style="display:flex; gap:12px; align-items:center; cursor:pointer;">
         <code><%= @schema.name %></code>
         <span class="text-muted"><%= @schema.title %></span>

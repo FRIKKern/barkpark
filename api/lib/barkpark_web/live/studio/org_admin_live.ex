@@ -88,7 +88,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     ~H"""
     <div class="org-admin" style="max-width: 920px; margin: 0 auto; padding: 24px;">
       <h1>Organization Admin</h1>
-      <p style="color:#666;">
+      <p style="color:var(--muted-text);">
         Configure enterprise SSO and directory sync, and review activity — per organization.
       </p>
 
@@ -97,10 +97,10 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
       <section
         :for={o <- @orgs}
         data-org={o.org.slug}
-        style="border:1px solid #e2e2e2; border-radius:10px; padding:16px; margin:16px 0;"
+        style="border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0;"
       >
         <h2 style="margin:0 0 8px;">
-          {o.org.name} <span style="color:#999; font-size:14px;">/{o.org.slug}</span>
+          {o.org.name} <span style="color:var(--muted-text); font-size:14px;">/{o.org.slug}</span>
         </h2>
 
         <div style="display:flex; gap:24px; flex-wrap:wrap; font-size:14px;">
@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             phx-click="mint_scim"
             phx-value-org={o.org.id}
             data-mint-scim={o.org.slug}
-            style="font-size:13px; padding:6px 12px; border:1px solid #ccc; border-radius:6px; cursor:pointer;"
+            style="font-size:13px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer;"
           >
             Mint SCIM token
           </button>
@@ -135,14 +135,14 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             phx-value-org={o.org.id}
             phx-value-to={to_string(not o.org.require_mfa)}
             data-toggle-require-mfa={o.org.slug}
-            style="font-size:13px; padding:6px 12px; border:1px solid #ccc; border-radius:6px; cursor:pointer;"
+            style="font-size:13px; padding:6px 12px; border:1px solid var(--border); border-radius:6px; cursor:pointer;"
           >
             {if o.org.require_mfa, do: "Stop requiring MFA", else: "Require MFA org-wide"}
           </button>
           <p
             :if={@minted[o.org.id]}
             data-minted-token
-            style="margin-top:8px; font-family:monospace; font-size:12px; background:#f6f6f6; padding:8px; border-radius:6px;"
+            style="margin-top:8px; font-family:monospace; font-size:12px; background:var(--muted-surface); padding:8px; border-radius:6px;"
           >
             Copy this token now — it won't be shown again:<br />{@minted[o.org.id]}
           </p>
@@ -154,7 +154,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         <p :if={@recent_audit == []}>No activity yet.</p>
         <ul data-audit-log style="font-family:monospace; font-size:12px;">
           <li :for={e <- @recent_audit}>
-            {e.action} · {e.category} <span style="color:#aaa;">{e.actor_id}</span>
+            {e.action} · {e.category} <span style="color:var(--muted-text);">{e.actor_id}</span>
           </li>
         </ul>
       </section>
