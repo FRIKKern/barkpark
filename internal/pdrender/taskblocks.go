@@ -443,12 +443,15 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 // → placeholder; empty → "No tasks yet."
 type taskBoardRenderer struct{}
 
-var boardColumns = []struct{ role, label string }{
-	{"open", "Open"},
-	{"ready", "Ready"},
-	{"progress", "In progress"},
-	{"blocked", "Blocked"},
-	{"done", "Done"},
+// boardColumns is the board's column ROLES in white-ladder order. The header
+// label is DERIVED (the canonical roleLabel, sentence-cased via boardLabel) —
+// NOT a second hardcoded copy (the fold — shares gridblocks.go's roleLabel).
+var boardColumns = []string{"open", "ready", "progress", "blocked", "done"}
+
+// boardLabel is a lane's sentence-cased column header, folded from the ONE
+// canonical lowercase label: "in progress" → "In progress".
+func boardLabel(role string) string {
+	return capitalizeFirst(labelForRole(role))
 }
 
 func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -472,9 +475,9 @@ func (taskBoardRenderer) Render(b Block, ctx RenderCtx) []string {
 		rows        []map[string]any
 	}
 	var lanes []lane
-	for _, col := range boardColumns {
-		if rs := byRole[col.role]; len(rs) > 0 {
-			lanes = append(lanes, lane{col.role, col.label, rs})
+	for _, role := range boardColumns {
+		if rs := byRole[role]; len(rs) > 0 {
+			lanes = append(lanes, lane{role, boardLabel(role), rs})
 		}
 	}
 	if len(lanes) == 0 {

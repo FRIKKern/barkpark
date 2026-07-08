@@ -42,13 +42,16 @@ import (
 //     drop is fixed, not just filed). Empty-column policy (web keep-empty vs
 //     View/TUI omit-empty) stays a SUPERSET difference the ⊆-projection does not
 //     police.
-//   - NOT COVERED (known divergences, FILED not fixed):
-//     (b) status/label PROSE differs (Elixir "in progress"/"cancelled" vs Go
-//         "progress"/"cancel"). The projection shares role + glyph, NOT meaning
-//         text; owned by au-w5-status-prose-parity. Board column LABELS are
-//         likewise "two copies agree" (gen `@board_columns` + components.ex,
-//         tied by this realization test), not a single manifest source — folded
-//         into au-w5-status-prose-parity.
+//   - COVERED since au-w5-status-prose-parity: the status LABEL prose is ONE
+//     manifest source (design/status-manifest.json roles[].label, inlined here as
+//     roleLabel and byte-checked by scripts/status-manifest-check.sh Part 4). The
+//     legend projection asserts the canonical label TEXT (progress→"in progress",
+//     cancel→"cancelled") and this TUI leg RENDERS it. Board column LABELS are the
+//     fold too — boardColumns roles + a derived boardLabel (sentence-cased
+//     canonical label), not a second hardcoded copy. Legend MEANING (roleMeaning)
+//     is an Elixir/TUI superset the web reader does not render.
+//   - NOT COVERED (known divergences, FILED not fixed): card slot order + tone +
+//     media fast-path (au-w5-card-slot-parity).
 
 // labelSpanRe matches a projection column label as the EXACT delimited header
 // field the TUI emits: `glyph Label␣␣count`. The label is bounded by a single
@@ -87,6 +90,7 @@ type legendProjection struct {
 		GlyphRole string `json:"glyph_role"`
 		Glyph     string `json:"glyph"`
 		Spinner   bool   `json:"spinner"`
+		Label     string `json:"label"`
 	} `json:"rows"`
 }
 
@@ -194,8 +198,11 @@ func TestStatusLegendGoldenParity(t *testing.T) {
 	}
 
 	for _, row := range proj.Rows {
-		if !strings.Contains(out, row.Role) {
-			t.Errorf("rung role %q missing from render:\n%s", row.Role, out)
+		// GRADUATED (au-w5-status-prose-parity): the canonical LABEL text is the
+		// shared truth the TUI renders (progress→"in progress", cancel→"cancelled"),
+		// not the raw role slug — a wrong label render reds this leg.
+		if !strings.Contains(out, row.Label) {
+			t.Errorf("rung label %q missing from render:\n%s", row.Label, out)
 		}
 		if !row.Spinner {
 			if !strings.Contains(out, row.Glyph) {

@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -319,14 +320,6 @@ func cardToneColor(t Theme, tone string) lipgloss.TerminalColor {
 // one per line, matching the reader.
 type statusLegendRenderer struct{}
 
-// statusRung is one line of the ladder. name/meaning are code-controlled
-// literals; the glyph is derived from the shared roleGlyph source and the color
-// comes from the injected Theme at render time.
-type statusRung struct {
-	name    string
-	meaning string
-}
-
 // roleGlyph is the SINGLE source of the role→glyph mapping shared by the status
 // legend AND the task-* widgets (task-list/detail/board/roadmap) — mirrors
 // design/status-manifest.json — keep in sync. `progress` has no static glyph in
@@ -343,25 +336,61 @@ var roleGlyph = map[string]string{
 	"cancel":   "✕",
 }
 
-// statusLadder is the ordered set of ladder rungs (the "white ladder"). Each
-// rung's glyph is looked up from roleGlyph at render time — ONE place defines
-// role→glyph, so a manifest drift can't leave the legend and the task widgets
-// disagreeing.
-var statusLadder = []statusRung{
-	{name: "open", meaning: "backlog — not ready yet"},
-	{name: "ready", meaning: "unchecked — claim it now"},
-	{name: "progress", meaning: "in progress"},
-	{name: "blocked", meaning: "something is required first"},
-	{name: "done", meaning: "complete"},
-	{name: "cancel", meaning: "abandoned or superseded"},
+// roleLabel is the SINGLE source of the role→canonical (lowercase) display label,
+// mirroring design/status-manifest.json's `roles[].label` — the legend prints
+// this, the board sentence-cases it (boardLabel). Byte-checked against the
+// manifest by scripts/status-manifest-check.sh Part 4 (like roleGlyph in Part 3).
+var roleLabel = map[string]string{
+	"open":     "open",
+	"ready":    "ready",
+	"progress": "in progress",
+	"blocked":  "blocked",
+	"done":     "done",
+	"cancel":   "cancelled",
+}
+
+// roleMeaning mirrors design/status-manifest.json's `roles[].meaning` — the
+// one-line legend gloss. Byte-checked against the manifest by Part 4.
+var roleMeaning = map[string]string{
+	"open":     "backlog — not ready yet",
+	"ready":    "unchecked — claim it now",
+	"progress": "being worked right now",
+	"blocked":  "something is required first",
+	"done":     "complete",
+	"cancel":   "abandoned or superseded",
+}
+
+// statusLadder is the ordered set of ladder role slugs (the "white ladder"). Each
+// rung's glyph/label/meaning is looked up from the shared maps at render time —
+// ONE place defines each, so a manifest drift can't leave the legend and the task
+// widgets disagreeing.
+var statusLadder = []string{"open", "ready", "progress", "blocked", "done", "cancel"}
+
+// labelForRole returns the canonical lowercase display label (unknown → the slug).
+func labelForRole(role string) string {
+	if l, ok := roleLabel[role]; ok {
+		return l
+	}
+	return role
+}
+
+// capitalizeFirst sentence-cases a label (first rune upper, rest unchanged):
+// "in progress" → "In progress", "cancelled" → "Cancelled".
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
 }
 
 func (statusLegendRenderer) Render(_ Block, ctx RenderCtx) []string {
 	out := make([]string, 0, len(statusLadder))
-	for _, r := range statusLadder {
-		glyph := statusGlyphStyle(ctx.Theme, r.name).Render(glyphForRole(r.name))
-		name := ctx.Theme.Body.Render(r.name)
-		meaning := ctx.Theme.Dim.Render("— " + r.meaning)
+	for _, role := range statusLadder {
+		glyph := statusGlyphStyle(ctx.Theme, role).Render(glyphForRole(role))
+		name := ctx.Theme.Body.Render(labelForRole(role))
+		meaning := ctx.Theme.Dim.Render("— " + roleMeaning[role])
 		out = append(out, glyph+"  "+name+"  "+meaning)
 	}
 	return out

@@ -502,28 +502,15 @@ defmodule Barkpark.PortableDoc.Render.Components do
   vocabulary is the vocabulary); useful atop a plan so a reader learns the marks.
   """
   def status_legend_html(_block) do
-    states = [
-      {"open", "backlog — not ready yet"},
-      {"ready", "unchecked — claim it now"},
-      {"progress", "being worked right now"},
-      {"blocked", "something is required first"},
-      {"done", "complete"},
-      {"cancel", "abandoned or superseded"}
-    ]
-
-    names = %{
-      "open" => "open",
-      "ready" => "ready",
-      "progress" => "in&nbsp;progress",
-      "blocked" => "blocked",
-      "done" => "done",
-      "cancel" => "cancelled"
-    }
-
+    # Name + meaning both derive from the ONE manifest source (StatusVocab); no
+    # hand-typed second copy. Row order is the manifest's role order.
     rows =
-      states
-      |> Enum.map(fn {role, meaning} ->
-        ~s|<div class="bp-legend__r">#{glyph_html(role)}<span class="bp-legend__n">#{Map.fetch!(names, role)}</span><span class="bp-legend__d">#{meaning}</span></div>|
+      StatusVocab.roles()
+      |> Enum.map(fn role ->
+        name = role |> StatusVocab.label_for_role() |> escape_html()
+        meaning = StatusVocab.meaning_for_role(role)
+
+        ~s|<div class="bp-legend__r">#{glyph_html(role)}<span class="bp-legend__n">#{name}</span><span class="bp-legend__d">#{meaning}</span></div>|
       end)
       |> Enum.join("")
 
@@ -551,14 +538,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
         by_role = Enum.group_by(rows, fn r -> r |> get("status") |> stringish() |> role_of() end)
 
         cols =
-          [
-            {"open", "Open"},
-            {"ready", "Ready"},
-            {"progress", "In progress"},
-            {"blocked", "Blocked"},
-            {"done", "Done"}
-          ]
-          |> Enum.map(fn {role, label} -> board_col(role, label, Map.get(by_role, role, [])) end)
+          board_roles()
+          |> Enum.map(fn role -> board_col(role, board_label(role), Map.get(by_role, role, [])) end)
           |> Enum.reject(&(&1 == ""))
           |> Enum.join("")
 
@@ -567,6 +548,15 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   def task_board_html(_), do: ""
+
+  # The board's column roles, in white-ladder order (cancel folds to a tally, so
+  # it is NOT a column). One place defines the order; labels are DERIVED, never a
+  # second hardcoded copy.
+  defp board_roles, do: ~w(open ready progress blocked done)
+
+  # A board column header: the canonical lowercase label sentence-cased at render
+  # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
+  defp board_label(role), do: role |> StatusVocab.label_for_role() |> String.capitalize()
 
   defp board_col(_role, _label, []), do: ""
 
@@ -741,7 +731,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp glyph_html(role) do
     if StatusVocab.spinner?(role) do
       # a spinner role is an empty span whose ::before CSS-animates the Braille frames
-      ~s|<span class="bp-g bp-g--#{role}" aria-label="in progress"></span>|
+      ~s|<span class="bp-g bp-g--#{role}" aria-label="#{StatusVocab.label_for_role(role)}"></span>|
     else
       ~s|<span class="bp-g bp-g--#{role}">#{glyph_char(role)}</span>|
     end

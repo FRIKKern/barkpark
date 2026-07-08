@@ -6,36 +6,42 @@
       {
         "glyph": "○",
         "glyph_role": "open",
+        "label": "open",
         "role": "open",
         "spinner": false
       },
       {
         "glyph": "○",
         "glyph_role": "ready",
+        "label": "ready",
         "role": "ready",
         "spinner": false
       },
       {
         "glyph": "",
         "glyph_role": "progress",
+        "label": "in progress",
         "role": "progress",
         "spinner": true
       },
       {
         "glyph": "!",
         "glyph_role": "blocked",
+        "label": "blocked",
         "role": "blocked",
         "spinner": false
       },
       {
         "glyph": "✓",
         "glyph_role": "done",
+        "label": "done",
         "role": "done",
         "spinner": false
       },
       {
         "glyph": "✕",
         "glyph_role": "cancel",
+        "label": "cancelled",
         "role": "cancel",
         "spinner": false
       }

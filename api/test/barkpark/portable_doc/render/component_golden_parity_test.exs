@@ -24,12 +24,13 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   INCLUDES an `open` row and the View + Go pdrender both grew an `open` column, so
   a populated `open` bucket realizes on every surface (the drop is fixed, not just
   filed). Empty-column policy (web keep-empty vs View/TUI omit-empty) stays a
-  SUPERSET difference this ⊆-projection deliberately does not police. NOT COVERED,
-  FILED not fixed: status/label PROSE ("in progress" vs
-  "progress"); the projection shares role + glyph, not meaning text; owned by
-  au-w5-status-prose-parity (which also owns the "board labels are two copies that
-  agree, not one manifest source" gap). The harness never implies parity it does
-  not hold.
+  SUPERSET difference this ⊆-projection deliberately does not police. COVERED since
+  au-w5-status-prose-parity: the status LABEL prose is ONE manifest source, the
+  legend projection asserts the canonical label TEXT ("in progress"/"cancelled")
+  and this leg RENDER-asserts it; board LABELS are the fold (derived
+  `board_label/1`, not two hardcoded copies). Legend MEANING stays an Elixir/TUI
+  superset (web renders name-only). The harness never implies parity it does not
+  hold.
   """
   use ExUnit.Case, async: true
 
@@ -119,6 +120,11 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     for row <- rows do
       role = row["role"]
       assert html =~ ~s|bp-g--#{role}|, "glyph-role #{role} missing"
+
+      # GRADUATED (au-w5-status-prose-parity): the canonical LABEL text is realized,
+      # not just the role+glyph — a wrong label render reds this leg.
+      assert html =~ ~s|<span class="bp-legend__n">#{row["label"]}</span>|,
+             "legend label #{inspect(row["label"])} for #{role} missing"
 
       if row["spinner"] do
         # A spinner role is an empty glyph span the CSS animates — no static char.
