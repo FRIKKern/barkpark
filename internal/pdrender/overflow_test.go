@@ -33,6 +33,12 @@ var overflowFixtures = []string{
 	// the narrow widths must still hold their content — no line may overflow the
 	// target width once the grid drops to fewer (or one) tracks.
 	"sample_m9.json",
+	// sample_m10 is the W4 side-by-side spine: notes/cards/pipeline widgets that
+	// opt INTO the horizontal Flex path via layout:{mode:"grid"}. At the wide
+	// widths they lay out horizontally (notes 3-up, cards 3-up, pipeline stages
+	// joined by `→`); at w40 every cell drops below its MinWidth floor and stacks.
+	// No line may overflow the target width in either regime.
+	"sample_m10.json",
 }
 
 // TestNoLineOverflow is the P9/80-column guarantee and the anti-vacuity spine:

@@ -126,6 +126,32 @@ func TestCardsRendersNormally(t *testing.T) {
 	}
 }
 
+// TestGridOptIn pins the corpus-freeze guarantee: a notes/cards/pipeline widget
+// only enters the horizontal Flex path when it carries layout:{mode:"grid"}.
+// WITHOUT a layout (the entire legacy corpus) → false → verbatim vertical stack,
+// byte-identical to before the Flex path existed (why sample_m5 stays frozen).
+// WITH it → true → side-by-side eligible. Any other layout shape stays false.
+func TestGridOptIn(t *testing.T) {
+	cases := []struct {
+		name  string
+		attrs map[string]any
+		want  bool
+	}{
+		{"with layout mode grid → opt in", map[string]any{"layout": map[string]any{"mode": "grid"}}, true},
+		{"no layout at all → stacks", map[string]any{}, false},
+		{"nil attrs → stacks", nil, false},
+		{"layout present but not grid → stacks", map[string]any{"layout": map[string]any{"mode": "stack"}}, false},
+		{"layout not an object → stacks", map[string]any{"layout": "grid"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := gridOptIn(Block{Attrs: tc.attrs}); got != tc.want {
+				t.Errorf("gridOptIn(%v) = %v, want %v", tc.attrs, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestStatusLegendShowsFullLadder pins the status-legend to the fixed 6-rung
 // ladder: every rung's glyph AND role name must appear, so a drift in
 // design/status-manifest.json (or the inlined statusLadder copy) trips this test.

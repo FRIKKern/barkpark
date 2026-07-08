@@ -16,6 +16,17 @@ import (
 // bottom corner a column short (the class of bug a hand-authored diagram hit).
 // This is the alignment complement of the no-overflow lock: overflow catches
 // "too wide", ragged catches "walls don't meet".
+//
+// Deliberately NOT here: the grid WIDGETS (notes/cards/pipeline — sample_m5
+// stacked, sample_m10 side-by-side). Unlike a full-bleed columns/section
+// container, these widgets LEFT-PACK: their side-by-side row is exactly
+// N*cellW+(N-1)*gutter (the shared Flex solver's packed width), so the surface's
+// floor-division remainder rides as a ragged right margin rather than being
+// stretched into the cells — and even their vertical stack leaves short prose
+// lines unpadded. That is intended (matching how sample_m5 was already excluded);
+// a border glyph still sits above a border glyph because each CELL is internally
+// rectangular. Their horizontal output is guarded instead by TestNoLineOverflow
+// (overflowFixtures carries sample_m10) + the byte-exact TestGoldenM10.
 var boxFixtures = []string{"sample_m4.json", "sample_m6.json", "sample_m7.json", "sample_m8.json", "sample_m9.json"}
 
 // raggedLines returns the indices of ANSI-stripped lines whose display width is
