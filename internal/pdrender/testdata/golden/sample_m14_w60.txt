@@ -1,0 +1,28 @@
+TASK DETAIL TIMELINE PARITY                               
+───────────────────────────                               
+                                                          
+╭────────────────────────────────────────────────────────╮
+│ Render the task-detail timeline                        │
+│ ⠋ in_progress · P1 · task · grace                      │
+│ created 2026-07-01 · updated 2026-07-08                │
+│ ○ Filed → ○ Groomed → ⠋ Claimed → ! Waiting on review  │
+│ →                                                      │
+│ ✓ Shipped                                              │
+│ Add the timeline section to the Go pdrender task-      │
+│ detail                                                 │
+│ renderer so a TUI reader sees the lifecycle history    │
+│ the                                                    │
+│ Elixir emitter already renders.                        │
+│ Criteria · 2/3                                         │
+│ ✓ Timeline renders between stamp and description       │
+│ ↳ taskblocks.go                                        │
+│ ✓ Glyphs match the Elixir emitter                      │
+│ ○ Absent timeline emits nothing                        │
+│ Dependencies                                           │
+│ blocks 1 task                                          │
+│ Children · 1/1 done                                    │
+│ ✓ author fixture                                       │
+│ Papers                                                 │
+│ ▸ pdrender block parity plan                           │
+│ pdrender · parity · wave-5                             │
+╰────────────────────────────────────────────────────────╯

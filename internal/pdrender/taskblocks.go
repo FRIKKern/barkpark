@@ -224,6 +224,7 @@ func (taskDetailRenderer) Render(b Block, ctx RenderCtx) []string {
 	add(wrapLines(ctx.Theme.Body.Bold(true).Render(title), cw)...)
 	add(detailMeta(t, ctx, cw)...)
 	add(detailStamp(t, ctx, cw)...)
+	add(detailTimeline(t, ctx, cw)...)
 	add(detailDesc(t, ctx, cw)...)
 	add(detailCriteria(t, ctx, cw)...)
 	add(detailDeps(t, ctx, cw)...)
@@ -277,6 +278,25 @@ func detailStamp(t map[string]any, ctx RenderCtx, cw int) []string {
 		return nil
 	}
 	return wrapLines(ctx.Theme.Dim.Render(sanitizeText(strings.Join(st, " · "))), cw)
+}
+
+// detailTimeline renders the task's lifecycle timeline — one glyph+label cell
+// per status transition, joined by a dim arrow — mirroring the Elixir emitter's
+// detail_timeline/1 (components.ex). Conditional-nil when absent/empty so a
+// task-detail with no "timeline" key emits nothing (keeps sample_m6 frozen).
+// Reuses the shared white-ladder status vocab (glyphForStatus → roleForStatus →
+// statusGlyphStyle) so each Go glyph matches its Elixir glyph_html(role_of(...)).
+func detailTimeline(t map[string]any, ctx RenderCtx, cw int) []string {
+	segs := itemMaps(t, "timeline")
+	if len(segs) == 0 {
+		return nil
+	}
+	cells := make([]string, 0, len(segs))
+	for _, s := range segs {
+		glyph := glyphForStatus(ctx.Theme, attrStr(s, "status"))
+		cells = append(cells, glyph+" "+sanitizeText(attrStr(s, "label")))
+	}
+	return wrapLines(strings.Join(cells, ctx.Theme.Dim.Render(" → ")), cw)
 }
 
 func detailDesc(t map[string]any, ctx RenderCtx, cw int) []string {
