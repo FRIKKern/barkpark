@@ -23,6 +23,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
+  alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @password "correct-horse-battery"
@@ -99,6 +100,16 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       Accounts.create_user_session_token(user, ip_address: "127.0.0.1", user_agent: "test")
 
     raw
+  end
+
+  # Govern `user` under a NEW require_mfa org (user has no factor enrolled).
+  defp govern_require_mfa!(user, org_slug) do
+    {:ok, org} = Tenancy.create_organization(%{slug: org_slug, name: org_slug})
+    {:ok, org} = Tenancy.set_organization_require_mfa(org.id, true)
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "#{org_slug}-ws", name: "#{org_slug}-ws"})
+    {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+    {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+    org
   end
 
   # ── 1. NULL-owner token → CANNOT claim ──────────────────────────────────────
@@ -251,6 +262,39 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       assert %{"grants" => grants} = json_response(conn, 200)
       assert grants != []
       refute Enum.any?(grants, &Map.has_key?(&1, "link_token_hash"))
+    end
+  end
+
+  # ── 7. org-MFA overlay preserved on the SESSION claim path ───────────────────
+
+  describe "case 7 — the org-MFA-enrolment overlay still gates the session path" do
+    test "an unenrolled session-user in a require_mfa org is 403 on POST /v1/access/claim",
+         %{conn: conn} do
+      ws = create_workspace!()
+      user = register_user(uniq_email("mfa-session"))
+      _org = govern_require_mfa!(user, "claim-mfa-#{System.unique_integer([:positive])}")
+      {_grant, raw} = mint_grant(ws, user.email)
+
+      conn = conn |> bearer(user_bearer(user)) |> post("/v1/access/claim", %{"token" => raw})
+
+      assert json_response(conn, 403)["error"]["code"] == "mfa_enrolment_required"
+    end
+  end
+
+  # ── 8. token path safety — enrolment is gated at ISSUANCE ────────────────────
+
+  describe "case 8 — an unenrolled require_mfa user cannot MINT an owned token" do
+    test "POST /v1/auth/tokens is 403 mfa_enrolment_required (locks the issuance gate)",
+         %{conn: conn} do
+      user = register_user(uniq_email("mfa-mint"))
+      _org = govern_require_mfa!(user, "mint-mfa-#{System.unique_integer([:positive])}")
+
+      conn =
+        conn
+        |> bearer(user_bearer(user))
+        |> post("/v1/auth/tokens", %{"name" => "blocked"})
+
+      assert json_response(conn, 403)["error"]["code"] == "mfa_enrolment_required"
     end
   end
 end

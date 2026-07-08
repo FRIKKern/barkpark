@@ -186,6 +186,19 @@ defmodule BarkparkWeb.AuthController do
 
   The raw token is returned ONCE and never recoverable. Field hygiene: only the
   token's non-secret fields are echoed — never the `token_hash`.
+
+  ## MFA posture (deliberate, not accidental)
+
+  An owned token is a NON-INTERACTIVE credential. Org-MFA-enrolment is a
+  SESSION/ISSUANCE gate, enforced HERE at mint (this action rides
+  `[:user_auth, :require_user]`, and `:require_user` includes
+  `RequireOrgMfaEnrolment`), NOT re-checked per token-CLAIM. So an unenrolled
+  user governed by a `require_mfa` org is 403'd BEFORE they can obtain an owned
+  token — the token path is safe because the upstream issuance gate holds. The
+  subsequent `bp access claim`/`mine` is then gated by token auth + the grant's
+  account-binding + the no-escalation caps baked at grant mint. (The SESSION
+  claim path re-applies `RequireOrgMfaEnrolment` on the `:access_principal`
+  pipeline; the token path relies on this issuance gate.)
   """
   def create_token(conn, params) do
     user = conn.assigns.current_user

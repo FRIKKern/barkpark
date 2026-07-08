@@ -376,6 +376,16 @@ defmodule BarkparkWeb.Router do
   #     session did not already resolve one (login session wins). Non-halting.
   #   * `RequirePrincipalUser` — 401 if `:current_user` is STILL nil (anonymous,
   #     bad token, or an UN-OWNED token → fail closed).
+  #   * `RequireOrgMfaEnrolment` — restores the org-MFA-enrolment overlay the OLD
+  #     `:require_user` pipeline applied here. A SESSION-user grantee unenrolled
+  #     in a `require_mfa` org is 403'd (`mfa_enrolment_required`) exactly as
+  #     before — login is not enrolment-gated, this per-route overlay is. It
+  #     reads `:current_user` (fails closed on nil) and exempts only `/v1/auth/*`
+  #     compliance paths, so claim/mine stay fully gated. The TOKEN path is safe
+  #     WITHOUT re-checking here: an owned token can only be MINTED via
+  #     `POST /v1/auth/tokens` under `[:user_auth, :require_user]`, so org-MFA
+  #     enrolment is enforced at ISSUANCE — an unenrolled user cannot obtain the
+  #     token to begin with (see AuthController.create_token/2).
   #
   # Requires `:fetch_session` upstream (`:user_auth` provides it). NEVER mounted
   # on the grantor routes — those stay a pure api_token principal.
@@ -384,6 +394,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.OptionalUserSession)
     plug(BarkparkWeb.Plugs.ResolveTokenOwner)
     plug(BarkparkWeb.Plugs.RequirePrincipalUser)
+    plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
   end
 
   # Browser Studio uploads send `credentials: same-origin` with the session
