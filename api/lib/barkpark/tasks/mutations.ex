@@ -8,7 +8,13 @@ defmodule Barkpark.Tasks.Mutations do
   import Ecto.Query, only: [from: 2]
 
   import Barkpark.Tasks.Internal,
-    only: [generate_rev: 0, insert_mutation_event!: 3, task_broadcast: 4, emit_broadcasts: 1]
+    only: [
+      generate_rev: 0,
+      insert_mutation_event!: 5,
+      caller_stamp: 1,
+      task_broadcast: 4,
+      emit_broadcasts: 1
+    ]
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
@@ -22,9 +28,9 @@ defmodule Barkpark.Tasks.Mutations do
   (dedup-preserving) minus the remove set; idempotent. Returns `{:ok, doc}`,
   `{:error, :not_found}`, or `{:error, :stale_claim}`.
   """
-  @spec relabel_by_id(binary(), [binary()], [binary()]) ::
+  @spec relabel_by_id(binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
-  def relabel_by_id(task_id, add, remove)
+  def relabel_by_id(task_id, add, remove, caller_token_id \\ nil)
       when is_binary(task_id) and is_list(add) and is_list(remove) do
     result =
       Repo.transaction(fn ->
@@ -57,7 +63,14 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
-                ev = insert_mutation_event!(updated, @event_task_relabeled, observed_rev)
+                ev =
+                  insert_mutation_event!(
+                    updated,
+                    @event_task_relabeled,
+                    observed_rev,
+                    "api",
+                    caller_stamp(caller_token_id)
+                  )
 
                 {:ok, updated, [task_broadcast(updated, @event_task_relabeled, ev, observed_rev)]}
 
@@ -87,9 +100,9 @@ defmodule Barkpark.Tasks.Mutations do
   key (`"papers"`) and the event kind. Returns `{:ok, doc}`,
   `{:error, :not_found}`, or `{:error, :stale_claim}`.
   """
-  @spec update_paper_refs_by_id(binary(), [binary()], [binary()]) ::
+  @spec update_paper_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
-  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs)
+  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id \\ nil)
       when is_binary(task_id) and is_list(add_slugs) and is_list(remove_slugs) do
     result =
       Repo.transaction(fn ->
@@ -122,7 +135,14 @@ defmodule Barkpark.Tasks.Mutations do
             case rows do
               1 ->
                 updated = %{doc | content: new_content, rev: new_rev}
-                ev = insert_mutation_event!(updated, @event_task_referenced, observed_rev)
+                ev =
+                  insert_mutation_event!(
+                    updated,
+                    @event_task_referenced,
+                    observed_rev,
+                    "api",
+                    caller_stamp(caller_token_id)
+                  )
 
                 {:ok, updated,
                  [task_broadcast(updated, @event_task_referenced, ev, observed_rev)]}

@@ -45,6 +45,7 @@ defmodule Barkpark.Tasks.Move do
       generate_rev: 0,
       current_epoch: 1,
       insert_mutation_event!: 5,
+      caller_stamp: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -65,9 +66,9 @@ defmodule Barkpark.Tasks.Move do
   Returns `{:ok, doc}` on a successful move (or an idempotent no-op),
   `{:error, :not_found}`, `{:error, :cycle}`, or `{:error, :stale_claim}`.
   """
-  @spec move(binary(), binary() | nil) ::
+  @spec move(binary(), binary() | nil, binary() | nil) ::
           {:ok, Document.t()} | {:error, :not_found | :cycle | :stale_claim}
-  def move(task_uuid, new_parent_doc_id)
+  def move(task_uuid, new_parent_doc_id, caller_token_id \\ nil)
       when is_binary(task_uuid) and (is_binary(new_parent_doc_id) or is_nil(new_parent_doc_id)) do
     result =
       Repo.transaction(fn ->
@@ -89,7 +90,7 @@ defmodule Barkpark.Tasks.Move do
                 {:error, :cycle}
 
               true ->
-                do_move(doc, old_parent, new_parent_doc_id)
+                do_move(doc, old_parent, new_parent_doc_id, caller_token_id)
             end
         end
       end)
@@ -110,7 +111,7 @@ defmodule Barkpark.Tasks.Move do
     end
   end
 
-  defp do_move(%Document{} = doc, old_parent, new_parent_doc_id) do
+  defp do_move(%Document{} = doc, old_parent, new_parent_doc_id, caller_token_id) do
     observed_rev = doc.rev
     new_rev = generate_rev()
 
@@ -142,7 +143,10 @@ defmodule Barkpark.Tasks.Move do
             @event_task_reparented,
             observed_rev,
             "api",
-            reparent_payload(old_parent, new_parent_doc_id, fenced?)
+            Map.merge(
+              reparent_payload(old_parent, new_parent_doc_id, fenced?),
+              caller_stamp(caller_token_id)
+            )
           )
 
         {:ok, updated, [task_broadcast(updated, @event_task_reparented, ev, observed_rev)]}

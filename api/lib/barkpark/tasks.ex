@@ -194,9 +194,10 @@ defmodule Barkpark.Tasks do
   the holder is fenced instead). The `{:ok, %Edge{}}` contract is unchanged.
   See `Barkpark.Tasks.Fence.add_dep/3` (which calls `Edges.add_dep/3`).
   """
-  @spec add_dep(binary(), binary(), atom() | String.t()) ::
+  @spec add_dep(binary(), binary(), atom() | String.t(), binary() | nil) ::
           {:ok, Edge.t()} | {:error, Ecto.Changeset.t()}
-  def add_dep(child_id, parent_id, kind \\ :blocks), do: Fence.add_dep(child_id, parent_id, kind)
+  def add_dep(child_id, parent_id, kind \\ :blocks, caller_token_id \\ nil),
+    do: Fence.add_dep(child_id, parent_id, kind, caller_token_id)
 
   @doc """
   Remove the `(child_id, parent_id, kind)` edge.
@@ -471,9 +472,10 @@ defmodule Barkpark.Tasks do
   the rev bump + event keep the relabel observable), or `{:error, :not_found}`
   / `{:error, :stale_claim}`.
   """
-  @spec relabel_by_id(binary(), [binary()], [binary()]) ::
+  @spec relabel_by_id(binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
-  defdelegate relabel_by_id(task_id, add, remove), to: Mutations
+  def relabel_by_id(task_id, add, remove, caller_token_id \\ nil),
+    do: Mutations.relabel_by_id(task_id, add, remove, caller_token_id)
 
   @doc """
   Phase A: add/remove `content.papers` entries (paper slugs) on a single task,
@@ -490,9 +492,10 @@ defmodule Barkpark.Tasks do
   the rev bump + event keep the change observable), or `{:error, :not_found}`
   / `{:error, :stale_claim}`.
   """
-  @spec update_paper_refs_by_id(binary(), [binary()], [binary()]) ::
+  @spec update_paper_refs_by_id(binary(), [binary()], [binary()], binary() | nil) ::
           {:ok, Document.t()} | {:error, term()}
-  defdelegate update_paper_refs_by_id(task_id, add_slugs, remove_slugs), to: Mutations
+  def update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id \\ nil),
+    do: Mutations.update_paper_refs_by_id(task_id, add_slugs, remove_slugs, caller_token_id)
 
   @doc """
   rail-l3: re-parent a task (change `content.parent_id`). `task_uuid` is the
@@ -505,9 +508,10 @@ defmodule Barkpark.Tasks do
   write). See `Barkpark.Tasks.Move.move/2`. Parent existence/type is the
   caller's pre-flight (the controller's `find_task_by_doc_id`).
   """
-  @spec move_by_id(binary(), binary() | nil) ::
+  @spec move_by_id(binary(), binary() | nil, binary() | nil) ::
           {:ok, Document.t()} | {:error, :not_found | :cycle | :stale_claim}
-  defdelegate move_by_id(task_uuid, new_parent_doc_id), to: Move, as: :move
+  def move_by_id(task_uuid, new_parent_doc_id, caller_token_id \\ nil),
+    do: Move.move(task_uuid, new_parent_doc_id, caller_token_id)
 
   # Fencing applies only to tasks that carry a claim lease. Work-tasks are
   # claimed before close, so they have `content.claim.epoch` and the observed

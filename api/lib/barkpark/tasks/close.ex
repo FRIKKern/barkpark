@@ -12,6 +12,7 @@ defmodule Barkpark.Tasks.Close do
       generate_rev: 0,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
+      caller_stamp: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -39,6 +40,9 @@ defmodule Barkpark.Tasks.Close do
     # to content.landed atomically with the close, so closed tasks become a
     # queryable ledger of touched surfaces (the CI re-land check reads it).
     landed = Keyword.get(opts, :landed)
+    # Audit stamp: the api_token id that drove this close (nil for internal
+    # callers), threaded into the task.closed mutation_event's document map.
+    caller_token_id = Keyword.get(opts, :caller_token_id)
 
     cond do
       new_status not in @closed_lifecycle_statuses ->
@@ -53,7 +57,8 @@ defmodule Barkpark.Tasks.Close do
           new_status,
           reason,
           criteria,
-          landed
+          landed,
+          caller_token_id
         )
     end
   end
@@ -66,7 +71,8 @@ defmodule Barkpark.Tasks.Close do
          new_status,
          reason,
          criteria,
-         landed
+         landed,
+         caller_token_id
        ) do
     result =
       Repo.transaction(fn ->
@@ -108,7 +114,15 @@ defmodule Barkpark.Tasks.Close do
                          criteria,
                          landed
                        ) do
-                  ev = insert_mutation_event!(updated, @event_task_closed, observed_rev)
+                  ev =
+                    insert_mutation_event!(
+                      updated,
+                      @event_task_closed,
+                      observed_rev,
+                      "api",
+                      caller_stamp(caller_token_id)
+                    )
+
                   unblocked = cascade_unblock_dependents!(updated)
                   landed = notify_landed_under_you!(updated, worker_id)
 

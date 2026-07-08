@@ -11,7 +11,8 @@ defmodule Barkpark.Tasks.Claim do
     only: [
       generate_rev: 0,
       current_epoch: 1,
-      insert_mutation_event!: 3,
+      insert_mutation_event!: 5,
+      caller_stamp: 1,
       task_broadcast: 4,
       emit_broadcasts: 1
     ]
@@ -25,6 +26,8 @@ defmodule Barkpark.Tasks.Claim do
   @ready_lifecycle_statuses ~w(open blocked)
 
   def claim(worker_id, opts \\ []) when is_binary(worker_id) do
+    caller_token_id = Keyword.get(opts, :caller_token_id)
+
     result =
       Repo.transaction(fn ->
         case opts
@@ -35,7 +38,7 @@ defmodule Barkpark.Tasks.Claim do
             {:ok, nil}
 
           %Document{} = doc ->
-            do_claim(doc, worker_id)
+            do_claim(doc, worker_id, [], caller_token_id)
         end
       end)
 
@@ -60,6 +63,7 @@ defmodule Barkpark.Tasks.Claim do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
     resources = opts |> Keyword.get(:resources, []) |> normalize_resources()
+    caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
       Repo.transaction(fn ->
@@ -84,12 +88,12 @@ defmodule Barkpark.Tasks.Claim do
             # recovery path after a fence bump. A DIFFERENT worker falls through
             # to check_ready and still gets :not_ready.
             if renewal?(doc, worker_id) do
-              do_renew(doc, worker_id)
+              do_renew(doc, worker_id, caller_token_id)
             else
               with :ok <- check_ready_for_targeted_claim(doc),
                    :ok <- check_deps_satisfied(doc),
                    :ok <- check_resources_free(resources, doc.id, workspace_id, project_id) do
-                do_claim(doc, worker_id, resources)
+                do_claim(doc, worker_id, resources, caller_token_id)
               end
             end
         end
@@ -224,7 +228,7 @@ defmodule Barkpark.Tasks.Claim do
     end
   end
 
-  defp do_claim(%Document{} = doc, worker_id, resources \\ []) do
+  defp do_claim(%Document{} = doc, worker_id, resources, caller_token_id) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     next_epoch = current_epoch(doc) + 1
@@ -265,7 +269,16 @@ defmodule Barkpark.Tasks.Claim do
     case rows do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
-        ev = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
+
+        ev =
+          insert_mutation_event!(
+            updated,
+            @event_task_claimed,
+            observed_rev,
+            "api",
+            caller_stamp(caller_token_id)
+          )
+
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
 
       0 ->
@@ -295,7 +308,7 @@ defmodule Barkpark.Tasks.Claim do
   # rail_rev + notices (a renewal after an edge fence surfaces
   # blocked_while_claimed in the same response). Resources + worker are left
   # exactly as the live claim holds them.
-  defp do_renew(%Document{content: content} = doc, worker_id) do
+  defp do_renew(%Document{content: content} = doc, worker_id, caller_token_id) do
     observed_rev = doc.rev
     new_rev = generate_rev()
     claim = Map.get(content, "claim") || %{}
@@ -322,7 +335,16 @@ defmodule Barkpark.Tasks.Claim do
     case rows do
       1 ->
         updated = %{doc | content: new_content, rev: new_rev}
-        ev = insert_mutation_event!(updated, @event_task_claimed, observed_rev)
+
+        ev =
+          insert_mutation_event!(
+            updated,
+            @event_task_claimed,
+            observed_rev,
+            "api",
+            caller_stamp(caller_token_id)
+          )
+
         {:ok, updated, [task_broadcast(updated, @event_task_claimed, ev, observed_rev)]}
 
       0 ->

@@ -1331,4 +1331,112 @@ defmodule BarkparkWeb.TasksControllerTest do
       conn |> get("/v1/tasks/prime") |> json_response(401)
     end
   end
+
+  # ─── Audit hardening: caller token id stamped onto workflow events ──────
+  # Each task-workflow mutation driven through the controller with an
+  # authenticated bearer stamps that token's id onto the emitted
+  # mutation_event's `document` map (`caller_token_id`), attributing the
+  # mutation to the CALLING TOKEN. Tokenless/internal callers stamp nothing.
+  describe "audit: caller_token_id on workflow mutation_events" do
+    test "close stamps the calling token id on the task.closed event",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-audit-close")
+      _task = mk_task!(uniq("audit-close"), scope, %{"parent_id" => phase})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/claim", Jason.encode!(%{worker_id: "worker-1", phase_id: phase}))
+
+      claim_payload = Jason.decode!(claim_resp.resp_body)
+      doc_id = claim_payload["doc"]["doc_id"]
+      epoch = claim_payload["doc"]["claim"]["epoch"]
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/close",
+          Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+        )
+
+      assert resp.status == 200
+      assert event_document(doc_id, "task.closed")["caller_token_id"] == test_token_id()
+    end
+
+    test "claim stamps the calling token id on the task.claimed event",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-audit-claim")
+      _task = mk_task!(uniq("audit-claim"), scope, %{"parent_id" => phase})
+
+      claim_resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/claim", Jason.encode!(%{worker_id: "worker-1", phase_id: phase}))
+
+      doc_id = Jason.decode!(claim_resp.resp_body)["doc"]["doc_id"]
+      assert event_document(doc_id, "task.claimed")["caller_token_id"] == test_token_id()
+    end
+
+    test "move stamps the calling token id on the task.reparented event",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("audit-move-parent"), scope)
+      child = mk_task!(uniq("audit-move-child"), scope)
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{child.doc_id}/move",
+          Jason.encode!(%{new_parent_id: parent.doc_id})
+        )
+
+      assert resp.status == 200
+      assert event_document(child.doc_id, "task.reparented")["caller_token_id"] == test_token_id()
+    end
+
+    test "labels stamps the calling token id on the task.relabeled event",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("audit-relabel"), scope)
+
+      resp =
+        conn
+        |> authed()
+        |> post("/v1/tasks/#{task.doc_id}/labels", Jason.encode!(%{add: ["audit:x"]}))
+
+      assert resp.status == 200
+      assert event_document(task.doc_id, "task.relabeled")["caller_token_id"] == test_token_id()
+    end
+
+    test "backward-compat: a tokenless internal move stamps NO caller_token_id and does not crash",
+         %{scope: scope} do
+      parent = mk_task!(uniq("audit-internal-parent"), scope)
+      child = mk_task!(uniq("audit-internal-child"), scope)
+
+      # Facade call with no caller token id (the internal / tokenless path).
+      assert {:ok, _doc} = Tasks.move_by_id(child.id, parent.doc_id)
+
+      document = event_document(child.doc_id, "task.reparented")
+      assert is_map(document)
+      refute Map.has_key?(document, "caller_token_id")
+    end
+  end
+
+  defp event_document(doc_id, mutation) do
+    import Ecto.Query, only: [from: 2]
+
+    Repo.one(
+      from(e in Barkpark.Content.MutationEvent,
+        where: e.doc_id == ^doc_id and e.mutation == ^mutation,
+        order_by: [desc: e.id],
+        limit: 1,
+        select: e.document
+      )
+    )
+  end
+
+  defp test_token_id do
+    alias Barkpark.Auth.ApiToken
+    Repo.get_by!(ApiToken, token_hash: ApiToken.hash_token(@token)).id
+  end
 end

@@ -74,6 +74,16 @@ defmodule Barkpark.Tasks.Internal do
     |> Repo.insert!()
   end
 
+  # Audit stamp: the id of the api_token that drove this workflow mutation.
+  # Returns an `extra_document`-shaped fragment so it merges into the event's
+  # `document` map (see `insert_mutation_event!/5`) as `"caller_token_id"`,
+  # attributing the event to the CALLING TOKEN — distinct from the self-declared
+  # `content.claim.worker`. Backward-compatible: an anonymous / tokenless /
+  # internal caller (no bearer resolved to `conn.assigns[:api_token]`) threads
+  # `nil` and emits NO key, so pre-existing events stay byte-identical.
+  def caller_stamp(token_id) when is_binary(token_id), do: %{"caller_token_id" => token_id}
+  def caller_stamp(_), do: %{}
+
   # Every CAS write path bypasses Content's canonical write path
   # (`tap_broadcast/5`), so these mirror its PubSub so the SSE listen endpoint
   # and workspace activity reads see task ops. Content stays the single owner of
