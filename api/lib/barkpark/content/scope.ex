@@ -43,6 +43,7 @@ defmodule Barkpark.Content.Scope do
 
   import Ecto.Query
 
+  alias Barkpark.Access
   alias Barkpark.Access.Grant
   alias Barkpark.Content.CallerContext
 
@@ -234,9 +235,15 @@ defmodule Barkpark.Content.Scope do
   # So this is a PURE TIGHTENING: every grant a read caller was already
   # legitimately narrowed by confers read (it had to, to be admitted), and only
   # the erroneously-contributing non-read grants drop out of the union.
-  defp covers_workspace_read?(%Grant{workspace_id: ws, capabilities: caps}, workspace_id)
+  #
+  # LIVE grantor gate (finding ag-1): a grant contributes its ladder to the
+  # read-union ONLY while its grantor still holds READ in this workspace — the
+  # SAME `Access.grantor_authorizes?/2` predicate the per-action admission path
+  # (`do_validate`) enforces, so the row-narrowing path can never widen a read
+  # by a grant whose grantor lost authority (no bypass between the two paths).
+  defp covers_workspace_read?(%Grant{workspace_id: ws, capabilities: caps} = grant, workspace_id)
        when is_list(caps),
-       do: ws == workspace_id and "read" in caps
+       do: ws == workspace_id and "read" in caps and Access.grantor_authorizes?(grant, :read)
 
   defp covers_workspace_read?(_grant, _workspace_id), do: false
 

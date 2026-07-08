@@ -78,10 +78,28 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
     {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
   end
 
+  # A LIVE grantor for enforcement-time re-validation (finding ag-1): an admin
+  # member of `ws` holding read+write+admin, so a grant it mints still confers
+  # (a grant only admits while its grantor still holds the capability).
+  defp grant_authority!(ws) do
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token("ag-grantor-" <> Ecto.UUID.generate()),
+        label: "ag-grantor",
+        dataset: "test",
+        permissions: ["read", "write", "admin"]
+      })
+      |> Repo.insert()
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
+    token
+  end
+
   defp bind_grant!(ws, user, overrides) do
     attrs =
       %{
-        grantor_id: Ecto.UUID.generate(),
+        grantor_id: grant_authority!(ws).id,
         grantee_email: user.email,
         grantee_user_id: user.id,
         claimed_at: DateTime.utc_now(),
