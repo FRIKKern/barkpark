@@ -1256,8 +1256,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, _view, html} = live(conn, "/admin/projects")
 
       assert html =~ "green the golden tests"
-      # a MET criterion is never the focus
-      refute html =~ "compile the parser"
+      # the full checklist shows BOTH criteria (wave 20)…
+      assert html =~ ~s(data-role="card-criteria")
+      assert html =~ "compile the parser"
+      # …but a MET criterion is never the NOW focus.
+      [_, focus] = String.split(html, ~s(data-role="focus"), parts: 2)
+      focus = focus |> String.split("</p>", parts: 2) |> hd()
+      assert focus =~ "green the golden tests"
+      refute focus =~ "compile the parser"
     end
 
     test "a child never duplicates as its own board card — it rides the family row",
@@ -1571,13 +1577,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
         lifecycle: "in_progress",
         parent_id: "rd-epic",
         assignee: "studio:doey",
-        description: "Porting the columns renderer to the two-pass solver."
+        description: "Porting the columns renderer to the two-pass solver.",
+        criteria: [
+          %{"criterion" => "solver flag flipped for columns", "met" => true},
+          %{"criterion" => "golden-diff green at 3 widths", "met" => false}
+        ]
       )
 
       task("rd-open", "Quiet child",
         lifecycle: "open",
         parent_id: "rd-epic",
-        description: "NEVER-ON-THE-ROW: only in-flight rows carry text."
+        description: "NEVER-ON-THE-ROW: only in-flight rows carry text.",
+        criteria: [%{"criterion" => "QUIET-CRITERION never on the row", "met" => false}]
       )
 
       task("rd-bare", "Bare epic", lifecycle: "in_progress")
@@ -1613,6 +1624,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       for i <- 1..10, do: assert(html =~ "Wide child #{i}")
       refute html =~ ~s(data-role="family-more")
+    end
+
+    test "the ongoing task's criteria checklist rides its row (wave 20)", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # the in-flight child's checklist renders under its row — met AND unmet…
+      assert html =~ ~s(data-role="family-criteria")
+      assert html =~ "solver flag flipped for columns"
+      assert html =~ "golden-diff green at 3 widths"
+      # …a quiet child's criteria never do.
+      refute html =~ "QUIET-CRITERION"
     end
 
     test "the peek links the full design paper", %{conn: conn} do
