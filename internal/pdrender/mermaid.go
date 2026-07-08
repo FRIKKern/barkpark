@@ -24,15 +24,15 @@ import (
 type mmShape int
 
 const (
-	shapeRect      mmShape = iota // A[Label]
-	shapeRound                    // A(Label)
-	shapeStadium                  // A([Label])
-	shapeCircle                   // A((Label))
-	shapeDiamond                  // A{Label}
-	shapeHexagon                  // A{{Label}}
-	shapeSubroutine               // A[[Label]]
-	shapeCylinder                 // A[(Label)]
-	shapeBare                     // A  (no brackets — id is the label)
+	shapeRect       mmShape = iota // A[Label]
+	shapeRound                     // A(Label)
+	shapeStadium                   // A([Label])
+	shapeCircle                    // A((Label))
+	shapeDiamond                   // A{Label}
+	shapeHexagon                   // A{{Label}}
+	shapeSubroutine                // A[[Label]]
+	shapeCylinder                  // A[(Label)]
+	shapeBare                      // A  (no brackets — id is the label)
 )
 
 // mmLinkStyle is an edge's line style, read from its operator.

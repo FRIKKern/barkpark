@@ -341,7 +341,7 @@ var bandGlyph = map[int]rune{
 	cU | cD | cR: '├', cU | cD | cL: '┤',
 	cL | cR | cD: '┬', cL | cR | cU: '┴',
 	cU | cD | cL | cR: '┼',
-	cU: '│', cD: '│', cL: '─', cR: '─',
+	cU:                '│', cD: '│', cL: '─', cR: '─',
 }
 
 // renderBand draws the orthogonal bus connecting rank `pr` (parents, exits at
