@@ -38,23 +38,33 @@ func styleguideGolden(t *testing.T, name, got string) {
 	}
 }
 
-// TestPdrenderTokensGolden renders the emitted status tones + reading tokens.
+// TestPdrenderTokensGolden renders the status tones the Theme actually paints
+// plus the reading tokens. The tone colors are pulled back OUT of a live
+// Theme.Callout — not read straight from GenTone* — so this golden guards the
+// wiring itself: if theme.go ever reverts to hand literals, the bar foreground
+// diverges from the emitted token and this render moves.
 func TestPdrenderTokensGolden(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("pdrender status tones (emitted from design/tokens.json)\n")
 	b.WriteString("tone     light      dark\n")
 	b.WriteString("------   -------    -------\n")
+	th := DarkTheme() // AdaptiveColor carries both L/D regardless of preset name
 	tones := []struct {
-		name string
-		c    lipgloss.AdaptiveColor
+		name   string
+		callTo string // Theme.Callout tone key
 	}{
-		{"info", GenToneInfo},
-		{"ok", GenToneOK},
-		{"warn", GenToneWarn},
-		{"danger", GenToneDanger},
+		{"info", "info"},
+		{"ok", "success"},
+		{"warn", "warning"},
+		{"danger", "danger"},
 	}
 	for _, tone := range tones {
-		b.WriteString(fmt.Sprintf("%-8s %-10s %s\n", tone.name, tone.c.Light, tone.c.Dark))
+		bar, _ := th.Callout(tone.callTo)
+		c, ok := bar.GetForeground().(lipgloss.AdaptiveColor)
+		if !ok {
+			t.Fatalf("callout %q bar foreground is %T, want lipgloss.AdaptiveColor", tone.callTo, bar.GetForeground())
+		}
+		b.WriteString(fmt.Sprintf("%-8s %-10s %s\n", tone.name, c.Light, c.Dark))
 	}
 	b.WriteString("\nreading tokens\n")
 	b.WriteString(fmt.Sprintf("font stack:     %s\n", GenReadingFontStack))

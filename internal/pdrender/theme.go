@@ -104,10 +104,11 @@ var (
 	pdLabel  = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"} // styles.go editorLabelStyle
 	pdTerra  = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"} // doc.css terracotta (pullquote bar)
 	pdBtnFg  = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"} // contrasting fg on the filled primary action
-	toneInfo = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"}
-	toneOK   = lipgloss.AdaptiveColor{Light: "#047857", Dark: "#34d399"} // styles.go greenDot-ish
-	toneWarn = lipgloss.AdaptiveColor{Light: "#92400e", Dark: "#fbbf24"} // styles.go amberDot-ish
-	toneDang = lipgloss.AdaptiveColor{Light: "#b91c1c", Dark: "#f87171"}
+	// Semantic status tones are token-sourced (see the Callout builder, which
+	// reads GenToneInfo/OK/Warn/Danger from tokens_gen.go). This is a DELIBERATE
+	// retint vs the old hand literals (e.g. ok #047857 → token #137236), so the
+	// callout bars in the WASM reader move with design/tokens.json. Only the
+	// neutral tone stays a hand literal here — its token twin lands in wave 2.
 	toneNeut = lipgloss.AdaptiveColor{Light: "#374151", Dark: "#9ca3af"}
 )
 
@@ -183,15 +184,15 @@ func buildTheme(name string) Theme {
 		var c lipgloss.TerminalColor
 		switch tone {
 		case "success":
-			c = toneOK
+			c = GenToneOK
 		case "warning":
-			c = toneWarn
+			c = GenToneWarn
 		case "danger":
-			c = toneDang
+			c = GenToneDanger
 		case "neutral":
 			c = toneNeut
 		default: // info + unknown
-			c = toneInfo
+			c = GenToneInfo
 		}
 		bar = lipgloss.NewStyle().Foreground(c)
 		bodyStyle = lipgloss.NewStyle().Foreground(c)
