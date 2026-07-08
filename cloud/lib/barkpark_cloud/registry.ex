@@ -47,6 +47,12 @@ defmodule BarkparkCloud.Registry do
   @default_region "nbg1"
   @default_server_type "cax11"
 
+  # A barkpark row that has NEVER phoned home (last_seen_at nil) and is older
+  # than this stops holding a name claim against custom-host attachment — see
+  # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
+  # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
+  @abandoned_claim_after_days 7
+
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
   # transit and — per the worker contract — it tore down its half-built box and
@@ -3185,8 +3191,23 @@ defmodule BarkparkCloud.Registry do
   defp provisioning_fqdn_taken?(norm) do
     url = "https://" <> norm
 
+    # ABANDONED rows do not hold a name claim. A row whose agent NEVER phoned
+    # home (last_seen_at nil — every live instance reports within a minute of
+    # provisioning), that is older than @abandoned_claim_after_days, and that
+    # has no active job in flight is a provisioning ghost (seen live
+    # 2026-07-08: a June-29 pre-registry-era attempt squatted
+    # gyldendal.barkpark.cloud forever with no owner able to release it).
+    # Excluding it here lets a legitimate attach reclaim the name; the ghost
+    # row itself stays untouched (it is dead weight, not a conflict).
+    cutoff = DateTime.add(DateTime.utc_now(), -@abandoned_claim_after_days, :day)
+
     Barkpark
     |> where([b], b.url == ^url)
+    |> where(
+      [b],
+      not (is_nil(b.last_seen_at) and b.inserted_at < ^cutoff and
+             b.id not in subquery(active_job_barkpark_ids()))
+    )
     |> select([b], 1)
     |> limit(1)
     |> Repo.one()
@@ -3194,6 +3215,12 @@ defmodule BarkparkCloud.Registry do
       nil -> false
       _ -> true
     end
+  end
+
+  defp active_job_barkpark_ids do
+    ProvisionJob
+    |> where([j], j.status in ["pending", "claimed"])
+    |> select([j], j.barkpark_id)
   end
 
   # Map a lost race on barkparks_custom_host_unique_idx to the same :taken the

@@ -56,6 +56,59 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       refute Registry.domain_registered?("someone-else.barkpark.cloud")
     end
 
+    test "an ABANDONED row's provisioning FQDN stops holding the claim (ghost reclamation)" do
+      # A provisioning ghost: url squats the name, agent NEVER phoned home
+      # (last_seen_at nil), older than the abandonment window, no jobs. Seen
+      # live 2026-07-08 — a pre-registry-era attempt held a name forever with
+      # no owner able to release it.
+      ghost = barkpark_fixture(team_fixture())
+
+      {:ok, ghost} =
+        ghost
+        |> Ecto.Changeset.change(
+          url: "https://reclaimed.barkpark.cloud",
+          inserted_at: DateTime.add(DateTime.utc_now(), -8, :day)
+        )
+        |> BarkparkCloud.Repo.update()
+
+      assert ghost.last_seen_at == nil
+
+      claimer = barkpark_fixture(team_fixture())
+
+      assert {:ok, %Barkpark{custom_host: "reclaimed.barkpark.cloud"}} =
+               Registry.set_custom_host(claimer, "reclaimed.barkpark.cloud")
+    end
+
+    test "a LIVE row's provisioning FQDN keeps the claim even when old" do
+      live = barkpark_fixture(team_fixture())
+
+      {:ok, _live} =
+        live
+        |> Ecto.Changeset.change(
+          url: "https://occupied.barkpark.cloud",
+          inserted_at: DateTime.add(DateTime.utc_now(), -30, :day),
+          last_seen_at: DateTime.utc_now()
+        )
+        |> BarkparkCloud.Repo.update()
+
+      claimer = barkpark_fixture(team_fixture())
+
+      assert {:error, :taken} = Registry.set_custom_host(claimer, "occupied.barkpark.cloud")
+    end
+
+    test "a young silent row keeps the claim (still provisioning, not yet abandoned)" do
+      young = barkpark_fixture(team_fixture())
+
+      {:ok, _young} =
+        young
+        |> Ecto.Changeset.change(url: "https://fresh.barkpark.cloud")
+        |> BarkparkCloud.Repo.update()
+
+      claimer = barkpark_fixture(team_fixture())
+
+      assert {:error, :taken} = Registry.set_custom_host(claimer, "fresh.barkpark.cloud")
+    end
+
     test "v1 format gate: anything but ONE label under the platform zone → {:error, changeset}" do
       bp = barkpark_fixture(team_fixture())
 
