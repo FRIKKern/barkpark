@@ -48,3 +48,26 @@ func TestScopedURLPlainSlugsUnchanged(t *testing.T) {
 		t.Errorf("plain slugs should be byte-identical:\n got=%q\nwant=%q", got, want)
 	}
 }
+
+// A base URL carrying a trailing slash must be normalized so the scheme splices a
+// single "/w/", not a doubled "//w/". This is the drift the extraction fixes: the
+// old Client.scopedURL used c.baseURL RAW (no trim) while the CLI's migrate copy
+// trimmed — so a trailing-slash base produced a malformed "//w/" on the apiclient
+// path only. Folding strings.TrimRight into the shared ScopedURL closes it.
+//
+// RED before the fix (raw base → ".../#/w/acme/..." with "//w/"), GREEN after.
+func TestScopedURLTrailingSlashBaseNormalized(t *testing.T) {
+	got := ScopedURL("https://api.example.com/", "acme", "web", "/v1/schemas/production")
+	want := "https://api.example.com/w/acme/p/web/v1/schemas/production"
+	if got != want {
+		t.Errorf("trailing-slash base not normalized:\n got=%q\nwant=%q", got, want)
+	}
+	if strings.Contains(got, "//w/") {
+		t.Errorf("doubled slash before /w/ (drift not fixed): %q", got)
+	}
+	// The Client method must inherit the same normalization via delegation.
+	c := New(Config{BaseURL: "https://api.example.com/", Workspace: "acme", Project: "web", Dataset: "production"})
+	if cgot := c.scopedURL("/v1/schemas/production"); cgot != want {
+		t.Errorf("Client.scopedURL did not inherit trailing-slash normalization:\n got=%q\nwant=%q", cgot, want)
+	}
+}

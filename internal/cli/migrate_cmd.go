@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // migrateBatchSize is how many createOrReplace mutations we POST per request on
@@ -34,15 +36,13 @@ type migrateEndpoint struct {
 	project   string
 }
 
-// scopedURL builds a workspace/project-scoped /v1/ URL for this endpoint,
-// mirroring apiclient.Client.scopedURL so a migration honours the same tenancy
-// routing the rest of the CLI uses.
+// scopedURL builds a workspace/project-scoped /v1/ URL for this endpoint by
+// delegating to apiclient.ScopedURL — the one owner of the scoped URL scheme —
+// so a migration honours the same tenancy routing the rest of the CLI uses.
+// (e.url is already trailing-slash-trimmed at populate in endpointFrom, so the
+// TrimRight folded into ScopedURL is a no-op here — byte-identical.)
 func (e migrateEndpoint) scopedURL(suffix string) string {
-	return fmt.Sprintf("%s/w/%s/p/%s%s",
-		strings.TrimRight(e.url, "/"),
-		url.PathEscape(e.workspace),
-		url.PathEscape(e.project),
-		suffix)
+	return apiclient.ScopedURL(e.url, e.workspace, e.project, suffix)
 }
 
 func (e migrateEndpoint) authHeaders() map[string]string {
