@@ -175,6 +175,29 @@ func TestRunCloudUsageMetered(t *testing.T) {
 	if !strings.Contains(stdout, "instance.datasets") {
 		t.Fatalf("the still-unmetered datasets source must render:\n%s", stdout)
 	}
+	// An unmetered meter has no reading, so it claims no freshness: its AS OF is a
+	// dash, never "live" (a quiet pipe never poses as a current read — the same
+	// no-fake-reading honesty its dashed VALUE cell carries).
+	datasetsRow := usageTestRow(t, stdout, "Datasets")
+	if strings.Contains(datasetsRow, "live") {
+		t.Fatalf("an unmetered meter's AS OF must not claim a live read:\n%s", datasetsRow)
+	}
+	if !strings.Contains(datasetsRow, "—") {
+		t.Fatalf("an unmetered meter's AS OF must dash out:\n%s", datasetsRow)
+	}
+}
+
+// usageTestRow returns the single rendered meter row whose METER label is the
+// given prefix, failing the test if it is absent.
+func usageTestRow(t *testing.T, out, label string) string {
+	t.Helper()
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, label) {
+			return line
+		}
+	}
+	t.Fatalf("no rendered row for meter %q:\n%s", label, out)
+	return ""
 }
 
 // TestRunCloudUsageJSONPassthrough: `-o json` emits the control-plane envelope

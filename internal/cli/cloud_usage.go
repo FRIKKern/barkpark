@@ -171,20 +171,22 @@ func renderUsageResult(out *writer, ref string, res cloudclient.UsageResult) {
 func renderUsageMeters(out *writer, meters map[string]cloudclient.UsageMeter) {
 	headers := []string{"METER", "VALUE", "LIMIT", "STATE", "AS OF", "SOURCE"}
 	cells := make([][]string, 0, len(usageMeterOrder))
-	// paintRole holds the role for each row's STATE cell so the join loop can
-	// paint through the shared seam without re-deriving it.
+	// stateTokens holds each row's bare STATE token so the join loop can paint it
+	// through the shared seam without re-deriving it (it is also the STATE cell's
+	// text, so the token is computed once per row).
 	stateTokens := make([]string, 0, len(usageMeterOrder))
 	for _, name := range usageMeterOrder {
 		m, present := meters[name]
+		token := usageStateToken(m, present)
 		cells = append(cells, []string{
 			usageMeterLabel(name),
 			usageValueCell(name, m, present),
 			usageLimitCell(m),
-			usageStateToken(m, present),
-			usageAsOfCell(m),
+			token,
+			usageAsOfCell(m, present),
 			usageSourceCell(m, present),
 		})
-		stateTokens = append(stateTokens, usageStateToken(m, present))
+		stateTokens = append(stateTokens, token)
 	}
 
 	widths := make([]int, len(headers))
@@ -273,8 +275,13 @@ func usageLimitCell(m cloudclient.UsageMeter) string {
 }
 
 // usageAsOfCell renders a meter's freshness: "as of <stamp>" when the envelope
-// carried a measured_at snapshot time, or "live" for a nil (current) read.
-func usageAsOfCell(m cloudclient.UsageMeter) string {
+// carried a measured_at snapshot time, or "live" for a nil (current) read. An
+// unmetered meter has no reading, so it has no freshness — it dashes out (a
+// quiet pipe never claims a "live" read, matching its dashed VALUE cell).
+func usageAsOfCell(m cloudclient.UsageMeter, present bool) string {
+	if !present || !usageIsMetered(m) {
+		return "—"
+	}
 	if m.MeasuredAt == nil || strings.TrimSpace(*m.MeasuredAt) == "" {
 		return "live"
 	}
