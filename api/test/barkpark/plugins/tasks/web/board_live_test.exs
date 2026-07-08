@@ -1018,7 +1018,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     test "facets live INSIDE a filter disclosure that is collapsed by default", %{conn: conn} do
       # A corpus with facet values that, uncapped, would wall the board.
       for i <- 1..30,
-          do: task("wall-#{i}", "Task #{i}", lifecycle: "open", labels: ["l#{i}"], assignee: "w#{i}")
+          do:
+            task("wall-#{i}", "Task #{i}",
+              lifecycle: "open",
+              labels: ["l#{i}"],
+              assignee: "w#{i}"
+            )
 
       {:ok, _view, html} = live(conn, "/admin/projects")
 
