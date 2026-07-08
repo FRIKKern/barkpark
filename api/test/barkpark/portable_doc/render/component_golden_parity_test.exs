@@ -185,13 +185,18 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     end
   end
 
-  test "card: the emitter realizes the projection (title + flattened body)" do
+  test "card: the emitter realizes the projection (title + body present)" do
     fx = decode!(@api_dir, "card")
     html = Components.card_html(fx["input"])
     ex = fx["expected"]
     assert String.starts_with?(html, ~s|<div class="bp-card|)
-    assert html =~ ~s|<div class="bp-card__t">#{ex["title"]}</div>|
-    assert html =~ ~s|<div class="bp-card__d">#{ex["body"]}</div>|
+    # Model B (au-w5-card-slot-parity) recurses title/body as semantic <h_>/<p>,
+    # dropping the bp-card__t/__d flatten wrappers — so this leg asserts the SHARED
+    # projection FLOOR (title/body TEXT present), mirroring Go's `mustContain`, NOT
+    # byte-exact chrome. The projection itself stays {container_role, title, body}
+    # this wave; substring-presence is aligning-to-floor, not projection graduation.
+    assert html =~ ex["title"]
+    assert html =~ ex["body"]
   end
 
   test "pipeline: the emitter realizes the projection (container · kind/title/detail per node)" do
