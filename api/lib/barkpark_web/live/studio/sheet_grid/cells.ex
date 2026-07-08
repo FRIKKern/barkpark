@@ -344,7 +344,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
       if(Map.get(s, "i") == true, do: " font-style: italic;", else: ""),
       case Map.get(s, "bg") do
         bg when is_binary(bg) ->
-          if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, bg), do: " background: #{bg};", else: ""
+          if Barkpark.Plugins.Sheets.CondFormat.valid_bg?(bg), do: " background: #{bg};", else: ""
 
         _ ->
           ""

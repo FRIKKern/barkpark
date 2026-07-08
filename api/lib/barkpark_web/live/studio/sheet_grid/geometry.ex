@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
   (`Geometry.col_px(...)`) without re-marking change-tracked assigns.
   """
 
+  alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias BarkparkWeb.Studio.PresenceState
 
@@ -157,7 +158,11 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
   def peer_color(p, uid) do
     case Map.get(p, :color) do
       color when is_binary(color) ->
-        if Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color),
+        # The peer cursor color lands raw in an inline `style` attribute
+        # (box-shadow/background), so route through the ONE `#rrggbb` owner
+        # (capability:sheets-bg-sanitizer) — `\z`-anchored, so a trailing-newline
+        # color falls back to a picked color rather than smuggling into the attr.
+        if CondFormat.valid_bg?(color),
           do: color,
           else: PresenceState.pick_color(uid)
 

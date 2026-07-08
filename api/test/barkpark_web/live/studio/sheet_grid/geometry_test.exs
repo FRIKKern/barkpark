@@ -206,4 +206,26 @@ defmodule BarkparkWeb.Studio.SheetGrid.GeometryTest do
       assert Geometry.rgba("#1a2b3c", 1) == "rgba(26, 43, 60, 1)"
     end
   end
+
+  describe "peer_color/2 — presence cursor colour lands in an inline style attr" do
+    test "a valid #rrggbb peer colour is used verbatim" do
+      assert Geometry.peer_color(%{color: "#aabbcc"}, "u1") == "#aabbcc"
+    end
+
+    test "an invalid peer colour falls back to a picked colour" do
+      color = Geometry.peer_color(%{color: "red"}, "u1")
+      refute color == "red"
+      assert Regex.match?(~r/^#[0-9a-fA-F]{6}$/, color)
+    end
+
+    test "a #rrggbb with a trailing newline is REJECTED — falls back, no stowaway" do
+      # The peer colour is interpolated raw into `box-shadow`/`background` inline
+      # style attributes (sheet_grid.ex). The old `$`-anchored copy accepted
+      # "#aabbcc\n"; delegating to the `\z` canonical rejects it so the newline
+      # can never smuggle into the style attribute — a picked colour is used.
+      color = Geometry.peer_color(%{color: "#aabbcc\n"}, "u1")
+      refute color == "#aabbcc\n"
+      refute color =~ "\n"
+    end
+  end
 end

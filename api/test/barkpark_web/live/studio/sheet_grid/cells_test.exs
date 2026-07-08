@@ -581,6 +581,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert style == nil
     end
 
+    test "a hex background with a trailing newline is REJECTED (no CSS-attr stowaway)" do
+      # `#rrggbb\n` passes the old `$`-anchored copy but is rejected by the
+      # canonical `\z` owner (CondFormat.valid_bg?/1) this path now delegates to,
+      # so the newline can never land in the inline `style` attribute.
+      style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"s" => %{"bg" => "#aabbcc\n"}})
+      assert style == nil
+      refute is_binary(style) and style =~ "background"
+    end
+
     test "cell with text-align returns alignment style" do
       style = Cells.cell_style(3, 3, 0, 0, %{}, %{}, %{"s" => %{"al" => "center"}})
       assert style =~ "text-align: center"
