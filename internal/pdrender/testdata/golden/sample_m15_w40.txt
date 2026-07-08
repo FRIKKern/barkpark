@@ -13,9 +13,9 @@ Tasks per status over the last 4 days
 ⠒⠒ open  ⠒⠒ ready  ⠒⠒ done              
                                         
        Mon Tue Wed Thu                  
-open    ·░█                             
-ready  ·░▒░                             
-done   ▒▓░                              
+open       ··· ░░░ ███                  
+ready  ··· ░░░ ▒▒▒ ░░░                  
+done   ▒▒▒ ▓▓▓ ░░░                      
 less ·░▒▓█ more                         
                                         
 14                                      

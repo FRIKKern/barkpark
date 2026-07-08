@@ -16,12 +16,11 @@ source: pdrender-block-parity
 TODO                                                        
 A stage with detail, files and source omitted               
                                                             
-╭────────────────────────────────────────────────────────╮  
-│ A media slot recursed through the registry beneath its │  
-│ muted label line.                                      │  
-│ Card title slot                                        │  
-│ The body slot holds element blocks that stack inside   │  
-│ the                                                    │  
-│ rounded border and wrap to the box inner width.        │  
-│  Open the card  (https://barkpark.cloud/papers/card)   │  
-╰────────────────────────────────────────────────────────╯  
+╭──────────────────────────────────────────────────────────╮
+│ A media slot recursed through the registry beneath its   │
+│ muted label line.                                        │
+│ Card title slot                                          │
+│ The body slot holds element blocks that stack inside the │
+│ rounded border and wrap to the box inner width.          │
+│  Open the card  (https://barkpark.cloud/papers/card)     │
+╰──────────────────────────────────────────────────────────╯
