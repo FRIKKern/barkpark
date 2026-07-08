@@ -90,3 +90,33 @@ func For(status string) string {
 		return "" // unknown token → neutral, never a guess
 	}
 }
+
+// Roles returns the four semantic colour roles in canonical order. Every role
+// has a generated adaptive tone (GenStatusTone) and a pinned ANSI-16 floor
+// (GenANSI16) in tokens_gen.go.
+func Roles() []string { return []string{"ok", "info", "warn", "danger"} }
+
+// Color resolves a coloured token to its light/dark hex pair, sourced from the
+// generated tokens_gen.go (design/tokens.json). Two paint layers, in order:
+//
+//   - A lifecycle state (in_progress, done, cancelled, …) paints its LIFECYCLE
+//     glyph hue — so `done` is teal, not ok-green (Decision 4). This includes
+//     the neutral-role states (cancelled/ready/open), which still carry a hue.
+//   - Any other token routes through For to its semantic status role tone
+//     (ok/info/warn/danger).
+//
+// colored is false only when the token is neither a lifecycle state nor a
+// recognised status — the caller leaves it unpainted (Color never guesses,
+// mirroring For). By construction, colored ⇒ the token is a lifecycle state or
+// For(token) != "" (TestColorAgreesWithFor pins this).
+func Color(token string) (light, dark string, colored bool) {
+	t := strings.ToLower(strings.TrimSpace(token))
+	if hue, ok := GenLifecycleHue[t]; ok {
+		return hue.Light, hue.Dark, true
+	}
+	if role := For(t); role != "" {
+		tone := GenStatusTone[role]
+		return tone.Light, tone.Dark, true
+	}
+	return "", "", false
+}
