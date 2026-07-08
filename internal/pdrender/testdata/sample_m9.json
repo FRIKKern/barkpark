@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Breakpoint reflow"
+    },
+    {
+      "id": "gridM9",
+      "type": "section",
+      "title": "Reflow grid",
+      "layout": {
+        "mode": "grid",
+        "tracks": 3,
+        "gap": "lg",
+        "breakpoints": [
+          { "minWidth": 100, "tracks": 3 },
+          { "minWidth": 70, "tracks": 2 }
+        ]
+      },
+      "blocks": [
+        {
+          "id": "gA",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "Alpha one." }]
+        },
+        {
+          "id": "gB",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "Beta two." }]
+        },
+        {
+          "id": "gC",
+          "type": "paragraph",
+          "content": [{ "type": "text", "value": "Gamma three." }]
+        }
+      ]
+    }
+  ]
+}
