@@ -467,115 +467,214 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   def render(assigns) do
     ~H"""
     <style>
-      /* Barkpark Projects board — §1/§2 task design-language vocabulary.
-         Self-contained + CSP-safe (pulse's inline discipline). Curly braces
-         inside <style> are verbatim in HEEx 1.x — no interpolation here. */
-      .bp-board-wrap { max-width: 82rem; }
+      /* Barkpark Projects board — §1/§2 task design-language vocabulary painted
+         with the Studio token manifest (design/tokens.json → root layout vars:
+         --bg/--surface/--muted-surface/--text/--muted-text/--border/--primary/
+         --ok/--warn/--danger/--info + softs, --font, radii). Self-contained +
+         CSP-safe (pulse's inline discipline). Curly braces inside <style> are
+         verbatim in HEEx 1.x — no interpolation here. NOTE: theme flips ride
+         html[data-theme="dark"] (the Studio toggle), never prefers-color-scheme
+         alone. */
+      .bp-page {
+        max-width: 1720px; margin: 0 auto;
+        padding: 26px clamp(20px, 3.5vw, 44px) 72px;
+        font-family: var(--font, 'Inter', -apple-system, sans-serif);
+        font-size: 13px; color: var(--text);
+        -webkit-font-smoothing: antialiased;
+      }
 
-      /* ── group + filter chips (wave 4) ───────────────────────────────────
-         A big board stays legible: a group selector + filter chips fold the
-         already-fetched cards through the pure organizer. Each chip is a real
-         <button> that push_patches the URL (D14) — pure CSS, CSP-safe, no JS. */
-      .bp-controls {
-        display: flex; flex-direction: column; align-items: flex-start;
-        gap: 0.55rem; margin: 0 0 1.1rem;
+      /* ── page header: identity left, momentum right ───────────────────── */
+      .bp-head {
+        display: flex; align-items: flex-end; justify-content: space-between;
+        flex-wrap: wrap; gap: 18px 40px; margin: 2px 0 18px;
       }
-      .bp-chip-row {
-        display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem;
+      .bp-h1 {
+        margin: 0; font-size: 20px; font-weight: 600;
+        letter-spacing: -0.02em; line-height: 1.2; color: var(--text);
       }
-      /* Filters fold behind a disclosure so the board — not a wall of every
-         label/worker in the dataset — is the hero directly under the momentum
-         bar. Native <details>: CSP-safe, no JS, keyboard-native. Opens itself
-         when a shared URL arrives pre-filtered so its active chips are visible. */
-      .bp-filters { width: 100%; }
-      .bp-filters > summary {
-        display: inline-flex; align-items: center; gap: 0.35rem; width: max-content;
-        cursor: pointer; user-select: none; list-style: none;
-        font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
-        font-weight: 600; opacity: 0.55; padding: 0.15rem 0;
-      }
-      .bp-filters > summary:hover { opacity: 0.8; }
-      .bp-filters > summary::-webkit-details-marker { display: none; }
-      .bp-filters > summary::before {
-        content: "\25B8"; display: inline-block; transition: transform 140ms ease;
-      }
-      .bp-filters[open] > summary::before { transform: rotate(90deg); }
-      .bp-filters-active { color: #2563eb; opacity: 1; }
-      .bp-filters-body {
-        display: flex; flex-direction: column; gap: 0.45rem;
-        margin-top: 0.55rem; max-height: 42vh; overflow-y: auto;
-        padding-right: 0.2rem;
-      }
-      .bp-filters-body .bp-chip-row { max-height: 5.6rem; overflow-y: auto; }
-      .bp-controls-label {
-        font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
-        opacity: 0.55; font-weight: 600; margin-right: 0.15rem;
-      }
-      .bp-chip {
-        font: inherit; font-size: 0.78rem; line-height: 1.2;
-        padding: 0.2rem 0.55rem; border-radius: 999px; cursor: pointer;
-        color: inherit; border: 1px solid var(--muted-border-color, rgba(127,127,127,0.32));
-        background: var(--card-background-color, rgba(127,127,127,0.05));
-        transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
-      }
-      .bp-chip:hover { border-color: rgba(37,99,235,0.5); }
-      .bp-chip.is-active {
-        border-color: #2563eb; color: #fff;
-        background: linear-gradient(90deg, #2563eb, #0d9488);
-      }
-      .bp-clear { opacity: 0.75; margin-left: auto; }
-      .bp-clear:hover { opacity: 1; }
-
-      /* ── swimlanes (grouped view) ───────────────────────────────────────── */
-      .bp-lane { margin: 0 0 1.5rem; }
-      .bp-lane-h {
-        font-size: 0.82rem; letter-spacing: 0.04em; font-weight: 700;
-        margin: 0 0 0.55rem; padding-bottom: 0.3rem;
-        border-bottom: 1px solid var(--muted-border-color, rgba(127,127,127,0.2));
-        opacity: 0.85;
-      }
-      .bp-filtered-empty {
-        display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap;
-        margin: 1.2rem 0; opacity: 0.85; font-size: 0.95rem;
+      .bp-sub { margin: 5px 0 0; font-size: 13px; color: var(--muted-text); }
+      .bp-head-r {
+        display: flex; flex-direction: column; align-items: flex-end;
+        gap: 8px; min-width: 260px;
       }
       .bp-momentum {
-        display: flex; align-items: center; gap: 1.4rem; flex-wrap: wrap;
-        font-variant-numeric: tabular-nums; margin: 0.4rem 0 0.2rem;
-        font-size: 1.05rem;
+        display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+        font-variant-numeric: tabular-nums; font-size: 13px;
       }
-      .bp-momentum .m-pct { font-weight: 700; margin-left: auto; }
+      .bp-stat {
+        display: inline-flex; align-items: center; gap: 7px;
+        color: var(--text); font-weight: 500; white-space: nowrap;
+      }
+      .bp-momentum .m-pct {
+        font-weight: 600; font-size: 13px; color: var(--muted-text);
+        padding-left: 14px; border-left: 1px solid var(--border);
+      }
       .bp-bar {
-        height: 8px; border-radius: 999px; margin: 0.6rem 0 1.4rem;
-        background: var(--muted-border-color, rgba(127,127,127,0.22));
-        overflow: hidden;
+        width: 100%; max-width: 320px; height: 4px; border-radius: 999px;
+        background: var(--muted-surface); overflow: hidden;
       }
       .bp-bar-fill {
         height: 100%; border-radius: 999px;
-        background: linear-gradient(90deg, #2563eb, #0d9488);
+        background: linear-gradient(90deg, var(--primary), var(--ok));
         transition: width 900ms cubic-bezier(0.22, 1, 0.36, 1);
       }
 
+      /* ── toolbar: segmented group-by + filter disclosure + tally ────────── */
+      .bp-controls {
+        display: flex; align-items: center; flex-wrap: wrap;
+        gap: 10px 16px; margin: 0 0 16px;
+      }
+      .bp-group { display: inline-flex; align-items: center; gap: 10px; }
+      .bp-controls-label {
+        font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase;
+        color: var(--muted-text); font-weight: 600;
+      }
+      .bp-seg {
+        display: inline-flex; align-items: center; gap: 2px;
+        background: var(--muted-surface); border: 1px solid var(--border);
+        border-radius: 8px; padding: 2px;
+      }
+      .bp-seg-opt {
+        border: 0; background: transparent; color: var(--muted-text);
+        font: inherit; font-size: 12px; font-weight: 500; line-height: 1.2;
+        padding: 4px 11px; border-radius: 6px; cursor: pointer;
+        transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+      }
+      .bp-seg-opt:hover { color: var(--text); }
+      .bp-seg-opt.is-active {
+        background: var(--surface); color: var(--text);
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+      }
+
+      /* Filters fold behind a disclosure so the board — not a wall of every
+         label/worker in the dataset — is the hero. Native <details>: CSP-safe,
+         no JS, keyboard-native. Opens itself when a shared URL arrives
+         pre-filtered so its active chips are visible; while open it takes the
+         full toolbar row. */
+      .bp-filters { display: inline-block; }
+      .bp-filters[open] { flex-basis: 100%; }
+      .bp-filters > summary {
+        display: inline-flex; align-items: center; gap: 6px; width: max-content;
+        cursor: pointer; user-select: none; list-style: none;
+        font-size: 12px; font-weight: 500; color: var(--muted-text);
+        padding: 4px 11px; border-radius: 6px; border: 1px solid transparent;
+        transition: background 120ms ease, color 120ms ease;
+      }
+      .bp-filters > summary:hover { background: var(--muted-surface); color: var(--text); }
+      .bp-filters > summary::-webkit-details-marker { display: none; }
+      .bp-filters > summary::before {
+        content: "\25B8"; display: inline-block; font-size: 10px;
+        color: var(--muted-text); transition: transform 140ms ease;
+      }
+      .bp-filters[open] > summary::before { transform: rotate(90deg); }
+      .bp-filters-active { color: var(--primary); font-weight: 600; }
+      .bp-filters-body {
+        display: flex; flex-direction: column; gap: 8px;
+        margin-top: 10px; padding: 12px 14px; max-height: 38vh; overflow-y: auto;
+        border: 1px solid var(--border); border-radius: 10px;
+        background: var(--surface);
+      }
+      .bp-filters-body .bp-chip-row { max-height: 88px; overflow-y: auto; }
+      .bp-chip-row {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+      }
+      .bp-chip-row .bp-controls-label { min-width: 56px; }
+      .bp-chip {
+        font: inherit; font-size: 12px; line-height: 1.2;
+        padding: 3px 10px; border-radius: 999px; cursor: pointer;
+        color: var(--muted-text); border: 1px solid var(--border);
+        background: var(--surface);
+        transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+      }
+      .bp-chip:hover { border-color: var(--ring); color: var(--text); }
+      .bp-chip.is-active {
+        border-color: var(--primary); color: var(--primary-fg);
+        background: var(--primary);
+      }
+      .bp-chip:focus-visible, .bp-seg-opt:focus-visible,
+      .bp-filters > summary:focus-visible {
+        outline: 2px solid var(--ring); outline-offset: 1px;
+      }
+      .bp-clear { opacity: 0.85; margin-left: auto; }
+      .bp-clear:hover { opacity: 1; }
+      .bp-cancelled {
+        margin-left: auto; color: var(--muted-text); font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── swimlanes (grouped view) ───────────────────────────────────────── */
+      .bp-lane { margin: 0 0 24px; }
+      .bp-lane-h {
+        font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+        margin: 0 0 10px; padding: 0 2px 8px; color: var(--text);
+        border-bottom: 1px solid var(--border);
+      }
+      .bp-filtered-empty {
+        display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+        margin: 18px 0; color: var(--muted-text); font-size: 13px;
+      }
+      .bp-filtered-empty p { margin: 0; }
+      .bp-board-empty {
+        margin: 18px 0; padding: 56px 24px; text-align: center;
+        border: 1px dashed var(--border); border-radius: 12px;
+        color: var(--muted-text); font-size: 13px;
+      }
+      .bp-board-empty p { margin: 0; }
+
+      /* ── the board: five status-ladder column panels ────────────────────── */
       .bp-board {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 0.9rem; align-items: start;
+        gap: 12px; align-items: stretch;
       }
-      @media (max-width: 60rem) { .bp-board { grid-template-columns: 1fr; } }
-      .bp-col { min-width: 0; }
+      @media (max-width: 1180px) { .bp-board { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+      @media (max-width: 760px) { .bp-board { grid-template-columns: 1fr; } }
+      .bp-col {
+        min-width: 0; display: flex; flex-direction: column;
+        background: var(--muted-surface);
+        background: color-mix(in srgb, var(--muted-surface) 55%, transparent);
+        border: 1px solid var(--border); border-radius: 12px; padding: 8px;
+      }
       .bp-col-h {
-        display: flex; align-items: baseline; gap: 0.5rem;
-        font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase;
-        opacity: 0.6; margin: 0 0 0.6rem; font-weight: 600;
+        display: flex; align-items: center; gap: 7px;
+        font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase;
+        color: var(--muted-text); font-weight: 600;
+        margin: 2px 2px 8px; padding: 3px 5px;
       }
-      .bp-col-n { opacity: 0.7; font-variant-numeric: tabular-nums; }
-      .bp-col-empty { opacity: 0.35; font-size: 0.85rem; padding: 0.3rem 0; }
+      .bp-col-h .gi { font-size: 12px; }
+      .bp-col-n {
+        margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0;
+        font-size: 11px; color: var(--muted-text);
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 999px; padding: 1px 8px;
+      }
+      .bp-col-scroll {
+        display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto;
+        overflow-y: auto; max-height: clamp(320px, calc(100vh - 330px), 900px);
+        padding: 1px; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+      }
+      .bp-col-scroll::-webkit-scrollbar { width: 8px; }
+      .bp-col-scroll::-webkit-scrollbar-thumb {
+        background: var(--border); border-radius: 999px;
+      }
+      .bp-col-empty {
+        margin: 0; padding: 20px 0; text-align: center;
+        border: 1px dashed var(--border); border-radius: 8px;
+        color: var(--muted-text); opacity: 0.6; font-size: 12px;
+      }
 
+      /* ── cards ──────────────────────────────────────────────────────────── */
       .bp-card {
-        border: 1px solid var(--muted-border-color, rgba(127,127,127,0.28));
-        border-radius: 10px; padding: 0.6rem 0.7rem; margin: 0 0 0.6rem;
-        background: var(--card-background-color, rgba(127,127,127,0.04));
+        background: var(--surface); border: 1px solid var(--border);
+        border-radius: 10px; padding: 10px 12px;
+        transition: border-color 120ms ease, box-shadow 120ms ease;
       }
-      .bp-card--done { opacity: 0.62; }
+      .bp-card:hover {
+        border-color: color-mix(in srgb, var(--border) 45%, var(--muted-text));
+        box-shadow: 0 2px 8px rgb(0 0 0 / 0.06);
+      }
+      .bp-card--done { opacity: 0.55; }
+      .bp-card--done .bp-title { font-weight: 400; }
 
       /* Drag restage (wave 3) — pure-CSS affordances (CSP-safe, no JS styling).
          A card is draggable="true"; while dragging it dims + shows the grab
@@ -585,24 +684,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-card[draggable="true"] { cursor: grab; }
       .bp-card.bp-card-dragging { opacity: 0.45; cursor: grabbing; }
       .bp-col.bp-drop-ok {
-        border-radius: 10px;
-        box-shadow: inset 0 0 0 2px rgba(37,99,235,0.55);
-        background: rgba(37,99,235,0.06);
+        box-shadow: inset 0 0 0 2px var(--ring);
+        background: color-mix(in srgb, var(--ring) 7%, transparent);
       }
       .bp-col.bp-drop-no {
-        border-radius: 10px;
-        box-shadow: inset 0 0 0 2px rgba(127,127,127,0.35);
-        background: rgba(127,127,127,0.06);
+        box-shadow: inset 0 0 0 2px var(--border);
+        background: var(--muted-surface);
       }
 
       /* Refusal / rollback banner — a dismissible status line so a refused drop
          reads as guidance, not a dead end (§0 "always a next step"). CSS fade-in
          only; frozen under prefers-reduced-motion below. */
       .bp-notice {
-        display: flex; align-items: center; gap: 0.6rem;
-        margin: 0 0 1rem; padding: 0.55rem 0.8rem; border-radius: 8px;
-        font-size: 0.9rem; border: 1px solid #d97706;
-        background: rgba(217,119,6,0.12);
+        display: flex; align-items: center; gap: 10px;
+        margin: 0 0 14px; padding: 8px 12px; border-radius: 8px;
+        font-size: 12.5px; color: var(--text);
+        border: 1px solid var(--warn); background: var(--warn-soft);
         animation: bp-notice-in 260ms ease-out 1;
       }
       .bp-notice-text { flex: 1 1 auto; }
@@ -633,39 +730,36 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
       /* The done-today tally gives a brief scale bump on a fresh close so the
          climbing number is felt, not just read. */
-      .m-bump { animation: bp-bump 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 1; display: inline-block; }
+      .m-bump { animation: bp-bump 700ms cubic-bezier(0.34, 1.56, 0.64, 1) 1; display: inline-flex; }
       @keyframes bp-bump {
         0%   { transform: scale(1); }
-        40%  { transform: scale(1.28); color: #0d9488; }
+        40%  { transform: scale(1.22); color: var(--ok); }
         100% { transform: scale(1); }
       }
-      .bp-card-top { display: flex; align-items: flex-start; gap: 0.5rem; }
-      .bp-title { font-weight: 600; font-size: 0.92rem; line-height: 1.3; }
+      .bp-card-top { display: flex; align-items: flex-start; gap: 8px; }
+      .bp-card-top .gi { margin-top: 1px; }
+      .bp-title {
+        font-weight: 500; font-size: 13px; line-height: 1.4; color: var(--text);
+      }
       .bp-meta {
-        display: flex; flex-wrap: wrap; gap: 0.4rem 0.55rem;
-        margin-top: 0.5rem; font-size: 0.74rem; align-items: center;
+        display: flex; flex-wrap: wrap; gap: 5px 6px;
+        margin-top: 8px; font-size: 11px; align-items: center;
+        color: var(--muted-text);
       }
-      .bp-pip {
-        font-variant-numeric: tabular-nums; font-weight: 700;
-        padding: 0.02rem 0.32rem; border-radius: 5px;
-        background: rgba(127,127,127,0.14);
+      .bp-pip, .bp-goal, .bp-label, .bp-crit {
+        padding: 1.5px 7px; border-radius: 5px; line-height: 1.5;
+        font-variant-numeric: tabular-nums; white-space: nowrap;
       }
-      .bp-goal {
-        opacity: 0.85; padding: 0.02rem 0.32rem; border-radius: 5px;
-        background: rgba(37,99,235,0.12);
-      }
+      .bp-pip { background: var(--muted-surface); color: var(--muted-text); font-weight: 600; }
+      .bp-pip[data-priority="0"] { background: var(--danger-soft); color: var(--danger); }
+      .bp-pip[data-priority="1"] { background: var(--warn-soft); color: var(--warn); }
+      .bp-goal { background: var(--info-soft); color: var(--info); }
       .bp-goal::before { content: "↳ "; opacity: 0.7; }
-      .bp-label {
-        opacity: 0.7; padding: 0.02rem 0.3rem; border-radius: 5px;
-        background: rgba(127,127,127,0.10);
-      }
-      .bp-worker { opacity: 0.8; }
-      .bp-worker::before { content: "@"; opacity: 0.6; }
-      .bp-crit {
-        font-variant-numeric: tabular-nums; opacity: 0.85;
-        padding: 0.02rem 0.3rem; border-radius: 5px;
-        background: rgba(13,148,136,0.12);
-      }
+      .bp-label { background: var(--muted-surface); color: var(--muted-text); }
+      .bp-worker { color: var(--muted-text); }
+      .bp-worker::before { content: "@"; opacity: 0.65; }
+      .bp-crit { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+      .bp-crit--zero { background: var(--muted-surface); color: var(--muted-text); }
 
       /* ── §1 white-ladder glyph vocabulary ────────────────────────────── */
       .gi {
@@ -698,28 +792,38 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
       /* GitHub badge — issue # + sync dot + click-through. */
       .bp-gh {
-        display: inline-flex; align-items: center; gap: 0.28rem;
+        display: inline-flex; align-items: center; gap: 5px;
         text-decoration: none; font-variant-numeric: tabular-nums;
-        padding: 0.02rem 0.34rem; border-radius: 5px; opacity: 0.9;
-        border: 1px solid var(--muted-border-color, rgba(127,127,127,0.3));
+        padding: 1px 8px; border-radius: 999px; line-height: 1.5;
+        color: var(--muted-text); border: 1px solid var(--border);
+        transition: border-color 120ms ease, color 120ms ease;
       }
-      .bp-gh:hover { opacity: 1; }
-      .bp-gh-dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; }
+      .bp-gh:hover { color: var(--text); border-color: var(--ring); }
+      .bp-gh-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
       .bp-gh-dot.is-synced { background: #2dd4bf; }
       .bp-gh-dot.is-detached { background: #d97706; }
-      .bp-gh-state { opacity: 0.6; }
-      .bp-cancelled {
-        margin: 1.2rem 0 0; opacity: 0.5; font-size: 0.85rem;
-        color: #a1a1aa; font-variant-numeric: tabular-nums;
-      }
+      .bp-gh-state { opacity: 0.65; }
 
-      /* Dark-scheme §1 hexes (lighter, higher-contrast on dark surfaces). */
+      /* Dark-scheme §1 hexes (lighter, higher-contrast on dark surfaces) —
+         keyed off the Studio theme attribute, with the media query as the
+         pre-hydration fallback. */
       @media (prefers-color-scheme: dark) {
         .gi--blocked { color: #fbbf24; }
         .gi--done { color: #2dd4bf; }
-        .gi--cancelled, .bp-cancelled { color: #71717a; }
+        .gi--cancelled { color: #71717a; }
         .gi--in_progress { color: #60a5fa; }
+        .bp-card:hover { box-shadow: 0 2px 10px rgb(0 0 0 / 0.35); }
+        .bp-seg-opt.is-active { box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
       }
+      html[data-theme="light"] .gi--blocked { color: #d97706; }
+      html[data-theme="light"] .gi--done { color: #0d9488; }
+      html[data-theme="light"] .gi--cancelled { color: #a1a1aa; }
+      html[data-theme="light"] .gi--in_progress { color: #2563eb; }
+      html[data-theme="dark"] .gi--blocked { color: #fbbf24; }
+      html[data-theme="dark"] .gi--done { color: #2dd4bf; }
+      html[data-theme="dark"] .gi--cancelled { color: #71717a; }
+      html[data-theme="dark"] .gi--in_progress { color: #60a5fa; }
+      html[data-theme="dark"] .bp-card:hover { box-shadow: 0 2px 10px rgb(0 0 0 / 0.35); }
 
       /* Motion is a signal, not decoration — honor the reader's preference. */
       @media (prefers-reduced-motion: reduce) {
@@ -732,25 +836,34 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
     </style>
 
-    <main class="container bp-board-wrap">
-      <h1>▦ Projects</h1>
-      <p>
-        <small>
-          A live board over the real task documents — it MOVES: claim or close a
-          task anywhere and its card flashes, re-buckets, and the tally climbs.
-          Columns are the status ladder; drag a card to In&nbsp;Progress to claim
-          it, or drop your own onto Done or Blocked to close it.
-        </small>
-      </p>
-
-      <header class="bp-momentum" data-role="momentum">
-        <span data-role="m-inflight">◐ <%= @view.momentum.in_flight %> in flight</span>
-        <span data-role="m-ready">○ <%= @view.momentum.ready %> ready</span>
-        <span class={done_bump_class(@last_change)} data-role="m-done-today">✓ <%= @view.momentum.done_today %> done today</span>
-        <span class="m-pct" data-role="m-pct"><%= @view.momentum.pct %>%</span>
-      </header>
-      <div class="bp-bar" data-role="momentum-bar">
-        <div class="bp-bar-fill" style={"width: #{@view.momentum.pct}%;"}></div>
+    <main class="bp-page">
+      <div class="bp-head">
+        <div class="bp-head-l">
+          <h1 class="bp-h1">Projects</h1>
+          <p class="bp-sub">
+            Every task, live — drag a card to claim it, block it, or close it.
+          </p>
+        </div>
+        <div class="bp-head-r">
+          <header class="bp-momentum" data-role="momentum">
+            <span class="bp-stat" data-role="m-inflight"><span
+              class="gi gi--in_progress"
+              aria-hidden="true"
+            ></span><%= @view.momentum.in_flight %> in flight</span>
+            <span class="bp-stat" data-role="m-ready"><span
+              class="gi gi--ready"
+              aria-hidden="true"
+            >○</span><%= @view.momentum.ready %> ready</span>
+            <span class={["bp-stat", done_bump_class(@last_change)]} data-role="m-done-today"><span
+              class="gi gi--done"
+              aria-hidden="true"
+            >✓</span><%= @view.momentum.done_today %> done today</span>
+            <span class="m-pct" data-role="m-pct"><%= @view.momentum.pct %>%</span>
+          </header>
+          <div class="bp-bar" data-role="momentum-bar">
+            <div class="bp-bar-fill" style={"width: #{@view.momentum.pct}%;"}></div>
+          </div>
+        </div>
       </div>
 
       <%= render_controls(assigns) %>
@@ -766,8 +879,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         >×</button>
       </div>
 
-      <div :if={empty_board?(@board)} data-role="board-empty">
-        <p><em>No tasks yet — file one with <code>bp task create</code> and it appears here.</em></p>
+      <div :if={empty_board?(@board)} class="bp-board-empty" data-role="board-empty">
+        <p>No tasks yet — file one with <code>bp task create</code> and it appears here.</p>
       </div>
 
       <div
@@ -801,9 +914,6 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <% end %>
       <% end %>
 
-      <p :if={@board.cancelled_count > 0} class="bp-cancelled" data-role="cancelled-tally">
-        ✕ <%= @board.cancelled_count %> cancelled
-      </p>
     </main>
     """
   end
@@ -816,20 +926,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp render_controls(assigns) do
     ~H"""
     <section class="bp-controls" data-role="controls">
-      <div class="bp-chip-row" data-role="group-select">
+      <div class="bp-group" data-role="group-select">
         <span class="bp-controls-label">Group</span>
-        <button
-          :for={g <- Board.group_keys()}
-          type="button"
-          class={["bp-chip", "bp-group-chip", @group_by == g && "is-active"]}
-          aria-pressed={to_string(@group_by == g)}
-          phx-click="set-group"
-          phx-value-group={g}
-          data-role="group-option"
-          data-group={g}
-        >
-          <%= group_label(g) %>
-        </button>
+        <div class="bp-seg" role="group" aria-label="Group the board by">
+          <button
+            :for={g <- Board.group_keys()}
+            type="button"
+            class={["bp-seg-opt", @group_by == g && "is-active"]}
+            aria-pressed={to_string(@group_by == g)}
+            phx-click="set-group"
+            phx-value-group={g}
+            data-role="group-option"
+            data-group={g}
+          >
+            <%= group_label(g) %>
+          </button>
+        </div>
       </div>
 
       <details
@@ -890,6 +1002,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </button>
         </div>
       </details>
+
+      <span :if={@board.cancelled_count > 0} class="bp-cancelled" data-role="cancelled-tally">
+        ✕ <%= @board.cancelled_count %> cancelled
+      </span>
     </section>
     """
   end
@@ -931,13 +1047,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     <div id={@id} class="bp-board" data-role="board" phx-hook="BarkparkBoardDrag">
       <section :for={col <- Board.columns()} class="bp-col" data-role="column" data-col={col}>
         <h2 class="bp-col-h">
+          <span class={"gi gi--#{col}"} aria-hidden="true"><%= col_glyph(col) %></span>
           <%= col_label(col) %>
           <span class="bp-col-n" data-role="col-count"><%= @lane.counts[col] %></span>
         </h2>
 
-        <p :if={@lane.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
+        <div class="bp-col-scroll">
+          <p :if={@lane.columns[col] == []} class="bp-col-empty" data-role="col-empty">—</p>
 
-        <article
+          <article
           :for={card <- @lane.columns[col]}
           class={["bp-card", "bp-card--#{col}", just_moved?(@last_change, card) && "bp-flash"]}
           data-role="task-card"
@@ -965,7 +1083,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
             <span :for={label <- card.labels} class="bp-label" data-role="label"><%= label %></span>
             <span :if={card.worker} class="bp-worker" data-role="worker"><%= card.worker %></span>
-            <span :if={card.criteria} class="bp-crit" data-role="criteria">
+            <span
+              :if={card.criteria}
+              class={["bp-crit", card.criteria.met == 0 && "bp-crit--zero"]}
+              data-role="criteria"
+            >
               <%= card.criteria.met %>/<%= card.criteria.total %>
             </span>
 
@@ -988,6 +1110,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             </a>
           </div>
         </article>
+        </div>
       </section>
     </div>
     """
@@ -1026,6 +1149,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp col_label(:in_progress), do: "In Progress"
   defp col_label(:blocked), do: "Blocked"
   defp col_label(:done), do: "Done"
+
+  # The column header's §1 ladder glyph. in_progress paints entirely from the
+  # CSS `::before` spinner (same as the card glyph), so its span body is empty.
+  defp col_glyph(:in_progress), do: ""
+  defp col_glyph(col), do: Board.glyphs()[col]
 
   # in_progress renders its (animated) glyph entirely from CSS `::before`, so the
   # span body is empty — every other state prints the literal §1 Unicode char.
