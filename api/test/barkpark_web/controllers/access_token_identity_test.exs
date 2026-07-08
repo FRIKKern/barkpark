@@ -28,9 +28,12 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
 
   @password "correct-horse-battery"
 
+  # A real claimant is a CONFIRMED account — claim requires proven mailbox
+  # control (`confirmed_at`). Registration is self-serve; the email round-trip
+  # (or IdP provisioning) stamps confirmation via User.confirm_changeset.
   defp register_user(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    user
+    Repo.update!(Accounts.User.confirm_changeset(user))
   end
 
   defp uniq_email(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}@example.com"
@@ -184,7 +187,10 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
          %{conn: conn} do
       ws = create_workspace!()
       {admin_raw, _} = unowned_token(["admin"])
-      {:ok, _} = TenancyAuth.create_membership(ws.id, admin_token_id(admin_raw), "admin", "api_token")
+
+      {:ok, _} =
+        TenancyAuth.create_membership(ws.id, admin_token_id(admin_raw), "admin", "api_token")
+
       {grant, _} = mint_grant(ws, "g@example.com")
 
       conn = conn |> bearer(admin_raw) |> get("/v1/access", %{"workspace_id" => ws.id})
