@@ -104,15 +104,22 @@ html[data-theme="dark"] .bp-paper-body {
 }
 
 /* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
-   These NUMBERS are the ONE source for BOTH the VIEW (`.bp-paper-surface
+   These `--bp-*` reading-scale vars feed BOTH the VIEW (`.bp-paper-surface
    h1/p/li/...`) and EDIT (`.bp-paper-editor-body h1/p/li/...`) rules below.
    Both panes descend from `.bp-paper-surface` (the Edit body lives inside
    `<main class="bp-paper-shell bp-paper-surface">`), so both INHERIT these
    — the two rule sets no longer have to be hand-matched byte-for-byte.
-   Byte-aligned with the standalone bundle (api/assets/paper-editor/src/
-   styles.css `:root`) and with render.ex heading_style/2 INLINE values
-   (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View inline wins, so these mirror
-   it). Changing a value here moves View AND Edit together — the point.
+   The NUMBERS themselves are NO LONGER hand-authored here: size/line-height/
+   heading-weight VAR-BRIDGE onto the emitted `--tok-reading-*` block (from
+   design/tokens.json via design/emit.mjs), declared just below on this same
+   `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
+   resolve. tokens.json is now the ONE source; change a reading value THERE and
+   `node design/emit.mjs --write` moves View AND Edit together. Only the
+   `--bp-*-tracking` letter-spacings stay hand-authored (no `--tok` twin exists).
+   Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
+   styles.css `:root`, re-derived by the mirror) and with render.ex
+   heading_style/2 INLINE values (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View
+   inline wins, so these mirror it).
    NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
    deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
    re-introduces double-spacing; see styles.css :84). */
