@@ -1,0 +1,64 @@
+name: pdrender-wasm
+
+# Gate for the pdrender→TUI WebAssembly blob the paper reader lazy-loads
+# (api/lib/barkpark_web/layouts/bulldocs.html.heex fetches
+# /assets/bp-pdrender.wasm.gz, decompresses, calls window.bpRenderTUI).
+#
+# The blob is NOT committed — Go's js/wasm output is not byte-reproducible across
+# toolchain versions, so a committed artifact + `git diff` staleness check would
+# be a perpetual false-positive. Instead it is BUILT at dev (`make dev`), at
+# deploy (scripts/deploy-rebuild.sh), and here. This gate proves two things on
+# every change to the renderer or its entry:
+#   1. `make wasm` succeeds  → the entry still compiles for GOOS=js GOARCH=wasm
+#      and gzips to the reader's exact path.
+#   2. the committed Node smoke harness renders the sample doc through the
+#      freshly-built blob + the committed bp-wasm-exec.js loader, asserting the
+#      output is a real <pre class="bp-tui-pre"> fragment — catching a renderer
+#      break or an ABI drift between the wasm and the committed loader.
+# There is deliberately NO `git diff` on the wasm (see above).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cmd/pdrender-wasm/**"
+      - "internal/pdrender/**"
+      - ".github/workflows/pdrender-wasm.yml"
+      - "go.mod"
+      - "go.sum"
+  pull_request:
+    paths:
+      - "cmd/pdrender-wasm/**"
+      - "internal/pdrender/**"
+      - ".github/workflows/pdrender-wasm.yml"
+      - "go.mod"
+      - "go.sum"
+
+concurrency:
+  # Never cancel main; collapse superseded PR runs.
+  group: pdrender-wasm-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  build-and-smoke:
+    name: make wasm + node smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinned to match WASM_GO_VERSION in the Makefile and the committed
+      # bp-wasm-exec.js loader (a version-matched pair). GOTOOLCHAIN=go1.25.8 in
+      # `make wasm` is then a no-op — the installed toolchain already is 1.25.8.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.8"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: make wasm (build + gzip to the reader's path)
+        run: make wasm
+
+      - name: node smoke (render sample doc through the built blob)
+        run: node cmd/pdrender-wasm/smoke.mjs

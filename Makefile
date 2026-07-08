@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots
+.PHONY: deploy rebuild restart status logs seed setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -36,7 +36,7 @@ reset-db: ## Drop, recreate, migrate, and seed the database
 
 # ── Local development ────────────────────────────────────────────────────────
 
-dev: ## Start tmux dev session (CC + TUI + Phoenix)
+dev: wasm ## Start tmux dev session (CC + TUI + Phoenix)
 	./dev.sh
 
 update: ## LOCAL: pull + rebuild bp + deps + migrations + digest of what changed
@@ -149,6 +149,25 @@ cli-build: cli-assets-sync ## Build native bp binary into dist/ (this host's GOO
 	@echo ">> Building native bp $(VERSION) -> dist/bp..."
 	CGO_ENABLED=0 go build $(GOFLAGS_RELEASE) -ldflags "$(LDFLAGS)" -o dist/bp ./cmd/barkpark
 	@echo ">> Done: dist/bp"
+
+# The pdrender→TUI wasm the paper reader lazy-loads (api/.../bulldocs.html.heex
+# fetches /assets/bp-pdrender.wasm.gz). Built from #1357's entry (cmd/pdrender-wasm)
+# with a PINNED toolchain: Go's js/wasm output is not byte-reproducible across
+# toolchain versions, and the committed bp-wasm-exec.js loader is version-matched,
+# so we pin rather than diff. The loader (bp-wasm-exec.js) is committed + host-stable
+# text — NOT rebuilt here. Regenerated at dev (make dev prereq) and at deploy
+# (scripts/deploy-rebuild.sh); the CI gate builds + smokes it.
+WASM_GO_VERSION ?= 1.25.8
+
+wasm: ## Build the pdrender→TUI wasm the paper reader lazy-loads (GOOS=js, pinned toolchain)
+	@echo ">> Building pdrender wasm (go$(WASM_GO_VERSION), js/wasm) -> api/priv/static/assets/bp-pdrender.wasm.gz..."
+	@command -v gzip >/dev/null 2>&1 || { echo "!! gzip not found on PATH"; exit 1; }
+	@test -f api/priv/static/assets/bp-wasm-exec.js || { echo "!! api/priv/static/assets/bp-wasm-exec.js (committed loader) missing"; exit 1; }
+	@tmp="$$(mktemp -d)"; \
+	GOTOOLCHAIN=go$(WASM_GO_VERSION) GOOS=js GOARCH=wasm go build -trimpath -ldflags=-buildid= -o "$$tmp/pdrender.wasm" ./cmd/pdrender-wasm && \
+	gzip -9 -c "$$tmp/pdrender.wasm" > api/priv/static/assets/bp-pdrender.wasm.gz && \
+	rm -rf "$$tmp" && \
+	echo ">> Done: api/priv/static/assets/bp-pdrender.wasm.gz ($$(ls -lh api/priv/static/assets/bp-pdrender.wasm.gz | awk '{print $$5}'))"
 
 cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux/windows × arm64/amd64 into dist/
 	@echo ">> Cross-compiling bp $(VERSION) for 6 targets into dist/..."

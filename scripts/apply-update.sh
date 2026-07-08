@@ -13,6 +13,25 @@ cd "$(dirname "$0")/.."
 SHA="$(git rev-parse HEAD 2>/dev/null || echo "")"
 
 if [ -n "$SHA" ] && bash scripts/fetch-prebuilt.sh "$SHA"; then
+  # The precompiled artifact carries api/_build/prod + deps ONLY — NOT the
+  # pdrender→TUI wasm the reader lazy-loads (api/priv/static/assets/
+  # bp-pdrender.wasm.gz, a source-tree asset dropped from git in #1361 and
+  # served by Plug.Static). The on-box-rebuild fallback below runs
+  # deploy-rebuild.sh which builds it; this happy path skips deploy-rebuild, so
+  # build it here — else the box serves the reader's TUI fallback. Non-fatal,
+  # same discipline as deploy-rebuild; a failed build only degrades that view.
+  # (Static asset — no restart needed to pick it up; fetch-prebuilt already
+  # restarted.) `make wasm` pins its own Go toolchain via GOTOOLCHAIN.
+  echo "[apply-update] building pdrender wasm (non-fatal)..."
+  if command -v go >/dev/null 2>&1; then
+    if make wasm; then
+      echo "[apply-update] pdrender wasm built."
+    else
+      echo "[apply-update] WARN: pdrender wasm build failed — reader TUI view degrades to its fallback."
+    fi
+  else
+    echo "[apply-update] go not found — skipping pdrender wasm build."
+  fi
   exit 0
 fi
 

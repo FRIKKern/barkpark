@@ -84,3 +84,9 @@ api/.claude/
 # doc-truth generated artifacts (byproducts of the standing --code / --emit-refs runs)
 tooling/doc-truth/citation-truth-report.json
 tooling/doc-truth/doc-refs.json
+
+# pdrender→TUI wasm — NOT committed (Go js/wasm is not byte-reproducible across
+# toolchains). Built at dev (`make dev`), at deploy (scripts/deploy-rebuild.sh),
+# and in CI (.github/workflows/pdrender-wasm.yml). The bp-wasm-exec.js loader IS
+# committed (host-stable text) and stays tracked.
+api/priv/static/assets/bp-pdrender.wasm.gz

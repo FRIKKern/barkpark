@@ -173,6 +173,25 @@ if ! build ecto.migrate;         then log "migrate failed";      git -C "$APP" r
 # ---- Boot the idle slot and gate on it. The active slot is never touched;
 # every failure path from here on is zero-downtime.
 cd "$APP" || { log "no $APP"; exit 10; }
+
+# ---- pdrender→TUI wasm the reader lazy-loads (api/priv/static/assets/
+# bp-pdrender.wasm.gz, served by Plug.Static). This build path is SEPARATE from
+# scripts/deploy-rebuild.sh (which builds the wasm and REFUSES slot boxes), so
+# the slot deployer must build it itself. BEFORE the slot boots + health-gates +
+# Caddy swaps, so the new slot serves the freshly-built blob — never a blob-less
+# cutover. #1361 dropped the committed blob, so build-at-deploy is what keeps the
+# reader whole. priv/static is shared source symlinked into both slots, so one
+# build serves whichever slot is live. Non-fatal (mirrors deploy-rebuild): a
+# failed build only degrades the reader's TUI view to its fallback, never aborts
+# a zero-downtime deploy. `make wasm` runs from the repo root ($APP) and pins its
+# own Go toolchain via GOTOOLCHAIN.
+log "building pdrender wasm (non-fatal)"
+if command -v go >/dev/null 2>&1; then
+  if make wasm; then log "pdrender wasm built"; else log "WARN: pdrender wasm build failed — reader TUI view degrades to its fallback"; fi
+else
+  log "go not found — skipping pdrender wasm build"
+fi
+
 log "boot barkpark-slot@$TARGET on :$TARGET_PORT"
 systemctl restart "barkpark-slot@$TARGET"
 
