@@ -293,7 +293,7 @@ func renderRank(layer []*mmNode, g *mmGraph, W int, ctx RenderCtx) ([]string, ma
 // shape. The label wraps to `content` columns; every line is exactly
 // content+4 wide (2 border + 2 padding), so the box is a clean rectangle.
 func renderNodeBox(n *mmNode, content int, ctx RenderCtx) []string {
-	tl, tr, bl, br, hz, vt := shapeGlyphs(n.shape)
+	g := shapeGlyphs(n.shape)
 	label := sanitizeText(n.label)
 	lines := wrapLines(label, content)
 	if len(lines) == 0 {
@@ -301,30 +301,57 @@ func renderNodeBox(n *mmNode, content int, ctx RenderCtx) []string {
 	}
 
 	inner := content + 2 // 1-cell padding each side
-	top := ctx.Theme.Dim.Render(string(tl) + strings.Repeat(string(hz), inner) + string(tr))
-	bot := ctx.Theme.Dim.Render(string(bl) + strings.Repeat(string(hz), inner) + string(br))
-	v := ctx.Theme.Dim.Render(string(vt))
+	top := ctx.Theme.Dim.Render(string(g.tl) + strings.Repeat(string(g.th), inner) + string(g.tr))
+	bot := ctx.Theme.Dim.Render(string(g.bl) + strings.Repeat(string(g.bh), inner) + string(g.br))
+	lv := ctx.Theme.Dim.Render(string(g.lv))
+	rv := ctx.Theme.Dim.Render(string(g.rv))
 
 	out := make([]string, 0, len(lines)+2)
 	out = append(out, top)
 	for _, ln := range lines {
-		out = append(out, v+" "+ctx.Theme.Body.Render(padRight(ln, content))+" "+v)
+		out = append(out, lv+" "+ctx.Theme.Body.Render(padRight(ln, content))+" "+rv)
 	}
 	out = append(out, bot)
 	return out
 }
 
-// shapeGlyphs returns the corner + edge runes for a node shape. Rectangles get
-// square corners; rounded/stadium/circle get rounded; decision (diamond) and
-// hexagon get angled corners so a reader can tell a branch point at a glance.
-func shapeGlyphs(s mmShape) (tl, tr, bl, br, hz, vt rune) {
+// shapeBox is the full glyph set for a node frame: four corners, the top and
+// bottom horizontal fills (which can differ from the sides — a database uses a
+// double line ═), and the left/right verticals (which can differ from each other
+// — a stadium's ( ) caps, a hexagon's < >).
+type shapeBox struct{ tl, tr, bl, br, th, bh, lv, rv rune }
+
+// shapeGlyphs maps a node shape to a DISTINCT terminal frame, using only
+// display-width-1 box-drawing + ASCII glyphs (verified — exotic arc/angle glyphs
+// are ambiguous-width and would break rectangularity). Each frame is a recognisable
+// analogue of its Mermaid shape:
+//
+//	rect        ┌─┐ │ │ └─┘     process
+//	rounded     ╭─╮ │ │ ╰─╯     soft process
+//	stadium     ╭─╮ ( ) ╰─╯     pill (rounded corners + paren caps)
+//	circle      ╔═╗ ║ ║ ╚═╝     start/end/event (double frame)
+//	diamond     ╱─╲ │ │ ╲─╱     decision
+//	hexagon     ╱─╲ < > ╲─╱     prepare (angled corners + angle caps)
+//	subroutine  ╓─╖ ║ ║ ╙─╜     subroutine (double side bars)
+//	cylinder    ╒═╕ │ │ ╘═╛     database (double top+bottom caps)
+func shapeGlyphs(s mmShape) shapeBox {
 	switch s {
-	case shapeRound, shapeStadium, shapeCircle:
-		return '╭', '╮', '╰', '╯', '─', '│'
-	case shapeDiamond, shapeHexagon:
-		return '╱', '╲', '╲', '╱', '─', '│'
-	default: // rect, subroutine, cylinder, bare
-		return '┌', '┐', '└', '┘', '─', '│'
+	case shapeRound:
+		return shapeBox{'╭', '╮', '╰', '╯', '─', '─', '│', '│'}
+	case shapeStadium:
+		return shapeBox{'╭', '╮', '╰', '╯', '─', '─', '(', ')'}
+	case shapeCircle:
+		return shapeBox{'╔', '╗', '╚', '╝', '═', '═', '║', '║'}
+	case shapeDiamond:
+		return shapeBox{'╱', '╲', '╲', '╱', '─', '─', '│', '│'}
+	case shapeHexagon:
+		return shapeBox{'╱', '╲', '╲', '╱', '─', '─', '<', '>'}
+	case shapeSubroutine:
+		return shapeBox{'╓', '╖', '╙', '╜', '─', '─', '║', '║'}
+	case shapeCylinder:
+		return shapeBox{'╒', '╕', '╘', '╛', '═', '═', '│', '│'}
+	default: // rect, bare
+		return shapeBox{'┌', '┐', '└', '┘', '─', '─', '│', '│'}
 	}
 }
 
