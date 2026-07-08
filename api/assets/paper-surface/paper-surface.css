@@ -88,7 +88,7 @@ html[data-theme="dark"] .bp-paper-body {
      actually renders in the macOS system serif (Iowan Old Style). We mirror
      that rendered face here; self-hosted Source Serif 4 stays in the stack as
      a cross-platform fallback (still @font-face'd above). */
-  --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
+  --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Cool evergreen chrome tone (bp/Cloud profile) — never pure white. */
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
@@ -104,26 +104,33 @@ html[data-theme="dark"] .bp-paper-body {
 }
 
 /* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).
-   These NUMBERS are the ONE source for BOTH the VIEW (`.bp-paper-surface
+   These `--bp-*` reading-scale vars feed BOTH the VIEW (`.bp-paper-surface
    h1/p/li/...`) and EDIT (`.bp-paper-editor-body h1/p/li/...`) rules below.
    Both panes descend from `.bp-paper-surface` (the Edit body lives inside
    `<main class="bp-paper-shell bp-paper-surface">`), so both INHERIT these
    — the two rule sets no longer have to be hand-matched byte-for-byte.
-   Byte-aligned with the standalone bundle (api/assets/paper-editor/src/
-   styles.css `:root`) and with render.ex heading_style/2 INLINE values
-   (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View inline wins, so these mirror
-   it). Changing a value here moves View AND Edit together — the point.
+   The NUMBERS themselves are NO LONGER hand-authored here: size/line-height/
+   heading-weight VAR-BRIDGE onto the emitted `--tok-reading-*` block (from
+   design/tokens.json via design/emit.mjs), declared just below on this same
+   `.bp-paper-surface, .bp-paper-body` scope, so the un-fallbacked var()s always
+   resolve. tokens.json is now the ONE source; change a reading value THERE and
+   `node design/emit.mjs --write` moves View AND Edit together. Only the
+   `--bp-*-tracking` letter-spacings stay hand-authored (no `--tok` twin exists).
+   Still byte-aligned with the standalone bundle (api/assets/paper-editor/src/
+   styles.css `:root`, re-derived by the mirror) and with render.ex
+   heading_style/2 INLINE values (h1 1.1/-0.02em, h2 1.2, h3 1.25 — the View
+   inline wins, so these mirror it).
    NOTE: the VIEW-only list bottom-margin (`ul,ol { margin:0 0 24px }`) is
    deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
    re-introduces double-spacing; see styles.css :84). */
 .bp-paper-surface, .bp-paper-body {
-  --bp-body-size: 18px;
-  --bp-body-lh: 1.65;
+  --bp-body-size: var(--tok-reading-body-size);
+  --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: 0.005em;
-  --bp-h1-size: 32px;   --bp-h1-lh: 1.1;   --bp-h1-tracking: -0.02em;
-  --bp-h2-size: 24px;   --bp-h2-lh: 1.2;
-  --bp-h3-size: 20px;   --bp-h3-lh: 1.25;
-  --bp-heading-weight: 600;
+  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: -0.02em;
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
+  --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
