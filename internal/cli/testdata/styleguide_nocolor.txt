@@ -1,0 +1,27 @@
+Barkpark - CLI/TUI style tokens
+rendered from internal/semrole + generated design tokens (tokens_gen.go)
+
+Status roles
+  ##  ok
+  ##  info
+  ##  warn
+  ##  danger
+
+Lifecycle glyphs
+  ~  in_progress  info
+  !  blocked      warn
+  v  done         ok
+  v  closed       ok
+  x  cancelled    -
+  o  ready        -
+  .  open         -
+
+Priority severity
+  P0  danger
+  P1  danger
+  P2  warn
+  P3  dim
+  P4  dim
+
+Spinner
+  still:  ~   (animated braille frames need a unicode terminal)
