@@ -1014,6 +1014,50 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "filters fold so the board is the hero (w6-reveal)" do
+    test "facets live INSIDE a filter disclosure that is collapsed by default", %{conn: conn} do
+      # A corpus with facet values that, uncapped, would wall the board.
+      for i <- 1..30,
+          do:
+            task("wall-#{i}", "Task #{i}",
+              lifecycle: "open",
+              labels: ["l#{i}"],
+              assignee: "w#{i}"
+            )
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # the disclosure wraps the facets and is CLOSED on a plain load…
+      assert html =~ ~s(data-role="filters")
+      assert html =~ ~s(data-role="filters-toggle")
+      refute html =~ ~s(data-role="filters" open)
+      # …yet the facet markup is still in the DOM (present, just folded)…
+      assert html =~ ~s(data-role="facet-label")
+      assert html =~ ~s(data-role="facet-worker")
+      # …and the KANBAN grid renders (the board, not a filter wall, is the hero).
+      assert html =~ ~s(data-role="board")
+      assert html =~ ~s(data-role="column")
+    end
+
+    test "arriving pre-filtered opens the disclosure so active chips are visible", %{conn: conn} do
+      task("pf-a", "Ada task", lifecycle: "in_progress", assignee: "studio:ada")
+      task("pf-b", "Bpp task", lifecycle: "in_progress", assignee: "studio:bpp")
+
+      {:ok, _view, html} = live(conn, "/admin/projects?worker=studio:ada")
+
+      # the filter is active → the disclosure is open, and flags itself active.
+      assert html =~ ~s(data-role="filters" open)
+      assert html =~ ~s(data-role="filters-active")
+    end
+
+    test "no facets at all → no filter chrome", %{conn: conn} do
+      # an empty board has nothing to filter.
+      {:ok, _view, html} = live(conn, "/admin/projects")
+      refute html =~ ~s(data-role="filters")
+      assert html =~ ~s(data-role="board-empty")
+    end
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   # A task persisted with an explicit workspace_id (D12): the fenced restage
