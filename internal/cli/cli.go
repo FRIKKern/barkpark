@@ -161,6 +161,16 @@ func Execute(args []string) int {
 		if verb == "lint" {
 			return runTaskLint(out, g, ctx, tail)
 		}
+		// `bp task create [<title>]` — file a new task. A client-side builtin
+		// like frontier/lint: the manifest `task` noun declares only the eight
+		// lifecycle/read verbs (no `create`), so this intercept shadows nothing.
+		// It injects the task schema's required kind/lifecycle_status defaults
+		// and sends the create via the same mutate contract `bp doc create` uses
+		// — the ergonomic front door that a bare `bp doc create task` (which does
+		// not know those required fields) can't be.
+		if verb == "create" {
+			return runTaskCreate(out, g, ctx, tail)
+		}
 	case "cmux":
 		// `bp cmux <hook|dispatch|install|status>` — the CMUX × Barkpark bridge
 		// (task-TUI epic, wave 14). A client-side builtin like `bp tasks` / `bp
