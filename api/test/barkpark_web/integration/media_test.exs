@@ -68,6 +68,21 @@ defmodule BarkparkWeb.Integration.MediaTest do
     put_req_header(conn, "authorization", "Bearer barkpark-dev-token")
   end
 
+  # A REAL token that holds only "read" — a legitimate principal that must not
+  # be able to mutate media. RequireWritePermission checks the token's
+  # permission array (not membership role), so ["read"] fails the :write gate.
+  defp read_only(conn) do
+    {:ok, _} =
+      Barkpark.Auth.create_token(
+        "media-readonly-token",
+        "read-only",
+        "media-integration-ro",
+        ["read"]
+      )
+
+    put_req_header(conn, "authorization", "Bearer media-readonly-token")
+  end
+
   defp png_upload do
     png_bin = Base.decode64!(@png_b64)
     tmp_path = Path.join(System.tmp_dir!(), "barkpark-test-#{:rand.uniform(1_000_000)}.png")
@@ -175,6 +190,58 @@ defmodule BarkparkWeb.Integration.MediaTest do
       assert resp.status == 400
       body = json_response(resp, 400)
       assert body["error"]["message"] =~ "missing 'file' field"
+    end
+  end
+
+  # ── write-gate (authz-drift fix — sibling of PR #1553) ───────────────────
+  # Before the fix the flat :media_mutate pipeline had NO :require_write, so a
+  # read-only token could upload/delete. The gate now halts a read-only token
+  # with 403 BEFORE the controller. Full-write callers are unaffected; the P5
+  # edit-share short-circuit (scoped route) is covered in shared_edit_test.exs.
+  describe "write-gate: media mutations require :write" do
+    test "read-only token → POST /media/upload 403", %{conn: conn} do
+      resp =
+        conn
+        |> read_only()
+        |> post(~p"/media/upload", %{"file" => png_upload()})
+
+      assert resp.status == 403
+      assert json_response(resp, 403)["error"]["code"] == "forbidden"
+    end
+
+    test "read-only token → DELETE /media/:id 403 (gate halts before the controller)", %{
+      conn: conn
+    } do
+      # The write-gate runs before the controller, so no real asset is needed —
+      # a read-only principal is denied regardless of the id.
+      resp =
+        conn
+        |> read_only()
+        |> delete(~p"/media/any-id-#{System.unique_integer([:positive])}")
+
+      assert resp.status == 403
+      assert json_response(resp, 403)["error"]["code"] == "forbidden"
+    end
+
+    test "full-write token → upload + delete both succeed (positive control)", %{conn: conn} do
+      body =
+        conn
+        |> authed()
+        |> post(~p"/media/upload", %{"file" => png_upload()})
+        |> json_response(201)
+
+      id = body["id"]
+      assert is_binary(id)
+
+      del =
+        conn
+        |> authed()
+        |> delete(~p"/media/#{id}")
+
+      assert del.status == 200
+      assert json_response(del, 200)["deleted"] == id
+
+      rm_uploaded(body)
     end
   end
 

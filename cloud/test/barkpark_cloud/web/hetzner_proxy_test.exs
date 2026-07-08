@@ -209,14 +209,52 @@ defmodule BarkparkCloud.Web.HetznerProxyTest do
       assert HetznerFakeHttpClient.requests() == []
     end
 
-    test "teamless user → the same 404 no_provider" do
+    # authz-drift fix: the overview is now team_admin-gated (it reveals the
+    # team's whole Hetzner estate). A teamless user resolves no current_team, so
+    # the admin gate 403s BEFORE any provider lookup — fail-closed, no upstream.
+    test "teamless user → 403 forbidden (team_admin gate), upstream never called" do
       user = user_fixture()
       HetznerFakeHttpClient.program(%{})
 
       conn = call(:get, "/v1/hetzner/overview", session_token(user))
 
-      assert conn.status == 404
-      assert json_body(conn) == %{"error" => "no_provider"}
+      assert conn.status == 403
+      assert json_body(conn) == %{"error" => "forbidden"}
+      assert HetznerFakeHttpClient.requests() == []
+    end
+
+    # authz-drift fix (mutation-proof): a plain MEMBER (not owner/admin) is
+    # denied 403 by require_team_admin even with a connected provider — the gate
+    # halts before provider resolution, so the upstream is never called.
+    test "a non-admin MEMBER → 403 forbidden, upstream never called" do
+      user = user_fixture()
+      n = System.unique_integer([:positive])
+      {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+      {:ok, _} = Accounts.add_member(team, user, "member")
+      connect_hetzner(team)
+      HetznerFakeHttpClient.program(%{})
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 403
+      assert json_body(conn) == %{"error" => "forbidden"}
+      assert HetznerFakeHttpClient.requests() == []
+    end
+
+    # authz-drift fix (positive control): a team ADMIN (non-owner) still gets the
+    # full 200 envelope — the tightening denies members, not admins.
+    test "a team ADMIN → 200 envelope (no over-deny of privileged roles)" do
+      user = user_fixture()
+      n = System.unique_integer([:positive])
+      {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+      connect_hetzner(team)
+      program_happy_upstream()
+
+      conn = call(:get, "/v1/hetzner/overview", session_token(user))
+
+      assert conn.status == 200
+      assert json_body(conn)["ok"] == true
     end
 
     test "one upstream kind failing → envelope still ok, that kind null + counted 0 + named in errors" do
