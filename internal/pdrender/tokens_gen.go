@@ -13,6 +13,16 @@ var (
 	GenToneDanger = lipgloss.AdaptiveColor{Light: "#b42222", Dark: "#ef6161"}
 )
 
+// Generated chrome + reading-accent tokens (design/tokens.json color.* → hex).
+var (
+	GenPrimary       = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
+	GenPrimaryFg     = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b1e18"}
+	GenInk           = lipgloss.AdaptiveColor{Light: "#09090b", Dark: "#f2f2f2"}
+	GenDim           = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}
+	GenRule          = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
+	GenReadingAccent = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"}
+)
+
 // Generated reading tokens (design/tokens.json font.reading / type.reading).
 const (
 	GenReadingFontStack     = "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"

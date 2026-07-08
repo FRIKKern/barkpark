@@ -96,3 +96,85 @@ func TestForTaskLifecycleVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// TestRoles pins the four semantic roles and their generated companions: every
+// role has an adaptive tone and an ANSI-16 floor, and the floor is the pinned
+// SGR code — notably info → blue (34), the visible cross-surface coherence fix.
+func TestRoles(t *testing.T) {
+	want := []string{"ok", "info", "warn", "danger"}
+	got := Roles()
+	if len(got) != len(want) {
+		t.Fatalf("Roles() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Roles() = %v, want %v", got, want)
+		}
+	}
+	for _, r := range got {
+		if _, ok := GenStatusTone[r]; !ok {
+			t.Errorf("role %q has no generated tone", r)
+		}
+		if _, ok := GenANSI16[r]; !ok {
+			t.Errorf("role %q has no ANSI-16 floor", r)
+		}
+	}
+	floor := map[string]int{"ok": 32, "info": 34, "warn": 33, "danger": 31}
+	for r, code := range floor {
+		if GenANSI16[r] != code {
+			t.Errorf("ANSI-16 floor for %q = %d, want %d", r, GenANSI16[r], code)
+		}
+	}
+}
+
+// TestColorAgreesWithFor is the slice's central invariant: Color paints a token
+// iff it is a lifecycle state OR For resolves it to a role. Status tokens paint
+// their role tone; lifecycle states paint their lifecycle hue (done stays teal,
+// NOT ok-green — Decision 4); unknown tokens stay unpainted.
+func TestColorAgreesWithFor(t *testing.T) {
+	// Cloud/health tokens all resolve to a role → paint that role's tone.
+	for _, tok := range cloudTokens {
+		l, d, colored := Color(tok)
+		role := For(tok)
+		if !colored {
+			t.Errorf("Color(%q) uncoloured but For=%q", tok, role)
+			continue
+		}
+		_, isLife := GenLifecycleHue[tok]
+		if !isLife && role == "" {
+			t.Errorf("Color(%q) coloured but neither a role nor a lifecycle state", tok)
+		}
+		if !isLife {
+			want := GenStatusTone[role]
+			if l != want.Light || d != want.Dark {
+				t.Errorf("Color(%q) = %s/%s, want role %q tone %s/%s", tok, l, d, role, want.Light, want.Dark)
+			}
+		}
+	}
+	// Every lifecycle token is coloured and paints its lifecycle hue.
+	for _, tok := range TaskLifecycles() {
+		l, d, colored := Color(tok)
+		if !colored {
+			t.Errorf("Color(%q) lifecycle token is uncoloured", tok)
+			continue
+		}
+		hue := GenLifecycleHue[tok]
+		if l != hue.Light || d != hue.Dark {
+			t.Errorf("Color(%q) = %s/%s, want lifecycle hue %s/%s", tok, l, d, hue.Light, hue.Dark)
+		}
+	}
+	// done/closed paint TEAL, distinct from status.ok green (Decision 4 tripwire).
+	for _, tok := range []string{"done", "closed"} {
+		if l, d, _ := Color(tok); l != "#0d9488" || d != "#2dd4bf" {
+			t.Errorf("Color(%q) = %s/%s, want teal #0d9488/#2dd4bf", tok, l, d)
+		}
+	}
+	// An unknown token is uncoloured — Color never guesses.
+	if l, d, colored := Color("banana"); colored || l != "" || d != "" {
+		t.Errorf("Color(banana) = %q/%q colored=%v, want uncoloured", l, d, colored)
+	}
+	// Case-insensitivity and trimming, inherited from For.
+	if l, d, colored := Color("  IN_PROGRESS  "); !colored || l != "#2563eb" || d != "#60a5fa" {
+		t.Errorf("Color(' IN_PROGRESS ') = %q/%q colored=%v, want #2563eb/#60a5fa", l, d, colored)
+	}
+}
