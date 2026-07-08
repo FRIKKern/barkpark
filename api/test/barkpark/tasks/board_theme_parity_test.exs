@@ -3,13 +3,16 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
   Cross-surface glyph parity gate (charter D17).
 
   The GUI board (`Barkpark.Tasks.Board.glyphs/0`) and the terminal TUI
-  (`internal/taskboard/components.go` `StatusGlyph`) each hard-code the §1
-  white-ladder glyphs (`.claude/workflows/bp-task-design-language-spec.md`) —
-  the anti-drift risk the wish's "same icons as TUI precisely" forbids. This
-  test parses the Go source's `StatusGlyph` switch into a `{lifecycle => glyph}`
-  map and asserts it is codepoint-EQUAL to `Board.glyphs/0` for the shared
-  lifecycle keys, so a restyle on EITHER surface fails the build. A hard-coded
-  expected map is the triple-check: a Go `case` drop fails loudly, not silently.
+  (`internal/taskboard` `StatusGlyph`, sourced from the generated
+  `GenLifecycle` table) speak the §1 white-ladder glyphs
+  (`.claude/workflows/bp-task-design-language-spec.md`) — the anti-drift risk
+  the wish's "same icons as TUI precisely" forbids. This test parses the Go
+  TUI's generated glyph table (`internal/taskboard/tokens_gen.go`'s
+  `GenLifecycle` map + `GenBrailleFrames` array, emitted from
+  `design/tokens.json`) into a `{lifecycle => glyph}` map and asserts it is
+  codepoint-EQUAL to `Board.glyphs/0` for the shared lifecycle keys, so a
+  restyle on EITHER surface fails the build. A hard-coded expected map is the
+  triple-check: a dropped glyph fails loudly, not silently.
 
   Pure string/regex parsing — no `ConnCase`, no DB. The Go TUI is READ-ONLY
   here; the fix for any failure is to re-align a glyph, never to edit this test.
@@ -18,9 +21,14 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
 
   alias Barkpark.Tasks.Board
 
-  # The mix root is `api/`; the Go TUI lives one level up.
-  @components_go "../internal/taskboard/components.go"
-  @spinner_go "../internal/taskboard/spinner.go"
+  # The mix root is `api/`; the Go TUI lives one level up. The TUI's glyph truth
+  # is the GENERATED `GenLifecycle` map + `GenBrailleFrames` array in
+  # `tokens_gen.go` (emitted from `design/tokens.json` via `design/emit.mjs`).
+  # #1394 ("consume generated lifecycle tokens, delete hand-tuned twin") moved
+  # both here from the retired hand-tuned twins — the `StatusGlyph` `switch
+  # lifecycle` in `components.go` and the inline `brailleFrames` literal in
+  # `spinner.go`. Read the generated single source, not the retired locations.
+  @tokens_gen_go "../internal/taskboard/tokens_gen.go"
 
   # The lifecycle keys BOTH surfaces speak. The board folds `cancelled` to a
   # tally (no rendered column), but the glyph is still shared truth — the glyph
@@ -85,71 +93,49 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
 
   # ── the parser ─────────────────────────────────────────────────────────────
 
-  # Parse `components.go`'s `StatusGlyph` switch into `%{lifecycle => glyph}`. A
-  # `case "a", "b":` line binds every listed lifecycle to the following `return`
-  # glyph. `in_progress` returns `brailleFrames[0]`, resolved against the array
-  # in `spinner.go` so the parity is genuinely codepoint-driven, not a comment
-  # read.
+  # Parse the Go TUI's glyph table into `%{lifecycle => glyph}`. Since #1394
+  # ("consume generated lifecycle tokens, delete hand-tuned twin") `StatusGlyph`
+  # is a `GenLifecycle[lifecycle].Glyph` lookup against the GENERATED
+  # `tokens_gen.go` map (emitted from `design/tokens.json`) — the hand-authored
+  # `switch lifecycle` this used to parse in `components.go` is retired. So the
+  # parity now reads from the same generated single source the TUI itself paints
+  # from: a `"key": {Glyph: "x"…}` entry binds each lifecycle to its glyph.
+  #
+  # `in_progress`'s steady glyph is resolved from `GenBrailleFrames[0]` (the
+  # animation's frame-0 codepoint), exactly as the retired switch's
+  # `brailleFrames[0]` return did — so the braille array stays the genuine,
+  # codepoint-driven source for in_progress, not a hard-coded assumption.
   defp parse_status_glyphs do
     braille = braille_frames()
-    body = status_glyph_body(File.read!(@components_go))
+    block = gen_lifecycle_block(File.read!(@tokens_gen_go))
 
-    ~r/case\s+([^:\n]+):\s*\n\s*return\s+([^\n]+)/
-    |> Regex.scan(body)
-    |> Enum.flat_map(fn [_, labels, ret] ->
-      case resolve_glyph(ret, braille) do
-        nil -> []
-        glyph -> for l <- parse_labels(labels), do: {l, glyph}
-      end
-    end)
-    |> Map.new()
+    ~r/"([^"]+)":\s*\{\s*Glyph:\s*"([^"]*)"/
+    |> Regex.scan(block)
+    |> Map.new(fn [_, key, glyph] -> {key, glyph} end)
+    |> Map.put("in_progress", Enum.at(braille, 0))
   end
 
-  # Isolate the StatusGlyph function's `switch lifecycle { ... }` body so the
-  # `asciiMode()` branch and neighbouring functions never leak into the scan.
-  defp status_glyph_body(source) do
-    fn_body =
-      case Regex.run(~r/func StatusGlyph\([^)]*\)\s*string\s*\{(.*?)\n\}/s, source) do
-        [_, body] -> body
-        _ -> flunk("could not locate func StatusGlyph in #{@components_go}")
-      end
-
-    case Regex.run(~r/switch\s+lifecycle\s*\{(.*)\}/s, fn_body) do
-      [_, switch_body] -> switch_body
-      _ -> flunk("could not locate the `switch lifecycle` block in StatusGlyph")
+  # Isolate the `var GenLifecycle = map[…]{ … }` literal so the neighbouring
+  # `GenLifecycleToken` struct and `GenLifecycleOrder` slice never leak into the
+  # scan.
+  defp gen_lifecycle_block(source) do
+    case Regex.run(~r/var GenLifecycle = map\[string\]GenLifecycleToken\{(.*?)\n\}/s, source) do
+      [_, block] -> block
+      _ -> flunk("could not locate the `GenLifecycle` map in #{@tokens_gen_go}")
     end
   end
 
-  # `"in_progress", "blocked"` → ["in_progress", "blocked"].
-  defp parse_labels(labels) do
-    ~r/"([^"]*)"/
-    |> Regex.scan(labels)
-    |> Enum.map(fn [_, l] -> l end)
-  end
-
-  # A return expression → its glyph: a quoted literal, or `brailleFrames[n]`.
-  defp resolve_glyph(ret, braille) do
-    ret = String.trim(ret)
-
-    cond do
-      match = Regex.run(~r/^"([^"]*)"/, ret) ->
-        Enum.at(match, 1)
-
-      match = Regex.run(~r/brailleFrames\[(\d+)\]/, ret) ->
-        Enum.at(braille, String.to_integer(Enum.at(match, 1)))
-
-      true ->
-        nil
-    end
-  end
-
-  # Read the `brailleFrames` array literal from `spinner.go` so `brailleFrames[0]`
-  # resolves to the real codepoint (⠋), not a hard-coded assumption.
+  # Read the braille frames array literal so `brailleFrames[0]` resolves to the
+  # real codepoint (⠋), not a hard-coded assumption. The frames are GENERATED
+  # into `tokens_gen.go` as `GenBrailleFrames` (emitted from `design/tokens.json`),
+  # moved there by #1394 ("consume generated lifecycle tokens, delete hand-tuned
+  # twin") from the now-retired inline `brailleFrames` literal in `spinner.go`.
+  # We read the generated single source so a future move re-points cleanly.
   defp braille_frames do
     arr =
-      case Regex.run(~r/brailleFrames\s*=\s*\[\d+\]string\{([^}]*)\}/, File.read!(@spinner_go)) do
+      case Regex.run(~r/GenBrailleFrames\s*=\s*\[\d+\]string\{([^}]*)\}/, File.read!(@tokens_gen_go)) do
         [_, inner] -> inner
-        _ -> flunk("could not locate the brailleFrames array in #{@spinner_go}")
+        _ -> flunk("could not locate the GenBrailleFrames array in #{@tokens_gen_go}")
       end
 
     ~r/"([^"]*)"/
