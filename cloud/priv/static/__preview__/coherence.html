@@ -681,11 +681,27 @@ body size:      18px
       [paperFrameRoot()],
     );
     if (!themed) {
+      // Cross-frame reach failed (mis-rooted server, cross-origin). Keep the
+      // paper's OWN toggle as the reviewer's escape hatch and say why.
       var note = document.getElementById("co-paper-note");
       if (note) {
         note.textContent =
           "Paper pane could not be reached — open paper-surface.html directly.";
       }
+      return;
+    }
+    // The frame IS reachable, so the ONE outer toggle now drives it. Neutralize
+    // the reused surface's own toggle — a second control here could desync this
+    // pane from the other three and quietly break the single-source thesis this
+    // instrument exists to prove. Best-effort + guarded; the reused page is
+    // otherwise untouched (verbatim), and a null (renamed/absent) is a no-op.
+    try {
+      var innerToggle =
+        frame.contentDocument &&
+        frame.contentDocument.getElementById("pv-theme");
+      if (innerToggle) innerToggle.style.display = "none";
+    } catch (e) {
+      /* cross-origin — never applies same-origin, but never throw. */
     }
   });
 
