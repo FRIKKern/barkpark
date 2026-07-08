@@ -49,11 +49,17 @@ EXEMPT = {
     # emitted :root tokens never cascade; they carry their own scoped palette.
     "controllers/error_html.ex",
     "controllers/status_controller.ex",
-    # Q3 — categorical palettes (presence avatars, sheet-CF swatches). Forcing
-    # categorical hues onto ok/warn/danger/info is a wrong-semantic binding.
-    "studio/presence_state.ex",
-    "live/studio/sheet_grid.ex",
+    # Q3 — categorical palettes. presence_state.ex + sheet_grid.ex are now
+    # TOKENIZED: they consume the emitted VALUE lists from
+    # BarkparkWeb.Studio.TokensGen (presence_palette/sheet_cf_backgrounds/
+    # sheet_tab_colors) — categorical hex kept as data, no inline literal — so
+    # they are no longer exempt. sheets.html.heex is a self-contained reader page
+    # (role/info-blue in its own <style>) tracked by a separate follow-up.
     "layouts/sheets.html.heex",
+    # The GENERATED categorical token artifact itself — design/emit.mjs owns
+    # these hex value lists (the single source presence_state.ex + sheet_grid.ex
+    # now consume). Analogous to the BEGIN/END GENERATED CSS block exemption.
+    "studio/tokens_gen.ex",
     "components/studio_components/modals.ex",   # color-picker swatch palette
     # color-picker DATA — a <input type=color> default value, not chrome theming.
     "components/field_inputs.ex",

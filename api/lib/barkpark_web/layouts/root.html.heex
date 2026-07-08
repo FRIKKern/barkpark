@@ -95,6 +95,14 @@
       --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
       --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
       --warn-strong: hsl(var(--warn-hsl) / 0.28);
+      --ok-fg: hsl(0 0% 100%);
+      --warn-fg: hsl(0 0% 100%);
+      --danger-fg: hsl(0 0% 98%);
+      --info-fg: hsl(0 0% 100%);
+      --bg-accent: hsl(240 4.8% 92%);
+      --border-muted: var(--border);
+      --fg-dim: hsl(240 4% 65%);
+      --fg-accent: hsl(240 5.9% 10%);
     }
     html[data-theme="dark"] {
       --primary: hsl(160 42% 62%);
@@ -110,6 +118,14 @@
       --accent: hsl(33 92% 60%);
       --primary-hsl: 160 42% 62%;
       --primary-soft: hsl(var(--primary-hsl) / 0.2);
+      --ok-fg: hsl(0 0% 100%);
+      --warn-fg: hsl(0 0% 100%);
+      --danger-fg: hsl(0 0% 100%);
+      --info-fg: hsl(0 0% 100%);
+      --bg-accent: hsl(240 3.7% 13%);
+      --border-muted: hsl(240 3.7% 11%);
+      --fg-dim: hsl(240 5% 45%);
+      --fg-accent: var(--text);
     }
     @media (prefers-color-scheme: dark) {
       :root {
@@ -126,25 +142,21 @@
     :root,
     html[data-theme="dark"] {
       color-scheme: dark;
-      /* --bg, --border, --ring, --primary, --primary-fg now cascade from the
-         GENERATED block above (evergreen primary/ring). Chrome aliases below
-         reference emitted tokens — no copied hex. */
+      /* --bg, --border, --ring, --primary, --primary-fg AND the zinc/chrome
+         ladder (--bg-accent/--border-muted/--fg-dim/--fg-accent) now cascade
+         from the GENERATED block above — no copied hex remains here. */
       --bg-card:       var(--surface);
       --bg-muted:      var(--muted-surface);
-      --bg-accent:     hsl(240 3.7% 13%); /* lit-allow: shadcn zinc hover shade — no exact token (au follow-up) */
       --bg-popover:    var(--surface);
 
-      --border-muted:  hsl(240 3.7% 11%); /* lit-allow: shadcn zinc divider shade — no exact token (au follow-up) */
       --input:         var(--border);
 
       --fg:            var(--text);
       --fg-muted:      var(--muted-text);
-      --fg-accent:     var(--text);
-      --fg-dim:        hsl(240 5% 45%); /* lit-allow: dimmer-than-muted foreground — no exact token (au follow-up) */
 
       /* --primary-hover now cascades from the GENERATED block (evergreen). */
       --destructive:       var(--danger);
-      --destructive-fg:    hsl(0 0% 100%); /* lit-allow: on-danger white foreground — no on-color token */
+      --destructive-fg:    var(--danger-fg);
 
       /* Tinted surfaces for status banners (settings flash). */
       --success:       var(--ok);
@@ -157,24 +169,21 @@
        re-authored — no token falls through to a dark value in light mode. */
     html[data-theme="light"] {
       color-scheme: light;
-      /* --bg, --border, --ring, --primary, --primary-fg cascade from the
-         GENERATED block (evergreen). Chrome aliases reference emitted tokens. */
+      /* --bg, --border, --ring, --primary, --primary-fg AND the zinc/chrome
+         ladder cascade from the GENERATED block (:root carries the light
+         values) — the light theme re-authors only the non-emitted aliases. */
       --bg-card:       var(--surface);
       --bg-muted:      var(--muted-surface);
-      --bg-accent:     hsl(240 4.8% 92%); /* lit-allow: shadcn zinc hover shade — no exact token (au follow-up) */
       --bg-popover:    var(--surface);
 
-      --border-muted:  var(--border);
       --input:         var(--border);
 
       --fg:            var(--text);
       --fg-muted:      var(--muted-text);
-      --fg-accent:     hsl(240 5.9% 10%); /* lit-allow: near-black accent foreground — no exact token (au follow-up) */
-      --fg-dim:        hsl(240 4% 65%); /* lit-allow: dimmer-than-muted foreground — no exact token (au follow-up) */
 
       /* --primary-hover now cascades from the GENERATED block (evergreen). */
       --destructive:       var(--danger);
-      --destructive-fg:    hsl(0 0% 98%); /* lit-allow: on-danger white foreground — no on-color token */
+      --destructive-fg:    var(--danger-fg);
 
       /* Tinted surfaces for status banners (settings flash). */
       --success:       var(--ok);
@@ -584,7 +593,7 @@
     .bp-update-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-shrink: 0; }
     .bp-update-btn {
       height: 24px; padding: 0 12px; border: none; border-radius: 5px;
-      font-size: 12px; font-weight: 600; color: #fff; background: var(--warning); /* lit-allow: on-warn white foreground — no on-color token */
+      font-size: 12px; font-weight: 600; color: var(--warn-fg); background: var(--warning);
       cursor: pointer; transition: filter 0.1s;
     }
     .bp-update-btn:hover { filter: brightness(1.06); }
@@ -2142,7 +2151,7 @@
       transition: background 0.1s, border-color 0.1s;
     }
     .bp-doc-checkbox-box.is-checked {
-      background: var(--primary); border-color: var(--primary); color: #fff; /* lit-allow: on-primary white checkmark — no on-color token */
+      background: var(--primary); border-color: var(--primary); color: var(--primary-fg);
     }
     .bp-doc-checkbox:hover .bp-doc-checkbox-box { border-color: var(--primary); }
 

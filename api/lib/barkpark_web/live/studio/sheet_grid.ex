@@ -141,6 +141,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.TokensGen
 
   # Paste preflight bound: a fat-finger whole-column paste (Excel ships up to
   # 1M rows) is refused whole rather than ground through 1000s of serial session
@@ -149,8 +150,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # The conditional-format panel's default rule background — the first toolbar
   # bg swatch, so a freshly-opened form always has a valid #rrggbb selected
-  # (the gate requires bg; an empty selection would reject on submit).
-  @cf_default_bg "#fde68a"
+  # (the gate requires bg; an empty selection would reject on submit). Sourced
+  # from the emitted categorical palette so it stays the first swatch verbatim.
+  @cf_default_bg hd(TokensGen.sheet_cf_backgrounds())
 
   # Per-tab color (QL-D2). The picker offers a saturated preset strip (tab
   # colors read best more vivid than the pastel CELL-bg swatches, so the list
@@ -2608,7 +2610,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title="Align right" data-test-id="sheet-align-right">⯈</button>
           <span class="sheet-bg-swatches" role="group" aria-label="Cell background">
             <button
-              :for={swatch <- ~w(#fde68a #bbf7d0 #bfdbfe #fecaca #e9d5ff #e5e7eb)}
+              :for={swatch <- TokensGen.sheet_cf_backgrounds()}
               type="button"
               class="sheet-bg-swatch"
               style={"background: #{swatch};"}
@@ -2694,7 +2696,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <div class="sheet-cf-field">
                 <span>Background</span>
                 <span class="sheet-bg-swatches" role="radiogroup" aria-label="Rule background color">
-                  <label :for={swatch <- ~w(#fde68a #bbf7d0 #bfdbfe #fecaca #e9d5ff #e5e7eb)} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
+                  <label :for={swatch <- TokensGen.sheet_cf_backgrounds()} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
                     <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" />
                     <span class="sheet-bg-swatch" style={"background: #{swatch};"} data-test-id={"sheet-cf-bg-" <> String.trim_leading(swatch, "#")} data-selected={to_string(@cf_panel["bg"] == swatch)}></span>
                   </label>
@@ -3075,7 +3077,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               data-test-id="sheet-tab-color-picker"
             >
               <button
-                :for={swatch <- ~w(#ef4444 #f59e0b #eab308 #22c55e #3b82f6 #8b5cf6)}
+                :for={swatch <- TokensGen.sheet_tab_colors()}
                 type="button"
                 class="sheet-bg-swatch"
                 style={"background: #{swatch};"}
