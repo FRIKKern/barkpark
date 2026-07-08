@@ -109,6 +109,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   activity-focus) or, when it has no children, the first unmet acceptance
   criterion. Any card with children shows a `done/total sub` lineage pill
   (organizer-derived from `parent_id` over the same corpus).
+
+  ## Task peek (wave 13)
+
+  A card click opens a read-only right-hand inspector over the live board —
+  the substance the card's signal can only count: the claim lease (worker,
+  epoch, held-since), the description, every acceptance criterion WITH its
+  close-time evidence, children (in-flight first; click to re-peek), and
+  titled blockers. The peeked id rides the URL (`?task=<id>`, D14) so a peek
+  is shareable and the back button closes it; Esc / × / scrim-click close;
+  the panel re-derives on every realtime event and reconcile so it is as
+  live as the board behind it. Reads only — every write still goes through
+  the fenced drag primitives or `bp`.
   """
 
   use BarkparkWeb, :live_view
@@ -121,6 +133,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   alias Barkpark.Repo
   alias Barkpark.Tasks
   alias Barkpark.Tasks.Board
+  alias Barkpark.Tasks.Edge
   alias Barkpark.Tenancy
 
   # The slow reconcile cadence. Realtime motion is instant off the broadcast;
@@ -163,6 +176,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      socket
      |> assign(:group_by, parse_group(params["group"]))
      |> assign(:filters, parse_filters(params))
+     |> assign_peek(params["task"])
      |> assign_view()}
   end
 
@@ -189,6 +203,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        |> assign(:board, board)
        |> assign(:last_change, change)
        |> update(:seen, &MapSet.put(&1, key))
+       |> refresh_peek()
        |> assign_view()}
     end
   end
@@ -204,6 +219,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      socket
      |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
      |> assign(:last_change, nil)
+     |> refresh_peek()
      |> assign_view()}
   end
 
@@ -282,6 +298,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   def handle_event("clear-filters", _params, socket) do
     {:noreply, push_patch(socket, to: ~p"/admin/projects")}
+  end
+
+  # ── wave 13: the task peek panel ────────────────────────────────────────────
+  #
+  # A card click opens a right-hand inspector over the live board; the peeked
+  # task rides the URL (`?task=<id>`, D14 — shareable, back-button closes) so
+  # handle_params stays the single mutation path. A hop (child/blocker row)
+  # re-peeks in place; × / Esc / scrim-click close.
+  def handle_event("peek", %{"task" => task_id}, socket) when is_binary(task_id) do
+    {:noreply, patch_to(socket, socket.assigns.group_by, socket.assigns.filters, task_id)}
+  end
+
+  def handle_event("peek-close", _params, socket) do
+    {:noreply, patch_to(socket, socket.assigns.group_by, socket.assigns.filters, nil)}
   end
 
   # A legal claim: OPTIMISTICALLY move the card to in_progress (D9 — the board
@@ -471,16 +501,196 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   defp facet_active?(filters, key, value), do: value in Map.get(filters, key, [])
 
-  # push_patch to the URL encoding this (group, filters) pair — the ONLY mutation
-  # path (D14). The bare path when nothing is selected keeps a clean, shareable URL.
+  # ── wave 13: peek loading ───────────────────────────────────────────────────
+
+  # Parse-and-load the `?task=` param into @peek. nil/blank closes; an unknown
+  # id peeks nothing (no crash, no panel — the board is unchanged).
+  defp assign_peek(socket, task_id) when is_binary(task_id) and task_id != "" do
+    assign(socket, :peek, load_peek(task_id, socket.assigns.board))
+  end
+
+  defp assign_peek(socket, _), do: assign(socket, :peek, nil)
+
+  # Re-derive the open peek after the board model moved (a realtime event or
+  # the :refresh reconcile) so the panel is as live as the board behind it.
+  defp refresh_peek(socket) do
+    case socket.assigns[:peek] do
+      %{doc_id: doc_id} -> assign(socket, :peek, load_peek(doc_id, socket.assigns.board))
+      _ -> socket
+    end
+  end
+
+  # The full human projection of one task: a FRESH doc read (description,
+  # criteria with evidence, the claim lease) + the board's own cards for
+  # children (same corpus the columns paint) + a titled blocker list off the
+  # blocks-edges. Reads only — the panel writes nothing.
+  defp load_peek(task_id, board) do
+    case peek_doc(task_id) do
+      %Document{} = doc ->
+        content = doc.content || %{}
+        lid = Content.published_id(doc.doc_id)
+        card = board.cards_by_id[lid]
+
+        %{
+          doc_id: lid,
+          title: doc.title,
+          col: card && card.col,
+          lifecycle_status: Map.get(content, "lifecycle_status") || "open",
+          priority: Map.get(content, "priority"),
+          parent_id: Map.get(content, "parent_id"),
+          labels: (card && card.labels) || [],
+          github: card && card.github,
+          claim: peek_claim(content),
+          description: presence(Map.get(content, "description")),
+          criteria: peek_criteria(content),
+          children: peek_children(board, lid),
+          blockers: peek_blockers(doc.id),
+          updated_at: doc.updated_at
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  # The same exact/`drafts.` fallback the restage fresh-read uses, dataset-
+  # scoped, published row preferred, NEVER interpolated (a crafted ?task= is
+  # only ever a bind parameter).
+  defp peek_doc(task_id) do
+    case fetch_peek_doc(task_id) do
+      %Document{} = doc ->
+        doc
+
+      nil ->
+        if String.starts_with?(task_id, "drafts."),
+          do: nil,
+          else: fetch_peek_doc("drafts." <> task_id)
+    end
+  end
+
+  defp fetch_peek_doc(doc_id) do
+    Repo.one(
+      from(d in Document,
+        where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset,
+        limit: 1
+      )
+    )
+  end
+
+  defp peek_claim(content) do
+    case Map.get(content, "claim") do
+      %{"worker" => worker} = claim when is_binary(worker) and worker != "" ->
+        %{worker: worker, epoch: claim["epoch"], at: parse_ts(claim["ts_iso"])}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp parse_ts(iso) when is_binary(iso) do
+    case DateTime.from_iso8601(iso) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  defp parse_ts(_), do: nil
+
+  # Criteria with their texts + close-time evidence — the data the card's n/m
+  # can only count. A malformed entry degrades to a positional placeholder.
+  defp peek_criteria(content) do
+    case Map.get(content, "acceptance_criteria") do
+      list when is_list(list) ->
+        list
+        |> Enum.with_index(1)
+        |> Enum.map(fn
+          {%{} = entry, i} ->
+            %{
+              text: presence(entry["criterion"]) || "criterion #{i}",
+              met: entry["met"] == true,
+              evidence: presence(entry["evidence"])
+            }
+
+          {_other, i} ->
+            %{text: "criterion #{i}", met: false, evidence: nil}
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  # Children come from the board's OWN cards (same corpus, already projected,
+  # realtime-adjacent), in-flight first so the active work leads.
+  @peek_child_order [:in_progress, :ready, :open, :blocked, :done]
+  defp peek_children(board, lid) do
+    order = @peek_child_order |> Enum.with_index() |> Map.new()
+
+    board.cards_by_id
+    |> Map.values()
+    |> Enum.filter(&(&1.parent_id == lid))
+    |> Enum.sort_by(fn c -> {Map.get(order, c.col, 99), c.title || c.doc_id} end)
+  end
+
+  # Titled blockers off the blocks-edges (the card only carries statuses).
+  defp peek_blockers(pk) do
+    from(e in Edge,
+      join: t in Document,
+      on: t.id == e.to_id,
+      where: e.from_id == ^pk and e.kind == "blocks",
+      select: %{doc_id: t.doc_id, title: t.title, content: t.content}
+    )
+    |> Repo.all()
+    |> Enum.map(fn b ->
+      %{
+        doc_id: Content.published_id(b.doc_id),
+        title: b.title,
+        lifecycle_status: Map.get(b.content || %{}, "lifecycle_status") || "open"
+      }
+    end)
+  end
+
+  defp presence(value) when is_binary(value) and value != "", do: value
+  defp presence(_), do: nil
+
+  # Status-string → §1 role/glyph, whitelisted (never String.to_atom/1 on
+  # stored content). The peeked card's derived :col wins when it is on the
+  # board (it carries the ready overlay a raw lifecycle read can't).
+  @peek_roles %{
+    "open" => :open,
+    "in_progress" => :in_progress,
+    "blocked" => :blocked,
+    "done" => :done,
+    "cancelled" => :cancelled
+  }
+
+  defp safe_role(status), do: Map.get(@peek_roles, status, :open)
+
+  defp peek_role(%{col: col}) when is_atom(col) and not is_nil(col), do: col
+  defp peek_role(peek), do: safe_role(peek.lifecycle_status)
+
+  defp peek_state_label(peek),
+    do: peek |> peek_role() |> Atom.to_string() |> String.replace("_", " ")
+
+  defp role_glyph(:in_progress), do: ""
+  defp role_glyph(role), do: Board.glyphs()[role] || "○"
+
+  # push_patch to the URL encoding this (group, filters, peeked task) triple —
+  # the ONLY mutation path (D14). The bare path when nothing is selected keeps
+  # a clean, shareable URL. Group/filter events preserve the open peek; the
+  # 3-arity form sets/clears it.
   defp patch_to(socket, group_by, filters) do
-    case board_query(group_by, filters) do
+    patch_to(socket, group_by, filters, socket.assigns.peek && socket.assigns.peek.doc_id)
+  end
+
+  defp patch_to(socket, group_by, filters, task_id) do
+    case board_query(group_by, filters, task_id) do
       [] -> push_patch(socket, to: ~p"/admin/projects")
       query -> push_patch(socket, to: ~p"/admin/projects?#{query}")
     end
   end
 
-  defp board_query(group_by, filters) do
+  defp board_query(group_by, filters, task_id) do
     group_params = if group_by == :none, do: [], else: [{"group", Atom.to_string(group_by)}]
 
     facet_params =
@@ -488,7 +698,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         {Atom.to_string(key), Enum.join(vals, ",")}
       end
 
-    group_params ++ facet_params
+    peek_params = if is_binary(task_id) and task_id != "", do: [{"task", task_id}], else: []
+
+    group_params ++ facet_params ++ peek_params
   end
 
   @impl true
@@ -957,6 +1169,110 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-variant-numeric: tabular-nums;
       }
 
+      /* ── task peek (wave 13): the right-hand inspector ────────────────────
+         A card click slides a read-only detail panel over the LIVE board —
+         no navigation away; the peeked id rides the URL. */
+      .bp-scrim { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 0.28); }
+      .bp-peek {
+        position: fixed; top: 0; right: 0; bottom: 0; z-index: 41;
+        width: min(480px, 94vw); display: flex; flex-direction: column;
+        background: var(--surface); border-left: 1px solid var(--border);
+        box-shadow: -16px 0 44px rgb(0 0 0 / 0.22);
+        animation: bp-peek-in 200ms cubic-bezier(0.22, 1, 0.36, 1) 1;
+      }
+      @keyframes bp-peek-in {
+        0%   { opacity: 0; transform: translateX(14px); }
+        100% { opacity: 1; transform: translateX(0); }
+      }
+      .bp-peek-head {
+        flex: 0 0 auto; padding: 16px 18px 13px;
+        border-bottom: 1px solid var(--border);
+      }
+      .bp-peek-status {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 12px; color: var(--muted-text);
+      }
+      .bp-peek-state {
+        text-transform: uppercase; letter-spacing: 0.07em;
+        font-size: 10.5px; font-weight: 700;
+      }
+      .bp-peek-status .bp-age { margin-left: 0; padding-left: 0; }
+      .bp-peek-x {
+        margin-left: auto; border: 0; background: transparent;
+        color: var(--muted-text); font-size: 1.3rem; line-height: 1;
+        cursor: pointer; padding: 0 2px;
+      }
+      .bp-peek-x:hover { color: var(--text); }
+      .bp-peek-title {
+        margin: 8px 0 10px; font-size: 16px; font-weight: 600;
+        letter-spacing: -0.01em; line-height: 1.35; color: var(--text);
+      }
+      .bp-peek-head .bp-meta { margin-top: 0; }
+      .bp-peek-id {
+        margin-left: auto; color: var(--muted-text); opacity: 0.7;
+        font-variant-numeric: tabular-nums;
+      }
+      .bp-peek-body {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto;
+        padding: 4px 18px 18px;
+        scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+      }
+      .bp-peek-sec { padding: 13px 0; border-bottom: 1px solid var(--border); }
+      .bp-peek-sec > .bp-controls-label {
+        display: flex; align-items: center; gap: 8px; margin: 0 0 9px;
+      }
+      .bp-peek-count {
+        font-variant-numeric: tabular-nums; color: var(--ok);
+        font-weight: 600; letter-spacing: 0; text-transform: none;
+      }
+      .bp-peek-claim {
+        margin: 0; font-size: 12.5px; color: var(--text);
+        display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline;
+      }
+      .bp-peek-claim .bp-worker { margin-left: 0; padding-left: 0; max-width: none; }
+      .bp-peek-desc {
+        margin: 0; font-size: 13px; line-height: 1.6; color: var(--text);
+        white-space: pre-wrap; overflow-wrap: anywhere;
+      }
+      .bp-peek-crit {
+        list-style: none; margin: 0; padding: 0;
+        display: flex; flex-direction: column; gap: 9px;
+      }
+      .bp-peek-crit li { display: flex; gap: 8px; align-items: flex-start; }
+      .bp-peek-crit li > .gi { margin-top: 2px; }
+      .bp-peek-crit-b { flex: 1 1 auto; min-width: 0; }
+      .bp-peek-crit-t { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text); }
+      .bp-peek-crit li.is-met .bp-peek-crit-t { color: var(--muted-text); }
+      .bp-peek-evidence {
+        margin: 4px 0 0; padding: 5px 9px;
+        border-left: 2px solid var(--ok); border-radius: 0 6px 6px 0;
+        background: var(--ok-soft); font-size: 11.5px; line-height: 1.5;
+        color: var(--muted-text); overflow-wrap: anywhere;
+      }
+      .bp-peek-list {
+        list-style: none; margin: 0; padding: 0;
+        display: flex; flex-direction: column; gap: 3px;
+      }
+      .bp-peek-hop {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        text-align: left; font: inherit; font-size: 12.5px; color: var(--text);
+        background: transparent; border: 1px solid transparent;
+        border-radius: 7px; padding: 6px 8px; cursor: pointer;
+        transition: background 120ms ease, border-color 120ms ease;
+      }
+      .bp-peek-hop:hover { background: var(--muted-surface); border-color: var(--border); }
+      .bp-peek-hop:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+      .bp-peek-hop-t {
+        flex: 1 1 auto; min-width: 0; overflow: hidden;
+        text-overflow: ellipsis; white-space: nowrap;
+      }
+      .bp-peek-hop-s { flex: 0 0 auto; font-size: 11px; color: var(--muted-text); }
+      .bp-peek-cli { margin: 14px 0 0; font-size: 11.5px; color: var(--muted-text); }
+      .bp-peek-cli code {
+        background: var(--muted-surface); border-radius: 5px;
+        padding: 1px 6px; font-size: 11px;
+      }
+
       /* ── §1 white-ladder glyph vocabulary ────────────────────────────── */
       .gi {
         display: inline-block; width: 1.1em; text-align: center;
@@ -1028,6 +1344,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .bp-flash { animation: none; }
         .m-bump { animation: none; }
         .bp-notice { animation: none; }
+        .bp-peek { animation: none; }
         .bp-chip { transition: none; }
       }
     </style>
@@ -1152,6 +1469,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <% end %>
       <% end %>
 
+      <%= if @peek do %>
+        <div class="bp-scrim" data-role="peek-scrim" phx-click="peek-close" aria-hidden="true"></div>
+        <.peek_panel peek={@peek} />
+      <% end %>
     </main>
     """
   end
@@ -1301,6 +1622,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           data-doc-id={card.doc_id}
           data-just-moved={just_moved?(@last_change, card) && "true"}
           draggable="true"
+          phx-click="peek"
+          phx-value-task={card.doc_id}
         >
           <div class="bp-card-top">
             <span
@@ -1408,6 +1731,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         data-role="task-card"
         data-col="done"
         data-doc-id={card.doc_id}
+        phx-click="peek"
+        phx-value-task={card.doc_id}
       >
         <div class="bp-card-top">
           <span
@@ -1425,6 +1750,147 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         </div>
       </article>
     </div>
+    """
+  end
+
+  # The task peek panel (wave 13) — a read-only right-hand inspector over the
+  # live board: status header, claim lease, description, criteria WITH their
+  # close-time evidence, children (in-flight first, hop to re-peek), titled
+  # blockers, and the CLI escape hatch. Esc / × / scrim-click close.
+  defp peek_panel(assigns) do
+    ~H"""
+    <aside
+      class="bp-peek"
+      data-role="peek"
+      aria-label="Task details"
+      phx-window-keydown="peek-close"
+      phx-key="escape"
+    >
+      <header class="bp-peek-head">
+        <div class="bp-peek-status">
+          <span class={"gi gi--#{peek_role(@peek)}"} aria-hidden="true">
+            <%= role_glyph(peek_role(@peek)) %>
+          </span>
+          <span class="bp-peek-state" data-role="peek-state"><%= peek_state_label(@peek) %></span>
+          <span :if={@peek.priority} class="bp-pip" data-priority={@peek.priority}>
+            P<%= @peek.priority %>
+          </span>
+          <span :if={@peek.updated_at} class="bp-age"><%= age_label(@peek.updated_at) %></span>
+          <button
+            type="button"
+            class="bp-peek-x"
+            phx-click="peek-close"
+            data-role="peek-close"
+            aria-label="Close task details"
+          >×</button>
+        </div>
+        <h2 class="bp-peek-title" data-role="peek-title"><%= @peek.title || @peek.doc_id %></h2>
+        <div class="bp-meta">
+          <span :if={@peek.parent_id} class="bp-goal" data-role="peek-goal"><%= @peek.parent_id %></span>
+          <span :for={label <- @peek.labels} class="bp-label"><%= label %></span>
+          <a
+            :if={github_badge?(@peek.github)}
+            class="bp-gh"
+            href={gh_href(@peek.github)}
+            target="_blank"
+            rel="noopener"
+          >
+            #<%= @peek.github["issue"] %>
+            <span class="bp-gh-state"><%= @peek.github["state"] %></span>
+          </a>
+          <span class="bp-peek-id"><%= @peek.doc_id %></span>
+        </div>
+      </header>
+
+      <div class="bp-peek-body">
+        <section :if={@peek.claim} class="bp-peek-sec" data-role="peek-claim">
+          <h3 class="bp-controls-label">Claim</h3>
+          <p class="bp-peek-claim">
+            <span class="bp-worker"><%= @peek.claim.worker %></span>
+            <span :if={@peek.claim.epoch}>· epoch <%= @peek.claim.epoch %></span>
+            <span :if={@peek.claim.at}>· held <%= age_label(@peek.claim.at) %></span>
+          </p>
+        </section>
+
+        <section :if={@peek.description} class="bp-peek-sec" data-role="peek-description">
+          <h3 class="bp-controls-label">Description</h3>
+          <p class="bp-peek-desc"><%= @peek.description %></p>
+        </section>
+
+        <section :if={@peek.criteria != []} class="bp-peek-sec" data-role="peek-criteria">
+          <h3 class="bp-controls-label">
+            Criteria
+            <span class="bp-peek-count">
+              <%= Enum.count(@peek.criteria, & &1.met) %>/<%= length(@peek.criteria) %>
+            </span>
+          </h3>
+          <ul class="bp-peek-crit">
+            <li :for={c <- @peek.criteria} class={c.met && "is-met"} data-role="peek-criterion">
+              <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
+                <%= if c.met, do: "✓", else: "○" %>
+              </span>
+              <div class="bp-peek-crit-b">
+                <p class="bp-peek-crit-t"><%= c.text %></p>
+                <p :if={c.evidence} class="bp-peek-evidence" data-role="peek-evidence">
+                  <%= c.evidence %>
+                </p>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <section :if={@peek.children != []} class="bp-peek-sec" data-role="peek-children">
+          <h3 class="bp-controls-label">
+            Subtasks
+            <span class="bp-peek-count">
+              <%= Enum.count(@peek.children, &(&1.lifecycle_status == "done")) %>/<%= length(@peek.children) %>
+            </span>
+          </h3>
+          <ul class="bp-peek-list">
+            <li :for={child <- @peek.children}>
+              <button
+                type="button"
+                class="bp-peek-hop"
+                phx-click="peek"
+                phx-value-task={child.doc_id}
+                data-role="peek-child"
+              >
+                <span class={"gi gi--#{child.color_role}"} aria-hidden="true">
+                  <%= glyph_text(child) %>
+                </span>
+                <span class="bp-peek-hop-t"><%= child.title || child.doc_id %></span>
+                <span :if={child.worker} class="bp-focus-w">@<%= child.worker %></span>
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <section :if={@peek.blockers != []} class="bp-peek-sec" data-role="peek-blockers">
+          <h3 class="bp-controls-label">Blocked by</h3>
+          <ul class="bp-peek-list">
+            <li :for={b <- @peek.blockers}>
+              <button
+                type="button"
+                class="bp-peek-hop"
+                phx-click="peek"
+                phx-value-task={b.doc_id}
+                data-role="peek-blocker"
+              >
+                <span class={"gi gi--#{safe_role(b.lifecycle_status)}"} aria-hidden="true">
+                  <%= role_glyph(safe_role(b.lifecycle_status)) %>
+                </span>
+                <span class="bp-peek-hop-t"><%= b.title || b.doc_id %></span>
+                <span class="bp-peek-hop-s"><%= b.lifecycle_status %></span>
+              </button>
+            </li>
+          </ul>
+        </section>
+
+        <p class="bp-peek-cli">
+          Inspect in the terminal: <code>bp task show <%= @peek.doc_id %></code>
+        </p>
+      </div>
+    </aside>
     """
   end
 
