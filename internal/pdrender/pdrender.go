@@ -295,5 +295,14 @@ func DefaultRegistry(theme Theme) *Registry {
 	// back-reference like section/figure/card.
 	r.blocks["columns"] = columnsRenderer{reg: r}
 	r.blocks["terminal"] = terminalRenderer{reg: r}
+
+	// ── grid / ladder blocks (notes / cards / pipeline / status-legend) ────────
+	// Terminal counterparts of the web/Studio grid widgets. notes/pipeline reuse
+	// the singular note/stage renderers on a synthesized child Block; cards draws
+	// its own tone-tinted box; status-legend inlines the fixed status ladder.
+	r.blocks["notes"] = notesRenderer{}
+	r.blocks["cards"] = cardsRenderer{}
+	r.blocks["pipeline"] = pipelineRenderer{}
+	r.blocks["status-legend"] = statusLegendRenderer{}
 	return r
 }
