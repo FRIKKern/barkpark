@@ -496,7 +496,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ ~s(data-doc-id="rt-open")
 
       # the moved card sits under the in_progress column now.
-      assert card_in_column?(html, "rt-open", "in_progress")
+      assert html =~ ~s(data-col="in_progress" data-doc-id="rt-open")
     end
 
     test "a task.closed event climbs done-today and flashes the closed card", %{conn: conn} do
@@ -508,7 +508,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       assert html =~ "1 done today"
       assert html =~ ~s(data-just-moved)
-      assert card_in_column?(html, "rt-wip", "done")
+      # on the deck the closed card lands in the LAST phone — the done ledger.
+      [_, ledger] = String.split(html, ~s(data-role="deck-done"), parts: 2)
+      assert ledger =~ ~s(data-doc-id="rt-wip")
     end
 
     test "an unknown non-task event is ignored — no crash, no change", %{conn: conn} do
@@ -563,17 +565,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       {:ok, _view, html} = live(conn, "/admin/projects")
 
-      # exactly 12 done cards render (the window), but the Done column count is 13.
+      # exactly 12 done rows render inside the deck's ledger card (the
+      # window), but its count pill reports the full 13 (wave 18: Done is the
+      # rail's LAST phone card, no longer a column).
       done_cards =
         html
-        |> String.split(~s(data-role="column" data-col="done"))
+        |> String.split(~s(data-role="deck-done"))
         |> List.last()
         |> String.split(~s(data-role="task-card"))
         |> length()
         |> Kernel.-(1)
 
       assert done_cards == 12, "the done render is windowed at 12; got #{done_cards}"
-      assert done_count(html) == 13, "the Done column count must report the full total"
+      assert done_count(html) == 13, "the Done card count must report the full total"
     end
   end
 
@@ -645,8 +649,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, view, _html} = live(conn, "/admin/projects")
       html = render_hook(view, "restage", %{"doc_id" => "dr-open", "to_col" => "in_progress"})
 
-      # the card re-buckets to in_progress in the render (optimistic move)…
-      assert card_in_column?(html, "dr-open", "in_progress")
+      # the card re-buckets to in flight in the render (optimistic move — on
+      # the deck that is the card's data-col attribute, wave 18)…
+      assert html =~ ~s(data-col="in_progress" data-doc-id="dr-open")
 
       # …and the PERSISTED row actually flipped through the claim primitive.
       doc = Repo.get_by(Document, doc_id: "dr-open")
@@ -767,13 +772,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute html =~ ~s(data-role="notice")
     end
 
-    test "the board container opts into the drag hook and cards are draggable",
+    test "the grouped kanban still opts into the drag hook with draggable cards",
          %{conn: conn, ws: ws} do
       scoped_task("dr-hook", "Anything", ws.id, lifecycle: "open")
 
-      {:ok, _view, html} = live(conn, "/admin/projects")
+      # wave 18: the flat deck has no drop targets (click = peek); the drag
+      # surface lives on the grouped/filtered kanban drill-down.
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
       assert html =~ ~s(phx-hook="BarkparkBoardDrag")
       assert html =~ ~s(draggable="true")
+
+      {:ok, _view, flat} = live(conn, "/admin/projects")
+      refute flat =~ ~s(phx-hook="BarkparkBoardDrag")
     end
   end
 
@@ -1179,9 +1189,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       # …yet the facet markup is still in the DOM (present, just folded)…
       assert html =~ ~s(data-role="facet-label")
       assert html =~ ~s(data-role="facet-worker")
-      # …and the KANBAN grid renders (the board, not a filter wall, is the hero).
-      assert html =~ ~s(data-role="board")
-      assert html =~ ~s(data-role="column")
+      # …and the DECK renders (the work, not a filter wall, is the hero).
+      assert html =~ ~s(data-role="deck")
+      assert html =~ ~s(data-role="task-card")
     end
 
     test "arriving pre-filtered opens the disclosure so active chips are visible", %{conn: conn} do
@@ -1382,7 +1392,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       {:ok, _view, html} = live(conn, "/admin/projects?task=no-such-task")
 
       refute html =~ ~s(data-role="peek")
-      assert html =~ ~s(data-role="column")
+      assert html =~ ~s(data-role="deck")
     end
 
     test "changing the grouping preserves the open peek", %{conn: conn} do
@@ -1490,6 +1500,64 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "the deck (wave 18) — the default view" do
+    setup do
+      w = task("dk-epic", "Epic in flight", lifecycle: "in_progress", assignee: "studio:kalle")
+      task("dk-child", "Epic child", lifecycle: "open", parent_id: "dk-epic")
+      task("dk-ready", "Ready standalone", lifecycle: "open", priority: 1)
+      b = task("dk-blocked", "Stuck on the epic", lifecycle: "blocked")
+      o = task("dk-backlog", "Backlog behind the epic", lifecycle: "open")
+      Repo.insert!(%Edge{from_id: b.id, to_id: w.id, kind: "blocks"})
+      Repo.insert!(%Edge{from_id: o.id, to_id: w.id, kind: "blocks"})
+      task("dk-done-1", "Shipped one", lifecycle: "done")
+      task("dk-done-2", "Shipped two", lifecycle: "done")
+      :ok
+    end
+
+    test "one phone rail, relevance-ordered, Done as the last card", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      assert html =~ ~s(data-role="deck")
+      refute html =~ ~s(data-role="column")
+
+      # relevance order: in flight → ready → blocked → open backlog…
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      at = fn id -> deck |> :binary.match(~s(data-doc-id="#{id}")) |> elem(0) end
+      assert at.("dk-epic") < at.("dk-ready")
+      assert at.("dk-ready") < at.("dk-blocked")
+      assert at.("dk-blocked") < at.("dk-backlog")
+
+      # …and the ledger phone closes the rail with the full done count.
+      assert html =~ ~s(data-role="deck-done")
+      [_, ledger] = String.split(html, ~s(data-role="deck-done"), parts: 2)
+      assert ledger =~ "Shipped one"
+      assert done_count(html) == 2
+
+      # the family still rides the epic's card; status is a chip, not a column.
+      assert html =~ ~s(data-role="family-row")
+      assert html =~ ~s(data-role="deck-state")
+      assert html =~ "in flight"
+    end
+
+    test "deck cards peek on click and are never drag surfaces", %{conn: conn} do
+      {:ok, view, html} = live(conn, "/admin/projects")
+
+      # scope to the deck markup (the page's inline hook JS mentions the
+      # draggable attribute as source text, and it trails </main>).
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+      refute deck =~ ~s(draggable="true")
+      refute deck =~ ~s(phx-hook="BarkparkBoardDrag")
+
+      view
+      |> element(~s{[data-role="task-card"][data-doc-id="dk-epic"]})
+      |> render_click()
+
+      assert_patch(view, "/admin/projects?task=dk-epic")
+      assert render(view) =~ ~s(data-role="peek")
+    end
+  end
+
   describe "settled lanes (wave 11) — grouped" do
     setup do
       task("sl-live", "Live under goal-live", lifecycle: "open", parent_id: "goal-live")
@@ -1512,12 +1580,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert occurrences(html, ~s(data-role="column")) == 5
     end
 
-    test "the flat board with live work renders columns, never the settled state",
+    test "the flat board with live work renders the deck, never the settled state",
          %{conn: conn} do
       {:ok, _view, html} = live(conn, "/admin/projects")
 
       refute html =~ ~s(data-role="board-settled")
-      assert occurrences(html, ~s(data-role="column")) == 5
+      assert html =~ ~s(data-role="deck")
+      refute html =~ ~s(data-role="column")
     end
   end
 
@@ -1614,7 +1683,14 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
   # The integer the Done column header prints in its `col-count` span.
   defp done_count(html) do
-    [_before, rest] = String.split(html, ~s(data-col="done"), parts: 2)
+    # the deck's ledger card (flat view) or the done column (grouped view) —
+    # whichever comes first carries the count pill.
+    anchor =
+      if String.contains?(html, ~s(data-role="deck-done")),
+        do: ~s(data-role="deck-done"),
+        else: ~s(data-col="done")
+
+    [_before, rest] = String.split(html, anchor, parts: 2)
     [_h, tail] = String.split(rest, ~s(data-role="col-count">), parts: 2)
     tail |> String.trim_leading() |> Integer.parse() |> elem(0)
   end
