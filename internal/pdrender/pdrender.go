@@ -316,5 +316,11 @@ func DefaultRegistry(theme Theme) *Registry {
 	r.blocks["task-detail"] = taskDetailRenderer{}
 	r.blocks["task-board"] = taskBoardRenderer{}
 	r.blocks["roadmap"] = roadmapRenderer{}
+
+	// ── TUI creative slate ────────────────────────────────────────────────────
+	// heatmap: a row-major intensity grid drawn through the auto-degrading cell
+	// primitive (shade ladder by default; lipgloss truecolor only under a
+	// TrueColor profile — see heatmap.go). W1 of the slate; W2/W3 reuse the cell.
+	r.blocks["heatmap"] = heatmapRenderer{}
 	return r
 }
