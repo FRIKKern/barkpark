@@ -38,9 +38,25 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
     "cancelled" => "✕"
   }
 
+  # Canonical string→atom map for the lifecycle keys, folded at COMPILE time
+  # from the app's own source of truth — `Board.glyphs/0`'s atom keys.
+  #
+  # WHY this exists (do not revert to `String.to_existing_atom/1` on a raw
+  # string): `to_existing_atom/1` raises `ArgumentError` when its atom is not
+  # yet in the atom table, and under `async: true` interning is LOAD-ORDER
+  # DEPENDENT. If this test happened to run before any module that references
+  # e.g. `:in_progress` had loaded, the atom was absent and the conversion
+  # raised — a ~1-in-8000, seed-dependent flake that still passed 186/0 in
+  # isolation. Folding `Board.glyphs/0` here embeds every lifecycle atom as a
+  # literal in this module, so they are interned the instant it loads (long
+  # before any test runs), regardless of order. The witness stays honest: each
+  # atom is a REAL app atom sourced from `Board`, and an unknown key resolves
+  # to `nil` (never a fabricated atom), so drift still fails loudly.
+  @lifecycle_atom Map.new(Board.glyphs(), fn {atom, _glyph} -> {Atom.to_string(atom), atom} end)
+
   describe "GUI ↔ TUI glyph parity (charter D17)" do
     test "Board.glyphs/0 matches the §1 manifest exactly" do
-      expected_atoms = Map.new(@expected, fn {k, v} -> {String.to_existing_atom(k), v} end)
+      expected_atoms = Map.new(@expected, fn {k, v} -> {@lifecycle_atom[k], v} end)
       assert Board.glyphs() == expected_atoms
     end
 
@@ -58,7 +74,7 @@ defmodule Barkpark.Tasks.BoardThemeParityTest do
       board = Board.glyphs()
 
       for key <- @shared_keys do
-        atom = String.to_existing_atom(key)
+        atom = @lifecycle_atom[key]
 
         assert Map.fetch!(tui, key) == Map.fetch!(board, atom),
                "GUI/TUI glyph drift on #{key}: TUI=#{inspect(Map.get(tui, key))} " <>
