@@ -90,22 +90,66 @@ func (heatmapRenderer) Render(b Block, ctx RenderCtx) []string {
 
 	var out []string
 
-	// Compact col-label header (dim), indented past the row-label gutter.
+	// Per-column cell width. Without colLabels every cell is the classic 1-glyph
+	// contribution square (byte-stable with the pre-label render). WITH colLabels
+	// each column widens to its label (glyph repeated, columns space-separated)
+	// so the header actually sits over its cells — 1-glyph cells under multi-char
+	// labels drifted apart after the first column.
+	colW := func(j int) int {
+		if j < len(colLabels) {
+			if w := runeWidth(colLabels[j]); w > 1 {
+				return w
+			}
+		}
+		return 1
+	}
+	colSep := ""
 	if len(colLabels) > 0 {
-		head := strings.Repeat(" ", gutter) + strings.Join(colLabels, " ")
+		colSep = " "
+	}
+
+	// Columns that fit: accumulate per-column width + separator against the
+	// space left of the row-label gutter.
+	fitCols := func(n int) int {
+		used, fit := 0, 0
+		for j := 0; j < n; j++ {
+			w := colW(j)
+			if j > 0 {
+				w += len(colSep)
+			}
+			if used+w > maxCols {
+				break
+			}
+			used += w
+			fit++
+		}
+		if fit < 1 {
+			fit = 1
+		}
+		return fit
+	}
+
+	// Compact col-label header (dim), each label padded to its column.
+	if len(colLabels) > 0 {
+		cols := fitCols(len(colLabels))
+		padded := make([]string, 0, cols)
+		for j := 0; j < cols; j++ {
+			padded = append(padded, padOrTruncate(colLabels[j], colW(j)))
+		}
+		head := strings.Repeat(" ", gutter) + strings.Join(padded, colSep)
 		out = append(out, firstLine(wrapLines(ctx.Theme.Dim.Render(head), clampWidth(ctx.Width))))
 	}
 
 	// The grid: one line per row, `rowLabel  cell cell cell…`.
 	for i, row := range grid {
 		var sb strings.Builder
-		cols := len(row)
-		if cols > maxCols {
-			cols = maxCols
-		}
+		cols := fitCols(len(row))
 		for j := 0; j < cols; j++ {
 			intensity := row[j] / maxVal
-			sb.WriteString(heatCell(intensity, trueColor, ctx))
+			if j > 0 {
+				sb.WriteString(colSep)
+			}
+			sb.WriteString(heatCellN(intensity, colW(j), trueColor, ctx))
 		}
 		line := sb.String()
 		if labelW > 0 {
@@ -186,6 +230,18 @@ func heatCell(intensity float64, trueColor bool, ctx RenderCtx) string {
 		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render("█")
 	}
 	return ctx.Theme.Body.Render(heatShadeGlyph(intensity))
+}
+
+// heatCellN is heatCell widened to a labeled column: the cell glyph repeated w
+// times under one style run. w<=1 is exactly heatCell.
+func heatCellN(intensity float64, w int, trueColor bool, ctx RenderCtx) string {
+	if w <= 1 {
+		return heatCell(intensity, trueColor, ctx)
+	}
+	if trueColor {
+		return lipgloss.NewStyle().Foreground(heatTrueColor(intensity)).Render(strings.Repeat("█", w))
+	}
+	return ctx.Theme.Body.Render(strings.Repeat(heatShadeGlyph(intensity), w))
 }
 
 // ── small helpers ────────────────────────────────────────────────────────────

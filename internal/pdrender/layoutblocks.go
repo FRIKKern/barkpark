@@ -165,7 +165,10 @@ func (tr terminalRenderer) Render(b Block, ctx RenderCtx) []string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(ruleColor(ctx.Theme)).
 		Padding(0, 1).
-		Width(clampWidth(inner)).
+		// lipgloss Width INCLUDES the padding (border excluded): inner+2 gives the
+		// children their full `inner` columns and lands the border on ctx.Width.
+		// Width(inner) left inner-2 for content, force-wrapping bordered children.
+		Width(clampWidth(inner + 2)).
 		Render(body)
 	return strings.Split(box, "\n")
 }

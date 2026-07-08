@@ -11,16 +11,16 @@ One.                       Two.                       Three.
                                                                                 
 A single column renders with no separator rule at all.                          
                                                                                 
-╭────────────────────────────────────────────────────────────────────────────╮  
-│ ● ● ●  deploy.sh   live                                                    │  
-│ A terminal frame wraps its child blocks in rounded chrome.                 │  
-│ ▌ BASH                                                                     │  
-│ ▌ make deploy                                                              │  
-│ ▌ curl -s localhost:4000/api/schemas | head                                │  
-│ exit 0 · 1.2s                                                              │  
-╰────────────────────────────────────────────────────────────────────────────╯  
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ● ● ●  deploy.sh   live                                                      │
+│ A terminal frame wraps its child blocks in rounded chrome.                   │
+│ ▌ BASH                                                                       │
+│ ▌ make deploy                                                                │
+│ ▌ curl -s localhost:4000/api/schemas | head                                  │
+│ exit 0 · 1.2s                                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
                                                                                 
-╭────────────────────────────────────────────────────────────────────────────╮  
-│ ● ● ●                                                                      │  
-│ A bare terminal: no title, no live chip, no footer — just the dots bar.    │  
-╰────────────────────────────────────────────────────────────────────────────╯  
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ● ● ●                                                                        │
+│ A bare terminal: no title, no live chip, no footer — just the dots bar.      │
+╰──────────────────────────────────────────────────────────────────────────────╯

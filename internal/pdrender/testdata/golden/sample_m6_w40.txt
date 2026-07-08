@@ -13,31 +13,30 @@ Delivery ───────────────────────�
                                         
 [task-list — unresolved]                
                                         
-╭────────────────────────────────────╮  
-│ Wire the resolver                  │  
-│ ⠋ in_progress · P0 · task · grace  │  
-│ created 2026-07-01 · updated 2026- │  
-│ 07-08                              │  
-│ Replace the authored query with    │  
-│ literal snapshot data at read      │  
-│ time.                              │  
-│ Criteria · 2/3                     │  
-│ ✓ Resolver replaces query with     │  
-│ snapshot                           │  
-│ ↳ compose.ex:210                   │  
-│ ✓ Absent key degrades honestly     │  
-│ ○ Golden tests cover all four      │  
-│ widgets                            │  
-│ Dependencies                       │  
-│ blocks 2 tasks · blocked by 1      │  
-│ Children · 1/2 done                │  
-│ ○ cache warmup                     │  
-│ ✓ eviction policy                  │  
-│ Papers                             │  
-│ ▸ pdrender block parity plan       │  
-│ ▸ task-family spec                 │  
-│ pdrender · parity · wave-3         │  
-╰────────────────────────────────────╯  
+╭──────────────────────────────────────╮
+│ Wire the resolver                    │
+│ ⠋ in_progress · P0 · task · grace    │
+│ created 2026-07-01 · updated 2026-   │
+│ 07-08                                │
+│ Replace the authored query with      │
+│ literal snapshot data at read time.  │
+│ Criteria · 2/3                       │
+│ ✓ Resolver replaces query with       │
+│ snapshot                             │
+│ ↳ compose.ex:210                     │
+│ ✓ Absent key degrades honestly       │
+│ ○ Golden tests cover all four        │
+│ widgets                              │
+│ Dependencies                         │
+│ blocks 2 tasks · blocked by 1        │
+│ Children · 1/2 done                  │
+│ ○ cache warmup                       │
+│ ✓ eviction policy                    │
+│ Papers                               │
+│ ▸ pdrender block parity plan         │
+│ ▸ task-family spec                   │
+│ pdrender · parity · wave-3           │
+╰──────────────────────────────────────╯
                                         
 Ready  1                                
   ○ Claim the next card  P2             

@@ -161,8 +161,10 @@ func (cr *codeRenderer) highlight(source, lang string, ctx RenderCtx, width int)
 	// Sanitize the source before lexing so no author escape-class control byte
 	// survives into the highlighted output — chroma's SGR is added AFTER
 	// tokenisation, so stripping input escapes cannot corrupt highlighting. Tabs
-	// survive (sanitizeCodeText) so indentation is preserved.
-	iterator, err := lexer.Tokenise(nil, sanitizeCodeText(source))
+	// and newlines survive (sanitizeCodeSource) so indentation AND line structure
+	// are preserved — sanitizeCodeText here would strip the newlines and collapse
+	// the block to one line.
+	iterator, err := lexer.Tokenise(nil, sanitizeCodeSource(source))
 	if err != nil {
 		// Tokenise failed → plain truncated source.
 		out := make([]string, len(rawLines))

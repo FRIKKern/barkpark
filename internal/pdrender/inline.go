@@ -399,6 +399,27 @@ func isCtrlNonTab(r rune) bool {
 	return r != '\t' && isCtrlRune(r)
 }
 
+// sanitizeCodeSource is sanitizeCodeText for a WHOLE multi-line source: it
+// additionally preserves the newline (0x0A) so line structure survives when the
+// full block is sanitized in one pass (the chroma Tokenise input). Feeding the
+// whole source through sanitizeCodeText would strip the newlines and collapse
+// every multi-line code block to a single line.
+func sanitizeCodeSource(s string) string {
+	if strings.IndexFunc(s, isCtrlNonTabNL) < 0 {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isCtrlNonTabNL(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isCtrlNonTabNL(r rune) bool {
+	return r != '\t' && r != '\n' && isCtrlRune(r)
+}
+
 // sanitizeText strips terminal control bytes (C0 controls + DEL) from
 // document-controlled display text so an embedded escape (e.g. an alt of
 // "\x1b[2J") can't repaint or hijack the reader's terminal when the text is
