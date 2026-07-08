@@ -3,7 +3,9 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
 
   alias Barkpark.Auth
   alias Barkpark.Media
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
+  alias Barkpark.Repo
 
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
@@ -141,6 +143,97 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
     case System.find_executable("vips") do
       nil -> false
       _ -> true
+    end
+  end
+
+  # ── stored-XSS hardening on the serve edge ────────────────────────────────
+  #
+  # A blob whose on-disk path ends in a browser-executable extension
+  # (svg/html/xml) must never be served with its honest, executable
+  # content-type inline: `MIME.from_path` would resolve `image/svg+xml` /
+  # `text/html` and the browser would run embedded <script> on the API/Studio
+  # origin (default asset visibility is public). We assert it is instead pinned
+  # to a non-executable type + nosniff + attachment.
+
+  # Write a blob straight to the media store and insert its row, bypassing the
+  # upload pipeline so we can control the on-disk extension precisely.
+  defp put_blob!(rel_path, bytes) do
+    full = Path.join(Media.upload_dir(), rel_path)
+    File.mkdir_p!(Path.dirname(full))
+    File.write!(full, bytes)
+
+    # Stamp the Default workspace/project so the flat serve pipeline
+    # (AssignDefaultScope → Default workspace) resolves the row — a real upload
+    # is stamped the same way. scope_to_workspace_or_global with a workspace_id
+    # is fail-closed (workspace-only), so a NULL-workspace row would 404.
+    proj = Barkpark.Tenancy.get_default_project()
+
+    {:ok, file} =
+      %MediaFile{}
+      |> MediaFile.changeset(%{
+        filename: Path.basename(rel_path),
+        original_name: Path.basename(rel_path),
+        path: rel_path,
+        mime_type: "application/octet-stream",
+        size: byte_size(bytes),
+        dataset: "production",
+        workspace_id: proj && proj.workspace_id,
+        project_id: proj && proj.id
+      })
+      |> Repo.insert()
+
+    {file, full}
+  end
+
+  describe "GET /media/files/* — dangerous-type neutralization" do
+    test "a stored .svg is served nosniff + attachment + non-executable type", %{conn: _conn} do
+      suffix = System.unique_integer([:positive])
+      svg = ~s|<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>|
+      {_file, full} = put_blob!("test/xss/evil-#{suffix}.svg", svg)
+
+      conn = get(build_conn(), "/media/files/test/xss/evil-#{suffix}.svg")
+
+      assert conn.status == 200
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(conn, "content-disposition") == ["attachment"]
+
+      content_type = List.first(get_resp_header(conn, "content-type"))
+      refute content_type =~ "image/svg+xml"
+      assert content_type =~ "application/octet-stream"
+
+      File.rm(full)
+    end
+
+    test "a stored .html is served nosniff + attachment + non-executable type", %{conn: _conn} do
+      suffix = System.unique_integer([:positive])
+      {_file, full} = put_blob!("test/xss/evil-#{suffix}.html", "<script>alert(1)</script>")
+
+      conn = get(build_conn(), "/media/files/test/xss/evil-#{suffix}.html")
+
+      assert conn.status == 200
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(conn, "content-disposition") == ["attachment"]
+      refute List.first(get_resp_header(conn, "content-type")) =~ "text/html"
+
+      File.rm(full)
+    end
+
+    test "a normal image still serves inline with its honest type + nosniff", %{conn: conn} do
+      created =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/upload", %{"file" => png_upload()})
+        |> json_response(201)
+
+      url = created["result"]["originalUrl"]
+      served = get(build_conn(), url)
+
+      assert served.status == 200
+      assert get_resp_header(served, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(served, "content-disposition") == ["inline"]
+      assert List.first(get_resp_header(served, "content-type")) =~ "image/png"
+
+      cleanup(created)
     end
   end
 end

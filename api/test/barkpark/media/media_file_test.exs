@@ -89,6 +89,51 @@ defmodule Barkpark.Media.Storage.MediaFileTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Security: dangerous MIME neutralization at write (stored-XSS hardening)
+  # ---------------------------------------------------------------------------
+
+  describe "changeset/2 — dangerous MIME neutralization" do
+    test "an svg upload is downgraded to application/octet-stream at write" do
+      cs = MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: "image/svg+xml"}))
+      assert cs.valid?
+      assert Ecto.Changeset.get_change(cs, :mime_type) == "application/octet-stream"
+    end
+
+    test "html / xml / javascript client types are all neutralized" do
+      for mime <- ~w(text/html application/xhtml+xml text/xml application/xml application/javascript text/javascript) do
+        cs = MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: mime}))
+        assert Ecto.Changeset.get_change(cs, :mime_type) == "application/octet-stream",
+               "expected #{mime} to be neutralized"
+      end
+    end
+
+    test "a dangerous type with a charset parameter is still neutralized" do
+      cs =
+        MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: "text/html; charset=utf-8"}))
+
+      assert Ecto.Changeset.get_change(cs, :mime_type) == "application/octet-stream"
+    end
+
+    test "legit image/pdf/video types pass through untouched" do
+      for mime <- ~w(image/png image/jpeg image/gif image/webp application/pdf video/mp4) do
+        cs = MediaFile.changeset(%MediaFile{}, valid_attrs(%{mime_type: mime}))
+        assert Ecto.Changeset.get_change(cs, :mime_type) == mime,
+               "expected #{mime} to survive unchanged"
+      end
+    end
+
+    test "dangerous_mime?/1 and serve_content_type/1 classify types consistently" do
+      assert MediaFile.dangerous_mime?("image/svg+xml")
+      assert MediaFile.dangerous_mime?("text/html; charset=utf-8")
+      refute MediaFile.dangerous_mime?("image/png")
+      refute MediaFile.dangerous_mime?(nil)
+
+      assert MediaFile.serve_content_type("image/svg+xml") == "application/octet-stream"
+      assert MediaFile.serve_content_type("image/png") == "image/png"
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # Validation: required fields
   # ---------------------------------------------------------------------------
 

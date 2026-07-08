@@ -4,7 +4,7 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Content.Errors
   alias Barkpark.Media
   alias Barkpark.Media.{Delivery, Renditions}
-  alias Barkpark.Media.Storage.Access
+  alias Barkpark.Media.Storage.{Access, MediaFile}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -116,10 +116,26 @@ defmodule BarkparkWeb.MediaController do
 
   defp maybe_send_file(%Plug.Conn{state: :sent} = conn, _path, _mime), do: conn
 
+  # Serve blobs defensively — these bytes can be written by an outsider-held key
+  # and the default asset visibility is public:
+  #   * `nosniff` pins the server-declared content-type (no browser MIME sniffing
+  #     upgrading an octet-stream back to an executable type).
+  #   * dangerous types (svg/html/xml/js) are collapsed to a non-executable
+  #     `application/octet-stream` AND served `attachment`, so a browser that
+  #     navigates to the blob downloads it instead of executing script on the
+  #     API/Studio origin (the stored-XSS vector).
+  #   * safe types (images, pdf, …) keep their honest type and serve `inline`
+  #     so Studio previews still work.
   defp maybe_send_file(conn, full_path, mime) do
     conn
-    |> put_resp_content_type(mime)
+    |> put_resp_content_type(MediaFile.serve_content_type(mime))
+    |> put_resp_header("x-content-type-options", "nosniff")
+    |> put_resp_header("content-disposition", disposition(mime))
     |> send_file(200, full_path)
+  end
+
+  defp disposition(mime) do
+    if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
   end
 
   defp not_found(conn, message) do
