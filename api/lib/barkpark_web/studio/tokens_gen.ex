@@ -25,4 +25,14 @@ defmodule BarkparkWeb.Studio.TokensGen do
   # Sheets per-tab colors — the saturated dot strip (sheet_grid.ex tab-color
   # picker). Read best more vivid than the pastel cell backgrounds.
   def sheet_tab_colors, do: ~w(#ef4444 #f59e0b #eab308 #22c55e #3b82f6 #8b5cf6)
+
+  # Public status-page health-severity DATA tones (status_controller.ex
+  # @labels + component dots) — inline-style hex conveying OUTAGE SEVERITY,
+  # NOT a CSS role. partial_outage is an out-of-model tone between warn-amber
+  # (degraded) and danger-red (major_outage): the severity distinction must
+  # survive, so it is NOT recolored onto --warn/--danger.
+  def status_health, do: %{operational: "#16a34a", degraded: "#d97706", partial_outage: "#ea580c", major_outage: "#dc2626"}
+
+  # Neutral gray fallback for an unrecognised / missing status.
+  def status_health_unknown, do: "#6b7280"
 end

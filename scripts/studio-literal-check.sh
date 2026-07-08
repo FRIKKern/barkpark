@@ -43,19 +43,13 @@ web = sys.argv[1]
 
 # Files skipped entirely, each with the lead-approved reason.
 EXEMPT = {
-    # Q2 — self-contained login layout, own <style>, root tokens don't cascade in.
-    "controllers/session_html.ex",
-    # Q2-analogous — standalone pages rendered WITHOUT the Studio layout, so the
-    # emitted :root tokens never cascade; they carry their own scoped palette.
-    "controllers/error_html.ex",
-    "controllers/status_controller.ex",
-    # Q3 — categorical palettes. presence_state.ex + sheet_grid.ex are now
-    # TOKENIZED: they consume the emitted VALUE lists from
-    # BarkparkWeb.Studio.TokensGen (presence_palette/sheet_cf_backgrounds/
-    # sheet_tab_colors) — categorical hex kept as data, no inline literal — so
-    # they are no longer exempt. sheets.html.heex is a self-contained reader page
-    # (role/info-blue in its own <style>) tracked by a separate follow-up.
-    "layouts/sheets.html.heex",
+    # NOTE: the four self-contained pages (session_html.ex login, error_html.ex,
+    # status_controller.ex, sheets.html.heex reader) were REMOVED from this list
+    # in au-w2-login-layout-tokens — each now de-literalizes onto design/tokens.json
+    # via its OWN page-scoped BEGIN/END GENERATED block (color.authButton /
+    # errorPage / statusChrome / readerInfo), and the status health-severity DATA
+    # tones moved to BarkparkWeb.Studio.TokensGen.status_health/0. They are SCANNED.
+    #
     # The GENERATED categorical token artifact itself — design/emit.mjs owns
     # these hex value lists (the single source presence_state.ex + sheet_grid.ex
     # now consume). Analogous to the BEGIN/END GENERATED CSS block exemption.

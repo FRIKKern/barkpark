@@ -38,17 +38,23 @@ defmodule BarkparkWeb.SessionHTML do
 
   @doc """
   Auth-page styles, scoped under `.bp-auth`. The brand overrides (evergreen
-  primary + matching focus ring, per-theme button fills) mirror the Cloud
-  design profile in cloud/priv/static/app.css and stay SCOPED to these pages
-  until the Unified Aesthetic epic re-tokens the whole Studio; everything
-  else rides the root-layout tokens (--bg-card, --border, --fg…) so both
-  themes keep working.
+  primary + matching focus ring, per-theme button fills) are emitted from
+  design/tokens.json (color.primary/ring/authButton) into the page-scoped
+  BEGIN/END GENERATED block below — regenerate with `node design/emit.mjs
+  --write`, never hand-edit. Everything else rides the root-layout tokens
+  (--bg-card, --border, --fg…) so both themes keep working.
   """
   def auth_styles(assigns) do
     ~H"""
     <style>
+      /* Auth-page brand override: evergreen --primary/--ring (the exact emitted
+         primary/ring tokens) + the decoupled auth button fills (color.authButton
+         — deep-green fill, light text, per the Cloud dashboard). De-literalized
+         onto design/tokens.json via the page-scoped block below; light on
+         .bp-auth, dark keyed on html[data-theme="dark"] .bp-auth. The layout +
+         component rules that follow stay hand-authored. */
+      /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
       .bp-auth {
-        /* Cloud design profile, light: deep park evergreen. */
         --primary: hsl(163 46% 22%);
         --primary-fg: hsl(0 0% 100%);
         --ring: hsl(163 42% 30%);
@@ -56,18 +62,8 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-bg: var(--primary);
         --btn-fg: var(--primary-fg);
         --btn-bg-hover: hsl(163 46% 17%);
-
-        min-height: 100vh;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 16px;
-        padding: 24px;
       }
       html[data-theme="dark"] .bp-auth {
-        /* Dark: light park sage carries the brand; button fills stay a deeper
-           green with LIGHT text (decoupled --btn-*, same as the dashboard). */
         --primary: hsl(160 42% 62%);
         --primary-fg: hsl(163 45% 8%);
         --ring: hsl(160 42% 62%);
@@ -75,6 +71,16 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-bg: hsl(163 45% 30%);
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
+      }
+      /* END GENERATED: tokens */
+      .bp-auth {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 24px;
       }
 
       .bp-auth-card {

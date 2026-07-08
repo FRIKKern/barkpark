@@ -34,10 +34,21 @@ defmodule BarkparkWeb.ErrorHTML do
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>#{code} · #{message}</title>
         <style>
+          /* INTENTIONALLY ALWAYS-DARK (a stark error card, no theme switch).
+             De-literalized onto design/tokens.json (color.errorPage) via the
+             page-scoped FIXED-DARK block below — regenerate with
+             `node design/emit.mjs --write`, never hand-edit. */
+          /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+          :root {
+            --err-bg: #0f1115;
+            --err-fg: #e6e6e6;
+            --err-muted: #9aa0a6;
+          }
+          /* END GENERATED: tokens */
           body {
             font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-            background: #0f1115;
-            color: #e6e6e6;
+            background: var(--err-bg);
+            color: var(--err-fg);
             display: flex;
             min-height: 100vh;
             margin: 0;
@@ -46,7 +57,7 @@ defmodule BarkparkWeb.ErrorHTML do
           }
           main { text-align: center; padding: 2rem; }
           h1 { font-size: 3rem; margin: 0; font-weight: 700; letter-spacing: -0.02em; }
-          p { color: #9aa0a6; margin: 0.5rem 0 0; }
+          p { color: var(--err-muted); margin: 0.5rem 0 0; }
         </style>
       </head>
       <body>
