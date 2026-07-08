@@ -110,20 +110,14 @@ func StatusGlyph(lifecycle string) string {
 	if asciiMode() {
 		return asciiGlyph(lifecycle)
 	}
-	switch lifecycle {
-	case "in_progress":
-		return brailleFrames[0] // ⠋ — steady representative; boardGlyph animates it
-	case "blocked":
-		return "!"
-	case "done", "closed":
-		return "✓"
-	case "cancelled":
-		return "✕"
-	case "ready", "open":
-		return "○"
-	default:
-		return "·"
+	// The steady glyph per lifecycle is sourced from tokens_gen.go (GenLifecycle,
+	// emitted from design/tokens.json). in_progress's ⠋ is GenBrailleFrames[0] —
+	// the steady representative boardGlyph animates. An unknown lifecycle degrades
+	// to the neutral "·" dot.
+	if tok, ok := GenLifecycle[lifecycle]; ok {
+		return tok.Glyph
 	}
+	return "·"
 }
 
 // SelectionMarker is the cursor's ▎ left bar in the gutter's leading column — a

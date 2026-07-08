@@ -5,7 +5,74 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/semrole"
+	"github.com/charmbracelet/lipgloss"
 )
+
+// TestLifecycleColorsSourceGeneratedTokens locks the board's LIFECYCLE hues to
+// the emitted token source (tokens_gen.go, from design/tokens.json). The values
+// are read via genColor, so this is the ratchet that fails if anyone re-hand-codes
+// one of these hex literals back into theme.go — the drift the unified-aesthetic
+// endgame forbids. okColor/dangerColor/neutral/dim/title are deliberately absent:
+// they have no lifecycle twin and stay hand-authored for a later ratchet slice.
+func TestLifecycleColorsSourceGeneratedTokens(t *testing.T) {
+	cases := []struct {
+		key   string
+		got   lipgloss.AdaptiveColor
+		named string
+	}{
+		{"in_progress", infoColor, "infoColor"},
+		{"blocked", warnColor, "warnColor"},
+		{"done", doneColor, "doneColor"},
+		{"ready", readyColor, "readyColor"},
+		{"open", openColor, "openColor"},
+		{"cancelled", cancelColor, "cancelColor"},
+	}
+	for _, c := range cases {
+		tok, ok := GenLifecycle[c.key]
+		if !ok {
+			t.Errorf("GenLifecycle missing %q — %s cannot source it", c.key, c.named)
+			continue
+		}
+		if c.got.Light != tok.ColorLight || c.got.Dark != tok.ColorDark {
+			t.Errorf("%s = {Light:%q Dark:%q}, want generated {Light:%q Dark:%q} for %q",
+				c.named, c.got.Light, c.got.Dark, tok.ColorLight, tok.ColorDark, c.key)
+		}
+	}
+}
+
+// TestLifecycleConstsMatchGeneratedTokens locks board.go's life* string consts to
+// the generated lifecycle set (GenLifecycle keys + GenLifecycleOrder), so adding a
+// token to design/tokens.json without teaching the board its const fails HERE, in
+// the same tree. It is the coupling that keeps the hand-named consts and the
+// generated vocabulary from drifting apart in either direction.
+func TestLifecycleConstsMatchGeneratedTokens(t *testing.T) {
+	consts := map[string]string{
+		"in_progress": lifeInProgress,
+		"blocked":     lifeBlocked,
+		"done":        lifeDone,
+		"closed":      lifeClosed,
+		"cancelled":   lifeCancelled,
+		"ready":       lifeReady,
+		"open":        lifeOpen,
+	}
+	for want, got := range consts {
+		if got != want {
+			t.Errorf("life const for %q = %q, want %q", want, got, want)
+		}
+		if _, ok := GenLifecycle[got]; !ok {
+			t.Errorf("life const %q is absent from GenLifecycle", got)
+		}
+	}
+	if len(GenLifecycleOrder) != len(consts) {
+		t.Fatalf("GenLifecycleOrder has %d tokens, board has %d life consts — vocabulary drift",
+			len(GenLifecycleOrder), len(consts))
+	}
+	for _, lc := range GenLifecycleOrder {
+		if _, ok := consts[lc]; !ok {
+			t.Errorf("GenLifecycleOrder token %q has no board life const", lc)
+		}
+	}
+}
 
 // TestRoleForParityWithSemrole locks the board's lifecycle→role mapping to the
 // shared internal/semrole vocabulary so the CLI tables (bp task … -o table), the
