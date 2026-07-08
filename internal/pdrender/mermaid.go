@@ -316,10 +316,12 @@ func (g *mmGraph) addEdge(from, to, label, op string) {
 
 // ── sequence parsing ─────────────────────────────────────────────────────────
 
-// seqMsgRe matches `A ->> B : text` and its arrow variants. Operators, longest
-// first: -->> (dashed solid-head), --> (dashed open), ->> (solid), -> (open),
-// -x / --x (cross). Labels after the colon are optional.
-var seqMsgRe = regexp.MustCompile(`^(\S+)\s*(--?>>?|--?x|-->|->)\s*(\S+?)\s*(?::\s*(.*))?$`)
+// seqMsgRe matches `A ->> B : text` and its arrow variants. The actor tokens are
+// alphanumeric (not \S+, which would greedily swallow the arrow's leading dash,
+// e.g. splitting `DB-->>API` as from="DB-"). Operators, longest first: -->>
+// (dashed solid-head), --> (dashed open), ->> (solid), -> (open), -x / --x
+// (cross). Labels after the colon are optional.
+var seqMsgRe = regexp.MustCompile(`^([A-Za-z0-9_]+)\s*(--?>>?|--?x|-->|->)\s*([A-Za-z0-9_]+)\s*(?::\s*(.*))?$`)
 
 // parseSequence parses `sequenceDiagram` source. Explicit `participant X` /
 // `actor X` (optionally `as "Label"`) declarations seed the actor order;
