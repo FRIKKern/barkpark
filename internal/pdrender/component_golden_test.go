@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -25,6 +26,38 @@ import (
 // seam). Literal-HTML / text-normalized diffs are rejected — the TUI emits ANSI
 // and the surfaces share no prose (e.g. the legend's meanings legitimately
 // differ; only the role + glyph are shared truth).
+//
+// COVERAGE (honest scope — subset-parity, projection ⊆ native):
+//   - COVERED: for every column/row PRESENT in the shared projection, all three
+//     surfaces (Elixir view / web / this TUI) agree on label + count + ordered
+//     card titles + glyph-role. The label check is EXACT: a lane header renders
+//     `glyph Label␣␣count`, so the projection label must appear as that delimited
+//     field (single space before, 2+ spaces after) — a superstring rename
+//     (`Blocked`→`Blockedz`) or a prefix rename fails, matching the Elixir
+//     exact-span and web exact-equality legs.
+//   - NOT COVERED (known divergences, FILED not fixed):
+//     (a) task-board `open`-task DROP — the Elixir 4-col omit-empty view drops
+//         `open` tasks the web 5-col view keeps. A ⊆-projection structurally
+//         cannot catch an omission, so the task-board fixture omits `open`;
+//         owned by bug-taskboard-drops-open-tasks (carries the open-inclusive
+//         cross-surface test).
+//     (b) status/label PROSE differs (Elixir "in progress"/"cancelled" vs Go
+//         "progress"/"cancel"). The projection shares role + glyph, NOT meaning
+//         text; owned by au-w5-status-prose-parity. Board column LABELS are
+//         likewise "two copies agree" (gen `@board_columns` + components.ex,
+//         tied by this realization test), not a single manifest source — folded
+//         into au-w5-status-prose-parity.
+
+// labelSpanRe matches a projection column label as the EXACT delimited header
+// field the TUI emits: `glyph Label␣␣count`. The label is bounded by a single
+// space (the glyph separator; or line start) before and 2+ spaces (the count
+// separator) after — so BOTH a superstring rename (append or prepend) and a
+// substring fail, giving this leg the same strictness as the Elixir exact-span
+// and web exact-equality legs (a bare strings.Contains let `Blocked`→`Blockedz`
+// wrongly pass).
+func labelSpanRe(label string) *regexp.Regexp {
+	return regexp.MustCompile(`(?:^| )` + regexp.QuoteMeta(label) + ` {2,}`)
+}
 
 type componentGolden struct {
 	Type     string          `json:"type"`
@@ -112,8 +145,8 @@ func TestTaskBoardGoldenParity(t *testing.T) {
 	out := renderComponent(t, fx.Input)
 
 	for _, col := range proj.Columns {
-		if !strings.Contains(out, col.Label) {
-			t.Errorf("column label %q missing from render:\n%s", col.Label, out)
+		if !labelSpanRe(col.Label).MatchString(out) {
+			t.Errorf("column label %q missing (as an exact `glyph Label␣␣count` header field) from render:\n%s", col.Label, out)
 		}
 		if col.Count != len(col.Cards) {
 			t.Errorf("fixture inconsistent: column %q count=%d but %d cards", col.Role, col.Count, len(col.Cards))

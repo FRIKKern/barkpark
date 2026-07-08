@@ -16,6 +16,18 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
       contract". Loops are fixture-driven, so a regen needs no edits here.
 
   Regenerate with `mix barkpark.paper_components.gen_golden_parity` whenever this reds.
+
+  COVERAGE (honest scope — subset-parity, projection ⊆ native): for every
+  column/row PRESENT in the projection, all three surfaces agree on label + count
+  + ordered card titles + glyph-role (this leg checks the View HTML at exact
+  span). NOT COVERED, FILED not fixed: (a) task-board `open`-task DROP — the
+  4-column omit-empty View drops `open` tasks the web 5-column view keeps; a
+  ⊆-projection cannot catch an omission, so the fixture input omits `open`; owned
+  by bug-taskboard-drops-open-tasks. (b) status/label PROSE ("in progress" vs
+  "progress"); the projection shares role + glyph, not meaning text; owned by
+  au-w5-status-prose-parity (which also owns the "board labels are two copies that
+  agree, not one manifest source" gap). The harness never implies parity it does
+  not hold.
   """
   use ExUnit.Case, async: true
 
@@ -47,7 +59,9 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     test "#{type}: the three mirrors decode term-identical" do
       api = decode!(@api_dir, @type_slug)
       assert api == decode!(@web_dir, @type_slug), "web mirror drifted from api mirror"
-      assert api == decode!(@go_dir, @type_slug), "internal/pdrender mirror drifted from api mirror"
+
+      assert api == decode!(@go_dir, @type_slug),
+             "internal/pdrender mirror drifted from api mirror"
     end
   end
 
@@ -71,8 +85,13 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     for col <- columns do
       role = col["role"]
       assert html =~ ~s|bp-board__col--#{role}|, "column #{role} lane missing"
-      assert html =~ ~s|<span class="bp-board__label">#{col["label"]}</span>|, "label #{col["label"]} missing"
-      assert html =~ ~s|<span class="bp-board__count">#{col["count"]}</span>|, "count for #{role} missing"
+
+      assert html =~ ~s|<span class="bp-board__label">#{col["label"]}</span>|,
+             "label #{col["label"]} missing"
+
+      assert html =~ ~s|<span class="bp-board__count">#{col["count"]}</span>|,
+             "count for #{role} missing"
+
       assert html =~ ~s|bp-g--#{col["glyph_role"]}|, "glyph-role #{col["glyph_role"]} missing"
 
       for card <- col["cards"] do

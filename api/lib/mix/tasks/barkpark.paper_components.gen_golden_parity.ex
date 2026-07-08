@@ -29,6 +29,29 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     * `task-board`    — data-driven kanban; columns bucket the snapshot by role.
     * `status-legend` — static 6-rung white ladder (no input data).
 
+  ## Coverage (honest scope — subset-parity, projection ⊆ native)
+
+  COVERED: for every column/row PRESENT in the shared projection, all three
+  surfaces agree on label + count + ordered card titles + glyph-role. Each surface
+  asserts this at native strictness — the View at exact HTML span, web at exact
+  equality, the TUI at an exact `glyph Label␣␣count` delimited-field match (a
+  superstring rename fails on every leg).
+
+  NOT COVERED (known divergences — FILED, not fixed; this harness must never imply
+  parity it does not hold):
+
+    * task-board `open`-task DROP — the Elixir 4-column omit-empty View drops
+      `open` tasks the web 5-column view keeps. A ⊆-projection structurally cannot
+      catch an omission, so the `task-board` input here OMITS `open`; owned by
+      **bug-taskboard-drops-open-tasks** (which carries the open-inclusive
+      cross-surface test that DOES catch it — a real data-loss bug found day one).
+    * status/label PROSE differs (Elixir "in progress"/"cancelled" vs Go
+      "progress"/"cancel"). The projection shares role + glyph, NOT meaning text;
+      owned by **au-w5-status-prose-parity**. Board column LABELS are likewise
+      "two copies agree" (this task's `@board_columns` + `components.ex`, tied by
+      the realization tests), NOT a single manifest source — folded into
+      **au-w5-status-prose-parity**.
+
   ## Mirrors (byte-identical — the same JSON string is written to all three)
 
     * `api/test/support/fixtures/<type>.golden.json`
@@ -168,8 +191,7 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
           "label" => label,
           "glyph_role" => role,
           "count" => length(rs),
-          "cards" =>
-            Enum.map(rs, fn r -> %{"title" => r |> Map.get("title") |> to_string()} end)
+          "cards" => Enum.map(rs, fn r -> %{"title" => r |> Map.get("title") |> to_string()} end)
         }
       end)
 

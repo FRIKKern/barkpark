@@ -20,6 +20,18 @@
  * the FIRST S2 item (see the skipped placeholder below); the harness is proven on
  * task-board for web.
  *
+ * COVERAGE (honest scope — subset-parity, projection ⊆ native): for every column
+ * PRESENT in the projection, all three surfaces agree on label + count + ordered
+ * card titles + glyph-role (this leg asserts the web model at exact equality). NOT
+ * COVERED, FILED not fixed: (a) task-board `open`-task DROP — the Elixir 4-column
+ * omit-empty view drops `open` tasks this 5-column web view keeps; a ⊆-projection
+ * cannot catch an omission, so the fixture input omits `open`; owned by
+ * bug-taskboard-drops-open-tasks (which carries the open-inclusive test that
+ * catches the real bug). (b) status/label PROSE ("in progress" vs "progress"); the
+ * projection shares role + glyph, not meaning text; owned by
+ * au-w5-status-prose-parity (also owns "board labels are two agreeing copies, not
+ * one manifest source"). The harness never implies parity it does not hold.
+ *
  * Run: `node --test __tests__/component-golden-parity.test.ts` (or `pnpm test`).
  */
 
