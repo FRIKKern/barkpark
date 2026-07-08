@@ -81,6 +81,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       `snapshot/1` with a dismissible notice if the fence refuses.
 
   No new process — the write rides THIS per-socket event (D5).
+
+  ## Signal pass (wave 10)
+
+  Less clutter, more structure: every card stamps a relative age; acceptance
+  criteria render as a real progress row (track + n/m) instead of a chip;
+  labels cap at two (+N); the worker anchors the meta row's right edge; a
+  blocked card states how many blockers are still live; and the Done column
+  compacts to a one-line ledger (✓ title · age) with an honest "+N earlier"
+  window note off `done_total` — history stays readable without competing with
+  the active pipeline for the eye.
   """
 
   use BarkparkWeb, :live_view
@@ -701,8 +711,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         border-color: color-mix(in srgb, var(--border) 45%, var(--muted-text));
         box-shadow: 0 2px 8px rgb(0 0 0 / 0.06);
       }
-      .bp-card--done { opacity: 0.55; }
-      .bp-card--done .bp-title { font-weight: 400; }
+      /* Done is a LEDGER, not competition for the eye: each entry compacts to
+         one line (✓ title · age) at reduced weight, so finished work reads as
+         history while the active pipeline keeps the visual budget. */
+      .bp-card--done { opacity: 0.6; padding: 6px 10px; }
+      .bp-card--done .bp-card-top { align-items: center; }
+      .bp-card--done .bp-title {
+        font-weight: 400; font-size: 12px; white-space: nowrap;
+        overflow: hidden; text-overflow: ellipsis;
+      }
+
+      /* Status accent — a 2px left edge on the two states that need attention
+         (working / stuck) so the board scans by column AND by card. */
+      .bp-card--in_progress { border-left: 2px solid var(--info); }
+      .bp-card--blocked { border-left: 2px solid var(--warn); }
 
       /* Drag restage (wave 3) — pure-CSS affordances (CSP-safe, no JS styling).
          A card is draggable="true"; while dragging it dims + shows the grab
@@ -767,14 +789,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-card-top { display: flex; align-items: flex-start; gap: 8px; }
       .bp-card-top .gi { margin-top: 1px; }
       .bp-title {
+        flex: 1 1 auto; min-width: 0;
         font-weight: 500; font-size: 13px; line-height: 1.4; color: var(--text);
+      }
+      /* Freshness stamp — every card dates itself (relative, tabular) so
+         relevance is readable at a glance without opening anything. */
+      .bp-age {
+        flex: 0 0 auto; margin-left: auto; padding-left: 8px;
+        font-size: 11px; color: var(--muted-text);
+        font-variant-numeric: tabular-nums; line-height: 1.6; opacity: 0.8;
       }
       .bp-meta {
         display: flex; flex-wrap: wrap; gap: 5px 6px;
         margin-top: 8px; font-size: 11px; align-items: center;
         color: var(--muted-text);
       }
-      .bp-pip, .bp-goal, .bp-label, .bp-crit {
+      .bp-pip, .bp-goal, .bp-label {
         padding: 1.5px 7px; border-radius: 5px; line-height: 1.5;
         font-variant-numeric: tabular-nums; white-space: nowrap;
       }
@@ -784,10 +814,49 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-goal { background: var(--info-soft); color: var(--info); }
       .bp-goal::before { content: "↳ "; opacity: 0.7; }
       .bp-label { background: var(--muted-surface); color: var(--muted-text); }
-      .bp-worker { color: var(--muted-text); }
+      .bp-label--more { opacity: 0.75; }
+      /* The holder anchors the row's right edge and ellipsizes rather than
+         wrapping — long worker ids never smear the card. */
+      .bp-worker {
+        color: var(--muted-text); margin-left: auto; padding-left: 6px;
+        max-width: 15ch; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .bp-worker::before { content: "@"; opacity: 0.65; }
-      .bp-crit { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
-      .bp-crit--zero { background: var(--muted-surface); color: var(--muted-text); }
+
+      /* Acceptance criteria — a real progress row (track + fill + n/m), not a
+         chip: the state of the work is structure, not decoration. */
+      .bp-progress {
+        display: flex; align-items: center; gap: 8px; margin-top: 9px;
+      }
+      .bp-progress-track {
+        flex: 1 1 auto; height: 3px; border-radius: 999px;
+        background: var(--muted-surface); overflow: hidden;
+      }
+      .bp-progress-fill {
+        display: block; height: 100%; border-radius: 999px;
+        background: var(--ok);
+        transition: width 500ms cubic-bezier(0.22, 1, 0.36, 1);
+      }
+      .bp-crit {
+        flex: 0 0 auto; font-size: 11px; font-weight: 600; color: var(--ok);
+        font-variant-numeric: tabular-nums; white-space: nowrap;
+      }
+      .bp-crit--zero { color: var(--muted-text); font-weight: 500; }
+
+      /* A blocked card says WHY it is stuck — the §0 always-a-next-step read. */
+      .bp-block-note {
+        margin: 8px 0 0; font-size: 11px; color: var(--warn);
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Honest window note — the done ledger shows the newest slice; the full
+         count never silently disappears. */
+      .bp-more {
+        margin: 0; padding: 7px 8px; text-align: center;
+        font-size: 11px; color: var(--muted-text);
+        font-variant-numeric: tabular-nums;
+      }
 
       /* ── §1 white-ladder glyph vocabulary ────────────────────────────── */
       .gi {
@@ -935,12 +1004,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               <.board_grid
                 lane={lane}
                 last_change={@last_change}
+                done_overflow={0}
                 id={"bp-board-lane-" <> lane_dom_id(lane.key)}
               />
             </section>
           </div>
         <% else %>
-          <.board_grid lane={hd(@view.lanes)} last_change={@last_change} id="bp-projects-board" />
+          <.board_grid
+            lane={hd(@view.lanes)}
+            last_change={@last_change}
+            done_overflow={done_overflow(@view, @board)}
+            id="bp-projects-board"
+          />
         <% end %>
       <% end %>
 
@@ -1104,21 +1179,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               <%= glyph_text(card) %>
             </span>
             <span class="bp-title" data-role="card-title"><%= card.title %></span>
+            <span :if={card.updated_at} class="bp-age" data-role="age">
+              <%= age_label(card.updated_at) %>
+            </span>
           </div>
 
-          <div class="bp-meta">
+          <div :if={col != :done} class="bp-meta">
             <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
               P<%= card.priority %>
             </span>
             <span :if={card.parent_id} class="bp-goal" data-role="goal"><%= card.parent_id %></span>
-            <span :for={label <- card.labels} class="bp-label" data-role="label"><%= label %></span>
-            <span :if={card.worker} class="bp-worker" data-role="worker"><%= card.worker %></span>
-            <span
-              :if={card.criteria}
-              class={["bp-crit", card.criteria.met == 0 && "bp-crit--zero"]}
-              data-role="criteria"
-            >
-              <%= card.criteria.met %>/<%= card.criteria.total %>
+            <span :for={label <- Enum.take(card.labels, 2)} class="bp-label" data-role="label">
+              <%= label %>
+            </span>
+            <span :if={length(card.labels) > 2} class="bp-label bp-label--more" data-role="label-more">
+              +<%= length(card.labels) - 2 %>
             </span>
 
             <a
@@ -1138,8 +1213,33 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               #<%= card.github["issue"] %>
               <span class="bp-gh-state" data-role="github-state"><%= card.github["state"] %></span>
             </a>
+
+            <span :if={card.worker} class="bp-worker" data-role="worker" title={card.worker}>
+              <%= card.worker %>
+            </span>
           </div>
+
+          <div :if={col != :done and card.criteria} class="bp-progress" data-role="progress">
+            <span class="bp-progress-track"><span
+              class="bp-progress-fill"
+              style={"width: #{crit_pct(card.criteria)}%;"}
+            ></span></span>
+            <span
+              class={["bp-crit", card.criteria.met == 0 && "bp-crit--zero"]}
+              data-role="criteria"
+            >
+              <%= card.criteria.met %>/<%= card.criteria.total %>
+            </span>
+          </div>
+
+          <p :if={col == :blocked and open_blockers(card) > 0} class="bp-block-note" data-role="blockers">
+            waiting on <%= open_blockers(card) %> of <%= length(card.blocker_statuses) %> blockers
+          </p>
         </article>
+
+          <p :if={col == :done and @done_overflow > 0} class="bp-more" data-role="done-overflow">
+            + <%= @done_overflow %> earlier — newest shown
+          </p>
         </div>
       </section>
     </div>
@@ -1189,6 +1289,47 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # span body is empty — every other state prints the literal §1 Unicode char.
   defp glyph_text(%{color_role: :in_progress}), do: ""
   defp glyph_text(%{glyph: glyph}), do: glyph
+
+  # A card's freshness stamp — coarse relative age ("now", "5m", "3h", "2d",
+  # "6w") off `updated_at`. Coarse on purpose: it re-renders on every 15s
+  # reconcile, so minute-level precision is honest and second-level would lie.
+  defp age_label(%DateTime{} = dt),
+    do: age_words(DateTime.diff(DateTime.utc_now(), dt))
+
+  defp age_label(%NaiveDateTime{} = dt),
+    do: age_words(NaiveDateTime.diff(NaiveDateTime.utc_now(), dt))
+
+  defp age_label(_), do: nil
+
+  defp age_words(s) when s < 60, do: "now"
+  defp age_words(s) when s < 3_600, do: "#{div(s, 60)}m"
+  defp age_words(s) when s < 86_400, do: "#{div(s, 3_600)}h"
+  defp age_words(s) when s < 604_800, do: "#{div(s, 86_400)}d"
+  defp age_words(s), do: "#{div(s, 604_800)}w"
+
+  # The criteria progress row's fill width. total ≥ 1 by the organizer's
+  # criteria projection contract, but guard the division anyway.
+  defp crit_pct(%{met: met, total: total}) when total > 0, do: round(met / total * 100)
+  defp crit_pct(_), do: 0
+
+  # How many of a blocked card's blockers are still live (not yet done). The
+  # organizer always projects `blocker_statuses` (broadcast cards carry the
+  # previous card's forward), but read defensively — a missing key is 0, never
+  # a crash.
+  defp open_blockers(card) do
+    card |> Map.get(:blocker_statuses, []) |> Enum.count(&(&1 != "done"))
+  end
+
+  # How many done tasks the capped ledger is NOT showing (flat, unfiltered view
+  # only — a filtered count would compare a filtered slice against the full
+  # done_total and overstate the window). The tally keeps the D10 promise
+  # honest at the column level: the window never silently shrinks history.
+  defp done_overflow(%{filtered?: true}, _board), do: 0
+
+  defp done_overflow(view, board) do
+    shown = view.lanes |> hd() |> Map.get(:columns, %{}) |> Map.get(:done, []) |> length()
+    max(board.done_total - shown, 0)
+  end
 
   defp gh_href(%{"repo" => repo, "issue" => issue})
        when is_binary(repo) and (is_integer(issue) or is_binary(issue)),
