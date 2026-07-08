@@ -1,0 +1,26 @@
+GRID SECTIONS                                               
+─────────────                                               
+                                                            
+────────────────────────────────────────────────────────────
+Two-track grid                                              
+                                                            
+Ordered first via CSS order:-  First cell sits in the left  
+1, so it leads the grid.       track and wraps within its   
+                               narrower column at every     
+                               width.                       
+                                                            
+Second cell sits in the right                               
+track of the same row.                                      
+                                                            
+This spanning cell consumes both tracks and fills the whole 
+row on its own line.                                        
+────────────────────────────────────────────────────────────
+                                                            
+────────────────────────────────────────────────────────────
+Legacy stack                                                
+                                                            
+A section with no layout attr stacks its children exactly as
+before.                                                     
+                                                            
+This is the byte-identical parity tripwire.                 
+────────────────────────────────────────────────────────────

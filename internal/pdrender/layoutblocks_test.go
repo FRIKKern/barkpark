@@ -80,6 +80,66 @@ func TestColumnsRendersNormally(t *testing.T) {
 	}
 }
 
+// TestColumnsSideBySide proves the P9 upgrade: at a wide surface two columns lay
+// SIDE-BY-SIDE (both texts on one line, no hairline rule), and at a narrow
+// surface where the per-cell width falls below MinWidth they STACK with the
+// hairline rule (the verbatim fallback). Two columns → cellW=(W-2)/2; the
+// boundary is cellW>=20 i.e. W>=42.
+func TestColumnsSideBySide(t *testing.T) {
+	reg := testRegistry()
+	mkCol := func(text string) []any {
+		return []any{map[string]any{
+			"type":    "paragraph",
+			"content": []any{map[string]any{"type": "text", "value": text}},
+		}}
+	}
+	two := Block{Type: "columns", Attrs: map[string]any{
+		"columns": []any{mkCol("alphaword"), mkCol("bravoword")},
+	}}
+
+	// w80: cellW=(80-2)/2=39 >= 20 → side-by-side, no rule.
+	wide := strings.Split(ansi.Strip(strings.Join(reg.Render(two, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}), "\n")), "\n")
+	if !someLineHasBoth(wide, "alphaword", "bravoword") {
+		t.Fatalf("w80: expected both columns on ONE line, got:\n%s", strings.Join(wide, "\n"))
+	}
+	for _, ln := range wide {
+		if strings.Contains(ln, "─") {
+			t.Fatalf("w80 horizontal columns must not draw a hairline rule, got:\n%s", strings.Join(wide, "\n"))
+		}
+	}
+
+	// w40: cellW=(40-2)/2=19 < 20 → stack with a hairline rule.
+	narrow := strings.Split(ansi.Strip(strings.Join(reg.Render(two, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}), "\n")), "\n")
+	if someLineHasBoth(narrow, "alphaword", "bravoword") {
+		t.Fatalf("w40: expected columns STACKED (not one line), got:\n%s", strings.Join(narrow, "\n"))
+	}
+	if lineIndexOf(narrow, "─") < 0 {
+		t.Fatalf("w40 stacked columns must draw a hairline rule, got:\n%s", strings.Join(narrow, "\n"))
+	}
+}
+
+// TestColumnsMinWidthBoundary pins the exact degrade boundary for three columns:
+// W=66 → cellW=(66-4)/3=20 (side-by-side); W=63 → cellW=(63-4)/3=19 (stack).
+func TestColumnsMinWidthBoundary(t *testing.T) {
+	reg := testRegistry()
+	col := func(text string) []any {
+		return []any{map[string]any{"type": "paragraph",
+			"content": []any{map[string]any{"type": "text", "value": text}}}}
+	}
+	three := Block{Type: "columns", Attrs: map[string]any{
+		"columns": []any{col("aaa"), col("bbb"), col("ccc")},
+	}}
+	render := func(w int) []string {
+		return strings.Split(ansi.Strip(strings.Join(reg.Render(three, RenderCtx{Width: w, Theme: DarkTheme(), Profile: NoColor}), "\n")), "\n")
+	}
+	if !someLineHasBoth(render(66), "aaa", "ccc") {
+		t.Errorf("w66 (cellW=20) should be side-by-side, got:\n%s", strings.Join(render(66), "\n"))
+	}
+	if someLineHasBoth(render(63), "aaa", "ccc") {
+		t.Errorf("w63 (cellW=19) should stack, got:\n%s", strings.Join(render(63), "\n"))
+	}
+}
+
 // TestTerminalRendersNormally checks the terminal frame draws its traffic-light
 // bar, an accent `live` chip when live is truthy, wraps a child block, and shows
 // a dim footer; and that a narrow width flat-degrades (no rounded border).

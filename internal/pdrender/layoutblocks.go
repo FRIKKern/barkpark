@@ -21,11 +21,14 @@ import (
 
 // ── columns ──────────────────────────────────────────────────────────────────
 // Mirrors compose_block(columns): `columns` is a LIST of columns, each a list of
-// blocks. A terminal has no reliable side-by-side grid, so — exactly like the
-// reader COLLAPSES grid→stack on a narrow surface — we STACK the columns
-// vertically, separated by a light hairline rule. Each column's blocks recurse
-// through the registry at full width (ctx.Deeper). Columns that render nothing
-// are dropped (no doubled rule); no non-empty column → one blank line.
+// blocks. When the surface is wide enough for every column to clear MinWidth we
+// lay them SIDE-BY-SIDE (the P9 80-column standard — the terminal DOES have a
+// grid: lipgloss.JoinHorizontal), each column re-recursed at its sub-width so its
+// content wraps correctly. Below that per-cell floor we degrade EXACTLY like
+// before — STACK the columns vertically, separated by a light hairline rule (the
+// same narrow-surface collapse the reader does). Each column's blocks recurse
+// through the registry (ctx.Deeper). Columns that render nothing are dropped (no
+// doubled rule / no empty lane); no non-empty column → one blank line.
 //
 // The `columns` key is NOT decoded by decode.go into Block.Children, so we pull
 // it straight off Attrs and normalize each column via slotBlocks (the same
@@ -40,38 +43,65 @@ func (cr columnsRenderer) Render(b Block, ctx RenderCtx) []string {
 	}
 
 	w := clampWidth(ctx.Width)
-	childCtx := ctx.Deeper().WithWidth(w)
+	fullCtx := ctx.Deeper().WithWidth(w)
 
-	// Render each column into its own line group; keep only non-empty groups so
-	// an empty column never leaves a doubled separator rule.
-	groups := make([][]string, 0, len(cols))
+	// Render each column at full width first; keep only non-empty groups so an
+	// empty column never leaves a doubled separator (and to count N honestly).
+	kept := make([][]Block, 0, len(cols))
+	fullGroups := make([][]string, 0, len(cols))
 	for _, col := range cols {
 		blocks := slotBlocks(col)
-		var lines []string
-		for i, blk := range blocks {
-			if i > 0 {
-				lines = append(lines, "") // rhythm between stacked blocks
-			}
-			lines = append(lines, cr.reg.Render(blk, childCtx)...)
-		}
+		lines := cr.renderColumn(blocks, fullCtx)
 		if len(lines) > 0 {
-			groups = append(groups, lines)
+			kept = append(kept, blocks)
+			fullGroups = append(fullGroups, lines)
 		}
 	}
-
-	if len(groups) == 0 {
+	n := len(fullGroups)
+	if n == 0 {
 		return []string{""}
 	}
 
+	// Horizontal path: per-cell width = (W-(N-1)*gutter)/N. When >1 column clears
+	// MinWidth, re-render each column at cellW (so wrapping is right — the
+	// full-width groups above would overflow) and JoinHorizontal them. Integer
+	// division may leave ≤N-1 columns of unused trailing slack; it NEVER overflows.
+	const gutter = 2
+	cellW := (w - (n-1)*gutter) / n
+	if n > 1 && cellW >= MinWidth {
+		cellCtx := ctx.Deeper().WithWidth(cellW)
+		groups := make([][]string, n)
+		widths := make([]int, n)
+		for i, blocks := range kept {
+			groups[i] = cr.renderColumn(blocks, cellCtx)
+			widths[i] = cellW
+		}
+		return joinColumns(groups, widths, gutter)
+	}
+
+	// Sub-MinWidth fallback (verbatim): stack the columns with a hairline rule.
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 	out := make([]string, 0)
-	for i, g := range groups {
+	for i, g := range fullGroups {
 		if i > 0 {
-			out = append(out, rule) // light separator between columns
+			out = append(out, rule) // light separator between stacked columns
 		}
 		out = append(out, g...)
 	}
 	return out
+}
+
+// renderColumn renders one column's blocks through the registry at ctx's width,
+// with a blank rhythm line between consecutive blocks (the RenderDoc cadence).
+func (cr columnsRenderer) renderColumn(blocks []Block, ctx RenderCtx) []string {
+	var lines []string
+	for i, blk := range blocks {
+		if i > 0 {
+			lines = append(lines, "") // rhythm between stacked blocks
+		}
+		lines = append(lines, cr.reg.Render(blk, ctx)...)
+	}
+	return lines
 }
 
 // ── terminal ───────────────────────────────────────────────────────────────────
