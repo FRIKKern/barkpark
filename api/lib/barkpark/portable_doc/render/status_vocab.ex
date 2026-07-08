@@ -25,9 +25,11 @@ defmodule Barkpark.PortableDoc.Render.StatusVocab do
   @roles @manifest["roles"]
   @tones @manifest["tones"]
 
-  # role -> glyph char / spinner?, precomputed from the manifest at compile time.
+  # role -> glyph char / spinner? / label / meaning, precomputed at compile time.
   @glyph_by_role Map.new(@roles, fn r -> {r["role"], r["glyph"]} end)
   @spinner_by_role Map.new(@roles, fn r -> {r["role"], r["spinner"] == true} end)
+  @label_by_role Map.new(@roles, fn r -> {r["role"], r["label"]} end)
+  @meaning_by_role Map.new(@roles, fn r -> {r["role"], r["meaning"]} end)
   @role_names Enum.map(@roles, & &1["role"])
 
   # @canonical capability:status-vocabulary aka:glyph,white-ladder,status-role,task-status doc:design/status-manifest.json
@@ -46,6 +48,16 @@ defmodule Barkpark.PortableDoc.Render.StatusVocab do
   @doc "True when the role renders as the animated (Braille) spinner, not a static glyph."
   @spec spinner?(String.t()) :: boolean()
   def spinner?(role), do: Map.get(@spinner_by_role, role, false)
+
+  @doc "The canonical lowercase display label for a role (e.g. \"in progress\")."
+  @spec label_for_role(String.t()) :: String.t()
+  def label_for_role(role),
+    do: Map.get(@label_by_role, role, Map.fetch!(@label_by_role, @default_role))
+
+  @doc "The one-line meaning (the legend gloss) for a role."
+  @spec meaning_for_role(String.t()) :: String.t()
+  def meaning_for_role(role),
+    do: Map.get(@meaning_by_role, role, Map.fetch!(@meaning_by_role, @default_role))
 
   @doc "The ordered list of role names (the ladder rungs)."
   @spec roles() :: [String.t()]

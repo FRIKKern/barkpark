@@ -51,7 +51,7 @@ source: tui
                                                             
 ○  open  — backlog — not ready yet                          
 ○  ready  — unchecked — claim it now                        
-⠋  progress  — in progress                                  
+⠋  in progress  — being worked right now                    
 !  blocked  — something is required first                   
 ✓  done  — complete                                         
-✕  cancel  — abandoned or superseded                        
+✕  cancelled  — abandoned or superseded                     

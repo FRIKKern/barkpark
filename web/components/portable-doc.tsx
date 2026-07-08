@@ -835,7 +835,7 @@ export function renderBlock(block: Block, key: Key): ReactNode {
                 {r.spinner ? "⠋" : r.glyph}
               </span>
               <dt className="font-medium text-zinc-700 dark:text-zinc-200">
-                {r.role}
+                {r.label}
               </dt>
             </div>
           ))}

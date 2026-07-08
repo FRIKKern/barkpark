@@ -13,12 +13,12 @@
   "default_role": "open",
 
   "roles": [
-    { "role": "open",     "glyph": "○", "spinner": false, "meaning": "backlog — not ready yet" },
-    { "role": "ready",    "glyph": "○", "spinner": false, "meaning": "unchecked — claim it now" },
-    { "role": "progress", "glyph": "",  "spinner": true,  "meaning": "in progress" },
-    { "role": "blocked",  "glyph": "!", "spinner": false, "meaning": "something is required first" },
-    { "role": "done",     "glyph": "✓", "spinner": false, "meaning": "complete" },
-    { "role": "cancel",   "glyph": "✕", "spinner": false, "meaning": "abandoned or superseded" }
+    { "role": "open",     "glyph": "○", "spinner": false, "label": "open",        "meaning": "backlog — not ready yet" },
+    { "role": "ready",    "glyph": "○", "spinner": false, "label": "ready",       "meaning": "unchecked — claim it now" },
+    { "role": "progress", "glyph": "",  "spinner": true,  "label": "in progress", "meaning": "being worked right now" },
+    { "role": "blocked",  "glyph": "!", "spinner": false, "label": "blocked",     "meaning": "something is required first" },
+    { "role": "done",     "glyph": "✓", "spinner": false, "label": "done",        "meaning": "complete" },
+    { "role": "cancel",   "glyph": "✕", "spinner": false, "label": "cancelled",   "meaning": "abandoned or superseded" }
   ],
 
   "tones": {

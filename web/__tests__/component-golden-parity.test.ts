@@ -27,10 +27,14 @@
  * omit-empty view drops `open` tasks this 5-column web view keeps; a ⊆-projection
  * cannot catch an omission, so the fixture input omits `open`; owned by
  * bug-taskboard-drops-open-tasks (which carries the open-inclusive test that
- * catches the real bug). (b) status/label PROSE ("in progress" vs "progress"); the
- * projection shares role + glyph, not meaning text; owned by
- * au-w5-status-prose-parity (also owns "board labels are two agreeing copies, not
- * one manifest source"). The harness never implies parity it does not hold.
+ * catches the real bug). COVERED since au-w5-status-prose-parity: the status LABEL
+ * prose is ONE manifest source; the legend projection asserts the canonical label
+ * TEXT ("in progress"/"cancelled") and the web RENDER realizes it (the
+ * status-legend RENDER leg below asserts `>${label}</dt>`); board LABELS are the
+ * fold — `TASK_BOARD_COLUMN_LABELS` is derived via `boardLabel`, not a hardcoded
+ * copy. Legend MEANING is not rendered by the web reader (name-only web parity, a
+ * SUPERSET the Elixir/TUI legends carry). The harness never implies parity it does
+ * not hold.
  *
  * Run: `node --test __tests__/component-golden-parity.test.ts` (or `pnpm test`).
  */
@@ -294,11 +298,14 @@ const ROADMAP_ROLE_BAR: Record<string, string> = {
   cancel: "bg-zinc-300",
 };
 
-test("web status-legend RENDER realizes the legend projection (role + glyph)", () => {
+test("web status-legend RENDER realizes the legend projection (label + glyph)", () => {
   const html = renderHtml({ type: "status-legend" });
   const exp = loadFixture("status-legend").expected as LegendProjection;
   for (const r of exp.rows) {
-    present(html, `>${r.role}</dt>`, `legend role ${r.role}`);
+    // GRADUATED (au-w5-status-prose-parity): the RENDER realizes the canonical
+    // LABEL text (progress→"in progress", cancel→"cancelled"), not the raw role
+    // slug — a wrong label render reds this leg (S2 render-assert discipline).
+    present(html, `>${r.label}</dt>`, `legend label ${r.label}`);
     present(html, `>${r.spinner ? "⠋" : r.glyph}</span>`, `legend glyph ${r.role}`);
   }
 });

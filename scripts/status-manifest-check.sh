@@ -21,6 +21,11 @@
 #     spinner:true (empty/animated glyph) and Go pins to a steady Braille frame
 #     (⠋) a static terminal render can show. That steady value is asserted
 #     explicitly so an ACCIDENTAL change to it still trips the gate.
+#   Part 4 — Go pdrender LABEL + MEANING: gridblocks.go also inlines `roleLabel`
+#     (the canonical lowercase display noun the legend prints / the board
+#     sentence-cases) and `roleMeaning` (the one-line gloss). Both are byte-checked
+#     against the manifest's `roles[].label` / `roles[].meaning` (no exception —
+#     these are prose, not spinner glyphs), so a Go label/meaning drift trips here.
 #
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
@@ -180,4 +185,47 @@ if fails:
     sys.exit(1)
 print(f"status-manifest-check part 3: PASS — Go pdrender vocab in lockstep "
       f"({len(expected_glyph)} glyphs, {len(man_status)} status aliases).")
+
+# ── Part 4: Go pdrender role LABEL + MEANING (roleLabel / roleMeaning) ────────
+# The label/meaning prose is folded into ONE manifest source (au-w5-status-prose-
+# parity): the legend prints roleLabel, the board sentence-cases it, and the
+# gloss is roleMeaning. Both are inlined in gridblocks.go (the go-list-deps
+# invariant forbids importing the Elixir vocab) so they're byte-checked here,
+# mirroring Part 3 — missing role / orphan / mismatch fails.
+def parse_go_map(name):
+    mm = re.search(r"var %s = map\[string\]string\{(.*?)\n\}" % name, go, re.DOTALL)
+    if not mm:
+        print(f"status-manifest-check part 4: FAILED — `var {name} = map[string]string{{...}}` "
+              "not found in gridblocks.go.", file=sys.stderr)
+        sys.exit(1)
+    return dict(re.findall(r'"([a-z_]+)":\s*"([^"]*)"', mm.group(1)))
+
+go_label = parse_go_map("roleLabel")
+go_meaning = parse_go_map("roleMeaning")
+
+man_label = {r["role"]: r["label"] for r in m["roles"]}
+man_meaning = {r["role"]: r["meaning"] for r in m["roles"]}
+
+p4_fails = []
+for field, go_map, man_map in (("label", go_label, man_label), ("meaning", go_meaning, man_meaning)):
+    for role in sorted(man_map):
+        want, got = man_map[role], go_map.get(role)
+        if got is None:
+            p4_fails.append(f"  {field}[{role!r}]: MISSING from Go role{field.capitalize()} (manifest {want!r})")
+        elif got != want:
+            p4_fails.append(f"  {field}[{role!r}]: Go {got!r} != manifest {want!r}")
+    orphan = set(go_map) - set(man_map)
+    if orphan:
+        p4_fails.append(f"  Go role{field.capitalize()} has extra role(s) not in the manifest: {sorted(orphan)}")
+
+if p4_fails:
+    print("status-manifest-check part 4: FAILED — Go pdrender label/meaning is STALE vs "
+          "design/status-manifest.json:", file=sys.stderr)
+    for f in p4_fails:
+        print(f, file=sys.stderr)
+    print("\n  Fix: edit internal/pdrender/gridblocks.go (roleLabel / roleMeaning) to "
+          "match design/status-manifest.json.", file=sys.stderr)
+    sys.exit(1)
+print(f"status-manifest-check part 4: PASS — Go pdrender label+meaning in lockstep "
+      f"({len(man_label)} labels, {len(man_meaning)} meanings).")
 PY

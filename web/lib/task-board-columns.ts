@@ -15,6 +15,8 @@
  * simpler web twin because readiness is already decided on the wire.
  */
 
+import { boardLabel, roleForStatus } from "./component-projections.ts";
+
 /** One resolved snapshot row (the `TaskResolver.row_from_task` shape — pruned,
  * so absent segments are simply missing). Loosely typed: only `status` drives
  * bucketing; the rest is display. */
@@ -40,14 +42,14 @@ export const TASK_BOARD_COLUMN_ORDER = [
 
 export type TaskBoardColumnKey = (typeof TASK_BOARD_COLUMN_ORDER)[number];
 
-/** Human labels for the column headers (mirror the live board / TUI wording). */
-export const TASK_BOARD_COLUMN_LABELS: Record<TaskBoardColumnKey, string> = {
-  open: "Open",
-  ready: "Ready",
-  in_progress: "In progress",
-  blocked: "Blocked",
-  done: "Done",
-};
+/** Human labels for the column headers — FOLDED from the ONE canonical status
+ * label (`design/status-manifest.json` via `boardLabel`/`roleForStatus`), NOT a
+ * second hardcoded copy: each column key maps through its ladder role to the
+ * sentence-cased canonical label ("in_progress" → progress → "In progress"). */
+export const TASK_BOARD_COLUMN_LABELS: Record<TaskBoardColumnKey, string> =
+  Object.fromEntries(
+    TASK_BOARD_COLUMN_ORDER.map((col) => [col, boardLabel(roleForStatus(col))]),
+  ) as Record<TaskBoardColumnKey, string>;
 
 /**
  * The §1 white-ladder glyph map — HARD-CODED, pinned to the shared status

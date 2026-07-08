@@ -72,19 +72,38 @@ interface LadderRow {
   glyph_role: string;
   glyph: string;
   spinner: boolean;
+  label: string;
 }
 
 /** The white ladder, in manifest order — the status-legend projection. Mirrors
- * `StatusVocab.roles/0` + glyph/spinner; a manifest edit re-derives the Elixir
- * fixture, so this hard-coded twin must move in lockstep or the web leg reds. */
+ * `StatusVocab.roles/0` + glyph/spinner/label; a manifest edit re-derives the
+ * Elixir fixture, so this hard-coded twin must move in lockstep or the web leg
+ * reds. `label` is the canonical lowercase display noun (progress→"in progress",
+ * cancel→"cancelled"); the board sentence-cases it via `boardLabel`. */
 export const STATUS_LADDER: LadderRow[] = [
-  { role: "open", glyph_role: "open", glyph: "○", spinner: false },
-  { role: "ready", glyph_role: "ready", glyph: "○", spinner: false },
-  { role: "progress", glyph_role: "progress", glyph: "", spinner: true },
-  { role: "blocked", glyph_role: "blocked", glyph: "!", spinner: false },
-  { role: "done", glyph_role: "done", glyph: "✓", spinner: false },
-  { role: "cancel", glyph_role: "cancel", glyph: "✕", spinner: false },
+  { role: "open", glyph_role: "open", glyph: "○", spinner: false, label: "open" },
+  { role: "ready", glyph_role: "ready", glyph: "○", spinner: false, label: "ready" },
+  { role: "progress", glyph_role: "progress", glyph: "", spinner: true, label: "in progress" },
+  { role: "blocked", glyph_role: "blocked", glyph: "!", spinner: false, label: "blocked" },
+  { role: "done", glyph_role: "done", glyph: "✓", spinner: false, label: "done" },
+  { role: "cancel", glyph_role: "cancel", glyph: "✕", spinner: false, label: "cancelled" },
 ];
+
+/** role → canonical lowercase label (unknown role → the slug itself). */
+const LABEL_BY_ROLE: Record<string, string> = Object.fromEntries(
+  STATUS_LADDER.map((r) => [r.role, r.label]),
+);
+
+export function labelForRole(role: string): string {
+  return LABEL_BY_ROLE[role] ?? role;
+}
+
+/** Sentence-case a role's canonical label for a board column header (the fold —
+ * ONE manifest source, not a second hardcoded copy): "in progress" → "In progress". */
+export function boardLabel(role: string): string {
+  const l = labelForRole(role);
+  return l.length === 0 ? l : l[0].toUpperCase() + l.slice(1);
+}
 
 /** Stored lifecycle status → ladder role (mirrors the manifest `statuses` map;
  * unknown/absent → the `open` default). */

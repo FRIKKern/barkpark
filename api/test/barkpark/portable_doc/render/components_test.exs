@@ -315,10 +315,14 @@ defmodule Barkpark.PortableDoc.Render.ComponentsLegendTest do
   use ExUnit.Case, async: true
   alias Barkpark.PortableDoc.Render.Components
 
-  test "status-legend renders all six states with glyph + name + meaning" do
+  test "status-legend renders all six states with glyph + canonical label + meaning" do
     html = Components.status_legend_html(%{})
     for role <- ~w(open ready progress blocked done cancel), do: assert(html =~ "bp-g--#{role}")
-    assert html =~ "in&nbsp;progress"
+    # Canonical manifest label (au-w5-status-prose-parity) — the folded ONE source,
+    # a plain space (no hardcoded &nbsp;), from StatusVocab.label_for_role/1.
+    assert html =~ ~s(<span class="bp-legend__n">in progress</span>)
+    assert html =~ ~s(<span class="bp-legend__n">cancelled</span>)
+    assert html =~ "being worked right now"
     assert html =~ "something is required first"
   end
 end
