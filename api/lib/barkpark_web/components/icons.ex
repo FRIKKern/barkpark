@@ -42,6 +42,7 @@ defmodule BarkparkWeb.Icons do
       ~s(<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>),
     # Editor-header action icons (task barkpark-jl4x). Inline SVG paths
     # copied from Lucide v0.460 so we keep zero JS dependencies.
+    "message-circle" => ~s(<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>),
     "send" =>
       ~s(<path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/>),
     "archive" =>

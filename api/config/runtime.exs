@@ -47,6 +47,13 @@ if System.get_env("BARKPARK_TMUX_CONSOLE") in ["0", "false", "no", "off"] do
   config :barkpark, :tmux_console, enabled: false
 end
 
+# Studio Claude chat: ON by default wherever the `claude` binary is installed
+# (admin-gated; auto-refused on any host where public_demo_studio is on). Opt
+# OUT per host by setting BARKPARK_CLAUDE_CHAT to a falsy value.
+if System.get_env("BARKPARK_CLAUDE_CHAT") in ["0", "false", "no", "off"] do
+  config :barkpark, :claude_chat, enabled: false
+end
+
 # "Log in with Barkpark Cloud" (instance-login handoff): on a cloud-managed
 # instance, the control plane's public origin here puts the cloud sign-in
 # button on /login. The button deep-links to the cloud SPA, which mints a

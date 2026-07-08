@@ -405,7 +405,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ] ++ tmux_console_entry(admin?) ++ styleguide_entry(admin?)
+    ] ++ tmux_console_entry(admin?) ++ claude_chat_entry(admin?) ++ styleguide_entry(admin?)
   end
 
   # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
@@ -433,6 +433,21 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # (on by default; hard-refused on public-demo hosts). The route is
   # admin-gated regardless — this just keeps the tab out of non-admin chrome.
   # Flat singleton path (not dataset-scoped): one shared session per host.
+  # The Claude chat tab. Shown ONLY to admins AND only where
+  # ClaudeChat.enabled?/0 holds (on by default when the `claude` binary is
+  # installed; hard-refused on public-demo hosts). The route is admin-gated
+  # regardless — this just keeps the tab out of non-admin chrome. Flat
+  # singleton path: one chat surface per host, like the tmux console.
+  defp claude_chat_entry(admin?) do
+    if admin? and BarkparkWeb.Studio.ClaudeChat.enabled?() do
+      [%{label: "chat", path: "/studio/chat", icon: nil, order: 45, active_when: "/studio/chat"}]
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
   defp tmux_console_entry(admin?) do
     if admin? and BarkparkWeb.Studio.TmuxConsole.enabled?() do
       [%{label: "tmux", path: "/studio/tmux", icon: nil, order: 40, active_when: "/studio/tmux"}]
