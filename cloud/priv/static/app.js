@@ -1267,8 +1267,8 @@
   // longer a view at all (A4/D66): it is the launchFlow() component, opened in a
   // modal or rendered as the empty-fleet welcome runway. Its old #launch bookmark
   // remaps to Overview (legacyRoute) and auto-opens the flow (wantsLaunchFlow).
-  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "activity"];
-  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens"];
+  var VIEWS = ["overview", "fleet", "sites", "billing", "providers", "notifications", "tokens", "members", "activity"];
+  var SETTINGS_VIEWS = ["billing", "providers", "notifications", "tokens", "members"];
 
   // Routes are either a tab (#overview …), a drill-down (#instance/<id>,
   // #site/<id>), or the invitation-accept landing (#invitations/accept —
@@ -1282,7 +1282,7 @@
   // C4/C5 instance-API proxy spine). #instance/<id> (the legacy-stable hash
   // `bp cloud open` mints, D14) maps to "overview" forever; an unknown/stale tab
   // suffix degrades to overview rather than 404ing a bookmark.
-  var INSTANCE_TABS = ["overview", "timeline", "webhooks"];
+  var INSTANCE_TABS = ["overview", "timeline", "webhooks", "usage"];
   var INSTANCE_TAB_DEFAULT = "overview";
   function instanceTabOf(tab) {
     return INSTANCE_TABS.indexOf(tab) !== -1 ? tab : INSTANCE_TAB_DEFAULT;
@@ -1428,6 +1428,7 @@
     if (r.view === "providers") { loadProviders(); loadGithub(); }
     if (r.view === "notifications") loadNotifications();
     if (r.view === "tokens") loadTokens();
+    if (r.view === "members") loadMembers(); // C10: the team Members settings panel
     if (r.view === "activity") loadActivity();
   }
 
@@ -1868,6 +1869,8 @@
         mountWebhooksTab(panel, bp);
       } else if (tab === "timeline") {
         mountTimelineTab(panel, bp); // C8: the merged events+audit incident home
+      } else if (tab === "usage") {
+        mountUsageTab(panel, bp); // C10: the instance usage meters (C9 /usage endpoint)
       } else if (showReady) {
         // The ready fold owns the timeline slot — wire its Open Studio + dismiss.
         var rs = $("#inst-ready-studio");
@@ -1917,7 +1920,7 @@
   // house focus-visible ring is applied in app.css.
   function instanceTabStripHtml(bp, tab) {
     tab = instanceTabOf(tab);
-    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks" };
+    var labels = { overview: "Overview", timeline: "Timeline", webhooks: "Webhooks", usage: "Usage" };
     return '<nav class="inst-tabs" aria-label="Instance sections">' +
       INSTANCE_TABS.map(function (t) {
         var on = t === tab;
@@ -5244,13 +5247,13 @@
     var h = parseHash();
     if (h.view !== "instance") return;
     if (h.tab === "webhooks") return;
+    if (h.tab === "usage") return; // C10: the Usage tab owns its own /usage fetch (like webhooks)
     loadInstance(h.id, h.tab);
   }
 
   // Registered so the vocabulary stays closed; handled conservatively (same
   // as the unknown-type fallback): don't let a cached fleet outlive the event.
   // Per type, DELIBERATELY no view refetch:
-  //   members       — no members panel exists yet (charter wave 3).
   //   onboarding    — no onboarding UI consumes the tick yet.
   //   notifications — a Notifications view EXISTS, but it is a settings form:
   //     a live loadNotifications() would clobber in-progress edits and stomp
@@ -5300,7 +5303,7 @@
     // changed; mirror "fleet".
     "barkpark.suspended": invalidateFleet,
     "barkpark.restored": invalidateFleet,
-    members: invalidateConservatively,
+    members: onMembersEvent, // C10: refresh the Members panel when it's open
     notifications: invalidateConservatively,
     onboarding: invalidateConservatively,
   };
@@ -7090,6 +7093,422 @@
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── C10: Members settings panel + Usage instance sub-tab ──────────────────
+  // ONE app.js slice (charter D13). The Usage tab (the 4th instance sub-tab,
+  // registered in INSTANCE_TABS above) consumes the C9 usage endpoint
+  // GET /v1/barkparks/:id/usage (#1034) — the fixed meter vocabulary shaped by
+  // BarkparkCloud.Usage.compose/1, plus seats.pending_invitations. The Members
+  // panel is a Settings view (registered in SETTINGS_VIEWS above) over the six
+  // team member/invitation routes under /v1/teams/:id/. It wires into the
+  // existing TYPE_ACTIONS.members consumer (onMembersEvent). Append-only: this
+  // region does NOT touch the rollback / liveness / coherence regions.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── Usage sub-tab ───────────────────────────────────────────────────────────
+  // The fixed meter vocabulary + render order (mirrors Usage.compose/1). Each
+  // spec names the meter key, its human label, and how to format a real number.
+  var USAGE_METERS = [
+    { key: "seats", label: "Team members", fmt: "count" },
+    { key: "documents", label: "Documents", fmt: "count" },
+    { key: "datasets", label: "Datasets", fmt: "count" },
+    { key: "webhooks", label: "Webhooks", fmt: "count" },
+    { key: "db_size", label: "Database size", fmt: "bytes" },
+    { key: "disk", label: "Disk used", fmt: "percent" },
+    { key: "api_requests", label: "API requests", fmt: "count" },
+    { key: "bandwidth", label: "Bandwidth", fmt: "bytes" }
+  ];
+
+  // Pure: humanize a byte count (base-1024). A non-number is echoed as-is so a
+  // caller never crashes on a surprise shape.
+  function c10FmtBytes(n) {
+    if (typeof n !== "number" || !isFinite(n) || n < 0) return String(n);
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0, v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+    return (i === 0 ? String(v) : v.toFixed(1)) + " " + units[i];
+  }
+
+  function c10FmtValue(fmt, value) {
+    if (fmt === "bytes") return c10FmtBytes(value);
+    if (fmt === "percent") return Math.round(value) + "%";
+    return String(value); // count
+  }
+
+  // Pure: the display model for ONE meter. `value === "unmetered"` (or any
+  // non-number) renders the designed "Not yet metered" state — never a fake
+  // zero, never an error. `measured_at` nil renders as a LIVE read ("live"),
+  // NOT an error (acceptance criterion 2); a present measured_at renders
+  // "as of <relTime>". The seats meter's pending_invitations rides along.
+  function usageMeterDisplay(spec, meter) {
+    meter = meter || {};
+    var unmetered = meter.value === "unmetered" || typeof meter.value !== "number";
+    var value = unmetered ? "Not yet metered" : c10FmtValue(spec.fmt, meter.value);
+    var freshness = unmetered ? "" : (meter.measured_at ? "as of " + relTime(meter.measured_at) : "live");
+    var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
+      ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
+      : "";
+    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending };
+  }
+
+  function usageMeterHtml(spec, meter) {
+    var d = usageMeterDisplay(spec, meter);
+    var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
+    return '<div class="fleet-row">' +
+      '<div class="fleet-main"><div class="fleet-name">' + esc(d.label) + "</div>" +
+      (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") + "</div>" +
+      '<div class="fleet-badges">' +
+      (d.unmetered ? '<span class="dim">' + esc(d.value) + "</span>" : "<strong>" + esc(d.value) + "</strong>") +
+      "</div></div>";
+  }
+
+  // Pure: the whole meter grid from a /usage `meters` object. A missing meter
+  // degrades to the unmetered state (usageMeterDisplay tolerates absent input),
+  // so the grid is always fully present.
+  function usageMetersHtml(meters) {
+    meters = meters || {};
+    return USAGE_METERS.map(function (spec) { return usageMeterHtml(spec, meters[spec.key]); }).join("");
+  }
+
+  // The loading skeleton — a hung box can hold /usage ~15s (D51), so the tab
+  // shows this the whole time rather than a blank panel (acceptance criterion 2).
+  function usageTabShellHtml() {
+    return '<div class="fleet-body" aria-live="polite"><div class="loading">Loading usage&hellip;</div></div>';
+  }
+
+  // Pure: honest human copy for a failed /usage fetch — never a dead spinner.
+  function usageFailureCopy(status) {
+    if (status === 404) return "This instance isn't in your team, or has been removed.";
+    return "We couldn't load usage for this instance — it may be starting up. Retry in a moment.";
+  }
+
+  function usageErrorHtml(status) {
+    return '<div class="empty-state"><h2>Couldn\'t load usage</h2><p>' +
+      esc(usageFailureCopy(status)) +
+      '</p><p><button class="btn btn-primary btn-sm" data-usage-retry type="button">Retry</button></p></div>';
+  }
+
+  // Mount the Usage tab into the instance tabpanel: paint the skeleton, fetch
+  // /usage, then swap in the meter grid — or an honest, retryable error state.
+  function mountUsageTab(panel, bp) {
+    if (!panel) return;
+    panel.innerHTML = usageTabShellHtml();
+    var box = panel.querySelector(".fleet-body");
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/usage").then(function (r) {
+      if (!box || box.isConnected === false) return; // navigated away mid-flight
+      if (r.ok && r.data && r.data.usage && r.data.usage.meters) {
+        box.innerHTML = usageMetersHtml(r.data.usage.meters);
+        return;
+      }
+      box.innerHTML = usageErrorHtml(r.status);
+      var retry = box.querySelector("[data-usage-retry]");
+      if (retry) retry.addEventListener("click", function () { mountUsageTab(panel, bp); });
+    });
+  }
+
+  // ── Members panel (Settings view) ───────────────────────────────────────────
+  var ROLE_LABELS = { owner: "Owner", admin: "Admin", member: "Member" };
+
+  // Pure: the roles the acting user may ASSIGN (anti-escalation is enforced
+  // server-side; this only shapes the menu + hides controls a member can't use).
+  function assignableRoles(actorRole) {
+    if (actorRole === "owner") return ["owner", "admin", "member"];
+    if (actorRole === "admin") return ["admin", "member"];
+    return [];
+  }
+
+  // The current team + the actor's role, read from the /v1/me cache the account
+  // chip already loads. null when teamless (the panel shows a "no team" state).
+  function membersContext() {
+    var me = meCache;
+    if (me && me.team && me.team.id) {
+      return { teamId: me.team.id, role: me.role || "member", userId: me.user && me.user.id };
+    }
+    return null;
+  }
+
+  // Pure: honest human copy for a failed members/invitations fetch.
+  function membersFailureCopy(status) {
+    if (status === 0) return "Network error — is the control plane reachable? Retry in a moment.";
+    if (status === 403) return "You don't have permission to view this team's members.";
+    return "We couldn't load your team's members. Retry in a moment.";
+  }
+
+  function membersErrorHtml(status) {
+    return '<div class="empty-state"><h2>Couldn\'t load members</h2><p>' +
+      esc(membersFailureCopy(status)) +
+      '</p><p><button class="btn btn-primary btn-sm" data-members-retry type="button">Retry</button></p></div>';
+  }
+
+  // Pure: one member row. The current user is tagged "(you)" and never carries
+  // manage controls (you can't demote/remove yourself here); non-managers see
+  // no controls at all.
+  function memberRowHtml(m, ctx) {
+    var canManage = assignableRoles(ctx.role).length > 0;
+    var isSelf = ctx.userId != null && String(m.user_id) === String(ctx.userId);
+    var actions = (canManage && !isSelf)
+      ? '<button class="btn btn-ghost btn-sm" data-member-role="' + esc(m.user_id) +
+          '" data-role="' + esc(m.role) + '" data-email="' + esc(m.email) + '" type="button">Change role</button>' +
+        '<button class="btn btn-ghost btn-sm" data-member-remove="' + esc(m.user_id) +
+          '" data-email="' + esc(m.email) + '" type="button">Remove</button>'
+      : "";
+    return '<div class="fleet-row">' +
+      '<div class="fleet-main"><div class="fleet-name">' + esc(m.email) +
+        (isSelf ? ' <span class="dim">(you)</span>' : "") + "</div>" +
+        '<div class="token-meta dim">joined ' + esc(relTime(m.joined_at)) + "</div></div>" +
+      '<div class="fleet-badges">' + badge(ROLE_LABELS[m.role] || m.role, "up") + actions + "</div></div>";
+  }
+
+  // Pure: one pending-invitation row.
+  function invitationRowHtml(inv, ctx) {
+    var canManage = assignableRoles(ctx.role).length > 0;
+    var action = canManage
+      ? '<button class="btn btn-ghost btn-sm" data-invite-revoke="' + esc(inv.id) +
+          '" data-email="' + esc(inv.email) + '" type="button">Revoke</button>'
+      : "";
+    return '<div class="fleet-row">' +
+      '<div class="fleet-main"><div class="fleet-name">' + esc(inv.email) + "</div>" +
+        '<div class="token-meta dim">invited as ' + esc(ROLE_LABELS[inv.role] || inv.role) +
+          " &middot; expires " + esc(fmtTokenDate(inv.expires_at)) + "</div></div>" +
+      '<div class="fleet-badges">' + badge("Pending", "warn") + action + "</div></div>";
+  }
+
+  // Pure: the whole panel body — members section + (for managers) a pending-
+  // invitations section. Empty member lists never happen (you're always a
+  // member), but the invitations block collapses to a quiet line when empty.
+  function membersPanelHtml(members, invitations, ctx) {
+    var canManage = assignableRoles(ctx.role).length > 0;
+    var out = "";
+    out += members.map(function (m) { return memberRowHtml(m, ctx); }).join("");
+    if (canManage) {
+      out += '<h2 class="fleet-name" style="margin:20px 0 8px">Pending invitations</h2>';
+      out += invitations.length
+        ? invitations.map(function (inv) { return invitationRowHtml(inv, ctx); }).join("")
+        : '<p class="dim">No pending invitations.</p>';
+    }
+    return out;
+  }
+
+  // Load the Members panel: resolve the team context (from /v1/me, fetching it
+  // if the cache is cold), then fetch the member + invitation lists.
+  function loadMembers() {
+    var box = $("#members-body");
+    if (!box) return;
+    box.innerHTML = '<div class="loading">Loading members&hellip;</div>';
+    var invite = $("#members-invite");
+    if (invite) invite.hidden = true; // shown only once we know the actor can manage
+    var ctx = membersContext();
+    if (ctx) { fetchMembers(ctx); return; }
+    api("GET", "/v1/me").then(function (r) {
+      if (r.ok && r.data) meCache = r.data;
+      var c = membersContext();
+      if (!c) {
+        box.innerHTML = '<div class="empty-state"><h2>No team yet</h2>' +
+          "<p>Your account isn't part of a team, so there are no members to manage.</p></div>";
+        return;
+      }
+      fetchMembers(c);
+    });
+  }
+
+  function fetchMembers(ctx) {
+    var box = $("#members-body");
+    if (!box) return;
+    var t = encodeURIComponent(ctx.teamId);
+    var canManage = assignableRoles(ctx.role).length > 0;
+    // Invitations are admin-gated — a plain member would just 403, so skip the
+    // call and treat the list as empty (they see no invitations section anyway).
+    var invitesReq = canManage
+      ? api("GET", "/v1/teams/" + t + "/invitations")
+      : Promise.resolve({ ok: true, data: { invitations: [] } });
+    Promise.all([api("GET", "/v1/teams/" + t + "/members"), invitesReq]).then(function (res) {
+      if (box.isConnected === false) return;
+      var mr = res[0], ir = res[1];
+      if (!mr.ok) {
+        box.innerHTML = membersErrorHtml(mr.status);
+        var rb = box.querySelector("[data-members-retry]");
+        if (rb) rb.addEventListener("click", loadMembers);
+        return;
+      }
+      var members = (mr.data && mr.data.members) || [];
+      var invitations = (ir.ok && ir.data && ir.data.invitations) || [];
+      var invite = $("#members-invite");
+      if (invite) invite.hidden = !canManage;
+      box.innerHTML = membersPanelHtml(members, invitations, ctx);
+      wireMembersPanel(box, ctx);
+    });
+  }
+
+  function wireMembersPanel(box, ctx) {
+    box.querySelectorAll("[data-member-role]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        openRoleModal(ctx, b.getAttribute("data-member-role"), b.getAttribute("data-email"), b.getAttribute("data-role"));
+      });
+    });
+    box.querySelectorAll("[data-member-remove]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        confirmRemoveMember(ctx, b.getAttribute("data-member-remove"), b.getAttribute("data-email"));
+      });
+    });
+    box.querySelectorAll("[data-invite-revoke]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        confirmRevokeInvite(ctx, b.getAttribute("data-invite-revoke"), b.getAttribute("data-email"));
+      });
+    });
+  }
+
+  // Invite: email + role → POST /v1/teams/:id/invitations. On 201 the accept_url
+  // is surfaced as the operator copy-paste fallback (the invitee is also mailed
+  // it server-side).
+  function openInviteModal(ctx) {
+    var roles = assignableRoles(ctx.role);
+    if (!roles.length) return;
+    var opts = roles.map(function (r) {
+      return '<option value="' + esc(r) + '"' + (r === "member" ? " selected" : "") + ">" + esc(ROLE_LABELS[r]) + "</option>";
+    }).join("");
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Invite a team member</h2>' +
+      '<p class="modal-sub">They\'ll be emailed an invitation link. You can also copy it here.</p>' +
+      '<div class="field"><label class="label" for="invite-email">Email</label>' +
+        '<input class="form-input" id="invite-email" type="email" placeholder="teammate@example.com" /></div>' +
+      '<div class="field"><label class="label" for="invite-role">Role</label>' +
+        '<select class="form-input" id="invite-role">' + opts + "</select></div>" +
+      '<div class="modal-actions"><button class="btn btn-primary btn-block" id="invite-submit" type="button">Send invitation</button></div>'
+    );
+    $("#invite-submit").addEventListener("click", function () { submitInvite(ctx); });
+    $("#invite-email").focus();
+  }
+
+  function submitInvite(ctx) {
+    var email = ($("#invite-email").value || "").trim();
+    var role = $("#invite-role").value;
+    if (!email) { toast({ kind: "error", title: "Enter an email address." }); return; }
+    var btn = $("#invite-submit");
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    api("POST", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/invitations", { email: email, role: role }).then(function (r) {
+      if (r.status === 201 && r.data && r.data.invitation) {
+        revealInvite(r.data.accept_url, email);
+        loadMembers();
+      } else {
+        btn.disabled = false;
+        btn.textContent = "Send invitation";
+        toast({ kind: "error", title: "Couldn't send invitation", body: friendly(r.data, "Check the address and try again.") });
+      }
+    });
+  }
+
+  // The copy-paste fallback after a successful invite — the accept link once,
+  // with a copy button (the invitee is also emailed it).
+  function revealInvite(url, email) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Invitation sent</h2>' +
+      '<p class="modal-sub">We emailed <b>' + esc(email) + "</b> an invitation. You can also share this link:</p>" +
+      '<div class="field"><input class="form-input" id="invite-link" type="text" readonly value="' + esc(url || "") + '" /></div>' +
+      '<div class="modal-actions">' +
+        '<button class="btn btn-ghost" id="invite-copy" type="button">Copy link</button>' +
+        '<button class="btn btn-primary" type="button" data-close>Done</button>' +
+      "</div>"
+    );
+    var copy = $("#invite-copy");
+    if (copy) copy.addEventListener("click", function () {
+      var input = $("#invite-link");
+      if (input) input.select();
+      if (navigator.clipboard && navigator.clipboard.writeText && url) {
+        navigator.clipboard.writeText(url).then(
+          function () { toast({ kind: "success", title: "Link copied", duration: 2000 }); },
+          function () { toast({ kind: "error", title: "Couldn't copy — select and copy manually." }); }
+        );
+      }
+    });
+  }
+
+  // Change role: PATCH /v1/teams/:id/members/:user_id {role}.
+  function openRoleModal(ctx, userId, email, currentRole) {
+    var roles = assignableRoles(ctx.role);
+    if (!roles.length) return;
+    var opts = roles.map(function (r) {
+      return '<option value="' + esc(r) + '"' + (r === currentRole ? " selected" : "") + ">" + esc(ROLE_LABELS[r]) + "</option>";
+    }).join("");
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Change role</h2>' +
+      '<p class="modal-sub">Set the team role for <b>' + esc(email || "this member") + "</b>.</p>" +
+      '<div class="field"><label class="label" for="role-select">Role</label>' +
+        '<select class="form-input" id="role-select">' + opts + "</select></div>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-primary" id="role-submit" type="button">Save role</button>' +
+      "</div>"
+    );
+    $("#role-submit").addEventListener("click", function () {
+      var role = $("#role-select").value;
+      var btn = $("#role-submit");
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      api("PATCH", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId), { role: role }).then(function (r) {
+        closeModal();
+        if (r.ok) toast({ kind: "success", title: "Role updated" });
+        else toast({ kind: "error", title: "Couldn't change role", body: friendly(r.data) });
+        loadMembers();
+      });
+    });
+  }
+
+  // Remove a member: DELETE /v1/teams/:id/members/:user_id.
+  function confirmRemoveMember(ctx, userId, email) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Remove member?</h2>' +
+      '<p class="modal-sub">Removing <b>' + esc(email || "this member") + "</b> ends their access to the team immediately.</p>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" id="member-remove-go" type="button">Remove</button>' +
+      "</div>"
+    );
+    $("#member-remove-go").addEventListener("click", function () {
+      var btn = $("#member-remove-go");
+      btn.disabled = true;
+      btn.textContent = "Removing…";
+      api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/members/" + encodeURIComponent(userId)).then(function (r) {
+        closeModal();
+        if (r.ok) toast({ kind: "success", title: "Member removed" });
+        else toast({ kind: "error", title: "Couldn't remove member", body: friendly(r.data) });
+        loadMembers();
+      });
+    });
+  }
+
+  // Revoke a pending invitation: DELETE /v1/teams/:id/invitations/:inv_id.
+  function confirmRevokeInvite(ctx, invId, email) {
+    openModal(
+      '<h2 class="modal-title" id="modal-title">Revoke invitation?</h2>' +
+      '<p class="modal-sub">The invitation for <b>' + esc(email || "this address") + "</b> will stop working.</p>" +
+      '<div class="modal-actions">' +
+        '<button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-danger" id="invite-revoke-go" type="button">Revoke</button>' +
+      "</div>"
+    );
+    $("#invite-revoke-go").addEventListener("click", function () {
+      var btn = $("#invite-revoke-go");
+      btn.disabled = true;
+      btn.textContent = "Revoking…";
+      api("DELETE", "/v1/teams/" + encodeURIComponent(ctx.teamId) + "/invitations/" + encodeURIComponent(invId)).then(function (r) {
+        closeModal();
+        if (r.ok) toast({ kind: "success", title: "Invitation revoked" });
+        else toast({ kind: "error", title: "Couldn't revoke invitation", body: friendly(r.data) });
+        loadMembers();
+      });
+    });
+  }
+
+  // TYPE_ACTIONS.members consumer: a live members broadcast (invite / revoke /
+  // role change / removal — possibly from another tab) refetches the Members
+  // panel when it's the open view; otherwise it stays conservative (drop the
+  // fleet cache, like the other settings ticks).
+  function onMembersEvent(v) {
+    fleetCache = null;
+    if (v === "members") loadMembers();
+  }
+
   // =========================================================== RENDER
   function render() {
     // A returning OAuth callback lands a session token on the fragment; consume
@@ -7289,6 +7708,12 @@
     $("#provider-add").addEventListener("click", openProviderPicker);
     $("#provider-add-empty").addEventListener("click", openProviderPicker);
     $("#token-add").addEventListener("click", openTokenModal);
+    // C10: the Members panel's invite button — reads the team context at click.
+    var membersInvite = $("#members-invite");
+    if (membersInvite) membersInvite.addEventListener("click", function () {
+      var c = membersContext();
+      if (c) openInviteModal(c);
+    });
 
     window.addEventListener("hashchange", function () {
       if (isNewFlow()) return; // the /new deploy flow is path+query driven, not hash-routed
@@ -7475,6 +7900,15 @@
       coherenceNextTheme: coherenceNextTheme, coherenceStampTheme: coherenceStampTheme,
       coherenceTokenRows: coherenceTokenRows, coherenceFixtureToHtml: coherenceFixtureToHtml,
       coherenceTokens: COHERENCE_TOKENS.slice(), coherenceRoles: COHERENCE_ROLES.slice(),
+      // C10: Members settings panel + Usage instance sub-tab. Pure helpers the
+      // node harness drives directly (the DOM mount/wiring is browser-verified).
+      usageMeters: USAGE_METERS.map(function (m) { return { key: m.key, label: m.label, fmt: m.fmt }; }),
+      c10FmtBytes: c10FmtBytes, usageMeterDisplay: usageMeterDisplay,
+      usageMeterHtml: usageMeterHtml, usageMetersHtml: usageMetersHtml,
+      usageTabShellHtml: usageTabShellHtml, usageFailureCopy: usageFailureCopy,
+      assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
+      memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
+      membersPanelHtml: membersPanelHtml,
     });
   }
 })();
