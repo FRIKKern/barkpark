@@ -41,7 +41,16 @@ defmodule BarkparkWeb.GrantControllerTest do
     token
   end
 
+  # A real claimant is a CONFIRMED account — registration self-serve, then the
+  # email round-trip stamps `confirmed_at`. Claim now requires mailbox control.
   defp register_user(email) do
+    user = register_unconfirmed_user(email)
+    Repo.update!(Barkpark.Accounts.User.confirm_changeset(user))
+  end
+
+  # An account that registered but never confirmed its mailbox — the hole a
+  # self-serve attacker would use to impersonate a grantee's email.
+  defp register_unconfirmed_user(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     user
   end
@@ -161,6 +170,7 @@ defmodule BarkparkWeb.GrantControllerTest do
       build_conn() |> log_in(user) |> get("/grant/no-such-token")
 
     assert redirected_to(failing) == redirected_to(reference)
+
     assert Phoenix.Flash.get(failing.assigns.flash, :error) ==
              Phoenix.Flash.get(reference.assigns.flash, :error)
 
@@ -190,6 +200,7 @@ defmodule BarkparkWeb.GrantControllerTest do
       build_conn() |> log_in(user) |> get("/grant/no-such-token")
 
     assert redirected_to(second) == redirected_to(reference)
+
     assert Phoenix.Flash.get(second.assigns.flash, :error) ==
              Phoenix.Flash.get(reference.assigns.flash, :error)
 
@@ -209,6 +220,39 @@ defmodule BarkparkWeb.GrantControllerTest do
 
     {id, _} = mint_lookup(raw)
     assert Access.get_grant(id).grantee_user_id == user.id
+  end
+
+  # ---------------------------------------------------------------------------
+  # 7. Confirmed-account gate — an UNCONFIRMED grantee cannot claim (finding #2)
+  # ---------------------------------------------------------------------------
+
+  test "an unconfirmed grantee (email matches) cannot claim → no-oracle failure, NOT bound", %{
+    conn: conn
+  } do
+    ws = create_workspace!()
+    project = create_project!(ws)
+    # Self-serve account with the grantee's exact email but NO mailbox proof.
+    user =
+      register_unconfirmed_user("unconfirmed-#{System.unique_integer([:positive])}@example.com")
+
+    {_grant, raw} = mint_grant(ws, user.email, %{project_id: project.id, dataset: "production"})
+
+    failing = conn |> log_in(user) |> get("/grant/#{raw}")
+
+    # Collapses to the single no-oracle failure — byte-identical to a token that
+    # never existed (same redirect, same flash, same body). No account-state leak.
+    reference = build_conn() |> log_in(user) |> get("/grant/no-such-token")
+
+    assert redirected_to(failing) == redirected_to(reference)
+
+    assert Phoenix.Flash.get(failing.assigns.flash, :error) ==
+             Phoenix.Flash.get(reference.assigns.flash, :error)
+
+    assert failing.resp_body == reference.resp_body
+
+    # The account-binding did NOT happen — the whole point of the gate.
+    {id, _} = mint_lookup(raw)
+    assert is_nil(Access.get_grant(id).grantee_user_id)
   end
 
   # Resolve a grant id from its raw token via the same hash the context uses,

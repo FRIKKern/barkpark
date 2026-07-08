@@ -56,7 +56,16 @@ defmodule BarkparkWeb.AccessControllerTest do
     raw
   end
 
+  # A real claimant is a CONFIRMED account — claim requires proven mailbox
+  # control (`confirmed_at`). Registration is self-serve; confirmation is the
+  # email round-trip.
   defp register_user(email) do
+    user = register_unconfirmed_user(email)
+    Repo.update!(Accounts.User.confirm_changeset(user))
+  end
+
+  # Registered but never confirmed — the self-serve impersonation hole.
+  defp register_unconfirmed_user(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     user
   end
@@ -298,6 +307,78 @@ defmodule BarkparkWeb.AccessControllerTest do
       assert spent.status == reference.status
       assert spent.resp_body == reference.resp_body
     end
+
+    test "an UNCONFIRMED grantee cannot claim — byte-identical to a nonexistent token", %{
+      conn: conn
+    } do
+      ws = create_workspace!()
+      # Self-serve account with the grantee's exact email but NO mailbox proof.
+      user =
+        register_unconfirmed_user("unconfirmed-#{System.unique_integer([:positive])}@example.com")
+
+      {grant, raw} = mint_grant(ws, user.email)
+
+      failing =
+        conn |> bearer(user_bearer(user)) |> post("/v1/access/claim", %{"token" => raw})
+
+      reference =
+        build_conn()
+        |> bearer(user_bearer(user))
+        |> post("/v1/access/claim", %{"token" => "this-token-never-existed"})
+
+      # Same status + same body — the confirmed gate leaks neither grant
+      # existence nor account state.
+      assert failing.status == reference.status
+      assert failing.resp_body == reference.resp_body
+
+      # And the grant was NOT bound.
+      assert is_nil(Access.get_grant(grant.id).grantee_user_id)
+    end
+
+    # Positive control: a CONFIRMED grantee (same email) DOES claim — proving the
+    # gate blocks only unconfirmed accounts, not every claim (no over-deny).
+    test "a CONFIRMED grantee with the same email claims successfully (no over-deny)", %{
+      conn: conn
+    } do
+      ws = create_workspace!()
+      email = "confirmed-#{System.unique_integer([:positive])}@example.com"
+      unconfirmed = register_unconfirmed_user(email)
+      confirmed = Repo.update!(Accounts.User.confirm_changeset(unconfirmed))
+      {grant, raw} = mint_grant(ws, email)
+
+      conn =
+        conn |> bearer(user_bearer(confirmed)) |> post("/v1/access/claim", %{"token" => raw})
+
+      assert %{"grant" => body} = json_response(conn, 200)
+      assert body["grantee_user_id"] == confirmed.id
+      assert Access.get_grant(grant.id).grantee_user_id == confirmed.id
+    end
+
+    # IdP-trust exception (documented, accepted): SSO / SCIM / social provisioning
+    # stamp `confirmed_at` via the SAME `User.confirm_changeset` — WITHOUT any
+    # email round-trip (sso/oidc.ex, sso/social.ex, scim.ex all do exactly this).
+    # The gate is a PLAIN `confirmed_at` check, so an IdP-provisioned account
+    # satisfies it and claims. Proven a PASS so the gate is not accidentally
+    # tightened to a stricter "mailbox-token-consumed" rule that would reject
+    # legitimate IdP users.
+    test "an SSO/SCIM-provisioned account (confirmed WITHOUT a mailbox token) claims", %{
+      conn: conn
+    } do
+      ws = create_workspace!()
+      email = "idp-#{System.unique_integer([:positive])}@example.com"
+      # Provisioned like the IdP paths: registered, then confirmed with no email
+      # round-trip — the identical Repo.update!(User.confirm_changeset/1) call.
+      {:ok, provisioned} = Accounts.register_user(%{email: email, password: @password})
+      idp_user = Repo.update!(Accounts.User.confirm_changeset(provisioned))
+      {grant, raw} = mint_grant(ws, email)
+
+      conn =
+        conn |> bearer(user_bearer(idp_user)) |> post("/v1/access/claim", %{"token" => raw})
+
+      assert %{"grant" => body} = json_response(conn, 200)
+      assert body["grantee_user_id"] == idp_user.id
+      assert Access.get_grant(grant.id).grantee_user_id == idp_user.id
+    end
   end
 
   # ── 7. shared no-oracle — ONE implementation, two surfaces ──────────────────
@@ -311,6 +392,14 @@ defmodule BarkparkWeb.AccessControllerTest do
       # The SHARED decision collapses wrong-grantee AND nonexistent to :invalid.
       assert ClaimFlow.resolve(real_raw, intruder) == :invalid
       assert ClaimFlow.resolve("no-such-token", intruder) == :invalid
+
+      # And an UNCONFIRMED grantee — even with a matching email + active grant —
+      # collapses to the SAME :invalid (the confirmed-account gate, finding #2).
+      unconfirmed =
+        register_unconfirmed_user("uc-#{System.unique_integer([:positive])}@example.com")
+
+      {_g, uc_raw} = mint_grant(ws, unconfirmed.email)
+      assert ClaimFlow.resolve(uc_raw, unconfirmed) == :invalid
 
       # JSON surface renders that :invalid as the uniform 422.
       json =

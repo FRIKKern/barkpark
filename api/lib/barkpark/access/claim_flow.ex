@@ -25,6 +25,22 @@ defmodule Barkpark.Access.ClaimFlow do
   indistinguishable. Token existence is unobservable. Each surface renders that
   one outcome in its own idiom (a redirect for the browser, a uniform JSON error
   for the API), but the DECISION is made in exactly one place.
+
+  ## Confirmed-account gate (account-binding depends on mailbox control)
+
+  Password registration is self-serve and login has no confirmation gate, so an
+  attacker could self-register an UNCONFIRMED account with the grantee's email,
+  obtain the raw token, and claim — binding the grant without ever proving they
+  control the mailbox the grant is addressed to. Account-binding is therefore
+  meaningless unless the claimant proved mailbox control. So a claim succeeds
+  ONLY if the grant is active AND `grantee_email` matches AND the user's
+  `confirmed_at` is set. An unconfirmed grantee collapses to the SAME `:invalid`
+  no-oracle outcome — never a distinct "account not confirmed" error that would
+  leak grant existence or account state.
+
+  NOTE (accepted exception): SSO / SCIM / social sign-in stamp `confirmed_at`
+  without an email round-trip — that is IdP-trust by design. This gate closes
+  the self-serve unconfirmed-password hole, not the IdP-trust variant.
   """
   alias Barkpark.Access
   alias Barkpark.Accounts.User
@@ -37,7 +53,7 @@ defmodule Barkpark.Access.ClaimFlow do
   def resolve(token, %User{} = user) when is_binary(token) do
     grant = Access.lookup_by_token(token)
 
-    if grant && grantee?(grant, user) do
+    if grant && grantee?(grant, user) && confirmed?(user) do
       case Access.claim(token, user) do
         {:ok, claimed} -> {:ok, claimed}
         {:error, _reason} -> :invalid
@@ -48,6 +64,15 @@ defmodule Barkpark.Access.ClaimFlow do
   end
 
   def resolve(_token, _user), do: :invalid
+
+  # An account may claim only after it proved mailbox control (`confirmed_at`
+  # set). An unconfirmed grantee fails HERE, folding into the single `:invalid`
+  # outcome — byte-identical to a wrong-email or nonexistent-token failure, so
+  # neither grant existence nor account state is observable. Fail-closed: a nil
+  # `confirmed_at` denies.
+  @spec confirmed?(User.t()) :: boolean()
+  defp confirmed?(%User{confirmed_at: %DateTime{}}), do: true
+  defp confirmed?(_user), do: false
 
   @doc """
   Case-insensitive grantee-email match. User emails are stored downcased
