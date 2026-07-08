@@ -193,6 +193,11 @@ defmodule BarkparkWeb.Router do
     # branch is CSRF-checked here (bearer callers return before the CSRF check).
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    # Write-gate: a read-only token/session member is denied 403 before the
+    # controller. A P5 edit-share token short-circuits via :share_writer (set by
+    # RequireShareEditToken above), so scoped uploads still work. Mirrors
+    # :scoped_mutate's RequireWritePermission.
+    plug(BarkparkWeb.Plugs.RequireWritePermission)
   end
 
   # Tenancy-aware variant of :browser for the path-scoped plugin LiveView
@@ -432,6 +437,11 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    # Write-gate: media upload/update/delete are mutations — a read-only token
+    # (or read-only session member) must be denied 403 before the controller.
+    # RequireBearerOrSessionToken always assigns :api_token on success, so the
+    # permits?(:write) check has a principal. Mirrors the doc :mutate gate.
+    plug(BarkparkWeb.Plugs.RequireWritePermission)
   end
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens

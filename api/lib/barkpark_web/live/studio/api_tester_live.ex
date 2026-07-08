@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   require Logger
 
   alias Barkpark.ApiTester.{Endpoints, Runner}
+  alias BarkparkWeb.Studio.Caps
   import BarkparkWeb.Studio.ApiTesterLive.Format
   import BarkparkWeb.Studio.ApiTesterLive.Request
   import BarkparkWeb.Studio.ApiTesterLive.Components
@@ -42,7 +43,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
        collapsed_categories: MapSet.new(),
        selected_id: selected.id,
-       token: "barkpark-dev-token",
+       # Default the playground token to the CALLER'S OWN raw token (from the
+       # session, via LiveAuth :fetch_api_token), never the all-perms
+       # barkpark-dev-token. A run then carries the caller's real authority, and
+       # an empty string (unauthenticated) sends no bearer rather than leaking a
+       # god token into the form.
+       token: socket.assigns[:api_token_raw] || "",
        form_state_by_id: form_state_by_id,
        last_result_by_id: %{},
        scenario_results: [],
@@ -141,6 +147,35 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   def handle_event("run", _, socket) do
+    if not Caps.derive(socket).admin do
+      {:noreply, deny_run(socket)}
+    else
+      do_run(socket)
+    end
+  end
+
+  def handle_event("run-all", _, socket) do
+    if not Caps.derive(socket).admin do
+      {:noreply, deny_run(socket)}
+    else
+      do_run_all(socket)
+    end
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  # The playground dispatches REAL authenticated HTTP against the live endpoint
+  # with the form's token. Only an admin principal (fresh Caps.derive) may fire
+  # it — a non-admin member is denied here, mirroring the Studio caps deny-gate.
+  defp deny_run(socket),
+    do: put_flash(socket, :error, "Admin access required to run API requests.")
+
+  defp do_run(socket) do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
 
     if endpoint == nil || endpoint.kind == :reference || endpoint[:runnable] == false do
@@ -162,20 +197,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     end
   end
 
-  def handle_event("run-all", _, socket) do
+  defp do_run_all(socket) do
     config = %{token: socket.assigns.token, base: runner_base(socket)}
     endpoints = socket.assigns.endpoints
 
     task = Task.async(fn -> {:run_all_result, run_all_scenarios(endpoints, config)} end)
 
     {:noreply, assign(socket, running: true, run_task_ref: task.ref)}
-  end
-
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("studio: unhandled event #{inspect(event)}")
-    {:noreply, socket}
   end
 
   # The blocking run-all sweep, extracted so it can run inside a Task off the

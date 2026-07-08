@@ -26,12 +26,18 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
   @dataset "production"
   @admin "caps-studio-admin"
   @member "caps-studio-member"
+  @readonly "caps-studio-readonly"
 
   setup %{conn: conn} do
     {ws, _proj} = TenancyFixtures.ensure_default_scope!()
 
     {:ok, _} = Auth.create_token(@admin, "caps admin", @dataset, ["read", "write", "admin"])
     {:ok, _} = Auth.create_token(@member, "caps member", @dataset, ["read", "write"])
+    # A READ-ONLY api token: create_token auto-memberships it on the Default ws,
+    # so it IS a member — but its permission array is ["read"], so derive/1's
+    # write arm (permits?(token, :write)) is false. This is the exact shape of
+    # the hole: a member-but-read-only principal on the non-restricted Default.
+    {:ok, _} = Auth.create_token(@readonly, "caps readonly", @dataset, ["read"])
 
     {:ok, _} =
       Content.upsert_schema(
@@ -200,6 +206,60 @@ defmodule BarkparkWeb.Studio.StudioLiveCapsGateTest do
       bind_grant!(ws, user, %{capabilities: ["read", "write"]})
 
       {:ok, view, _html} = live(conn, priv_url(ws, proj))
+
+      before = doc_count()
+      render_click(view, "new-document", %{"type" => "post"})
+      assert doc_count() > before
+    end
+  end
+
+  # ── 2b. write tier enforced on ALL sockets (authz-drift fix) ─────────────────
+
+  describe "write-tier enforced on non-restricted sockets too" do
+    test "a READ-ONLY api-token MEMBER forging new-document is DENIED — nothing persists", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = token_view(conn, @readonly)
+
+      # The hole's exact shape: a member (auto-membership) whose token is
+      # read-only, mounted on the non-restricted Default. Before the fix the
+      # :write tier short-circuited on `not restricted?` and this write PASSED.
+      assert caps(view) == %{read: true, write: false, admin: false}
+
+      before = doc_count()
+      render_click(view, "new-document", %{"type" => "post"})
+
+      assert doc_count() == before
+      assert flash_error(view) == "You don't have access to do that."
+    end
+
+    test "a READ-ONLY member forging save/publish/confirm-delete is DENIED (all :write)", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = token_view(conn, @readonly)
+
+      for event <- ["save", "publish", "confirm-delete"] do
+        render_hook(view, event, %{})
+        assert flash_error(view) == "You don't have access to do that."
+      end
+    end
+
+    test "a full-WRITE api-token member is NOT over-denied — new-document persists", %{
+      conn: conn
+    } do
+      {:ok, view, _html} = token_view(conn, @member)
+
+      before = doc_count()
+      render_click(view, "new-document", %{"type" => "post"})
+      assert doc_count() > before
+    end
+
+    test "a USER member (role member ⇒ read+write) is NOT over-denied", %{conn: conn, ws: ws} do
+      {user, conn} = grantee_session(conn)
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
+
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
+      assert caps(view).write == true
 
       before = doc_count()
       render_click(view, "new-document", %{"type" => "post"})

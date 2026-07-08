@@ -43,12 +43,13 @@ defmodule BarkparkWeb.Studio.Caps do
   Enforcement per tier:
 
     * `:admin` / `:deny` — enforced on ALL sockets: `caps.admin` required.
-    * `:write` — enforced on capability-RESTRICTED sockets (a share/grant
-      grade, marked by LiveScope). Members and the open public-demo posture
-      keep write (they already hold it / are intentionally open); their write
-      gating, where it exists, is LiveScope's write-target ladder — this gate
-      layers FRESH expiry-truth on top for restricted sockets without
-      double-denying members.
+    * `:write` — a write-capable socket passes. Otherwise a RESTRICTED socket
+      (share-read / grant grade) is denied AND a socket carrying a read-only
+      PRINCIPAL (api_token and/or current_user) is denied — closing the hole
+      where a read-only API-token member rode the `not restricted?`
+      short-circuit. Only a principal-less socket falls through, i.e. the
+      intentionally-open anonymous public-demo posture. Grant expiry truth
+      still comes from the fresh `derive/1`.
     * `:none` / `:read` — pass.
 
   The per-handler `caps.admin` re-check in `Handlers.Shares`/`Handlers.ItemShare`
@@ -228,11 +229,22 @@ defmodule BarkparkWeb.Studio.Caps do
       tier when tier in [:none, :read] ->
         {:cont, socket}
 
+      # :write enforcement. A write-capable socket always passes. Otherwise:
+      #   * a RESTRICTED socket (share-read / grant / caller_context grade) is
+      #     denied — unchanged from before;
+      #   * a socket that carries a PRINCIPAL (api_token and/or current_user)
+      #     but lacks write is now ALSO denied — this closes the hole where a
+      #     read-only API-token MEMBER (or read-only user member) rode the
+      #     non-restricted short-circuit;
+      #   * only a principal-LESS socket falls through to pass, i.e. the
+      #     intentionally-open anonymous public-demo posture (an anonymous
+      #     non-demo socket never reaches a write event un-restricted).
       :write ->
-        if not restricted?(socket) or derive(socket).write do
-          {:cont, socket}
-        else
-          {:halt, deny(socket)}
+        cond do
+          derive(socket).write -> {:cont, socket}
+          restricted?(socket) -> {:halt, deny(socket)}
+          has_principal?(socket) -> {:halt, deny(socket)}
+          true -> {:cont, socket}
         end
 
       # :admin and :deny (default) both require admin, enforced on ALL sockets.
@@ -249,15 +261,19 @@ defmodule BarkparkWeb.Studio.Caps do
     do: put_flash(socket, :error, "You don't have access to do that.")
 
   # A capability-RESTRICTED socket is one LiveScope decided to gate (a share
-  # read grade or a grant grade). Members and the anonymous public-demo posture
-  # are NOT restricted here — the write tier is not enforced against them by
-  # this gate (they hold write, or the demo is intentionally open); LiveScope's
-  # write ladder governs write-capable grantees, and this gate adds fresh
-  # expiry-truth on top.
+  # read grade or a grant grade). These were ALWAYS write-gated by this hook;
+  # kept unchanged so share-read/grant sockets keep their fresh expiry-truth.
   defp restricted?(socket) do
     socket.assigns[:readonly_gate?] == true or
       socket.assigns[:write_gate?] == true or
       not is_nil(socket.assigns[:caller_context]) or
       socket.assigns[:share_access] == :read
+  end
+
+  # Does the socket carry an authenticated principal? A read-only such principal
+  # must be write-denied (the hole this fix closes). A principal-LESS socket is
+  # the anonymous public-demo posture, which stays intentionally open for write.
+  defp has_principal?(socket) do
+    not is_nil(socket.assigns[:api_token]) or not is_nil(socket.assigns[:current_user])
   end
 end

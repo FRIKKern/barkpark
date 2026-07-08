@@ -52,7 +52,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/providers        user      the team's connected cloud providers
       POST    /v1/providers        user      connect a cloud provider
       GET     /v1/hetzner/catalog  user      the allowlisted Hetzner action catalog (resource/verb/tier/params)
-      GET     /v1/hetzner/overview user      server-side Hetzner estate snapshot (token never reaches the browser)
+      GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
       POST    /v1/github/installations     user  record a GitHub App install (503 if unconfigured)
       DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
@@ -1896,7 +1896,11 @@ defmodule BarkparkCloud.Web.Router do
   # one slow upstream. 404 no_provider when the team has no connected hetzner
   # account (the dashboard renders its connect-first empty state from this).
   get "/v1/hetzner/overview" do
-    conn = Auth.require_user(conn, [])
+    # team_admin: the overview reveals the team's whole Hetzner estate (server
+    # IPs, DNS zones, firewalls) — privileged infra, gated like every other
+    # cloud/ privileged op (require_team_admin runs require_user first, so
+    # current_team is still assigned). A plain member is 403'd.
+    conn = Auth.require_team_admin(conn, [])
 
     cond do
       conn.halted ->
