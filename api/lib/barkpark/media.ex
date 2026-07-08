@@ -24,8 +24,7 @@ defmodule Barkpark.Media do
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
   """
   def upload(plug_upload, dataset, opts \\ []) when is_binary(dataset) do
-    %Plug.Upload{filename: original_name, path: temp_path, content_type: content_type} =
-      plug_upload
+    %Plug.Upload{filename: original_name, path: temp_path} = plug_upload
 
     # Generate date-based path: uploads/2026/04/filename
     now = DateTime.utc_now()
@@ -35,18 +34,32 @@ defmodule Barkpark.Media do
     full_dir = Path.join(@upload_dir, date_dir)
     full_path = Path.join(@upload_dir, relative_path)
 
-    # Write the blob to storage with NON-raising File ops so a disk fault
-    # (ENOSPC / EACCES / read-only mount) returns {:error, :storage_unavailable}
-    # — mapped to an enveloped 503 by FallbackController — instead of an uncaught
-    # File.*! raise surfacing as a bare 500 with no error envelope. On ANY failure
-    # after the copy we remove the (possibly partial) blob so a rejected upload
-    # never orphans bytes on disk.
-    with :ok <- File.mkdir_p(full_dir),
-         :ok <- File.cp(temp_path, full_path),
-         {:ok, %{size: size}} <- File.stat(full_path) do
-      # Detect MIME type
-      mime_type = content_type || MIME.from_path(original_name)
+    # SECURITY — server-derived MIME + validate-before-persist.
+    #
+    # PART 1 (behavior-preserving): the stored `mime_type` is derived from the
+    # filename the SAME way the serve path derives it (`MIME.from_path` — see
+    # media_controller serve + media/probe.ex), NOT taken from the client-supplied
+    # multipart `content_type`. A legit upload carries the real extension
+    # (pixel.png, book.xml), so the derived type is byte-identical to what the
+    # client claimed and to what serving already returns — only a header LIE can
+    # no longer set the persisted mime. Size is read from the TEMP file (identical
+    # bytes to the copy) so nothing is written until every check below passes.
+    #
+    # PART 2 (config-gated, OFF by default): `validate_upload/3` reads an optional
+    # allowlist + size cap from app config. Unset/empty = allow-all (today's
+    # behavior, zero rejections). When configured it rejects BEFORE any blob is
+    # written (`unsupported_media_type` → 422 / `payload_too_large` → 413).
+    #
+    # File ops are NON-raising so a disk fault (ENOSPC / EACCES / read-only mount)
+    # returns {:error, :storage_unavailable} — an enveloped 503 — instead of an
+    # uncaught File.*! raise → bare 500. On ANY failure after the copy we remove
+    # the (possibly partial) blob so a rejected upload never orphans bytes.
+    mime_type = MIME.from_path(original_name)
 
+    with {:ok, %{size: size}} <- File.stat(temp_path),
+         :ok <- validate_upload(mime_type, original_name, size),
+         :ok <- File.mkdir_p(full_dir),
+         :ok <- File.cp(temp_path, full_path) do
       # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
       # `opts` when the caller supplied a resolved scope — mirrors
       # `Barkpark.Content` write scoping so a new blob is owned by the workspace
@@ -71,7 +84,10 @@ defmodule Barkpark.Media do
       case result do
         {:ok, file} = ok ->
           _ =
-            Barkpark.Plugins.Registry.run_after_media_upload(%{media_file: file, dataset: dataset})
+            Barkpark.Plugins.Registry.run_after_media_upload(%{
+              media_file: file,
+              dataset: dataset
+            })
 
           ok
 
@@ -83,12 +99,77 @@ defmodule Barkpark.Media do
           error
       end
     else
+      # PART 2 rejects, raised by validate_upload BEFORE any blob is written — the
+      # allowlist / size-cap veto. Nothing is on disk, so surface the typed error
+      # (→ 422 / 413 via FallbackController) with no cleanup needed.
+      {:error, :unsupported_media_type} = rejected ->
+        rejected
+
+      {:error, :payload_too_large} = rejected ->
+        rejected
+
       {:error, _reason} ->
-        # mkdir_p / cp / stat failed. cp may have written a partial file before
-        # failing → best-effort cleanup so no orphan blob survives, then report
-        # storage as unavailable (503) rather than raising.
+        # stat(temp) / mkdir_p / cp failed. cp may have written a partial file
+        # before failing → best-effort cleanup so no orphan blob survives, then
+        # report storage as unavailable (503) rather than raising.
         _ = File.rm(full_path)
         {:error, :storage_unavailable}
+    end
+  end
+
+  # PART 2 — config-gated upload allowlist + size cap. OFF by default: an unset /
+  # empty allowlist and a nil cap short-circuit to :ok, so an unconfigured server
+  # accepts every type + size exactly as before (allow-all). Configure via:
+  #
+  #     config :barkpark, :media_uploads,
+  #       allowed_mime_types: ["image/png", "image/jpeg"],  # server-derived MIME
+  #       allowed_extensions: ["png", "jpg", "jpeg"],        # lower-case, no dot
+  #       max_upload_bytes: 10_000_000                       # per-upload cap
+  #
+  # Read at RUNTIME (not compile_env) so an operator can flip it via runtime.exs
+  # and tests can override per-case. Rejection happens BEFORE the blob is
+  # persisted, so a disallowed upload never touches disk.
+  defp validate_upload(mime_type, original_name, size) do
+    cfg = Application.get_env(:barkpark, :media_uploads, [])
+
+    with :ok <- check_mime(cfg, mime_type),
+         :ok <- check_extension(cfg, original_name) do
+      check_size(cfg, size)
+    end
+  end
+
+  defp check_mime(cfg, mime_type) do
+    case Keyword.get(cfg, :allowed_mime_types, []) do
+      allowed when allowed in [nil, []] ->
+        :ok
+
+      allowed ->
+        if mime_type in allowed, do: :ok, else: {:error, :unsupported_media_type}
+    end
+  end
+
+  defp check_extension(cfg, original_name) do
+    case Keyword.get(cfg, :allowed_extensions, []) do
+      allowed when allowed in [nil, []] ->
+        :ok
+
+      allowed ->
+        ext = original_name |> Path.extname() |> String.downcase() |> String.trim_leading(".")
+        normalized = Enum.map(allowed, &(&1 |> String.downcase() |> String.trim_leading(".")))
+        if ext in normalized, do: :ok, else: {:error, :unsupported_media_type}
+    end
+  end
+
+  # Per-upload byte cap. This does NOT duplicate the endpoint's 100 MB body bound
+  # (Plug.Parsers → RequestTooLargeError → enveloped 413 in endpoint.ex): that is
+  # a hard global ceiling on the whole multipart body; this is an OPTIONAL,
+  # operator-set, tighter per-media cap. nil (the default) = no media-layer cap,
+  # so the 100 MB body bound remains the only limit and behavior is unchanged.
+  defp check_size(cfg, size) do
+    case Keyword.get(cfg, :max_upload_bytes) do
+      nil -> :ok
+      max when is_integer(max) and size <= max -> :ok
+      max when is_integer(max) -> {:error, :payload_too_large}
     end
   end
 

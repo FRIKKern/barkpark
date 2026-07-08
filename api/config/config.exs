@@ -88,6 +88,17 @@ config :barkpark, :media_webhooks, endpoints: []
 # `Barkpark.Webhooks.auto_disable_threshold/0` reads this (module default 20).
 config :barkpark, :webhook_auto_disable_threshold, 20
 
+# Config-gated media upload allowlist + per-upload size cap (SECURITY, PART 2).
+# Ships OFF: empty lists + nil cap = allow-all, i.e. accept every server-derived
+# MIME / extension and any size up to the endpoint's 100 MB body bound — today's
+# behavior, zero rejections. An operator opts in by listing allowed types and/or
+# a tighter cap; `Barkpark.Media.upload/3` then rejects disallowed uploads BEFORE
+# the blob is persisted (unsupported_media_type → 422 / payload_too_large → 413).
+config :barkpark, :media_uploads,
+  allowed_mime_types: [],
+  allowed_extensions: [],
+  max_upload_bytes: nil
+
 config :barkpark, :media_processing_callback_token, "dev-media-processing-callback-token"
 
 # Fallback CORS allowlist for API routes without a dataset path segment
