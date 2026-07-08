@@ -96,6 +96,10 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudWebhook(out, g, args[1:])
 	case "verify":
 		return runCloudVerify(out, g, args[1:])
+	case "usage":
+		return runCloudUsage(out, g, args[1:])
+	case "members", "member":
+		return runCloudMembers(out, g, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown cloud command %q (run `bp cloud -h` for usage)", args[0]), exitUsage)
 	}

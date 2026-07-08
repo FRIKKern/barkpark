@@ -1,0 +1,12 @@
+{
+  "meters": [
+    { "name": "documents", "label": "Documents" },
+    { "name": "datasets", "label": "Datasets" },
+    { "name": "webhooks", "label": "Webhooks" },
+    { "name": "db_size", "label": "DB size" },
+    { "name": "disk", "label": "Disk" },
+    { "name": "seats", "label": "Seats" },
+    { "name": "api_requests", "label": "API requests" },
+    { "name": "bandwidth", "label": "Bandwidth" }
+  ]
+}
