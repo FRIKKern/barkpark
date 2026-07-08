@@ -168,4 +168,67 @@ defmodule Barkpark.TenancyTest do
       refute bad.valid?
     end
   end
+
+  describe "User principals (principal_type: \"user\")" do
+    alias Barkpark.Accounts
+    alias Barkpark.Tenancy.Auth
+
+    defp user(prefix) do
+      {:ok, u} =
+        Accounts.register_user(%{
+          email: prefix <> "-" <> Ecto.UUID.generate() <> "@example.com",
+          password: "correct horse battery"
+        })
+
+      u
+    end
+
+    test "list_workspaces_for/1 returns exactly the workspaces the user is a member of" do
+      u = user("lister")
+      {:ok, ws_a} = Tenancy.create_workspace(%{slug: "u-lw-a", name: "A"})
+      {:ok, _ws_b} = Tenancy.create_workspace(%{slug: "u-lw-b", name: "B"})
+
+      # The user is a member of ws_a only (as a "user" principal).
+      {:ok, _} = Auth.create_membership(ws_a.id, u.id, "member", "user")
+
+      slugs = Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug)
+      assert slugs == ["u-lw-a"]
+      refute "u-lw-b" in slugs
+    end
+
+    test "kind isolation: a token membership sharing the user's id does NOT leak into the user's list" do
+      u = user("kind")
+      {:ok, ws_user} = Tenancy.create_workspace(%{slug: "u-kind-user", name: "UserWS"})
+      {:ok, ws_token} = Tenancy.create_workspace(%{slug: "u-kind-token", name: "TokenWS"})
+
+      # A "user" membership in ws_user…
+      {:ok, _} = Auth.create_membership(ws_user.id, u.id, "member", "user")
+      # …and an "api_token" membership carrying the SAME principal_id in ws_token.
+      # (No FK on principal_id — a coincidentally-shared id is representable.)
+      {:ok, _} = Auth.create_membership(ws_token.id, u.id, "owner", "api_token")
+
+      slugs = Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug)
+      # Only the "user"-kind grant is visible; the token grant is invisible.
+      assert slugs == ["u-kind-user"]
+      refute "u-kind-token" in slugs
+    end
+
+    test "create_workspace_with_owner/2 stamps a \"user\" owner-membership and grants the creator" do
+      u = user("owner")
+      {:ok, ws} = Tenancy.create_workspace_with_owner(%{name: "User Owned"}, u)
+
+      m = Auth.membership(u, ws.id)
+      assert %Membership{} = m
+      assert m.role == "owner"
+      assert m.principal_type == "user"
+
+      # The creator can actually see + fully administer the workspace they made.
+      assert Auth.authorize(u, ws.id, :read) == :ok
+      assert Auth.authorize(u, ws.id, :write) == :ok
+      assert Auth.authorize(u, ws.id, :admin) == :ok
+
+      # …and it shows up in the user's own workspace list.
+      assert ws.slug in (Tenancy.list_workspaces_for(u) |> Enum.map(& &1.slug))
+    end
+  end
 end

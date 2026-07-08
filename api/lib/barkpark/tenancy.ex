@@ -9,6 +9,7 @@ defmodule Barkpark.Tenancy do
   import Ecto.Query, warn: false
 
   alias Barkpark.Repo
+  alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Document
@@ -236,8 +237,21 @@ defmodule Barkpark.Tenancy do
   workspace the caller has no membership row in can never appear — there is no
   unscoped fallback. A nil/unknown principal yields `[]`.
   """
-  @spec list_workspaces_for(ApiToken.t() | binary() | nil) :: [Workspace.t()]
+  @spec list_workspaces_for(User.t() | ApiToken.t() | binary() | nil) :: [Workspace.t()]
   def list_workspaces_for(%ApiToken{id: principal_id}), do: list_workspaces_for(principal_id)
+
+  # A User principal joins on `principal_type == "user"`. Kept SEPARATE from the
+  # raw-binary clause below (pinned to "api_token") so a user id can never match
+  # a token's membership grant — the discriminator IS the cross-kind isolation.
+  def list_workspaces_for(%User{id: principal_id}) when is_binary(principal_id) do
+    Repo.all(
+      from w in Workspace,
+        join: m in Membership,
+        on: m.workspace_id == w.id,
+        where: m.principal_id == ^principal_id and m.principal_type == "user",
+        order_by: w.slug
+    )
+  end
 
   def list_workspaces_for(principal_id) when is_binary(principal_id) do
     Repo.all(
@@ -309,18 +323,29 @@ defmodule Barkpark.Tenancy do
   `{:error, changeset}`. A duplicate workspace slug surfaces as a clean
   changeset error on the unique constraint.
   """
-  @spec create_workspace_with_owner(map(), ApiToken.t() | binary()) ::
+  @spec create_workspace_with_owner(map(), User.t() | ApiToken.t() | binary()) ::
           {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
   def create_workspace_with_owner(attrs, %ApiToken{id: principal_id}),
-    do: create_workspace_with_owner(attrs, principal_id)
+    do: do_create_workspace_with_owner(attrs, principal_id, "api_token")
 
-  def create_workspace_with_owner(attrs, principal_id) when is_binary(principal_id) do
+  # A User creator gets a `principal_type: "user"` owner-membership row, so
+  # `authorize(%User{}, workspace, …)` can see the grant — otherwise the creator
+  # would be locked out of the workspace they just made. Kept SEPARATE from the
+  # raw-binary head (pinned to "api_token"); a bare id carries no kind.
+  def create_workspace_with_owner(attrs, %User{id: principal_id}) when is_binary(principal_id),
+    do: do_create_workspace_with_owner(attrs, principal_id, "user")
+
+  def create_workspace_with_owner(attrs, principal_id) when is_binary(principal_id),
+    do: do_create_workspace_with_owner(attrs, principal_id, "api_token")
+
+  defp do_create_workspace_with_owner(attrs, principal_id, principal_type)
+       when is_binary(principal_id) and is_binary(principal_type) do
     ws_attrs = put_derived_slug(attrs)
 
     Repo.transaction(fn ->
       with {:ok, workspace} <- create_workspace(ws_attrs),
            {:ok, _membership} <-
-             TenancyAuth.create_membership(workspace.id, principal_id, "owner"),
+             TenancyAuth.create_membership(workspace.id, principal_id, "owner", principal_type),
            {:ok, project} <-
              create_project(workspace, %{
                slug: @default_project_slug,
