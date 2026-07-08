@@ -607,11 +607,18 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert Board.restage_plan(:in_progress, :done, nil, "studio:doey") == :refuse
     end
 
-    test "ready is a non-drop target, reopen is deferred, unclaimed->done + done->* refuse" do
+    test "the holder's in_progress -> open is a voluntary RELEASE (wave 17)" do
+      assert Board.restage_plan(:in_progress, :open, "studio:doey", "studio:doey") ==
+               {:release}
+
+      # a non-holder (or an unclaimed lease) never releases someone's work.
+      assert Board.restage_plan(:in_progress, :open, "studio:someone", "studio:doey") == :refuse
+      assert Board.restage_plan(:in_progress, :open, nil, "studio:doey") == :refuse
+    end
+
+    test "ready is a non-drop target, unclaimed->done + done->* refuse" do
       # -> ready (D3, derived column)
       assert Board.restage_plan(:open, :ready, nil, "studio:doey") == :refuse
-      # -> open (reopen deferred, D4)
-      assert Board.restage_plan(:in_progress, :open, "studio:doey", "studio:doey") == :refuse
       # unclaimed open -> done (must claim first)
       assert Board.restage_plan(:open, :done, nil, "studio:doey") == :refuse
       # done -> anything
@@ -665,6 +672,42 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       doc = Repo.get_by(Document, doc_id: "dr-wip")
       assert doc.content["lifecycle_status"] == "done"
+    end
+
+    test "dropping your own in_progress card on Open RELEASES it (wave 17 unclaim)",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-release", "Un-claim me by drag", ws.id,
+        lifecycle: "in_progress",
+        assignee: "studio:admin",
+        claim: %{"worker" => "studio:admin", "epoch" => 7}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      _ = render_hook(view, "restage", %{"doc_id" => "dr-release", "to_col" => "open"})
+
+      doc = Repo.get_by(Document, doc_id: "dr-release")
+      assert doc.content["lifecycle_status"] == "open"
+      assert get_in(doc.content, ["claim", "worker"]) == nil
+      assert get_in(doc.content, ["claim", "epoch"]) == 8
+      refute Map.has_key?(doc.content, "assignee")
+    end
+
+    test "dropping someone ELSE'S in_progress card on Open refuses — never steals the lease",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-keep", "Held elsewhere", ws.id,
+        lifecycle: "in_progress",
+        claim: %{"worker" => "studio:other", "epoch" => 3}
+      )
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-keep", "to_col" => "open"})
+
+      assert html =~ ~s(data-role="notice")
+      assert html =~ "only the holder can release"
+
+      doc = Repo.get_by(Document, doc_id: "dr-keep")
+      assert doc.content["lifecycle_status"] == "in_progress"
+      assert get_in(doc.content, ["claim", "worker"]) == "studio:other"
     end
 
     test "dropping your own in_progress card on Blocked parks it (lifecycle flips to blocked)",

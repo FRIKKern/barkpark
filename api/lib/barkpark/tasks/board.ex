@@ -515,6 +515,11 @@ defmodule Barkpark.Tasks.Board do
   def restage_plan(:in_progress, :blocked, holder, worker) when holder == worker,
     do: {:close, "blocked"}
 
+  # Dropping your own in-flight card back on Open is a voluntary UNCLAIM
+  # (wave 17): the fenced release primitive — never a raw reopen.
+  def restage_plan(:in_progress, :open, holder, worker) when holder == worker,
+    do: {:release}
+
   def restage_plan(_from, _to, _holder, _worker), do: :refuse
 
   # ── wave 4: group-by + filter (charter D13/D14/D15) ────────────────────────
