@@ -167,26 +167,53 @@ defmodule Barkpark.Tasks.Query do
   @agg_time_fields ~w(inserted_at updated_at closed_at)
   @agg_scan_cap 5000
 
+  # ── v2 measure vocabulary (closed whitelist) ────────────────────────────────
+  #
+  # A v2 aggregate can COUNT (v1, default) or reduce a whitelisted MEASURE with
+  # sum/avg/min/max. The measure vocabulary is closed EXACTLY like the groupBy
+  # dims: a token maps to a PURE extractor closure (mirroring `cat_keys/2`),
+  # NEVER a caller-supplied jsonb path — so a `query` can never point the reducer
+  # at an arbitrary field. Each entry is `{extractor, extremum_safe?}`; a measure
+  # is min/max-able ONLY when flagged `extremum_safe?` (min/max returns a real
+  # row's value even for a large bucket, so it stays opt-in per measure).
+  @agg_ops ~w(count sum avg min max)
+  @agg_measures %{"priority" => {&__MODULE__.measure_priority/1, true}}
+
+  # k-anonymity floor: a sum/avg/min/max cell (or total) folded over FEWER than
+  # this many rows is SUPPRESSED (emits nil, never 0 — a 0 would itself leak),
+  # because a tiny bucket's aggregate approximates the individual field values
+  # that row-level field-visibility would redact. `count` is EXEMPT (it reveals
+  # cardinality only, the v1 boundary).
+  @k_anon 5
+
   @doc """
   Resolve a data-viz block's aggregate `query` into a neutral count tally the
   PortableDoc data-viz shapers (`TaskResolver.shape/2`) turn into the ratified
   chart / heatmap / stat Attrs.
 
-  **v1 is COUNT-ONLY** — every cell / point / value is a COUNT of matching task
-  documents. There is no agg/field key; `count` reveals cardinality, never a
-  field value, so it stays inside the workspace boundary that field-visibility
-  redaction only enforces at the ROW level.
+  **v2 = count + sum/avg/min/max over a CLOSED measure whitelist.** Absent an
+  `agg` key (or `op:"count"`) every cell / point / value is a COUNT of matching
+  task documents — BYTE-IDENTICAL to v1. `count` reveals cardinality only, so it
+  stays inside the workspace boundary that field-visibility redaction enforces at
+  the ROW level. A measure op (`sum|avg|min|max`) reduces a whitelisted field's
+  values, but a measure over a tiny bucket approximates the individual values
+  redaction would hide — so measure cells (and the `total`) are k-anon
+  SUPPRESSED (`nil`, never 0) below `@k_anon` rows, the measure field must be
+  whitelisted (token→closure, never a caller path) AND readable to an anonymous
+  caller, and min/max is gated to `extremum_safe?` measures.
 
   `query` shape (mirrors the ratified contract):
 
       %{
-        "source"  => "tasks",                       # v1: tasks only
+        "source"  => "tasks",                       # v2: tasks only
         "filter"  => %{parent_id, labels, status, kind, dataset},  # reuses the
                                                     #   shared `maybe_filter_*`
         "groupBy" => dim | [rowDim, colDim],        # closed whitelist
         "over"    => %{"bucket" => day|week|month,
                        "on" => inserted_at|updated_at|closed_at,
-                       "last" => n}                  # optional time axis
+                       "last" => n},                 # optional time axis
+        "agg"     => %{"op" => count|sum|avg|min|max,
+                       "field" => <@agg_measures token>}  # absent ⇒ count (v1)
       }
 
   A groupBy element is either a categorical dim (`@agg_group_dims`) or a time
@@ -198,21 +225,141 @@ defmodule Barkpark.Tasks.Query do
   source. Tenancy stays fail-CLOSED via the SAME `Scope.scope_to_workspace/3`
   the row fetcher uses — a nil/foreign workspace yields an empty tally.
   """
-  def agg_for_query(query, scope \\ [])
+  def agg_for_query(query, scope \\ [], opts \\ [])
 
-  def agg_for_query(query, scope) when is_map(query) do
+  def agg_for_query(query, scope, opts) when is_map(query) do
     with "tasks" <- Map.get(query, "source", "tasks"),
          {:ok, dims} <- normalize_group_by(Map.get(query, "groupBy")),
-         {:ok, over} <- normalize_over(Map.get(query, "over")) do
+         {:ok, over} <- normalize_over(Map.get(query, "over")),
+         {:ok, agg} <-
+           normalize_agg(Map.get(query, "agg"), fn -> resolve_schema(query, scope, opts) end) do
       docs = agg_docs(filter_of(query), scope)
-      {:ok, tally_docs(docs, dims, over)}
+      {:ok, tally_docs(docs, dims, over, agg)}
     else
       {:error, _} = err -> err
       other -> {:error, {:bad_source, other}}
     end
   end
 
-  def agg_for_query(_query, _scope), do: {:error, :bad_query}
+  def agg_for_query(_query, _scope, _opts), do: {:error, :bad_query}
+
+  # ── v2 agg normalisation (op + measure whitelist + visibility cross-check) ───
+
+  # The `agg` spec is `%{"op" => count|sum|avg|min|max, "field" => <measure>}`.
+  # ABSENT (or op=count) ⇒ `{"count", nil}` ⇒ v1 count path, byte-identical.
+  # A non-count op must name a whitelisted measure; min/max additionally require
+  # the measure to be `extremum_safe?`; and — belt+suspenders — the measure's
+  # field must be READABLE to the resolving (anonymous, fail-closed) caller under
+  # the task schema, so a field the schema marks private/owner_only/readable_by
+  # is rejected even if it were added to `@agg_measures`. `schema_fn` is a thunk
+  # so the schema is loaded ONLY for a non-count op (count stays query-free).
+  defp normalize_agg(nil, _schema_fn), do: {:ok, {"count", nil}}
+
+  defp normalize_agg(%{} = agg, schema_fn) do
+    op = Map.get(agg, "op", "count")
+    field = Map.get(agg, "field")
+
+    case validate_measure(op, field) do
+      # count: no field, no schema load, no visibility check (v1 boundary).
+      {:ok, nil} ->
+        {:ok, {"count", nil}}
+
+      # a whitelisted, extremum-safe (if min/max) measure — now the belt+
+      # suspenders field-visibility cross-check against the resolving caller.
+      {:ok, extractor} ->
+        if measure_field_readable?(schema_fn.(), field) do
+          {:ok, {op, extractor}}
+        else
+          {:error, {:bad_measure, {:not_readable, field}}}
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp normalize_agg(other, _schema_fn), do: {:error, {:bad_measure, other}}
+
+  @doc false
+  # PURE op + measure whitelist gate (no schema, no DB — unit-testable with a
+  # custom `measures` map). `count` needs no field. A measure op must name a
+  # whitelisted field; `min`/`max` additionally require the measure to be flagged
+  # `extremum_safe?` (min/max returns a real row's value even for a k-large
+  # bucket, so it's opt-in per measure — a future sensitive measure defaults to
+  # sum/avg-only). Returns `{:ok, extractor | nil}` or `{:error, {:bad_measure,
+  # reason}}`.
+  def validate_measure(op, field, measures \\ @agg_measures)
+
+  def validate_measure("count", _field, _measures), do: {:ok, nil}
+
+  def validate_measure(op, _field, _measures) when op not in @agg_ops,
+    do: {:error, {:bad_measure, {:op, op}}}
+
+  def validate_measure(op, field, measures) do
+    case Map.get(measures, field) do
+      {extractor, extremum_safe?} ->
+        if op in ~w(min max) and not extremum_safe? do
+          {:error, {:bad_measure, {:not_extremum_safe, field}}}
+        else
+          {:ok, extractor}
+        end
+
+      _ ->
+        {:error, {:bad_measure, {:field, field}}}
+    end
+  end
+
+  # Field-visibility cross-check against the resolving caller: ANONYMOUS +
+  # fail-closed. A declared private / owner_only / readable_by field is denied.
+  defp measure_field_readable?(schema, field) do
+    Barkpark.Content.Envelope.field_readable?(
+      schema,
+      field,
+      Barkpark.Content.CallerContext.anonymous()
+    )
+  end
+
+  # Resolve the task schema for the visibility cross-check. A pre-loaded
+  # `:schema` (threaded from the paper render path, loaded ONCE) wins; otherwise
+  # a single indexed `Content.get_schema/3` (NOT cached — one Repo.one per
+  # non-count agg block) under the resolving dataset + tenancy scope.
+  defp resolve_schema(query, scope, opts) do
+    Keyword.get(opts, :schema) || load_task_schema(query, scope, opts)
+  end
+
+  defp load_task_schema(query, scope, opts) do
+    dataset = Keyword.get(opts, :dataset) || Map.get(filter_of(query), "dataset") || "production"
+
+    case Barkpark.Content.get_schema("task", dataset, scope) do
+      {:ok, schema} -> schema
+      _ -> nil
+    end
+  end
+
+  @doc false
+  # Pure measure extractor for `priority` — token→closure, mirroring `cat_keys/2`
+  # (never a caller-supplied path). Returns the numeric priority (0=highest..4)
+  # or nil when absent/non-numeric (a doc with no value simply doesn't
+  # contribute to the measure or its k-anon count). Public only so the closure
+  # capture in `@agg_measures` is unambiguous.
+  def measure_priority(doc) do
+    case content_get(doc, "priority") do
+      n when is_integer(n) ->
+        n
+
+      n when is_float(n) ->
+        n
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, ""} -> n
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
 
   defp filter_of(query) do
     case Map.get(query, "filter") do
@@ -309,7 +456,8 @@ defmodule Barkpark.Tasks.Query do
   # `{primary_key, secondary_key}` (`:__all__` when an axis is absent). The
   # secondary axis is dim2 (heatmap cols → `labels2`) OR the `over` buckets
   # (chart points / stat spark → `buckets`), never both.
-  def tally_docs(docs, dims, over) do
+  def tally_docs(docs, dims, over, agg \\ {"count", nil}) do
+    {op, extractor} = agg
     primary = Enum.at(dims, 0)
 
     secondary =
@@ -318,20 +466,31 @@ defmodule Barkpark.Tasks.Query do
         d2 -> d2
       end
 
+    # Per-cell accumulator is `{count, sum, min, max}` (see `bump/3`). `count` is
+    # the number of CONTRIBUTING rows — every doc for `count`, only docs with a
+    # non-nil measure for sum/avg/min/max — and gates k-anon suppression. A
+    # doc's measure is read ONCE (`doc_measure/3`); a `:skip` (nil measure) drops
+    # it from every axis, so it never inflates a bucket count it can't measure.
     {tally, p_labels, s_labels} =
       Enum.reduce(docs, {%{}, %{}, %{}}, fn doc, acc ->
-        pks = axis_keys(primary, doc)
-        sks = axis_keys(secondary, doc)
+        case doc_measure(op, extractor, doc) do
+          :skip ->
+            acc
 
-        Enum.reduce(pks, acc, fn {pk, ps}, acc1 ->
-          Enum.reduce(sks, acc1, fn {sk, ss}, {t, pl, sl} ->
-            {
-              Map.update(t, {pk, sk}, 1, &(&1 + 1)),
-              Map.put_new(pl, pk, ps),
-              Map.put_new(sl, sk, ss)
-            }
-          end)
-        end)
+          {:ok, val} ->
+            pks = axis_keys(primary, doc)
+            sks = axis_keys(secondary, doc)
+
+            Enum.reduce(pks, acc, fn {pk, ps}, acc1 ->
+              Enum.reduce(sks, acc1, fn {sk, ss}, {t, pl, sl} ->
+                {
+                  Map.update(t, {pk, sk}, bump(nil, op, val), &bump(&1, op, val)),
+                  Map.put_new(pl, pk, ps),
+                  Map.put_new(sl, sk, ss)
+                }
+              end)
+            end)
+        end
       end)
 
     {labels2, buckets} =
@@ -342,12 +501,69 @@ defmodule Barkpark.Tasks.Query do
       end
 
     %{
+      op: op,
       labels1: ordered_labels(p_labels),
       labels2: labels2,
       buckets: buckets,
-      total: length(docs),
-      tally: tally
+      total: total_value(op, extractor, docs),
+      tally: finalize_tally(op, tally)
     }
+  end
+
+  # One doc's contribution to a measure. `count` always contributes (value is
+  # unused — the count IS the value). A measure op contributes only its numeric
+  # extractor value; a nil/non-numeric measure `:skip`s the doc entirely.
+  defp doc_measure("count", _extractor, _doc), do: {:ok, nil}
+
+  defp doc_measure(_op, extractor, doc) do
+    case extractor.(doc) do
+      n when is_number(n) -> {:ok, n}
+      _ -> :skip
+    end
+  end
+
+  # Accumulate one contribution into a cell's `{count, sum, min, max}`.
+  defp bump(nil, "count", _val), do: {1, 0, nil, nil}
+  defp bump({c, s, mn, mx}, "count", _val), do: {c + 1, s, mn, mx}
+  defp bump(nil, _op, val), do: {1, val, val, val}
+  defp bump({c, s, mn, mx}, _op, val), do: {c + 1, s + val, min(mn, val), max(mx, val)}
+
+  # Finalise every cell to the scalar the shapers read. `count` cells stay
+  # integers (never suppressed). A sum/avg/min/max cell folded over < @k_anon
+  # rows is DROPPED (suppressed) — an absent cell reads as nil (never 0) for a
+  # measure op, so a suppressed cell emits no number.
+  defp finalize_tally(op, tally) do
+    Enum.reduce(tally, %{}, fn {key, acc}, out ->
+      case finalize_cell(op, acc) do
+        nil -> out
+        v -> Map.put(out, key, v)
+      end
+    end)
+  end
+
+  defp finalize_cell("count", {c, _s, _mn, _mx}), do: c
+  defp finalize_cell(_op, {c, _s, _mn, _mx}) when c < @k_anon, do: nil
+  defp finalize_cell("sum", {_c, s, _mn, _mx}), do: s
+  defp finalize_cell("avg", {c, s, _mn, _mx}), do: s / c
+  defp finalize_cell("min", {_c, _s, mn, _mx}), do: mn
+  defp finalize_cell("max", {_c, _s, _mn, mx}), do: mx
+
+  # The grand `total`: for `count` it stays `length(docs)` (v1 byte-identical);
+  # for a measure it folds ALL contributing docs ONCE (never per-cell, so a
+  # multi-label doc is counted once) and is k-anon suppressed (nil) below the
+  # floor or when no doc carries the measure.
+  defp total_value("count", _extractor, docs), do: length(docs)
+
+  defp total_value(op, extractor, docs) do
+    acc =
+      Enum.reduce(docs, nil, fn doc, tacc ->
+        case doc_measure(op, extractor, doc) do
+          :skip -> tacc
+          {:ok, val} -> bump(tacc, op, val)
+        end
+      end)
+
+    if acc, do: finalize_cell(op, acc), else: nil
   end
 
   # Distinct axis keys for one doc, each `{key_string, sort_term}`. `:__all__`

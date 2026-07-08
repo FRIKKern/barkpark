@@ -35,17 +35,35 @@ defmodule Barkpark.Tasks.AggQueryTest do
     %{scope_a: scope_a, scope_b: scope_b}
   end
 
-  defp register_task_schema!(scope) do
+  defp register_task_schema!(scope, opts \\ []) do
+    private_fields = Keyword.get(opts, :private_fields, [])
+
     for schema_def <- Tasks.schema_definitions(@dataset) do
       attrs =
         schema_def
         |> Map.from_struct()
         |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
         |> Map.new(fn {k, v} -> {to_string(k), v} end)
+        |> mark_private(private_fields)
 
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
   end
+
+  # Flag the named fields `private` in the schema's field list — the schema-side
+  # field-visibility marking `Envelope.field_readable?/3` reads.
+  defp mark_private(%{"name" => "task", "fields" => fields} = attrs, private)
+       when private != [] do
+    Map.put(
+      attrs,
+      "fields",
+      Enum.map(fields, fn f ->
+        if Map.get(f, "name") in private, do: Map.put(f, "private", true), else: f
+      end)
+    )
+  end
+
+  defp mark_private(attrs, _private), do: attrs
 
   defp mk_task!(scope, content) do
     doc_id = "t-#{System.unique_integer([:positive])}"
@@ -236,4 +254,171 @@ defmodule Barkpark.Tasks.AggQueryTest do
     # agg_fetch returns {:error, _} → block keeps its query, renderer degrades.
     assert [^block] = TaskResolver.resolve([block], no_rows(), agg_fetch(scope_a))
   end
+
+  # ── PROOF 5 (v2): measure whitelist + field-visibility cross-check ───────────
+
+  defp agg(op, field), do: %{"op" => op, "field" => field}
+
+  test "a measure over a NON-whitelisted field is rejected (no number leaks)", %{
+    scope_a: scope_a
+  } do
+    # Two tasks carry a priority; a naive `sum(content->>'x')` read would total
+    # them. The closed measure whitelist rejects the field up front — the reducer
+    # never touches it, so no aggregate is produced.
+    mk_task!(scope_a, %{"priority" => 2})
+    mk_task!(scope_a, %{"priority" => 3})
+
+    query = %{"source" => "tasks", "agg" => agg("sum", "not_a_measure")}
+
+    assert {:error, {:bad_measure, {:field, "not_a_measure"}}} =
+             TaskQuery.agg_for_query(query, scope_a, dataset: @dataset)
+
+    # And the block is left untouched — the renderer shows its dim placeholder,
+    # never a leaked number.
+    block = %{"type" => "stat", "id" => "s1", "query" => query}
+    assert [^block] = TaskResolver.resolve([block], no_rows(), agg_fetch_v2(scope_a))
+  end
+
+  test "a WHITELISTED measure whose field the schema marks PRIVATE is rejected", %{} do
+    # A workspace whose task schema flags `priority` PRIVATE. `priority` IS in
+    # @agg_measures, so the whitelist alone would allow it — the belt+suspenders
+    # field_readable? cross-check (anonymous, fail-closed) is what rejects it.
+    # Fail-before: without the cross-check, a whitelisted-but-private field's
+    # values would be summed.
+    ws = create_workspace!()
+    proj = create_project!(ws)
+    scope = [workspace_id: ws.id, project_id: proj.id]
+    register_task_schema!(scope, private_fields: ["priority"])
+
+    mk_task!(scope, %{"priority" => 2})
+    mk_task!(scope, %{"priority" => 3})
+
+    query = %{"source" => "tasks", "agg" => agg("sum", "priority")}
+
+    assert {:error, {:bad_measure, {:not_readable, "priority"}}} =
+             TaskQuery.agg_for_query(query, scope, dataset: @dataset)
+  end
+
+  # ── PROOF 6 (v2): k-anonymity suppression (nil, never 0 or the raw value) ────
+
+  test "a sub-k bucket is SUPPRESSED (nil); a k-large sibling shows a real sum", %{
+    scope_a: scope_a
+  } do
+    # `open` bucket: 5 tasks × priority 1 → sum 5 (count 5 ≥ k). `done` bucket:
+    # ONE task × priority 3 → count 1 < k → suppressed. Fail-before: without the
+    # k-anon floor the singleton bucket would return 3 — the raw row value.
+    for _ <- 1..5, do: mk_task!(scope_a, %{"lifecycle_status" => "open", "priority" => 1})
+    mk_task!(scope_a, %{"lifecycle_status" => "done", "priority" => 3})
+
+    query = %{
+      "source" => "tasks",
+      "groupBy" => "status",
+      "agg" => agg("sum", "priority")
+    }
+
+    {:ok, tally} = TaskQuery.agg_for_query(query, scope_a, dataset: @dataset)
+
+    assert Map.get(tally.tally, {"open", :__all__}) == 5
+    # Suppressed → absent from the finalized tally (reads as nil, never 0/3).
+    assert Map.get(tally.tally, {"done", :__all__}) == nil
+    refute Map.get(tally.tally, {"done", :__all__}) == 3
+
+    # Through the chart shaper the suppressed cell passes as nil, never coerced.
+    block = %{"type" => "chart", "id" => "c1", "query" => query}
+    [out] = TaskResolver.resolve([block], no_rows(), agg_fetch_v2(scope_a))
+    by_label = Map.new(out["series"], fn %{"label" => l, "points" => p} -> {l, p} end)
+    assert by_label["open"] == [5]
+    assert by_label["done"] == [nil]
+  end
+
+  test "count op is EXEMPT from suppression (a singleton bucket still counts)", %{
+    scope_a: scope_a
+  } do
+    mk_task!(scope_a, %{"lifecycle_status" => "done"})
+
+    {:ok, tally} =
+      TaskQuery.agg_for_query(
+        %{"source" => "tasks", "groupBy" => "status", "agg" => %{"op" => "count"}},
+        scope_a,
+        dataset: @dataset
+      )
+
+    assert Map.get(tally.tally, {"done", :__all__}) == 1
+
+    # And `agg:{op:count}` is byte-identical to no agg (v1 back-compat).
+    {:ok, v1} =
+      TaskQuery.agg_for_query(%{"source" => "tasks", "groupBy" => "status"}, scope_a)
+
+    assert Map.delete(tally, :op) == Map.delete(v1, :op)
+  end
+
+  # ── PROOF 7 (v2): tenancy — a measure inherits the SAME fail-closed scope ────
+
+  test "a SUM in workspace A excludes workspace B; nil scope suppresses", %{
+    scope_a: scope_a,
+    scope_b: scope_b
+  } do
+    # A: 5 × priority 1 → 5. B: 5 × priority 4 → 20. The WHERE clause is
+    # untouched from v1 — the measure just folds the SAME scoped rows.
+    for _ <- 1..5, do: mk_task!(scope_a, %{"priority" => 1})
+    for _ <- 1..5, do: mk_task!(scope_b, %{"priority" => 4})
+
+    query = %{"source" => "tasks", "agg" => agg("sum", "priority")}
+
+    {:ok, ta} = TaskQuery.agg_for_query(query, scope_a, dataset: @dataset)
+    assert ta.total == 5
+
+    {:ok, tb} = TaskQuery.agg_for_query(query, scope_b, dataset: @dataset)
+    assert tb.total == 20
+
+    # nil workspace → zero rows → measure total suppressed (nil, never 0).
+    {:ok, tnil} = TaskQuery.agg_for_query(query, [], dataset: @dataset)
+    assert tnil.total == nil
+  end
+
+  test "avg / min / max fold the scoped rows correctly", %{scope_a: scope_a} do
+    for p <- 0..4, do: mk_task!(scope_a, %{"priority" => p})
+
+    for {op, expect} <- [{"sum", 10}, {"avg", 2.0}, {"min", 0}, {"max", 4}] do
+      {:ok, t} =
+        TaskQuery.agg_for_query(
+          %{"source" => "tasks", "agg" => agg(op, "priority")},
+          scope_a,
+          dataset: @dataset
+        )
+
+      assert t.total == expect, "#{op} total should be #{inspect(expect)}"
+    end
+  end
+
+  # ── PROOF 8 (v2): min/max is gated to extremum_safe? measures ────────────────
+
+  test "min/max on a non-extremum-safe measure is rejected; sum/avg allowed" do
+    # A synthetic whitelist where the measure is NOT flagged extremum_safe. This
+    # is the guard a FUTURE sensitive measure relies on: it may be summed/avg'd
+    # but a min/max would surface a real row's value.
+    measures = %{"sensitive" => {fn _ -> 1 end, false}}
+
+    assert {:error, {:bad_measure, {:not_extremum_safe, "sensitive"}}} =
+             TaskQuery.validate_measure("min", "sensitive", measures)
+
+    assert {:error, {:bad_measure, {:not_extremum_safe, "sensitive"}}} =
+             TaskQuery.validate_measure("max", "sensitive", measures)
+
+    assert {:ok, _} = TaskQuery.validate_measure("sum", "sensitive", measures)
+    assert {:ok, _} = TaskQuery.validate_measure("avg", "sensitive", measures)
+
+    # The real default measure (`priority`) IS extremum-safe → min/max allowed.
+    assert {:ok, _} = TaskQuery.validate_measure("min", "priority")
+    assert {:ok, _} = TaskQuery.validate_measure("max", "priority")
+
+    # An unknown op / field is rejected distinctly (not as an extremum issue).
+    assert {:error, {:bad_measure, {:op, "median"}}} =
+             TaskQuery.validate_measure("median", "priority")
+
+    assert {:error, {:bad_measure, {:field, "ghost"}}} =
+             TaskQuery.validate_measure("sum", "ghost")
+  end
+
+  defp agg_fetch_v2(scope), do: fn q -> TaskQuery.agg_for_query(q, scope, dataset: @dataset) end
 end

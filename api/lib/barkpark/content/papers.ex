@@ -731,16 +731,23 @@ defmodule Barkpark.Content.Papers do
   blocks (unlike the embeds resolver's target→html map — task blocks carry
   their own snapshot, so the transform is in-place).
   """
-  @spec resolve_tasks_in_blocks(list(), keyword()) :: list()
-  def resolve_tasks_in_blocks(blocks, scope) when is_list(blocks) do
+  @spec resolve_tasks_in_blocks(list(), keyword(), String.t()) :: list()
+  def resolve_tasks_in_blocks(blocks, scope, dataset \\ @paper_default_dataset)
+
+  def resolve_tasks_in_blocks(blocks, scope, dataset) when is_list(blocks) do
+    # Thread the RESOLVING dataset so the aggregate's field-visibility
+    # cross-check loads the task schema under the same dataset+tenancy the rows
+    # come from. The schema is loaded lazily inside `agg_for_query` and ONLY for
+    # a non-count (sum/avg/min/max) block, so a count-only / rows-only paper pays
+    # no schema query.
     Barkpark.PortableDoc.TaskResolver.resolve(
       blocks,
       fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
-      fn query -> Barkpark.Tasks.Query.agg_for_query(query, scope) end
+      fn query -> Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: dataset) end
     )
   end
 
-  def resolve_tasks_in_blocks(blocks, _scope), do: blocks
+  def resolve_tasks_in_blocks(blocks, _scope, _dataset), do: blocks
 
   @doc """
   Pre-resolve every note-embed (`![[note]]`) target in a block list into the
