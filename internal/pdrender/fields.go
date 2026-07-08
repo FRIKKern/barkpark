@@ -12,6 +12,81 @@ import (
 // box: a bold label line (Theme.FieldLabel) followed by the value. All the
 // scalar field types funnel through fieldRow; field-color and field-reference
 // carry extra logic (a real swatch, an injected resolver).
+//
+// Standalone, a field is that two-line label/value pair. But a RUN of fields —
+// the common case (a doc's metadata) — reads far better as an ALIGNED
+// definition list: a dim label column and a value column, values lined up,
+// continuations indented. RenderDoc collapses consecutive field blocks into one
+// renderFieldGroup so the density-with-craft P9 bar holds for metadata too,
+// reusing each field's own value logic verbatim (see renderFieldGroup).
+
+// fieldGroupTypes are the block types RenderDoc gathers into an aligned
+// definition list when they appear consecutively. The field-* leaves plus the
+// composite/arrayOf/localizedText structured fields — every type whose renderer
+// emits a label line followed by its value.
+var fieldGroupTypes = map[string]bool{
+	"field-string": true, "field-slug": true, "field-text": true,
+	"field-boolean": true, "field-select": true, "field-datetime": true,
+	"field-color": true, "field-reference": true, "field-image": true,
+	"composite": true, "arrayOf": true, "localizedText": true,
+	"codelist": true, // label + resolved code→label; same definition-list shape
+}
+
+// isFieldGroupType reports whether a block joins an aligned field group.
+func isFieldGroupType(t string) bool { return fieldGroupTypes[t] }
+
+// renderFieldGroup lays a run of consecutive field blocks as an ALIGNED
+// definition list: a dim label column (width = the widest label, capped to
+// [8, min(24, width/2)]) and a value column that wraps in the remaining width,
+// with continuation lines indented to the value column. It reuses each field's
+// OWN value logic — the block is rendered at the value width and its label line
+// (line 0) dropped, so the swatch, select-option, resolver, boolean, datetime
+// and image behaviours are untouched; only the layout changes. A field with no
+// value renders label-only. This is the density fix for metadata runs that the
+// per-field two-line stack left ragged.
+func renderFieldGroup(r *Registry, blocks []Block, ctx RenderCtx) []string {
+	labels := make([]string, len(blocks))
+	labelW := 0
+	for i, b := range blocks {
+		l := sanitizeText(attrStr(b.Attrs, "label"))
+		labels[i] = l
+		if w := lipgloss.Width(l); w > labelW {
+			labelW = w
+		}
+	}
+	maxLabel := ctx.Width / 2
+	if maxLabel > 24 {
+		maxLabel = 24
+	}
+	if labelW > maxLabel {
+		labelW = maxLabel
+	}
+	if labelW < 8 {
+		labelW = 8
+	}
+	const gap = 2
+	valueW := clampWidth(ctx.Width - labelW - gap)
+	indent := strings.Repeat(" ", labelW+gap)
+
+	out := make([]string, 0, len(blocks)*2)
+	for i, b := range blocks {
+		full := r.Render(b, ctx.WithWidth(valueW))
+		labelCol := ctx.Theme.Dim.Render(padOrTruncate(labels[i], labelW))
+		var value []string
+		if len(full) > 1 {
+			value = full[1:] // drop the field's own label line; keep its value
+		}
+		if len(value) == 0 {
+			out = append(out, labelCol)
+			continue
+		}
+		out = append(out, labelCol+strings.Repeat(" ", gap)+value[0])
+		for _, vl := range value[1:] {
+			out = append(out, indent+vl)
+		}
+	}
+	return out
+}
 
 // fieldRow builds the two-line labelled box: bold label, then the value text,
 // wrapped to width. The shared shape for every scalar field-* type.
