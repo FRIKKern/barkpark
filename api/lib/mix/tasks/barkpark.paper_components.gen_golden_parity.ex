@@ -37,14 +37,15 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   equality, the TUI at an exact `glyph Label␣␣count` delimited-field match (a
   superstring rename fails on every leg).
 
+  COVERED since **bug-taskboard-drops-open-tasks**: the `task-board` input now
+  INCLUDES an `open` row and the Elixir View + Go pdrender both grew an `open`
+  column, so a populated `open` bucket realizes on every surface (the day-one
+  data-loss drop is fixed, not just filed). Empty-column policy (web keep-empty vs
+  View/TUI omit-empty) stays a SUPERSET difference this ⊆-projection does not police.
+
   NOT COVERED (known divergences — FILED, not fixed; this harness must never imply
   parity it does not hold):
 
-    * task-board `open`-task DROP — the Elixir 4-column omit-empty View drops
-      `open` tasks the web 5-column view keeps. A ⊆-projection structurally cannot
-      catch an omission, so the `task-board` input here OMITS `open`; owned by
-      **bug-taskboard-drops-open-tasks** (which carries the open-inclusive
-      cross-surface test that DOES catch it — a real data-loss bug found day one).
     * status/label PROSE differs (Elixir "in progress"/"cancelled" vs Go
       "progress"/"cancel"). The projection shares role + glyph, NOT meaning text;
       owned by **au-w5-status-prose-parity**. Board column LABELS are likewise
@@ -78,15 +79,19 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
 
   # ── the canonical component inputs ───────────────────────────────────────────
   #
-  # task-board: a snapshot whose statuses land in the four board columns the
-  # emitter draws (ready · progress · blocked · done); two `ready` rows pin the
-  # per-column ordering, `open`/`cancelled` are deliberately avoided so the SAME
-  # projection is realizable on all three surfaces (the emitter drops `open`, the
-  # web keeps an extra empty `open` column + a cancelled tally — both are supersets
-  # of this projection, which is the shared truth).
+  # task-board: a snapshot whose statuses land in the five board columns every
+  # emitter now draws (open · ready · progress · blocked · done); two `ready` rows
+  # pin the per-column ordering and a leading `open` row COVERS the open-inclusive
+  # parity that bug-taskboard-drops-open-tasks fixed — the Elixir View + Go
+  # pdrender both grew an `open` column so a populated `open` bucket is no longer
+  # dropped, matching the web reader's white-ladder set. `cancelled` is still
+  # avoided (the board folds it to a tally, never a column). Empty-column policy
+  # (web keep-empty vs View/TUI omit-empty) is a SUPERSET difference this
+  # ⊆-projection deliberately does not police.
   @task_board_input %{
     "type" => "task-board",
     "snapshot" => [
+      %{"title" => "Backlog groom", "status" => "open"},
       %{"title" => "Wire the harness", "status" => "ready", "priority" => "1"},
       %{"title" => "Render the board", "status" => "in_progress", "priority" => "0"},
       %{"title" => "Await review", "status" => "blocked"},
@@ -231,6 +236,7 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   # `Components.task_board_html/1`. The freshness test renders the real emitter and
   # asserts every column here is realized, so a column-order/label edit there reds.
   @board_columns [
+    {"open", "Open"},
     {"ready", "Ready"},
     {"progress", "In progress"},
     {"blocked", "Blocked"},

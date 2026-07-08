@@ -256,6 +256,26 @@ defmodule Barkpark.PortableDoc.Render.ComponentsBoardRoadmapTest do
     assert Components.task_board_html(nil) == ""
   end
 
+  # bug-taskboard-drops-open-tasks: the 4-column omit-empty board had NO `open`
+  # column, so `open` tasks were silently dropped (data loss — the reader could
+  # not see open work the web 5-column reader kept). FAIL-BEFORE / PASS-AFTER:
+  # this asserts a populated `open` bucket renders as its own column + card.
+  test "task-board renders open tasks in an Open column (no silent drop)" do
+    html =
+      Components.task_board_html(%{
+        "snapshot" => [
+          %{"title" => "Backlog groom", "status" => "open"},
+          %{"title" => "Wire the harness", "status" => "ready"}
+        ]
+      })
+
+    assert html =~ "bp-board__col--open"
+    assert html =~ ~s(<span class="bp-board__label">Open</span>)
+    assert html =~ "Backlog groom"
+    # the open card still carries the shared white-ladder glyph
+    assert html =~ ~s(<span class="bp-g bp-g--open">)
+  end
+
   test "roadmap draws status-coloured bars, clamps geometry, today marker + scale" do
     html =
       Components.roadmap_html(%{

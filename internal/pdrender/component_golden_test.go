@@ -36,12 +36,13 @@ import (
 //     field (single space before, 2+ spaces after) — a superstring rename
 //     (`Blocked`→`Blockedz`) or a prefix rename fails, matching the Elixir
 //     exact-span and web exact-equality legs.
+//   - COVERED since bug-taskboard-drops-open-tasks: the task-board fixture now
+//     INCLUDES an `open` row and the Elixir View + this Go pdrender both grew an
+//     `open` column, so a populated `open` bucket realizes on every surface (the
+//     drop is fixed, not just filed). Empty-column policy (web keep-empty vs
+//     View/TUI omit-empty) stays a SUPERSET difference the ⊆-projection does not
+//     police.
 //   - NOT COVERED (known divergences, FILED not fixed):
-//     (a) task-board `open`-task DROP — the Elixir 4-col omit-empty view drops
-//         `open` tasks the web 5-col view keeps. A ⊆-projection structurally
-//         cannot catch an omission, so the task-board fixture omits `open`;
-//         owned by bug-taskboard-drops-open-tasks (carries the open-inclusive
-//         cross-surface test).
 //     (b) status/label PROSE differs (Elixir "in progress"/"cancelled" vs Go
 //         "progress"/"cancel"). The projection shares role + glyph, NOT meaning
 //         text; owned by au-w5-status-prose-parity. Board column LABELS are

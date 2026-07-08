@@ -527,8 +527,13 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   @doc """
   Render a `task-board` block: a kanban of the snapshot, one column per
-  lifecycle bucket (ready · in_progress · blocked · done), each card carrying
-  title · priority · criteria. Empty columns are omitted.
+  lifecycle bucket (open · ready · in_progress · blocked · done), each card
+  carrying title · priority · criteria. Empty columns are omitted.
+
+  The `open` column mirrors the web reader's white-ladder column set
+  (`web/lib/task-board-columns.ts`) so a populated `open` bucket is NEVER
+  silently dropped — the omit-empty layout used to have no `open` column at all,
+  so `open` tasks vanished from the Studio/View board (bug-taskboard-drops-open-tasks).
   """
   def task_board_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()
@@ -542,6 +547,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         cols =
           [
+            {"open", "Open"},
             {"ready", "Ready"},
             {"progress", "In progress"},
             {"blocked", "Blocked"},
