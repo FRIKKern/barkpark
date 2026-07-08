@@ -618,4 +618,50 @@ defmodule Barkpark.PortableDoc.Render.CardsPipelineTest do
     assert Components.pipeline_html(nil) == ""
     assert Components.pipeline_html(%{"nodes" => [%{"title" => "<x>"}]}) =~ "&lt;x&gt;"
   end
+
+  # ── source coercion regression (au-w5-pipeline-source-parity) ────────────────
+  # The old `truthy/1` CONFLATED boolean true and a non-empty string — both flipped
+  # the accent and the string TEXT was swallowed, never rendered. These pin the
+  # ratified three-way coercion; #1 reds if reverted to `truthy(get(n,"source"))`.
+  test "pipeline source:\"text\" string RENDERS the provenance text (was swallowed by truthy)" do
+    html =
+      Components.pipeline_html(%{
+        "nodes" => [%{"title" => "Ingest", "source" => "queue.ex:42"}]
+      })
+
+    # the TEXT renders in the provenance line …
+    assert html =~ ~s(<div class="bp-pnode__src">queue.ex:42</div>)
+    # … and a string does NOT flip the boolean-only origin accent.
+    refute html =~ "bp-pnode--src"
+  end
+
+  test "pipeline source:true → origin accent, NO provenance line, no literal \"true\"" do
+    html = Components.pipeline_html(%{"nodes" => [%{"title" => "Ingest", "source" => true}]})
+    assert html =~ ~s(<div class="bp-pnode bp-pnode--src">)
+    refute html =~ "bp-pnode__src"
+    refute html =~ "true"
+  end
+
+  test "pipeline source:false / absent → NOTHING (no accent, no provenance line)" do
+    for src <- [%{"title" => "Ingest", "source" => false}, %{"title" => "Ingest"}] do
+      html = Components.pipeline_html(%{"nodes" => [src]})
+      refute html =~ "bp-pnode--src"
+      refute html =~ "bp-pnode__src"
+      refute html =~ "false"
+    end
+  end
+
+  test "stage source coercion mirrors the pipeline node (string→provenance, true→accent)" do
+    prov = Components.stage_html(%{"title" => "Ingest", "source" => "queue.ex:42"})
+    assert prov =~ ~s(<div class="bp-pnode__src">queue.ex:42</div>)
+    refute prov =~ "bp-pnode--src"
+
+    origin = Components.stage_html(%{"title" => "Ingest", "source" => true})
+    assert origin =~ ~s(<div class="bp-pnode bp-pnode--src">)
+    refute origin =~ "bp-pnode__src"
+
+    none = Components.stage_html(%{"title" => "Ingest", "source" => false})
+    refute none =~ "bp-pnode--src"
+    refute none =~ "bp-pnode__src"
+  end
 end

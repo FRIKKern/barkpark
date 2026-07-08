@@ -408,12 +408,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
             t = n |> get("title") |> stringish() |> escape_html()
             d = n |> get("detail") |> stringish() |> escape_html()
             f = n |> get("files") |> stringish() |> escape_html()
-            src = if truthy(get(n, "source")), do: " bp-pnode--src", else: ""
+            {src_class, src_html} = pnode_source(n)
             k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
             t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
             d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
             f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
-            ~s|<div class="bp-pnode#{src}">#{k_html}#{t_html}#{d_html}#{f_html}</div>|
+            ~s|<div class="bp-pnode#{src_class}">#{k_html}#{t_html}#{d_html}#{f_html}#{src_html}</div>|
           end)
           |> Enum.join(~s|<span class="bp-pipe__arr">→</span>|)
 
@@ -429,8 +429,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   per-node loop), so a stage carrying the same scalars renders byte-identically. The
   three text fields `kind`/`title`/`detail` read through `Slots.stage_field_text/2`
   (slots OR scalar — both yield the same PLAIN string); `files`/`source` are chrome
-  scalars (a `source`-truthy stage gets the `bp-pnode--src` accent, the SAME `truthy`
-  the pipeline uses). ADDITIVE: the legacy `pipeline` clause + `pipeline_html/1` are
+  scalars — `source` is coerced through the SAME `pnode_source/1` the pipeline uses
+  (boolean `true` → `bp-pnode--src` origin accent; non-empty string → a
+  `bp-pnode__src` provenance line; false/absent → nothing). ADDITIVE: the legacy
+  `pipeline` clause + `pipeline_html/1` are
   UNTOUCHED — this is a SEPARATE emitter. A stage is ONE cell, so there is no
   `bp-pipe-scroll`/`bp-pipe` wrapper (a `section` of stages composes the flow).
   """
@@ -439,12 +441,12 @@ defmodule Barkpark.PortableDoc.Render.Components do
     t = block |> Slots.stage_field_text("title") |> escape_html()
     d = block |> Slots.stage_field_text("detail") |> escape_html()
     f = block |> get("files") |> stringish() |> escape_html()
-    src = if truthy(get(block, "source")), do: " bp-pnode--src", else: ""
+    {src_class, src_html} = pnode_source(block)
     k_html = if k == "", do: "", else: ~s|<div class="bp-pnode__k">#{k}</div>|
     t_html = if t == "", do: "", else: ~s|<div class="bp-pnode__t">#{t}</div>|
     d_html = if d == "", do: "", else: ~s|<div class="bp-pnode__d">#{d}</div>|
     f_html = if f == "", do: "", else: ~s|<div class="bp-pnode__f">#{f}</div>|
-    ~s|<div class="bp-pnode#{src}">#{k_html}#{t_html}#{d_html}#{f_html}</div>|
+    ~s|<div class="bp-pnode#{src_class}">#{k_html}#{t_html}#{d_html}#{f_html}#{src_html}</div>|
   end
 
   def stage_html(_), do: ""
@@ -801,6 +803,27 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp truthy("true"), do: true
   defp truthy(1), do: true
   defp truthy(_), do: false
+
+  # A pnode's `source` coercion (RATIFIED): boolean `true` → an ORIGIN accent (the
+  # `bp-pnode--src` border, existing origin signal); a non-empty STRING → a
+  # provenance LINE rendering the text (`bp-pnode__src`); `false`/absent/"" →
+  # nothing. accent and provenance are MUTUALLY EXCLUSIVE (one field, coerced by
+  # type). The pipeline per-node loop AND stage_html BOTH read through this, so a
+  # stage carrying the same scalars byte-matches one legacy pipeline node.
+  # NOTE: distinct from `truthy/1` — that conflated `true` and a non-empty string
+  # (both → accent, the string text SWALLOWED); this distinguishes them.
+  defp pnode_source(node) do
+    case get(node, "source") do
+      true ->
+        {" bp-pnode--src", ""}
+
+      s when is_binary(s) and s != "" ->
+        {"", ~s|<div class="bp-pnode__src">#{escape_html(s)}</div>|}
+
+      _ ->
+        {"", ""}
+    end
+  end
 
   defp int_or(n, _) when is_integer(n), do: n
   defp int_or(_, d), do: d

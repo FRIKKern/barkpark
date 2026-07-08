@@ -230,6 +230,37 @@ func mustContain(t *testing.T, out, needle, what string) {
 	}
 }
 
+func mustNotContain(t *testing.T, out, needle, what string) {
+	t.Helper()
+	if strings.Contains(out, needle) {
+		t.Errorf("%s %q leaked into render:\n%s", what, needle, out)
+	}
+}
+
+// TestStageSourceCoercion is the bug-fix regression for au-w5-pipeline-source-parity:
+// the old code stringified `source` via attrStr→toStr, so a boolean `true` leaked a
+// literal "source: true" line and `false` leaked "source: false". The RATIFIED model
+// type-switches the RAW attr BEFORE stringifying: true → the ◆ ORIGIN eyebrow (never
+// a literal "true"); a non-empty string → the "source: <text>" provenance line;
+// false/absent → nothing. Each assertion reds if reverted to the toStr path.
+func TestStageSourceCoercion(t *testing.T) {
+	origin := renderComponent(t, json.RawMessage(`{"type":"stage","title":"Ingest","source":true}`))
+	mustContain(t, origin, "◆ ORIGIN", "stage source:true origin marker")
+	mustNotContain(t, origin, "source: true", "stage source:true literal leak")
+
+	prov := renderComponent(t, json.RawMessage(`{"type":"stage","title":"Ingest","source":"queue.ex:42"}`))
+	mustContain(t, prov, "source: queue.ex:42", "stage source:string provenance line")
+	mustNotContain(t, prov, "◆ ORIGIN", "stage source:string false origin")
+
+	no := renderComponent(t, json.RawMessage(`{"type":"stage","title":"Ingest","source":false}`))
+	mustNotContain(t, no, "source: false", "stage source:false literal leak")
+	mustNotContain(t, no, "◆ ORIGIN", "stage source:false origin")
+
+	absent := renderComponent(t, json.RawMessage(`{"type":"stage","title":"Ingest"}`))
+	mustNotContain(t, absent, "source:", "stage source-absent line")
+	mustNotContain(t, absent, "◆ ORIGIN", "stage source-absent origin")
+}
+
 // unmarshalExpected decodes the fixture's expected projection into dst.
 func unmarshalExpected(t *testing.T, fx componentGolden, dst any) {
 	t.Helper()
@@ -303,12 +334,20 @@ func TestCardGoldenParity(t *testing.T) {
 	// Authored slot render markers, DERIVED from the fixture input (never hand-typed).
 	var in struct {
 		Slots struct {
-			Media  []struct{ Alt string `json:"alt"` } `json:"media"`
-			Title  []struct{ Text string `json:"text"` } `json:"title"`
-			Body   []struct {
-				Content []struct{ Value string `json:"value"` } `json:"content"`
+			Media []struct {
+				Alt string `json:"alt"`
+			} `json:"media"`
+			Title []struct {
+				Text string `json:"text"`
+			} `json:"title"`
+			Body []struct {
+				Content []struct {
+					Value string `json:"value"`
+				} `json:"content"`
 			} `json:"body"`
-			Action []struct{ Label string `json:"label"` } `json:"action"`
+			Action []struct {
+				Label string `json:"label"`
+			} `json:"action"`
 		} `json:"slots"`
 	}
 	if err := json.Unmarshal(fx.Input, &in); err != nil {
@@ -347,29 +386,59 @@ func TestCardGoldenParity(t *testing.T) {
 func TestPipelineGoldenParity(t *testing.T) {
 	fx := loadComponentGolden(t, "pipeline")
 	var proj struct {
-		Nodes []struct{ Kind, Title, Detail string } `json:"nodes"`
+		Nodes []struct {
+			Kind, Title, Detail string
+			SourceRole          string `json:"source_role"`
+			SourceText          string `json:"source_text"`
+		} `json:"nodes"`
 	}
 	unmarshalExpected(t, fx, &proj)
 	if len(proj.Nodes) < 2 {
 		t.Fatalf("projection floor: %d nodes, want >= 2", len(proj.Nodes))
 	}
 	out := renderComponent(t, fx.Input)
+	sawOrigin, sawProvenance := false, false
 	for _, n := range proj.Nodes {
 		// The stage renderer UPPERCASES the kind kicker.
 		mustContain(t, out, strings.ToUpper(n.Kind), "pipeline node kind")
 		mustContain(t, out, n.Title, "pipeline node title")
 		mustContain(t, out, n.Detail, "pipeline node detail")
+
+		// source_role realizes: origin → the ◆ ORIGIN marker; provenance → the
+		// "source: <text>" line (a render tamper reds this leg).
+		switch n.SourceRole {
+		case "origin":
+			sawOrigin = true
+			mustContain(t, out, "◆ ORIGIN", "pipeline origin marker")
+		case "provenance":
+			sawProvenance = true
+			mustContain(t, out, "source: "+n.SourceText, "pipeline provenance line")
+		}
+	}
+	// non-vacuous: the fixture must exercise BOTH coercion branches.
+	if !sawOrigin || !sawProvenance {
+		t.Fatalf("fixture must carry an origin AND a provenance node (origin=%v provenance=%v)", sawOrigin, sawProvenance)
 	}
 }
 
 func TestStageGoldenParity(t *testing.T) {
 	fx := loadComponentGolden(t, "stage")
-	var proj struct{ Kind, Title, Detail string }
+	var proj struct {
+		Kind, Title, Detail string
+		SourceRole          string `json:"source_role"`
+		SourceText          string `json:"source_text"`
+	}
 	unmarshalExpected(t, fx, &proj)
 	out := renderComponent(t, fx.Input)
 	mustContain(t, out, strings.ToUpper(proj.Kind), "stage kind")
 	mustContain(t, out, proj.Title, "stage title")
 	mustContain(t, out, proj.Detail, "stage detail")
+	switch proj.SourceRole {
+	case "origin":
+		mustContain(t, out, "◆ ORIGIN", "stage origin marker")
+	case "provenance":
+		mustContain(t, out, "source: "+proj.SourceText, "stage provenance line")
+	}
 }
 
 func TestTaskDetailGoldenParity(t *testing.T) {

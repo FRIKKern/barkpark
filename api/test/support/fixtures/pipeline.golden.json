@@ -6,16 +6,22 @@
       {
         "detail": "reads the queue",
         "kind": "source",
+        "source_role": "origin",
+        "source_text": "",
         "title": "Ingest"
       },
       {
         "detail": "maps the rows",
         "kind": "emit",
+        "source_role": "provenance",
+        "source_text": "queue.ex:42",
         "title": "Transform"
       },
       {
         "detail": "writes the board",
         "kind": "gate",
+        "source_role": null,
+        "source_text": "",
         "title": "Publish"
       }
     ]
@@ -31,6 +37,7 @@
       {
         "detail": "maps the rows",
         "kind": "emit",
+        "source": "queue.ex:42",
         "title": "Transform"
       },
       {

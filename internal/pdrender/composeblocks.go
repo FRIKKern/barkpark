@@ -85,7 +85,6 @@ func (stageRenderer) Render(b Block, ctx RenderCtx) []string {
 	title := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "title")))
 	detail := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "detail")))
 	files := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "files")))
-	source := sanitizeText(strings.TrimSpace(attrStr(b.Attrs, "source")))
 
 	w := clampWidth(ctx.Width)
 	var out []string
@@ -101,8 +100,21 @@ func (stageRenderer) Render(b Block, ctx RenderCtx) []string {
 	if files != "" {
 		out = append(out, wrapLines(ctx.Theme.Dim.Render("files: "+files), w)...)
 	}
-	if source != "" {
-		out = append(out, wrapLines(ctx.Theme.Dim.Render("source: "+source), w)...)
+	// `source` coercion (RATIFIED): read the RAW attr and type-switch BEFORE any
+	// stringify (attrStr/toStr would render a bool `true`/`false` as the literal
+	// text "true"/"false" — the leak this fixes). A boolean `true` → an ORIGIN
+	// marker via the Eyebrow theme (◆ ORIGIN, the TUI-native origin signal, mirrors
+	// the reader's bp-pnode--src accent — no new token); a non-empty STRING → the
+	// provenance line rendering the text; `false`/absent → nothing.
+	switch raw := b.Attrs["source"].(type) {
+	case bool:
+		if raw {
+			out = append(out, wrapLines(ctx.Theme.Eyebrow.Render("◆ ORIGIN"), w)...)
+		}
+	case string:
+		if s := sanitizeText(strings.TrimSpace(raw)); s != "" {
+			out = append(out, wrapLines(ctx.Theme.Dim.Render("source: "+s), w)...)
+		}
 	}
 	if len(out) == 0 {
 		return []string{""}

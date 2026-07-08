@@ -402,24 +402,67 @@ test("web card RENDER realizes the MODEL-B projection (ordered slots · tone tin
   if (exp.media_fastpath) present(html, "<img", "card media image fast-path");
 });
 
-test("web pipeline RENDER realizes every node (kind · title · detail)", () => {
+test("web pipeline RENDER realizes every node (kind · title · detail · source_role)", () => {
   const input = loadFixture("pipeline").input;
   const html = renderHtml(input);
   const exp = loadFixture("pipeline").expected as PipelineProjection;
+  const roles = exp.nodes.map((n) => n.source_role);
+  // non-vacuous: the fixture must exercise BOTH coercion branches.
+  assert.ok(roles.includes("origin"), "fixture lost its source:true (origin) node");
+  assert.ok(
+    roles.includes("provenance"),
+    'fixture lost its source:"text" (provenance) node',
+  );
   for (const n of exp.nodes) {
     present(html, `>${n.kind}</p>`, `pipeline kind ${n.kind}`);
     present(html, `>${n.title}</p>`, `pipeline title ${n.title}`);
     present(html, `>${n.detail}</p>`, `pipeline detail ${n.detail}`);
+    // source_role realizes: origin → the accent border; provenance → the text line.
+    if (n.source_role === "origin") {
+      present(html, "border-sky-400", "pipeline origin accent border");
+    } else if (n.source_role === "provenance") {
+      present(html, `>${n.source_text}</p>`, `pipeline provenance ${n.source_text}`);
+    }
   }
 });
 
-test("web stage RENDER realizes kind · title · detail", () => {
+test("web stage RENDER realizes kind · title · detail · source_role", () => {
   const input = loadFixture("stage").input;
   const html = renderHtml(input);
   const exp = loadFixture("stage").expected as StageProjection;
   present(html, `>${exp.kind}</p>`, "stage kind");
   present(html, `>${exp.title}</p>`, "stage title");
   present(html, `>${exp.detail}</p>`, "stage detail");
+  if (exp.source_role === "origin") {
+    present(html, "border-sky-400", "stage origin accent border");
+  } else if (exp.source_role === "provenance") {
+    present(html, `>${exp.source_text}</p>`, "stage provenance line");
+  }
+});
+
+// ── source coercion regression (au-w5-pipeline-source-parity) ─────────────────
+// The web reader used to DROP `source` entirely (no accent, no line, any value).
+// These pin the ratified coercion RENDERS a signal; each reds if reverted to the drop.
+test("web stage source:true → origin accent renders (was dropped)", () => {
+  const html = renderHtml({ type: "stage", title: "Ingest", source: true });
+  present(html, "border-sky-400", "stage source:true accent");
+});
+
+test('web stage source:"text" → provenance line renders the text (was dropped)', () => {
+  const html = renderHtml({ type: "stage", title: "Ingest", source: "queue.ex:42" });
+  present(html, ">queue.ex:42</p>", "stage source:string provenance");
+  assert.ok(!html.includes("border-sky-400"), "a string must not flip the origin accent");
+});
+
+test("web stage source:false / absent → NO signal", () => {
+  for (const block of [
+    { type: "stage", title: "Ingest", source: false },
+    { type: "stage", title: "Ingest" },
+  ]) {
+    const html = renderHtml(block);
+    assert.ok(!html.includes("border-sky-400"), "source:false/absent must not accent");
+    assert.ok(!html.includes(">queue.ex</p>"), "no provenance line for false/absent");
+  }
 });
 
 test("web task-detail RENDER realizes title + timeline + criteria tally", () => {

@@ -233,19 +233,39 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     assert html =~ ~s|class="bp-button"|, "action button chrome missing"
   end
 
-  test "pipeline: the emitter realizes the projection (container · kind/title/detail per node)" do
+  test "pipeline: the emitter realizes the projection (container · kind/title/detail · source_role per node)" do
     fx = decode!(@api_dir, "pipeline")
     html = Components.pipeline_html(fx["input"])
     assert html =~ ~s|<div class="bp-pipe">|
+
+    # the fixture MUST exercise both coercion branches or the source graduation is
+    # vacuous — pin that an origin node AND a provenance node are present.
+    roles = fx["expected"]["nodes"] |> Enum.map(& &1["source_role"])
+    assert "origin" in roles, "fixture lost its source:true (origin) node"
+    assert "provenance" in roles, "fixture lost its source:\"text\" (provenance) node"
 
     for node <- fx["expected"]["nodes"] do
       assert html =~ ~s|<div class="bp-pnode__k">#{node["kind"]}</div>|, "kind #{node["kind"]}"
       assert html =~ ~s|<div class="bp-pnode__t">#{node["title"]}</div>|, "title #{node["title"]}"
       assert html =~ ~s|<div class="bp-pnode__d">#{node["detail"]}</div>|, "detail #{node["detail"]}"
+
+      # source_role realizes: origin → the accent-bordered pnode; provenance → the
+      # provenance line carrying the text (a render tamper reds this leg).
+      case node["source_role"] do
+        "origin" ->
+          assert html =~ ~s|<div class="bp-pnode bp-pnode--src">|, "origin accent for #{node["title"]}"
+
+        "provenance" ->
+          assert html =~ ~s|<div class="bp-pnode__src">#{node["source_text"]}</div>|,
+                 "provenance line #{node["source_text"]}"
+
+        _ ->
+          :ok
+      end
     end
   end
 
-  test "stage: the emitter realizes the projection (one pnode · kind/title/detail)" do
+  test "stage: the emitter realizes the projection (one pnode · kind/title/detail · source_role)" do
     fx = decode!(@api_dir, "stage")
     html = Components.stage_html(fx["input"])
     ex = fx["expected"]
@@ -253,6 +273,12 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     assert html =~ ~s|<div class="bp-pnode__k">#{ex["kind"]}</div>|
     assert html =~ ~s|<div class="bp-pnode__t">#{ex["title"]}</div>|
     assert html =~ ~s|<div class="bp-pnode__d">#{ex["detail"]}</div>|
+
+    case ex["source_role"] do
+      "origin" -> assert html =~ ~s|<div class="bp-pnode bp-pnode--src">|, "stage origin accent"
+      "provenance" -> assert html =~ ~s|<div class="bp-pnode__src">#{ex["source_text"]}</div>|
+      _ -> :ok
+    end
   end
 
   test "task-detail: the emitter realizes the projection (title · ordered sections · timeline · criteria)" do

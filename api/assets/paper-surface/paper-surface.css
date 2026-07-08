@@ -620,4 +620,5 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-pnode__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-surface .bp-pnode__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
 .bp-paper-surface .bp-pnode__f { font-family: var(--paper-font-mono); font-size: 0.66rem; color: var(--paper-ink-faint); margin-top: 8px; word-break: break-word; }
+.bp-paper-surface .bp-pnode__src { font-family: var(--paper-font-mono); font-size: 0.64rem; color: var(--paper-accent); margin-top: 8px; word-break: break-word; }
 .bp-paper-surface .bp-pipe__arr { display: flex; align-items: center; color: var(--paper-ink-faint); font-size: 1.1rem; flex: none; }
