@@ -5,6 +5,17 @@
       {
         "cards": [
           {
+            "title": "Backlog groom"
+          }
+        ],
+        "count": 1,
+        "glyph_role": "open",
+        "label": "Open",
+        "role": "open"
+      },
+      {
+        "cards": [
+          {
             "title": "Wire the harness"
           },
           {
@@ -54,6 +65,10 @@
   },
   "input": {
     "snapshot": [
+      {
+        "status": "open",
+        "title": "Backlog groom"
+      },
       {
         "priority": "1",
         "status": "ready",

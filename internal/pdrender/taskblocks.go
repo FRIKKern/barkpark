@@ -431,7 +431,9 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 
 // ── task-board ───────────────────────────────────────────────────────────────
 // {snapshot: [row]}. Group rows by roleForStatus(status) into the FIXED column
-// order ready · progress · blocked · done (empty columns omitted). Where every
+// order open · ready · progress · blocked · done (empty columns omitted). The
+// `open` lane mirrors the web reader's white-ladder column set so a populated
+// `open` bucket is never silently dropped (bug-taskboard-drops-open-tasks). Where every
 // lane clears MinWidth the lanes draw SIDE-BY-SIDE as bordered columns (the P9
 // standard — the internal/taskboard lane look, ported into pdrender's
 // import-disciplined world via joinColumns): a role-tinted rounded box per lane
@@ -442,6 +444,7 @@ func detailLabels(t map[string]any, ctx RenderCtx, cw int) []string {
 type taskBoardRenderer struct{}
 
 var boardColumns = []struct{ role, label string }{
+	{"open", "Open"},
 	{"ready", "Ready"},
 	{"progress", "In progress"},
 	{"blocked", "Blocked"},

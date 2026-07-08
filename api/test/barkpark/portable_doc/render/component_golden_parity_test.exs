@@ -20,10 +20,12 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   COVERAGE (honest scope — subset-parity, projection ⊆ native): for every
   column/row PRESENT in the projection, all three surfaces agree on label + count
   + ordered card titles + glyph-role (this leg checks the View HTML at exact
-  span). NOT COVERED, FILED not fixed: (a) task-board `open`-task DROP — the
-  4-column omit-empty View drops `open` tasks the web 5-column view keeps; a
-  ⊆-projection cannot catch an omission, so the fixture input omits `open`; owned
-  by bug-taskboard-drops-open-tasks. (b) status/label PROSE ("in progress" vs
+  span). COVERED since bug-taskboard-drops-open-tasks: the task-board fixture now
+  INCLUDES an `open` row and the View + Go pdrender both grew an `open` column, so
+  a populated `open` bucket realizes on every surface (the drop is fixed, not just
+  filed). Empty-column policy (web keep-empty vs View/TUI omit-empty) stays a
+  SUPERSET difference this ⊆-projection deliberately does not police. NOT COVERED,
+  FILED not fixed: status/label PROSE ("in progress" vs
   "progress"); the projection shares role + glyph, not meaning text; owned by
   au-w5-status-prose-parity (which also owns the "board labels are two copies that
   agree, not one manifest source" gap). The harness never implies parity it does
