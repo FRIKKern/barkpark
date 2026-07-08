@@ -56,13 +56,22 @@ func runTaskFrontier(out *writer, g globals, ctx manifest.Context, tail []string
 	// D65 scorer boosts against. Reuse the board's derivation rather than
 	// re-deriving "what is running" here.
 	board := taskboard.BuildBoard(snap, taskboard.RepoContext{}, now)
+
+	// Slice-2 (df-graph-crossdep): enrich the frontier with REAL cross-root
+	// block edges fetched from the graph API — OUTSIDE the pure Frontier model.
+	// The fetch is guarded (zero graph.show calls unless the ready set spans ≥2
+	// roots) and best-effort (a fetch error just leaves the frontier at its
+	// slice-1 precision).
+	opts.CrossEdges = fetchCrossEdges(client, snap)
+
 	picks := taskboard.Frontier(snap, details, board.Now, now, opts)
 
-	// The honest capacity is the FULL frontier (unbounded, all classes) — the
-	// same number the TUI prints — regardless of a --max display cap or a
-	// --proven-only filter. Compute it once for the summary line.
-	capacity := board.IndependentReady
-	proven, unproven := frontierTally(taskboard.Frontier(snap, details, board.Now, now, taskboard.FrontierOpts{}))
+	// The honest capacity is the FULL frontier (unbounded, all classes) on the
+	// SAME enriched edge set — regardless of a --max display cap or a
+	// --proven-only filter. With no cross edges this equals board.IndependentReady.
+	full := taskboard.Frontier(snap, details, board.Now, now, taskboard.FrontierOpts{CrossEdges: opts.CrossEdges})
+	capacity := len(full)
+	proven, unproven := frontierTally(full)
 
 	if out.machineOut() {
 		return emitFrontierJSON(out, picks, capacity, proven, unproven)
@@ -100,6 +109,54 @@ func parseFrontierFlags(tail []string) (taskboard.FrontierOpts, error) {
 		}
 	}
 	return opts, nil
+}
+
+// graphShower is the one method fetchCrossEdges needs — an interface so the
+// zero-fetch guard is unit-testable with a call-counting fake (no network).
+// *apiclient.Client satisfies it.
+type graphShower interface {
+	GraphShow(id string) (*apiclient.GraphResult, error)
+}
+
+// fetchCrossEdges enriches the dispatch frontier with REAL cross-root `blocks`
+// edges (df-graph-crossdep). The ZERO-FETCH GUARD: it makes NO GraphShow calls
+// unless the ready set spans ≥2 roots — a single-root ready set can carry no
+// cross-ROOT dependency, so there is nothing to fetch. When it does fetch, it
+// pulls graph.show once per candidate root, keeps the `blocks` edges (resolving
+// each endpoint from node-id space into doc_id space), and folds them into the
+// FrontierOpts.CrossEdges shape via taskboard.CrossRootBlockEdges (which drops
+// same-root and non-candidate edges). Best-effort: a per-root fetch error is
+// skipped, never fatal — the frontier simply keeps its slice-1 precision.
+func fetchCrossEdges(gs graphShower, snap taskboard.Snapshot) map[string][]string {
+	roots := taskboard.ReadyRootSpan(snap)
+	if len(roots) < 2 {
+		return nil // no cross-root dependency possible → zero graph.show calls
+	}
+	var edges []taskboard.GraphEdge
+	for _, root := range roots {
+		res, err := gs.GraphShow(root)
+		if err != nil || res == nil {
+			continue // best-effort — a missing root just under-enriches
+		}
+		id2doc := make(map[string]string, len(res.Nodes))
+		for _, n := range res.Nodes {
+			id2doc[n.ID] = n.DocID
+		}
+		for _, e := range res.Edges {
+			if e.Kind != "blocks" {
+				continue
+			}
+			from, to := e.FromID, e.ToID
+			if d := id2doc[from]; d != "" {
+				from = d
+			}
+			if d := id2doc[to]; d != "" {
+				to = d
+			}
+			edges = append(edges, taskboard.GraphEdge{From: from, To: to})
+		}
+	}
+	return taskboard.CrossRootBlockEdges(snap, edges)
 }
 
 // frontierTally counts proven (isolated) vs the metadata-thin remainder across

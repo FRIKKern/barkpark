@@ -64,27 +64,34 @@ func TestInterferesTruthTable(t *testing.T) {
 	cli := areasOf(Task{Labels: []string{"area:cli"}})
 	none := areasOf(Task{})
 
+	// A real cross-root block edge between bareIDs "a" and "b" (slice-2).
+	blockAB := buildCrossAdj(map[string][]string{"a": {"b"}})
+
 	cases := []struct {
 		name     string
 		ai, bi   areaInfo
 		nkA, nkB string
+		cross    crossAdj
 		want     interfereTier
 	}{
-		{"area overlap → HARD", studio, studioApi, "proj:x", "proj:y", tierHard},
-		{"area disjoint → NONE", studio, cli, "proj:x", "proj:y", tierNone},
-		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, "root:e", "root:e", tierNone},
-		{"one area-less, same nbhd → HARD", studio, none, "root:e", "root:e", tierHard},
-		{"one area-less, diff nbhd → UNKNOWN", studio, none, "proj:x", "proj:y", tierUnknown},
-		{"both area-less, same nbhd → HARD", none, none, "root:e", "root:e", tierHard},
-		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, "proj:x", "proj:y", tierUnknown},
+		{"area overlap → HARD", studio, studioApi, "proj:x", "proj:y", nil, tierHard},
+		{"area disjoint → NONE", studio, cli, "proj:x", "proj:y", nil, tierNone},
+		{"area disjoint same nbhd → NONE (intra-epic parallel)", studio, cli, "root:e", "root:e", nil, tierNone},
+		{"one area-less, same nbhd → HARD", studio, none, "root:e", "root:e", nil, tierHard},
+		{"one area-less, diff nbhd → UNKNOWN", studio, none, "proj:x", "proj:y", nil, tierUnknown},
+		{"both area-less, same nbhd → HARD", none, none, "root:e", "root:e", nil, tierHard},
+		{"both area-less, diff nbhd → UNKNOWN (strangers)", none, none, "proj:x", "proj:y", nil, tierUnknown},
+		// slice-2: a cross-root block edge overrides even disjoint proven areas.
+		{"cross edge overrides disjoint areas → HARD", studio, cli, "proj:x", "proj:y", blockAB, tierHard},
+		{"cross edge overrides area-less diff nbhd → HARD", none, none, "proj:x", "proj:y", blockAB, tierHard},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := interferes(c.ai, c.bi, c.nkA, c.nkB); got != c.want {
+			if got := interferes(c.ai, c.bi, c.nkA, c.nkB, "a", "b", c.cross); got != c.want {
 				t.Errorf("interferes = %v, want %v", got, c.want)
 			}
 			// symmetry — the predicate must not depend on argument order
-			if got := interferes(c.bi, c.ai, c.nkB, c.nkA); got != c.want {
+			if got := interferes(c.bi, c.ai, c.nkB, c.nkA, "b", "a", c.cross); got != c.want {
 				t.Errorf("interferes (swapped) = %v, want %v", got, c.want)
 			}
 		})
@@ -299,6 +306,113 @@ func TestFrontierMaxAndProvenOnly(t *testing.T) {
 	}
 	if proven[0].Risk != RiskIsolated {
 		t.Errorf("proven risk = %s, want isolated", proven[0].Risk)
+	}
+}
+
+// TestFrontierCrossRootBlockEdge — slice-2 (df-graph-crossdep): a REAL cross-
+// root `blocks` edge passed in via FrontierOpts.CrossEdges makes two otherwise-
+// INDEPENDENT tasks (different roots, disjoint proven areas) INTERFERE, so only
+// one is admitted. With empty CrossEdges the pair parallelizes — the regression
+// guard that slice-1 behavior is unchanged.
+func TestFrontierCrossRootBlockEdge(t *testing.T) {
+	tasks := []Task{
+		{DocID: "r1", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "r2", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "a", Title: "studio bit", ParentID: "r1", Lifecycle: lifeReady, Priority: "0", Labels: []string{"proj:one", "area:studio"}},
+		{DocID: "b", Title: "cli bit", ParentID: "r2", Lifecycle: lifeReady, Priority: "3", Labels: []string{"proj:two", "area:cli"}},
+	}
+
+	// Baseline (empty CrossEdges): disjoint areas across two roots → BOTH admit.
+	base := Frontier(Snapshot{Tasks: tasks}, nil, nil, refNow, FrontierOpts{})
+	if len(base) != 2 {
+		t.Fatalf("baseline (empty CrossEdges) = %d picks, want 2 — slice-1 regression", len(base))
+	}
+
+	// A real cross-root block edge a↔b collapses them to one pick.
+	opts := FrontierOpts{CrossEdges: map[string][]string{"a": {"b"}}}
+	picks := Frontier(Snapshot{Tasks: tasks}, nil, nil, refNow, opts)
+	if len(picks) != 1 {
+		t.Fatalf("with cross edge = %d picks, want 1 (the block edge interferes)", len(picks))
+	}
+	if picks[0].Task.DocID != "a" {
+		t.Errorf("winner = %q, want a (P0 beats P3)", picks[0].Task.DocID)
+	}
+	if len(picks[0].Displaced) != 1 || picks[0].Displaced[0].DocID != "b" {
+		t.Fatalf("displaced = %+v, want [b]", picks[0].Displaced)
+	}
+	if got := picks[0].Displaced[0].Reason; got != "blocks edge a" {
+		t.Errorf("displaced reason = %q, want %q", got, "blocks edge a")
+	}
+}
+
+// TestFrontierCrossEdgeUndirected — the edge is undirected: supplying it as
+// b→a interferes the same pair as a→b.
+func TestFrontierCrossEdgeUndirected(t *testing.T) {
+	tasks := []Task{
+		{DocID: "r1", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "r2", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "a", ParentID: "r1", Lifecycle: lifeReady, Priority: "0", Labels: []string{"proj:one", "area:studio"}},
+		{DocID: "b", ParentID: "r2", Lifecycle: lifeReady, Priority: "3", Labels: []string{"proj:two", "area:cli"}},
+	}
+	picks := Frontier(Snapshot{Tasks: tasks}, nil, nil, refNow, FrontierOpts{CrossEdges: map[string][]string{"b": {"a"}}})
+	if len(picks) != 1 {
+		t.Fatalf("with b→a edge = %d picks, want 1 (undirected)", len(picks))
+	}
+}
+
+// TestReadyRootSpanGuard — the zero-fetch guard: a single-root ready set spans
+// <2 roots (so the CLI makes zero graph.show calls); a multi-root ready set
+// spans exactly its distinct roots.
+func TestReadyRootSpanGuard(t *testing.T) {
+	oneRoot := []Task{
+		{DocID: "r1", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "a", ParentID: "r1", Lifecycle: lifeReady, Priority: "1"},
+		{DocID: "b", ParentID: "r1", Lifecycle: lifeReady, Priority: "2"},
+	}
+	if got := ReadyRootSpan(Snapshot{Tasks: oneRoot}); len(got) != 1 {
+		t.Errorf("single-root span = %v, want len 1 (< 2 ⇒ zero graph.show calls)", got)
+	}
+	twoRoots := []Task{
+		{DocID: "r1", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "r2", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "a", ParentID: "r1", Lifecycle: lifeReady, Priority: "1"},
+		{DocID: "c", ParentID: "r2", Lifecycle: lifeReady, Priority: "1"},
+	}
+	if got := ReadyRootSpan(Snapshot{Tasks: twoRoots}); len(got) != 2 {
+		t.Errorf("two-root span = %v, want len 2", got)
+	}
+}
+
+// TestCrossRootBlockEdgesFold — the fold keeps only cross-root edges between
+// ready candidates, drops same-root and non-candidate edges, and is symmetric.
+func TestCrossRootBlockEdgesFold(t *testing.T) {
+	tasks := []Task{
+		{DocID: "r1", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "r2", Kind: kindGoal, Lifecycle: lifeOpen},
+		{DocID: "a", ParentID: "r1", Lifecycle: lifeReady, Priority: "1"},
+		{DocID: "a2", ParentID: "r1", Lifecycle: lifeReady, Priority: "1"}, // same root as a
+		{DocID: "b", ParentID: "r2", Lifecycle: lifeReady, Priority: "1"},
+		{DocID: "done", ParentID: "r2", Lifecycle: lifeOpen}, // not ready
+	}
+	edges := []GraphEdge{
+		{From: "a", To: "b"},     // cross-root, both ready → KEEP
+		{From: "a", To: "a2"},    // same root → drop
+		{From: "b", To: "done"},  // endpoint not ready → drop
+		{From: "a", To: "ghost"}, // endpoint not a candidate → drop
+	}
+	got := CrossRootBlockEdges(Snapshot{Tasks: tasks}, edges)
+	if len(got) != 2 { // symmetric: a↔b appears under both keys
+		t.Fatalf("fold = %+v, want 2 keys (a and b)", got)
+	}
+	if len(got["a"]) != 1 || got["a"][0] != "b" {
+		t.Errorf("got[a] = %v, want [b]", got["a"])
+	}
+	if len(got["b"]) != 1 || got["b"][0] != "a" {
+		t.Errorf("got[b] = %v, want [a]", got["b"])
+	}
+	// No qualifying edge ⇒ nil (slice-1 behavior).
+	if CrossRootBlockEdges(Snapshot{Tasks: tasks}, []GraphEdge{{From: "a", To: "a2"}}) != nil {
+		t.Errorf("same-root-only fold should be nil")
 	}
 }
 

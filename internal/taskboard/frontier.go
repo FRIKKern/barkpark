@@ -19,11 +19,18 @@ package taskboard
 // `unproven` risk class (§4 of the design) — a stranger pair with no `area:`
 // label is dispatched but FLAGGED, never silently upgraded to "safe".
 //
-// Slice 1 (this file): the pure predicate + greedy MWIS over ready tasks. It
-// deliberately does NOT consult `graph.show` for cross-neighborhood block
-// edges — the design (§1a) verified every block edge in the live corpus is
-// WITHIN a root tree, which the neighborhood key already merges to one pick.
-// Cross-root block-edge precision is the slice-2 enrichment.
+// Slice 1: the pure predicate + greedy MWIS over ready tasks, with NO graph I/O.
+//
+// Slice 2 (df-graph-crossdep): cross-root block-edge PRECISION. The function
+// stays PURE — it never calls `graph.show`. Instead the caller fetches the
+// real cross-root `blocks` edges from the graph API OUTSIDE this function and
+// folds them into FrontierOpts.CrossEdges. `interferes` then consults that
+// edge set and returns tierHard for any candidate pair joined by a real block
+// edge, overriding the counts-only neighborhood proxy. A cross-root block edge
+// is the hardest signal there is: the two tasks have a genuine dependency, so
+// they must never both be dispatched — regardless of disjoint `area:` surfaces
+// that would otherwise clear them to run in parallel. Empty/nil CrossEdges ⇒
+// exact slice-1 behavior (the board path, and any caller that supplies none).
 
 import (
 	"sort"
@@ -43,6 +50,14 @@ type FrontierOpts struct {
 	// labels. Everything metadata-thin is withheld. This is the "safe set" the
 	// table footer points an orchestrator at.
 	ProvenOnly bool
+	// CrossEdges carries the REAL cross-root `blocks` edges (slice-2), fetched
+	// from the graph API OUTSIDE this pure function and passed in. It is keyed by
+	// bareID → the bareIDs it shares a `blocks` dependency with across root
+	// trees. The direction of the edge is irrelevant to interference, so the
+	// map need not be symmetric — Frontier symmetrises it internally. An edge
+	// here forces tierHard interference between the two candidates, overriding
+	// the counts-only neighborhood proxy. Empty/nil ⇒ exact slice-1 behavior.
+	CrossEdges map[string][]string
 }
 
 // RiskClass stamps each pick with how safe it is to batch (§4 of the design).
@@ -250,11 +265,62 @@ const (
 	tierHard                         // never dispatch both: same neighborhood or overlapping areas
 )
 
+// crossAdj is the symmetric adjacency built from FrontierOpts.CrossEdges: a
+// bareID maps to the set of bareIDs it shares a real cross-root `blocks` edge
+// with. Nil (no edges supplied) short-circuits every lookup to false, so the
+// slice-1 path pays nothing.
+type crossAdj map[string]map[string]bool
+
+// buildCrossAdj symmetrises the pass-in edge map into a set-of-sets. A nil or
+// empty input yields nil, which linked/has() treat as "no cross edges" — the
+// regression-safe default.
+func buildCrossAdj(edges map[string][]string) crossAdj {
+	if len(edges) == 0 {
+		return nil
+	}
+	adj := make(crossAdj, len(edges))
+	link := func(a, b string) {
+		if a == "" || b == "" || a == b {
+			return
+		}
+		if adj[a] == nil {
+			adj[a] = map[string]bool{}
+		}
+		adj[a][b] = true
+	}
+	for a, bs := range edges {
+		for _, b := range bs {
+			link(a, b)
+			link(b, a) // interference is undirected
+		}
+	}
+	if len(adj) == 0 {
+		return nil
+	}
+	return adj
+}
+
+// has reports whether a and b are joined by a real cross-root block edge.
+func (c crossAdj) has(a, b string) bool {
+	if c == nil {
+		return false
+	}
+	n, ok := c[a]
+	return ok && n[b]
+}
+
 // interferes is the careful core (§3.1). It NEVER returns tierNone/tierUnknown
-// for a pair that shares a HARD signal. Slice 1 has no cross-neighborhood
-// block-edge check (verified unnecessary on the corpus — every block edge is
-// within a root tree the neighborhood key already merges).
-func interferes(ai, bi areaInfo, nkA, nkB string) interfereTier {
+// for a pair that shares a HARD signal. Slice 2 (df-graph-crossdep) adds the
+// cross-root block-edge consult FIRST: a real `blocks` dependency between two
+// candidates (idA, idB are bareIDs) is the hardest signal — it overrides even
+// the precise area-disjoint test that would otherwise clear two tasks with
+// non-overlapping surfaces to run in parallel. With a nil/empty edge set the
+// consult is a no-op and behavior is identical to slice 1.
+func interferes(ai, bi areaInfo, nkA, nkB, idA, idB string, cross crossAdj) interfereTier {
+	// A real cross-root block edge trumps everything below.
+	if cross.has(idA, idB) {
+		return tierHard
+	}
 	if !ai.empty() && !bi.empty() {
 		// both self-declare a surface (authored or derived) — PRECISE test
 		if areasOverlap(ai, bi) {
@@ -301,6 +367,9 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 	evAt := buildEvAt(s.Events)
 	resumables := computeResumables(s, byBare)
 	contRoots := continuityRoots(byBare, now, resumables)
+	// Slice-2 seam: the real cross-root block edges the caller fetched from the
+	// graph API (nil on the board path → zero cost).
+	cross := buildCrossAdj(opts.CrossEdges)
 
 	// Candidates = the ready pool (the SAME set the old independentReady counted
 	// roots over), refined by the interference model below.
@@ -338,23 +407,30 @@ func Frontier(s Snapshot, details DetailIndex, now []Task, nowT time.Time, opts 
 	// suppressed count (→ RiskNeighborhood).
 	var picks []*admitted
 	for _, c := range cands {
+		cID := bareID(c.t.DocID)
 		winner := -1
 		for k := range picks {
-			if interferes(c.ai, picks[k].ai, c.nk, picks[k].pick.NeighborhoodKey) == tierHard {
+			wID := bareID(picks[k].pick.Task.DocID)
+			if interferes(c.ai, picks[k].ai, c.nk, picks[k].pick.NeighborhoodKey, cID, wID, cross) == tierHard {
 				winner = k // first hard conflict owns the displacement
 				break
 			}
 		}
 		if winner >= 0 {
 			w := picks[winner]
-			// The hard conflict is EITHER an area overlap (both self-declare a
-			// surface) OR a same-neighborhood collision — interferes() only
-			// reaches the neighborhood branch when ≥1 side is area-less, so the
-			// two cases are mutually exclusive.
-			reason := "same neighborhood " + c.nk
-			if !c.ai.empty() && !w.ai.empty() {
+			wID := bareID(w.pick.Task.DocID)
+			// The hard conflict is a cross-root block edge, an area overlap (both
+			// self-declare a surface), or a same-neighborhood collision — in that
+			// priority. A cross-edge conflict does NOT cap a neighborhood, so it
+			// never bumps `suppressed`.
+			var reason string
+			switch {
+			case cross.has(cID, wID):
+				reason = "blocks edge " + wID
+			case !c.ai.empty() && !w.ai.empty():
 				reason = "shared surface " + areaOverlapLabel(c.ai, w.ai)
-			} else {
+			default:
+				reason = "same neighborhood " + c.nk
 				w.suppressed++ // it capped its neighborhood to one pick
 			}
 			w.pick.Displaced = append(w.pick.Displaced, Displaced{
@@ -412,6 +488,97 @@ func classifyRisk(a *admitted) {
 	default:
 		a.pick.Risk = RiskUnproven
 	}
+}
+
+// GraphEdge is one block edge as fetched from GET /v1/graph/:id (slice-2),
+// reduced to its two endpoints in bareID space. Direction is not carried:
+// interference is undirected.
+type GraphEdge struct {
+	From string
+	To   string
+}
+
+// ReadyRootSpan returns the distinct epic roots that own a READY task in the
+// snapshot. It is the ZERO-FETCH guard for the slice-2 enrichment: a cross-ROOT
+// block edge is impossible unless the ready set spans ≥2 roots, so the CLI
+// fetches graph.show ONLY when len(ReadyRootSpan(s)) >= 2 — a single-root ready
+// set makes zero graph.show calls. Roots are returned sorted for determinism.
+func ReadyRootSpan(s Snapshot) []string {
+	byBare := readySnapshotByBare(s)
+	seen := map[string]bool{}
+	var roots []string
+	for _, t := range s.Tasks {
+		if t.Lifecycle != lifeReady {
+			continue
+		}
+		r := rootOfBare(byBare, t.DocID)
+		if !seen[r] {
+			seen[r] = true
+			roots = append(roots, r)
+		}
+	}
+	sort.Strings(roots)
+	return roots
+}
+
+// CrossRootBlockEdges folds fetched block edges into the CrossEdges map the
+// Frontier consults. It keeps ONLY edges whose BOTH endpoints are READY
+// candidates AND live in DIFFERENT epic roots — a same-root edge is already
+// merged by the neighborhood key, so it would add nothing (and an edge touching
+// a non-ready task can never displace a candidate). Keyed by bareID → sorted
+// bareIDs; the result is exactly what FrontierOpts.CrossEdges wants. Nil when no
+// edge qualifies (⇒ slice-1 behavior).
+func CrossRootBlockEdges(s Snapshot, edges []GraphEdge) map[string][]string {
+	byBare := readySnapshotByBare(s)
+	readyRoot := make(map[string]string) // ready bareID -> its root
+	for _, t := range s.Tasks {
+		if t.Lifecycle != lifeReady {
+			continue
+		}
+		readyRoot[bareID(t.DocID)] = rootOfBare(byBare, t.DocID)
+	}
+	set := map[string]map[string]bool{}
+	link := func(a, b string) {
+		if set[a] == nil {
+			set[a] = map[string]bool{}
+		}
+		set[a][b] = true
+	}
+	for _, e := range edges {
+		a, b := bareID(e.From), bareID(e.To)
+		ra, oka := readyRoot[a]
+		rb, okb := readyRoot[b]
+		if !oka || !okb { // both endpoints must be ready candidates
+			continue
+		}
+		if ra == rb { // same root — already merged by the neighborhood key
+			continue
+		}
+		link(a, b)
+		link(b, a)
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(set))
+	for a, nbrs := range set {
+		list := make([]string, 0, len(nbrs))
+		for b := range nbrs {
+			list = append(list, b)
+		}
+		sort.Strings(list)
+		out[a] = list
+	}
+	return out
+}
+
+// readySnapshotByBare builds the bareID task index the root walk needs.
+func readySnapshotByBare(s Snapshot) map[string]Task {
+	byID := make(map[string]Task, len(s.Tasks))
+	for _, t := range s.Tasks {
+		byID[t.DocID] = t
+	}
+	return buildByBare(byID)
 }
 
 // areaOverlapLabel names the first shared surface for a displaced reason.
