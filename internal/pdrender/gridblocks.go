@@ -215,36 +215,90 @@ func cardToneColor(t Theme, tone string) lipgloss.TerminalColor {
 // one per line, matching the reader.
 type statusLegendRenderer struct{}
 
-// statusRung is one line of the ladder. glyph/name/meaning are code-controlled
-// literals; the color comes from the injected Theme at render time.
+// statusRung is one line of the ladder. name/meaning are code-controlled
+// literals; the glyph is derived from the shared roleGlyph source and the color
+// comes from the injected Theme at render time.
 type statusRung struct {
 	name    string
-	glyph   string
 	meaning string
 }
 
-// statusLadder mirrors design/status-manifest.json — keep in sync.
-// progress uses a steady spinner glyph (a static render can't animate the
-// spinner). pdrender must NOT import internal/semrole or internal/taskboard
-// (the go-list-deps invariant in render_test.go), so the ladder is inlined here.
+// roleGlyph is the SINGLE source of the role→glyph mapping shared by the status
+// legend AND the task-* widgets (task-list/detail/board/roadmap) — mirrors
+// design/status-manifest.json — keep in sync. `progress` has no static glyph in
+// the manifest (spinner: true, a Braille frame the reader CSS-animates); a
+// static terminal render can't animate, so it shows one steady frame (⠋).
+// pdrender must NOT import internal/semrole or internal/taskboard (the
+// go-list-deps invariant in render_test.go), so the vocabulary is inlined here.
+var roleGlyph = map[string]string{
+	"open":     "○",
+	"ready":    "○",
+	"progress": "⠋",
+	"blocked":  "!",
+	"done":     "✓",
+	"cancel":   "✕",
+}
+
+// statusLadder is the ordered set of ladder rungs (the "white ladder"). Each
+// rung's glyph is looked up from roleGlyph at render time — ONE place defines
+// role→glyph, so a manifest drift can't leave the legend and the task widgets
+// disagreeing.
 var statusLadder = []statusRung{
-	{name: "open", glyph: "○", meaning: "backlog — not ready yet"},
-	{name: "ready", glyph: "○", meaning: "unchecked — claim it now"},
-	{name: "progress", glyph: "⠋", meaning: "in progress"},
-	{name: "blocked", glyph: "!", meaning: "something is required first"},
-	{name: "done", glyph: "✓", meaning: "complete"},
-	{name: "cancel", glyph: "✕", meaning: "abandoned or superseded"},
+	{name: "open", meaning: "backlog — not ready yet"},
+	{name: "ready", meaning: "unchecked — claim it now"},
+	{name: "progress", meaning: "in progress"},
+	{name: "blocked", meaning: "something is required first"},
+	{name: "done", meaning: "complete"},
+	{name: "cancel", meaning: "abandoned or superseded"},
 }
 
 func (statusLegendRenderer) Render(_ Block, ctx RenderCtx) []string {
 	out := make([]string, 0, len(statusLadder))
 	for _, r := range statusLadder {
-		glyph := statusGlyphStyle(ctx.Theme, r.name).Render(r.glyph)
+		glyph := statusGlyphStyle(ctx.Theme, r.name).Render(glyphForRole(r.name))
 		name := ctx.Theme.Body.Render(r.name)
 		meaning := ctx.Theme.Dim.Render("— " + r.meaning)
 		out = append(out, glyph+"  "+name+"  "+meaning)
 	}
 	return out
+}
+
+// roleForStatus maps a stored lifecycle status onto its ladder role, inlining
+// design/status-manifest.json's `statuses` map (pdrender may not import the
+// Elixir StatusVocab / internal/semrole). Unknown/empty → the default "open".
+func roleForStatus(status string) string {
+	switch status {
+	case "open":
+		return "open"
+	case "ready":
+		return "ready"
+	case "in_progress":
+		return "progress"
+	case "blocked":
+		return "blocked"
+	case "done", "closed":
+		return "done"
+	case "cancelled":
+		return "cancel"
+	default:
+		return "open"
+	}
+}
+
+// glyphForRole returns the static glyph for a ladder role (unknown role → ○).
+func glyphForRole(role string) string {
+	if g, ok := roleGlyph[role]; ok {
+		return g
+	}
+	return "○"
+}
+
+// glyphForStatus is the row-level convenience the task widgets use: a stored
+// status → its role → the themed, colored glyph string. Composes roleForStatus,
+// glyphForRole, and the existing statusGlyphStyle color seam.
+func glyphForStatus(t Theme, status string) string {
+	role := roleForStatus(status)
+	return statusGlyphStyle(t, role).Render(glyphForRole(role))
 }
 
 // statusGlyphStyle maps a rung's role onto the glyph color: progress→info,
