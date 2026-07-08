@@ -37,32 +37,19 @@
 │ 🖼 https://barkpark.cloud/media/bare.png (view in Studio)                     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
                                                                                 
-Dimensions                                                                      
-Width: 19.5                                                                     
-Height: 23                                                                      
-unit: cm                                                                        
-                                                                                
-Contributors                                                                    
-1. name: Knut Hamsun, role: author                                              
-2. name: Marie, role: editor                                                    
-3. Anonymous                                                                    
-                                                                                
-Tags                                                                            
-—                                                                               
-                                                                                
-Thema subject                                                                   
-Modern & contemporary fiction                                                   
-                                                                                
-Unresolved subject                                                              
-ZZZ                                                                             
-                                                                                
-Empty subject                                                                   
-—                                                                               
-                                                                                
-Blurb                                                                           
-en: A terminal renderer for portable documents.                                 
-nb: En terminal-renderer for portable dokumenter.                               
-de: Ein Terminal-Renderer für portable Dokumente.                               
+Dimensions          Width: 19.5                                                 
+                    Height: 23                                                  
+                    unit: cm                                                    
+Contributors        1. name: Knut Hamsun, role: author                          
+                    2. name: Marie, role: editor                                
+                    3. Anonymous                                                
+Tags                —                                                           
+Thema subject       Modern & contemporary fiction                               
+Unresolved subject  ZZZ                                                         
+Empty subject       —                                                           
+Blurb               en: A terminal renderer for portable documents.             
+                    nb: En terminal-renderer for portable dokumenter.           
+                    de: Ein Terminal-Renderer für portable Dokumente.           
                                                                                 
 ╭──────────────────────────────────────────────────────────────────────────────╮
 │ Should the diagram block ship a mermaid-ascii dependency now?                │

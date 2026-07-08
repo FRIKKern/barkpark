@@ -43,35 +43,15 @@ Knut Hamsun · 2026-06-08 · Terminal desk
                                                                                                                         
 ▌ Every block type is a self-contained renderer that, given a width and a theme, returns styled lines.                  
                                                                                                                         
-Title                                                                                                                   
-Bulldocs Terminal Render                                                                                                
-                                                                                                                        
-Slug                                                                                                                    
-bulldocs-terminal-render                                                                                                
-                                                                                                                        
-Summary                                                                                                                 
-A multi-line summary field whose value is long enough to wrap under the bold label line when the width is narrow.       
-                                                                                                                        
-Published                                                                                                               
-Yes                                                                                                                     
-                                                                                                                        
-Featured                                                                                                                
-No                                                                                                                      
-                                                                                                                        
-Category                                                                                                                
-Technology                                                                                                              
-                                                                                                                        
-Published at                                                                                                            
-2026-05-24 10:00                                                                                                        
-                                                                                                                        
-Accent                                                                                                                  
-   #a23925                                                                                                              
-                                                                                                                        
-Author                                                                                                                  
-Knut Hamsun                                                                                                             
-                                                                                                                        
-Cover                                                                                                                   
-🖼 https://barkpark.cloud/media/cover.jpg                                                                                
-                                                                                                                        
-Thumbnail                                                                                                               
-No image                                                                                                                
+Title         Bulldocs Terminal Render                                                                                  
+Slug          bulldocs-terminal-render                                                                                  
+Summary       A multi-line summary field whose value is long enough to wrap under the bold label line when the width is 
+              narrow.                                                                                                   
+Published     Yes                                                                                                       
+Featured      No                                                                                                        
+Category      Technology                                                                                                
+Published at  2026-05-24 10:00                                                                                          
+Accent           #a23925                                                                                                
+Author        Knut Hamsun                                                                                               
+Cover         🖼 https://barkpark.cloud/media/cover.jpg                                                                  
+Thumbnail     No image                                                                                                  
