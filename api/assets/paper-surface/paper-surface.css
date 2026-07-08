@@ -327,6 +327,62 @@ html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-b
 html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body { --st-info: #60a5fa; --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; }
 /* END GENERATED: status-tones */
 
+/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
+.bp-paper-surface, .bp-paper-body {
+  --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
+  --tok-reading-heading-weight: 600;
+  --tok-reading-body-size: 18px;
+  --tok-reading-body-lh: 1.65;
+  --tok-reading-h1-size: 32px;
+  --tok-reading-h1-lh: 1.1;
+  --tok-reading-h2-size: 24px;
+  --tok-reading-h2-lh: 1.2;
+  --tok-reading-h3-size: 20px;
+  --tok-reading-h3-lh: 1.25;
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+@media (prefers-color-scheme: dark) {
+  .bp-paper-surface, .bp-paper-body {
+    --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+    --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+    --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+    --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  }
+}
+html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {
+  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */
+.bp-lg--in_progress { color: #2563eb; }
+.bp-lg--blocked { color: #d97706; }
+.bp-lg--done { color: #0d9488; }
+.bp-lg--closed { color: #0d9488; }
+.bp-lg--cancelled { color: #a1a1aa; }
+.bp-lg--ready { color: #18181b; }
+.bp-lg--open { color: #71717a; }
+@media (prefers-color-scheme: dark) {
+  .bp-lg--in_progress { color: #60a5fa; }
+  .bp-lg--blocked { color: #fbbf24; }
+  .bp-lg--done { color: #2dd4bf; }
+  .bp-lg--closed { color: #2dd4bf; }
+  .bp-lg--cancelled { color: #71717a; }
+  .bp-lg--ready { color: #e7edf2; }
+  .bp-lg--open { color: #5f6b78; }
+}
+/* END GENERATED: tokens */
+
 .bp-paper-surface .bp-tasks {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   margin: 1.6rem 0;

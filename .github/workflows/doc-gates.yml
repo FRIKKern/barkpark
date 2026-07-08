@@ -29,6 +29,17 @@ on:
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"
       - "scripts/status-manifest-check.sh"
+      # unified-aesthetic design tokens — the source, the emitter/gate, and every
+      # generated per-surface artifact (W1.2). Any drift trips design/check.mjs.
+      - "design/tokens.json"
+      - "design/tokens.schema.json"
+      - "design/validate.mjs"
+      - "design/emit.mjs"
+      - "design/check.mjs"
+      - "cloud/priv/static/app.css"
+      - "web/app/globals.css"
+      - "internal/taskboard/tokens_gen.go"
+      - "internal/pdrender/tokens_gen.go"
   pull_request:
     paths:
       - "**/*.md"
@@ -51,6 +62,17 @@ on:
       # status vocabulary single-source — the manifest + its drift gate.
       - "design/status-manifest.json"
       - "scripts/status-manifest-check.sh"
+      # unified-aesthetic design tokens — the source, the emitter/gate, and every
+      # generated per-surface artifact (W1.2). Any drift trips design/check.mjs.
+      - "design/tokens.json"
+      - "design/tokens.schema.json"
+      - "design/validate.mjs"
+      - "design/emit.mjs"
+      - "design/check.mjs"
+      - "cloud/priv/static/app.css"
+      - "web/app/globals.css"
+      - "internal/taskboard/tokens_gen.go"
+      - "internal/pdrender/tokens_gen.go"
 
 concurrency:
   group: doc-gates-${{ github.ref }}
@@ -84,6 +106,18 @@ jobs:
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
       - name: Status manifest drift gate (blocking)
         run: bash scripts/status-manifest-check.sh
+
+      # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
+      # design/tokens.json is the ONE source of the Barkpark design language; the
+      # emitter regenerates every per-surface artifact (Cloud/Studio/web CSS,
+      # paper-surface, Go taskboard + pdrender) from it. validate proves the source
+      # is well-formed; check re-emits into memory and byte-compares each committed
+      # artifact, plus a §6 cross-surface parity assertion (Go lifecycle literals ==
+      # CSS glyph tones == tokens) so a GUI/TUI divergence cannot slip through.
+      - name: Design-token drift gate (blocking)
+        run: |
+          node design/validate.mjs
+          node design/check.mjs
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
