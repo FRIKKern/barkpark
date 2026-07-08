@@ -515,10 +515,120 @@
        Studio grid's .sheet-cell.sheet-al-* rules (root.html.heex). */
     td.sheet-al-right { text-align: right; }
     td.sheet-al-center { text-align: center; }
+
+    /* ── TUI view: a terminal skin for the reader, toggled bottom-right ──────
+       Opt-in (body.bp-tui), persisted client-side. It re-skins the SAME article
+       HTML as a terminal — monospace, near-black ground, box-drawing tables,
+       markdown-ish heading prefixes — evoking the Go pdrender surface
+       (`bp paper view`). Purely presentational + additive; the render pipeline
+       is untouched. Scoped to `.bp-paper-article` so email/non-article papers
+       are never affected. */
+    .bp-view-toggle {
+      position: fixed; right: 20px; bottom: 20px; z-index: 60;
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
+      font-weight: 600; letter-spacing: 0.02em;
+      padding: 8px 13px; border-radius: 999px; cursor: pointer;
+      color: #2f6b4e; background: rgba(255,255,255,0.86);
+      border: 1px solid rgba(20,40,30,0.16);
+      box-shadow: 0 2px 10px rgba(20,40,30,0.14); backdrop-filter: blur(6px);
+      transition: background 0.15s, color 0.15s, transform 0.08s;
+    }
+    .bp-view-toggle:hover { transform: translateY(-1px); }
+    .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
+    .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
+    /* hide the toggle when there is no article paper on the page */
+    body:not(:has(.bp-paper-article)) .bp-view-toggle { display: none; }
+
+    /* toggle look in TUI mode */
+    body.bp-tui .bp-view-toggle {
+      color: #5fcf9c; background: rgba(10,15,12,0.9);
+      border-color: rgba(95,207,156,0.35); box-shadow: 0 2px 14px rgba(0,0,0,0.5);
+    }
+    body.bp-tui .bp-view-toggle .bp-vt-dot { background: #5fcf9c; box-shadow: 0 0 6px #5fcf9c; }
+
+    /* ── the terminal skin ─────────────────────────────────────────────── */
+    body.bp-tui { background: #060907; }
+    body.bp-tui .bp-paper-shell.bp-paper-article {
+      background: #0b0f0d; color: #c8d3cc;
+      font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+      font-size: 14px; line-height: 1.65;
+      border: 1px solid #21302a; border-radius: 10px;
+      box-shadow: 0 0 0 1px #060907, 0 24px 60px rgba(0,0,0,0.5);
+      max-width: 900px; padding: 34px 30px 72px; margin-top: 28px;
+    }
+    body.bp-tui .bp-paper-article h1,
+    body.bp-tui .bp-paper-article h2,
+    body.bp-tui .bp-paper-article h3 {
+      font-family: inherit; color: #eaf3ee; font-weight: 700;
+      border-bottom: 1px dashed #263029; padding-bottom: 4px; letter-spacing: 0;
+    }
+    body.bp-tui .bp-paper-article h1::before { content: "# "; color: #5fcf9c; }
+    body.bp-tui .bp-paper-article h2::before { content: "## "; color: #5fcf9c; }
+    body.bp-tui .bp-paper-article h3::before { content: "### "; color: #5fcf9c; }
+    body.bp-tui .bp-paper-article p,
+    body.bp-tui .bp-paper-article li { color: #c8d3cc; }
+    body.bp-tui .bp-paper-article strong { color: #eaf3ee; }
+    body.bp-tui .bp-paper-article em { color: #9fb4a8; }
+    body.bp-tui .bp-paper-article a { color: #e0b65f; border-bottom-color: #6a5a2e; }
+    body.bp-tui .bp-paper-article .bp-eyebrow,
+    body.bp-tui .bp-paper-article [class*="eyebrow"] { color: #5fcf9c; }
+    body.bp-tui .bp-paper-article ul li::marker { color: #5fcf9c; }
+    body.bp-tui .bp-paper-article pre,
+    body.bp-tui .bp-paper-article code { background: #060907; color: #b7e3cd; border-color: #21302a; }
+    body.bp-tui .bp-paper-article table { border: 1px solid #263029; }
+    body.bp-tui .bp-paper-article th,
+    body.bp-tui .bp-paper-article td { border: 1px solid #1c2723; color: #c8d3cc; }
+    body.bp-tui .bp-paper-article th { color: #8aa89a; background: #0f1512; }
+    body.bp-tui .bp-paper-article hr { border-color: #21302a; }
+    body.bp-tui .bp-paper-article blockquote,
+    body.bp-tui .bp-paper-article .bp-callout {
+      background: transparent; border-left: 3px solid #5fcf9c; color: #c8d3cc;
+    }
+    body.bp-tui .bp-paper-article img { filter: grayscale(0.15) brightness(0.96); border: 1px solid #21302a; border-radius: 6px; }
+    @media (prefers-reduced-motion: reduce) {
+      .bp-view-toggle { transition: none; }
+    }
   </style>
 </head>
 <body>
   {@inner_content}
+
+  <%!-- Reader ⇄ TUI view toggle (bottom-right). Opt-in terminal skin for the
+        SAME article, persisted in localStorage. Hidden by CSS on non-article
+        papers. The <button> + tiny script are at the END of <body> (never a
+        blocking <head> script — golden rule). --%>
+  <button
+    type="button"
+    class="bp-view-toggle"
+    aria-pressed="false"
+    aria-label="Toggle terminal (TUI) view"
+    onclick="window.__bpToggleTui && window.__bpToggleTui()"
+  >
+    <span class="bp-vt-dot" aria-hidden="true"></span>
+    <span class="bp-vt-label">TUI view</span>
+  </button>
+  <script>
+    (function () {
+      var KEY = "bp-paper-view";
+      var btn = document.querySelector(".bp-view-toggle");
+      var label = btn && btn.querySelector(".bp-vt-label");
+      function apply(mode) {
+        var tui = mode === "tui";
+        document.body.classList.toggle("bp-tui", tui);
+        if (btn) btn.setAttribute("aria-pressed", tui ? "true" : "false");
+        if (label) label.textContent = tui ? "Reader view" : "TUI view";
+      }
+      // restore persisted choice
+      try { apply(localStorage.getItem(KEY) === "tui" ? "tui" : "reader"); } catch (e) { apply("reader"); }
+      window.__bpToggleTui = function () {
+        var next = document.body.classList.contains("bp-tui") ? "reader" : "tui";
+        apply(next);
+        try { localStorage.setItem(KEY, next); } catch (e) {}
+      };
+    })();
+  </script>
+
   <%!-- Mermaid engine for `diagram` blocks. Loaded `defer` (NEVER a blocking
         <script> in <head> — golden rule). startOnLoad:false: the PaperMermaid
         hook runs it manually so it works with LiveView's streamed DOM, where
