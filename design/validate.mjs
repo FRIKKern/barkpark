@@ -48,7 +48,7 @@ ok(tokens.meta && typeof tokens.meta.note === "string" && tokens.meta.note.lengt
 
 // --- color roles -----------------------------------------------------------
 const color = tokens.color || {};
-for (const role of ["primary", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent"]) {
+for (const role of ["primary", "primary-hover", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent"]) {
   hslPair(color[role], `color.${role}`);
 }
 

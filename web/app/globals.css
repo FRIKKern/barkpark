@@ -14,6 +14,7 @@
 /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
 @theme {
   --color-primary: hsl(163 46% 22%);
+  --color-primary-hover: hsl(163 46% 16%);
   --color-primary-fg: hsl(0 0% 100%);
   --color-bg: hsl(0 0% 100%);
   --color-surface: hsl(0 0% 100%);
@@ -30,6 +31,7 @@
 }
 [data-theme="dark"] {
   --color-primary: hsl(160 42% 62%);
+  --color-primary-hover: hsl(160 42% 70%);
   --color-primary-fg: hsl(163 45% 8%);
   --color-bg: hsl(240 10% 3.9%);
   --color-surface: hsl(240 10% 5.5%);

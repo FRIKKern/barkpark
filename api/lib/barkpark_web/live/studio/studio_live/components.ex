@@ -1012,7 +1012,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 <% end %>
               </div>
               <%= if @valueref_panel[:error] do %>
-                <p class="text-sm" style="color: #b91c1c; margin: 8px 0;" data-test-id="valueref-error">
+                <p class="text-sm" style="color: var(--danger); margin: 8px 0;" data-test-id="valueref-error">
                   <%= @valueref_panel.error %>
                 </p>
               <% end %>

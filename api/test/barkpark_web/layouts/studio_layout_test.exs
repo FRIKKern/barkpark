@@ -92,6 +92,51 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
     end
   end
 
+  describe "emitted design tokens in the Studio root layout (au-w2-studio-sweep, W2.6)" do
+    # The root layout <style> is rendered on the dead (disconnected) HTTP render,
+    # so a plain GET carries the whole generated token block + the swept chrome.
+    defp studio_dead_html(conn) do
+      conn
+      |> init_test_session(%{"api_token" => @admin_token})
+      |> get(scoped_studio("/d/production/studio"))
+      |> html_response(200)
+    end
+
+    test "generated block emits --primary-hover/-hsl/-soft for BOTH light and dark", %{conn: conn} do
+      html = studio_dead_html(conn)
+
+      # AC4: both theme scopes render (light :root + dark attribute block).
+      assert html =~ ~s|:root {|
+      assert html =~ ~s|html[data-theme="dark"] {|
+
+      # AC5: emitted evergreen --primary-hover, both themes (darker in light,
+      # lighter in dark). The hand-authored blue --primary-hover is gone.
+      assert html =~ "--primary-hover: hsl(163 46% 16%);"
+      assert html =~ "--primary-hover: hsl(160 42% 70%);"
+      refute html =~ "--primary-hover: hsl(217.2 91.2% 50%);"
+      refute html =~ "--primary-hover: hsl(240 5.9% 22%);"
+
+      # -hsl/-soft machinery so blue accent tints bind to an evergreen soft token.
+      assert html =~ "--primary-hsl: 163 46% 22%;"
+      assert html =~ "--primary-soft: hsl(var(--primary-hsl) / 0.15);"
+      assert html =~ "--primary-hsl: 160 42% 62%;"
+      assert html =~ "--primary-soft: hsl(var(--primary-hsl) / 0.2);"
+    end
+
+    test "swept chrome consumes role/status tokens, not primary-blue literals", %{conn: conn} do
+      html = studio_dead_html(conn)
+
+      # A few representative migrations (evergreen primary + semantic status).
+      assert html =~ ".flash-info { background: var(--info-soft);"
+      assert html =~ ".badge-active { background: var(--primary-soft);"
+      assert html =~ ".history-action-publish { background: var(--ok-soft);"
+
+      # No primary-role blue channel literal survived in the swept chrome.
+      refute html =~ "hsl(217.2 91.2% 59.8% / 0.15)"
+      refute html =~ "hsl(217.2 91.2% 59.8% / 0.12)"
+    end
+  end
+
   describe "self-update chrome (isu-4)" do
     test "update bar is absent by default (Checker not running in test env)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})

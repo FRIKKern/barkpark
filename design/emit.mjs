@@ -23,7 +23,7 @@ export const tokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8")
 
 // ── shared vocabulary ───────────────────────────────────────────────────────
 export const BASE_ROLES = [
-  "primary", "primary-fg", "bg", "surface", "muted-surface",
+  "primary", "primary-hover", "primary-fg", "bg", "surface", "muted-surface",
   "text", "muted-text", "border", "ring", "accent",
 ];
 export const STATUS_ROLES = ["ok", "warn", "danger", "info"];
@@ -88,6 +88,19 @@ function baseVars(theme, indent) {
   return BASE_ROLES.map((r) => indent + baseVar(r, theme)).join("\n");
 }
 
+// --primary carries the same -hsl/-soft machinery the status roles use, so blue
+// accent TINTS being swept off literals have an evergreen --primary-soft to bind
+// to. (--primary and --primary-hover themselves are emitted by baseVars via
+// BASE_ROLES; this only adds the derived -hsl channel + the soft-tint fill.)
+function primaryVars(theme, indent) {
+  const ch = tokens.color.primary[theme];
+  const lines = [
+    `--primary-hsl: ${ch};`,
+    `--primary-soft: hsl(var(--primary-hsl) / ${alpha(softAlpha[theme])});`,
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
 // ── surface: Cloud SPA (cloud/priv/static/app.css) ──────────────────────────
 // Full base + status contract. Values mirror the committed :root today; this is
 // a check-against-committed surface (the generated block is additive and the
@@ -96,10 +109,12 @@ function cloudBlock() {
   return [
     ":root {",
     baseVars("light", "  "),
+    primaryVars("light", "  "),
     statusVars("light", "  "),
     "}",
     '[data-theme="dark"] {',
     baseVars("dark", "  "),
+    primaryVars("dark", "  "),
     statusVars("dark", "  "),
     "}",
   ].join("\n");
@@ -165,10 +180,12 @@ function studioBlock() {
   return [
     ind + ":root {",
     baseVars("light", ind + "  "),
+    primaryVars("light", ind + "  "),
     statusVars("light", ind + "  "),
     ind + "}",
     ind + 'html[data-theme="dark"] {',
     baseVars("dark", ind + "  "),
+    primaryVars("dark", ind + "  "),
     ind + "}",
     ind + "@media (prefers-color-scheme: dark) {",
     ind + "  :root {",
