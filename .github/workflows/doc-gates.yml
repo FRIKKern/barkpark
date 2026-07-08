@@ -50,7 +50,7 @@ on:
       # Go (CLI/TUI) literal-color gate — the bp CLI/TUI must resolve semantic
       # colours through internal/semrole off the generated token artifact.
       - "cmd/barkpark/**"
-      - "internal/cli/setup/**"
+      - "internal/cli/**"
       - "internal/taskboard/theme.go"
       - "scripts/go-literal-check.sh"
   pull_request:
@@ -96,7 +96,7 @@ on:
       # Go (CLI/TUI) literal-color gate — the bp CLI/TUI must resolve semantic
       # colours through internal/semrole off the generated token artifact.
       - "cmd/barkpark/**"
-      - "internal/cli/setup/**"
+      - "internal/cli/**"
       - "internal/taskboard/theme.go"
       - "scripts/go-literal-check.sh"
 
@@ -165,7 +165,7 @@ jobs:
         run: bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
-      # (cmd/barkpark/** + internal/cli/setup/** + internal/taskboard/theme.go)
+      # (cmd/barkpark/** + internal/cli/** + internal/taskboard/theme.go)
       # must resolve semantic status/lifecycle/priority colours through
       # internal/semrole off the generated token artifact (tokens_gen.go, from
       # design/tokens.json) — never an inline lipgloss color literal at a call
@@ -175,6 +175,14 @@ jobs:
       # scripts/go-literal-check.sh for the full list.
       - name: Go literal-color gate (blocking)
         run: bash scripts/go-literal-check.sh
+
+      # Durable tripwire (au-w4-cli-ratchet, AC5): prove the gate actually REDs on
+      # a planted literal — a temp-dir self-test that plants #ff0000, asserts the
+      # REAL scanner exits non-zero naming the file:line, then asserts clean +
+      # commented-hex files pass. Plants nothing in the tree; guards the gate
+      # against a future edit that silently weakens the lexer/LITERAL/allow logic.
+      - name: Go literal-color gate self-test (tripwire)
+        run: bash scripts/go-literal-check.sh --selftest
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
       # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
