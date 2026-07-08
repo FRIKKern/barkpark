@@ -55,12 +55,12 @@ func innerWidth(ctx RenderCtx) int {
 // The article-mode `<pre class="mermaid">` browser render has no terminal
 // analogue — no library draws mermaid — so the box IS the honest ceiling.
 //
-// SEAM: a future `mermaid-ascii`-style dependency could replace the folded
-// source with an actual ASCII rendering for the flowchart/graph kinds it
-// supports (detect kind below, dispatch on it). We deliberately DON'T add that
-// dep now — it would break the lipgloss/x-ansi/chroma/stdlib import discipline,
-// and the labeled box is correct (if minimal) for every kind. The detected kind
-// is already computed here so wiring such a dep later is a one-branch change.
+// The SEAM is now realized for the kinds we can draw well: a native, dependency-
+// free layout engine (mermaid.go + mermaidflow.go) turns `flowchart`/`graph`
+// source into responsive, always-rectangular terminal art (ranked boxes + a
+// box-drawing connector bus + a labelled legend for edges a bus can't carry).
+// Kinds we don't yet draw (sequence — wave 2 — and everything else) keep the
+// honest folded-source box below: a reader never sees a half-drawn diagram.
 type diagramRenderer struct{}
 
 func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
@@ -68,6 +68,13 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	source := attrStr(b.Attrs, "source")
 	caption := sanitizeText(attrStr(b.Attrs, "caption"))
 	kind := mermaidKind(source)
+
+	// Drawable kinds render as real terminal art with a Figure caption beneath.
+	if doc := parseMermaid(source); doc.kind == "flowchart" {
+		if art := renderFlowchart(doc.graph, ctx); len(art) > 0 {
+			return append(art, diagramCaption(n, caption, ctx))
+		}
+	}
 
 	inner := innerWidth(ctx)
 
@@ -91,6 +98,18 @@ func (diagramRenderer) Render(b Block, ctx RenderCtx) []string {
 	sb.WriteString(strings.Join(wrapLines(ctx.Theme.Caption.Render(cap), inner), "\n"))
 
 	return boxLines(sb.String(), ctx)
+}
+
+// diagramCaption is the "Figure N. <caption>" line beneath a drawn diagram —
+// the same document-global figure counter figure/asciicast share. A drawn
+// diagram needs no "view in Studio" suffix (it IS the render), unlike the folded
+// fallback box which states its ceiling.
+func diagramCaption(n int, caption string, ctx RenderCtx) string {
+	cap := "Figure " + itoa(n) + "."
+	if caption != "" {
+		cap += " " + caption
+	}
+	return ctx.Theme.Caption.Render(truncateANSI(cap, clampWidth(ctx.Width)))
 }
 
 // mermaidKind detects the diagram kind from the FIRST non-empty, non-directive
