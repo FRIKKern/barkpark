@@ -25,7 +25,8 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   def reading_accent, do: "#a23925"
 
   # Reading type (design/tokens.json font.reading / type.reading).
-  def reading_font, do: "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"
+  @reading_font "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"
+  def reading_font, do: @reading_font
   def reading_heading_weight, do: 600
   def reading_body_size, do: 18
 end

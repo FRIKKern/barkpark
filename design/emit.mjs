@@ -424,7 +424,11 @@ function elixirTokensGen() {
     `  def reading_accent, do: "${hx("reading-accent")}"`,
     "",
     "  # Reading type (design/tokens.json font.reading / type.reading).",
-    `  def reading_font, do: ${JSON.stringify(tokens.font.reading.stack)}`,
+    // Via a module attribute so the long font-stack literal is a `mix format`
+    // fixed point — a bare `def _, do: "<long>"` gets reflowed, which would flap
+    // the byte-exact drift gate the moment anyone runs the formatter.
+    `  @reading_font ${JSON.stringify(tokens.font.reading.stack)}`,
+    "  def reading_font, do: @reading_font",
     `  def reading_heading_weight, do: ${r.headingWeight}`,
     `  def reading_body_size, do: ${r.body.size}`,
     "end",
