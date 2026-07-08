@@ -86,6 +86,29 @@
   --st-ok: #0d9488;
   --st-warn: #d97706;
   --st-danger: #dc2626;
+  --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
+  --tok-reading-heading-weight: 600;
+  --tok-reading-body-size: 18px;
+  --tok-reading-body-lh: 1.65;
+  --tok-reading-h1-size: 32px;
+  --tok-reading-h1-lh: 1.1;
+  --tok-reading-h2-size: 24px;
+  --tok-reading-h2-lh: 1.2;
+  --tok-reading-h3-size: 20px;
+  --tok-reading-h3-lh: 1.25;
+  --ok-hsl: 142 72% 26%;
+  --warn-hsl: 35 92% 38%;
+  --danger-hsl: 0 68% 42%;
+  --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15);
+  --warn-soft: hsl(var(--warn-hsl) / 0.15);
+  --danger-soft: hsl(var(--danger-hsl) / 0.15);
+  --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
@@ -114,6 +137,19 @@
   --st-ok: #2dd4bf;
   --st-warn: #fbbf24;
   --st-danger: #f87171;
+  --ok-hsl: 142 52% 52%;
+  --warn-hsl: 38 94% 56%;
+  --danger-hsl: 0 82% 66%;
+  --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl));
+  --warn: hsl(var(--warn-hsl));
+  --danger: hsl(var(--danger-hsl));
+  --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2);
+  --warn-soft: hsl(var(--warn-hsl) / 0.2);
+  --danger-soft: hsl(var(--danger-hsl) / 0.2);
+  --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
 /* END GENERATED: paper-surface */
 

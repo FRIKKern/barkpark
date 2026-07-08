@@ -1,0 +1,353 @@
+#!/usr/bin/env node
+// design/emit.mjs — the W1.2 emitter. design/tokens.json is the ONE source of the
+// Barkpark Unified Aesthetic; this regenerates EVERY per-surface artifact from it.
+// Dependency-free (Node built-ins only), deterministic output. Trusts
+// design/validate.mjs to have proven the source well-formed.
+//
+//   node design/emit.mjs            # default: report drift, write nothing (== --check)
+//   node design/emit.mjs --check    # same as default
+//   node design/emit.mjs --write    # rewrite every artifact in place
+//
+// CSS surfaces are spliced into a BEGIN/END GENERATED: tokens marker block that
+// must already exist (mirrors the status-tones precedent). Go surfaces are whole
+// generated *_gen.go files. check.mjs imports the builders here for the drift gate
+// and the §6 cross-surface parity assertion.
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const here = dirname(fileURLToPath(import.meta.url));
+export const repoRoot = join(here, "..");
+export const tokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
+
+// ── shared vocabulary ───────────────────────────────────────────────────────
+export const BASE_ROLES = [
+  "primary", "primary-fg", "bg", "surface", "muted-surface",
+  "text", "muted-text", "border", "ring", "accent",
+];
+export const STATUS_ROLES = ["ok", "warn", "danger", "info"];
+export const LIFE_ORDER = [
+  "in_progress", "blocked", "done", "closed", "cancelled", "ready", "open",
+];
+
+const softAlpha = tokens.color._convention.softAlpha;   // { light, dark }
+const strongAlpha = tokens.color._convention.strongAlpha; // { light, dark, _note }
+
+const MARKER_BEGIN =
+  "/* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */";
+const MARKER_END = "/* END GENERATED: tokens */";
+
+// ── color helpers ───────────────────────────────────────────────────────────
+const hsl = (ch) => `hsl(${ch})`;
+const alpha = (a) => String(a); // 0.15 -> "0.15", 0.2 -> "0.2"
+
+// HSL channels "H S% L%" -> "#rrggbb". Only the Go pdrender tones need hex
+// (lipgloss wants hex); CSS surfaces keep hsl() so the soft-tint machinery lives.
+export function hslToHex(channels) {
+  const m = channels.trim().split(/\s+/);
+  const h = parseFloat(m[0]);
+  const s = parseFloat(m[1]) / 100;
+  const l = parseFloat(m[2]) / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0, g = 0, b = 0;
+  if (hp >= 0 && hp < 1) [r, g, b] = [c, x, 0];
+  else if (hp < 2) [r, g, b] = [x, c, 0];
+  else if (hp < 3) [r, g, b] = [0, c, x];
+  else if (hp < 4) [r, g, b] = [0, x, c];
+  else if (hp < 5) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const m2 = l - c / 2;
+  const to = (v) => Math.round((v + m2) * 255).toString(16).padStart(2, "0");
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+// "U+280B" -> "⠋"
+export const glyphOf = (cp) => String.fromCodePoint(parseInt(cp.slice(2), 16));
+
+// ── CSS var fragments (shared by every CSS surface) ─────────────────────────
+const baseVar = (role, theme) => `--${role}: ${hsl(tokens.color[role][theme])};`;
+
+function statusVars(theme, indent) {
+  const st = tokens.color.status;
+  const lines = [
+    STATUS_ROLES.map((r) => `--${r}-hsl: ${st[r][theme]};`).join(" "),
+    STATUS_ROLES.map((r) => `--${r}: hsl(var(--${r}-hsl));`).join(" "),
+    STATUS_ROLES.map((r) => `--${r}-soft: hsl(var(--${r}-hsl) / ${alpha(softAlpha[theme])});`).join(" "),
+    STATUS_ROLES
+      .filter((r) => st[r].strong === true)
+      .map((r) => `--${r}-strong: hsl(var(--${r}-hsl) / ${alpha(strongAlpha[theme])});`)
+      .join(" "),
+  ];
+  return lines.map((l) => indent + l).join("\n");
+}
+
+function baseVars(theme, indent) {
+  return BASE_ROLES.map((r) => indent + baseVar(r, theme)).join("\n");
+}
+
+// ── surface: Cloud SPA (cloud/priv/static/app.css) ──────────────────────────
+// Full base + status contract. Values mirror the committed :root today; this is
+// a check-against-committed surface (the generated block is additive and the
+// hand-authored :root that follows keeps the live values).
+function cloudBlock() {
+  return [
+    ":root {",
+    baseVars("light", "  "),
+    statusVars("light", "  "),
+    "}",
+    '[data-theme="dark"] {',
+    baseVars("dark", "  "),
+    statusVars("dark", "  "),
+    "}",
+  ].join("\n");
+}
+
+// ── surface: paper-surface (api/assets/paper-surface/paper-surface.css) ──────
+// Reading font + reading type scale + status tones, plus the lifecycle
+// glyph-tone classes (.bp-lg--<state>) that give the CSS/GUI half of the §6
+// cross-surface parity assertion its hues. Additive (.bp-lg-- is a fresh, un-
+// consumed class set; the hand-authored .bp-g-- ladder is untouched).
+function paperBlock() {
+  const r = tokens.type.reading;
+  const readingVars = [
+    `--tok-reading-font: ${tokens.font.reading.stack};`,
+    `--tok-reading-heading-weight: ${r.headingWeight};`,
+    `--tok-reading-body-size: ${r.body.size}px;`,
+    `--tok-reading-body-lh: ${r.body.lineHeight};`,
+    `--tok-reading-h1-size: ${r.h1.size}px;`,
+    `--tok-reading-h1-lh: ${r.h1.lineHeight};`,
+    `--tok-reading-h2-size: ${r.h2.size}px;`,
+    `--tok-reading-h2-lh: ${r.h2.lineHeight};`,
+    `--tok-reading-h3-size: ${r.h3.size}px;`,
+    `--tok-reading-h3-lh: ${r.h3.lineHeight};`,
+  ].map((l) => "  " + l).join("\n");
+
+  const lifeClasses = (theme) =>
+    LIFE_ORDER.map((s) => `.bp-lg--${s} { color: ${tokens.lifecycle[s].color[theme]}; }`).join("\n");
+
+  return [
+    ".bp-paper-surface, .bp-paper-body {",
+    readingVars,
+    statusVars("light", "  "),
+    "}",
+    "@media (prefers-color-scheme: dark) {",
+    "  .bp-paper-surface, .bp-paper-body {",
+    statusVars("dark", "    "),
+    "  }",
+    "}",
+    'html[data-theme="light"] .bp-paper-surface, html[data-theme="light"] .bp-paper-body {',
+    statusVars("light", "  "),
+    "}",
+    'html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-body {',
+    statusVars("dark", "  "),
+    "}",
+    "/* lifecycle glyph tones — the CSS half of the §6 GUI/TUI parity assertion */",
+    lifeClasses("light"),
+    "@media (prefers-color-scheme: dark) {",
+    lifeClasses("dark").split("\n").map((l) => "  " + l).join("\n"),
+    "}",
+  ].join("\n");
+}
+
+// ── surface: Studio (api/lib/barkpark_web/layouts/root.html.heex inline style) ─
+// Additive, NOT adoption: base roles are overridden by the hand-authored
+// html[data-theme] blocks that follow (order/specificity), so live consumers keep
+// today's palette; status vars are a fresh stub. Emitted inside a <style>, hence
+// CSS comment syntax and an extra 4-space indent to sit in the block.
+function studioBlock() {
+  const ind = "    ";
+  return [
+    ind + ":root {",
+    baseVars("light", ind + "  "),
+    statusVars("light", ind + "  "),
+    ind + "}",
+    ind + "@media (prefers-color-scheme: dark) {",
+    ind + "  :root {",
+    statusVars("dark", ind + "    "),
+    ind + "  }",
+    ind + "}",
+  ].join("\n");
+}
+
+// ── surface: web demo (web/app/globals.css — Tailwind v4 @theme) ─────────────
+// Additive stub; no consumer references these --color-* / --status-* tokens yet.
+function webBlock() {
+  const st = tokens.color.status;
+  return [
+    "@theme {",
+    ...BASE_ROLES.map((r) => `  --color-${r}: ${hsl(tokens.color[r].light)};`),
+    ...STATUS_ROLES.map((r) => `  --color-${r}: ${hsl(st[r].light)};`),
+    "}",
+    "@media (prefers-color-scheme: dark) {",
+    "  @theme {",
+    ...BASE_ROLES.map((r) => `    --color-${r}: ${hsl(tokens.color[r].dark)};`),
+    ...STATUS_ROLES.map((r) => `    --color-${r}: ${hsl(st[r].dark)};`),
+    "  }",
+    "}",
+  ].join("\n");
+}
+
+// ── surface: Go board (internal/taskboard/tokens_gen.go) ─────────────────────
+// Lifecycle glyph + adaptive hue + braille frames, mirroring theme.go/spinner.go
+// values 1:1. Additive: no consumer is rewired — this is the generated twin the
+// §6 gate compares against the CSS glyph tones.
+// gofmt aligns contiguous map entries and var/const specs. Emit the same
+// alignment up-front so gofmt is a no-op and the emitter output IS canonical.
+function alignMap(rows) {
+  const p = rows.map((r) => { const i = r.indexOf(": "); return { head: r.slice(0, i + 1), tail: r.slice(i + 2) }; });
+  const w = Math.max(...p.map((x) => x.head.length));
+  return p.map((x) => `${x.head.padEnd(w)} ${x.tail}`);
+}
+function alignEq(rows) {
+  const p = rows.map((r) => { const i = r.indexOf(" = "); return { head: r.slice(0, i), tail: r.slice(i + 3) }; });
+  const w = Math.max(...p.map((x) => x.head.length));
+  return p.map((x) => `${x.head.padEnd(w)} = ${x.tail}`);
+}
+
+function goHeader(pkg) {
+  return [
+    "// Code generated by design/emit.mjs from design/tokens.json. DO NOT EDIT.",
+    "// Regenerate: node design/emit.mjs --write",
+    "",
+    `package ${pkg}`,
+    "",
+  ].join("\n");
+}
+
+function taskboardGo() {
+  const life = tokens.lifecycle;
+  const rows = LIFE_ORDER.map((s) => {
+    const e = life[s];
+    return `\t"${s}": {Glyph: "${glyphOf(e.codepoint)}", ASCIIGlyph: ${JSON.stringify(e.asciiGlyph)}, Role: ${JSON.stringify(e.role)}, ColorLight: "${e.color.light}", ColorDark: "${e.color.dark}"},`;
+  });
+  const frames = life.in_progress.frames.map((f) => `"${glyphOf(f)}"`).join(", ");
+  return [
+    goHeader("taskboard"),
+    "// GenLifecycleToken mirrors one design/tokens.json lifecycle state.",
+    "type GenLifecycleToken struct {",
+    "\tGlyph      string",
+    "\tASCIIGlyph string",
+    "\tRole       string",
+    "\tColorLight string",
+    "\tColorDark  string",
+    "}",
+    "",
+    "// GenLifecycle is the generated 1:1 mirror of tokens.lifecycle (glyph + hue).",
+    "var GenLifecycle = map[string]GenLifecycleToken{",
+    ...alignMap(rows),
+    "}",
+    "",
+    "// GenLifecycleOrder is the canonical emission order (matches the source).",
+    `var GenLifecycleOrder = []string{${LIFE_ORDER.map((s) => `"${s}"`).join(", ")}}`,
+    "",
+    "// GenBrailleFrames mirrors lifecycle.in_progress.frames (spinner.go).",
+    `var GenBrailleFrames = [10]string{${frames}}`,
+    "",
+    "// GenBrailleStill is the reduced-motion steady frame.",
+    `var GenBrailleStill = "${glyphOf(life.in_progress.framesStill)}"`,
+    "",
+  ].join("\n");
+}
+
+// ── surface: Go pdrender (internal/pdrender/tokens_gen.go) ────────────────────
+// Reading tokens + the four semantic status tones as hex AdaptiveColors.
+// Additive stub — pdrender's hand-tuned tone*/pd* vars are untouched.
+function pdrenderGo() {
+  const st = tokens.color.status;
+  const r = tokens.type.reading;
+  const tone = (name, role) =>
+    `\tGenTone${name} = lipgloss.AdaptiveColor{Light: "${hslToHex(st[role].light)}", Dark: "${hslToHex(st[role].dark)}"}`;
+  return [
+    goHeader("pdrender"),
+    'import "github.com/charmbracelet/lipgloss"',
+    "",
+    "// Generated semantic status tones (design/tokens.json color.status → hex).",
+    "var (",
+    ...alignEq([tone("Info", "info"), tone("OK", "ok"), tone("Warn", "warn"), tone("Danger", "danger")]),
+    ")",
+    "",
+    "// Generated reading tokens (design/tokens.json font.reading / type.reading).",
+    "const (",
+    `\tGenReadingFontStack     = ${JSON.stringify(tokens.font.reading.stack)}`,
+    `\tGenReadingHeadingWeight = ${r.headingWeight}`,
+    `\tGenReadingBodySize      = ${r.body.size}`,
+    ")",
+    "",
+  ].join("\n");
+}
+
+// ── artifact registry ────────────────────────────────────────────────────────
+// kind "css": splice content between the shared marker block.
+// kind "go" : the build() is the WHOLE file.
+export const ARTIFACTS = [
+  { name: "cloud SPA", path: "cloud/priv/static/app.css", kind: "css", build: cloudBlock },
+  { name: "paper-surface", path: "api/assets/paper-surface/paper-surface.css", kind: "css", build: paperBlock },
+  { name: "Studio", path: "api/lib/barkpark_web/layouts/root.html.heex", kind: "css", build: studioBlock },
+  { name: "web demo", path: "web/app/globals.css", kind: "css", build: webBlock },
+  { name: "Go board", path: "internal/taskboard/tokens_gen.go", kind: "go", build: taskboardGo },
+  { name: "Go pdrender", path: "internal/pdrender/tokens_gen.go", kind: "go", build: pdrenderGo },
+];
+
+// Tolerant of leading indentation on the marker lines (Studio's markers sit
+// indented inside a <style> block); the captured groups preserve that whitespace.
+const markerRe = new RegExp(
+  `([ \\t]*${escapeRe(MARKER_BEGIN)}\\n)([\\s\\S]*?)(\\n[ \\t]*${escapeRe(MARKER_END)})`
+);
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+
+// Compute {expected, current, path, kind, name} for one artifact. `expected` is
+// the desired full file text; `current` is what's on disk. A missing marker for a
+// css artifact is a hard error (surface not prepared with the marker block).
+export function evaluate(a) {
+  const abs = join(repoRoot, a.path);
+  let current;
+  try { current = readFileSync(abs, "utf8"); }
+  catch { current = null; }
+  const content = a.build();
+
+  if (a.kind === "go") {
+    return { ...a, abs, current, expected: content };
+  }
+  // css: splice into the marker block of the CURRENT file
+  const base = current == null ? "" : current;
+  const m = base.match(markerRe);
+  if (!m) {
+    return { ...a, abs, current, expected: null, error: `no BEGIN/END GENERATED: tokens marker in ${a.path}` };
+  }
+  const expected = base.slice(0, m.index) + m[1] + content + m[3] + base.slice(m.index + m[0].length);
+  return { ...a, abs, current, expected };
+}
+
+export function evaluateAll() { return ARTIFACTS.map(evaluate); }
+
+function run(mode) {
+  const results = evaluateAll();
+  let changed = 0, errored = 0;
+  for (const r of results) {
+    if (r.error) { console.error(`  ERROR ${r.name}: ${r.error}`); errored++; continue; }
+    const drift = r.current !== r.expected;
+    if (mode === "write") {
+      if (drift) { writeFileSync(r.abs, r.expected); console.log(`  WROTE ${r.name} (${r.path})`); changed++; }
+      else { console.log(`  ok    ${r.name} (already current)`); }
+    } else {
+      if (drift) { console.error(`  DRIFT ${r.name} (${r.path})`); changed++; }
+      else { console.log(`  ok    ${r.name}`); }
+    }
+  }
+  if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
+  if (mode !== "write" && changed) {
+    console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json. Fix: node design/emit.mjs --write`);
+    process.exit(1);
+  }
+  console.log(mode === "write"
+    ? `emit --write: ${changed} artifact(s) regenerated, ${results.length - changed} already current.`
+    : `emit --check: all ${results.length} artifacts in sync with design/tokens.json.`);
+}
+
+// CLI
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  const mode = process.argv.includes("--write") ? "write" : "check";
+  run(mode);
+}
