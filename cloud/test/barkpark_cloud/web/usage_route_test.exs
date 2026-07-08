@@ -1,20 +1,24 @@
 defmodule BarkparkCloud.Web.UsageRouteTest do
   @moduledoc """
-  GET /v1/barkparks/:id/usage (C9 — charter decision D48): the console's usage
-  meters, composed honestly. Proves:
+  GET /v1/barkparks/:id/usage (C9 + C11 — charter decision D48 / OC3): the
+  console's usage meters, composed honestly. Proves:
 
     * 200 with the FULL fixed meter vocabulary, every meter uniform-shaped
     * flow meters (api_requests / bandwidth) are ALWAYS "unmetered"
     * seats reflect the team's real member count (+ pending-invitation detail)
     * db_size / disk come from the latest health beat, carrying its measured_at
-    * the webhook count is fetched server-side with the vault-stored admin token,
-      and that token is ABSENT from the rendered body (regex-scanned) while the
-      upstream request DID carry it (custody round-trip)
-    * honest degradation: an unreachable instance still returns 200 with the
-      control-plane meters present and webhooks degraded to "unmetered" — never a
-      500, never a fake zero, never a block
-    * a still-provisioning (no-url) instance never calls upstream; webhooks
-      degrade, seats still return
+    * C11 real inventory: documents + datasets + webhooks are fetched SERVER-SIDE
+      with the vault-stored admin token — datasets from the instance's dataset
+      list, documents (analytics total) and webhooks summed CROSS-DATASET over
+      that list — and that token is ABSENT from the rendered body (regex-scanned)
+      while every upstream request DID carry it (custody round-trip)
+    * honest degradation: an unenumerable / unreachable instance still returns
+      200 with the control-plane meters present and the instance-sourced meters
+      degraded to "unmetered" — never a 500, never a fake zero, never a block
+    * partial failure of a cross-dataset fan-out degrades that WHOLE meter (a
+      partial sum would silently undercount) WITHOUT dragging the others down
+    * a still-provisioning (no-url) / pre-feature (no-token) instance never calls
+      upstream; the instance meters degrade, seats still return
     * auth: 401 unauthenticated; team-scope fail-closed → the SAME 404 for
       wrong-team / nonexistent / malformed ids
   """
@@ -88,7 +92,6 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
   defp usage(conn), do: Jason.decode!(conn.resp_body)["usage"]
   defp meters(conn), do: usage(conn)["meters"]
 
-  defp program(response), do: Fake.program([response])
   defp ok_json(status, body), do: {:ok, %{status: status, body: body}}
 
   defp seed_health(bp, payload) do
@@ -96,11 +99,44 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     :ok
   end
 
+  # ── Instance-API programming (C11 fan-out order) ────────────────────────────
+  #
+  # build_usage fires, in order: (1) the dataset LIST, then (2) the DOCUMENTS
+  # analytics fan-out (one call per dataset, in list order), then (3) the
+  # WEBHOOKS fan-out (one per dataset). `program_instance/1` queues exactly that
+  # sequence from a list of `{slug, doc_count, webhook_count}`.
+  defp program_instance(datasets) do
+    ds_body = Jason.encode!(%{datasets: Enum.map(datasets, fn {s, _d, _w} -> %{slug: s} end)})
+    doc_resps = for {_s, d, _w} <- datasets, do: ok_json(200, Jason.encode!(%{total_documents: d}))
+
+    wh_resps =
+      for {_s, _d, w} <- datasets,
+          do: ok_json(200, Jason.encode!(%{webhooks: List.duplicate(%{id: "wh"}, w)}))
+
+    Fake.program([ok_json(200, ds_body) | doc_resps ++ wh_resps])
+  end
+
+  # A single-production-dataset healthy instance with the given doc/webhook count.
+  defp program_simple(docs \\ 0, webhooks \\ 0) do
+    program_instance([{"production", docs, webhooks}])
+  end
+
+  # Every upstream request must carry the decrypted admin bearer, and the token
+  # must never surface in the rendered body.
+  defp assert_token_custody(conn) do
+    refute conn.resp_body =~ @instance_admin_token
+
+    for req <- Fake.requests() do
+      assert {"Authorization", "Bearer " <> @instance_admin_token} =
+               List.keyfind(req.headers, "Authorization", 0)
+    end
+  end
+
   describe "GET /v1/barkparks/:id/usage — the composed envelope" do
     test "200 with the full meter vocabulary, uniform-shaped" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[{"id":"wh_1"},{"id":"wh_2"}]})))
+      program_simple(0, 2)
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
 
@@ -123,7 +159,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     test "flow meters are always unmetered" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_simple()
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -132,16 +168,18 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert m["bandwidth"]["value"] == "unmetered"
     end
 
-    test "documents/datasets ship honestly unmetered in v1 (no fake zero)" do
+    test "C11: documents + datasets are real counts from the enumerated instance" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_simple(137, 0)
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
 
-      assert m["documents"]["value"] == "unmetered"
-      assert m["datasets"]["value"] == "unmetered"
+      # One dataset (production) → datasets count 1, documents total 137.
+      assert m["datasets"]["value"] == 1
+      assert m["datasets"]["source"] == "instance.datasets"
+      assert m["documents"]["value"] == 137
       assert m["documents"]["source"] == "instance.documents"
     end
   end
@@ -154,7 +192,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       {:ok, _} = Accounts.invite_member(team, "invitee@example.com", "member", owner)
 
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_simple()
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(owner))
       seats = meters(conn)["seats"]
@@ -175,7 +213,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
         "pg_size_bytes" => 987_654_321
       })
 
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_simple()
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -189,7 +227,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     test "no health beat yet → db_size/disk unmetered, endpoint still 200" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_simple()
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -200,52 +238,91 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     end
   end
 
-  describe "webhook count — server-side fetch + token custody" do
-    test "webhooks value == the instance count; token round-trips but never leaks" do
+  describe "C11 instance inventory — cross-dataset counts + token custody" do
+    test "webhooks + documents SUM across every enumerated dataset" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[{"id":"wh_1"},{"id":"wh_2"},{"id":"wh_3"}]})))
+      # Three datasets with distinct doc + webhook counts.
+      program_instance([
+        {"production", 100, 2},
+        {"staging", 20, 1},
+        {"archive", 3, 4}
+      ])
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
 
-      assert meters(conn)["webhooks"]["value"] == 3
-      # The source label admits the count's dataset scope (production only).
-      assert meters(conn)["webhooks"]["source"] == "instance.webhooks.production"
-
-      # The upstream fetch hit the default-dataset webhook list with the bearer.
-      assert [req] = Fake.requests()
-      assert req.method == :get
-      assert req.url == @instance_url <> "/v1/webhooks/production"
-
-      assert {"Authorization", "Bearer " <> @instance_admin_token} =
-               List.keyfind(req.headers, "Authorization", 0)
-
-      # ...and the token is ABSENT from the rendered body.
-      refute conn.resp_body =~ @instance_admin_token
+      assert m["datasets"]["value"] == 3
+      # documents = 100 + 20 + 3 ; webhooks = 2 + 1 + 4
+      assert m["documents"]["value"] == 123
+      assert m["webhooks"]["value"] == 7
+      # The cross-dataset webhook label drops the old .production suffix.
+      assert m["webhooks"]["source"] == "instance.webhooks"
     end
 
-    test "zero webhooks renders a real 0, not the degrade" do
+    test "every upstream call carries the bearer; the token never leaks" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"webhooks":[]})))
+      program_instance([{"production", 5, 2}, {"staging", 0, 1}])
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
-      assert meters(conn)["webhooks"]["value"] == 0
+      assert conn.status == 200
+
+      urls = Enum.map(Fake.requests(), & &1.url)
+
+      # 1 dataset-list + 2 analytics + 2 webhook-list calls.
+      assert @instance_url <> "/api/workspaces/default/projects/default/datasets" in urls
+      assert @instance_url <> "/v1/data/analytics/production" in urls
+      assert @instance_url <> "/v1/data/analytics/staging" in urls
+      assert @instance_url <> "/v1/webhooks/production" in urls
+      assert @instance_url <> "/v1/webhooks/staging" in urls
+
+      assert_token_custody(conn)
+    end
+
+    test "a true zero across datasets renders real 0s, not the degrade" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program_instance([{"production", 0, 0}])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      assert m["documents"]["value"] == 0
+      assert m["webhooks"]["value"] == 0
+      assert m["datasets"]["value"] == 1
+    end
+
+    test "an instance with NO datasets is an honest empty (datasets 0, sums 0)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # Empty dataset list → no fan-out; sums are a true 0.
+      Fake.program([ok_json(200, ~s({"datasets":[]}))])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      assert m["datasets"]["value"] == 0
+      assert m["documents"]["value"] == 0
+      assert m["webhooks"]["value"] == 0
     end
   end
 
   describe "honest degradation — the endpoint never 500s, never blocks" do
-    test "an unreachable instance → 200, control-plane meters present, webhooks unmetered" do
+    test "an unreachable instance → 200, control-plane meters present, instance meters unmetered" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
       seed_health(bp, %{"pg_size_bytes" => 42})
-      program({:error, {:http_client, :timeout}})
+      # The very first call (dataset list) fails → nothing to enumerate.
+      Fake.program([{:error, {:http_client, :timeout}}])
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
 
       assert conn.status == 200
       m = meters(conn)
-      # The instance-sourced meter degraded...
+      # Every instance-sourced meter degraded...
+      assert m["datasets"]["value"] == "unmetered"
+      assert m["documents"]["value"] == "unmetered"
       assert m["webhooks"]["value"] == "unmetered"
       # ...but control-plane meters STILL returned.
       assert m["seats"]["value"] == 1
@@ -253,23 +330,78 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       refute conn.resp_body =~ @instance_admin_token
     end
 
-    test "an upstream non-2xx degrades webhooks, endpoint still 200" do
+    test "a partial webhook fan-out failure degrades ONLY webhooks (no undercount)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(500, ~s({"error":"boom"})))
+      # Datasets list ok (2), both analytics ok, but the SECOND webhook call 500s.
+      Fake.program([
+        ok_json(200, ~s({"datasets":[{"slug":"production"},{"slug":"staging"}]})),
+        ok_json(200, ~s({"total_documents":10})),
+        ok_json(200, ~s({"total_documents":5})),
+        ok_json(200, ~s({"webhooks":[{"id":"a"}]})),
+        ok_json(500, ~s({"error":"boom"}))
+      ])
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
-      assert conn.status == 200
-      assert meters(conn)["webhooks"]["value"] == "unmetered"
+      m = meters(conn)
+
+      # webhooks can't be honestly totalled → unmetered...
+      assert m["webhooks"]["value"] == "unmetered"
+      assert m["webhooks"]["source"] == "instance.webhooks"
+      # ...while datasets + documents (which all landed) stay real.
+      assert m["datasets"]["value"] == 2
+      assert m["documents"]["value"] == 15
     end
 
-    test "a garbage-shaped webhook body degrades webhooks (no guessed count)" do
+    test "a garbage-shaped analytics body degrades documents (no guessed count)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      program(ok_json(200, ~s({"not_webhooks":true})))
+
+      Fake.program([
+        ok_json(200, ~s({"datasets":[{"slug":"production"}]})),
+        ok_json(200, ~s({"not_total":true})),
+        ok_json(200, ~s({"webhooks":[]}))
+      ])
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
-      assert meters(conn)["webhooks"]["value"] == "unmetered"
+      m = meters(conn)
+
+      assert m["documents"]["value"] == "unmetered"
+      # datasets + webhooks still landed.
+      assert m["datasets"]["value"] == 1
+      assert m["webhooks"]["value"] == 0
+    end
+
+    test "a garbage-shaped dataset list degrades ALL instance meters, endpoint 200" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      Fake.program([ok_json(200, ~s({"not_datasets":true}))])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      assert conn.status == 200
+      assert m["datasets"]["value"] == "unmetered"
+      assert m["documents"]["value"] == "unmetered"
+      assert m["webhooks"]["value"] == "unmetered"
+    end
+
+    test "too many datasets: the COUNT still lands but the fan-outs degrade" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # 30 datasets — over the fan-out cap (24). The list call alone reveals the
+      # count; documents/webhooks refuse to fan out that wide and degrade.
+      slugs = for i <- 1..30, do: %{slug: "ds#{i}"}
+      Fake.program([ok_json(200, Jason.encode!(%{datasets: slugs}))])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      assert m["datasets"]["value"] == 30
+      assert m["documents"]["value"] == "unmetered"
+      assert m["webhooks"]["value"] == "unmetered"
+      # Only the ONE list call was made — no fan-out beyond the cap.
+      assert length(Fake.requests()) == 1
     end
 
     test "a still-provisioning instance (no url) never calls upstream; seats still return" do
@@ -282,6 +414,8 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert conn.status == 200
       m = meters(conn)
       assert m["webhooks"]["value"] == "unmetered"
+      assert m["documents"]["value"] == "unmetered"
+      assert m["datasets"]["value"] == "unmetered"
       assert m["seats"]["value"] == 1
       assert Fake.requests() == []
     end
@@ -299,7 +433,9 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
 
       assert conn.status == 200
-      assert meters(conn)["webhooks"]["value"] == "unmetered"
+      m = meters(conn)
+      assert m["webhooks"]["value"] == "unmetered"
+      assert m["datasets"]["value"] == "unmetered"
       assert Fake.requests() == []
     end
   end

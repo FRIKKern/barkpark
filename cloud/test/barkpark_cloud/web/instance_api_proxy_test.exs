@@ -486,6 +486,76 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
     end
   end
 
+  describe "honest degradation — a webhook DELETED elsewhere (C11 / OC4)" do
+    # The instance disambiguates old-box vs deleted-webhook BY DESIGN: its
+    # WebhookController answers a genuine miss with a resource-CODED 404 body
+    # (`webhook_not_found` / `event_not_found`), while a route-missing 404 on a
+    # too-old box is Phoenix's UNCODED `{"errors":{"detail":...}}`. A coded body
+    # → `webhook_gone` ("refresh the list"), NOT the "update this instance" lie.
+    test "coded 404 (webhook_not_found) on deliveries → 502 webhook_gone, refresh hint" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}})))
+
+      conn =
+        call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries",
+          token: session_token(user)
+        )
+
+      assert conn.status == 502
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"]["code"] == "webhook_gone"
+      assert body["error"]["hint"] =~ "refresh"
+      # NOT the capability lie.
+      refute body["error"]["hint"] =~ "update"
+    end
+
+    test "coded 404 (event_not_found) on replay → 502 webhook_gone, and no audit event" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(404, ~s({"error":{"code":"event_not_found","message":"event not found"}})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries/evt_5/replay",
+          token: session_token(user)
+        )
+
+      assert conn.status == 502
+      assert json_body(conn)["error"]["code"] == "webhook_gone"
+      # A capability that returned 404 is not an action that happened.
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "coded 404 (webhook_not_found) on rotate → 502 webhook_gone, no audit" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program(ok_json(404, ~s({"error":{"code":"webhook_not_found","message":"webhook not found"}})))
+
+      conn =
+        call(:post, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/rotate", token: session_token(user))
+
+      assert conn.status == 502
+      assert json_body(conn)["error"]["code"] == "webhook_gone"
+      assert Accounts.list_audit_events(team) == []
+    end
+
+    test "an UNCODED 404 (string error / route-missing) stays capability_unavailable" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # A string `error` (not the coded object) is NOT a confident 'gone' signal.
+      program(ok_json(404, ~s({"error":"not_found"})))
+
+      conn =
+        call(:get, "/v1/barkparks/#{bp.id}/api/webhooks/wh_9/deliveries",
+          token: session_token(user)
+        )
+
+      assert conn.status == 502
+      assert json_body(conn)["error"]["code"] == "capability_unavailable"
+    end
+  end
+
   describe "URL-reshaping values are refused before any upstream call" do
     test "a query-injecting ?dataset= is a 400 bad_request, upstream never called" do
       {user, team} = user_with_team()

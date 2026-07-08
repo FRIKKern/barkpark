@@ -4600,8 +4600,8 @@ defmodule BarkparkCloud.Web.Router do
   # control-plane-sourced meters on the instance: seats (team members) and the
   # telemetry-sourced db_size/disk are computed from control-plane data and
   # returned even when the instance is unreachable; only the instance-sourced
-  # inventory counts (webhooks live; documents/datasets are D48-tier-2 not-yet-
-  # wired) reach across the wire, and any failure there degrades that ONE meter
+  # inventory counts (documents / datasets / webhooks — all live over the wire
+  # since C11) reach across, and any failure there degrades that ONE meter
   # to `value:"unmetered"` (never a fake zero) rather than failing the request.
   # `BarkparkCloud.Usage.compose/1` is the pure, total shaper; this handler only
   # gathers the (possibly partial / failed) inputs. The vault-stored admin token
@@ -4668,16 +4668,20 @@ defmodule BarkparkCloud.Web.Router do
   # "unmetered", never the whole envelope (D51 — control-plane meters return even
   # when the instance is down).
   defp build_usage(team, bp) do
+    # ONE dataset enumeration feeds three instance-inventory meters (C11): the
+    # datasets COUNT is its length; documents + webhooks FAN OUT over the same
+    # slug set and sum. All inputs are resolved BEFORE compose, so the pure shaper
+    # only ever sees the (possibly failed / partial) results — never does IO.
+    datasets = usage_instance_datasets(bp)
+    slugs = usage_fanout_slugs(datasets)
+
     Usage.compose(%{
       telemetry: usage_telemetry(bp),
       seats: usage_seats(team),
       pending_invitations: usage_pending_invitations(team),
-      webhooks: usage_instance_webhooks(bp),
-      # D48 tier 2: documents/datasets have no cheap, control-plane-reachable
-      # instance count endpoint yet (the dataset/document catalog rows land with
-      # C11), so they ship honestly "unmetered" rather than faked. Source named.
-      documents: :unmetered,
-      datasets: :unmetered
+      datasets: usage_dataset_count(datasets),
+      documents: usage_instance_documents(bp, slugs),
+      webhooks: usage_instance_webhooks(bp, slugs)
     })
   end
 
@@ -4709,50 +4713,178 @@ defmodule BarkparkCloud.Web.Router do
     _ -> nil
   end
 
-  # The instance's webhook count, fetched SERVER-SIDE with the vault-stored admin
-  # token over the SAME transport seam the proxy uses (bounded timeout — never a
-  # hang). DATASET-SCOPED: the instance's webhook list is per-dataset, so this
-  # counts the `production` list — the C5 panel's default view — and the meter's
-  # source label (`instance.webhooks.production`) says so; cross-dataset truth
-  # waits for C11's catalog rows. A not-live / token-less instance has nothing to
-  # fetch (`:unmetered`);
-  # a transport or shape failure is `{:error, _}`. In EVERY branch the admin
-  # token stays in the request header and NEVER in the returned value — so it can
-  # never reach the response body, a log line, or an error tuple.
-  defp usage_instance_webhooks(bp) do
+  # ── instance-inventory gatherers (C11 — real documents/datasets/webhooks) ──
+  #
+  # Every gatherer fetches SERVER-SIDE with the vault-stored admin token over the
+  # SAME transport seam the proxy uses (`instance_api_http_client/0`), bounded by
+  # that client's timeout (`Billing.HttpClient`: 10s connect / 15s total — well
+  # under the SPA's ~15s skeleton budget, so a hung box can never wedge the poll).
+  # In EVERY branch the admin token stays in the request HEADER and NEVER appears
+  # in a return value, a log line, or an error tuple — so it can never reach the
+  # response body (the `usage_route_test` regex-scan pins this). A not-live /
+  # token-less instance has nothing to fetch → `:unmetered`; a transport or shape
+  # failure → `{:error, _}`; both let `Usage.instance_meter/2` degrade that ONE
+  # meter honestly (D51 — never a fake zero, never a 500'd envelope).
+
+  # Cap on the per-request inventory FAN-OUT. A box with more datasets than this
+  # can't be totalled inside the skeleton budget without risking a hang, so the
+  # fanned meters (documents, webhooks) degrade to "unmetered" rather than gamble
+  # — the datasets COUNT itself still lands (it is one list call, not a fan-out).
+  @usage_max_fanout_datasets 24
+
+  # The instance's dataset list, fetched once (the WorkspaceController datasets
+  # envelope on the Default workspace/project — the same Default scope the flat
+  # admin token operates in). `{:ok, [slug]}` on success; `:unmetered` when the
+  # box is not live / token-less; `{:error, _}` on a transport or shape failure.
+  defp usage_instance_datasets(bp) do
     with {:ok, base} <- instance_base_url(bp),
          {:ok, admin_token} <- instance_admin_token(bp) do
       request = %{
         method: :get,
-        url: base <> "/v1/webhooks/production",
+        url: base <> "/api/workspaces/default/projects/default/datasets",
         headers: instance_api_headers(admin_token),
         body: ""
       }
 
       case instance_api_http_client().request(request) do
         {:ok, %{status: status, body: body}} when status in 200..299 ->
-          count_webhooks(body)
+          parse_dataset_slugs(body)
 
         _ ->
           {:error, :unreachable}
       end
     else
-      # not_live / no_admin_token / decrypt_failed — nothing to count, not a
-      # failure to surface: the meter degrades honestly to "unmetered".
       {:error, _} -> :unmetered
     end
   end
 
-  # The webhook list is `{"webhooks": [...]}` (instance WebhookController.index).
-  # Any other shape is an honest degrade, never a guessed count.
-  defp count_webhooks(body) when is_binary(body) do
+  # The datasets METER count = how many datasets the list returned. A failure /
+  # not-live passes through verbatim so `instance_meter/2` degrades it (never a
+  # fake zero on a box we simply couldn't enumerate).
+  defp usage_dataset_count({:ok, slugs}), do: {:ok, length(slugs)}
+  defp usage_dataset_count(other), do: other
+
+  # The slug set the documents + webhooks fan-outs iterate. A successful list
+  # within the cap → `{:ok, slugs}`; over the cap → an honest error (too big to
+  # total cheaply); a not-live / failed list passes through so both fanned meters
+  # degrade in lockstep with the datasets meter.
+  defp usage_fanout_slugs({:ok, slugs}) when length(slugs) <= @usage_max_fanout_datasets,
+    do: {:ok, slugs}
+
+  defp usage_fanout_slugs({:ok, _slugs}), do: {:error, :too_many_datasets}
+  defp usage_fanout_slugs(other), do: other
+
+  # Cross-dataset DOCUMENT total: sum every dataset's `total_documents` (the
+  # instance analytics endpoint). Any per-dataset failure degrades the WHOLE meter
+  # (a partial sum silently undercounts — a lie).
+  defp usage_instance_documents(bp, {:ok, slugs}) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      sum_across_datasets(slugs, fn slug -> count_documents(base, admin_token, slug) end)
+    else
+      {:error, _} -> :unmetered
+    end
+  end
+
+  defp usage_instance_documents(_bp, other), do: other
+
+  # Cross-dataset WEBHOOK total: sum every dataset's webhook-list length (C11 —
+  # the meter is no longer `production`-only; the `instance.webhooks` source label
+  # says so).
+  defp usage_instance_webhooks(bp, {:ok, slugs}) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      sum_across_datasets(slugs, fn slug -> count_webhooks(base, admin_token, slug) end)
+    else
+      {:error, _} -> :unmetered
+    end
+  end
+
+  defp usage_instance_webhooks(_bp, other), do: other
+
+  # Sum a per-dataset count across the set, SHORT-CIRCUITING to `{:error, _}` the
+  # instant any dataset's fetch fails or returns an unexpected shape — a partial
+  # cross-dataset total would silently undercount, so the whole meter degrades.
+  defp sum_across_datasets(slugs, fetch_one) do
+    Enum.reduce_while(slugs, {:ok, 0}, fn slug, {:ok, acc} ->
+      case fetch_one.(slug) do
+        {:ok, n} when is_integer(n) and n >= 0 -> {:cont, {:ok, acc + n}}
+        _ -> {:halt, {:error, :dataset_fetch_failed}}
+      end
+    end)
+  end
+
+  # One dataset's webhook count — `{"webhooks": [...]}` (instance
+  # WebhookController.index). Any other shape is an honest degrade, never a
+  # guessed count.
+  defp count_webhooks(base, admin_token, dataset) do
+    request = %{
+      method: :get,
+      url: base <> "/v1/webhooks/" <> dataset,
+      headers: instance_api_headers(admin_token),
+      body: ""
+    }
+
+    case instance_api_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        decode_list_count(body, "webhooks")
+
+      _ ->
+        {:error, :unreachable}
+    end
+  end
+
+  # One dataset's document total — `{"total_documents": n, ...}` (instance
+  # AnalyticsController.index). A single cheap read per dataset; no per-type walk.
+  defp count_documents(base, admin_token, dataset) do
+    request = %{
+      method: :get,
+      url: base <> "/v1/data/analytics/" <> dataset,
+      headers: instance_api_headers(admin_token),
+      body: ""
+    }
+
+    case instance_api_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        decode_scalar_total(body, "total_documents")
+
+      _ ->
+        {:error, :unreachable}
+    end
+  end
+
+  # `{"<key>": [...]}` → `{:ok, length}`; any other shape → an honest degrade.
+  defp decode_list_count(body, key) when is_binary(body) do
     case Jason.decode(body) do
-      {:ok, %{"webhooks" => list}} when is_list(list) -> {:ok, length(list)}
+      {:ok, %{^key => list}} when is_list(list) -> {:ok, length(list)}
       _ -> {:error, :bad_shape}
     end
   end
 
-  defp count_webhooks(_), do: {:error, :bad_shape}
+  defp decode_list_count(_, _key), do: {:error, :bad_shape}
+
+  # `{"<key>": n}` → `{:ok, n}` for a non-negative integer; else degrade.
+  defp decode_scalar_total(body, key) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{^key => n}} when is_integer(n) and n >= 0 -> {:ok, n}
+      _ -> {:error, :bad_shape}
+    end
+  end
+
+  defp decode_scalar_total(_, _key), do: {:error, :bad_shape}
+
+  # The datasets-list envelope → a slug list (skipping any malformed row).
+  defp parse_dataset_slugs(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"datasets" => list}} when is_list(list) ->
+        {:ok, for(%{"slug" => s} <- list, is_binary(s) and s != "", do: s)}
+
+      _ ->
+        {:error, :bad_shape}
+    end
+  end
+
+  defp parse_dataset_slugs(_), do: {:error, :bad_shape}
 
   ## go-live handler (shared by /launch and /go-live)
 
@@ -5778,18 +5910,16 @@ defmodule BarkparkCloud.Web.Router do
         maybe_audit_instance_mutation(conn, team, bp, entry)
         json(conn, status, %{ok: true, resource: "webhook", data: decode_instance_body(body)})
 
-      # An instance too OLD for the C5-added endpoints 404s them — that is
-      # honest capability degradation, not "webhook not found". Exactly the
-      # three routes C5 adds to the instance API (rotate, deliveries, replay —
-      # every instance live before C5 404s all three) map a bare upstream 404
-      # this way; the CRUD routes predate C4, so their 404s relay verbatim as
-      # upstream_error below.
-      {:ok, %{status: 404}}
+      # A bare upstream 404 on one of the three C5-added routes (rotate /
+      # deliveries / replay) is AMBIGUOUS from the status alone (C11 / D25 / OC4):
+      # the instance may be too OLD to serve the route at all, OR the route exists
+      # and the webhook/event was simply DELETED — very likely elsewhere, on a
+      # modern autoupdate-by-default fleet. "Update this instance" is an actively
+      # WRONG dead-end for the deleted case. `instance_capability_404/2`
+      # discriminates on the instance's OWN coded body (see there).
+      {:ok, %{status: 404, body: body}}
       when entry.capability in [:"webhook.rotate", :"webhook.deliveries", :"webhook.replay"] ->
-        json(conn, 502, %{
-          ok: false,
-          error: %{code: "capability_unavailable", hint: "update this instance"}
-        })
+        instance_capability_404(conn, body)
 
       # Any other non-2xx is relayed with the instance's OWN status so a caller
       # can distinguish 404-not-found from 422-invalid.
@@ -5804,6 +5934,53 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 502, %{ok: false, error: %{code: "instance_unreachable"}, reachable: false})
     end
   end
+
+  # Disambiguate a 404 on a C5-added route. The instance disambiguates for us BY
+  # DESIGN: its WebhookController answers a genuine miss with a resource-CODED
+  # body (`webhook_not_found` / `event_not_found` — see api WebhookController's
+  # coded_not_found/3, added precisely so the console can tell the two apart),
+  # while a route-missing 404 on a too-old box is Phoenix's UNCODED
+  # `{"errors":{"detail":"Not Found"}}`.
+  #
+  #   coded body   → `webhook_gone` + "refresh the list" — the resource is gone
+  #                  (likely deleted elsewhere); re-fetching the list is the ONE
+  #                  recovery (D25). The SPA's failureCopy owns this exact code
+  #                  string (C10 — merge order irrelevant).
+  #   uncoded body → `capability_unavailable` + "update this instance" — the
+  #                  genuinely-old box that never served the route.
+  #
+  # Both stay HTTP 502, mirroring the sibling capability_unavailable envelope the
+  # SPA/CLI already transport: the honest story rides the code + hint, not the
+  # status. (A version/capability discriminator that could also flag a truly
+  # ancient box WITHOUT the coded-body signal is a wave-2 follow-on.)
+  defp instance_capability_404(conn, body) do
+    if upstream_webhook_gone?(body) do
+      json(conn, 502, %{ok: false, error: %{code: "webhook_gone", hint: "refresh the list"}})
+    else
+      json(conn, 502, %{
+        ok: false,
+        error: %{code: "capability_unavailable", hint: "update this instance"}
+      })
+    end
+  end
+
+  # True when the upstream 404 body carries the instance's resource-coded
+  # not-found (`webhook_not_found` / `event_not_found`) — proof the endpoint
+  # EXISTS and the webhook/event is simply gone, not the route missing. Anything
+  # else (an uncoded body, a string `error`, unparseable bytes) is NOT a
+  # confident "gone" → stays capability_unavailable.
+  defp upstream_webhook_gone?(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"error" => %{"code" => code}}}
+      when code in ["webhook_not_found", "event_not_found"] ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp upstream_webhook_gone?(_), do: false
 
   # Only :mutate capabilities audit, and only on a landed 2xx (never a recorded
   # action that did not happen). Best-effort + post-relay, mirroring the

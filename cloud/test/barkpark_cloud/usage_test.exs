@@ -64,7 +64,7 @@ defmodule BarkparkCloud.UsageTest do
       m = meters(%{})
       assert m.documents.source == "instance.documents"
       assert m.datasets.source == "instance.datasets"
-      assert m.webhooks.source == "instance.webhooks.production"
+      assert m.webhooks.source == "instance.webhooks"
       assert m.db_size.source == "telemetry.pg_size_bytes"
       assert m.disk.source == "telemetry.disk_used_percent"
       assert m.seats.source == "control-plane.team_members"
@@ -97,6 +97,32 @@ defmodule BarkparkCloud.UsageTest do
       assert m.webhooks.measured_at == nil
     end
 
+    test "C11: landed document + dataset counts render their real numbers" do
+      # The router now resolves these over the wire (cross-dataset sums); the
+      # composer shapes a landed {:ok, n} into the number, same as webhooks.
+      m = meters(%{documents: {:ok, 812}, datasets: {:ok, 3}})
+      assert m.documents.value == 812
+      assert m.datasets.value == 3
+      assert m.documents.measured_at == nil
+      assert m.datasets.measured_at == nil
+    end
+
+    test "C11: a true zero documents / datasets is a real 0, not the degrade" do
+      m = meters(%{documents: {:ok, 0}, datasets: {:ok, 0}})
+      assert m.documents.value == 0
+      assert m.datasets.value == 0
+    end
+
+    test "C11: a per-meter failure degrades documents / datasets, source still named" do
+      # A failed cross-dataset fan-out (or an unenumerable box) is {:error, _};
+      # each degrades to unmetered WITHOUT dragging the other meters down.
+      m = meters(%{documents: {:error, :dataset_fetch_failed}, datasets: {:error, :unreachable}})
+      assert m.documents.value == "unmetered"
+      assert m.documents.source == "instance.documents"
+      assert m.datasets.value == "unmetered"
+      assert m.datasets.source == "instance.datasets"
+    end
+
     test "zero webhooks is a real, TRUE zero (not the fake-zero degrade)" do
       m = meters(%{webhooks: {:ok, 0}})
       assert m.webhooks.value == 0
@@ -105,7 +131,7 @@ defmodule BarkparkCloud.UsageTest do
     test "a transport error degrades to unmetered, source still named" do
       m = meters(%{webhooks: {:error, :unreachable}})
       assert m.webhooks.value == "unmetered"
-      assert m.webhooks.source == "instance.webhooks.production"
+      assert m.webhooks.source == "instance.webhooks"
     end
 
     test "an explicit :unmetered (D48 tier-2 not-yet-wired) degrades cleanly" do
