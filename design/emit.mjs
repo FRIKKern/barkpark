@@ -15,6 +15,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { evaluateMirror } from "./paper-editor-mirror.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
@@ -336,14 +337,34 @@ function run(mode) {
       else { console.log(`  ok    ${r.name}`); }
     }
   }
+  // Post-step: the paper-editor token mirror. It is DERIVED from the just-emitted
+  // paper-surface.css (a second generation hop), so it runs AFTER the artifact
+  // loop has written paper-surface.css to disk. One shared transform with
+  // design/check.mjs + scripts/paper-editor-mirror-check.sh — they can't disagree.
+  const mr = evaluateMirror(repoRoot);
+  if (mr.error) {
+    console.error(`  ERROR ${mr.name}: ${mr.error}`);
+    errored++;
+  } else {
+    const drift = mr.current !== mr.expected;
+    if (mode === "write") {
+      if (drift) { writeFileSync(mr.abs, mr.expected); console.log(`  WROTE ${mr.name} (${mr.path})`); changed++; }
+      else { console.log(`  ok    ${mr.name} (already current)`); }
+    } else {
+      if (drift) { console.error(`  DRIFT ${mr.name} (${mr.path})`); changed++; }
+      else { console.log(`  ok    ${mr.name}`); }
+    }
+  }
+
   if (errored) { console.error(`emit: ${errored} artifact(s) missing their marker block.`); process.exit(1); }
   if (mode !== "write" && changed) {
     console.error(`\nemit --check: ${changed} artifact(s) DRIFTED from design/tokens.json. Fix: node design/emit.mjs --write`);
     process.exit(1);
   }
+  const total = results.length + 1; // + paper-editor mirror
   console.log(mode === "write"
-    ? `emit --write: ${changed} artifact(s) regenerated, ${results.length - changed} already current.`
-    : `emit --check: all ${results.length} artifacts in sync with design/tokens.json.`);
+    ? `emit --write: ${changed} artifact(s) regenerated, ${total - changed} already current.`
+    : `emit --check: all ${total} artifacts in sync (${results.length} surfaces + paper-editor mirror).`);
 }
 
 // CLI

@@ -24,11 +24,17 @@
 #   `--bp-*` typography tokens in the embedder bundle (styles.css) are GENERATED
 #   from the ONE canonical source (api/assets/paper-surface/paper-surface.css)
 #   via a deterministic de-scoping transform, and live between exact BEGIN/END
-#   GENERATED markers. Default mode regenerates in memory and byte-compares
-#   against the marked section (fails with a --write hint on drift). `--write`
-#   rewrites the marked section in place. This makes the bundle track the source:
-#   a token added/changed in paper-surface.css (e.g. wave-2 --bp-tone-* light+dark
-#   values) can't be silently forgotten in the standalone bundle.
+#   GENERATED markers. Default mode byte-compares against the marked section
+#   (fails with a --write hint on drift); `--write` rewrites it in place. This
+#   makes the bundle track the source: a token added/changed in paper-surface.css
+#   (e.g. wave-2 --bp-tone-* light+dark values) can't be silently forgotten.
+#
+#   The transform NO LONGER lives here: it is owned by design/paper-editor-mirror.mjs
+#   (zero-dep Node), which design/emit.mjs ALSO drives after it emits
+#   paper-surface.css and design/check.mjs gates. So a single
+#   `node design/emit.mjs --write` keeps paper-surface.css AND this mirror in
+#   lockstep, and there is exactly ONE implementation — this script and the
+#   emitter can never disagree. This part just delegates (CLI surface unchanged).
 #
 # Usage:
 #   scripts/paper-editor-mirror-check.sh            # check (CI + the merge gate)
@@ -49,150 +55,15 @@ BUNDLE="$ROOT/api/assets/paper-editor/src/styles.css"
 SURFACE="$ROOT/api/assets/paper-surface/paper-surface.css"
 
 # ── Part 3: generated paper-surface token layer (source → bundle) ────────────
-# Runs first so `--write` regenerates before the lockstep check verifies.
-python3 - "$SURFACE" "$BUNDLE" "$MODE" <<'PY'
-import os, re, sys, difflib
-
-surface_path, bundle_path, mode = sys.argv[1:4]
-
-if not os.path.isfile(surface_path):
-    print(f"paper-editor-mirror-check part 3: FAILED — canonical source missing: "
-          f"{surface_path}\n  (paper-surface.css is the ONE source the bundle's "
-          f"token layer is generated from — it must never be deleted/moved without "
-          f"updating this script.)", file=sys.stderr)
-    sys.exit(1)
-
-# Literal font stacks for any host-app-only `var(--font*)` values the source
-# might carry (Studio resolves those through host vars that DO NOT exist in a
-# bare host). The source is literal-fonts today, so this is a passthrough guard;
-# it keeps the transform correct if a `var(--font…)` ever lands in the source.
-FONT_LITERALS = {
-    "--paper-font-serif": '"Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, \'Source Serif 4\', serif',
-    "--paper-font-sans": '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
-    "--paper-font-mono": 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
-}
-
-def strip_comments(s):
-    return re.sub(r"/\*.*?\*/", " ", s, flags=re.S)
-
-def parse_decls(sel, body):
-    """Ordered (name, value) custom-property declarations from a token-scope
-    rule body. A token scope must be PURE custom properties: a non-custom
-    declaration there is a hard error, never a silent skip — a silently
-    skipped block would mean its tokens NEVER reach the generated bundle
-    section while the check stays green (the exact drift this gate exists to
-    prevent). Element/chrome rules belong under element selectors
-    (`.bp-paper-surface h1`, `.bp-callout`, …), not the bare token scopes."""
-    out = []
-    for decl in strip_comments(body).split(";"):
-        decl = decl.strip()
-        if not decl:
-            continue
-        name, _, value = decl.partition(":")
-        name, value = name.strip(), value.strip()
-        if not name.startswith("--"):
-            print("paper-editor-mirror-check part 3: FAILED — paper-surface.css "
-                  f"token scope `{sel.strip()}` carries a non-custom-property "
-                  f"declaration (`{decl}`).\n"
-                  "  Token scopes (.bp-paper-surface/.bp-paper-body, themed or "
-                  "not) must hold ONLY `--*` custom properties — move element/"
-                  "chrome declarations to an element selector, or the generated "
-                  "bundle section cannot represent this block.", file=sys.stderr)
-            sys.exit(1)
-        m = re.fullmatch(r"var\((--font[\w-]*)\)", value)
-        if m:
-            value = FONT_LITERALS.get(m.group(1), value)
-        out.append((name, value))
-    return out
-
-def is_token_selector(sel):
-    """True for the paper-surface TOKEN scopes only (not element/class rules):
-    every comma-part resolves to `.bp-paper-surface` / `.bp-paper-body`,
-    optionally under an `html[data-theme=…]` ancestor. Element rules
-    (`.bp-paper-surface h1`) and unrelated selectors return False."""
-    sel = strip_comments(sel).strip()
-    if not sel:
-        return False
-    for part in sel.split(","):
-        part = re.sub(r'^html\[data-theme="(?:light|dark)"\]\s+', "", part.strip())
-        if part not in (".bp-paper-surface", ".bp-paper-body"):
-            return False
-    return True
-
-# Strip comments up front: a source comment may legitimately contain literal
-# braces (e.g. the `ul,ol { margin:0 0 24px }` example) that would otherwise
-# fool the flat brace matcher below.
-surface = strip_comments(open(surface_path, encoding="utf-8").read())
-
-light, dark = {}, {}          # name -> value (last write wins)
-light_order, dark_order = [], []
-
-for m in re.finditer(r"([^{}]*)\{([^{}]*)\}", surface):
-    sel, body = m.group(1), m.group(2)
-    if not is_token_selector(sel):
-        continue
-    decls = parse_decls(sel, body)
-    dark_scope = 'data-theme="dark"' in sel
-    bucket, order = (dark, dark_order) if dark_scope else (light, light_order)
-    for name, value in decls:
-        if name not in bucket:
-            order.append(name)
-        bucket[name] = value
-
-def emit(selector, order, bucket):
-    lines = [f"  {name}: {bucket[name]};" for name in order]
-    return selector + " {\n" + "\n".join(lines) + "\n}"
-
-generated = emit(":root, :host", light_order, light) + "\n\n" + emit(
-    ':root[data-theme="dark"], :host([data-theme="dark"])', dark_order, dark
-)
-
-bundle = open(bundle_path, encoding="utf-8").read()
-marker = re.search(
-    r"(/\* BEGIN GENERATED: paper-surface[^\n]*\*/\n)(.*?)(\n/\* END GENERATED: paper-surface \*/)",
-    bundle,
-    re.S,
-)
-if not marker:
-    print("paper-editor-mirror-check part 3: FAILED — BEGIN/END GENERATED: "
-          "paper-surface markers not found in styles.css.", file=sys.stderr)
-    sys.exit(1)
-
-if bundle.count("BEGIN GENERATED: paper-surface") > 1:
-    print("paper-editor-mirror-check part 3: FAILED — multiple 'BEGIN GENERATED: "
-          "paper-surface' markers in styles.css; the generated section must be "
-          "exactly one marked region.", file=sys.stderr)
-    sys.exit(1)
-
-current = marker.group(2)
-
-if mode == "write":
-    new_bundle = bundle[: marker.start()] + marker.group(1) + generated + marker.group(3) + bundle[marker.end():]
-    if new_bundle != bundle:
-        open(bundle_path, "w", encoding="utf-8").write(new_bundle)
-        print("paper-editor-mirror-check part 3: WROTE — regenerated the "
-              "paper-surface token layer in styles.css from paper-surface.css.")
-    else:
-        print("paper-editor-mirror-check part 3: up to date — nothing to write.")
-    sys.exit(0)
-
-if current == generated:
-    n = generated.count("--")
-    print(f"paper-editor-mirror-check part 3: PASS — {n} generated paper-surface "
-          f"tokens in styles.css match paper-surface.css.")
-    sys.exit(0)
-
-print("paper-editor-mirror-check part 3: FAILED — the generated paper-surface "
-      "token layer in styles.css is STALE vs paper-surface.css.\n", file=sys.stderr)
-for line in difflib.unified_diff(
-    current.strip("\n").splitlines(), generated.splitlines(),
-    "styles.css (marked)", "regenerated from paper-surface.css", lineterm=""):
-    print("  " + line, file=sys.stderr)
-print("\n  Fix: run  scripts/paper-editor-mirror-check.sh --write  and commit the "
-      "result (the token layer is GENERATED — never hand-edit between the markers).",
-      file=sys.stderr)
-sys.exit(1)
-PY
+# Delegates to the single Node owner (design/paper-editor-mirror.mjs). Runs first
+# so `--write` regenerates before the lockstep check verifies. `--write` passes
+# through; default is a byte-compare. The transform is the SAME code design/emit.mjs
+# drives, so this script and the emitter can never disagree.
+if [[ "$MODE" == "write" ]]; then
+  node "$ROOT/design/paper-editor-mirror.mjs" --write
+else
+  node "$ROOT/design/paper-editor-mirror.mjs"
+fi
 
 # ── Part 1/2: .bp-canvas-* lockstep (root.html.heex ↔ styles.css bundle) ─────
 # Intentional one-sided selectors (documented). Keep this list SMALL and justified.
