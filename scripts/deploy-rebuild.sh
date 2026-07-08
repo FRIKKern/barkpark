@@ -79,6 +79,24 @@ else
   echo "[deploy-rebuild] go not found — skipping TUI client build."
 fi
 
+# pdrender→TUI wasm the paper reader lazy-loads (/assets/bp-pdrender.wasm.gz).
+# NON-FATAL, same discipline as the TUI build above, and BEFORE the restart for
+# the same cgroup-kill reason. Build-at-deploy is what lets us drop the committed
+# blob from git without ever leaving the live reader without it: every deploy
+# regenerates it into api/priv/static/assets/ (served by Plug.Static at /assets/).
+# `make wasm` pins its own Go toolchain via GOTOOLCHAIN, independent of the
+# system go used for the TUI build.
+echo "[deploy-rebuild] Building pdrender wasm (non-fatal)..."
+if command -v go > /dev/null 2>&1; then
+  if make wasm; then
+    echo "[deploy-rebuild] pdrender wasm built."
+  else
+    echo "[deploy-rebuild] WARN: pdrender wasm build failed — API deploy unaffected (reader TUI view degrades to its fallback)."
+  fi
+else
+  echo "[deploy-rebuild] go not found — skipping pdrender wasm build."
+fi
+
 # Restart LAST — see the header comment. Nothing may follow this block.
 if systemctl is-active barkpark > /dev/null 2>&1; then
   echo "[deploy-rebuild] Restarting service..."
