@@ -427,15 +427,17 @@ export function wireAtomAccessibility(dom, { block, chipText, editor, getPos }) 
 // hand-renders fleet markup — the preview stays 100% server-painted (D8 / rule 3).
 
 // Item-array editors: cards/notes/pipeline carry an authored array the author edits.
-// Each descriptor names the block's array key; `scalar:true` means the items are plain
-// STRINGS (notes) — one per line — while object items (cards/pipeline stages) edit as
-// structured JSON. The whole array rides ONE <textarea> island (the code-node textarea
-// pattern), so add / remove / reorder / edit are ALL expressed by editing text — NO
-// edit-only <button> chrome (rule 6 / __atom_chrome guard: an atom builds no button).
+// Each descriptor names the block's AUTHORITATIVE array key — the exact key the reader
+// emitter reads (render/components.ex: cards_html/notes_html read "items"; pipeline_html
+// reads "nodes"), so an edit lands on the SAME key the server repaints from. Items are
+// objects (card {title,text,tone}; note {label,lead,text}; pipeline node
+// {kind,title,detail,files,source}), edited as structured JSON in ONE <textarea> island
+// (the code-node textarea pattern): add / remove / reorder / edit are ALL expressed by
+// editing text — NO edit-only <button> chrome (rule 6 / __atom_chrome guard).
 const FLEET_ITEM_EDITORS = {
-  cards: { arrayKey: "cards", scalar: false },
-  notes: { arrayKey: "items", scalar: true },
-  pipeline: { arrayKey: "stages", scalar: false },
+  cards: { arrayKey: "items" },
+  notes: { arrayKey: "items" },
+  pipeline: { arrayKey: "nodes" },
 };
 
 // task-* kinds edit their QUERY (filter label) + optional id ref, not an item array.
@@ -480,8 +482,6 @@ function cloneFleetBlock(b) {
 function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   const type = (initialBlock && initialBlock.type) || "";
   const itemEditor = FLEET_ITEM_EDITORS[type];
-  const isQuery = !itemEditor && FLEET_QUERY_KINDS.has(type);
-
   const el = document.createElement("div");
   el.className = "bp-fleet-edit";
   el.setAttribute("contenteditable", "false");
@@ -495,9 +495,7 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   hint.style.opacity = "0.65";
   hint.style.marginBottom = "0.25rem";
   hint.textContent = itemEditor
-    ? itemEditor.scalar
-      ? "Edit items — one per line"
-      : "Edit items as JSON — add / remove / reorder rows"
+    ? "Edit items as JSON — add / remove / reorder rows"
     : "Edit query — filter label + task id";
   el.appendChild(hint);
 
@@ -516,9 +514,6 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
       const arr = Array.isArray(block[itemEditor.arrayKey])
         ? block[itemEditor.arrayKey]
         : [];
-      if (itemEditor.scalar) {
-        return arr.map((x) => (x == null ? "" : String(x))).join("\n");
-      }
       return JSON.stringify(arr, null, 2);
     }
     // query kind
@@ -534,13 +529,6 @@ function buildFleetEditor(initialBlock, { onEdit, isEditable }) {
   function toBlock(text) {
     const next = cloneFleetBlock(initialBlock) || { type };
     if (itemEditor) {
-      if (itemEditor.scalar) {
-        // One item per line; a trailing blank line is ignored (no phantom "" item).
-        const lines = text.split("\n");
-        while (lines.length && lines[lines.length - 1].trim() === "") lines.pop();
-        next[itemEditor.arrayKey] = lines;
-        return next;
-      }
       let arr;
       try {
         arr = JSON.parse(text);

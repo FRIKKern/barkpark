@@ -99,19 +99,22 @@ function editFleet(block, mutate) {
   return runToOps([block], doc);
 }
 
-check("runToOps: editing cards items emits ONE patch-block{cards} (add/remove/edit persists)", () => {
-  const block = { id: "x", type: "cards", cards: [{ title: "orig", body: "b" }] };
+// NOTE the authoritative content keys (render/components.ex): cards & notes read
+// `items`; pipeline reads `nodes` — an edit must land on the SAME key the reader
+// repaints from, so the fixtures use the real keys the emitters consume.
+check("runToOps: editing cards items emits ONE patch-block{items} (add/remove/edit persists)", () => {
+  const block = { id: "x", type: "cards", items: [{ title: "orig", text: "b" }] };
   const ops = editFleet(block, (b) => {
-    b.cards[0].title = "CHANGED";
-    b.cards.push({ title: "added", body: "n" }); // add
+    b.items[0].title = "CHANGED";
+    b.items.push({ title: "added", text: "n" }); // add
   });
   const patches = ops.filter((o) => o.op === "patch-block");
   assert.equal(patches.length, 1, "exactly one patch-block");
   assert.equal(patches[0].id, "x", "keyed by the block id");
   assert.deepEqual(
-    patches[0].patch.cards,
-    [{ title: "CHANGED", body: "b" }, { title: "added", body: "n" }],
-    "the edited cards array rides the patch verbatim"
+    patches[0].patch.items,
+    [{ title: "CHANGED", text: "b" }, { title: "added", text: "n" }],
+    "the edited items array rides the patch verbatim"
   );
   // The immutable id/type are NEVER in the patch (patch.ex re-pins them).
   assert.equal(patches[0].patch.id, undefined, "id is not patched");
@@ -119,19 +122,19 @@ check("runToOps: editing cards items emits ONE patch-block{cards} (add/remove/ed
 });
 
 check("runToOps: editing notes items emits patch-block{items}", () => {
-  const block = { id: "n", type: "notes", items: ["one", "two"] };
+  const block = { id: "n", type: "notes", items: [{ label: "A", text: "one" }, { label: "B", text: "two" }] };
   const ops = editFleet(block, (b) => b.items.splice(0, 1)); // remove first
   const patch = ops.find((o) => o.op === "patch-block");
   assert.ok(patch, "a patch-block is emitted");
-  assert.deepEqual(patch.patch.items, ["two"], "the shortened items array rides the patch");
+  assert.deepEqual(patch.patch.items, [{ label: "B", text: "two" }], "the shortened items array rides the patch");
 });
 
-check("runToOps: editing pipeline stages emits patch-block{stages}", () => {
-  const block = { id: "p", type: "pipeline", stages: [{ title: "Build" }] };
-  const ops = editFleet(block, (b) => (b.stages[0].title = "Ship"));
+check("runToOps: editing pipeline nodes emits patch-block{nodes}", () => {
+  const block = { id: "p", type: "pipeline", nodes: [{ kind: "gate", title: "Build" }] };
+  const ops = editFleet(block, (b) => (b.nodes[0].title = "Ship"));
   const patch = ops.find((o) => o.op === "patch-block");
   assert.ok(patch, "a patch-block is emitted");
-  assert.deepEqual(patch.patch.stages, [{ title: "Ship" }], "the edited stages ride the patch");
+  assert.deepEqual(patch.patch.nodes, [{ kind: "gate", title: "Ship" }], "the edited nodes ride the patch");
 });
 
 check("runToOps: editing a task-* query/id config emits patch-block{query}", () => {
