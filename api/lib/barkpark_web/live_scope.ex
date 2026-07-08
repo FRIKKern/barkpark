@@ -38,6 +38,8 @@ defmodule BarkparkWeb.LiveScope do
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView, only: [attach_hook: 4, redirect: 2, put_flash: 3]
 
+  alias Barkpark.Access
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
 
   def on_mount(:resolve, params, _session, socket) do
@@ -81,12 +83,14 @@ defmodule BarkparkWeb.LiveScope do
          %{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
          {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]) do
       socket =
-        assign(socket,
+        socket
+        |> assign(
           current_workspace: ws,
           current_project: proj,
           scope_prefix: "/w/#{ws.slug}/p/#{proj.slug}",
           share_access: if(grade == :share_read, do: :read, else: nil)
         )
+        |> assign_grant_scope(grade)
 
       {:ok, maybe_attach_readonly_gate(socket, grade)}
     else
@@ -112,6 +116,11 @@ defmodule BarkparkWeb.LiveScope do
         end
 
       _ ->
+        # Access-grant admission (airdrop-grants ag-enforcement) — the socket
+        # twin of ResolveWorkspace's grant path. Computed ONCE here (a DB load
+        # of the user's active grants) and offered as the LAST cond clause.
+        grant_ctx = grant_read_ctx(socket.assigns[:current_user], ws.id)
+
         cond do
           # studio-user-login: an account session (:current_user, set by
           # LiveAuth.:fetch_api_token) is a User principal — same authorize/3
@@ -132,11 +141,39 @@ defmodule BarkparkWeb.LiveScope do
           Barkpark.Sharing.shared?(ws.slug, proj.slug, dataset || "production", :docs) ->
             {:ok, :share_read}
 
+          # Grant arm, LAST before forbidden. ONLY a non-member signed-in USER
+          # with an ACTIVE grant authorizing :read here (fail-closed nil ⇒ skip).
+          # Ordered after the member / anonymous-default / share arms so a
+          # grantee who ALSO qualifies for broader public access keeps it
+          # UNNARROWED — grants only ADD access, never REMOVE it. The
+          # grant-bearing ctx rides the grade → `scope_to_grants` narrows reads
+          # to the grant ladder (via the :grant_scoped_read flag) and the write
+          # gate is decided in `resolve_and_authorize`.
+          not is_nil(grant_ctx) ->
+            {:ok, {:grant, grant_ctx}}
+
           true ->
             {:error, :forbidden}
         end
     end
   end
+
+  # Build a grant-bearing CallerContext for `user` and admit it ONLY if some
+  # ACTIVE grant authorizes :read at this workspace. Returns the ctx (to ride
+  # the grade) or nil. Verbatim port of ResolveWorkspace.grant_read_ctx/2 —
+  # `from_user/2` loads active grants in-query; `Access.validate/3` applies
+  # scope+capability+expiry. Fail-closed: no covering grant → nil.
+  defp grant_read_ctx(%Barkpark.Accounts.User{id: uid}, workspace_id) when is_binary(uid) do
+    ctx = CallerContext.from_user(uid)
+
+    if Enum.any?(ctx.grants, fn grant ->
+         Access.validate(grant, :read, %{workspace_id: workspace_id}) == :ok
+       end) do
+      ctx
+    end
+  end
+
+  defp grant_read_ctx(_user, _workspace_id), do: nil
 
   # Read-only shared Studio (P4): a `:docs` read share opens the FULL
   # Studio UI to an anonymous viewer, so the write boundary must be the
@@ -154,11 +191,35 @@ defmodule BarkparkWeb.LiveScope do
     editor-set-mode search ref-search validate-upload
   )
 
-  defp maybe_attach_readonly_gate(socket, :share_read) do
-    # Idempotent across re-resolves (a live patch between two shared scopes
-    # re-runs this; attach_hook raises on a duplicate name). A stale gate on
-    # an anonymous socket that later patches into the Default scope only
-    # over-restricts — never under-restricts — so we keep it once attached.
+  defp maybe_attach_readonly_gate(socket, :share_read),
+    do: attach_readonly_gate(socket, "This workspace is shared read-only")
+
+  # Grant write-containment (airdrop-grants ag-enforcement). `scope_to_grants`
+  # narrows READS only — Studio write handlers do not gate on :write. So a
+  # grantee admitted via a read-only (or non-write) grant MUST have mutating
+  # events denied by the same @readonly_events allowlist. A grantee whose grant
+  # DOES confer :write at this workspace is NOT gated (their writes pass; row
+  # narrowing still applies to reads). The write check is workspace-level
+  # (`authorize(ctx, ws.id, :write)`) — a write-capable grantee writing OUTSIDE
+  # their sub-scope is the reported residual, not gated here.
+  defp maybe_attach_readonly_gate(socket, {:grant, ctx}) do
+    ws = socket.assigns[:current_workspace]
+
+    if Tenancy.Auth.authorize(ctx, ws.id, :write) == :ok do
+      socket
+    else
+      attach_readonly_gate(socket, "Your access grant is read-only")
+    end
+  end
+
+  defp maybe_attach_readonly_gate(socket, _grade), do: socket
+
+  # Deny-by-default write gate: only @readonly_events pass; every mutating
+  # event is halted with a flash. Idempotent across re-resolves (a live patch
+  # re-runs this; attach_hook raises on a duplicate name). A stale gate that
+  # later patches into a broader scope only over-restricts — never
+  # under-restricts — so we keep it once attached.
+  defp attach_readonly_gate(socket, message) do
     if socket.assigns[:readonly_gate?] do
       socket
     else
@@ -168,13 +229,24 @@ defmodule BarkparkWeb.LiveScope do
         if event in @readonly_events do
           {:cont, socket}
         else
-          {:halt, put_flash(socket, :error, "This workspace is shared read-only")}
+          {:halt, put_flash(socket, :error, message)}
         end
       end)
     end
   end
 
-  defp maybe_attach_readonly_gate(socket, _grade), do: socket
+  # Assign the grant-bearing ctx + the row-narrowing flag for a grant-admitted
+  # socket. `ScopeHelpers.scope_opts/1` reads both → threads `grant_scoped: true`
+  # + the ctx into every read → `Content.Scope.scope_to_grants/3` narrows to the
+  # grant ladder. Members / anonymous / share sockets are untouched (no flag,
+  # no narrowing — byte-identical to today).
+  defp assign_grant_scope(socket, {:grant, ctx}) do
+    socket
+    |> assign(:caller_context, ctx)
+    |> assign(:grant_scoped_read, true)
+  end
+
+  defp assign_grant_scope(socket, _grade), do: socket
 
   defp deny(socket) do
     {:halt,

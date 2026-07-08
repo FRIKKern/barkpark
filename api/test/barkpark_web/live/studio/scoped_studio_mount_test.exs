@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
   import Phoenix.LiveViewTest
   import Barkpark.TenancyFixtures
 
+  alias Barkpark.Access.Grant
+  alias Barkpark.Accounts
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 
@@ -371,6 +375,239 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
 
       assert html_response(conn, 200) =~ "OnixEdit plugin route alive."
     end
+  end
+
+  # ── airdrop-grants: grant-scoped Studio access (ag-enforcement) ────────────
+  # The socket twin of ResolveWorkspace's grant arm (#1353): a CLAIMED grantee
+  # (a signed-in USER who is NOT a tenancy member) mounts the scoped Studio with
+  # the Layer-2 read-narrowing seam wired, and a read-only grant's writes gated.
+  # Uses ws_a (NON-Default) so the anonymous-Default allowance can't mask the
+  # grant arm — the grant is the ONLY admission path. Admission requires the
+  # mounted scope ⊆ grant, so only a workspace-covering grant admits; narrower
+  # grants (project/type/doc) are fail-closed at the dead render.
+  describe "grant-scoped Studio access (airdrop-grants ag-enforcement)" do
+    setup do
+      # A global `post` schema so `new-document` has a type to create.
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "icon" => "file-text",
+            "visibility" => "public",
+            "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+          },
+          @dataset
+        )
+
+      :ok
+    end
+
+    test "a claimed grantee MOUNTS the scoped Studio (no /login redirect)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+
+      {:ok, _view, html} = live(conn, scoped_url(ws_a, proj_a))
+      assert html =~ "pane-layout"
+    end
+
+    test "the grantee socket carries the Layer-2 read-narrowing seam (flag + grant ctx)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # Desk-level document narrowing is UNOBSERVABLE by construction: admission
+      # requires the mounted scope ⊆ grant, so every row the desk reads is
+      # already inside the grant. The load-bearing wiring is therefore the
+      # `:grant_scoped_read` flag + grant-bearing `caller_context` on the socket
+      # — `ScopeHelpers.scope_opts/1` threads them into `Content.Query`, and
+      # `access_enforcement_test` proves the flag→row-narrowing correctness.
+      {user, conn} = grantee_session(conn)
+      grant = bind_grant!(ws_a, user, %{capabilities: ["read"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+      assigns = :sys.get_state(view.pid).socket.assigns
+
+      assert assigns.grant_scoped_read == true
+      assert %CallerContext{grants: [%Grant{id: gid}]} = assigns.caller_context
+      # Real grant identity — the ctx folds EXACTLY the claimed grant.
+      assert gid == grant.id
+    end
+
+    test "grant containment ⊆ — a grant for another workspace does NOT admit here", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      # The grantee holds a real, active, read grant — but scoped to ws_b. It
+      # must not open ws_a's Studio (access ⊆ grant.scope; no cross-ws widen).
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_b, user, %{capabilities: ["read"]})
+
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
+    test "narrower-than-workspace — a PROJECT-scoped grant on ws_A does NOT admit ws_A", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      # The AC#2 reframe (desk narrowing unobservable) rests on this invariant:
+      # admission validates against the BARE workspace scope, so a grant with a
+      # non-nil sub-level (project/type) is NOT contained by `%{workspace_id}`
+      # and is denied — even in the SAME workspace it names. If admission is
+      # ever loosened to thread sub-scope into `Access.validate`, this test
+      # breaks LOUDLY (the grantee would be admitted → 200 instead of 403).
+      {user, conn} = grantee_session(conn)
+
+      bind_grant!(ws_a, user, %{
+        project_id: proj_a.id,
+        type: "post",
+        capabilities: ["read"]
+      })
+
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
+    test "a signed-in NON-grantee is DENIED (fail-closed at the dead render)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {_user, conn} = grantee_session(conn)
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
+    test "an EXPIRED grant is DENIED", %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{expires_at: DateTime.add(DateTime.utc_now(), -3600, :second)})
+
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
+    test "a REVOKED grant is DENIED", %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{revoked_at: DateTime.utc_now()})
+
+      conn = get(conn, scoped_url(ws_a, proj_a))
+      assert conn.status == 403
+    end
+
+    test "WRITE CONTAINMENT — a read-only grant's mutating event is denied server-side", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # The write boundary is the SERVER event gate, not hidden buttons: a
+      # forged mutating event is halted BEFORE StudioLive's handler and creates
+      # nothing (the gate halts on the event name, so params are irrelevant).
+      before_count = Repo.aggregate(Content.Document, :count)
+      html = render_click(view, "new-document", %{"type" => "post"})
+
+      assert html =~ "Your access grant is read-only"
+      assert Repo.aggregate(Content.Document, :count) == before_count
+
+      # Navigation stays allowed (an allowlisted event is NOT halted).
+      assert render_click(view, "select-group", %{"group" => "brief"})
+    end
+
+    test "a WRITE-capable grant is NOT gated — the same event reaches the handler", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{capabilities: ["read", "write"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # Same event as the read-only case; the write-conferring grant means the
+      # read-only gate is never attached, so it reaches StudioLive (which opens
+      # a fresh draft) — and NO read-only denial flash is raised.
+      refute render_click(view, "new-document", %{"type" => "post"}) =~
+               "Your access grant is read-only"
+    end
+
+    test "live-patch containment — a grantee patching to an uncovered workspace is re-denied", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b,
+      proj_b: proj_b
+    } do
+      {user, conn} = grantee_session(conn)
+      bind_grant!(ws_a, user, %{capabilities: ["read"]})
+
+      {:ok, view, _html} = live(conn, scoped_url(ws_a, proj_a))
+
+      # LiveScope.reauthorize re-runs the grant arm for ws_b (uncovered) and
+      # denies — the cross-tenant seam the conn plugs cannot see.
+      assert_redirect_to_login(fn ->
+        render_patch(view, scoped_url(ws_b, proj_b))
+      end)
+    end
+
+    test "a real member is UNAFFECTED — byte-identical (no grant flag, no gate)", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {:ok, view, html} = live(conn, scoped_url(ws_a, proj_a))
+      assert html =~ "pane-layout"
+
+      # No grant machinery is attached for a member: the socket carries neither
+      # the row-narrowing flag nor a grant-derived caller_context — reads run
+      # exactly as before this arc.
+      assigns = :sys.get_state(view.pid).socket.assigns
+      refute Map.get(assigns, :grant_scoped_read)
+
+      # …and the read-only grant gate never fires for a member's write.
+      refute render_click(view, "new-document", %{"type" => "post"}) =~
+               "Your access grant is read-only"
+    end
+  end
+
+  # A signed-in USER who is NOT a tenancy member (users aren't tenancy
+  # principals yet — so every plain user is a non-member, admitted only by a
+  # covering grant). Returns {user, conn-with-session}.
+  defp grantee_session(conn) do
+    email = "grantee-#{System.unique_integer([:positive])}@example.com"
+    {:ok, user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+    {:ok, raw} = Accounts.create_user_session_token(user)
+    {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
+  end
+
+  # Insert a grant CLAIMED by `user` (so list_active_grants_for_grantee loads
+  # it). `overrides` set the scope ladder / capabilities / expiry / revocation.
+  defp bind_grant!(ws, user, overrides) do
+    attrs =
+      %{
+        grantor_id: Ecto.UUID.generate(),
+        grantee_email: user.email,
+        grantee_user_id: user.id,
+        claimed_at: DateTime.utc_now(),
+        workspace_id: ws.id,
+        capabilities: ["read"],
+        link_token_hash: "hash-" <> Ecto.UUID.generate()
+      }
+      |> Map.merge(overrides)
+
+    {:ok, grant} = %Grant{} |> Grant.changeset(attrs) |> Repo.insert()
+    grant
   end
 
   # The denied patch surfaces as a redirect — either raised by render_patch
