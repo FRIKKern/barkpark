@@ -88,7 +88,7 @@ html[data-theme="dark"] .bp-paper-body {
      actually renders in the macOS system serif (Iowan Old Style). We mirror
      that rendered face here; self-hosted Source Serif 4 stays in the stack as
      a cross-platform fallback (still @font-face'd above). */
-  --paper-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif;
+  --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
   --paper-font-mono: ui-monospace, Menlo, monospace;
   /* Cool evergreen chrome tone (bp/Cloud profile) — never pure white. */
   --paper-chrome-border: rgba(21, 33, 29, 0.12);
@@ -117,13 +117,13 @@ html[data-theme="dark"] .bp-paper-body {
    deliberately NOT a token — it belongs to VIEW alone (pulling it into Edit
    re-introduces double-spacing; see styles.css :84). */
 .bp-paper-surface, .bp-paper-body {
-  --bp-body-size: 18px;
-  --bp-body-lh: 1.65;
+  --bp-body-size: var(--tok-reading-body-size);
+  --bp-body-lh: var(--tok-reading-body-lh);
   --bp-body-tracking: 0.005em;
-  --bp-h1-size: 32px;   --bp-h1-lh: 1.1;   --bp-h1-tracking: -0.02em;
-  --bp-h2-size: 24px;   --bp-h2-lh: 1.2;
-  --bp-h3-size: 20px;   --bp-h3-lh: 1.25;
-  --bp-heading-weight: 600;
+  --bp-h1-size: var(--tok-reading-h1-size);   --bp-h1-lh: var(--tok-reading-h1-lh);   --bp-h1-tracking: -0.02em;
+  --bp-h2-size: var(--tok-reading-h2-size);   --bp-h2-lh: var(--tok-reading-h2-lh);
+  --bp-h3-size: var(--tok-reading-h3-size);   --bp-h3-lh: var(--tok-reading-h3-lh);
+  --bp-heading-weight: var(--tok-reading-heading-weight);
   --bp-para-margin-top: 12pt;
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
