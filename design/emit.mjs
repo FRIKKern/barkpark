@@ -382,6 +382,10 @@ function pdrenderGo() {
   // wave 2 (S7: pdAccent/L2/links → GenPrimary, pdTerra → GenReadingAccent).
   const chrome = (name, role) =>
     `\tGen${name} = lipgloss.AdaptiveColor{Light: "${hslToHex(c[role].light)}", Dark: "${hslToHex(c[role].dark)}"}`;
+  // Code-block tones (color.code → hex; stored as hex directly, no HSL hop).
+  // Additive: pdrender's ingress points at GenInk in a later wave.
+  const code = (name, sub) =>
+    `\tGenCode${name} = lipgloss.AdaptiveColor{Light: "${c.code[sub].light}", Dark: "${c.code[sub].dark}"}`;
   return [
     goHeader("pdrender"),
     'import "github.com/charmbracelet/lipgloss"',
@@ -398,6 +402,11 @@ function pdrenderGo() {
       chrome("Ink", "text"), chrome("Dim", "muted-text"), chrome("Rule", "border"),
       chrome("ReadingAccent", "reading-accent"),
     ]),
+    ")",
+    "",
+    "// Generated code-block tones (design/tokens.json color.code → hex).",
+    "var (",
+    ...alignEq([code("Fg", "fg"), code("Bg", "bg")]),
     ")",
     "",
     "// Generated reading tokens (design/tokens.json font.reading / type.reading).",
@@ -457,6 +466,65 @@ function semroleGo() {
     "// cross-surface coherence fix.",
     "var GenANSI16 = map[string]int{",
     ...alignMap(SEMROLE_TONES.map(([, role]) => `\t"${role}": ${SEMROLE_ANSI16[role]},`)),
+    "}",
+    "",
+  ].join("\n");
+}
+
+// ── surface: Go CLI chrome (internal/semrole/chrome_gen.go) ──────────────────
+// The ratified CLI/TUI chrome role set as hex AdaptiveColors, emitted into a
+// SIBLING file (NOT tokens_gen.go) so the status/lifecycle artifact stays
+// byte-stable and the #1394 board-parity risk is isolated. Nine NEW roles carry
+// {light,dark} HEX directly (color.cliChrome[role] = {light,dark}); five REUSE
+// roles are 'var(--role)' references RESOLVED here to the target role's hex —
+// chrome-primary-cta → evergreen --primary (RECOLOR off the legacy #2563eb
+// blue), chrome-on-primary → adaptive --primary-fg. Additive: the 27 call sites
+// keep their lit-allows; a later wave threads GenChrome* through them.
+const CLI_CHROME_NEW = [
+  ["Accent", "chrome-accent"], ["Dim", "chrome-dim"], ["Ink", "chrome-ink"],
+  ["TextSecondary", "chrome-text-secondary"], ["SelectionBg", "chrome-selection-bg"],
+  ["SelectionFg", "chrome-selection-fg"], ["FieldBorder", "chrome-field-border"],
+  ["ToolbarBg", "chrome-toolbar-bg"], ["CursorBg", "chrome-cursor-bg"],
+];
+const CLI_CHROME_REUSE = [
+  ["Border", "chrome-border"], ["BorderActive", "chrome-border-active"],
+  ["Label", "chrome-label"], ["PrimaryCta", "chrome-primary-cta"],
+  ["OnPrimary", "chrome-on-primary"],
+];
+// Resolve a 'var(--role)' reference to its {light,dark} HSL channels. Status
+// roles live under color.status (var(--info) → color.status.info); base roles
+// sit directly on color.*.
+function resolveChromeRef(ref) {
+  const role = ref.replace(/^var\(--/, "").replace(/\)$/, "");
+  return STATUS_ROLES.includes(role) ? tokens.color.status[role] : tokens.color[role];
+}
+// {light,dark} hex for a cliChrome role: NEW roles are hex already; REUSE roles
+// resolve their reference to HSL channels then convert to hex.
+function cliChromeHex(role) {
+  const v = tokens.color.cliChrome[role];
+  if (typeof v === "string") { const ch = resolveChromeRef(v); return { light: hslToHex(ch.light), dark: hslToHex(ch.dark) }; }
+  return { light: v.light, dark: v.dark };
+}
+function cliChromeGo() {
+  const line = (name, role) => {
+    const h = cliChromeHex(role);
+    return `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${h.light}", Dark: "${h.dark}"}`;
+  };
+  const all = [...CLI_CHROME_NEW, ...CLI_CHROME_REUSE];
+  return [
+    goHeader("semrole"),
+    'import "github.com/charmbracelet/lipgloss"',
+    "",
+    "// Generated CLI/TUI chrome roles (design/tokens.json color.cliChrome → hex).",
+    "// Nine NEW hex roles + five REUSE references resolved to their target role's",
+    "// hex (chrome-primary-cta = evergreen --primary; chrome-on-primary = --primary-fg).",
+    "var (",
+    ...alignEq(all.map(([name, role]) => line(name, role))),
+    ")",
+    "",
+    "// GenChrome maps a cliChrome role name to its adaptive colour.",
+    "var GenChrome = map[string]lipgloss.AdaptiveColor{",
+    ...alignMap(all.map(([name, role]) => `\t"${role}": GenChrome${name},`)),
     "}",
     "",
   ].join("\n");
@@ -698,6 +766,7 @@ export const ARTIFACTS = [
   { name: "Go board", path: "internal/taskboard/tokens_gen.go", kind: "go", build: taskboardGo },
   { name: "Go pdrender", path: "internal/pdrender/tokens_gen.go", kind: "go", build: pdrenderGo },
   { name: "Go semrole", path: "internal/semrole/tokens_gen.go", kind: "go", build: semroleGo },
+  { name: "Go CLI chrome", path: "internal/semrole/chrome_gen.go", kind: "go", build: cliChromeGo },
   { name: "Elixir render tokens", path: "api/lib/barkpark/portable_doc/render/tokens_gen.ex", kind: "elixir", build: elixirTokensGen },
   { name: "Elixir Studio categorical tokens", path: "api/lib/barkpark_web/studio/tokens_gen.ex", kind: "elixir", build: studioTokensGen },
   { name: "login (session_html)", path: "api/lib/barkpark_web/controllers/session_html.ex", kind: "css", build: sessionAuthBlock },

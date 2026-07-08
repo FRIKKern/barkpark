@@ -78,6 +78,35 @@ for (const role of ["bg-accent", "border-muted", "fg-dim", "fg-accent"]) {
   }
 }
 
+// --- code-block tones (color.code): mint fg/bg hex pairs, direct ------------
+const code = color.code || {};
+for (const sub of ["fg", "bg"]) {
+  const o = code[sub];
+  ok(o && typeof o === "object", `color.code.${sub} is required (paper code-block tone)`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.code.${sub}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.code.${sub}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+
+// --- CLI/TUI chrome roles (color.cliChrome): 9 NEW hex pairs + 5 var refs -----
+const cliChrome = color.cliChrome || {};
+const CLI_NEW = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary",
+  "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
+const CLI_REUSE = { "chrome-border": "var(--border)", "chrome-border-active": "var(--info)",
+  "chrome-label": "var(--muted-text)", "chrome-primary-cta": "var(--primary)", "chrome-on-primary": "var(--primary-fg)" };
+for (const role of CLI_NEW) {
+  const o = cliChrome[role];
+  ok(o && typeof o === "object", `color.cliChrome.${role} is required (new CLI chrome hex role)`);
+  if (o) {
+    ok(HEX.test(o.light || ""), `color.cliChrome.${role}.light must be #rrggbb, got ${JSON.stringify(o.light)}`);
+    ok(HEX.test(o.dark || ""), `color.cliChrome.${role}.dark must be #rrggbb, got ${JSON.stringify(o.dark)}`);
+  }
+}
+for (const [role, ref] of Object.entries(CLI_REUSE)) {
+  ok(cliChrome[role] === ref, `color.cliChrome.${role} must be the reuse reference ${ref} (reuse-not-mint), got ${JSON.stringify(cliChrome[role])}`);
+}
+
 // --- categorical palettes: presence + sheet CF (hex value lists) -------------
 const hexList = (arr, where, len) => {
   ok(Array.isArray(arr) && arr.length === len, `${where} must be a ${len}-hex array, got ${JSON.stringify(arr)}`);
