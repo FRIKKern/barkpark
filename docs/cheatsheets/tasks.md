@@ -19,7 +19,7 @@ Tasks are `type:task` docs. Root task = goal; nest via `content.parent_id`. Crea
 
 **Lifecycle:** `open · in_progress · blocked · done · cancelled`. Ready = open/blocked AND every `blocks` target `done`. Closing `done` unblocks dependents.
 
-**Claim/close contract:** claim → `lifecycle_status=in_progress`, stamps `content.claim {worker, ts_iso, epoch}`; epoch bumps every claim. Close needs `worker_id` + `observed_epoch` (CAS; mismatch → 409 `fenced_off`; race → `stale_claim`); optional `lifecycle_status` done|cancelled|blocked (default done), `observed_rev`. Leases sweep after 2700s / 45min (`task_lease_ttl_seconds`, override `BARKPARK_TASK_LEASE_TTL_SECONDS`) → `task.lease_expired`; reap clears `claim.worker` + bumps epoch but keeps `content.assignee`.
+**Claim/close contract:** claim → `lifecycle_status=in_progress`, stamps `content.claim {worker, ts_iso, epoch}`; epoch bumps every claim. Close needs `worker_id` + `observed_epoch` (CAS; mismatch → 409 `fenced_off`; race → `stale_claim`); optional `lifecycle_status` done|cancelled|blocked (default done), `observed_rev`. Leases sweep after 2700s (`task_lease_ttl_seconds`) → `task.lease_expired`.
 
 **Events** (SSE `/v1/data/listen/:dataset`): `task.claimed/closed/mutated/relabeled/referenced/lease_expired/task.compacted/task.compaction_restored` (compaction job, not lifecycle transitions).
 
