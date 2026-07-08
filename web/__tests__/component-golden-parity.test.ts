@@ -334,19 +334,65 @@ test("web cards RENDER realizes every card (title · text · tone stripe)", () =
   }
 });
 
-test("web card RENDER realizes title + body (model B: text present)", () => {
+/** The card tone accent → its distinctive tint class in the rendered card div
+ * (mirrors portable-doc.tsx `tint = tone==="ok" ? calloutTone.success :
+ * calloutTone[tone]`). A tone drop in the render loses this class and reds. */
+const CARD_TONE_TINT: Record<string, string> = {
+  info: "border-blue-300/70",
+  ok: "border-emerald-300/70",
+  warn: "border-amber-300/70",
+  danger: "border-red-300/70",
+};
+
+/** The authored render marker for one card slot, DERIVED from the fixture input
+ * (never hand-typed): the media image alt attr, the title heading text, the body
+ * paragraph plain text, the action label. */
+function cardSlotMarker(input: Record<string, unknown>, slot: string): string {
+  const s = (v: unknown): string =>
+    typeof v === "string" ? v : typeof v === "number" ? String(v) : "";
+  const slots = (input.slots ?? {}) as Record<string, Array<Record<string, unknown>>>;
+  const first = (slots[slot] ?? [])[0] ?? {};
+  switch (slot) {
+    case "media":
+      return `alt="${s(first.alt)}"`;
+    case "title":
+      return s(first.text);
+    case "body": {
+      const content = Array.isArray(first.content) ? first.content : [];
+      return content.map((n) => s((n as Record<string, unknown>).value)).join("");
+    }
+    case "action":
+      return s(first.label);
+    default:
+      return "";
+  }
+}
+
+test("web card RENDER realizes the MODEL-B projection (ordered slots · tone tint · image · action)", () => {
   const input = loadFixture("card").input;
   const html = renderHtml(input);
   const exp = loadFixture("card").expected as CardProjection;
-  // Model B (au-w5-card-slot-parity): the card recurses its title slot to a
-  // semantic <h_> and its body to a <p>, dropping the old flat <p> title chrome —
-  // so this leg asserts the shared projection FLOOR (title/body TEXT present),
-  // mirroring the Elixir substring relax in component_golden_parity_test.exs. The
-  // model-B slot order + tone + image fast-path are the GRADUATION target, not yet
-  // render-asserted here (the projection stays frozen this wave). Still reds if the
-  // title/body TEXT is dropped from the render.
-  present(html, exp.title, "card title");
-  present(html, exp.body, "card body");
+
+  // The projection's PRESENT slots realize IN ORDER in the rendered DOM — a
+  // dropped or reordered slot in portable-doc.tsx's `case "card"` render (projector
+  // untouched) reds this ordered-spine check (the load-bearing non-vacuous proof).
+  assert.deepEqual(
+    exp.slots,
+    ["media", "title", "body", "action"],
+    "projection floor: card must exercise all four model-B slots",
+  );
+  let prev = -1;
+  for (const slot of exp.slots) {
+    const marker = cardSlotMarker(input, slot);
+    const idx = html.indexOf(marker);
+    assert.ok(idx >= 0, `card slot ${slot}: rendered DOM is missing ${JSON.stringify(marker)}`);
+    assert.ok(idx > prev, `card slot ${slot} rendered out of model-B order (idx ${idx} <= ${prev})`);
+    prev = idx;
+  }
+
+  // tone accent tints the card container; media fast-path renders a real <img>.
+  if (exp.tone) present(html, CARD_TONE_TINT[exp.tone], `card tone tint ${exp.tone}`);
+  if (exp.media_fastpath) present(html, "<img", "card media image fast-path");
 });
 
 test("web pipeline RENDER realizes every node (kind · title · detail)", () => {

@@ -341,9 +341,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   `style` defaults to `:article` (the reader/paper surface) so
   `render_block(card, :article)` and a bare `card_html(card)` agree.
 
-  The shared cross-surface PROJECTION stays `{container_role, title, body}` this wave
-  (interim-green): the model-B slot order / tone / media fast-path are the GRADUATION
-  target, activated in the follow-up PR after the Go (pdrender) card leg conforms.
+  The shared cross-surface PROJECTION is now the full model-B shape
+  (`{container_role, slots, tone, media_fastpath}` — au-w5-card-slot-parity GRADUATED,
+  all three surfaces conform): the ordered present slots, the tone accent and the
+  image media fast-path are asserted by every surface's realization leg.
   """
   def card_html(block, style \\ :article)
 

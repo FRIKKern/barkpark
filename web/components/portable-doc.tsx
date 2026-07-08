@@ -920,10 +920,11 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       // card-specific media/action code. The legacy `tone` accent
       // (info|ok|warn|danger) tints the card; an all-empty card renders as a
       // blank container. This mirrors the Elixir `Components.card_html/2` model-B
-      // render. (The shared golden projection stays {title, body} this wave — the
-      // model-B slots/order/tone are the GRADUATION target, not yet harness-
-      // asserted; the render↔render parity lock lands with graduation once Go
-      // conforms. `cardProjection` is still used by the frozen golden-parity leg.)
+      // render. (Card is now COVERED in the parity gate: this render realizes the
+      // model-B slots/order/tone projection and is RENDER-asserted by the parity
+      // harness — all three surfaces (Elixir, web, Go) conform, so the
+      // render↔render parity lock is live. `cardProjection` still feeds the frozen
+      // golden-parity leg.)
       const slots = (block.slots ?? {}) as Record<string, unknown>;
       const slotKids = (name: string): Block[] =>
         Array.isArray(slots[name]) ? (slots[name] as Block[]) : [];

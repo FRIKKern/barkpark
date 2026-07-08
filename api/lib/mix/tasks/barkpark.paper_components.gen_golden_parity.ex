@@ -43,6 +43,19 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   data-loss drop is fixed, not just filed). Empty-column policy (web keep-empty vs
   View/TUI omit-empty) stays a SUPERSET difference this ⊆-projection does not police.
 
+  COVERED since **au-w5-card-slot-parity** (GRADUATED — all three surfaces render
+  MODEL B: Elixir View + web reader #1529, Go pdrender #1535): the `card` fixture
+  exercises all four slots and `card_projection/1` projects the full model-B shape —
+  the ORDERED PRESENT slots (`media, title, body, action`, the emitter's fixed
+  render order, derived by filtering `@card_slot_order` through `Slots.slot_elements`),
+  the `tone` accent (info|ok|warn|danger, normalized via the shared `card_tone/1`
+  allowlist), and a `media_fastpath` marker (an image media child ⇒ `<img>` / 🖼-box).
+  Each surface's realization leg asserts the authored slot text renders IN that order,
+  the tone class/tint (Elixir + web — the Go border tint is a stripped colour, owned
+  by the coloured legs like the roadmap lane bar), and the image element. A card-slot
+  render tamper (drop/reorder a slot, drop the tone, drop the image) reds the tampered
+  surface's leg — the non-vacuous proof of graduation.
+
   NOT COVERED (known divergences — FILED, not fixed; this harness must never imply
   parity it does not hold):
 
@@ -53,25 +66,9 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
       the realization tests), NOT a single manifest source — folded into
       **au-w5-status-prose-parity**.
 
-    * card slot ORDER + tone accent + the media image fast-path (**au-w5-card-slot-parity**).
-      The Elixir View and the web reader now render MODEL B — the card's slots hold
-      arbitrary element children, recursed in the order `media, title, body, action`;
-      an `image` media child fast-paths to a real `<img>`; the legacy `tone`
-      (info|ok|warn|danger) tints the card. The shared `card_projection/1` below stays
-      the honest common FLOOR — `{container_role, title, body}` — this wave (interim
-      green: Go/pdrender still renders the OLD card shape, so graduating the projection
-      now would red the Go realization leg). The DOCUMENTED GRADUATION TARGET (activated
-      in the FOLLOW-UP PR, after the Go card leg conforms) is the full model-B projection:
-
-          %{"container_role" => "card",
-            "slots" => ["media", "title", "body", "action"],  # ordered slot kinds present
-            "tone" => "info|ok|warn|danger|"",                 # legacy card accent
-            "media_fastpath" => true}                          # an image media child ⇒ <img>
-
-      When it graduates, `card_projection/1` gains those keys, the `card` golden is
-      REGENERATED (all three mirrors move together once Go conforms), and the Elixir /
-      web realization legs assert slot order + tone + the image element — NOT the
-      substring floor. Until then the render is model B but the projection is frozen.
+    * pipeline `source` accent (Elixir-class vs Go-provenance-line) and card/roadmap
+      surface-local COLOUR (tone border, lane bar) stay expressed as style, not the
+      shared projection text — asserted by the coloured legs (Elixir/web), not the TUI.
 
   ## Mirrors (byte-identical — the same JSON string is written to all three)
 
@@ -163,18 +160,43 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     ]
   }
 
-  # card: the slots-native singular card. title/body are the SHARED subset every
-  # surface realizes (tone accent + media/action + slot ORDER diverge across
-  # Elixir/Go — see au-w5-card-slot-parity; NOT projected here).
+  # card: the slots-native singular card, MODEL B (au-w5-card-slot-parity GRADUATED).
+  # All FOUR slots are exercised so the full model-B projection realizes on every
+  # surface: a `media` image (fast-paths to <img> / 🖼 box), a `title` heading, a
+  # `body` paragraph, an `action` link button — recursed in the emitter's fixed
+  # render order (media·title·body·action). A `tone` accent (info) tints the card.
   @card_input %{
     "type" => "card",
+    "tone" => "info",
     "slots" => %{
+      "media" => [
+        %{
+          "type" => "image",
+          "src" => "https://cdn.example.com/cover.png",
+          "alt" => "Cover art",
+          "width" => 320,
+          "height" => 180
+        }
+      ],
       "title" => [%{"type" => "heading", "text" => "Card title"}],
       "body" => [
         %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Card body text."}]}
+      ],
+      "action" => [
+        %{"type" => "action", "label" => "Open the board", "href" => "https://example.com/board"}
       ]
     }
   }
+
+  # The card's FIXED render order (mirrors the PRIVATE slot order in
+  # `Components.card_html/2`, components.ex:355-358). The projection derives the
+  # PRESENT slots by filtering this order to the slots the card actually carries
+  # (read through `Slots.slot_elements`, the SAME accessor the emitter recurses),
+  # so the ordered slot list is a STRUCTURAL render contract — a reorder in the
+  # emitter reds the realization legs, exactly like `@board_columns` and the
+  # task-detail section spine (two copies that AGREE, tied by the realization
+  # tests). Not a manifest token — the slot vocabulary is structural, not glyph.
+  @card_slot_order ["media", "title", "body", "action"]
 
   # pipeline: a horizontal flow of labelled nodes. kind/title/detail are the
   # SHARED per-node fields (the `source` accent is Elixir-class vs Go-provenance-
@@ -477,21 +499,52 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     %{"container_role" => "cards", "cards" => cards}
   end
 
-  # card: the SHARED subset FLOOR — title + flattened plain-text body (via the slot
-  # accessors). FROZEN this wave (au-w5-card-slot-parity): the Elixir + web readers
-  # ship model B (arbitrary slot children recursed in media→title→body→action order,
-  # tone accent, image media fast-path), but Go/pdrender still renders the OLD card
-  # shape — so tone/media/action + slot ORDER stay OUT of the projection (adding them
-  # now reds the Go realization leg). The DOCUMENTED graduation target — ordered slot
-  # kinds ["media","title","body","action"] + tone + a media-fastpath marker — activates
-  # in the follow-up PR once Go conforms (see the moduledoc §"NOT COVERED"). Do NOT add
-  # those keys or regenerate the card golden here until then.
+  # card: the MODEL-B projection (au-w5-card-slot-parity GRADUATED — all three
+  # surfaces now render model B: Elixir+web #1529, Go #1535). The card's slots hold
+  # arbitrary element children recursed in the emitter's fixed order (media·title·
+  # body·action) with a legacy `tone` accent and an image-media fast-path. The
+  # projection carries:
+  #
+  #   * `slots` — `@card_slot_order` FILTERED to the slots PRESENT (non-empty) in
+  #     this card, read through the SAME `Slots.slot_elements/2` accessor the emitter
+  #     recurses (so a slot the emitter would draw is projected, and the ORDER is the
+  #     structural render contract — a reorder reds the realization legs, like the
+  #     board column order + the task-detail spine).
+  #   * `tone` — normalized through the SHARED card allowlist (`card_tone/1`,
+  #     info|ok|warn|danger→itself, off-list→"") EXACTLY as `card_html/1` and
+  #     `cards_html/1` — derived from the input, never hand-typed.
+  #   * `media_fastpath` — true iff the media slot's lone element is (or normalizes
+  #     to) an image element (the `<img>` / 🖼-box fast-path every surface takes).
+  #
+  # The title/body TEXT is no longer projected — the ORDERED slot list already
+  # asserts they render (in place), and the per-surface realization legs assert the
+  # authored slot text appears in that order. This is the DOCUMENTED graduation
+  # target (see the moduledoc), now activated.
   defp card_projection(block) do
+    present = Enum.filter(@card_slot_order, fn name -> Slots.slot_elements(block, name) != [] end)
+
     %{
       "container_role" => "card",
-      "title" => Slots.card_title_text(block),
-      "body" => Slots.card_body_text(block)
+      "slots" => present,
+      "tone" => block |> Map.get("tone") |> to_string() |> card_tone(),
+      "media_fastpath" => card_media_fastpath?(block)
     }
+  end
+
+  # media_fastpath: does the card's media slot fast-path to an image? True iff its
+  # lone element is a typed `image` element OR a typeless `{src,...}` map (which the
+  # emitters normalize to `type:"image"` — `normalize_media_element` in
+  # components.ex, `coerceMediaImages` in composeblocks.go). Read through the SAME
+  # `Slots.slot_elements` accessor, so it tracks whatever the emitter would recurse.
+  defp card_media_fastpath?(block) do
+    case Slots.slot_elements(block, "media") do
+      [first | _] when is_map(first) ->
+        Map.get(first, "type") == "image" or
+          (not Map.has_key?(first, "type") and Map.has_key?(first, "src"))
+
+      _ ->
+        false
+    end
   end
 
   # pipeline: per-node kind · title · detail (the SHARED text fields every surface

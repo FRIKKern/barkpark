@@ -274,13 +274,67 @@ func TestCardsGoldenParity(t *testing.T) {
 	}
 }
 
+// TestCardGoldenParity proves the TUI card renderer realizes the MODEL-B
+// projection (au-w5-card-slot-parity GRADUATED): the card's PRESENT slots render
+// in the projected order (media·title·body·action), the media image fast-paths to
+// the 🖼 image box (not the unknown-block degrade), and the action button renders.
+// The `tone` accent is a border COLOUR the terminal expresses as style — stripped
+// under NoColor — so (like the roadmap lane bar) the coloured Elixir/web legs own
+// the tone assertion, not this TUI leg; the ORDER + image drops are what red here.
 func TestCardGoldenParity(t *testing.T) {
 	fx := loadComponentGolden(t, "card")
-	var proj struct{ Title, Body string }
+	var proj struct {
+		Slots         []string `json:"slots"`
+		Tone          string   `json:"tone"`
+		MediaFastpath bool     `json:"media_fastpath"`
+	}
 	unmarshalExpected(t, fx, &proj)
+	if len(proj.Slots) != 4 {
+		t.Fatalf("projection floor: %d slots, want 4 (the model-B media·title·body·action)", len(proj.Slots))
+	}
+
+	// Authored slot render markers, DERIVED from the fixture input (never hand-typed).
+	var in struct {
+		Slots struct {
+			Media  []struct{ Alt string `json:"alt"` } `json:"media"`
+			Title  []struct{ Text string `json:"text"` } `json:"title"`
+			Body   []struct {
+				Content []struct{ Value string `json:"value"` } `json:"content"`
+			} `json:"body"`
+			Action []struct{ Label string `json:"label"` } `json:"action"`
+		} `json:"slots"`
+	}
+	if err := json.Unmarshal(fx.Input, &in); err != nil {
+		t.Fatalf("decode card input: %v", err)
+	}
+	marker := map[string]string{
+		"media":  in.Slots.Media[0].Alt,
+		"title":  in.Slots.Title[0].Text,
+		"body":   in.Slots.Body[0].Content[0].Value,
+		"action": in.Slots.Action[0].Label,
+	}
+
 	out := renderComponent(t, fx.Input)
-	mustContain(t, out, proj.Title, "card title")
-	mustContain(t, out, proj.Body, "card body")
+
+	// Each PROJECTED slot's authored text renders, IN the projection's slot ORDER —
+	// a reorder or a dropped slot in cardRenderer reds this ordered-spine check.
+	prev := -1
+	for _, slot := range proj.Slots {
+		m := marker[slot]
+		mustContain(t, out, m, "card slot "+slot)
+		if idx := strings.Index(out, m); idx >= 0 {
+			if idx < prev {
+				t.Errorf("card slot %q rendered out of model-B order (idx %d < %d):\n%s", slot, idx, prev, out)
+			}
+			prev = idx
+		}
+	}
+
+	// media fast-path: the image media child renders as the 🖼 image box (a
+	// dropped/degraded image loses the glyph and reds).
+	if proj.MediaFastpath {
+		mustContain(t, out, "🖼", "card media image fast-path")
+	}
 }
 
 func TestPipelineGoldenParity(t *testing.T) {
