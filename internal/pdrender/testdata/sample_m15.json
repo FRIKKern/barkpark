@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "blocks": [
+    {
+      "id": "h1",
+      "type": "heading",
+      "level": 1,
+      "text": "Data-viz live-data (resolved)"
+    },
+    {
+      "id": "p1",
+      "type": "paragraph",
+      "text": "The three blocks below carry the resolved Attrs that TaskResolver.shape/2 stamps onto a query-bearing chart/heatmap/stat block after the count rollup — series/cells/value, no query."
+    },
+    {
+      "id": "chart1",
+      "type": "chart",
+      "caption": "Tasks per status over the last 4 days",
+      "series": [
+        { "label": "open", "points": [3, 4, 2, 5] },
+        { "label": "ready", "points": [1, 2, 3, 2] },
+        { "label": "done", "points": [0, 1, 3, 6] }
+      ],
+      "axes": { "xLabels": ["Mon", "Thu"] }
+    },
+    {
+      "id": "heat1",
+      "type": "heatmap",
+      "cells": [
+        [0, 1, 2, 5],
+        [1, 2, 3, 2],
+        [3, 4, 2, 0]
+      ],
+      "max": 5,
+      "rowLabels": ["open", "ready", "done"],
+      "colLabels": ["Mon", "Tue", "Wed", "Thu"]
+    },
+    {
+      "id": "stat1",
+      "type": "stat",
+      "value": 14,
+      "label": "open tasks",
+      "spark": [3, 4, 2, 5]
+    }
+  ]
+}
