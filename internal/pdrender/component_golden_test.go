@@ -314,8 +314,13 @@ func TestStageGoldenParity(t *testing.T) {
 func TestTaskDetailGoldenParity(t *testing.T) {
 	fx := loadComponentGolden(t, "task-detail")
 	var proj struct {
-		Title    string   `json:"title"`
-		Sections []string `json:"sections"`
+		Title    string `json:"title"`
+		Sections []string
+		Timeline []struct {
+			Role      string `json:"role"`
+			GlyphRole string `json:"glyph_role"`
+			Label     string `json:"label"`
+		} `json:"timeline"`
 		Criteria struct {
 			Met, Total int
 		} `json:"criteria"`
@@ -326,6 +331,15 @@ func TestTaskDetailGoldenParity(t *testing.T) {
 	// The criteria rollup label is shared verbatim across surfaces.
 	if proj.Criteria.Total > 0 {
 		mustContain(t, out, fmt.Sprintf("Criteria · %d/%d", proj.Criteria.Met, proj.Criteria.Total), "criteria rollup")
+	}
+	// Timeline is now COVERED (au-w5-task-detail-timeline-parity): every ordered
+	// cell's label survives to the terminal render (the cell's role is a glyph the
+	// Elixir/web legs own; this TUI leg asserts the shared label text).
+	if len(proj.Timeline) == 0 {
+		t.Fatalf("projection floor: task-detail fixture carries no timeline")
+	}
+	for _, seg := range proj.Timeline {
+		mustContain(t, out, seg.Label, "task-detail timeline label")
 	}
 }
 

@@ -22,7 +22,14 @@ import {
   stageProjection,
   taskDetailProjection,
   roadmapProjection,
+  STATUS_LADDER,
 } from "@/lib/component-projections";
+
+/** Role → its white-ladder glyph char (the spinner role shows the steady Braille
+ * frame the reader animates elsewhere) — the timeline cell glyph per status. */
+const ROLE_GLYPH: Record<string, string> = Object.fromEntries(
+  STATUS_LADDER.map((r) => [r.role, r.spinner ? "⠋" : r.glyph]),
+);
 
 /* ── inline ─────────────────────────────────────────────────────────────── */
 
@@ -1010,6 +1017,25 @@ export function renderBlock(block: Block, key: Key): ReactNode {
                 .filter(Boolean)
                 .join(" · ")}
             </p>
+          ) : null}
+          {d.sections.includes("timeline") ? (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+              {d.timeline.map((seg, i) => (
+                <span key={i} className="flex items-center gap-1.5">
+                  {i > 0 ? (
+                    <span aria-hidden className="text-zinc-400">
+                      →
+                    </span>
+                  ) : null}
+                  <span className="flex items-center gap-1">
+                    <span aria-hidden className="text-zinc-400">
+                      {ROLE_GLYPH[seg.role] ?? ""}
+                    </span>
+                    <span>{seg.label}</span>
+                  </span>
+                </span>
+              ))}
+            </div>
           ) : null}
           {d.sections.includes("criteria") ? (
             <div>

@@ -20,9 +20,6 @@
  * FILED, not papered over, and are simply NOT projected:
  *   • card — only title + flattened body are shared; tone accent, media/action
  *     slots, and slot ORDER differ across Elixir/Go (au-w5-card-slot-parity).
- *   • task-detail — the `timeline` section is Elixir-only; Go's renderer omits
- *     it (au-w5-task-detail-timeline-parity), so it is neither authored nor
- *     projected.
  *   • pipeline — the `source` accent is Elixir-class vs Go-provenance-line, so
  *     only kind/title/detail are shared.
  *   • roadmap — bar geometry (left/width) is surface-local; only the structural
@@ -138,10 +135,16 @@ export interface StageProjection {
   title: string;
   detail: string;
 }
+export interface TimelineEntry {
+  role: string;
+  glyph_role: string;
+  label: string;
+}
 export interface TaskDetailProjection {
   container_role: "task-detail";
   title: string;
   sections: string[];
+  timeline: TimelineEntry[];
   criteria: { met: number; total: number };
 }
 export interface RoadmapProjection {
@@ -255,15 +258,29 @@ export function taskDetailProjection(block: Block): TaskDetailProjection {
       : block;
   const criteria = Array.isArray(task.criteria) ? (task.criteria as Block[]) : [];
   const labels = Array.isArray(task.labels) ? (task.labels as unknown[]) : [];
+  const timelineSegs = Array.isArray(task.timeline)
+    ? (task.timeline as Block[])
+    : [];
 
+  // meta · timeline · criteria · labels — the emitter's ordered conditional slots
+  // (timeline drawn after meta, before criteria in `task_detail_html/1`).
   const sections: string[] = ["meta"];
+  if (timelineSegs.length > 0) sections.push("timeline");
   if (criteria.length > 0) sections.push("criteria");
   if (labels.length > 0) sections.push("labels");
+
+  // Each cell's ladder role (derived, mirrors the emitter's `role_of`) doubles as
+  // the glyph-role; the label is the shared plain text every surface prints.
+  const timeline: TimelineEntry[] = timelineSegs.map((s) => {
+    const role = roleForStatus(str(s.status));
+    return { role, glyph_role: role, label: str(s.label) };
+  });
 
   return {
     container_role: "task-detail",
     title: str(task.title),
     sections,
+    timeline,
     criteria: {
       met: criteria.filter((c) => c && (c as Block).met === true).length,
       total: criteria.length,
