@@ -128,9 +128,9 @@ defmodule Barkpark.Status do
   @doc "Fetch one incident by id, or nil."
   @spec get_incident(binary()) :: Incident.t() | nil
   def get_incident(id) do
-    case Ecto.UUID.cast(id) do
-      {:ok, uuid} -> Repo.get(Incident, uuid)
-      :error -> nil
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Incident, uuid)
     end
   end
 
