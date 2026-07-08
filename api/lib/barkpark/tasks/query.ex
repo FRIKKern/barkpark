@@ -156,6 +156,315 @@ defmodule Barkpark.Tasks.Query do
     |> Repo.all()
   end
 
+  # ── the aggregate/rollup fetcher (v1 = COUNT-ONLY) ──────────────────────────
+
+  # Closed vocabularies. A groupBy dim / `over` bucket / timestamp field MUST be
+  # one of these — anything else is rejected up front, so a `query` can never
+  # reach a raw column or a jsonb path it names itself. Each categorical dim maps
+  # to a pure extractor closure (`cat_keys/2`), never a caller-supplied path.
+  @agg_group_dims ~w(status label parent assignee priority phase)
+  @agg_time_buckets ~w(day week month)
+  @agg_time_fields ~w(inserted_at updated_at closed_at)
+  @agg_scan_cap 5000
+
+  @doc """
+  Resolve a data-viz block's aggregate `query` into a neutral count tally the
+  PortableDoc data-viz shapers (`TaskResolver.shape/2`) turn into the ratified
+  chart / heatmap / stat Attrs.
+
+  **v1 is COUNT-ONLY** — every cell / point / value is a COUNT of matching task
+  documents. There is no agg/field key; `count` reveals cardinality, never a
+  field value, so it stays inside the workspace boundary that field-visibility
+  redaction only enforces at the ROW level.
+
+  `query` shape (mirrors the ratified contract):
+
+      %{
+        "source"  => "tasks",                       # v1: tasks only
+        "filter"  => %{parent_id, labels, status, kind, dataset},  # reuses the
+                                                    #   shared `maybe_filter_*`
+        "groupBy" => dim | [rowDim, colDim],        # closed whitelist
+        "over"    => %{"bucket" => day|week|month,
+                       "on" => inserted_at|updated_at|closed_at,
+                       "last" => n}                  # optional time axis
+      }
+
+  A groupBy element is either a categorical dim (`@agg_group_dims`) or a time
+  bucket — a `day|week|month` string (on `inserted_at`) or `%{"bucket","on"}`.
+
+  Returns `{:ok, tally}` where `tally` is
+  `%{labels1:, labels2:, buckets:, total:, tally:}` (see `tally_docs/3`), or
+  `{:error, reason}` for an out-of-whitelist dim / bucket / field or a non-task
+  source. Tenancy stays fail-CLOSED via the SAME `Scope.scope_to_workspace/3`
+  the row fetcher uses — a nil/foreign workspace yields an empty tally.
+  """
+  def agg_for_query(query, scope \\ [])
+
+  def agg_for_query(query, scope) when is_map(query) do
+    with "tasks" <- Map.get(query, "source", "tasks"),
+         {:ok, dims} <- normalize_group_by(Map.get(query, "groupBy")),
+         {:ok, over} <- normalize_over(Map.get(query, "over")) do
+      docs = agg_docs(filter_of(query), scope)
+      {:ok, tally_docs(docs, dims, over)}
+    else
+      {:error, _} = err -> err
+      other -> {:error, {:bad_source, other}}
+    end
+  end
+
+  def agg_for_query(_query, _scope), do: {:error, :bad_query}
+
+  defp filter_of(query) do
+    case Map.get(query, "filter") do
+      %{} = f -> f
+      _ -> %{}
+    end
+  end
+
+  # Scoped, filtered task Documents for an aggregate — reuses the EXACT same
+  # `Scope.scope_to_workspace/3` + `maybe_filter_*` composables as
+  # `docs_for_query/2` so the tenancy boundary and filter semantics can't drift.
+  defp agg_docs(filter, scope) do
+    ws_id = Keyword.get(scope, :workspace_id)
+    project_id = Keyword.get(scope, :project_id)
+
+    from(d in Document, where: d.type == "task", limit: @agg_scan_cap)
+    |> Scope.scope_to_workspace(ws_id, project_id)
+    |> maybe_filter_dataset(Map.get(filter, "dataset"))
+    |> maybe_filter_kind(Map.get(filter, "kind"))
+    |> maybe_filter_parent_id(Map.get(filter, "parent_id"))
+    |> apply_labels(Map.get(filter, "label") || Map.get(filter, "labels"))
+    |> apply_statuses(Map.get(filter, "status"))
+    |> Repo.all()
+  end
+
+  # ── groupBy / over normalisation (closed-whitelist gate) ────────────────────
+
+  defp normalize_group_by(nil), do: {:ok, []}
+  defp normalize_group_by(dim) when is_binary(dim) or is_map(dim), do: wrap_dim(norm_dim(dim))
+
+  defp normalize_group_by(list) when is_list(list) do
+    Enum.reduce_while(list, {:ok, []}, fn d, {:ok, acc} ->
+      case norm_dim(d) do
+        {:ok, spec} -> {:cont, {:ok, acc ++ [spec]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp normalize_group_by(other), do: {:error, {:bad_dim, other}}
+
+  defp wrap_dim({:ok, spec}), do: {:ok, [spec]}
+  defp wrap_dim({:error, _} = err), do: err
+
+  defp norm_dim(dim) when is_binary(dim) do
+    cond do
+      dim in @agg_group_dims -> {:ok, {:cat, dim}}
+      dim in @agg_time_buckets -> {:ok, {:time, dim, "inserted_at"}}
+      true -> {:error, {:bad_dim, dim}}
+    end
+  end
+
+  defp norm_dim(%{} = m) do
+    bucket = Map.get(m, "bucket")
+    on = Map.get(m, "on", "inserted_at")
+
+    if bucket in @agg_time_buckets and on in @agg_time_fields,
+      do: {:ok, {:time, bucket, on}},
+      else: {:error, {:bad_dim, m}}
+  end
+
+  defp norm_dim(other), do: {:error, {:bad_dim, other}}
+
+  defp normalize_over(nil), do: {:ok, nil}
+
+  defp normalize_over(%{} = over) do
+    bucket = Map.get(over, "bucket")
+    on = Map.get(over, "on", "inserted_at")
+    last = Map.get(over, "last")
+
+    cond do
+      bucket not in @agg_time_buckets -> {:error, {:bad_over, bucket}}
+      on not in @agg_time_fields -> {:error, {:bad_over_field, on}}
+      not valid_last?(last) -> {:error, {:bad_over_last, last}}
+      true -> {:ok, {:time, bucket, on, normalize_last(last)}}
+    end
+  end
+
+  defp normalize_over(other), do: {:error, {:bad_over, other}}
+
+  defp valid_last?(nil), do: true
+  defp valid_last?(n) when is_integer(n) and n > 0, do: true
+  defp valid_last?(_), do: false
+
+  defp normalize_last(n) when is_integer(n) and n > 0, do: n
+  defp normalize_last(_), do: nil
+
+  # ── the pure count roll-up ──────────────────────────────────────────────────
+
+  @doc false
+  # Fold `docs` into a neutral 2-axis count tally. `dims` is 0/1/2 normalised
+  # group specs; `over` is a normalised time axis (or nil). Returns
+  # `%{labels1, labels2, buckets, total, tally}` where `tally` is keyed
+  # `{primary_key, secondary_key}` (`:__all__` when an axis is absent). The
+  # secondary axis is dim2 (heatmap cols → `labels2`) OR the `over` buckets
+  # (chart points / stat spark → `buckets`), never both.
+  def tally_docs(docs, dims, over) do
+    primary = Enum.at(dims, 0)
+
+    secondary =
+      case Enum.at(dims, 1) do
+        nil -> if over, do: {:over, over}, else: nil
+        d2 -> d2
+      end
+
+    {tally, p_labels, s_labels} =
+      Enum.reduce(docs, {%{}, %{}, %{}}, fn doc, acc ->
+        pks = axis_keys(primary, doc)
+        sks = axis_keys(secondary, doc)
+
+        Enum.reduce(pks, acc, fn {pk, ps}, acc1 ->
+          Enum.reduce(sks, acc1, fn {sk, ss}, {t, pl, sl} ->
+            {
+              Map.update(t, {pk, sk}, 1, &(&1 + 1)),
+              Map.put_new(pl, pk, ps),
+              Map.put_new(sl, sk, ss)
+            }
+          end)
+        end)
+      end)
+
+    {labels2, buckets} =
+      case secondary do
+        {:over, {:time, _b, _o, last}} -> {[], apply_last(ordered_labels(s_labels), last)}
+        nil -> {[], nil}
+        _ -> {ordered_labels(s_labels), nil}
+      end
+
+    %{
+      labels1: ordered_labels(p_labels),
+      labels2: labels2,
+      buckets: buckets,
+      total: length(docs),
+      tally: tally
+    }
+  end
+
+  # Distinct axis keys for one doc, each `{key_string, sort_term}`. `:__all__`
+  # (absent axis) collapses everything into one bucket; a missing categorical
+  # value or timestamp yields `[]` so the doc simply doesn't count on that axis.
+  defp axis_keys(nil, _doc), do: [{:__all__, nil}]
+  defp axis_keys({:cat, dim}, doc), do: cat_keys(dim, doc)
+  defp axis_keys({:time, bucket, on}, doc), do: time_keys(bucket, on, doc)
+  defp axis_keys({:over, {:time, bucket, on, _last}}, doc), do: time_keys(bucket, on, doc)
+
+  defp cat_keys("status", doc), do: one(content_get(doc, "lifecycle_status") || "open")
+  defp cat_keys("parent", doc), do: one(strip_drafts(content_get(doc, "parent_id")))
+  defp cat_keys("priority", doc), do: one(stringify(content_get(doc, "priority")))
+
+  defp cat_keys("assignee", doc) do
+    worker =
+      case content_get(doc, "claim") do
+        %{} = c -> Map.get(c, "worker")
+        _ -> nil
+      end
+
+    one(worker || content_get(doc, "assignee"))
+  end
+
+  defp cat_keys("label", doc) do
+    doc
+    |> content_get("labels")
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&{&1, &1})
+  end
+
+  defp cat_keys("phase", doc) do
+    doc
+    |> content_get("labels")
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.find_value([], fn l ->
+      case String.split(l, ":", parts: 2) do
+        [p, rest] when p in ~w(phase wave) and rest != "" -> [{rest, rest}]
+        _ -> nil
+      end
+    end)
+  end
+
+  defp cat_keys(_dim, _doc), do: []
+
+  defp one(nil), do: []
+  defp one(""), do: []
+  defp one(v) when is_binary(v), do: [{v, v}]
+  defp one(v), do: [{to_string(v), to_string(v)}]
+
+  defp time_keys(bucket, on, doc) do
+    case timestamp_for(doc, on) do
+      %DateTime{} = dt -> [bucket_key(dt, bucket)]
+      _ -> []
+    end
+  end
+
+  defp timestamp_for(doc, "inserted_at"), do: doc.inserted_at
+  defp timestamp_for(doc, "updated_at"), do: doc.updated_at
+
+  defp timestamp_for(doc, "closed_at") do
+    with %{} = claim <- content_get(doc, "claim"),
+         ts when is_binary(ts) <- Map.get(claim, "closed_at"),
+         {:ok, dt, _} <- DateTime.from_iso8601(ts) do
+      dt
+    else
+      _ -> nil
+    end
+  end
+
+  defp timestamp_for(_doc, _on), do: nil
+
+  defp bucket_key(%DateTime{} = dt, "day") do
+    d = DateTime.to_date(dt)
+    {Date.to_iso8601(d), Date.to_erl(d)}
+  end
+
+  defp bucket_key(%DateTime{} = dt, "month") do
+    d = DateTime.to_date(dt)
+    {pad4(d.year) <> "-" <> pad2(d.month), {d.year, d.month, 0}}
+  end
+
+  defp bucket_key(%DateTime{} = dt, "week") do
+    d = DateTime.to_date(dt)
+    {y, w} = :calendar.iso_week_number(Date.to_erl(d))
+    {pad4(y) <> "-W" <> pad2(w), {y, w}}
+  end
+
+  defp pad2(n), do: String.pad_leading(Integer.to_string(n), 2, "0")
+  defp pad4(n), do: String.pad_leading(Integer.to_string(n), 4, "0")
+
+  defp ordered_labels(map) do
+    map
+    |> Map.delete(:__all__)
+    |> Enum.sort_by(fn {_k, s} -> s end)
+    |> Enum.map(fn {k, _s} -> k end)
+  end
+
+  defp apply_last(list, nil), do: list
+  defp apply_last(list, n) when is_integer(n) and n > 0, do: Enum.take(list, -n)
+  defp apply_last(list, _), do: list
+
+  defp content_get(%Document{content: content}, key) when is_map(content),
+    do: Map.get(content, key)
+
+  defp content_get(_doc, _key), do: nil
+
+  defp strip_drafts(nil), do: nil
+  defp strip_drafts(s) when is_binary(s), do: Regex.replace(~r/^drafts\./, s, "")
+  defp strip_drafts(_), do: nil
+
+  defp stringify(nil), do: nil
+  defp stringify(s) when is_binary(s), do: s
+  defp stringify(n), do: to_string(n)
+
   # A list of labels ANDs (task must carry all); a single string uses the
   # shared membership filter.
   defp apply_labels(query, nil), do: query

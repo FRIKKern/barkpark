@@ -28,16 +28,28 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   @snapshot_types ~w(tasks task-list task-board roadmap)
   @detail_type "task-detail"
 
+  # The data-viz block types that read an AGGREGATE (count-only) rollup rather
+  # than task rows. Each resolves a `query` into the ratified renderer Attrs:
+  # `chart` → `series`, `heatmap` → `cells`, `stat` → `value` (see `shape/2`).
+  @dataviz_types ~w(chart heatmap stat)
+
   @doc """
   Walk `blocks`, resolving every task block that carries a `query`. `fetch` is
-  any `(query_map -> [row])` function. A block with a literal `snapshot`/`task`
-  and no `query` is left untouched (author-pinned rows still work offline).
+  any `(query_map -> [row])` function for the task-ROW blocks. The optional
+  `agg_fetch` is `(query_map -> {:ok, tally} | {:error, _})` for the data-viz
+  blocks (`chart`/`heatmap`/`stat`) — omit it (or pass `nil`) and those blocks
+  pass through UNTOUCHED, the correct offline/wasm degrade (renderer shows its
+  dim placeholder). A block with a literal `snapshot`/`task`/`series`/`cells`/
+  `value` and no `query` is always left untouched (author-pinned rows work
+  offline).
   """
-  def resolve(blocks, fetch) when is_list(blocks) and is_function(fetch, 1) do
-    Enum.map(blocks, &resolve_block(&1, fetch))
+  def resolve(blocks, fetch, agg_fetch \\ nil)
+
+  def resolve(blocks, fetch, agg_fetch) when is_list(blocks) and is_function(fetch, 1) do
+    Enum.map(blocks, &resolve_block(&1, fetch, agg_fetch))
   end
 
-  def resolve(blocks, _fetch), do: blocks
+  def resolve(blocks, _fetch, _agg_fetch), do: blocks
 
   @doc """
   Build the LIVE-TASK PREVIEW channel for `blocks` — the DISPLAY-ONLY twin of
@@ -136,7 +148,7 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     end
   end
 
-  defp resolve_block(%{"type" => type, "query" => query} = block, fetch)
+  defp resolve_block(%{"type" => type, "query" => query} = block, fetch, _agg_fetch)
        when type in @snapshot_types and is_map(query) do
     rows = query |> fetch.() |> List.wrap()
 
@@ -145,7 +157,7 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     |> Map.delete("query")
   end
 
-  defp resolve_block(%{"type" => @detail_type, "query" => query} = block, fetch)
+  defp resolve_block(%{"type" => @detail_type, "query" => query} = block, fetch, _agg_fetch)
        when is_map(query) do
     task =
       case query |> fetch.() |> List.wrap() do
@@ -158,12 +170,93 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     |> Map.delete("query")
   end
 
-  # A container block (columns/section/…) can nest task blocks in `children`.
-  defp resolve_block(%{"children" => children} = block, fetch) when is_list(children) do
-    Map.put(block, "children", resolve(children, fetch))
+  # A data-viz block (chart/heatmap/stat) carrying an aggregate `query`: run the
+  # count rollup and MERGE the ratified Attrs (`series`/`cells`/`value`), dropping
+  # `query`. An `{:error, _}` (out-of-whitelist dim / non-task source / agg off)
+  # leaves the block UNTOUCHED — the renderer then shows its dim placeholder,
+  # exactly like an offline/wasm render with only a `query` present.
+  defp resolve_block(%{"type" => type, "query" => query} = block, _fetch, agg_fetch)
+       when type in @dataviz_types and is_map(query) and is_function(agg_fetch, 1) do
+    case agg_fetch.(query) do
+      {:ok, tally} when is_map(tally) ->
+        block |> Map.merge(shape(type, tally)) |> Map.delete("query")
+
+      _ ->
+        block
+    end
   end
 
-  defp resolve_block(block, _fetch), do: block
+  # A container block (columns/section/…) can nest task blocks in `children`.
+  defp resolve_block(%{"children" => children} = block, fetch, agg_fetch)
+       when is_list(children) do
+    Map.put(block, "children", resolve(children, fetch, agg_fetch))
+  end
+
+  defp resolve_block(block, _fetch, _agg_fetch), do: block
+
+  # ── data-viz shapers (pure): neutral count tally → ratified block Attrs ──────
+
+  @doc """
+  Shape a `Barkpark.Tasks.Query.agg_for_query/2` count tally into the ratified
+  data-viz Attrs for `type`. COUNT-ONLY: every value is a count.
+
+    * `"stat"`  → `%{"value" => n, "spark" => [...]?}`
+    * `"chart"` → `%{"series" => [%{"label", "points" => [...]}]}` (one series
+      per primary groupBy value; points per `over` bucket, else a single count)
+    * `"heatmap"` → `%{"cells" => [[...]], "max", "rowLabels", "colLabels"}`
+  """
+  def shape("stat", tally), do: stat_shape(tally)
+  def shape("chart", tally), do: chart_shape(tally)
+  def shape("heatmap", tally), do: heatmap_shape(tally)
+  def shape(_type, _tally), do: %{}
+
+  defp cell(tally, p, s), do: Map.get(tally.tally, {p, s}, 0)
+
+  defp stat_shape(%{buckets: buckets} = t) when is_list(buckets) and buckets != [] do
+    %{"value" => t.total, "spark" => Enum.map(buckets, &cell(t, :__all__, &1))}
+  end
+
+  defp stat_shape(t), do: %{"value" => t.total}
+
+  defp chart_shape(%{labels1: []} = t) do
+    points =
+      case t.buckets do
+        buckets when is_list(buckets) and buckets != [] ->
+          Enum.map(buckets, &cell(t, :__all__, &1))
+
+        _ ->
+          [t.total]
+      end
+
+    %{"series" => [%{"label" => "count", "points" => points}]}
+  end
+
+  defp chart_shape(%{labels1: labels1} = t) do
+    axis =
+      case t.buckets do
+        buckets when is_list(buckets) and buckets != [] -> buckets
+        _ -> [:__all__]
+      end
+
+    series =
+      for l1 <- labels1 do
+        %{"label" => l1, "points" => Enum.map(axis, &cell(t, l1, &1))}
+      end
+
+    %{"series" => series}
+  end
+
+  defp heatmap_shape(%{labels1: rows, labels2: cols} = t) do
+    cells = for r <- rows, do: for(c <- cols, do: cell(t, r, c))
+
+    max =
+      case List.flatten(cells) do
+        [] -> 0
+        flat -> Enum.max(flat)
+      end
+
+    %{"cells" => cells, "max" => max, "rowLabels" => rows, "colLabels" => cols}
+  end
 
   @doc """
   Map one task doc (the `TasksController.render_doc` shape — tolerant of string

@@ -733,9 +733,11 @@ defmodule Barkpark.Content.Papers do
   """
   @spec resolve_tasks_in_blocks(list(), keyword()) :: list()
   def resolve_tasks_in_blocks(blocks, scope) when is_list(blocks) do
-    Barkpark.PortableDoc.TaskResolver.resolve(blocks, fn query ->
-      Barkpark.Tasks.Query.rows_for_query(query, scope)
-    end)
+    Barkpark.PortableDoc.TaskResolver.resolve(
+      blocks,
+      fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
+      fn query -> Barkpark.Tasks.Query.agg_for_query(query, scope) end
+    )
   end
 
   def resolve_tasks_in_blocks(blocks, _scope), do: blocks
