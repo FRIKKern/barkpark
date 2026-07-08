@@ -97,6 +97,19 @@ def scan(path, rel):
     # stripped copy (so hex in a /* … */ note never trips); the allow-annotation
     # and the region markers live in comments, so they're read from raw_lines.
     s = GEN_BLOCK.sub(blank, raw)
+    # Neutralise the CSS block-comment delimiters (/* … */) INSIDE single-line
+    # double-quoted string literals BEFORE the block-comment pass. Otherwise a
+    # `/*` living in an ordinary string — e.g. `embed_templates "session_html/*"`
+    # — is misread as a real comment OPENER and the DOTALL strip below blanks
+    # everything down to the next `*/`, silently exempting the intervening lines
+    # from the scan. We only rewrite the two-char delimiters (length-preserving),
+    # so a real inline literal like `style="color:#ff0000"` (no /* inside) is
+    # untouched and still detected, and a genuine CSS `/* … */` comment — which
+    # lives in bare heredoc/template text, not inside a "…" string — is left for
+    # the block-comment pass to strip normally.
+    def _neuter_str_delims(m):
+        return m.group(0).replace("/*", "/ ").replace("*/", " /")
+    s = re.sub(r'"[^"\n]*"', _neuter_str_delims, s)
     s = re.sub(r"/\*.*?\*/", blank, s, flags=re.S)
     s = re.sub(r"<!--.*?-->", blank, s, flags=re.S)
     s = re.sub(r"<%!--.*?--%>", blank, s, flags=re.S)
