@@ -100,6 +100,24 @@ defmodule BarkparkWeb.PulseChannelTest do
     end
   end
 
+  describe "cost vitals fastlane" do
+    test "a Metrics vitals tick reaches a JOINED channel as a push, never a crash" do
+      {_reply, socket} = join!("test-storm")
+
+      # fire the sampler tick synchronously — it broadcasts "vitals" on the topic
+      metrics = Process.whereis(Barkpark.Pulse.Metrics)
+      assert is_pid(metrics)
+      send(metrics, :tick)
+      _ = :sys.get_state(metrics)
+
+      # the joined channel must FASTLANE it to the client (Endpoint.broadcast),
+      # not choke on an undefined handle_out/3
+      assert_push "vitals", payload, 500
+      assert is_number(payload.cpu)
+      assert Process.alive?(socket.channel_pid)
+    end
+  end
+
   describe "roster presence" do
     test "join tracks the socket and pushes a presence_state with the hue" do
       {_reply, _socket} = join!("test-storm", %{"hue" => 200})

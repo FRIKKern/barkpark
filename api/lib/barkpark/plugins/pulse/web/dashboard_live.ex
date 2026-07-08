@@ -18,17 +18,24 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
   use BarkparkWeb, :live_view
 
   alias Barkpark.Pulse
+  alias Barkpark.Pulse.Metrics
 
   @refresh_ms 5_000
+  @vitals_ms 2_000
 
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
       for name <- channel_names(), do: BarkparkWeb.Endpoint.subscribe("pulse:" <> name)
       Process.send_after(self(), :refresh, @refresh_ms)
+      Process.send_after(self(), :vitals, @vitals_ms)
     end
 
-    {:ok, assign(socket, :rows, load_rows())}
+    {:ok,
+     socket
+     |> assign(:rows, load_rows())
+     |> assign(:vitals, load_vitals())
+     |> assign(:storage, safe_storage())}
   end
 
   # a strike broadcast on any channel topic — bump that channel's total live
@@ -54,10 +61,57 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
   # periodic re-read: keeps today/last_hour honest across the clock + TTL sweep
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
-    {:noreply, assign(socket, :rows, load_rows())}
+    {:noreply, socket |> assign(:rows, load_rows()) |> assign(:storage, safe_storage())}
+  end
+
+  # the fast tick: CPU / rates / presence — no DB touch, so it can breathe at 2s
+  def handle_info(:vitals, socket) do
+    Process.send_after(self(), :vitals, @vitals_ms)
+    {:noreply, assign(socket, :vitals, load_vitals())}
   end
 
   defp channel_names, do: Pulse.channels() |> Map.keys() |> Enum.sort()
+
+  defp load_vitals do
+    snap = Metrics.snapshot()
+
+    online =
+      Enum.reduce(channel_names(), 0, fn name, acc ->
+        acc + map_size(BarkparkWeb.Presence.list("pulse:" <> name))
+      end)
+
+    # broadcast fan-out: every relayed frame goes to (subscribers - 1) sockets
+    fanout = (snap.cursor_per_s + snap.strikes_per_min / 60) * max(0, online - 1)
+
+    Map.merge(snap, %{online: online, fanout_per_s: fanout})
+  end
+
+  defp safe_storage do
+    Pulse.storage()
+  rescue
+    _ -> %{events_bytes: 0, counters_bytes: 0, event_rows: 0}
+  end
+
+  # the tangible number: this node's CPU share × the box's monthly price.
+  # Honest framing — an ESTIMATE of the storm's share of a fixed-price server.
+  defp host_eur_month do
+    case Application.get_env(:barkpark, :pulse_host_eur_month, 4.51) do
+      n when is_number(n) ->
+        n * 1.0
+
+      s when is_binary(s) ->
+        with {f, _} <- Float.parse(s) do
+          f
+        else
+          _ -> 4.51
+        end
+    end
+  end
+
+  defp eur(cpu_util), do: :erlang.float_to_binary(cpu_util * host_eur_month(), decimals: 4)
+  defp pct(u), do: :erlang.float_to_binary(u * 100, decimals: 1)
+  defp f1(x), do: :erlang.float_to_binary(x * 1.0, decimals: 1)
+  defp mb(bytes), do: :erlang.float_to_binary(bytes / 1_048_576, decimals: 2)
 
   # thousands separators, no extra dep: 1317 -> "1,317"
   defp commas(n) when is_integer(n) do
@@ -88,6 +142,37 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
           the feed behind them is swept after 24&nbsp;h. Updates stream in real time.
         </small>
       </p>
+
+      <section data-role="pulse-cost"
+               style="border: 1px solid var(--muted-border-color, #ccc); border-radius: 8px; padding: 1.2rem 1.4rem; margin: 1rem 0;">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+          <strong>what the storm costs right now</strong>
+          <span data-role="cost-eur" style="font-size:1.6rem; font-weight:700; font-variant-numeric: tabular-nums;">
+            ≈ €<%= eur(@vitals.cpu_util) %>/mo
+          </span>
+        </div>
+        <div style="display:flex; gap:1.6rem; margin-top:0.5rem; flex-wrap:wrap; opacity:0.8; font-variant-numeric: tabular-nums;">
+          <span>cpu <strong data-role="cost-cpu"><%= pct(@vitals.cpu_util) %>%</strong></span>
+          <span>mem <strong><%= f1(@vitals.mem_mb) %> MB</strong></span>
+          <span>run queue <strong><%= @vitals.run_queue %></strong></span>
+          <span>online <strong data-role="cost-online"><%= @vitals.online %></strong></span>
+          <span>cursor msgs <strong data-role="cost-cursor"><%= f1(@vitals.cursor_per_s) %>/s</strong></span>
+          <span>strikes <strong><%= f1(@vitals.strikes_per_min) %>/min</strong></span>
+          <span>fan-out <strong><%= f1(@vitals.fanout_per_s) %> msg/s</strong></span>
+          <span>storage <strong data-role="cost-storage"><%= mb(@storage.events_bytes + @storage.counters_bytes) %> MB</strong>
+            (<%= @storage.event_rows %> rows)</span>
+        </div>
+        <p style="margin:0.6rem 0 0; opacity:0.55;">
+          <small>
+            The euro figure is this node's live BEAM CPU share of a fixed
+            €<%= f1(host_eur_month()) %>/mo server — it rises when people join and
+            play, and falls back to ~zero when the storm is idle. Message rates
+            and presence are measured, not modelled; storage is real
+            <code>pg_total_relation_size</code> (events are swept after 24 h,
+            the counter rows live forever).
+          </small>
+        </p>
+      </section>
 
       <div :if={@rows == []} data-role="pulse-empty">
         <p><em>No Pulse channels configured on this instance.</em></p>

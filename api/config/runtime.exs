@@ -256,6 +256,15 @@ end
 # Barkpark.Pulse @moduledoc for the per-channel keys. Example:
 #   BARKPARK_PULSE_CHANNELS='{"jarl-card":{"fields":{"hue":["int",0,359],
 #     "x":["float",0,1],"y":["float",0,1],"mega":["bool"]}}}'
+# The fixed monthly price of this box (EUR) — the pulse cost dashboard
+# multiplies it by live CPU share for the "what the storm costs" estimate.
+with raw when is_binary(raw) and raw != "" <- System.get_env("BARKPARK_HOST_EUR_MONTH"),
+     {price, _} <- Float.parse(raw) do
+  config :barkpark, :pulse_host_eur_month, price
+else
+  _ -> :ok
+end
+
 with raw when is_binary(raw) and raw != "" <- System.get_env("BARKPARK_PULSE_CHANNELS"),
      {:ok, channels} when is_map(channels) <- Jason.decode(raw) do
   config :barkpark, :pulse_channels, channels

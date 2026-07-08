@@ -38,6 +38,8 @@ defmodule BarkparkWeb.PulseController do
         total: total
       })
 
+      Barkpark.Pulse.Metrics.bump(:strike)
+
       json(conn, %{ok: true, id: id, total: total})
     else
       {:halted, conn} -> conn

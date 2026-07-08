@@ -52,6 +52,15 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
     assert render(view) =~ "424,242"
   end
 
+  test "the cost section renders live vitals and the euro estimate" do
+    %{conn: conn} = %{conn: build_conn() |> init_test_session(%{"api_token" => @admin_token})}
+    {:ok, _view, html} = live(conn, "/admin/pulse")
+    assert html =~ "what the storm costs right now"
+    assert html =~ "cost-eur"
+    assert html =~ "cursor msgs"
+    assert html =~ "pg_total_relation_size" or html =~ "storage"
+  end
+
   test "the plugin contributes a Structure-desk link to the dashboard" do
     items = Barkpark.Plugins.Pulse.desk_items("production")
     assert Enum.any?(items, &(&1[:type] == :link and &1[:path] == "/admin/pulse"))

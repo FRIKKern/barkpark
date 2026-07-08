@@ -232,6 +232,21 @@ defmodule Barkpark.Pulse do
   # ── Sweep ─────────────────────────────────────────────────────────────
 
   @doc """
+  On-disk cost of the pulse tables (events + counters), in bytes — the real
+  `pg_total_relation_size`, and the retained event-row count. The events side
+  breathes with the TTL sweep; the counters side is a handful of rows forever.
+  """
+  def storage do
+    %{rows: [[ev_bytes, ct_bytes]]} =
+      Repo.query!(
+        "SELECT pg_total_relation_size('pulse_events'), pg_total_relation_size('pulse_counters')"
+      )
+
+    events = Repo.one(from e in Event, select: count(e.id))
+    %{events_bytes: ev_bytes, counters_bytes: ct_bytes, event_rows: events}
+  end
+
+  @doc """
   Delete events older than each configured channel's TTL. Idempotent; safe
   with concurrent ingest (a plain range DELETE — new rows are untouchable
   by the cutoff, and the counter table is never touched). Returns the
