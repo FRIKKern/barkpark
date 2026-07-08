@@ -289,6 +289,160 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   end
 
   @doc """
+  SHARE-ACCESS sheet (airdrop-grants capstone) — mint + deliver a scoped,
+  time-boxed, account-bound grant link. Distinct from `item_share_popover`
+  (anonymous public read of ONE item): this grants an authenticated grantee a
+  capability the GRANTOR HOLDS, delivered by email + a live toast.
+
+    * `@caps` — the capabilities the grantor holds (`["read"]`, `["read",
+      "write"]`, or `[]`). The picker offers ONLY these (View=read, Edit=write);
+      an empty list disables submit. mint re-checks server-side.
+    * `@type` — the post-type in scope (post-type surface) or nil (workspace).
+    * `@link` — the `/grant/<token>` claim URL, surfaced ONCE after a successful
+      mint (copy-to-clipboard). Dropped on close; the token hash is never shown.
+
+  Events bubble to StudioLive: airdrop-close, airdrop-create.
+  """
+  attr :show, :boolean, default: false
+  attr :type, :string, default: nil
+  attr :caps, :list, default: []
+  attr :link, :string, default: nil
+  attr :error, :string, default: nil
+
+  def airdrop_sheet(assigns) do
+    ~H"""
+    <%= if @show do %>
+      <div class="image-picker-overlay" phx-click="airdrop-close"></div>
+      <div
+        class="image-picker airdrop-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="airdrop-sheet-title"
+        phx-window-keydown="airdrop-close"
+        phx-key="escape"
+      >
+        <div class="image-picker-header">
+          <span id="airdrop-sheet-title" style="font-weight: 600; font-size: 14px;">
+            Share access<%= if @type, do: " · #{@type}", else: "" %>
+          </span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="airdrop-close" aria-label="Close">×</button>
+        </div>
+
+        <%= if @link do %>
+          <%!-- Post-mint: surface the claim link ONCE. --%>
+          <div class="airdrop-body" data-test-id="airdrop-minted">
+            <div class="item-share-lead">
+              <span class="item-share-lead-icon"><.icon name="check-circle" size={18} /></span>
+              <div>
+                <div class="item-share-lead-title">Access shared</div>
+                <div class="item-share-lead-sub">Emailed to the recipient. Copy the link if you want to hand it over directly.</div>
+              </div>
+            </div>
+            <div class="item-share-link-row">
+              <input
+                type="text"
+                readonly
+                value={@link}
+                class="form-input item-share-url"
+                data-test-id="airdrop-link"
+                onclick="this.select()"
+              />
+              <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                onclick="var u=this.previousElementSibling.value; if(navigator.clipboard){navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"
+                title="Copy link"
+              >
+                Copy
+              </button>
+            </div>
+            <div class="item-share-footer">
+              <button type="button" class="btn btn-sm" phx-click="airdrop-close">Done</button>
+            </div>
+          </div>
+        <% else %>
+          <form phx-submit="airdrop-create" class="airdrop-body">
+            <label class="shares-field">
+              <span class="shares-field-label">Recipient email</span>
+              <input
+                type="email"
+                name="grantee_email"
+                placeholder="person@example.com"
+                class="form-input"
+                autocomplete="off"
+                data-test-id="airdrop-email"
+                required
+              />
+            </label>
+
+            <div class="shares-field">
+              <span class="shares-field-label">Access lasts</span>
+              <div class="airdrop-duration" role="radiogroup" aria-label="Duration">
+                <label class="airdrop-chip">
+                  <input type="radio" name="duration" value="30m" /> 30 min
+                </label>
+                <label class="airdrop-chip">
+                  <input type="radio" name="duration" value="5h" /> 5 hours
+                </label>
+                <label class="airdrop-chip">
+                  <input type="radio" name="duration" value="1d" checked /> 1 day
+                </label>
+                <label class="airdrop-chip">
+                  <input type="radio" name="duration" value="custom" /> Custom…
+                </label>
+              </div>
+              <input
+                type="datetime-local"
+                name="expires_at"
+                class="form-input airdrop-custom-expiry"
+                data-test-id="airdrop-custom-expiry"
+                aria-label="Custom expiry"
+              />
+            </div>
+
+            <div class="shares-field">
+              <span class="shares-field-label">Capabilities</span>
+              <%= if @caps == [] do %>
+                <p class="shares-note" data-test-id="airdrop-no-caps">
+                  You hold no shareable access in this workspace.
+                </p>
+              <% else %>
+                <div class="airdrop-caps">
+                  <label :if={"read" in @caps} class="airdrop-chip">
+                    <input type="checkbox" name="capabilities[]" value="read" checked /> View
+                  </label>
+                  <label :if={"write" in @caps} class="airdrop-chip">
+                    <input type="checkbox" name="capabilities[]" value="write" /> Edit
+                  </label>
+                </div>
+              <% end %>
+            </div>
+
+            <label class="airdrop-single-use">
+              <input type="checkbox" name="single_use" value="true" /> Single use (link is spent on first claim)
+            </label>
+
+            <p :if={@error} class="shares-error" data-test-id="airdrop-error"><%= @error %></p>
+
+            <div class="item-share-footer">
+              <button type="button" class="btn btn-sm" phx-click="airdrop-close">Cancel</button>
+              <button
+                type="submit"
+                class="btn btn-primary btn-sm"
+                data-test-id="airdrop-submit"
+                disabled={@caps == []}
+              >
+                Share access
+              </button>
+            </div>
+          </form>
+        <% end %>
+      </div>
+    <% end %>
+    """
+  end
+
+  @doc """
   Reference-picker modal, formerly a legacy inline block in StudioLive, now
   aggregated by `studio_modals/1`. Shares the `.image-picker` overlay styling
   (deliberate — same modal chrome). Caller pre-filters candidates via

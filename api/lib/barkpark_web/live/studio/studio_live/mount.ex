@@ -99,6 +99,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       item_share: nil,
       item_share_links: [],
       item_share_error: nil,
+      # ── Share-access sheet (airdrop-grants capstone) ─────────────────
+      # Mints a scoped, time-boxed, account-bound grant via Barkpark.Access
+      # .mint/2 IN-PROCESS. Gated on HOLDING shareable access (not admin):
+      # `airdrop_can_share?` reveals the entry buttons for any authenticated
+      # principal, and the sheet's picker offers only the caps the grantor
+      # actually holds. `airdrop_link` carries the raw claim URL ONCE after a
+      # mint, then is dropped on close (the token hash is never surfaced).
+      airdrop_can_share?: (socket.assigns[:current_user] || socket.assigns[:api_token]) != nil,
+      airdrop_open: false,
+      airdrop_type: nil,
+      airdrop_caps: [],
+      airdrop_link: nil,
+      airdrop_error: nil,
       validation_errors: %{},
       # ── Cross-field validations (Task barkpark-cgn) ──────────────────
       # Populated after every autosave by `Barkpark.Content.CrossValidator
