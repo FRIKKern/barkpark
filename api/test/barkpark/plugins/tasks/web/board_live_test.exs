@@ -1205,8 +1205,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert html =~ "goldens byte-identical"
       assert html =~ ~s(data-role="peek-evidence")
       assert html =~ "PR #1421 merged"
-      # lineage both ways
-      assert html =~ ~s(data-role="peek-child")
+      # lineage both ways — the child sits in the family tree, the blocker in
+      # its own section
+      assert html =~ ~s(data-role="peek-tree")
+      assert html =~ ~s(data-doc-id="pk-child")
       assert html =~ "Peek child"
       assert html =~ ~s(data-role="peek-blocker")
       assert html =~ "The blocking task"
@@ -1231,7 +1233,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     test "hopping to a child re-peeks in place", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/admin/projects?task=pk-epic")
 
-      view |> element(~s{[data-role="peek-child"]}) |> render_click()
+      view
+      |> element(~s{li[data-doc-id="pk-child"] [data-role="tree-hop"]})
+      |> render_click()
 
       assert_patch(view, "/admin/projects?task=pk-child")
       assert render(view) =~ "Peek child"
@@ -1268,6 +1272,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
       task("ctx-c1", "Direct child", lifecycle: "open", parent_id: "ctx-task")
       task("ctx-g1", "Grandchild shipped", lifecycle: "done", parent_id: "ctx-c1")
+      task("ctx-sib", "Sibling of the task", lifecycle: "open", parent_id: "ctx-mid")
+      task("ctx-aunt", "Sibling of the parent", lifecycle: "open", parent_id: "ctx-grand")
 
       dependent = task("ctx-dep", "Waiting dependent", lifecycle: "blocked")
       Repo.insert!(%Edge{from_id: dependent.id, to_id: t.id, kind: "blocks"})
@@ -1285,23 +1291,33 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       :ok
     end
 
-    test "the breadcrumb walks ancestors root-first and hops", %{conn: conn} do
+    test "the family tree shows ancestors, siblings, the parent's siblings, and grandchildren",
+         %{conn: conn} do
       {:ok, view, html} = live(conn, "/admin/projects?task=ctx-task")
 
-      assert html =~ ~s(data-role="peek-ancestors")
-      assert html =~ "Grand goal"
-      assert html =~ "Mid parent"
+      # scope to the tree section (every title also exists as a board card)
+      [_, tree] = String.split(html, ~s(data-role="peek-tree"), parts: 2)
+      tree = tree |> String.split("</section>", parts: 2) |> hd()
 
-      # root-first: within the crumb row (both titles also exist as board
-      # cards, so scope to the nav), the grand goal precedes the mid parent.
-      [_, crumbs] = String.split(html, ~s(data-role="peek-ancestors"), parts: 2)
-      crumbs = crumbs |> String.split("</nav>", parts: 2) |> hd()
-      {grand_at, _} = :binary.match(crumbs, "Grand goal")
-      {mid_at, _} = :binary.match(crumbs, "Mid parent")
-      assert grand_at < mid_at
+      # the whole family is present…
+      assert tree =~ "Grand goal"
+      assert tree =~ "Mid parent"
+      assert tree =~ "Sibling of the task"
+      assert tree =~ "Sibling of the parent"
+      assert tree =~ "The focused task"
+      assert tree =~ "Direct child"
+      assert tree =~ "Grandchild shipped"
 
+      # …root-first down the spine, and the focused row is marked.
+      {grand_at, _} = :binary.match(tree, "Grand goal")
+      {mid_at, _} = :binary.match(tree, "Mid parent")
+      {self_at, _} = :binary.match(tree, "The focused task")
+      assert grand_at < mid_at and mid_at < self_at
+      assert tree =~ "this task"
+
+      # an ancestor row hops to re-peek it.
       view
-      |> element(~s{[data-role="peek-ancestor"]}, "Grand goal")
+      |> element(~s{li[data-doc-id="ctx-grand"] [data-role="tree-hop"]})
       |> render_click()
 
       assert_patch(view, "/admin/projects?task=ctx-grand")
