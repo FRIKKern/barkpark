@@ -22,8 +22,8 @@ func roleColor(role string) lipgloss.AdaptiveColor {
 }
 
 var (
-	highlight = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"} // lit-allow: chrome accent, no generated twin — au-w4-cli-chrome-tokens
-	dimText   = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"} // lit-allow: chrome dim, no generated twin — au-w4-cli-chrome-tokens
+	highlight = semrole.GenChromeAccent // chrome-accent
+	dimText   = semrole.GenChromeDim    // chrome-dim
 
 	// Status dots resolve through semrole off the generated status tones — no
 	// inline hex. greenDot=ok / amberDot=warn / blueDot=info (design/tokens.json).
@@ -33,23 +33,23 @@ var (
 
 	paneBorder = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}) // lit-allow: chrome border, no generated twin — au-w4-cli-chrome-tokens
+			BorderForeground(semrole.GenChromeBorder) // chrome-border
 
 	activePaneBorder = lipgloss.NewStyle().
 				Border(lipgloss.NormalBorder(), false, true, false, false).
-				BorderForeground(lipgloss.AdaptiveColor{Light: "#3b82f6", Dark: "#3b82f6"}) // lit-allow: chrome active-border, no generated twin — au-w4-cli-chrome-tokens
+				BorderForeground(semrole.GenChromeBorderActive) // chrome-border-active (reuse-of-info)
 
 	headerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}). // lit-allow: chrome ink, no generated twin — au-w4-cli-chrome-tokens
+			Foreground(semrole.GenChromeInk). // chrome-ink
 			Padding(0, 1)
 
 	selectedItemStyle = lipgloss.NewStyle().
-				Background(lipgloss.AdaptiveColor{Light: "#eff6ff", Dark: "#172554"}). // lit-allow: chrome selection bg, no generated twin — au-w4-cli-chrome-tokens
-				Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#93c5fd"})  // lit-allow: chrome selection fg, no generated twin — au-w4-cli-chrome-tokens
+				Background(semrole.GenChromeSelectionBg). // chrome-selection-bg
+				Foreground(semrole.GenChromeSelectionFg)  // chrome-selection-fg
 
 	normalItemStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}) // lit-allow: chrome ink, no generated twin — au-w4-cli-chrome-tokens
+			Foreground(semrole.GenChromeTextSecondary) // chrome-text-secondary
 
 	dimStyle = lipgloss.NewStyle().
 			Foreground(dimText)
@@ -59,26 +59,26 @@ var (
 	statusActive    = lipgloss.NewStyle().Foreground(blueDot)
 
 	dividerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}) // lit-allow: chrome divider, no generated twin — au-w4-cli-chrome-tokens
+			Foreground(semrole.GenChromeBorder) // chrome-border (divider)
 
 	editorLabelStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}). // lit-allow: chrome label, no generated twin — au-w4-cli-chrome-tokens
+				Foreground(semrole.GenChromeLabel). // chrome-label (reuse-of-muted-text)
 				Bold(true)
 
 	editorFieldStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}). // lit-allow: chrome field border, no generated twin — au-w4-cli-chrome-tokens
+				BorderForeground(semrole.GenChromeFieldBorder). // chrome-field-border
 				Padding(0, 1)
 
 	toolbarStyle = lipgloss.NewStyle().
-			Background(lipgloss.AdaptiveColor{Light: "#fafafa", Dark: "#0a0a0a"}). // lit-allow: chrome toolbar bg, no generated twin — au-w4-cli-chrome-tokens
-			Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"})  // lit-allow: chrome toolbar fg, no generated twin — au-w4-cli-chrome-tokens
+			Background(semrole.GenChromeToolbarBg).    // chrome-toolbar-bg
+			Foreground(semrole.GenChromeTextSecondary) // chrome-text-secondary
 
 	breadcrumbStyle = lipgloss.NewStyle().
 			Foreground(dimText)
 
 	breadcrumbActiveStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#d4d4d8"}) // lit-allow: chrome breadcrumb, no generated twin — au-w4-cli-chrome-tokens
+				Foreground(semrole.GenChromeInk) // chrome-ink (Q1 fold: dark #d4d4d8→#e4e4e7)
 
 	// Styles extracted from inline NewStyle() calls
 	logoStyle = lipgloss.NewStyle().
@@ -87,11 +87,11 @@ var (
 
 	activeTabStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}) // lit-allow: chrome active-tab, no generated twin — au-w4-cli-chrome-tokens
+			Foreground(semrole.GenChromeInk) // chrome-ink (active-tab)
 
 	publishBtnStyle = lipgloss.NewStyle().
-			Background(lipgloss.Color("#2563eb")). // lit-allow: primary-CTA chrome, no generated twin — au-w4-cli-chrome-tokens
-			Foreground(lipgloss.Color("#ffffff")). // lit-allow: on-primary white, no generated twin — au-w4-cli-chrome-tokens
+			Background(semrole.GenChromePrimaryCta). // chrome-primary-cta (evergreen recolor)
+			Foreground(semrole.GenChromeOnPrimary).  // chrome-on-primary
 			Bold(true).
 			Padding(0, 2)
 
@@ -100,8 +100,8 @@ var (
 				Foreground(highlight)
 
 	inactiveCursorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}). // lit-allow: chrome cursor fg, no generated twin — au-w4-cli-chrome-tokens
-				Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"})  // lit-allow: chrome cursor bg, no generated twin — au-w4-cli-chrome-tokens
+				Foreground(semrole.GenChromeTextSecondary). // chrome-text-secondary (cursor fg)
+				Background(semrole.GenChromeCursorBg)       // chrome-cursor-bg
 
 	focusedFieldStyle = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).

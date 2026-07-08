@@ -56,13 +56,13 @@ func roleColor(role string) lipgloss.AdaptiveColor {
 }
 
 var (
-	wzTitle  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"})                                           // lit-allow: wizard title chrome, no generated twin — au-w4-cli-chrome-tokens
-	wzDim    = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"})                                                      // lit-allow: wizard dim chrome, no generated twin — au-w4-cli-chrome-tokens
-	wzSel    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#93c5fd"})                                           // lit-allow: wizard selection chrome, no generated twin — au-w4-cli-chrome-tokens
-	wzCheck  = lipgloss.NewStyle().Foreground(roleColor("ok"))                                                                                                // ok role via semrole
-	wzLabel  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"})                                           // lit-allow: wizard label chrome, no generated twin — au-w4-cli-chrome-tokens
-	wzAmber  = lipgloss.NewStyle().Foreground(roleColor("warn"))                                                                                              // warn role via semrole
-	wzBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}).Padding(0, 1) // lit-allow: wizard border chrome, no generated twin — au-w4-cli-chrome-tokens
+	wzTitle  = lipgloss.NewStyle().Bold(true).Foreground(semrole.GenChromeAccent)                                                // chrome-accent
+	wzDim    = lipgloss.NewStyle().Foreground(semrole.GenChromeDim)                                                              // chrome-dim
+	wzSel    = lipgloss.NewStyle().Bold(true).Foreground(semrole.GenChromeSelectionFg)                                           // chrome-selection-fg
+	wzCheck  = lipgloss.NewStyle().Foreground(roleColor("ok"))                                                                   // ok role via semrole
+	wzLabel  = lipgloss.NewStyle().Bold(true).Foreground(semrole.GenChromeLabel)                                                 // chrome-label
+	wzAmber  = lipgloss.NewStyle().Foreground(roleColor("warn"))                                                                 // warn role via semrole
+	wzBorder = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(semrole.GenChromeFieldBorder).Padding(0, 1) // chrome-field-border
 )
 
 // wizardStage enumerates the linear flow.

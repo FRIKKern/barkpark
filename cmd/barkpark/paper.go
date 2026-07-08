@@ -91,8 +91,8 @@ func barkparkPaperTheme() pdrender.Theme {
 		Accent: accent,
 		Rule:   rule,
 		InlineCode: lipgloss.NewStyle().
-			Foreground(lipgloss.AdaptiveColor{Light: "#be123c", Dark: "#fda4af"}). // lit-allow: code frame fg, no generated twin — au-w4-cli-chrome-tokens
-			Background(lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#27272a"}), // lit-allow: code frame bg, no generated twin — au-w4-cli-chrome-tokens
+			Foreground(pdrender.GenCodeFg). // code-block fg
+			Background(pdrender.GenCodeBg), // code-block bg
 		Link: lipgloss.NewStyle().
 			Foreground(accent).
 			Underline(true),
@@ -136,7 +136,7 @@ func barkparkPaperTheme() pdrender.Theme {
 
 	// Ingress: brighter ink standfirst with a left accent bar; pullquote bar uses
 	// the same accent (the terminal substitutes a bar for the larger font size).
-	t.Ingress = lipgloss.NewStyle().Foreground(lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}) // lit-allow: ingress ink chrome, no generated twin — au-w4-cli-chrome-tokens
+	t.Ingress = lipgloss.NewStyle().Foreground(pdrender.GenInk) // ingress ink → GenInk
 	t.IngressBar = lipgloss.NewStyle().Foreground(accent)
 	t.PullquoteBar = lipgloss.NewStyle().Foreground(accent)
 
