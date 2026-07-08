@@ -7308,6 +7308,77 @@
     init();
   }
 
+  // >>> BEGIN coherence-helpers — MIRRORED VERBATIM into __preview__/coherence.html.
+  //     Drift is a test failure (see __app.test.mjs "coherence helper block is
+  //     byte-identical in app.js and coherence.html"). Depends only on esc(),
+  //     which is in scope in both files. Pure: no DOM, no globals. These back the
+  //     S5 four-surface coherence harness — the human sign-off gate for the
+  //     Unified Aesthetic. >>>
+  var COHERENCE_TOKENS = [
+    "--primary", "--primary-fg", "--accent",
+    "--ok", "--warn", "--danger", "--info",
+    "--bg", "--surface", "--text", "--muted-text", "--border",
+  ];
+
+  // The four lifecycle roles the TUI golden fixtures colorize, mapped to the one
+  // token vocabulary. "ok" is health-green; danger/warn/info round it out.
+  var COHERENCE_ROLES = ["info", "warn", "ok", "danger"];
+
+  // light/dark is a single bit — flip it. Kept a function so the toggle and the
+  // tests share one definition of "the other theme".
+  function coherenceNextTheme(cur) {
+    return cur === "dark" ? "light" : "dark";
+  }
+
+  // Stamp data-theme on every pane root so ONE toggle cascades to all surfaces —
+  // including a same-origin iframe's documentElement. Roots may be null (an
+  // iframe still loading, an absent pane): those are skipped, never thrown on.
+  // Returns the count actually stamped (honest: 0 while nothing is mounted yet).
+  function coherenceStampTheme(theme, roots) {
+    var stamped = 0;
+    (roots || []).forEach(function (root) {
+      if (!root) return;
+      if (typeof root.setAttribute === "function") {
+        root.setAttribute("data-theme", theme);
+        stamped++;
+      } else if (root.dataset) {
+        root.dataset.theme = theme;
+        stamped++;
+      }
+    });
+    return stamped;
+  }
+
+  // Build the token-manifest rows from a live reader (browser: a closure over
+  // getComputedStyle(root).getPropertyValue). Never hand-copies a hex — an
+  // unresolved var surfaces as { empty: true } so a missing token reads as a
+  // gap, not a fabricated color.
+  function coherenceTokenRows(readVar, names) {
+    var list = names || COHERENCE_TOKENS;
+    return list.map(function (name) {
+      var raw = readVar ? readVar(name) : "";
+      var value = String(raw == null ? "" : raw).trim();
+      return { name: name, value: value, empty: value === "" };
+    });
+  }
+
+  // Transform a committed TUI golden fixture (taskboard/pdrender styleguide .txt)
+  // into styled <pre> HTML: escape everything, then paint the emitted lifecycle
+  // role words with .bp-lc-<role> (the shared token classes) and wrap each
+  // #rrggbb cell in a color chip. Deterministic + escaping-safe so the terminal
+  // surface shows on-screen in the same vocabulary as the other three.
+  function coherenceFixtureToHtml(text) {
+    var out = esc(text == null ? "" : text);
+    out = out.replace(/\b(info|warn|ok|danger)\b/g, function (word) {
+      return '<span class="bp-lc-' + word + '">' + word + "</span>";
+    });
+    out = out.replace(/#[0-9a-fA-F]{6}\b/g, function (hex) {
+      return '<span class="bp-lc-hex" style="--hex:' + hex + '">' + hex + "</span>";
+    });
+    return out;
+  }
+  // <<< END coherence-helpers <<<
+
   // Test-only escape hatch (same pattern as the sheet-grid hook): a node:vm
   // harness (__app.test.mjs) sets __bpTestHook to grab the pure helpers. Absent
   // in a real browser, so this is a no-op in production.
@@ -7398,6 +7469,12 @@
       liveDotState: liveDotState, liveFreshness: liveFreshness,
       liveStaleMs: LIVE_STALE_MS,
       ensureLivenessChip: ensureLivenessChip, renderLivenessChip: renderLivenessChip,
+      // S5 four-surface coherence harness (__preview__/coherence.html): the pure
+      // theme-propagation / token-manifest / fixture-transform helpers. The block
+      // is mirrored verbatim into that page; a drift test pins the two copies.
+      coherenceNextTheme: coherenceNextTheme, coherenceStampTheme: coherenceStampTheme,
+      coherenceTokenRows: coherenceTokenRows, coherenceFixtureToHtml: coherenceFixtureToHtml,
+      coherenceTokens: COHERENCE_TOKENS.slice(), coherenceRoles: COHERENCE_ROLES.slice(),
     });
   }
 })();
