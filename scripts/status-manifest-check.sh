@@ -13,6 +13,14 @@
 #     rule for EXACTLY the manifest's roles — no orphan glyph class for a role
 #     that isn't in the manifest, no missing rule for one that is. This is the
 #     tripwire for "a surface added/dropped a glyph by hand."
+#   Part 3 — Go pdrender: internal/pdrender/gridblocks.go inlines the SAME
+#     vocabulary (it may not import the Elixir StatusVocab or internal/semrole,
+#     per the go-list-deps invariant). Its `roleGlyph` map and `roleForStatus`
+#     status→role aliases are byte-checked against the manifest here — the ONE
+#     documented exception is the `progress` role, which the manifest marks
+#     spinner:true (empty/animated glyph) and Go pins to a steady Braille frame
+#     (⠋) a static terminal render can show. That steady value is asserted
+#     explicitly so an ACCIDENTAL change to it still trips the gate.
 #
 # The Elixir emitters need no check here: Render.StatusVocab reads THIS manifest
 # at compile time, so they cannot diverge by construction.
@@ -23,12 +31,13 @@ cd "$(dirname "$0")/.."
 
 MANIFEST="design/status-manifest.json"
 CSS="api/assets/paper-surface/paper-surface.css"
+GO="internal/pdrender/gridblocks.go"
 MODE="${1:-check}"
 
-python3 - "$MANIFEST" "$CSS" "$MODE" <<'PY'
+python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" <<'PY'
 import json, re, sys
 
-manifest_path, css_path, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 m = json.load(open(manifest_path))
 css = open(css_path).read()
 
@@ -90,4 +99,85 @@ if missing or orphan:
     sys.exit(1)
 print(f"status-manifest-check part 2: PASS — {len(roles)} glyph roles in lockstep "
       f"({', '.join(sorted(roles))}).")
+
+# ── Part 3: Go pdrender (internal/pdrender/gridblocks.go) ────────────────────
+# The Go copy can't be generated at compile time (it's a separate binary that
+# must not import the Elixir vocab), so it is inlined and gated here instead.
+go = open(go_path).read()
+
+# The manifest marks `progress` as spinner (empty/animated glyph); a static
+# terminal render can't animate, so Go pins one steady Braille frame. Hard-code
+# the agreed steady value so this legitimate divergence is documented AND an
+# accidental change to the Go glyph still trips the gate.
+STEADY_PROGRESS = "⠋"  # ⠋ — see roleGlyph comment in gridblocks.go
+
+# Expected role→glyph per the manifest, applying the progress exception.
+expected_glyph = {}
+for r in m["roles"]:
+    expected_glyph[r["role"]] = STEADY_PROGRESS if r.get("spinner") else r["glyph"]
+
+# Parse the inlined `var roleGlyph = map[string]string{ ... }` block.
+gm = re.search(r"var roleGlyph = map\[string\]string\{(.*?)\n\}", go, re.DOTALL)
+if not gm:
+    print("status-manifest-check part 3: FAILED — `var roleGlyph = map[string]string{...}` "
+          "not found in gridblocks.go.", file=sys.stderr)
+    sys.exit(1)
+go_glyph = dict(re.findall(r'"([a-z_]+)":\s*"([^"]*)"', gm.group(1)))
+
+fails = []
+for role in sorted(expected_glyph):
+    want, got = expected_glyph[role], go_glyph.get(role)
+    note = " (steady-frame exception for manifest spinner)" if role == "progress" else ""
+    if got is None:
+        fails.append(f"  role {role!r}: MISSING from Go roleGlyph (manifest glyph {want!r}){note}")
+    elif got != want:
+        fails.append(f"  role {role!r}: Go {got!r} != manifest {want!r}{note}")
+    else:
+        print(f"status-manifest-check part 3: PASS — glyph[{role}] = {want!r}{note}")
+orphan_g = set(go_glyph) - set(expected_glyph)
+if orphan_g:
+    fails.append(f"  Go roleGlyph has extra role(s) not in the manifest: {sorted(orphan_g)}")
+
+# Parse `func roleForStatus(status string) string { switch ... }` into status→role.
+fn = re.search(r"func roleForStatus\(status string\) string \{(.*?)\n\}", go, re.DOTALL)
+if not fn:
+    print("status-manifest-check part 3: FAILED — func roleForStatus not found in gridblocks.go.",
+          file=sys.stderr)
+    sys.exit(1)
+body = fn.group(1)
+go_status = {}
+for cm in re.finditer(r'case ((?:"[a-z_]+"(?:,\s*)?)+):\s*\n\s*return "([a-z_]+)"', body):
+    for s in re.findall(r'"([a-z_]+)"', cm.group(1)):
+        go_status[s] = cm.group(2)
+dm = re.search(r'default:\s*\n\s*return "([a-z_]+)"', body)
+go_default = dm.group(1) if dm else None
+
+man_status = m["statuses"]
+man_default = m["default_role"]
+for status in sorted(man_status):
+    want, got = man_status[status], go_status.get(status)
+    if got is None:
+        fails.append(f"  status {status!r}: MISSING from roleForStatus (manifest role {want!r})")
+    elif got != want:
+        fails.append(f"  status {status!r}: Go role {got!r} != manifest {want!r}")
+    else:
+        print(f"status-manifest-check part 3: PASS — roleForStatus[{status}] = {want!r}")
+orphan_s = set(go_status) - set(man_status)
+if orphan_s:
+    fails.append(f"  roleForStatus has extra status alias(es) not in the manifest: {sorted(orphan_s)}")
+if go_default != man_default:
+    fails.append(f"  roleForStatus default {go_default!r} != manifest default_role {man_default!r}")
+else:
+    print(f"status-manifest-check part 3: PASS — roleForStatus default = {man_default!r}")
+
+if fails:
+    print("status-manifest-check part 3: FAILED — Go pdrender vocab is STALE vs "
+          "design/status-manifest.json:", file=sys.stderr)
+    for f in fails:
+        print(f, file=sys.stderr)
+    print("\n  Fix: edit internal/pdrender/gridblocks.go (roleGlyph / roleForStatus) to "
+          "match design/status-manifest.json.", file=sys.stderr)
+    sys.exit(1)
+print(f"status-manifest-check part 3: PASS — Go pdrender vocab in lockstep "
+      f"({len(expected_glyph)} glyphs, {len(man_status)} status aliases).")
 PY
