@@ -1,0 +1,33 @@
+KPI / STAT CELLS                                            
+────────────────                                            
+                                                            
+                                                            
+                                                            
+1.24M                                                       
+Tokens this month                                           
+▁▂▃▃▅▆█                                                     
+                                                            
+▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░░░░░░  73
+Cache hit rate                                              
+                                                            
+ramp                                                        
+Eighth-block ladder (ascending)                             
+▁▂▃▄▅▆▇█                                                    
+                                                            
+1.24M                                                       
+Tokens                                                      
+▁▁▃▂▆▇█                                                     
+                                                            
+8,391                                                       
+Requests                                                    
+▃▁▅▆▆█▆                                                     
+                                                            
+$42.10                                                      
+Cost                                                        
+▁▂▂▄▅▆█                                                     
+                                                            
+73%                                                         
+Cache hit                                                   
+█▁█▁▁▁▁                                                     
+                                                            
+[stat — unresolved]                                         

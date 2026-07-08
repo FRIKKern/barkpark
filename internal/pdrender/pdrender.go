@@ -322,5 +322,13 @@ func DefaultRegistry(theme Theme) *Registry {
 	// primitive (shade ladder by default; lipgloss truecolor only under a
 	// TrueColor profile — see heatmap.go). W1 of the slate; W2/W3 reuse the cell.
 	r.blocks["heatmap"] = heatmapRenderer{}
+	// stat: a single KPI cell (big-number, or a bullet-bar when `max` is set) with
+	// an optional caption + eighth-block sparkline. `stats` (alias `stat-grid`) is
+	// the plural KPI grid — N cells laid out N-up through the shared Flex solver
+	// (no new width math). W2 of the slate; W3's chart reuses the sparkline (see
+	// stat.go). The eighth-block sparkline is the reusable W2/W3 primitive.
+	r.blocks["stat"] = statRenderer{}
+	r.blocks["stats"] = statsRenderer{}
+	r.blocks["stat-grid"] = statsRenderer{}
 	return r
 }
