@@ -386,13 +386,16 @@ defmodule Barkpark.SheetsM1ProofTest do
     # The debounced persist is what the SSE stream's consumers see.
     assert_receive {:document_changed, %{doc_id: @draft_id, type: "sheet"}}, 1_000
 
-    # 7 — the dashboard paper: write-through snapshot shows the final state.
-    #
-    # The paper's embedded-sheet snapshot is refreshed by the write-through that
-    # runs AFTER the sheet's debounced persist — a separate async hop from the
-    # sheet-doc persist waited on above. Reading the paper once here raced that
-    # hop (intermittent `html =~ ">#{@final_sum}</td>"` failures). Poll until the
-    # snapshot has caught up, then assert the full render.
+    # 7 — the dashboard paper. The live ops persisted to the DRAFT sheet, so
+    # the PUBLISHED paper stays frozen — a draft autosave must never publish
+    # draft cell values to anonymous /papers readers (the draft-content
+    # boundary). The final SUM is invisible in the reader…
+    refute read_paper() =~ ">#{@final_sum}</td>"
+
+    # …until the sheet itself is PUBLISHED, which routes the now-published grid
+    # back through the embed write-through and refreshes the paper's snapshot.
+    assert mutate([%{"publish" => %{"id" => @sheet_id, "type" => "sheet"}}]).status == 200
+
     wait_until(fn -> read_paper() =~ ">#{@final_sum}</td>" end, 6_000)
     html = read_paper()
     assert html =~ "Budsjettet oppdateres live."

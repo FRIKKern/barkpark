@@ -13,11 +13,14 @@ defmodule Barkpark.SheetsM0ProofTest do
        ingest hydrated BOTH blocks' snapshots immediately (M0a): the first
        read already shows the cell values, still with no DB join at render
        time (the blocks compose straight from their cached snapshots).
-    4. A second mutate (append a row) fires the write-through: BOTH embed
-       snapshots refresh in the same logical operation, and the re-fetched
-       page shows the appended row.
-    5. A third mutate edits ONE cell; the re-fetched page shows the new
-       value and no trace of the old one.
+    4. A second mutate (append a row) edits the DRAFT sheet — the PUBLISHED
+       paper stays frozen (a draft autosave must never publish draft cell
+       values to anonymous readers). PUBLISHING the sheet fires the
+       write-through: BOTH embed snapshots refresh, and the re-fetched page
+       shows the appended row.
+    5. A third mutate edits ONE cell on the draft (paper still frozen), then
+       publishes; the re-fetched page shows the new value and no trace of the
+       old one.
     6. Structurally malformed sheets (cells as a list, a non-A1 `"1A"` key)
        are rejected at the write gate with a 4xx.
 
@@ -163,8 +166,7 @@ defmodule Barkpark.SheetsM0ProofTest do
     assert html =~ ">Q3-lansering utsatt</td>"
     refute html =~ ">Kobbel</td>"
 
-    # 4 — WRITE-THROUGH: mutate the sheet over the wire (append row 3). The
-    # same logical operation must refresh BOTH embed snapshots in the paper.
+    # 4 — WRITE-THROUGH: mutate the DRAFT sheet over the wire (append row 3).
     resp =
       mutate(conn, [
         %{
@@ -176,6 +178,16 @@ defmodule Barkpark.SheetsM0ProofTest do
         }
       ])
 
+    assert resp.status == 200
+
+    # DRAFT-CONTENT BOUNDARY: a draft-sheet edit must NOT reach the PUBLISHED
+    # paper — the appended row is invisible to anonymous /papers readers until
+    # the sheet itself is published.
+    refute read_paper(conn) =~ ">Kobbel</td>"
+
+    # PUBLISH the sheet: the write-through now refreshes BOTH embed snapshots in
+    # the paper, in the same logical operation.
+    resp = mutate(conn, [%{"publish" => %{"id" => @sheet_id, "type" => "sheet"}}])
     assert resp.status == 200
 
     html = read_paper(conn)
@@ -196,18 +208,29 @@ defmodule Barkpark.SheetsM0ProofTest do
     # The SECOND embed (tab 1) refreshed in the same operation.
     assert html =~ ">Q3-lansering utsatt</td>"
 
-    # 5 — mutate ONE cell (C3: 149 → 179) through the same endpoint.
+    # 5 — mutate ONE cell (C3: 149 → 179) on the DRAFT through the same
+    # endpoint. Step 4's publish consumed the draft, so patch by the canonical
+    # id — the merge base falls back to the published row and a fresh draft is
+    # written. The published paper still shows the last-published value…
     resp =
       mutate(conn, [
         %{
           "patch" => %{
-            "id" => stored_id,
+            "id" => @sheet_id,
             "type" => "sheet",
             "set" => %{"tabs" => tabs(kobbel_row(179))}
           }
         }
       ])
 
+    assert resp.status == 200
+
+    frozen = read_paper(conn)
+    assert frozen =~ ">149</td>"
+    refute frozen =~ ">179</td>"
+
+    # …until the sheet is published again.
+    resp = mutate(conn, [%{"publish" => %{"id" => @sheet_id, "type" => "sheet"}}])
     assert resp.status == 200
 
     # 6 — re-fetch: the new value renders; the old one is gone; neighbours

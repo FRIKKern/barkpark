@@ -14,11 +14,13 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     1. `POST /v1/plugins/sheets/import` — the stored doc carries the
        recomputed values, never the file's lies.
     2. A paper embeds tab 0 — the ingest hydrates the snapshot immediately
-       (M0a); re-uploading the same file fires the embed write-through, and
-       `GET /papers/:slug` renders the computed total, the merged title
-       (colspan) and the styled cells in the HTML grid.
-    3. One qty cell mutates via `/v1/data/mutate`; the dependent product
-       total AND the SUM grand total update in the re-fetched page.
+       (M0a); re-uploading the same file then PUBLISHING the sheet fires the
+       embed write-through, and `GET /papers/:slug` renders the computed
+       total, the merged title (colspan) and the styled cells in the HTML grid.
+    3. One qty cell mutates via `/v1/data/mutate` on the DRAFT; the PUBLISHED
+       paper stays frozen until the sheet is published again — then the
+       dependent product total AND the SUM grand total update in the
+       re-fetched page.
     4. `GET export.xlsx` → re-import under a new slug → cell-level equality
        of values / formulas / fmt / merges / col widths (true round trip).
     5. `export.csv` + `export.md` spot-checks (RFC-4180 quoting, computed
@@ -210,8 +212,11 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     # The hydrated snapshot carries the RECOMPUTED total, not the file's lie.
     assert html =~ ">5463</td>"
 
-    # Re-upload the same file: the idempotent upsert re-saves the sheet and
-    # the write-through refreshes the embed snapshot in the same operation.
+    # Re-upload the same file: the idempotent upsert re-saves the sheet. The
+    # embed snapshot already carries the recomputed grid from the M0a ingest
+    # hydration above, so the published reader still renders the full styled
+    # grid (the write-through's on-publish half is proven at the end of the
+    # story, once the draft has been mutated).
     assert %{"ok" => true, "cells" => 30} =
              import_upload(tmp_dir, "salgsrapport.xlsx", fixture_xlsx(), %{"slug" => @slug})
              |> json_response(200)
@@ -246,21 +251,18 @@ defmodule Barkpark.SheetsM3M5ProofTest do
 
     assert resp.status == 200
 
-    # Stored doc recomputed: the product total AND the grand total moved.
+    # Stored DRAFT recomputed: the product total AND the grand total moved.
     cells = fetch_sheet("drafts." <> @slug)["tabs"] |> hd() |> Map.fetch!("cells")
     assert cells["D4"]["v"] == 1788
     assert cells["D7"]["v"] == 5761.0
 
-    # …and the paper shows the new numbers with no trace of the old ones.
-    html = read_paper()
-    assert html =~ ">12</td>"
-    assert html =~ ">1788</td>"
-    assert html =~ ">5761</td>"
-    refute html =~ ">1490</td>"
-    refute html =~ ">5463</td>"
-    # Untouched neighbours survive the recompute.
-    assert html =~ ">1798</td>"
-    assert html =~ ">177</td>"
+    # DRAFT-CONTENT BOUNDARY: the PUBLISHED paper stays frozen on the last
+    # published grid — the draft edit's new numbers do NOT leak to anonymous
+    # readers (they surface only when the sheet is published, at the end).
+    frozen = read_paper()
+    assert frozen =~ ">5463</td>"
+    refute frozen =~ ">5761</td>"
+    refute frozen =~ ">1788</td>"
 
     # 4 — ROUND TRIP: export.xlsx → re-import under a new slug → equality.
     conn = export(@slug, "xlsx")
@@ -312,6 +314,22 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     assert cells["A1"]["v"] == "Vare"
     assert cells["A2"]["v"] == "Krok, liten"
     assert cells["B2"]["v"] == 7
+
+    # 7 — ON-PUBLISH UN-FREEZE: the sheet's own data (exports, round-trip)
+    # reflected the B4 edit immediately, but the PUBLISHED paper only catches
+    # up when the sheet is published. Publishing routes the now-published grid
+    # back through the write-through, refreshing the embed snapshot.
+    assert mutate([%{"publish" => %{"id" => @slug, "type" => "sheet"}}]).status == 200
+
+    html = read_paper()
+    assert html =~ ">12</td>"
+    assert html =~ ">1788</td>"
+    assert html =~ ">5761</td>"
+    refute html =~ ">1490</td>"
+    refute html =~ ">5463</td>"
+    # Untouched neighbours survive the recompute.
+    assert html =~ ">1798</td>"
+    assert html =~ ">177</td>"
   end
 
   # ── hostile inputs ───────────────────────────────────────────────────────────

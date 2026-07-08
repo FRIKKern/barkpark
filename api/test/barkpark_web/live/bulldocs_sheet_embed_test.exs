@@ -2,10 +2,13 @@ defmodule BarkparkWeb.BulldocsSheetEmbedTest do
   @moduledoc """
   End-to-end View-mode lock for the `"sheet"` embed block: a paper ingested
   with a sheet block hydrates its snapshot at ingest (M0a) and renders the
-  grid values in the Bulldocs reader on the FIRST read, and after the
-  referenced sheet is mutated through Content the write-through refreshed
-  snapshot is what the reader renders — no plugin in the loop, the block
-  composes straight from its cached snapshot (fresh-install invariant).
+  grid values in the Bulldocs reader on the FIRST read. Because the paper is
+  PUBLISHED, a mere DRAFT edit of the referenced sheet must NOT reach the
+  reader (that would leak draft cell values to anonymous /papers visitors —
+  the draft-content boundary); the reader's snapshot moves only when the sheet
+  itself is PUBLISHED, at which point the write-through refreshes it. No plugin
+  in the loop — the block composes straight from its cached snapshot
+  (fresh-install invariant).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -54,14 +57,22 @@ defmodule BarkparkWeb.BulldocsSheetEmbedTest do
     assert html =~ "Metric"
     assert html =~ "first-value"
 
-    # Mutate the sheet: write-through refreshes the paper's snapshot (and its
-    # body_html cache) in the same logical operation.
+    # DRAFT edit of the sheet: the published paper's snapshot must stay put —
+    # a draft autosave cannot publish "second-value" to anonymous readers.
     {:ok, _} =
       Content.upsert_document(
         "sheet",
         %{"doc_id" => sheet.doc_id, "content" => sheet_content("second-value")},
         @dataset
       )
+
+    {:ok, _view, mid} = live(conn, "/papers/#{@slug}")
+    assert mid =~ "first-value", "the published reader must stay frozen on the published value"
+    refute mid =~ "second-value", "a draft sheet edit must not leak into the published reader"
+
+    # PUBLISH the sheet: NOW the write-through refreshes the published paper's
+    # snapshot (and its body_html cache) in the same logical operation.
+    {:ok, _} = Content.publish_document(sheet.doc_id, "sheet", @dataset)
 
     {:ok, _view, refreshed} = live(conn, "/papers/#{@slug}")
     assert refreshed =~ "<table"

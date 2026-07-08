@@ -8,12 +8,14 @@ defmodule Barkpark.SheetsM3ProofTest do
        a deliberate `1/0`).
     2. The mutation response envelope already carries COMPUTED `"v"` values —
        the engine ran inside the same save, before the row persisted.
-    3. A paper ingested via `/v1/plugins/bulldocs/papers` embeds the sheet; a
-       follow-up mutate fires the write-through, and `GET /papers/:slug`
+    3. A paper ingested via `/v1/plugins/bulldocs/papers` embeds the sheet;
+       PUBLISHING the sheet fires the write-through, and `GET /papers/:slug`
        renders the computed results (and the `#DIV/0!`) in the HTML grid —
        zero renderer changes.
-    4. Patching ONE input cell over the wire recomputes the dependents: the
-       re-fetched page shows the new total and no trace of the old one.
+    4. Patching ONE input cell on the DRAFT over the wire recomputes the
+       dependents, but the PUBLISHED paper stays frozen until the sheet is
+       published again — then the re-fetched page shows the new total and no
+       trace of the old one.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -113,7 +115,7 @@ defmodule Barkpark.SheetsM3ProofTest do
     assert cells["B8"]["t"] == "e"
 
     # 3 — EMBED + WRITE-THROUGH: ingest a paper referencing the sheet, then
-    # mutate the sheet again so the snapshot refreshes with computed values.
+    # PUBLISH the sheet so the snapshot refreshes with computed values.
     resp =
       ingest_paper(conn, %{
         "slug" => @slug,
@@ -130,17 +132,7 @@ defmodule Barkpark.SheetsM3ProofTest do
     assert resp.status == 200
     assert Jason.decode!(resp.resp_body)["ok"] == true
 
-    resp =
-      mutate(conn, [
-        %{
-          "patch" => %{
-            "id" => stored_id,
-            "type" => "sheet",
-            "set" => %{"tabs" => tabs(5)}
-          }
-        }
-      ])
-
+    resp = mutate(conn, [%{"publish" => %{"id" => @sheet_id, "type" => "sheet"}}])
     assert resp.status == 200
 
     html = read_paper(conn)
@@ -153,19 +145,31 @@ defmodule Barkpark.SheetsM3ProofTest do
     # The raw formula text never leaks into the rendered grid.
     refute html =~ "SUM(B2:B4)"
 
-    # 4 — patch ONE input (B4: 5 → 15) over the wire; dependents recompute
-    # and the refreshed snapshot shows the new total only.
+    # 4 — patch ONE input (B4: 5 → 15) on the DRAFT over the wire; dependents
+    # recompute in the draft, but the PUBLISHED paper stays frozen on the last
+    # published total. Step 3's publish consumed the draft, so patch by the
+    # canonical id — the merge base falls back to the published row and a fresh
+    # draft is written…
     resp =
       mutate(conn, [
         %{
           "patch" => %{
-            "id" => stored_id,
+            "id" => @sheet_id,
             "type" => "sheet",
             "set" => %{"tabs" => tabs(15)}
           }
         }
       ])
 
+    assert resp.status == 200
+
+    frozen = read_paper(conn)
+    assert frozen =~ ">10</td>"
+    refute frozen =~ ">20</td>"
+
+    # …until the sheet is published again — then the refreshed snapshot shows
+    # the new total only.
+    resp = mutate(conn, [%{"publish" => %{"id" => @sheet_id, "type" => "sheet"}}])
     assert resp.status == 200
 
     html = read_paper(conn)
