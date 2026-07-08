@@ -957,7 +957,13 @@ export function renderBlock(block: Block, key: Key): ReactNode {
                   →
                 </span>
               ) : null}
-              <div className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800">
+              <div
+                className={`rounded-md border px-3 py-2 text-sm ${
+                  n.source_role === "origin"
+                    ? "border-sky-400 dark:border-sky-500"
+                    : "border-zinc-200 dark:border-zinc-800"
+                }`}
+              >
                 {n.kind ? (
                   <p className="text-xs uppercase tracking-widest text-zinc-400">
                     {n.kind}
@@ -973,6 +979,11 @@ export function renderBlock(block: Block, key: Key): ReactNode {
                     {n.detail}
                   </p>
                 ) : null}
+                {n.source_role === "provenance" ? (
+                  <p className="mt-2 font-mono text-[0.7rem] text-sky-500 dark:text-sky-400">
+                    {n.source_text}
+                  </p>
+                ) : null}
               </div>
             </div>
           ))}
@@ -984,7 +995,11 @@ export function renderBlock(block: Block, key: Key): ReactNode {
       return (
         <div
           key={key}
-          className="rounded-md border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+          className={`rounded-md border px-3 py-2 text-sm ${
+            s.source_role === "origin"
+              ? "border-sky-400 dark:border-sky-500"
+              : "border-zinc-200 dark:border-zinc-800"
+          }`}
         >
           {s.kind ? (
             <p className="text-xs uppercase tracking-widest text-zinc-400">
@@ -999,6 +1014,11 @@ export function renderBlock(block: Block, key: Key): ReactNode {
           {s.detail ? (
             <p className="text-xs text-zinc-500 dark:text-zinc-400">
               {s.detail}
+            </p>
+          ) : null}
+          {s.source_role === "provenance" ? (
+            <p className="mt-2 font-mono text-[0.7rem] text-sky-500 dark:text-sky-400">
+              {s.source_text}
             </p>
           ) : null}
         </div>

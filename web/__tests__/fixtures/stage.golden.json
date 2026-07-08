@@ -4,11 +4,14 @@
     "container_role": "stage",
     "detail": "checks the criteria",
     "kind": "gate",
+    "source_role": "origin",
+    "source_text": "",
     "title": "Review"
   },
   "input": {
     "detail": "checks the criteria",
     "kind": "gate",
+    "source": true,
     "title": "Review",
     "type": "stage"
   },

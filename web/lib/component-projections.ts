@@ -152,15 +152,27 @@ export interface CardProjection {
   tone: "info" | "ok" | "warn" | "danger" | "";
   media_fastpath: boolean;
 }
+/** A pnode's `source` coercion RESULT (RATIFIED): boolean `true` → "origin"
+ * (an accent signal); a non-empty string → "provenance" (the text is source_text);
+ * `false`/absent/"" → null. accent and provenance are MUTUALLY EXCLUSIVE. */
+export type SourceRole = "origin" | "provenance" | null;
 export interface PipelineProjection {
   container_role: "pipeline";
-  nodes: Array<{ kind: string; title: string; detail: string }>;
+  nodes: Array<{
+    kind: string;
+    title: string;
+    detail: string;
+    source_role: SourceRole;
+    source_text: string;
+  }>;
 }
 export interface StageProjection {
   container_role: "stage";
   kind: string;
   title: string;
   detail: string;
+  source_role: SourceRole;
+  source_text: string;
 }
 export interface TimelineEntry {
   role: string;
@@ -271,15 +283,30 @@ export function cardProjection(block: Block): CardProjection {
   };
 }
 
+/** A pnode's `source` coercion RESULT — the RAW value is type-branched (NOT
+ * stringified): boolean `true` → origin; a non-empty string → provenance carrying
+ * the text; `false`/absent/"" → null. Mirrors `Components.pnode_source/1` and the
+ * Go `stageRenderer` type-switch. */
+function pnodeSource(v: unknown): { role: SourceRole; text: string } {
+  if (v === true) return { role: "origin", text: "" };
+  if (typeof v === "string" && v !== "") return { role: "provenance", text: v };
+  return { role: null, text: "" };
+}
+
 export function pipelineProjection(block: Block): PipelineProjection {
   const nodes = Array.isArray(block.nodes) ? (block.nodes as Block[]) : [];
   return {
     container_role: "pipeline",
-    nodes: nodes.map((n) => ({
-      kind: str(n.kind),
-      title: str(n.title),
-      detail: str(n.detail),
-    })),
+    nodes: nodes.map((n) => {
+      const src = pnodeSource(n.source);
+      return {
+        kind: str(n.kind),
+        title: str(n.title),
+        detail: str(n.detail),
+        source_role: src.role,
+        source_text: src.text,
+      };
+    }),
   };
 }
 
@@ -292,11 +319,14 @@ function stageField(block: Block, name: string): string {
 }
 
 export function stageProjection(block: Block): StageProjection {
+  const src = pnodeSource(block.source);
   return {
     container_role: "stage",
     kind: stageField(block, "kind"),
     title: stageField(block, "title"),
     detail: stageField(block, "detail"),
+    source_role: src.role,
+    source_text: src.text,
   };
 }
 

@@ -69,9 +69,21 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   NOT COVERED (known divergences — FILED, not fixed; this harness must never imply
   parity it does not hold):
 
-    * pipeline `source` accent (Elixir-class vs Go-provenance-line) and card/roadmap
-      surface-local COLOUR (tone border, lane bar) stay expressed as style, not the
-      shared projection text — asserted by the coloured legs (Elixir/web), not the TUI.
+    * card/roadmap/pipeline surface-local COLOUR (tone border, lane bar, source
+      accent) stays expressed as style, not the shared projection text — asserted
+      by the coloured legs (Elixir/web), not the TUI.
+
+  COVERED since **au-w5-pipeline-source-parity** (GRADUATED): a pipeline/stage node's
+  `source` is projected as its coercion RESULT — `source_role` ("origin" |
+  "provenance" | null) + `source_text`. The RATIFIED model: boolean `true` → an
+  ORIGIN signal, a non-empty string → a provenance LINE rendering the text,
+  false/absent → nothing (false is the SAME as absent → null). Each surface realizes
+  the role in its NATIVE idiom (accent border on Elixir + web, ◆ ORIGIN eyebrow on
+  the Go TUI, provenance line everywhere) — a semantic-parity graduation like
+  tone/glyph, no pixel identity required. The pipeline fixture exercises all three
+  branches (true · "queue.ex:42" · absent); the stage fixture covers origin. Only the
+  surface-local COLOUR of the accent stays a documented non-structural carve-out. A
+  source-render tamper reds the tampered surface's realization leg (non-vacuous).
 
   ## Mirrors (byte-identical — the same JSON string is written to all three)
 
@@ -201,24 +213,34 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   # tests). Not a manifest token — the slot vocabulary is structural, not glyph.
   @card_slot_order ["media", "title", "body", "action"]
 
-  # pipeline: a horizontal flow of labelled nodes. kind/title/detail are the
-  # SHARED per-node fields (the `source` accent is Elixir-class vs Go-provenance-
-  # line — NOT projected).
+  # pipeline: a horizontal flow of labelled nodes. kind/title/detail are the SHARED
+  # per-node text fields; `source` is now COVERED via its coercion RESULT
+  # (source_role/source_text — au-w5-pipeline-source-parity). The three nodes
+  # exercise ALL THREE coercion branches: node 1 `source: true` → origin (accent),
+  # node 2 `source: "queue.ex:42"` → provenance (line), node 3 absent → null.
   @pipeline_input %{
     "type" => "pipeline",
     "nodes" => [
       %{"kind" => "source", "title" => "Ingest", "detail" => "reads the queue", "source" => true},
-      %{"kind" => "emit", "title" => "Transform", "detail" => "maps the rows"},
+      %{
+        "kind" => "emit",
+        "title" => "Transform",
+        "detail" => "maps the rows",
+        "source" => "queue.ex:42"
+      },
       %{"kind" => "gate", "title" => "Publish", "detail" => "writes the board"}
     ]
   }
 
-  # stage: ONE pipeline node (the singular widget). kind/title/detail flat scalars.
+  # stage: ONE pipeline node (the singular widget). kind/title/detail flat scalars;
+  # `source: true` exercises the ORIGIN coercion branch (the accent), COVERED by the
+  # projected source_role. (The pipeline fixture above covers provenance + absent.)
   @stage_input %{
     "type" => "stage",
     "kind" => "gate",
     "title" => "Review",
-    "detail" => "checks the criteria"
+    "detail" => "checks the criteria",
+    "source" => true
   }
 
   # task-detail: the "open a task and SEE it" card. The projected sections are the
@@ -550,15 +572,23 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
     end
   end
 
-  # pipeline: per-node kind · title · detail (the SHARED text fields every surface
-  # draws; the `source` accent is surface-divergent, not projected).
+  # pipeline: per-node kind · title · detail + the `source` coercion RESULT
+  # (source_role/source_text — COVERED since au-w5-pipeline-source-parity). The
+  # projection carries the SEMANTIC result, not the raw field: boolean `true` →
+  # "origin", a non-empty string → "provenance" (+ source_text), false/absent → null.
+  # Each surface realizes the role in its native idiom (accent border on Elixir/web,
+  # ◆ ORIGIN eyebrow on the Go TUI) — no pixel identity, like tone/glyph parity.
   defp pipeline_projection(%{"nodes" => nodes}) when is_list(nodes) do
     ns =
       Enum.map(nodes, fn n ->
+        {role, text} = source_coercion(Map.get(n, "source"))
+
         %{
           "kind" => n |> Map.get("kind") |> to_string(),
           "title" => n |> Map.get("title") |> to_string(),
-          "detail" => n |> Map.get("detail") |> to_string()
+          "detail" => n |> Map.get("detail") |> to_string(),
+          "source_role" => role,
+          "source_text" => text
         }
       end)
 
@@ -566,15 +596,28 @@ defmodule Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity do
   end
 
   # stage: ONE pnode's kind · title · detail, read through the same slot accessor
-  # `stage_html/1` uses (scalar-only stage → the plain scalar).
+  # `stage_html/1` uses (scalar-only stage → the plain scalar), plus the `source`
+  # coercion RESULT (source_role/source_text).
   defp stage_projection(block) do
+    {role, text} = source_coercion(Map.get(block, "source"))
+
     %{
       "container_role" => "stage",
       "kind" => Slots.stage_field_text(block, "kind"),
       "title" => Slots.stage_field_text(block, "title"),
-      "detail" => Slots.stage_field_text(block, "detail")
+      "detail" => Slots.stage_field_text(block, "detail"),
+      "source_role" => role,
+      "source_text" => text
     }
   end
+
+  # The RATIFIED `source` coercion, projected as the SEMANTIC result (mirrors
+  # `Components.pnode_source/1`, the Go type-switch, and the web `pnodeSource`):
+  # boolean `true` → {"origin", ""}; non-empty string → {"provenance", text};
+  # `false`/absent/"" → {nil, ""} (nil ⇒ JSON null — false is SAME as absent).
+  defp source_coercion(true), do: {"origin", ""}
+  defp source_coercion(s) when is_binary(s) and s != "", do: {"provenance", s}
+  defp source_coercion(_), do: {nil, ""}
 
   # task-detail: title + the ORDERED present-section spine (the SHARED ⊆ every
   # surface renders) + the ordered timeline entries + the criteria rollup. Section
