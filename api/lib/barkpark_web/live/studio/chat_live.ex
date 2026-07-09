@@ -3253,7 +3253,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # topic so all tabs converge. A publish failure is honest, not silent, and never
   # re-raises — the approve already succeeded.
   defp publish_plan_paper(session_id, request_id, markdown, topic) do
-    case PlanPapers.publish(session_id, request_id, markdown) do
+    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
+    # invariant) must degrade to the SAME honest failure broadcast as an
+    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
+    # promised "couldn't publish" line would never appear. Scoped to the publish
+    # call only: a raise AFTER a successful publish must not lie "couldn't
+    # publish" about a Paper that exists.
+    result =
+      try do
+        PlanPapers.publish(session_id, request_id, markdown)
+      rescue
+        e -> {:error, e}
+      catch
+        kind, reason -> {:error, {kind, reason}}
+      end
+
+    case result do
       {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
         StudioChat.merge_approval_metadata(session_id, request_id, %{
           "paper_id" => paper_id,
