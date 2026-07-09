@@ -1,0 +1,236 @@
+defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
+  @moduledoc """
+  Complexity-contract guard for `Barkpark.Plugins.Sheets.Engine`.
+
+  The engine's documented contract (engine.ex §Complexity) is ONE topological
+  pass (Kahn) over the formula-dependency graph — **O(cells + edges)**, no
+  per-cell rescans. That contract has no executable guard: a regression to an
+  O(n²) rescan (e.g. re-walking the whole cell set per formula, or expanding a
+  range rectangle instead of intersecting the occupied set) would still return
+  correct values, so every value-oriented test in `engine_test.exs` stays
+  green. Only the wall clock notices.
+
+  This file is that clock. It builds a sheet document near the `@cell_cap`
+  (50_000, `plugins/sheets.ex`) — tens of thousands of non-empty cells with
+  thousands of formula cells (a long arithmetic dependency CHAIN, per-row SUM
+  ranges over the occupied region, and cross-tab references that force the
+  unified `{tab, col, row}` graph, which is the heavier of the two recompute
+  paths) — and asserts `Engine.recompute/1` finishes inside a generous
+  `:timer.tc` bound. A quadratic rescan on ~48k cells blows past the bound by
+  orders of magnitude; a linear pass clears it with room to spare.
+
+  Pure `Engine`, no Repo/DB — same shape as `engine_test.exs`.
+
+  ## The bound, and why it will not flake
+
+  Measured local baseline (Apple Silicon M-series, Erlang/OTP 28,
+  `MIX_ENV=test`) for the ~47k-cell UNIFIED recompute built below: **~0.8–1.3 s
+  wall** across repeated runs (parse + evaluate dominate; ~47k cells at tens of
+  µs each). That is higher than a naive "toposort is instant" guess — the cost
+  is a real constant factor, but it is *linear*: tripling the row count grows
+  the time ~3.9× (verified in the linearity test below and in local sweeps),
+  nowhere near the ~9× a quadratic rescan would show.
+
+  The guard bound is **10_000 ms** — roughly **8× the worst observed run
+  (~1.3 s) and ~10× the typical run (~1.0 s)**, the headroom the slice brief
+  calls for. CI runners are slower and noisier than a dev laptop, but not 8×
+  on a pure-CPU toposort, so a healthy engine clears 10 s with wide margin
+  while a genuine O(n²) regression — which on 47k cells with a 3.6k-deep
+  dependency chain would need tens of seconds to minutes — fails hard. The
+  bound guards the *shape* of the algorithm, not a micro-benchmark number.
+  The main test performs exactly ONE near-cap recompute and the linearity
+  test uses small grids, so the file's own wall time stays a few seconds,
+  well under the 10 s file budget even on a 2–3× slower runner.
+
+  This test is intentionally UN-tagged: it runs in the default suite. An
+  excluded guard is a vacuous guard.
+  """
+  use ExUnit.Case, async: true
+
+  alias Barkpark.Plugins.Sheets.Core
+  alias Barkpark.Plugins.Sheets.Engine
+
+  # Generous wall-clock ceiling. See @moduledoc — ~8× the worst / ~10× the
+  # typical measured local baseline (~0.8–1.3 s). A linear recompute clears
+  # this with room to spare; an O(n²) rescan on ~47k cells cannot.
+  @bound_ms 10_000
+
+  # Grid geometry for the near-cap sheet. 10 value columns + 3 formula columns
+  # per row → 13 cells/row; 3_600 rows ≈ 46_800 cells on the Data tab, plus the
+  # Summary tab's cross-tab formulas, staying just under @cell_cap (50_000).
+  @value_cols 10
+  @rows 3_600
+  @cross_tab_refs 200
+
+  # Linearity probe geometry (small grids on the fast path — kept far below the
+  # cap so this second test adds only a fraction of a second).
+  @lin_small_rows 700
+  @lin_factor 3
+
+  describe "recompute/1 complexity floor (near @cell_cap)" do
+    test "a near-cap unified recompute finishes inside the generous bound" do
+      content = near_cap_content(@rows)
+
+      {cells, formula_cells} = cell_census(content)
+      # Guard the guard: if this ever drifts far from the cap the bound would
+      # stop meaning "near-cap", so pin the shape we actually measured.
+      assert cells >= 45_000,
+             "expected a near-cap sheet (>=45k cells) but built #{cells}"
+
+      assert cells < 50_000,
+             "must stay under @cell_cap (50_000) but built #{cells}"
+
+      assert formula_cells >= 10_000,
+             "expected thousands of formula cells but built #{formula_cells}"
+
+      {micros, out} = :timer.tc(fn -> Engine.recompute(content) end)
+      ms = micros / 1_000
+
+      # Prove the recompute actually did the work — a no-op that returned the
+      # input untouched would clear any time bound (distrust vacuous green).
+      assert computed?(out), "recompute did not write back computed values"
+
+      assert ms < @bound_ms,
+             """
+             near-cap recompute took #{Float.round(ms, 1)}ms for #{cells} cells \
+             (#{formula_cells} formulas), over the #{@bound_ms}ms complexity \
+             floor. This is the O(cells+edges) → O(n^2) tripwire: a linear \
+             pass clears this bound ~10x over. Investigate the toposort / range \
+             evaluation before raising the bound.
+             """
+    end
+
+    # Optional linearity sanity: growing the row count @lin_factor× must NOT
+    # super-linearly blow up the time. Both grids use the per-tab fast path (no
+    # cross-tab refs) so they share one code path, and both stay far below the
+    # cap so this probe is cheap. The ceiling is deliberately loose — it flags a
+    # quadratic CLIFF, not constant-factor or GC noise. We warm each grid once
+    # (drop first-run JIT/alloc noise) and floor the small time to avoid
+    # divide-by-noise at millisecond scale.
+    test "recompute scales roughly linearly, not quadratically, with cell count" do
+      small = fast_path_content(@lin_small_rows)
+      big = fast_path_content(@lin_small_rows * @lin_factor)
+
+      # Best-of-N (min wall time) rejects GC/scheduler spikes — the standard
+      # microbenchmark denoiser. A quadratic regression shows in every run, so
+      # taking the minimum cannot hide it; it only removes upward noise that
+      # would otherwise flake the ratio.
+      small_ms = max(best_ms(fn -> Engine.recompute(small) end, 3), 1.0)
+      big_ms = best_ms(fn -> Engine.recompute(big) end, 3)
+
+      ratio = big_ms / small_ms
+      # big has @lin_factor× (3×) the rows of small. Linear ≈ 3×; quadratic
+      # ≈ 9×. A 6× ceiling sits cleanly between the ~3.9× observed locally and
+      # the 9× a quadratic rescan would show.
+      assert ratio < 6.0,
+             """
+             recompute time grew #{Float.round(ratio, 1)}x when rows grew \
+             #{@lin_factor}x (small #{Float.round(small_ms, 1)}ms -> \
+             big #{Float.round(big_ms, 1)}ms). Super-linear growth toward \
+             #{@lin_factor * @lin_factor}x points at an O(n^2) rescan.
+             """
+    end
+  end
+
+  # ── content builders ────────────────────────────────────────────────────────
+
+  # A near-cap, two-tab document that exercises the UNIFIED cross-tab recompute
+  # path (the heavier one): the Summary tab references Data, so the whole doc
+  # recomputes as one {tab, col, row} graph.
+  defp near_cap_content(rows) do
+    %{"tabs" => [data_tab("Data", rows), summary_tab("Summary")]}
+  end
+
+  # A single-tab document with NO cross-tab refs → the per-tab fast path.
+  defp fast_path_content(rows) do
+    %{"tabs" => [data_tab("Data", rows)]}
+  end
+
+  # One "Data" tab:
+  #   * value columns A..J (1..@value_cols): plain numbers over the occupied
+  #     region that the SUM ranges cover.
+  #   * column K: a long arithmetic dependency CHAIN (K_r = K_{r-1} + A_r). A
+  #     naive per-formula rescan degrades hardest on a deep chain.
+  #   * column L: per-row SUM over the row's value block (range dependency that
+  #     must intersect the occupied set, not expand the rectangle).
+  #   * column M: L_r * 2 + K_r — mixes a range result with the chain.
+  defp data_tab(name, rows) do
+    value_cols = 1..@value_cols
+
+    values =
+      for row <- 1..rows, col <- value_cols, into: %{} do
+        {a1(col, row), %{"v" => rem(row * 7 + col, 97) + 1}}
+      end
+
+    chain_col = @value_cols + 1
+    sum_col = @value_cols + 2
+    combo_col = @value_cols + 3
+
+    cells =
+      Enum.reduce(1..rows, values, fn row, acc ->
+        chain_col_ref = a1(chain_col, row)
+        sum_col_ref = a1(sum_col, row)
+        combo_col_ref = a1(combo_col, row)
+
+        acc
+        |> Map.put(chain_col_ref, chain_formula(chain_col, row))
+        |> Map.put(sum_col_ref, %{"f" => "SUM(#{a1(1, row)}:#{a1(@value_cols, row)})"})
+        |> Map.put(combo_col_ref, %{"f" => "#{sum_col_ref}*2+#{chain_col_ref}"})
+      end)
+
+    %{"name" => name, "cells" => cells}
+  end
+
+  # K1 seeds the chain from A1; K_r extends it. Long chain ⇒ deep dependency
+  # path, the pathological case for an O(n^2) rescan.
+  defp chain_formula(_chain_col, 1), do: %{"f" => "#{a1(1, 1)}+1"}
+
+  defp chain_formula(chain_col, row),
+    do: %{"f" => "#{a1(chain_col, row - 1)}+#{a1(1, row)}"}
+
+  # Summary tab: @cross_tab_refs direct cross-tab cell refs plus one heavy
+  # cross-tab aggregate. ANY cross-tab ref forces the unified graph for the
+  # whole document.
+  defp summary_tab(name) do
+    refs =
+      for i <- 1..@cross_tab_refs, into: %{} do
+        {a1(1, i), %{"f" => "Data!#{a1(@value_cols + 3, i)}"}}
+      end
+
+    cells =
+      Map.put(refs, a1(2, 1), %{"f" => "SUM(Data!#{a1(@value_cols + 2, 1)}:#{a1(@value_cols + 2, @rows)})"})
+
+    %{"name" => name, "cells" => cells}
+  end
+
+  # ── measurement + assertions helpers ────────────────────────────────────────
+
+  # Minimum wall time over `n` runs, in ms — best-of-N microbenchmark denoiser.
+  defp best_ms(fun, n) do
+    1..n
+    |> Enum.map(fn _ ->
+      {micros, _} = :timer.tc(fun)
+      micros / 1_000
+    end)
+    |> Enum.min()
+  end
+
+  defp a1(col, row), do: Core.format_ref({col, row})
+
+  defp cell_census(%{"tabs" => tabs}) do
+    Enum.reduce(tabs, {0, 0}, fn %{"cells" => cells}, {total, formulas} ->
+      f = Enum.count(cells, fn {_k, c} -> is_map(c) and is_binary(c["f"]) end)
+      {total + map_size(cells), formulas + f}
+    end)
+  end
+
+  # At least one formula cell has a written-back numeric "v" (a "t" of "n") —
+  # proof the engine actually computed rather than passing content through.
+  defp computed?(%{"tabs" => tabs}) do
+    Enum.any?(tabs, fn %{"cells" => cells} ->
+      Enum.any?(cells, fn {_k, c} ->
+        is_map(c) and is_binary(c["f"]) and Map.has_key?(c, "v") and c["t"] == "n"
+      end)
+    end)
+  end
+end
