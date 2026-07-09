@@ -56,11 +56,11 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         phx-click="scope-menu-toggle"
         aria-haspopup="menu"
         aria-expanded={if @menu, do: "true", else: "false"}
-        title="Switch workspace / project / dataset"
+        title={scope_hint(@current_workspace, @current_project, @current_dataset)}
       >
         <span class="scope-title-ws"><%= name_of(@current_workspace) %></span>
         <span class="scope-title-trail">
-          <%= name_of(@current_project) %> / <%= @current_dataset || "—" %>
+          <%= name_of(@current_project) %> · <%= @current_dataset || "—" %>
         </span>
         <span class="scope-title-caret" aria-hidden="true"><.icon name="chevron-down" size={13} /></span>
       </button>
@@ -181,6 +181,14 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
 
   defp name_of(%{name: name}) when is_binary(name), do: name
   defp name_of(_), do: "—"
+
+  # The chip's native tooltip spells out the full scope in words — so the
+  # visible trail can stay compact (workspace prominent, project · dataset
+  # muted) while hover/focus still surfaces exactly where the operator is and
+  # what the button switches (sup-w1 compact scope chip).
+  defp scope_hint(ws, proj, dataset) do
+    "Switch scope — #{name_of(ws)} · #{name_of(proj)} · #{dataset || "—"}"
+  end
 
   defp same?(%{id: a}, %{id: b}), do: a == b
   defp same?(_, _), do: false

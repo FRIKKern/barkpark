@@ -259,6 +259,49 @@ defmodule BarkparkWeb.StudioChromeTest do
     end
   end
 
+  describe "icons-only top bar (sup-w1)" do
+    test "each host tab renders an SVG glyph named by aria-label, with no visible text node",
+         %{member_conn: conn, ws_a: ws_a, proj_a: proj_a} do
+      {:ok, _view, html} = live(conn, media_url(ws_a, proj_a))
+
+      # The label is the accessible name AND the native tooltip — never a
+      # visible text child of the tab.
+      for label <- ["Structure", "Media", "API"] do
+        assert html =~ ~s{title="#{label}" aria-label="#{label}"}
+      end
+
+      # The tab's visible content is the inline SVG glyph, wrapped in the
+      # aria-hidden icon span (the label lives only in the a11y attributes).
+      assert html =~
+               ~s{aria-label="Structure" data-test-id="top-menu-tab"><span class="studio-tab-icon" aria-hidden="true"><svg}
+
+      # The pre-icon markup rendered the label as a bare text node
+      # (…top-menu-tab">Structure</a>). Prove that text node is GONE.
+      refute html =~ ~s{data-test-id="top-menu-tab">Structure</a>}
+      refute html =~ ~s{data-test-id="top-menu-tab">Media</a>}
+      refute html =~ ~s{data-test-id="top-menu-tab">API</a>}
+
+      # Every rendered tab carries a glyph: at least one <svg per host tab.
+      assert length(Regex.scan(~r/class="studio-tab-icon"/, html)) >= 3
+    end
+
+    test "the compact scope chip still fires scope-menu-toggle", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {:ok, view, html} = live(conn, media_url(ws_a, proj_a))
+
+      # The trigger is the compact chip button (unchanged event contract).
+      assert html =~ ~s{class="scope-title bar-focusable"}
+      assert html =~ ~s{phx-click="scope-menu-toggle"}
+
+      # Clicking it still opens the Miller-columns popover.
+      html = render_click(view, "scope-menu-toggle", %{})
+      assert html =~ ~s{aria-label="Switch workspace, project and dataset"}
+    end
+  end
+
   describe "current_path is derived by the shared hook, not hand-set per LiveView" do
     # The disease this hook cures: only 4 of ~13 Studio LiveViews used to
     # hand-set current_path, so ApiTester/Settings/Styleguide/OrgAdmin/

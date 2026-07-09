@@ -346,12 +346,19 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     <div class="studio-bar-tabs">
       <%= for tab <- @tabs do %>
         <% active = plugin_tab_active?(tab, @current_path) %>
+        <%!-- Icons-only top bar (sup-w1): the glyph carries the meaning, the
+              label rides the native tooltip (title) and the accessible name
+              (aria-label). A tab with a nil/unknown icon degrades to the
+              generic "file" glyph — its label tooltip keeps it legible
+              (charter D2). --%>
         <a
           href={tab.path}
           class={"studio-tab #{if active, do: "active"}"}
           aria-current={if active, do: "page"}
+          title={tab.label}
+          aria-label={tab.label}
           data-test-id="top-menu-tab"
-        ><%= tab.label %></a>
+        ><span class="studio-tab-icon" aria-hidden="true"><.icon name={tab[:icon] || "file"} size={16} /></span></a>
       <% end %>
     </div>
     """
@@ -421,21 +428,23 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       %{
         label: "Structure",
         path: base,
-        icon: nil,
+        # folder-tree glyph ships with sup-w1-icon-authority; until it merges
+        # the icon component falls back to the generic "file" glyph (graceful).
+        icon: "folder-tree",
         order: 10,
         active_when: structure_active
       },
       %{
         label: "Media",
         path: media_path,
-        icon: nil,
+        icon: "image",
         order: 20,
         active_when: media_path
       },
       %{
         label: "API",
         path: api_path,
-        icon: nil,
+        icon: "zap",
         order: 30,
         active_when: api_path
       }
@@ -456,7 +465,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       %{
         label: "Style",
         path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/styleguide", return_path),
-        icon: nil,
+        icon: "palette",
         order: 50,
         active_when: "/studio/styleguide"
       }
@@ -491,7 +500,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         prefix -> "#{prefix}/studio/settings"
       end
 
-    [%{label: "Settings", path: path, icon: nil, order: 60, active_when: path}]
+    [%{label: "Settings", path: path, icon: "settings", order: 60, active_when: path}]
   end
 
   defp settings_entry(_base, _scope_prefix, _), do: []
@@ -502,7 +511,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         %{
           label: "chat",
           path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/chat", return_path),
-          icon: nil,
+          # messages-square glyph ships with sup-w1-icon-authority; falls back
+          # to "file" until it merges.
+          icon: "messages-square",
           order: 45,
           active_when: "/studio/chat"
         }
@@ -520,7 +531,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         %{
           label: "tmux",
           path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/tmux", return_path),
-          icon: nil,
+          icon: "terminal",
           order: 40,
           active_when: "/studio/tmux"
         }
