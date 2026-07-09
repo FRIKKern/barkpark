@@ -132,6 +132,42 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   defp session_pid(view), do: lv_assigns(view)[:session]
   defp store_id(view), do: lv_assigns(view)[:store_session_id]
 
+  # A successful result frame whose context occupancy is `input` tokens against a
+  # 200k window — drives the header ring to `input / 200000`.
+  defp big_result(input) do
+    %{
+      "type" => "result",
+      "subtype" => "success",
+      "total_cost_usd" => 0.01,
+      "usage" => %{
+        "input_tokens" => input,
+        "output_tokens" => 0,
+        "cache_read_input_tokens" => 0,
+        "cache_creation_input_tokens" => 0
+      },
+      "modelUsage" => %{"claude-opus-4" => %{"contextWindow" => 200_000}}
+    }
+  end
+
+  # Establish a LIVE session whose subprocess does NOT loop our control frames
+  # back. Plain `cat` echoes every control_request, and our own dispatch answers
+  # each with an error control_response that `cat` echoes AGAIN — minting a
+  # spurious EMPTY set_mode ack that races the ack under test (with the real
+  # binary there is no such loopback). `cat >/dev/null` keeps stdin open (port
+  # alive) and stays silent, so the only acks the LV sees are the ones the test
+  # injects — exactly the shape the Session forwards from the real CLI.
+  defp spawn_silent_session(view) do
+    Application.put_env(:barkpark, :claude_chat,
+      enabled: true,
+      command: {"sh", ["-c", "cat >/dev/null"]}
+    )
+
+    render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+    send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+    refute session_pid(view) == nil
+    :ok
+  end
+
   defp seed_session(title, opts \\ []) do
     id = Ecto.UUID.generate()
     {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
@@ -814,51 +850,152 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
     end
 
-    # ── control acks: the UI never lies about a mode switch (scc-w2, D17) ──
+    # ── control acks: the UI never lies about a mode switch (scc-w2/w3, D17/D23) ──
+    #
+    # The ack is now correlated by request_id — the LV records the minted id in
+    # `:pending_mode`, so a test reads it from assigns to forge a matching ack.
+
+    defp pending_mode_req(view), do: lv_assigns(view)[:pending_mode][:req]
 
     test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      spawn_silent_session(view)
 
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      rid = pending_mode_req(view)
       # the CLI echoes back exactly the mode we asked for → confirmed
-      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "default"}})
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "default"}})
 
       html = render(view)
       assert html =~ "ask to act"
       refute html =~ "Couldn't switch permission mode"
+      # confirmed = persisted: the store's mode is the ACKED value (D23), and the
+      # pending marker is cleared.
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert StudioChat.get_session(store_id(view)).mode == "default"
     end
 
     test "an empty mode echo reverts the optimistic selector + posts an honest line",
          %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      spawn_silent_session(view)
 
       # optimistic switch to acceptEdits…
       html =
         render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
 
       assert html =~ "auto-accept edits"
+      rid = pending_mode_req(view)
 
       # …but the CLI's ack carries an EMPTY response (the silent-no-op trap, D12):
       # we must NOT trust subtype:success, so the switch reverts to plan.
-      send(view.pid, {:claude_chat_control, :set_mode, %{}})
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{}})
+      html = render(view)
+      assert html =~ "switch permission mode"
+      assert html =~ "plan (read-only)"
+      # revert persists too: the store never keeps a mode the CLI refused.
+      assert StudioChat.get_session(store_id(view)).mode == "plan"
+    end
+
+    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
+      spawn_silent_session(view)
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
+      rid = pending_mode_req(view)
+      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "plan"}})
+
       html = render(view)
       assert html =~ "switch permission mode"
       assert html =~ "plan (read-only)"
     end
 
-    test "a mismatched mode echo reverts to the prior mode", %{view: view} do
-      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
-      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+    test "a stale ack from a superseded rapid switch is ignored (no mis-revert)",
+         %{view: view} do
+      spawn_silent_session(view)
 
+      # rapid double switch: acceptEdits (req A) then default (req B) before any ack
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
-      # the CLI reports a DIFFERENT mode than we asked → the switch did not take
-      send(view.pid, {:claude_chat_control, :set_mode, %{"mode" => "plan"}})
+      rid_a = pending_mode_req(view)
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      rid_b = pending_mode_req(view)
+      refute rid_a == rid_b
+
+      # req A's ack lands LATE echoing acceptEdits. Value-matching (the wave-2 bug)
+      # would see echo "acceptEdits" != current "default" and MIS-REVERT. By
+      # request_id it is stale (B superseded it) → ignored, mode stays default.
+      send(view.pid, {:claude_chat_control, :set_mode, rid_a, %{"mode" => "acceptEdits"}})
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+
+      # req B's ack then confirms default honestly.
+      send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "default"}})
+      html = render(view)
+      assert html =~ "ask to act"
+      refute html =~ "Couldn't switch permission mode"
+      assert lv_assigns(view)[:pending_mode] == nil
+      assert StudioChat.get_session(store_id(view)).mode == "default"
+    end
+
+    # ── compaction is visible, not a silent ring reset (scc-w3, D27) ──────────
+
+    test "an auto compact_boundary posts an honest ephemeral system line", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "auto", "pre_tokens" => 152_000}
+         }}
+      )
 
       html = render(view)
-      assert html =~ "switch permission mode"
-      assert html =~ "plan (read-only)"
+      assert html =~ "compacted automatically"
+      assert html =~ "152000"
+    end
+
+    test "a manual compact_boundary names the manual trigger", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "manual", "pre_tokens" => 90_000}
+         }}
+      )
+
+      assert render(view) =~ "compacted manually"
+    end
+
+    test "after compaction a smaller result frame shrinks the ring (SET, never summed)",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+
+      # a near-full window pre-compaction: 180k / 200k = 90%
+      send(view.pid, {:claude_chat_event, big_result(180_000)})
+      html = render(view)
+      assert html =~ "90%"
+
+      # the CLI compacts…
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "compact_boundary",
+           "compact_metadata" => %{"trigger" => "auto", "pre_tokens" => 180_000}
+         }}
+      )
+
+      # …and the NEXT turn reports far fewer context tokens. Because the snapshot
+      # is SET (not summed), the ring shrinks to the post-compaction reality. If
+      # someone regressed the formula to `inc:`, 180k+40k would clamp at 100% and
+      # this refute would fail — the guard.
+      send(view.pid, {:claude_chat_event, big_result(40_000)})
+      html = render(view)
+      assert html =~ "20%"
+      refute html =~ "90%"
     end
 
     # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────

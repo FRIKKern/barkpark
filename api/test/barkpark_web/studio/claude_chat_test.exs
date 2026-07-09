@@ -421,31 +421,34 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
-  # Typed control-response dispatch (charter D17). A control_response whose
+  # Typed control-response dispatch (charter D17/D23). A control_response whose
   # request_id matches one WE minted must reach the sink as a TYPED
-  # {:claude_chat_control, kind, response} — not fall through the generic
-  # dispatch into the ChatLive catch-all (which drops it). The reflector fake
-  # reads our outbound control_request, extracts its (randomly minted)
-  # request_id, and echoes a control_response with that SAME id — the only
+  # {:claude_chat_control, kind, request_id, response} — not fall through the
+  # generic dispatch into the ChatLive catch-all (which drops it). The dispatch
+  # carries the request_id so the consumer can correlate the ack to the SPECIFIC
+  # outbound request (latest-outstanding wins; a stale ack is ignored). The
+  # reflector fake reads our outbound control_request, extracts its (randomly
+  # minted) request_id, and echoes a control_response with that SAME id — the only
   # deterministic way to prove the request_id → kind map since we mint the id.
-  describe "typed control-response dispatch (charter D17)" do
-    test "a set_permission_mode ack dispatches {:claude_chat_control, :set_mode, echo}" do
+  describe "typed control-response dispatch (charter D17/D23)" do
+    test "a set_permission_mode ack dispatches {:claude_chat_control, :set_mode, rid, echo}" do
       put_chat_config(command: {"sh", ["-c", mode_reflector()]})
 
       {:ok, session} = ClaudeChat.start_session(%{sink: self()})
-      {:ok, _rid} = ClaudeChat.set_permission_mode(session, "acceptEdits")
+      {:ok, rid} = ClaudeChat.set_permission_mode(session, "acceptEdits")
 
-      assert_receive {:claude_chat_control, :set_mode, %{"mode" => "acceptEdits"}}, 2_000
+      # The ack carries OUR minted request_id back — that is the correlation key.
+      assert_receive {:claude_chat_control, :set_mode, ^rid, %{"mode" => "acceptEdits"}}, 2_000
       ClaudeChat.close(session)
     end
 
-    test "an interrupt ack dispatches {:claude_chat_control, :interrupt, _}" do
+    test "an interrupt ack dispatches {:claude_chat_control, :interrupt, rid, _}" do
       put_chat_config(command: {"sh", ["-c", mode_reflector()]})
 
       {:ok, session} = ClaudeChat.start_session(%{sink: self()})
-      {:ok, _rid} = ClaudeChat.interrupt(session)
+      {:ok, rid} = ClaudeChat.interrupt(session)
 
-      assert_receive {:claude_chat_control, :interrupt, response}, 2_000
+      assert_receive {:claude_chat_control, :interrupt, ^rid, response}, 2_000
       assert is_map(response)
       ClaudeChat.close(session)
     end
@@ -469,7 +472,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
                       }},
                      2_000
 
-      refute_receive {:claude_chat_control, _, _}, 200
+      refute_receive {:claude_chat_control, _, _, _}, 200
     end
   end
 
