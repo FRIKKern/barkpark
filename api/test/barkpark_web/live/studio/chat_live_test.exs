@@ -4187,6 +4187,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute lv_assigns(view)[:bypass_disarmed]
       refute html =~ "Bypass disarmed"
     end
+
+    test "a reopen while the runtime is still LIVE never shows the false disarmed banner",
+         %{conn: conn} do
+      # tab A spawns the live runtime for this session
+      {:ok, view_a, _html} = live(conn, "/studio/chat")
+      render_submit(element(view_a, "form[phx-submit=send]"), %{"message" => "act"})
+      sid = store_id(view_a)
+      assert is_pid(session_pid(view_a))
+      {:ok, _} = StudioChat.set_mode(sid, "bypassPermissions")
+
+      # tab B reopens the SAME session — the runtime is LIVE (adopted, D22) and
+      # runs under ITS spawn-time arming; "disarmed — re-arm to enable" would be
+      # a false banner here, and re-arming only ever applies at the next spawn.
+      {:ok, view_b, html} = live(conn, "/studio/chat/#{sid}")
+      refute lv_assigns(view_b)[:arming_bypass]
+      refute lv_assigns(view_b)[:bypass_disarmed]
+      refute html =~ "Bypass disarmed"
+      # the live token still starts false in this tab (D55): once that runtime
+      # dies, the next respawn fail-closes to plan exactly as a cold reopen does.
+      refute lv_assigns(view_b)[:bypass_live_armed]
+    end
   end
 
   # ── send is instant and never loses your words (optimistic echo, D24) ──────

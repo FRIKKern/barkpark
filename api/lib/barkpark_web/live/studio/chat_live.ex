@@ -2895,10 +2895,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # re-runs. When the reopened row is bypass, auto-open the arm panel with an
       # honest "disarmed" line — the selector keeps showing bypassPermissions but
       # the next resume fail-closes to plan until the user re-arms.
-      arming_bypass: reopened_bypass?(session),
+      # HONESTY GATE: only when there is NO live runtime. A live adopted process
+      # (D22) is running under ITS spawn-time arming — telling the user it is
+      # "disarmed — re-arm to enable" while an armed process is mid-turn would
+      # be false, and re-arming applies only at the next spawn anyway. The live
+      # token above still drops, so once that runtime dies the next respawn
+      # fail-closes exactly the same.
+      arming_bypass: reopened_bypass?(session) and not live?,
       bypass_confirm: "",
       bypass_live_armed: false,
-      bypass_disarmed: reopened_bypass?(session),
+      bypass_disarmed: reopened_bypass?(session) and not live?,
       status: status,
       init: replay_init(session),
       messages: messages,
