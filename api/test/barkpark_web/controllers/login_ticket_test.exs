@@ -77,8 +77,13 @@ defmodule BarkparkWeb.LoginTicketTest do
       assert get_session(conn, "api_token") == @admin_token
 
       # Carry the freshly-set session cookie forward into a LiveView mount.
+      # ssp-w3 (charter D15): /studio/settings is now a compat entry that, once
+      # the :admin gate PASSES, 302s to the canonical Scoped-by-URL Settings
+      # route (a gate FAILURE would 302 to "/studio" instead — so this scoped
+      # target is the end-to-end proof the minted session cleared :admin).
       conn = recycle(conn)
-      assert {:ok, _view, _html} = live(conn, "/studio/settings")
+      assert {:error, {:live_redirect, %{to: to}}} = live(conn, "/studio/settings")
+      assert to =~ ~r{^/w/[^/]+/p/[^/]+/d/production/studio/settings$}
     end
 
     test "a second consume of the same ticket fails (single-use)", %{conn: conn} do

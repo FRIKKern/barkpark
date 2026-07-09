@@ -391,8 +391,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
     base_re = Regex.escape(base)
 
+    # Structure owns the base path and every sub-route EXCEPT the ones other
+    # built-ins own (media / api-tester / settings) — so the scoped Settings
+    # page (ssp-w3) lights the Settings tab, not Structure.
     structure_active =
-      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)).*)")
+      Regex.compile!("^#{base_re}(?:$|/(?!media(?:/|$)|api-tester(?:/|$)|settings(?:/|$)).*)")
 
     media_path = "#{base}/media"
     api_path = "#{base}/api-tester"
@@ -419,8 +422,29 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ] ++ tmux_console_entry(admin?) ++ claude_chat_entry(admin?) ++ styleguide_entry(admin?)
+    ] ++
+      tmux_console_entry(admin?) ++
+      claude_chat_entry(admin?) ++
+      styleguide_entry(admin?) ++ settings_entry(base, scope_prefix, admin?)
   end
+
+  # The Workspace Settings tab (ssp-w3, charter D15). Admin-only — mirrors the
+  # Style/tmux/chat gating (the route itself is admin-gated). Scope-prefixed:
+  # on a scoped surface it addresses the SAME workspace/project/dataset the page
+  # is on (the canonical `/w/:ws/p/:proj/d/:dataset/studio/settings` route); on a
+  # flat surface (scope_prefix "") it points at the flat `/studio/settings`
+  # compat entry, which resolves the Default scope and 302s to the scoped URL.
+  defp settings_entry(base, scope_prefix, true) do
+    path =
+      case scope_prefix || "" do
+        "" -> "/studio/settings"
+        _ -> "#{base}/settings"
+      end
+
+    [%{label: "Settings", path: path, icon: nil, order: 60, active_when: path}]
+  end
+
+  defp settings_entry(_base, _scope_prefix, _), do: []
 
   # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
   # Admin-only — mirrors the tmux-console gating precedent (the route itself is

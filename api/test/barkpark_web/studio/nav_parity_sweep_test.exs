@@ -55,17 +55,20 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       data fixtures — out of scope for the shell-parity spine, covered by
       the two representative `:plugin` rows).
 
-  ## RESIDUAL GAP (settings / org-admin highlight nothing)
+  ## RESIDUAL GAP (org-admin highlights nothing)
 
-  `/studio/settings` and `/studio/org-admin` are FLAT routes with no
-  `:dataset` segment, so the nav's tab paths (built from the default
-  dataset → `/studio/production/...`) never prefix-match the page path.
-  None of the wave-1 code slices (current-path hook / nav-model dedup /
-  gating determinism) adds a Settings or Org-admin top-tab, so post-fix
-  these surfaces still highlight NO primary tab. That is encoded here as
-  `active: :none` (the shell is still identical — parity holds — it just
-  doesn't falsely highlight). If a later slice promotes them to real
-  tabs, flip `:active` and this test enforces it.
+  `/studio/org-admin` is a FLAT route with no `:dataset` segment, so the
+  nav's tab paths (built from the default dataset → `/studio/production/...`)
+  never prefix-match the page path, and no slice adds an Org-admin top-tab —
+  so it highlights NO primary tab (`active: :none`; the shell is still
+  identical, it just doesn't falsely highlight). If a later slice promotes
+  it to a real tab, flip `:active` and this test enforces it.
+
+  Workspace Settings CLOSED this gap (ssp-w3, charter D15): it is now
+  Scoped-by-URL (`/w/:ws/p/:proj/d/:dataset/studio/settings`) with a real
+  admin-gated `Settings` tab that highlights itself; the flat
+  `/studio/settings` is a compat entry that 302s to the scoped URL
+  (`:reflect_only` — reflected + counted, never mounted here).
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -113,8 +116,18 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/d/production/studio/post"},
       active: "Structure"
     },
+    # ── Workspace Settings, Scoped-by-URL (ssp-w3, charter D15) ──
+    # The canonical scoped route mounts + highlights its own "Settings" tab;
+    # the flat `/studio/settings` is a compat entry that 302s to the scoped
+    # URL, so it is reflected + counted but never mounted here.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/settings",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/settings"},
+      active: "Settings"
+    },
+    %{route: "/studio/settings", disposition: :reflect_only},
     # ── flat admin singletons ──
-    %{route: "/studio/settings", disposition: :mount, url: "/studio/settings", active: :none},
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{
       route: "/studio/styleguide",

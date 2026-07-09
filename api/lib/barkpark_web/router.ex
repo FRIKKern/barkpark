@@ -952,6 +952,30 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :api)
   end
 
+  # ── Scoped Workspace Settings (ssp-w3, charter D15) ──────────────────────
+  # Workspace Settings is Scoped-by-URL: the admin control panel binds its
+  # workspace from `/w/:ws/p/:proj/d/:dataset` exactly like the desk, so a
+  # scope switch RE-BINDS the panel (killing the mount-pinned-Default write
+  # hazard). Its own live_session mirrors :scoped_studio's on_mount order
+  # with LiveAuth :admin swapped for :fetch_api_token — LiveScope :resolve
+  # then binds + re-binds current_workspace from the URL, and StudioChrome
+  # :default fills the shared top-bar. This scope MUST register BEFORE the
+  # :scoped_studio scope below: its `/settings` path would otherwise be
+  # swallowed by that scope's `live("/*path", StudioLive)` catch-all.
+  scope "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", BarkparkWeb.Studio do
+    pipe_through(:shared_studio_browser)
+
+    live_session :scoped_admin_studio,
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveScope, :resolve},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      live("/settings", SettingsLive)
+    end
+  end
+
   # ── Scoped Studio (P1 of Scoped-by-URL — tsk-url-p1) ─────────────────────
   # THE canonical Studio address: workspace + project + dataset are URL
   # segments, not socket state — every scope level gets a marker

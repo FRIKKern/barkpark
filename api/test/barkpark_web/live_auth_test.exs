@@ -77,7 +77,16 @@ defmodule BarkparkWeb.LiveAuthTest do
 
     test "admin still grants /studio/settings", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      assert {:ok, _view, _html} = live(conn, "/studio/settings")
+      # ssp-w3 (charter D15): the admin gate still passes — but the flat route
+      # is now a compat entry that resolves the Default scope and 302s to the
+      # canonical Scoped-by-URL Settings route (an ops/anon failure would 302 to
+      # "/studio" instead, so this redirect target IS the "granted" signal).
+      assert {:error, {:live_redirect, %{to: to}}} = live(conn, "/studio/settings")
+      assert to =~ ~r{^/w/[^/]+/p/[^/]+/d/production/studio/settings$}
+
+      # And the admin actually reaches the scoped Settings panel.
+      assert {:ok, _view, html} = live(conn, to)
+      assert html =~ "Workspace Settings"
     end
   end
 end

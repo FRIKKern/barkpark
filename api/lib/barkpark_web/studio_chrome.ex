@@ -87,6 +87,12 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)
       |> assign_new(:scope_menu, fn -> nil end)
+      # scope_subpath (ssp-w3, charter D16): the path a scope switch appends
+      # to the target's `studio_root`. "" lands on the desk (the default for
+      # every desk surface); a scoped chrome surface OVERRIDES it in its own
+      # mount (SettingsLive sets "/settings") so a switch fired from that
+      # surface re-opens the SAME surface under the NEW scope, not the desk.
+      |> assign_new(:scope_subpath, fn -> "" end)
 
     {:cont,
      socket
@@ -296,7 +302,7 @@ defmodule BarkparkWeb.StudioChrome do
          true <- Enum.any?(Tenancy.list_datasets(project.id), &(&1.slug == ds)) do
       socket
       |> assign(:scope_menu, nil)
-      |> push_navigate(to: studio_root(ws, project, ds))
+      |> push_navigate(to: scoped_root(socket, ws, project, ds))
     else
       _ -> assign(socket, :scope_menu, nil)
     end
@@ -326,7 +332,7 @@ defmodule BarkparkWeb.StudioChrome do
     with %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(slug),
          true <- can_reach?(socket, ws),
          %{} = project <- project_for(ws) do
-      push_navigate(socket, to: studio_root(ws, project, dataset_for(project, socket)))
+      push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
     else
       nil -> socket
       false -> socket
@@ -338,7 +344,7 @@ defmodule BarkparkWeb.StudioChrome do
     with %{slug: ws_slug} = ws when is_binary(ws_slug) <- socket.assigns[:current_workspace],
          true <- can_reach?(socket, ws),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, slug) do
-      push_navigate(socket, to: studio_root(ws, project, dataset_for(project, socket)))
+      push_navigate(socket, to: scoped_root(socket, ws, project, dataset_for(project, socket)))
     else
       _ -> socket
     end
@@ -349,7 +355,7 @@ defmodule BarkparkWeb.StudioChrome do
          %{id: proj_id} = project when is_binary(proj_id) <- socket.assigns[:current_project],
          true <- is_binary(slug) and slug != "",
          true <- Enum.any?(Tenancy.list_datasets(proj_id), &(&1.slug == slug)) do
-      push_navigate(socket, to: studio_root(ws, project, slug))
+      push_navigate(socket, to: scoped_root(socket, ws, project, slug))
     else
       _ -> socket
     end
@@ -370,6 +376,13 @@ defmodule BarkparkWeb.StudioChrome do
 
   defp studio_root(ws, project, dataset),
     do: "/w/#{ws.slug}/p/#{project.slug}/d/#{dataset}/studio"
+
+  # A scope switch lands on the target's `studio_root` PLUS the current
+  # surface's `:scope_subpath` (ssp-w3 D16). "" on every desk surface (the
+  # default) → the desk root, byte-identical to before. A scoped chrome
+  # surface (SettingsLive → "/settings") re-opens ITSELF under the new scope.
+  defp scoped_root(socket, ws, project, dataset),
+    do: studio_root(ws, project, dataset) <> (socket.assigns[:scope_subpath] || "")
 
   defp can_reach?(socket, %{id: ws_id}) do
     case socket.assigns[:api_token] do
