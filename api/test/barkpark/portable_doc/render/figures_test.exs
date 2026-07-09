@@ -44,10 +44,13 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       html = Figures.code_block_html("hello world")
       assert html =~ "<pre style="
       assert html =~ "hello world"
-      # S9: the terracotta left-accent is now token-bound (--bp-codeblock-accent-w,
-      # 3px fallback) so View↔Edit share ONE source; the accent colour still binds
-      # --paper-accent for dark-mode theming.
-      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #1e5347)"
+      # S8 (au-eg): the code-block bar is a reading-character cue (TUI twin
+      # ReadingAccent), so its left-accent now binds the terracotta
+      # `--paper-reading-accent` (color.reading-accent) rather than the evergreen
+      # chrome `--paper-accent`. Width stays token-bound (--bp-codeblock-accent-w)
+      # so View↔Edit share ONE source; the fallback hex is TokensGen-sourced.
+      assert html =~
+               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925)"
     end
 
     test "HTML-escapes the value inside the code block" do

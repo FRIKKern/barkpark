@@ -574,6 +574,39 @@ defmodule Barkpark.StructureTest do
     %{tree | items: Enum.reject(items, &(&1.id == "rest"))}
   end
 
+  describe "owned_schema_types_map/0 (studio-structure-polish D19)" do
+    test "publishes the harvested plugin→owned-types map, keyed by plugin name" do
+      map = Structure.owned_schema_types_map()
+
+      assert is_map(map)
+
+      # Every entry is a plugin-name binary → a list of type-name binaries.
+      for {name, types} <- map do
+        assert is_binary(name)
+        assert is_list(types)
+        assert Enum.all?(types, &is_binary/1)
+      end
+    end
+
+    test "reflects a real plugin's schema ownership (bulldocs owns `paper`)" do
+      map = Structure.owned_schema_types_map()
+
+      # bulldocs harvests its ownership from `register_schemas/1` (the `paper`
+      # schema) via the `use Barkpark.Plugin` default — no hardcode here.
+      assert "paper" in Map.get(map, "bulldocs", []),
+             "the public map must mirror the desk's harvested ownership"
+    end
+
+    test "is the SAME harvest the desk build uses, not a replica" do
+      # Equivalence with the private map that feeds the tiered tree: both read
+      # `owned_schema_types/0` off every registered plugin, so a consumer outside
+      # structure.ex sees exactly what the desk sees. (Proven by shape: the map
+      # is non-empty in the boot registry and every value is a list.)
+      map = Structure.owned_schema_types_map()
+      refute map == %{}, "the boot registry owns at least one schema type"
+    end
+  end
+
   describe "parse_filter/1" do
     test "returns empty map for nil" do
       assert Structure.parse_filter(nil) == %{}

@@ -1,11 +1,20 @@
 package cli
 
-// mcp_tasks.go — the curated five Barkpark task tools, hand-mapped onto the
+// mcp_tasks.go — the curated six Barkpark task tools, hand-mapped onto the
 // manifest task verbs and exposed over MCP. Each tool's description carries the
 // barkpark-tasks.mdc doctrine (claim-first, epoch-CAS, lifecycle_status is the
 // done-signal, criteria-in-close, 409 doc_changed_since_claim, re-claim on
 // lapse) so an MCP model drives the queue the way a human following the card
-// would.
+// would. task_prime (task.prime) is the one-call rehydration entry point: an
+// agent resuming a session reads its in-progress claims (with the epoch it needs
+// to close), the ready head, recent events, and lifecycle counts in a single
+// read — no re-fetch loop.
+//
+// Every tool also carries an MCP behaviour annotation (readOnlyHint /
+// destructiveHint) hand-set to match what it actually does: the three reads
+// (task_ready, task_show, task_prime) are ReadOnlyHint:true; the three writers
+// (task_next, task_close, task_create) are ReadOnlyHint:false + DestructiveHint
+// so a client can prompt before a mutating call.
 //
 // The handlers ride the dispatch seam (execManifestCommand, run.go): each one
 // translates its MCP tool arguments into the manifest command's positional+flag
@@ -34,15 +43,22 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close doc:docs/cards/cli.md
-// registerTaskTools registers the curated five task tools on srv, hand-mapping
+// registerTaskTools registers the curated six task tools on srv, hand-mapping
 // each onto its manifest task verb (task_create has no manifest verb — the live
 // manifest declares no task.create, so it is built directly from the mutate
 // contract). It returns an error only if a required manifest verb is missing —
-// the server must not come up advertising a tool it cannot back.
+// the server must not come up advertising a tool it cannot back. All verb
+// Lookups run BEFORE the first AddTool: this batch-first invariant is what lets
+// runMCPServe report a missing-verb failure cleanly (nothing half-registered),
+// and it is why a tasks-less manifest under --tools all fails this function fast
+// rather than serving a broken tool.
+//
+// @canonical capability:mcp-task-tools aka:mcp,cursor,tasks,task_ready,task_next,task_close,task_prime doc:docs/cards/cli.md
 func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	tree := m.Tree()
 
+	// Batch every verb Lookup up front (invariant: all Lookups precede the first
+	// AddTool). A missing verb aborts registration before anything lands on srv.
 	ready, ok := tree.Lookup("task", "ready")
 	if !ok {
 		return fmt.Errorf("manifest has no task.ready verb")
@@ -59,12 +75,17 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	if !ok {
 		return fmt.Errorf("manifest has no task.close verb")
 	}
+	prime, ok := tree.Lookup("task", "prime")
+	if !ok {
+		return fmt.Errorf("manifest has no task.prime verb")
+	}
 
 	// task_ready — the queue head. A read; the optional limit rides the query.
 	readyCmd := *ready
 	srv.AddTool(&mcp.Tool{
 		Name:        "task_ready",
 		Title:       "List ready tasks",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: "List the READY tasks — unblocked work available to claim, in priority order (priority 0 is highest). This is the queue head: start here to find work. Read-only; it does NOT claim anything. To take a task, call task_next (atomic claim) rather than task_show on a specific id, so you never race another worker.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
@@ -103,6 +124,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	srv.AddTool(&mcp.Tool{
 		Name:        "task_next",
 		Title:       "Claim the next ready task",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
 		Description: "Atomically CLAIM the next ready task (priority order) for worker_id, and return its brief. Claim FIRST — the claim is what hands you the task's full description + acceptance_criteria AND the epoch you need to close it. Pick one worker_id and keep it (e.g. \"cursor-<your-name-or-branch>\") so claim/close stay symmetric. An empty queue returns 200 with {\"ok\":false,\"reason\":\"no_ready\"} — that means 'no work available', NOT an error; do not retry in a tight loop. On success the response carries the claimed doc and its claim.epoch — remember that epoch to close.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
@@ -144,6 +166,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	srv.AddTool(&mcp.Tool{
 		Name:        "task_show",
 		Title:       "Show a task",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 		Description: "Fetch one task by its doc_id — full detail including description, acceptance_criteria, lifecycle_status, any claim, and children + child_count. Read-only. Use it to re-read a brief (e.g. after a close 409'd with doc_changed_since_claim, read the task again before closing) or to inspect a task you already hold. To START work, prefer task_next (which claims atomically) over showing an id and hoping it's still free.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
@@ -175,6 +198,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	srv.AddTool(&mcp.Tool{
 		Name:        "task_close",
 		Title:       "Close a claimed task",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
 		Description: "Close a task you hold, under epoch-CAS. Pass the SAME worker_id you claimed with and the observed_epoch from that claim (doc.claim.epoch). lifecycle_status is the done-signal — \"done\" for completed work, \"cancelled\" to drop it, \"blocked\" if it can't proceed; it is what marks the task finished, NOT the claim record. Mark acceptance criteria in the same write via `criteria` — an array of {index, met, evidence} — so the ledger records WHAT you proved and HOW. If the close returns 409 doc_changed_since_claim, the brief changed under your claim: task_show it again, reconcile, then close again. If your claim lapsed (epoch moved on), re-claim the task with task_next / a fresh claim to get a new epoch, then close with that.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
@@ -267,6 +291,7 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 	srv.AddTool(&mcp.Tool{
 		Name:        "task_create",
 		Title:       "Create a task",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)},
 		Description: "File a NEW task. Injects the task schema's required kind=\"task\" + lifecycle_status=\"open\" defaults, so you supply only the title (and any optional fields). Published by default — an unpublished task is invisible to boards and gates, so it effectively 'does not exist'; pass publish:false only for a deliberate draft. Nest large work with parent_id (a slug) for a Goal -> sub-task tree; keep it flat otherwise. priority is 0 (highest) .. 4. Give acceptance_criteria as concrete, evidence-bearing checks — one per real proof obligation.",
 		InputSchema: json.RawMessage(`{
   "type": "object",
@@ -341,8 +366,60 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		return mcpTaskCreate(ctx, body, publish), nil
 	})
 
+	// task_prime — one-call session rehydration. A read (task.prime, GET
+	// /v1/tasks/prime): it establishes NOTHING, it only reports. The optional
+	// worker_id narrows in_progress to YOUR claims (and their close-ready epochs);
+	// omitting it dumps every open claim across all workers (an orchestrator view).
+	primeCmd := *prime
+	srv.AddTool(&mcp.Tool{
+		Name:        "task_prime",
+		Title:       "Rehydrate task context",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+		Description: "One-call REHYDRATION for a resuming agent — read this first when you pick up work. It returns, in a single response: your in_progress claims (each carries content.claim.epoch, so you can task_close WITHOUT re-fetching the task), the ready-head (top of the queue), recent_events (what changed lately), lifecycle counts, and rails (rail_rev per epic you hold). Pass worker_id = the SAME id you claim and close with, so in_progress is scoped to YOUR claims; OMITTING worker_id returns ALL open claims across every worker — the orchestrator dump, not your working set. IMPORTANT: prime is read-only and NEVER (re-)establishes a claim. If a task you expected is MISSING from in_progress, your claim LAPSED — re-claim it with task_next before you touch it; do not assume the old epoch is still valid.",
+		InputSchema: json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "worker_id": {
+      "type": "string",
+      "description": "Your stable worker identity — pass the SAME id you claim/close with, so in_progress is scoped to your claims. Omit it to get the all-claims orchestrator dump across every worker."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Ready-head and event-window size (default 10)."
+    }
+  }
+}`),
+	}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var in struct {
+			WorkerID string `json:"worker_id"`
+			Limit    *int   `json:"limit"`
+		}
+		if err := decodeMCPArgs(req, &in); err != nil {
+			return mcpArgError(err), nil
+		}
+		// task.prime declares worker + limit as flags (no positionals); build the
+		// tail exactly as `bp task prime --worker <id> --limit <n>` and let the seam
+		// place both in the query string via ArgLocation inference.
+		tail := []string{}
+		if strings.TrimSpace(in.WorkerID) != "" {
+			tail = append(tail, "--worker", in.WorkerID)
+		}
+		if in.Limit != nil {
+			tail = append(tail, "--limit", strconv.Itoa(*in.Limit))
+		}
+		return mcpRun(execManifestCommand(g, ctx, m, primeCmd, tail)), nil
+	})
+
 	return nil
 }
+
+// mcpBoolPtr returns a pointer to b — for the SDK's *bool annotation fields
+// (DestructiveHint) where nil means "SDK default" and a non-nil pointer sets the
+// hint explicitly.
+func mcpBoolPtr(b bool) *bool { return &b }
 
 // mcpTaskCreate files a new task via the mutate contract (there is no task.create
 // manifest verb), riding sendTaskMutations — the same raw send half `bp task

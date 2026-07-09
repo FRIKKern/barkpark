@@ -325,6 +325,17 @@ const EXPECTATIONS = {
     container: "instance-body",
     includes: ["inst-tabs", '/usage" aria-current="page"', 'id="instance-tabpanel"', ">Usage<"],
   },
+  // Wave 3: the Overview fleet usage strip. Unlike the Usage meter wall, the
+  // strip fills its OWN #overview-fleet-usage container (a real registry element
+  // the app writes to), so the async /v1/usage/summary fetch → render is fully
+  // observable here: the over-quota team headline + Manage-plan recovery, the
+  // fresh/stale "as of" stamps, and the honest no-sample cell all in one boot.
+  "fleet-usage": {
+    what: "the fleet usage strip paints team headline + per-instance sample cells",
+    container: "overview-fleet-usage",
+    includes: ["Fleet usage", "usage-bar--over", ">Manage plan<", "fleet-usage-cell", "as of ", "No sample yet"],
+    excludes: ["Loading fleet usage"],
+  },
   // C8: the golden-path verify card renders from the events feed on Overview.
   "verify-pass": {
     what: "verify chips — three green probes + the quiet re-check",

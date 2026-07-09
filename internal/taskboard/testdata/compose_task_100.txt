@@ -41,4 +41,4 @@
 
 
 
- jk move · enter open · esc back · space scroll
+ jk move · enter open · esc back · space scroll · opt/shift-click selects · M mouse

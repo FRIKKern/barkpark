@@ -123,6 +123,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # on every session load — a bypass is never armed by a select alone.
          arming_bypass: false,
          bypass_confirm: "",
+         # Bypass arming is a LIVE act (charter D55). `bypass_live_armed` is the
+         # socket-local twin of the persisted mode: arming happens ONLY through
+         # the type-"bypass" ceremony this lifetime, never inherited from the
+         # stored row. Spawn's dangerous-flag gate is this token AND the persisted
+         # bypassPermissions mode — a reopened bypass session fail-closes to plan
+         # until the ceremony re-runs. `bypass_disarmed` drives the honest
+         # auto-opened panel line on reopening such a session.
+         bypass_live_armed: false,
+         bypass_disarmed: false,
          status: :new,
          init: nil,
          messages: [],
@@ -401,13 +410,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # The mode is unchanged until the ceremony completes — a plain select can't
   # arm dangerous bypass.
   def handle_event("set-mode", %{"mode" => "bypassPermissions"}, socket) do
-    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "")}
+    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)}
   end
 
   def handle_event("set-mode", %{"mode" => mode}, socket) do
+    # Steering to any non-bypass mode drops the live arming token (charter D55):
+    # the next resume of what was a bypass session can never fail open.
     {:noreply,
      socket
-     |> assign(arming_bypass: false, bypass_confirm: "")
+     |> assign(
+       arming_bypass: false,
+       bypass_confirm: "",
+       bypass_disarmed: false,
+       bypass_live_armed: false
+     )
      |> change_mode(ClaudeChat.normalize_mode(mode))}
   end
 
@@ -434,9 +450,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             "⚠ Bypass permissions ARMED — it takes effect on the next resume, not the running turn.",
           else: "⚠ Bypass permissions ARMED — it takes effect when this chat next runs."
 
+      # The ceremony is the ONLY thing that flips the live token (charter D55) —
+      # a reopened bypass session lands here disarmed and re-arms only through
+      # this branch, so the next spawn's build_args gate (live token AND
+      # persisted mode) can emit --allow-dangerously-skip-permissions.
       socket =
         socket
-        |> assign(mode: "bypassPermissions", arming_bypass: false, bypass_confirm: "")
+        |> assign(
+          mode: "bypassPermissions",
+          arming_bypass: false,
+          bypass_confirm: "",
+          bypass_live_armed: true,
+          bypass_disarmed: false
+        )
         |> append_message(:system, line)
 
       {:noreply, socket}
@@ -447,7 +473,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("cancel-arm-bypass", _params, socket) do
-    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "")}
+    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "", bypass_disarmed: false)}
   end
 
   # Pick the brain (wave 5). The choice persists on the session row (intent)
@@ -1292,13 +1318,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
-  # A real port exit (exit_status frame). Run the shared honest teardown.
-  def handle_info({:claude_chat_exit, status}, socket) do
-    {:noreply,
-     teardown_session(
-       socket,
-       "Claude session ended (exit #{status}). Send a message to resume it."
-     )}
+  # A real port exit (exit_status frame). Run the shared honest teardown, and
+  # tell the truth about a DOOMED spawn (charter D54): a nonzero exit BEFORE any
+  # system/init frame means the argv was rejected — zero frames emitted, the
+  # reason on stderr — so a resume would re-run the same command and re-die.
+  # Surface the captured stderr reason and DO NOT invite a resume. A death AFTER
+  # init resumes cleanly (lazy `--resume` rehydrates), so keep the invite and
+  # append the reason when the CLI wrote one. `init` is nil until the first init
+  # frame arrives, so it is the "did this session initialize?" signal.
+  def handle_info({:claude_chat_exit, status, stderr_tail}, socket) do
+    reason = stderr_reason(stderr_tail)
+    init_seen? = not is_nil(socket.assigns[:init])
+
+    message =
+      if not init_seen? and failed_start?(status) do
+        "Claude failed to start (exit #{status})" <>
+          if reason != "", do: ": #{reason}", else: "."
+      else
+        base = "Claude session ended (exit #{status}). Send a message to resume it."
+        if reason != "", do: base <> "\n" <> reason, else: base
+      end
+
+    {:noreply, teardown_session(socket, message)}
   end
 
   # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
@@ -2436,6 +2477,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
           aria-label="Arm bypass permissions"
           style="max-width: 860px; margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--danger); border-radius: 8px; background: hsl(var(--danger-hsl) / 0.08);"
         >
+          <%!-- Honest reopen affordance (charter D55): a remembered bypass
+                session lands here disarmed — the mode persisted but the live
+                arming did not, so the next resume fail-closes to plan until the
+                ceremony re-runs. --%>
+          <p
+            :if={@bypass_disarmed}
+            class="text-xs"
+            style="color: var(--danger); font-weight: 600; margin: 0 0 4px;"
+          >
+            ⚠ Bypass disarmed — re-arm to enable. This session remembers bypassPermissions, but arming never survives a reopen.
+          </p>
           <p class="text-xs" style="color: var(--danger); font-weight: 600; margin: 0 0 4px;">
             ⚠ Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.
           </p>
@@ -2747,9 +2799,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
              resume: resume?,
              model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
              effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
-             # Armed strictly off the PERSISTED row (charter D48), never a live
-             # assign — build_args needs BOTH mode == bypassPermissions AND this.
-             bypass_armed: StudioChat.bypass_armed?(store_id)
+             # Bypass arming is a LIVE act (charter D55): the dangerous flag
+             # rides ONLY when the type-"bypass" ceremony ran THIS lifetime
+             # (`bypass_live_armed`) AND the persisted row is bypassPermissions.
+             # A reopened bypass session has the mode but not the live token, so
+             # it fail-closes to plan (build_args' normalize path, D48b) until
+             # the user re-runs the ceremony — the persisted mode alone can never
+             # silently re-arm.
+             bypass_armed:
+               socket.assigns[:bypass_live_armed] == true and
+                 StudioChat.bypass_armed?(store_id)
            }),
          {:ok, session} <- Recorder.session_pid(recorder) do
       StudioChat.update_status(store_id, "working")
@@ -2871,9 +2930,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
       model_choice: session.model_choice || "default",
       effort_choice: session.effort_choice || "default",
       # A reopen resets any in-flight arm ceremony — arming is never carried
-      # across a session load (charter D48).
-      arming_bypass: false,
+      # across a session load (charter D48). Bypass arming is a LIVE act
+      # (charter D55): the live token drops to false on every reopen, so a
+      # remembered bypassPermissions session is DISARMED until the ceremony
+      # re-runs. When the reopened row is bypass, auto-open the arm panel with an
+      # honest "disarmed" line — the selector keeps showing bypassPermissions but
+      # the next resume fail-closes to plan until the user re-arms.
+      # HONESTY GATE: only when there is NO live runtime. A live adopted process
+      # (D22) is running under ITS spawn-time arming — telling the user it is
+      # "disarmed — re-arm to enable" while an armed process is mid-turn would
+      # be false, and re-arming applies only at the next spawn anyway. The live
+      # token above still drops, so once that runtime dies the next respawn
+      # fail-closes exactly the same.
+      arming_bypass: reopened_bypass?(session) and not live?,
       bypass_confirm: "",
+      bypass_live_armed: false,
+      bypass_disarmed: reopened_bypass?(session) and not live?,
       status: status,
       init: replay_init(session),
       messages: messages,
@@ -2933,6 +3005,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> refresh_sessions()
   end
 
+  # A reopened session whose persisted mode is bypassPermissions (charter D55).
+  # Drives the auto-opened, honest "bypass disarmed — re-arm to enable" panel:
+  # the mode survives in the store (the selector keeps showing it) but arming
+  # never survives a reopen, so the panel tells the user to re-run the ceremony.
+  defp reopened_bypass?(%{mode: "bypassPermissions"}), do: true
+  defp reopened_bypass?(_), do: false
+
   # The live SESSION pid for a store id, reached through its Recorder — or nil.
   # Charter D22/D28: consulted BEFORE any store write so a reopen of a session
   # whose runtime is still running keeps its pending approvals answerable
@@ -2978,6 +3057,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       effort_choice: StudioChat.recent_effort_choice() || "default",
       arming_bypass: false,
       bypass_confirm: "",
+      # A new chat is never armed (charter D55) — the live token starts false.
+      bypass_live_armed: false,
+      bypass_disarmed: false,
       status: :new,
       init: nil,
       messages: [],
@@ -3049,6 +3131,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # cancel-persisting pending approvals, marking the row exited — is the
   # Recorder's job (it owns the runtime and outlives every tab). This flips the
   # visible cards, posts the honest line, and re-reads the sidebar.
+  # A nonzero OS exit status (integer). The crash/idle-reap paths carry an atom
+  # (`:crashed`/`:idle_reaped`) and never count as a rejected-argv start.
+  defp failed_start?(status), do: is_integer(status) and status != 0
+
+  # The captured stderr tail, trimmed for display; nil-safe for the paths that
+  # carry no stderr (already bounded to a few lines at the Session, charter D54).
+  defp stderr_reason(tail) when is_binary(tail), do: String.trim(tail)
+  defp stderr_reason(_), do: ""
+
   defp teardown_session(socket, message) do
     if socket.assigns.status == :offline do
       socket
@@ -3104,15 +3195,64 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # an echoed frame is an untrusted string and must never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
        when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
+    cond do
+      mode == socket.assigns.mode or not is_nil(socket.assigns[:pending_mode]) ->
+        socket
+
+      # A DISARMED bypassPermissions session deliberately spawns fail-closed
+      # (charter D48b/D55): build_args normalizes the mode, so the init frame
+      # echoing that normalized mode is OUR OWN fail-close, not a CLI-side flip.
+      # Stay quiet and — critically — do NOT adopt/persist it: the stored
+      # bypassPermissions row is what keeps the re-arm affordance alive on the
+      # next reopen (D55's honest disarmed panel).
+      mode == ClaudeChat.normalize_mode(socket.assigns.mode) ->
+        socket
+
+      true ->
+        if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+
+        # No silent escalation (charter D52, wave-10 real-binary verdict): the CLI
+        # flips its OWN permission mode plan → default inside ExitPlanMode (PROVEN
+        # v2.1.205 — the post-plan init reports `"default"`), a mode the user never
+        # picked. A user-initiated switch surfaces its own "Permission mode → …"
+        # line (via set-mode); this CLI-initiated adoption was previously SILENT.
+        # Surface it too, so the transcript never quietly changes what the agent is
+        # allowed to do. `pending_mode` guards this off during a user switch (its
+        # ack owns the mode, D17/D23), so this line only ever narrates a genuine
+        # CLI-side flip.
+        socket
+        |> assign(mode: mode)
+        |> append_message(:system, observed_mode_line(socket.assigns.mode, mode))
+    end
+  end
+
+  # A permissionMode OUTSIDE the six-value guard (a future/unknown CLI mode) is
+  # NOT silently adopted (charter D52): the stored mode is left ALONE (never
+  # widen the guard to admit an untrusted string), but the divergence is surfaced
+  # honestly so the transcript does not hide it. Falls through for a nil observed
+  # value (an init frame with no permissionMode — a routine turn boundary).
+  defp observe_permission_mode(socket, mode) when is_binary(mode) and mode != "" do
     if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
-      if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
-      assign(socket, mode: mode)
+      append_message(
+        socket,
+        :system,
+        "The agent reports an unrecognized permission mode (#{mode}); keeping #{mode_label(socket.assigns.mode)}."
+      )
     else
       socket
     end
   end
 
   defp observe_permission_mode(socket, _mode), do: socket
+
+  # The proven ExitPlanMode signature (plan → default, charter D52) gets the
+  # specific story; any other CLI-side divergence is narrated without inventing
+  # a cause — "after plan approval" on a flip that wasn't one would be a lie.
+  defp observed_mode_line("plan", "default"),
+    do: "Permission mode is now #{mode_label("default")} after plan approval."
+
+  defp observed_mode_line(_from, mode),
+    do: "Permission mode is now #{mode_label(mode)} (reported by the agent)."
 
   # Persist a mode switch onto the store row (charter D17) — no-op with no store
   # session yet (a brand-new chat before its first send has no row to write).
@@ -4383,7 +4523,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # workflow's tree (visible now that rows default expanded) must never show a
   # running agent off a stale node state.
   defp rail_node_running?(entry, node),
-    do: rail_running?(entry) and node["state"] in ["running", "in_progress", "active"]
+    do: rail_running?(entry) and rail_node_state_running?(node)
+
+  # TERMINAL-SET semantics (wave-10 real-binary truth): the CLI emits only
+  # "start" and "done" for a workflow agent's state — never "running". A positive
+  # running-set (the old ["running","in_progress","active"]) matched none of them,
+  # so a live agent never breathed. Instead: "done" and the obvious failure
+  # terminals are settled; ANYTHING ELSE (incl. "start", "queued") is running.
+  @rail_node_terminal ~w(done completed failed error canceled cancelled aborted)
+  defp rail_node_state_running?(node) when is_map(node) do
+    case node["state"] do
+      s when is_binary(s) -> String.downcase(s) not in @rail_node_terminal
+      _ -> false
+    end
+  end
+
+  defp rail_node_state_running?(_), do: false
 
   defp rail_status_label("completed"), do: "done"
   defp rail_status_label("interrupted"), do: "interrupted"

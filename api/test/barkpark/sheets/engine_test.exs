@@ -2883,6 +2883,43 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
       assert run(cells)["A3"] == %{"f" => "=SUM(A1:A2)", "t" => "n", "v" => 5}
     end
 
+    test "depth-2 chained spill converges — a spill whose SOURCE is itself spilled" do
+      # E1 reads C1:C3, C1 reads A1:A3, A1 is a literal array. Spill visibility
+      # propagates one level per recompute phase, so a single extra phase (the
+      # pre-fixpoint engine) leaves E reading a stale, not-yet-spilled C. The
+      # N-phase fixpoint (charter D3) must re-topo until the spill map is stable,
+      # so E finally reads the materialised C region.
+      #   A1:A3 = [2,3,1]  →  C1:C3 = SORT(asc) = [1,2,3]  →  E1:E3 = SORT(desc) = [3,2,1]
+      out =
+        run(%{
+          "A1" => %{"f" => "={2;3;1}"},
+          "C1" => %{"f" => "=SORT(A1:A3)"},
+          "E1" => %{"f" => "=SORT(C1:C3, -1)"}
+        })
+
+      assert [out["A1"]["v"], out["A2"]["v"], out["A3"]["v"]] == [2, 3, 1]
+      assert [out["C1"]["v"], out["C2"]["v"], out["C3"]["v"]] == [1, 2, 3]
+      assert [out["E1"]["v"], out["E2"]["v"], out["E3"]["v"]] == [3, 2, 1]
+    end
+
+    test "depth-3 chained spill still converges within the phase cap" do
+      # A → C → E → G, three spill hops. Each SORT preserves order for an already
+      # ascending source, so the whole chain settles on [1,2,3]. Proves the
+      # fixpoint drives more than the single depth-2 hop and terminates well
+      # inside the hard cap.
+      out =
+        run(%{
+          "A1" => %{"f" => "={1;2;3}"},
+          "C1" => %{"f" => "=SORT(A1:A3)"},
+          "E1" => %{"f" => "=SORT(C1:C3)"},
+          "G1" => %{"f" => "=SORT(E1:E3)"}
+        })
+
+      assert [out["C1"]["v"], out["C2"]["v"], out["C3"]["v"]] == [1, 2, 3]
+      assert [out["E1"]["v"], out["E2"]["v"], out["E3"]["v"]] == [1, 2, 3]
+      assert [out["G1"]["v"], out["G2"]["v"], out["G3"]["v"]] == [1, 2, 3]
+    end
+
     test "REGRESSION LOCK — a scalar/bounded doc recomputes byte-identically, no spill markers" do
       # The wave's critical regression lock (charter): a document with NO
       # top-level array result produces the exact same cells map the pre-spill
@@ -2956,6 +2993,163 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         |> get_in(["tabs", Access.at(1), "cells"])
 
       assert s2["A1"]["v"] == 20
+    end
+
+    test "cross-tab depth-2 chained spill converges through the unified path" do
+      # The unified twin of the fast-path depth-2 test: the spill chain crosses
+      # tabs, so it MUST ride recompute_unified. Sheet1!A1 spills, Sheet2!C1 sorts
+      # Sheet1's spilled region, Sheet1!E1 sorts Sheet2's spilled region — two
+      # spill hops across the tab boundary. The unified fixpoint must re-topo
+      # until every tab's spill map is stable, or E reads a stale C.
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Sheet1",
+            "cells" => %{
+              "A1" => %{"f" => "={2;3;1}"},
+              "E1" => %{"f" => "=SORT(Sheet2!C1:C3, -1)"}
+            }
+          },
+          %{
+            "name" => "Sheet2",
+            "cells" => %{"C1" => %{"f" => "=SORT(Sheet1!A1:A3)"}}
+          }
+        ]
+      }
+
+      out = Engine.recompute(content)
+      s1 = get_in(out, ["tabs", Access.at(0), "cells"])
+      s2 = get_in(out, ["tabs", Access.at(1), "cells"])
+
+      assert [s1["A1"]["v"], s1["A2"]["v"], s1["A3"]["v"]] == [2, 3, 1]
+      assert [s2["C1"]["v"], s2["C2"]["v"], s2["C3"]["v"]] == [1, 2, 3]
+      assert [s1["E1"]["v"], s1["E2"]["v"], s1["E3"]["v"]] == [3, 2, 1]
+    end
+  end
+
+  describe "RAND / RANDBETWEEN (volatile-as-of-last-save)" do
+    test "RAND returns a float in [0, 1)" do
+      for _ <- 1..50 do
+        v = eval!("=RAND()")
+        assert is_float(v) and v >= 0.0 and v < 1.0
+      end
+    end
+
+    test "RANDBETWEEN returns an inclusive integer within [lo, hi]" do
+      for _ <- 1..50 do
+        v = eval!("=RANDBETWEEN(5, 8)")
+        assert is_integer(v) and v >= 5 and v <= 8
+      end
+    end
+
+    test "RANDBETWEEN with a single-point range is that integer" do
+      assert eval!("=RANDBETWEEN(7, 7)") == 7
+    end
+
+    test "RANDBETWEEN spans a negative range inclusively" do
+      for _ <- 1..50 do
+        v = eval!("=RANDBETWEEN(-2, 2)")
+        assert is_integer(v) and v >= -2 and v <= 2
+      end
+    end
+
+    test "RANDBETWEEN with lo > hi is #NUM!" do
+      assert eval!("=RANDBETWEEN(9, 1)") == "#NUM!"
+    end
+
+    test "RANDBETWEEN truncates non-integer bounds toward zero before drawing" do
+      for _ <- 1..50 do
+        # trunc(1.9)=1, trunc(3.9)=3 -> inclusive [1, 3]
+        v = eval!("=RANDBETWEEN(1.9, 3.9)")
+        assert v in [1, 2, 3]
+      end
+    end
+
+    test "RANDBETWEEN with a non-numeric bound is #VALUE!" do
+      assert eval!("=RANDBETWEEN(\"x\", 5)") == "#VALUE!"
+      assert eval!("=RANDBETWEEN(1, \"y\")") == "#VALUE!"
+    end
+
+    test "RANDBETWEEN propagates an error bound (e.g. #DIV/0!) through" do
+      assert eval!("=RANDBETWEEN(1/0, 5)") == "#DIV/0!"
+    end
+
+    test "wrong arity is #VALUE! (fallthrough), for both RAND and RANDBETWEEN" do
+      assert eval!("=RAND(1)") == "#VALUE!"
+      assert eval!("=RANDBETWEEN(1)") == "#VALUE!"
+      assert eval!("=RANDBETWEEN(1, 2, 3)") == "#VALUE!"
+    end
+
+    test "within a save, a spill-present doc persists RAND consistently with what dependents consumed" do
+      # An unrelated SEQUENCE spill forces the two-phase recompute path
+      # (`any_array_result?` true): the RAND anchor A1 is re-evaluated in EVERY
+      # phase, so a stateful draw would drift between phases. The pure per-cell
+      # derivation lands the identical value each phase, so the dependent B1
+      # (=A1) and C1 (=A1*2) persist exactly the drawn value.
+      cells = %{
+        "A1" => %{"f" => "=RAND()"},
+        "B1" => %{"f" => "=A1"},
+        "C1" => %{"f" => "=A1 * 2"},
+        "E1" => %{"f" => "=SEQUENCE(3)"}
+      }
+
+      out = run(cells)
+
+      # the spill actually materialised — the two-phase path was taken.
+      assert out["E1"]["spill_dims"] == [3, 1]
+      assert out["E3"]["v"] == 3
+
+      draw = out["A1"]["v"]
+      assert is_float(draw) and draw >= 0.0 and draw < 1.0
+      assert out["B1"]["v"] == draw
+      assert out["C1"]["v"] == draw * 2
+    end
+
+    test "RAND is volatile across saves — two recomputes draw different values" do
+      cells = %{"A1" => %{"f" => "=RAND()"}}
+      refute run(cells)["A1"]["v"] == run(cells)["A1"]["v"]
+    end
+
+    test "distinct cells draw independently within one save (pure per {seed, tab, col, row})" do
+      out =
+        run(%{
+          "A1" => %{"f" => "=RAND()"},
+          "A2" => %{"f" => "=RAND()"},
+          "B1" => %{"f" => "=RAND()"}
+        })
+
+      vals = [out["A1"]["v"], out["A2"]["v"], out["B1"]["v"]]
+      assert length(Enum.uniq(vals)) == 3
+    end
+
+    test "the draw never mutates process-global :rand state (functional seed_s/uniform_s only)" do
+      # Naive `:rand.uniform/0` would read+advance the process dictionary seed;
+      # the pure per-cell `:rand.uniform_s(:rand.seed_s(...))` never touches it.
+      :rand.seed(:exsss, {1, 2, 3})
+      before = :rand.export_seed()
+      _ = run(%{"A1" => %{"f" => "=RAND()"}, "B1" => %{"f" => "=RANDBETWEEN(1, 100)"}})
+      assert :rand.export_seed() == before
+    end
+
+    test "RAND recomputes under the cross-tab unified path and a cross-tab reader sees the persisted draw" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Sheet1",
+            "cells" => %{"A1" => %{"f" => "=RAND()"}, "B1" => %{"f" => "=Sheet2!A1"}}
+          },
+          %{"name" => "Sheet2", "cells" => %{"A1" => %{"f" => "=RANDBETWEEN(1, 6)"}}}
+        ]
+      }
+
+      out = Engine.recompute(content)
+      s1 = get_in(out, ["tabs", Access.at(0), "cells"])
+      s2 = get_in(out, ["tabs", Access.at(1), "cells"])
+
+      assert is_float(s1["A1"]["v"]) and s1["A1"]["v"] >= 0.0 and s1["A1"]["v"] < 1.0
+      assert s2["A1"]["v"] in 1..6
+      # the cross-tab reader consumed exactly what S2!A1 persisted.
+      assert s1["B1"]["v"] == s2["A1"]["v"]
     end
   end
 
@@ -4600,8 +4794,10 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
         assert n in names, "#{n} missing from function_names/0"
       end
 
-      # 123 after batch 3 + 17 batch-4 names. THE authoritative count.
-      assert length(names) == 140
+      # 123 after batch 3 + 17 batch-4 names + RAND/RANDBETWEEN. THE
+      # authoritative count.
+      assert "RAND" in names and "RANDBETWEEN" in names
+      assert length(names) == 142
       assert names == Enum.sort(names)
       assert Enum.uniq(names) == names
     end

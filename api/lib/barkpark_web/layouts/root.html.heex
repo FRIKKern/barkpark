@@ -42,29 +42,22 @@
       font-weight: 100 900; font-style: normal; font-display: swap;
     }
 
-    /* ── Source Serif 4 — self-hosted (TTFs in priv/static/fonts/,
-       served at /fonts/ by Plug.Static; "fonts" is in static_paths).
-       The Beta editor "paper" surface uses this as its body face;
-       `font-display: swap` accepts a brief Georgia FOUT on cold cache. */
+    /* ── Source Serif 4 — self-hosted variable woff2 (Roman + Italic in
+       priv/static/fonts/, served at /fonts/ by Plug.Static; "fonts" is in
+       static_paths). Two files carry the full wght 200–900 axis (was four
+       static TTFs @ 400/700 — unified-aesthetic S9). The Beta editor "paper"
+       surface uses this as its body face; `font-display: swap` accepts a
+       brief Georgia FOUT on cold cache. Source Serif 4, SIL OFL 1.1 — see
+       fonts/SourceSerif4-OFL.txt. */
     @font-face {
       font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Regular.ttf') format('truetype');
-      font-weight: 400; font-style: normal; font-display: swap;
+      src: url('/fonts/SourceSerif4Variable-Roman.woff2') format('woff2');
+      font-weight: 200 900; font-style: normal; font-display: swap;
     }
     @font-face {
       font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Italic.ttf') format('truetype');
-      font-weight: 400; font-style: italic; font-display: swap;
-    }
-    @font-face {
-      font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Bold.ttf') format('truetype');
-      font-weight: 700; font-style: normal; font-display: swap;
-    }
-    @font-face {
-      font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-BoldItalic.ttf') format('truetype');
-      font-weight: 700; font-style: italic; font-display: swap;
+      src: url('/fonts/SourceSerif4Variable-Italic.woff2') format('woff2');
+      font-weight: 200 900; font-style: italic; font-display: swap;
     }
 
     /* ── shadcn/radix inspired design tokens ──────────────────────────── */
@@ -3009,7 +3002,7 @@
       font-style: italic;
       font-size: 1.2rem;
       color: var(--paper-ink-soft);
-      border-left: 3px solid var(--paper-accent);
+      border-left: 3px solid var(--paper-reading-accent);
       border-bottom: 0;
       margin: 1.6rem 0;
       padding: 0.2rem 0 0.2rem 1.2rem;
@@ -3044,7 +3037,7 @@
        cascade. */
     .bp-paper-edit-block[data-block-type="code"] textarea.bp-paper-edit-code {
       border: 0;
-      border-left: 3px solid var(--paper-accent);
+      border-left: 3px solid var(--paper-reading-accent);
       border-radius: 0;
       font-size: 0.9rem;
       line-height: 1.5;
@@ -3350,7 +3343,7 @@
     .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
     .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
     .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
@@ -3444,7 +3437,7 @@
        (view title is <strong>, walk.ex:1130-1133), chip tokens bound to real
        --paper-* vars, and the compound pre.bp-canvas-code frame (figures.ex:25). */
     .bp-paper-editor-body pre.bp-canvas-code {
-      background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-accent);
+      background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-reading-accent);
       border-radius: var(--bp-codeblock-radius); padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin);
       font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
       color: var(--paper-ink); white-space: normal; overflow-x: auto;

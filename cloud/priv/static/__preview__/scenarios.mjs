@@ -516,6 +516,39 @@ const quotaBarsUsage = {
   },
 };
 
+// ── fleet usage summary (GET /v1/usage/summary — OC16 sampler read) ───────────
+// The Overview fleet strip's contract: a team-level instances quota meter + one
+// cached-sample row per instance. This one envelope carries all four honest
+// states in a single Overview shot: an OVER-quota team headline (with the
+// Manage-plan recovery), a FRESH row (~20s), an hours-STALE row, and a
+// NO-SAMPLE row (measured_at null → the honest "no sample yet" cell). Derived
+// from the sampler's Usage.compose/1 meter shape — NOT invented.
+const fleetMeter = (value, over) => Object.assign({ value, quota: null, warn_at: null, source: "preview", measured_at: null }, over || {});
+const fleetInstMeters = (docs, db, disk, seats, at) => ({
+  instances: fleetMeter("unmetered"),
+  seats: fleetMeter(seats, { source: "control-plane.team_members", measured_at: at }),
+  documents: fleetMeter(docs, { source: "instance.documents", measured_at: at }),
+  datasets: fleetMeter("unmetered", { source: "instance.datasets" }),
+  webhooks: fleetMeter("unmetered", { source: "instance.webhooks" }),
+  db_size: fleetMeter(db, { source: "telemetry.pg_size_bytes", measured_at: at }),
+  disk: fleetMeter(disk, { source: "telemetry.disk_used_percent", measured_at: at }),
+  api_requests: fleetMeter("unmetered", { source: "not-metered" }),
+  bandwidth: fleetMeter("unmetered", { source: "not-metered" }),
+});
+const fleetUsageSummary = {
+  // Team headline OVER its instance ceiling — the one honest quota bar, with the
+  // over tone + Manage-plan recovery (OC11/D25).
+  team: { instances: fleetMeter(12, { quota: 10, warn_at: 8, source: "control-plane.barkparks" }) },
+  instances: [
+    { id: IDS.liveInstance, name: "Acme Production", slug: "acme-prod", host: "acme.barkpark.cloud",
+      measured_at: tMinus(20), meters: fleetInstMeters(412, 1048576, 37, 4, tMinus(20)) },
+    { id: IDS.behindInstance, name: "Analytics", slug: "analytics", host: "an.barkpark.cloud",
+      measured_at: tMinus(3 * 3600), meters: fleetInstMeters(88, 262144, 21, 2, tMinus(3 * 3600)) },
+    { id: IDS.suspendedInstance, name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
+      measured_at: null, meters: fleetInstMeters("unmetered", "unmetered", "unmetered", "unmetered", null) },
+  ],
+};
+
 // ── the scenario table ───────────────────────────────────────────────────────
 // authed:   whether mock.js should seed a session token (false = logged out).
 // deepLink: the hash a shot / smoke should open to exercise the scenario's view.
@@ -590,6 +623,24 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       usage: quotaBarsUsage,
+    },
+  },
+  // ── Wave 3: Overview fleet usage strip (OC16/OC18/OC6) ────────────────────
+  // Open Overview and the whole fleet's usage answers instantly from cached
+  // samples: a team headline over its instance ceiling (with Manage-plan), a
+  // fresh row, an hours-stale row, and a no-sample row — all four honest states
+  // in one shot. The strip reads /v1/usage/summary, never a live fan-out.
+  "fleet-usage": {
+    label: "Overview fleet usage strip — over headline + fresh / stale / no-sample cells",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, behindInstance, suspendedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      usageSummary: fleetUsageSummary,
     },
   },
   // ── rollback/redeploy (charter D7 + D25) ──────────────────────────────────
@@ -897,6 +948,13 @@ export function route(name, method, path) {
     return d.auditDenied
       ? { status: 403, body: { error: "forbidden" } }
       : { status: 200, body: { events: d.audit } };
+  }
+
+  // Wave 3 (OC16): the fleet usage SUMMARY — the cached-sample read the Overview
+  // strip paints. A scenario without a `usageSummary` fixture answers the honest
+  // empty shape (no team meter, no rows → the strip hides itself).
+  if (p === "/v1/usage/summary") {
+    return { status: 200, body: { usage: d.usageSummary || { team: {}, instances: [] } } };
   }
 
   // C10/OC7: the instance usage envelope (the meter wall the Usage sub-tab paints).

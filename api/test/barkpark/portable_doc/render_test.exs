@@ -1036,10 +1036,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Parchment background, terracotta left-border, horizontal scroll —
       # now emitted through `var(--paper-*, hex)` for dark-mode theming.
       assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
-      # S9: geometry is now token-bound (--bp-codeblock-*), accent colour still
-      # binds --paper-accent for dark-mode theming.
+      # S8 (au-eg): geometry is token-bound (--bp-codeblock-*); the code bar is a
+      # reading-character cue (TUI twin ReadingAccent), so its accent now binds the
+      # terracotta --paper-reading-accent (color.reading-accent), not the evergreen
+      # chrome --paper-accent.
       assert html =~
-               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #1e5347)"
+               "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925)"
 
       assert html =~ "font-size:var(--bp-codeblock-size, 0.9rem)"
       assert html =~ "overflow-x:auto"

@@ -5,9 +5,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`). `Barkpark.Content` calls `recompute/1`
   on every `"sheet"` save, so HTTP mutations persist computed values and the
   write-through snapshots project them into embeds with zero renderer
-  changes. Pure functions: no Repo, no I/O — except `TODAY`/`NOW`, which
-  read the wall clock and are therefore volatile-as-of-last-save (they
-  recompute only when the sheet is saved, not on every read).
+  changes. Pure functions: no Repo, no I/O — except `TODAY`/`NOW` (which read
+  the wall clock) and `RAND`/`RANDBETWEEN` (which draw from a fresh
+  per-recompute seed): all four are volatile-as-of-last-save — they recompute
+  only when the sheet is saved, not on every read. A RAND draw is a PURE
+  function of `{recompute-seed, tab, col, row}`, so it is identical across
+  every phase of a multi-phase (spill) recompute — a spill anchor and its
+  dependents persist the same draw — yet fresh on the next save; process-global
+  `:rand` state is never touched.
 
   ## Canonical formula form
 
@@ -363,6 +368,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @max_col 16_384
   @max_row 1_048_576
 
+  # Hard cap on the spill re-topo fixpoint (charter D3). Each phase widens spill
+  # visibility by one dependency level, so a chain of depth d settles in d+1
+  # phases; ten covers any realistic nesting. The loop is NOT provably monotone
+  # (a pathological anchor could oscillate between #SPILL! and a region), so the
+  # cap is load-bearing: on exhaustion recompute falls back to the last computed
+  # map rather than hanging.
+  @spill_max_phases 10
+
   # Guard on pure array generation (SEQUENCE): a rows*cols request beyond this
   # is #NUM!, so a fat-fingered SEQUENCE(1000000) can't materialise a runaway
   # intermediate list.
@@ -378,7 +391,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 EXACT FIND SEARCH SUBSTITUTE REPLACE REPT PROPER VALUE
                 ISBLANK ISNUMBER ISTEXT ISLOGICAL ISERROR ISERR ISNA
                 CHOOSE SWITCH IFS
-                DATE YEAR MONTH DAY TODAY NOW
+                DATE YEAR MONTH DAY TODAY NOW RAND RANDBETWEEN
                 NA COUNTIF SUMIF AVERAGEIF
                 VLOOKUP MATCH INDEX
                 COUNTIFS SUMIFS AVERAGEIFS
@@ -599,6 +612,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       fspec("DAY", [farg("date")], "Returns the day of the month of a date."),
       fspec("TODAY", [], "Returns the current date."),
       fspec("NOW", [], "Returns the current date and time."),
+      fspec("RAND", [], "Returns a random number in [0, 1), fresh on each save."),
+      fspec(
+        "RANDBETWEEN",
+        [farg("bottom"), farg("top")],
+        "Returns a random integer between bottom and top, inclusive."
+      ),
       fspec("NA", [], "Returns the #N/A error value."),
       fspec(
         "COUNTIF",
@@ -962,20 +981,46 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @spec recompute(term()) :: term()
   def recompute(%{"tabs" => tabs} = content) when is_list(tabs) do
     name_index = tab_name_index(tabs)
+    # ONE seed per recompute invocation, threaded into every cell's ctx so a
+    # RAND/RANDBETWEEN draw is stable across all recompute phases within this
+    # save (pure per {seed, tab, col, row}) yet fresh on the next.
+    seed = rand_recompute_seed()
 
     if needs_unified?(tabs, name_index) do
       # Any cross-tab reference forces ONE unified {tab,col,row} graph over
       # every formula cell of every tab (CT-D4); cross-tab cycles fall out as
-      # ordinary Kahn leftovers. See recompute_unified/3.
-      recompute_unified(content, tabs, name_index)
+      # ordinary Kahn leftovers. See recompute_unified/4.
+      recompute_unified(content, tabs, name_index, seed)
     else
       # Zero cross-tab references → the per-tab fast path, byte-for-byte the
       # legacy behaviour (each tab recomputed in isolation).
-      Map.put(content, "tabs", Enum.map(tabs, &recompute_tab/1))
+      new_tabs =
+        tabs
+        |> Enum.with_index()
+        |> Enum.map(fn {tab, ti} -> recompute_tab(tab, ti, seed) end)
+
+      Map.put(content, "tabs", new_tabs)
     end
   end
 
   def recompute(content), do: content
+
+  # A fresh integer for each recompute/1 call: unique_integer guarantees a new
+  # value on every call within the node (so two saves reseed and RAND is
+  # volatile between them), system_time keeps it fresh across restarts.
+  defp rand_recompute_seed do
+    :erlang.unique_integer([:positive]) + :erlang.system_time(:nanosecond)
+  end
+
+  # One uniform draw in [0, 1), pure in the cell's identity: seed the exsss
+  # generator (a **-scrambled algorithm, decorrelated on its first output) with
+  # {seed, tab, cell} and take a single value. col/row fold into one integer —
+  # row is grid-bounded (< 2_000_000) so the 3-int seed tuple stays unique per
+  # cell — and :exsss_seed rejects a 4-tuple, hence the fold.
+  defp rand_unit(seed, tab, col, row) do
+    {v, _} = :rand.uniform_s(:rand.seed_s(:exsss, {seed, tab, col * 2_000_000 + row}))
+    v
+  end
 
   @doc false
   # Would recompute/1 take the unified cross-tab path? The regression lock in
@@ -987,11 +1032,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   def uses_cross_tab?(_), do: false
 
-  defp recompute_tab(%{"cells" => cells} = tab) when is_map(cells) and map_size(cells) > 0 do
-    Map.put(tab, "cells", recompute_cells(cells))
+  defp recompute_tab(%{"cells" => cells} = tab, ti, seed)
+       when is_map(cells) and map_size(cells) > 0 do
+    Map.put(tab, "cells", recompute_cells(cells, ti, seed))
   end
 
-  defp recompute_tab(tab), do: tab
+  defp recompute_tab(tab, _ti, _seed), do: tab
 
   # ── cross-tab routing ───────────────────────────────────────────────────────
 
@@ -1065,7 +1111,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # cross-tab edges and detects cross-tab cycles as residual-in-degree leftovers
   # (no new cycle algorithm — the per-tab rule generalises for free).
 
-  defp recompute_unified(content, tabs, name_index) do
+  defp recompute_unified(content, tabs, name_index, seed) do
     # Gather, across ALL tabs: per-tab occupied sets, a global {tab,col,row}
     # value map (literals), and the parsed formula nodes.
     {occupied, values, parsed} =
@@ -1119,28 +1165,26 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         unified: true,
         values: values,
         occupied: occupied,
-        formulas: parsed |> Map.keys() |> MapSet.new()
+        formulas: parsed |> Map.keys() |> MapSet.new(),
+        seed: seed
       }
 
       queue = for {key, 0} <- in_deg, do: key
       {computed, residual} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base)
       computed = mark_cycles(computed, residual)
 
-      # Two-phase spill in the cross-tab graph, identical to the fast path: a
-      # spill inside a cross-tab document still distributes and its readers see
-      # the region in phase 2 (spill keys carry the tab index).
-      computed =
-        if any_array_result?(computed) do
-          spill = unified_spill_map(tabs, parsed, computed)
-          base2 = with_spill(base, spill)
+      # N-phase spill fixpoint in the cross-tab graph, identical to the fast
+      # path (charter D3): a spill inside a cross-tab document distributes and
+      # its readers see the region, and a spill chain crossing tabs converges
+      # instead of stalling one level per phase. Spill keys carry the tab index.
+      recompute = fn base_k ->
+        {c, residual} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base_k)
+        mark_cycles(c, residual)
+      end
 
-          {computed2, residual2} =
-            topo_unified(queue, computed0, in_deg, out_edges, node_asts, base2)
+      spill_of = fn c -> unified_spill_map(tabs, parsed, c) end
 
-          mark_cycles(computed2, residual2)
-        else
-          computed
-        end
+      computed = spill_fixpoint(computed, base, spill_of, recompute)
 
       write_back_unified(content, tabs, parsed, computed)
     end
@@ -1217,7 +1261,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       occupied: base.occupied,
       formulas: base.formulas,
       self: {c, r},
-      spill: Map.get(base, :spill)
+      spill: Map.get(base, :spill),
+      seed: base.seed
     }
 
     computed = Map.put(computed, key, eval(ast, ctx))
@@ -1314,7 +1359,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # ── recompute pipeline ──────────────────────────────────────────────────────
 
-  defp recompute_cells(cells) do
+  defp recompute_cells(cells, tab_index, seed) do
     entries =
       for {addr, cell} <- cells, is_map(cell), reduce: [] do
         acc ->
@@ -1353,28 +1398,35 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       base = %{
         values: values,
         occupied: occupied,
-        formulas: parsed |> Map.keys() |> MapSet.new()
+        formulas: parsed |> Map.keys() |> MapSet.new(),
+        seed: seed,
+        tab: tab_index
       }
 
       queue = for {pos, 0} <- in_deg, do: pos
       {computed, residual} = topo(queue, computed0, in_deg, out_edges, node_asts, base)
       computed = mark_cycles(computed, residual)
 
-      # Two-phase spill (design §3.3): when a formula's top-level result spills,
-      # phase 1 (above) fixes every anchor's array; phase 2 re-evaluates with the
-      # materialised spill map visible via cell_at, so a reader (`=A2`) sees the
-      # spilled value and a range over an anchor reads its top-left, not the whole
-      # array. Bounded — ONLY when array formulas are present; a zero-array
-      # document never enters this branch and stays single-pass byte-identical.
-      computed =
-        if any_array_result?(computed) do
-          {_cells, spill} = spill_distribution(cells, parsed, computed)
-          base2 = with_spill(base, spill)
-          {computed2, residual2} = topo(queue, computed0, in_deg, out_edges, node_asts, base2)
-          mark_cycles(computed2, residual2)
-        else
-          computed
-        end
+      # N-phase spill fixpoint (design §3.3, charter D3): when a formula's
+      # top-level result spills, re-topo with the materialised spill map visible
+      # via cell_at until that map stops changing, so a reader (`=A2`) sees the
+      # spilled value and — critically — a spill whose SOURCE is itself spilled
+      # (`E1=SORT(C1:C3)` where `C1=SORT(A1:A3)`) converges instead of reading a
+      # stale, one-level-behind region. Bounded — ONLY when array formulas are
+      # present; a zero-array document never enters and stays single-pass
+      # byte-identical (regression lock). Depth-1 settles in exactly one extra
+      # phase, byte-identical to the prior two-phase engine.
+      recompute = fn base_k ->
+        {c, residual} = topo(queue, computed0, in_deg, out_edges, node_asts, base_k)
+        mark_cycles(c, residual)
+      end
+
+      spill_of = fn c ->
+        {_cells, spill} = spill_distribution(cells, parsed, c)
+        spill
+      end
+
+      computed = spill_fixpoint(computed, base, spill_of, recompute)
 
       write_back(cells, parsed, computed)
     end
@@ -1414,7 +1466,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       occupied: base.occupied,
       formulas: base.formulas,
       self: pos,
-      spill: Map.get(base, :spill)
+      spill: Map.get(base, :spill),
+      seed: base.seed,
+      tab: base.tab
     }
 
     computed = Map.put(computed, pos, eval(ast, ctx))
@@ -1474,6 +1528,44 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp spillable_array?(_), do: false
 
   defp any_array_result?(computed), do: Enum.any?(computed, fn {_k, v} -> spillable_array?(v) end)
+
+  # The spill re-topo fixpoint shared by BOTH recompute paths (charter D3). The
+  # zero-array guard is preserved here — a document with no top-level array
+  # result never re-topos and stays single-pass byte-identical (regression
+  # lock). Otherwise iterate { spill_k = spill_of(computed_k); computed_k+1 =
+  # recompute(with_spill(base, spill_k)) } until the spill map stops changing.
+  # `spill_of` and `recompute` are the per-path closures (fast: spill_distribution
+  # + topo; unified: unified_spill_map + topo_unified), so ONE fixpoint drives
+  # both — fixing only one path would silently leave cross-tab depth-2 broken.
+  # Only the returned (final) computed map is written back, so a transient
+  # #SPILL! from an intermediate phase is never persisted.
+  defp spill_fixpoint(computed, base, spill_of, recompute) do
+    if any_array_result?(computed) do
+      converge_spill(computed, nil, base, spill_of, recompute, @spill_max_phases)
+    else
+      computed
+    end
+  end
+
+  # Drive the fixpoint to a stable spill map or the hard cap. On `spill == prev`
+  # the region has settled — return the current computed (its readers already saw
+  # this exact map). On fuel exhaustion fall back to the last computed rather
+  # than looping: the iteration is not provably monotone, so the cap guarantees
+  # termination for any input.
+  defp converge_spill(computed, _prev_spill, _base, _spill_of, _recompute, 0), do: computed
+
+  defp converge_spill(computed, prev_spill, base, spill_of, recompute, fuel) do
+    spill = spill_of.(computed)
+
+    if spill == prev_spill do
+      computed
+    else
+      base
+      |> with_spill(spill)
+      |> recompute.()
+      |> converge_spill(spill, base, spill_of, recompute, fuel - 1)
+    end
+  end
 
   # Phase-2 base: expose the materialised spill map to cell_at AND fold the
   # spilled positions into the occupied set so a RANGE aggregate over a spill
@@ -3079,6 +3171,36 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp call("TODAY", [], _ctx), do: Date.utc_today()
   defp call("NOW", [], _ctx), do: DateTime.utc_now()
+
+  # RAND/RANDBETWEEN are volatile-as-of-last-save (see moduledoc): the draw is a
+  # PURE function of the per-recompute seed and the cell's own {tab, col, row},
+  # so a multi-phase spill recompute yields the identical value in every phase
+  # (no process-global :rand state), yet the next save reseeds. A single cell
+  # carrying more than one volatile draw shares that one per-cell draw by design.
+  defp call("RAND", [], ctx) do
+    {c, r} = ctx.self
+    rand_unit(ctx.seed, ctx.tab, c, r)
+  end
+
+  defp call("RANDBETWEEN", [lo_ast, hi_ast], ctx) do
+    with lo when is_number(lo) <- eval_number(lo_ast, ctx),
+         hi when is_number(hi) <- eval_number(hi_ast, ctx) do
+      lo = trunc(lo)
+      hi = trunc(hi)
+
+      if lo > hi do
+        err(:num)
+      else
+        {c, r} = ctx.self
+        # min-clamp: for astronomically wide ranges (span near 2^53) the float
+        # product `v * (hi - lo + 1)` can round UP to the span itself, which
+        # would emit hi + 1 — clamp so the inclusive contract always holds.
+        min(lo + trunc(rand_unit(ctx.seed, ctx.tab, c, r) * (hi - lo + 1)), hi)
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
 
   # HOUR/MINUTE/SECOND read the time component the way YEAR/MONTH/DAY read the
   # date component; a pure date reads midnight (all three are 0).

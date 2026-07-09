@@ -69,18 +69,30 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 		Version: cliVersion,
 	}, nil)
 
-	// The curated five task tools are ALWAYS registered — they are the point of
-	// this server. --tools all additionally exposes every other bp capability as a
-	// generic tool via the bridge (bridge slice owns registerBridgeTools).
+	// The curated six task tools are the point of this server and register under
+	// both toolsets. --tools all additionally exposes every other bp capability
+	// as a generic tool via the bridge (bridge slice owns registerBridgeTools).
 	// Headless liveness (charter decision 5): tool handlers ride the guard-free
 	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a
 	// stdin-reading confirm prompt would hang a server whose stdin is the
 	// protocol pipe.
 	g.yes = true
 
+	// Under the default --tools tasks the curated task tools ARE the server, so a
+	// missing task verb is fatal (fail fast, decision 10). Under --tools all the
+	// bridge exposes whatever the manifest DOES carry, so a tasks-less instance is
+	// served bridge-only after a stderr warning rather than refused — a Barkpark
+	// with the Tasks plugin off still gets a useful MCP surface. registerTaskTools
+	// batches every verb Lookup before the first AddTool, so a failure leaves
+	// NOTHING half-registered on srv; and bridgeShadowedIDs is inert when the
+	// task verbs are absent (there is no twin to skip) — so continuing is safe.
 	if err := registerTaskTools(srv, g, ctx, m); err != nil {
-		out.userErr("mcp serve: register task tools: %v", err)
-		return exitGeneric
+		if toolset != "all" {
+			out.userErr("mcp serve: register task tools: %v", err)
+			return exitGeneric
+		}
+		// stderr only — os.Stdout is the JSON-RPC protocol stream (decision 4).
+		out.errf("mcp serve: curated task tools unavailable (%v) — serving --tools all bridge-only", err)
 	}
 	if toolset == "all" {
 		if err := registerBridgeTools(srv, g, ctx, m); err != nil {
@@ -88,6 +100,13 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 			return exitGeneric
 		}
 	}
+
+	// Published papers as read-only MCP resources — independent of --tools (the
+	// 40-tool Cursor cap is about TOOLS, not resources). Wholly best-effort: it
+	// registers the read template and enumerates the published papers for
+	// resources/list, warning to stderr and degrading to template-only on any
+	// failure (unreachable API, missing doc verbs) — never fatal to startup.
+	registerPaperResources(out, srv, g, ctx, m)
 
 	// Announce readiness on stderr (never stdout — that pipe is the protocol).
 	out.errf("bp mcp serve: %s tools over stdio (server %s) — Ctrl-C to stop", toolset, ctx.Server)
@@ -153,9 +172,12 @@ func printMCPServeHelp(out *writer) {
 
 flags:
   --tools tasks|all   Which tools to expose. "tasks" (default) is the curated
-                      five — task_ready, task_next, task_show, task_close,
-                      task_create. "all" additionally bridges every other bp
-                      capability into a generic tool.
+                      six — task_ready, task_next, task_show, task_close,
+                      task_create, task_prime. "all" additionally bridges every
+                      other bp capability into a generic tool.
+
+Published papers are also exposed as read-only MCP resources
+(barkpark://papers/<id>), independent of --tools.
 
 The server resolves its target Barkpark the same way every other bp command
 does (-s / --token / BARKPARK_* env / saved config). Register it in Cursor via

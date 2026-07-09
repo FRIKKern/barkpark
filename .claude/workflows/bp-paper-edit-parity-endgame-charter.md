@@ -75,3 +75,103 @@ Slices land as `loop-epic/parity-<slice>` branches. Integrate in the order above
 share index.js + paper_editor.ex partition + convert.js → source-union + REBUILD
 the bundle once). Full suite (baseline ~7400/0) + mirror-check + status-manifest +
 the extended parity gates. Lead browser-verifies each on localhost:4000 before PR.
+
+## Wave 2 candidates — the pass-2 divergence audit (W1.4, 2026-07-09)
+
+Method: dual-rendered the 91-block `portabledoc-showcase` (50 distinct block
+types). READER via the standalone harness `cd api && mix run --no-start
+scripts/pass2_audit_harness.exs` (calls `Render.render_block(block, %{style:
+:article})` — the SAME call the canvas paint makes — never `mix phx.server`);
+EDIT at spec/source level (node-view `renderHTML` / `dom.className`, node-views
+can't mount headless). Every block type classified into four buckets:
+
+**A. SERVER-PAINTED-BY-CONSTRUCTION** (reader HTML painted into the canvas or
+carried verbatim — parity by construction, gated). NO wave-2 slice.
+`figure` (child rides `bpChild` verbatim → `data-bp-fleet-body` paint hole,
+figure-node.js:156-174), `task-list` (rows are the ONE server producer via
+TaskResolver → `data-bp-fleet-body`, task-list-node.js:196-215), `diagram`
+(edit island edits source, reader renders the figure — fleet §1,
+diagram-node.js:205-224), and the verbatim chips `tasks`/`task-board`/`roadmap`/
+`task-detail`/`cards`/`notes`/`pipeline`/`status-legend`/`form`/`asciicast`/
+`sheet`/`embed`. Gate: `canvas_reader_parity_gate_test.exs` §1/§3/§4.
+
+**B. GATED editable node-views** (each has a dedicated source-level edit⇄reader
+parity assertion). NO wave-2 slice. `divider` (S1, `__divider_parity.test.mjs`,
+14 parity refs; + W1.1 value-lockstep `view_edit_parity_test.exs` §8 binding the
+figures.ex inline decls to the edit CSS), `callout` (S2-S3,
+`__callout_parity.test.mjs`, 22 refs), `code` (S9, `__code_interior.test.mjs`,
+10 refs) — and, landed THIS wave: `section` (W1.3 `__section_parity.test.mjs` +
+the rewritten Elixir §6/§6b tripwire), `table` (W1.2 `__table_parity.test.mjs`).
+
+**C. PROSE** (paragraph/heading/list/eyebrow/byline/ingress/pullquote + fields):
+bare semantic tags, styled by the shared surface CSS; locked by
+`view_edit_parity_test.exs` (element-rule byte-compare) + W1.2
+`__role_parity.test.mjs` (the 4 role node-views provably emit the reader's
+`<p class="bp-role-*">`). NO wave-2 slice.
+
+**D. UNGATED DIVERGENCE** — post-07-07 structural node-views wrap reader-shaped
+inner DOM in `bp-canvas-*` chrome with a **round-trip-only** test (`run-convert`
+diff, ZERO reader-parity refs) and **no** structural edit⇄reader assertion. These
+are the wave-2 slices — each adds a `__<block>_parity.test.mjs` in the S1/S2/S9
+mould (assert the node-view `renderHTML`/`dom` source matches the reader emitter's
+tags + classes). The two `LIVE BUG` rows also have a filed parity bug task.
+
+| # | Slice | Reader emits (file:line) | Edit node-view emits (file:line) | Divergence / why ungated |
+|---|---|---|---|---|
+| S10 | **card-slot-parity** `LIVE BUG` | `Components.card_html/2` — bare `<h_>`/`<p>`/`<img>`/`<a>` under `<div class="bp-card[ --tone]">`, "no bp-card__ chrome" (components.ex:328,349-364) | `bp-canvas-card bp-card` with children wrapped in `bp-card__t`/`__d`/`__media`/`__action` (card-node.js:157-161,236) | Edit mirrors the LEGACY `cards` fleet chrome (`Components.cards_html`, components.ex:308-310), NOT the reader `card` widget. Shared CSS `.bp-card h3` vs `.bp-card__t` will not cross-apply → wrong look. `__cards.test.mjs` is round-trip only. |
+| S11 | ~~section-grid-parity~~ **CLOSED by W1.3** | `bp-section__grid` (`--bp-tracks`, `--bp-grid-gap`) with `bp-section__cell` per child (compose.ex ~1415-1433) | grid mode DOES swap the body to the shared `bp-section__grid` + track vars (section-node.js:358-359 — the audit's original "plain body" claim was wrong; only the per-child `bp-section__cell` WRAPPER is absent, its `min-width:0` now mirrored onto the item) | W1.3 `__section_parity.test.mjs` locks title/body/grid-class/min-width + reconcile-or-justify for all 3 micro-divergences; Elixir §6/§6b pin the wiring. Residual (documented, not gated): the cell's `> :first-child { margin-top:0 }`. |
+| S12 | **note-island-parity** | `bp-note` › `bp-note__k` (span) + `bp-note__d` (`<b>` lead + body) | `bp-canvas-note` › `bp-canvas-note__k`/`__lead`/`__body` inputs — its OWN class family, never the reader's `bp-note*` (note-node.js:119-134) | Two separate CSS producers hand-matched for one look; no assertion the island resembles `bp-note`. `__note.test.mjs` round-trip only. |
+| S13 | **stage-island-parity** | `bp-pnode[ bp-pnode--src]` › `bp-pnode__k`/`__t`/`__d` (`Components.pipeline_html`) | `bp-canvas-stage[ --src]` with inputs (stage-node.js:143-197) | DESIGN-1 mandates `bp-canvas-stage` (§7 asserts only the NEGATIVE — no `bp-pnode` leak); nothing asserts the POSITIVE look-parity to `bp-pnode`. |
+| S14 | **columns-parity-assertion** | `<div class="bp-cols" style="--bp-cols:N">` › `bp-cols__c` (walk/compose) | `renderHTML` `class:"bp-cols"` (columns-node.js:115-121), `bp-cols__c` (:150), non-first-class child → `bp-cols__atom` (:250) | Reuses reader classes (parity by construction) but `__columns.test.mjs` has 0 reader-parity refs — a reader `bp-cols` restructure or a node drift ships silently. |
+| S15 | **terminal-parity-assertion** | `bp-term` › `bp-term__bar`(`__dots`/`__title`/`__live`) + `bp-term__body` + `bp-term__foot` | `bp-term bp-canvas-term` › `bp-term__bar`/`__title`(input)/`__live` (terminal-node.js:178-205) | Reuses reader classes; `__terminal.test.mjs` is round-trip only (1 ref). Verify `__body`/`__foot` structural coverage. |
+| S16 | ~~table-parity-assertion~~ **CLOSED by W1.2** | `<table role="presentation" class="bp-table">` › `thead`/`tbody` › `bp-table__th`/`__td` (walk.ex:908-952) | `bp-canvas-table` wrapper + `table.bp-table` + col/row rails (table-node.js:243,270-285) | W1.2 `__table_parity.test.mjs` freezes the shared `.bp-table*` bindings + justifies the thead-drop and the `bp-canvas-table__*` rails as edit-only islands. Residual (flagged, a11y-only): edit `<table>` omits the reader's `role="presentation"`. |
+| S17 | **action-preview-parity** | `<a class="bp-button[ bp-button--primary]">` | `bp-canvas-action` with a LIVE `bp-button` preview + edit islands (action-node.js:14-15,187-206) | Preview reuses reader classes but no test pins the preview to the reader button emitter. |
+
+**Filed bugs** (under `paper-edit-parity-endgame`): S10 card-slot mismatch
+(`parity2-bug-card-slot-chrome`); the `task-detail` reader has NO empty-state —
+an unresolved task-detail returns `""` while sibling widgets render
+`bp-tasks--empty` (components.ex:80-83,106 vs :39) (`parity2-bug-taskdetail-empty-state`).
+
+Integration: S10/S12/S13 are self-contained (card/note/stage node-views — no
+shared partition). S14/S15/S17 add assertions only (no node-view edit) → can
+batch. S11/S16 CLOSED this wave (W1.3/W1.2). Take the LIVE-BUG slice S10 first.
+
+## Wave log
+
+### Wave 2026-07-09 (pass-2 wave 1 — S1-S4 self-contained gates + audit)
+
+**Landed (4/4 green, reviewer-verified + mutation-spot-checked):**
+
+- **W1.1 divider value-lockstep** — `view_edit_parity_test.exs` §8 byte-binds
+  the reader's inline `section_divider_html/0` decls (figures.ex) to the
+  `.bp-section-divider*` CSS in root.html.heex + styles.css (var-fallbacks
+  stripped) + parser-sanity guard. Branch
+  `loop-epic/w1-1-divider-value-lockstep-gate-figures-0-r` (reviewer: mix format).
+- **W1.2 roles+table edit-DOM gates** — `__role_parity.test.mjs` (4 roles emit
+  the reader's `<p class="bp-role-*">`, chrome-free, bp-attrs survive, pullquote
+  italic) + `__table_parity.test.mjs` (`.bp-table*` bindings frozen; thead-drop
+  + `bp-canvas-table__*` rails justified as edit-only islands). Branch
+  `loop-epic/parity-roles-table-dom` (clean — no reviewer fixes).
+- **W1.3 section parity gate** — `__section_parity.test.mjs` (11 checks) with
+  reconcile-or-justify for the 3 micro-divergences; RECONCILED: grid items now
+  mirror the reader cell's `min-width:0` (section-node.js applyCellPlacement);
+  Elixir §6 rewritten to a tripwire + §6b pins the mjs wiring. Branch
+  `loop-epic/w1-3-section-parity-gate-mounted-shape-a-2-r` (reviewer: mix format).
+- **W1.4 pass-2 audit** — dual-rendered the 91-block showcase (50 types) via
+  `api/scripts/pass2_audit_harness.exs`; the Wave-2 candidates table above.
+  Reviewer corrected S11 (main DOES paint `bp-section__grid`, section-node.js:358)
+  and marked S11/S16 CLOSED by this wave's own W1.3/W1.2. Bugs filed:
+  `parity2-bug-card-slot-chrome`, `parity2-bug-taskdetail-empty-state`. Branch
+  `loop-epic/w1-4-pass-2-divergence-audit-dual-render-3-r`.
+
+**Integration notes for the lead:** W1.2 + W1.3 both append to package.json's
+one-line `test` chain → expect a trivial same-line conflict; keep BOTH new
+entries. Merge-gated "PR merged" criteria stay open on all 4 tasks — lead closes
+on merge. Lead browser-verifies W1.3 via the static harness before PR. Elixir
+changes (W1.1/W1.3) wait for the Elixir Test gate before merge.
+
+**Next wave:** S10 card-slot chrome (LIVE BUG — edit card mirrors the legacy
+`cards` fleet chrome, not the reader `card` widget; restructure card-node.js
+slots to bare semantic children) + S12 note / S13 stage island parity (self-
+contained node-views), then batch the assertion-only S14/S15/S17. Also decide
+`parity2-bug-taskdetail-empty-state` (reader-side `bp-tasks--empty` fix, tiny).

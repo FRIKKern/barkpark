@@ -299,6 +299,8 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case changeMsg:
 		return m.handleChange(msg)
 	case pulseMsg:
@@ -399,6 +401,23 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// setHoverTarget is the whole flicker discipline for the mouse hover tint
+// (charter D95, the never-flickers law). It stores the ttm-s1-resolved pointer
+// target (a selectable row's Ref, "" when the pointer is over nothing
+// selectable) and reports whether it CHANGED. The hover-changed guard IS the
+// debounce: bubbletea's cell-motion reporting fires one Motion MouseMsg per cell
+// the pointer crosses, but every Motion that resolves to the SAME row returns
+// changed=false, so the caller short-circuits the re-render — no timer, no new
+// cadence, the 100ms heartbeat stays armed only while Alive(). A "" target
+// clears the tint (the pointer left every selectable row, or a key was pressed).
+func setHoverTarget(st UIState, target string) (UIState, bool) {
+	if target == st.HoverTarget {
+		return st, false
+	}
+	st.HoverTarget = target
+	return st, true
+}
+
 // handleKey is the navigation-shell dispatcher (charter D29): two navigation
 // domains, one entry point keyed on the stack-top frame kind. The BOARD frame
 // (level 0) keeps its native grammar unchanged; a pushed reading frame
@@ -415,6 +434,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingClose = ""
 	}
 	m.ui.Strip = ActionStrip{}
+	// Any key yields the hover tint back to the keyboard (charter D95): the mouse
+	// pointer's highlight clears the moment the user reaches for the keyboard, so
+	// the two input modes never fight over the selection. Routed through the same
+	// guard the pointer uses, so a board with no active hover pays nothing.
+	m.ui, _ = setHoverTarget(m.ui, "")
 
 	switch key {
 	case "ctrl+c", "q":
@@ -422,6 +446,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		(&m).popFrame()
 		return m, nil
+	case "M":
+		return m.toggleMouse()
 	}
 
 	if m.topFrame().Kind == FrameBoard {
@@ -540,6 +566,261 @@ func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
 		return m.openTask(t)
 	}
 	return m, nil
+}
+
+// ── Mouse (charter wave-16, D89–D96) ─────────────────────────────────────────
+//
+// One entry point mirroring handleKey, FUSED from the wave's slices: the
+// compose-level hit map (ComposeHitMap, ttm-s1) resolves a click's Y to a
+// LineTarget so NO coordinate math lives here; footer verbs (ttm-s4) are the
+// one exception, hit-tested by their own X-spans BEFORE the map (the footer is
+// chrome in the map, so span order matters). Wheel rides the keyboard motions
+// verbatim (#1878's 1-line spine slide on the board, free-scroll in a reading
+// frame), a left press selects then activates, and a press on a scroll
+// affordance is one wheel step. Motion is hover (ttm-s3 rows + ttm-s4 footer
+// verbs) behind change-only mutation; wide two-pane is ttm-s5. A terminal
+// without mouse reporting simply never reaches here — the keyboard flow is
+// untouched.
+
+// handleMouse is the ONE mouse reducer. Order is load-bearing:
+//
+//  1. MouseReleased guard (ttm-s4): mouse reporting is off (M) — a straggler
+//     event from the instant before DisableMouse landed must not act or hover.
+//  2. Motion = HOVER (ttm-s3 rows + ttm-s4 footer verbs), change-only mutation
+//     (never-flickers, charter D95).
+//  3. Button RELEASES are ignored (a press already acted; disarming on the
+//     paired release would defeat a press-armed two-step — ttm-s4's two-click
+//     close).
+//  4. A left press hit-tests the footer verbs FIRST (clickFooterVerb owns the
+//     x-exception disarm rule), then falls through to the hit map.
+//
+// Everything past the verb check is non-x input, so — exactly like handleKey —
+// it clears the transient action strip and disarms the close guard before
+// acting.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.ui.MouseReleased {
+		return m, nil
+	}
+	if m.wide {
+		// ttm-s5: the ≥110-col two-pane frame routes by pure X/Y over the SAME
+		// geometry composeAt paints — board pane / dead gutter / right pane.
+		return m.handleWideMouse(msg)
+	}
+	if msg.Action == tea.MouseActionMotion {
+		return m.mouseMotion(msg.X, msg.Y)
+	}
+	if msg.Action == tea.MouseActionRelease {
+		return m, nil // the press acted; the release is not an input of its own
+	}
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		if verb, ok := m.footerVerbAt(msg.X, msg.Y); ok {
+			return m.clickFooterVerb(verb)
+		}
+	}
+	m.pendingClose = ""
+	m.ui.Strip = ActionStrip{}
+
+	switch {
+	case msg.Button == tea.MouseButtonWheelUp:
+		return m.mouseWheel(-1)
+	case msg.Button == tea.MouseButtonWheelDown:
+		return m.mouseWheel(1)
+	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
+		return m.mouseLeftPress(msg.Y)
+	}
+	return m, nil
+}
+
+// mouseMotion is pointer hover: resolve the pointer against the footer-verb
+// X-spans (ttm-s4) and the compose-level hit map's selectable row (ttm-s3, the
+// row's Ref into UIState.HoverTarget). Board frame only this wave (reading
+// rails have no hover tint yet — an honest gap, not a bug). Change-only
+// mutation IS the debounce (charter D95): the all-motion firehose emits one
+// event per cell crossed, but a Motion that resolves to the same row AND the
+// same verb returns the model unchanged, so the renderer diff repaints
+// nothing. Anything that is not a selectable board row or a footer verb —
+// chrome, separators, scroll affordances, a reading frame — resolves to
+// ""/0 and clears the tint.
+func (m Model) mouseMotion(x, y int) (tea.Model, tea.Cmd) {
+	target := ""
+	if m.topFrame().Kind == FrameBoard {
+		hits := m.ComposeHitMap()
+		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
+			rows := m.visibleRows()
+			if idx := hits[y].CursorIndex; idx >= 0 && idx < len(rows) {
+				target = rows[idx].docID
+			}
+		}
+	}
+	verb := rune(0)
+	if v, ok := m.footerVerbAt(x, y); ok {
+		verb = v
+	}
+	ui, changed := setHoverTarget(m.ui, target)
+	if verb != ui.HoverFooterVerb {
+		ui.HoverFooterVerb = verb
+		changed = true
+	}
+	if !changed {
+		return m, nil
+	}
+	m.ui = ui
+	return m, nil
+}
+
+// mouseWheel is one wheel notch: on the board it steps the cursor (moveCursor),
+// which rides SpineTopFor/slideTop for the #1878 1-line slide (a scroll-only
+// wheel is impossible — Update force-syncs SpineScroll every message); in a
+// reading frame it free-scrolls the prose one line WITHOUT moving the stop
+// cursor. This is the SAME state a j/k keypress (board) or a space/u/d
+// free-scroll (reading) reaches, so wheel and keyboard never disagree.
+func (m Model) mouseWheel(delta int) (tea.Model, tea.Cmd) {
+	if m.topFrame().Kind == FrameBoard {
+		(&m).moveCursor(delta)
+		return m, nil
+	}
+	(&m).freeScroll(delta)
+	return m, nil
+}
+
+// mouseLeftPress resolves a click's Y through the compose-level hit map and acts:
+// a scroll affordance = one wheel step; a spine row = select-then-activate. An out
+// -of-range Y or a chrome/none line is an honest no-op.
+func (m Model) mouseLeftPress(y int) (tea.Model, tea.Cmd) {
+	hits := m.ComposeHitMap()
+	if y < 0 || y >= len(hits) {
+		return m, nil
+	}
+	switch tgt := hits[y]; tgt.Kind {
+	case LineScrollUp:
+		return m.mouseWheel(-1)
+	case LineScrollDown:
+		return m.mouseWheel(1)
+	case LineSpineRow:
+		if m.topFrame().Kind == FrameBoard {
+			return m.boardClickSelect(tgt.CursorIndex)
+		}
+		return m.readingClickSelect(tgt.CursorIndex)
+	}
+	return m, nil
+}
+
+// boardClickSelect is a left press on a board spine row: select it, or — if it is
+// ALREADY the cursor row — activate it (activateBoard: descend a task, fold/unfold
+// a section header). A double-click is two presses, so the second press lands on
+// the now-selected row and activates for free.
+func (m Model) boardClickSelect(idx int) (tea.Model, tea.Cmd) {
+	rows := m.visibleRows()
+	if idx < 0 || idx >= len(rows) {
+		return m, nil
+	}
+	if m.ui.Cursor == idx {
+		return m.activateBoard(), nil
+	}
+	m.ui.Cursor = idx
+	return m, nil
+}
+
+// readingClickSelect is a left press on a reading-frame rail stop: select it, or
+// — if it is ALREADY the cursor stop — descend onto it (the same as enter). The
+// stop index comes from the hit map (built at the paint width), and the stop
+// count is width-independent, so it is a valid cursor for setTopCursor.
+func (m Model) readingClickSelect(idx int) (tea.Model, tea.Cmd) {
+	if len(m.stack) == 0 {
+		return m, nil
+	}
+	if idx < 0 || idx >= m.frameStopCount() {
+		return m, nil
+	}
+	if m.topFrame().Cursor == idx {
+		return m.descend()
+	}
+	(&m).setTopCursor(idx)
+	return m, nil
+}
+
+// ── Mouse: clickable footer verbs + the M mouse-mode toggle (charter D96) ─────
+//
+// The board footer's c/x/o hints are click targets (buildBoardFooter emits their
+// spans). A left click on a verb fires the SAME reducer as its key — claim and
+// studio dispatch straight through, and close keeps its existing two-click guard
+// (the pendingClose machine, arm-then-fire on the same task under the cursor). A
+// click that is NOT on a verb disarms a pending close, exactly as a stray key
+// does. Motion updates the hover tint. When the mouse is released (M), the shell
+// ignores stray events and the footer shows the mode. Nothing here paints — the
+// render state (mode + hover) lives on UIState so the frozen-signature renderer
+// reads it.
+
+// clickFooterVerb dispatches a clicked board verb through the EXACT keyboard
+// reducer (charter D96: "verb click == key press"), so claim/close/studio share
+// one code path with c/x/o and can never drift. It mirrors handleKey's two
+// cross-cutting rules first: the click clears the transient strip, and anything
+// but a repeated x-affordance click disarms the close guard — so a second click
+// on the x verb (with pendingClose still armed from the first) is the one input
+// that reaches closeTask's fire branch.
+func (m Model) clickFooterVerb(verb rune) (tea.Model, tea.Cmd) {
+	key := string(verb)
+	if key != "x" {
+		m.pendingClose = ""
+	}
+	m.ui.Strip = ActionStrip{}
+	return m.handleBoardKey(key)
+}
+
+// footerVerbAt maps an absolute terminal click (x,y) to the board footer verb
+// whose span contains it, or (0,false). NARROW board mode only — the portrait
+// primary surface: wide two-pane and the reading frames expose no footer verb
+// targets (the reading footer omits c/x/o by charter). The geometry mirrors
+// Compose byte-for-byte: the footer is the last painted row (Y == height-1 after
+// Compose's clamps and its one blank top row), inset by the left gutter gl, and
+// the spans are computed at the same inner width renderFooter paints at.
+func (m Model) footerVerbAt(x, y int) (rune, bool) {
+	if m.wide || m.topFrame().Kind != FrameBoard {
+		return 0, false
+	}
+	width, height := m.width, m.height
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	if y != height-1 {
+		return 0, false
+	}
+	gl, gr := 1, 3
+	if width < 56 {
+		gl, gr = 1, 2
+	}
+	inner := width - gl - gr
+	if inner < 20 {
+		inner = 20
+	}
+	col := x - gl
+	_, spans := buildBoardFooter(inner, m.ui.MouseReleased)
+	for _, s := range spans {
+		if col >= s.start && col < s.end {
+			return s.verb, true
+		}
+	}
+	return 0, false
+}
+
+// toggleMouse is the M key: flip mouse reporting and emit the matching bubbletea
+// command (charter D96). Releasing clears any hover and, honestly, the footer
+// switches to the released-mode note; re-arming restores all-motion reporting so
+// hover and clicks work again. The command is the ONLY thing that changes the
+// terminal's mouse state — the model flag just tracks it for the render + the
+// stray-event guard.
+func (m Model) toggleMouse() (tea.Model, tea.Cmd) {
+	if m.ui.MouseReleased {
+		m.ui.MouseReleased = false
+		return m, tea.EnableMouseAllMotion
+	}
+	m.ui.MouseReleased = true
+	m.ui.HoverFooterVerb = 0
+	m.ui, _ = setHoverTarget(m.ui, "")
+	return m, tea.DisableMouse
 }
 
 // ── Act verbs: claim / close / open-in-Studio ────────────────────────────────
@@ -1226,12 +1507,22 @@ func (m Model) readingWidth() int {
 }
 
 // readingViewportHeight is the number of body lines a pushed frame gets — it MUST
-// match Compose's layout math (narrow: breadcrumb + footer reserved; wide: the
-// breadcrumb spans the top) or the free-scroll clamp desyncs from the paint.
+// match Compose's layout math or the free-scroll clamp desyncs from the paint
+// (under-scrolls by one, hiding the last body line under a stuck ↓-more marker).
+// It mirrors Compose→composeAt's height chain EXACTLY: Compose floors height at 8,
+// prepends ONE blank row and hands composeAt height-1, which floors again at 8.
+// So the window composeAt actually paints is (height-1, re-floored) minus the
+// chrome it reserves — breadcrumb + footer in narrow (−2), the spanning
+// breadcrumb in wide (−1). The leading-blank hop is the off-by-one that a naive
+// height-1 / height-2 split (measuring Compose's height, not composeAt's) missed.
 func (m Model) readingViewportHeight() int {
 	h := m.height
 	if h < 8 {
 		h = 8
+	}
+	h = h - 1 // Compose's leading blank row eats one line before composeAt
+	if h < 8 {
+		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
 		return h - 1
@@ -1302,7 +1593,15 @@ func Run(cfg Config) error {
 		Server:   serverHost(cfg.BaseURL),
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// Mouse is ON by default via WithMouseAllMotion (not cell-motion: in
+	// bubbletea v1.3.10 cell-motion reports motion only while a button is held,
+	// and hover needs the free stream). It degrades honestly: a terminal without
+	// mouse reporting simply never sends events and the keyboard flow is
+	// untouched (charter D93), and M (tea.DisableMouse/EnableMouseAllMotion)
+	// hands clicks back to the terminal for native text selection — the footer's
+	// etiquette footnote teaches both the M toggle and the opt/shift-click
+	// bypass (charter D96).
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	wireLive(p, client, cfg.Token)
 
 	_, err := p.Run()

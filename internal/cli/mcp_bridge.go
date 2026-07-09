@@ -25,25 +25,26 @@ import (
 //
 // Opt-in rationale: Cursor hard-caps 40 MCP tools across ALL enabled servers and
 // silently drops the excess, while a live guerrilla manifest is ~107 commands.
-// So `--tools all` is deliberate, and the curated five (mcp_tasks.go) stay the
+// So `--tools all` is deliberate, and the curated six (mcp_tasks.go) stay the
 // default. Where the curated overlay already covers a command, the bridge
 // SHADOWS its twin (see bridgeShadowedIDs) so the same capability is not exposed
 // twice under two names.
 
 // bridgeShadowedIDs is the set of manifest command IDs the curated overlay
 // (mcp_tasks.go) already exposes under a hand-tuned name, so the bridge must NOT
-// also generate a bp_<noun>_<verb> twin for them. Only the four queue/read/close
-// verbs the curated five cover are shadowed:
+// also generate a bp_<noun>_<verb> twin for them. Only the five queue/read/close/
+// prime verbs the curated six cover are shadowed:
 //
 //   - task.ready  → curated task_ready
 //   - task.next   → curated task_next  (atomic queue-claim)
 //   - task.get    → curated task_show
 //   - task.close  → curated task_close (epoch-CAS)
+//   - task.prime  → curated task_prime (one-call rehydration)
 //
 // task.claim is NOT shadowed: the curated task_next is the ATOMIC queue-claim,
 // whereas task.claim claims a SPECIFIC id — a distinct capability, so
 // bp_task_claim generates. doc.create is likewise not covered by the curated
-// five and generates as bp_doc_create. (task_create has no manifest verb at all,
+// six and generates as bp_doc_create. (task_create has no manifest verb at all,
 // so there is no twin to shadow.)
 //
 // This set is kept here next to the bridge because the bridge is what consults
@@ -55,6 +56,7 @@ var bridgeShadowedIDs = map[string]bool{
 	"task.next":  true,
 	"task.get":   true,
 	"task.close": true,
+	"task.prime": true,
 }
 
 // registerBridgeTools walks m.Commands and registers one MCP tool per command
@@ -76,6 +78,7 @@ func registerBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *ma
 			Name:        bridgeToolName(cmd),
 			Description: cmd.Summary,
 			InputSchema: json.RawMessage(schema),
+			Annotations: bridgeAnnotations(cmd),
 		}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			var args map[string]any
 			if err := decodeMCPArgs(req, &args); err != nil {
@@ -86,6 +89,23 @@ func registerBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *ma
 		})
 	}
 	return nil
+}
+
+// bridgeAnnotations derives the MCP behaviour hints for a generated tool
+// straight from the manifest's cmd.Writes bit — the one honest signal the bridge
+// already sees. A non-writing command is ReadOnlyHint:true (safe to call for
+// information; the SDK marshals readOnlyHint only when true, so read tools carry
+// the positive hint). A writing command is ReadOnlyHint:false + DestructiveHint
+// explicitly true: the manifest cannot tell an additive create from a
+// destructive update, so the conservative hint is "may modify" — a client that
+// gates on destructiveHint then prompts before the call. IdempotentHint and
+// OpenWorldHint are left unset: the manifest carries no signal for either, and a
+// wrong hint is worse than an absent one (both default sensibly SDK-side).
+func bridgeAnnotations(cmd manifest.Command) *mcp.ToolAnnotations {
+	if cmd.Writes {
+		return &mcp.ToolAnnotations{ReadOnlyHint: false, DestructiveHint: mcpBoolPtr(true)}
+	}
+	return &mcp.ToolAnnotations{ReadOnlyHint: true}
 }
 
 // bridgeToolName renders the MCP tool name for a command: bp_<noun>_<verb> with

@@ -465,24 +465,34 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
            "the JS scan's contains-check failed to see injected markup — §3 would be toothless"
   end
 
-  # ── §6 STEP-6 layout-parity TEXTUAL PROXY (weak — NOT a render-parity proof) ──
+  # ── §6 SECTION edit⇄reader parity — the REAL gate lives in the mjs suite ─────
   #
-  # The pure-Node smoke harness cannot mount section-node.js's NodeView (paint
-  # references `document`/DOM), so the per-child grid-column/order paint is NOT
-  # unit-testable in-repo today — real parity is LIVE browser verify (or a future
-  # jsdom NodeView test). This is an EXPLICITLY WEAK text-scan that section-node.js's
-  # paint still READS the bpId-keyed cells map and mirrors placement onto the grid
-  # items via `el.style.gridColumn`/`order` keyed by `data-bp-id` — the SAME keys the
-  # reader (compose.ex cell_layout_attr) and run-convert use. It proves the paint
-  # path was not DELETED/renamed, NOT that the rendered pixels match the reader.
-  test "§6 section-node.js paint mirrors per-child placement (textual proxy, NOT render parity)" do
+  # This §6 was once an EXPLICITLY WEAK text-scan (it only grepped section-node.js
+  # for `gridColumn`/`order`/`data-bp-id` writes — proving the paint path was not
+  # DELETED, never that the mounted shape matches the reader). The mounted-shape
+  # assertions now live where they can import the node's spec + read its source in
+  # pure Node: `assets/paper-editor/src/__section_parity.test.mjs` (S3 slice,
+  # parity2-w1-section-gate). That mjs gate locks the `bp-section__title` binding,
+  # the `bp-section__body` contentDOM, the edit-only controls (`display:none` in
+  # view mode), the min-width:0 grid-cell mirror, and forbids a nested bpSection —
+  # and carries a RECONCILE-or-JUSTIFY verdict for all three micro-divergences.
+  #
+  # A pure-Node smoke harness cannot MOUNT the NodeView (paint calls `document`),
+  # so this Elixir §6 keeps ONE job: a style-write TRIPWIRE proving section-node.js
+  # still mirrors per-child grid placement onto the wrapper-less item via
+  # `el.style.gridColumn`/`order` keyed by `data-bp-id` (the SAME keys the reader
+  # compose.ex cell_layout_attr + run-convert use), PLUS the min-width:0 cell mirror
+  # this slice reconciled — a canvas that has no `.bp-section__cell` wrapper (that
+  # would red §3) must carry the wrapper's resolved geometry on the item. It also
+  # PINS the two-file wiring so the real gate cannot be silently unhooked.
+  test "§6 section-node.js mirrors per-child grid placement + min-width onto the wrapper-less item (style-write tripwire)" do
     src =
       "../../../../assets/paper-editor/src/canvas/section-node.js"
       |> Path.expand(__DIR__)
       |> File.read!()
 
     assert String.contains?(src, "gridColumn"),
-           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (re-point §6 or it is a real regression)"
+           "section-node.js no longer writes el.style.gridColumn — the per-child span paint moved (real regression)"
 
     assert String.contains?(src, ".order"),
            "section-node.js no longer writes el.style.order — the per-child order paint moved"
@@ -490,9 +500,46 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
     assert String.contains?(src, "data-bp-id"),
            "section-node.js paint no longer keys child placement by data-bp-id — reorder-safety lost"
 
-    # The bpId-keyed cells map must be READ in paint (not the old positional array).
     assert String.contains?(src, "cells"),
            "section-node.js paint no longer reads the cells map"
+
+    # The min-width:0 mirror of the reader's `.bp-section__cell { min-width: 0 }`
+    # (compose.ex grid cell), reconciled in this slice onto the wrapper-less item.
+    assert String.contains?(src, "minWidth"),
+           "section-node.js no longer mirrors the reader cell's min-width:0 onto the grid item — a wide child can blow out its 1fr track (the reader can't)"
+
+    # §3 corollary: grid mode must ride the SHARED `bp-section__grid` class (parity by
+    # construction), never a hand-rolled inline grid that would fork the reader CSS.
+    assert String.contains?(src, "bp-section__grid"),
+           "section-node.js no longer swaps the grid body to the shared bp-section__grid class — the shared reader CSS would stop applying (a second producer)"
+  end
+
+  # ── §6b The REAL section parity gate is wired into the mjs suite ─────────────
+  #
+  # distrust-vacuous-green: the mounted-shape assertions only protect parity if
+  # they actually RUN in CI. The paper-editor `npm test` chain (elixir.yml's asset
+  # job / the paper-editor mirror job) runs the mjs suite; pin that
+  # __section_parity.test.mjs EXISTS and is APPENDED to that chain, so it cannot be
+  # written yet silently unhooked.
+  test "§6b __section_parity.test.mjs exists and is wired into the paper-editor npm test chain" do
+    base = "../../../../assets/paper-editor" |> Path.expand(__DIR__)
+    test_path = Path.join(base, "src/__section_parity.test.mjs")
+
+    assert File.exists?(test_path),
+           "__section_parity.test.mjs is missing — the real section parity gate is gone"
+
+    body = File.read!(test_path)
+
+    # Non-vacuous: it must exercise the load-bearing bindings, not be an empty stub.
+    for marker <- ["bp-section__title", "bp-section__body", "BP_SECTION_CONTENT", "minWidth"] do
+      assert String.contains?(body, marker),
+             "__section_parity.test.mjs no longer asserts #{marker} — the parity gate was gutted"
+    end
+
+    package_json = Path.join(base, "package.json") |> File.read!()
+
+    assert String.contains?(package_json, "__section_parity.test.mjs"),
+           "__section_parity.test.mjs is not in package.json's test chain — the real gate never runs in CI"
   end
 
   # ── §7 STAGE-WIDGET exemption (DESIGN 1 — the editable pipeline-node twin) ────
@@ -522,7 +569,8 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
       |> Path.expand(__DIR__)
       |> File.read!()
 
-    assert byte_size(src) > 0, "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
+    assert byte_size(src) > 0,
+           "stage-node.js not found — the DESIGN-1 exemption cannot be verified"
 
     refute String.contains?(src, "bp-pnode"),
            "stage-node.js emits the reader `bp-pnode` cell class — DESIGN 1 forbids it (use bp-canvas-stage)"
