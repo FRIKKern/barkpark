@@ -187,6 +187,10 @@ config :barkpark_cloud, Oban,
     {Oban.Plugins.Cron,
      crontab: [
        {"* * * * *", BarkparkCloud.Workers.StaleProvisionJobReaper},
+       # bp-login-ux: sweep expired device-authorization requests (abandoned
+       # `bp login` flows). Pure hygiene — expiry is enforced in-band by every
+       # DeviceAuth query — so it rides the cheap :maintenance queue.
+       {"* * * * *", BarkparkCloud.Workers.DeviceAuthReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.

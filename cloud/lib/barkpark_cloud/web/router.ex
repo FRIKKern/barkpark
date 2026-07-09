@@ -13,6 +13,11 @@ defmodule BarkparkCloud.Web.Router do
       GET     /health              —         alias of /up
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id}
+      POST    /v1/auth/device/start   —      {client_name} → {device_code, user_code, verification_uri, ...}
+      POST    /v1/auth/device/poll    —      {device_code} → pending | {token, team_id} | slow_down | expired
+      POST    /v1/auth/device/inspect user   {user_code} → {client_name, ip_address, user_agent, expires_at}
+      POST    /v1/auth/device/approve user   {user_code} → {ok: true} (pending→approved CAS)
+      POST    /v1/auth/device/deny    user   {user_code} → {ok: true}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
       GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
       GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
@@ -118,6 +123,7 @@ defmodule BarkparkCloud.Web.Router do
     ArchiveStore,
     Azure,
     Billing,
+    DeviceAuth,
     DomainStatus,
     Events,
     FailureCopy,
@@ -134,6 +140,7 @@ defmodule BarkparkCloud.Web.Router do
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -317,6 +324,159 @@ defmodule BarkparkCloud.Web.Router do
 
       _ ->
         json(conn, 401, %{error: "invalid_code"})
+    end
+  end
+
+  ## Device authorization (bp-login-ux) — Claude-Code-style copy-link `bp login`.
+  ##
+  ## An RFC-8628-shaped handshake with two secrets: the CLI polls with a
+  ## `device_code`; the human types a short `user_code` (XXXX-XXXX) into the
+  ## browser to approve. See `BarkparkCloud.DeviceAuth`. Five routes:
+  ##
+  ##   POST /v1/auth/device/start   —      {client_name} → codes + verification URIs
+  ##   POST /v1/auth/device/poll    —      {device_code} → pending | {token,team_id} | slow_down | expired
+  ##   POST /v1/auth/device/inspect user   {user_code}   → who is asking (confirm screen)
+  ##   POST /v1/auth/device/approve user   {user_code}   → {ok:true} (pending→approved CAS)
+  ##   POST /v1/auth/device/deny    user   {user_code}   → {ok:true}
+  ##
+  ## start + poll are unauthenticated (the CLI has no session yet) but rate-limited
+  ## by IP / device_code. inspect/approve/deny are behind Auth.require_user — the
+  ## Bearer session is the 2FA guarantee: the mint function itself doesn't enforce
+  ## 2FA, so approve must NEVER run unauthenticated (charter decision 5).
+
+  ## POST /v1/auth/device/start {client_name}
+  ##   → 200 {device_code, user_code, verification_uri, verification_uri_complete,
+  ##          interval, expires_in}
+  ##   → 429 {error: "rate_limited"} — >10 starts/min for this IP
+  post "/v1/auth/device/start" do
+    ip = peer_ip(conn)
+
+    case DeviceAuthRateLimiter.check("start:" <> (ip || "unknown")) do
+      {:error, :rate_limited} ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      :ok ->
+        attrs = %{
+          client_name: conn.body_params["client_name"],
+          ip_address: ip,
+          user_agent: get_first_header(conn, "user-agent")
+        }
+
+        case DeviceAuth.start(attrs) do
+          {:ok, %{device_code: dc, user_code: uc, interval: interval, expires_in: expires_in}} ->
+            base = activate_url(conn)
+
+            json(conn, 200, %{
+              device_code: dc,
+              user_code: uc,
+              verification_uri: base,
+              verification_uri_complete: base <> "?code=" <> uc,
+              interval: interval,
+              expires_in: expires_in
+            })
+
+          {:error, _changeset} ->
+            json(conn, 500, %{error: "server_error"})
+        end
+    end
+  end
+
+  ## POST /v1/auth/device/poll {device_code}
+  ##   → 200 {status: "pending"}          — not yet approved
+  ##   → 200 {token, team_id}             — approved: session minted (byte-identical to /login)
+  ##   → 429 {error: "slow_down"}         — >20 polls/min for this device_code
+  ##   → 404 {error: "expired_or_invalid"} — expired, denied, replayed, or unknown
+  post "/v1/auth/device/poll" do
+    device_code = conn.body_params["device_code"]
+
+    if is_binary(device_code) and device_code != "" do
+      case DeviceAuthRateLimiter.check("poll:" <> DeviceAuth.device_code_hash(device_code)) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{error: "slow_down"})
+
+        :ok ->
+          case DeviceAuth.poll(device_code) do
+            {:pending} ->
+              json(conn, 200, %{status: "pending"})
+
+            {:ok, token, team} ->
+              json(conn, 200, %{token: token, team_id: team && team.id})
+
+            {:error, :expired_or_invalid} ->
+              json(conn, 404, %{error: "expired_or_invalid"})
+          end
+      end
+    else
+      json(conn, 404, %{error: "expired_or_invalid"})
+    end
+  end
+
+  ## POST /v1/auth/device/inspect {user_code} (require_user)
+  ##   → 200 {client_name, ip_address, user_agent, expires_at} — for the confirm screen
+  ##   → 404 {error: "expired_or_invalid"}
+  post "/v1/auth/device/inspect" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case DeviceAuth.inspect(conn.body_params["user_code"] || "") do
+        {:ok, row} ->
+          json(conn, 200, %{
+            client_name: row.client_name,
+            ip_address: row.ip_address,
+            user_agent: row.user_agent,
+            expires_at: row.expires_at
+          })
+
+        {:error, :expired_or_invalid} ->
+          json(conn, 404, %{error: "expired_or_invalid"})
+      end
+    end
+  end
+
+  ## POST /v1/auth/device/approve {user_code} (require_user)
+  ##   → 200 {ok: true}                   — pending→approved, user_id stamped
+  ##   → 404 {error: "expired_or_invalid"} — unknown / already-approved / denied / expired
+  ##   → 429 {error: "rate_limited"}      — >10 approve attempts/min for this user
+  post "/v1/auth/device/approve" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+
+      case DeviceAuthRateLimiter.check("approve:" <> user.id) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{error: "rate_limited"})
+
+        :ok ->
+          case DeviceAuth.approve(conn.body_params["user_code"] || "", user.id) do
+            :ok -> json(conn, 200, %{ok: true})
+            {:error, :expired_or_invalid} -> json(conn, 404, %{error: "expired_or_invalid"})
+          end
+      end
+    end
+  end
+
+  ## POST /v1/auth/device/deny {user_code} (require_user) → 200 {ok: true} (idempotent)
+  post "/v1/auth/device/deny" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+
+      case DeviceAuthRateLimiter.check("approve:" <> user.id) do
+        {:error, :rate_limited} ->
+          json(conn, 429, %{error: "rate_limited"})
+
+        :ok ->
+          :ok = DeviceAuth.deny(conn.body_params["user_code"] || "")
+          json(conn, 200, %{ok: true})
+      end
     end
   end
 
@@ -7960,6 +8120,19 @@ defmodule BarkparkCloud.Web.Router do
     port_part = https_safe_port_part(scheme, conn.port)
 
     "#{scheme}://#{host}#{port_part}/v1/webhooks/github/#{site_id}"
+  end
+
+  # The browser approve page for a device-authorization login (bp-login-ux). The
+  # scheme + host come from the request (via Plug.RewriteOn) so dev
+  # (http://localhost:4100) and prod (https://barkpark.cloud) both land a working
+  # URL without threading config through — the same idiom as webhook_url_for. The
+  # SPA route + view at /activate ship in the sibling slice (W1-S2).
+  defp activate_url(conn) do
+    scheme = conn.scheme |> to_string()
+    host = conn.host
+    port_part = https_safe_port_part(scheme, conn.port)
+
+    "#{scheme}://#{host}#{port_part}/activate"
   end
 
   # The port segment for a user-facing URL, shared by accept_url/reset_url/
