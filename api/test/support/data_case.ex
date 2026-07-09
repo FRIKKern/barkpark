@@ -149,7 +149,7 @@ defmodule Barkpark.DataCase do
       receive do
         {:DOWN, ^ref, :process, _pid, _reason} -> :ok
       after
-        @drain_deadline_ms -> Process.demonitor(ref, flush: true)
+        @drain_deadline_ms -> Process.demonitor(ref, [:flush])
       end
     end)
   end
