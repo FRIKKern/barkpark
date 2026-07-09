@@ -405,6 +405,44 @@ defmodule BarkparkCloud.RegistryTest do
 
       assert %Barkpark{} = Registry.verify_agent_token(plaintext)
     end
+
+    test "re-minting supersedes the prior same-scope token (double-claim leaves exactly one active)" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      # First claim mints the box's report token.
+      {:ok, first_pt, first} = Registry.mint_agent_token(bp, "report")
+      # A stale-reclaim mints a fresh one — the old MUST be revoked in the same txn.
+      {:ok, second_pt, second} = Registry.mint_agent_token(bp, "report")
+
+      # Exactly one active "report" token survives — the newest.
+      active_report =
+        from(t in AgentToken,
+          where: t.barkpark_id == ^bp.id and t.scope == "report" and is_nil(t.revoked_at)
+        )
+        |> Repo.all()
+
+      assert [%AgentToken{id: only_id}] = active_report
+      assert only_id == second.id
+
+      # The superseded token is revoked and no longer verifies; the fresh one does.
+      assert Repo.get(AgentToken, first.id).revoked_at
+      assert is_nil(Registry.verify_agent_token(first_pt))
+      assert %Barkpark{id: bid} = Registry.verify_agent_token(second_pt)
+      assert bid == bp.id
+    end
+
+    test "re-mint only supersedes the SAME scope — other scopes stay live" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      {:ok, other_pt, _other} = Registry.mint_agent_token(bp, "report:health")
+      {:ok, _pt1, _} = Registry.mint_agent_token(bp, "report")
+      {:ok, _pt2, _} = Registry.mint_agent_token(bp, "report")
+
+      # The different-scope token is untouched by the "report" re-mint churn.
+      assert Registry.verify_agent_token(other_pt)
+    end
   end
 
   describe "deprovision jobs" do

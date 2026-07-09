@@ -208,7 +208,12 @@ config :barkpark_cloud, Oban,
        # opt-out auto-rollout by ONE health-gated instance (trigger a `behind`
        # box, wait for it to settle `current`, then advance). Cheap per tick (≤1
        # refresh or ≤1 trigger); rides the hourly :17 sweep's `behind` verdicts.
-       {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker}
+       {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker},
+       # azh-w6: daily retention prune of the two unbounded agent tables
+       # (agent_events >14d, dead agent_tokens >30d past revoked/expired). Runs
+       # off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a missed
+       # tick is harmless (max_attempts: 1 — the next day catches up).
+       {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker}
      ]}
   ]
 
