@@ -1,17 +1,24 @@
-// design/derive.mjs — the theme-system Wave-2 compiler CORE (theme-system D12/D14).
+// design/derive.mjs — the theme-system Wave-2 compiler (theme-system D12/D14).
 //
-// Zero-dependency (Node built-ins only), PURE and DETERMINISTIC OKLCH colour
-// math + Barkpark-format serializers. Author ~3 colours per mode ({bg, ink,
-// accent}) → a flat slot map of derived theme colours: a hue-tinted neutral
-// ladder, an accent ramp, a contrast-aware on-accent foreground, an 8<16<22<55
-// chrome ladder, OKLCH hue-locked status roles with AA lightness-walking, and a
-// hue-preserved dark inversion capability.
+// Zero-dependency (Node built-ins only), PURE and DETERMINISTIC. TWO layers in
+// one module, sharing ONE implementation of the colour math:
 //
-// This is the CORE only (theme-system ts-w3-derive-compiler): it creates no
-// design/themes/*.json file and does not touch check.mjs / emit.mjs. The
-// exported helpers + `derive()` are the contract ts-w3b (evergreen
-// characterization + check.mjs Part F) consumes; the D12 w4 seam is "swap the
-// emitted `tokens` singleton for derive()'s output".
+//   PART I — the capability CORE (ts-w3-derive-compiler): OKLCH colour math +
+//   Barkpark-format serializers. Author ~3 colours per mode ({bg, ink, accent})
+//   → `deriveSpine()`, a flat slot map of derived theme colours: a hue-tinted
+//   neutral ladder, an accent ramp, a contrast-aware on-accent foreground, an
+//   8<16<22<55 chrome ladder, OKLCH hue-locked status roles with AA
+//   lightness-walking, and a hue-preserved dark inversion capability. These
+//   formulas are IMPOSED on future themes (charter D14v); evergreen adopts them
+//   slot-by-slot as its override pins burn down.
+//
+//   PART II — the characterization COMPILER (ts-w3b): `derive(theme)` resolves
+//   every theme-varying tokens.json slot (the SLOTS contract) from an authored
+//   design/themes/*.json skin — per-mode {bg,ink,accent} + an `overrides` pin
+//   block + a D21 `passthrough` declaration — over a FROZEN neutral structure.
+//   check.mjs Part F proves derive(evergreen) === tokens.json BYTE-equal and
+//   freezes the override count (D13). The D12 w4 seam is "swap the emitted
+//   `tokens` singleton for derive()'s output".
 //
 // COLOUR MATH PROVENANCE. The Ottosson sRGB↔OKLab matrices, the sRGB gamma
 // transfer, the WCAG contrast ratio, the 24-step gamut chroma bisection and the
@@ -245,12 +252,12 @@ export function aaWalk(startL, C, h, bg, opts = {}) {
 //    neither clears (a mid-L accent), still return the higher-contrast option
 //    but flag it so a caller can pin an override (D13).
 // ─────────────────────────────────────────────────────────────────────────────
-const WARM_WHITE = "#fbfaf6"; // paw's warm paper white
+const WARM_WHITE_HEX = "#fbfaf6"; // paw's warm paper white (Part I hex domain)
 const NEAR_INK = "#15211d"; // the paper ink (near-black, green-tinted)
 
 /** @returns {{ color:string, contrast:number, clears:boolean, pick:"warm-white"|"near-ink" }} */
 export function onAccent(accent, opts = {}) {
-  const { warmWhite = WARM_WHITE, nearInk = NEAR_INK, target = 4.5 } = opts;
+  const { warmWhite = WARM_WHITE_HEX, nearInk = NEAR_INK, target = 4.5 } = opts;
   const cw = contrast(warmWhite, accent);
   const ci = contrast(nearInk, accent);
   const wWins = cw >= ci;
@@ -476,7 +483,7 @@ function chromeLadder(bg, ink) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 15. derive(themeSpec) → flat slot map.
+// 15. deriveSpine(themeSpec) → flat slot map (the CAPABILITY pipeline).
 //
 //   themeSpec = {
 //     light: { bg, ink, accent },   // authoring colours (any parseable form)
@@ -489,8 +496,10 @@ function chromeLadder(bg, ink) {
 //   HSL triplets. `overrides` are applied verbatim last (var() passes through).
 //   AA-walk misses live on a NON-enumerable `.misses` array so a byte-comparison
 //   over Object.keys stays clean while a caller can still audit them (D15).
+//   NOTE: this is the capability pipeline for FUTURE themes — the shipped-byte
+//   characterization compiler is `derive()` in Part II below.
 // ─────────────────────────────────────────────────────────────────────────────
-export function derive(spec, opts = {}) {
+export function deriveSpine(spec, opts = {}) {
   const { onMiss = defaultOnMiss } = opts;
   const out = {};
   const misses = [];
@@ -562,3 +571,304 @@ function defaultOnMiss(m) {
     )} < ${m.want} — pin an override (D13/D15).`,
   );
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PART II — the characterization COMPILER (ts-w3b, charter D12/D13/D21).
+// derive(theme) resolves every theme-varying tokens.json slot from an authored
+// design/themes/*.json skin over a FROZEN neutral structure. check.mjs Part F
+// proves derive(evergreen) === tokens.json byte-equal. The perceptual math
+// (OKLCH, WCAG contrast, AA-walk, gamut clamp) is PART I's — one owner.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── byte-exact string-format helpers (0..255 channel domain) ─────────────────
+// These serialize/parse the exact string formats tokens.json ships. Distinct
+// from Part I's 0..1-domain serializers on purpose: Part F byte-equality rides
+// on this rounding path matching emit.mjs's hslToHex converter.
+const toHex2 = (v) =>
+  Math.round(Math.min(1, Math.max(0, v)) * 255)
+    .toString(16)
+    .padStart(2, "0");
+
+export function hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+}
+export const rgbToHex = ([r, g, b]) =>
+  `#${toHex2(r / 255)}${toHex2(g / 255)}${toHex2(b / 255)}`;
+
+// HSL channels "H S% L%" ⇄ {h,s,l}. Format round-trips byte-for-byte for the
+// values tokens.json carries (integers stay integers, "9.6"/"217.2" keep their
+// decimals) — JS Number#toString drops trailing zeros exactly like the source.
+export function hslParse(ch) {
+  const m = ch.trim().split(/\s+/);
+  return { h: parseFloat(m[0]), s: parseFloat(m[1]), l: parseFloat(m[2]) };
+}
+const num4 = (x) => Number(x.toFixed(4)); // strip float noise, keep authored precision
+export const hslFormat = ({ h, s, l }) => `${num4(h)} ${num4(s)}% ${num4(l)}%`;
+
+/** "H S% L%"-parsed {h,s,l} → sRGB [r,g,b] in 0..255 (UNROUNDED floats). */
+export function hslToRgb({ h, s, l }) {
+  s /= 100;
+  l /= 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0,
+    g = 0,
+    b = 0;
+  if (hp >= 0 && hp < 1) [r, g, b] = [c, x, 0];
+  else if (hp < 2) [r, g, b] = [x, c, 0];
+  else if (hp < 3) [r, g, b] = [0, c, x];
+  else if (hp < 4) [r, g, b] = [0, x, c];
+  else if (hp < 5) [r, g, b] = [x, 0, c];
+  else [r, g, b] = [c, 0, x];
+  const m = l - c / 2;
+  return [(r + m) * 255, (g + m) * 255, (b + m) * 255];
+}
+export const hslToHex = (ch) => rgbToHex(hslToRgb(hslParse(ch)));
+
+// ── on-accent flip (D16) over Part I's WCAG contrast ─────────────────────────
+// Pick the foreground that sits ON a filled accent: warm-white if it clears AA
+// on the fill, else a near-ink of the accent's own hue. Both branches are
+// unit-tested. (Part I's `onAccent` is the hex-domain twin used by
+// deriveSpine; this one speaks tokens.json HSL-triplet strings.)
+export const WARM_WHITE = "0 0% 100%";
+export function onAccentFor(fillHsl, { warmWhite = WARM_WHITE, aa = 4.5 } = {}) {
+  if (contrast(fillHsl, warmWhite) >= aa) return warmWhite;
+  // near-ink of the accent hue: hold H, drop to a low L that clears AA.
+  const { h } = hslParse(fillHsl);
+  return hslFormat({ h, s: 45, l: 8 });
+}
+
+// ── rgba passthrough helper (byte-exact alpha as a literal string) ───────────
+const rgbaFrom = (hex, alphaStr) => {
+  if (typeof hex !== "string") return undefined; // an unresolved (unpinned) base cascades as undefined, not a throw
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alphaStr})`;
+};
+
+// ── the FROZEN neutral STRUCTURE ─────────────────────────────────────────────
+// The neutral spine and the CLI zinc-chrome ramp are SHARED structure, not
+// per-theme skin (paw: "frozen structure + thin swappable skin"; charter D14v:
+// "the ladder is imposed on future themes"). A theme swaps {bg,ink,accent};
+// these rungs stay, re-hued toward the theme's neutral hue. For evergreen the
+// neutral hue is 240 and the chroma is ~0, so the ladder resolves to shadcn
+// zinc — the exact bytes shipped today. Theme N+1 passes its own neutral
+// hue/chroma; these are the compiler's default neutral palette, NOT overrides
+// (an all-overrides compiler is vacuous — D13).
+const NEUTRAL_HSL = {
+  // role → { light, dark } HSL channels (the CSS neutral rungs)
+  "surface":        { light: null,             dark: "240 10% 5.5%" }, // light = bg passthrough
+  "muted-surface":  { light: "240 4.8% 95.9%", dark: "240 3.7% 12%" },
+  "muted-text":     { light: "240 3.8% 46.1%", dark: "240 5% 64.9%" },
+  "border":         { light: "240 5.9% 90%",   dark: "240 3.7% 15.9%" },
+  "studio-bg-accent":    { light: "240 4.8% 92%", dark: "240 3.7% 13%" },
+  "studio-border-muted": { light: null,           dark: "240 3.7% 11%" }, // light = var(--border)
+  "studio-fg-dim":       { light: "240 4% 65%",   dark: "240 5% 45%" },
+  "studio-fg-accent":    { light: "240 5.9% 10%", dark: null },           // dark = var(--text)
+};
+// CLI zinc-chrome hex ramp — achromatic (r≈g≈b, faint cool tint) so it can NOT
+// share the hue-240 CSS rungs above; it is its own structural gray ramp keyed
+// to the theme's neutral identity. Evergreen → shadcn zinc hexes verbatim.
+const ZINC_CHROME = {
+  "chrome-dim":            { light: "#a1a1aa", dark: "#52525b" },
+  "chrome-ink":            { light: "#18181b", dark: "#e4e4e7" },
+  "chrome-text-secondary": { light: "#3f3f46", dark: "#a1a1aa" },
+  "chrome-field-border":   { light: "#d4d4d8", dark: "#3f3f46" },
+  "chrome-toolbar-bg":     { light: "#fafafa", dark: "#0a0a0a" },
+  "chrome-cursor-bg":      { light: "#f4f4f5", dark: "#18181b" },
+  "code-bg":               { light: "#f4f4f5", dark: "#27272a" },
+};
+
+// ── per-mode formula constants (fit-first, D14) ──────────────────────────────
+// hover is a per-mode lightness step (darken in light, lighten in dark). The
+// shipped evergreen hover bytes fit a clean HSL-L step exactly; Part I's OKLCH
+// ΔL (~-7.5/+4.7) is the design intent this step approximates on the brand ramp.
+const HOVER_HSL_STEP = { light: -6, dark: +8 };
+// Paper hairline / tint alphas — the rule/edit-hover/accent-soft/chrome-border
+// roles are the paper ink (or accent) at a fixed alpha. Strings so "0.10"
+// keeps its trailing zero.
+const PAPER_ALPHA = {
+  "rule":          { light: "0.09", dark: "0.10" },
+  "edit-hover":    { light: "0.08", dark: "0.09" },
+  "chrome-border": { light: "0.12", dark: "0.13" },
+  "accent-soft":   { light: "0.10", dark: "0.16" },
+};
+
+// ── the derivation map: slot → (ctx) => value ────────────────────────────────
+// Every slot is EITHER here (native) OR in the theme's overrides (pinned). A
+// slot in neither resolves to undefined — Part F reds that as an uncovered slot.
+function buildFormulas() {
+  const F = {};
+  const modes = ["light", "dark"];
+  const M = (fn) => modes.forEach((m) => { const [k, v] = fn(m); F[k] = v; });
+
+  // — brand spine —
+  M((m) => [`primary.${m}`, (c) => c.skin[m].accent]);
+  M((m) => [`primary-hover.${m}`, (c) => {
+    const p = hslParse(c.skin[m].accent); return hslFormat({ ...p, l: p.l + HOVER_HSL_STEP[m] });
+  }]);
+  F["primary-fg.light"] = (c) => onAccentFor(c.skin.light.accent); // → warm-white on the dark-green fill
+  M((m) => [`bg.${m}`, (c) => c.skin[m].bg]);
+  M((m) => [`text.${m}`, (c) => c.skin[m].ink]);
+  F["surface.light"] = (c) => c.skin.light.bg; // paper-flat white
+  F["surface.dark"] = () => NEUTRAL_HSL["surface"].dark;
+  F["ring.dark"] = (c) => c.skin.dark.accent; // ring dark == brand dark
+
+  // — CSS neutral rungs (frozen structure) —
+  for (const role of ["muted-surface", "muted-text", "border"])
+    M((m) => [`${role}.${m}`, () => NEUTRAL_HSL[role][m]]);
+  F["studioChrome.bg-accent.light"] = () => NEUTRAL_HSL["studio-bg-accent"].light;
+  F["studioChrome.bg-accent.dark"] = () => NEUTRAL_HSL["studio-bg-accent"].dark;
+  F["studioChrome.border-muted.light"] = () => "var(--border)";
+  F["studioChrome.border-muted.dark"] = () => NEUTRAL_HSL["studio-border-muted"].dark;
+  F["studioChrome.fg-dim.light"] = () => NEUTRAL_HSL["studio-fg-dim"].light;
+  F["studioChrome.fg-dim.dark"] = () => NEUTRAL_HSL["studio-fg-dim"].dark;
+  F["studioChrome.fg-accent.light"] = () => NEUTRAL_HSL["studio-fg-accent"].light;
+  F["studioChrome.fg-accent.dark"] = () => "var(--text)";
+
+  // — onStatus: the shipped design stamps warm-white on EVERY status chip (the
+  // status fills are picked to carry white text). The two fills that don't clear
+  // AA 4.5 on white — warn light + info light — are the charter's known warn/info
+  // AA follow-up, kept white here on purpose; danger-fg.light's asymmetric 98% is
+  // the one pinned residual. The on-accent FLIP itself (contrast-aware near-ink
+  // vs white, D16) is exercised on the brand: primary-fg.light. —
+  for (const role of ["ok", "warn", "danger", "info"])
+    M((m) => [`onStatus.${role}-fg.${m}`, () => WARM_WHITE]);
+
+  // — CLI chrome: zinc ramp (structure) + 5 structural var() aliases —
+  for (const role of ["chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"])
+    M((m) => [`cliChrome.${role}.${m}`, () => ZINC_CHROME[role][m]]);
+  F["cliChrome.chrome-border"] = () => "var(--border)";
+  F["cliChrome.chrome-border-active"] = () => "var(--info)";
+  F["cliChrome.chrome-label"] = () => "var(--muted-text)";
+  F["cliChrome.chrome-primary-cta"] = () => "var(--primary)";
+  F["cliChrome.chrome-on-primary"] = () => "var(--primary-fg)";
+
+  // — CLI chrome accent/selection: PRIMARY-DERIVED (ts-w3e retint, charter D19).
+  // chrome-accent = hslToHex(primary) per mode; selection-fg = primary (light) /
+  // primary-hover (dark) as hex; selection-bg = primary mixed 10% over the mode
+  // bg, flattened to a solid gamma-sRGB hex. NATIVE — zero pins (D19). —
+  M((m) => [`cliChrome.chrome-accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
+  F["cliChrome.chrome-selection-fg.light"] = (c) => hslToHex(c.skin.light.accent);
+  F["cliChrome.chrome-selection-fg.dark"] = (c) => {
+    const p = hslParse(c.skin.dark.accent);
+    return rgbToHex(hslToRgb({ ...p, l: p.l + HOVER_HSL_STEP.dark }));
+  };
+  M((m) => [`cliChrome.chrome-selection-bg.${m}`, (c) => {
+    const acc = hslToRgb(hslParse(c.skin[m].accent));
+    const bg = hslToRgb(hslParse(c.skin[m].bg));
+    return rgbToHex(acc.map((v, i) => v * 0.1 + bg[i] * 0.9)); // color-mix(in srgb, primary 10%, bg)
+  }]);
+
+  // — code frame: bg from the zinc ramp (fg is bespoke rose, pinned) —
+  F["code.bg.light"] = () => ZINC_CHROME["code-bg"].light;
+  F["code.bg.dark"] = () => ZINC_CHROME["code-bg"].dark;
+
+  // — paper.surface: derived hairlines/tints/chrome from the pinned paper bases —
+  for (const role of ["rule", "edit-hover", "chrome-border"])
+    M((m) => [`paper.surface.${role}.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.ink.${m}`), PAPER_ALPHA[role][m])]);
+  F["paper.surface.accent-soft.light"] = (c) => rgbaFrom(c.resolve("paper.surface.accent.light"), PAPER_ALPHA["accent-soft"].light);
+  F["paper.surface.chrome-bg.light"] = (c) => c.resolve("paper.surface.bg.light");    // chrome bg == page bg (light)
+  F["paper.surface.chrome-bg.dark"] = (c) => c.resolve("paper.surface.bg-deep.dark"); // chrome bg == deep bg (dark)
+
+  // — paper.reader: overlay of paper.surface; only the two hairline rules diverge —
+  const readerMap = {
+    light: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft" },
+    dark: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft", "ink-faint": "ink-faint", "chrome-bg": "chrome-bg", "chrome-border": "chrome-border" },
+  };
+  for (const m of modes)
+    for (const [rk, sk] of Object.entries(readerMap[m]))
+      F[`paper.reader.${m}.${rk}`] = ((mm, s) => (c) => c.resolve(`paper.surface.${s}.${mm}`))(m, sk);
+
+  // — mailChrome: ⊂ paper.surface mapping (paper.light + rule.dark pinned residuals) —
+  const mailMap = {
+    "bar.light": "paper.surface.bg.light", "bar.dark": "paper.surface.bg.dark",
+    "paper.dark": "paper.surface.bg-deep.dark",
+    "rule.light": "paper.reader.light.rule",
+    "ink.light": "paper.surface.ink.light", "ink.dark": "paper.surface.ink.dark",
+    "soft.light": "paper.surface.ink-soft.light", "soft.dark": "paper.surface.ink-soft.dark",
+    "accent.light": "paper.surface.accent.light", "accent.dark": "paper.surface.accent.dark",
+  };
+  for (const [slot, src] of Object.entries(mailMap))
+    F[`mailChrome.${slot}`] = ((s) => (c) => c.resolve(s))(src);
+
+  // — paperEmail: light-only skin, ⊂ paper.surface / reader —
+  const emailMap = {
+    brand: "paper.surface.accent.light", "brand-text": null, // brand-text = warm white
+    rule: "paper.reader.light.rule", "page-bg": "paper.surface.bg-deep.light",
+    paper: "mailChrome.paper.light", text: "paper.surface.ink.light",
+    muted: "paper.surface.ink-soft.light", "code-bg": "paper.surface.bg-deep.light",
+  };
+  for (const [slot, src] of Object.entries(emailMap))
+    F[`paperEmail.${slot}`] = src == null ? () => "#ffffff" : ((s) => (c) => c.resolve(s))(src);
+
+  return F;
+}
+const FORMULAS = buildFormulas();
+
+// ── the output contract: every theme-varying slot derive() produces ──────────
+// Part F asserts this set === tokens.json's theme-varying leaf set (minus
+// declared passthroughs). A drift either way is a red (w4 must not discover a
+// hole — D21). paperCallout carries light AND dark tone families (post ts-w3c).
+export const SLOTS = (() => {
+  const base = ["primary", "primary-hover", "primary-fg", "bg", "surface", "muted-surface", "text", "muted-text", "border", "ring", "accent", "reading-accent"];
+  const s = [];
+  for (const r of base) for (const m of ["light", "dark"]) s.push(`${r}.${m}`);
+  for (const r of ["fg", "bg"]) for (const m of ["light", "dark"]) s.push(`code.${r}.${m}`);
+  const paperRoles = ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"];
+  for (const r of paperRoles) for (const m of ["light", "dark"]) s.push(`paper.surface.${r}.${m}`);
+  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft"]) s.push(`paper.reader.light.${r}`);
+  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) s.push(`paper.reader.dark.${r}`);
+  for (const r of ["paper", "bar", "rule", "ink", "soft", "accent"]) for (const m of ["light", "dark"]) s.push(`mailChrome.${r}.${m}`);
+  for (const m of ["light", "dark"]) s.push(`cliCalloutNeutral.${m}`);
+  for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);
+  for (const r of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) for (const m of ["light", "dark"]) s.push(`onStatus.${r}.${m}`);
+  for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
+  const cliHex = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
+  for (const r of cliHex) for (const m of ["light", "dark"]) s.push(`cliChrome.${r}.${m}`);
+  for (const r of ["chrome-border", "chrome-border-active", "chrome-label", "chrome-primary-cta", "chrome-on-primary"]) s.push(`cliChrome.${r}`);
+  for (const r of ["brand", "brand-text", "rule", "page-bg", "paper", "text", "muted", "code-bg"]) s.push(`paperEmail.${r}`);
+  for (const t of ["light", "dark"])
+    for (const r of ["success", "warning", "danger", "info", "neutral"])
+      for (const k of ["bg", "fg"]) s.push(`paperCallout.${t}.${r}.${k}`);
+  return s;
+})();
+
+// The theme-INVARIANT families a theme is allowed to declare as passthrough
+// (D21). A theme.json `passthrough` array outside this set is a schema red — it
+// can not opt a derivable family out of characterization.
+export const PASSTHROUGH_FAMILIES = [
+  "presence", "sheetCf", "matchQuality", "provider", "statusHealth", "statusChrome",
+  "errorPage", "readerInfo", "lifecycle", "instanceLifecycle", "authButton",
+];
+
+// ── derive(theme) — the characterization compiler ────────────────────────────
+const PENDING = Symbol("pending");
+export function derive(theme) {
+  const O = theme.overrides || {};
+  const skin = theme.modes;
+  const memo = new Map();
+  function resolve(slot) {
+    if (memo.has(slot)) {
+      const v = memo.get(slot);
+      if (v === PENDING) throw new Error(`derive: cyclic slot dependency at ${slot}`);
+      return v;
+    }
+    memo.set(slot, PENDING);
+    let v;
+    if (Object.prototype.hasOwnProperty.call(O, slot)) v = O[slot];
+    else if (FORMULAS[slot]) v = FORMULAS[slot](ctx);
+    else v = undefined;
+    memo.set(slot, v);
+    return v;
+  }
+  const ctx = { skin, resolve };
+  const values = {};
+  for (const slot of SLOTS) values[slot] = resolve(slot);
+  const pinned = SLOTS.filter((s) => Object.prototype.hasOwnProperty.call(O, s));
+  const native = SLOTS.filter((s) => !Object.prototype.hasOwnProperty.call(O, s));
+  return { values, native, pinned, slots: SLOTS };
+}
+
+export default derive;

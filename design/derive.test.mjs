@@ -26,6 +26,7 @@ import {
   invertL,
   darkInvert,
   derive,
+  deriveSpine,
 } from "./derive.mjs";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
@@ -203,13 +204,13 @@ const EVERGREEN = {
 };
 
 test("derive: deterministic — two runs are byte-identical", () => {
-  const a = derive(EVERGREEN, { onMiss: () => {} });
-  const b = derive(EVERGREEN, { onMiss: () => {} });
+  const a = deriveSpine(EVERGREEN, { onMiss: () => {} });
+  const b = deriveSpine(EVERGREEN, { onMiss: () => {} });
   assert.equal(JSON.stringify(a), JSON.stringify(b));
 });
 
 test("derive: emits a flat slot map with the expected spine keys, both modes", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   for (const mode of ["light", "dark"]) {
     for (const slot of [
       "bg",
@@ -244,20 +245,20 @@ test("derive: emits a flat slot map with the expected spine keys, both modes", (
 });
 
 test("derive: misses is a NON-enumerable audit array (stays out of the byte map)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   assert.equal(Object.keys(out).includes("misses"), false);
   assert.ok(Array.isArray(out.misses));
   assert.equal(JSON.parse(JSON.stringify(out)).misses, undefined);
 });
 
 test("derive: on-accent flip feeds primary-fg (near-ink for the amber-free evergreen)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   // deep-green light primary → warm-white fg
   assert.equal(out["primary-fg.light"], toHslTriplet(parseColor("#fbfaf6")));
 });
 
 test("derive: neutral ladder chroma RAMPS bg→ink and rides the accent hue", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   const rungs = ["surface", "muted-surface", "border", "muted-text"];
   const chromas = rungs.map((s) => srgbToOklch(`hsl(${out[`${s}.light`]})`).C);
   for (let i = 1; i < chromas.length; i++) assert.ok(chromas[i] > chromas[i - 1]);
@@ -268,7 +269,7 @@ test("derive: neutral ladder chroma RAMPS bg→ink and rides the accent hue", ()
 });
 
 test("derive: accent hover moves ΔL per mode (light darkens, dark lightens)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   const pL = srgbToOklch(`hsl(${out["primary.light"]})`).L;
   const hL = srgbToOklch(`hsl(${out["primary-hover.light"]})`).L;
   assert.ok(hL < pL, "light hover should darken");
@@ -278,7 +279,7 @@ test("derive: accent hover moves ΔL per mode (light darkens, dark lightens)", (
 });
 
 test("derive: chrome ladder 8<16<22<55 is monotonic (more ink → darker in light)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   const L = ["chrome-muted", "chrome-secondary", "chrome-border", "chrome-input"].map(
     (s) => srgbToOklch(`hsl(${out[`${s}.light`]})`).L,
   );
@@ -286,7 +287,7 @@ test("derive: chrome ladder 8<16<22<55 is monotonic (more ink → darker in ligh
 });
 
 test("derive: status roles keep their LOCKED OKLCH hue (75/150/264/27)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   const want = { ok: 150, warn: 75, danger: 27, info: 264 };
   for (const [role, hue] of Object.entries(want)) {
     for (const mode of ["light", "dark"]) {
@@ -298,7 +299,7 @@ test("derive: status roles keep their LOCKED OKLCH hue (75/150/264/27)", () => {
 });
 
 test("derive: status text clears AA 4.5 on its own bg (both modes)", () => {
-  const out = derive(EVERGREEN, { onMiss: () => {} });
+  const out = deriveSpine(EVERGREEN, { onMiss: () => {} });
   for (const role of ["ok", "warn", "danger", "info"]) {
     for (const mode of ["light", "dark"]) {
       const c = contrast(
@@ -317,11 +318,11 @@ test("derive: status text clears AA 4.5 on its own bg (both modes)", () => {
 });
 
 test("derive: chroma dial — a muted accent yields lower status chroma than a vivid one", () => {
-  const vivid = derive(
+  const vivid = deriveSpine(
     { light: { bg: "0 0% 100%", ink: "240 10% 4%", accent: "20 95% 50%" }, dark: EVERGREEN.dark },
     { onMiss: () => {} },
   );
-  const muted = derive(
+  const muted = deriveSpine(
     { light: { bg: "0 0% 100%", ink: "240 10% 4%", accent: "210 12% 45%" }, dark: EVERGREEN.dark },
     { onMiss: () => {} },
   );
@@ -331,7 +332,7 @@ test("derive: chroma dial — a muted accent yields lower status chroma than a v
 });
 
 test("derive: overrides are honest pins — applied verbatim, var() passes through", () => {
-  const out = derive(
+  const out = deriveSpine(
     {
       ...EVERGREEN,
       overrides: { "accent.light": "30 92% 42%", "border.light": "var(--border)" },
@@ -345,7 +346,7 @@ test("derive: overrides are honest pins — applied verbatim, var() passes throu
 test("derive: onMiss is invoked for every reported AA miss", () => {
   // A degenerate spec whose ink barely differs from bg strains the walks.
   const seen = [];
-  const out = derive(
+  const out = deriveSpine(
     {
       light: { bg: "0 0% 100%", ink: "0 0% 96%", accent: "60 90% 92%" },
       dark: { bg: "0 0% 4%", ink: "0 0% 8%", accent: "60 90% 20%" },
