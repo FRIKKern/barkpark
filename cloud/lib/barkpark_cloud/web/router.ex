@@ -8213,17 +8213,41 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # The browser approve page for a device-authorization login (bp-login-ux). The
-  # scheme + host come from the request (via Plug.RewriteOn) so dev
-  # (http://localhost:4100) and prod (https://barkpark.cloud) both land a working
-  # URL without threading config through — the same idiom as webhook_url_for. The
-  # SPA route + view at /activate ship in the sibling slice (W1-S2).
+  # approve page is an SPA view on the DASHBOARD host (barkpark.cloud), where the
+  # user already holds their authed session — so when the request arrives on the
+  # dashboard host or a subdomain of it (prod: api.barkpark.cloud → barkpark.cloud),
+  # we box the canonical dashboard origin and the user lands already-signed-in
+  # rather than through a second login. Any OTHER host (local dev: localhost:4100,
+  # a test host) keeps the request-host construction — :dashboard_url is
+  # barkpark.cloud in EVERY env, so an unconditional swap would point a localhost
+  # CLI at barkpark.cloud (a different DB) and break local device login.
   defp activate_url(conn) do
-    scheme = conn.scheme |> to_string()
-    host = conn.host
-    port_part = https_safe_port_part(scheme, conn.port)
+    dashboard_base =
+      String.trim_trailing(
+        Application.get_env(:barkpark_cloud, :dashboard_url) || "https://barkpark.cloud",
+        "/"
+      )
 
-    "#{scheme}://#{host}#{port_part}/activate"
+    if within_dashboard_host?(conn.host, URI.parse(dashboard_base).host) do
+      dashboard_base <> "/activate"
+    else
+      scheme = conn.scheme |> to_string()
+      host = conn.host
+      port_part = https_safe_port_part(scheme, conn.port)
+
+      "#{scheme}://#{host}#{port_part}/activate"
+    end
   end
+
+  # True when the request host IS the dashboard host or a subdomain of it
+  # (api.barkpark.cloud is within barkpark.cloud). Only then do we canonicalize
+  # onto the dashboard origin.
+  defp within_dashboard_host?(request_host, dashboard_host)
+       when is_binary(request_host) and is_binary(dashboard_host) do
+    request_host == dashboard_host or String.ends_with?(request_host, "." <> dashboard_host)
+  end
+
+  defp within_dashboard_host?(_request_host, _dashboard_host), do: false
 
   # The port segment for a user-facing URL, shared by accept_url/reset_url/
   # webhook_url_for. HTTPS ALWAYS omits the port: the app never terminates TLS

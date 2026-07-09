@@ -331,6 +331,47 @@ defmodule BarkparkCloud.DeviceAuthTest do
     end
   end
 
+  describe "HTTP: verification_uri host split (dashboard boxing)" do
+    # :dashboard_url is https://barkpark.cloud in every env. A request arriving on
+    # the dashboard host or a subdomain of it (prod: api.barkpark.cloud) boxes the
+    # canonical dashboard origin so the browser rides its existing session; any
+    # other host (local dev) keeps its own origin so a localhost CLI never points
+    # at barkpark.cloud's DB.
+    test "a request on api.<dashboard-host> canonicalizes onto the dashboard host" do
+      start =
+        call(:post, "https://api.barkpark.cloud/v1/auth/device/start", %{client_name: "bp"})
+
+      assert start.status == 200
+      s = jbody(start)
+      assert s["verification_uri"] == "https://barkpark.cloud/activate"
+
+      assert s["verification_uri_complete"] ==
+               "https://barkpark.cloud/activate?code=" <> s["user_code"]
+
+      assert String.ends_with?(s["verification_uri"], "/activate")
+    end
+
+    test "a local (non-dashboard) host keeps its own origin — no barkpark.cloud boxing" do
+      start =
+        call(:post, "http://localhost:4100/v1/auth/device/start", %{client_name: "bp"})
+
+      assert start.status == 200
+      s = jbody(start)
+      assert s["verification_uri"] == "http://localhost:4100/activate"
+      refute String.contains?(s["verification_uri"], "barkpark.cloud")
+      assert s["verification_uri_complete"] == s["verification_uri"] <> "?code=" <> s["user_code"]
+    end
+
+    test "a lookalike host (evilbarkpark.cloud) is NOT boxed — the subdomain match needs the dot" do
+      start =
+        call(:post, "https://evilbarkpark.cloud/v1/auth/device/start", %{client_name: "bp"})
+
+      assert start.status == 200
+      s = jbody(start)
+      assert s["verification_uri"] == "https://evilbarkpark.cloud/activate"
+    end
+  end
+
   describe "HTTP: auth gating (the 2FA guarantee)" do
     test "inspect / approve / deny reject an unauthenticated caller with 401" do
       {:ok, %{user_code: uc}} = DeviceAuth.start(%{})
