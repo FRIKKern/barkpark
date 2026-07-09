@@ -98,31 +98,12 @@ func For(status string) string {
 // (GenANSI16) in tokens_gen.go.
 func Roles() []string { return []string{"ok", "info", "warn", "danger"} }
 
-// Themes returns every registered theme id in a stable order: DefaultTheme
-// (evergreen) first, the rest lexicographically. It is the enumeration seam the
-// all-themes surfaces (`bp style`'s per-theme slate, the Studio showroom matrix)
-// loop so they GROW when theme N+1 lands: genTones (tokens_gen.go) gains one
-// keyed entry and every caller widens with zero code edits — the "adding theme
-// N+1 touches exactly one new file" invariant made observable. Keyed off the
-// same genTones the RoleColorFor/LifecycleColorFor accessors read, so it can
-// never list a theme those accessors can't resolve.
-func Themes() []string {
-	rest := make([]string, 0, len(genTones))
-	haveDefault := false
-	for id := range genTones {
-		if id == DefaultTheme {
-			haveDefault = true
-			continue
-		}
-		rest = append(rest, id)
-	}
-	sort.Strings(rest)
-	out := make([]string, 0, len(genTones))
-	if haveDefault {
-		out = append(out, DefaultTheme)
-	}
-	return append(out, rest...)
-}
+// Themes (the enumeration seam the all-themes surfaces loop — `bp style`'s
+// per-theme slate, the Studio showroom matrix) is GENERATED in tokens_gen.go
+// (ts-w5b): design/emit.mjs stamps one id per design/themes/*.json, default
+// theme first. TestThemes pins its contract (default-first, sorted tail, 1:1
+// with genTones) so the generated list can never drift from what the
+// RoleColorFor/LifecycleColorFor accessors resolve.
 
 // RoleColor returns the generated adaptive tone for one of the four semantic
 // roles (ok/info/warn/danger), reading GenStatusTone directly — the role IS the
