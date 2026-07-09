@@ -62,11 +62,24 @@ defmodule BarkparkWeb.SheetsReaderLive do
           )
         end
 
+        # Preview manifest for the social-share head (preview-contract pc-w2) —
+        # the SAME shared emitter the papers reader uses. Computed in mount so
+        # the DEAD render already carries the og/twitter head (unfurlers run no
+        # JS). A sheet's raw type maps to og:type=website (D8).
+        preview =
+          BarkparkWeb.ShareMeta.manifest(
+            doc.content || %{},
+            "/sheets/#{slug}",
+            "sheet",
+            doc.title || slug
+          )
+
         {:ok,
          assign(socket,
            slug: slug,
            doc: doc,
            dataset: @dataset,
+           preview: preview,
            page_title: doc.title || slug
          ), layout: false}
     end

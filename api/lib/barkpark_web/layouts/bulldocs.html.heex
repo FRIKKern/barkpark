@@ -10,7 +10,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
-  <title>Paper · Barkpark</title>
+  <title>{(assigns[:page_title] && assigns[:page_title] <> " · Barkpark") || "Paper · Barkpark"}</title>
+  <%!-- Social-share head (preview-contract pc-w2): og/twitter/JSON-LD emitted
+        from the paper's preview manifest, IMMEDIATELY after <title> and BEFORE
+        the multi-KB inline style blob (Slack reads only the first 32 KB). The
+        `:preview` assign is the write-time `content["preview"]` (or the pc-w1
+        read-time projection / a degraded core manifest) that BulldocsLive.mount
+        and the share-link / scoped-paper controllers set; `assigns[:preview]`
+        is nil-safe — a render path that assigns none renders site-default meta,
+        never crashes (charter D12). --%>
+  <BarkparkWeb.ShareMeta.head preview={assigns[:preview]} page_title={assigns[:page_title]} />
   <%!-- asciinema-player CSS for `asciicast` blocks (a stylesheet, not a blocking
         <script> — the golden no-blocking-script-in-head rule covers JS; the
         player JS itself loads `defer` in the body alongside mermaid). Pinned to

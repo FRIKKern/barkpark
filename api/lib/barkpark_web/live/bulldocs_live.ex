@@ -72,6 +72,19 @@ defmodule BarkparkWeb.BulldocsLive do
 
     paper = fetch_paper(slug, reader_scope, dataset)
 
+    # Preview manifest (preview-contract pc-w2) — the outward social-share card.
+    # Computed BEFORE the `connected?` branch so the DEAD render (crawlers +
+    # unfurlers run no JS) already carries the og/twitter/JSON-LD head. Resolves
+    # to the write-time `content["preview"]`, else the pc-w1 read-time
+    # projection, else a degraded core manifest (ShareMeta.manifest/4). The
+    # layout reads `:preview` + `:page_title`.
+    preview = paper_preview(paper, slug)
+
+    socket =
+      socket
+      |> assign(:preview, preview)
+      |> assign(:page_title, preview["title"])
+
     if connected?(socket) do
       # Workspace-scope the subscription (barkpark-n56v, P0). The topic now
       # carries the owning workspace, so we MUST subscribe with the SAME
@@ -582,6 +595,16 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_html(nil), do: ""
   defp paper_html(%{content: content}), do: Map.get(content || %{}, "body_html") || ""
+
+  # Preview manifest for the social-share head (preview-contract pc-w2). The
+  # canonical url is the RELATIVE `/papers/:slug` (ShareMeta absolutizes it at
+  # emission, D3). A missing paper still yields a valid degraded manifest, so
+  # the not-found reader unfurls as a branded default card rather than blank.
+  defp paper_preview(%{content: content} = paper, slug) when is_map(content),
+    do: BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
+
+  defp paper_preview(_paper, slug),
+    do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
   defp paper_blocks(%{content: content}), do: Map.get(content || %{}, "blocks")
   defp paper_blocks(_), do: nil
