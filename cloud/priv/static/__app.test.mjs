@@ -3110,6 +3110,131 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   assert.ok(!plain.includes("Pending invitations"));
 });
 
+// ── Wave 3 (OC16/OC18): Overview fleet usage strip ──────────────────────────
+// Pure model + render helpers only (the DOM mount loadFleetUsageStrip is browser-
+// verified). These pin the four honest states — fresh / stale / no-sample /
+// over-quota — and prove the team bar reuses the C10 renderer + recovery action.
+
+const fleetIso = (secsAgo) => new Date(Date.now() - secsAgo * 1000).toISOString();
+// A summary envelope with all four states: an over-quota team headline, a fresh
+// row, an hours-stale row, and a no-sample row. Mirrors OC16 { team, instances }.
+const fleetSummaryFixture = () => ({
+  team: { instances: { value: 12, quota: 10, warn_at: 8, source: "control-plane.barkparks", measured_at: null } },
+  instances: [
+    {
+      id: "inst-fresh", name: "Acme Prod", slug: "acme-prod", host: "acme.barkpark.cloud",
+      measured_at: fleetIso(20),
+      meters: {
+        documents: { value: 412, measured_at: fleetIso(20) },
+        db_size: { value: 1048576, measured_at: fleetIso(20) },
+        disk: { value: 37, measured_at: fleetIso(20) },
+        seats: { value: 4, measured_at: fleetIso(20) },
+      },
+    },
+    {
+      id: "inst-stale", name: "Analytics", slug: "analytics", host: "an.barkpark.cloud",
+      measured_at: fleetIso(3 * 3600),
+      meters: {
+        documents: { value: 88, measured_at: fleetIso(3 * 3600) },
+        db_size: { value: "unmetered" },
+        disk: { value: "unmetered" },
+        seats: { value: 2, measured_at: fleetIso(3 * 3600) },
+      },
+    },
+    {
+      id: "inst-nosample", name: "Staging", slug: "staging", host: "stg.barkpark.cloud",
+      measured_at: null,
+      meters: { documents: { value: "unmetered" }, db_size: { value: "unmetered" }, disk: { value: "unmetered" }, seats: { value: "unmetered" } },
+    },
+  ],
+});
+
+test("W3 fleet strip: helpers exported + headline subset is exactly DOCS·DB·DISK·SEATS", () => {
+  for (const name of ["fleetStripModel", "fleetStripWorst", "fleetStripCellHtml", "fleetStripHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  assert.deepEqual([...hooks.fleetStripMeters], ["documents", "db_size", "disk", "seats"]);
+  // The subset keys must all be real meters in the shared vocabulary (no drift).
+  const known = new Set(hooks.usageMeters.map((m) => m.key));
+  for (const k of hooks.fleetStripMeters) assert.ok(known.has(k), k + " must be a real usage meter");
+});
+
+test("W3 fleet strip: fresh row stamps its own relTime, cells format by the shared spec", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const fresh = model.rows.find((r) => r.id === "inst-fresh");
+  assert.equal(fresh.noSample, false);
+  assert.match(fresh.asOf, /just now|s ago|m ago/); // a recent sample reads fresh
+  const byKey = Object.fromEntries(fresh.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.documents.value, "412");   // count
+  assert.equal(byKey.db_size.value, "1.0 MB");  // bytes (base-1024, shared fmt)
+  assert.equal(byKey.disk.value, "37%");        // percent
+  assert.equal(byKey.seats.value, "4");
+  for (const c of fresh.cells) assert.equal(c.unmetered, false);
+});
+
+test("W3 fleet strip: an hours-stale row keeps its OWN older 'as of', never fake-fresh", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const stale = model.rows.find((r) => r.id === "inst-stale");
+  assert.equal(stale.noSample, false);
+  assert.match(stale.asOf, /h ago/); // hours old — the stamp tells the truth
+  // A meter with no measurement is a compact em-dash, not a fake zero.
+  const byKey = Object.fromEntries(stale.cells.map((c) => [c.key, c]));
+  assert.equal(byKey.db_size.value, "—");
+  assert.equal(byKey.db_size.unmetered, true);
+  assert.equal(byKey.documents.value, "88");
+});
+
+test("W3 fleet strip: a null measured_at is the honest no-sample cell (no stamp, no values)", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const none = model.rows.find((r) => r.id === "inst-nosample");
+  assert.equal(none.noSample, true);
+  assert.equal(none.asOf, null);
+  assert.equal(none.worstState, null); // no sample → nothing to accent
+  const html = hooks.fleetStripCellHtml(none);
+  assert.match(html, /No sample yet/);
+  assert.ok(!html.includes("as of"), "a no-sample cell must not fake a freshness stamp");
+  assert.ok(!html.includes("fleet-usage-cell-metrics"), "a no-sample cell shows no values");
+  // Still a live drill-down to the instance's own Usage tab.
+  assert.match(html, /href="#instance\/inst-nosample\/usage"/);
+});
+
+test("W3 fleet strip: the team headline over-quota carries the tone + Manage-plan recovery (D25)", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  assert.equal(model.teamState, "over"); // value 12 >= quota 10, inclusive
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, /usage-bar--over/);
+  // Exactly ONE recovery action, routing to a real Settings billing view.
+  assert.match(html, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
+  assert.equal((html.match(/usage-bar-action/g) || []).length, 1);
+  assert.ok(hooks.settingsViews.includes("billing"), "Manage plan must land on a real view");
+});
+
+test("W3 fleet strip: cells deep-link into the instance Usage tab", () => {
+  const model = hooks.fleetStripModel(fleetSummaryFixture());
+  const html = hooks.fleetStripHtml(model);
+  assert.match(html, /href="#instance\/inst-fresh\/usage"/);
+  assert.match(html, /href="#instance\/inst-stale\/usage"/);
+  assert.match(html, /aria-label="Fleet usage"/);
+});
+
+test("W3 fleet strip: worst-state fold picks the worst headline quota tone, null when none", () => {
+  // No headline meter carries a ceiling → nothing to accent.
+  assert.equal(hooks.fleetStripWorst({ documents: { value: 5 }, seats: { value: 2 } }), null);
+  // A headline meter over its ceiling folds the row to "over".
+  assert.equal(hooks.fleetStripWorst({ documents: { value: 20, quota: 10, warn_at: 8 }, seats: { value: 2 } }), "over");
+  // warn beats ok.
+  assert.equal(hooks.fleetStripWorst({ seats: { value: 8, quota: 10, warn_at: 8 }, documents: { value: 3, quota: 100, warn_at: 90 } }), "warn");
+});
+
+test("W3 fleet strip: an absent / empty summary yields an empty, bar-less model", () => {
+  const empty = hooks.fleetStripModel(undefined);
+  assert.equal(empty.rows.length, 0); // sandbox-prototype array — compare by length
+  assert.equal(empty.teamMeter, null);
+  assert.equal(empty.teamState, null);
+  const noTeam = hooks.fleetStripModel({ instances: [] });
+  assert.equal(hooks.fleetStripHtml(noTeam).includes("usage-bar"), false);
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // S7 — Azure card + verified connect + priced provider-neutral launch catalog
 // (epic azure-hetzner hosting parity). The pure seam; the DOM mount is live.
