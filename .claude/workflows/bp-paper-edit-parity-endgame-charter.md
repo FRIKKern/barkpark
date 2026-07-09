@@ -135,3 +135,43 @@ an unresolved task-detail returns `""` while sibling widgets render
 Integration: S10/S12/S13 are self-contained (card/note/stage node-views — no
 shared partition). S14/S15/S17 add assertions only (no node-view edit) → can
 batch. S11/S16 CLOSED this wave (W1.3/W1.2). Take the LIVE-BUG slice S10 first.
+
+## Wave log
+
+### Wave 2026-07-09 (pass-2 wave 1 — S1-S4 self-contained gates + audit)
+
+**Landed (4/4 green, reviewer-verified + mutation-spot-checked):**
+
+- **W1.1 divider value-lockstep** — `view_edit_parity_test.exs` §8 byte-binds
+  the reader's inline `section_divider_html/0` decls (figures.ex) to the
+  `.bp-section-divider*` CSS in root.html.heex + styles.css (var-fallbacks
+  stripped) + parser-sanity guard. Branch
+  `loop-epic/w1-1-divider-value-lockstep-gate-figures-0-r` (reviewer: mix format).
+- **W1.2 roles+table edit-DOM gates** — `__role_parity.test.mjs` (4 roles emit
+  the reader's `<p class="bp-role-*">`, chrome-free, bp-attrs survive, pullquote
+  italic) + `__table_parity.test.mjs` (`.bp-table*` bindings frozen; thead-drop
+  + `bp-canvas-table__*` rails justified as edit-only islands). Branch
+  `loop-epic/parity-roles-table-dom` (clean — no reviewer fixes).
+- **W1.3 section parity gate** — `__section_parity.test.mjs` (11 checks) with
+  reconcile-or-justify for the 3 micro-divergences; RECONCILED: grid items now
+  mirror the reader cell's `min-width:0` (section-node.js applyCellPlacement);
+  Elixir §6 rewritten to a tripwire + §6b pins the mjs wiring. Branch
+  `loop-epic/w1-3-section-parity-gate-mounted-shape-a-2-r` (reviewer: mix format).
+- **W1.4 pass-2 audit** — dual-rendered the 91-block showcase (50 types) via
+  `api/scripts/pass2_audit_harness.exs`; the Wave-2 candidates table above.
+  Reviewer corrected S11 (main DOES paint `bp-section__grid`, section-node.js:358)
+  and marked S11/S16 CLOSED by this wave's own W1.3/W1.2. Bugs filed:
+  `parity2-bug-card-slot-chrome`, `parity2-bug-taskdetail-empty-state`. Branch
+  `loop-epic/w1-4-pass-2-divergence-audit-dual-render-3-r`.
+
+**Integration notes for the lead:** W1.2 + W1.3 both append to package.json's
+one-line `test` chain → expect a trivial same-line conflict; keep BOTH new
+entries. Merge-gated "PR merged" criteria stay open on all 4 tasks — lead closes
+on merge. Lead browser-verifies W1.3 via the static harness before PR. Elixir
+changes (W1.1/W1.3) wait for the Elixir Test gate before merge.
+
+**Next wave:** S10 card-slot chrome (LIVE BUG — edit card mirrors the legacy
+`cards` fleet chrome, not the reader `card` widget; restructure card-node.js
+slots to bare semantic children) + S12 note / S13 stage island parity (self-
+contained node-views), then batch the assertion-only S14/S15/S17. Also decide
+`parity2-bug-taskdetail-empty-state` (reader-side `bp-tasks--empty` fix, tiny).
