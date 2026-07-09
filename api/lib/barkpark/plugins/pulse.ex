@@ -59,8 +59,9 @@ defmodule Barkpark.Plugins.Pulse do
 
   # Surface the dashboard in the Structure desk. The link points at the
   # OPS-console path `/admin/pulse` (not `/studio/...`): the host's
-  # `scoped_plugin_href` rewrites `/studio/<x>` links assuming `<x>` is a
-  # dataset — which mangled `/studio/pulse` into a bogus `/d/pulse/studio`.
+  # plugin-link canonicaliser (Paths.plugin_link_href/2) rewrites
+  # `/studio/<x>` links assuming `<x>` is a dataset — which mangled
+  # `/studio/pulse` into a bogus `/d/pulse/studio`.
   # An `/admin/...` path is left untouched on both flat and scoped surfaces,
   # the same proven shape onixedit's desk consoles use.
   @impl Barkpark.Plugin

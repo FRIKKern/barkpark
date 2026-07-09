@@ -58,6 +58,7 @@ defmodule BarkparkWeb.StudioChrome do
   import Phoenix.LiveView, only: [attach_hook: 4, push_navigate: 2, put_flash: 3]
 
   alias Barkpark.{Content, Tenancy}
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   @studio_live BarkparkWeb.Studio.StudioLive
 
@@ -369,7 +370,7 @@ defmodule BarkparkWeb.StudioChrome do
   end
 
   defp studio_root(ws, project, dataset),
-    do: "/w/#{ws.slug}/p/#{project.slug}/d/#{dataset}/studio"
+    do: Paths.scoped_root(ws.slug, project.slug, dataset)
 
   defp can_reach?(socket, %{id: ws_id}) do
     case socket.assigns[:api_token] do

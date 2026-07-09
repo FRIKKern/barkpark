@@ -111,7 +111,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </button>
           <a
             :if={@slug}
-            href={(assigns[:scope_prefix] || "") <> "/papers/#{@slug}"}
+            href={Paths.paper_path(assigns[:scope_prefix] || "", @slug)}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
@@ -644,7 +644,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 <% :plugin_link -> %>
                   <a
                     id={"plugin-link-#{item.id}"}
-                    href={Paths.scoped_plugin_href(@scope_prefix || "", item.href)}
+                    href={item.href}
                     class="pane-item nav-plugin-entry"
                     data-test-id="nav-plugin-entry"
                   >
@@ -799,7 +799,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               dataset={@dataset}
               data-token={Map.get(assigns, :api_token_raw, "")}
               data-kind-filter={@media_kind_filter || "all"}
-              data-open-path={(assigns[:scope_prefix] || "") <> "/d/#{@dataset}/studio/" <> Enum.join(@nav_path, "/")}
+              data-open-path={Paths.studio_path(assigns[:scope_prefix] || "", @nav_path, @dataset)}
             />
           </div>
         </div>

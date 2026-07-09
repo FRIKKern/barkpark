@@ -10,6 +10,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   import BarkparkWeb.Icons
 
+  alias BarkparkWeb.Studio.StudioLive.Paths
+
   @doc """
   Renders Studio flash banners (info + error) using the canonical
   `style="margin: 8px 16px 0;"` margin. Both `studio.html.heex` and
@@ -385,8 +387,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     # those ride the flat→scoped 302 funnel.
     base =
       case scope_prefix || "" do
-        "" -> "/studio/#{ds}"
-        prefix -> "#{prefix}/d/#{ds}/studio"
+        "" -> Paths.flat_root(ds)
+        prefix -> Paths.studio_path(prefix, [], ds)
       end
 
     base_re = Regex.escape(base)
