@@ -671,7 +671,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
   end
 
-  # The canonical scoped Settings address for the seeded Default workspace
+  # The canonical scoped Settings address for the seeded Default workspace.
   # main's route is PROJECT-level (no dataset segment, #1936).
   defp scoped_settings_path do
     ws = Barkpark.Tenancy.get_default_workspace()
