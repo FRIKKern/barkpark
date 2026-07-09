@@ -5088,8 +5088,42 @@ defmodule BarkparkCloud.Web.Router do
       pending_invitations: usage_pending_invitations(team),
       datasets: usage_dataset_count(datasets),
       documents: usage_instance_documents(bp, slugs),
-      webhooks: usage_instance_webhooks(bp, slugs)
+      webhooks: usage_instance_webhooks(bp, slugs),
+      instances: usage_instances(team)
     })
+  end
+
+  # The fleet meter (OC11) — the fleet's ONE enforcement-backed ceiling. `value`
+  # is the team's live managed-instance count; `quota` is the plan ceiling the
+  # create-time 402 guard and the quota reconciler both enforce
+  # (`Billing.barkpark_limit/1`), but ONLY when it is an honest wall to draw:
+  #
+  #   * NO active subscription → nil. An unsubscribed team's ceiling is owned by
+  #     the ENTITLEMENT gate (the 402 `no_active_subscription`), not a quota bar —
+  #     mirroring `barkpark_limit_reached?/1` returning false for it. `barkpark_limit/1`
+  #     would resolve the "none" ceiling (0) here, which is not a real quota.
+  #   * a "forever"-tier placeholder (>= 100_000) → nil. 1_000_000 is a stand-in
+  #     for "effectively unlimited", not a wall; a bar to a million is a lie.
+  #
+  # A pure control-plane read that returns even when every instance is down.
+  # Rescued so a repo hiccup degrades THIS meter (→ "unmetered"), never 500s the
+  # envelope (D51). The renderer computes over/at-limit as `value >= quota`
+  # (inclusive, matching the create-time guard); the envelope carries no `over`.
+  defp usage_instances(team) do
+    %{value: Registry.count_barkparks(team), quota: usage_instance_quota(team)}
+  rescue
+    _ -> %{value: nil, quota: nil}
+  end
+
+  defp usage_instance_quota(team) do
+    case Billing.active_subscription(team) do
+      nil ->
+        nil
+
+      %{} ->
+        limit = Billing.barkpark_limit(team)
+        if is_integer(limit) and limit < 100_000, do: limit
+    end
   end
 
   # The latest health beat, normalized — the SAME read the /telemetry route does
