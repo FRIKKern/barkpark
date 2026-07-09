@@ -35,7 +35,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
+  alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
+
+  # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
+  # helpers shared by the live render and the store-replay path.
+  import BarkparkWeb.Studio.ChatToolRenderer, only: [spawn?: 2, spawn_label: 2]
 
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
@@ -88,7 +93,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
          init: nil,
          messages: [],
          next_id: 0,
+         # The in-memory id of THIS turn's TodoWrite living-checklist card
+         # (charter D39). The turn's first TodoWrite appends a :todo card and
+         # records its id here; every later TodoWrite supersedes that card in
+         # place. Reset to nil on the broadcast `system/init` (the per-turn
+         # boundary) and on every session load.
+         todo_card_id: nil,
          streaming: nil,
+         # The live extended-thinking pulse (charter D41): nil, or
+         # %{tokens: N, text: ""}. Driven by `system/thinking_tokens` frames — the
+         # wire never carries thinking text, so the row shows a "✻ thinking… ~N
+         # tokens" counter that settles into a durable `:thinking` message the
+         # instant real output (text/tool/result) begins.
+         thinking_pulse: nil,
          # Advertised slash commands (charter D36a) — the CLI's initialize list,
          # held by the Recorder and delivered on subscribe + broadcast. The
          # composer's slash menu merges these with the builtin floor.
@@ -222,30 +239,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
          |> clear_composer()}
 
       :none ->
-        # No send queue (t3 item 10): while a turn runs the only control is
-        # Stop — a stray Enter-submit must not fire a second overlapping turn.
-        # An image-only turn (text blank but attachments present) is valid (D25).
         cond do
           text == "" and not has_attachments? ->
             {:noreply, socket}
 
-          turn_active?(socket.assigns.status) ->
-            {:noreply, socket}
-
           true ->
+            # Queue-honest send (charter D43): a mid-turn send is NO LONGER
+            # dropped. The real binary buffers a mid-turn stdin user frame and
+            # runs it as the NEXT turn (probe-proven — never steers, never
+            # errors), so a mid-turn send runs the SAME two-phase path; its echo
+            # just wears a '⧗ queued' badge and the row persists metadata.queued.
+            # Words are never lost to a silent drop.
+            queued? = turn_active?(socket.assigns.status)
+
             # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
             # every failure-prone step to {:dispatch_send}. An image-only turn gets
             # its bubble in phase 2 when the staged files are consumed (D25) — the
             # attachment strip keeps showing the thumbnails until that next diff,
             # so nothing visually vanishes in between.
             echo_id = socket.assigns.next_id
-            send(self(), {:dispatch_send, text})
+            send(self(), {:dispatch_send, text, queued?})
 
             socket =
               if text == "" do
                 assign(socket, pending_echo_id: nil)
               else
-                socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
+                socket
+                |> append_message(:user, text, queued: queued?)
+                |> assign(pending_echo_id: echo_id)
               end
 
             # The stuck draft is history the instant a turn dispatches (charter
@@ -253,10 +274,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             # not the words that just went to the model.
             socket = clear_persisted_draft(socket)
 
-            {:noreply,
-             socket
-             |> start_turn_clock()
-             |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")}
+            # A FRESH send starts the turn clock and flips to :thinking; a QUEUED
+            # send rides the already-running turn, so leave its clock and status
+            # untouched — the live spinner keeps its own elapsed time.
+            socket =
+              if queued? do
+                assign(socket, composer_draft: "")
+              else
+                socket
+                |> start_turn_clock()
+                |> assign(status: :thinking, interrupt_requested: false, composer_draft: "")
+              end
+
+            {:noreply, socket}
         end
     end
   end
@@ -280,12 +310,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the subprocess and runs the shared honest teardown so the composer never
   # sticks at "Stopping…" forever.
   def handle_event("stop_turn", _params, socket) do
-    case socket.assigns.session do
-      nil ->
+    # Esc now fires stop_turn from ANYWHERE (charter D42), so this must be a
+    # strict no-op unless a turn is actually running: a stray Escape at an idle
+    # composer must never interrupt a live-but-quiescent session (nor a dead one).
+    cond do
+      is_nil(socket.assigns.session) ->
         {:noreply, socket}
 
-      session ->
-        ClaudeChat.interrupt(session)
+      not turn_active?(socket.assigns.status) ->
+        {:noreply, socket}
+
+      true ->
+        ClaudeChat.interrupt(socket.assigns.session)
 
         Process.send_after(
           self(),
@@ -605,7 +641,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   #     STAYS and the composer stays CLEARED (restoring would double-send);
   #     `persist_user_message` warns that this row may not survive a reopen.
   @impl true
-  def handle_info({:dispatch_send, text}, socket) do
+  def handle_info({:dispatch_send, text, queued?}, socket) do
     socket = ensure_session(socket)
 
     case socket.assigns.session do
@@ -662,7 +698,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
                 {:noreply,
                  socket
-                 |> persist_user_message(text, attachments)
+                 |> persist_user_message(text, attachments, queued?)
                  |> assign(status: :thinking, pending_echo_id: nil)}
 
               {:error, reason} ->
@@ -692,9 +728,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     status = if socket.assigns.status == :starting, do: :ready, else: socket.assigns.status
 
+    # system/init fires once per TURN (charter): the queued turn is now starting,
+    # so drop the live-only '⧗ queued' badge on any echoed row (charter D43). The
+    # metadata.queued fact stays in the store; only the chrome clears.
     {:noreply,
      socket
-     |> assign(init: init, status: status)
+     # A new turn is starting: forget the previous turn's checklist card so this
+     # turn's first TodoWrite starts a fresh living card (charter D39), and drop
+     # the live-only '⧗ queued' badge on any echoed row (charter D43).
+     |> assign(
+       init: init,
+       status: status,
+       todo_card_id: nil,
+       messages: clear_queued_badges(socket.assigns.messages)
+     )
      |> observe_permission_mode(observed)}
   end
 
@@ -709,28 +756,117 @@ defmodule BarkparkWeb.Studio.ChatLive do
          }},
         socket
       ) do
+    # The first text delta is the moment thinking gives way to prose — settle any
+    # live pulse into its durable row (charter D41) before the bubble streams.
+    socket = settle_thinking(socket)
     {:noreply, assign(socket, streaming: advance_streaming(socket.assigns.streaming, text))}
   end
 
+  # The thinking block opens (charter D41): show the ✻ row immediately, even
+  # before the first `thinking_tokens` count lands, so a bout that thinks briefly
+  # still pulses. Idempotent — a live pulse already open keeps its count.
   def handle_info(
-        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}}},
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_start",
+             "content_block" => %{"type" => "thinking"}
+           }
+         }},
+        socket
+      ) do
+    {:noreply, assign(socket, thinking_pulse: socket.assigns[:thinking_pulse] || blank_pulse())}
+  end
+
+  # A thinking delta (charter D41). The count comes from `thinking_tokens`, NEVER
+  # from a delta's per-block count. Forward-compatible: today `delta["thinking"]`
+  # is always "" (the wire carries no thinking text), but if a future CLI ever
+  # populates it we append it live and fall back to the counter otherwise. The
+  # encrypted signature is never read.
+  def handle_info(
+        {:claude_chat_event,
+         %{
+           "type" => "stream_event",
+           "event" => %{
+             "type" => "content_block_delta",
+             "delta" => %{"type" => "thinking_delta"} = delta
+           }
+         }},
+        socket
+      ) do
+    pulse = socket.assigns[:thinking_pulse] || blank_pulse()
+
+    pulse =
+      case delta["thinking"] do
+        text when is_binary(text) and text != "" -> %{pulse | text: pulse.text <> text}
+        _ -> pulse
+      end
+
+    {:noreply, assign(socket, thinking_pulse: pulse)}
+  end
+
+  # The cumulative thinking-token counter (charter D41). `estimated_tokens` is
+  # monotonic across a bout — bump the pulse's high-water mark. This clause and
+  # the two above MUST precede the `{:claude_chat_event, _event}` catch-all.
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens"} = ev},
+        socket
+      ) do
+    pulse = socket.assigns[:thinking_pulse] || blank_pulse()
+    tokens = max(pulse.tokens, thinking_tokens_count(ev))
+    {:noreply, assign(socket, thinking_pulse: %{pulse | tokens: tokens})}
+  end
+
+  def handle_info(
+        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}} = ev},
         socket
       )
       when is_list(blocks) do
+    # A thinking bout with no intervening prose (thinking → tool_use) settles here
+    # so its ✻ row lands just before the tool row, matching the persisted order.
+    socket = settle_thinking(socket)
+
+    # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
+    # every row this frame produces inherits it so children indent under the
+    # spawn row. Top-level frames leave it nil (no indent).
+    parent_id = ev["parent_tool_use_id"]
+
     socket =
       Enum.reduce(blocks, socket, fn
         %{"type" => "text", "text" => text}, acc when is_binary(text) ->
           if String.trim(text) == "" do
             acc
           else
-            append_message(acc, :assistant, text, html: render_paper_html(text))
+            append_message(acc, :assistant, text,
+              html: render_paper_html(text),
+              parent_tool_use_id: parent_id
+            )
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
-          append_message(acc, :tool, tool_line(name, block["input"]),
-            tool_use_id: block["id"],
-            output: nil
-          )
+          input = block["input"]
+
+          if StudioChat.todo_shaped?(input) and is_nil(parent_id) do
+            # A TOP-LEVEL TodoWrite-shaped call becomes the turn's ONE living
+            # checklist card (D39) instead of a generic tool row. A sub-agent's
+            # TodoWrite must never hijack the main turn's card — it stays a
+            # plain (indented) tool row below its spawn (D40).
+            apply_todo_block(acc, input)
+          else
+            # Thread the FULL input + tool name so the diff renderer (D38) can
+            # dispatch on input SHAPE; the store already persists both verbatim
+            # (recorder.ex), so live and replay render the identical diff.
+            append_message(acc, :tool, tool_line(name, input),
+              tool_use_id: block["id"],
+              output: nil,
+              tool: name,
+              input: input,
+              parent_tool_use_id: parent_id,
+              spawn?: spawn?(name, input),
+              spawn_label: spawn_label(name, input)
+            )
+          end
 
         _block, acc ->
           acc
@@ -746,6 +882,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev}, socket) do
+    # A turn that thought then produced no prose/tool still settles its pulse
+    # here so the ✻ row is never lost (charter D41).
+    socket = settle_thinking(socket)
+
     # An interrupted turn arrives as `error_during_execution` too — the ONLY
     # way to tell it from a genuine error is that WE asked to stop
     # (`interrupt_requested`) or the CLI tagged the terminus
@@ -775,6 +915,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign(
        status: :ready,
        streaming: nil,
+       thinking_pulse: nil,
        last_result: last_result,
        interrupt_requested: false
      )
@@ -1186,6 +1327,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     phx-keydown="session-rename-cancel"
                     phx-key="Escape"
+                    data-chat-rename
                     data-test-id={"chat-session-rename-input-#{s.id}"}
                   />
                 </form>
@@ -1384,7 +1526,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-hook="PaperMermaid"
             style="display: flex; flex-direction: column; gap: 10px;"
           >
-            <div :for={message <- @messages} data-role={message.role}>
+            <div
+              :for={message <- @messages}
+              data-role={message.role}
+              data-parent={message[:parent_tool_use_id]}
+              style={message[:parent_tool_use_id] && trace_child_style()}
+            >
             <%= case message.role do %>
               <% :user -> %>
                 <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
@@ -1420,6 +1567,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       <%= message.text %>
                     </div>
                   </div>
+                  <%!-- Queue-honest badge (charter D43): a mid-turn send lands
+                        immediately and is dispatched right away — the binary runs
+                        it as the next turn. The badge is LIVE-ONLY; it clears when
+                        that turn's system/init fires, and replay never shows it. --%>
+                  <div
+                    :if={message[:queued]}
+                    class="text-xs text-dim"
+                    style="font-family: var(--font-mono); padding-left: 22px;"
+                  >
+                    ⧗ queued
+                  </div>
                 </div>
               <% :assistant -> %>
                 <%!-- Terminal anatomy: assistant prose wears the ● gutter. --%>
@@ -1448,10 +1606,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   </div>
                 </div>
               <% :tool -> %>
-                <div class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                <%!-- A Task/agent spawn (charter D40) gets a headline row: the
+                      ● gutter plus the sub-agent's description; the frames it
+                      emits interleave below, indented under it. A plain tool row
+                      keeps the terse mono line. --%>
+                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                  <span style="color: var(--primary);">●</span>
+                  <span style="font-weight: 650;"><%= message[:spawn_label] || message.text %></span>
+                  <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+                </div>
+                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
                   <span style="color: var(--primary);">●</span>
                   <span><%= message.text %></span>
                 </div>
+                <%!-- D38: a file-mutating tool call renders as a real colored
+                      diff (dispatch on input SHAPE, not tool name) beneath the
+                      ● header; a non-diff shape renders nothing here and keeps
+                      the generic ⎿ row below. --%>
+                <ChatToolRenderer.tool_diff
+                  :if={ChatToolRenderer.diff?(message[:input])}
+                  input={message.input}
+                />
                 <%!-- The terminal's ⎿ result line: first line inline; multi-
                       line outputs expand on click (details/summary). --%>
                 <div
@@ -1471,6 +1646,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     ⎿ <%= tool_output_head(message.output) %>
                   <% end %>
                 </div>
+              <% :todo -> %>
+                <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+                      Recorder collapsed + the reducer superseded, so it renders
+                      the turn's LATEST todo state whether live or replayed. --%>
+                <ChatToolRenderer.todo_card todos={message.todos} />
               <% :approval -> %>
                 <div
                   :if={message.approval_status == :pending}
@@ -1592,12 +1772,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 >
                   <%= plan_outcome_label(message.approval_status) %> — <%= message.title %>
                 </div>
+              <% :thinking -> %>
+                <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
+                      ever — only "thought for ~N tokens". Same shape live and on
+                      replay. --%>
+                <div class="text-xs text-dim" style="font-family: var(--font-mono);">
+                  <span aria-hidden="true">✻</span> <%= message.text %>
+                </div>
               <% _ -> %>
                 <div class="text-xs text-dim" style="font-family: var(--font-mono);">
                   <span aria-hidden="true">✻</span> <%= message.text %>
                 </div>
             <% end %>
             </div>
+          </div>
+
+          <%!-- The LIVE thinking pulse (charter D41): a ✻ counter that breathes
+                while the model thinks, before any prose streams. It settles into a
+                durable :thinking message (above) the moment real output begins. --%>
+          <div
+            :if={@thinking_pulse}
+            class="text-xs text-dim"
+            style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px;"
+          >
+            <span class="bp-chat-spinner" aria-hidden="true"></span>
+            <span :if={@thinking_pulse.text in [nil, ""]}>
+              thinking… ~<%= @thinking_pulse.tokens %> tokens
+            </span>
+            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;">
+              <%= @thinking_pulse.text %>
+            </span>
           </div>
 
           <div :if={@streaming} style="opacity: 0.92;">
@@ -1626,7 +1830,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </div>
 
           <div
-            :if={@streaming == nil and turn_active?(@status)}
+            :if={@streaming == nil and @thinking_pulse == nil and turn_active?(@status)}
             class="text-xs text-dim"
             style="font-family: var(--font-mono); display: flex; align-items: center; gap: 8px;"
           >
@@ -1738,8 +1942,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
               >
               </ul>
             </div>
-            <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
-                  to cancel, never to queue a second turn (t3: no send queue). --%>
+            <%!-- While a turn runs the primary button becomes Stop (interrupt),
+                  but pressing ↵ still submits: a mid-turn send is queued honestly
+                  (charter D43) — dispatched immediately, run as the next turn. --%>
             <button
               :if={turn_active?(@status)}
               type="button"
@@ -1759,6 +1964,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </form>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
+        </p>
+        <%!-- Keyboard-first footer hint (charter D42): unconditional so the
+              affordances are visible from the very first mount, before any turn
+              completes — a sibling of the cost strip, never gated on it. --%>
+        <p class="text-xs text-dim" style="max-width: 860px; margin: 4px auto 0; font-family: var(--font-mono); opacity: 0.7;">
+          esc interrupt · / commands · ↵ send
         </p>
       </div>
       </div>
@@ -2042,7 +2253,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Strictly past every replayed id (seqs are 1-based), so a live append
       # never collides with a replayed message's id.
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
+      # A reopen starts no turn — the next live TodoWrite opens a fresh card
+      # (charter D39). A replayed todo row is already the final collapsed state.
+      todo_card_id: nil,
       streaming: nil,
+      thinking_pulse: nil,
       interrupt_requested: false,
       pending_mode: nil,
       last_result: nil,
@@ -2117,7 +2332,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       init: nil,
       messages: [],
       next_id: 0,
+      todo_card_id: nil,
       streaming: nil,
+      thinking_pulse: nil,
       # A new chat has no runtime yet, so no advertised commands — the slash menu
       # floors to builtins until the first send spawns + initializes (D36a).
       commands: [],
@@ -2186,7 +2403,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       socket
       |> assign(messages: messages)
       |> append_message(:system, message)
-      |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
+      |> assign(
+        session: nil,
+        status: :offline,
+        streaming: nil,
+        thinking_pulse: nil,
+        interrupt_requested: false
+      )
       |> refresh_sessions()
     end
   end
@@ -2245,7 +2468,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # append race that outlived its retries) — we never discard that error: log it
   # and tell the user honestly that THIS message may not survive a reopen, so
   # the transcript never lies about what was remembered (charter D20b).
-  defp persist_user_message(socket, text, attachments) do
+  defp persist_user_message(socket, text, attachments, queued?) do
     # Only the lightweight pointer rides the jsonb — NEVER the base64/bytes
     # (charter D25/D7). An attachment-free send keeps the empty-metadata shape.
     metadata =
@@ -2253,6 +2476,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
         [] -> %{}
         list -> %{"attachments" => Enum.map(list, &attachment_pointer_json/1)}
       end
+
+    # A mid-turn send is stamped queued=true (charter D43) as HISTORICAL FACT:
+    # replay keeps the row a plain ❯ (the '⧗ queued' badge is live-only chrome),
+    # but the metadata records that this word landed while a turn was running.
+    metadata = if queued?, do: Map.put(metadata, "queued", true), else: metadata
 
     socket =
       case persist_store(socket, %{role: "user", source_markdown: text, metadata: metadata}) do
@@ -2461,15 +2689,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
   end
 
-  # A tool row replays with its captured output so the ⎿ line survives reopen.
+  # A todo row replays as ONE final-state living checklist (charter D39): the
+  # Recorder collapsed every TodoWrite of the turn into this single row's
+  # metadata.input, so parsing it here reconstructs exactly the last state.
+  defp replay_message(%{role: "todo", seq: seq, metadata: meta}, _live?) do
+    input = Map.get(meta || %{}, "input") || %{}
+
+    %{
+      id: seq,
+      role: :todo,
+      text: "Update todos",
+      html: nil,
+      todos: ChatToolRenderer.parse_todos(input)
+    }
+  end
+
+  # A tool row replays with its captured output so the ⎿ line survives reopen,
+  # its input + tool name so the diff renderer (D38) reproduces the identical
+  # colored diff, and the spawn heuristics + nested-trace parentage (D40) so a
+  # reopened transcript shows the same ● spawn row and indented children the
+  # live tab drew — replay parity is first-class.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    meta = meta || %{}
+    name = Map.get(meta, "tool")
+    input = Map.get(meta, "input")
+
     %{
       id: seq,
       role: :tool,
       text: md,
       html: nil,
-      output: Map.get(meta || %{}, "output")
+      output: Map.get(meta, "output"),
+      tool: name,
+      input: input,
+      tool_use_id: Map.get(meta, "tool_use_id"),
+      parent_tool_use_id: Map.get(meta, "parent_tool_use_id"),
+      spawn?: spawn?(name, input),
+      spawn_label: spawn_label(name, input)
     }
+  end
+
+  # A thinking row (charter D41) rebuilds the ✻ pulse from its persisted count —
+  # the signature was never stored, only `metadata.tokens`. `source_markdown` is
+  # the human-readable fallback for an older/thinner row with no count.
+  defp replay_message(%{role: "thinking", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    tokens = Map.get(meta || %{}, "tokens")
+    text = if is_integer(tokens), do: thinking_label(tokens), else: md || "thought"
+    %{id: seq, role: :thinking, text: text, html: nil}
   end
 
   defp replay_message(m, _live?) do
@@ -2480,7 +2746,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
            String.trim(m.source_markdown) != "",
          do: render_paper_html(m.source_markdown)
 
-    %{id: m.seq, role: role, text: m.source_markdown, html: html}
+    %{
+      id: m.seq,
+      role: role,
+      text: m.source_markdown,
+      html: html,
+      parent_tool_use_id: Map.get(m.metadata || %{}, "parent_tool_use_id")
+    }
   end
 
   # Rebuild the inline image list from a user row's metadata attachment pointers.
@@ -2527,6 +2799,74 @@ defmodule BarkparkWeb.Studio.ChatLive do
       messages: socket.assigns.messages ++ [message],
       next_id: id + 1
     )
+  end
+
+  # Drop the live-only '⧗ queued' badge (charter D43) when the queued turn starts
+  # (the next system/init). Historical fact lives in the store's metadata.queued;
+  # this only clears the in-memory chrome so the row settles to a plain ❯ prompt.
+  defp clear_queued_badges(messages) do
+    Enum.map(messages, fn m ->
+      if Map.get(m, :queued), do: Map.put(m, :queued, false), else: m
+    end)
+  end
+
+  # Settle the live thinking pulse into a durable `:thinking` message (charter
+  # D41). Called at the first real output of a bout (text delta / assistant
+  # blocks / result) so live order matches the persisted replay order. A bout
+  # with a positive count leaves a "thought for ~N tokens" row; one that never
+  # counted (no thinking frames) leaves nothing. Always clears the pulse, so
+  # repeated calls within a turn are idempotent.
+  defp settle_thinking(socket) do
+    case socket.assigns[:thinking_pulse] do
+      %{tokens: n} when is_integer(n) and n > 0 ->
+        socket
+        |> append_message(:thinking, thinking_label(n))
+        |> assign(thinking_pulse: nil)
+
+      _ ->
+        assign(socket, thinking_pulse: nil)
+    end
+  end
+
+  defp blank_pulse, do: %{tokens: 0, text: ""}
+
+  defp thinking_label(n), do: "thought for ~#{n} tokens"
+
+  # The cumulative estimated-token count off a `system/thinking_tokens` frame.
+  defp thinking_tokens_count(ev) do
+    case ev["estimated_tokens"] do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 0
+    end
+  end
+
+  # A TodoWrite-shaped tool_use is ONE living checklist card per turn (charter
+  # D39). The turn's first TodoWrite appends a :todo card and records its id;
+  # every later one supersedes that card's list IN PLACE (never appends). The
+  # tracked id resets on the broadcast `system/init` (per-turn boundary), so a
+  # mid-turn joiner — whose id is nil — appends one latest-state card (accepted;
+  # reopen converges to the single persisted row). The existence guard keeps a
+  # stale id (from a session we just left) from silently dropping the card.
+  defp apply_todo_block(socket, input) do
+    todos = ChatToolRenderer.parse_todos(input)
+    tracked = socket.assigns[:todo_card_id]
+
+    if is_integer(tracked) and
+         Enum.any?(socket.assigns.messages, &(&1.id == tracked and &1.role == :todo)) do
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{id: ^tracked} = m -> %{m | todos: todos}
+          m -> m
+        end)
+
+      assign(socket, messages: messages)
+    else
+      id = socket.assigns.next_id
+
+      socket
+      |> append_message(:todo, "Update todos", todos: todos)
+      |> assign(todo_card_id: id)
+    end
   end
 
   # Resolve a pending needs-you card (approval | question | plan) with a
@@ -3079,18 +3419,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp tool_output_lines(out) when is_binary(out),
     do: out |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
 
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE) renders its content as a
+  # colored diff right below the header (D38) — the header shows only the path,
+  # terminal style (`● Update(path)`), never a duplicate old/new-string preview.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if ChatToolRenderer.diff?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name
+
+  # A sub-agent's rows (charter D40) indent under their spawn row with a
+  # connecting evergreen gutter — the nested-trace feel of the terminal. Tokens
+  # only (no color literals): the gate stays green.
+  defp trace_child_style,
+    do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary);"
 
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"

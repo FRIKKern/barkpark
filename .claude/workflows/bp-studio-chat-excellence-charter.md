@@ -443,6 +443,118 @@ quality."
   (it omits model_choice; the naive seed reads nil and ships "default" forever,
   vacuous-green).
 
+### Wave-7 decisions (2026-07-09, decided from real-binary + code ground truth — "the transcript IS the terminal")
+
+- **D38 — Tool-specific rendering = shape dispatch over persisted metadata.input;
+  BOTH render paths widen first.** The full tool `input` map is persisted
+  verbatim and uncapped on every tool row (recorder.ex:302) — but both render
+  paths DROP it today: live append keeps only tool_use_id+output
+  (chat_live.ex:730/2524) and replay keeps only output (chat_live.ex:2465-2473).
+  Foundation move: thread `input` + `tool` (+ `tool_use_id` in replay) through
+  both maps, then dispatch renderers on INPUT SHAPE, never a hardcoded name
+  (names are host-binary-dependent — the cmux binary emits `Agent` where vanilla
+  says `Task`, and lacks TodoWrite/MultiEdit entirely). Shapes, wire-proven
+  v2.1.205: Edit `{file_path, old_string, new_string, replace_all}`; Write
+  `{file_path, content}` (render as all-added); Task/Agent
+  `{description, prompt, subagent_type, run_in_background}`; MultiEdit
+  `{file_path, edits:[…]}` is UNVERIFIED on this host — handle defensively as
+  stacked hunks, no dedicated proof. Diff engine: REUSE
+  `Barkpark.Papers.TextDiff.diff_lines/2` (tested DP-LCS returning
+  `%{op: "="|"+"|"-", text}`) — do NOT build a second Myers differ (the
+  original List.myers_difference plan is superseded; a second line-diff engine
+  is the exact capability-dup the repo polices). Chrome: `--ok`/`--ok-soft`
+  added lines, `--danger`/`--danger-soft` removed, mono, collapsible via the
+  existing ⎿ details pattern; truncation lives at RENDER ("+N more lines",
+  show ~20 lines collapsed, cap the expanded pre honestly for huge hunks) —
+  persist stays full for replay fidelity, no persist cap this wave.
+  studio-literal-check must pass (var()/hsl(var(--*-hsl)/α)/color-mix all pass;
+  raw hsl(digit)/#hex fail).
+- **D39 — TodoWrite = ONE living checklist card; the Recorder owns the
+  collapse.** Each TodoWrite arrives as a fresh tool_use with a UNIQUE id, so
+  find-by-tool_use_id cannot collapse — the Recorder tracks "this turn's todo
+  row" (the tool_use_id of the turn's FIRST TodoWrite-shaped block) in state,
+  RESET on `system/init` (the per-turn boundary, recorder.ex:189); a later
+  TodoWrite in the same turn UPDATES that persisted row's metadata.input in
+  place (new `StudioChat.update_tool_input/3`, the attach_tool_result pattern:
+  find by tool_use_id, changeset metadata, Repo.update) instead of appending.
+  Replay therefore reconstructs ONE final-state card for free. Live
+  convergence: the Recorder keeps rebroadcasting frames VERBATIM; ChatLive's
+  assistant reducer applies the SAME pure rule — a TodoWrite-shaped tool_use
+  supersedes the turn's existing todo card in-memory (tracked per turn, reset
+  on the broadcast init frame) — so all tabs that saw the turn converge;
+  a mid-turn joiner appends one card with the latest state (correct content,
+  later position — accepted; reopen converges). Shape-TOLERANT: accept both
+  `{content, status, activeForm}` (modern) and `{content, status, priority,
+  id}` (legacy); status map pending→☐, in_progress→◐ (+ activeForm as the live
+  line when present), completed→☒. TodoWrite is ABSENT from this host's cmux
+  binary (swapped for Barkpark task tools) — build fixture-driven, degrade to
+  nothing when no TodoWrite ever arrives, and the vanilla-binary proof is a
+  spot-check, not a blocker.
+- **D40 — Task/Agent spawns render as nested traces; `parent_tool_use_id`
+  joins the persisted row (this IS new plumbing — the "zero wire plumbing"
+  framing was half-wrong).** Every frame carries top-level
+  `parent_tool_use_id` (null = top-level; a tool_use id = child of that
+  spawn), and child tool_use/tool_result frames interleave on the SAME stream
+  — wire-proven. The Recorder discards it today (it only reads
+  message.content blocks). Fix: persist non-nil `ev["parent_tool_use_id"]`
+  into the metadata of every row the Recorder writes; live + replay render
+  rows with a parent as an INDENTED nested trace under their parent's ● row,
+  labeled with the spawn's `description`. Name/shape-tolerant per D38
+  (match both `Task` and `Agent`, or the `{description, prompt,
+  subagent_type}` shape). The parent's own ⎿ tool_result (subagent summary +
+  usage) already attaches via the existing machinery.
+- **D41 — Thinking is a PULSE, not a snippet — premise CORRECTED, snippet
+  CUT.** The wire carries thinking FRAMES but never thinking TEXT: every
+  thinking_delta and every assistant thinking block arrives with
+  `thinking: ""` — only `estimated_tokens` and a ~3.8KB ENCRYPTED signature
+  are populated, identical across models (fable + sonnet probed, v2.1.205).
+  There is nothing to collapse. Build instead: a ✻ thinking row driven by
+  `system/thinking_tokens` (`estimated_tokens` is monotonic CUMULATIVE — use
+  it; thinking_delta's per-block counts are NOT cumulative, never sum them)
+  with a live "✻ thinking… ~N tokens" counter; the row opens on the first
+  thinking signal and settles when the first text_delta/tool_use/result
+  arrives. All these frames ALREADY reach ChatLive via the Recorder's
+  verbatim rebroadcast — they just fall through the catch-all
+  (chat_live.ex:914); add handler clauses above it. Replay: the Recorder
+  accumulates the turn's thinking tokens and persists a compact row (role
+  `"thinking"`, metadata `{tokens: N}`) BEFORE that turn's assistant blocks
+  so replay order matches live order; replay renders the dim mono
+  "✻ thought for ~N tokens" line. NEVER persist or render the signature.
+  Forward-compatible: the handler reads `delta["thinking"]` and would append
+  text if a future CLI populates it — falls back to the counter today.
+- **D42 — Esc interrupts from anywhere; the two real Esc consumers get
+  stopPropagation; the keyboard hint is unconditional.** Only TWO surfaces
+  actively consume Esc (slash combobox, bp-chat-composer.js:228-231; session
+  rename, chat_live.ex:1187-1188) and NEITHER stops propagation — a naive
+  global listener double-fires through them. Fix: document-level keydown
+  added in ChatComposer's mounted/destroyed (BarkparkPaperContextMenu
+  precedent); the slash-menu Escape branch adds `e.stopPropagation()`; the
+  rename input is marked (data attribute) and the global handler skips when
+  focus is inside it. Otherwise Escape pushes `stop_turn` — the server
+  handler already exists (chat_live.ex:282) and must stay a no-op when no
+  turn runs. Native ⎿ details don't consume Esc and the global handler must
+  not close them. Footer: a quiet UNCONDITIONAL mono hint line
+  "esc interrupt · / commands · ↵ send" as a SIBLING of the D37 cost strip —
+  the cost strip's `:if last_result.cost_usd` conditional stays; the hint
+  never hides behind it.
+- **D43 — Steering resolves to honest QUEUE; the composer never locks.**
+  Real-binary probe (twice, v2.1.205): a user frame written mid-turn is NOT
+  injected into the running turn — the CLI buffers it, turn 1 completes
+  untouched, then a fresh system/init fires and the queued frame runs as its
+  own turn. The "remove the gate and it steers" bet is DISQUALIFIED; the t3
+  "mid-turn = steer" pattern is t3's own engine, not the raw binary. Build
+  the honest fallback: delete the silent drop-gate (chat_live.ex:232) so a
+  mid-turn send runs the normal D24 two-phase path — wire write immediately
+  (the binary buffers it), optimistic echo rendered with a "⧗ queued" badge,
+  persisted IMMEDIATELY with `metadata.queued: true` (never defer — words
+  must never be lost; the queued row interleaving among the running turn's
+  assistant rows on replay is accepted temporal truth). The badge is
+  LIVE-ONLY state: it clears in-memory when the next system/init fires
+  (the queued turn starting); replay renders a plain ❯ row (position tells
+  the story; metadata.queued is kept as a historical fact, not chrome).
+  Interrupt-with-queued-frames interplay (`still_queued` in the interrupt
+  ack) is out of scope this wave.
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -603,6 +715,38 @@ initialize additions in claude_chat.ex (new public fn + control_kind clause —
 disjoint from S1's respond_permission region), and the Recorder commands hold.
 Builders build against main; the lead reconciles in S1 → S2 → S3 order.
 
+## Wave 7 plan (decided 2026-07-09) — "the transcript IS the terminal"
+
+Waves 1–6.5 built Claude Code's skeleton (sessions, honesty, server runtime,
+asks, gutters, ⎿ results); wave 7 gives it the terminal's soul: every tool
+call renders the way the CLI renders it, thinking breathes, the keyboard
+drives, and the composer never locks. Five slices, integration order
+**S1 → S2 → S3 → S4 → S5**.
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w7-tool-diffs` | input/tool threading through BOTH render paths + shape-dispatch renderer module + Edit/Write colored diffs via Papers.TextDiff, collapsible, honest truncation (D38) | none |
+| S2 | `scc-w7-todo-card` | TodoWrite living checklist card — Recorder per-turn collapse + `update_tool_input/3` + ChatLive supersede rule + shape-tolerant render + single-card replay (D39) | none |
+| S3 | `scc-w7-agent-trace` | persist `parent_tool_use_id`, nested indented subagent trace live + replay, Task/Agent-tolerant labeling (D40) | none |
+| S4 | `scc-w7-thinking-pulse` | ✻ thinking pulse off system/thinking_tokens + persisted `"thinking"` row for replay (D41) | none |
+| S5 | `scc-w7-keyboard-steer` | global Esc → stop_turn + stopPropagation on the two consumers + unconditional footer hint + queue-honest mid-turn send (D42/D43) | none |
+
+Region contract (chat_live.ex and recorder.ex are hot): **S1 owns** the tool
+render clause (~1450), the replay tool clause (2465-2473), the live append
+opts (730/2522-2530), and a NEW renderer module
+(`BarkparkWeb.Studio.ChatToolRenderer`) that S2/S3 add functions to. **S2
+owns** the Recorder's TodoWrite branch inside persist_assistant_blocks + turn
+tracking in Recorder state, `StudioChat.update_tool_input/3`, and the ChatLive
+assistant-reducer supersede rule + its checklist render fn. **S3 owns** the
+parent_tool_use_id threading into persist_assistant_blocks metadata (additive
+— S2 and S3 both touch that function; the lead reconciles in S2 → S3 order)
+and the nesting render/replay. **S4 owns** new handle_info clauses above the
+ChatLive catch-all (914), the Recorder's thinking accumulation + `"thinking"`
+row persist, and its replay clause. **S5 owns** bp-chat-composer.js, the
+footer region, and the send-gate region (chat_live.ex:232 + the D24 two-phase
+path) — disjoint from S1–S4. Builders build against main in isolated
+worktrees; the lead integrates in order and resolves recorder.ex overlaps.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -612,6 +756,107 @@ Builders build against main; the lead reconciles in S1 → S2 → S3 order.
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+### Wave 2026-07-09 (wave 7 BUILT + REVIEWED — the transcript IS the terminal)
+
+All five slices built green and reviewed at the Kinsta/Vercel bar; nothing
+stalled. The reviewer serialized the wave into ONE integration chain — each
+`-r` branch contains everything before it — so the lead merges
+**`loop-epic/keyboard-first-esc-interrupts-from-anywh-4-r`** (chain head:
+S1-r → S2-r → S3-r → S4-r → S5-r, integration order per the plan) and gets
+the whole wave. Combined gate on the chain head: **349 tests 0 failures**
+across the five-file suite (5 consecutive green runs incl. seeds 37/74/111;
+one unreproduced flake in the very first combined run — the suite's known
+capture-file/timing flake class, never seen again), studio-literal-check
+PASS, `mix compile --warnings-as-errors` clean. `git merge-tree` proves the
+chain head merges CLEAN onto current origin/main (#1772). This charter copy
+on the chain head carries the wave-7 Decide content that was still
+uncommitted in the main checkout — merging the chain commits it.
+
+- **Landed**: Edit/Write/MultiEdit render as real colored line diffs —
+  input+tool threaded through BOTH render paths, shape-dispatch renderer
+  (`ChatToolRenderer.classify/1`, never tool names), TextDiff reuse (no
+  second engine, grep-guarded by a test), `--ok/--danger` token chrome,
+  collapse >20 lines behind details with an honest "+N more lines", replay
+  parity proven (S1/D38); TodoWrite as ONE living ☐/◐/☒ checklist card —
+  Recorder-owned collapse (`update_tool_input/3`, per-turn first-id
+  tracking, init reset), ChatLive in-memory supersede, shape-tolerant
+  modern+legacy items, single-card replay (S2/D39); Task/Agent spawns as
+  nested traces — `parent_tool_use_id` stamped on every Recorder row,
+  ● spawn headline with description prominent, children indented behind an
+  evergreen gutter live AND on replay (S3/D40); ✻ thinking pulse — live
+  "thinking… ~N tokens" off system/thinking_tokens (cumulative max, never
+  delta sums), settles to a durable "thought for ~N tokens" row, Recorder
+  flushes a `"thinking"` row BEFORE the turn's blocks, signature never
+  stored, forward-compat text path (S4/D41); keyboard-first — document-level
+  Esc → stop_turn (strict no-op when idle), stopPropagation on the slash
+  menu, rename input skipped by data attribute, unconditional footer hint
+  "esc interrupt · / commands · ↵ send", and the silent mid-turn drop-gate
+  DELETED: mid-turn sends queue honestly ("⧗ queued" badge, immediate wire
+  write + persist with metadata.queued, badge clears on the next init,
+  plain ❯ on replay) (S5/D42+D43).
+- **Reviewer fixes worth knowing**: (1) THREE slices created
+  `BarkparkWeb.Studio.ChatToolRenderer` (S2 even at a different path —
+  would have been a silent duplicate-module compile break); unioned into ONE
+  module at `live/studio/chat_tool_renderer.ex` (diff + todo + spawn
+  sections). (2) The tool_use reducer and `persist_assistant_blocks` are a
+  three-way union: todo-supersede × D38 input threading × D40 parent/spawn
+  opts — reconciled in both ChatLive and Recorder (arity /3 with state
+  threading). (3) NEW cross-slice rule the merge surfaced: a SUB-AGENT's
+  TodoWrite must not hijack the main turn's living card — collapse only
+  top-level TodoWrites; a child-frame todo persists as a plain indented tool
+  row (guard test added, D39×D40). (4) Diff-shaped ● headers now show only
+  `Tool — path` (both tool_line copies, ChatLive + Recorder) — the old
+  header dumped old_string/new_string previews that duplicated the diff
+  right below. (5) The per-turn init reset now covers todo_card_id +
+  pending_thinking + queued badges in one place.
+- **Known seams (reviewed, deliberate, not blockers)**: (a) the exact
+  `estimated_tokens` wire field/nesting is charter-sourced, not
+  fixture-proven on this host — a wrong guess degrades to an honest 0-token
+  absence, never a crash; real-binary spot-check recommended; (b) MultiEdit
+  is defensively handled, unverified on this host's binary; (c) the JS
+  document-Esc hook is read-verified + server-contract tested only
+  (LiveViewTest can't drive hooks) — a manual browser pass pre-ship is
+  called out in the S5 evidence; (d) one LV test pins the literal gutter
+  style `border-left: 2px solid var(--primary)` — brittle if a later
+  aesthetic pass moves it to a class; (e) diff-shaped rows recompute the DP
+  diff per render (capped, bounded transcripts — memoize only if long
+  sessions hurt); (f) a queued badge can linger cosmetically if a session
+  dies before its next init (replay drops it).
+- **Ledger**: all five tasks were richly evidence-stamped by the builders
+  but their claims had EXPIRED, flipping lifecycle back to `open` — the
+  ledger read "available work" for built slices. Re-claimed all five under
+  `epic-reviewer-w7` (epoch 3, in_progress). The lead closes each on merge
+  (the one unmet criterion per task is "PR merged"; close with worker
+  epic-reviewer-w7 / epoch 3).
+- **Next wave should take**: (1) real-binary spot-checks — thinking_tokens
+  field shape, MultiEdit input shape, a real Task spawn trace end-to-end;
+  (2) a real-browser pass — global Esc (slash-menu precedence, rename skip),
+  details expand on diffs, the queued badge under a genuinely running turn;
+  (3) surface diff STATS on the collapsed header row (t3 shows "+12 −3" in
+  the summary line — ours shows it above the hunk); (4) wave-6 leftovers
+  still open: chosen answers on the terminal question card, /compact //clear
+  pinning spot-check, per-model cost hints; (5) consider memoizing tool
+  diffs for very long transcripts.
+
+- **2026-07-09 wave 7 DECIDED** (post-merge of waves 1–6.5: #1681 #1693 #1702
+  #1708 #1712 #1741 #1746): five slices filed as scc-w7-tool-diffs /
+  scc-w7-todo-card / scc-w7-agent-trace / scc-w7-thinking-pulse /
+  scc-w7-keyboard-steer under epic `studio-claude-chat` (D38–D43 above).
+  Explorer corrections folded in, probed on the real binary v2.1.205:
+  (1) "input is already plumbed" was HALF-true — persisted verbatim but
+  dropped by BOTH render paths; threading it is S1's foundation. (2) Tool
+  names are host-dependent (cmux emits `Agent` for `Task`, lacks
+  TodoWrite/MultiEdit) — dispatch on input shape. (3) A second Myers differ
+  is a capability-dup: reuse Papers.TextDiff.diff_lines. (4) The Task nested
+  trace needs NEW persistence (parent_tool_use_id is discarded today).
+  (5) Thinking TEXT never reaches the wire (empty across models, encrypted
+  signature) — the collapsible snippet is CUT; the ✻ pulse rides
+  system/thinking_tokens. (6) Steering probe: the binary QUEUES a mid-turn
+  frame and runs it as the next turn — steer-into-turn is disqualified;
+  build "⧗ queued" honestly. (7) A global Esc double-fires through the slash
+  menu and rename (neither stops propagation) — stopPropagation lands on the
+  consumers, not guard-soup in the global handler.
 
 ### Wave 2026-07-09 (wave 6 BUILT + REVIEWED — when the agent asks, the product answers)
 
