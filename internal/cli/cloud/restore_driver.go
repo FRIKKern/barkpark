@@ -78,6 +78,12 @@ const restoreHealthURL = "http://localhost:4000/api/schemas"
 // idiom).
 var dbNameSafe = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
+// secretKeyShape fences an identity-secret KEY before it is interpolated into the
+// .env merge script (grep pattern + printf format). Values already ride
+// secretValueAlphabet; keys get the env-var shape for the same reason — a torn or
+// foreign bundle must fail loudly, never leak bytes into the box's shell.
+var secretKeyShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
+
 // CreateHost cold-creates a fresh box for kind and returns its live IP. It is
 // ALWAYS a cold create (D40 — a resurrect must land the bundle's sealed identity,
 // so it can never take a warm box carrying the wrong empty identity). The box is
@@ -311,6 +317,9 @@ func restoreSecretsEnvStep(secrets map[string]string) (CaddyStep, error) {
 		v := secrets[k]
 		if v == "" {
 			continue // never install a blank identity secret
+		}
+		if !secretKeyShape.MatchString(k) {
+			return CaddyStep{}, fmt.Errorf("resurrect identity secret key %q is not env-var shaped; refusing to interpolate it into a shell command", k)
 		}
 		if !secretValueAlphabet.MatchString(v) {
 			return CaddyStep{}, fmt.Errorf("resurrect identity secret %s has an unexpected shape; refusing to interpolate it into a shell command", k)

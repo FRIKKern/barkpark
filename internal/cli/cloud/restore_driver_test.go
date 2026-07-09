@@ -80,6 +80,9 @@ func TestRestoreSecretsEnvStepRejectsUnsafeValue(t *testing.T) {
 	if _, err := restoreSecretsEnvStep(map[string]string{"SECRET_KEY_BASE": "value; rm -rf /"}); err == nil {
 		t.Fatal("expected an unsafe secret value to be rejected")
 	}
+	if _, err := restoreSecretsEnvStep(map[string]string{"BAD'KEY": "safevalue"}); err == nil {
+		t.Fatal("expected a non-env-var-shaped secret KEY to be rejected")
+	}
 	if _, err := restoreSecretsEnvStep(map[string]string{}); err == nil {
 		t.Fatal("expected an empty identity set to be rejected")
 	}

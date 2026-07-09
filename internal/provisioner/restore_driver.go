@@ -221,11 +221,12 @@ func (d *CloudRestoreDriver) Verify(ctx context.Context, fqdn string) error {
 	}, func(step, status, detail string) {})
 }
 
-// TearDown reclaims an orphaned restored box (the succeed-report-failed edge). Best
-// effort — creds are not carried to teardown, so an azure teardown falls back to the
-// hetzner provider and is surfaced (never crashes the drain).
-func (d *CloudRestoreDriver) TearDown(ctx context.Context, kind, fqdn, ip string) error {
-	return d.Exec.TearDown(ctx, kind, nil, fqdn, ip)
+// TearDown reclaims a half-restored or orphaned restored box (any post-create step
+// failure, or the succeed-report-failed edge). creds are the claim's decrypted
+// per-kind credentials so an azure teardown resolves its own provider; the hetzner
+// path ignores them. Best effort — a failure is surfaced, never crashes the drain.
+func (d *CloudRestoreDriver) TearDown(ctx context.Context, kind string, creds map[string]string, fqdn, ip string) error {
+	return d.Exec.TearDown(ctx, kind, creds, fqdn, ip)
 }
 
 // compile-time proof the adapter satisfies the seam (and its optional teardowner).

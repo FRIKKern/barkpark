@@ -240,6 +240,11 @@ func TestResurrectDrainRoundTripFiresEndToEnd(t *testing.T) {
 // the bundle store env is not configured, the CLAIMED job fails honestly (/fail,
 // with actionable copy) and NO box is created — the drain survives.
 func TestResurrectMissingBundleEnvFailsJobHonestly(t *testing.T) {
+	// Hermetic: a developer machine carrying real S3 creds must not flip this test
+	// onto the configured path (and toward a live object store).
+	for _, v := range []string{"HETZNER_S3_ACCESS_KEY", "HETZNER_S3_SECRET_KEY", "BARKPARK_BUNDLE_BUCKET", "BARKPARK_BUNDLE_KEK"} {
+		t.Setenv(v, "")
+	}
 	prov := cloud.NewFakeProvider()
 	seams := Seams{Restore: &CloudRestoreDriver{Exec: &cloud.RestoreExecutor{Provider: prov, DNS: cloud.NewFakeDNS(), RunnerFor: func(string) cloud.StepRunner { return &restoreRunner{} }}}}
 
@@ -277,6 +282,63 @@ func TestResurrectMissingBundleEnvFailsJobHonestly(t *testing.T) {
 	}
 	if servers, _ := prov.List(context.Background()); len(servers) != 0 {
 		t.Fatalf("no box may be created when the bundle env is missing; got %d", len(servers))
+	}
+}
+
+// TestResurrectMidChainFailureTearsDownTheBox proves the money edge: a restore
+// that fails AFTER the cold create (here: configure — the carried KEK does not
+// match the bundle, so the unseal fails GCM) must tear the half-restored box back
+// down. Without it the box is billed, carries no orphan label (SweepOrphans is
+// blind to it), and the control plane never learned it exists.
+func TestResurrectMidChainFailureTearsDownTheBox(t *testing.T) {
+	store, prefix := writeTestBundle(t, "the-real-kek", "acme.barkpark.cloud", "barkpark_prod")
+
+	prov := cloud.NewFakeProvider()
+	dns := cloud.NewFakeDNS()
+	runner := &restoreRunner{}
+	driver := &CloudRestoreDriver{
+		Exec: &cloud.RestoreExecutor{
+			Provider:  prov,
+			DNS:       dns,
+			RunnerFor: func(string) cloud.StepRunner { return runner },
+			Store:     store,
+		},
+	}
+	seams := Seams{Restore: driver}
+
+	cp := &resurrectCP{claim: map[string]any{
+		"job_id":     "rj-4",
+		"name":       "Acme Co",
+		"slug":       "acme",
+		"bundle_ref": prefix,
+	}}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	w := &Worker{
+		ControlURL: srv.URL,
+		Token:      "worker-tok",
+		HTTPClient: srv.Client(),
+		Provision:  DefaultProvision(seams),
+		Resurrect: func() (ResurrectDeps, error) {
+			// A WRONG carried KEK: create/freshen/secure succeed, configure fails GCM.
+			return ResurrectDeps{Store: store, Bucket: "test-bucket", KEK: "wrong-kek"}, nil
+		},
+		ReportRetryBackoff: time.Millisecond,
+	}
+
+	claimed, err := w.RunOnceResurrect(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnceResurrect: %v", err)
+	}
+	if !claimed {
+		t.Fatal("a mid-chain failure is still a cleanly-handled (failed) cycle")
+	}
+	if cp.failCall != 1 {
+		t.Fatalf("want 1 fail report, got %d (succeed=%d)", cp.failCall, cp.succeedCall)
+	}
+	if servers, _ := prov.List(context.Background()); len(servers) != 0 {
+		t.Fatalf("the half-restored box must be torn down (no unlabeled billed orphan); got %d boxes", len(servers))
 	}
 }
 
