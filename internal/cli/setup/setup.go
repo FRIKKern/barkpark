@@ -24,6 +24,7 @@ type Target = string
 
 const (
 	TargetConnect   Target = "connect"   // point the CLI at an existing server
+	TargetCloud     Target = "cloud"     // log in to Barkpark Cloud and pick a Barkpark
 	TargetLocal     Target = "local"     // bring up a local dev server (modes step)
 	TargetDeploy    Target = "deploy"    // deploy to an existing host over SSH (modes step)
 	TargetProvision Target = "provision" // provision a fresh cloud host (modes step)
@@ -100,6 +101,12 @@ func (p SetupPlan) Validate() error {
 		if !strings.HasPrefix(p.Server, "http://") && !strings.HasPrefix(p.Server, "https://") {
 			return fmt.Errorf("setup connect: --server %q must start with http:// or https://", p.Server)
 		}
+	case TargetCloud:
+		// Cloud has no plan-internal inputs: it logs in via the injected CloudLogin
+		// hook and resolves the server from the picked Barkpark. The hook's presence
+		// is Options-scoped, so it is enforced in executeCloud / buildCloudPlan
+		// (which see Options) rather than here (Validate sees only the plan). A nil
+		// hook there is a clear "no Barkpark Cloud login is wired" error.
 	case TargetLocal:
 		// Local has no required inputs (docker-vs-native is a bool; plugins are
 		// optional). Nothing to validate beyond the known target.
@@ -108,9 +115,9 @@ func (p SetupPlan) Validate() error {
 	case TargetProvision:
 		return validateProvision(p)
 	case "":
-		return fmt.Errorf("setup: no target (want one of connect|local|deploy|provision)")
+		return fmt.Errorf("setup: no target (want one of connect|cloud|local|deploy|provision)")
 	default:
-		return fmt.Errorf("setup: unknown target %q (want connect|local|deploy|provision)", p.Target)
+		return fmt.Errorf("setup: unknown target %q (want connect|cloud|local|deploy|provision)", p.Target)
 	}
 	return nil
 }
@@ -200,7 +207,32 @@ type Options struct {
 	// loaded from the persisted config. The connect Plan surfaces it as
 	// known_servers; the wizard offers it as a pick-list. Empty on a first run.
 	KnownServers []KnownServerInfo
+
+	// CloudLogin drives the TargetCloud path: it logs the user in to Barkpark
+	// Cloud, then resolves a Barkpark to connect to (or reports a logged-in-only
+	// outcome). The cli built-in injects it (setup_cloud_login.go) so the setup
+	// package never imports cloudclient. A nil hook makes TargetCloud a clear
+	// error from executeCloud / buildCloudPlan.
+	CloudLogin CloudLoginFunc
 }
+
+// CloudLoginResult is what a CloudLogin hook yields on success. Either it carries
+// a Server + Token to connect bp to (the user picked a Barkpark from their fleet),
+// or LoggedInOnly is true — the user is authenticated but has (or chose) no server
+// to connect to. A logged-in-only outcome is COMPLETE, not a dead end: being
+// logged in is itself a valid end state (exit 0).
+type CloudLoginResult struct {
+	Server       string // the picked Barkpark's URL (empty ⇒ logged-in-only)
+	Token        string // the picked Barkpark's admin token (persisted as the server token; never printed)
+	Name         string // the Barkpark's name, saved as the short handle
+	LoggedInOnly bool   // true ⇒ authenticated but not connecting to any server
+}
+
+// CloudLoginFunc is the CLI-injected hook the setup package calls for TargetCloud.
+// Keeping it a func (rather than importing cloudclient) is the whole point of the
+// seam: setup stays free of the control-plane client. It receives the same Options
+// Execute runs under so the hook can honor DryRun / Out if it wants.
+type CloudLoginFunc func(opts Options) (CloudLoginResult, error)
 
 // json reports whether this run should suppress human prose (the cli built-in
 // renders structured JSON instead).
@@ -234,6 +266,8 @@ func Execute(plan SetupPlan, opts Options) error {
 	switch plan.Target {
 	case TargetConnect:
 		return executeConnect(plan, opts)
+	case TargetCloud:
+		return executeCloud(plan, opts)
 	case TargetLocal:
 		return executeLocal(plan, opts)
 	case TargetDeploy:
@@ -258,6 +292,8 @@ func BuildPlan(plan SetupPlan, opts Options) (Plan, error) {
 	switch plan.Target {
 	case TargetConnect:
 		return buildConnectPlan(plan, opts), nil
+	case TargetCloud:
+		return buildCloudPlan(plan, opts)
 	case TargetLocal:
 		return buildLocalPlan(plan, opts), nil
 	case TargetDeploy:

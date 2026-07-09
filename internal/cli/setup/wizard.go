@@ -87,6 +87,7 @@ type targetChoice struct {
 
 var targetChoices = []targetChoice{
 	{TargetConnect, "Connect", "point bp at an existing server"},
+	{TargetCloud, "Barkpark Cloud", "log in and pick your barkpark"},
 	{TargetLocal, "Local", "bring up a dev server here (docker or native)"},
 	{TargetDeploy, "Deploy", "install on a server you own over SSH"},
 	{TargetProvision, "Provision", "create a cloud host, then deploy (staged)"},
@@ -240,6 +241,13 @@ func (m wizardModel) updateTarget(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.targetIdx++
 		}
 	case "enter":
+		// Barkpark Cloud has no plan-internal inputs — login + fleet pick happen in
+		// the CloudLogin hook after the wizard exits (they own the terminal). Skip
+		// the inputs / profile / plugins stages straight to confirm.
+		if m.target() == TargetCloud {
+			m.stage = stageConfirm
+			return m, nil
+		}
 		// Connect with a non-empty history: offer the pick-list first. Every other
 		// case goes straight to the inputs stage (text input / docker toggle).
 		if m.target() == TargetConnect && len(m.knownServers) > 0 {
@@ -460,6 +468,11 @@ func (m wizardModel) selectedPlugins() []string {
 // pick-list selected a remembered server, the server URL + its token/scope come
 // from history rather than the (skipped) text input.
 func (m wizardModel) plan() SetupPlan {
+	// Cloud carries no inputs: the CloudLogin hook resolves the server + token
+	// after the wizard returns, so the plan is just the bare target.
+	if m.target() == TargetCloud {
+		return SetupPlan{Target: TargetCloud}
+	}
 	p := SetupPlan{Target: m.target(), Plugins: m.selectedPlugins()}
 	vals := map[string]string{}
 	for i, k := range m.inputKeys {
@@ -647,6 +660,8 @@ func (m wizardModel) viewConfirm() string {
 	switch p.Target {
 	case TargetConnect:
 		b.WriteString(wzLabel.Render("server:  ") + " " + dash(p.Server) + "\n")
+	case TargetCloud:
+		b.WriteString(wzLabel.Render("action:  ") + " log in to Barkpark Cloud, then pick a Barkpark to connect to\n")
 	case TargetLocal:
 		mode := "native"
 		if p.Docker {
@@ -663,14 +678,20 @@ func (m wizardModel) viewConfirm() string {
 		b.WriteString(wzLabel.Render("type:    ") + " " + dash(p.ServerType) + "\n")
 		b.WriteString(wzLabel.Render("domain:  ") + " " + dash(p.Domain) + "\n")
 	}
-	if p.Target != TargetConnect {
+	// Profile + plugins apply only to the seeding/connect targets. Cloud carries
+	// neither — its server + token come from the fleet pick after confirm.
+	if p.Target != TargetConnect && p.Target != TargetCloud {
 		b.WriteString(wzLabel.Render("profile: ") + " " + profileSummary(p.profileOrDefault()) + "\n")
 	}
-	b.WriteString(wzLabel.Render("plugins: ") + " " + PluginsSummary(p.Plugins) + "\n")
+	if p.Target != TargetCloud {
+		b.WriteString(wzLabel.Render("plugins: ") + " " + PluginsSummary(p.Plugins) + "\n")
+	}
 
 	// For destructive/outbound targets, show the dry-run plan inline so the
-	// operator confirms against the EXACT commands.
-	if p.Target != TargetConnect {
+	// operator confirms against the EXACT commands. Connect and Cloud are exempt:
+	// connect is a pure config write, and cloud's login/pick is interactive (it
+	// runs after the wizard exits, not in a confirm-screen dry run).
+	if p.Target != TargetConnect && p.Target != TargetCloud {
 		var buf bytes.Buffer
 		_ = Execute(p, Options{DryRun: true, Out: &buf})
 		b.WriteString("\n" + wzBorder.Render(strings.TrimRight(buf.String(), "\n")) + "\n")

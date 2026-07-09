@@ -178,6 +178,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 		Wizard:       setup.Wizard,
 		JSON:         jsonOut,
 		KnownServers: loadKnownServers(),
+		CloudLogin:   cloudLoginHook,
 	}
 
 	// (3) NEVER-PROMPT / NEVER-HANG. No --target: the interactive wizard launches
@@ -192,7 +193,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 			return exitOK
 		}
 		return setupUsageError(out, jsonOut, "usage",
-			"no --target and not an interactive terminal — pass --target connect|local|deploy|provision (see bp setup -h)")
+			"no --target and not an interactive terminal — pass --target connect|cloud|local|deploy|provision (see bp setup -h)")
 	}
 
 	// CONNECT with no --server AND no active saved server to fall back on: a clean
@@ -259,8 +260,8 @@ func RunFirstTimeSetup() (configured bool, exit int) {
 	out := newWriter(os.Stdout, os.Stderr)
 	out.outf("Welcome to Barkpark — no server is configured yet.")
 	out.outf("")
-	out.outf("  bp can connect to an existing server, bring one up on this")
-	out.outf("  machine, or install one on a server you own.")
+	out.outf("  bp can log in to Barkpark Cloud, connect to an existing server,")
+	out.outf("  bring one up on this machine, or install one on a server you own.")
 	out.outf("")
 
 	opts := setup.Options{
@@ -268,6 +269,7 @@ func RunFirstTimeSetup() (configured bool, exit int) {
 		Store:        configStoreAdapter{},
 		Wizard:       setup.Wizard,
 		KnownServers: loadKnownServers(),
+		CloudLogin:   cloudLoginHook,
 	}
 	if err := setup.RunInteractive(opts); err != nil {
 		out.userErr("%v", err)
@@ -407,11 +409,12 @@ func printSetupHelp(out *writer) {
 	const help = `bp setup — connect to, bring up, deploy, or provision a Barkpark server.
 
 USAGE
-  bp setup --target <connect|local|deploy|provision> [flags]
+  bp setup --target <connect|cloud|local|deploy|provision> [flags]
   bp setup                       # interactive wizard (TTY only)
 
 TARGETS
   connect     point bp at an existing server (--server URL)
+  cloud       log in to Barkpark Cloud and pick one of your Barkparks
   local       bring up a local dev server here (--docker for compose)
   deploy      install on a server you own over SSH (--ssh-host, --domain)
   provision   create a cloud host, then deploy (--provider; staged)
