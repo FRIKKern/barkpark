@@ -161,9 +161,16 @@ defmodule BarkparkCloud.AzurePricingTest do
 
       # Two stale reads at the same instant each serve stale and each hand a
       # refresh to the GenServer. The in-flight guard (and the cache re-check)
-      # collapse them into a SINGLE fetch — no thundering herd.
+      # collapse them into a SINGLE fetch — no thundering herd. The GenServer is
+      # SUSPENDED across the two reads so the refresh provably cannot land
+      # between them (without this, a fast background fetch could freshen the
+      # cache before the second read and flake the 64.24 assertion) — both casts
+      # queue, and on resume the guard sees them back-to-back: the worst case
+      # for coalescing.
+      :ok = :sys.suspend(Pricing)
       assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 64.24
       assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 64.24
+      :ok = :sys.resume(Pricing)
       assert Pricing.flush() == :ok
 
       # Exactly one page was fetched. A second refresh would pop the now-empty
