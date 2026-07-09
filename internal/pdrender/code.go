@@ -60,11 +60,15 @@ func newCodeRenderer() *codeRenderer {
 // the same viewport — never approaches the cap.
 const maxCodeCacheEntries = 512
 
-// codeKey is the memo key: a content hash plus the three render-affecting axes.
+// codeKey is the memo key: a content hash plus the render-affecting axes. Both
+// the theme IDENTITY and the light/dark MODE are keyed (ts-w4c): the chroma style
+// AND the resolved palette differ per (theme, mode), so two themes at the same
+// mode — or one theme in two modes — must not share a cached render.
 type codeKey struct {
 	hash    uint64
 	width   int
 	themeID string
+	mode    string
 	profile Profile
 }
 
@@ -81,7 +85,8 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	key := codeKey{
 		hash:    hashStrings(source, lang),
 		width:   ctx.Width,
-		themeID: ctx.Theme.name,
+		themeID: ctx.Theme.themeID, // theme identity (ts-w4c)
+		mode:    ctx.Theme.name,    // Theme.name holds the light/dark mode
 		profile: ctx.Profile,
 	}
 

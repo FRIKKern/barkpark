@@ -37,55 +37,86 @@ func (r Role) String() string {
 	}
 }
 
-// genColor lifts a generated lifecycle token's light/dark hues (tokens_gen.go,
-// emitted from the ONE evergreen design/tokens.json) into a lipgloss
-// AdaptiveColor. It is the seam that makes the board READ the emitted token
-// source instead of re-typing its hex — the de-duplication this slice installs.
-// A missing key yields the zero AdaptiveColor, which the goldens catch at once.
-func genColor(key string) lipgloss.AdaptiveColor {
-	tok := GenLifecycle[key]
-	return lipgloss.AdaptiveColor{Light: tok.ColorLight, Dark: tok.ColorDark}
+// palette is the board's theme-resolved color set. buildPalette(theme) is the
+// RELOCATION ts-w4c installs: the lifecycle/status/chrome hues that were bound at
+// package init (flattening the evergreen skin into the styles below) now derive
+// inside a builder that takes a theme id, so a resolved theme can flow to the
+// board instead of being hardwired. Only "evergreen" exists today, so the
+// defaultPalette bound below is byte-identical to the former init bindings — the
+// goldens stay frozen — and a later wave threads a config/env theme id into the
+// board Model to rebuild the palette per theme.
+type palette struct {
+	ok, danger                          lipgloss.AdaptiveColor
+	info, warn, done, ready, open, canc lipgloss.AdaptiveColor
+	neutral, dim, title                 lipgloss.AdaptiveColor
 }
 
-// statusTone lifts a semantic status role (ok/info/warn/danger) into a lipgloss
-// AdaptiveColor via the shared internal/semrole vocabulary (GenStatusTone, emitted
-// from design/tokens.json) — the status peer of genColor. It is the seam that makes
-// the board's STATUS hues READ the generated tone instead of re-typing their hex, so
-// a `bp` table's ok cell and the board's ok strip are the same design token. Panics
-// on an unknown role (a compile-time-constant programmer error).
-func statusTone(role string) lipgloss.AdaptiveColor {
-	c, ok := semrole.RoleColor(role)
-	if !ok {
-		panic("taskboard: unknown semrole role " + role)
+// buildPalette resolves one theme id's board palette. The LIFECYCLE hues
+// (info/warn/done/ready/open/cancel) READ the emitted lifecycle tokens via
+// Resolve(theme) (tokens_gen.go, from design/tokens.json); the STATUS hues
+// (ok/danger) READ semrole's generated status tones via RoleColorFor; and the
+// neutral/dim/title CHROME reads semrole's cliChrome roles via ChromeColorFor —
+// none re-type hex, so the board can never drift from the shared manifest the
+// other surfaces read, and a theme change moves all three together. Panics on an
+// unknown semrole role/chrome key (a compile-time-constant programmer error).
+func buildPalette(theme string) palette {
+	life := Resolve(theme).Lifecycle
+	genColor := func(key string) lipgloss.AdaptiveColor {
+		tok := life[key]
+		return lipgloss.AdaptiveColor{Light: tok.ColorLight, Dark: tok.ColorDark}
 	}
-	return c
+	statusTone := func(role string) lipgloss.AdaptiveColor {
+		c, ok := semrole.RoleColorFor(theme, role)
+		if !ok {
+			panic("taskboard: unknown semrole role " + role)
+		}
+		return c
+	}
+	chrome := func(role string) lipgloss.AdaptiveColor {
+		c, ok := semrole.ChromeColorFor(theme, role)
+		if !ok {
+			panic("taskboard: unknown semrole chrome role " + role)
+		}
+		return c
+	}
+	return palette{
+		ok:     statusTone("ok"),     // GRADUATED: generated status.ok; distinct from done teal
+		danger: statusTone("danger"), // GRADUATED: generated status.danger; P0/P1 severity
+
+		info:  genColor("in_progress"), // in_progress blue (tokens_gen)
+		warn:  genColor("blocked"),     // blocked amber (tokens_gen)
+		done:  genColor("done"),        // done TEAL glyph (tokens_gen) — distinct from ok
+		ready: genColor("ready"),       // ready ○ = full foreground (tokens_gen)
+		open:  genColor("open"),        // open ○ ≈ dim backlog (tokens_gen)
+		canc:  genColor("cancelled"),   // cancelled ✕ dim (tokens_gen)
+
+		neutral: chrome("chrome-text-secondary"), // zinc mid chrome (chrome_gen)
+		dim:     chrome("chrome-dim"),            // zinc dim chrome (chrome_gen)
+		title:   chrome("chrome-ink"),            // near-fg title chrome (chrome_gen)
+	}
 }
 
-// Palette — the design-language spec §1 terminal values (charter D37). The
-// LIFECYCLE hues (info/warn/done/ready/open/cancel) are SOURCED from tokens_gen.go
-// via genColor, and the STATUS hues (okColor/dangerColor) are now GRADUATED onto
-// the generated semrole status tones via statusTone (au-w4 W4.10) — both can no
-// longer drift from the shared manifest the other surfaces read, and refreshing
-// them is a generation-time concern, never a role remap (RoleFor is untouched).
-// okColor is the DISTINCT status.ok green (cloud health / live-dot / action-strip
-// ok — the spec's teal completion hue is doneColor, so restyling the done glyph
-// never shifts deploy-table semantics); dangerColor is the status.danger red
-// (P0/P1 severity). Only neutral/dim/title remain hand-authored — pure chrome with
-// no generated twin (earmarked for the au-w4-cli-chrome-tokens follow-up).
+// defaultPalette is the evergreen board palette, bound at package init from the
+// emitted tokens. The style vars below read it, so every board render uses the
+// default skin until a wave threads a resolved theme id to the Model.
+var defaultPalette = buildPalette(DefaultTheme)
+
+// The design-language spec §1 terminal values (charter D37), projected from
+// defaultPalette so every existing call site keeps its byte-frozen colour.
 var (
-	okColor     = statusTone("ok")     // GRADUATED: generated status.ok (was #10b981); distinct from doneColor teal
-	dangerColor = statusTone("danger") // GRADUATED: generated status.danger (was #dc2626); P0/P1 severity
+	okColor     = defaultPalette.ok
+	dangerColor = defaultPalette.danger
 
-	infoColor   = genColor("in_progress") // in_progress blue (tokens_gen)
-	warnColor   = genColor("blocked")     // blocked amber (tokens_gen)
-	doneColor   = genColor("done")        // done TEAL glyph (tokens_gen) — distinct from okColor
-	readyColor  = genColor("ready")       // ready ○ = full foreground (tokens_gen)
-	openColor   = genColor("open")        // open ○ ≈ dim backlog (tokens_gen)
-	cancelColor = genColor("cancelled")   // cancelled ✕ dim (tokens_gen)
+	infoColor   = defaultPalette.info
+	warnColor   = defaultPalette.warn
+	doneColor   = defaultPalette.done
+	readyColor  = defaultPalette.ready
+	openColor   = defaultPalette.open
+	cancelColor = defaultPalette.canc
 
-	neutralColor = semrole.GenChromeTextSecondary // zinc mid chrome (chrome_gen)
-	dimColor     = semrole.GenChromeDim           // zinc dim chrome (chrome_gen)
-	titleColor   = semrole.GenChromeInk           // near-fg title chrome (chrome_gen)
+	neutralColor = defaultPalette.neutral
+	dimColor     = defaultPalette.dim
+	titleColor   = defaultPalette.title
 )
 
 var (

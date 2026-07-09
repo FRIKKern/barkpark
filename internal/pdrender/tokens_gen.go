@@ -48,3 +48,60 @@ const (
 	GenReadingHeadingWeight = 600
 	GenReadingBodySize      = 18
 )
+
+// DefaultTheme is the built-in evergreen skin. Resolve defaults to it for any
+// unknown/empty theme id, so today (evergreen-only) every id yields these exact
+// bytes — the styleguide golden stays frozen. Adding theme N+1 grows genPalette
+// (one keyed entry); theme.go's buildTheme already reads Resolve(themeID).
+const DefaultTheme = "evergreen"
+
+// Palette is one theme's resolved pdrender token set. The Chrome* roles are the
+// zinc cliChrome family (ChromeInk/ChromeDim are NOT the warmer reading Ink/Dim —
+// the decoy guard theme.go documents); ReadingMuted/ReadingAccent are the reading
+// family; Tone* are the semantic status tones the Callout builder paints.
+type Palette struct {
+	ChromeAccent        lipgloss.AdaptiveColor
+	ChromeInk           lipgloss.AdaptiveColor
+	ChromeTextSecondary lipgloss.AdaptiveColor
+	ChromeDim           lipgloss.AdaptiveColor
+	Rule                lipgloss.AdaptiveColor
+	CodeFg              lipgloss.AdaptiveColor
+	CodeBg              lipgloss.AdaptiveColor
+	ReadingMuted        lipgloss.AdaptiveColor
+	ReadingAccent       lipgloss.AdaptiveColor
+	ToneInfo            lipgloss.AdaptiveColor
+	ToneOK              lipgloss.AdaptiveColor
+	ToneWarn            lipgloss.AdaptiveColor
+	ToneDanger          lipgloss.AdaptiveColor
+	ToneNeutral         lipgloss.AdaptiveColor
+}
+
+// genPalette keys each theme's Palette by id. Values REFERENCE the Gen* vars
+// above (no re-typed literals) so the evergreen skin is byte-identical to them.
+var genPalette = map[string]Palette{
+	"evergreen": {
+		ChromeAccent:        GenChromeAccent,
+		ChromeInk:           GenChromeInk,
+		ChromeTextSecondary: GenChromeTextSecondary,
+		ChromeDim:           GenChromeDim,
+		Rule:                GenRule,
+		CodeFg:              GenCodeFg,
+		CodeBg:              GenCodeBg,
+		ReadingMuted:        GenDim,
+		ReadingAccent:       GenReadingAccent,
+		ToneInfo:            GenToneInfo,
+		ToneOK:              GenToneOK,
+		ToneWarn:            GenToneWarn,
+		ToneDanger:          GenToneDanger,
+		ToneNeutral:         GenToneNeutral,
+	},
+}
+
+// Resolve returns the pdrender Palette for a theme id, defaulting to evergreen
+// for an unknown or empty id (never a partial/zero palette).
+func Resolve(theme string) Palette {
+	if p, ok := genPalette[theme]; ok {
+		return p
+	}
+	return genPalette[DefaultTheme]
+}

@@ -43,6 +43,26 @@ var GenChrome = map[string]lipgloss.AdaptiveColor{
 	"chrome-on-primary":     GenChromeOnPrimary,
 }
 
+// ThemeChrome bundles one theme's CLI/TUI chrome role map. Keyed off the same
+// DefaultTheme const (tokens_gen.go); ResolveChrome defaults to evergreen for an
+// unknown/empty id so ChromeColorFor never returns a partial palette.
+type ThemeChrome struct {
+	Chrome map[string]lipgloss.AdaptiveColor
+}
+
+// genChrome keys each theme's chrome map by id (evergreen REFERENCES GenChrome).
+var genChrome = map[string]ThemeChrome{
+	"evergreen": {Chrome: GenChrome},
+}
+
+// ResolveChrome returns a theme's chrome role map, defaulting to evergreen.
+func ResolveChrome(theme string) ThemeChrome {
+	if c, ok := genChrome[theme]; ok {
+		return c
+	}
+	return genChrome[DefaultTheme]
+}
+
 // GenProviderMark is the generated cloud-provider IDENTITY palette
 // (design/tokens.json color.provider → hex). Identity ONLY (Decision 7):
 // tint a chip mark or a chip/row border, NEVER a pill background — the

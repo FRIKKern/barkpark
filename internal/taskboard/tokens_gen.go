@@ -31,3 +31,29 @@ var GenBrailleFrames = [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦
 
 // GenBrailleStill is the reduced-motion steady frame.
 var GenBrailleStill = "⠿"
+
+// DefaultTheme is the built-in evergreen skin. Resolve defaults to it for an
+// unknown/empty theme id; theme.go's buildPalette reads Resolve(theme).Lifecycle.
+const DefaultTheme = "evergreen"
+
+// ThemeLifecycle bundles one theme's lifecycle token map + braille frames.
+type ThemeLifecycle struct {
+	Lifecycle     map[string]GenLifecycleToken
+	BrailleFrames [10]string
+	BrailleStill  string
+}
+
+// genLifecycleThemes keys each theme's lifecycle set by id (evergreen REFERENCES
+// GenLifecycle/GenBrailleFrames/GenBrailleStill — no re-typed literals).
+var genLifecycleThemes = map[string]ThemeLifecycle{
+	"evergreen": {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},
+}
+
+// Resolve returns a theme's lifecycle token set, defaulting to evergreen for an
+// unknown or empty id.
+func Resolve(theme string) ThemeLifecycle {
+	if t, ok := genLifecycleThemes[theme]; ok {
+		return t
+	}
+	return genLifecycleThemes[DefaultTheme]
+}
