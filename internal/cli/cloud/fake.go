@@ -168,7 +168,7 @@ func (f *FakeProvider) Catalog(context.Context) (Catalog, error) {
 	}, nil
 }
 
-// Archive (InstanceLifecycler) returns a synthetic resurrection-bearing archive
+// Archive (Archiver) returns a synthetic resurrection-bearing archive
 // for target. It does not mutate the map (snapshotting leaves the box running);
 // an empty target is an error so a test can assert that guard.
 func (f *FakeProvider) Archive(_ context.Context, target string) (Archive, error) {
@@ -178,7 +178,7 @@ func (f *FakeProvider) Archive(_ context.Context, target string) (Archive, error
 	return Archive{ID: "fake-archive-" + target, FQDN: target, Provider: ProviderFake}, nil
 }
 
-// Decommission (InstanceLifecycler) tears the box down — the in-memory analogue
+// Decommission (Decommissioner) tears the box down — the in-memory analogue
 // of archive→teardown→verify-no-residue. An unknown target is a not-found error.
 func (f *FakeProvider) Decommission(_ context.Context, target string) error {
 	f.mu.Lock()
@@ -190,13 +190,13 @@ func (f *FakeProvider) Decommission(_ context.Context, target string) error {
 	return nil
 }
 
-// Resurrect (InstanceLifecycler) rebuilds an instance for fqdn from its (implied
+// Resurrect (Resurrector) rebuilds an instance for fqdn from its (implied
 // newest) archive — modelled as a fresh Create under the fqdn name.
 func (f *FakeProvider) Resurrect(ctx context.Context, fqdn string) (Server, error) {
 	return f.Create(ctx, ServerSpec{Name: fqdn})
 }
 
-// Adopt (InstanceLifecycler) converts a standalone box into a tenant of team;
+// Adopt (Adopter) converts a standalone box into a tenant of team;
 // the fake just validates the inputs (an empty fqdn or team is an error).
 func (f *FakeProvider) Adopt(_ context.Context, fqdn, team string) error {
 	if fqdn == "" || team == "" {
@@ -205,7 +205,7 @@ func (f *FakeProvider) Adopt(_ context.Context, fqdn, team string) error {
 	return nil
 }
 
-// Audit (InstanceLifecycler) cross-checks the fleet — the fake reports how many
+// Audit (Auditor) cross-checks the fleet — the fake reports how many
 // boxes it holds with no residue issues.
 func (f *FakeProvider) Audit(context.Context) (AuditReport, error) {
 	f.mu.Lock()
@@ -236,14 +236,20 @@ func (f *FakeProvider) Resume(_ context.Context, name string) error {
 
 // compile-time assertions that *FakeProvider satisfies the core interface, the
 // optional label-aware capabilities the orphan-recovery path uses, and — as the
-// reference provider — EVERY seam-v2 optional capability the fixture marks true.
+// reference provider — EVERY seam-v2 optional capability the fixture marks true,
+// including each lifecycle FACET interface (charter Decision 20) that replaced
+// the old all-or-nothing InstanceLifecycler.
 var (
 	_ CloudProvider      = (*FakeProvider)(nil)
 	_ ServerLabeler      = (*FakeProvider)(nil)
 	_ LabelLister        = (*FakeProvider)(nil)
 	_ ServerLabelRemover = (*FakeProvider)(nil)
 	_ Cataloger          = (*FakeProvider)(nil)
-	_ InstanceLifecycler = (*FakeProvider)(nil)
+	_ Archiver           = (*FakeProvider)(nil)
+	_ Resurrector        = (*FakeProvider)(nil)
+	_ Decommissioner     = (*FakeProvider)(nil)
+	_ Adopter            = (*FakeProvider)(nil)
+	_ Auditor            = (*FakeProvider)(nil)
 	_ Pauser             = (*FakeProvider)(nil)
 	_ Authenticator      = (*FakeProvider)(nil)
 )

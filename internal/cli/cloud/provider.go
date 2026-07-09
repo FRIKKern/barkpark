@@ -96,38 +96,62 @@ type Server struct {
 // providers_capabilities.json fixture declares, per slug, which optional
 // capabilities each honours today, and a Go parity test (registry_test.go) fails
 // if a fixture claim and the provider's ACTUAL interface set drift apart. That
-// fixture is the cross-surface contract the Elixir control plane and the SPA
-// read too, so "honest degradation" is renderable and drift is a CI failure.
+// fixture is the CANONICAL Go source of the cross-surface capability contract;
+// the Elixir control plane and the SPA consume a byte-COPY of it that a byte-
+// drift gate keeps in lockstep (charter Decision 22), so "honest degradation"
+// is renderable and drift is a CI failure, never a support ticket.
 //
 // Capabilities is the honest capability row for one provider — the exact shape
 // of a providers_capabilities.json entry (see LoadCapabilities in registry.go).
+// The fleet-lifecycle verbs are SPLIT into independent facet bools (charter
+// Decision 20): a provider advertises exactly the ones it honours, so Azure's
+// honest decommission+audit is not forced to fake the snapshot-based
+// archive/resurrect (or hetzner's clone-swap adopt) it genuinely lacks.
 type Capabilities struct {
-	Core      bool `json:"core"`      // Create/IP/Delete/List (the CloudProvider contract)
-	Catalog   bool `json:"catalog"`   // Cataloger — normalized regions + priced server types
-	Lifecycle bool `json:"lifecycle"` // InstanceLifecycler — archive/decommission/resurrect/adopt/audit
-	Pause     bool `json:"pause"`     // Pauser — stop/start a box without deleting it
-	Labels    bool `json:"labels"`    // the ServerLabeler + LabelLister + ServerLabelRemover cluster
+	Core         bool `json:"core"`         // Create/IP/Delete/List (the CloudProvider contract)
+	Catalog      bool `json:"catalog"`      // Cataloger — normalized regions + priced server types
+	Archive      bool `json:"archive"`      // Archiver — snapshot an instance into a resurrection bundle
+	Resurrect    bool `json:"resurrect"`    // Resurrector — rebuild an instance from its newest archive
+	Decommission bool `json:"decommission"` // Decommissioner — tear an instance down, verify no residue
+	Adopt        bool `json:"adopt"`        // Adopter — convert a standalone box into a SaaS tenant
+	Audit        bool `json:"audit"`        // Auditor — cross-check servers ↔ DNS ↔ registry
+	Pause        bool `json:"pause"`        // Pauser — stop/start a box without deleting it
+	Labels       bool `json:"labels"`       // the ServerLabeler + LabelLister + ServerLabelRemover cluster
 }
 
-// DetectCapabilities reports which seam capabilities a provider ACTUALLY honours,
-// by type-asserting the optional interfaces — the ground truth the parity test
-// checks the fixture against and the `bp cloud providers` matrix renders. Core
-// is always true: p is a CloudProvider by construction. Labels is the AND of the
-// three label interfaces (a provider that can add but not remove a label does
-// not honour the cluster).
+// DetectCapabilities reports which seam capabilities a provider ACTUALLY honours
+// — the ground truth the parity test checks the fixture against and the `bp cloud
+// providers` matrix renders. Core is always true: p is a CloudProvider by
+// construction. Labels is the AND of the three label interfaces (a provider that
+// can add but not remove a label does not honour the cluster).
+//
+// The five lifecycle facets are TWO-SOURCE (charter Decision 21): a provider
+// advertises one either by satisfying its per-facet interface (the in-memory fake
+// does) OR by a RegisterLifecycleVerbs registration keyed on its slug — the path
+// hetzner and azure take, whose lifecycle lives in free/CLI-level functions
+// (internal/cli/hetzner_instance_cmd.go, cloud_instance_lifecycle_cmd.go), not on
+// a credential-less provider struct. Passing the slug (not just p) is what lets
+// the second source apply.
 //
 // @canonical capability:cloud-provider-seam aka:cloudprovider,provider-registry,hetzner,azure doc:.claude/workflows/bp-azure-hetzner-hosting-charter.md
-func DetectCapabilities(p CloudProvider) Capabilities {
+func DetectCapabilities(kind string, p CloudProvider) Capabilities {
 	c := Capabilities{Core: true}
 	if _, ok := p.(Cataloger); ok {
 		c.Catalog = true
 	}
-	if _, ok := p.(InstanceLifecycler); ok {
-		c.Lifecycle = true
-	}
 	if _, ok := p.(Pauser); ok {
 		c.Pause = true
 	}
+	_, arch := p.(Archiver)
+	c.Archive = arch || lifecycleVerbRegistered(kind, VerbArchive)
+	_, res := p.(Resurrector)
+	c.Resurrect = res || lifecycleVerbRegistered(kind, VerbResurrect)
+	_, dec := p.(Decommissioner)
+	c.Decommission = dec || lifecycleVerbRegistered(kind, VerbDecommission)
+	_, ad := p.(Adopter)
+	c.Adopt = ad || lifecycleVerbRegistered(kind, VerbAdopt)
+	_, au := p.(Auditor)
+	c.Audit = au || lifecycleVerbRegistered(kind, VerbAudit)
 	_, sl := p.(ServerLabeler)
 	_, ll := p.(LabelLister)
 	_, sr := p.(ServerLabelRemover)
@@ -211,10 +235,10 @@ type Cataloger interface {
 	Catalog(ctx context.Context) (Catalog, error)
 }
 
-// Archive is the resurrection-bearing artifact an InstanceLifecycler.Archive
-// produces — a self-contained bundle (a Hetzner snapshot today; an object-storage
-// bundle once portable archives land, Decision 12) tagged with what Resurrect
-// needs to rebuild the box, potentially on the OTHER provider.
+// Archive is the resurrection-bearing artifact an Archiver.Archive produces — a
+// self-contained bundle (a Hetzner snapshot today; an object-storage bundle once
+// portable archives land, Decision 12) tagged with what Resurrect needs to
+// rebuild the box, potentially on the OTHER provider.
 type Archive struct {
 	ID       string    `json:"id"`
 	FQDN     string    `json:"fqdn"`
@@ -222,32 +246,53 @@ type Archive struct {
 	Created  time.Time `json:"created"`
 }
 
-// AuditReport is the servers ↔ DNS ↔ registry cross-check an
-// InstanceLifecycler.Audit returns: how many instances were checked and any
-// residue/mismatch found (a stranded box, a dangling A-record, a stale row).
+// AuditReport is the servers ↔ DNS ↔ registry cross-check an Auditor.Audit
+// returns: how many instances were checked and any residue/mismatch found (a
+// stranded box, a dangling A-record, a stale row).
 type AuditReport struct {
 	Checked int      `json:"checked"`
 	Issues  []string `json:"issues"`
 }
 
-// InstanceLifecycler is the OPTIONAL capability a provider advertises when it can
-// treat a whole Barkpark instance (server + DNS record + registry row) as ONE
-// unit — the fleet-lifecycle verbs today served by `bp cloud hetzner instance …`
-// (hetzner_instance_cmd.go), lifted to be provider-neutral so an Azure box gets
-// the same archive/decommission/resurrect/adopt/audit vocabulary. These are the
-// seam-v2 SHAPES; the real Hetzner implementation moves behind this interface in
-// a later slice (S9) and Azure implements it in S6 — a provider without it
-// degrades visibly, never a fake-parity button.
-type InstanceLifecycler interface {
-	// Archive snapshots target (an fqdn or server name) into a resurrection-bearing bundle.
+// ── Fleet-lifecycle facet interfaces (charter Decision 20) ───────────────────
+// The lifecycle verbs today served by `bp cloud hetzner instance …`
+// (hetzner_instance_cmd.go) — lifted to be provider-neutral so an Azure box gets
+// the same archive/decommission/resurrect/adopt/audit vocabulary — are each an
+// INDEPENDENT, OPTIONAL capability rather than one all-or-nothing bundle. That is
+// what lets a provider honour exactly what it can: Azure has honest decommission
+// + audit but no snapshot-based archive/resurrect, and adopt (a hetzner
+// clone-swap) means something different there, so it advertises none of those.
+//
+// A provider satisfies a facet by implementing its interface (the in-memory fake
+// does); a provider whose lifecycle lives in free/CLI-level functions rather than
+// on the provider struct (hetzner, azure) advertises instead through
+// RegisterLifecycleVerbs — DetectCapabilities merges both sources. Either way a
+// provider without a facet degrades visibly, never a fake-parity button.
+
+// Archiver snapshots an instance (target: an fqdn or server name) into a
+// resurrection-bearing bundle.
+type Archiver interface {
 	Archive(ctx context.Context, target string) (Archive, error)
-	// Decommission archives then tears target down, verifying no residue survives.
-	Decommission(ctx context.Context, target string) error
-	// Resurrect rebuilds an instance for fqdn from its newest archive.
+}
+
+// Resurrector rebuilds an instance for fqdn from its newest archive.
+type Resurrector interface {
 	Resurrect(ctx context.Context, fqdn string) (Server, error)
-	// Adopt converts a standalone box at fqdn into a SaaS tenant of team.
+}
+
+// Decommissioner archives (where supported) then tears an instance down,
+// verifying no residue survives.
+type Decommissioner interface {
+	Decommission(ctx context.Context, target string) error
+}
+
+// Adopter converts a standalone box at fqdn into a SaaS tenant of team.
+type Adopter interface {
 	Adopt(ctx context.Context, fqdn, team string) error
-	// Audit cross-checks servers against DNS and the registry, reporting residue.
+}
+
+// Auditor cross-checks servers against DNS and the registry, reporting residue.
+type Auditor interface {
 	Audit(ctx context.Context) (AuditReport, error)
 }
 

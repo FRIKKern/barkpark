@@ -86,7 +86,7 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 
-	headers := []string{"PROVIDER", "STATE", "AUTH", "CORE", "CATALOG", "LIFECYCLE", "PAUSE", "LABELS"}
+	headers := []string{"PROVIDER", "STATE", "AUTH", "CORE", "CATALOG", "ARCHIVE", "RESURRECT", "DECOMMISSION", "ADOPT", "AUDIT", "PAUSE", "LABELS"}
 	table := make([][]string, 0, len(rows))
 	for _, v := range rows {
 		table = append(table, []string{
@@ -95,7 +95,11 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 			v.authLabel(),
 			capMark(v.caps.Core),
 			capMark(v.caps.Catalog),
-			capMark(v.caps.Lifecycle),
+			capMark(v.caps.Archive),
+			capMark(v.caps.Resurrect),
+			capMark(v.caps.Decommission),
+			capMark(v.caps.Adopt),
+			capMark(v.caps.Audit),
 			capMark(v.caps.Pause),
 			capMark(v.caps.Labels),
 		})
@@ -144,11 +148,15 @@ func (v providerView) structured() map[string]any {
 		"registered": v.registered,
 		"tier":       v.tier,
 		"capabilities": map[string]any{
-			"core":      v.caps.Core,
-			"catalog":   v.caps.Catalog,
-			"lifecycle": v.caps.Lifecycle,
-			"pause":     v.caps.Pause,
-			"labels":    v.caps.Labels,
+			"core":         v.caps.Core,
+			"catalog":      v.caps.Catalog,
+			"archive":      v.caps.Archive,
+			"resurrect":    v.caps.Resurrect,
+			"decommission": v.caps.Decommission,
+			"adopt":        v.caps.Adopt,
+			"audit":        v.caps.Audit,
+			"pause":        v.caps.Pause,
+			"labels":       v.caps.Labels,
 		},
 	}
 	if v.auth == nil {
@@ -196,11 +204,19 @@ but not yet built), a best-effort auth state, and which seam capabilities it
 honours today. Dev-tier providers (the in-memory fake) are hidden by default;
 --all reveals them.
 
-  CORE       create / ip / delete / list a host
-  CATALOG    a normalized, priced region + server-type menu
-  LIFECYCLE  archive · decommission · resurrect · adopt · audit an instance
-  PAUSE      stop / start a box without deleting it
-  LABELS     add / list-by / remove managed labels (orphan-sweep fence)
+  CORE          create / ip / delete / list a host
+  CATALOG       a normalized, priced region + server-type menu
+  ARCHIVE       snapshot an instance into a resurrection bundle
+  RESURRECT     rebuild an instance from its newest archive
+  DECOMMISSION  tear an instance down and verify no residue
+  ADOPT         convert a standalone box into a SaaS tenant
+  AUDIT         cross-check servers ↔ DNS ↔ registry
+  PAUSE         stop / start a box without deleting it
+  LABELS        add / list-by / remove managed labels (orphan-sweep fence)
+
+The five lifecycle facets (archive/resurrect/decommission/adopt/audit) are
+independent (charter Decision 20): a provider advertises exactly the ones it
+honours, so honest degradation is per-verb, never all-or-nothing.
 
 A capability is shown ONLY when the provider actually implements it — a Go
 parity test fails the build if the fixture and the implementation disagree, so

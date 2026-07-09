@@ -13,9 +13,11 @@ package cli
 // escape hatch that talks straight to ARM with credentials resolved flag > env,
 // bypassing the control plane entirely (the terminal twin of `bp cloud hetzner`).
 //
-// Lifecycle verbs (archive/decommission/resurrect/adopt/audit) are NOT here —
-// they stay on `bp cloud hetzner instance` until the neutral-lifecycle slice (S9)
-// lifts them onto this surface.
+// The provider-neutral fleet-LIFECYCLE verbs (archive/resurrect/decommission/
+// adopt/audit/pause/resume) live in the sibling cloud_instance_lifecycle_cmd.go
+// (S9) to keep this file's churn minimal; runCloudInstance routes them there. The
+// raw `bp cloud hetzner instance …` surface survives untouched as the escape
+// hatch, and eject/export/import stay hetzner-only there (not neutral facets).
 //
 // The named azure import self-registers the azure provider into the seam (its
 // init() calls cloud.Register) AND powers the escape hatch's flag>env credential
@@ -69,6 +71,10 @@ func runCloudInstance(out *writer, g globals, args []string) int {
 		return runCloudInstanceIP(out, rest)
 	case "label":
 		return runCloudInstanceLabel(out, rest)
+	case cloud.VerbArchive, cloud.VerbResurrect, cloud.VerbDecommission, cloud.VerbAdopt, cloud.VerbAudit:
+		return runCloudInstanceLifecycle(out, g, verb, rest)
+	case "pause", "resume":
+		return runCloudInstancePause(out, verb, rest)
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown instance command %q (run `bp cloud instance -h` for usage)", verb), exitUsage)
 	}
@@ -493,24 +499,37 @@ func printCloudInstanceHelp(out *writer) {
 	const help = `bp cloud instance — provider-neutral fleet control through the cloud seam.
 
 USAGE
-  bp cloud instance list   [--provider hetzner|azure|fake]
-  bp cloud instance create --name <n> [--provider …] [--type <t>] [--region <r>] [--image <img>]
-  bp cloud instance delete <name> [--provider …] [--yes]
-  bp cloud instance ip     <name> [--provider …]
-  bp cloud instance label  set <name> <key> <value> | rm <name> <key> [--provider …]
+  bp cloud instance list         [--provider hetzner|azure|fake]
+  bp cloud instance create       --name <n> [--provider …] [--type <t>] [--region <r>] [--image <img>]
+  bp cloud instance delete       <name> [--provider …] [--yes]
+  bp cloud instance ip           <name> [--provider …]
+  bp cloud instance label        set <name> <key> <value> | rm <name> <key> [--provider …]
+  bp cloud instance archive      <fqdn|server> [--provider …]
+  bp cloud instance resurrect    <fqdn> [--provider …]
+  bp cloud instance decommission <fqdn|server> [--provider …] [--yes] [--direct]
+  bp cloud instance adopt        <fqdn|server> --team <id> [--provider …]
+  bp cloud instance audit        [--provider …]
+  bp cloud instance pause        <name> [--provider …]
+  bp cloud instance resume       <name> [--provider …]
 
 WHAT IT DOES
   Resolves --provider (default hetzner) through the provider seam and runs the
   core create/ip/delete/list verbs — the SAME code path for every provider.
-  Label verbs need the provider's optional label capability; a provider that
-  lacks a capability prints an honest reason (never a dead verb). Credentials
-  come from each provider's own environment (HCLOUD_TOKEN for hetzner, AZURE_*
-  for azure); use 'bp cloud azure' to pass Azure creds as flags.
+  Label + lifecycle verbs need the provider's optional capability; a provider that
+  lacks one prints an honest reason (never a dead verb) — 'bp cloud providers'
+  shows what each honours. Credentials come from each provider's own environment
+  (HCLOUD_TOKEN for hetzner, AZURE_* for azure); use 'bp cloud azure' to pass
+  Azure creds as flags.
 
-  Lifecycle verbs (archive/decommission/resurrect/adopt/audit) are not here yet —
-  they live on 'bp cloud hetzner instance' until the neutral-lifecycle slice.
+  LIFECYCLE (archive/resurrect/decommission/adopt/audit) treats a whole instance —
+  server + DNS record + control-plane row — as one unit. Hetzner honours all five;
+  Azure honours decommission + audit only (no snapshot archive/resurrect, no
+  clone-swap adopt) and its decommission is UNRECOVERABLE (no archive is taken).
+  The hetzner path is identical to 'bp cloud hetzner instance <verb>', which also
+  keeps the hetzner-only eject/export/import escape hatches.
 
-  See 'bp cloud providers' for what each provider honours.`
+  PAUSE/RESUME stop/start a box without deleting it (azure deallocate/start);
+  hetzner does not honour pause and degrades with a reason.`
 	out.outf("%s", help)
 }
 
