@@ -46,6 +46,41 @@
   --color-danger: hsl(0 82% 66%);
   --color-info: hsl(217.2 91.2% 59.8%);
 }
+/* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+[data-bp-theme="evergreen"] {
+  --color-primary: hsl(163 46% 22%);
+  --color-primary-hover: hsl(163 46% 16%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(0 0% 100%);
+  --color-surface: hsl(0 0% 100%);
+  --color-muted-surface: hsl(240 4.8% 95.9%);
+  --color-text: hsl(240 10% 3.9%);
+  --color-muted-text: hsl(240 3.8% 46.1%);
+  --color-border: hsl(240 5.9% 90%);
+  --color-ring: hsl(163 42% 30%);
+  --color-accent: hsl(30 92% 42%);
+  --color-ok: hsl(142 72% 26%);
+  --color-warn: hsl(35 92% 38%);
+  --color-danger: hsl(0 68% 42%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+}
+[data-bp-theme="evergreen"][data-theme="dark"] {
+  --color-primary: hsl(160 42% 62%);
+  --color-primary-hover: hsl(160 42% 70%);
+  --color-primary-fg: hsl(163 45% 8%);
+  --color-bg: hsl(240 10% 3.9%);
+  --color-surface: hsl(240 10% 5.5%);
+  --color-muted-surface: hsl(240 3.7% 12%);
+  --color-text: hsl(0 0% 95%);
+  --color-muted-text: hsl(240 5% 64.9%);
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(160 42% 62%);
+  --color-accent: hsl(33 92% 60%);
+  --color-ok: hsl(142 52% 52%);
+  --color-warn: hsl(38 94% 56%);
+  --color-danger: hsl(0 82% 66%);
+  --color-info: hsl(217.2 91.2% 59.8%);
+}
 /* END GENERATED: tokens */
 
 /* --background / --foreground are thin aliases onto the emitted tokens so the

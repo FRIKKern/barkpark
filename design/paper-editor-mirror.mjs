@@ -44,17 +44,51 @@ const FONT_LITERALS = {
 
 const stripComments = (s) => s.replace(/\/\*[\s\S]*?\*\//g, " ");
 
-// True for the paper-surface TOKEN scopes only (not element/class rules): every
-// comma-part resolves to `.bp-paper-surface` / `.bp-paper-body`, optionally under
-// an `html[data-theme=…]` ancestor.
-function isTokenSelector(sel) {
+// Classify a paper-surface TOKEN scope (not an element/class rule): every
+// comma-part must resolve to `.bp-paper-surface` / `.bp-paper-body`, optionally
+// under an `html[data-theme=…]` mode ancestor AND/OR an `html[data-bp-theme="X"]`
+// THEME-identity ancestor (theme-system Wave 4, D27). Returns `{ theme, dark }`
+// (theme === "" for the bare/evergreen fallback scope) or `null` for a non-token
+// rule. All comma-parts must agree on the same (theme, dark) — a mixed scope is a
+// structural error the caller surfaces, never a silent bucket.
+//
+// A theme-scoped block that this did NOT understand would be dropped (its tokens
+// never reach the mirror) OR collapsed into the light/dark buckets last-write-
+// wins across themes — the exact drift D27 exists to prevent.
+function tokenScope(sel) {
   sel = stripComments(sel).trim();
-  if (!sel) return false;
+  if (!sel) return null;
+  let agreed = null;
   for (let part of sel.split(",")) {
-    part = part.trim().replace(/^html\[data-theme="(?:light|dark)"\]\s+/, "");
-    if (part !== ".bp-paper-surface" && part !== ".bp-paper-body") return false;
+    part = part.trim();
+    let theme = "";
+    let dark = false;
+    // Optional theme-identity ancestor, itself optionally carrying a mode.
+    let m = part.match(/^html\[data-bp-theme="([\w-]+)"\](\[data-theme="(light|dark)"\])?\s+/);
+    if (m) {
+      theme = m[1];
+      if (m[3]) dark = m[3] === "dark";
+      part = part.slice(m[0].length);
+    } else {
+      // Bare mode ancestor (no theme identity) — today's structure.
+      m = part.match(/^html\[data-theme="(light|dark)"\]\s+/);
+      if (m) {
+        dark = m[1] === "dark";
+        part = part.slice(m[0].length);
+      }
+    }
+    if (part !== ".bp-paper-surface" && part !== ".bp-paper-body") return null;
+    const here = { theme, dark };
+    if (agreed === null) agreed = here;
+    else if (agreed.theme !== here.theme || agreed.dark !== here.dark)
+      throw new MirrorError(
+        `paper-surface.css token scope \`${sel}\` mixes theme/mode across its ` +
+          `comma-parts (${JSON.stringify(agreed)} vs ${JSON.stringify(here)}) — ` +
+          `each token scope must resolve to ONE (theme, mode) so the mirror can ` +
+          `de-scope it deterministically.`,
+      );
   }
-  return true;
+  return agreed;
 }
 
 // Ordered [name, value] custom-property declarations. A token scope must be PURE
@@ -98,33 +132,46 @@ function emitScope(selector, order, bucket) {
 // structural problem.
 export function computeMirror(surfaceText, bundleText) {
   const surface = stripComments(surfaceText);
-  const light = new Map();
-  const dark = new Map();
-  const lightOrder = [];
-  const darkOrder = [];
+
+  // One (light,dark) bucket pair PER theme identity. Key "" is the bare/evergreen
+  // fallback (de-scoped to :root); a named theme de-scopes to :root[data-bp-theme].
+  // Insertion order is preserved so the emitted scopes track the source order.
+  const themes = new Map(); // theme -> { light, dark, lightOrder, darkOrder }
+  const bucketFor = (theme) => {
+    if (!themes.has(theme))
+      themes.set(theme, { light: new Map(), dark: new Map(), lightOrder: [], darkOrder: [] });
+    return themes.get(theme);
+  };
+  bucketFor(""); // the base fallback scope always exists (and emits first)
 
   for (const m of surface.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
     const sel = m[1];
     const body = m[2];
-    if (!isTokenSelector(sel)) continue;
+    const scope = tokenScope(sel);
+    if (scope === null) continue;
     const decls = parseDecls(sel, body);
-    const darkScope = sel.includes('data-theme="dark"');
-    const bucket = darkScope ? dark : light;
-    const order = darkScope ? darkOrder : lightOrder;
+    const b = bucketFor(scope.theme);
+    const bucket = scope.dark ? b.dark : b.light;
+    const order = scope.dark ? b.darkOrder : b.lightOrder;
     for (const [name, value] of decls) {
       if (!bucket.has(name)) order.push(name);
-      bucket.set(name, value); // last write wins
+      bucket.set(name, value); // last write wins (within one theme+mode)
     }
   }
 
-  const generated =
-    emitScope(":root, :host", lightOrder, light) +
-    "\n\n" +
-    emitScope(
-      ':root[data-theme="dark"], :host([data-theme="dark"])',
-      darkOrder,
-      dark
-    );
+  // De-scope each theme to its :root/:host equivalent. The bare fallback ("") maps
+  // to today's exact `:root, :host` + `:root[data-theme="dark"], …` (byte-stable);
+  // a theme "X" adds the orthogonal `:root[data-bp-theme="X"]` identity scopes.
+  const parts = [];
+  for (const [theme, b] of themes) {
+    const lightSel = theme === "" ? ":root, :host" : `:root[data-bp-theme="${theme}"], :host([data-bp-theme="${theme}"])`;
+    const darkSel = theme === ""
+      ? ':root[data-theme="dark"], :host([data-theme="dark"])'
+      : `:root[data-bp-theme="${theme}"][data-theme="dark"], :host([data-bp-theme="${theme}"][data-theme="dark"])`;
+    parts.push(emitScope(lightSel, b.lightOrder, b.light));
+    parts.push(emitScope(darkSel, b.darkOrder, b.dark));
+  }
+  const generated = parts.join("\n\n");
 
   const markerRe =
     /(\/\* BEGIN GENERATED: paper-surface[^\n]*\*\/\n)([\s\S]*?)(\n\/\* END GENERATED: paper-surface \*\/)/;

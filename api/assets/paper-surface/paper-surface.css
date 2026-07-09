@@ -401,6 +401,41 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   .bp-lg--ready { color: #e7edf2; }
   .bp-lg--open { color: #5f6b78; }
 }
+/* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
+html[data-bp-theme="evergreen"] .bp-paper-surface, html[data-bp-theme="evergreen"] .bp-paper-body {
+  --paper-bg: #f6faf9;
+  --paper-bg-deep: #eaf1ee;
+  --paper-ink: #15211d;
+  --paper-ink-soft: #55635e;
+  --paper-ink-faint: #82918b;
+  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-edit-hover: rgba(21, 33, 29, 0.08);
+  --paper-accent: #1e5347;
+  --paper-accent-soft: rgba(30, 83, 71, 0.10);
+  --paper-chrome-bg: #f6faf9;
+  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0e1614;
+  --paper-bg-deep: #131d19;
+  --paper-ink: #e7ede9;
+  --paper-ink-soft: #9aaaa3;
+  --paper-ink-faint: #6c7a74;
+  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-edit-hover: rgba(231, 237, 233, 0.09);
+  --paper-accent: #45b394;
+  --paper-accent-soft: rgba(70, 179, 148, 0.16);
+  --paper-chrome-bg: #131d19;
+  --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
 /* END GENERATED: tokens */
 
 .bp-paper-surface .bp-tasks {
