@@ -573,6 +573,41 @@ test("theme aria-label CONTAINS the visible word (label-in-name), both themes", 
   assert.equal(hooks.themeToggleAria("light"), "Switch to dark theme");
 });
 
+// ── theme IDENTITY picker (D36) ─────────────────────────────────────────────
+// data-bp-theme swaps the whole palette; it is a SECOND, orthogonal switch to
+// the light/dark toggle above. normalizeBpTheme is the safety net: any id the
+// build doesn't ship (stale localStorage, a retired theme) collapses to
+// evergreen so a bad value never leaves the SPA on an undefined palette.
+
+test("bp-theme picker helpers are exported", () => {
+  assert.equal(typeof hooks.normalizeBpTheme, "function");
+  assert.equal(typeof hooks.applyBpTheme, "function");
+  assert.ok(Array.isArray(hooks.bpThemes));
+});
+
+test("bpThemes pins the known identity list (matches the index.html <option>s)", () => {
+  assert.deepEqual([...hooks.bpThemes], ["evergreen", "ember", "fjord"]);
+});
+
+test("normalizeBpTheme passes known ids through and folds anything else to evergreen", () => {
+  for (const id of ["evergreen", "ember", "fjord"]) {
+    assert.equal(hooks.normalizeBpTheme(id), id);
+  }
+  // Unknown / hostile / empty inputs all fall back — never an undefined palette.
+  for (const bad of ["", "EMBER", "midnight", null, undefined, "evergreen ", "0"]) {
+    assert.equal(hooks.normalizeBpTheme(bad), "evergreen", `${JSON.stringify(bad)} → evergreen`);
+  }
+});
+
+test("applyBpTheme returns the applied (normalized) id — the DOM stamp is no-op in the sandbox", () => {
+  // document.documentElement.setAttribute + $("#bp-theme-picker") are inert here;
+  // the return value is the contract the wiring persists to localStorage.
+  assert.equal(hooks.applyBpTheme("ember"), "ember");
+  assert.equal(hooks.applyBpTheme("fjord"), "fjord");
+  assert.equal(hooks.applyBpTheme("evergreen"), "evergreen");
+  assert.equal(hooks.applyBpTheme("bogus"), "evergreen");
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // C3 — provisioning timeline: ONE fold (provisionSteps), THREE mounts.
 // ════════════════════════════════════════════════════════════════════════════
