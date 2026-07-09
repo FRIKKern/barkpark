@@ -610,13 +610,21 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     """
   end
 
+  # Capture file names must be unique ACROSS `mix test` runs, not just within
+  # one: `System.unique_integer/1` restarts every BEAM boot, and a fake command
+  # can flush its capture file AFTER the owning test's on_exit rm_rf already ran
+  # (the port outlives the test by a beat) — a later RUN that mints the same
+  # small integer would then `read_frame` a STALE frame from a previous run and
+  # fail on a request_id that nobody in this run minted. The OS pid pins the
+  # name to this BEAM instance; rm_rf-before-use belts-and-suspenders it.
   defp capture_path(kind) do
     file =
       Path.join(
         System.tmp_dir!(),
-        "claude_chat_#{kind}_#{System.unique_integer([:positive])}"
+        "claude_chat_#{kind}_#{System.pid()}_#{System.unique_integer([:positive])}"
       )
 
+    File.rm_rf(file)
     on_exit(fn -> File.rm_rf(file) end)
     file
   end
