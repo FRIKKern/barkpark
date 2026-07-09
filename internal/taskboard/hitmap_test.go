@@ -337,8 +337,8 @@ func TestHitMapClickClearsStripAndDisarm(t2 *testing.T) {
 	}
 }
 
-// TestHitMapMotionIgnored: a hover-motion event changes nothing this slice (hover
-// is ttm-s3).
+// TestHitMapMotionIgnored: a hover-motion event NEVER moves the cursor — motion
+// is hover only (ttm-s3, tested in mouse_fusion_test.go), never navigation.
 func TestHitMapMotionIgnored(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.width, m.height = 80, 40
@@ -350,8 +350,10 @@ func TestHitMapMotionIgnored(t2 *testing.T) {
 	}
 }
 
-// TestHitMapWideNoOp: in wide two-pane mode the mouse no-ops this slice (ttm-s5)
-// and ComposeHitMap yields no map.
+// TestHitMapWideNoOp: wide two-pane mode routes through ttm-s5's handleWideMouse
+// (tested in compose_test.go + mouse_fusion_test.go), never the narrow hit map —
+// ComposeHitMap yields no map there, and an event OFF the pane rows (this wheel
+// lands on the leading blank row) is an honest no-op.
 func TestHitMapWideNoOp(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	m.now = func() time.Time { return time.Unix(2, 0) }
