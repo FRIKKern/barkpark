@@ -199,14 +199,11 @@ defmodule BarkparkCloud.FailureCopy do
   @spec capability_gap_reason(String.t(), String.t()) :: String.t()
 
   # Azure lifecycle facets (S9 split the old all-or-nothing lifecycle bool into
-  # archive/resurrect/decommission/adopt/audit). Azure honours decommission +
-  # audit; the three it lacks are named specifically so the console can say WHY,
-  # not just "no". Azure has no snapshot substrate — portable archives (charter
-  # Decision 12) are the planned path.
-  def capability_gap_reason("azure", "archive") do
-    "Azure has no archive yet — there's no snapshot substrate there. Portable archives will bring it; until then an Azure decommission is unrecoverable."
-  end
-
+  # archive/resurrect/decommission/adopt/audit). Azure now honours archive too —
+  # via the PORTABLE bp-bundle-v1 (charter Decision 42), not a snapshot — so its
+  # archive gap clause is gone. resurrect + adopt remain the two it still lacks,
+  # named specifically so the console can say WHY, not just "no". (S14d flips
+  # resurrect once a bundle can hydrate a fresh box.)
   def capability_gap_reason("azure", "resurrect") do
     "Resurrect rebuilds a box from its archive, and Azure has no archives yet — portable archives will bring both."
   end
