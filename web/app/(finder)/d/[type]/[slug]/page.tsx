@@ -1,27 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getDocument, type GenericDoc } from "@/lib/get-document";
-import { paperExcerpt, type PaperDocument } from "@/lib/papers";
+import { getDocument } from "@/lib/get-document";
+import { PUBLIC_API_URL } from "@/lib/bp-env";
+import { metadataFromPreview } from "@/lib/preview-metadata";
 import { DocumentDetail } from "@/components/document-detail";
-
-/**
- * A one-line summary for the doc's meta description / OG / twitter card.
- * `post` carries an explicit `excerpt`; `paper` derives one from its first
- * paragraph; other types have no reliable excerpt, so we return null and the
- * metadata gracefully omits the description (never a broken/empty tag).
- */
-function docDescription(doc: GenericDoc, type: string): string | undefined {
-  if (type === "post") {
-    const excerpt = (doc as { excerpt?: unknown }).excerpt;
-    return typeof excerpt === "string" && excerpt.trim() !== ""
-      ? excerpt
-      : undefined;
-  }
-  if (type === "paper") {
-    return paperExcerpt(doc as PaperDocument) ?? undefined;
-  }
-  return undefined;
-}
 
 // ISR: getDocument wraps its fetch in unstable_cache (5-min revalidate, busted
 // on-demand via revalidateTag("doc:<type>")), so the per-request work here is a
@@ -62,25 +44,17 @@ export async function generateMetadata({
   if (!doc && !error) notFound();
   if (!doc) return { title: "Document unavailable · Barkpark" };
 
-  const title = doc.title ?? slug;
-  const description = docDescription(doc, type);
-  const url = `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`;
-
-  return {
-    title: `${title} · Barkpark`,
-    ...(description ? { description } : {}),
-    openGraph: {
-      title,
-      ...(description ? { description } : {}),
-      type: type === "post" || type === "paper" ? "article" : "website",
-      url,
-    },
-    twitter: {
-      card: "summary",
-      title,
-      ...(description ? { description } : {}),
-    },
-  };
+  // ONE preview manifest drives every meta tag. The v1 envelope hoists content
+  // keys to the top level, so the write-time card arrives as `doc.preview`
+  // ({title,type,description,url,image,extensions}) — image srcs are relative
+  // and absolutized against the API origin. Absent (legacy unstamped) → the
+  // helper degrades to title-only + the branded default card.
+  return metadataFromPreview({
+    preview: (doc as { preview?: unknown }).preview,
+    apiOrigin: PUBLIC_API_URL,
+    pageUrl: `/d/${encodeURIComponent(type)}/${encodeURIComponent(slug)}`,
+    fallbackTitle: doc.title ?? slug,
+  });
 }
 
 export default async function DetailPage({ params }: { params: Params }) {
