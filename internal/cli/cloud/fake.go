@@ -146,11 +146,104 @@ func (f *FakeProvider) List(_ context.Context) ([]Server, error) {
 	return out, nil
 }
 
-// compile-time assertions that *FakeProvider satisfies the core interface and
-// the optional label-aware capabilities the orphan-recovery path uses.
+// ── Optional seam-v2 capabilities ───────────────────────────────────────────
+// The fake honours EVERY optional capability (providers_capabilities.json marks
+// fake all-true) so it is the reference provider future capability tests run
+// against — the real Hetzner/Azure impls are verified for equivalence against
+// this behaviour. All operate purely in memory: no network, no spend.
+
+// HasAuth (Authenticator): the fake needs no credential, so it is always
+// authenticated. Lets `bp cloud providers` show a deterministic auth state.
+func (f *FakeProvider) HasAuth(context.Context) bool { return true }
+
+// Catalog (Cataloger) returns a small, deterministic normalized catalog so a
+// launch-menu test has stable regions and priced sizes to assert against.
+func (f *FakeProvider) Catalog(context.Context) (Catalog, error) {
+	return Catalog{
+		Regions: []string{"fake-region-a", "fake-region-b"},
+		ServerTypes: []ServerType{
+			{Slug: "fake-small", Cores: 2, RAMGb: 4, DiskGb: 40, MonthlyPrice: 5.0},
+			{Slug: "fake-large", Cores: 8, RAMGb: 16, DiskGb: 160, MonthlyPrice: 20.0},
+		},
+	}, nil
+}
+
+// Archive (InstanceLifecycler) returns a synthetic resurrection-bearing archive
+// for target. It does not mutate the map (snapshotting leaves the box running);
+// an empty target is an error so a test can assert that guard.
+func (f *FakeProvider) Archive(_ context.Context, target string) (Archive, error) {
+	if target == "" {
+		return Archive{}, fmt.Errorf("cloud: fake Archive requires a non-empty target")
+	}
+	return Archive{ID: "fake-archive-" + target, FQDN: target, Provider: ProviderFake}, nil
+}
+
+// Decommission (InstanceLifecycler) tears the box down — the in-memory analogue
+// of archive→teardown→verify-no-residue. An unknown target is a not-found error.
+func (f *FakeProvider) Decommission(_ context.Context, target string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.servers[target]; !ok {
+		return fmt.Errorf("cloud: fake server %q not found", target)
+	}
+	delete(f.servers, target)
+	return nil
+}
+
+// Resurrect (InstanceLifecycler) rebuilds an instance for fqdn from its (implied
+// newest) archive — modelled as a fresh Create under the fqdn name.
+func (f *FakeProvider) Resurrect(ctx context.Context, fqdn string) (Server, error) {
+	return f.Create(ctx, ServerSpec{Name: fqdn})
+}
+
+// Adopt (InstanceLifecycler) converts a standalone box into a tenant of team;
+// the fake just validates the inputs (an empty fqdn or team is an error).
+func (f *FakeProvider) Adopt(_ context.Context, fqdn, team string) error {
+	if fqdn == "" || team == "" {
+		return fmt.Errorf("cloud: fake Adopt requires a non-empty fqdn and team")
+	}
+	return nil
+}
+
+// Audit (InstanceLifecycler) cross-checks the fleet — the fake reports how many
+// boxes it holds with no residue issues.
+func (f *FakeProvider) Audit(context.Context) (AuditReport, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return AuditReport{Checked: len(f.servers)}, nil
+}
+
+// Pause (Pauser) stops a box without deleting it. An unknown name is a not-found
+// error; the fake has no power state to change, so a present box is a no-op.
+func (f *FakeProvider) Pause(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.servers[name]; !ok {
+		return fmt.Errorf("cloud: fake server %q not found", name)
+	}
+	return nil
+}
+
+// Resume (Pauser) starts a paused box. An unknown name is a not-found error.
+func (f *FakeProvider) Resume(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.servers[name]; !ok {
+		return fmt.Errorf("cloud: fake server %q not found", name)
+	}
+	return nil
+}
+
+// compile-time assertions that *FakeProvider satisfies the core interface, the
+// optional label-aware capabilities the orphan-recovery path uses, and — as the
+// reference provider — EVERY seam-v2 optional capability the fixture marks true.
 var (
 	_ CloudProvider      = (*FakeProvider)(nil)
 	_ ServerLabeler      = (*FakeProvider)(nil)
 	_ LabelLister        = (*FakeProvider)(nil)
 	_ ServerLabelRemover = (*FakeProvider)(nil)
+	_ Cataloger          = (*FakeProvider)(nil)
+	_ InstanceLifecycler = (*FakeProvider)(nil)
+	_ Pauser             = (*FakeProvider)(nil)
+	_ Authenticator      = (*FakeProvider)(nil)
 )

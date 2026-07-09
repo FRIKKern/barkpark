@@ -84,9 +84,62 @@ type Server struct {
 	Labels map[string]string
 }
 
+// ── The provider seam (v2) ──────────────────────────────────────────────────
+//
+// CloudProvider (below) is the provisioning seam every provider satisfies. It is
+// deliberately narrow — Create/IP/Delete/List — and NEVER widened: every richer
+// ability (labels, catalog, lifecycle, pause) rides an OPTIONAL capability
+// interface a provider advertises just by satisfying it, so a minimal or
+// asymmetric provider (Azure's resource groups + LRO deletes, Hetzner's 63-char
+// label rule) lands as an implementation, not a fork. The registry (registry.go)
+// resolves a slug + creds to a CloudProvider via ProviderFor; the committed
+// providers_capabilities.json fixture declares, per slug, which optional
+// capabilities each honours today, and a Go parity test (registry_test.go) fails
+// if a fixture claim and the provider's ACTUAL interface set drift apart. That
+// fixture is the cross-surface contract the Elixir control plane and the SPA
+// read too, so "honest degradation" is renderable and drift is a CI failure.
+//
+// Capabilities is the honest capability row for one provider — the exact shape
+// of a providers_capabilities.json entry (see LoadCapabilities in registry.go).
+type Capabilities struct {
+	Core      bool `json:"core"`      // Create/IP/Delete/List (the CloudProvider contract)
+	Catalog   bool `json:"catalog"`   // Cataloger — normalized regions + priced server types
+	Lifecycle bool `json:"lifecycle"` // InstanceLifecycler — archive/decommission/resurrect/adopt/audit
+	Pause     bool `json:"pause"`     // Pauser — stop/start a box without deleting it
+	Labels    bool `json:"labels"`    // the ServerLabeler + LabelLister + ServerLabelRemover cluster
+}
+
+// DetectCapabilities reports which seam capabilities a provider ACTUALLY honours,
+// by type-asserting the optional interfaces — the ground truth the parity test
+// checks the fixture against and the `bp cloud providers` matrix renders. Core
+// is always true: p is a CloudProvider by construction. Labels is the AND of the
+// three label interfaces (a provider that can add but not remove a label does
+// not honour the cluster).
+//
+// @canonical capability:cloud-provider-seam aka:cloudprovider,provider-registry,hetzner,azure doc:.claude/workflows/bp-azure-hetzner-hosting-charter.md
+func DetectCapabilities(p CloudProvider) Capabilities {
+	c := Capabilities{Core: true}
+	if _, ok := p.(Cataloger); ok {
+		c.Catalog = true
+	}
+	if _, ok := p.(InstanceLifecycler); ok {
+		c.Lifecycle = true
+	}
+	if _, ok := p.(Pauser); ok {
+		c.Pause = true
+	}
+	_, sl := p.(ServerLabeler)
+	_, ll := p.(LabelLister)
+	_, sr := p.(ServerLabelRemover)
+	c.Labels = sl && ll && sr
+	return c
+}
+
 // CloudProvider is the provisioning seam. A real impl shells out to a provider
-// CLI; the fake keeps everything in memory. The four methods are the whole API
-// the setup flow needs — create a host, read its IP, delete it, list them.
+// CLI (or drives a provider SDK); the fake keeps everything in memory. The four
+// methods are the whole API the setup flow needs — create a host, read its IP,
+// delete it, list them. Grow it ONLY by the optional capability interfaces below
+// (the ServerLabeler idiom), never by adding a method here.
 type CloudProvider interface {
 	Create(ctx context.Context, spec ServerSpec) (Server, error)
 	IP(ctx context.Context, name string) (string, error)
@@ -120,6 +173,99 @@ type LabelLister interface {
 // FakeProvider implement it.
 type ServerLabelRemover interface {
 	RemoveLabel(ctx context.Context, name, key string) error
+}
+
+// ── Optional capability interfaces (seam v2) ────────────────────────────────
+// Each is a small STANDALONE interface a provider advertises by satisfying it,
+// exactly like ServerLabeler above — NEVER folded into the core CloudProvider.
+// A caller type-asserts for the one it needs and degrades visibly (with a
+// reason) when a provider lacks it; providers_capabilities.json declares, per
+// slug, which of these are honoured today so the CLI/SPA can render honest
+// degradation instead of a dead button.
+
+// ServerType is one normalized machine size in a provider's Catalog. Prices and
+// specs are provider-mapped into ONE shape so Hetzner and Azure sizes render in
+// the same table with the same columns — the normalized catalog the charter's
+// Decision 6 requires (and the lever that finally makes the Hetzner catalog
+// carry pricing, which hcloud exposes but we drop today).
+type ServerType struct {
+	Slug         string  `json:"slug"`          // provider's type id (e.g. "cx23", "Standard_B2s")
+	Cores        int     `json:"cores"`         // vCPU count
+	RAMGb        float64 `json:"ram_gb"`        // memory in GiB (fractional sizes exist)
+	DiskGb       int     `json:"disk_gb"`       // included boot disk in GB
+	MonthlyPrice float64 `json:"monthly_price"` // list price per month in the account currency
+}
+
+// Catalog is a provider's normalized launch menu: the regions it offers and the
+// priced server types available in them. Both providers map their native shape
+// into this ONE structure.
+type Catalog struct {
+	Regions     []string     `json:"regions"`
+	ServerTypes []ServerType `json:"server_types"`
+}
+
+// Cataloger is the OPTIONAL capability a provider advertises when it can report
+// its normalized, priced launch catalog. Off the core contract for the same
+// YAGNI reason as ServerLabeler.
+type Cataloger interface {
+	Catalog(ctx context.Context) (Catalog, error)
+}
+
+// Archive is the resurrection-bearing artifact an InstanceLifecycler.Archive
+// produces — a self-contained bundle (a Hetzner snapshot today; an object-storage
+// bundle once portable archives land, Decision 12) tagged with what Resurrect
+// needs to rebuild the box, potentially on the OTHER provider.
+type Archive struct {
+	ID       string    `json:"id"`
+	FQDN     string    `json:"fqdn"`
+	Provider string    `json:"provider"`
+	Created  time.Time `json:"created"`
+}
+
+// AuditReport is the servers ↔ DNS ↔ registry cross-check an
+// InstanceLifecycler.Audit returns: how many instances were checked and any
+// residue/mismatch found (a stranded box, a dangling A-record, a stale row).
+type AuditReport struct {
+	Checked int      `json:"checked"`
+	Issues  []string `json:"issues"`
+}
+
+// InstanceLifecycler is the OPTIONAL capability a provider advertises when it can
+// treat a whole Barkpark instance (server + DNS record + registry row) as ONE
+// unit — the fleet-lifecycle verbs today served by `bp cloud hetzner instance …`
+// (hetzner_instance_cmd.go), lifted to be provider-neutral so an Azure box gets
+// the same archive/decommission/resurrect/adopt/audit vocabulary. These are the
+// seam-v2 SHAPES; the real Hetzner implementation moves behind this interface in
+// a later slice (S9) and Azure implements it in S6 — a provider without it
+// degrades visibly, never a fake-parity button.
+type InstanceLifecycler interface {
+	// Archive snapshots target (an fqdn or server name) into a resurrection-bearing bundle.
+	Archive(ctx context.Context, target string) (Archive, error)
+	// Decommission archives then tears target down, verifying no residue survives.
+	Decommission(ctx context.Context, target string) error
+	// Resurrect rebuilds an instance for fqdn from its newest archive.
+	Resurrect(ctx context.Context, fqdn string) (Server, error)
+	// Adopt converts a standalone box at fqdn into a SaaS tenant of team.
+	Adopt(ctx context.Context, fqdn, team string) error
+	// Audit cross-checks servers against DNS and the registry, reporting residue.
+	Audit(ctx context.Context) (AuditReport, error)
+}
+
+// Pauser is the OPTIONAL capability a provider advertises when it can STOP a box
+// (releasing compute billing) and START it again WITHOUT deleting it — Hetzner
+// poweroff/poweron, Azure deallocate/start. Distinct from lifecycle archive
+// (which snapshots + destroys); pause preserves the running box's disk.
+type Pauser interface {
+	Pause(ctx context.Context, name string) error
+	Resume(ctx context.Context, name string) error
+}
+
+// Authenticator is the OPTIONAL capability a provider advertises when it can
+// cheaply report whether a usable credential is present, WITHOUT a mutating or
+// billable call. `bp cloud providers` type-asserts for it to show a best-effort
+// auth state; a provider without it renders "—" (unknown), never a false claim.
+type Authenticator interface {
+	HasAuth(ctx context.Context) bool
 }
 
 // DefaultSpec returns the region/type/image fallbacks for a provider so a bare
@@ -599,4 +745,5 @@ var (
 	_ ServerLabeler      = HcloudProvider{}
 	_ LabelLister        = HcloudProvider{}
 	_ ServerLabelRemover = HcloudProvider{}
+	_ Authenticator      = HcloudProvider{}
 )
