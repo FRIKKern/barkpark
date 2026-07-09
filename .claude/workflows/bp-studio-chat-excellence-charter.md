@@ -2062,3 +2062,54 @@ Footer status strip goes mono: `<mode> ⏵ <model> · <duration> · $<cost>`.
 Gate: 307 tests × 3 seeds; studio-literal-check PASS; warnings-as-errors
 clean. Unknown tool_use_id results are safe noops (echoed test-fake frames
 never match).
+
+### Wave 2026-07-10 (wave 11 — the journey, not the list: BUILT + REVIEWED)
+
+All three slices green and reviewed; integrate S1-r → S2-r → S3(-r).
+
+**Landed.** S1 (`scc-w11-journey-truth`): two committed real-run fixtures
+(`epic_cycle_progress.ndjson` — the completed 7-phase/29-agent wf_49614704,
+verbatim node payloads, 2,137,873 real tokens; `epic_cycle_interrupted.ndjson`
+— the killed wf_1e38c940 ending mid-flight) + the pure journey helpers
+(`workflow_journey/1` four-state truth table, `workflow_label_parts/1`,
+`model_family/1`, `format_tokens/1`, `workflow_node_terminal?/1`) +
+`phaseIndex` in the rail signature + the D51 @doc correction; tests fold the
+FULL interleaved streams exactly as the Recorder does. S2
+(`scc-w11-journey-render`): the agents rail renders the phase journey —
+status-settled header aggregates ("⚙ epic · Build 3/4 · 2 running · 3 done ·
+324k tok"), settled phases one quiet ✓ line, the active phase breathing its
+nested agents (two-part labels, model families, abbreviated tokens), dim
+futures, D61 status-aware collapse (completed defaults collapsed; manual
+toggle wins both ways), all `--life-*` + the `--text-dim`→`--fg-dim` fix.
+S3 (`task-c0cbe467eb44c161`, adopted): the idle-reaper flake is dead —
+deterministic `send(recorder, :idle_reap)` after subscribe+monitor, 12/12
+green.
+
+**Reviewer findings (fixed in place, `-r` branches).** (1) THE integration
+bug: S1 shipped `workflow_journey` summary/phase keys that DIVERGED from the
+charter's pinned wave-11 contract (`phases_total/phases_done/current_index/
+agents_*/tokens_total/agent_count` vs the pinned `phase_total/phases_run/
+skipped/active/running/done/failed/tokens/total`) — S2 consumed the pinned
+names verbatim, so the honest S1+S2 merge crashed the rail with KeyError (8
+red tests). Fixed by conforming S1 to the pinned contract; a pinned contract
+only protects parallel builders if the exporter builds to it byte-for-byte —
+next wave, the truth slice should paste the contract block into its tests.
+(2) Two failure-set owners: chat_live grew a private `@rail_node_failed`
+missing canceled/cancelled — a canceled agent rendered ✓ while the header
+counted it failed; `workflow_node_failed?/1` is now public and the ONE owner.
+(3) Failures vanished on completion (completed header + settled phase lines
+showed no failed count; error-inside-completed is real — 304 nodes/507 runs)
+— both now carry an honest "· N failed". (4) `format_tokens` rounds to
+nearest k (323,700 → "324k"); a scaffold-derived test expected floor.
+Gate on final state: 488 tests × seeds 37/74/111, 0 failures;
+studio-literal-check PASS; warnings-as-errors clean.
+
+**Next wave should take:** (a) real-browser verification of the rail against
+a live epic-cycle run (all wave-11 proof is LiveView-test-level; nobody has
+SEEN the journey breathe); (b) drill-down into a SETTLED phase — a finished
+phase's per-agent detail (who failed, per-agent tokens) is unreachable from
+the rail by design; consider expand-on-click per phase; (c) a workflow whose
+agents carry no `workflow_phase` nodes degrades to the bare header row
+(journey renders nothing) — fine per D57's 9,433-node evidence, but capture a
+fixture if a non-epic workflow shape ever ships; (d) per-phase `model` is
+derived (first agent) but unused by the render — surface it or drop it.
