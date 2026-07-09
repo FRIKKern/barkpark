@@ -21,3 +21,5 @@ Conventions:
   `--set 'criteria:=[{"index":0,"met":true,"evidence":"..."}]'`
 - Nest large work with `parent_id` (a slug) for a Goal → sub-task tree; keep it flat otherwise.
 - If a close 409s with `doc_changed_since_claim`, the brief changed under you — re-read the task, then close again.
+
+MCP-native surface? Skip the shell: `bp mcp serve` exposes these verbs as first-class MCP tools — see `docs/setup/CURSOR.md`.
