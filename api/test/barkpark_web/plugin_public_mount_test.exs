@@ -30,8 +30,12 @@ defmodule BarkparkWeb.PluginPublicMountTest do
   defp mount_plugin_public(session) do
     # A mount-ready socket: LiveView initialises `private.lifecycle` before it
     # runs on_mount hooks, and StudioChrome.on_mount attaches a handle_event
-    # hook, so a bare `%Socket{}` (no lifecycle) would KeyError.
+    # hook, so a bare `%Socket{}` (no lifecycle) would KeyError. It must also
+    # look ROUTER-mounted (`router:` set) — every real :plugin_public view is
+    # mounted via live/3, and StudioChrome's :handle_params hook (the
+    # current_path producer) refuses to attach to a non-router socket.
     socket = %Phoenix.LiveView.Socket{
+      router: BarkparkWeb.Router,
       private: %{lifecycle: %Phoenix.LiveView.Lifecycle{}, live_temp: %{}}
     }
 
