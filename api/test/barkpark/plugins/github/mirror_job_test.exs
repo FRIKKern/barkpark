@@ -736,6 +736,50 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       assert {:cancel, :repo_unconfigured} = MirrorJob.reconcile(id, @dataset, fast())
     end
 
+    test "intake link + pre-adoption edit → {:cancel, :intake}, no HTTP (D13 gate)", %{
+      bypass: bypass,
+      scope: scope
+    } do
+      # A born-dark inbound issue awaiting adoption: it carries the outsider's issue
+      # number but NO synced_rev, so `synced?` is false and an ordinary Barkpark edit
+      # would otherwise converge and PATCH the outsider's still-owned issue with our
+      # projection BEFORE consent. Any HTTP call fails the test — the gate must fire
+      # before the client resolves a token.
+      Bypass.down(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "edited before adopt"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 22, state: "intake"}, scope)
+      # Prove the coalesce guard can't be what fires: an intake link has no synced_rev.
+      refute Link.get(reload(id, scope))["synced_rev"]
+
+      assert {:cancel, :intake} = MirrorJob.reconcile(id, @dataset, fast())
+    end
+
+    test "adopted link with NO synced_rev still converges (consent-moment first push stays live)",
+         %{bypass: bypass, scope: scope} do
+      # PROTECTIVE twin of the intake gate: `adopted` also lacks a synced_rev until its
+      # first mirror. The gate keys on the STATE STRING, never synced_rev absence, so
+      # the consent-moment first push MUST fire GET + PATCH and stamp synced_rev +
+      # fingerprint. Keying on synced_rev absence would strand every just-adopted task.
+      stub_token(bypass)
+      id = uniq("gh")
+      _task = mk_task!(id, %{"title" => "just adopted"}, scope)
+      {:ok, _} = Link.put(id, @dataset, %{repo: @repo, issue: 23, state: "adopted"}, scope)
+      refute Link.get(reload(id, scope))["synced_rev"]
+
+      stub_get(bypass, 23)
+
+      Bypass.expect_once(bypass, "PATCH", "/repos/#{@repo}/issues/23", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"number" => 23, "state" => "open"}))
+      end)
+
+      assert :ok = MirrorJob.reconcile(id, @dataset, fast())
+
+      gh = Link.get(reload(id, scope))
+      assert is_binary(gh["synced_rev"])
+      assert is_integer(gh["synced_fingerprint"])
+    end
+
     test "already-synced (synced_rev == _rev) → :ok, no HTTP", %{bypass: bypass, scope: scope} do
       Bypass.down(bypass)
       id = uniq("gh")

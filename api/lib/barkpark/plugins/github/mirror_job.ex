@@ -23,6 +23,14 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
        issue. Absent task → `{:cancel, :task_gone}`.
     2. `Link.get/1`. A `state: "detached"` link → `{:cancel, :detached}`: the
        issue was deleted/transferred out-of-band and we NEVER recreate it (D7).
+       A `state: "intake"` link → `{:cancel, :intake}` (D13, the PRE-ADOPTION
+       MIRROR GATE): a born-dark inbound `gh-<num>` holds the outsider's issue
+       number but no consent to mirror, so a pre-adoption Barkpark edit must
+       NEVER PATCH the outsider's issue with our projection — intake stays
+       intake-only until `adopt` flips the state. Keyed on the state string
+       ONLY, never `synced_rev` absence: an `adopted` link also lacks a
+       `synced_rev` until its first mirror, and that consent-moment push must
+       stay live.
     3. `Link.synced?/1` fast-path. This rarely fires in steady state (the stamp
        write itself bumps `_rev`, so `synced_rev` lags — D3 AMENDED). It is a
        cheap COALESCE guard for a duplicate job, NOT the loop guard — the loop
@@ -185,6 +193,18 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         cond do
           detached?(link) ->
             {:cancel, :detached}
+
+          # PRE-ADOPTION MIRROR GATE (D13). A `state: "intake"` link is a born-dark
+          # `gh-<num>` awaiting an operator's `adopt`: it holds the outsider's issue
+          # NUMBER but no `synced_rev`, so an ordinary pre-consent Barkpark edit would
+          # sail past `synced?` (false without a synced_rev) and converge — PATCHing
+          # the outsider's still-owned issue with Barkpark's projection BEFORE anyone
+          # said yes. Cancel here so intake stays intake-only until adopt flips the
+          # state. Keyed on the STATE STRING only, never synced_rev absence — an
+          # `adopted` link also lacks a synced_rev until its first mirror, and that
+          # consent-moment push must stay live.
+          intake?(link) ->
+            {:cancel, :intake}
 
           # A `relink: true` job (D11-retry) BYPASSES the synced coalesce guard so
           # a child that is already synced still re-runs to link its now-mirrored
@@ -559,6 +579,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
 
   defp detached?(link) when is_map(link), do: Map.get(link, "state") == "detached"
   defp detached?(_), do: false
+
+  # An `intake` link is a born-dark inbound issue awaiting adoption (D13). It carries
+  # the outsider's issue number but NO consent to mirror, so the reconcile cancels
+  # before converge — see the pre-adoption gate in reconcile/3.
+  defp intake?(link) when is_map(link), do: Map.get(link, "state") == "intake"
+  defp intake?(_), do: false
 
   defp issue_number(link) when is_map(link) do
     case Map.get(link, "issue") do
