@@ -603,13 +603,168 @@
   // Only Hetzner is wired to the API; the rest are shown disabled ("Soon").
   var PROVIDERS = [
     { kind: "hetzner", name: "Hetzner Cloud", sub: "Deploy on your own Hetzner account",
-      mark: "H", cls: "brand-hetzner", available: true,
+      mark: "H", cls: "brand-hetzner", available: true, fields: "token",
       console: "https://console.hetzner.cloud/",
       blurb: "Connect to your Hetzner Cloud account to deploy instances." },
+    { kind: "azure", name: "Microsoft Azure", sub: "Deploy on your own Azure subscription",
+      mark: "Az", cls: "brand-azure", available: true, fields: "azure",
+      console: "https://portal.azure.com/",
+      blurb: "Connect an Azure service principal so Barkpark can provision on your subscription." },
     { kind: "digitalocean", name: "DigitalOcean", sub: "Coming soon", mark: "DO", cls: "brand-do", available: false },
     { kind: "aws", name: "AWS", sub: "Coming soon", mark: "aws", cls: "brand-aws", available: false },
     { kind: "vultr", name: "Vultr", sub: "Coming soon", mark: "V", cls: "brand-vultr", available: false }
   ];
+
+  // Azure's service-principal is a four-tuple (Decision 4 — the single
+  // encrypted_token credential home holds it as a JSON blob). The field order +
+  // copy mirror the Azure Portal → App registrations surface so an operator
+  // copies each value straight across; the router keeps ONLY these four keys
+  // (router.ex azure_credential_blob), so stray input never persists.
+  var AZURE_FIELDS = [
+    { key: "tenant_id", label: "Directory (tenant) ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "client_id", label: "Application (client) ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" },
+    { key: "client_secret", label: "Client secret", secret: true, placeholder: "••••••••••••••••" },
+    { key: "subscription_id", label: "Subscription ID", secret: false, placeholder: "00000000-0000-0000-0000-000000000000" }
+  ];
+
+  // ---- provider/launch pure helpers (S7) — every one is exported through the
+  // __bpTestHook block at the tail and asserted in __app.test.mjs.
+
+  // The provider identity chip (IDENTITY, never status — Decision 7). Returns ""
+  // for an unknown/absent kind so a fleet row NEVER fakes a provider it doesn't
+  // have: the chip only renders once the payload actually carries `provider`.
+  // Static class strings per kind (no dynamic head) so the CSS checker resolves
+  // every token; the tint rides --provider-<kind> via the modifier class.
+  function providerChipHtml(kind) {
+    if (kind === "hetzner")
+      return '<span class="provider-chip provider-chip--hetzner">' +
+        '<span class="provider-mark" aria-hidden="true"></span>Hetzner</span>';
+    if (kind === "azure")
+      return '<span class="provider-chip provider-chip--azure">' +
+        '<span class="provider-mark" aria-hidden="true"></span>Azure</span>';
+    return "";
+  }
+
+  // Instance-lifecycle glyph class (STATUS). Maps one of the seven canonical
+  // states (S4 tokens) to its `.bp-inst--<state>` class, "" for anything else so
+  // an unknown state degrades to the untinted glyph rather than a fabricated hue.
+  var INSTANCE_LIFECYCLE = ["provisioning", "live", "degraded", "stopped", "archived", "decommissioned", "adopted"];
+  function instanceLifecycleClass(state) {
+    return INSTANCE_LIFECYCLE.indexOf(state) !== -1 ? "bp-inst--" + state : "";
+  }
+
+  // Azure four-field validator: every service-principal field must be a non-empty
+  // (trimmed) string before we spend a verify-before-save round trip.
+  function azureFieldsValid(fields) {
+    if (!fields || typeof fields !== "object") return false;
+    for (var i = 0; i < AZURE_FIELDS.length; i++) {
+      var v = fields[AZURE_FIELDS[i].key];
+      if (typeof v !== "string" || v.trim() === "") return false;
+    }
+    return true;
+  }
+
+  // The POST /v1/providers body, per kind (router.ex:5572-5583): hetzner sends
+  // {kind, token}; azure sends {kind, credentials:{tenant_id,…}}. label is added
+  // only when the operator typed one. Trims each value so trailing paste
+  // whitespace never reaches the vault.
+  function providerCredBody(kind, fields, label) {
+    var body = { kind: kind };
+    if (kind === "azure") {
+      var creds = {};
+      for (var i = 0; i < AZURE_FIELDS.length; i++) {
+        var k = AZURE_FIELDS[i].key;
+        creds[k] = ((fields && fields[k]) || "").trim();
+      }
+      body.credentials = creds;
+    } else {
+      body.token = ((fields && fields.token) || "").trim();
+    }
+    var lb = (label || "").trim();
+    if (lb) body.label = lb;
+    return body;
+  }
+
+  // Server-owned remediation extractor. The connect preflight returns a 422 with
+  // a human `remediation` string (FailureCopy.connect_remediation) that names the
+  // exact console fix. friendly() reads only .error/.details and PROVABLY drops
+  // this field (asserted in the harness) — so we surface it directly, never
+  // through friendly(), keeping the copy server-owned and un-rewritten.
+  function remediationCopy(data) {
+    if (!data || typeof data !== "object") return null;
+    var r = data.remediation;
+    return typeof r === "string" && r.trim() !== "" ? r : null;
+  }
+
+  // Normalized monthly-price formatter (Decision 6 — real price on BOTH clouds).
+  // A number renders as "<sym>N/mo"; azure is framed "from ~$N/mo compute" (its
+  // catalog is a floor, VM-only). A nil price is an HONEST "Price unavailable" —
+  // never a fabricated $0. `currency` is the catalog payload's own code
+  // (Decision 15: "EUR" hetzner / "USD" azure) so a EUR price is never dressed
+  // as dollars; absent (pre-currency server) it defaults to "$".
+  function formatMonthlyPrice(price, kind, currency) {
+    if (typeof price !== "number" || !isFinite(price) || price < 0) return "Price unavailable";
+    var sym = currency === "EUR" ? "€" : "$";
+    var n = price >= 10 ? String(Math.round(price)) : (Math.round(price * 100) / 100).toString();
+    return kind === "azure" ? "from ~" + sym + n + "/mo compute" : sym + n + "/mo";
+  }
+
+  // Map an api() catalog response to a render state. The catalog needs a
+  // connected provider of that kind (404 no_provider = connect-first), degrades
+  // honestly on an upstream failure (502 unavailable), and never white-screens on
+  // a surprise status.
+  function catalogViewState(r) {
+    if (!r) return { state: "error" };
+    if (r.status === 200 && r.data && Array.isArray(r.data.server_types)) {
+      return { state: "ready", catalog: r.data };
+    }
+    var err = (r.data && r.data.error) || "";
+    if (r.status === 404 && err === "no_provider") return { state: "no_provider" };
+    if (r.status === 404) return { state: "unknown" };
+    if (r.status === 502) return { state: "unavailable" };
+    return { state: "error" };
+  }
+
+  // Human size line: "2 vCPU · 8 GB RAM · 40 GB SSD", each part dropped when the
+  // catalog didn't carry it (honest partial, never "undefined GB").
+  function serverTypeLabel(st) {
+    if (!st) return "";
+    var parts = [];
+    if (typeof st.cores === "number") parts.push(st.cores + " vCPU");
+    if (typeof st.ram_gb === "number") parts.push(st.ram_gb + " GB RAM");
+    if (typeof st.disk_gb === "number") parts.push(st.disk_gb + " GB SSD");
+    return parts.join(" · ");
+  }
+
+  // Default catalog selection: first region, and the cheapest priced server type
+  // (falling back to the first type when none carry a price). Returns null slugs
+  // for an empty catalog so the caller renders the empty state, not a phantom pick.
+  function defaultCatalogSelection(catalog) {
+    var regions = (catalog && catalog.regions) || [];
+    var types = (catalog && catalog.server_types) || [];
+    var region = regions.length ? regions[0].slug : null;
+    var pick = null;
+    for (var i = 0; i < types.length; i++) {
+      var t = types[i];
+      if (typeof t.monthly_price === "number") {
+        if (!pick || t.monthly_price < pick.monthly_price) pick = t;
+      }
+    }
+    if (!pick && types.length) pick = types[0];
+    return { region: region, server_type: pick ? pick.slug : null };
+  }
+
+  // The POST /v1/launch body. name is always sent; provider/region/server_type
+  // ride along ONLY when a real selection exists — the server honors them once
+  // S6 lands and harmlessly ignores them before, so a name-only managed launch
+  // (no connected provider) keeps working unchanged.
+  function launchBody(name, provider, region, serverType) {
+    var body = { name: name };
+    if (provider) body.provider = provider;
+    if (region) body.region = region;
+    if (serverType) body.server_type = serverType;
+    return body;
+  }
   function providerMeta(kind) {
     return PROVIDERS.filter(function (p) { return p.kind === kind; })[0] || PROVIDERS[0];
   }
@@ -634,6 +789,37 @@
     });
   }
 
+  // The per-kind credential inputs. hetzner: one API key (affixed eye toggle).
+  // azure: the four service-principal fields, the secret one carrying its own eye
+  // toggle. Every input id is namespaced cred-az-<field> so submit can read them.
+  function credentialFieldsHtml(p) {
+    if (p.fields === "azure") {
+      return '<p class="field-hint dim" style="margin:0 0 10px">Create a service principal in the ' +
+        '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">Azure Portal</a> ' +
+        "(App registrations → your app). Encrypted at rest, never shown again.</p>" +
+        AZURE_FIELDS.map(function (f) {
+          var id = "cred-az-" + f.key;
+          if (f.secret) {
+            return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + "</label>" +
+              '<div class="input-affix">' +
+                '<input class="form-input" id="' + id + '" type="password" autocomplete="off" placeholder="' + esc(f.placeholder) + '" />' +
+                '<button class="affix-btn" id="cred-az-eye" type="button" tabindex="-1" aria-label="Show secret">' + EYE_SVG + "</button>" +
+              "</div></div>";
+          }
+          return '<div class="field"><label class="label" for="' + id + '">' + esc(f.label) + "</label>" +
+            '<input class="form-input" id="' + id + '" type="text" autocomplete="off" spellcheck="false" placeholder="' + esc(f.placeholder) + '" /></div>';
+        }).join("");
+    }
+    return '<div class="field"><label class="label" for="cred-token">API key</label>' +
+      '<p class="field-hint dim" style="margin:0 0 6px">Create a key in the ' +
+        '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">' + esc(p.name) + " console</a>. " +
+        "Encrypted at rest, never shown again.</p>" +
+      '<div class="input-affix">' +
+        '<input class="form-input" id="cred-token" type="password" autocomplete="off" placeholder="••••••••••••••••" />' +
+        '<button class="affix-btn" id="cred-eye" type="button" tabindex="-1" aria-label="Show key">' + EYE_SVG + "</button>" +
+      "</div></div>";
+  }
+
   function openProviderCredential(kind) {
     var p = providerMeta(kind);
     openModal(
@@ -643,48 +829,82 @@
       '<p class="modal-sub">' + esc(p.blurb || "") + "</p>" +
       '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
         '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
-      '<div class="field"><label class="label" for="cred-token">API key</label>' +
-        '<p class="field-hint dim" style="margin:0 0 6px">Create a key in the ' +
-          '<a href="' + esc(p.console || "#") + '" target="_blank" rel="noopener">' + esc(p.name) + " console</a>. " +
-          "Encrypted at rest, never shown again.</p>" +
-        '<div class="input-affix">' +
-          '<input class="form-input" id="cred-token" type="password" autocomplete="off" placeholder="••••••••••••••••" />' +
-          '<button class="affix-btn" id="cred-eye" type="button" tabindex="-1" aria-label="Show key">' + EYE_SVG + "</button>" +
-        "</div></div>" +
+      credentialFieldsHtml(p) +
+      '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="cred-submit" type="button">Add provider</button></div>'
     );
     $("#cred-back").addEventListener("click", openProviderPicker);
-    $("#cred-eye").addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
+    var eye = $("#cred-eye");
+    if (eye) eye.addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
+    var azEye = $("#cred-az-eye");
+    if (azEye) azEye.addEventListener("click", function () { toggleEye("#cred-az-client_secret", "#cred-az-eye"); });
     $("#cred-submit").addEventListener("click", function () { submitProviderCred(kind); });
-    $("#cred-token").focus();
+    var first = $("#cred-token") || $("#cred-az-tenant_id");
+    if (first) first.focus();
+  }
+
+  // Read the operator's inputs into the shape providerCredBody() expects.
+  function readCredentialFields(p) {
+    if (p.fields === "azure") {
+      var f = {};
+      AZURE_FIELDS.forEach(function (af) {
+        var el = $("#cred-az-" + af.key);
+        f[af.key] = el ? el.value : "";
+      });
+      return f;
+    }
+    var t = $("#cred-token");
+    return { token: t ? t.value : "" };
+  }
+
+  // Paint the server-owned remediation copy INSIDE the sheet (both kinds). Never
+  // routed through friendly() — the copy is the server's, verbatim (esc'd only).
+  function showCredRemediation(copy) {
+    var box = $("#cred-remediation");
+    if (!box) return;
+    box.innerHTML = '<span class="cred-remediation-ico" aria-hidden="true">!</span>' +
+      '<span class="cred-remediation-body">' + esc(copy) + "</span>";
+    box.hidden = false;
   }
 
   function submitProviderCred(kind) {
-    var token = ($("#cred-token").value || "").trim();
+    var p = providerMeta(kind);
+    var fields = readCredentialFields(p);
     var label = ($("#cred-label").value || "").trim();
-    if (!token) { toast({ kind: "error", title: "An API key is required." }); return; }
+
+    var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
+    if (!valid) {
+      toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
+      return;
+    }
+
+    var rem = $("#cred-remediation");
+    if (rem) { rem.hidden = true; rem.innerHTML = ""; } // clear a prior failure
 
     var btn = $("#cred-submit");
     btn.disabled = true;
-    btn.textContent = "Validating…";
-    var body = { kind: kind, token: token };
-    if (label) body.label = label;
+    btn.textContent = "Verifying…";
 
-    api("POST", "/v1/providers", body).then(function (r) {
+    api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
       if (r.status === 201) {
         closeModal();
-        var p = (r.data && r.data.provider) || { kind: kind, label: label };
+        var prov = (r.data && r.data.provider) || { kind: kind, label: label };
         toast({
           kind: "success",
           title: "Provider connected",
-          body: "Connected " + (p.kind || kind) + (p.label ? " (" + p.label + ")" : "") + "."
+          body: "Connected " + (prov.kind || kind) + (prov.label ? " (" + prov.label + ")" : "") + "."
         });
         loadProviders();
-      } else {
-        btn.disabled = false;
-        btn.textContent = "Add provider";
-        toast({ kind: "error", title: "Couldn't validate the key", body: friendly(r.data, "Check the API key and try again.") });
+        return;
       }
+      btn.disabled = false;
+      btn.textContent = "Add provider";
+      // Verify-before-save failure carries server-owned remediation (naming the
+      // exact console fix) — render it in-sheet so the operator can act without
+      // dismissing the form. Anything else falls back to friendly()'s copy.
+      var copy = remediationCopy(r.data);
+      if (copy) showCredRemediation(copy);
+      else toast({ kind: "error", title: "Couldn't verify those credentials", body: friendly(r.data, "Check the details and try again.") });
     });
   }
 
@@ -1605,7 +1825,10 @@
         urlHtml +
       "</div>" +
       '<div class="fleet-badges">' +
-        pill + openStudioBtn +
+        // Provider IDENTITY chip — renders ONLY when the payload carries
+        // `provider` (S6 stamps it); never a fabricated identity, and never a
+        // stand-in for the status pill beside it.
+        providerChipHtml(bp.provider) + pill + openStudioBtn +
       "</div>" +
       '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
     "</div>";
@@ -4543,29 +4766,161 @@
   // only the input carries an id — unique per mount — for its <label for>.
   var launchFlowSeq = 0;
 
-  // Step 1: the name field + submit (state "name").
+  // Provider tab strip for the launch picker. Available providers only; the
+  // active one carries aria-pressed="true" (styling reads the attribute, so the
+  // class stays static — __css_check E3-safe). "" when nothing is provisionable.
+  function launchProviderTabsHtml(activeKind) {
+    var avail = PROVIDERS.filter(function (p) { return p.available; });
+    if (!avail.length) return "";
+    return avail.map(function (p) {
+      var on = p.kind === activeKind ? "true" : "false";
+      return '<button class="seg-btn" type="button" data-kind="' + esc(p.kind) + '" aria-pressed="' + on + '">' +
+        esc(p.name) + "</button>";
+    }).join("");
+  }
+
+  // Catalog <option> rows (region select), the selected one marked.
+  function catalogRegionsHtml(catalog, selected) {
+    var regions = (catalog && catalog.regions) || [];
+    return regions.map(function (rg) {
+      var sel = rg.slug === selected ? " selected" : "";
+      return '<option value="' + esc(rg.slug) + '"' + sel + ">" + esc(rg.name || rg.slug) + "</option>";
+    }).join("");
+  }
+
+  // Size radio rows, each with its normalized spec line + monthly price (the
+  // honest 'Price unavailable' when the catalog carries none).
+  function catalogSizeRowsHtml(catalog, kind, selectedType, groupName) {
+    var types = (catalog && catalog.server_types) || [];
+    return types.map(function (t) {
+      var checked = t.slug === selectedType ? " checked" : "";
+      return '<label class="size-opt">' +
+        '<input class="size-opt-radio" type="radio" name="' + esc(groupName) + '" value="' + esc(t.slug) + '"' + checked + " />" +
+        '<span class="size-opt-main">' +
+          '<span class="size-opt-name">' + esc(t.slug) + "</span>" +
+          '<span class="size-opt-spec dim">' + esc(serverTypeLabel(t)) + "</span>" +
+        "</span>" +
+        '<span class="size-opt-price">' + esc(formatMonthlyPrice(t.monthly_price, kind, catalog && catalog.currency)) + "</span>" +
+      "</label>";
+    }).join("");
+  }
+
+  // The catalog panel for a resolved view state (loading is a transient DOM
+  // state handled at the mount). Every branch is an honest state — never a blank
+  // panel or a fabricated price.
+  function catalogPanelHtml(vs, kind, sel, groupName) {
+    var name = esc(providerMeta(kind).name);
+    if (vs.state === "ready") {
+      var regions = catalogRegionsHtml(vs.catalog, sel && sel.region);
+      var sizes = catalogSizeRowsHtml(vs.catalog, kind, sel && sel.server_type, groupName);
+      if (!regions || !sizes) {
+        return '<p class="launch-catalog-note dim">This ' + name + " account has no regions or sizes to provision into.</p>";
+      }
+      return '<div class="field"><label class="label">Region</label>' +
+          '<select class="form-input launch-region">' + regions + "</select></div>" +
+        '<div class="field"><span class="label">Size</span>' +
+          '<div class="size-list">' + sizes + "</div></div>";
+    }
+    if (vs.state === "no_provider") {
+      // Provider-honest copy (Decision 17): managed Hetzner launches on the
+      // PLATFORM account, so the hetzner tab may promise the managed fallback.
+      // Azure is BYO-only — a launch without a connected row 422s at the button —
+      // so its copy must say connect-first, never promise a managed instance.
+      var lead = kind === "azure"
+        ? "Azure instances provision into your own subscription — connect your Azure account to launch here."
+        : "Connect a " + name + " account to provision here. Until then we launch a fully-managed instance for you.";
+      return '<div class="launch-catalog-empty">' +
+        '<p class="dim">' + lead + "</p>" +
+        '<button class="btn btn-ghost btn-sm launch-connect-provider" type="button" data-kind="' + esc(kind) + '">Connect ' + name + "</button></div>";
+    }
+    if (vs.state === "unavailable") {
+      return '<p class="launch-catalog-note dim">' + name + "'s catalog is unavailable right now — you can still launch and we'll pick sensible defaults.</p>";
+    }
+    return '<div class="launch-catalog-empty"><p class="dim">Couldn\'t load the ' + name + " catalog.</p>" +
+      '<button class="btn btn-ghost btn-sm launch-catalog-retry" type="button" data-kind="' + esc(kind) + '">Retry</button></div>';
+  }
+
+  // Fetch + paint the catalog into the picker's slot, tracking the selection on
+  // the container (container._launchHosting) so submit reads region+size back.
+  // Browser-coupled (network + events) — the pure builders above are what the
+  // node harness pins.
+  function mountLaunchCatalog(container, opts, kind, groupName) {
+    var slot = container.querySelector(".launch-catalog");
+    if (!slot) return;
+    container._launchHosting = { provider: kind, region: null, server_type: null };
+    slot.innerHTML = '<div class="loading">Loading ' + esc(providerMeta(kind).name) + " catalog&hellip;</div>";
+    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/catalog").then(function (r) {
+      // A tab switch mid-flight: ignore a stale response for a provider we left.
+      if (!container._launchHosting || container._launchHosting.provider !== kind) return;
+      if (!slot.isConnected) return;
+      var vs = catalogViewState(r);
+      var sel = vs.state === "ready" ? defaultCatalogSelection(vs.catalog) : { region: null, server_type: null };
+      container._launchHosting = { provider: kind, region: sel.region, server_type: sel.server_type };
+      slot.innerHTML = catalogPanelHtml(vs, kind, sel, groupName);
+      wireLaunchCatalog(container, opts, kind, groupName);
+    });
+  }
+
+  function wireLaunchCatalog(container, opts, kind, groupName) {
+    var region = container.querySelector(".launch-region");
+    if (region) region.addEventListener("change", function () {
+      if (container._launchHosting) container._launchHosting.region = region.value || null;
+    });
+    container.querySelectorAll(".size-opt-radio").forEach(function (radio) {
+      radio.addEventListener("change", function () {
+        if (container._launchHosting) container._launchHosting.server_type = radio.value || null;
+      });
+    });
+    var connect = container.querySelector(".launch-connect-provider");
+    if (connect) connect.addEventListener("click", function () { openProviderCredential(connect.getAttribute("data-kind")); });
+    var retry = container.querySelector(".launch-catalog-retry");
+    if (retry) retry.addEventListener("click", function () { mountLaunchCatalog(container, opts, kind, groupName); });
+  }
+
+  // Step 1: name + a provider→region+size hosting picker + submit (state "name").
   function renderLaunchName(container, opts) {
     var hero = opts.runway
       ? welcomeHeroHtml(subCache)
       : '<h2 class="modal-title" id="modal-title">Launch a Barkpark</h2>' +
         '<p class="modal-sub">Name it and we provision it — a fresh instance, hosted and run for you.</p>';
-    var nameId = "launch-flow-name-" + (++launchFlowSeq);
+    var seq = ++launchFlowSeq;
+    var nameId = "launch-flow-name-" + seq;
+    var groupName = "launch-size-" + seq;
+    var avail = PROVIDERS.filter(function (p) { return p.available; });
+    var activeKind = avail.length ? avail[0].kind : null;
     // Static class strings per variant so the CSS checker can resolve every token
     // (no dynamic class-head concat — __css_check E3).
     var submitBtn = opts.runway
       ? '<button class="btn btn-primary btn-lg btn-block" type="submit">' + esc(launchCta(opts)) + "</button>"
       : '<button class="btn btn-primary" type="submit">' + esc(launchCta(opts)) + "</button>";
+    var hosting = activeKind
+      ? '<div class="launch-hosting"><span class="label">Where to host</span>' +
+          '<div class="seg" role="group" aria-label="Hosting provider">' + launchProviderTabsHtml(activeKind) + "</div>" +
+          '<div class="launch-catalog" aria-live="polite"></div></div>'
+      : "";
     var inner = hero +
       '<form class="launch-form" novalidate>' +
         '<div class="field"><label class="label" for="' + nameId + '">Name</label>' +
           '<input class="form-input" id="' + nameId + '" type="text" placeholder="Production" value="' +
             esc(opts.name || "") + '" required />' +
           '<p class="field-hint dim">A human label for this instance.</p></div>' +
+        hosting +
         submitBtn +
       "</form>";
     container.innerHTML = launchFlowShell(inner, opts);
     var form = container.querySelector(".launch-form");
     if (form) form.addEventListener("submit", function (e) { submitLaunchFlow(e, container, opts); });
+    // Provider tabs: activate + refetch the catalog for the chosen provider.
+    container.querySelectorAll(".seg-btn[data-kind]").forEach(function (tab) {
+      tab.addEventListener("click", function () {
+        var k = tab.getAttribute("data-kind");
+        container.querySelectorAll(".seg-btn[data-kind]").forEach(function (t) {
+          t.setAttribute("aria-pressed", t === tab ? "true" : "false");
+        });
+        mountLaunchCatalog(container, opts, k, groupName);
+      });
+    });
+    if (activeKind) mountLaunchCatalog(container, opts, activeKind, groupName);
     var input = container.querySelector(".launch-form .form-input");
     if (input && opts.modal) input.focus();
   }
@@ -4577,7 +4932,11 @@
     if (!name) { toast({ kind: "error", title: "A name is required." }); if (input) input.focus(); return; }
     var btn = container.querySelector('.launch-form button[type="submit"]');
     if (btn) { btn.disabled = true; btn.textContent = "Launching…"; }
-    api("POST", "/v1/launch", { name: name }).then(function (r) {
+    // Provider/region/size ride along when the hosting picker resolved a real
+    // selection (honored once S6 lands; harmlessly ignored before — a name-only
+    // managed launch is unchanged).
+    var h = container._launchHosting || {};
+    api("POST", "/v1/launch", launchBody(name, h.provider, h.region, h.server_type)).then(function (r) {
       if (r.status === 201) {
         fleetCache = null; // the new instance must show on the next fetch
         try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
@@ -4595,7 +4954,11 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = launchCta(opts); }
-      toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
+      // Decision 19, launch edition: a 422 like provider_not_connected carries
+      // server-owned remediation copy naming the exact fix (connect the provider
+      // first) — friendly() provably drops it, so surface it directly.
+      var copy = remediationCopy(r.data);
+      toast({ kind: "error", title: "Couldn't launch", body: copy || friendly(r.data, "Please try again.") });
     });
   }
 
@@ -7880,6 +8243,20 @@
       welcomeHeroHtml: welcomeHeroHtml, launchedHash: launchedHash,
       launchFlowReducer: launchFlowReducer, readyFoldTrigger: readyFoldTrigger,
       readyHeroHtml: readyHeroHtml, railValue: railValue,
+      // S7 (azure-hetzner hosting parity): the Azure card + verified-connect +
+      // priced neutral launch-catalog pure helpers. Every branch a node-pinned
+      // pure function; the DOM mount (mountLaunchCatalog) is browser-verified.
+      providerChipHtml: providerChipHtml, instanceLifecycleClass: instanceLifecycleClass,
+      azureFieldsValid: azureFieldsValid, providerCredBody: providerCredBody,
+      // friendly is exported so the harness can PROVE it drops .remediation (the
+      // connect sheet must never route the server copy through it).
+      remediationCopy: remediationCopy, friendly: friendly, formatMonthlyPrice: formatMonthlyPrice,
+      catalogViewState: catalogViewState, serverTypeLabel: serverTypeLabel,
+      defaultCatalogSelection: defaultCatalogSelection, launchBody: launchBody,
+      launchProviderTabsHtml: launchProviderTabsHtml, catalogRegionsHtml: catalogRegionsHtml,
+      catalogSizeRowsHtml: catalogSizeRowsHtml, catalogPanelHtml: catalogPanelHtml,
+      azureFieldKeys: AZURE_FIELDS.map(function (f) { return f.key; }),
+      availableProviderKinds: PROVIDERS.filter(function (p) { return p.available; }).map(function (p) { return p.kind; }),
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,

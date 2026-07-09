@@ -2992,3 +2992,197 @@ test("C10: membersPanelHtml — invitations section is manager-only and collapse
   const plain = hooks.membersPanelHtml(members, invitations, { role: "member", userId: "u1" });
   assert.ok(!plain.includes("Pending invitations"));
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// S7 — Azure card + verified connect + priced provider-neutral launch catalog
+// (epic azure-hetzner hosting parity). The pure seam; the DOM mount is live.
+// ════════════════════════════════════════════════════════════════════════════
+
+const catalogFixture = JSON.parse(
+  fs.readFileSync(new URL("./__fixtures__/provider_catalog.json", import.meta.url), "utf8"),
+);
+
+// Helpers cross the node:vm boundary, so their objects/arrays carry the
+// sandbox's Object/Array prototype — strict deepEqual rejects that even when the
+// structure matches. Round-trip through JSON to compare by structure only.
+const plain = (v) => JSON.parse(JSON.stringify(v));
+
+test("S7: every new pure helper is exported through the hook", () => {
+  for (const name of ["providerChipHtml", "instanceLifecycleClass", "azureFieldsValid",
+    "providerCredBody", "remediationCopy", "friendly", "formatMonthlyPrice", "catalogViewState",
+    "serverTypeLabel", "defaultCatalogSelection", "launchBody", "launchProviderTabsHtml",
+    "catalogRegionsHtml", "catalogSizeRowsHtml", "catalogPanelHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  // Azure is a first-class launchable provider now.
+  assert.deepEqual(plain(hooks.availableProviderKinds), ["hetzner", "azure"]);
+  assert.deepEqual(plain(hooks.azureFieldKeys), ["tenant_id", "client_id", "client_secret", "subscription_id"]);
+});
+
+// ── providerChipHtml: identity only, never fabricated ───────────────────────
+test("S7: providerChipHtml renders a tinted chip for known kinds, '' otherwise", () => {
+  assert.match(hooks.providerChipHtml("hetzner"), /provider-chip--hetzner/);
+  assert.match(hooks.providerChipHtml("hetzner"), /Hetzner/);
+  assert.match(hooks.providerChipHtml("azure"), /provider-chip--azure/);
+  // Absent / unknown provider → NO chip: a fleet row never fakes an identity.
+  assert.equal(hooks.providerChipHtml(undefined), "");
+  assert.equal(hooks.providerChipHtml(null), "");
+  assert.equal(hooks.providerChipHtml("gcp"), "");
+  assert.equal(hooks.providerChipHtml(""), "");
+});
+
+// ── instanceLifecycleClass: the seven canonical states, '' for the rest ─────
+test("S7: instanceLifecycleClass maps the 7 states and degrades unknown to ''", () => {
+  for (const s of ["provisioning", "live", "degraded", "stopped", "archived", "decommissioned", "adopted"]) {
+    assert.equal(hooks.instanceLifecycleClass(s), "bp-inst--" + s);
+  }
+  assert.equal(hooks.instanceLifecycleClass("exploded"), "");
+  assert.equal(hooks.instanceLifecycleClass(null), "");
+});
+
+// ── azureFieldsValid: all four service-principal fields required ────────────
+test("S7: azureFieldsValid requires all four non-empty fields", () => {
+  const full = { tenant_id: "t", client_id: "c", client_secret: "s", subscription_id: "sub" };
+  assert.equal(hooks.azureFieldsValid(full), true);
+  // Whitespace-only is empty.
+  assert.equal(hooks.azureFieldsValid({ ...full, client_secret: "   " }), false);
+  // Any missing field fails.
+  assert.equal(hooks.azureFieldsValid({ tenant_id: "t", client_id: "c", client_secret: "s" }), false);
+  assert.equal(hooks.azureFieldsValid({}), false);
+  assert.equal(hooks.azureFieldsValid(null), false);
+});
+
+// ── providerCredBody: the exact per-kind POST shape (router.ex:5572-5583) ────
+test("S7: providerCredBody builds {kind,token} for hetzner and {kind,credentials} for azure", () => {
+  assert.deepEqual(
+    plain(hooks.providerCredBody("hetzner", { token: "  abc  " }, "  main  ")),
+    { kind: "hetzner", token: "abc", label: "main" },
+  );
+  // No label → no label key.
+  assert.deepEqual(plain(hooks.providerCredBody("hetzner", { token: "abc" }, "")), { kind: "hetzner", token: "abc" });
+  const az = plain(hooks.providerCredBody("azure", {
+    tenant_id: " t ", client_id: "c", client_secret: "s", subscription_id: "sub", stray: "DROP ME",
+  }, "prod"));
+  assert.deepEqual(az, {
+    kind: "azure",
+    credentials: { tenant_id: "t", client_id: "c", client_secret: "s", subscription_id: "sub" },
+    label: "prod",
+  });
+  // Stray keys never reach the credentials blob.
+  assert.ok(!("stray" in az.credentials));
+});
+
+// ── remediationCopy is the ONLY path for server remediation; friendly drops it ─
+test("S7: remediationCopy extracts server copy that friendly() provably drops", () => {
+  const data = { error: "provider_unverified", remediation: "Fix it in the Azure Portal." };
+  assert.equal(hooks.remediationCopy(data), "Fix it in the Azure Portal.");
+  // friendly() reads only .error/.details — it MUST NOT surface the remediation.
+  const f = hooks.friendly(data, "fallback");
+  assert.ok(!f.includes("Azure Portal"), "friendly must not leak the server remediation");
+  // No remediation → null (caller falls back to friendly()).
+  assert.equal(hooks.remediationCopy({ error: "invalid" }), null);
+  assert.equal(hooks.remediationCopy({ remediation: "   " }), null);
+  assert.equal(hooks.remediationCopy(null), null);
+});
+
+// ── formatMonthlyPrice: real price both clouds, honest nil, azure framing ───
+test("S7: formatMonthlyPrice renders the catalog's currency, azure 'from ~' framing, honest nil", () => {
+  // The payload's currency wins (Decision 15: EUR hetzner / USD azure) — a EUR
+  // price is never dressed as dollars.
+  assert.equal(hooks.formatMonthlyPrice(3.79, "hetzner", "EUR"), "€3.79/mo");
+  assert.equal(hooks.formatMonthlyPrice(70.08, "azure", "USD"), "from ~$70/mo compute");
+  assert.equal(hooks.formatMonthlyPrice(4, "hetzner", "EUR"), "€4/mo");
+  // Absent currency (a pre-currency server) defaults to "$".
+  assert.equal(hooks.formatMonthlyPrice(3.79, "hetzner"), "$3.79/mo");
+  // A nil/absent/negative price is NEVER a fabricated $0.
+  assert.equal(hooks.formatMonthlyPrice(null, "azure", "USD"), "Price unavailable");
+  assert.equal(hooks.formatMonthlyPrice(undefined, "hetzner", "EUR"), "Price unavailable");
+  assert.equal(hooks.formatMonthlyPrice(-1, "hetzner", "EUR"), "Price unavailable");
+});
+
+// ── catalogViewState: honest states from the api() response ─────────────────
+test("S7: catalogViewState maps 200/404-no_provider/502/other to render states", () => {
+  assert.deepEqual(
+    hooks.catalogViewState({ status: 200, data: catalogFixture.hetzner }).state,
+    "ready",
+  );
+  assert.equal(hooks.catalogViewState({ status: 404, data: { error: "no_provider" } }).state, "no_provider");
+  assert.equal(hooks.catalogViewState({ status: 404, data: { error: "unknown_kind" } }).state, "unknown");
+  assert.equal(hooks.catalogViewState({ status: 502, data: { error: "catalog_unavailable" } }).state, "unavailable");
+  assert.equal(hooks.catalogViewState({ status: 500, data: {} }).state, "error");
+  assert.equal(hooks.catalogViewState(null).state, "error");
+});
+
+// ── serverTypeLabel: honest partial spec line ───────────────────────────────
+test("S7: serverTypeLabel joins present dimensions and drops missing ones", () => {
+  assert.equal(hooks.serverTypeLabel({ cores: 2, ram_gb: 8, disk_gb: 16 }), "2 vCPU · 8 GB RAM · 16 GB SSD");
+  assert.equal(hooks.serverTypeLabel({ cores: 1, ram_gb: null, disk_gb: 20 }), "1 vCPU · 20 GB SSD");
+  assert.equal(hooks.serverTypeLabel({}), "");
+});
+
+// ── defaultCatalogSelection: first region + cheapest priced size ────────────
+test("S7: defaultCatalogSelection picks first region + cheapest priced size", () => {
+  // Hetzner: cheapest is cx11 at 3.79.
+  assert.deepEqual(plain(hooks.defaultCatalogSelection(catalogFixture.hetzner)), { region: "fsn1", server_type: "cx11" });
+  // Azure: the only priced size wins over the nil-priced one.
+  assert.deepEqual(plain(hooks.defaultCatalogSelection(catalogFixture.azure)), { region: "eastus", server_type: "Standard_D2ps_v5" });
+  // No priced sizes → first type; empty catalog → null slugs (empty state).
+  assert.deepEqual(
+    plain(hooks.defaultCatalogSelection({ regions: [{ slug: "x", name: "X" }], server_types: [{ slug: "s1" }, { slug: "s2" }] })),
+    { region: "x", server_type: "s1" },
+  );
+  assert.deepEqual(plain(hooks.defaultCatalogSelection({ regions: [], server_types: [] })), { region: null, server_type: null });
+});
+
+// ── launchBody: name always; provider/region/size only when selected ────────
+test("S7: launchBody sends name-only when nothing selected, full body when it is", () => {
+  assert.deepEqual(plain(hooks.launchBody("Prod")), { name: "Prod" });
+  assert.deepEqual(plain(hooks.launchBody("Prod", null, null, null)), { name: "Prod" });
+  assert.deepEqual(
+    plain(hooks.launchBody("Prod", "azure", "eastus", "Standard_D2ps_v5")),
+    { name: "Prod", provider: "azure", region: "eastus", server_type: "Standard_D2ps_v5" },
+  );
+});
+
+// ── catalog markup builders: prices + honest states surface in the HTML ─────
+test("S7: catalogPanelHtml renders the priced ready state for both clouds", () => {
+  const hz = hooks.catalogPanelHtml(
+    { state: "ready", catalog: catalogFixture.hetzner }, "hetzner",
+    { region: "fsn1", server_type: "cx11" }, "grp-h",
+  );
+  assert.match(hz, /Falkenstein/);
+  // Hetzner prices are EUR (the fixture's currency) — never dressed as dollars.
+  assert.match(hz, /€3\.79\/mo/);
+  assert.ok(!hz.includes("$3.79"), "a EUR price must not render with a $ symbol");
+  assert.match(hz, /value="cx11" checked/);
+  const az = hooks.catalogPanelHtml(
+    { state: "ready", catalog: catalogFixture.azure }, "azure",
+    { region: "eastus", server_type: "Standard_D2ps_v5" }, "grp-a",
+  );
+  assert.match(az, /from ~\$70\/mo compute/);
+  // The nil-priced azure size shows the honest unavailable state, never $0.
+  assert.match(az, /Price unavailable/);
+  assert.ok(!az.includes("$0"));
+});
+
+test("S7: catalogPanelHtml renders honest non-ready states with an action", () => {
+  const noProv = hooks.catalogPanelHtml({ state: "no_provider" }, "azure", null, "g");
+  assert.match(noProv, /Connect Microsoft Azure/);
+  assert.match(noProv, /launch-connect-provider/);
+  // Azure is BYO-only (Decision 17): a launch without a connected row 422s at
+  // the button, so the azure panel must NOT promise a managed fallback…
+  assert.ok(!noProv.includes("fully-managed"), "azure no_provider copy must not promise a managed launch");
+  // …while managed Hetzner (platform account) honestly may.
+  const noProvHz = hooks.catalogPanelHtml({ state: "no_provider" }, "hetzner", null, "g");
+  assert.match(noProvHz, /fully-managed/);
+  const unavail = hooks.catalogPanelHtml({ state: "unavailable" }, "hetzner", null, "g");
+  assert.match(unavail, /unavailable/);
+  const err = hooks.catalogPanelHtml({ state: "error" }, "hetzner", null, "g");
+  assert.match(err, /launch-catalog-retry/);
+});
+
+test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () => {
+  const tabs = hooks.launchProviderTabsHtml("azure");
+  assert.match(tabs, /data-kind="azure" aria-pressed="true"/);
+  assert.match(tabs, /data-kind="hetzner" aria-pressed="false"/);
+});

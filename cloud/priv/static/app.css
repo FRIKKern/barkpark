@@ -892,11 +892,89 @@ select.form-input {
 .choice-chev { color: var(--dim); font-size: 18px; line-height: 1; }
 .choice-tag { font-size: 11px; color: var(--muted-text); background: var(--muted-surface); padding: 2px 8px; border-radius: var(--pill); }
 
-/* brand tiles — provider colours, not shipped logos */
-.brand-hetzner { background: #d50c2d; }
+/* brand tiles — provider colours, not shipped logos. Hetzner + Azure read from
+   the shared --provider-* identity tokens (S4) so the picker tile, the fleet
+   provider chip, and the CLI glyph all tint from ONE source; the not-yet-wired
+   providers keep their raw brand hues until they graduate. */
+.brand-hetzner { background: var(--provider-hetzner); }
+.brand-azure { background: var(--provider-azure); }
 .brand-do { background: #0080ff; }
 .brand-aws { background: #232f3e; }
 .brand-vultr { background: #007bfc; }
+
+/* Provider IDENTITY chip (Decision 7 — never a status voice). The tint rides
+   --provider-<kind> on the border + the little square mark ONLY; the chip body
+   stays on surface/text so identity never doubles as a status pill background
+   (DESIGN.md §5). */
+.provider-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 9px 2px 7px;
+  border: 1px solid var(--border); border-radius: var(--pill);
+  font-size: 12px; font-weight: 600; color: var(--text);
+  background: var(--surface);
+}
+.provider-mark { width: 8px; height: 8px; border-radius: 2px; background: var(--dim); flex: 0 0 auto; }
+.provider-chip--hetzner { border-color: var(--provider-hetzner); }
+.provider-chip--hetzner .provider-mark { background: var(--provider-hetzner); }
+.provider-chip--azure { border-color: var(--provider-azure); }
+.provider-chip--azure .provider-mark { background: var(--provider-azure); }
+
+/* In-sheet remediation: the server-owned copy that names the exact console fix
+   when verify-before-save can't authenticate a credential. Amber (informational,
+   not crash-red) — the fix is an action, not a failure. */
+.cred-remediation {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 4px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--warn-strong); border-radius: 8px;
+  background: var(--warn-soft);
+  font-size: 13px; line-height: 1.45; color: var(--text);
+}
+.cred-remediation-ico {
+  flex: 0 0 auto; width: 18px; height: 18px; margin-top: 1px;
+  display: grid; place-items: center;
+  border-radius: 50%; background: var(--warn); color: var(--primary-fg);
+  font-weight: 700; font-size: 12px;
+}
+.cred-remediation-body { flex: 1; min-width: 0; }
+
+/* Launch hosting picker: provider tabs → a catalog panel (region + priced
+   sizes). The active tab reads from aria-pressed so the class stays static. */
+.launch-hosting { margin-bottom: 4px; }
+.launch-hosting > .label { display: block; margin-bottom: 6px; }
+.seg {
+  display: inline-flex; gap: 2px; margin-bottom: 12px;
+  padding: 2px; border: 1px solid var(--border); border-radius: 9px;
+  background: var(--muted-surface);
+}
+.seg-btn {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  padding: 5px 14px; border-radius: 7px;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--muted-text);
+}
+.seg-btn:hover { color: var(--text); }
+.seg-btn[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+.launch-catalog { margin-bottom: 8px; }
+.launch-catalog-note { margin: 0 0 12px; font-size: 13px; }
+.launch-catalog-empty {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  margin-bottom: 12px; padding: 14px;
+  border: 1px dashed var(--border); border-radius: 10px;
+}
+.launch-catalog-empty p { margin: 0; font-size: 13px; }
+.size-list { display: flex; flex-direction: column; gap: 6px; }
+.size-opt {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: 9px;
+  cursor: pointer;
+}
+.size-opt:hover { border-color: var(--dim); }
+.size-opt:has(.size-opt-radio:checked) { border-color: var(--primary); background: var(--primary-soft); }
+.size-opt-radio { flex: 0 0 auto; accent-color: var(--primary); }
+.size-opt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.size-opt-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.size-opt-spec { font-size: 12px; margin-top: 1px; }
+.size-opt-price { flex: 0 0 auto; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
 
 .modal-back {
   display: inline-flex; align-items: center; gap: 6px;
