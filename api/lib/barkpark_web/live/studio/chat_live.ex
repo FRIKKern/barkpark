@@ -2210,6 +2210,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 type="submit"
                 form="chat-composer-form"
                 class="btn btn-primary"
+                aria-label="Send message"
               >
                 <.icon name="send" size={14} />
               </button>

@@ -470,6 +470,17 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "opus-x"
     end
 
+    test "the attach label's `for` reaches the rendered live_file_input by id", %{view: view} do
+      # Charter D44: the image-attach button is a <label for={upload.ref}> and
+      # relies on live_file_input rendering id={ref}. That id is LiveView's own
+      # convention, not our markup — this guard fails loudly if an LV upgrade
+      # changes it (a silently dead attach button otherwise).
+      html = render(view)
+      assert [_, ref] = Regex.run(~r/<label[^>]*\bfor="([^"]+)"/, html)
+      assert html =~ ~s(id="#{ref}")
+      assert has_element?(view, ~s(input[type=file][id="#{ref}"]))
+    end
+
     test "text deltas stream into an in-progress bubble", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("Hel")})
       send(view.pid, {:claude_chat_event, stream_delta("lo!")})
