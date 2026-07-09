@@ -307,6 +307,27 @@ defmodule BarkparkCloud.Web.ResurrectRouteTest do
       assert json_body(conn)["bundle_ref"] == @bundle
     end
 
+    test "a NON-STRING bundle_ref is a 422, never a silent newest-resolution" do
+      {user, team} = user_with_team()
+      subscribe!(team)
+      # A malformed ref must NOT fall back to team-newest (that would stand up a
+      # billed box from a bundle the caller never named) — and the store is never
+      # dialed on the way to the 422.
+      configure_store!()
+
+      Application.put_env(:barkpark_cloud, :archive_store_http_client, fn _req ->
+        raise "the store must not be dialed for a malformed bundle_ref"
+      end)
+
+      for bad <- [123, %{"ref" => "x"}, ["a"]] do
+        conn = call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bad}, token_for(user))
+        assert conn.status == 422
+        assert json_body(conn)["error"] == "invalid_bundle_ref"
+      end
+
+      assert Registry.list_barkparks(team) == []
+    end
+
     test "no bundle_ref + an empty store → 404 no_archives (an honest true-empty)" do
       {user, team} = user_with_team()
       subscribe!(team)

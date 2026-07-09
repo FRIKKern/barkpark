@@ -5427,6 +5427,9 @@ defmodule BarkparkCloud.Web.Router do
           {:error, :no_archives} ->
             json(conn, 404, %{error: "no_archives"})
 
+          {:error, :invalid_bundle_ref} ->
+            json(conn, 422, %{error: "invalid_bundle_ref"})
+
           {:error, {:store, reason}} ->
             json(conn, 502, %{ok: false, error: archive_store_error(reason)})
         end
@@ -5453,8 +5456,14 @@ defmodule BarkparkCloud.Web.Router do
           trimmed -> {:ok, trimmed}
         end
 
-      _ ->
+      nil ->
         newest_bundle_ref(conn.assigns.current_team)
+
+      # A NON-STRING bundle_ref (a number, a map…) is a malformed request, never
+      # "absent": silently resolving the newest archive would stand up a billed
+      # box from a bundle the caller never named.
+      _other ->
+        {:error, :invalid_bundle_ref}
     end
   end
 
