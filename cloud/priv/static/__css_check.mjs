@@ -99,6 +99,9 @@ const ALLOW_HOOK_CLASSES = [
   "fleet-open-studio", // querySelectorAll(".fleet-open-studio") — Open Studio button per fleet row
   "new-plan",          // querySelectorAll(".new-plan") — plan-choice buttons on the /new pricing step
   "wh-event-cb",       // querySelectorAll(".wh-event-cb") — event checkboxes in the create-webhook modal
+  "launch-region",     // querySelector(".launch-region") — region <select>, styled by .form-input; S7 change hook
+  "launch-connect-provider", // querySelector(".launch-connect-provider") — connect CTA, styled by .btn; S7 click hook
+  "launch-catalog-retry",    // querySelector(".launch-catalog-retry") — retry button, styled by .btn; S7 click hook
 ];
 
 // R3 — violations we know about that live in app.js (another slice owns app.js
@@ -111,7 +114,7 @@ const REPORT_ONLY = [];
 const ALLOW_RAW_COLORS = [
   { line: ".modal-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.5); backdrop-filter: blur(2px); }", why: "scrim — theme-invariant by design" },
   { line: "color: #fff; font-weight: 700; font-size: 13px;", why: "white initials on the fixed provider brand tiles" },
-  { line: ".brand-hetzner { background: #d50c2d; }", why: "Hetzner brand colour" },
+  // .brand-hetzner + .brand-azure now tint from --provider-* tokens (S7) — no raw literal to allow.
   { line: ".brand-do { background: #0080ff; }", why: "DigitalOcean brand colour" },
   { line: ".brand-aws { background: #232f3e; }", why: "AWS brand colour" },
   { line: ".brand-vultr { background: #007bfc; }", why: "Vultr brand colour" },

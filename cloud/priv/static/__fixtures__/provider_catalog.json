@@ -1,0 +1,22 @@
+{
+  "hetzner": {
+    "regions": [
+      { "slug": "fsn1", "name": "Falkenstein" },
+      { "slug": "hel1", "name": "Helsinki" }
+    ],
+    "server_types": [
+      { "slug": "cx22", "cores": 2, "ram_gb": 4, "disk_gb": 40, "monthly_price": 4.59 },
+      { "slug": "cx11", "cores": 1, "ram_gb": 2, "disk_gb": 20, "monthly_price": 3.79 }
+    ]
+  },
+  "azure": {
+    "regions": [
+      { "slug": "eastus", "name": "East US" },
+      { "slug": "westeurope", "name": "West Europe" }
+    ],
+    "server_types": [
+      { "slug": "Standard_B2s", "cores": 2, "ram_gb": 4, "disk_gb": 8, "monthly_price": null },
+      { "slug": "Standard_D2ps_v5", "cores": 2, "ram_gb": 8, "disk_gb": 16, "monthly_price": 70.08 }
+    ]
+  }
+}
