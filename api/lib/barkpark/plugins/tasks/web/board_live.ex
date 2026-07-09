@@ -1583,6 +1583,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         text-transform: uppercase; letter-spacing: 0.07em;
         font-size: 10px; font-weight: 700;
       }
+      .bp-phone-state.is-flight {
+        color: var(--info); background: var(--info-soft);
+        padding: 1px 7px; border-radius: 999px;
+      }
       .bp-phone-head .bp-age { margin-left: auto; padding-left: 0; }
       .bp-phone-title {
         margin: 0; flex: 0 0 auto;
@@ -1605,7 +1609,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
          timeline — the list stays as the left column, bars run created →
          closed/now. The phone aspect yields while expanded. */
       .bp-phone.is-expanded {
-        aspect-ratio: auto; width: min(920px, 82vw); max-width: none;
+        aspect-ratio: auto; width: min(1000px, 80vw); max-width: none;
         cursor: default;
       }
       .bp-phone.is-expanded .bp-fam { display: none; }
@@ -1620,23 +1624,33 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-x-details:hover { color: var(--text); border-color: var(--ring); }
       .bp-phone.is-expanded .bp-phone-head .bp-age { margin-left: 0; }
       .bp-phone.is-expanded .bp-phone-head .bp-peek-x { margin-left: 4px; }
-      .bp-gantt { display: flex; flex-direction: column; gap: 3px; padding-top: 4px; }
+      /* High-standard pass (wave 24): the chart reads in LAYERS — task rows
+         lead (weight + breathing room), their checks tuck beneath as quiet
+         single-line rows, descriptions whisper at one line. Real corpora
+         write paragraph-length criteria; the chart shows four and counts the
+         rest (the inline detail has them all). */
+      .bp-gantt { display: flex; flex-direction: column; gap: 2px; padding-top: 4px; }
       .bp-gantt-axis {
         display: flex; justify-content: space-between;
         font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase;
         color: var(--muted-text); padding-left: 42%; margin-bottom: 2px;
       }
       .bp-gantt-row {
-        display: grid; grid-template-columns: 42% 1fr; gap: 10px;
+        display: grid; grid-template-columns: 42% 1fr; gap: 2px 12px;
         align-items: center; min-width: 0;
+        margin-top: 7px; padding: 2px 4px; border-radius: 8px;
+        transition: background 120ms ease;
       }
+      .bp-gantt-row:hover { background: color-mix(in srgb, var(--muted-surface) 60%, transparent); }
+      .bp-gantt-row:first-of-type { margin-top: 0; }
       .bp-gantt-label {
         display: flex; align-items: center; gap: 6px; min-width: 0;
-        border: 0; background: transparent; font: inherit; font-size: 12px;
-        color: var(--text); text-align: left; cursor: pointer;
+        border: 0; background: transparent; font: inherit; font-size: 12.5px;
+        font-weight: 500; color: var(--text); text-align: left; cursor: pointer;
         padding: 3px 4px 3px calc(var(--d) * 12px + 4px); border-radius: 6px;
       }
       .bp-gantt-label:hover { background: var(--muted-surface); }
+      .bp-gantt-label .bp-focus-w { max-width: 12ch; }
       .bp-gantt-label:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
       .bp-gantt-t {
         flex: 1 1 auto; min-width: 0; overflow: hidden;
@@ -1659,50 +1673,65 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
          task's brief + checklist span under its bar line. */
       .bp-gantt-detail {
         grid-column: 1 / -1; min-width: 0;
-        padding: 1px 8px 5px calc(var(--d) * 12px + 24px);
+        padding: 0 8px 2px calc(var(--d) * 12px + 24px);
       }
       .bp-gantt-detail .bp-fam-desc {
-        margin: 0 0 3px; padding-left: 0; -webkit-line-clamp: 2;
+        margin: 0 0 2px; padding-left: 0; -webkit-line-clamp: 1;
+        font-size: 11px; opacity: 0.85;
       }
       .bp-gantt-detail .bp-crits--row { margin: 0; padding-left: 0; }
-      /* Wave 23: criteria as CHECKS + GANTT PARTS. display:contents lets each
-         criterion contribute a label cell and a track cell to the row grid,
-         so segments align with the task bars above them. */
-      .bp-gantt-crits { display: contents; }
-      .bp-gantt-crit-label {
-        display: flex; align-items: center; gap: 6px; min-width: 0;
-        padding: 1px 4px 1px calc(var(--d) * 12px + 24px);
-        font-size: 11px; color: var(--text);
+      /* Wave 24: criteria as HORIZONTAL POINTS — a premium flex strip of
+         check chips under the task: met chips lit, the NEXT one pulsing,
+         the rest quiet outlines. The task bar keeps the time story. */
+      .bp-chips {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+        grid-column: 1 / -1; min-width: 0;
+        padding: 3px 4px 5px calc(var(--d, 0) * 12px + 24px);
       }
-      .bp-gantt-crit-label .gi { font-size: 10px; }
-      .bp-gantt-crit-label.is-met { color: var(--muted-text); }
-      .bp-gantt-crit-label.is-met .bp-crits-t {
-        text-decoration: line-through;
-        text-decoration-color: color-mix(in srgb, var(--muted-text) 45%, transparent);
+      .bp-chips--card { padding: 0; }
+      .bp-check {
+        display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+        max-width: 30ch; padding: 3px 10px; border-radius: 999px;
+        font-size: 11px; line-height: 1.5; color: var(--muted-text);
+        border: 1px solid var(--border); background: transparent;
       }
-      .bp-gantt-track--crit {
-        height: 7px; background: transparent; border-right: 0;
-        align-self: center;
+      .bp-check-gi { flex: 0 0 auto; font-size: 10px; }
+      .bp-check-t {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .bp-gantt-bar--crit {
-        position: absolute; top: 0; bottom: 0; border-radius: 999px;
-        background: transparent;
-        border: 1px solid color-mix(in srgb, var(--muted-text) 40%, transparent);
+      .bp-check.is-met {
+        color: var(--ok); background: var(--ok-soft);
+        border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
       }
-      .bp-gantt-bar--crit.is-met {
-        background: var(--ok); border-color: var(--ok); opacity: 0.85;
-      }
-      .bp-gantt-bar--crit.is-next {
-        background: var(--info-soft); border-color: var(--info);
+      .bp-check.is-next {
+        color: var(--info); background: var(--info-soft);
+        border-color: color-mix(in srgb, var(--info) 50%, var(--border));
         animation: bp-crit-pulse 2s ease-in-out infinite;
       }
+      .bp-check--more { font-variant-numeric: tabular-nums; flex: 0 0 auto; }
       @keyframes bp-crit-pulse {
-        0%   { opacity: 0.45; }
+        0%   { opacity: 0.5; }
         50%  { opacity: 1; }
-        100% { opacity: 0.45; }
+        100% { opacity: 0.5; }
       }
-      /* while expanded, the plain checklist yields to the chart's segments */
-      .bp-phone.is-expanded > .bp-crits { display: none; }
+      /* while expanded, the card strip yields to the chart's chips */
+      .bp-phone.is-expanded > .bp-chips--card { display: none; }
+      /* ── inline peek (wave 24): the detail opens BELOW the pressed row ── */
+      .bp-peek-host { grid-column: 1 / -1; min-width: 0; padding: 4px 0 6px; }
+      .bp-peek-inline {
+        border: 1px solid color-mix(in srgb, var(--info) 30%, var(--border));
+        border-radius: 12px; background: var(--surface);
+        box-shadow: 0 6px 22px rgb(0 0 0 / 0.10);
+        animation: bp-notice-in 200ms ease-out 1;
+      }
+      .bp-peek-inline .bp-peek-head { padding: 12px 14px 10px; }
+      .bp-peek-inline .bp-peek-title { font-size: 13.5px; margin: 6px 0 8px; }
+      .bp-peek-inline .bp-peek-body {
+        padding: 2px 14px 12px; max-height: 46vh; overflow-y: auto;
+        scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+      }
+      .bp-ledger .bp-peek-host { padding: 2px 0 4px; }
       /* Wave 19: the card READS, not just scans — the root's brief under the
          title, the ongoing task's text under its row, a paper chip when the
          detailed description lives as a PortableDoc design paper. */
@@ -1997,7 +2026,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .m-bump { animation: none; }
         .bp-notice { animation: none; }
         .bp-peek { animation: none; }
-        .bp-gantt-bar--crit.is-next { animation: none; opacity: 1; }
+        .bp-check.is-next { animation: none; opacity: 1; }
         .bp-chip { transition: none; }
       }
     </style>
@@ -2080,7 +2109,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                       last <%= age_label(newest_done_at(lane)) %>
                     </span>
                   </summary>
-                  <.done_ledger cards={lane.columns[:done]} last_change={@last_change} />
+                  <.done_ledger cards={lane.columns[:done]} last_change={@last_change} peek={nil} />
                 </details>
               <% else %>
                 <section class="bp-lane" data-role="lane" data-lane={lane_dom_id(lane.key)}>
@@ -2107,7 +2136,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   in flight, or blocked. File the next one with <code>bp task create</code>.
                 </p>
               </div>
-              <.done_ledger cards={hd(@view.lanes).columns[:done]} last_change={@last_change} />
+              <.done_ledger
+                cards={hd(@view.lanes).columns[:done]}
+                last_change={@last_change}
+                peek={@peek}
+              />
               <p :if={done_overflow(@view, @board) > 0} class="bp-more" data-role="done-overflow">
                 + <%= done_overflow(@view, @board) %> earlier — newest shown
               </p>
@@ -2119,6 +2152,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                 last_change={@last_change}
                 done_overflow={done_overflow(@view, @board)}
                 expanded={@expanded}
+                peek={@peek}
               />
             <% else %>
               <.board_grid
@@ -2133,7 +2167,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         <% end %>
       <% end %>
 
-      <%= if @peek do %>
+      <%= if @peek && !peek_hosted?(@view, @expanded, @peek) do %>
         <div class="bp-scrim" data-role="peek-scrim" phx-click="peek-close" aria-hidden="true"></div>
         <.peek_panel peek={@peek} />
       <% end %>
@@ -2420,8 +2454,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp done_ledger(assigns) do
     ~H"""
     <div class="bp-ledger" data-role="done-ledger">
+      <%= for card <- @cards do %>
       <article
-        :for={card <- @cards}
         class={["bp-card", "bp-card--done", just_moved?(@last_change, card) && "bp-flash"]}
         data-role="task-card"
         data-col="done"
@@ -2445,6 +2479,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </span>
         </div>
       </article>
+
+      <div
+        :if={@peek && @peek.doc_id == card.doc_id}
+        class="bp-peek-host"
+        data-role="peek-host"
+      >
+        <.peek_inline peek={@peek} />
+      </div>
+      <% end %>
     </div>
     """
   end
@@ -2453,15 +2496,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # live board: status header, claim lease, description, criteria WITH their
   # close-time evidence, children (in-flight first, hop to re-peek), titled
   # blockers, and the CLI escape hatch. Esc / × / scrim-click close.
-  defp peek_panel(assigns) do
+  # The task detail CARD — header + sections — shared by the inline expansion
+  # (wave 24: the information opens BELOW the row you pressed) and the aside
+  # FALLBACK (a shared ?task= URL whose task has no visible row on this view).
+  defp peek_card(assigns) do
     ~H"""
-    <aside
-      class="bp-peek"
-      data-role="peek"
-      aria-label="Task details"
-      phx-window-keydown="peek-close"
-      phx-key="escape"
-    >
       <header class="bp-peek-head">
         <div class="bp-peek-status">
           <span class={"gi gi--#{peek_role(@peek)}"} aria-hidden="true">
@@ -2659,7 +2698,38 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           Inspect in the terminal: <code>bp task show <%= @peek.doc_id %></code>
         </p>
       </div>
+    """
+  end
+
+  # Fallback shell only (wave 24): a right-hand panel for a peeked task with
+  # NO visible host row — a shared URL into a filtered/collapsed view. When
+  # the row is visible, the SAME card renders inline beneath it instead.
+  defp peek_panel(assigns) do
+    ~H"""
+    <aside
+      class="bp-peek"
+      data-role="peek"
+      aria-label="Task details"
+      phx-window-keydown="peek-close"
+      phx-key="escape"
+    >
+      <.peek_card peek={@peek} />
     </aside>
+    """
+  end
+
+  # The inline expansion (wave 24) — the same detail card, homed under the
+  # pressed row. Esc still closes.
+  defp peek_inline(assigns) do
+    ~H"""
+    <div
+      class="bp-peek-inline"
+      data-role="peek"
+      phx-window-keydown="peek-close"
+      phx-key="escape"
+    >
+      <.peek_card peek={@peek} />
+    </div>
     """
   end
 
@@ -2700,7 +2770,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
             data-status={card.lifecycle_status}
             aria-hidden="true"
           ><%= glyph_text(card) %></span>
-          <span class="bp-phone-state" data-role="deck-state"><%= deck_state(card.col) %></span>
+          <span
+            class={["bp-phone-state", card.col == :in_progress && "is-flight"]}
+            data-role="deck-state"
+          >
+            <%= deck_state(card.col) %>
+          </span>
           <span :if={card.priority} class="bp-pip" data-role="priority" data-priority={card.priority}>
             P<%= card.priority %>
           </span>
@@ -2743,18 +2818,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           no brief — add a description or link a design paper
         </p>
 
-        <ul
+        <div
           :if={card.lifecycle_status == "in_progress" && card[:criteria_list]}
-          class="bp-crits"
+          class="bp-chips bp-chips--card"
           data-role="card-criteria"
         >
-          <li :for={c <- card.criteria_list} class={c.met && "is-met"} data-role="card-criterion">
-            <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
-              <%= if c.met, do: "✓", else: "○" %>
-            </span>
-            <span class="bp-crits-t"><%= c.text %></span>
-          </li>
-        </ul>
+          <span
+            :for={c <- card.criteria_list}
+            class={["bp-check", c.met && "is-met"]}
+            data-role="card-criterion"
+            title={c.text}
+          >
+            <span class="bp-check-gi" aria-hidden="true"><%= if c.met, do: "✓", else: "○" %></span>
+            <span class="bp-check-t"><%= c.text %></span>
+          </span>
+        </div>
 
         <p
           :if={card.col == :in_progress && !card[:family] && focus_of(card)}
@@ -2846,34 +2924,43 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   <p class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
                 </div>
 
-                <div :if={row[:crits]} class="bp-gantt-crits" data-role="gantt-criteria">
-                  <%= for {c, i} <- Enum.with_index(row.crits) do %>
+                <div
+                  :if={row[:crits]}
+                  class="bp-chips"
+                  style={"--d: #{row.depth};"}
+                  data-role="gantt-criteria"
+                >
+                  <%= for {c, i} <- Enum.with_index(Enum.take(row.crits, 8)) do %>
                     <span
-                      class={["bp-gantt-crit-label", c.met && "is-met"]}
-                      style={"--d: #{row.depth};"}
+                      class={[
+                        "bp-check",
+                        c.met && "is-met",
+                        !c.met && i == next_unmet_index(row.crits) && "is-next"
+                      ]}
                       data-role="gantt-criterion"
+                      title={c.text}
                     >
-                      <span
-                        class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")}
-                        aria-hidden="true"
-                      >
+                      <span class="bp-check-gi" aria-hidden="true">
                         <%= if c.met, do: "✓", else: "○" %>
                       </span>
-                      <span class="bp-crits-t"><%= c.text %></span>
+                      <span class="bp-check-t"><%= c.text %></span>
                     </span>
-                    <div class="bp-gantt-track bp-gantt-track--crit">
-                      <span
-                        class={[
-                          "bp-gantt-bar--crit",
-                          c.met && "is-met",
-                          !c.met && i == next_unmet_index(row.crits) && "is-next"
-                        ]}
-                        data-role="gantt-crit-bar"
-                        style={crit_seg_style(row, i, length(row.crits))}
-                      >
-                      </span>
-                    </div>
                   <% end %>
+                  <span
+                    :if={length(row.crits) > 8}
+                    class="bp-check bp-check--more"
+                    data-role="gantt-crit-more"
+                  >
+                    +<%= length(row.crits) - 8 %>
+                  </span>
+                </div>
+
+                <div
+                  :if={@peek && @peek.doc_id == row.doc_id}
+                  class="bp-peek-host"
+                  data-role="peek-host"
+                >
+                  <.peek_inline peek={@peek} />
                 </div>
               </div>
               <p :if={card[:family] && card.family.more > 0} class="bp-fam-more">
@@ -2963,7 +3050,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         </header>
         <h3 class="bp-phone-title">Shipped</h3>
         <div class="bp-phone-body">
-          <.done_ledger cards={@lane.columns[:done]} last_change={@last_change} />
+          <.done_ledger cards={@lane.columns[:done]} last_change={@last_change} peek={@peek} />
           <p :if={@done_overflow > 0} class="bp-more" data-role="done-overflow">
             + <%= @done_overflow %> earlier — newest shown
           </p>
@@ -2988,6 +3075,28 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # An explicit ?expand=<id> narrows to that one card; the "none" sentinel
   # (what × patches to) collapses everything. The bare URL stays the default
   # experience.
+  # Does the peeked task have a VISIBLE host row on this view (wave 24)?
+  # Hosted = rendered inline beneath that row; unhosted (a shared URL into a
+  # filtered/collapsed/grouped view) falls back to the side panel. Hosts are
+  # deck-only: an EXPANDED card's root/family gantt rows, or a done-ledger row.
+  defp peek_hosted?(view, expanded, peek) do
+    view[:family?] == true and is_map(peek) and
+      Enum.any?(view.lanes, fn lane ->
+        done_hit = Enum.any?(lane.columns[:done] || [], &(&1.doc_id == peek.doc_id))
+
+        live_hit =
+          Enum.any?([:in_progress, :ready, :blocked, :open], fn col ->
+            Enum.any?(lane.columns[col] || [], fn c ->
+              expanded?(expanded, c) and
+                (c.doc_id == peek.doc_id or
+                   Enum.any?((c[:family] && c.family.rows) || [], &(&1.doc_id == peek.doc_id)))
+            end)
+          end)
+
+        done_hit or live_hit
+      end)
+  end
+
   defp expanded?(nil, card), do: card.col == :in_progress
   defp expanded?("none", _card), do: false
   defp expanded?(expanded, card), do: is_binary(expanded) and expanded == card.doc_id
@@ -3063,17 +3172,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   defp clamp_pct(v, lo, hi), do: v |> max(lo) |> min(max(hi, lo)) |> Kernel.*(1.0)
 
-  # Criteria as GANTT PARTS (wave 23): criterion i of n owns the i-th slice of
-  # its task's bar — not a time claim, a progress geometry riding the same
-  # track. Met slices fill; the FIRST unmet slice is "next" and pulses.
-  defp crit_seg_style(row, i, n) do
-    n = max(n, 1)
-    seg = row.width / n
-    left = row.left + seg * i
-    width = max(seg - 0.6, 0.8)
-    "left: #{Float.round(left, 2)}%; width: #{Float.round(width, 2)}%;"
-  end
-
+  # The FIRST unmet criterion is "next" — the chip that pulses.
   defp next_unmet_index(crits), do: Enum.find_index(crits, &(!&1.met))
 
   # ── Render helpers ──────────────────────────────────────────────────────────
