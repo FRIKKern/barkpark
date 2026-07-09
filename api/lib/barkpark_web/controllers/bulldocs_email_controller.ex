@@ -30,7 +30,11 @@ defmodule BarkparkWeb.BulldocsEmailController do
           |> paper_blocks()
           |> Content.Papers.resolve_tasks_in_blocks(email_task_scope(paper))
 
-        html = Render.render_document(blocks, %{style: :email})
+        # Thread the paper's workspace THEME IDENTITY (ts-w4e) into the render
+        # opts. The `:theme` opt is the seam the multi-theme emission (w5) reads
+        # to select the palette; with the default (evergreen) theme it is inert,
+        # so the email golden bytes stay locked.
+        html = Render.render_document(blocks, %{style: :email, theme: email_theme(paper)})
 
         conn
         |> put_resp_content_type("text/html")
@@ -53,5 +57,21 @@ defmodule BarkparkWeb.BulldocsEmailController do
         end
 
     [workspace_id: ws_id, project_id: paper && paper.project_id]
+  end
+
+  # The paper's workspace theme identity, defaulting through the seeded Default
+  # workspace (mirrors email_task_scope's fail-closed fallback). Absent/unknown
+  # → the default theme, keeping the byte stream unchanged.
+  defp email_theme(paper) do
+    ws_id =
+      (paper && paper.workspace_id) ||
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: id} -> id
+          _ -> nil
+        end
+
+    ws_id
+    |> Barkpark.Tenancy.get_workspace_by_id()
+    |> Barkpark.Tenancy.workspace_theme()
   end
 end

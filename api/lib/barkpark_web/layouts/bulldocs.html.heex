@@ -1,5 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<%!-- data-bp-theme (ts-w4e) — the paper's workspace THEME IDENTITY, stamped
+      server-side so the reader skin paints on the first byte. It is orthogonal
+      to light/dark mode: the reader ALWAYS mode-swaps via prefers-color-scheme
+      (no data-theme here — reader-dark-parity stays green), and this attribute
+      only selects WHICH theme. Omitted for the default (evergreen) theme, so a
+      default paper is byte-identical to before this feature. --%>
+<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />

@@ -74,6 +74,12 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
       |> default_scope_fallback()
+      # Resolve the workspace THEME IDENTITY (ts-w4e) from the now-resolved
+      # current_workspace, so root.html.heex stamps `data-bp-theme` server-side
+      # (no flash). A nil/unseeded workspace → the default theme → no attribute.
+      |> then(fn s ->
+        assign(s, :bp_theme, Tenancy.workspace_theme(s.assigns[:current_workspace]))
+      end)
       |> then(fn s ->
         assign(s, :shares_admin?, admin?(s.assigns[:api_token], s.assigns[:current_user]))
       end)

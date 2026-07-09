@@ -52,6 +52,52 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
   end
 
+  describe "workspace theme picker (ts-w4e)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/settings")
+      {:ok, view: view, html: html}
+    end
+
+    test "renders the theme section, the current selection, and the mirror", %{html: html} do
+      assert html =~ "Workspace theme"
+      # The hidden mirror the BpThemeMirror hook reads.
+      assert html =~ ~s(id="bp-theme-mirror")
+      assert html =~ ~s(phx-hook="BpThemeMirror")
+      # StudioChrome pins the seeded Default workspace → default theme is the
+      # option AND is the selected one (HEEx renders the boolean attr bare).
+      assert html =~ ~s(<option value="evergreen")
+      assert html =~ ~r/<option value="evergreen"[^>]*selected/
+    end
+
+    test "picking a theme persists it on the current workspace and previews it",
+         %{view: view} do
+      ws = Barkpark.Tenancy.get_default_workspace()
+      assert ws
+
+      html =
+        render_change(element(view, "form[phx-change=set_workspace_theme]"), %{theme: "evergreen"})
+
+      # Feedback + persisted server-side.
+      assert html =~ "Workspace theme set to evergreen"
+
+      assert Barkpark.Tenancy.workspace_theme(Barkpark.Tenancy.get_workspace_by_id(ws.id)) ==
+               "evergreen"
+
+      # Mirror carries the live value for the hook to stamp.
+      assert html =~ ~s(data-bp-theme="evergreen")
+    end
+
+    test "a forged unknown theme is rejected server-side", %{view: view} do
+      html =
+        render_change(element(view, "form[phx-change=set_workspace_theme]"), %{
+          theme: "forged-9000"
+        })
+
+      assert html =~ "Unknown theme"
+    end
+  end
+
   describe "load / save / reveal / delete" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})

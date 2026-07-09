@@ -159,9 +159,26 @@ defmodule BarkparkWeb.BulldocsLive do
       # no task cites the paper. Re-reads live at mount, so a close that sets
       # met=true + evidence (lvw-t9) shows satisfied on the next page load.
       |> assign(:driven_tasks_html, driven_tasks_section_html(paper, dataset))
+      # Theme identity (ts-w4e): resolve the paper's workspace theme so
+      # bulldocs.html.heex stamps `data-bp-theme` server-side (no flash). The
+      # reader ALWAYS mode-swaps via prefers-color-scheme — this attribute only
+      # selects WHICH theme, never light/dark. No setting → default → the layout
+      # omits the attribute → byte-identical to before.
+      |> assign(:bp_theme, reader_theme(paper, reader_scope))
       |> assign_block_mode(paper)
 
     {:ok, socket, layout: false}
+  end
+
+  # Resolve the theme identity for the reader: the paper's OWN workspace, falling
+  # back to the mounted reader scope's workspace (the seeded Default for the flat
+  # /papers surface). A nil/unresolvable workspace → the default theme.
+  defp reader_theme(paper, reader_scope) do
+    ws_id = (paper && Map.get(paper, :workspace_id)) || reader_scope[:workspace_id]
+
+    ws_id
+    |> Barkpark.Tenancy.get_workspace_by_id()
+    |> Barkpark.Tenancy.workspace_theme()
   end
 
   # Render the "Linked mentions" section for a paper. Empty string (no markup)

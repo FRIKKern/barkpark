@@ -27,6 +27,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Plugins.Registry, as: PluginsRegistry
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
+  alias Barkpark.Tenancy
 
   @impl true
   def mount(_params, _session, socket) do
@@ -41,7 +42,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
        revealed: %{},
        masked: true,
        loaded?: false,
-       error: nil
+       error: nil,
+       # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
+       # resolved by the StudioChrome on_mount hook (nil on an unseeded tenancy).
+       known_themes: Tenancy.known_themes()
      )}
   end
 
@@ -160,6 +164,34 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
+  # Workspace theme picker (ts-w4e). Persists `settings["theme"]` on the current
+  # workspace and re-assigns `:bp_theme` so the hidden `#bp-theme-mirror` element
+  # re-renders → the `BpThemeMirror` hook stamps `document.documentElement`
+  # instantly (preview with no reload). The server-side stamp on the next full
+  # load comes from StudioChrome resolving the persisted value.
+  def handle_event("set_workspace_theme", %{"theme" => theme}, socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: _} = ws ->
+        case Tenancy.set_workspace_theme(ws.id, theme) do
+          {:ok, updated} ->
+            {:noreply,
+             socket
+             |> assign(:current_workspace, updated)
+             |> assign(:bp_theme, Tenancy.workspace_theme(updated))
+             |> put_flash(:info, "Workspace theme set to #{theme}.")}
+
+          {:error, :unknown_theme} ->
+            {:noreply, put_flash(socket, :error, "Unknown theme #{inspect(theme)}.")}
+
+          {:error, _} ->
+            {:noreply, put_flash(socket, :error, "Could not save the workspace theme.")}
+        end
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "No workspace in scope to theme.")}
+    end
+  end
+
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
   # the session. Keep LAST among handle_event/3 clauses.
   def handle_event(event, _params, socket) do
@@ -171,6 +203,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   def render(assigns) do
     ~H"""
     <div class="settings-live" style="max-width: 720px; margin: 2rem auto; font-family: ui-sans-serif, system-ui;">
+      {render_theme_section(assigns)}
+
       <h1>Plugin Settings</h1>
 
       <p style="color: var(--fg-muted);">
@@ -214,6 +248,64 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
       </p>
     </div>
+    """
+  end
+
+  # ── Workspace theme picker (ts-w4e) ────────────────────────────────────
+  #
+  # One persisted, server-resolved theme identity per workspace. The hidden
+  # `#bp-theme-mirror` element carries the live `data-bp-theme`; the root
+  # layout's `BpThemeMirror` hook mirrors it onto `document.documentElement`
+  # on mount AND on every update, so a pick previews instantly with no reload.
+  # Theme identity is orthogonal to the light/dark toggle (which stays entirely
+  # client-side); this control never touches `data-theme`.
+  defp render_theme_section(assigns) do
+    ~H"""
+    <section
+      aria-labelledby="theme-heading"
+      style="border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; margin-bottom:2rem;"
+    >
+      <h2 id="theme-heading" style="margin-top:0;">Workspace theme</h2>
+
+      <div
+        id="bp-theme-mirror"
+        phx-hook="BpThemeMirror"
+        data-bp-theme={@bp_theme}
+        hidden
+      >
+      </div>
+
+      <%= if @current_workspace do %>
+        <p style="color: var(--fg-muted);">
+          The theme identity for
+          <strong>{@current_workspace.name}</strong>. Applies to the reader,
+          Studio and emailed papers — light/dark mode stays a separate switch.
+        </p>
+
+        <form phx-change="set_workspace_theme">
+          <label>
+            Theme
+            <select name="theme" style="margin-left:.5rem;">
+              <%= for id <- @known_themes do %>
+                <option value={id} selected={to_string(@bp_theme) == id}>{id}</option>
+              <% end %>
+            </select>
+          </label>
+        </form>
+
+        <p style="color: var(--fg-muted); font-size:.9em; margin-bottom:0;">
+          <%= if length(@known_themes) == 1 do %>
+            One theme ships today; more land as the compiler emits them.
+          <% else %>
+            Saved server-side and stamped on the first byte — no flash.
+          <% end %>
+        </p>
+      <% else %>
+        <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
+          No workspace in scope to theme.
+        </p>
+      <% end %>
+    </section>
     """
   end
 
