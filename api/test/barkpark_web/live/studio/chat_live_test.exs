@@ -3381,6 +3381,16 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, conn: conn}
     end
 
+    test "the slash menu is hook-owned so composer round-trips can't close it", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      # regression: the composer is server-bound (D24) — every keystroke
+      # round-trips, and without phx-update="ignore" the returning patch
+      # re-applied `hidden` and wiped the menu milliseconds after it opened.
+      assert html =~ ~r/<ul[^>]*id="chat-slash-menu"[^>]*phx-update="ignore"/s or
+               html =~ ~r/<ul[^>]*phx-update="ignore"[^>]*id="chat-slash-menu"/s
+    end
+
     test "the composer stamps the builtin slash vocabulary on the form", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/studio/chat")
 

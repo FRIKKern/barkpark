@@ -1933,8 +1933,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 placeholder={composer_placeholder(@status)}
                 style="width: 100%; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
               />
+              <%!-- phx-update="ignore": the combobox hook OWNS this element —
+                    every keystroke round-trips (server-bound composer, D24) and
+                    without the ignore, the returning patch re-applies `hidden`
+                    and wipes the options the instant the menu opens. --%>
               <ul
                 id="chat-slash-menu"
+                phx-update="ignore"
                 role="listbox"
                 aria-label="Slash commands"
                 hidden
