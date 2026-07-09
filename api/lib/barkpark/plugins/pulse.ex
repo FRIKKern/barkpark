@@ -24,6 +24,56 @@ defmodule Barkpark.Plugins.Pulse do
   `BARKPARK_PULSE_CHANNELS` in prod) — nothing is open by default; with no
   channels configured every route 404s. Plugin off = zero routes; the
   tables sit dark.
+
+  ## Abuse caps (plugin-owned policy)
+
+  The surface is anonymous and CORS-open by design — safety is CAPS, not
+  identity. Every cap is billed at the plugin's own call sites through the
+  core generic `Barkpark.RateLimiter` (never a plug on the `:public_api`
+  pipeline, which would collaterally throttle Bulldocs/Sheets and every other
+  public plugin route). Same law as `PublicCors`: mechanism in core, policy
+  in the plugin. See `BarkparkWeb.PulseController`.
+
+  | Surface | Cap | Over-cap response |
+  |---|---|---|
+  | POST `/events` | per-IP token bucket — sustained `rate_per_min`, burst 3 | `429` + `Retry-After: ceil(60/rate_per_min)` |
+  | POST `/events` | per-channel UTC-day ceiling — `daily_cap` | `429` + `Retry-After: 3600` |
+  | POST `/events` | strict schema + encoded-byte ceiling `max_bytes` | `400 invalid_event` |
+  | GET `/recent`, GET `/stats` | per-IP read bucket — 30 burst, 10/sec refill | `429` + `Retry-After: 1` |
+
+  The read bucket is deliberately GENEROUS so a NAT'd office sharing one
+  egress IP survives normal polling, while a single-IP read flood (DB
+  read-amplification, otherwise unmetered) still hits backpressure. Write and
+  read buckets are DISTINCT keys — a client's reads and writes never share a
+  budget. Per-IP socket-connect and per-IP cursor caps are a deferred
+  residual (charter Decision 5): joins fail closed on unknown channels and
+  cursor pushes are already throttled per-socket.
+
+  ## Client backoff contract
+
+  A well-behaved client treats `429` as flow control, not failure:
+
+    * On `429`, read `Retry-After` (seconds) and wait AT LEAST that long
+      before retrying — the server tells you exactly when it will accept you.
+    * Then back off exponentially on repeated `429`s (e.g. double the wait
+      each time) with jitter, capped at **60s** — never a tight retry loop.
+    * `400 invalid_event` is the client's bug (bad field/shape/oversize
+      payload); do NOT retry it, fix the payload.
+    * A dropped realtime socket falls back to polling `GET /recent?since=<id>`
+      at a human cadence — the read bucket assumes seconds, not milliseconds,
+      between polls.
+
+  ## Trust caveat: X-Forwarded-For is spoofable
+
+  Per-IP buckets key on the first `x-forwarded-for` hop when present (Caddy
+  fronts prod and sets it), else the peer address. A client that sends its
+  own `X-Forwarded-For` can rotate the apparent IP and sidestep the per-IP
+  caps — so these caps raise the cost of abuse, they do not make it
+  impossible. The per-channel `daily_cap` is the spoof-proof backstop: it is
+  global to the channel, indifferent to source IP, and bounds total damage to
+  a vanity counter and a 24h ephemeral feed regardless of how many IPs a
+  hostile client forges. In prod, terminate XFF at the trusted edge (Caddy)
+  so only its hop is believed.
   """
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
