@@ -262,7 +262,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             read this host's files, but cannot edit or execute anything.
           </p>
 
-          <div :for={message <- @messages} data-role={message.role}>
+          <div
+            id="chat-messages"
+            phx-hook="PaperMermaid"
+            style="display: flex; flex-direction: column; gap: 10px;"
+          >
+            <div :for={message <- @messages} data-role={message.role}>
             <%= case message.role do %>
               <% :user -> %>
                 <div style="display: flex; justify-content: flex-end;">
@@ -332,6 +337,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <%= message.text %>
                 </div>
             <% end %>
+            </div>
           </div>
 
           <div :if={@streaming} style="opacity: 0.92;">

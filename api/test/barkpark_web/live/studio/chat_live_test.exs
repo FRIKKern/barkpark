@@ -72,6 +72,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "mermaid hook wiring regression guard" do
+    # The papers reader had the engine + hook; the Studio layout did not — so
+    # chat `diagram` blocks rendered as raw source. This guards the exact
+    # three-part wiring (engine script, hook asset, Hooks registration) the
+    # same way the TmuxTerminal guard does.
+    test "root layout loads the mermaid engine AND the PaperMermaid hook" do
+      root = File.read!("lib/barkpark_web/layouts/root.html.heex")
+
+      assert root =~ "mermaid.min.js",
+             "root.html.heex must load the mermaid engine, else chat diagrams are raw text"
+
+      assert root =~ "/assets/bp-paper-mermaid.js",
+             "root.html.heex must load the PaperMermaid hook asset"
+
+      assert root =~ "Hooks.PaperMermaid",
+             "root.html.heex must register PaperMermaid in the LiveSocket Hooks map"
+
+      assert File.exists?("priv/static/assets/bp-paper-mermaid.js")
+    end
+  end
+
   describe "enabled + admin" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -91,6 +112,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "renders the composer and the chat tab in the top menu", %{html: html} do
       assert html =~ ~s(phx-submit="send")
+      assert html =~ ~s(phx-hook="PaperMermaid")
       assert html =~ ~s(href="/studio/chat")
       assert html =~ "studio-tab active"
     end
@@ -141,7 +163,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       # the boundary must not advance into the open fence: no diagram figure yet,
       # the raw fence text remains visible as the plain tail
-      refute html =~ "bp-paper-surface bp-chat-md\" style=\"overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;\">\n<figure"
+      refute html =~
+               "bp-paper-surface bp-chat-md\" style=\"overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;\">\n<figure"
+
       assert html =~ "```mermaid"
     end
 
@@ -319,6 +343,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "mode selector clamps junk to plan (no-op when already plan)", %{view: view} do
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
       html = render(view)
       refute html =~ "Permission mode → bypass"
       assert html =~ "plan (read-only)"
