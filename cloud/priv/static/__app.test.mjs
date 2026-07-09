@@ -3766,10 +3766,10 @@ test("S14: archivesModel — a bundle row carries the exact resurrect command pe
     ok: true,
     archives: [
       { fqdn: "api.barkpark.cloud", slug: "api-2", source_provider: "azure",
-        created_at: "2026-07-08T00:00:00Z", bundle_ref: "archives/t/api-2/manifest.json",
+        created_at: "2026-07-08T00:00:00Z", bundle_ref: "archives/t/api-2/",
         spec: { region: "eastus", server_type: "Standard_B1s" } },
       { fqdn: "web.barkpark.cloud", slug: "web-1", source_provider: "hetzner",
-        created_at: "2026-07-01T00:00:00Z", bundle_ref: "archives/t/web-1/manifest.json",
+        created_at: "2026-07-01T00:00:00Z", bundle_ref: "archives/t/web-1/",
         spec: { region: "nbg1", server_type: "cax11" } },
     ],
   });

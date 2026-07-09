@@ -177,7 +177,7 @@ defmodule BarkparkCloud.ArchiveStoreTest do
     assert a.source_provider == "azure"
     assert a.created_at == "2026-07-08T00:00:00Z"
     assert a.spec == %{region: "eastus", server_type: "Standard_B1s"}
-    assert a.bundle_ref == "archives/team-a/api-2/manifest.json"
+    assert a.bundle_ref == "archives/team-a/api-2/"
   end
 
   test "list_archives is team-scoped: a two-team bucket yields each team only its own" do
@@ -487,8 +487,10 @@ defmodule BarkparkCloud.ArchiveStoreTest do
     end)
   end
 
-  # A manifest WITHOUT an explicit bundle_ref — the reader falls back to the real
-  # object key, so bundle_ref always names where the bundle actually lives.
+  # A manifest WITHOUT an explicit bundle_ref — the reader falls back to the
+  # bundle's key PREFIX (the manifest key minus "manifest.json"), so bundle_ref
+  # always names where the bundle actually lives AND is directly consumable as
+  # a resurrect --bundle ref.
   defp manifest_json(fqdn, slug, provider, created_at, region, server_type) do
     Jason.encode!(%{
       fqdn: fqdn,

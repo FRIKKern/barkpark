@@ -216,7 +216,7 @@ defmodule BarkparkCloud.ArchiveStore do
           slug: string_or(m["slug"], slug_from_key(key)),
           source_provider: string_or(m["source_provider"], ""),
           created_at: string_or(m["created_at"], nil),
-          bundle_ref: string_or(m["bundle_ref"], key),
+          bundle_ref: string_or(m["bundle_ref"], bundle_prefix(key)),
           spec: %{
             region: string_or(spec["region"], nil),
             server_type: string_or(spec["server_type"], nil)
@@ -228,6 +228,12 @@ defmodule BarkparkCloud.ArchiveStore do
         nil
     end
   end
+
+  # The bundle's key PREFIX — the manifest key with its trailing
+  # "manifest.json" removed. This is the ref the resurrect surfaces consume
+  # (`bp cloud instance resurrect … --bundle <prefix>` / POST /v1/resurrect
+  # bundle_ref), so a console row's bundle_ref is directly actionable.
+  defp bundle_prefix(key), do: String.trim_trailing(key, "manifest.json")
 
   # archives/<team>/<slug>/manifest.json → <slug>.
   defp slug_from_key(key) do
