@@ -408,16 +408,29 @@ func renderHzTable(out *writer, headers []string, rows [][]string) {
 			}
 		}
 	}
-	line := func(cells []string) string {
+	// Header-driven chrome: one tinter per column, resolved from the header
+	// label (nil for a column with no chrome vocabulary). Tinting is applied to
+	// DATA rows only, only when out.color is on, and only wraps the padded cell
+	// in an SGR span — column widths above are measured on bare strings, so the
+	// color-off path stays byte-identical to a build without chrome_table.go.
+	tinters := make([]cellTinter, len(headers))
+	for i, h := range headers {
+		tinters[i] = tinterForHeader(h)
+	}
+	line := func(cells []string, paint bool) string {
 		parts := make([]string, len(cells))
 		for i, c := range cells {
-			parts[i] = runewidth.FillRight(c, widths[i])
+			padded := runewidth.FillRight(c, widths[i])
+			if paint && out.color && i < len(tinters) {
+				padded = paintChromeCell(tinters[i], padded, c)
+			}
+			parts[i] = padded
 		}
 		return strings.TrimRight(strings.Join(parts, "  "), " ")
 	}
-	out.outf("%s", line(headers))
+	out.outf("%s", line(headers, false))
 	for _, r := range rows {
-		out.outf("%s", line(r))
+		out.outf("%s", line(r, true))
 	}
 }
 
