@@ -51,7 +51,22 @@ Wave 2+ (filed when wave 1 lands):
 
 ## Wave log
 
-(empty — the reviewer appends per wave)
+### Wave 2 (2026-07-09) — reviewer log
+
+**Landed (review-fixed, gates green, UNMERGED — lead integrates slice 1 first, then slice 2):**
+
+- **ssp-w2-owned-types-settings** → `loop-epic/harvested-plugin-schema-ownership-kills--0-r`. `owned_schema_types/0` (optional callback, try/rescue→[] `__using__` default; Frt overrides via compile-time `schema_names/0`) feeds ONE harvested `plugin => [types]` map per desk build — both structure.ex hardcodes deleted (`plugin_owned_types/1` media/onixedit list, the `[book, mediaAsset, mediaCollection]` + `frt_schema_names` Settings rejects). Settings catch-all now rejects by OWNERSHIP, not enablement: the ticket Settings-masquerade is dead (falls to …Rest with honest count), sheet no longer double-lists, host singletons (siteSettings/navigation/colors) stay. structure.ex names zero plugin modules. Reviewer fix (one commit): the two new Settings-leak refutes were wrapped in `if settings do` — silently vacuous if the Settings group ever vanished; now assert the node exists. Gate 22/22 green; format clean.
+- **ssp-w2-studio-honest-desk** → `loop-epic/studio-desk-finally-reflects-enablement--1-r` (no code fixes needed — clean build). panes[0] now renders the GATED tree, so the flagship Studio sidebar finally tells the enablement truth (disabled plugins absent, top-menu Media out of MAIN). Resolution walks gated-first via new `resolve/4`: a stale pre-tiering deep link (`/studio/:ds/book/:id`) is normalized through `find_type_node` and reveals via the drilled Plugins/…Rest column, URL unchanged; a type absent from the gated display entirely falls back to the ungated `gating: :none` tree — the #1851 never-unreachable guarantee holds. Reserved `graph`/`open` heads bypass both. Gate 30/30; cross-slice merged sweep (both branches together): studio + live/studio + structure + plugins = 2806 tests, 0 failures.
+
+**Stalled (correctly):**
+
+- **ssp-w2-visual-addendum** refused to shoot — prerequisites unmerged, guerrilla still serves the wave-1 desk (no display gating, ticket leak live); pixels would lie. No mutations, no vizcheck workspace, claim held at epoch 1. Stall status stamped into the task description. Re-run AFTER both merges + confirmed guerrilla redeploy.
+
+**Ledger notes:** slice-2's builder believed criteria stamping was broken — actual failure mode: `bp doc patch` writes to a DRAFT; the published ledger (which gates/boards read) only changes after `bp doc publish`. Reviewer stamped criteria 0–5 with evidence and published (lifecycle in_progress, claim intact); criterion 5 is met-with-caveat (full suite 8919 tests, 1 pre-existing pulse_metrics sandbox flake, passes in isolation). Both wave tasks' work digests changed under claim → the eventual `task close` may 409 `doc_changed_since_claim`; re-read then close (documented fence). Wave-1 tasks untouched (all `done`).
+
+**Charter gap:** wave-2 briefs cite "charter Decisions 11/12/13/14" but this file stops at Decision 10 — the Decide phase never wrote them here. For the record: 11 = harvested `owned_schema_types/0` ownership map; 12 = Settings catch-all rejects by ownership, not enablement; 13 = the wave-1 tree does not display-gate enablement (fixed this wave in PaneBuilder); 14 = live-guerrilla visual evidence Paper. Future Decide phases must append decisions to this file.
+
+**Next wave:** (1) merge slice 1 then slice 2 (api/** — wait for the Elixir Test gate; PR bodies carry `Task: <id>` lines); lead closes each task's merge-gated criterion on merge. (2) IMMEDIATELY re-run ssp-w2-visual-addendum against redeployed guerrilla — it is the epic's only remaining owed proof and now unblocked. (3) Then pick from the wave-2+ queue: deep-link courtesy redirects for demoted types, paper-editor CSS ledger onboarding, docs/cards/studio.md + plugins card refresh.
 
 ## Wave 1 log (2026-07-09, lead-landed)
 
