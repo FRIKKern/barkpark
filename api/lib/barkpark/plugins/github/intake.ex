@@ -148,7 +148,17 @@ defmodule Barkpark.Plugins.Github.Intake do
 
   # ── gate 2: bot drop (D4 cut #1) ───────────────────────────────────────────
 
-  defp bot_sender?(payload) do
+  @doc """
+  `true` when the webhook's `sender` is a GitHub App/`[bot]` identity (`sender.type
+  == "Bot"`). The App's own outbound mirror writes always carry a Bot sender;
+  dropping them is the structural inbound loop cut (D4 cut #1).
+
+  Public so the sibling `Github.InboundEvents` handler reuses the EXACT same
+  bot-drop as the FIRST gate on every inbound path — the App's own issue-close
+  echo must never be mistaken for a human action and mint a detach.
+  """
+  @spec bot_sender?(map()) :: boolean()
+  def bot_sender?(payload) do
     case Map.get(payload, "sender") do
       %{"type" => "Bot"} -> true
       _ -> false

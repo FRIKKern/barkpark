@@ -67,6 +67,11 @@ defmodule Barkpark.Plugins.Github.Settings do
   @datasets_key :github_mirror_datasets
   @default_datasets ["production"]
 
+  # OS env var naming the workspace inbound intake tasks are born into. Absent/
+  # blank → `nil` → the webhook falls back to today's default-workspace scope
+  # (byte-identical behavior). See `intake_workspace_id/0` (charter D15).
+  @intake_workspace_env "BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"
+
   @typedoc "Resolved GitHub credentials. Any field may be `nil` if unconfigured."
   @type credentials :: %{
           repo: String.t() | nil,
@@ -152,6 +157,23 @@ defmodule Barkpark.Plugins.Github.Settings do
         @default_datasets
     end
   end
+
+  @doc """
+  The workspace id inbound intake tasks are born into, from OS env
+  `#{@intake_workspace_env}`. `nil` when the env var is unset or blank.
+
+  Read ONCE per delivery by the webhook controller and threaded as `:workspace_id`
+  into the intake/inbound ingest opts (charter D15). Optional by design — an
+  absent value keeps today's default-workspace behavior byte-identical (the
+  controller adds no `:workspace_id` key at all). A workspace id is a `binary_id`
+  (UUID string), so the raw env value is used as-is.
+
+  Read straight from the OS env (no DB, no audit row) so it is cheap on the hot
+  webhook path — unlike the App credentials it is not a secret and needs no
+  encrypted `plugin_settings` fallback.
+  """
+  @spec intake_workspace_id() :: String.t() | nil
+  def intake_workspace_id, do: present(System.get_env(@intake_workspace_env))
 
   @doc """
   The `webhook_secret` ONLY, memoized with a short monotonic TTL.
