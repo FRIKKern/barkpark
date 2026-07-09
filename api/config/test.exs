@@ -95,6 +95,28 @@ config :barkpark, :pulse_channels, %{
     },
     "rate_per_min" => 600,
     "daily_cap" => 100_000
+  },
+  # Tight-cap fixtures for the abuse drill (pulse_abuse_drill_test.exs). Each
+  # isolates ONE cap so the drill can prove it holds — and go RED if neutered.
+  "abuse-rate" => %{
+    # slow refill (0.1/sec) so a rapid volley from one IP is bounded to the
+    # burst (3) with no in-loop refill slop — the 429 boundary stays crisp.
+    "fields" => %{"hue" => ["int", 0, 359]},
+    "rate_per_min" => 6,
+    "daily_cap" => 1_000_000
+  },
+  "abuse-daily" => %{
+    # daily ceiling of 3, rate wide open so distinct IPs never trip the bucket.
+    "fields" => %{"hue" => ["int", 0, 359]},
+    "rate_per_min" => 6000,
+    "daily_cap" => 3
+  },
+  "abuse-bytes" => %{
+    # three required fields whose coerced payload (~28 B) blows a 20 B ceiling.
+    "fields" => %{"hue" => ["int", 0, 359], "x" => ["float", 0, 1], "y" => ["float", 0, 1]},
+    "max_bytes" => 20,
+    "rate_per_min" => 6000,
+    "daily_cap" => 1_000_000
   }
 }
 

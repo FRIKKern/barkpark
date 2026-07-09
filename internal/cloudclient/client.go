@@ -1339,6 +1339,67 @@ func (c *Client) Usage(ctx context.Context, id string) (UsageResult, error) {
 	return UsageResult{Raw: body, Meters: env.Usage.Meters}, nil
 }
 
+// UsageInstanceRow is one instance's cached usage sample in the fleet summary
+// (OC16): its identity (id/name/slug/host) plus the row-level `measured_at`
+// (the sampler's last capture time — nil = never sampled, an honest "no sample
+// yet", never a fake-fresh reading) and the 9-name meter set (the SAME envelope
+// shape `Usage` returns per-instance, so the fleet renderer reuses the same
+// per-meter helpers).
+type UsageInstanceRow struct {
+	ID         string                `json:"id"`
+	Name       string                `json:"name"`
+	Slug       string                `json:"slug"`
+	Host       string                `json:"host"`
+	MeasuredAt *string               `json:"measured_at"`
+	Meters     map[string]UsageMeter `json:"meters"`
+}
+
+// UsageSummaryResult is the parsed + raw fleet usage envelope (OC16). Raw is the
+// bytes VERBATIM so `-o json` re-emits the contract without reshaping (D4).
+// TeamInstances is the team-level instances meter (`usage.team.instances`) — the
+// one honest quota (OC11), carrying the fleet's headline "X of Y" count;
+// TeamPresent is false when the summary omits it (an honest missing header, not
+// a fake zero). Instances is the per-instance sample rows in server order.
+type UsageSummaryResult struct {
+	Raw           []byte
+	TeamInstances UsageMeter
+	TeamPresent   bool
+	Instances     []UsageInstanceRow
+}
+
+// UsageSummary fetches the fleet-wide usage summary via GET /v1/usage/summary
+// (Bearer, team-scoped). This is the CACHED-samples read (OC16) — it reads the
+// sampler worker's stored snapshots, NEVER a live per-instance fan-out (the ~15s
+// hang that disqualified a live gather). Each row carries its own `measured_at`
+// so a stale or never-sampled box is honest about its freshness. The envelope
+// is `{usage:{team:{instances:<meter>}, instances:[<row>…]}}`.
+func (c *Client) UsageSummary(ctx context.Context) (UsageSummaryResult, error) {
+	status, body, err := c.do(ctx, "GET", "/v1/usage/summary", true, nil)
+	if err != nil {
+		return UsageSummaryResult{}, err
+	}
+	if !ok(status) {
+		return UsageSummaryResult{}, routeError(status, body)
+	}
+	var env struct {
+		Usage struct {
+			Team struct {
+				Instances *UsageMeter `json:"instances"`
+			} `json:"team"`
+			Instances []UsageInstanceRow `json:"instances"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return UsageSummaryResult{}, fmt.Errorf("decode usage summary envelope: %w", err)
+	}
+	res := UsageSummaryResult{Raw: body, Instances: env.Usage.Instances}
+	if env.Usage.Team.Instances != nil {
+		res.TeamInstances = *env.Usage.Team.Instances
+		res.TeamPresent = true
+	}
+	return res, nil
+}
+
 // TeamMember is one seat on a team, as returned by GET /v1/teams/:id/members.
 type TeamMember struct {
 	UserID   string `json:"user_id"`

@@ -3520,7 +3520,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
-  describe "agents rail — mission control below the composer (charter D47)" do
+  describe "agents rail — the epic-cycle journey (charter D57–D61, wave 11)" do
     setup %{conn: conn} do
       enable_fake_chat()
       conn = init_test_session(conn, %{"api_token" => @admin_token})
@@ -3545,6 +3545,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
            "usage" => usage
          }}
 
+    defp wf_phase(index, title),
+      do: %{"type" => "workflow_phase", "index" => index, "title" => title}
+
+    defp wf_agent(label, phase_index, phase_title, state, opts) do
+      %{
+        "type" => "workflow_agent",
+        "label" => label,
+        "phaseIndex" => phase_index,
+        "phaseTitle" => phase_title,
+        "state" => state,
+        "model" => opts[:model],
+        "tokens" => opts[:tokens],
+        "error" => opts[:error]
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+    end
+
+    # Every assertion about the rail is scoped INSIDE data-role="agents-rail" —
+    # the setup turn (and the transcript) can carry its own bp-chat-agent-run and
+    # phase-like words, which must never satisfy a rail assertion.
+    defp rail_html(view),
+      do: view |> render() |> String.split(~s(data-role="agents-rail")) |> List.last()
+
     test "background_tasks_changed renders a live rail row below the composer",
          %{view: view, sid: sid} do
       send_frame(
@@ -3554,18 +3578,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         ])
       )
 
-      html = render(view)
-      assert html =~ ~s(data-role="agents-rail")
+      assert render(view) =~ ~s(data-role="agents-rail")
+      html = rail_html(view)
       assert html =~ ~s(data-rail-task="t")
       assert html =~ ~s(data-rail-status="running")
       assert html =~ "Build the rail"
     end
 
-    test "a workflow row expands into its phase→agent tree with model + token counts",
+    test "a RUNNING cycle reads as a journey: aggregate header, settled phases, breathing active phase, dim futures",
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
@@ -3573,65 +3599,286 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         wf_progress(
           "t",
           [
-            %{"type" => "workflow_phase", "title" => "Explore"},
-            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 128}
+            wf_phase(1, "Strategize"),
+            wf_phase(2, "Explore"),
+            wf_phase(3, "Build"),
+            wf_phase(4, "Review"),
+            wf_agent("strategist", 1, "Strategize", "done", model: "fable", tokens: 9_600),
+            wf_agent("explore:a", 2, "Explore", "done",
+              model: "claude-opus-4-8[1m]",
+              tokens: 42_100
+            ),
+            wf_agent("explore:b", 2, "Explore", "done",
+              model: "claude-opus-4-8[1m]",
+              tokens: 38_700
+            ),
+            wf_agent("build:journey-render", 3, "Build", "start",
+              model: "claude-opus-4-8[1m]",
+              tokens: 145_000
+            ),
+            wf_agent("build:aggregates", 3, "Build", "start",
+              model: "claude-opus-4-8[1m]",
+              tokens: 88_300
+            )
           ],
-          %{"total_tokens" => 128}
+          %{"total_tokens" => 323_700}
         )
       )
 
-      # EXPANDED by default (user mandate 2026-07-09) → the phase→agent tree
-      # renders immediately, no click needed
-      html = render(view)
-      assert html =~ "Explore"
-      assert html =~ "explorer"
-      assert html =~ "fable"
-      assert html =~ "128 tok"
+      html = rail_html(view)
 
-      # the manual toggle is the per-tab override that wins
-      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
-      refute render(view) =~ "explorer"
+      # (1) aggregate header — active phase m/n + running/done + tokens, all from
+      # workflow_journey/1's summary, none invented
+      assert html =~ "Build 3/4"
+      assert html =~ "2 running"
+      assert html =~ "3 done"
+      # 323_700 → nearest-k "324k" (format_tokens rounds, never floors)
+      assert html =~ "324k tok"
+
+      # (2) settled phases collapse to one quiet line
+      assert html =~ "Strategize"
+      assert html =~ "1 agent"
+      assert html =~ "Explore"
+      assert html =~ "2 agents"
+      # a settled phase does NOT spill its agent rows
+      refute html =~ "explore:"
+
+      # (3) the active phase breathes with its nested agents; pair labels render
+      # two-part (kind dim + rest emphasized), NOT a raw "build:slug" node
+      assert html =~ "bp-chat-agent-run"
+      assert html =~ ">build:</span>"
+      assert html =~ ">journey-render</span>"
+      # (3b) wire model ids read as family names, never the raw id
+      assert html =~ "Opus"
+      refute html =~ "claude-opus-4-8"
+      # (3c) tokens abbreviated
+      assert html =~ "145k tok"
+
+      # (4) a future phase renders dim by name, no agents
+      assert html =~ ~s(data-rail-phase="future")
+      assert html =~ "var(--life-open)"
     end
 
-    test "a manual collapse survives a later workflow_progress re-render",
+    test "a COMPLETED cycle collapses to one summary line; expand still works (D61)",
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
         sid,
         wf_progress(
           "t",
-          [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running"}],
+          [
+            wf_phase(1, "Strategize"),
+            wf_phase(2, "Build"),
+            wf_phase(3, "Perfect"),
+            wf_agent("strategist", 1, "Strategize", "done", tokens: 9_600),
+            wf_agent("build:one", 2, "Build", "done", tokens: 51_900),
+            wf_agent("build:two", 2, "Build", "done", tokens: 88_300)
+          ],
+          %{"total_tokens" => 149_800}
+        )
+      )
+
+      # the workflow task vanishes from the bg snapshot ⇒ completed
+      send_frame(sid, bg_changed([]))
+
+      html = rail_html(view)
+      assert html =~ ~s(data-rail-status="completed")
+      # honest terminal collapse: "k of n phases · s skipped · A agents · T tok"
+      assert html =~ "2 of 3 phases"
+      assert html =~ "1 skipped"
+      assert html =~ "3 agents"
+      # default COLLAPSED — the phase detail is not spilled
+      refute html =~ ~s(data-rail-phase=)
+      assert html =~ "expand"
+
+      # the explicit toggle still opens it
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      opened = rail_html(view)
+      assert opened =~ ~s(data-rail-phase="done")
+      assert opened =~ ~s(data-rail-phase="skipped")
+      assert opened =~ "Perfect"
+      assert opened =~ "skipped"
+    end
+
+    test "the manual toggle wins BOTH ways, and survives a running→completed flip (D61)",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            wf_phase(1, "Build"),
+            wf_agent("build:x", 1, "Build", "start", tokens: 10)
+          ],
           %{"total_tokens" => 10}
         )
       )
 
-      assert render(view) =~ "explorer"
+      # running defaults EXPANDED — detail visible
+      assert rail_html(view) =~ ~s(data-rail-phase="active")
+      # user collapses: the override beats the running default-expanded
       render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
-      refute render(view) =~ "explorer"
+      refute rail_html(view) =~ ~s(data-rail-phase=)
 
-      # a structural re-render (new agent node appears) must NOT reopen the row
+      # the running→completed flip must NOT reopen it — the manual override persists
+      send_frame(sid, bg_changed([]))
+      assert rail_html(view) =~ ~s(data-rail-status="completed")
+      refute rail_html(view) =~ ~s(data-rail-phase=)
+    end
+
+    test "a COMPLETED cycle's default-collapsed can be manually expanded (override wins the other way, D61)",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "done epic"},
+            "status" => "completed",
+            "seq" => 1,
+            "workflow" => [
+              wf_phase(1, "Strategize"),
+              wf_agent("strategist", 1, "Strategize", "done", tokens: 9_600)
+            ]
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      # completed defaults COLLAPSED
+      refute rail_html(view) =~ ~s(data-rail-phase=)
+      # user expands — the override wins over the completed default-collapsed
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      assert rail_html(view) =~ ~s(data-rail-phase="done")
+      assert rail_html(view) =~ "Strategize"
+    end
+
+    test "an INTERRUPTED cycle shows exactly the frontier phase, with agents visible but NOT breathing (D58)",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "killed epic"},
+            "status" => "interrupted",
+            "seq" => 1,
+            "workflow" => [
+              wf_phase(1, "Strategize"),
+              wf_phase(2, "Explore"),
+              wf_phase(3, "Decide"),
+              wf_agent("strategist", 1, "Strategize", "done",
+                model: "claude-fable-1[1m]",
+                tokens: 9_600
+              ),
+              wf_agent("explore:wire", 2, "Explore", "progress",
+                model: "claude-opus-4-8[1m]",
+                tokens: 21_400
+              ),
+              wf_agent("explore:grammar", 2, "Explore", "progress",
+                model: "claude-fable-1[1m]",
+                tokens: 14_700
+              )
+            ]
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = rail_html(view)
+
+      assert html =~ ~s(data-rail-status="interrupted")
+      # the frontier is named honestly — "died in Explore"
+      assert html =~ "interrupted in Explore (2/3)"
+      assert html =~ ~s(data-rail-phase="interrupted")
+      assert html =~ "var(--life-blocked)"
+
+      # the frontier's agents are visible (mixed model families read as names)
+      assert html =~ "Opus"
+      assert html =~ "Fable"
+      assert html =~ ">explore:</span>"
+
+      # phases past the frontier are unreached; Strategize settled to done
+      assert html =~ ~s(data-rail-phase="unreached")
+      assert html =~ ~s(data-rail-phase="done")
+
+      # a DEAD entry never breathes — no fake spinners (mandate law)
+      refute html =~ "bp-chat-agent-run"
+    end
+
+    test "a failed agent renders ✕ with its error string, and the header counts it (D58)",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
+      )
+
       send_frame(
         sid,
         wf_progress(
           "t",
           [
-            %{"type" => "workflow_agent", "label" => "explorer", "state" => "done"},
-            %{"type" => "workflow_agent", "label" => "builder", "state" => "running"}
+            wf_phase(1, "Build"),
+            wf_agent("build:doomed", 1, "Build", "error",
+              error: "context deadline exceeded",
+              tokens: 12
+            ),
+            wf_agent("build:live", 1, "Build", "start", tokens: 8)
           ],
           %{"total_tokens" => 20}
         )
       )
 
-      html = render(view)
-      refute html =~ "explorer"
-      refute html =~ "builder"
-      # the row itself is still there, honestly collapsed
-      assert html =~ ~s(data-rail-task="t")
-      assert html =~ "expand"
+      html = rail_html(view)
+      # the header carries the honest failed count
+      assert html =~ "1 running"
+      assert html =~ "1 failed"
+      # the failed agent shows ✕ and surfaces its error in a title=
+      assert html =~ "✕"
+      assert html =~ ~s(title="context deadline exceeded")
+      assert html =~ "var(--danger)"
+
+      # a failure NEVER vanishes on completion: the collapsed summary line and
+      # the settled phase line both keep the honest failed count
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            wf_phase(1, "Build"),
+            wf_agent("build:doomed", 1, "Build", "error",
+              error: "context deadline exceeded",
+              tokens: 12
+            ),
+            wf_agent("build:live", 1, "Build", "done", tokens: 8)
+          ],
+          %{"total_tokens" => 20}
+        )
+      )
+
+      send_frame(sid, bg_changed([]))
+
+      collapsed = rail_html(view)
+      assert collapsed =~ ~s(data-rail-status="completed")
+      assert collapsed =~ "1 failed"
+
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      expanded = rail_html(view)
+      assert expanded =~ ~s(data-rail-phase="done")
+      assert expanded =~ "1 failed"
     end
 
     test "a token-only workflow tick does NOT re-render the rail; a state flip does",
@@ -3645,7 +3892,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         sid,
         wf_progress(
           "t",
-          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 10}],
+          [wf_agent("a", 1, "P", "start", tokens: 10)],
           %{"total_tokens" => 10}
         )
       )
@@ -3657,7 +3904,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         sid,
         wf_progress(
           "t",
-          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 9_999}],
+          [wf_agent("a", 1, "P", "start", tokens: 9_999)],
           %{"total_tokens" => 9_999}
         )
       )
@@ -3669,7 +3916,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         sid,
         wf_progress(
           "t",
-          [%{"type" => "workflow_agent", "label" => "a", "state" => "completed", "tokens" => 9_999}],
+          [wf_agent("a", 1, "P", "done", tokens: 9_999)],
           %{}
         )
       )
@@ -3692,105 +3939,87 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
         bg_changed([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}])
       )
 
-      html = render(view)
       # "a" is gone from the wire but its row survives as done
-      assert html =~ ~s(data-rail-task="a")
+      assert rail_html(view) =~ ~s(data-rail-task="a")
       assert lv_assigns(view)[:rail]["a"]["status"] == "completed"
     end
 
-    test "replay hydrates the rail; a reopened interrupted entry shows no running row",
-         %{conn: conn} do
-      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+    # ── fed off S1's committed real-run fixtures (charter D62) ───────────────
+    # These fold the FULL interleaved bg+progress stream exactly as the Recorder
+    # does, then cross-check the render against workflow_journey/1's own summary —
+    # robust to the exact fixture bytes S1 ships (any real epic-cycle capture).
+    @fixtures_dir Path.expand("../../../fixtures/claude_chat", __DIR__)
 
-      {:ok, _} =
-        StudioChat.set_rail_snapshot(s.id, %{
-          "t" => %{
-            "row" => %{"task_type" => "local_workflow", "description" => "was running"},
-            "status" => "interrupted",
-            "seq" => 1,
-            "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running"}]
-          }
-        })
-
-      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
-      html = render(view)
-
-      assert html =~ ~s(data-rail-task="t")
-      assert html =~ ~s(data-rail-status="interrupted")
-      assert html =~ "interrupted"
-      assert html =~ "was running"
-      # the honest last-known rail: NOTHING renders as a live running row
-      refute html =~ ~s(data-rail-status="running")
-
-      # default-expanded means the tree IS visible on reopen — but its stale
-      # "running" node must not breathe on an interrupted entry (the bare
-      # class= form is the rail glyphs' rendered shape; the ever-present
-      # inline CSS rule spells it .bp-chat-agent-run and never matches)
-      assert html =~ "explorer"
-      refute html =~ ~s(class="bp-chat-agent-run")
+    defp load_epic(name) do
+      @fixtures_dir
+      |> Path.join(name)
+      |> File.read!()
+      |> String.split("\n", trim: true)
+      |> Enum.map(&Jason.decode!/1)
     end
 
-    test "a real \"start\" agent state BREATHES, \"done\" settles (terminal-set, wave 10)",
-         %{view: view, sid: sid} do
-      send_frame(
-        sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
-      )
+    defp fold_epic(frames) do
+      Enum.reduce(frames, %{}, fn f, rail ->
+        case f["subtype"] do
+          "background_tasks_changed" -> StudioChat.rail_apply_background(rail, f)
+          "task_progress" -> StudioChat.rail_capture_progress(rail, f)
+          _ -> rail
+        end
+      end)
+    end
 
-      # the real wire only ever emits "start"/"done" for an agent — the old
-      # positive running-set matched neither, so live agents never breathed
-      send_frame(
-        sid,
-        wf_progress(
-          "t",
-          [
-            %{
-              "type" => "workflow_agent",
-              "label" => "phase-one-echo",
-              "model" => "claude-haiku-4-5",
-              "state" => "start",
-              "tokens" => 0
-            }
-          ],
-          %{"total_tokens" => 0}
-        )
-      )
+    test "epic_cycle_progress.ndjson folds to a multi-phase journey rendered from the SAME pure folds",
+         %{conn: conn} do
+      rail = fold_epic(load_epic("epic_cycle_progress.ndjson"))
+      assert map_size(rail) == 1
+      [{tid, entry}] = Map.to_list(rail)
 
-      # the tree is EXPANDED by default (user mandate 2026-07-09), so the agent
-      # node renders with no click needed.
-      # count the breathing markers WITHIN the rail region only (the assistant
-      # turn from setup also breathes transiently — scope past it): the outer row
-      # (status running) + the agent node (state start ⇒ running under
-      # terminal-set) ⇒ one MORE than when the node settles to "done".
-      breathing = fn ->
-        render(view)
-        |> String.split(~s(data-role="agents-rail"))
-        |> List.last()
-        |> String.split("bp-chat-agent-run")
-        |> length()
+      journey = StudioChat.workflow_journey(Map.put(entry, "task_id", tid))
+      s = journey.summary
+      # a real epic cycle is multi-phase, many-agent
+      assert s.phase_total > 1
+      assert s.agents_total > 1
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sess.id}")
+
+      # a completed cycle defaults collapsed — open it so the journey shows
+      unless rail_html(view) =~ "data-rail-phase" do
+        render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="#{tid}"])))
       end
 
-      started = breathing.()
+      html = rail_html(view)
+      # the token aggregate the SAME pure fold produced is on the entry header
+      assert html =~ "#{StudioChat.format_tokens(s.tokens)} tok"
+      # a settled/active phase's real title renders in the journey
+      shown = Enum.find(journey.phases, &(&1.status in [:done, :active]))
+      assert shown
+      assert html =~ shown.title
+    end
 
-      send_frame(
-        sid,
-        wf_progress(
-          "t",
-          [
-            %{
-              "type" => "workflow_agent",
-              "label" => "phase-one-echo",
-              "model" => "claude-haiku-4-5",
-              "state" => "done",
-              "tokens" => 42
-            }
-          ],
-          %{"total_tokens" => 42}
-        )
-      )
+    test "epic_cycle_interrupted.ndjson folds to a frontier journey; the dead entry never breathes",
+         %{conn: conn} do
+      rail = fold_epic(load_epic("epic_cycle_interrupted.ndjson"))
+      assert map_size(rail) == 1
+      [{tid, entry}] = Map.to_list(rail)
+      # the capture has NO terminal frames — the session-teardown interrupt flip
+      # supplies "interrupted" exactly as production does (mirrors
+      # interrupt_running_tasks/1); we stamp it here
+      rail = Map.put(rail, tid, Map.put(entry, "status", "interrupted"))
 
-      settled = breathing.()
-      assert started == settled + 1
+      journey = StudioChat.workflow_journey(Map.put(Map.get(rail, tid), "task_id", tid))
+      %{index: fi, title: ft} = journey.summary.active
+
+      {:ok, sess} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+      {:ok, _} = StudioChat.set_rail_snapshot(sess.id, rail)
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sess.id}")
+
+      html = rail_html(view)
+      assert html =~ ~s(data-rail-status="interrupted")
+      assert html =~ "interrupted in #{ft} (#{fi}/#{journey.summary.phase_total})"
+      assert html =~ ~s(data-rail-phase="interrupted")
+      refute html =~ "bp-chat-agent-run"
     end
   end
 

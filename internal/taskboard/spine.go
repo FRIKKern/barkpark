@@ -11,10 +11,10 @@ import (
 // spine.go — the ONE ordered spine producer (charter D42). Both the shell's
 // visibleRows (the cursor index space) and the renderer's flattenSpine (the
 // painted lines) consume spineRows, so cursor-parity is STRUCTURAL: they can no
-// longer drift because they read the SAME ordered list. spineRows covers only
-// the SCROLLING spine (epics → clusters → the loose bucket); the pinned band
-// (NOW cards / READY head) owns the first cursor indices and is produced by
-// render.go's renderNowBand, exactly as before. A separator/phase-band is
+// longer drift because they read the SAME ordered list. The spine IS the whole
+// cursor space (Amendment 7 / commit 92a618f8 — the pinned NOW/NEXT band and its
+// renderNowBand producer are retired): spineRows owns every cursor index, in
+// emission order (epics → clusters → the loose bucket). A separator/phase-band is
 // Selectable:false — display-only, never a cursor stop — while headers, tasks
 // AND "+N more" fold lines (D57) are selectable: the fold line is the
 // affordance for "open and see the rest". Both consumers read this ONE list,

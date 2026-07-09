@@ -926,6 +926,155 @@ the no-silent-escalation system line the post-plan verdict demands (charter D52
 product law), which is orthogonal to the `"default"` value being the one D34
 already assumed.
 
+- **D57 — The phase journey is pure render-time derivation; the snapshot format
+  is FROZEN.** All wave-11 structure (phase grouping, phase status, aggregates,
+  label/model/token formatting) derives at render time from the stored flat
+  `workflow` node list + entry `status` — public pure helpers in
+  `Barkpark.StudioChat` so fixture-fed unit tests drive them directly.
+  `recorder.ex` untouched; replay durability and backward-compat with existing
+  `rail_snapshot` rows come free. The grouping key is REAL: agent nodes carry
+  `phaseIndex` + `phaseTitle` on the wire (verified in the committed fixture
+  AND across 9,433 real agent nodes; one exploration claim of "no phaseIndex"
+  was spot-checked FALSE). Group agents by `phaseIndex` against the declared
+  `workflow_phase` nodes — which carry ONLY `{type,index,title}` (no
+  model/detail ever; per-phase model derives from that phase's agents; an
+  agentless phase has no model signal). ONE fold amendment:
+  `strip_workflow_node`'s take list (studio_chat.ex:675) grows `"phaseIndex"`
+  so newly-rendered grouping structure is inside `rail_signature` (mandate:
+  the signature incorporates whatever new structure renders). Tokens stay OUT:
+  a token tick must never re-render — every rendered token aggregate is a
+  settle-on-state-flip number, never a live counter.
+
+- **D58 — Honest four-state truth table (the "only start/done" premise is
+  amended).** Real agent states across 507 wf runs: `start`/`progress` are
+  non-terminal (breathe while the entry is live); `done`/`error` are terminal.
+  `error` is real (304 nodes; carries an `error` string, `resultPreview:
+  null`, occurs even inside completed workflows) — it renders ✕ failed and is
+  NEVER counted as done. The terminal-state set moves to StudioChat as the one
+  owner (keep the wave-10 superset done/completed/failed/error/canceled…).
+  Phase truth: phases are STRICTLY sequential (proven ~15ms handoffs;
+  parallelism is intra-phase only), but intra-phase agents may launch late —
+  so a phase is `:done` ONLY when it has agents, all are terminal, AND (a
+  later phase has agents OR the entry is terminal); `:active` = the
+  highest-index phase with agents while the entry lives; agentless phases are
+  `:future` while running, `:skipped` when the entry completed (Perfect is
+  conditional — an honest cycle reads "6 of 7 phases · 1 skipped", never a
+  fake 7/7), `:unreached` when the entry was interrupted; the interrupted
+  frontier (highest phase WITH agents on a dead entry) is `:interrupted` —
+  "died in Explore".
+
+- **D59 — Label grammar, model family, token abbreviation: three generic pure
+  helpers, never epic-cycle-hardcoded.** Real label vocabularies vary by
+  workflow version: bare roles (strategist/architect/review/judge), kind:slug
+  (explore:/build:/perfect:/design:/impl:), MULTI-colon
+  (verify:encryption:leak), and raw-prompt fallbacks all occur in real runs.
+  `workflow_label_parts/1`: split at the FIRST colon iff the head matches
+  `[a-z0-9_-]{1,16}` → `{:pair, kind, rest}` (rest keeps its colons); else
+  `{:bare, label}` — render raw, CSS-truncate, never invent.
+  `model_family/1`: wire ids by prefix — claude-fable-*→Fable,
+  claude-opus-*→Opus, claude-sonnet-*→Sonnet, claude-haiku-*→Haiku; short
+  picker slugs still work; unknown → raw. (Existing `model_label/1` alone is a
+  TRAP: rail nodes carry raw wire ids like `claude-opus-4-8[1m]` and fall
+  through verbatim today.) `format_tokens/1`: <1,000 raw; <10k one decimal
+  ("9.6k"); <1M integer k ("145k"); else "1.2M".
+
+- **D60 — One design vocabulary: the rail speaks `--life-*`.** The lifecycle
+  palette already ships as Studio CSS vars hex-identical to the task design
+  spec and the TUI (root.html.heex:111-117/141-147) — the journey adopts it:
+  settled ✓ `var(--life-done)`; active breathes `var(--life-in_progress)` via
+  the ONE existing `bp-chat-agent-run` pulse (keyframe untouched — it is
+  shared with the transcript region); future/skipped ○ `var(--life-open)`;
+  interrupted frontier `var(--life-blocked)`; failed agent ✕ `var(--danger)`.
+  `rail_status_color` migrates off --ok/--warn/--primary to the life family.
+  Ride-along fix: the rail's `var(--text-dim)` (chat_live.ex:2585, 2637) is
+  UNDEFINED — no such token exists (the `.text-dim` class maps to `--fg-dim`);
+  replace with `var(--fg-dim)`. All chrome via var(--…); glyphs from the
+  manifest vocabulary (✓ / ○ / ✕ / breathing ●); no fake spinners — breathing
+  keys ONLY on real non-terminal state while the entry is live.
+
+- **D61 — Terminal collapse is a status-aware DEFAULT, not a tri-state.**
+  `rail_open?`'s default becomes `entry status != "completed"`: a completed
+  cycle defaults collapsed to ONE settled summary line ("✓ k of n phases · A
+  agents · T tok"); running AND interrupted entries default expanded (the
+  interrupted frontier must be visible); the explicit user toggle always wins
+  both ways — the exact idiom `default_agent_open?` already proves
+  (manual-expand survives the running→completed flip). Tests asserting
+  unconditional default-expanded update to running-vs-completed forms; the
+  interrupted-reopen test stays valid by design.
+
+- **D62 — Fixture provenance law + the D51 comment corrected.** Two new
+  committed fixtures whose node payloads are VERBATIM from real runs (never
+  invented; only the frame envelope + progressive state replay are derived,
+  following the exact envelope grammar of the committed capture: bg-add →
+  task_progress* → empty-bg → task_updated → task_notification):
+  `epic_cycle_progress.ndjson` — the real COMPLETED 7-phase 29-agent node
+  list (wf_49614704, all-opus, design:/impl:/verify: labels) replayed as
+  progressive frames, states walked start→done in real startedAt/durationMs
+  order; `epic_cycle_interrupted.ndjson` — the real KILLED 7-phase epic-cycle
+  (wf_1e38c940: fable strategist done, 4 opus explorers in `progress`, phases
+  3–7 declared agentless) with NO terminal frames — the session-teardown
+  interrupt flip supplies "interrupted", exactly as production does.
+  Provenance (source run ids, replay method) documented at the top of the
+  test file. AND the D51 prose at studio_chat.ex (~689-695) is CORRECTED: the
+  committed workflow fixture's first frame carries the local_workflow task in
+  a background_tasks_changed snapshot, so workflow entries ARE
+  background-origin; "completed" arrives redundantly (vanish-flip ∪
+  task_updated ∪ task_notification). The provenance gate's true law: an entry
+  never seen in a bg snapshot cannot be vanish-completed by an unrelated
+  snapshot. New fixture tests fold the FULL INTERLEAVED stream (bg frames
+  included) exactly as the Recorder does — the wave-10 test's filtered-fold
+  blind spot dies here. (Watch item, not built speculatively: no evidence
+  exists of a workflow blinking OUT of a bg snapshot mid-run; if a future
+  real capture shows it, gate the vanish-flip on "no non-terminal workflow
+  agents".)
+
+### Wave 11 plan (decided 2026-07-10) — "the journey, not the list"
+
+One flagship deliverable: the agents rail renders an epic-cycle run as a phase
+JOURNEY readable at a glance — mission control. Header: "⚙ <row label> ·
+<ActivePhase> m/n · r running · d done [· f failed] · T tok". Completed phases
+settle to one quiet line ("✓ Strategize · 1 agent · 9.6k tok"); the active
+phase breathes with its live agents nested under it (state glyph · two-part
+label · model family · tokens); future phases render dim by name; a completed
+cycle collapses to "✓ k of n phases · A agents · T tok" (expand still works);
+an interrupted cycle shows exactly which phase was the frontier. Three slices:
+
+| # | Slice (bp task) | Owns |
+|---|---|---|
+| S1 | `scc-w11-journey-truth` | the two real fixtures (D62) + StudioChat pure helpers (`workflow_journey/1`, `workflow_label_parts/1`, `model_family/1`, `format_tokens/1`, terminal-set owner) + strip-list `"phaseIndex"` growth + D51 comment correction + interleaved fixture-fed fold/signature tests |
+| S2 | `scc-w11-journey-render` | agents_rail journey markup (phases grouped, aggregates header, terminal collapse D61, label/model/token prettify, --life-* colors D60, --text-dim fix) + chat_live_test.exs rail rewrites |
+| S3 | `task-c0cbe467eb44c161` (ADOPTED, pre-existing) | recorder_test.exs idle-reaper flake fix + unused `sid` warning |
+
+Region contract (file-disjoint): **S1 owns** `api/lib/barkpark/studio_chat.ex`
+(new public helper region + `strip_workflow_node` + the D51 @doc prose),
+`api/test/barkpark/studio_chat_test.exs`, and
+`api/test/fixtures/claude_chat/epic_cycle_*.ndjson` (new files only — the
+three wave-10 fixtures are frozen). **S2 owns**
+`api/lib/barkpark_web/live/studio/chat_live.ex` (the `agents_rail` component +
+`rail_*` render helpers + `rail_open?` ONLY — nothing outside the rail region;
+`bp-chat-agent-run` keyframe untouched) and the "agents rail" describes in
+`api/test/barkpark_web/live/studio/chat_live_test.exs`. **S3 owns**
+`api/test/barkpark/studio_chat/recorder_test.exs` only. No file overlap;
+integration order S1 → S2 → S3; S2 builds against the pinned helper contract
+below and rebases on S1 at integration.
+
+Wave-11 shared helper contract (S1 exports, S2 consumes — pinned):
+
+```elixir
+StudioChat.workflow_journey(entry) :: %{phases: [phase], summary: summary}
+# phase   = %{index: int, title: String, status: :done | :active | :future |
+#             :skipped | :unreached | :interrupted,
+#             agents: [raw node maps, emit order], running: int, done: int,
+#             failed: int, total: int, tokens: int}
+# summary = %{phase_total: int, phases_run: int, skipped: int,
+#             active: %{index, title} | nil, agents_total: int, running: int,
+#             done: int, failed: int, tokens: int}
+StudioChat.workflow_label_parts(label) :: {:pair, kind, rest} | {:bare, label}
+StudioChat.model_family(model)         :: String   # "Fable" | "Opus" | … | raw
+StudioChat.format_tokens(n)            :: String   # "980" | "9.6k" | "145k" | "1.2M"
+StudioChat.workflow_node_terminal?(node) :: boolean # done/error superset owner
+```
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -1185,8 +1334,8 @@ reconciles the recorder.ex and studio_chat.ex touch points.
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
   (worktree recipe: `ln -sfn $MAIN/api/deps deps && mkdir -p _build && cp -R $MAIN/api/_build/test _build/test` — verified working in the gui-premium epic; the `mkdir -p _build` is REQUIRED on a fresh worktree or the cp dies)
-- Wave-9 pinned five-file chat suite (374 tests, 0 failures baseline on main 1da4ea5d, 3 seeds 37/74/111):
-  `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/studio_chat_test.exs test/barkpark/studio_chat/recorder_test.exs test/barkpark/studio_chat/titles_test.exs`
+- Wave-11 pinned SIX-file chat suite (0 failures, 3 seeds 37/74/111):
+  `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/studio_chat_test.exs test/barkpark/studio_chat/recorder_test.exs test/barkpark/studio_chat/titles_test.exs test/barkpark/studio_chat/plan_papers_test.exs`
 - Studio chrome: `bash scripts/studio-literal-check.sh` (no color literals)
 - Real-binary E2E harnesses exist in the session scratchpad (not committed) —
   builders may replicate the pattern for new features.
@@ -1913,3 +2062,54 @@ Footer status strip goes mono: `<mode> ⏵ <model> · <duration> · $<cost>`.
 Gate: 307 tests × 3 seeds; studio-literal-check PASS; warnings-as-errors
 clean. Unknown tool_use_id results are safe noops (echoed test-fake frames
 never match).
+
+### Wave 2026-07-10 (wave 11 — the journey, not the list: BUILT + REVIEWED)
+
+All three slices green and reviewed; integrate S1-r → S2-r → S3(-r).
+
+**Landed.** S1 (`scc-w11-journey-truth`): two committed real-run fixtures
+(`epic_cycle_progress.ndjson` — the completed 7-phase/29-agent wf_49614704,
+verbatim node payloads, 2,137,873 real tokens; `epic_cycle_interrupted.ndjson`
+— the killed wf_1e38c940 ending mid-flight) + the pure journey helpers
+(`workflow_journey/1` four-state truth table, `workflow_label_parts/1`,
+`model_family/1`, `format_tokens/1`, `workflow_node_terminal?/1`) +
+`phaseIndex` in the rail signature + the D51 @doc correction; tests fold the
+FULL interleaved streams exactly as the Recorder does. S2
+(`scc-w11-journey-render`): the agents rail renders the phase journey —
+status-settled header aggregates ("⚙ epic · Build 3/4 · 2 running · 3 done ·
+324k tok"), settled phases one quiet ✓ line, the active phase breathing its
+nested agents (two-part labels, model families, abbreviated tokens), dim
+futures, D61 status-aware collapse (completed defaults collapsed; manual
+toggle wins both ways), all `--life-*` + the `--text-dim`→`--fg-dim` fix.
+S3 (`task-c0cbe467eb44c161`, adopted): the idle-reaper flake is dead —
+deterministic `send(recorder, :idle_reap)` after subscribe+monitor, 12/12
+green.
+
+**Reviewer findings (fixed in place, `-r` branches).** (1) THE integration
+bug: S1 shipped `workflow_journey` summary/phase keys that DIVERGED from the
+charter's pinned wave-11 contract (`phases_total/phases_done/current_index/
+agents_*/tokens_total/agent_count` vs the pinned `phase_total/phases_run/
+skipped/active/running/done/failed/tokens/total`) — S2 consumed the pinned
+names verbatim, so the honest S1+S2 merge crashed the rail with KeyError (8
+red tests). Fixed by conforming S1 to the pinned contract; a pinned contract
+only protects parallel builders if the exporter builds to it byte-for-byte —
+next wave, the truth slice should paste the contract block into its tests.
+(2) Two failure-set owners: chat_live grew a private `@rail_node_failed`
+missing canceled/cancelled — a canceled agent rendered ✓ while the header
+counted it failed; `workflow_node_failed?/1` is now public and the ONE owner.
+(3) Failures vanished on completion (completed header + settled phase lines
+showed no failed count; error-inside-completed is real — 304 nodes/507 runs)
+— both now carry an honest "· N failed". (4) `format_tokens` rounds to
+nearest k (323,700 → "324k"); a scaffold-derived test expected floor.
+Gate on final state: 488 tests × seeds 37/74/111, 0 failures;
+studio-literal-check PASS; warnings-as-errors clean.
+
+**Next wave should take:** (a) real-browser verification of the rail against
+a live epic-cycle run (all wave-11 proof is LiveView-test-level; nobody has
+SEEN the journey breathe); (b) drill-down into a SETTLED phase — a finished
+phase's per-agent detail (who failed, per-agent tokens) is unreachable from
+the rail by design; consider expand-on-click per phase; (c) a workflow whose
+agents carry no `workflow_phase` nodes degrades to the bare header row
+(journey renders nothing) — fine per D57's 9,433-node evidence, but capture a
+fixture if a non-epic workflow shape ever ships; (d) per-phase `model` is
+derived (first agent) but unused by the render — surface it or drop it.

@@ -1196,6 +1196,109 @@ producer), `compose.go`, `components.go` and pdrender are UNTOUCHED; no server/A
     about what a row means, only where it sits.
 
 
+### Post-wave-15 reconciliation (2026-07-09 — Amendment 7 + #1878 landed WITHOUT a charter entry)
+
+Two merges reshaped the board after wave 15 and are the CURRENT truth (the wave-15 log above is
+partially stale — read it through this note):
+
+- **Amendment 7 (#1868, commit 92a618f8): the pinned NOW/NEXT band is RETIRED — the spine is the
+  whole board.** `renderNowBand`/`renderNextBand`/`selectableSpineCount` base-offsets are GONE; the
+  cursor space is just the spine `[0, S)`. Band-era tests (`TestNextCursorParity`,
+  `TestPinnedRowParityUnderHeightPressure`, `TestInvertedIndexOrder`) were retired with it — the
+  living cursor-parity family is `TestCursorParityShellRender` (program_test.go:114) +
+  `TestVisibleRows*` / `TestCursorParity*` (program_test.go:79,215,253,385,433,465). A stale comment
+  at spine.go:17 still names `renderNowBand` — fix rides wave-16 slice 1.
+- **#1878: scrolling slides 1 line at a time** — `slideTop` (render.go:119) is the minimal-slide
+  primitive for BOTH the board spine (`SpineTopFor`, render.go:97) and reading-frame cursor-follow
+  (`followStop`); the window holds still mid-viewport and slides 1:1 at the edge, never a
+  recenter jump. This is the motion law every scroll input (keyboard AND mouse) must ride.
+
+### Wave-16 architect decisions (2026-07-09 — THE MOUSE; wish AMENDMENT 8 "the tasks TUI goes mouse-friendly at Claude-Code-TUI quality")
+
+All claims below verified against the tree 2026-07-09 (bubbletea v1.3.10 source read from the
+module cache; taskboard line refs current at cut time).
+
+89. **The mouse is a PEER of the keyboard, never a second interaction model.** Every mouse gesture
+    resolves to an EXISTING reducer verb: wheel = the existing 1-line motion, click = cursor
+    movement, second click = enter, verb clicks = c/x/o. Mouse reporting is ON by default via
+    `tea.WithMouseAllMotion()` — NOT cell-motion: in v1.3.10 cell-motion reports motion only while
+    a button is held (screen.go:55-63), so hover REQUIRES all-motion (screen.go:70-86). A terminal
+    without mouse reporting sees a byte-identical board: no mouse event → no model change → all
+    existing goldens frozen. Wheel arrives one MouseMsg per notch (Button=WheelUp/WheelDown,
+    Action=Press, no release) — map each notch to ±1.
+
+90. **The hit map: ONE producer, one parallel slice — never coordinate math in Update.**
+    `flattenSpine` (render.go:437, the sole consumer of `spineRows`) gains a parallel
+    `[]LineTarget` (`{Kind, CursorIndex}`; kinds: spine-row / scroll-up / scroll-down / chrome /
+    none) recorded PER-EMIT inside the same emit/markSel closures — per-emit, not per-row, because
+    `TaskRow` returns `[]string` via a range loop (render.go:463-465) and is multi-line-ready even
+    though every branch is 1 line today. `Render`'s signature stays FROZEN; the seam is a pure
+    sibling `HitMapFor(b, st, width, height, now) []LineTarget` mirroring `SpineTopFor` exactly
+    (same avail math, same slideTop, same windowSpine clip; the `↑/↓ N more` overwrite lines become
+    scroll-affordance targets, never stale cursor stops). Compose's origin offsets (leading blank
+    line, left gutter gl, breadcrumb row, wide panes) are applied ONCE in a compose-level hit-map
+    wrapper. **bubblezone considered and REJECTED**: it injects/strips zero-width markers in the
+    view string — a second coordinate producer that fights D42 (spineRows is the ONE producer) and
+    byte-stable goldens.
+
+91. **Hit-map parity is golden-tested with the multi-line-safe invariant.** Assert:
+    (a) `len(hitmap) == len(painted frame lines)`; (b) every visibleRows cursor index appears on
+    ≥1 CONTIGUOUS painted lines (NOT "exactly once" — that breaks the day a row wraps);
+    (c) the line(s) tagged index i are exactly the ▎-marked line(s) (SelectionMarker, U+258E);
+    (d) non-selectables (separators, phase bands, dead-epic lines, ↑/↓ affordances, chrome) carry
+    non-cursor kinds. Mirror `TestCursorParityShellRender`'s exhaustive per-index walk.
+
+92. **Wheel semantics per region.** Board: wheel = `moveCursor(±1)` — j/k parity. (A scroll-only
+    wheel is impossible: Update force-syncs `SpineScroll = SpineTopFor(...)` after every message
+    (program.go:279), so a bumped scroll snaps back the same tick; the cursor step IS the #1878
+    1-line motion.) Reading frames (FrameTask/FramePaper): wheel = `freeScroll(±1)` — prose pans,
+    cursor stays put, and the next j/k minimal-slides back per D18, automatically.
+
+93. **Click semantics.** Click a selectable row = select (move ▎, reuse the moveCursor/clamp
+    path); click the already-selected row = activate (exactly `enter`: descend on a task row,
+    fold/unfold on a section header); double-click = two presses = the same thing, for free.
+    Reading rails: click a stop = select it; click the selected stop = `descend()`. Clicks are
+    "non-x input": they clear the action strip and disarm `pendingClose` — EXCEPT a click on the
+    close affordance, which drives `closeTask` verbatim (two clicks = the existing two-step
+    confirm; the pendingClose machine at program.go:575-588 is click-agnostic; CAS epoch logic
+    untouched).
+
+94. **Hover is the taskboard's FIRST legitimate background tint; color = state law, zero new
+    colors.** New `palette` fields read EXISTING semrole chrome tokens (desk precedent:
+    cmd/barkpark/styles.go:48,104): hover = `chrome-cursor-bg` (subtle), pressed =
+    `chrome-selection-bg` (stronger; verb affordances only — row clicks act on press, so rows get
+    hover only). The flash stays foreground-only (D17 untouched; motion_test's
+    GetBackground==NoColor guards stay green) — hover is a NEW style, never a flashStyle
+    extension. Rectangularity: `padTo(width)` ONLY the hovered row. The hover golden follows
+    `TestFlashPaintedInFrame` (forced TrueColor profile, styled-with ≠ styled-without) but asserts
+    per-line TrimRight equality instead of strict strip equality (the pad adds trailing spaces);
+    the no-hover render stays byte-identical so every existing golden is frozen.
+
+95. **Never-flickers under the motion firehose.** All-motion emits one event per cell crossed.
+    The model stores the current hover target and mutates state ONLY when the resolved target
+    CHANGES — same-target motion returns the model unchanged (unchanged View → renderer diff →
+    zero repaint). The hover-changed guard IS the debounce; no timers, no new cadence (the 100ms
+    heartbeat stays armed only while Alive()).
+
+96. **Etiquette: the app owns only a toggle and a footnote.** Mouse reporting disables native
+    click-drag text selection in EVERY terminal; the bypass is TERMINAL-owned (Option in iTerm2,
+    Shift in most xterm-family terminals) and cannot be implemented app-side. The app ships:
+    (a) runtime toggle `M` — `tea.DisableMouse()` / `tea.EnableMouseAllMotion()` as Cmds;
+    (b) a dim footer note in the existing hint vocabulary (sheds FIRST under width pressure,
+    before the verb hints). Footer verbs (`c claim · x close · o studio`) become click targets via
+    per-verb X-span targets on the footer line — BOARD footer only this wave (the reading footer
+    keeps omitting c/x/o; surfacing them there is a separate decision).
+
+97. **Narrow-first; wide is a column threshold, and the depth-0 preview is inert.** The v1
+    substrate covers the narrow frame completely. Wide (≥110) routing is a pure X-threshold on
+    Compose's assembly (x < 46 → board pane; x ≥ 48 → right pane; the 2-col gutter is dead space)
+    — its own small slice. The depth-0 right pane is a non-interactive preview (cursor=-1, no
+    stops): clicks there no-op honestly. Wheel routes by X the same way. Also adopted as wave-16
+    finishing work: `readingViewportHeight` (program.go:1231) is 1 larger than composeAt's real
+    painted window in BOTH modes (narrow h-2 vs painted h-3; wide h-1 vs h-2 — Compose eats one
+    row for the leading blank), so freeScroll under-scrolls by one line; fix + parity test ride a
+    dedicated slice.
+
 ## Wave log
 
 (append one entry per wave: what merged, what was learned, what the next wave should do)
@@ -1874,3 +1977,68 @@ a live task.
 
 **Next wave.** Charter §6 hygiene + human polish + the D43 pdrender glyph-unify remain (unchanged by this wave —
 placement-only). Nothing new opened.
+
+### Wave 16 2026-07-09 (CUT: THE MOUSE — wish AMENDMENT 8; D89–D97; hit-map substrate + wheel + click + hover + verbs)
+
+**The wish.** `bp tasks` goes mouse-friendly at Claude-Code-TUI quality: wheel scrolls exactly like
+the 1-line keyboard scroll (#1878, never a recenter jump), click a full-width row to select, click
+again to descend, hover tints with existing theme tokens, footer verbs clickable (close keeps its
+two-step confirm as two clicks), honest degrade (no mouse reporting → byte-identical board), and
+mouse-mode etiquette (terminal-owned text-selection bypass named in a dim footnote + runtime `M`
+toggle). Decisions D89–D97 above; laws untouched: spineRows stays the ONE producer (D42), flash
+stays fg-only (D17), never-flickers, detail-ceiling, alignment=rectangularity.
+
+**Ledger.** task-tui-goal stays lifecycle done (the glanceable/live/never-flickers goal shipped —
+never flip it back). Children-of-done IS accepted by the ledger (taskboard-thread-chrome-tokens
+precedent, 2026-07-08), but this wave groups under ONE published wave-goal task **task-tui-mouse**
+(parent_id=task-tui-goal) with the five slices as its children — keeps the epic tree readable and
+gives the wave a single closable spine.
+
+**The wave (integration order; gates per slice: `CC=/usr/bin/clang go build ./... && go vet
+./internal/taskboard/... && go test ./internal/taskboard/...`):**
+
+1. **ttm-s1-hitmap-soul** (large) — LineTarget hit map from flattenSpine's emit closure +
+   `HitMapFor` pure sibling + compose-level origin wrapper; `tea.WithMouseAllMotion()`;
+   `case tea.MouseMsg` in reduce: wheel (board = moveCursor ±1, reading = freeScroll ±1),
+   click-select / click-descend on board rows + reading rail stops; ↑/↓ more lines = scroll
+   targets; fix stale spine.go:17 comment. Parity tests per D91; existing goldens byte-frozen.
+2. **ttm-s2-reading-viewport-clamp** (small, independent) — fix readingViewportHeight off-by-one
+   (narrow h-3, wide h-2) + a parity test pinning it to composeAt's painted window.
+3. **ttm-s3-hover-tint** (medium, atop S1) — palette hoverBg/pressedBg from chrome-cursor-bg /
+   chrome-selection-bg; hover-target state with change-only mutation (D95); padTo only the hovered
+   row; TrueColor hover golden per D94.
+4. **ttm-s4-click-verbs-etiquette** (medium, atop S1) — footer verb X-span targets (c/x/o, board
+   footer), close = two clicks through pendingClose; `M` mouse toggle; dim selection-etiquette
+   footnote that sheds first; footer golden updates.
+5. **ttm-s5-wide-pane-routing** (small, atop S1) — ≥110-col X-threshold routing (board pane /
+   gutter / right pane), depth-0 preview inert, crumb-row offset for right-pane reading frames.
+
+Concurrent-cycle note: unified-aesthetic w2 also touches theme.go's palette/buildPalette — S3
+rebases before PR and keeps token edits to one field + one builder line each (chrome_gen.go is
+generated, never hand-edited).
+
+### Wave 16 2026-07-10 (REVIEWED: the mouse wave — all five slices green + review-fixed; integration is the lead's real work)
+
+**What landed (all gates green — `CC=/usr/bin/clang go build ./... && go vet ./internal/taskboard/... && go test ./internal/taskboard/...` — on every final branch):**
+
+- **ttm-s1 hit-map soul** (`…mousea-0-r`): `hitmap.go` LineTarget{Kind,CursorIndex} over spine-row/scroll-up/scroll-down/chrome/none; `HitMapFor` mirrors Render's avail/slideTop/windowSpine line-for-line; `ComposeHitMap` applies every origin offset ONCE (leading blank + breadcrumb/footer); `flattenSpine` records targets PER-EMIT inside its own closures — the hit map is the SECOND consumer of the one spine producer (D42), bubblezone rejected. Wheel = `moveCursor(±1)` (board, rides #1878) / `freeScroll(±1)` (reading); left press = select-then-activate (task descends, header folds, rail descends); scroll-affordance click = one wheel step. `tea.WithMouseAllMotion()` wired. `TestHitMapBoardParity` walks EVERY cursor index against the real painted `View()` — the D91 tripwire is structural. Zero goldens changed.
+- **ttm-s2 reading-viewport clamp** (original branch, no fixes needed): `readingViewportHeight` now mirrors Compose→composeAt's height chain exactly (floor 8, −1 blank row, re-floor 8, then −2 narrow / −1 wide); freeScroll reaches the last body line, no stuck ↓-more. Parity proven against the REAL paint across h=8..30 both modes; both tests fail on the pre-fix helper.
+- **ttm-s3 hover tint** (`…backgro-2-r`): first background paint — `hoverBg`/`pressedBg` read from EXISTING chrome roles (chrome-cursor-bg / chrome-selection-bg, zero new colors); `hoverPaint` squares the ONE hovered row with padTo then re-arms the bg across the row's embedded `\x1b[0m` resets; `setHoverTarget`'s changed-guard IS the debounce (no timers); any key clears the tint; selectable rows only. No-hover frames byte-identical; flash stays foreground-only (D17). NOTE: inert at runtime until wired into the merged mouse reducer (built parallel to s1 by design).
+- **ttm-s4 clickable footer verbs + etiquette** (original branch, no fixes needed): `buildBoardFooter` emits per-verb X-spans tracking the shed/truncate ladder (etiquette footnote sheds FIRST, then "move", then truncate; a clipped verb loses its span); verb click == key press through `handleBoardKey` — close stays the two-step pendingClose machine as two clicks with the observed CAS epoch; `M` toggles `tea.DisableMouse`/`EnableMouseAllMotion` with `UIState.MouseReleased`; footnote copy "opt/shift-click selects · M mouse" / "mouse off · M on" (terminal-owned bypass, never claims app passthrough). 3 footer goldens regenerated (100-col lines only; the footnote sheds at ≤80). Self-contained `footerVerbAt` re-derives footer geometry — NOT layered on s1's hit map (s1 was absent in its worktree).
+- **ttm-s5 wide two-pane routing** (`…threshold--4-r`): `handleWideMouse` routes by pure X/Y over the SAME geometry composeAt paints — x<46 board / dead 2-col gutter / x≥48 right (crumb +1 Y once); depth-0 preview fully inert; depth>0 rail-stop click via the extracted `readingWindowTop` (paint and hit-test share one offset, byte-neutral — `compose_wide_120` untouched); wheel = cursor step (board) / freeScroll (reading). NOT reachable until the lead wires it into the merged reducer.
+
+**Reviewer fixes (on the `-r` branches):** s1 `composeInner` now delegates to `boardGeometry` (killed a third verbatim copy of the gutter math) and **ignores mouse Release** — a paired release must never disarm a press-armed two-step (would have broken s4's two-click close at integration); s3 un-spliced `handleKey`'s doc comment from `setHoverTarget`; s5 `wideGeom` gains composeAt's height re-floor and `boardPaneMouse` mirrors Render's internal 8-floor (≤8-row wide terminals were off by one), and click-again now ACTIVATES (board) / DESCENDS (rail) — the slice's own "identical semantics to narrow" instruction, matching s1's grammar and the wish's "click again to expand".
+
+**Charter debt: D89–D96 exist only in the wave-16 task briefs, not in this file.** For the record: D89 = one compose-level offset seam (`ComposeHitMap`), D91 = hit-map⇄paint parity tripwire, D92/D42-ext = hit map as second consumer of the ONE spine producer, D93 = honest degrade (no mouse reporting → keyboard untouched), D94/D95 = hover/pressed backgrounds from existing chrome tokens + changed-guard debounce (never-flickers), D96 = clickable footer verbs + M toggle + selection-etiquette footnote. The next strategist should backfill a proper decision block.
+
+**Integration map (the lead's real work — the five branches deliberately collide in program.go):**
+1. Suggested order: s2 (disjoint fix) → s1 (the soul) → s3 → s4 → s5, gating after each.
+2. s1 and s4 BOTH define `handleMouse`, the `tea.MouseMsg` case, and `WithMouseAllMotion` in program.go — merge into ONE reducer: `MouseReleased` guard first (s4), then Motion → row hover via `setHoverTarget` (s3, resolve through s1's ComposeHitMap) + footer-verb hover (s4), then Release → ignore (s1-r), then left press → `footerVerbAt` FIRST (s4; the footer is chrome in s1's map, so order matters), else ComposeHitMap dispatch (s1); wide → `handleWideMouse` (s5) replacing s1's wide no-op.
+3. s1's flattenSpine returns 3 values; s3 (hover paint in flattenSpine) and s5 (`boardLineOwners`, 2-value call) collide — rebase s3's `paint()` into s1's emit closures; prefer s1's per-emit targets over s5's one-line-per-row `boardLineOwners` where convenient (s5's helper is correct today but multi-line-unsafe by construction).
+4. s3+s4 both append to theme.go's style var block and types.go's UIState (HoverTarget vs MouseReleased/HoverFooterVerb — distinct fields, both stay); s4's `renderFooter(st, width)` signature + 3 regenerated goldens must survive the merge.
+5. After integration: `MouseReleased` must also gate s1's row clicks + s3's row hover (not just footer verbs), and wide mode should stop being hover-dead if cheap (s3 painted flattenSpine, which wide's left pane shares — verify).
+6. s5's builder stamped evidence via doc patch under the active claim — the lead's `bp task close` may 409 `doc_changed_since_claim`; standard same-worker re-claim self-heal.
+
+**Honest gaps:** nobody has driven a real terminal — every behavior is proven by constructed `tea.MouseMsg` at computed coordinates; the etiquette footnote is invisible below ~96 inner cols (sheds by design — most portrait panes never see it); reading-frame rail stops have no hover tint (needs the merged reducer + threading HoverTarget into the frame renderers); wide-mode footer verbs expose no click targets (honest, documented).
+
+**Next wave:** (1) the INTEGRATION slice above — one merged mouse reducer, full-suite + goldens + a LIVE tmux mouse drive against guerrilla (wheel, click-select, double-click descend, verb clicks, M toggle, shift-click selection) — the wish's "feels native" bar can only be judged in a real terminal; (2) hover for reading-frame rails + wide panes once the reducer is one; (3) charter backfill of D89–D96; (4) the D43 pdrender glyph-unify and §6 hygiene still stand from wave 15.

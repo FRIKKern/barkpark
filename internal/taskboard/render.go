@@ -50,7 +50,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 
 	bottom := bottomChrome(b, st, width, now)
 
-	spineLines, cursorLine := flattenSpine(b, st, width, now)
+	spineLines, _, cursorLine := flattenSpine(b, st, width, now)
 
 	avail := height - len(identityTop) - len(bottom)
 	if avail < 1 {
@@ -84,7 +84,7 @@ func bottomChrome(b Board, st UIState, width int, now time.Time) []string {
 	if strip := renderActionStrip(st.Strip, width); strip != "" {
 		chrome = append(chrome, strip)
 	}
-	chrome = append(chrome, renderFooter(width))
+	chrome = append(chrome, renderFooter(st, width))
 	return chrome
 }
 
@@ -101,7 +101,7 @@ func SpineTopFor(b Board, st UIState, width, height int, now time.Time) int {
 	if height < 8 {
 		height = 8
 	}
-	lines, cursorLine := flattenSpine(b, st, width, now)
+	lines, _, cursorLine := flattenSpine(b, st, width, now)
 	avail := height - len(renderIdentityTop(st, width, now)) - len(bottomChrome(b, st, width, now))
 	if avail < 1 {
 		avail = 1
@@ -421,6 +421,49 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
+// ── Hover paint (the board's first background state) ─────────────────────────
+
+// hoverSentinel is a byte pair that never occurs in a rendered spine line (a NUL
+// is never emitted), used to probe hoverStyle's live open/close SGR sequences so
+// the exact bytes match the resolved color profile + theme (AdaptiveColor binds
+// at render time, not here).
+const hoverSentinel = "\x00\x00"
+
+// hoverPaint fills one selectable spine row with the subtle hover Background
+// (charter D94/D95). It is the board's FIRST paint that spans a whole row instead
+// of a single glyph, so it must survive the row's OWN embedded resets: a
+// lipgloss Foreground segment ends in \x1b[0m, which also clears the background,
+// so a naive Background().Render leaves the tint painting only the first segment.
+// The fix re-establishes the background open sequence after every inner reset,
+// then wraps the padded row.
+//
+// RECTANGULARITY (alignment=rectangularity): board rows are ragged today (TaskRow
+// pads only the meta path), so the tint would be a torn right edge. padTo(width)
+// squares the hovered row to a full rectangle FIRST — the ONLY row that pads, and
+// the pad is pure trailing spaces, so the ansi-stripped text is unchanged apart
+// from that trailing run (TrimRight equality holds).
+//
+// HONEST DEGRADE: under a profile with no color (Ascii/NoColor — a terminal that
+// can't tint, or the test runner's default) hoverStyle renders no SGR, so open is
+// empty and the row is returned UNTOUCHED — no pad, no tint. A board without
+// mouse reporting loses nothing.
+func hoverPaint(line string, width int) string {
+	probe := hoverStyle.Render(hoverSentinel)
+	i := strings.Index(probe, hoverSentinel)
+	if i < 0 {
+		return line // profile mangled the sentinel — never paint (paranoia)
+	}
+	open, closeSeq := probe[:i], probe[i+len(hoverSentinel):]
+	if open == "" {
+		return line // no background in this profile — honest no-op
+	}
+	padded := padTo(line, width)
+	// Re-arm the background after each of the row's own foreground resets so the
+	// tint is continuous, then open before the first cell and close after the pad.
+	body := strings.ReplaceAll(padded, "\x1b[0m", "\x1b[0m"+open)
+	return open + body + closeSeq
+}
+
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
@@ -434,44 +477,74 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 // then orphans). Separators, "+K more" folds and phase sub-bands are
 // Selectable:false and never touch the cursor. Any divergence is impossible:
 // visibleRows filters the SAME producer to its Selectable set.
-func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
+func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, targets []LineTarget, cursorLine int) {
 	cursorLine = -1
 	selIdx := 0
-	emit := func(s string) { lines = append(lines, s) }
-	markSel := func() bool {
-		selected := selIdx == st.Cursor
+	// emit records ONE painted line together with its mouse hit-target, so the
+	// hit map (HitMapFor) is built from the SAME closures as the paint and can
+	// never drift (charter D42 — one producer, two consumers). Recording is
+	// PER-EMIT, not per-row: a spineTask that grows to multiple lines (NOW cards,
+	// future multi-line rows) tags EACH of its lines with the row's cursor index.
+	emit := func(s string, tgt LineTarget) {
+		lines = append(lines, s)
+		targets = append(targets, tgt)
+	}
+	// markSel advances the selectable-row index and reports both whether this row
+	// is the cursor row (for the ▎ marker) and the index itself (for the target's
+	// CursorIndex). It stamps cursorLine at the row's FIRST line — the same line
+	// SpineTopFor slides into view.
+	markSel := func() (selected bool, idx int) {
+		idx = selIdx
+		selected = selIdx == st.Cursor
 		if selected {
 			cursorLine = len(lines)
 		}
 		selIdx++
-		return selected
+		return selected, idx
 	}
 	for _, sr := range spineRows(b, st) {
+		// A selectable row whose Ref matches the pointer target wears the hover
+		// tint (charter D94/D95). paint() is the identity for every other row, so
+		// a "" target (no mouse) leaves the frame byte-identical, and separators /
+		// phase bands / dead-epic lines (Selectable:false, or an empty Ref) can
+		// never tint. Only the ONE hovered row pads to a full rectangle.
+		hovered := st.HoverTarget != "" && sr.Selectable && sr.Ref == st.HoverTarget
+		paint := func(s string) string {
+			if hovered {
+				return hoverPaint(s, width)
+			}
+			return s
+		}
 		switch sr.Kind {
 		case spineSep:
-			emit("")
+			emit("", noneTarget)
 		case spineEpicHeader, spineClusterHeader, spineOrphanHeader:
-			selected := markSel()
-			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width))
+			selected, idx := markSel()
+			emit(paint(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width)),
+				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spinePhaseBand:
 			// A named phase band (W10-A): the SAME dotted-leader grammar as a
 			// section header, indented one level under its epic, display-only (no
 			// selection marker — the cursor never lands on a band).
-			emit(renderSectionHeaderIndent(sr.hdr.title, sr.hdr.code, false, false, childIndent, sr.hdr.counts, width))
+			emit(renderSectionHeaderIndent(sr.hdr.title, sr.hdr.code, false, false, childIndent, sr.hdr.counts, width),
+				noneTarget)
 		case spineTask:
-			selected := markSel()
+			selected, idx := markSel()
+			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
 			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, sr.Guide, width, st.Frame, now) {
-				emit(ln)
+				emit(paint(ln), tgt)
 			}
 		case spineMore:
-			emit(moreLine(sr.more, sr.Depth, width, markSel()))
+			selected, idx := markSel()
+			emit(paint(moreLine(sr.more, sr.Depth, width, selected)),
+				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spineDeadEpic:
-			emit(deadEpicLine(sr.hdr.title, width))
+			emit(deadEpicLine(sr.hdr.title, width), noneTarget)
 		case spineEmpty:
-			emit(dimStyle.Render(truncate(sr.text, width)))
+			emit(dimStyle.Render(truncate(sr.text, width)), noneTarget)
 		}
 	}
-	return lines, cursorLine
+	return lines, targets, cursorLine
 }
 
 // deadEpicLine is a cancelled-root epic's tombstone (charter W10-B): one dim
@@ -646,12 +719,165 @@ func eventLifecycle(verb string) string {
 // detail frame (charter D11). A tight pane drops the word "move" (jk next to the
 // other single-key verbs still reads as motion) rather than blind-truncating the
 // LAST verb off the end; the trailing truncate stays as the sub-60 safety net.
-func renderFooter(width int) string {
-	hint := "jk move · enter open · esc back · c claim · x close · o studio"
-	if disp(hint) > width {
-		hint = "jk · enter open · esc back · c claim · x close · o studio"
+//
+// The c/x/o verbs are also CLICK targets (charter D96): buildBoardFooter emits
+// their column spans alongside the text, and the shell's footerVerbAt hit-tests a
+// mouse click against exactly this ladder — so a clicked verb fires the same
+// reducer as its key. A hovered verb (st.HoverFooterVerb) wears a background tint;
+// at rest the whole line is one dim span, byte-identical to the pre-mouse footer.
+func renderFooter(st UIState, width int) string {
+	segs, _ := buildBoardFooter(width, st.MouseReleased)
+	return renderFooterSegs(segs, width, st.HoverFooterVerb)
+}
+
+// footerSeg is one dot-separated footer segment. A non-zero verb marks a
+// clickable board act-verb (c claim / x close / o studio); the nav/reading hints
+// carry verb 0.
+type footerSeg struct {
+	text string
+	verb rune
+}
+
+// footerVerbSpan is a clickable verb's [start,end) column range within the
+// rendered board footer line (display columns, measured BEFORE the pane gutter
+// the compositor adds). A verb that the width ladder clips loses its span, so a
+// span never points at a half-painted or absent token (charter D96).
+type footerVerbSpan struct {
+	verb       rune
+	start, end int
+}
+
+// footerSep is the dim dot leader between footer segments — one display cell.
+const footerSep = " · "
+
+// footerEtiquette is the dim mouse-mode footnote (charter D96): while the mouse
+// is captured it names the terminal-owned text-selection bypass and the M toggle;
+// while released it states the mode and how to re-arm. The wording is terminal-
+// GENERIC — Option (iTerm2) or Shift (most xterm-family) click bypasses mouse
+// reporting to select text — and never claims an app-side passthrough, which does
+// not exist. It rides the shed ladder as the lowest-priority tail (sheds first).
+func footerEtiquette(mouseReleased bool) string {
+	if mouseReleased {
+		return "mouse off · M on"
 	}
-	return dimStyle.Render(truncate(hint, width))
+	return "opt/shift-click selects · M mouse"
+}
+
+// footerEtiquetteShort is the compressed footnote the ladder falls back to when
+// the full etiquette line does not fit: it keeps the M toggle discoverable at
+// every canonical portrait width (Compose insets 4, so the full board note needs
+// a >=102-col terminal — the whole 60–100-col portrait vision would otherwise
+// never see it). Captured mode names the toggle; released mode names the re-arm.
+func footerEtiquetteShort(mouseReleased bool) string {
+	if mouseReleased {
+		return "M on"
+	}
+	return "M mouse"
+}
+
+// buildBoardFooter assembles the board footer's segments at the given inner width
+// and mouse mode, plus the click spans for the c/x/o verbs (charter D93/D96). The
+// width ladder, widest-that-fits: the etiquette footnote COMPRESSES first (full
+// note → the short M-toggle form) and sheds entirely before any verb hint, THEN
+// the nav hint drops its "move" word, THEN the whole line trailing-truncates as
+// the sub-60 floor. verbSpans clips a verb the truncation would cut, so the
+// returned spans always align with fully-painted verb tokens.
+func buildBoardFooter(width int, mouseReleased bool) (segs []footerSeg, spans []footerVerbSpan) {
+	verbs := []footerSeg{
+		{"enter open", 0},
+		{"esc back", 0},
+		{"c claim", 'c'},
+		{"x close", 'x'},
+		{"o studio", 'o'},
+	}
+	assemble := func(nav, tail string) []footerSeg {
+		out := make([]footerSeg, 0, len(verbs)+2)
+		out = append(out, footerSeg{nav, 0})
+		out = append(out, verbs...)
+		if tail != "" {
+			out = append(out, footerSeg{tail, 0})
+		}
+		return out
+	}
+	for _, cand := range [][]footerSeg{
+		assemble("jk move", footerEtiquette(mouseReleased)),
+		assemble("jk move", footerEtiquetteShort(mouseReleased)),
+		assemble("jk move", ""),
+		assemble("jk", ""),
+	} {
+		if segsWidth(cand) <= width {
+			return cand, verbSpans(cand, width)
+		}
+	}
+	// Sub-60 floor: the shortest line, trailing-truncated to width by renderFooter;
+	// verbs the cut clips drop their spans.
+	segs = assemble("jk", "")
+	return segs, verbSpans(segs, width)
+}
+
+// segsWidth is the display width of segments joined by the dot leader.
+func segsWidth(segs []footerSeg) int {
+	w := 0
+	for i, s := range segs {
+		if i > 0 {
+			w += disp(footerSep)
+		}
+		w += disp(s.text)
+	}
+	return w
+}
+
+// footerJoin renders the plain footer line (segments + dot leaders).
+func footerJoin(segs []footerSeg) string {
+	parts := make([]string, len(segs))
+	for i, s := range segs {
+		parts[i] = s.text
+	}
+	return strings.Join(parts, footerSep)
+}
+
+// verbSpans locates each verb segment's [start,end) column range in the joined
+// line, KEEPING only the verbs that fall entirely within width — a clipped verb
+// loses its span (charter D96), so a click can never land on a token the ladder
+// truncated away.
+func verbSpans(segs []footerSeg, width int) []footerVerbSpan {
+	var spans []footerVerbSpan
+	col := 0
+	for i, s := range segs {
+		if i > 0 {
+			col += disp(footerSep)
+		}
+		w := disp(s.text)
+		if s.verb != 0 && col+w <= width {
+			spans = append(spans, footerVerbSpan{verb: s.verb, start: col, end: col + w})
+		}
+		col += w
+	}
+	return spans
+}
+
+// renderFooterSegs paints the joined footer. At rest (hover == 0) it is one dim
+// span — byte-identical ANSI to the pre-mouse footer, so the only golden churn is
+// the footnote text. When a verb is hovered its whole token gets the background
+// tint; the rest stays dim. A line that overflows width falls back to the plain
+// dim+truncate path so a hover tint never risks cutting an ANSI escape.
+func renderFooterSegs(segs []footerSeg, width int, hover rune) string {
+	plain := footerJoin(segs)
+	if hover == 0 || disp(plain) > width {
+		return dimStyle.Render(truncate(plain, width))
+	}
+	var sb strings.Builder
+	for i, s := range segs {
+		if i > 0 {
+			sb.WriteString(dimStyle.Render(footerSep))
+		}
+		if s.verb == hover {
+			sb.WriteString(verbHoverStyle.Render(s.text))
+		} else {
+			sb.WriteString(dimStyle.Render(s.text))
+		}
+	}
+	return sb.String()
 }
 
 // ── small shared helpers ─────────────────────────────────────────────────────

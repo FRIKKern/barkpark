@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
@@ -244,12 +245,15 @@ func TestRunCloudUsageNoToken(t *testing.T) {
 	}
 }
 
-// TestRunCloudUsageUsage: zero or extra positionals (and unknown flags) are
-// usage errors, exit 2.
+// TestRunCloudUsageUsage: extra positionals and unknown flags are usage errors
+// (exit 2). The no-arg form is NO LONGER a usage error — it is the fleet summary
+// path, so with no login it falls through to the auth gate (exit auth), proving
+// the dispatch branch splits on positional count.
 func TestRunCloudUsageUsage(t *testing.T) {
 	withTempConfigHome(t)
-	if _, _, code := runUsage(t, "table", false); code != exitUsage {
-		t.Fatalf("no-arg exit = %d, want %d", code, exitUsage)
+	// No-arg → fleet path → auth gate (not a usage error) when unauthenticated.
+	if _, _, code := runUsage(t, "table", false); code != exitAuth {
+		t.Fatalf("no-arg exit = %d, want %d (fleet path hits the auth gate)", code, exitAuth)
 	}
 	if _, _, code := runUsage(t, "table", false, "a", "b"); code != exitUsage {
 		t.Fatalf("two-arg exit = %d, want %d", code, exitUsage)
@@ -390,6 +394,334 @@ func TestRunCloudUsageQuotaStateColors(t *testing.T) {
 	}
 	if !strings.Contains(colored, "\033[31m") {
 		t.Fatalf("want a red (danger) over_limit STATE cell:\n%q", colored)
+	}
+}
+
+// ---- fleet summary (`bp cloud usage`, no argument) ----
+
+// fMeter builds an unmetered-or-metered meter object for a fake fleet payload:
+// pass a number for a real reading or the "unmetered" sentinel for a quiet pipe.
+func fMeter(value any, source string) map[string]any {
+	return map[string]any{"value": value, "quota": nil, "warn_at": nil, "source": source, "measured_at": nil}
+}
+
+// fMeterQuota builds a metered meter carrying a plan limit (value/quota/warn_at).
+func fMeterQuota(value, quota, warn float64, source string) map[string]any {
+	return map[string]any{"value": value, "quota": quota, "warn_at": warn, "source": source, "measured_at": nil}
+}
+
+// buildFleetPayload assembles the OC16 fleet summary envelope from a team
+// instances meter (or nil to omit it) and per-instance rows.
+func buildFleetPayload(t *testing.T, team map[string]any, instances []map[string]any) string {
+	t.Helper()
+	teamBlock := map[string]any{}
+	if team != nil {
+		teamBlock["instances"] = team
+	}
+	if instances == nil {
+		instances = []map[string]any{}
+	}
+	env := map[string]any{
+		"usage": map[string]any{
+			"team":      teamBlock,
+			"instances": instances,
+		},
+	}
+	b, err := json.Marshal(env)
+	if err != nil {
+		t.Fatalf("marshal fleet payload: %v", err)
+	}
+	return string(b)
+}
+
+// agoStamp is an RFC3339 timestamp d in the past, for deterministic relative-age
+// assertions (kept at minute+ granularity so a few seconds of test drift can't
+// flip the bucket).
+func agoStamp(d time.Duration) *string {
+	s := time.Now().Add(-d).UTC().Format(time.RFC3339)
+	return &s
+}
+
+// freshFleetRow is a healthy sampled box: docs + telemetry + seats all metered,
+// sampled minutes ago.
+func freshFleetRow() map[string]any {
+	return map[string]any{
+		"id": testInstanceID, "name": "alpha", "slug": "alpha", "host": "alpha.bp.dev",
+		"measured_at": agoStamp(5 * time.Minute),
+		"meters": map[string]any{
+			"documents":    fMeter(128.0, "instance.documents"),
+			"datasets":     fMeter(4.0, "instance.datasets"),
+			"webhooks":     fMeter(3.0, "instance.webhooks.production"),
+			"db_size":      fMeter(4194304.0, "telemetry.pg_size_bytes"),
+			"disk":         fMeter(42.0, "telemetry.disk_used_percent"),
+			"seats":        fMeter(2.0, "control-plane.team_members"),
+			"api_requests": fMeter(unmeteredValue, "not-metered"),
+			"bandwidth":    fMeter(unmeteredValue, "not-metered"),
+			"instances":    fMeter(3.0, "control-plane.team_instances"),
+		},
+	}
+}
+
+// TestRunCloudFleetUsageDispatch: no positional hits GET /v1/usage/summary with
+// the cloud bearer — the dispatch branch on positional count, no resolve call.
+func TestRunCloudFleetUsageDispatch(t *testing.T) {
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{freshFleetRow()})
+	method, path, auth := newUsageServer(t, 200, body)
+
+	stdout, stderr, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if *method != "GET" || *path != "/v1/usage/summary" {
+		t.Fatalf("hit %s %s, want GET /v1/usage/summary", *method, *path)
+	}
+	if *auth != "Bearer sess-abc" {
+		t.Fatalf("auth = %q, want the cloud session bearer", *auth)
+	}
+}
+
+// TestRunCloudFleetUsageFresh: a healthy sampled fleet renders the header count,
+// the instance name, formatted headline values (human bytes, percent), a
+// relative "as of" age, and a live STATE.
+func TestRunCloudFleetUsageFresh(t *testing.T) {
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{freshFleetRow()})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, want := range []string{
+		"Instances 3 of 5", // team header
+		"alpha",            // instance name
+		"128",              // docs
+		"4.0 MB",           // db_size
+		"42%",              // disk
+		"5m ago",           // relative sample age
+		"live",             // healthy STATE
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("fresh fleet render missing %q:\n%s", want, stdout)
+		}
+	}
+}
+
+// TestRunCloudFleetUsageStale: an hours-old sample renders its age as "Nh ago",
+// never a fake-fresh reading.
+func TestRunCloudFleetUsageStale(t *testing.T) {
+	row := freshFleetRow()
+	row["measured_at"] = agoStamp(3*time.Hour + 15*time.Minute)
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{row})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "3h ago") {
+		t.Fatalf("a stale row must render its hours-old age:\n%s", stdout)
+	}
+}
+
+// TestRunCloudFleetUsageNoSample: a never-sampled row (measured_at null, all
+// headline meters unmetered) reads an honest "no sample yet" AS OF and an
+// unmetered STATE — never a fake-fresh value, never a false "live" glow.
+func TestRunCloudFleetUsageNoSample(t *testing.T) {
+	row := map[string]any{
+		"id": testInstanceID, "name": "beta", "slug": "beta", "host": "beta.bp.dev",
+		"measured_at": nil,
+		"meters": map[string]any{
+			"documents":    fMeter(unmeteredValue, "instance.documents"),
+			"datasets":     fMeter(unmeteredValue, "instance.datasets"),
+			"webhooks":     fMeter(unmeteredValue, "instance.webhooks.production"),
+			"db_size":      fMeter(unmeteredValue, "telemetry.pg_size_bytes"),
+			"disk":         fMeter(unmeteredValue, "telemetry.disk_used_percent"),
+			"seats":        fMeter(unmeteredValue, "control-plane.team_members"),
+			"api_requests": fMeter(unmeteredValue, "not-metered"),
+			"bandwidth":    fMeter(unmeteredValue, "not-metered"),
+			"instances":    fMeter(unmeteredValue, "control-plane.team_instances"),
+		},
+	}
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{row})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	betaRow := usageTestRow(t, stdout, "beta")
+	if !strings.Contains(betaRow, "no sample yet") {
+		t.Fatalf("a never-sampled row must read 'no sample yet':\n%s", betaRow)
+	}
+	if strings.Contains(betaRow, "live") {
+		t.Fatalf("a blind row must not read a false 'live':\n%s", betaRow)
+	}
+	if !strings.Contains(betaRow, "unmetered") {
+		t.Fatalf("a fully-unmetered row's STATE must read unmetered:\n%s", betaRow)
+	}
+	// the headline value cells dash out honestly (no fake zero).
+	if !strings.Contains(betaRow, "—") {
+		t.Fatalf("an unmetered headline value must render an em dash:\n%s", betaRow)
+	}
+}
+
+// TestRunCloudFleetUsageUnmetered: a partially-dark box (docs live, db_size
+// unmetered) dashes the quiet cell and rolls the row STATE to unmetered — one
+// dark source degrades the row's glance, never a fake-healthy green (D51).
+func TestRunCloudFleetUsageUnmetered(t *testing.T) {
+	row := freshFleetRow()
+	row["name"] = "gamma"
+	row["slug"] = "gamma"
+	meters := row["meters"].(map[string]any)
+	meters["db_size"] = fMeter(unmeteredValue, "telemetry.pg_size_bytes")
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{row})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	gammaRow := usageTestRow(t, stdout, "gamma")
+	if !strings.Contains(gammaRow, "unmetered") {
+		t.Fatalf("a row with a dark headline meter must roll STATE to unmetered:\n%s", gammaRow)
+	}
+	if !strings.Contains(gammaRow, "128") {
+		t.Fatalf("the still-live docs value must render:\n%s", gammaRow)
+	}
+}
+
+// TestRunCloudFleetUsageOverQuotaHeadline: a headline meter at/over its quota
+// reddens the whole row (over_limit), and an over-quota team headline paints the
+// instances line danger — the same warn/over story the dashboard tells.
+func TestRunCloudFleetUsageOverQuotaHeadline(t *testing.T) {
+	row := freshFleetRow()
+	row["name"] = "delta"
+	row["slug"] = "delta"
+	meters := row["meters"].(map[string]any)
+	meters["documents"] = fMeterQuota(1000, 1000, 800, "instance.documents") // exactly on the ceiling → over_limit
+	// team at its instances ceiling → over_limit header.
+	body := buildFleetPayload(t, fMeterQuota(5, 5, 4, "control-plane.team_instances"), []map[string]any{row})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "Instances 5 of 5") {
+		t.Fatalf("an at-ceiling team must render its X of Y header:\n%s", stdout)
+	}
+	deltaRow := usageTestRow(t, stdout, "delta")
+	if !strings.Contains(deltaRow, "over_limit") {
+		t.Fatalf("a headline meter at its quota must roll STATE to over_limit:\n%s", deltaRow)
+	}
+
+	// with color on, the over_limit row + the over-quota header both paint danger red.
+	newUsageServer(t, 200, body)
+	colored, _, _ := runUsage(t, "table", true)
+	if !strings.Contains(colored, "\033[31m") {
+		t.Fatalf("an over_limit row/header must paint danger red:\n%q", colored)
+	}
+}
+
+// TestRunCloudFleetUsageUnlimitedHeader: with no team quota the header is a plain
+// "Instances N" — no "of Y" ceiling invented, no paint (D48 no-fake-ceiling).
+func TestRunCloudFleetUsageUnlimitedHeader(t *testing.T) {
+	body := buildFleetPayload(t, fMeter(3.0, "control-plane.team_instances"), []map[string]any{freshFleetRow()})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "Instances 3") {
+		t.Fatalf("an unlimited team must render a plain count:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "Instances 3 of") {
+		t.Fatalf("an unlimited team must not invent a ceiling:\n%s", stdout)
+	}
+}
+
+// TestRunCloudFleetUsageEmpty: an empty fleet is an honest empty state pointing
+// at `bp cloud launch`, never a bare header with a skeletal table.
+func TestRunCloudFleetUsageEmpty(t *testing.T) {
+	body := buildFleetPayload(t, fMeter(0.0, "control-plane.team_instances"), []map[string]any{})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "table", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "No instances yet") {
+		t.Fatalf("an empty fleet must render an honest empty state:\n%s", stdout)
+	}
+}
+
+// TestRunCloudFleetUsageJSON: `-o json` emits the fleet envelope BYTES verbatim.
+func TestRunCloudFleetUsageJSON(t *testing.T) {
+	body := buildFleetPayload(t, fMeterQuota(3, 5, 4, "control-plane.team_instances"), []map[string]any{freshFleetRow()})
+	newUsageServer(t, 200, body)
+
+	stdout, _, code := runUsage(t, "json", false)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if stdout != body+"\n" {
+		t.Fatalf("json output must be the fleet envelope verbatim:\n got: %q\nwant: %q", stdout, body+"\n")
+	}
+}
+
+// TestRelativeAge pins the relative-age buckets directly (deterministic at
+// minute+ granularity): minutes/hours/days ago, a future skew reading "just now",
+// and an unparseable stamp falling back to its literal (never a crash).
+func TestRelativeAge(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name  string
+		stamp string
+		want  string
+	}{
+		{"minutes", now.Add(-5 * time.Minute).UTC().Format(time.RFC3339), "5m ago"},
+		{"hours", now.Add(-3 * time.Hour).UTC().Format(time.RFC3339), "3h ago"},
+		{"days", now.Add(-50 * time.Hour).UTC().Format(time.RFC3339), "2d ago"},
+		{"future skew", now.Add(1 * time.Hour).UTC().Format(time.RFC3339), "just now"},
+		{"unparseable falls back to literal", "not-a-timestamp", "not-a-timestamp"},
+	}
+	for _, c := range cases {
+		if got := relativeAge(c.stamp); got != c.want {
+			t.Errorf("%s: relativeAge(%q) = %q, want %q", c.name, c.stamp, got, c.want)
+		}
+	}
+}
+
+// TestFleetRowState pins the row STATE roll-up severity directly: over_limit
+// outranks near_limit outranks unmetered outranks live; a partially-dark row is
+// unmetered, a healthy row is live, and a tripped headline meter wins.
+func TestFleetRowState(t *testing.T) {
+	live := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 10.0}, "db_size": {Value: 100.0}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+	}
+	if got := fleetRowState(live); got != "live" {
+		t.Errorf("all-metered row = %q, want live", got)
+	}
+	dark := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 10.0}, "db_size": {Value: "unmetered"}, "disk": {Value: 5.0}, "seats": {Value: 2.0},
+	}
+	if got := fleetRowState(dark); got != "unmetered" {
+		t.Errorf("partially-dark row = %q, want unmetered", got)
+	}
+	near := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: "unmetered"},
+		"disk": {Value: 5.0}, "seats": {Value: 2.0},
+	}
+	if got := fleetRowState(near); got != "near_limit" {
+		t.Errorf("near-limit-with-dark row = %q, want near_limit (near outranks unmetered)", got)
+	}
+	over := map[string]cloudclient.UsageMeter{
+		"documents": {Value: 100.0, Quota: fp(100), WarnAt: fp(80)}, "db_size": {Value: 90.0, Quota: fp(100), WarnAt: fp(80)},
+		"disk": {Value: 5.0}, "seats": {Value: 2.0},
+	}
+	if got := fleetRowState(over); got != "over_limit" {
+		t.Errorf("over-limit row = %q, want over_limit", got)
 	}
 }
 

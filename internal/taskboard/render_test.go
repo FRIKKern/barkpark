@@ -556,6 +556,228 @@ func TestFlashPaintedInFrame(t *testing.T) {
 	}
 }
 
+// --- wave 16 slice 3: mouse hover tint --------------------------------------
+
+// firstSelectableTask returns the Ref and selectable-index of the first spine
+// TASK row in a board — the row a hover test paints. selectable-index counts
+// only Selectable rows (headers included), matching the cursor index space.
+func firstSelectableTask(b Board, st UIState) (ref string, selIdx int) {
+	i := 0
+	for _, sr := range spineRows(b, st) {
+		if !sr.Selectable {
+			continue
+		}
+		if sr.Kind == spineTask {
+			return sr.Ref, i
+		}
+		i++
+	}
+	return "", -1
+}
+
+// TestHoverPaintedInFrame proves the hover tint in the STYLED frame (a forced
+// truecolor profile, since the runner's default drops ANSI), mirroring
+// TestFlashPaintedInFrame: hovering a selectable row visibly changes the frame,
+// the change is a background tint ONLY (the ansi-stripped text is unchanged apart
+// from the hovered row's trailing pad), and EXACTLY one row differs. The cursor
+// is parked on the hovered row so it is guaranteed inside the viewport window;
+// both renders share that cursor, so the selection marker is identical and only
+// the background is the diff.
+func TestHoverPaintedInFrame(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+
+	b := motionBoard()
+	st := motionUIState()
+	st.Flashes = nil // isolate the hover paint from the flash motion
+
+	ref, selIdx := firstSelectableTask(b, st)
+	if ref == "" {
+		t.Fatal("fixture has no selectable spine task to hover")
+	}
+	st.Cursor = selIdx // keep the hovered row inside the window in both renders
+
+	without := Render(b, st, 100, goldenHeight, fixedNow)
+
+	hov := st
+	hov.HoverTarget = ref
+	with := Render(b, hov, 100, goldenHeight, fixedNow)
+
+	if with == without {
+		t.Fatalf("a hover target produced NO visible change in the styled frame")
+	}
+
+	wl := strings.Split(with, "\n")
+	ol := strings.Split(without, "\n")
+	if len(wl) != len(ol) {
+		t.Fatalf("hover changed the line count: %d vs %d", len(wl), len(ol))
+	}
+	styledDiffs := 0
+	for i := range wl {
+		// Background tint only: the visible text (trailing pad stripped) is equal.
+		if strings.TrimRight(ansi.Strip(wl[i]), " ") != strings.TrimRight(ansi.Strip(ol[i]), " ") {
+			t.Errorf("line %d: hover changed the VISIBLE text (must be a background tint only)\n got: %q\nwant: %q",
+				i, ansi.Strip(wl[i]), ansi.Strip(ol[i]))
+		}
+		if wl[i] != ol[i] {
+			styledDiffs++
+		}
+	}
+	if styledDiffs != 1 {
+		t.Errorf("hover changed %d styled lines, want exactly 1 (only the hovered row tints)", styledDiffs)
+	}
+
+	// D17 remains intact: hover is a Background, the flash is Foreground-only —
+	// they are DISTINCT styles. hoverStyle must carry a background and no
+	// foreground so it can compose over a row's lifecycle hues without recolour.
+	if hoverStyle.GetBackground() == (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle has no background — it is the board's first background paint")
+	}
+	if hoverStyle.GetForeground() != (lipgloss.NoColor{}) {
+		t.Errorf("hoverStyle set a foreground — hover must tint the background only, never recolour text")
+	}
+}
+
+// deadEpicHoverBoard carries a live epic (selectable task rows) plus a
+// cancelled-root epic that folds to a non-selectable tombstone line whose Ref is
+// a real doc_id — the exact shape that proves hover NEVER tints a row just
+// because its Ref matches, only a SELECTABLE one.
+func deadEpicHoverBoard() Board {
+	return Board{
+		Epics: []Epic{
+			{
+				Root: Task{DocID: "live-epic", Title: "Live epic", Lifecycle: "in_progress",
+					Kind: "goal", UpdatedAt: fixedNow},
+				Children: []Task{
+					{DocID: "row-a", Title: "First real task", Lifecycle: "ready",
+						ParentID: "live-epic", Priority: "P2", UpdatedAt: fixedNow},
+					{DocID: "row-b", Title: "Second real task", Lifecycle: "open",
+						ParentID: "live-epic", Priority: "P3", UpdatedAt: fixedNow.Add(-time.Hour)},
+				},
+				FocusSet: focusOf("row-a", "row-b"),
+			},
+			{
+				Root: Task{DocID: "dead-epic", Title: "Abandoned initiative", Lifecycle: "cancelled",
+					Kind: "goal", UpdatedAt: fixedNow.Add(-30 * 24 * time.Hour)},
+			},
+		},
+		Counts: map[string]int{"in_progress": 0, "ready": 1, "open": 1},
+	}
+}
+
+// TestHoverOnlyTintsSelectableRows proves criterion 3: the tint lands on a
+// selectable spine row ONLY. Every NON-selectable row carrying a real Ref (a
+// cancelled-epic tombstone) is un-tintable — hovering its Ref leaves the frame
+// byte-identical — while a real task Ref does tint (guarding against a vacuous
+// all-pass). Separators and phase bands carry an empty Ref, so the `!= ""` guard
+// makes them structurally unhoverable; the loop asserts the same for any
+// non-selectable row that DOES carry a Ref.
+func TestHoverOnlyTintsSelectableRows(t *testing.T) {
+	oldp := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(oldp) })
+
+	b := deadEpicHoverBoard()
+	st := motionUIState()
+	st.Flashes = nil
+
+	without := Render(b, st, 80, goldenHeight, fixedNow)
+
+	sawNonSelectableRef := false
+	for _, sr := range spineRows(b, st) {
+		if sr.Selectable || sr.Ref == "" {
+			continue
+		}
+		sawNonSelectableRef = true
+		hov := st
+		hov.HoverTarget = sr.Ref
+		if got := Render(b, hov, 80, goldenHeight, fixedNow); got != without {
+			t.Errorf("hovering non-selectable row (kind %v, ref %q) tinted the frame — only selectable rows may hover",
+				sr.Kind, sr.Ref)
+		}
+	}
+	if !sawNonSelectableRef {
+		t.Fatal("fixture produced no non-selectable row with a Ref — the guard is untested")
+	}
+
+	// Non-vacuous: a selectable task Ref DOES tint, so the pass above is real.
+	ref, _ := firstSelectableTask(b, st)
+	if ref == "" {
+		t.Fatal("fixture has no selectable task")
+	}
+	hov := st
+	hov.HoverTarget = ref
+	if Render(b, hov, 80, goldenHeight, fixedNow) == without {
+		t.Fatalf("hovering a selectable task ref %q did not tint — the criterion-3 test would be vacuous", ref)
+	}
+}
+
+// TestHoverFlickerDiscipline proves the never-flickers law (charter D95): the
+// hover-changed guard IS the debounce. A Motion resolving to the SAME target
+// returns changed=false and leaves the state — and therefore the View — byte
+// identical; a Motion to a NEW target flips changed and mutates ONLY HoverTarget;
+// and a "" target (pointer left every selectable row, or a key was pressed)
+// clears the tint. No timer, no wall-clock — the guard is the whole cadence.
+func TestHoverFlickerDiscipline(t *testing.T) {
+	b := motionBoard()
+	base := motionUIState()
+	base.HoverTarget = ""
+
+	// Motion onto a target sets it and reports the change.
+	st1, ch1 := setHoverTarget(base, "flash-spine")
+	if !ch1 || st1.HoverTarget != "flash-spine" {
+		t.Fatalf("first hover: changed=%v target=%q, want true/\"flash-spine\"", ch1, st1.HoverTarget)
+	}
+
+	// A Motion resolving to the SAME target is the debounce: unchanged, and the
+	// rendered frame is byte-identical (nothing to re-render).
+	st2, ch2 := setHoverTarget(st1, "flash-spine")
+	if ch2 {
+		t.Errorf("a Motion onto the same target reported a change — the guard is not the debounce")
+	}
+	if Render(b, st1, 100, goldenHeight, fixedNow) != Render(b, st2, 100, goldenHeight, fixedNow) {
+		t.Errorf("same-target Motion changed the View — the never-flickers law is broken")
+	}
+
+	// A Motion to a NEW target flips changed and mutates ONLY HoverTarget.
+	st3, ch3 := setHoverTarget(st1, "calm-row")
+	if !ch3 || st3.HoverTarget != "calm-row" {
+		t.Fatalf("new target: changed=%v target=%q, want true/\"calm-row\"", ch3, st3.HoverTarget)
+	}
+	if st3.Cursor != st1.Cursor || st3.Frame != st1.Frame || st3.SpineScroll != st1.SpineScroll || st3.Conn != st1.Conn {
+		t.Errorf("new-target Motion mutated more than HoverTarget: %+v vs %+v", st3, st1)
+	}
+
+	// Leaving every selectable row (or pressing a key) clears the tint.
+	st4, ch4 := setHoverTarget(st3, "")
+	if !ch4 || st4.HoverTarget != "" {
+		t.Fatalf("clear: changed=%v target=%q, want true/\"\"", ch4, st4.HoverTarget)
+	}
+}
+
+// TestHoverClearsOnKeyInput proves the tint yields to the keyboard: with a hover
+// target armed, any keypress clears it, so the mouse highlight never lingers into
+// keyboard navigation (charter D95). The keyboard flow is otherwise untouched —
+// the cursor still moves.
+func TestHoverClearsOnKeyInput(t *testing.T) {
+	m := testModel(motionBoard())
+	m.ui.HoverTarget = "flash-spine"
+	m.ui.Cursor = 1
+
+	nm, _ := m.handleKey(runes("j"))
+	mm, ok := nm.(Model)
+	if !ok {
+		t.Fatalf("handleKey returned %T, want Model", nm)
+	}
+	if mm.ui.HoverTarget != "" {
+		t.Errorf("a keypress did not clear the hover tint: HoverTarget=%q", mm.ui.HoverTarget)
+	}
+	if mm.ui.Cursor == m.ui.Cursor {
+		t.Errorf("the keyboard flow was broken — the cursor did not move on 'j'")
+	}
+}
+
 // --- wave 3: clusters / twins / staleness / suggestions ----------------------
 
 // wave3Board is a compact fixture with one derived cluster carrying a twin pair,

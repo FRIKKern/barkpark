@@ -773,6 +773,8 @@ OUTBOUND-only, inbound is intake/bookkeeping-only, `mutation_events.source` stay
 no field is ever bidirectional, claims/epochs/fencing/rail_rev never leave Barkpark, Conflicts.record
 stays DB-only, plugin off by default.
 
+
+
 ### Wave 2026-07-09 — Wave 8 BUILT + REVIEWED (4/4 code slices green; live proof HALTED honestly)
 
 S1-S4 all came back green, survived adversarial review, and PROVEN COHERENT TOGETHER: a throwaway

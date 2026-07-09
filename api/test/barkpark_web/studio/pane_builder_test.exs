@@ -381,5 +381,80 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert editor.type == "book"
       assert editor.doc.doc_id =~ "b1"
     end
+
+    # Charter Decision 20 residual — the DISABLED-plugin deep-link case. OnixEdit
+    # is off by declaration default, so its owned `book` type is dropped from the
+    # placed nodes (structure.ex place_host_group → {[], []}) and instead surfaces
+    # in the …Rest census (id `rest-book`, a `:document_type_list` because the
+    # schema still resolves in scope). A stale top-level `["book", id]` deep link
+    # therefore misses the gated root; `find_type_node` recurses the `…Rest`
+    # `:list` and normalizes the path to `["rest", "rest-book", id]`, drilling and
+    # revealing the doc. Sibling cases (enabled-demoted via Plugins, top-menu
+    # ungated fallback) are pinned above; this pins the third, previously verified
+    # only by code-trace.
+    test "a disabled plugin's owned type reveals via …Rest when documents exist" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "pb_disabled_rest_book"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      # Global book schema (visible under scope via include_global) so the …Rest
+      # node is a drillable :document_type_list and the editor's get_schema/2
+      # resolves it.
+      insert_schema!(%{
+        name: "book",
+        title: "Books",
+        icon: "book",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      {:ok, _} =
+        Content.create_document(
+          "book",
+          %{"_id" => "b1", "title" => "Book 1"},
+          dataset,
+          source: :studio,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      # NO set_workspace_plugin_settings call: OnixEdit stays disabled by its
+      # declaration default (default_enabled?/0 → false), so `book` is a homeless
+      # type that falls to the honest census, not a Plugins-column member.
+
+      {panes, editor} = PaneBuilder.build(dataset, ["book", "b1"], scope: scope)
+
+      root = hd(panes)
+
+      # Anti-vacuous guard: `book` is genuinely ABSENT from the gated root — never
+      # a top-level item and (OnixEdit disabled) no Plugins column claims it. If a
+      # future change re-homed it at the root, `find_type_node` would resolve it
+      # without touching …Rest and this pin would be meaningless.
+      refute Enum.any?(root.items, &(Map.get(&1, :id) == "book")),
+             "book must not be a top-level root item — it has no enabled owner"
+
+      refute Enum.any?(root.items, &(Map.get(&1, :id) == "plugins")),
+             "OnixEdit is disabled — no Plugins column may claim book"
+
+      # (1) The path is normalized under …Rest: the census folder surfaces at the
+      # root and the stale path is drilled into it.
+      assert Enum.any?(root.items, &(Map.get(&1, :id) == "rest")),
+             "the …Rest folder must surface book's homeless type"
+
+      assert root.selected == "rest",
+             "the stale ['book', id] path is normalized so …Rest is the selected reveal"
+
+      # (3) The reveal drilled root → …Rest → rest-book: the walk opened the
+      # demoted-to-census column down to the book doc.
+      assert length(panes) == 3, "root → …Rest → book: the census column is drilled open"
+      assert List.last(panes).type_name == "book"
+
+      # (2) The editor pane opens the document itself.
+      assert is_map(editor), "the homeless book doc still opens its editor"
+      assert editor.type == "book"
+      assert editor.doc.doc_id =~ "b1"
+    end
   end
 end

@@ -1,19 +1,14 @@
 <!-- doc-tier: agent | canonical-for: plugin-authoring | budget: 600tok -->
 # Plugins
 
-CANONICAL contract = `Barkpark.Plugin` @moduledoc (MUST/MUST-NOT, buckets, fresh-install invariant, idempotency, .beam gotcha). Read it first. Living examples: `tasks.ex`; `sheets.ex` (lifecycle_hooks gate; see api/CLAUDE.md §Sheets).
+CANONICAL contract = `Barkpark.Plugin` @moduledoc (MUST/MUST-NOT, route buckets, fresh-install, idempotency, .beam gotcha). Read first. Examples: `tasks.ex`, `sheets.ex` (lifecycle_hooks; api/CLAUDE.md §Sheets).
 
-Add a plugin: (1) `api/lib/barkpark/plugins/<name>.ex` with `use Barkpark.Plugin`; create `priv/plugins/<name>/plugin.json` (`plugin_name`, `module`, `version`, `capabilities`) — auto-discovered on boot; (2) schema JSON in `priv/plugins/<name>/schemas/` from `register_schemas/1` — auto-installed each boot by `Bootstrap.register_all_schemas/0`; NEVER reintroduce the manual `mix run` workaround on the server; (3) routes from `register_routes/1`, bucket-tagged:
+Add a plugin: (1) `api/lib/barkpark/plugins/<name>.ex` with `use Barkpark.Plugin` + `priv/plugins/<name>/plugin.json` — auto-discovered on boot; (2) schemas in `priv/plugins/<name>/schemas/` from `register_schemas/1`, auto-installed each boot by `Bootstrap.register_all_schemas/0` (no `mix run`); (3) routes from `register_routes/1`, `auth:`-bucketed.
 
-| Bucket | Pipeline | Use |
-|---|---|---|
-| :admin / :ops | browser + on_mount auth | admin/ops consoles |
-| :public | browser, no auth | in-studio public LV |
-| :public_root | browser, own root_layout | public readers (`/papers/:slug`, `/sheets/:slug`) |
-| :api / :token | `/v1/plugins`, admin / bearer | controller APIs |
-| :token_root | host `/v1`, bearer | root token API (`/v1/tasks`) |
-| :ingest | RequireIngestToken (shared secret) | ingest APIs (`/v1/plugins/<name>/*`) |
-| :public_api | PublicCors, no auth | anonymous CORS APIs (pulse) + OPTIONS preflights |
+Route buckets (`auth:`; per-bucket pipeline + mount in the `## Route buckets` moduledoc): `:admin`/`:ops`, `:public`, `:public_root` (readers, needs `root_layout:`), `:api`/`:token` (`/v1/plugins`), `:token_root` (host `/v1`), `:ingest` (`RequireIngestToken`), `:public_api` (`PublicCors`, anon CORS).
+
+## Per-workspace enablement
+Optional callbacks (`__using__` defaults): `default_enabled?/0` (`true`), `structure_placement/0` (`:plugins`; `:main | :plugins | :top_menu`), `owned_schema_types/0` (harvested from `register_schemas` → the desk's ownership map). Surfaced per workspace via `workspaces.settings["plugins"]` (`Tenancy.workspace_plugin_settings/1`); `Enablement.effective/1` merges over the defaults. Boot `:plugins` whitelist = installed, not surfaced.
 
 Rules:
 - **No deletion in v1** — removing a schema file keeps the `schema_definitions` row (protects documents); removal is manual ops.
@@ -21,14 +16,12 @@ Rules:
 
 Anti-patterns:
 - Don't clone the desk — use schema metadata (`groups`/`actions`/`visibleWhen`/…).
-- No hand-mounted routes, plugin CSS, or plugin field renderers — use native v2 components.
-- No plugin-private PubSub vocab — `external_sync:<system>:<doc_id>`.
+- No hand-mounted routes, plugin CSS, or field renderers — use native v2 components; PubSub vocab is `external_sync:<system>:<doc_id>`.
 - Missing capability ⇒ add a bucket/callback/generic in CORE; never route around the host.
-- Schema bugs hide behind UI bugs — check schema + sub-schema splice first.
 
 ## Code anchors
-- api/lib/barkpark/plugin.ex — Barkpark.Plugin (moduledoc = contract)
+- api/lib/barkpark/plugin.ex — Barkpark.Plugin contract; def default_enabled?, def structure_placement, def owned_schema_types
 - api/lib/barkpark/plugins/tasks.ex — register_schemas, register_routes
-- api/lib/barkpark/plugins/sheets.ex — lifecycle_hooks, register_routes
+- api/lib/barkpark/plugins/enablement.ex — def effective
 - api/lib/barkpark/plugins/bootstrap.ex — register_all_schemas
 - api/lib/barkpark/plugins/registry.ex — all
