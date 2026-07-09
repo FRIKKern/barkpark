@@ -72,6 +72,31 @@ human gate and it blocks nothing in code.
 - **D11. `PR` linkage is unchanged.** The `Task:` trailer + `pr-task-gate` stays canonical;
   issue-closing keywords are derived niceties. The mirror renders a `Task: <doc_id>` trailer into
   the issue body so GitHub-side PRs keep working with the existing gate.
+- **D13 (wave 8). Pre-adoption outbound gate — the intake task is OUTBOUND-DARK until adoption.**
+  `MirrorJob.reconcile` cancels on `link.state == "intake"` (`{:cancel, :intake}`, the `:detached`
+  twin) BEFORE any GitHub call. Barkpark never PATCHes an issue it has not been granted ownership
+  of; adoption is the consent moment that re-opens the path. The guard keys on the state string,
+  NEVER on synced_rev absence — an adopted task also lacks `synced_rev` until its first mirror,
+  and that consent-moment first push must stay live.
+- **D14 (wave 8). Inbound breadth is bookkeeping-only, in a sibling handler.** `Intake` stays
+  birth-only (its `@canonical` identity). A sibling `Github.InboundEvents` handles
+  `issues.deleted`/`issues.transferred` (gh-born task → detach) and `issues.closed` by a non-bot
+  sender on a `state=="intake"` task (→ detach, reason `closed_by_author`). Every path runs the
+  bot-drop FIRST, then `Link.put(state: "detached")` + `Conflicts.record(kind: "detached",
+  detail.reason: deleted|transferred|closed_by_author)`. No `lifecycle_status` write EVER (the
+  ownership matrix says outbound_only — an inbound lifecycle write is a bidirectionality breach),
+  no field read-back, no new conflict kind (Health's 3-kind bucketing untouched). Lookup is by the
+  deterministic `gh-<num>` doc_id only; outbound-mirrored issues keep the reactive 410 detach.
+  Missing task / non-intake close → deliberate `:ignored` 2xx with a test asserting it. Detached
+  is not adoptable (adopt gate unchanged).
+- **D15 (wave 8). Tenancy threads at the edges; the service layer is already scope-clean.**
+  `Adopt`/`Intake` already thread `:workspace_id`/`:project_id` opts — only the callers pass `[]`.
+  Studio: `resolve_action_handlers/2` closes over `ctx.scope` (the onixedit arity-3 precedent).
+  HTTP: the adopt controller derives `ScopeHelpers.scope_opts(conn)`; the `:token` plugin bucket
+  gains the `/w/:ws/p/:proj` scoped mirror (the `:api`-bucket precedent, router.ex ~949) and
+  `github.adopt`/`github.status` set `scoped_prefix`. Inbound: optional `intake_workspace_id`
+  (env-resolved via Settings; absent → default workspace, today's behavior) threaded into
+  ingest opts. Never accept raw tenancy params that bypass membership enforcement.
 
 ## Ownership matrix
 
@@ -126,15 +151,26 @@ webhook secret memoized (kill pre-verify audit amplification). The plugin dir no
 hydration). Isolated LAST so it can't destabilize the proven Issues loop. **See the "Wave 5 CUT" section for
 the 4-slice build plan.**
 
-**Wave 6 — observability — ⏳ DISPATCHED (architect pass 2026-07-07, seams verified live vs HEAD `1069a8b7`; cut below):**
+**Wave 6 — observability — ✅ MERGED (#1238, `f7f47cc8`):**
 sync-health state (cursor/lag/queue-depth/open-conflicts) + `/admin/github` `:ops` console (pulse precedent) +
 `bp github status` verb + fold in the 3 wave-5 deferrals (child-count cap, real-422 distinction, GraphQL-RATE_LIMITED
 visibility). **See the "Wave 6 CUT" section for the 4-slice build plan.**
 
-**Wave 7 — needs-human:** GitHub App creation on FRIKKern/barkpark, install, generate private key +
-webhook secret, create Projects v2 board + single-select fields, provision secrets into guerrilla,
-add `github` to the whitelist. Runbook doc (`docs/ops/github-sync.md`, human-tier) + `@canonical`
-markers on `MirrorJob.reconcile` and intake find-or-create. Blocks NO code slice.
+**Wave 7 — needs-human — ✅ DONE (2026-07-08, LIVE on guerrilla):** App `barkpark-bridge-frikkern`
+created + installed on FRIKKern/barkpark, secrets provisioned, `github` whitelisted — bridge live
+(active:true, cursor==head, 0 conflicts; 433 tasks carry an outbound link). Two live-found fixes
+merged: **#1243** (`db8b7382`, MirrorJob resolves repo via Settings env→DB) and **#1247**
+(`80fc9b73`, project top-level task title + draft/publish mirror-job dedup). Outbound round-trip
+(create→issue→close) and inbound BOT-DROP verified live; the **human-opened inbound issue test did
+NOT happen** — that is wave 8's gate.
+
+**Wave 8 — the inbound journey, proven and hardened — 🔨 CUT (2026-07-09, architect pass):** fix the
+live `resolve_doc_actions` struct-Access defect (shared antipattern with onixedit) + scope-aware
+Studio adopt; gate the outbound mirror on `state=="intake"` (D13 — adoption is the consent moment);
+widen inbound bookkeeping (D14 — deleted/transferred/human-closed intake → VISIBLE detach, bot-drop
+first, no lifecycle write ever); thread tenancy at the adopt/intake edges (D15) + pay the test debt
+(full-stack signed-body ConnCase, conflicts detail merge-not-overwrite, Health `db_ok` liveness);
+then ONE live human-opened issue driven intake→adopt→backlink. **See the "Wave 8 CUT" section.**
 
 ## Wave log
 
@@ -685,6 +721,139 @@ automation so the pin actually runs.
 
 **Wave 6 = DONE (pending integration).** Only Wave 7 remains — the human GitHub App / Projects board / secret gate that
 lights the whole epic up but blocks NO further code. The loop has mined the epic out.
+
+### Wave 2026-07-09 — RECONCILIATION + Wave 8 CUT — the inbound journey, proven and hardened
+
+**Reconciliation (audited vs git + the live guerrilla ledger + FRIKKern/barkpark):**
+- The old carry list ("adoption action, D7 quarantine, deleted→detached") is STALE — all merged in
+  wave 4 (#1236). Waves 5 (#1237) and 6 (#1238) merged; wave 7 (the human gate) is DONE and the
+  bridge is LIVE on guerrilla (App `barkpark-bridge-frikkern`, active:true, cursor==head,
+  0 conflicts). Live-found fixes #1243 (repo env→DB) and #1247 (title + draft/publish dedup) merged.
+- **The inbound half has NEVER fired live.** FRIKKern/barkpark holds 442 issues — ALL authored by
+  the bridge App, ZERO human-authored. On the ledger: 433 tasks carry an outbound `content.github`
+  link (all `synced`), ZERO `gh-<num>`/`state=="intake"` tasks exist. Wave 8 = prove and harden
+  that journey.
+- **Ledger cleanup:** the 4 stale draft twins (`drafts.github-bridge-w3..w6` — empty-title,
+  open, expired-claim siblings of DONE published waves) are DISCARDED (`bp doc discard-draft`),
+  never published — publishing would have overwritten the done records with empty drafts.
+- **Gate-glob note:** the wave-6 "fix the glob" item is prose-only — the bad path
+  `test/barkpark/plugins/github/github_test.exs` exists ONLY in this charter's old task-spec text;
+  no live automation references it. The real file is the parent `test/barkpark/plugins/github_test.exs`.
+  Nothing to fix in CI; do not copy the old path into any future gate.
+- **OPEN QUESTION for the human (not a slice):** the public mirror exposes the ENTIRE internal
+  backlog — 420 issues minted in 2 days, full engineering bodies with file:line refs, on a public
+  repo. This is the vision working as designed ("one board"), but the human should confirm
+  public-roadmap intent or ask for a scoping slice (label/goal/workspace filter or body-stripping).
+
+**Confirmed live defects driving the cut** (explorer-verified, file:line):
+- `github.ex adoptable_intake?/1` (~L323-332): the middle `get_in(doc, ["content","github","state"])`
+  rung RAISES on any `%Document{}` task lacking a github key — i.e. nearly every task in Studio with
+  the plugin on. The Registry's PER-PLUGIN rescue masks it (only github's contribution is dropped;
+  baseline actions survive) → log spam per render + a latent 500, not a broken header. onixedit's
+  `hide_publish_action?/1` carries the IDENTICAL ladder (github copied its precedent) — one shared fix.
+- `MirrorJob.reconcile` has NO intake guard: a pre-adoption Barkpark edit to a born-dark `gh-<num>`
+  task (ordinary triage!) drains → converge → PATCHes the OUTSIDER's issue with Barkpark's projection
+  (forced title, fenced body, intake labels) before any consent. No test covers a `state=="intake"`
+  link. D13 closes this.
+- `Intake.ingest` ignores everything but `opened`: issues.deleted/transferred leave a live-looking
+  link; an outsider closing their own intake issue leaves the task needs-human forever, invisibly.
+  D14 closes this, bookkeeping-only.
+- Adopt callers all hardcode `[]` scope (Studio `action_handlers/0`, adopt controller L44, CLI);
+  webhook ingest_opts carries only a dataset — intake lands in the default workspace. D15 closes this.
+- Test debt still unpaid at HEAD: no full-stack signed-body ConnCase (controller test calls the
+  action directly and its own moduledoc admits the gap); `Conflicts.refresh` OVERWRITES detail on the
+  `{repo,issue,kind}` dedup key (a graphql projection error clobbers a recorded human drift);
+  `Health.safe/2` renders a DB outage as healthy-zeros with no liveness bit.
+
+**The wave = 5 slices** (S1-S4 parallel, file-disjoint; S5 is the human-driven live gate after
+S1-S4 merge + auto-deploy). Tasks: `github-bridge-w8-s1..s5` under `github-bridge-epic` (reopened).
+Quality bar: ZERO silent states — every inbound event acts, records, or deliberately no-ops with a
+test asserting which. Doctrine unchanged and LAW: Barkpark is the single source of truth, mirror is
+OUTBOUND-only, inbound is intake/bookkeeping-only, `mutation_events.source` stays EXACTLY `"github"`,
+no field is ever bidirectional, claims/epochs/fencing/rail_rev never leave Barkpark, Conflicts.record
+stays DB-only, plugin off by default.
+
+## Wave 8 CUT — the inbound journey, proven and hardened (2026-07-09, architect pass)
+
+**Wish increment:** an outsider opens an issue on public FRIKKern/barkpark and every subsequent
+thing they do — edit nothing, delete their issue, close it, have it transferred — leaves the ledger
+coherent and VISIBLE, never overwrites their words pre-adoption, and one adopt (CLI or a Studio
+button that renders without raising) flips ownership cleanly in ANY workspace. Fixture-first for all
+code; the live step is one-issue-only.
+
+### Slice 1 — Studio adopt surface: struct-safe content probe + scope-aware handler (`github-bridge-w8-s1`)
+- **Surface:** new `api/lib/barkpark/plugins/content_probe.ex` + `plugins/github.ex` +
+  `plugins/onixedit.ex` + tests.
+- **Build:** one shared `Barkpark.Plugins.ContentProbe.content_get(doc, string_keys)` that never
+  raises on any doc shape (struct → `Access.key(:content)` then string/atom probes on the inner
+  plain map; plain map → `"content"`/`:content` then string/atom probes; bare-key `get_in` NEVER
+  runs against a struct). Rewire `github.ex adoptable_intake?/1` and `onixedit.ex
+  hide_publish_action?/1` onto it. Add `github.ex resolve_action_handlers/2` per the onixedit
+  precedent (onixedit.ex ~L108-125): scope==[] → bare arity-3 `Adopt.adopt(doc_id, dataset, [])`,
+  else a closure passing `ctx.scope` as the opts. Keep `action_handlers/0` as the scope-less fallback.
+- **Gate:** `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github_test.exs
+  test/barkpark/plugins/onixedit_test.exs test/barkpark/plugins/content_probe_test.exs` — the
+  load-bearing PROTECTIVE test: a real `%Barkpark.Content.Document{}` task struct WITHOUT a github
+  key through `resolve_doc_actions/2` DIRECTLY (no Registry rescue) returns `prev` unchanged and
+  does not raise; same shape for onixedit. Intake doc still gets the button; scope threads.
+- **Size:** medium.
+
+### Slice 2 — pre-adoption mirror gate: intake link → `{:cancel, :intake}` (`github-bridge-w8-s2`)
+- **Surface:** `github/mirror_job.ex` + `test/.../mirror_job_test.exs` only.
+- **Build:** D13. `intake?/1` helper (twin of `detached?/1` ~L560) + a `reconcile/3` cond branch
+  right after the `detached?` branch, BEFORE converge: `intake?(link) -> {:cancel, :intake}`.
+  Key on `state=="intake"` ONLY — never synced_rev absence.
+- **Gate:** `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/mirror_job_test.exs`
+  — intake link + Barkpark edit → `{:cancel, :intake}`, ZERO HTTP (Bypass.down); PROTECTIVE:
+  `state=="adopted"`, no synced_rev → still converges (the consent-moment first push stays live).
+- **Size:** small.
+
+### Slice 3 — inbound event breadth: deleted/transferred/closed → visible detach (`github-bridge-w8-s3`)
+- **Surface:** new `github/inbound_events.ex` + `github_webhook_controller.ex` + `github/intake.ex`
+  (`bot_sender?/1` public) + `github/settings.ex` (optional `intake_workspace_id/0`) + tests.
+- **Build:** D14 exactly (bookkeeping-only sibling handler; bot-drop first; detach via `Link.put` +
+  `Conflicts.record kind:"detached"` with `detail.reason` discriminator; closed acts ONLY on
+  `state=="intake"`; missing task → `:ignored`). Controller dispatches the 3 actions to
+  `InboundEvents.handle/2`, everything else to `Intake.ingest/2` as today, maps EVERY new outcome
+  tag to an explicit 2xx clause (a new tag with no clause = CaseClauseError = GitHub retry-storm).
+  Thread `workspace_id: Settings.intake_workspace_id()` (env `BARKPARK_GITHUB_INTAKE_WORKSPACE_ID`,
+  nil-absent) into ingest_opts for both handlers.
+- **Gate:** `cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/inbound_events_test.exs
+  test/barkpark/plugins/github/intake_test.exs test/barkpark_web/controllers/github_webhook_controller_test.exs`
+  — every action path acts/records/no-ops with an assertion; Bot-sender closed → `:dropped`, NO
+  detach (the outbound mirror closes issues as the App — its echo must not detach); adopted-task
+  close → `:ignored`; `mutation_events.source == "github"` EXACTLY on every Link.put row.
+- **Size:** large.
+
+### Slice 4 — adopt tenancy at the HTTP/CLI edge + test-debt trio (`github-bridge-w8-s4`)
+- **Surface:** `github_adopt_controller.ex` + `github/cli.ex` + `router.ex` (scoped `:token` mount)
+  + `github/conflicts.ex` + `github/health.ex` + NEW `test/barkpark_web/controllers/github_webhook_integration_test.exs`.
+- **Build:** D15 edge-threading (controller `ScopeHelpers.scope_opts(conn)`; scoped mirror of the
+  `:token` plugin bucket per the `:api` precedent router.ex ~949; `scoped_prefix` on
+  `github.adopt`/`github.status`); the carried full-stack signed-body ConnCase (raw JSON STRING
+  body — never a map, or the CacheBodyReader tee is bypassed — + real X-Hub-Signature-256 +
+  `webhook_secret_ttl_ms: 0` + `Settings.reset_webhook_secret_cache()` in setup/on_exit);
+  `Conflicts.refresh` merges detail (`Map.merge(existing.detail, new)`) instead of overwriting;
+  `Health.snapshot/1` gains a `db_ok` liveness bit (`safe(fn -> SELECT 1 end, false)`).
+- **Gate:** `cd api && CC=/usr/bin/clang mix test test/barkpark_web/controllers/github_adopt_controller_test.exs
+  test/barkpark_web/controllers/github_webhook_integration_test.exs test/barkpark/plugins/github/conflicts_test.exs
+  test/barkpark/plugins/github/health_test.exs` + the Go smoke (`CC=/usr/bin/clang go build ./... &&
+  go vet ./internal/cli/... && go test ./internal/cli/...` — manifest-only CLI change).
+- **Size:** large.
+
+### Slice 5 — LIVE PROOF, the wave's human gate (`github-bridge-w8-s5`)
+After S1-S4 merge + auto-deploy: confirm the App's Issues webhook subscription, open EXACTLY ONE
+human-authored issue on FRIKKern/barkpark, verify `gh-<num>` born-dark (labels, unclaimed,
+`state=="intake"`, backlink comment), EDIT the task pre-adoption and verify the outsider's issue is
+NOT patched (S2 live), `bp github adopt gh-<num>` (needs-human stripped, adopted, backlink, no
+auto-claim), next edit fires the consent-moment first mirror, then close out cleanly. Every
+observation recorded as task evidence + a wave-log entry. Any misbehavior → file a child task,
+never hotfix live. **Size:** small.
+
+**Integration order:** S1-S4 parallel (file-disjoint by design: S1=github.ex/onixedit.ex/probe,
+S2=mirror_job, S3=webhook controller/inbound_events/intake/settings, S4=adopt controller/cli/router/
+conflicts/health). S5 strictly after S1-S4 merge + deploy. Elixir Test gate before every merge;
+pr-task-gate needs the task in_progress at PR-open.
 
 ## Wave 6 CUT — observability (2026-07-07, architect pass)
 

@@ -87,6 +87,10 @@ EXPLICITLY OUT of the epic (do not build here): paper-editor CSS onboarding (no 
 
 ## Wave log
 
+### Wave 3 integration (2026-07-10) — lead log — EPIC COMPLETE
+
+All 13 children `done`; epic closed 2026-07-10. Final wave-3 landings: scope-bind delta #1981 + Settings-URL lint fix #1992 (earlier), typeless-feedback **#2038** (fresh PR after #1991's mergeability wedged UNKNOWN — a fresh branch/PR fired workflows instantly; empty commits do NOT retrigger path-filtered workflows), cards-refresh **#2039** (c878c079, merged LAST per D21). ssp-w3-deeplink-rest-test: BOTH parallel runs' branches went stale; a third session's **#2007** ("ssp-w3 remainder") landed the pin first — same assertions plus an anti-vacuous …Rest-surface guard; the lead's own rebuild #2046 closed-superseded. `fix-settings-flat-mount-dead-code` landed as **#1997**. LESSON (twice this wave): with ≥3 concurrent sessions on one epic, re-check main for the capability — not just the branch name — before rebuilding or landing anything; supersede loudly with a PR comment. Guerrilla verified live at ≥#2040 (includes every A merge), `/api/schemas` 200. Only filed follow-on outside the epic: `workspace-delete-archive-api`.
+
 ### Wave 3 (2026-07-09) — closing wave, reviewer log (run e5a6e6b2)
 
 **⚠ DUPLICATE CONCURRENT RUNS.** Wave 3 was built TWICE in parallel (runs `e5a6e6b2` — this log — and `e358a86f`, which has its own reviewer). Both stamped the same bp tasks under identical worker names, so criteria evidence mixes both runs' artifacts (e.g. cards evidence cites the twin's commit bbec6055). A DUPLICATE-RUN NOTICE with both candidate branches is now stamped into all four wave-3 task descriptions (this bumps the work digest — the lead's close will 409 `doc_changed_since_claim`; re-read then close, the documented fence). **Lead: integrate ONE run's slice-set end-to-end, never mix runs** — slices 1+2 both edit the same SettingsLive plugins region.
