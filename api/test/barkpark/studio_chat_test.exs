@@ -806,6 +806,68 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # Charter D49 — the plan-paper stamp seam. A request_id-keyed metadata merge
+  # onto a needs-you (plan) row, distinct from update_approval_status (which
+  # writes ONLY approval_status) and merge_tool_metadata (keyed on tool_use_id,
+  # which plan rows lack). The publishing Task stamps {paper_id, paper_url} here
+  # so a reopened plan card links to its Paper forever.
+  describe "merge_approval_metadata/3 (D49)" do
+    defp plan_ask(session, request_id) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: "plan",
+          source_markdown: "# The plan\n\nDo it.",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "ExitPlanMode",
+            "input" => %{"plan" => "# The plan\n\nDo it."},
+            "approval_status" => "allowed"
+          }
+        })
+
+      m
+    end
+
+    test "merges the patch WITHOUT clobbering the row's existing metadata keys" do
+      s = new_session()
+      plan_ask(s, "p-1")
+
+      assert {:ok, m} =
+               StudioChat.merge_approval_metadata(s.id, "p-1", %{
+                 "paper_id" => "chat-plan-abc",
+                 "paper_url" => "/papers/chat-plan-abc"
+               })
+
+      # the new keys landed…
+      assert m.metadata["paper_id"] == "chat-plan-abc"
+      assert m.metadata["paper_url"] == "/papers/chat-plan-abc"
+      # …and every pre-existing key is preserved (request_id, tool_name, input,
+      # approval_status all survive the merge)
+      assert m.metadata["request_id"] == "p-1"
+      assert m.metadata["tool_name"] == "ExitPlanMode"
+      assert m.metadata["approval_status"] == "allowed"
+      assert m.metadata["input"] == %{"plan" => "# The plan\n\nDo it."}
+    end
+
+    test "a later merge overwrites only its own keys, keeping earlier stamps" do
+      s = new_session()
+      plan_ask(s, "p-2")
+
+      {:ok, _} = StudioChat.merge_approval_metadata(s.id, "p-2", %{"paper_id" => "chat-plan-1"})
+
+      {:ok, m} =
+        StudioChat.merge_approval_metadata(s.id, "p-2", %{"paper_url" => "/papers/chat-plan-1"})
+
+      assert m.metadata["paper_id"] == "chat-plan-1"
+      assert m.metadata["paper_url"] == "/papers/chat-plan-1"
+    end
+
+    test "an unmatched request_id is a clean :noop, never a raise" do
+      s = new_session()
+      assert :noop == StudioChat.merge_approval_metadata(s.id, "nope", %{"paper_id" => "x"})
+    end
+  end
+
   describe "set_draft/2 — sticky composer draft (charter D36c)" do
     test "persists and restores a draft on the FULL struct" do
       s = new_session()
