@@ -189,6 +189,28 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
       end
     end
 
+    test "matrix cells auto-fit their content instead of a fixed-height internal scroll", %{
+      region: region
+    } do
+      # ssp-w1: every swatch iframe is wired to the SgFit hook and starts at a
+      # min-height (grown to contentDocument.scrollHeight client-side), with
+      # overflow:hidden + scrolling="no" as the no-JS fallback — so no cell
+      # scrolls internally. The old hard `height: 340px` is gone.
+      assert region =~ ~s(phx-hook="SgFit")
+      assert region =~ "min-height: 320px"
+      assert region =~ "overflow: hidden"
+      assert region =~ ~s(scrolling="no")
+
+      refute region =~ "height: 340px",
+             "the fixed 340px swatch height (internal-scroll bug) must be replaced by the SgFit autofit"
+
+      # the hook that does the same-origin fit is defined in the root layout
+      root = File.read!(@root_layout)
+      assert root =~ "Hooks.SgFit = {"
+      assert root =~ "contentDocument"
+      assert root =~ "scrollHeight"
+    end
+
     test "mail-chrome row per theme paints generated email_skin hex (no hand-copied hex)", %{
       region: region
     } do

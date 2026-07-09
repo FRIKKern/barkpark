@@ -4958,6 +4958,41 @@
       }
     };
 
+    // SgFit — sizes a /studio/styleguide theme-matrix swatch iframe to its
+    // own content instead of a fixed height, so no matrix cell scrolls
+    // internally. The swatch (/studio/styleguide/swatch) is SAME-ORIGIN and
+    // admin-gated, so we read frame.contentDocument.documentElement.scrollHeight
+    // directly — no postMessage needed (same prior art as the bulldocs mail
+    // frame). Re-fits on load, again after late fonts/images (400/1500ms), and
+    // on window resize; the iframe keeps overflow:hidden + scrolling="no" as the
+    // no-JS fallback so a min-height cell never grows its own scrollbar.
+    Hooks.SgFit = {
+      _fit() {
+        try {
+          var d = this.el.contentDocument;
+          if (d && d.documentElement) {
+            this.el.style.height = Math.max(320, d.documentElement.scrollHeight) + "px";
+          }
+        } catch (e) {}
+      },
+      mounted() {
+        var self = this;
+        this._onLoad = function () {
+          self._fit();
+          setTimeout(function () { self._fit(); }, 400);
+          setTimeout(function () { self._fit(); }, 1500);
+        };
+        this._onResize = function () { self._fit(); };
+        this.el.addEventListener("load", this._onLoad);
+        window.addEventListener("resize", this._onResize);
+        this._fit(); // already-loaded (cached) frames
+      },
+      destroyed() {
+        if (this._onLoad) this.el.removeEventListener("load", this._onLoad);
+        if (this._onResize) window.removeEventListener("resize", this._onResize);
+      }
+    };
+
     // BpThemeMirror — mirrors the server-resolved workspace THEME IDENTITY
     // (ts-w4e) onto <html data-bp-theme>, so the theme picker on
     // /studio/settings previews instantly with no reload. Same mirror pattern

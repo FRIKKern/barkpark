@@ -208,10 +208,14 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
                 {theme} · {mode}
               </div>
               <iframe
+                id={"sg-swatch-#{theme}-#{mode}"}
+                phx-hook="SgFit"
+                phx-update="ignore"
                 src={"/studio/styleguide/swatch?theme=#{theme}&mode=#{mode}"}
                 title={"#{theme} #{mode} preview"}
                 loading="lazy"
-                style="width: 100%; height: 340px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);"
+                scrolling="no"
+                style="width: 100%; min-height: 320px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);"
               >
               </iframe>
             </div>
