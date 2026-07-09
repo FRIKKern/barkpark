@@ -129,6 +129,41 @@ func TestRoles(t *testing.T) {
 	}
 }
 
+// TestThemes pins the enumeration seam the all-themes surfaces loop: every
+// registered theme id, DefaultTheme first and the rest sorted, every entry
+// resolvable through the theme-keyed accessors. This is the contract that makes
+// "add theme N+1 → the slate/showroom grow with no code edit" hold — a theme in
+// genTones but not returned here (or vice-versa) would silently drop a surface.
+func TestThemes(t *testing.T) {
+	got := Themes()
+	if len(got) == 0 {
+		t.Fatal("Themes() returned no themes")
+	}
+	if got[0] != DefaultTheme {
+		t.Errorf("Themes()[0] = %q, want DefaultTheme %q first", got[0], DefaultTheme)
+	}
+	// exactly the genTones key set, no dupes, no phantom ids
+	if len(got) != len(genTones) {
+		t.Errorf("Themes() has %d ids, genTones has %d — must be 1:1", len(got), len(genTones))
+	}
+	seen := map[string]bool{}
+	for _, id := range got {
+		if seen[id] {
+			t.Errorf("Themes() lists %q twice", id)
+		}
+		seen[id] = true
+		if _, ok := genTones[id]; !ok {
+			t.Errorf("Themes() lists %q which genTones cannot resolve", id)
+		}
+	}
+	// tail (everything after DefaultTheme) is lexicographically sorted
+	for i := 2; i < len(got); i++ {
+		if got[i-1] > got[i] {
+			t.Errorf("Themes() tail not sorted: %q before %q", got[i-1], got[i])
+		}
+	}
+}
+
 // TestRoleColor pins the role→AdaptiveColor accessor the CLI/TUI paint through:
 // every semantic role returns EXACTLY its GenStatusTone entry (the unflattened
 // adaptive tone, so the profile degradation ladder is preserved), and any
