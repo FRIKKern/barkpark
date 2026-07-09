@@ -44,8 +44,8 @@ Steps:
    ]}
    ```
 
-   A `201`/transaction id back means the Action is live. Ask the GPT plainly:
-   *"create a task titled …"* and it drives the same call.
+   A `200` carrying a `transactionId` back means the Action is live. Ask the
+   GPT plainly: *"create a task titled …"* and it drives the same call.
 
 Caveats, stated honestly:
 
@@ -119,13 +119,17 @@ curl -s $BP/v1/data/mutate/production -H "Authorization: Bearer $TOK" \
         {"publish":{"id":"triage","type":"task"}}]}'
 ```
 
-**Create a paper** — papers are `type:"paper"` documents; ingest one through the
-Bulldocs route:
+**Create a paper** — papers are `type:"paper"` documents; ingest one through
+the Bulldocs route. The body carries `slug` + `blocks` at the **top level**
+(no `content` wrapper), and this one route wants an **admin-tier** bearer (or
+the instance's `BARKPARK_INGEST_TOKEN`) — a read/write scoped token 401s here:
 
 ```bash
 curl -s $BP/v1/plugins/bulldocs/papers -H "Authorization: Bearer $TOK" \
   -H 'Content-Type: application/json' \
-  -d '{"slug":"welcome","title":"Welcome","content":{"type":"portable-doc","blocks":[]}}'
+  -d '{"slug":"welcome","blocks":[
+        {"id":"t1","type":"heading","level":1,"text":"Welcome"},
+        {"id":"p1","type":"paragraph","content":[{"type":"text","value":"First paper, filed remotely."}]}]}'
 ```
 
 Paste any of these into a Claude.ai chat as a code block for the user to run.
