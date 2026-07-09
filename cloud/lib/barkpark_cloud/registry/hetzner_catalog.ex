@@ -304,4 +304,97 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
       entry -> {:ok, entry}
     end
   end
+
+  ## ── Provisioning catalog (region/size/price) ──────────────────────────────
+  ##
+  ## A SEPARATE concern from the action allowlist above: the normalized menu of
+  ## what a team can PROVISION into their Hetzner account (regions + server
+  ## types + price), mapped into the provider-neutral shape every provider's
+  ## catalog serves — the EXACT shape `Registry.AzureCatalog.normalize/2` emits:
+  ##
+  ##     %{regions: [%{slug, name}, …],
+  ##       server_types: [%{slug, cores, ram_gb, disk_gb, monthly_price}, …]}
+  ##
+  ## Kept PURE (fed the raw hcloud `/v1/server_types` + `/v1/locations` payloads
+  ## by the route) so it is unit-testable off a fixture with no token. The
+  ## Hetzner improvement this wave delivers is `monthly_price`: hcloud exposes it
+  ## per server type (a `prices[].price_monthly.gross` string per location), so
+  ## we thread the cheapest gross monthly through — the catalog used to carry no
+  ## price at all.
+
+  @type region :: %{slug: String.t(), name: String.t()}
+  @type server_type :: %{
+          slug: String.t(),
+          cores: non_neg_integer() | nil,
+          ram_gb: number() | nil,
+          disk_gb: number() | nil,
+          monthly_price: number() | nil
+        }
+
+  @doc """
+  Map raw hcloud `server_types` + `locations` lists into the neutral catalog.
+  Deprecated server types are dropped; rows missing a usable name are dropped.
+  `monthly_price` is the cheapest gross monthly across the type's per-location
+  prices (`nil` when hcloud lists none).
+  """
+  @spec normalize([map()], [map()]) :: %{regions: [region()], server_types: [server_type()]}
+  def normalize(server_types, locations) when is_list(server_types) and is_list(locations) do
+    %{
+      regions: locations |> Enum.map(&region/1) |> Enum.reject(&is_nil/1),
+      server_types: server_types |> Enum.map(&server_type/1) |> Enum.reject(&is_nil/1)
+    }
+  end
+
+  defp region(%{"name" => name} = loc) when is_binary(name) and name != "" do
+    %{slug: name, name: location_name(loc, name)}
+  end
+
+  defp region(_), do: nil
+
+  defp location_name(loc, fallback) do
+    case Map.get(loc, "city") do
+      city when is_binary(city) and city != "" -> city
+      _ -> fallback
+    end
+  end
+
+  defp server_type(%{"deprecated" => true}), do: nil
+
+  defp server_type(%{"name" => name} = st) when is_binary(name) and name != "" do
+    %{
+      slug: name,
+      cores: numeric(Map.get(st, "cores")),
+      ram_gb: numeric(Map.get(st, "memory")),
+      disk_gb: numeric(Map.get(st, "disk")),
+      monthly_price: cheapest_monthly(Map.get(st, "prices"))
+    }
+  end
+
+  defp server_type(_), do: nil
+
+  defp numeric(n) when is_number(n), do: n
+  defp numeric(_), do: nil
+
+  # hcloud prices: [%{"price_monthly" => %{"gross" => "6.49…"}}, …]. Parse each
+  # gross to a float and keep the cheapest, rounded to 2dp; nil when none parse.
+  defp cheapest_monthly(prices) when is_list(prices) do
+    prices
+    |> Enum.map(&monthly_gross/1)
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] -> nil
+      grosses -> grosses |> Enum.min() |> Float.round(2)
+    end
+  end
+
+  defp cheapest_monthly(_), do: nil
+
+  defp monthly_gross(%{"price_monthly" => %{"gross" => gross}}) when is_binary(gross) do
+    case Float.parse(gross) do
+      {value, _rest} -> value
+      :error -> nil
+    end
+  end
+
+  defp monthly_gross(_), do: nil
 end

@@ -34,6 +34,12 @@ config :barkpark_cloud,
 config :barkpark_cloud,
   hetzner_http_client: BarkparkCloud.HetznerFakeHttpClient
 
+# azure: the config-selected Azure client seam. Default (prod) is
+# Azure.RealClient; tests use the in-memory Azure.FakeClient so verify-before-
+# save + the normalized catalog run with ZERO real Azure credentials.
+config :barkpark_cloud,
+  azure_http_client: BarkparkCloud.Azure.FakeClient
+
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still
 # exercising the real Bcrypt code path.

@@ -87,6 +87,37 @@ defmodule BarkparkCloud.FailureCopy do
       String.contains?(reason, "exceeded max") and String.contains?(reason, "attempts") ->
         "This didn't finish after several attempts. Try again in a moment."
 
+      # ── Azure provider classes (provider-neutral hosting) ──
+      # Matched on Azure-specific tokens so they never collide with the Hetzner
+      # classes below (e.g. Azure's "QuotaExceeded" is caught here, while
+      # Hetzner's spaced "account quota exceeded" falls through to the generic
+      # capacity class). Each names the EXACT Azure Portal fix. All three are
+      # idempotent under a second pass (their output re-maps to itself or misses
+      # every class).
+
+      # Missing RBAC role: the service principal authenticated but lacks the role
+      # to act on the subscription (`AuthorizationFailed`, "does not have
+      # authorization/permission"). Checked before the generic auth class.
+      String.contains?(down, "authorizationfailed") or
+        String.contains?(down, "does not have authorization") or
+          String.contains?(down, "does not have permission") ->
+        "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
+
+      # Quota exceeded per VM family: the subscription's vCPU quota for a specific
+      # size family is exhausted (`QuotaExceeded`, quota + family/vcpu). Checked
+      # before the generic capacity class.
+      String.contains?(down, "quotaexceeded") or
+          (String.contains?(down, "quota") and
+             (String.contains?(down, "family") or String.contains?(down, "vcpu"))) ->
+        "Your Azure subscription's vCPU quota for this VM family is exhausted. In the Azure Portal → Subscriptions → your subscription → Usage + quotas, filter to the family and choose Request increase, then retry."
+
+      # Region capacity: the region/zone has no capacity for the requested size
+      # right now (`SkuNotAvailable`, `AllocationFailed`, `ZonalAllocationFailed`).
+      String.contains?(down, "skunotavailable") or
+        String.contains?(down, "allocationfailed") or
+          String.contains?(down, "zonalallocationfailed") ->
+        "This Azure region has no capacity for this VM size right now. In the Azure Portal → Virtual machines, pick another region or size — or retry shortly, since capacity is transient per region and size."
+
       # DNS: a domain/zone step failed on the provider. Checked BEFORE capacity
       # so a "dns zone quota" failure reads as a domain problem, not a
       # server-capacity one.
@@ -116,4 +147,23 @@ defmodule BarkparkCloud.FailureCopy do
   end
 
   def humanize(other), do: other
+
+  @doc """
+  The per-kind remediation copy the connect endpoint returns when the
+  verify-before-save preflight can't authenticate a provider credential. Names
+  the EXACT console/portal fix so the user can act without a support round-trip.
+  Falls back to a provider-agnostic line for an unknown kind.
+  """
+  @spec connect_remediation(String.t()) :: String.t()
+  def connect_remediation("hetzner") do
+    "We couldn't reach Hetzner with that API token. Create a fresh Read & Write token in the Hetzner Cloud Console → your project → Security → API tokens, then paste it here."
+  end
+
+  def connect_remediation("azure") do
+    "We couldn't authenticate to Azure with those details. In the Azure Portal → App registrations → your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired — then reconnect."
+  end
+
+  def connect_remediation(_kind) do
+    "We couldn't verify those credentials with the provider. Double-check them and try again."
+  end
 end

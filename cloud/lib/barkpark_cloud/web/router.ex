@@ -113,6 +113,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.{
     Accounts,
+    Azure,
     Billing,
     Events,
     FailureCopy,
@@ -128,6 +129,7 @@ defmodule BarkparkCloud.Web.Router do
   }
 
   alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
   alias BarkparkCloud.Registry.InstanceApiCatalog
@@ -1831,8 +1833,20 @@ defmodule BarkparkCloud.Web.Router do
     proxy_instance_webhook(conn, :"webhook.replay")
   end
 
-  # POST /v1/providers {kind, token, label?} → 201 {provider: ...}. The plaintext
-  # token is encrypted at rest by connect_provider — it is NEVER echoed back.
+  # POST /v1/providers → 201 {provider: ...}. Provider-neutral connect:
+  #
+  #   * hetzner: {kind:"hetzner", token, label?}
+  #   * azure:   {kind:"azure", credentials:{tenant_id, client_id, client_secret,
+  #              subscription_id}, label?}
+  #
+  # VERIFY-BEFORE-SAVE: a cheap authenticated call to the provider runs FIRST
+  # (hetzner — a one-row server list; azure — a token-exchange + tagged resource
+  # list via the `Azure.client/0` seam). Only if it succeeds is the credential
+  # encrypted at rest and the row inserted. On failure NOTHING is saved and the
+  # per-kind remediation copy (naming the exact console/portal fix) is returned,
+  # so the user never connects a dead credential and never sees raw provider
+  # jargon. The plaintext credential is encrypted by connect_provider — it is
+  # NEVER echoed back.
   post "/v1/providers" do
     # RBAC (rbac-roles): stores a cloud credential at rest → team admin only.
     conn = Auth.require_team_admin(conn, [])
@@ -1845,15 +1859,31 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 422, %{error: "no_team"})
 
       true ->
-        kind = conn.body_params["kind"]
-        token = conn.body_params["token"]
-        label = conn.body_params["label"]
-
-        case Registry.connect_provider(conn.assigns.current_team, kind, token || "", label: label) do
-          {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
-          {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
-        end
+        connect_provider_request(conn)
     end
+  end
+
+  # GET /v1/providers/:kind/catalog → 200 {regions, server_types} — the
+  # PROVIDER-NEUTRAL provisioning menu (what this team can provision into its
+  # connected account), normalized to one shape across providers so the
+  # dashboard and CLI render one menu:
+  #
+  #     {regions: [{slug, name}, …],
+  #      server_types: [{slug, cores, ram_gb, disk_gb, monthly_price}, …]}
+  #
+  # Requires a connected provider of that kind (404 no_provider otherwise — the
+  # connect-first empty state). Any team member may read the menu.
+  get "/v1/providers/:kind/catalog" do
+    conn = Auth.require_user(conn, [])
+    if conn.halted, do: conn, else: providers_catalog(conn, conn.params["kind"])
+  end
+
+  # GET /v1/providers/:kind/overview → 200 {provider:{kind,label}, regions,
+  # server_types} — the same normalized menu wrapped with the connected
+  # provider's header (a lightweight "what this connection offers" overview).
+  get "/v1/providers/:kind/overview" do
+    conn = Auth.require_user(conn, [])
+    if conn.halted, do: conn, else: providers_overview(conn, conn.params["kind"])
   end
 
   ## Hetzner control-plane proxy (epic charter decision 3) — the dashboard's
@@ -5492,11 +5522,219 @@ defmodule BarkparkCloud.Web.Router do
     }
   end
 
-  ## Hetzner proxy helpers (charter decisions 3+4)
+  ## Provider-neutral connect + catalog helpers ────────────────────────────────
+  ## Hetzner and Azure are peers: one connect endpoint (verify-before-save), one
+  ## normalized catalog shape. Kind-specific bits (credential shape, preflight,
+  ## raw-catalog fetch) split per provider; the persisted row and the JSON are
+  ## one shape.
+
+  @neutral_kinds ~w(hetzner azure)
 
   # The Hetzner Cloud API host. Lives HERE (the impure call site), never in the
-  # pure catalog and never in any response.
+  # pure catalog and never in any response. Defined above the first use (module
+  # attributes are read at their point of reference).
   @hetzner_api_base "https://api.hetzner.cloud"
+
+  # POST /v1/providers body → verify-before-save → insert. Refuses to persist a
+  # credential the provider can't authenticate, returning the per-kind
+  # remediation copy instead.
+  defp connect_provider_request(conn) do
+    kind = conn.body_params["kind"]
+    label = conn.body_params["label"]
+
+    with true <- kind in @neutral_kinds,
+         {:ok, credential} <- provider_credential(kind, conn.body_params),
+         :ok <- preflight_provider(kind, credential) do
+      case Registry.connect_provider(conn.assigns.current_team, kind, credential, label: label) do
+        {:ok, provider} -> json(conn, 201, %{provider: provider_json(provider)})
+        {:error, changeset} -> json(conn, 422, %{error: "invalid", details: errors(changeset)})
+      end
+    else
+      false ->
+        json(conn, 422, %{error: "invalid", details: %{kind: ["is invalid"]}})
+
+      {:error, :bad_credentials} ->
+        json(conn, 422, %{error: "invalid", details: %{credentials: ["is invalid"]}})
+
+      {:error, :unverified} ->
+        # The credential authenticates to nothing — do NOT save it. Return the
+        # per-kind remediation naming the exact console/portal fix.
+        json(conn, 422, %{
+          error: "provider_unverified",
+          remediation: FailureCopy.connect_remediation(kind)
+        })
+    end
+  end
+
+  # The plaintext credential to validate + encrypt, per kind. hetzner: the token
+  # string. azure: the four-field service-principal blob as JSON — the single
+  # encrypted_token home holds it (Decision 4), so stray input is dropped here.
+  defp provider_credential("hetzner", params) do
+    case params["token"] do
+      token when is_binary(token) -> {:ok, token}
+      _ -> {:ok, ""}
+    end
+  end
+
+  defp provider_credential("azure", params) do
+    case params["credentials"] do
+      creds when is_map(creds) -> {:ok, Jason.encode!(azure_credential_blob(creds))}
+      _ -> {:error, :bad_credentials}
+    end
+  end
+
+  # Keep ONLY the four known azure fields (string keys) — never persist stray
+  # request input alongside the credential. A field is stringified only when it
+  # is genuinely a string; any other JSON shape (nested object, array, number,
+  # bool) is coerced to "" so a malformed body fails the shape gate / preflight
+  # with a clean 422 remediation instead of raising a Protocol.UndefinedError
+  # (to_string/1 has no impl for maps/lists) and 500-ing the request.
+  defp azure_credential_blob(creds) do
+    for field <- BarkparkCloud.Registry.Provider.azure_fields(),
+        into: %{},
+        do: {field, credential_string(Map.get(creds, field))}
+  end
+
+  defp credential_string(value) when is_binary(value), do: value
+  defp credential_string(_), do: ""
+
+  # Verify-before-save: a cheap authenticated call proving the credential works.
+  # :ok to proceed; {:error, :unverified} to refuse the save with remediation.
+  defp preflight_provider("hetzner", token) do
+    if hetzner_token_ok?(token), do: :ok, else: {:error, :unverified}
+  end
+
+  defp preflight_provider("azure", credential) do
+    with {:ok, creds} when is_map(creds) <- Jason.decode(credential),
+         {:ok, _meta} <- Azure.verify(creds) do
+      :ok
+    else
+      _ -> {:error, :unverified}
+    end
+  end
+
+  # A one-row authenticated server list — the cheapest proof the token is live.
+  # Success is a 2xx from api.hetzner.cloud; anything else (401/403/transport)
+  # means "can't verify". The token never leaves this call.
+  defp hetzner_token_ok?(token) when is_binary(token) and token != "" do
+    request = %{
+      method: :get,
+      url: @hetzner_api_base <> "/v1/servers?per_page=1",
+      headers: [{"Authorization", "Bearer " <> token}, {"Accept", "application/json"}],
+      body: ""
+    }
+
+    case hetzner_http_client().request(request) do
+      {:ok, %{status: status}} when status in 200..299 -> true
+      _ -> false
+    end
+  end
+
+  defp hetzner_token_ok?(_), do: false
+
+  # GET /v1/providers/:kind/catalog handler.
+  defp providers_catalog(conn, kind) do
+    with_provider_catalog(conn, kind, fn _provider, catalog ->
+      json(conn, 200, catalog)
+    end)
+  end
+
+  # GET /v1/providers/:kind/overview handler — the catalog wrapped with the
+  # connected provider's header.
+  defp providers_overview(conn, kind) do
+    with_provider_catalog(conn, kind, fn provider, catalog ->
+      json(conn, 200, Map.put(catalog, :provider, %{kind: provider.kind, label: provider.label}))
+    end)
+  end
+
+  # Shared resolve → build → serve for both neutral catalog routes. 404
+  # unknown_kind for a kind we don't host; 404 no_provider when the team has
+  # none connected (connect-first empty state); 502 catalog_unavailable when the
+  # provider is connected but the upstream fetch failed (honest degraded state,
+  # no jargon leaked).
+  defp with_provider_catalog(conn, kind, on_ok) do
+    cond do
+      kind not in @neutral_kinds ->
+        json(conn, 404, %{error: "unknown_kind"})
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "no_provider"})
+
+      true ->
+        case provider_of_kind(conn.assigns.current_team, kind) do
+          nil ->
+            json(conn, 404, %{error: "no_provider"})
+
+          provider ->
+            case build_provider_catalog(kind, provider) do
+              {:ok, catalog} -> on_ok.(provider, catalog)
+              {:error, _reason} -> json(conn, 502, %{error: "catalog_unavailable"})
+            end
+        end
+    end
+  end
+
+  # The team's connected provider of `kind` (newest first, first wins), or nil.
+  defp provider_of_kind(team, kind) do
+    team
+    |> Registry.list_providers()
+    |> Enum.find(&(&1.kind == kind))
+  end
+
+  # Build the normalized {regions, server_types} for a connected provider. Both
+  # branches decrypt the stored credential SERVER-SIDE, fetch the provider's raw
+  # regions/sizes over its seam, and normalize to the identical shape.
+  defp build_provider_catalog("hetzner", provider) do
+    # per_page=50 (hcloud's max, matching the proxy's @hetzner_per_page) so the
+    # menu isn't silently truncated to hcloud's default first 25 — Hetzner lists
+    # 40+ server types. Not paginated beyond page 1: one page of 50 covers the
+    # whole current catalog for both server_types and the handful of locations.
+    with {:ok, token} <- Registry.reveal_provider_token(provider),
+         {:ok, %{"server_types" => server_types}} <-
+           hetzner_get_json("/v1/server_types?per_page=50", token),
+         {:ok, %{"locations" => locations}} <- hetzner_get_json("/v1/locations", token) do
+      {:ok, HetznerCatalog.normalize(List.wrap(server_types), List.wrap(locations))}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  defp build_provider_catalog("azure", provider) do
+    with {:ok, credential} <- Registry.reveal_provider_token(provider),
+         {:ok, creds} when is_map(creds) <- Jason.decode(credential),
+         {:ok, %{locations: locations, vm_sizes: vm_sizes}} <- Azure.list_catalog(creds) do
+      {:ok, AzureCatalog.normalize(List.wrap(locations), List.wrap(vm_sizes))}
+    else
+      _ -> {:error, :unavailable}
+    end
+  end
+
+  # A single authenticated hetzner GET returning the decoded JSON map, or an
+  # error. The token never leaves this call.
+  defp hetzner_get_json(path, token) do
+    request = %{
+      method: :get,
+      url: @hetzner_api_base <> path,
+      headers: [{"Authorization", "Bearer " <> token}, {"Accept", "application/json"}],
+      body: ""
+    }
+
+    case hetzner_http_client().request(request) do
+      {:ok, %{status: 200, body: body}} ->
+        case Jason.decode(body) do
+          {:ok, decoded} when is_map(decoded) -> {:ok, decoded}
+          _ -> {:error, :bad_payload}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, {:http, status}}
+
+      {:error, _} ->
+        {:error, :unreachable}
+    end
+  end
+
+  ## Hetzner proxy helpers (charter decisions 3+4)
 
   # The nine overview kinds, in charter envelope key order. Each row is
   # {envelope/catalog resource, upstream JSON list key, extra query string}:
