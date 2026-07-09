@@ -258,5 +258,16 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       assert conn.status == 422
       assert json_body(conn)["error"] == "invalid"
     end
+
+    test "azure with a NESTED-object credential field → clean 422, never a 500 crash" do
+      {user, team} = user_with_team()
+      # A malformed body where a field is a JSON object, not a string. This must
+      # NOT crash (to_string/1 has no impl for maps) — it is coerced to blank and
+      # fails the preflight with a clean remediation.
+      body = %{kind: "azure", credentials: azure_blob(%{"tenant_id" => %{"nested" => 1}})}
+      conn = call(:post, "/v1/providers", body, session_token(user))
+      assert conn.status == 422
+      assert Registry.list_providers(team) == []
+    end
   end
 end

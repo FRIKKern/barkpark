@@ -5584,12 +5584,19 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # Keep ONLY the four known azure fields (string keys) — never persist stray
-  # request input alongside the credential.
+  # request input alongside the credential. A field is stringified only when it
+  # is genuinely a string; any other JSON shape (nested object, array, number,
+  # bool) is coerced to "" so a malformed body fails the shape gate / preflight
+  # with a clean 422 remediation instead of raising a Protocol.UndefinedError
+  # (to_string/1 has no impl for maps/lists) and 500-ing the request.
   defp azure_credential_blob(creds) do
     for field <- BarkparkCloud.Registry.Provider.azure_fields(),
         into: %{},
-        do: {field, to_string(Map.get(creds, field, ""))}
+        do: {field, credential_string(Map.get(creds, field))}
   end
+
+  defp credential_string(value) when is_binary(value), do: value
+  defp credential_string(_), do: ""
 
   # Verify-before-save: a cheap authenticated call proving the credential works.
   # :ok to proceed; {:error, :unverified} to refuse the save with remediation.
@@ -5678,8 +5685,13 @@ defmodule BarkparkCloud.Web.Router do
   # branches decrypt the stored credential SERVER-SIDE, fetch the provider's raw
   # regions/sizes over its seam, and normalize to the identical shape.
   defp build_provider_catalog("hetzner", provider) do
+    # per_page=50 (hcloud's max, matching the proxy's @hetzner_per_page) so the
+    # menu isn't silently truncated to hcloud's default first 25 — Hetzner lists
+    # 40+ server types. Not paginated beyond page 1: one page of 50 covers the
+    # whole current catalog for both server_types and the handful of locations.
     with {:ok, token} <- Registry.reveal_provider_token(provider),
-         {:ok, %{"server_types" => server_types}} <- hetzner_get_json("/v1/server_types", token),
+         {:ok, %{"server_types" => server_types}} <-
+           hetzner_get_json("/v1/server_types?per_page=50", token),
          {:ok, %{"locations" => locations}} <- hetzner_get_json("/v1/locations", token) do
       {:ok, HetznerCatalog.normalize(List.wrap(server_types), List.wrap(locations))}
     else
