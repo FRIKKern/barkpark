@@ -29,6 +29,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   use BarkparkWeb, :live_view
 
+  require Logger
+
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
@@ -70,6 +72,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          composer_rev: 0,
          interrupt_requested: false,
          mode_switch_from: nil,
+         detached: false,
          last_result: nil,
          ring: blank_ring(),
          title_source: "default",
@@ -215,6 +218,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # Take the session back after another tab adopted it (charter D20). Clears the
+  # detached banner and re-acquires the live process via `ensure_session` —
+  # which, finding the other tab still registered, ADOPTS it (the other tab now
+  # sees the detached banner). One writer at a time, ownership ping-pongs
+  # honestly.
+  def handle_event("take_over", _params, socket) do
+    {:noreply, socket |> assign(detached: false) |> ensure_session()}
+  end
+
   def handle_event("approve", %{"rid" => request_id}, socket) do
     {:noreply, resolve_permission(socket, request_id, :allow)}
   end
@@ -286,7 +298,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Flip the active ⇄ archived shelf. refresh_sessions reads the new flag.
   def handle_event("toggle-archived", _params, socket) do
     show = not (socket.assigns.show_archived == true)
-    {:noreply, socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
+
+    {:noreply,
+     socket |> assign(show_archived: show, open_menu_session: nil) |> refresh_sessions()}
   end
 
   # Stale/unknown client events must never crash the chat — mirror the other
@@ -469,6 +483,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
        )}
     else
       {:noreply, socket}
+    end
+  end
+
+  # Another tab took this session over (charter D20 single-writer). The session
+  # process now drives that tab; ours must stop pretending to own it. Drop the
+  # live pid, freeze the composer behind an honest banner, and let "Take over
+  # here" re-acquire it. Idempotent — a second detach (ownership ping-pong) is a
+  # no-op so the system line never stacks.
+  def handle_info({:claude_chat_detached}, socket) do
+    if socket.assigns[:detached] do
+      {:noreply, socket}
+    else
+      {:noreply,
+       socket
+       |> assign(
+         detached: true,
+         session: nil,
+         status: :detached,
+         streaming: nil,
+         interrupt_requested: false
+       )
+       |> append_message(
+         :system,
+         "This chat is now active in another tab. Use “Take over here” to continue."
+       )}
     end
   end
 
@@ -883,7 +922,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </div>
 
       <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 10px 16px;">
-        <form phx-submit="send" style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;">
+        <%!-- Single-writer honesty (charter D20): another tab holds this
+              session's process. Freeze the composer behind a banner rather than
+              spawn a second writer; "Take over here" re-acquires it. --%>
+        <div
+          :if={@detached}
+          style="display: flex; align-items: center; gap: 12px; max-width: 860px; margin: 0 auto; padding: 10px 12px; border: 1px solid var(--border-muted); border-left: 3px solid var(--warn); border-radius: 8px;"
+        >
+          <div style="flex: 1; min-width: 0;">
+            <div class="text-sm" style="font-weight: 600;">This chat is open in another tab</div>
+            <div class="text-xs text-dim">
+              Only one tab drives a session at a time, so its history never tears. Take over to continue here.
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary" phx-click="take_over">
+            Take over here
+          </button>
+        </div>
+        <form
+          :if={not @detached}
+          phx-submit="send"
+          style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;"
+        >
           <input
             id={"chat-composer-#{@composer_rev}"}
             type="text"
@@ -1046,7 +1106,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # Ready as soon as the subprocess is up. The CLI emits its init event
         # only when the FIRST turn starts — gating the composer on init would
         # deadlock the tab (nothing sent → no init → composer never enables).
-        socket |> assign(session: session, status: :ready) |> refresh_sessions()
+        socket |> assign(session: session, status: :ready, detached: false) |> refresh_sessions()
+
+      # Another tab already owns this session's process (charter D20). Adopt it
+      # as the sole sink instead of spawning a second `claude --resume` writer —
+      # the other tab gets the detached banner. Single writer, no torn transcript.
+      {:error, {:already_started, other}} when is_pid(other) ->
+        ClaudeChat.adopt_sink(other, self())
+        Process.monitor(other)
+        StudioChat.update_status(store_id, "working")
+        socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
 
       {:error, reason} ->
         socket
@@ -1077,6 +1146,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       streaming: nil,
       interrupt_requested: false,
       mode_switch_from: nil,
+      detached: false,
       last_result: nil,
       # Reopen must show the last-known headroom (charter D19) — read the snapshot
       # off the stored row; nil window renders hollow, never a fake arc.
@@ -1109,6 +1179,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       streaming: nil,
       interrupt_requested: false,
       mode_switch_from: nil,
+      detached: false,
       last_result: nil,
       ring: blank_ring(),
       title_source: "default",
@@ -1119,7 +1190,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp refresh_sessions(socket) do
-    assign(socket, sessions: StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true))
+    assign(socket,
+      sessions: StudioChat.list_sessions(archived: socket.assigns[:show_archived] == true)
+    )
   end
 
   # A row-level archive/delete. Always refresh the sidebar; when the mutated row
@@ -1183,34 +1256,72 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # ── persistence (D7 — source markdown, on completion only) ──────────────
 
+  # Persist the user's turn (D7). A store write can fail (e.g. a same-session
+  # append race that outlived its retries) — we never discard that error: log it
+  # and tell the user honestly that THIS message may not survive a reopen, so
+  # the transcript never lies about what was remembered (charter D20b).
   defp persist_user_message(socket, text) do
-    if store_id = socket.assigns.store_session_id do
-      StudioChat.append_message(store_id, %{role: "user", source_markdown: text, metadata: %{}})
-    end
+    socket =
+      case persist_store(socket, %{role: "user", source_markdown: text, metadata: %{}}) do
+        {:error, reason} ->
+          Logger.warning("studio chat: failed to persist user message: #{inspect(reason)}")
+
+          append_message(
+            socket,
+            :system,
+            "⚠ This message could not be saved — it may not appear if you reopen this chat."
+          )
+
+        _ ->
+          socket
+      end
 
     refresh_sessions(socket)
   end
 
   defp persist_assistant_blocks(socket, blocks) do
-    if store_id = socket.assigns.store_session_id do
-      Enum.each(blocks, fn
-        %{"type" => "text", "text" => text} when is_binary(text) ->
-          if String.trim(text) != "",
-            do: StudioChat.append_message(store_id, %{role: "assistant", source_markdown: text})
+    Enum.each(blocks, fn
+      %{"type" => "text", "text" => text} when is_binary(text) ->
+        if String.trim(text) != "",
+          do:
+            persist_store_logged(socket, %{role: "assistant", source_markdown: text}, "assistant")
 
-        %{"type" => "tool_use", "name" => name} = block ->
-          StudioChat.append_message(store_id, %{
+      %{"type" => "tool_use", "name" => name} = block ->
+        persist_store_logged(
+          socket,
+          %{
             role: "tool",
             source_markdown: tool_line(name, block["input"]),
             metadata: %{"tool" => name, "input" => block["input"]}
-          })
+          },
+          "tool"
+        )
 
-        _ ->
-          :ok
-      end)
-    end
+      _ ->
+        :ok
+    end)
 
     :ok
+  end
+
+  # Append to the store when a session row exists; `:no_store` when this chat is
+  # still unsaved (a pre-first-send draft), otherwise the append result verbatim
+  # so callers can react to `{:error, _}` (never silently drop it).
+  defp persist_store(socket, attrs) do
+    case socket.assigns.store_session_id do
+      nil -> :no_store
+      store_id -> StudioChat.append_message(store_id, attrs)
+    end
+  end
+
+  defp persist_store_logged(socket, attrs, kind) do
+    case persist_store(socket, attrs) do
+      {:error, reason} ->
+        Logger.warning("studio chat: failed to persist #{kind} message: #{inspect(reason)}")
+
+      _ ->
+        :ok
+    end
   end
 
   # Record the turn's usage AND capture the per-turn context snapshot for the
@@ -1475,6 +1586,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp status_label(:thinking), do: "working"
   defp status_label(:interrupting), do: "stopping…"
   defp status_label(:offline), do: "offline"
+  defp status_label(:detached), do: "open in another tab"
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
