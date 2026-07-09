@@ -583,6 +583,8 @@ FLEET (control plane — needs 'bp login')
             control an instance's webhooks             (bp cloud webhook -h)
   verify    re-run the readiness probes (API · login · Studio) against a live
             box; exit 0 only when all pass             (bp cloud verify -h)
+  domain    a domain's DNS/TLS checklist (found · points here · TLS · serving);
+            exit 0 only when it's serving              (bp cloud domain -h)
   usage     an instance's usage meters — honest counts, "unmetered" where a
             source is quiet, never a fake zero          (bp cloud usage -h)
   members   your team's seats + pending invitations, the console's Members

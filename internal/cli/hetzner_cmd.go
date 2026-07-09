@@ -102,6 +102,8 @@ func runCloud(out *writer, g globals, args []string) int {
 		return runCloudWebhook(out, g, args[1:])
 	case "verify":
 		return runCloudVerify(out, g, args[1:])
+	case "domain", "domains":
+		return runCloudDomain(out, g, args[1:])
 	case "usage":
 		return runCloudUsage(out, g, args[1:])
 	case "members", "member":

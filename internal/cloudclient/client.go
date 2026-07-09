@@ -400,6 +400,84 @@ var verifyErrorCodes = map[string]bool{
 	"decrypt_failed": true,
 }
 
+// DomainStage is one rung of a per-host domain checklist as the control plane's
+// GET /v1/barkparks/:id/domain-status route (charter S13) reports it: DNS found
+// → points here → TLS issued → serving. Status is one of ok|pending|failed;
+// Evidence is the server's one-line proof for that rung; Remediation is the
+// server-owned fix copy shown only under a non-ok rung — the CLI renders it
+// VERBATIM and never invents its own (the FailureCopy-server-owns-copy rule).
+type DomainStage struct {
+	Stage       string `json:"stage"`
+	Label       string `json:"label"`
+	Status      string `json:"status"`
+	Evidence    string `json:"evidence"`
+	Remediation string `json:"remediation"`
+}
+
+// DomainCheck is one attached host's full checklist. Kind is platform (a
+// name.barkpark.cloud subdomain we own end to end) or custom (a BYO domain the
+// operator points at the box); Overall is the rolled-up status the box's chip
+// paints (ok|pending|failed).
+type DomainCheck struct {
+	Host    string        `json:"host"`
+	Kind    string        `json:"kind"`
+	Overall string        `json:"overall"`
+	Stages  []DomainStage `json:"stages"`
+}
+
+// DomainStatusResult is a COMPLETED domain-status probe run: the control plane
+// checked every attached host inline (DNS/points-here/TLS/serving) and reported
+// each rung. OK is the VERDICT (every host serving), not transport success — a
+// box mid-issuance arrives here as ok:false with pending rungs, never as a Go
+// error. Raw is the envelope BYTES verbatim so `-o json` re-emits the contract
+// without reshaping (the verify-envelope idiom).
+type DomainStatusResult struct {
+	Raw       []byte `json:"-"`
+	OK        bool   `json:"ok"`
+	CheckedAt string `json:"checked_at"`
+	Instance  struct {
+		ID   string `json:"id"`
+		Host string `json:"host"`
+	} `json:"instance"`
+	Domains []DomainCheck `json:"domains"`
+}
+
+// DomainStatusTimeout is the wall-clock cap for a DomainStatus call. Like
+// VerifyInstance, the route is SYNCHRONOUS — the control plane probes live DNS
+// resolvers and the box's TLS endpoint inline for every attached host — so it
+// needs headroom past the 30s DefaultTimeout that fits a quick control-plane
+// call, or the exact stuck-domain scenario the checklist exists to diagnose
+// would surface as a transport error instead of the honest pending/failed rungs
+// the server was about to deliver.
+const DomainStatusTimeout = 90 * time.Second
+
+// DomainStatus fetches the per-host domain checklist for a managed instance via
+// GET /v1/barkparks/:id/domain-status (Bearer). The control plane owns every
+// probe (DNS/points-here/TLS/serving) — this client never touches a resolver or
+// the box; it renders the CP's truth. A 200 is a completed run (read result.OK
+// for the verdict); any non-2xx surfaces through cloudError.
+func (c *Client) DomainStatus(ctx context.Context, id string) (DomainStatusResult, error) {
+	// Give the synchronous probe suite headroom past DefaultTimeout (see
+	// DomainStatusTimeout). An injected HTTP client (tests) is honored untouched;
+	// only the lazily-built fallback is widened, and only for this call.
+	dc := *c
+	if dc.HTTP == nil {
+		dc.HTTP = &http.Client{Timeout: DomainStatusTimeout}
+	}
+	status, raw, err := dc.do(ctx, "GET", "/v1/barkparks/"+esc(id)+"/domain-status", true, nil)
+	if err != nil {
+		return DomainStatusResult{}, err
+	}
+	if !ok(status) {
+		return DomainStatusResult{}, cloudError(status, raw)
+	}
+	res := DomainStatusResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return DomainStatusResult{}, fmt.Errorf("decode domain-status envelope: %w", err)
+	}
+	return res, nil
+}
+
 // VerifyTimeout is the wall-clock cap for a VerifyInstance call. The route is
 // SYNCHRONOUS: the control plane probes the live box inline (up to 6 upstream
 // requests, each with its own 5s connect + 5s recv bound — ~60s absolute worst
