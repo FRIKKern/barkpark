@@ -49,6 +49,7 @@ type palette struct {
 	ok, danger                          lipgloss.AdaptiveColor
 	info, warn, done, ready, open, canc lipgloss.AdaptiveColor
 	neutral, dim, title                 lipgloss.AdaptiveColor
+	hoverBg, pressedBg                  lipgloss.AdaptiveColor
 }
 
 // buildPalette resolves one theme id's board palette. The LIFECYCLE hues
@@ -93,6 +94,15 @@ func buildPalette(theme string) palette {
 		neutral: chrome("chrome-text-secondary"), // zinc mid chrome (chrome_gen)
 		dim:     chrome("chrome-dim"),            // zinc dim chrome (chrome_gen)
 		title:   chrome("chrome-ink"),            // near-fg title chrome (chrome_gen)
+
+		// The board's FIRST legitimate background states (charter D94/D95), both
+		// read from EXISTING chrome roles — zero new colors. hover is the subtle
+		// pointer tint (the desk's inactive-cursor bg, cmd/barkpark/styles.go:104);
+		// pressed is the stronger selection tint reserved for ttm-s4's verb
+		// affordances (the desk's selected-item bg, styles.go:48). Row clicks act on
+		// press, so board rows wear hover only.
+		hoverBg:   chrome("chrome-cursor-bg"),    // subtle row hover tint (chrome_gen)
+		pressedBg: chrome("chrome-selection-bg"), // pressed affordance — reserved for ttm-s4
 	}
 }
 
@@ -117,6 +127,12 @@ var (
 	neutralColor = defaultPalette.neutral
 	dimColor     = defaultPalette.dim
 	titleColor   = defaultPalette.title
+
+	// Background states (charter D94/D95). hoverBgColor is the board's first paint
+	// that fills a full row rather than a glyph; pressedBgColor is reserved for the
+	// verb affordances ttm-s4 adds (it is not painted this slice).
+	hoverBgColor   = defaultPalette.hoverBg
+	pressedBgColor = defaultPalette.pressedBg
 )
 
 var (
@@ -133,6 +149,15 @@ var (
 	dimStyle   = lipgloss.NewStyle().Foreground(dimColor)
 	titleStyle = lipgloss.NewStyle().Foreground(titleColor).Bold(true)
 	boldStyle  = lipgloss.NewStyle().Bold(true)
+
+	// hoverStyle is the board's ONLY background paint (charter D94/D95): a subtle
+	// full-row tint under the mouse pointer. It sets a Background ONLY — never a
+	// foreground — so it composes over a row's existing lifecycle/priority/worker
+	// hues without recoloring them (hoverPaint re-establishes it across the row's
+	// own embedded resets). It is DISTINCT from the flash, which stays
+	// foreground-only (decision 17): hover is a NEW style, never a flashStyle
+	// extension, so the motion_test GetBackground==NoColor guards stay green.
+	hoverStyle = lipgloss.NewStyle().Background(hoverBgColor)
 )
 
 // glyphStyleFor paints the STATUS GLYPH by the spec §1 brightness+meaning ladder

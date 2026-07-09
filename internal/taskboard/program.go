@@ -401,6 +401,23 @@ func (m Model) handleFrame(msg frameMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// setHoverTarget is the whole flicker discipline for the mouse hover tint
+// (charter D95, the never-flickers law). It stores the ttm-s1-resolved pointer
+// target (a selectable row's Ref, "" when the pointer is over nothing
+// selectable) and reports whether it CHANGED. The hover-changed guard IS the
+// debounce: bubbletea's cell-motion reporting fires one Motion MouseMsg per cell
+// the pointer crosses, but every Motion that resolves to the SAME row returns
+// changed=false, so the caller short-circuits the re-render — no timer, no new
+// cadence, the 100ms heartbeat stays armed only while Alive(). A "" target
+// clears the tint (the pointer left every selectable row, or a key was pressed).
+func setHoverTarget(st UIState, target string) (UIState, bool) {
+	if target == st.HoverTarget {
+		return st, false
+	}
+	st.HoverTarget = target
+	return st, true
+}
+
 // handleKey is the navigation-shell dispatcher (charter D29): two navigation
 // domains, one entry point keyed on the stack-top frame kind. The BOARD frame
 // (level 0) keeps its native grammar unchanged; a pushed reading frame
@@ -417,6 +434,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pendingClose = ""
 	}
 	m.ui.Strip = ActionStrip{}
+	// Any key yields the hover tint back to the keyboard (charter D95): the mouse
+	// pointer's highlight clears the moment the user reaches for the keyboard, so
+	// the two input modes never fight over the selection. Routed through the same
+	// guard the pointer uses, so a board with no active hover pays nothing.
+	m.ui, _ = setHoverTarget(m.ui, "")
 
 	switch key {
 	case "ctrl+c", "q":
@@ -550,22 +572,25 @@ func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
 // resolves a click's Y to a LineTarget so NO coordinate math lives here. Wheel
 // rides the keyboard motions verbatim (#1878's 1-line spine slide on the board,
 // free-scroll in a reading frame), a left press selects then activates, and a
-// press on a scroll affordance is one wheel step. Motion (hover) is ttm-s3 and
-// ignored; wide two-pane is ttm-s5 and no-ops. A terminal without mouse reporting
-// simply never reaches here — the keyboard flow is untouched.
+// press on a scroll affordance is one wheel step. Motion is hover (ttm-s3),
+// resolved through the SAME hit map behind setHoverTarget's changed-guard; wide
+// two-pane is ttm-s5 and no-ops. A terminal without mouse reporting simply
+// never reaches here — the keyboard flow is untouched.
 
-// handleMouse is the mouse reducer. It ignores hover motion (ttm-s3), button
-// RELEASES (a press already acted; disarming on the paired release would defeat
-// any press-armed two-step, e.g. ttm-s4's two-click close) and no-ops in wide
-// two-pane mode (ttm-s5); every remaining event is non-x input, so — exactly
-// like handleKey — it clears the transient action strip and disarms the close
-// guard before acting.
+// handleMouse is the mouse reducer. Motion is HOVER (ttm-s3): resolved through
+// the same compose-level hit map a click uses, stored behind setHoverTarget's
+// changed-guard so same-target motion returns the model untouched
+// (never-flickers, charter D95). Button RELEASES are ignored (a press already
+// acted; disarming on the paired release would defeat any press-armed
+// two-step, e.g. ttm-s4's two-click close); wide two-pane no-ops (ttm-s5).
+// Every remaining event is non-x input, so — exactly like handleKey — it
+// clears the transient action strip and disarms the close guard before acting.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.wide {
 		return m, nil
 	}
 	if msg.Action == tea.MouseActionMotion {
-		return m, nil // hover is ttm-s3
+		return m.mouseMotion(msg.Y)
 	}
 	if msg.Action == tea.MouseActionRelease {
 		return m, nil // the press acted; the release is not an input of its own
@@ -581,6 +606,34 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		return m.mouseLeftPress(msg.Y)
 	}
+	return m, nil
+}
+
+// mouseMotion is pointer hover (ttm-s3): resolve Y through the compose-level
+// hit map to the selectable row under the pointer and store its Ref in
+// UIState.HoverTarget. Board frame only this wave (reading rails have no hover
+// tint yet — an honest gap, not a bug). setHoverTarget's changed-guard IS the
+// debounce: the all-motion firehose emits one event per cell crossed, but a
+// same-row Motion returns the model unchanged, so the renderer diff repaints
+// nothing (charter D95). Anything that is not a selectable board row — chrome,
+// separators, scroll affordances, a reading frame — resolves to "" and clears
+// the tint.
+func (m Model) mouseMotion(y int) (tea.Model, tea.Cmd) {
+	target := ""
+	if m.topFrame().Kind == FrameBoard {
+		hits := m.ComposeHitMap()
+		if y >= 0 && y < len(hits) && hits[y].Kind == LineSpineRow {
+			rows := m.visibleRows()
+			if idx := hits[y].CursorIndex; idx >= 0 && idx < len(rows) {
+				target = rows[idx].docID
+			}
+		}
+	}
+	ui, changed := setHoverTarget(m.ui, target)
+	if !changed {
+		return m, nil
+	}
+	m.ui = ui
 	return m, nil
 }
 

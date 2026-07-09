@@ -421,6 +421,49 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 	return t
 }
 
+// ── Hover paint (the board's first background state) ─────────────────────────
+
+// hoverSentinel is a byte pair that never occurs in a rendered spine line (a NUL
+// is never emitted), used to probe hoverStyle's live open/close SGR sequences so
+// the exact bytes match the resolved color profile + theme (AdaptiveColor binds
+// at render time, not here).
+const hoverSentinel = "\x00\x00"
+
+// hoverPaint fills one selectable spine row with the subtle hover Background
+// (charter D94/D95). It is the board's FIRST paint that spans a whole row instead
+// of a single glyph, so it must survive the row's OWN embedded resets: a
+// lipgloss Foreground segment ends in \x1b[0m, which also clears the background,
+// so a naive Background().Render leaves the tint painting only the first segment.
+// The fix re-establishes the background open sequence after every inner reset,
+// then wraps the padded row.
+//
+// RECTANGULARITY (alignment=rectangularity): board rows are ragged today (TaskRow
+// pads only the meta path), so the tint would be a torn right edge. padTo(width)
+// squares the hovered row to a full rectangle FIRST — the ONLY row that pads, and
+// the pad is pure trailing spaces, so the ansi-stripped text is unchanged apart
+// from that trailing run (TrimRight equality holds).
+//
+// HONEST DEGRADE: under a profile with no color (Ascii/NoColor — a terminal that
+// can't tint, or the test runner's default) hoverStyle renders no SGR, so open is
+// empty and the row is returned UNTOUCHED — no pad, no tint. A board without
+// mouse reporting loses nothing.
+func hoverPaint(line string, width int) string {
+	probe := hoverStyle.Render(hoverSentinel)
+	i := strings.Index(probe, hoverSentinel)
+	if i < 0 {
+		return line // profile mangled the sentinel — never paint (paranoia)
+	}
+	open, closeSeq := probe[:i], probe[i+len(hoverSentinel):]
+	if open == "" {
+		return line // no background in this profile — honest no-op
+	}
+	padded := padTo(line, width)
+	// Re-arm the background after each of the row's own foreground resets so the
+	// tint is continuous, then open before the first cell and close after the pad.
+	body := strings.ReplaceAll(padded, "\x1b[0m", "\x1b[0m"+open)
+	return open + body + closeSeq
+}
+
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
 // flattenSpine renders every spine display line and reports the line index of
@@ -460,12 +503,24 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 		return selected, idx
 	}
 	for _, sr := range spineRows(b, st) {
+		// A selectable row whose Ref matches the pointer target wears the hover
+		// tint (charter D94/D95). paint() is the identity for every other row, so
+		// a "" target (no mouse) leaves the frame byte-identical, and separators /
+		// phase bands / dead-epic lines (Selectable:false, or an empty Ref) can
+		// never tint. Only the ONE hovered row pads to a full rectangle.
+		hovered := st.HoverTarget != "" && sr.Selectable && sr.Ref == st.HoverTarget
+		paint := func(s string) string {
+			if hovered {
+				return hoverPaint(s, width)
+			}
+			return s
+		}
 		switch sr.Kind {
 		case spineSep:
 			emit("", noneTarget)
 		case spineEpicHeader, spineClusterHeader, spineOrphanHeader:
 			selected, idx := markSel()
-			emit(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width),
+			emit(paint(renderSectionHeader(sr.hdr.title, sr.hdr.code, sr.hdr.derived, selected, sr.hdr.counts, width)),
 				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spinePhaseBand:
 			// A named phase band (W10-A): the SAME dotted-leader grammar as a
@@ -477,11 +532,11 @@ func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string
 			selected, idx := markSel()
 			tgt := LineTarget{Kind: LineSpineRow, CursorIndex: idx}
 			for _, ln := range TaskRow(flashTitle(sr.task, st, now), selected, sr.Depth, sr.Guide, width, st.Frame, now) {
-				emit(ln, tgt)
+				emit(paint(ln), tgt)
 			}
 		case spineMore:
 			selected, idx := markSel()
-			emit(moreLine(sr.more, sr.Depth, width, selected),
+			emit(paint(moreLine(sr.more, sr.Depth, width, selected)),
 				LineTarget{Kind: LineSpineRow, CursorIndex: idx})
 		case spineDeadEpic:
 			emit(deadEpicLine(sr.hdr.title, width), noneTarget)
