@@ -81,6 +81,74 @@
   --color-danger: hsl(0 82% 66%);
   --color-info: hsl(217.2 91.2% 59.8%);
 }
+[data-bp-theme="ember"] {
+  --color-primary: hsl(20 82% 42%);
+  --color-primary-hover: hsl(20 82% 36%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(30 40% 99%);
+  --color-surface: hsl(30 40% 99%);
+  --color-muted-surface: hsl(16.48 26.29% 95.68%);
+  --color-text: hsl(22 24% 11%);
+  --color-muted-text: hsl(16.54 4.67% 41.31%);
+  --color-border: hsl(16.5 12.96% 87.95%);
+  --color-ring: hsl(20 82% 50%);
+  --color-accent: hsl(20 82% 42%);
+  --color-ok: hsl(138.34 50.65% 34.78%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(3.67 50.42% 48.54%);
+  --color-info: hsl(221.2 49.02% 51.79%);
+}
+[data-bp-theme="ember"][data-theme="dark"] {
+  --color-primary: hsl(30 92% 60%);
+  --color-primary-hover: hsl(30 92% 68%);
+  --color-primary-fg: hsl(30 45% 8%);
+  --color-bg: hsl(24 22% 8%);
+  --color-surface: hsl(24 26% 6%);
+  --color-muted-surface: hsl(26.83 17% 5.24%);
+  --color-text: hsl(32 24% 92%);
+  --color-muted-text: hsl(26.68 6.42% 60.11%);
+  --color-border: hsl(26.78 12.03% 7.72%);
+  --color-ring: hsl(30 92% 60%);
+  --color-accent: hsl(30 92% 60%);
+  --color-ok: hsl(134.02 37.1% 56.89%);
+  --color-warn: hsl(37.47 67.56% 50.7%);
+  --color-danger: hsl(5.31 83.22% 69.77%);
+  --color-info: hsl(220.6 86.84% 72.26%);
+}
+[data-bp-theme="fjord"] {
+  --color-primary: hsl(222 58% 44%);
+  --color-primary-hover: hsl(222 58% 38%);
+  --color-primary-fg: hsl(0 0% 100%);
+  --color-bg: hsl(210 36% 99%);
+  --color-surface: hsl(210 36% 99%);
+  --color-muted-surface: hsl(219.67 25.15% 95.91%);
+  --color-text: hsl(220 30% 11%);
+  --color-muted-text: hsl(219.7 4.2% 41.73%);
+  --color-border: hsl(219.67 12.06% 88.27%);
+  --color-ring: hsl(222 58% 52%);
+  --color-accent: hsl(222 58% 44%);
+  --color-ok: hsl(137.23 45.13% 35.85%);
+  --color-warn: hsl(40.11 100% 29.89%);
+  --color-danger: hsl(4.05 47.78% 48.54%);
+  --color-info: hsl(221.08 46.09% 51.46%);
+}
+[data-bp-theme="fjord"][data-theme="dark"] {
+  --color-primary: hsl(213 74% 66%);
+  --color-primary-hover: hsl(213 74% 74%);
+  --color-primary-fg: hsl(213 45% 8%);
+  --color-bg: hsl(220 28% 8%);
+  --color-surface: hsl(216 30% 6%);
+  --color-muted-surface: hsl(213.45 15.36% 5.53%);
+  --color-text: hsl(212 26% 92%);
+  --color-muted-text: hsl(213.51 6.24% 60.93%);
+  --color-border: hsl(213.47 11.04% 8.02%);
+  --color-ring: hsl(213 74% 66%);
+  --color-accent: hsl(213 74% 66%);
+  --color-ok: hsl(132.78 31.44% 58.66%);
+  --color-warn: hsl(35.93 57.77% 55.07%);
+  --color-danger: hsl(5.83 69.33% 69.33%);
+  --color-info: hsl(220.37 70.04% 71.14%);
+}
 /* END GENERATED: tokens */
 
 /* --background / --foreground are thin aliases onto the emitted tokens so the

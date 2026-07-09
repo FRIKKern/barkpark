@@ -47,6 +47,32 @@ type ThemeLifecycle struct {
 // GenLifecycle/GenBrailleFrames/GenBrailleStill — no re-typed literals).
 var genLifecycleThemes = map[string]ThemeLifecycle{
 	"evergreen": {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},
+	"ember": {
+		Lifecycle: map[string]GenLifecycleToken{
+			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
+			"blocked": {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+		},
+		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		BrailleStill: "⠿",
+	},
+	"fjord": {
+		Lifecycle: map[string]GenLifecycleToken{
+			"in_progress": {Glyph: "⠋", ASCIIGlyph: "~", Role: "info", ColorLight: "#2563eb", ColorDark: "#60a5fa"},
+			"blocked": {Glyph: "!", ASCIIGlyph: "!", Role: "warn", ColorLight: "#d97706", ColorDark: "#fbbf24"},
+			"done": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"closed": {Glyph: "✓", ASCIIGlyph: "v", Role: "ok", ColorLight: "#0d9488", ColorDark: "#2dd4bf"},
+			"cancelled": {Glyph: "✕", ASCIIGlyph: "x", Role: "", ColorLight: "#a1a1aa", ColorDark: "#71717a"},
+			"ready": {Glyph: "○", ASCIIGlyph: "o", Role: "", ColorLight: "#18181b", ColorDark: "#e7edf2"},
+			"open": {Glyph: "○", ASCIIGlyph: ".", Role: "", ColorLight: "#71717a", ColorDark: "#5f6b78"},
+		},
+		BrailleFrames: [10]string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		BrailleStill: "⠿",
+	},
 }
 
 // Resolve returns a theme's lifecycle token set, defaulting to evergreen for an

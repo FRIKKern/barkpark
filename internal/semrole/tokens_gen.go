@@ -70,6 +70,52 @@ type ThemeTones struct {
 // Gen* maps above (no re-typed literals) so it is byte-identical to them.
 var genTones = map[string]ThemeTones{
 	"evergreen": {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},
+	"ember": {
+		StatusTone: map[string]lipgloss.AdaptiveColor{
+			"ok": lipgloss.AdaptiveColor{Light: "#2c8647", Dark: "#68ba7b"},
+			"info": lipgloss.AdaptiveColor{Light: "#486ec0", Dark: "#7ba3f6"},
+			"warn": lipgloss.AdaptiveColor{Light: "#986600", Dark: "#d6962c"},
+			"danger": lipgloss.AdaptiveColor{Light: "#ba453d", Dark: "#f27d72"},
+		},
+		LifecycleHue: map[string]lipgloss.AdaptiveColor{
+			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
+			"blocked": lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+		},
+		ANSI16: map[string]int{
+			"ok": 32,
+			"info": 34,
+			"warn": 33,
+			"danger": 31,
+		},
+	},
+	"fjord": {
+		StatusTone: map[string]lipgloss.AdaptiveColor{
+			"ok": lipgloss.AdaptiveColor{Light: "#32854a", Dark: "#74b783"},
+			"info": lipgloss.AdaptiveColor{Light: "#4a6ebc", Dark: "#82a4e9"},
+			"warn": lipgloss.AdaptiveColor{Light: "#986600", Dark: "#cf9a4a"},
+			"danger": lipgloss.AdaptiveColor{Light: "#b74941", Dark: "#e7857b"},
+		},
+		LifecycleHue: map[string]lipgloss.AdaptiveColor{
+			"in_progress": lipgloss.AdaptiveColor{Light: "#2563eb", Dark: "#60a5fa"},
+			"blocked": lipgloss.AdaptiveColor{Light: "#d97706", Dark: "#fbbf24"},
+			"done": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"closed": lipgloss.AdaptiveColor{Light: "#0d9488", Dark: "#2dd4bf"},
+			"cancelled": lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#71717a"},
+			"ready": lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e7edf2"},
+			"open": lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#5f6b78"},
+		},
+		ANSI16: map[string]int{
+			"ok": 32,
+			"info": 34,
+			"warn": 33,
+			"danger": 31,
+		},
+	},
 }
 
 // Resolve returns a theme's status/lifecycle/ANSI-16 token set, defaulting to
@@ -84,4 +130,4 @@ func Resolve(theme string) ThemeTones {
 // Themes lists every generated theme id in dir order (evergreen first). bp style
 // and the styleguide showroom enumerate it to iterate skins; it grows by exactly
 // one id when theme N+1 ships its file.
-func Themes() []string { return []string{"evergreen"} }
+func Themes() []string { return []string{"evergreen", "ember", "fjord"} }

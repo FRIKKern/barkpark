@@ -1,0 +1,40 @@
+{
+  "name": "fjord",
+  "_note": "Cool blue-slate — Nordic water. Accent rides ~H222 (deep slate-blue light, clear glacier blue dark); the neutral ladder and paper ground re-hue cold off the accent, so paper/ink carry a blue-slate chill, never warm grey. Cool accents keep a warm-white on-accent per the flip.",
+  "modes": {
+    "light": {
+      "bg": "210 36% 99%",
+      "ink": "220 30% 11%",
+      "accent": "222 58% 44%"
+    },
+    "dark": {
+      "bg": "220 28% 8%",
+      "ink": "212 26% 92%",
+      "accent": "213 74% 66%"
+    }
+  },
+  "overrides": {
+    "reading-accent.light": "190 82% 33%",
+    "reading-accent.dark": "188 78% 62%",
+    "surface.dark": "216 30% 6%"
+  },
+  "_overrideReasons": {
+    "reading-accent.light": "formula's teal lands at L0.72 — too light to read as code.fg on the near-white code panel; pinned to a deep glacier-teal that clears contrast while staying a cool sibling of the slate accent (code.fg.light tracks this)",
+    "reading-accent.dark": "formula's HSL173 skews green-mint; pinned a touch bluer (H188) so the dark reading/code accent stays in the cool fjord-water family",
+    "surface.dark": "the neutral-ladder OKLCH L0.095 pick collapses to ~1.3% HSL-L — a crushed near-black that loses the cool tint; pinned to a designed slate near-black that grounds the page under bg (8%) and holds the Nordic-water temperature"
+  },
+  "_aaExceptions": [],
+  "passthrough": [
+    "presence",
+    "sheetCf",
+    "matchQuality",
+    "provider",
+    "statusHealth",
+    "statusChrome",
+    "errorPage",
+    "readerInfo",
+    "lifecycle",
+    "instanceLifecycle",
+    "authButton"
+  ]
+}
