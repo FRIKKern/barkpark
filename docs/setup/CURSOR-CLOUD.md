@@ -15,7 +15,7 @@ Cursor Cloud reads `.cursor/environment.json` from your repo root. Its `install`
 }
 ```
 
-The installer drops `bp` in `~/.local/bin`; if the agent can't find it, add that directory to the VM's `PATH` (or set `install` to install into a directory already on `PATH`).
+The installer drops `bp` in `/usr/local/bin`, or `~/.local/bin` when that isn't writable (common on cloud VMs); if the agent can't find it, add the fallback directory to the VM's `PATH` (or set `install` to install into a directory already on `PATH`).
 
 ## 2. Token via Secrets, never the repo
 
