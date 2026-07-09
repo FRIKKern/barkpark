@@ -220,8 +220,8 @@ func renderDomainCheck(out *writer, d cloudclient.DomainCheck) {
 }
 
 // domainStageToken maps a rung's status onto a statusRole token so its cell
-// colours identically to a dashboard dot: ok → green, pending → yellow, failed
-// → red. An unknown/empty status passes through scrubbed (never a guess).
+// colours identically to a dashboard dot: ok → green, pending → cyan (info),
+// failed → red. An unknown/empty status passes through scrubbed (never a guess).
 func domainStageToken(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "ok":

@@ -3492,7 +3492,7 @@ test("S13: remediation shows ONLY under a non-ok rung that carries server copy, 
   assert.equal(serving.remediation, "");
 });
 
-test("S13: a failed rung is terminal (failed counts as settled — no infinite poll)", () => {
+test("S13: a failed rung settles, but a skipped-pending rung downstream keeps polling (the operator can fix + watch)", () => {
   const m = hooks.domainStages(DOMAIN_FAILED, 0);
   const roles = [...m.domains[0].rows.map((r) => r.role)];
   // dns failed; points_here never had a prior ok, so it stays pending (no active).

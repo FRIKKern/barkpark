@@ -187,7 +187,7 @@ func TestRunCloudDomainJSONFailExit(t *testing.T) {
 }
 
 // TestRunCloudDomainColorRoles: with color on, an ok rung paints green, a
-// pending rung yellow, and a failed rung red — the same statusRole seam as every
+// pending rung cyan (info), and a failed rung red — the same statusRole seam as every
 // other table — while the colorless run of the same envelope carries no ANSI.
 func TestRunCloudDomainColorRoles(t *testing.T) {
 	newDomainServer(t, 200, domainFailedEnvelope)
