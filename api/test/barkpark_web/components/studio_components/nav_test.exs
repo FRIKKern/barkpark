@@ -87,6 +87,17 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
       refute Nav.plugin_tab_active?(media_tab(), "/studio/production/media-library")
     end
 
+    test "a prefix declared WITH a trailing slash still boundary-matches" do
+      # Plugins declare directory-style prefixes (onixedit ships
+      # active_when: "/admin/onixedit/"); current_path is slash-normalized
+      # by StudioChrome, so the declared slash must be trimmed before the
+      # boundary match or the tab could never light up.
+      tab = %{active_when: "/admin/onixedit/", path: "/admin/onixedit/staleness"}
+      assert Nav.plugin_tab_active?(tab, "/admin/onixedit/bokbasen")
+      assert Nav.plugin_tab_active?(tab, "/admin/onixedit")
+      refute Nav.plugin_tab_active?(tab, "/admin/onixedit-v2")
+    end
+
     test "chat deep-link highlights the chat tab (boundary preserved)" do
       chat = %{active_when: "/studio/chat", path: "/studio/chat"}
       assert Nav.plugin_tab_active?(chat, "/studio/chat")

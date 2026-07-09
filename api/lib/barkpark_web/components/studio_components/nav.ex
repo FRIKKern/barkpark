@@ -481,7 +481,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   #       links live (e.g. `/studio/chat/:session_id` highlights `chat`)
   #       while refusing sibling over-match (`/studio/media-library` must
   #       NOT light up the `/studio/media` tab, which a bare
-  #       `String.starts_with?` would have wrongly done).
+  #       `String.starts_with?` would have wrongly done). A declared
+  #       trailing slash is trimmed first ("/admin/onixedit/" ≡
+  #       "/admin/onixedit") — `current_path` is slash-normalized by
+  #       StudioChrome, so an untrimmed prefix could never match.
   #     - regex   → `Regex.match?(active_when, current_path)`
   #   * absent → exact match on `tab.path`
   #
@@ -495,8 +498,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       do: Regex.match?(re, current_path)
 
   def plugin_tab_active?(%{active_when: prefix}, current_path)
-      when is_binary(prefix) and is_binary(current_path),
-      do: current_path == prefix or String.starts_with?(current_path, prefix <> "/")
+      when is_binary(prefix) and is_binary(current_path) do
+    prefix = String.trim_trailing(prefix, "/")
+    current_path == prefix or String.starts_with?(current_path, prefix <> "/")
+  end
 
   def plugin_tab_active?(%{path: path}, current_path)
       when is_binary(path) and is_binary(current_path),
