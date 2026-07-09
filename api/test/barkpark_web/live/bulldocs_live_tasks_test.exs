@@ -79,6 +79,9 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     assert html =~ "inject snapshot"
     assert html =~ "bp-g--done"
     assert html =~ "bp-g--ready"
+    # …and the streamed email-variant blocks show the open task as a ready
+    # ○ row-cell (this is what the post-mutation refute below proves gone).
+    assert html =~ ~r/○<\/td>/
 
     # Move the work: close the open task.
     {:ok, _} =
@@ -93,13 +96,17 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
       )
 
     # The reader heard the task mutation on its tenant stream and re-resolved —
-    # the same live view now shows both tasks done, no ready ROW left (the
-    # momentum legend keeps a static "ready" label, so assert on the row class).
+    # the same live view now shows both tasks done, no ready ROW left. A
+    # NON-article paper streams its blocks in the :email inline-styled variant
+    # (`render_opts(false)` — the email default), so assert on the email
+    # markup's semantics: two teal ✓ glyph row-cells, a "2 done" momentum
+    # count, and no ○ ready row-cell (the momentum legend keeps a static
+    # "ready" label inside a <span>, so scope the refute to row <td>s).
     updated = render(view)
     assert updated =~ "inject snapshot"
-    refute updated =~ "bp-trow--ready"
-    assert updated =~ ~r/bp-trow--done.*bp-trow--done/s
-    assert updated =~ "<b>2</b> done"
+    refute updated =~ ~r/○<\/td>/
+    assert updated =~ ~r/✓<\/td>.*✓<\/td>/s
+    assert updated =~ ~r/<b[^>]*>2<\/b> done/
   end
 
   test "an author-pinned snapshot (no query) still renders offline", %{conn: conn} do
