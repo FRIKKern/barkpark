@@ -543,3 +543,37 @@ Next wave should take: (1) real-browser verify of paste/drop + adopt flows;
 (4) restore staged attachments on dispatch failure (today only text restores —
 the strip empties if the wire write fails after consume); (5) charter D20c
 follow-through: periodic real-binary E2E in a scheduled lane, not just on-demand.
+
+### Wave 2026-07-09 (wave 4 — server-owned runtime, LEAD-BUILT inline)
+
+**D28 — The server owns the agent runtime; tabs are viewers.** User mandate:
+"I should not be needed to hold my tab open for the chat to continue going."
+One `Barkpark.StudioChat.Recorder` per live session (Registry-keyed, under
+`RuntimeSupervisor`) is the Session's PERMANENT sink: it persists every durable
+outcome (assistant/tool rows, result metrics + context snapshot, approval asks,
+exit → cancel-pendings + mark-exited) and rebroadcasts every frame verbatim on
+PubSub `studio_chat:<id>`. ChatLive subscribes instead of owning: `terminate/2`
+no longer closes the session, navigating away only unsubscribes, and the w2/w3
+adopt/detach/take-over machinery is REPLACED by co-viewing (all tabs render
+live; sends still serialize through the single Session; user turns broadcast
+via {:chat_user_message} so transcripts converge). ChatLive store writes now:
+user-message persist + approval RESOLUTION only; `record_result` is read-only
+(recording there too would double-sum). Idle reaper: 30 min of frame-silence
+(config `:studio_chat_idle_reap_ms`) closes the subprocess honestly
+({:claude_chat_exit, :idle_reaped}) — invisible: next send lazy-resumes.
+
+Proof: 233 tests × 3 seeds green (9 new recorder tests own the persistence
+seam — including "runtime survives a viewer's death"); REAL-BINARY detached
+proof executed: turn sent, no viewer subscribed, `BARKPARK-DETACHED-OK`
+persisted to the store by the Recorder alone. warnings-as-errors clean,
+studio-literal-check PASS.
+
+Known accepted gaps → wave 5 candidates: (1) streaming tail is not snapshotted
+— a reopen mid-turn shows a gap until the next frame (Recorder could buffer
+the current turn's deltas and replay to a late subscriber); (2) the title kick
+still lives in ChatLive (needs an open tab on the FIRST turn; move to Recorder
+for fully-detached first turns); (3) interrupt-timeout force-close is
+tab-driven (move the D18 timer into the Recorder); (4) sidebar "working" pill
+while fully detached only updates on result frames; (5) subscribe-then-read
+replay window can double-render a message that persists in the gap (rare,
+cosmetic, converges on reopen).

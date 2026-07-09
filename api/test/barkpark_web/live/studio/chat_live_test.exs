@@ -56,6 +56,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     prev = Application.get_env(:barkpark, :claude_chat)
     prev_demo = Application.get_env(:barkpark, :public_demo_studio)
 
+    # Recorders are server-owned (wave 4) and outlive the LiveView — reap them
+    # at test end so a late frame can't hit the closed sandbox connection.
+    on_exit(fn ->
+      Barkpark.StudioChat.RuntimeSupervisor
+      |> DynamicSupervisor.which_children()
+      |> Enum.each(fn
+        {_, pid, _, _} when is_pid(pid) ->
+          DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
+
+        _ ->
+          :ok
+      end)
+    end)
+
     # `cat` echoes our own NDJSON back; the LiveView ignores echoed "user"
     # events, so tests drive assistant/result events directly.
     Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
@@ -107,6 +121,19 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end)
 
     marker
+  end
+
+  # Route a frame through the session's REAL Recorder (wave 4, charter D28): it
+  # persists the durable outcome and rebroadcasts to every subscribed viewer.
+  # The Recorder's PubSub broadcast is a synchronous local send, so once the
+  # :sys.get_state roundtrip returns, the frame sits in every viewer's mailbox
+  # — the next render(view) drains it deterministically.
+  defp send_frame(sid, msg) do
+    recorder = Barkpark.StudioChat.Recorder.whereis(sid)
+    assert is_pid(recorder), "no live recorder for session #{sid}"
+    send(recorder, msg)
+    :sys.get_state(recorder)
+    :ok
   end
 
   defp read_marker(path, tries \\ 80) do
@@ -298,7 +325,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       enable_fake_chat()
       conn = init_test_session(conn, %{"api_token" => @admin_token})
       {:ok, view, html} = live(conn, "/studio/chat")
-      {:ok, view: view, html: html}
+      {:ok, view: view, html: html, conn: conn}
     end
 
     # Mount no longer spawns (the eager-spawn contract is inverted): the tab is
@@ -330,31 +357,47 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "working"
     end
 
-    # Single-writer honesty (charter D20): when another tab adopts this session,
-    # the Session sends {:claude_chat_detached}. The composer must be REPLACED by
-    # an honest banner — never left live to spawn a second `claude --resume`
-    # writer — with a Take-over affordance to re-acquire it.
-    test "a detach notice freezes the composer behind a take-over banner", %{view: view} do
-      send(view.pid, {:claude_chat_detached})
-      html = render(view)
+    # Server-owned runtime (wave 4, charter D28): tabs are VIEWERS. A second
+    # tab on the same session co-views live — both keep their composer (sends
+    # serialize through the single Session), and a frame renders in both.
+    test "a second tab co-views the same session live", %{view: view, conn: conn} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      sid = store_id(view)
 
-      assert html =~ "open in another tab"
-      assert html =~ "Take over here"
-      assert html =~ ~s(phx-click="take_over")
-      # the send form is gone while detached — no path to a second writer
-      refute has_element?(view, "form[phx-submit=send]")
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
+
+      # both tabs keep a live composer — no banner, no frozen tab
+      assert has_element?(view, "form[phx-submit=send]")
+      assert has_element?(view_b, "form[phx-submit=send]")
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "both of you see this"}]}
+         }}
+      )
+
+      assert render(view) =~ "both of you see this"
+      assert render(view_b) =~ "both of you see this"
     end
 
-    test "take over dismisses the banner and restores the composer", %{view: view} do
-      send(view.pid, {:claude_chat_detached})
-      refute has_element?(view, "form[phx-submit=send]")
+    test "a user send in one tab appears in the other tab's transcript",
+         %{view: view, conn: conn} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "first"})
+      sid = store_id(view)
+      # complete the first turn so the no-send-queue gate frees the composer
+      send_frame(sid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      render(view)
 
-      render_click(element(view, "button[phx-click=take_over]"))
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
 
-      assert has_element?(view, "form[phx-submit=send]")
-      # the banner + its button are gone (the persisted system line still quotes
-      # the phrase, so assert the control element, not raw text)
-      refute has_element?(view, "button[phx-click=take_over]")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "cross-tab hello"})
+      # phase 2 (dispatch + broadcast) runs on the next roundtrip
+      render(view)
+
+      assert render(view_b) =~ "cross-tab hello"
     end
 
     test "init event surfaces the model in the header", %{view: view} do
@@ -600,8 +643,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a result frame fills the ring geometry-first + shows cost", %{view: view} do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
-      send(
-        view.pid,
+      send_frame(
+        store_id(view),
         {:claude_chat_event,
          %{
            "type" => "result",
@@ -973,7 +1016,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
       # a near-full window pre-compaction: 180k / 200k = 90%
-      send(view.pid, {:claude_chat_event, big_result(180_000)})
+      send_frame(store_id(view), {:claude_chat_event, big_result(180_000)})
       html = render(view)
       assert html =~ "90%"
 
@@ -992,7 +1035,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # is SET (not summed), the ring shrinks to the post-compaction reality. If
       # someone regressed the formula to `inc:`, 180k+40k would clamp at 100% and
       # this refute would fail — the guard.
-      send(view.pid, {:claude_chat_event, big_result(40_000)})
+      send_frame(store_id(view), {:claude_chat_event, big_result(40_000)})
       html = render(view)
       assert html =~ "20%"
       refute html =~ "90%"
@@ -1319,14 +1362,15 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert StudioChat.get_session(sid).message_count == 1
 
       # streaming deltas must NOT touch the store
-      send(view.pid, {:claude_chat_event, stream_delta("partial ")})
-      send(view.pid, {:claude_chat_event, stream_delta("answer")})
+      send_frame(sid, {:claude_chat_event, stream_delta("partial ")})
+      send_frame(sid, {:claude_chat_event, stream_delta("answer")})
       render(view)
       assert StudioChat.get_session(sid).message_count == 1
 
-      # the completed assistant message persists (on the message boundary)
-      send(
-        view.pid,
+      # the completed assistant message persists (on the message boundary,
+      # written by the RECORDER — the runtime owns the store since wave 4)
+      send_frame(
+        sid,
         {:claude_chat_event,
          %{
            "type" => "assistant",
@@ -1343,8 +1387,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "measure me"})
       sid = store_id(view)
 
-      send(
-        view.pid,
+      send_frame(
+        sid,
         {:claude_chat_event,
          %{
            "type" => "result",
@@ -1625,8 +1669,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
       sid = store_id(view)
 
-      send(
-        view.pid,
+      send_frame(
+        sid,
         {:claude_chat_permission,
          %{
            request_id: "req-live",
@@ -1653,8 +1697,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
       sid = store_id(view)
 
-      send(
-        view.pid,
+      send_frame(
+        sid,
         {:claude_chat_permission,
          %{
            request_id: "req-live",
@@ -1716,8 +1760,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       sid = store_id(view)
       owner = session_pid(view)
 
-      send(
-        view.pid,
+      send_frame(
+        sid,
         {:claude_chat_permission,
          %{
            request_id: request_id,
@@ -1744,18 +1788,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert session_pid(viewB) == owner
     end
 
-    test "the old tab is detached (honest banner, composer frozen) when the new tab adopts",
+    test "the first tab keeps co-viewing (no detach, no frozen composer) when a second opens",
          %{conn: conn} do
-      {viewA, sid, _owner} = start_live_session_with_pending(conn, "req-detach")
+      {view_a, sid, owner} = start_live_session_with_pending(conn, "req-coview")
 
-      {:ok, _viewB, _html} = live(conn, "/studio/chat/#{sid}")
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
 
-      await(fn -> lv_assigns(viewA)[:detached] == true end)
-      assert lv_assigns(viewA)[:status] == :detached
-      # the take-over banner replaces the composer (no second-writer path)
-      render(viewA)
-      assert has_element?(viewA, "button[phx-click=take_over]")
-      refute has_element?(viewA, "form[phx-submit=send]")
+      # wave 4: the runtime is server-owned — BOTH tabs stay live viewers of
+      # the SAME session process; neither composer freezes.
+      assert session_pid(view_b) == owner
+      assert has_element?(view_a, "form[phx-submit=send]")
+      assert has_element?(view_b, "form[phx-submit=send]")
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "co-viewed answer"}]}
+         }}
+      )
+
+      assert render(view_a) =~ "co-viewed answer"
+      assert render(view_b) =~ "co-viewed answer"
     end
 
     test "the store never lies on reopen-of-live: the pending approval stays pending and answerable",
