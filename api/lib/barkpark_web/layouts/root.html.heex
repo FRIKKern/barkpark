@@ -4655,6 +4655,10 @@
         window.BarkparkPaperMermaid exists before the LiveSocket Hooks
         registration below. --%>
   <script src="/assets/bp-paper-mermaid.js"></script>
+  <%!-- Composer paste/drop image attachments for the Studio Claude chat
+        (charter D25). Non-defer so window.BarkparkChatComposer exists before the
+        Hooks registration + LiveSocket connect below. --%>
+  <script src="/assets/bp-chat-composer.js"></script>
   <script>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -4689,6 +4693,9 @@
     // PaperMermaid — renders `diagram` blocks in the Studio Claude chat
     // (defined in /assets/bp-paper-mermaid.js, loaded non-defer above).
     if (window.BarkparkPaperMermaid) Hooks.PaperMermaid = window.BarkparkPaperMermaid;
+    // ChatComposer — paste/drop image attachments for the Studio Claude chat
+    // composer (defined in /assets/bp-chat-composer.js, loaded non-defer above).
+    if (window.BarkparkChatComposer) Hooks.ChatComposer = window.BarkparkChatComposer;
 
     Hooks.PresenceIdentity = {
       mounted() {

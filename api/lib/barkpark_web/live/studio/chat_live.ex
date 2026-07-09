@@ -83,6 +83,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          ring: blank_ring(),
          title_source: "default",
          title_kicked: false
+       )
+       |> allow_upload(:attachments,
+         # Charter D25: paste/drop images ride the SAME user turn as base64
+         # content blocks. Cap at 4 × 3MB — base64 inflates ×4/3, so the wire
+         # payload stays under the Anthropic ~5MB-per-image cap. The composer
+         # phx-hook feeds files into this upload; consume happens on send.
+         accept: ~w(.png .jpg .jpeg .gif .webp),
+         max_entries: 4,
+         max_file_size: 3_000_000
        )}
     else
       {:ok,
@@ -140,31 +149,43 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @impl true
   def handle_event("send", %{"message" => text}, socket) do
     text = String.trim(text)
+    has_attachments? = socket.assigns.uploads.attachments.entries != []
 
     # No send queue (t3 item 10): while a turn runs the only control is Stop —
     # a stray Enter-submit must not fire a second overlapping turn. Enter is a
-    # server-side no-op here; the composer shows Stop, not Send.
+    # server-side no-op here; the composer shows Stop, not Send. An image-only
+    # turn (text blank but attachments present) is a valid send (charter D25).
     cond do
-      text == "" ->
+      text == "" and not has_attachments? ->
         {:noreply, socket}
 
       turn_active?(socket.assigns.status) ->
         {:noreply, socket}
 
       true ->
+        # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
+        # every failure-prone step to {:dispatch_send}. An image-only turn gets
+        # its bubble in phase 2 when the staged files are consumed (D25) — the
+        # attachment strip keeps showing the thumbnails until that next diff,
+        # so nothing visually vanishes in between.
         echo_id = socket.assigns.next_id
         send(self(), {:dispatch_send, text})
 
+        socket =
+          if text == "" do
+            assign(socket, pending_echo_id: nil)
+          else
+            socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
+          end
+
         {:noreply,
-         socket
-         |> append_message(:user, text)
-         |> assign(
-           status: :thinking,
-           interrupt_requested: false,
-           composer_draft: "",
-           pending_echo_id: echo_id
-         )}
+         assign(socket, status: :thinking, interrupt_requested: false, composer_draft: "")}
     end
+  end
+
+  # Cancel a staged attachment before send (the × on its chip).
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :attachments, ref)}
   end
 
   # Stop a running turn. The interrupt is a control-request frame on stdin
@@ -346,22 +367,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     case socket.assigns.session do
       nil ->
+        # Nothing consumed yet — staged attachments survive in the strip, the
+        # words go back to the composer. A send never disappears into a lie.
         {:noreply, restore_failed_send(socket, text)}
 
       session ->
-        case ClaudeChat.send_message(session, text) do
-          :ok ->
-            {:noreply,
-             socket
-             |> persist_user_message(text)
-             |> assign(status: :thinking, pending_echo_id: nil)}
+        # Consume the pasted/dropped images only once a session exists (D25):
+        # store each under the chat-owned dir and build the content blocks.
+        {attachments, socket} = consume_attachments(socket)
 
-          {:error, reason} ->
+        case build_user_content(text, attachments) do
+          [] ->
+            # Every image failed to store AND there was no text — never write
+            # an empty user frame; say so honestly and keep the composer live.
             {:noreply,
              socket
-             |> append_message(:system, send_error_text(reason))
-             |> assign(session: nil, status: :offline)
-             |> restore_failed_send(text)}
+             |> append_message(:system, "⚠ Nothing to send — the attachment could not be read.")
+             |> restore_failed_send(text)
+             |> assign(status: :ready)}
+
+          blocks ->
+            case ClaudeChat.send_message(session, blocks) do
+              :ok ->
+                # With images, upgrade the phase-1 text echo to the full bubble
+                # (text + thumbnails) now that the stored data-URIs exist.
+                socket =
+                  if attachments != [] do
+                    socket
+                    |> withdraw_pending_echo()
+                    |> append_user_message(text, attachments)
+                  else
+                    socket
+                  end
+
+                {:noreply,
+                 socket
+                 |> persist_user_message(text, attachments)
+                 |> assign(status: :thinking, pending_echo_id: nil)}
+
+              {:error, reason} ->
+                note =
+                  if attachments != [],
+                    do: " Your attached images were not sent — re-attach them.",
+                    else: ""
+
+                {:noreply,
+                 socket
+                 |> append_message(:system, send_error_text(reason) <> note)
+                 |> assign(session: nil, status: :offline)
+                 |> restore_failed_send(text)}
+            end
         end
     end
   end
@@ -929,8 +984,32 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <div :for={message <- @messages} data-role={message.role}>
             <%= case message.role do %>
               <% :user -> %>
-                <div style="display: flex; justify-content: flex-end;">
-                  <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-raised, rgba(127,127,127,0.08)); border: 1px solid var(--border-muted); border-radius: 10px; padding: 8px 12px; max-width: 85%;">
+                <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
+                  <%!-- Image attachments (charter D25) render inline as data-URIs
+                        (live: from the just-sent bytes; replay: read server-side
+                        from the chat-owned store — never an HTTP route). A file
+                        missing on disk degrades to an honest placeholder. --%>
+                  <div
+                    :if={user_images(message) != []}
+                    style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 85%;"
+                  >
+                    <%= for img <- user_images(message) do %>
+                      <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
+                        attachment missing
+                      </div>
+                      <img
+                        :if={img[:data_uri]}
+                        src={img.data_uri}
+                        alt="attachment"
+                        style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border-muted);"
+                      />
+                    <% end %>
+                  </div>
+                  <div
+                    :if={message.text not in [nil, ""]}
+                    class="text-sm"
+                    style="white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg-raised, rgba(127,127,127,0.08)); border: 1px solid var(--border-muted); border-radius: 10px; padding: 8px 12px; max-width: 85%;"
+                  >
                     <%= message.text %>
                   </div>
                 </div>
@@ -1050,36 +1129,96 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </div>
         <form
           :if={not @detached}
+          id="chat-composer-form"
+          phx-hook="ChatComposer"
           phx-submit="send"
           phx-change="composer-change"
-          style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;"
+          style="display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin: 0 auto;"
         >
-          <input
-            id="chat-composer"
-            type="text"
-            name="message"
-            value={@composer_draft}
-            autocomplete="off"
-            placeholder={composer_placeholder(@status)}
-            style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
-          />
-          <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
-                to cancel, never to queue a second turn (t3: no send queue). --%>
-          <button
-            :if={turn_active?(@status)}
-            type="button"
-            class="btn"
-            phx-click="stop_turn"
-            disabled={@status == :interrupting}
-            aria-label="Stop the current turn"
-            style="display: inline-flex; align-items: center; gap: 6px;"
+          <%!-- The upload the paste/drop hook feeds (charter D25). Kept in the
+                DOM (allow_upload needs it) but visually hidden — files are added
+                programmatically via `this.upload("attachments", …)`. The form's
+                phx-change (composer-change, which also owns the server-bound
+                draft per D24) is what lets allow_upload validate staged entries. --%>
+          <.live_file_input upload={@uploads.attachments} style="display: none;" />
+
+          <%!-- Attachment strip: a thumbnail chip per staged image with a remove
+                button; per-entry + form-level upload errors render honestly. --%>
+          <div
+            :if={@uploads.attachments.entries != []}
+            style="display: flex; flex-wrap: wrap; gap: 8px;"
           >
-            <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
-            <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
-          </button>
-          <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
-            <.icon name="send" size={14} />
-          </button>
+            <div
+              :for={entry <- @uploads.attachments.entries}
+              style="display: flex; align-items: center; gap: 6px; border: 1px solid var(--border-muted); border-radius: 8px; padding: 4px 6px; background: var(--bg);"
+            >
+              <.live_img_preview
+                entry={entry}
+                style="width: 40px; height: 40px; object-fit: cover; border-radius: 6px;"
+              />
+              <span
+                class="text-xs text-dim"
+                style="max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+              >
+                <%= entry.client_name %>
+              </span>
+              <button
+                type="button"
+                class="btn"
+                phx-click="cancel_upload"
+                phx-value-ref={entry.ref}
+                aria-label="Remove attachment"
+                style="padding: 0 6px; line-height: 1;"
+              >
+                ×
+              </button>
+              <span
+                :for={err <- upload_errors(@uploads.attachments, entry)}
+                class="text-xs"
+                role="alert"
+                style="color: var(--danger);"
+              >
+                <%= upload_error_label(err) %>
+              </span>
+            </div>
+          </div>
+          <p
+            :for={err <- upload_errors(@uploads.attachments)}
+            class="text-xs"
+            role="alert"
+            style="color: var(--danger); margin: 0;"
+          >
+            <%= upload_error_label(err) %>
+          </p>
+
+          <div style="display: flex; gap: 8px;">
+            <input
+              id="chat-composer"
+              type="text"
+              name="message"
+              value={@composer_draft}
+              autocomplete="off"
+              placeholder={composer_placeholder(@status)}
+              style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
+            />
+            <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
+                  to cancel, never to queue a second turn (t3: no send queue). --%>
+            <button
+              :if={turn_active?(@status)}
+              type="button"
+              class="btn"
+              phx-click="stop_turn"
+              disabled={@status == :interrupting}
+              aria-label="Stop the current turn"
+              style="display: inline-flex; align-items: center; gap: 6px;"
+            >
+              <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
+              <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+            </button>
+            <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
+              <.icon name="send" size={14} />
+            </button>
+          </div>
         </form>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0;">
           last turn: <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
@@ -1278,6 +1417,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
     assign(socket,
       messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
       composer_draft: text,
+      pending_echo_id: nil
+    )
+  end
+
+  # Drop the phase-1 text-only echo WITHOUT restoring the composer — used when a
+  # dispatched turn carries images (D25) and the echo upgrades to the full
+  # text+thumbnails bubble. A no-op when there is no pending echo.
+  defp withdraw_pending_echo(socket) do
+    echo_id = socket.assigns[:pending_echo_id]
+
+    assign(socket,
+      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
       pending_echo_id: nil
     )
   end
@@ -1484,9 +1635,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # append race that outlived its retries) — we never discard that error: log it
   # and tell the user honestly that THIS message may not survive a reopen, so
   # the transcript never lies about what was remembered (charter D20b).
-  defp persist_user_message(socket, text) do
+  defp persist_user_message(socket, text, attachments) do
+    # Only the lightweight pointer rides the jsonb — NEVER the base64/bytes
+    # (charter D25/D7). An attachment-free send keeps the empty-metadata shape.
+    metadata =
+      case attachments do
+        [] -> %{}
+        list -> %{"attachments" => Enum.map(list, &attachment_pointer_json/1)}
+      end
+
     socket =
-      case persist_store(socket, %{role: "user", source_markdown: text, metadata: %{}}) do
+      case persist_store(socket, %{role: "user", source_markdown: text, metadata: metadata}) do
         {:error, reason} ->
           Logger.warning("studio chat: failed to persist user message: #{inspect(reason)}")
 
@@ -1502,6 +1661,82 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     refresh_sessions(socket)
   end
+
+  # ── image attachments (charter D25) ─────────────────────────────────────────
+
+  # Consume the staged uploads: read each into memory, store the bytes under the
+  # chat-owned dir keyed by the session id, and carry the bytes forward (for the
+  # base64 wire block + the live bubble data-URI). A store/read failure drops that
+  # one image honestly (logged) rather than failing the whole turn.
+  defp consume_attachments(socket) do
+    store_id = socket.assigns.store_session_id
+
+    attachments =
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+        with {:ok, bytes} <- File.read(tmp_path),
+             {:ok, pointer} <- StudioChat.store_attachment(store_id, bytes, entry.client_type) do
+          {:ok, Map.put(pointer, :bytes, bytes)}
+        else
+          {:error, reason} ->
+            Logger.warning("studio chat: failed to attach image: #{inspect(reason)}")
+            {:ok, :error}
+        end
+      end)
+
+    {Enum.reject(attachments, &(&1 == :error)), socket}
+  end
+
+  # Assemble the user frame's content-block list: the text block (omitted when
+  # blank — an image-only turn) followed by one base64 image block per attachment
+  # (charter D25 wire shape, proven on the real binary).
+  defp build_user_content(text, attachments) do
+    text_blocks = if text == "", do: [], else: [%{"type" => "text", "text" => text}]
+
+    image_blocks =
+      Enum.map(attachments, fn a ->
+        %{
+          "type" => "image",
+          "source" => %{
+            "type" => "base64",
+            "media_type" => a.media_type,
+            "data" => Base.encode64(a.bytes)
+          }
+        }
+      end)
+
+    text_blocks ++ image_blocks
+  end
+
+  # Live user bubble carrying the just-sent images as data-URIs (bytes in hand —
+  # no disk re-read). Replay rebuilds the same shape from the store.
+  defp append_user_message(socket, text, attachments) do
+    images = Enum.map(attachments, fn a -> %{data_uri: data_uri(a.media_type, a.bytes)} end)
+    id = socket.assigns.next_id
+    message = %{id: id, role: :user, text: text, html: nil, images: images}
+    assign(socket, messages: socket.assigns.messages ++ [message], next_id: id + 1)
+  end
+
+  # The jsonb pointer for a stored attachment — path/media_type/sha256/byte_size
+  # ONLY, never the bytes.
+  defp attachment_pointer_json(a) do
+    %{
+      "path" => a.path,
+      "media_type" => a.media_type,
+      "sha256" => a.sha256,
+      "byte_size" => a.byte_size
+    }
+  end
+
+  defp data_uri(media_type, bytes),
+    do: "data:#{media_type};base64,#{Base.encode64(bytes)}"
+
+  # Images on a message map (live or replayed); older/other user rows have none.
+  defp user_images(message), do: Map.get(message, :images, []) || []
+
+  defp upload_error_label(:too_large), do: "Image is larger than 3 MB."
+  defp upload_error_label(:not_accepted), do: "Only PNG, JPEG, GIF, or WebP images."
+  defp upload_error_label(:too_many_files), do: "Up to 4 images per message."
+  defp upload_error_label(_), do: "That file could not be attached."
 
   # Persist an approval ask as a "pending" row. String metadata keys mirror the
   # jsonb round-trip, so replay reads them back verbatim (request_id + tool_name
@@ -1647,6 +1882,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
     }
   end
 
+  # A user row rebuilds its image attachments (charter D25) from the metadata
+  # pointers, read SERVER-SIDE from the chat-owned store and inlined as data-URIs
+  # — no HTTP route ever (D6). A file missing on disk degrades to an honest
+  # placeholder so replay never crashes.
+  defp replay_message(%{role: "user", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
+  end
+
   defp replay_message(m, _live?) do
     role = replay_role(m.role)
 
@@ -1657,6 +1900,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     %{id: m.seq, role: role, text: m.source_markdown, html: html}
   end
+
+  # Rebuild the inline image list from a user row's metadata attachment pointers.
+  defp replay_images(meta) do
+    case Map.get(meta || %{}, "attachments") do
+      list when is_list(list) -> Enum.map(list, &replay_image/1)
+      _ -> []
+    end
+  end
+
+  defp replay_image(%{"path" => path, "media_type" => media_type}) when is_binary(path) do
+    case StudioChat.read_attachment(path) do
+      {:ok, bytes} -> %{data_uri: data_uri(media_type, bytes)}
+      {:error, :missing} -> %{missing: true}
+    end
+  end
+
+  defp replay_image(_), do: %{missing: true}
 
   defp replay_approval_status("allowed", _live?), do: :allowed
   defp replay_approval_status("denied", _live?), do: :denied
@@ -2052,7 +2312,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # port write failed or the session had already gone. The words are restored to
   # the composer, so this is a "try again", not a "your message is lost".
   defp send_error_text(_reason),
-    do: "That message didn't reach Claude — the session dropped. Your words were kept; send again."
+    do:
+      "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do

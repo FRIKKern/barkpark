@@ -107,6 +107,12 @@ config :barkpark, :public_demo_studio, true
 # fake command (no real `claude` on CI).
 config :barkpark, :claude_chat, enabled: false
 
+# Studio chat image attachments (charter D25) — write bytes under a temp dir in
+# test so they never touch a real store. Tests that assert file lifecycle point
+# it at a per-test unique dir via Application.put_env.
+config :barkpark, Barkpark.StudioChat,
+  attachments_dir: Path.join(System.tmp_dir!(), "bp_studio_chat_test_attachments")
+
 # The github-bridge DrainWorker runs a periodic DB-touching drain tick. Keep the
 # boot-started singleton dormant in test so it never fires against a process that
 # owns no ExUnit sandbox connection (DBConnection.OwnershipError cascade). Drain

@@ -503,6 +503,72 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "image attachments — chat-owned file store (wave 3, charter D25)" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "bp_sc_attach_#{System.unique_integer([:positive])}")
+      prev = Application.get_env(:barkpark, StudioChat)
+      Application.put_env(:barkpark, StudioChat, attachments_dir: dir)
+
+      on_exit(fn ->
+        File.rm_rf(dir)
+        if prev, do: Application.put_env(:barkpark, StudioChat, prev)
+      end)
+
+      {:ok, dir: dir}
+    end
+
+    test "store_attachment writes bytes under <dir>/<session>/<sha256> and returns a pointer",
+         %{dir: dir} do
+      s = new_session()
+      bytes = "the-png-bytes"
+      sha = :sha256 |> :crypto.hash(bytes) |> Base.encode16(case: :lower)
+
+      assert {:ok, pointer} = StudioChat.store_attachment(s.id, bytes, "image/png")
+      assert pointer.path == Path.join(s.id, sha)
+      assert pointer.media_type == "image/png"
+      assert pointer.sha256 == sha
+      assert pointer.byte_size == byte_size(bytes)
+
+      # bytes really live on disk under the content-addressed path
+      assert File.read!(Path.join(dir, pointer.path)) == bytes
+    end
+
+    test "read_attachment round-trips by relative pointer; a missing/traversal path is honest" do
+      s = new_session()
+      {:ok, pointer} = StudioChat.store_attachment(s.id, "abc", "image/jpeg")
+
+      assert {:ok, "abc"} = StudioChat.read_attachment(pointer.path)
+      assert {:error, :missing} = StudioChat.read_attachment("#{s.id}/deadbeef")
+      assert {:error, :missing} = StudioChat.read_attachment("../../etc/passwd")
+      assert {:error, :missing} = StudioChat.read_attachment(nil)
+    end
+
+    test "jpg normalizes to image/jpeg; an unknown type falls back to image/png" do
+      s = new_session()
+      {:ok, a} = StudioChat.store_attachment(s.id, "x", "image/jpg")
+      {:ok, b} = StudioChat.store_attachment(s.id, "y", "application/pdf")
+      assert a.media_type == "image/jpeg"
+      assert b.media_type == "image/png"
+    end
+
+    test "delete_session removes the session's attachment dir (files never outlive the row)",
+         %{dir: dir} do
+      s = new_session()
+      {:ok, pointer} = StudioChat.store_attachment(s.id, "img", "image/png")
+      session_dir = Path.join(dir, s.id)
+      assert File.exists?(Path.join(dir, pointer.path))
+      assert File.dir?(session_dir)
+
+      assert {:ok, %Session{}} = StudioChat.delete_session(s.id)
+      refute File.exists?(session_dir)
+    end
+
+    test "delete_session on a session with no attachments is a clean success" do
+      s = new_session()
+      assert {:ok, %Session{}} = StudioChat.delete_session(s.id)
+    end
+  end
+
   describe "list_sessions/1 — archived filter + cap (wave 2)" do
     test "the default list excludes archived; archived: true lists only the shelf" do
       live = new_session()
