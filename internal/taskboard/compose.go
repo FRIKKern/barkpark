@@ -384,6 +384,15 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 
 	// Screen (X,Y) → composeAt (x,y): strip the leading blank row and the gl pad.
 	cx, cy := ev.X-gl, ev.Y-1
+	// Motion = HOVER (ttm-s3), resolved BEFORE the pane-row early-outs so a
+	// pointer leaving the panes (chrome, crumb, gutter) clears the tint instead
+	// of leaving it stale.
+	if ev.Action == tea.MouseActionMotion {
+		return m.wideMouseMotion(cx, cy, inner, now)
+	}
+	if ev.Action == tea.MouseActionRelease {
+		return m, nil // the press acted; the release is not an input of its own
+	}
 	if cx < 0 || cy < 0 {
 		return m, nil
 	}
@@ -396,6 +405,11 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	if pl < 0 || pl >= inner {
 		return m, nil
 	}
+	// Every press/wheel that reaches a pane is non-x input — exactly like the
+	// narrow reducer, it clears the transient strip and disarms the close guard
+	// (wide exposes no footer-verb click targets, so there is no x-exception).
+	m.pendingClose = ""
+	m.ui.Strip = ActionStrip{}
 	// X: pure threshold over the assembled row.
 	switch {
 	case cx < boardPaneWidth:
@@ -405,6 +419,31 @@ func (m Model) handleWideMouse(ev tea.MouseMsg) (Model, tea.Cmd) {
 	default:
 		return m.rightPaneMouse(ev, pl, innerW, inner, now)
 	}
+}
+
+// wideMouseMotion is wide-mode hover (ttm-s3 fused into ttm-s5's router): only
+// the left board pane's spine rows tint — the wide pane shares flattenSpine's
+// hover paint with the narrow board, so resolving the row Ref is all it takes.
+// The right pane's rail stops and the depth-0 preview have no hover tint (the
+// same honest gap as the narrow reading frames). Change-only mutation through
+// setHoverTarget stays the debounce (charter D95); anything off the board
+// pane's spine rows resolves to "" and clears the tint.
+func (m Model) wideMouseMotion(cx, cy, inner int, now time.Time) (Model, tea.Cmd) {
+	target := ""
+	if cx >= 0 && cx < boardPaneWidth && cy >= 1 && cy-1 < inner {
+		idTop, avail := m.wideBoardPaneAvail(inner, now)
+		if idx := m.wideBoardRowIndex(cy-1, idTop, avail, now); idx >= 0 {
+			if rows := m.visibleRows(); idx < len(rows) {
+				target = rows[idx].docID
+			}
+		}
+	}
+	ui, changed := setHoverTarget(m.ui, target)
+	if !changed {
+		return m, nil
+	}
+	m.ui = ui
+	return m, nil
 }
 
 // paneRow is a composeAt row's vertical class in wide mode, keyed on Y alone (the
@@ -480,62 +519,64 @@ func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Mo
 	if ev.Button != tea.MouseButtonLeft || ev.Action != tea.MouseActionPress {
 		return m, nil
 	}
-	idTop := len(renderIdentityTop(m.ui, boardPaneWidth, now))
-	bottom := len(bottomChrome(m.board, m.ui, boardPaneWidth, now))
 	// Render floors its height at 8 internally, so the painted layout is computed
 	// at max(8, inner) even when a pathologically short pane clips the frame —
-	// mirror that floor or the chrome/spine row boundaries drift by one there.
+	// wideBoardPaneAvail mirrors that floor or the chrome/spine row boundaries
+	// would drift by one there.
+	idTop, avail := m.wideBoardPaneAvail(inner, now)
+	idx := m.wideBoardRowIndex(pl, idTop, avail, now)
+	if idx < 0 {
+		return m, nil // chrome, an overflow marker, or a display-only line
+	}
+	if m.ui.Cursor == idx {
+		return m.activateBoard(), nil
+	}
+	m.ui.Cursor = idx
+	return m, nil
+}
+
+// wideBoardRowIndex resolves a wide left-pane row (pl, in pane coordinates, with
+// the pane's identity-top height and spine window height already derived) to the
+// selectable-row (cursor) index painted there, or -1 for chrome, an ↑/↓ overflow
+// marker, or a display-only line. It reads flattenSpine's per-emit LineTarget
+// slice — the SAME hit-map producer the narrow board resolves through (ttm-s1),
+// multi-line-safe by construction — windowed by the SAME slideTop offset the
+// paint used, so click, hover and keyboard cursors can never desync.
+func (m Model) wideBoardRowIndex(pl, idTop, avail int, now time.Time) int {
+	if pl < idTop || pl >= idTop+avail {
+		return -1 // identity / status chrome, not a spine row
+	}
+	winIdx := pl - idTop
+	spineLines, targets, cursorLine := flattenSpine(m.board, m.ui, boardPaneWidth, now)
+	top := slideTop(m.ui.SpineScroll, cursorLine, avail, len(spineLines))
+	if top > 0 && winIdx == 0 {
+		return -1 // ↑ more-above marker
+	}
+	if len(spineLines)-(top+avail) > 0 && winIdx == avail-1 {
+		return -1 // ↓ more-below marker
+	}
+	line := top + winIdx
+	if line < 0 || line >= len(targets) || targets[line].Kind != LineSpineRow {
+		return -1 // a separator / phase band / dead-epic line — display only
+	}
+	return targets[line].CursorIndex
+}
+
+// wideBoardPaneAvail derives the wide left pane's identity-top height and spine
+// window height — the SAME chrome math Render uses at boardPaneWidth, including
+// Render's internal 8-row floor — shared by the press and hover resolvers.
+func (m Model) wideBoardPaneAvail(inner int, now time.Time) (idTop, avail int) {
+	idTop = len(renderIdentityTop(m.ui, boardPaneWidth, now))
+	bottom := len(bottomChrome(m.board, m.ui, boardPaneWidth, now))
 	effH := inner
 	if effH < 8 {
 		effH = 8
 	}
-	avail := effH - idTop - bottom
+	avail = effH - idTop - bottom
 	if avail < 1 {
 		avail = 1
 	}
-	if pl < idTop || pl >= idTop+avail {
-		return m, nil // identity / status chrome, not a spine row
-	}
-	winIdx := pl - idTop
-
-	spineLines, cursorLine := flattenSpine(m.board, m.ui, boardPaneWidth, now)
-	top := slideTop(m.ui.SpineScroll, cursorLine, avail, len(spineLines))
-	if top > 0 && winIdx == 0 {
-		return m, nil // ↑ more-above marker
-	}
-	if len(spineLines)-(top+avail) > 0 && winIdx == avail-1 {
-		return m, nil // ↓ more-below marker
-	}
-	line := top + winIdx
-	owners := m.boardLineOwners()
-	if line < 0 || line >= len(owners) || owners[line] < 0 {
-		return m, nil // a separator / phase band / dead-epic line — display only
-	}
-	if m.ui.Cursor == owners[line] {
-		return m.activateBoard(), nil
-	}
-	m.ui.Cursor = owners[line]
-	return m, nil
-}
-
-// boardLineOwners maps each spine LINE to the selectable-row (cursor) index that
-// owns it, or -1 for a display-only line. Every spine row paints exactly one line
-// (TaskRow returns one line), so this is 1:1 with spineRows — the same ordered
-// producer visibleRows and flattenSpine read, so the click cursor can never
-// desync from the keyboard cursor.
-func (m Model) boardLineOwners() []int {
-	rows := spineRows(m.board, m.ui)
-	owners := make([]int, len(rows))
-	sel := 0
-	for i, sr := range rows {
-		if sr.Selectable {
-			owners[i] = sel
-			sel++
-		} else {
-			owners[i] = -1
-		}
-	}
-	return owners
+	return idTop, avail
 }
 
 // rightPaneMouse routes a click/wheel that landed in the wide right pane. At

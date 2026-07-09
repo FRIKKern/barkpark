@@ -602,7 +602,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.wide {
-		return m, nil
+		// ttm-s5: the ≥110-col two-pane frame routes by pure X/Y over the SAME
+		// geometry composeAt paints — board pane / dead gutter / right pane.
+		return m.handleWideMouse(msg)
 	}
 	if msg.Action == tea.MouseActionMotion {
 		return m.mouseMotion(msg.X, msg.Y)
