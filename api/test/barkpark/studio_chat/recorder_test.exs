@@ -197,17 +197,24 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert Recorder.whereis(sid) == nil
   end
 
-  test "the idle reaper closes a silent session honestly", %{sid: sid} do
-    Application.put_env(:barkpark, :studio_chat_idle_reap_ms, 60)
-    on_exit(fn -> Application.delete_env(:barkpark, :studio_chat_idle_reap_ms) end)
-
-    # a FRESH recorder arms its timer from the overridden config
+  test "the idle reaper closes a silent session honestly", %{sid: _sid} do
+    # We drive the reap DETERMINISTICALLY by sending the `:idle_reap` tick
+    # ourselves — the exact message the frame-silence timer fires — AFTER we've
+    # subscribed and monitored. A short (60ms) real-timer override raced the reap
+    # ahead of this setup on a loaded box: the process died before `monitor/1`,
+    # so `:DOWN` carried `:noproc` not `:normal`, and the `:idle_reaped`
+    # broadcast landed before the subscribe. The honest signal is the reap
+    # handler itself, not the wall clock, so we exercise it directly.
     other = Ecto.UUID.generate()
     {:ok, _} = StudioChat.create_session(%{id: other, mode: "plan"})
-    {:ok, recorder} = Recorder.ensure(%{session_id: other, mode: "plan", resume: false})
+    # Subscribe BEFORE the recorder exists (the topic is derived from `other`,
+    # generated above) so the teardown broadcast can never be missed.
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(other))
+    {:ok, recorder} = Recorder.ensure(%{session_id: other, mode: "plan", resume: false})
 
     ref = Process.monitor(recorder)
+    send(recorder, :idle_reap)
+
     assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
     assert_receive {:claude_chat_exit, :idle_reaped, _tail}
 
