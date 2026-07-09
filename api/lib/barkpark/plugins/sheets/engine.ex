@@ -5,9 +5,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   (`Barkpark.Plugins.Sheets.Core.snapshot_for/2`). `Barkpark.Content` calls `recompute/1`
   on every `"sheet"` save, so HTTP mutations persist computed values and the
   write-through snapshots project them into embeds with zero renderer
-  changes. Pure functions: no Repo, no I/O — except `TODAY`/`NOW`, which
-  read the wall clock and are therefore volatile-as-of-last-save (they
-  recompute only when the sheet is saved, not on every read).
+  changes. Pure functions: no Repo, no I/O — except `TODAY`/`NOW` (which read
+  the wall clock) and `RAND`/`RANDBETWEEN` (which draw from a fresh
+  per-recompute seed): all four are volatile-as-of-last-save — they recompute
+  only when the sheet is saved, not on every read. A RAND draw is a PURE
+  function of `{recompute-seed, tab, col, row}`, so it is identical across
+  every phase of a multi-phase (spill) recompute — a spill anchor and its
+  dependents persist the same draw — yet fresh on the next save; process-global
+  `:rand` state is never touched.
 
   ## Canonical formula form
 
@@ -378,7 +383,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
                 EXACT FIND SEARCH SUBSTITUTE REPLACE REPT PROPER VALUE
                 ISBLANK ISNUMBER ISTEXT ISLOGICAL ISERROR ISERR ISNA
                 CHOOSE SWITCH IFS
-                DATE YEAR MONTH DAY TODAY NOW
+                DATE YEAR MONTH DAY TODAY NOW RAND RANDBETWEEN
                 NA COUNTIF SUMIF AVERAGEIF
                 VLOOKUP MATCH INDEX
                 COUNTIFS SUMIFS AVERAGEIFS
@@ -599,6 +604,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       fspec("DAY", [farg("date")], "Returns the day of the month of a date."),
       fspec("TODAY", [], "Returns the current date."),
       fspec("NOW", [], "Returns the current date and time."),
+      fspec("RAND", [], "Returns a random number in [0, 1), fresh on each save."),
+      fspec(
+        "RANDBETWEEN",
+        [farg("bottom"), farg("top")],
+        "Returns a random integer between bottom and top, inclusive."
+      ),
       fspec("NA", [], "Returns the #N/A error value."),
       fspec(
         "COUNTIF",
@@ -962,20 +973,46 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @spec recompute(term()) :: term()
   def recompute(%{"tabs" => tabs} = content) when is_list(tabs) do
     name_index = tab_name_index(tabs)
+    # ONE seed per recompute invocation, threaded into every cell's ctx so a
+    # RAND/RANDBETWEEN draw is stable across all recompute phases within this
+    # save (pure per {seed, tab, col, row}) yet fresh on the next.
+    seed = rand_recompute_seed()
 
     if needs_unified?(tabs, name_index) do
       # Any cross-tab reference forces ONE unified {tab,col,row} graph over
       # every formula cell of every tab (CT-D4); cross-tab cycles fall out as
-      # ordinary Kahn leftovers. See recompute_unified/3.
-      recompute_unified(content, tabs, name_index)
+      # ordinary Kahn leftovers. See recompute_unified/4.
+      recompute_unified(content, tabs, name_index, seed)
     else
       # Zero cross-tab references → the per-tab fast path, byte-for-byte the
       # legacy behaviour (each tab recomputed in isolation).
-      Map.put(content, "tabs", Enum.map(tabs, &recompute_tab/1))
+      new_tabs =
+        tabs
+        |> Enum.with_index()
+        |> Enum.map(fn {tab, ti} -> recompute_tab(tab, ti, seed) end)
+
+      Map.put(content, "tabs", new_tabs)
     end
   end
 
   def recompute(content), do: content
+
+  # A fresh integer for each recompute/1 call: unique_integer guarantees a new
+  # value on every call within the node (so two saves reseed and RAND is
+  # volatile between them), system_time keeps it fresh across restarts.
+  defp rand_recompute_seed do
+    :erlang.unique_integer([:positive]) + :erlang.system_time(:nanosecond)
+  end
+
+  # One uniform draw in [0, 1), pure in the cell's identity: seed the exsss
+  # generator (a **-scrambled algorithm, decorrelated on its first output) with
+  # {seed, tab, cell} and take a single value. col/row fold into one integer —
+  # row is grid-bounded (< 2_000_000) so the 3-int seed tuple stays unique per
+  # cell — and :exsss_seed rejects a 4-tuple, hence the fold.
+  defp rand_unit(seed, tab, col, row) do
+    {v, _} = :rand.uniform_s(:rand.seed_s(:exsss, {seed, tab, col * 2_000_000 + row}))
+    v
+  end
 
   @doc false
   # Would recompute/1 take the unified cross-tab path? The regression lock in
@@ -987,11 +1024,12 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   def uses_cross_tab?(_), do: false
 
-  defp recompute_tab(%{"cells" => cells} = tab) when is_map(cells) and map_size(cells) > 0 do
-    Map.put(tab, "cells", recompute_cells(cells))
+  defp recompute_tab(%{"cells" => cells} = tab, ti, seed)
+       when is_map(cells) and map_size(cells) > 0 do
+    Map.put(tab, "cells", recompute_cells(cells, ti, seed))
   end
 
-  defp recompute_tab(tab), do: tab
+  defp recompute_tab(tab, _ti, _seed), do: tab
 
   # ── cross-tab routing ───────────────────────────────────────────────────────
 
@@ -1065,7 +1103,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   # cross-tab edges and detects cross-tab cycles as residual-in-degree leftovers
   # (no new cycle algorithm — the per-tab rule generalises for free).
 
-  defp recompute_unified(content, tabs, name_index) do
+  defp recompute_unified(content, tabs, name_index, seed) do
     # Gather, across ALL tabs: per-tab occupied sets, a global {tab,col,row}
     # value map (literals), and the parsed formula nodes.
     {occupied, values, parsed} =
@@ -1119,7 +1157,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
         unified: true,
         values: values,
         occupied: occupied,
-        formulas: parsed |> Map.keys() |> MapSet.new()
+        formulas: parsed |> Map.keys() |> MapSet.new(),
+        seed: seed
       }
 
       queue = for {key, 0} <- in_deg, do: key
@@ -1217,7 +1256,8 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       occupied: base.occupied,
       formulas: base.formulas,
       self: {c, r},
-      spill: Map.get(base, :spill)
+      spill: Map.get(base, :spill),
+      seed: base.seed
     }
 
     computed = Map.put(computed, key, eval(ast, ctx))
@@ -1314,7 +1354,7 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   # ── recompute pipeline ──────────────────────────────────────────────────────
 
-  defp recompute_cells(cells) do
+  defp recompute_cells(cells, tab_index, seed) do
     entries =
       for {addr, cell} <- cells, is_map(cell), reduce: [] do
         acc ->
@@ -1353,7 +1393,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       base = %{
         values: values,
         occupied: occupied,
-        formulas: parsed |> Map.keys() |> MapSet.new()
+        formulas: parsed |> Map.keys() |> MapSet.new(),
+        seed: seed,
+        tab: tab_index
       }
 
       queue = for {pos, 0} <- in_deg, do: pos
@@ -1414,7 +1456,9 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       occupied: base.occupied,
       formulas: base.formulas,
       self: pos,
-      spill: Map.get(base, :spill)
+      spill: Map.get(base, :spill),
+      seed: base.seed,
+      tab: base.tab
     }
 
     computed = Map.put(computed, pos, eval(ast, ctx))
@@ -3079,6 +3123,33 @@ defmodule Barkpark.Plugins.Sheets.Engine do
 
   defp call("TODAY", [], _ctx), do: Date.utc_today()
   defp call("NOW", [], _ctx), do: DateTime.utc_now()
+
+  # RAND/RANDBETWEEN are volatile-as-of-last-save (see moduledoc): the draw is a
+  # PURE function of the per-recompute seed and the cell's own {tab, col, row},
+  # so a multi-phase spill recompute yields the identical value in every phase
+  # (no process-global :rand state), yet the next save reseeds. A single cell
+  # carrying more than one volatile draw shares that one per-cell draw by design.
+  defp call("RAND", [], ctx) do
+    {c, r} = ctx.self
+    rand_unit(ctx.seed, ctx.tab, c, r)
+  end
+
+  defp call("RANDBETWEEN", [lo_ast, hi_ast], ctx) do
+    with lo when is_number(lo) <- eval_number(lo_ast, ctx),
+         hi when is_number(hi) <- eval_number(hi_ast, ctx) do
+      lo = trunc(lo)
+      hi = trunc(hi)
+
+      if lo > hi do
+        err(:num)
+      else
+        {c, r} = ctx.self
+        lo + trunc(rand_unit(ctx.seed, ctx.tab, c, r) * (hi - lo + 1))
+      end
+    else
+      {:error, _} = e -> e
+    end
+  end
 
   # HOUR/MINUTE/SECOND read the time component the way YEAR/MONTH/DAY read the
   # date component; a pure date reads midnight (all three are 0).
