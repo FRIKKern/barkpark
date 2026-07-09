@@ -13,18 +13,15 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
-    # On the scoped mount LiveScope assigned the /w/<ws>/p/<proj> prefix
-    # before this runs (tsk-url-p2); flat mount → "" → paths byte-identical.
-    prefix = socket.assigns[:scope_prefix] || ""
-
+    # `current_path` is owned by BarkparkWeb.StudioChrome's :handle_params
+    # hook (the ONE producer) — never hand-set here.
     {:ok,
      socket
      |> assign_new(:scope_prefix, fn -> "" end)
      |> assign(
        nav_section: :media,
        dataset: dataset,
-       page_title: "Media Library",
-       current_path: prefix <> "/d/#{dataset}/studio/media"
+       page_title: "Media Library"
      )}
   end
 

@@ -258,4 +258,58 @@ defmodule BarkparkWeb.StudioChromeTest do
       assert html =~ "studio-bar-tabs"
     end
   end
+
+  describe "current_path is derived by the shared hook, not hand-set per LiveView" do
+    # The disease this hook cures: only 4 of ~13 Studio LiveViews used to
+    # hand-set current_path, so ApiTester/Settings/Styleguide/OrgAdmin/
+    # plugin-admin rendered with NO active tab. StudioChrome's
+    # :handle_params hook now derives it for every studio-layout surface.
+
+    test "ApiTesterLive mount derives current_path and lights the API tab", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      path = "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio/api-tester"
+      {:ok, view, html} = live(conn, path)
+
+      # The hook (not the LiveView — ApiTesterLive never sets it) derived
+      # current_path from the request URI.
+      assert :sys.get_state(view.pid).socket.assigns.current_path == path
+
+      # …and that lit the API tab: active-state is now DERIVED everywhere.
+      assert html =~ ~s{href="#{path}" class="studio-tab active" aria-current="page"}
+      # Exactly one tab is active across the whole bar.
+      assert length(Regex.scan(~r/class="studio-tab active"/, html)) == 1
+    end
+
+    test "trailing slash is normalized away (deterministic active_when boundary)", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      base = "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio"
+      {:ok, view, _html} = live(conn, base <> "/api-tester/")
+
+      # No trailing slash on the derived path; bare root stays "/".
+      assert :sys.get_state(view.pid).socket.assigns.current_path == base <> "/api-tester"
+    end
+
+    test "push_patch within StudioLive refreshes current_path (hook fires on every patch)", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      root = "/w/#{ws_a.slug}/p/#{proj_a.slug}/d/#{@dataset}/studio"
+      {:ok, view, _html} = live(conn, root)
+
+      # Mount value from the hook.
+      assert :sys.get_state(view.pid).socket.assigns.current_path == root
+
+      # A live patch to a deeper Structure path re-runs handle_params, so the
+      # hook re-derives current_path — it is not frozen at the mount value.
+      render_patch(view, root <> "/post")
+      assert :sys.get_state(view.pid).socket.assigns.current_path == root <> "/post"
+    end
+  end
 end
