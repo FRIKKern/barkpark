@@ -5,9 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
   <.live_title default="Sheet · Barkpark" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>
-  <meta name="description" content={"Live spreadsheet — " <> (assigns[:page_title] || "Barkpark Sheets")} />
-  <meta property="og:title" content={(assigns[:page_title] || "Barkpark Sheets") <> " · Barkpark"} />
-  <meta property="og:type" content="website" />
+  <%!-- Social-share head (preview-contract pc-w2): the SAME shared emitter the
+        papers reader uses, driven by the sheet's `:preview` manifest that
+        SheetsReaderLive.mount sets. Emitted BEFORE the multi-KB style blob (Slack
+        reads only the first 32 KB). Replaces the hand-rolled canned
+        description/og:title/og:type — those are now derived from the manifest
+        (a sheet's raw type maps to og:type=website, D8). `assigns[:preview]`
+        is nil-safe → site-default meta on any render that assigns none. --%>
+  <BarkparkWeb.ShareMeta.head preview={assigns[:preview]} page_title={assigns[:page_title]} />
   <style>
     /* The /sheets/:slug public reader (Sheets M4) — the papers-reader
        aesthetic (bulldocs.html.heex's parchment article chrome) over the

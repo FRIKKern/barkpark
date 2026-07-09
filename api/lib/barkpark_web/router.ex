@@ -697,7 +697,10 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     live_session :plugin_public,
-      on_mount: [{BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)
     end
@@ -917,7 +920,11 @@ defmodule BarkparkWeb.Router do
     pipe_through(:scoped_browser)
 
     live_session :scoped_plugin_public,
-      on_mount: [{BarkparkWeb.PluginScopeSession, :scope}, {BarkparkWeb.StudioChrome, :default}],
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :fetch_api_token},
+        {BarkparkWeb.PluginScopeSession, :scope},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
       session: {BarkparkWeb.PluginScopeSession, :build, []},
       layout: {BarkparkWeb.Layouts, :studio} do
       plugin_routes(scope: :public)

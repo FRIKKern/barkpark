@@ -502,11 +502,14 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       {:ok, view, _html} = live(conn, "/sheets/rdr-chrome")
       assert page_title(view) == "Quarterly Numbers · Barkpark"
 
-      # The static <head> carries the og:title + description unfurl meta.
+      # The static <head> carries the unfurl meta via the shared ShareMeta
+      # emitter (preview-contract pc-w2): og:title is the bare manifest title
+      # (og:site_name carries "Barkpark"); the site suffix lives on the <title>.
       resp = conn |> get("/sheets/rdr-chrome") |> html_response(200)
-      assert resp =~ ~s(property="og:title")
-      assert resp =~ "Quarterly Numbers · Barkpark"
-      assert resp =~ ~s(name="description")
+      assert resp =~ ~s(<meta property="og:title" content="Quarterly Numbers")
+      assert resp =~ "Quarterly Numbers · Barkpark</title>"
+      assert resp =~ ~s(<meta property="og:type" content="website")
+      assert resp =~ ~s(<meta name="twitter:card" content="summary_large_image")
     end
 
     test "an untitled sheet falls back to the slug in the page title", %{conn: conn} do
@@ -782,6 +785,41 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
 
       # PURE navigation — no session ever started (reader-safe).
       assert Session.whereis("rdr-find", @dataset) == nil
+    end
+  end
+
+  # preview-contract pc-w2: the sheet reader emits the shared social-share head
+  # (og/twitter) from the sheet's preview manifest, in the DEAD render (crawlers
+  # + unfurlers run no JS). A sheet's raw type maps to og:type=website (D8) —
+  # no JSON-LD Article.
+  describe "social-share head (og/twitter)" do
+    test "the dead render carries the og/twitter head for a sheet", %{conn: conn} do
+      create_draft!("rdr-share", one_tab(%{"A1" => %{"v" => "hi"}}), %{
+        "title" => "Q3 Revenue Model"
+      })
+
+      publish!("rdr-share")
+
+      conn = get(conn, "/sheets/rdr-share")
+      html = html_response(conn, 200)
+      base = BarkparkWeb.Endpoint.url()
+
+      assert html =~ ~s(<meta property="og:site_name" content="Barkpark")
+      assert html =~ ~s(<meta property="og:title" content="Q3 Revenue Model")
+      # D8 — a sheet is a website, not an article.
+      assert html =~ ~s(<meta property="og:type" content="website")
+      assert html =~ ~s(<meta property="og:url" content="#{base}/sheets/rdr-share")
+      # Branded default card (D5) + name= twitter discipline.
+      assert html =~ ~s(<meta property="og:image" content="#{base}/images/og-default.jpg")
+      assert html =~ ~s(<meta name="twitter:card" content="summary_large_image")
+
+      # A sheet emits no JSON-LD Article, and none of the retired hand-rolled
+      # canned og:title-with-suffix survives (the shared emitter owns og now).
+      refute html =~ "application/ld+json"
+      refute html =~ ~s(content="Q3 Revenue Model · Barkpark")
+
+      # The <title> still carries the site suffix (via <.live_title>).
+      assert html =~ "Q3 Revenue Model · Barkpark</title>"
     end
   end
 end

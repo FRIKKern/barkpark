@@ -106,6 +106,107 @@ defmodule Barkpark.PortableDoc.ProjectionTest do
     end
   end
 
+  describe "content[\"preview\"] — stamped alongside content[\"body\"] when opted in" do
+    test "NO :preview render_opt ⇒ NO stamp (the A2 gate)" do
+      blocks = [
+        %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "My Post"},
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Lead prose."}]
+        }
+      ]
+
+      # Projection callers that don't opt in (sheets/forms/proposals scaffolds,
+      # doctrine backfill) must not stamp a degraded manifest: it would
+      # overwrite a rich card on re-save and shadow the reader's read-time
+      # fallback, which only recomputes when content["preview"] is absent.
+      content = Projection.project(%{}, blocks)
+
+      refute Map.has_key?(content, "preview")
+      # body projection is unaffected by the gate
+      assert content["body"]["html"] =~ "Lead prose."
+    end
+
+    test "a minimal :preview opt map stamps a valid degraded manifest" do
+      blocks = [
+        %{"id" => "t", "type" => "field-string", "fieldName" => "title", "value" => "My Post"},
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Lead prose."}]
+        }
+      ]
+
+      preview = Projection.project(%{}, blocks, blocks, %{preview: %{}})["preview"]
+
+      # The projected content[title] flows into the manifest; body prose becomes
+      # the description; no media_resolver ⇒ nil image, still a valid card.
+      assert preview["title"] == "My Post"
+      assert preview["description"] == "Lead prose."
+      assert preview["image"] == nil
+      assert is_map(preview["extensions"])
+    end
+
+    test "the injected :preview render_opt drives type/url/image" do
+      resolver = fn "/media/files/" <> _ ->
+        %{
+          "url" => "/media/renditions/x/og",
+          "width" => 1200,
+          "height" => 630,
+          "type" => "image/jpeg"
+        }
+      end
+
+      blocks = [
+        %{"id" => "h", "type" => "heading", "level" => 1, "role" => "title", "text" => "Hello"},
+        %{
+          "id" => "f",
+          "type" => "image",
+          "role" => "featured",
+          "src" => "/media/files/a/h.png",
+          "alt" => "Art"
+        }
+      ]
+
+      render_opts = %{
+        preview: %{media_resolver: resolver, url: "/papers/hello", doc_type: "paper"}
+      }
+
+      preview = Projection.project(%{}, blocks, blocks, render_opts)["preview"]
+
+      assert preview["type"] == "paper"
+      assert preview["url"] == "/papers/hello"
+      assert preview["image"]["url"] == "/media/renditions/x/og"
+      assert preview["image"]["alt"] == "Art"
+    end
+
+    test "is recomputed on every project — no drift from the block list" do
+      v1 = [%{"id" => "h", "type" => "heading", "role" => "title", "text" => "First"}]
+      v2 = [%{"id" => "h", "type" => "heading", "role" => "title", "text" => "Renamed"}]
+      opts = %{preview: %{doc_type: "paper"}}
+
+      assert Projection.project(%{}, v1, v1, opts)["preview"]["title"] == "First"
+      assert Projection.project(%{}, v2, v2, opts)["preview"]["title"] == "Renamed"
+    end
+
+    test "the extra :preview render_opt key does not leak into the rendered body html" do
+      blocks = [
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Body."}]
+        }
+      ]
+
+      render_opts = %{preview: %{doc_type: "paper", url: "/papers/x"}}
+
+      content = Projection.project(%{}, blocks, blocks, render_opts)
+      refute content["body"]["html"] =~ "preview"
+      refute content["body"]["html"] =~ "doc_type"
+    end
+  end
+
   describe "Synthesis.synthesize/3 — lazy in-memory synthesis, byte-equal round-trip" do
     @layout [
       %{"kind" => "field", "name" => "title"},

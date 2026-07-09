@@ -35,12 +35,26 @@ defmodule BarkparkWeb.ScopedPaperController do
   def show(conn, %{"slug" => slug}) do
     case Content.get_paper(slug, @dataset, scope_opts(conn)) do
       %Content.Document{} = paper ->
+        # Social-share head (preview-contract pc-w2): the `:bulldocs` root layout
+        # reads `:preview` + `:page_title` (kept in sync with BulldocsLive even
+        # though this dead-render controller is currently retired from routing —
+        # see the backlinks note below).
+        preview =
+          BarkparkWeb.ShareMeta.manifest(
+            paper.content || %{},
+            "/papers/#{slug}",
+            "paper",
+            paper.title
+          )
+
         conn
         |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
         |> put_layout(false)
         |> render(:show,
           article?: paper_article?(paper),
           body_html: paper_body_html(paper),
+          preview: preview,
+          page_title: preview["title"],
           # "Linked mentions" — papers that link TO this one, rendered as a
           # server-side section AFTER the body. Powered by the INDEXED engine
           # `Content.Graph.reverse_referencers/2` (over `content_edges`), scoped

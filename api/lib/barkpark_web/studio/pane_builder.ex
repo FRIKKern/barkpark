@@ -40,18 +40,73 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   @spec build(String.t(), [String.t()], keyword()) :: {[map()], map() | nil}
   def build(dataset, nav_path, opts) do
-    # gating: :none — the tree here is a nav-path RESOLUTION index, not the
-    # displayed desk; enablement tiering must never make an existing type's
-    # panes unreachable (top-menu Media, a disabled plugin's deep link).
-    structure = Structure.build(dataset, [gating: :none] ++ scope(opts))
+    # The DISPLAYED desk is the default-gated tree (charter Decisions 1/3): a
+    # disabled plugin's tree and top-menu Media are absent, so panes[0] tells
+    # the enablement truth. `gated` renders the root pane in EVERY case.
+    gated = Structure.build(dataset, scope(opts))
+
+    # Resolution walks gated-first. A raw nav_path whose head no longer sits at
+    # the gated root (a stale pre-tiering deep link — e.g. the router's legacy
+    # `/studio/:ds/book/:id` → ["book", id], now nested under the Plugins node)
+    # is normalized to the node's nested ancestor path so the walk drills the
+    # Plugins/…Rest column and reveals it (URL unchanged). A type absent from
+    # the gated display entirely (top-menu mediaAsset, a disabled plugin's
+    # bookmark) falls back to the ungated `gating: :none` tree so its panes /
+    # editor still open — the #1851 never-unreachable guarantee.
+    {tree, segments} = resolve(nav_path, gated, dataset, opts)
 
     root_pane = %{
-      title: structure.title,
-      items: list_items(structure),
-      selected: Enum.at(nav_path, 0)
+      title: gated.title,
+      items: list_items(gated),
+      selected: Enum.at(segments, 0)
     }
 
-    walk_path(nav_path, 0, structure, [root_pane], nil, dataset, opts)
+    walk_path(segments, 0, tree, [root_pane], nil, dataset, opts)
+  end
+
+  # Pick the tree to walk and the (possibly normalized) segments to walk it
+  # with. Returns `{tree, segments}` — `tree` is the gated desk unless a type
+  # absent from it forces the ungated fallback; `segments` is the raw nav_path
+  # unless a demoted-but-present type is normalized to its nested ancestor path.
+  @spec resolve([String.t()], map(), String.t(), keyword()) :: {map(), [String.t()]}
+  defp resolve([], gated, _dataset, _opts), do: {gated, []}
+
+  # RESERVED heads — `walk_path` resolves these WITHOUT any structure lookup
+  # (per-doc graph blast-radius; direct type+id open from backlinks). They must
+  # never be normalized or diverted to the ungated tree.
+  defp resolve(["graph" | _] = nav_path, gated, _dataset, _opts), do: {gated, nav_path}
+  defp resolve(["open" | _] = nav_path, gated, _dataset, _opts), do: {gated, nav_path}
+
+  defp resolve([head | tail] = nav_path, gated, dataset, opts) do
+    cond do
+      root_has_segment?(gated, head) ->
+        # Head still names a gated root item — walk the gated tree as-is.
+        {gated, nav_path}
+
+      true ->
+        case find_type_node(gated.items || [], head, []) do
+          # Demoted-but-present: the type lives deeper in the gated tree
+          # (under Plugins / …Rest). Normalize to its nested ancestor path.
+          {node_path, %{type: :document}} ->
+            # Singletons resolve by type name — the stale doc-id tail is dropped.
+            {gated, node_path}
+
+          {node_path, _node} ->
+            {gated, node_path ++ tail}
+
+          # Absent from the gated display — resolve against the ungated tree so
+          # the panes / editor still open (top-menu Media, a disabled plugin).
+          nil ->
+            {Structure.build(dataset, [gating: :none] ++ scope(opts)), nav_path}
+        end
+    end
+  end
+
+  # True when `seg` names a direct child of the (gated) root — by node id or by
+  # the document type it lists. Mirrors `walk_path/7`'s `[id | rest]` match so
+  # "still resolves at the root" means exactly "the walk would find it there".
+  defp root_has_segment?(node, seg) do
+    Enum.any?(node.items || [], fn n -> n.id == seg || n.type_name == seg end)
   end
 
   @doc """

@@ -22,7 +22,8 @@ defmodule Barkpark.Media.ImageBackend.Magick do
 
       bin ->
         args =
-          [src, "-resize", "#{spec.max_width}x#{spec.max_height}"] ++
+          [src] ++
+            resize_args(spec) ++
             watermark_args(watermark, spec) ++
             ["-quality", to_string(spec.quality), dest]
 
@@ -61,6 +62,16 @@ defmodule Barkpark.Media.ImageBackend.Magick do
   end
 
   defp path_sep, do: if(match?({:win32, _}, :os.type()), do: ";", else: ":")
+
+  # Aspect-preserving fit by default. With `:crop` set, cover-and-centre-crop to
+  # an exact WxH: `-resize WxH^` scales so the box is fully covered, then
+  # `-gravity center -extent WxH` crops the overflow — the exact-card geometry
+  # the vix backend's `crop:` produces.
+  defp resize_args(%{crop: crop, max_width: w, max_height: h}) when not is_nil(crop) do
+    ["-resize", "#{w}x#{h}^", "-gravity", "center", "-extent", "#{w}x#{h}"]
+  end
+
+  defp resize_args(%{max_width: w, max_height: h}), do: ["-resize", "#{w}x#{h}"]
 
   # No watermark.
   defp watermark_args(profile, _spec) when profile in [nil, "", "none"], do: []

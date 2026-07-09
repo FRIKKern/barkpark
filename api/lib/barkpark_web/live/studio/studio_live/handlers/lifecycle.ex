@@ -12,31 +12,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   alias BarkparkWeb.Studio.PresenceState
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Shared}
 
-  def finish_handle_params(socket, dataset, path, desk, uri, params) do
+  # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
+  # `:handle_params` hook is the single producer (it runs before this
+  # callback, deriving current_path from `uri` for every studio-layout
+  # surface), so `uri` is unused in this body now.
+  def finish_handle_params(socket, dataset, path, desk, _uri, params) do
     socket =
       socket
       |> Shared.ensure_list_subscription(dataset)
       |> Shared.ensure_presence_subscription()
-
-    current_path =
-      case uri do
-        u when is_binary(u) ->
-          case URI.parse(u) do
-            %URI{path: p} when is_binary(p) -> p
-            _ -> nil
-          end
-
-        _ ->
-          nil
-      end
 
     socket =
       socket
       |> assign(
         dataset: dataset,
         nav_path: path,
-        nav_desk: desk,
-        current_path: current_path
+        nav_desk: desk
       )
       |> Shared.maybe_open_shares(params)
       |> Shared.rebuild_panes()

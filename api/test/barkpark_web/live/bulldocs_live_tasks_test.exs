@@ -62,6 +62,11 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _paper} =
       Content.upsert_paper(%{
         slug: slug,
+        # Real ingested papers are article-styled (BulldocsIngestController
+        # defaults style: "article") — the reader renders their blocks with the
+        # CLASSED article emitters. A style-less legacy paper renders the
+        # self-contained inline :email variants instead (works, different DOM).
+        style: "article",
         blocks: [
           %{
             "id" => "t1",
@@ -108,6 +113,11 @@ defmodule BarkparkWeb.BulldocsLiveTasksTest do
     {:ok, _paper} =
       Content.upsert_paper(%{
         slug: slug,
+        # Real ingested papers are article-styled (BulldocsIngestController
+        # defaults style: "article") — the reader renders their blocks with the
+        # CLASSED article emitters. A style-less legacy paper renders the
+        # self-contained inline :email variants instead (works, different DOM).
+        style: "article",
         blocks: [
           %{
             "id" => "t1",

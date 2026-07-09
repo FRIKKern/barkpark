@@ -24,7 +24,11 @@ defmodule Barkpark.Media.Renditions do
     "thumb" => %{max_width: 320, max_height: 320, format: "jpg", quality: 80},
     "preview" => %{max_width: 1600, max_height: 1600, format: "jpg", quality: 85},
     "hero" => %{max_width: 1920, max_height: 1080, format: "webp", quality: 85},
-    "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85}
+    # `og` is an EXACT crop, not a fit: a share card must be a constant
+    # 1200×630 whatever the source aspect (portrait sources upscale-and-crop to
+    # fill), so the preview manifest can hardcode those dimensions with zero
+    # per-asset lookup. `crop: :attention` centres the crop on the salient region.
+    "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85, crop: :attention}
   }
 
   @doc "All supported preset names."

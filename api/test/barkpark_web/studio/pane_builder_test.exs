@@ -5,8 +5,11 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
   """
   use Barkpark.DataCase, async: true
 
+  import Barkpark.TenancyFixtures
+
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.PaneBuilder
 
   defp insert_schema!(attrs) do
@@ -269,6 +272,114 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert length(panes) == 2
       assert editor[:view] == :media_explorer
       assert editor[:kind_filter] == "image"
+    end
+  end
+
+  # ssp-w2-studio-honest-desk — the displayed desk (panes[0]) now reflects
+  # enablement: the gated tree renders, so disabled plugins / top-menu Media are
+  # NOT root items. Resolution stays honest: a stale deep link to a DEMOTED type
+  # (now nested under Plugins / …Rest) is normalized and drilled; a type ABSENT
+  # from the gated display (top-menu Media, a disabled plugin's bookmark) falls
+  # back to the ungated tree so its panes/editor still open (#1851 guarantee).
+  describe "honest gated desk + demoted-type resolution (ssp-w2)" do
+    test "the root pane is the gated desk — a top-menu type is not a root item" do
+      dataset = "pb_gated_root"
+
+      insert_schema!(%{
+        name: "mediaAsset",
+        title: "Media Asset",
+        icon: "image",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      {panes, _editor} = PaneBuilder.build(dataset, [])
+      root = hd(panes)
+
+      # Media is :top_menu by default → hidden from the tree. The desk tells the
+      # truth: no mediaAsset / media-library rows at the root.
+      refute Enum.any?(root.items, &(Map.get(&1, :id) in ["mediaAsset", "media-library"])),
+             "top-menu Media must not appear in the gated root desk"
+    end
+
+    test "a top-menu type absent from the gated desk still opens via the ungated fallback" do
+      dataset = "pb_media_fallback"
+
+      insert_schema!(%{
+        name: "mediaAsset",
+        title: "Media Asset",
+        icon: "image",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      # mediaAsset is absent from the gated desk (top-menu placement), yet the
+      # pane + media-explorer editor still resolve — the never-unreachable rule.
+      {panes, editor} = PaneBuilder.build(dataset, ["mediaAsset"])
+
+      assert length(panes) == 2
+      assert editor[:view] == :media_explorer
+
+      refute Enum.any?(hd(panes).items, &(Map.get(&1, :id) == "mediaAsset")),
+             "the root pane stays gated even though resolution used the ungated tree"
+    end
+
+    test "a stale deep link to a demoted type drills the Plugins column and reveals it" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "pb_demoted_book"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      # Global book schema (visible under scope via include_global) so both the
+      # tree and the editor's get_schema/2 resolve it.
+      insert_schema!(%{
+        name: "book",
+        title: "Books",
+        icon: "book",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      {:ok, _} =
+        Content.create_document(
+          "book",
+          %{"_id" => "b1", "title" => "Book 1"},
+          dataset,
+          source: :studio,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      # Enable OnixEdit but keep its default :plugins placement → book nests
+      # under the Plugins node, so the legacy ["book", id] path misses the root.
+      {:ok, _} =
+        Tenancy.set_workspace_plugin_settings(ws.id, %{"onixedit" => %{"enabled" => true}})
+
+      {panes, editor} = PaneBuilder.build(dataset, ["book", "b1"], scope: scope)
+
+      root = hd(panes)
+
+      # The gated root shows a Plugins column, never a top-level book.
+      assert Enum.any?(root.items, &(Map.get(&1, :id) == "plugins")),
+             "an enabled :plugins plugin surfaces a Plugins column at the root"
+
+      refute Enum.any?(root.items, &(Map.get(&1, :id) == "book")),
+             "book is demoted under Plugins — never a top-level root item"
+
+      # The reveal: the root highlights the Plugins column and the walk drilled
+      # into it down to the book doc.
+      assert root.selected == "plugins",
+             "the stale path is normalized so the Plugins column is the selected reveal"
+
+      assert length(panes) == 3, "root → Plugins → book: the demoted column is drilled open"
+      assert List.last(panes).type_name == "book"
+
+      assert is_map(editor), "the demoted book doc still opens its editor"
+      assert editor.type == "book"
+      assert editor.doc.doc_id =~ "b1"
     end
   end
 end

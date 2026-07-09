@@ -74,7 +74,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
          page_title: "chat",
          nav_section: :chat,
          dataset: default_dataset(),
-         current_path: "/studio/chat",
+         # current_path is owned by StudioChrome's :handle_params hook, which
+         # also keeps it fresh across the /studio/chat/:session_id patches
+         # (this static string used to freeze the active tab on reopen).
          session: nil,
          store_session_id: nil,
          session_id: nil,
