@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   # rewrite to the `/d/` canonical instead. Empty prefix (flat surfaces,
   # e.g. the `/studio/:dataset/_plugins` admin LV) keeps the flat path —
   # mirrors the flat branch in
-  # `StudioComponents.Nav.default_top_menu_entries/3`. Non-`/studio` hrefs
+  # `StudioComponents.Nav.default_top_menu_entries/4`. Non-`/studio` hrefs
   # (e.g. a plugin's `/admin/...` console) pass through untouched.
   @doc false
   def plugin_link_href("", href), do: href

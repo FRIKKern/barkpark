@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.StudioComponents.NavTest do
   @moduledoc """
-  Guards the canonical Studio nav model (`default_top_menu_entries/3`,
+  Guards the canonical Studio nav model (`default_top_menu_entries/4`,
   the sole `studio-nav-model` capability owner) and the boundary
   semantics of `plugin_tab_active?/2`. Both are pure — no Repo, no
   LiveView render — so this is a plain ExUnit case.
@@ -12,9 +12,9 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
 
   alias BarkparkWeb.StudioComponents.Nav
 
-  describe "default_top_menu_entries/3 — canonical nav model" do
+  describe "default_top_menu_entries/4 — canonical nav model" do
     test "non-admin returns exactly the three built-ins, ordered" do
-      entries = Nav.default_top_menu_entries("production", "", false)
+      entries = Nav.default_top_menu_entries("production", "", false, nil)
 
       assert Enum.map(entries, & &1.label) == ["Structure", "Media", "API"]
       assert Enum.map(entries, & &1.order) == [10, 20, 30]
@@ -27,8 +27,8 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
     end
 
     test "admin list is a stable superset of the non-admin list" do
-      non_admin = Nav.default_top_menu_entries("production", "", false)
-      admin = Nav.default_top_menu_entries("production", "", true)
+      non_admin = Nav.default_top_menu_entries("production", "", false, nil)
+      admin = Nav.default_top_menu_entries("production", "", true, nil)
 
       # The three built-ins lead the admin list unchanged — admin gating
       # only ever APPENDS extras, never reorders or drops. (Compared on the
@@ -46,14 +46,14 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
     end
 
     test "entries come out sorted by :order (non-decreasing)" do
-      admin = Nav.default_top_menu_entries("production", "", true)
+      admin = Nav.default_top_menu_entries("production", "", true, nil)
       orders = Enum.map(admin, & &1.order)
       assert orders == Enum.sort(orders)
     end
 
     test "scoped surface addresses tabs via the /d/ canonical under the scope prefix" do
       entries =
-        Nav.default_top_menu_entries("production", "/w/acme/p/site", false)
+        Nav.default_top_menu_entries("production", "/w/acme/p/site", false, nil)
 
       assert Enum.map(entries, & &1.path) == [
                "/w/acme/p/site/d/production/studio",
@@ -63,10 +63,41 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
     end
 
     test "every built-in entry carries an :active_when highlight rule" do
-      for entry <- Nav.default_top_menu_entries("production", "", true) do
+      for entry <- Nav.default_top_menu_entries("production", "", true, nil) do
         assert Map.has_key?(entry, :active_when)
         refute is_nil(entry.active_when)
       end
+    end
+
+    test "flat surface leaves the extra tabs bare — no return_to (current_path arg unused)" do
+      # scope_prefix "" → no truthful return path to carry, so the flat
+      # chat/tmux/styleguide tabs stay bare even when a current_path is passed.
+      style =
+        Nav.default_top_menu_entries("production", "", true, "/w/acme/p/site/d/production/studio")
+        |> Enum.find(&(&1.label == "Style"))
+
+      assert style.path == "/studio/styleguide"
+    end
+
+    test "scoped surface threads the current canonical path into the flat extras as ?return_to" do
+      # charter D5: from a SCOPED surface the flat Style/chat/tmux tabs carry
+      # ?return_to=<current canonical path> so leaving lands back in the same
+      # workspace/project/dataset rather than the /studio session funnel.
+      style =
+        Nav.default_top_menu_entries(
+          "production",
+          "/w/acme/p/site",
+          true,
+          "/w/acme/p/site/d/production/studio/media"
+        )
+        |> Enum.find(&(&1.label == "Style"))
+
+      assert String.starts_with?(style.path, "/studio/styleguide?return_to=")
+
+      assert String.contains?(
+               style.path,
+               URI.encode_www_form("/w/acme/p/site/d/production/studio/media")
+             )
     end
   end
 
@@ -109,7 +140,7 @@ defmodule BarkparkWeb.StudioComponents.NavTest do
 
   describe "plugin_tab_active?/2 — regex and fallback clauses (unchanged)" do
     test "Structure regex matches the base and sub-routes but not media/api-tester" do
-      [structure | _] = Nav.default_top_menu_entries("production", "", false)
+      [structure | _] = Nav.default_top_menu_entries("production", "", false, nil)
 
       assert Nav.plugin_tab_active?(structure, "/studio/production")
       assert Nav.plugin_tab_active?(structure, "/studio/production/desk")

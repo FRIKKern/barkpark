@@ -23,10 +23,11 @@ defmodule BarkparkWeb.Studio.TmuxLive do
 
   use BarkparkWeb, :live_view
 
+  alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.Studio.TmuxConsole
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     if TmuxConsole.enabled?() do
       {:ok,
        socket
@@ -35,6 +36,11 @@ defmodule BarkparkWeb.Studio.TmuxLive do
          nav_section: :tmux,
          dataset: default_dataset(),
          # current_path is owned by StudioChrome's :handle_params hook.
+         # Truthful return path (charter D5): a scoped surface links here with
+         # `?return_to=<its canonical path>`; sanitized (open-redirect guard) so
+         # a back affordance can land back in the SAME scope, not the `/studio`
+         # session funnel. nil when arrived at flat/directly.
+         return_to: ReturnTo.sanitize(params["return_to"]),
          session_name: TmuxConsole.session_name(),
          pty: nil,
          exited: false
@@ -43,7 +49,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
       {:ok,
        socket
        |> put_flash(:error, "The tmux console is not enabled on this instance.")
-       |> redirect(to: "/studio")}
+       |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
 

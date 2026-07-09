@@ -1,0 +1,256 @@
+defmodule BarkparkWeb.Studio.ReturnToTest do
+  @moduledoc """
+  The `return_to` contract for Studio's flat, scope-free destinations
+  (chat/tmux/styleguide/org-admin — charter `bp-studio-deep-link` D5).
+
+  Three layers, proven end to end:
+
+    * the pure `ReturnTo` validator (open-redirect guard),
+    * the nav top-menu tabs that emit `?return_to=<canonical>` from a SCOPED
+      surface and stay bare from a flat one,
+    * the flat LiveViews (chat/tmux) that thread the param through their own
+      patches and prefer the validated `return_to` over the `/studio` funnel
+      on their disabled-fallback / exit redirect.
+
+  `async: false` — the nav + LV arcs flip global `:claude_chat` / `:tmux_console`
+  enable flags (restored in `on_exit`).
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Auth
+  alias Barkpark.StudioChat
+  alias BarkparkWeb.Studio.ReturnTo
+
+  @scoped "/w/acme/p/site/d/production/studio"
+  @ws_scoped "/w/acme/p/site/studio/settings"
+  @admin_token "return-to-admin-token"
+
+  # ── Layer 1: the pure validator (open-redirect guard) ────────────────────
+
+  describe "valid?/1" do
+    test "accepts a dataset-scoped canonical Studio path" do
+      assert ReturnTo.valid?(@scoped)
+      assert ReturnTo.valid?("/w/ws/p/proj/d/ds/studio")
+      assert ReturnTo.valid?("/w/ws/p/proj/d/ds/studio/media")
+      assert ReturnTo.valid?("/w/ws/p/proj/d/ds/studio/some/deep/path")
+    end
+
+    test "accepts a workspace-level (dataset-less) canonical Studio path" do
+      assert ReturnTo.valid?(@ws_scoped)
+      assert ReturnTo.valid?("/w/ws/p/proj/studio")
+    end
+
+    test "accepts a canonical path carrying a query string" do
+      assert ReturnTo.valid?("/w/ws/p/proj/d/ds/studio?shares=open")
+    end
+
+    test "rejects absolute URLs" do
+      refute ReturnTo.valid?("https://evil.com")
+      refute ReturnTo.valid?("http://evil.com/w/ws/p/proj/d/ds/studio")
+    end
+
+    test "rejects scheme-relative host redirects" do
+      refute ReturnTo.valid?("//evil.com")
+      refute ReturnTo.valid?("//evil.com/w/ws/p/proj/d/ds/studio")
+    end
+
+    test "rejects non-Studio local paths" do
+      refute ReturnTo.valid?("/admin")
+      refute ReturnTo.valid?("/studio")
+      refute ReturnTo.valid?("/w/ws/p/proj/d/ds/other")
+    end
+
+    test "rejects a `/studio` prefix trick (must be followed by / or ? or end)" do
+      refute ReturnTo.valid?("/w/ws/p/proj/d/ds/studioevil")
+    end
+
+    test "rejects dot-segment traversal (browser would normalize to another path)" do
+      refute ReturnTo.valid?("/w/a/p/b/studio/../../../../logout")
+      refute ReturnTo.valid?("/w/a/p/b/d/ds/studio/./x")
+      # WHATWG URL parsers treat %2e-spelled dot-segments as dots too.
+      refute ReturnTo.valid?("/w/a/p/b/studio/%2E%2E/%2e%2e/logout")
+      refute ReturnTo.valid?("/w/a/p/b/studio/.%2e/x")
+    end
+
+    test "rejects empty and non-binary" do
+      refute ReturnTo.valid?("")
+      refute ReturnTo.valid?(nil)
+      refute ReturnTo.valid?(:not_a_string)
+    end
+  end
+
+  describe "sanitize/1" do
+    test "returns the value when valid, nil otherwise" do
+      assert ReturnTo.sanitize(@scoped) == @scoped
+      assert ReturnTo.sanitize("https://evil.com") == nil
+      assert ReturnTo.sanitize("//evil.com") == nil
+      assert ReturnTo.sanitize("/admin") == nil
+      assert ReturnTo.sanitize("") == nil
+      assert ReturnTo.sanitize(nil) == nil
+    end
+  end
+
+  describe "with_return_to/2" do
+    test "appends a www-form-encoded return_to when non-empty" do
+      assert ReturnTo.with_return_to("/studio/chat", @scoped) ==
+               "/studio/chat?return_to=" <> URI.encode_www_form(@scoped)
+    end
+
+    test "leaves the path untouched for nil/empty" do
+      assert ReturnTo.with_return_to("/studio/chat", nil) == "/studio/chat"
+      assert ReturnTo.with_return_to("/studio/chat", "") == "/studio/chat"
+    end
+  end
+
+  # ── Layer 2: nav top-menu tabs carry (or omit) the return path ────────────
+
+  describe "top-menu tabs (nav *_entry helpers)" do
+    setup do
+      enable_flat_surfaces!()
+      :ok
+    end
+
+    test "a scoped surface stamps return_to=<current canonical path> on the flat tabs" do
+      html =
+        render_component(&BarkparkWeb.StudioComponents.Nav.studio_tabs/1,
+          dataset: "production",
+          scope_prefix: "/w/acme/p/site",
+          admin?: true,
+          current_path: @scoped
+        )
+
+      encoded = URI.encode_www_form(@scoped)
+      assert html =~ ~s(href="/studio/chat?return_to=#{encoded}")
+      assert html =~ ~s(href="/studio/tmux?return_to=#{encoded}")
+      assert html =~ ~s(href="/studio/styleguide?return_to=#{encoded}")
+    end
+
+    test "a flat surface (scope_prefix \"\") emits bare tabs — no return_to to build" do
+      html =
+        render_component(&BarkparkWeb.StudioComponents.Nav.studio_tabs/1,
+          dataset: "production",
+          scope_prefix: "",
+          admin?: true,
+          current_path: "/studio/chat"
+        )
+
+      assert html =~ ~s(href="/studio/chat")
+      refute html =~ "return_to="
+    end
+  end
+
+  # ── Layer 3: the flat LiveViews thread + honor the return path ────────────
+
+  describe "ChatLive return_to flow" do
+    setup %{conn: conn} do
+      {:ok, _} = Auth.create_token(@admin_token, "rt admin", "production", ["read", "admin"])
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "disabled fallback redirects to a validated return_to instead of /studio",
+         %{conn: conn} do
+      set_chat!(enabled: false, command: {"cat", []})
+
+      assert {:error, {:redirect, %{to: to}}} =
+               live(conn, "/studio/chat?return_to=#{URI.encode_www_form(@scoped)}")
+
+      assert to == @scoped
+    end
+
+    test "disabled fallback with a hostile return_to falls back to /studio", %{conn: conn} do
+      set_chat!(enabled: false, command: {"cat", []})
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               live(conn, "/studio/chat?return_to=#{URI.encode_www_form("https://evil.com")}")
+    end
+
+    test "enabled chat threads return_to through its own session patch links", %{conn: conn} do
+      set_chat!(enabled: true, command: {"cat", []})
+      {:ok, _} = StudioChat.create_session(%{id: Ecto.UUID.generate(), cwd: ".", mode: "plan"})
+
+      {:ok, view, html} =
+        live(conn, "/studio/chat?return_to=#{URI.encode_www_form(@scoped)}")
+
+      encoded = URI.encode_www_form(@scoped)
+      # The "New" (new-chat) patch link and every session-row patch link carry
+      # the return path forward, so navigating inside chat never loses scope.
+      assert html =~ ~s(patch="/studio/chat?return_to=#{encoded}") or
+               html =~ ~s(href="/studio/chat?return_to=#{encoded}")
+
+      assert html =~ "return_to=#{encoded}"
+
+      # Clicking "New" issues a push_patch that carries the param.
+      view |> element("a.btn-primary", "New") |> render_click()
+      assert_patch(view, "/studio/chat?return_to=#{encoded}")
+    end
+
+    test "enabled chat ignores a hostile return_to (no param leaks into links)", %{conn: conn} do
+      set_chat!(enabled: true, command: {"cat", []})
+
+      {:ok, _view, html} =
+        live(conn, "/studio/chat?return_to=#{URI.encode_www_form("//evil.com")}")
+
+      refute html =~ "evil.com"
+      refute html =~ "return_to="
+    end
+  end
+
+  describe "TmuxLive return_to flow" do
+    setup %{conn: conn} do
+      {:ok, _} = Auth.create_token(@admin_token, "rt admin", "production", ["read", "admin"])
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "disabled fallback redirects to a validated return_to instead of /studio",
+         %{conn: conn} do
+      set_tmux!(enabled: false)
+
+      assert {:error, {:redirect, %{to: to}}} =
+               live(conn, "/studio/tmux?return_to=#{URI.encode_www_form(@scoped)}")
+
+      assert to == @scoped
+    end
+
+    test "disabled fallback with a hostile return_to falls back to /studio", %{conn: conn} do
+      set_tmux!(enabled: false)
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               live(conn, "/studio/tmux?return_to=#{URI.encode_www_form("/admin")}")
+    end
+  end
+
+  # ── helpers ──────────────────────────────────────────────────────────────
+
+  defp enable_flat_surfaces! do
+    set_chat!(enabled: true, command: {"cat", []})
+    set_tmux!(enabled: true, backend: ExPTY)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    Application.put_env(:barkpark, :public_demo_studio, false)
+    on_exit(fn -> Application.put_env(:barkpark, :public_demo_studio, prev_demo) end)
+  end
+
+  defp set_chat!(config) do
+    prev = Application.get_env(:barkpark, :claude_chat)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+    Application.put_env(:barkpark, :claude_chat, config)
+    Application.put_env(:barkpark, :public_demo_studio, false)
+
+    on_exit(fn ->
+      restore(:claude_chat, prev)
+      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+  end
+
+  defp set_tmux!(config) do
+    prev = Application.get_env(:barkpark, :tmux_console)
+    Application.put_env(:barkpark, :tmux_console, config)
+    on_exit(fn -> restore(:tmux_console, prev) end)
+  end
+
+  defp restore(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore(key, prev), do: Application.put_env(:barkpark, key, prev)
+end

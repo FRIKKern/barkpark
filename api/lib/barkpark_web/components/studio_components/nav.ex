@@ -278,7 +278,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   @doc """
   Studio top-level tab navigation. Seeds the registry resolver chain
   with the host's built-in tabs — the canonical nav model
-  `default_top_menu_entries/3` (the single source of truth for the
+  `default_top_menu_entries/4` (the single source of truth for the
   built-in Structure / Media / API tabs plus the admin-gated
   tmux / chat / Style extras) — as `:baseline` and
   passes `%{dataset, current_path}` as `:ctx`. Plugins that override
@@ -298,7 +298,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   `Barkpark.ApiTester.Endpoints.all/1`.
 
   The `:nav_section` assign is preserved for backwards compatibility
-  but no longer drives active-state — `default_top_menu_entries/3`'s
+  but no longer drives active-state — `default_top_menu_entries/4`'s
   `:active_when` rules cover the same routes.
 
   Caller wraps with `:if={assigns[:dataset]}` — the component itself
@@ -327,7 +327,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       default_top_menu_entries(
         assigns.dataset,
         assigns[:scope_prefix] || "",
-        assigns[:admin?] == true
+        assigns[:admin?] == true,
+        assigns[:current_path]
       )
 
     tabs =
@@ -376,9 +377,14 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   Orders 10 / 20 / 30 keep built-ins sorted ahead of plugin tabs (which
   default to 100 via `normalize_top_menu_entry/1`).
+
+  `current_path` is the canonical path the viewer is on; on a SCOPED
+  surface it seeds the `?return_to=` the flat chat/tmux/styleguide tabs
+  carry so leaving one lands back in the same scope (charter D5).
   """
   # @canonical capability:studio-nav-model aka:nav-tabs,top-menu,studio-tabs doc:docs/cards/studio.md
-  def default_top_menu_entries(dataset, scope_prefix, admin?) when is_binary(dataset) do
+  def default_top_menu_entries(dataset, scope_prefix, admin?, current_path)
+      when is_binary(dataset) do
     ds = URI.encode(dataset)
 
     # Scoped surface (tsk-url-p2): tabs address the SAME workspace/project
@@ -398,6 +404,18 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
     media_path = "#{base}/media"
     api_path = "#{base}/api-tester"
+
+    # Truthful return path for the flat, scope-free tabs (chat/tmux/styleguide,
+    # charter D5): the canonical path the viewer is currently ON, so leaving one
+    # of those surfaces lands back in the SAME workspace/project/dataset instead
+    # of the `/studio` session funnel (which re-resolves scope and can teleport
+    # a multi-workspace admin). Only a SCOPED surface (non-empty `scope_prefix`)
+    # can build one — a flat surface passes `nil` and the tabs stay bare.
+    return_path =
+      case scope_prefix || "" do
+        "" -> nil
+        _ -> BarkparkWeb.Studio.ReturnTo.sanitize(current_path) || base
+      end
 
     [
       %{
@@ -421,7 +439,9 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         order: 30,
         active_when: api_path
       }
-    ] ++ tmux_console_entry(admin?) ++ claude_chat_entry(admin?) ++ styleguide_entry(admin?)
+    ] ++
+      tmux_console_entry(admin?, return_path) ++
+      claude_chat_entry(admin?, return_path) ++ styleguide_entry(admin?, return_path)
   end
 
   # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
@@ -430,11 +450,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # Flat singleton path (not dataset-scoped): the token spec is per-host, not
   # per-dataset. NOTE: /studio/styleguide is the STUDIO node of the future
   # cross-surface design index (W3.9/W5.D) — not built here.
-  defp styleguide_entry(true) do
+  defp styleguide_entry(true, return_path) do
     [
       %{
         label: "Style",
-        path: "/studio/styleguide",
+        path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/styleguide", return_path),
         icon: nil,
         order: 50,
         active_when: "/studio/styleguide"
@@ -442,7 +462,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ]
   end
 
-  defp styleguide_entry(_), do: []
+  defp styleguide_entry(_admin?, _return_path), do: []
 
   # The tmux console tab. Shown ONLY to admins (`admin?`, from the
   # `shares_admin?` chrome flag) AND only where `TmuxConsole.enabled?/0` holds
@@ -454,9 +474,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # installed; hard-refused on public-demo hosts). The route is admin-gated
   # regardless — this just keeps the tab out of non-admin chrome. Flat
   # singleton path: one chat surface per host, like the tmux console.
-  defp claude_chat_entry(admin?) do
+  defp claude_chat_entry(admin?, return_path) do
     if admin? and BarkparkWeb.Studio.ClaudeChat.enabled?() do
-      [%{label: "chat", path: "/studio/chat", icon: nil, order: 45, active_when: "/studio/chat"}]
+      [
+        %{
+          label: "chat",
+          path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/chat", return_path),
+          icon: nil,
+          order: 45,
+          active_when: "/studio/chat"
+        }
+      ]
     else
       []
     end
@@ -464,9 +492,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     _ -> []
   end
 
-  defp tmux_console_entry(admin?) do
+  defp tmux_console_entry(admin?, return_path) do
     if admin? and BarkparkWeb.Studio.TmuxConsole.enabled?() do
-      [%{label: "tmux", path: "/studio/tmux", icon: nil, order: 40, active_when: "/studio/tmux"}]
+      [
+        %{
+          label: "tmux",
+          path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/tmux", return_path),
+          icon: nil,
+          order: 40,
+          active_when: "/studio/tmux"
+        }
+      ]
     else
       []
     end
