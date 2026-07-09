@@ -112,10 +112,13 @@ var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 
 // cloudFleetPick lists the logged-in user's Barkparks and returns the one to
 // connect bp to. An empty fleet finishes logged-in with launch/deploy guidance
-// (LoggedInOnly — exit 0, never a dead end). Otherwise it prints a numbered list,
-// reads the pick from in, fetches that Barkpark's admin credentials, and returns
-// them as the connect target. A no_admin_token 404 offers a manual token paste or
-// a logged-in-only finish. The admin token is never printed.
+// (LoggedInOnly — exit 0, never a dead end). When the fleet holds exactly ONE
+// Barkpark (the overwhelmingly common case) it is auto-selected — no numbered
+// pick — and the choice is announced on stderr; the connect summary itself is
+// printed by the connect path that consumes the result. Two or more prints a
+// numbered list, reads the pick from in, and resolves that one. The credential
+// tail (no_admin_token → manual paste, still-provisioning → logged-in) is shared
+// by both paths in cloudResolveTarget. The admin token is never printed.
 func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.CloudLoginResult, error) {
 	list, err := client.ListBarkparks(cloudCtx())
 	if err != nil {
@@ -132,6 +135,16 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 	}
 
 	reader := bufio.NewReader(in)
+
+	// Exactly one Barkpark: skip the pick entirely and auto-connect it. Announce
+	// which one on stderr (the connect path prints the full premium summary), then
+	// resolve its credentials through the shared tail.
+	if len(list) == 1 {
+		picked := list[0]
+		out.errf("Only Barkpark in your fleet — connecting to %q (%s).", picked.Name, fleetTarget(picked.URL, picked.Host))
+		return cloudResolveTarget(out, reader, client, picked)
+	}
+
 	out.outf("")
 	out.outf("Your Barkparks:")
 	for i, b := range list {
@@ -145,8 +158,17 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 		out.outf("No Barkpark selected — you stay logged in. Re-run 'bp setup' to connect.")
 		return setup.CloudLoginResult{LoggedInOnly: true}, nil
 	}
-	picked := list[idx]
+	return cloudResolveTarget(out, reader, client, list[idx])
+}
 
+// cloudResolveTarget fetches the picked Barkpark's admin credentials and returns
+// them as the connect target. It is the shared tail of both the single-Barkpark
+// fast path and the numbered multi-pick. A no_admin_token 404 diverts to the
+// manual-paste path; a Barkpark that has no address yet (still provisioning)
+// finishes logged-in rather than erroring — every branch is a complete outcome,
+// never a dead end. The admin token is saved as the server token (charter-accepted
+// posture) and is never printed here.
+func cloudResolveTarget(out *writer, reader *bufio.Reader, client cloudFleetClient, picked cloudclient.Barkpark) (setup.CloudLoginResult, error) {
 	creds, gerr := client.GetCredentials(cloudCtx(), picked.ID)
 	if gerr != nil {
 		if strings.Contains(gerr.Error(), "no_admin_token") {
@@ -157,11 +179,19 @@ func cloudFleetPick(out *writer, client cloudFleetClient, in io.Reader) (setup.C
 
 	target := fleetTarget(creds.URL, creds.Host)
 	if target == "" {
-		return setup.CloudLoginResult{}, fmt.Errorf("%q has no URL to connect to yet (still provisioning?)", picked.Name)
+		return cloudStillProvisioning(out, picked), nil
 	}
-	// The admin token is saved as the server token (charter-accepted posture) and
-	// never printed here.
 	return setup.CloudLoginResult{Server: target, Token: creds.AdminToken, Name: picked.Name}, nil
+}
+
+// cloudStillProvisioning is the not-a-dead-end outcome when a Barkpark has no URL
+// or host yet — it is still coming up. The user stays logged in; re-running setup
+// once the box is reachable will connect. LoggedInOnly ⇒ exit 0.
+func cloudStillProvisioning(out *writer, picked cloudclient.Barkpark) setup.CloudLoginResult {
+	out.outf("")
+	out.outf("%q has no address yet — it's still provisioning.", picked.Name)
+	out.outf("You stay logged in. Re-run 'bp setup' once it's up to connect.")
+	return setup.CloudLoginResult{LoggedInOnly: true}
 }
 
 // promptFleetChoice reads a 1-based fleet selection from reader and returns the
@@ -187,6 +217,12 @@ func promptFleetChoice(out *writer, reader *bufio.Reader, n int) (int, bool) {
 // logged-in-only finish — never a dead end.
 func cloudNoAdminToken(out *writer, reader *bufio.Reader, picked cloudclient.Barkpark) (setup.CloudLoginResult, error) {
 	target := fleetTarget(picked.URL, picked.Host)
+	if target == "" {
+		// No address to connect to even if the user pasted a token — the box is
+		// still provisioning. Finish logged-in rather than prompt for a token that
+		// can't be used yet.
+		return cloudStillProvisioning(out, picked), nil
+	}
 	out.outf("")
 	out.outf("%q has no stored admin token (an older or ip-only provision).", picked.Name)
 	out.outf("Paste an admin token to connect now, or press Enter to stay logged in.")
@@ -197,17 +233,25 @@ func cloudNoAdminToken(out *writer, reader *bufio.Reader, picked cloudclient.Bar
 		out.outf("No token entered — you stay logged in. Re-run 'bp setup' any time.")
 		return setup.CloudLoginResult{LoggedInOnly: true}, nil
 	}
-	if target == "" {
-		return setup.CloudLoginResult{}, fmt.Errorf("%q has no URL to connect to yet (still provisioning?)", picked.Name)
-	}
 	return setup.CloudLoginResult{Server: target, Token: token, Name: picked.Name}, nil
 }
 
-// fleetTarget prefers a Barkpark's URL, falling back to its host (a box still
-// provisioning may have only a host). Returns "" when both are blank.
+// fleetTarget resolves a Barkpark's connectable address, preferring its full URL
+// and falling back to its host (a box may have only a host early on). The result
+// ALWAYS carries an http(s) scheme — a scheme-less host is promoted to
+// https://<host> — so the connect path and normalizeServerURL upsert-equality
+// (the W2 steal-guard) always compare a canonical scheme+host URL, never a bare
+// authority. Returns "" when both url and host are blank.
 func fleetTarget(url, host string) string {
-	if strings.TrimSpace(url) != "" {
-		return url
+	raw := strings.TrimSpace(url)
+	if raw == "" {
+		raw = strings.TrimSpace(host)
 	}
-	return strings.TrimSpace(host)
+	if raw == "" {
+		return ""
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "https://" + raw
+	}
+	return raw
 }
