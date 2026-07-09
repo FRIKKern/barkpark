@@ -219,6 +219,46 @@ defmodule BarkparkWeb.GithubWebhookControllerTest do
     end
   end
 
+  describe "intake workspace threading (D15)" do
+    @intake_ws_env "BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"
+
+    setup do
+      prev = System.get_env(@intake_ws_env)
+      System.delete_env(@intake_ws_env)
+
+      on_exit(fn ->
+        if prev,
+          do: System.put_env(@intake_ws_env, prev),
+          else: System.delete_env(@intake_ws_env)
+      end)
+
+      :ok
+    end
+
+    test "env-configured workspace threads as :workspace_id into BOTH handlers' opts" do
+      System.put_env(@intake_ws_env, "ws-uuid-42")
+
+      stub_intake({:ok, :born, %{"_id" => "gh-1"}})
+      deliver("issues", @issue_opened)
+      assert_received {:intake_called, _payload, intake_opts}
+      assert Keyword.get(intake_opts, :workspace_id) == "ws-uuid-42"
+
+      stub_inbound(:ignored)
+      deliver("issues", Map.put(@issue_opened, "action", "deleted"))
+      assert_received {:inbound_called, _payload, inbound_opts}
+      assert Keyword.get(inbound_opts, :workspace_id) == "ws-uuid-42"
+    end
+
+    test "absent env var adds NO :workspace_id key — opts are byte-identical to before D15" do
+      stub_intake({:ok, :born, %{"_id" => "gh-1"}})
+      deliver("issues", @issue_opened)
+
+      assert_received {:intake_called, _payload, opts}
+      refute Keyword.has_key?(opts, :workspace_id)
+      assert opts == [dataset: "production"]
+    end
+  end
+
   describe "non-issues deliveries never touch Intake" do
     test "ping handshake answers 200 without calling Intake" do
       stub_intake({:ok, :should_not_run})
