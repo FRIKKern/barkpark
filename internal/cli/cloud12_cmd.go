@@ -358,9 +358,12 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 // HEALTH · AGENT (Decision 34 activates the merged-but-dormant #1739 chrome on the
 // registry leg). renderHzTable measures widths on bare strings and only tints when
 // out.color is on, so color-off output stays byte-stable. URL falls back to the
-// host when the server has no URL yet (still provisioning); an empty PROVIDER or
-// STATUS cell (a pre-migration or unplaceable row) blanks honestly rather than
-// guessing.
+// host when the server has no URL yet (still provisioning). Every cell rides
+// through hzCell like every other renderHzTable call site: control chars from a
+// server-supplied value are stripped (never echoed raw to the terminal) and an
+// empty PROVIDER or STATUS cell (a pre-migration or unplaceable row) renders the
+// house em-dash rather than a bare gap — the tinters key on exact vocabulary
+// values, so a dashed cell stays honestly unpainted.
 func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
 	headers := []string{"NAME", "PROVIDER", "URL", "STATUS", "MODE", "HEALTH", "AGENT"}
 	rows := make([][]string, 0, len(list))
@@ -370,8 +373,8 @@ func renderCloudBarkparksTable(out *writer, list []cloudclient.Barkpark) {
 			u = b.Host
 		}
 		rows = append(rows, []string{
-			b.Name, b.Provider, u, registryLifecycleToken(b),
-			b.Mode, b.HealthStatus, b.AgentStatus,
+			hzCell(b.Name), hzCell(b.Provider), hzCell(u), hzCell(registryLifecycleToken(b)),
+			hzCell(b.Mode), hzCell(b.HealthStatus), hzCell(b.AgentStatus),
 		})
 	}
 	renderHzTable(out, headers, rows)

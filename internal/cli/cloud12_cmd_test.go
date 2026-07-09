@@ -392,8 +392,9 @@ func TestRegistryLifecycleToken(t *testing.T) {
 // (renderCloudBarkparksTable → the shared renderHzTable) with a mixed-provider,
 // mixed-lifecycle fleet: the PROVIDER identity column and the STATUS lifecycle
 // column are present and folded, and — color OFF (the test writer is not a tty) —
-// the bytes are stable. A pre-migration row (blank provider) blanks its PROVIDER
-// cell rather than guessing.
+// the bytes are stable. A pre-migration row (blank provider) renders the house
+// em-dash (hzCell, like every other cloud table) rather than guessing — and a
+// dashed cell never paints (the tinters key on exact vocabulary values).
 func TestBarkparksFleetTableGolden(t *testing.T) {
 	list := []cloudclient.Barkpark{
 		{Name: "prod", Provider: "hetzner", URL: "https://prod.example.com", Host: "prod.example.com", Mode: "managed", HealthStatus: "up", AgentStatus: "online"},
@@ -408,6 +409,30 @@ func TestBarkparksFleetTableGolden(t *testing.T) {
 	w.output = "table"
 	renderCloudBarkparksTable(w, list)
 	assertGolden(t, "barkparks_fleet_table", stdout.String())
+}
+
+// TestBarkparksFleetTableSanitizes proves fleet cells ride through hzCell: a
+// control-plane value carrying a raw ESC (a would-be terminal-injection) is
+// stripped before it reaches the terminal, and a newline flattens to a space —
+// the sanitizeCell contract every other cloud table already gets.
+func TestBarkparksFleetTableSanitizes(t *testing.T) {
+	list := []cloudclient.Barkpark{
+		{Name: "evil\x1b[31mname", Provider: "hetzner", Host: "h.example.com\nx", Mode: "managed", HealthStatus: "up", AgentStatus: "online"},
+	}
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	renderCloudBarkparksTable(w, list)
+	got := stdout.String()
+	if bytes.Contains([]byte(got), []byte("\x1b")) {
+		t.Fatalf("fleet table echoed a raw ESC from a server value:\n%q", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("evil[31mname")) {
+		t.Fatalf("sanitized name missing (want ESC stripped, rest intact):\n%q", got)
+	}
+	if !bytes.Contains([]byte(got), []byte("h.example.com x")) {
+		t.Fatalf("newline in host should flatten to a space:\n%q", got)
+	}
 }
 
 // TestBarkparksFleetTableColorTints proves the fleet path itself lights up the
