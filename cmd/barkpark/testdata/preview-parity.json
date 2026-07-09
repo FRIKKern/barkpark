@@ -32,11 +32,13 @@
               "value": "How Barkpark's "
             },
             {
-              "marks": [
-                "strong"
+              "children": [
+                {
+                  "type": "text",
+                  "value": "design tokens"
+                }
               ],
-              "type": "text",
-              "value": "design tokens"
+              "type": "strong"
             },
             {
               "type": "text",

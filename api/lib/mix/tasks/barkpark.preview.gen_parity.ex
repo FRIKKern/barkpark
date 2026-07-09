@@ -45,9 +45,13 @@ defmodule Mix.Tasks.Barkpark.Preview.GenParity do
   # ── the canonical documents ─────────────────────────────────────────────────
   #
   # RICH: a paper whose description is DERIVED (no explicit excerpt) from the
-  # first ingress block — whose inline-mark children (a `strong` run) must
-  # flatten to plain text identically on every surface (the pc-w2b description-
-  # marks class, pinned here as a cross-surface lock). A `role: "title"` heading,
+  # first ingress block — whose inline-mark span uses the CANONICAL stored shape
+  # (a `strong` node wrapping its text under "children", inline.ex
+  # compose_inline) and must flatten to plain text identically on every surface.
+  # This pins the pc-w2b description-marks class as a cross-surface lock: if
+  # `Preview.node_text/1` ever loses the "children" clause again, `build/0`
+  # regenerates a garbled description and the freshness lock reds — the
+  # committed fixture stays clean. A `role: "title"` heading,
   # and a `role: "featured"` MEDIA image (a `/media/files/...` src) resolved
   # through the stub to the constant-geometry `og` rendition → a 5-field image
   # object carrying a RELATIVE url (D3) each surface must absolutize itself.
@@ -66,7 +70,7 @@ defmodule Mix.Tasks.Barkpark.Preview.GenParity do
       "type" => "ingress",
       "content" => [
         %{"type" => "text", "value" => "How Barkpark's "},
-        %{"type" => "text", "value" => "design tokens", "marks" => ["strong"]},
+        %{"type" => "strong", "children" => [%{"type" => "text", "value" => "design tokens"}]},
         %{"type" => "text", "value" => " fan out to every surface."}
       ]
     },
