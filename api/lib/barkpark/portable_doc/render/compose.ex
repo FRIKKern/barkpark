@@ -17,7 +17,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   import Inline, only: [compose_inline_children: 1, to_pd_node_from_inline_child: 1]
 
-  @rule Barkpark.PortableDoc.Render.Palettes.rule()
+  # Default theme id (charter D28). compose_block/1,2 resolve their one baked
+  # colour (the field-color swatch border) through this; compose_block/3 carries
+  # a caller-supplied theme instead.
+  @default_theme :evergreen
 
   # ── compose_block: portable-doc block → Pd-tree ────────────────────────────
 
@@ -26,6 +29,42 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # the render style so heading / eyebrow / byline / ingress can diverge.
   @doc false
   def compose_block(b), do: compose_block(b, :email)
+
+  # ── theme-threaded dispatch (charter D28) ──────────────────────────────────
+  #
+  # `compose_block/3` is the theme-aware entry `Render.render_block/2` calls with
+  # `opts[:theme]`. Only the COLOUR-baking block types read `theme` — the
+  # field-color swatch border (Palettes.rule/1) and the email-variant data-viz
+  # emitters (DataViz.*_email_html/2). Every other block (and all `:article`
+  # renders, whose colour lives in paper-surface.css, theme-keyed by ts-w4b)
+  # forwards to the theme-invariant compose_block/2 clause byte-unchanged. The
+  # evergreen default makes compose_block(b, style, :evergreen) byte-identical to
+  # compose_block(b, style).
+  #
+  # SCOPE: the container clauses (section / columns / terminal) recurse through
+  # `render_blocks/2`, which threads `style` only — a data-viz block nested INSIDE
+  # a section renders its email variant at evergreen. The walk palette (every
+  # prose/link/button/table/callout colour) IS fully theme-threaded at all depths;
+  # nested EMAIL data-viz theming is a filed follow-on (article data-viz is
+  # CSS-themed regardless).
+  @doc false
+  def compose_block(%{"type" => "field-color"} = b, style, theme) when style != :article,
+    do: compose_field_color(b, theme)
+
+  def compose_block(%{"type" => "stat"} = b, style, theme) when style != :article,
+    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stat_email_html(b, theme)}
+
+  def compose_block(%{"type" => t} = b, style, theme)
+      when t in ["stats", "stat-grid"] and style != :article,
+      do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stats_email_html(b, theme)}
+
+  def compose_block(%{"type" => "heatmap"} = b, style, theme) when style != :article,
+    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_email_html(b, theme)}
+
+  def compose_block(%{"type" => "chart"} = b, style, theme) when style != :article,
+    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)}
+
+  def compose_block(b, style, _theme), do: compose_block(b, style)
 
   @doc false
   def compose_block(%{"type" => "heading"} = b, style) do
@@ -489,37 +528,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     field_row_article(b, value)
   end
 
-  def compose_block(%{"type" => "field-color"} = b, _style) do
-    hex = field_value_text(b)
-    # A swatch (PdBox with a backgroundColor + border) beside the hex string.
-    # The swatch background only takes the value when it's a strict #rrggbb /
-    # #rgb hex — never an arbitrary string — so it can't break out of the inline
-    # style attribute (the hex text itself is still escaped at PdText walk time).
-    swatch = %{
-      "kind" => "PdBox",
-      "style" => %{
-        "width" => 16,
-        "height" => 16,
-        "backgroundColor" => safe_hex(hex),
-        "borderWidth" => 1,
-        "borderColor" => @rule,
-        "borderStyle" => "single"
-      },
-      "children" => []
-    }
-
-    value_row = %{
-      "kind" => "PdBox",
-      "style" => %{"flexDirection" => "row"},
-      "children" => [swatch, %{"kind" => "PdText", "children" => [hex]}]
-    }
-
-    %{
-      "kind" => "PdBox",
-      "style" => %{"flexDirection" => "column"},
-      "children" => [field_label_node(b), value_row]
-    }
-  end
+  def compose_block(%{"type" => "field-color"} = b, _style),
+    do: compose_field_color(b, @default_theme)
 
   # ── field-reference / field-image PICKER blocks (P2.2) ─────────────────────
   # Two field blocks whose Edit-mode control is an existing picker Web Component
@@ -1001,6 +1011,41 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp field_value_text(b), do: stringish(Map.get(b, "value", ""))
+
+  # field-color swatch (non-article). The swatch BORDER is the one baked colour
+  # compose emits (was the compile-time @rule); it now resolves per theme
+  # (charter D28). Evergreen keeps the byte-exact email rule.
+  defp compose_field_color(b, theme) do
+    hex = field_value_text(b)
+    # A swatch (PdBox with a backgroundColor + border) beside the hex string.
+    # The swatch background only takes the value when it's a strict #rrggbb /
+    # #rgb hex — never an arbitrary string — so it can't break out of the inline
+    # style attribute (the hex text itself is still escaped at PdText walk time).
+    swatch = %{
+      "kind" => "PdBox",
+      "style" => %{
+        "width" => 16,
+        "height" => 16,
+        "backgroundColor" => safe_hex(hex),
+        "borderWidth" => 1,
+        "borderColor" => Barkpark.PortableDoc.Render.Palettes.rule(theme),
+        "borderStyle" => "single"
+      },
+      "children" => []
+    }
+
+    value_row = %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "row"},
+      "children" => [swatch, %{"kind" => "PdText", "children" => [hex]}]
+    }
+
+    %{
+      "kind" => "PdBox",
+      "style" => %{"flexDirection" => "column"},
+      "children" => [field_label_node(b), value_row]
+    }
+  end
 
   # Image fields may store a bare URL (v1) or JSON `{"url","assetId"}` (v2).
   defp media_field_url(v) when is_binary(v) do

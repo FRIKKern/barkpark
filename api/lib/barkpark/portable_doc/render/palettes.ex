@@ -22,55 +22,88 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
   # Font names are wrapped in single quotes inside CSS so the surrounding
   # double-quoted style attribute stays valid HTML. (Embedding `"SF Pro Text"`
   # directly would terminate the attribute at the first `"`.)
+  #
+  # Fonts are theme-INVARIANT (charter D28) — they stay compile-time constants.
   @font_body "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
   @font_mono "ui-monospace,Menlo,monospace"
-  # Evergreen profile — the same brand the reader, Studio, TUI and web carry.
-  # Sourced VERBATIM from design/tokens.json paperEmail via TokensGen (theme-
-  # system Wave 1 CAPTURE). NOTE: these deliberately DIVERGE from TokensGen's
-  # HSL-derived brand/rule (#1e5243/#e4e4e7) — email bytes ship to mail clients,
-  # so the drifted slots would retint the byte-locked golden; w3 reconciles.
-  @brand TokensGen.email_brand()
-  @brand_text TokensGen.email_brand_text()
-  @rule TokensGen.email_rule()
-  @page_bg TokensGen.email_page_bg()
 
   @default_width 600
+
+  # Default theme id. Every colour accessor below defaults to it, so a caller
+  # that passes no theme gets byte-identical output to the pre-theme constants.
+  @default_theme :evergreen
+
+  # The email-skin slots a theme override map may set (Map.take guards against
+  # a caller injecting stray keys into the merged skin).
+  @skin_keys [:brand, :brand_text, :rule, :page_bg, :paper, :text, :muted, :code_bg]
 
   @doc false
   def font_body, do: @font_body
   @doc false
   def font_mono, do: @font_mono
   @doc false
-  def brand, do: @brand
-  @doc false
-  def brand_text, do: @brand_text
-  @doc false
-  def rule, do: @rule
-  @doc false
-  def page_bg, do: @page_bg
-  @doc false
   def default_width, do: @default_width
 
+  # ── Theme-resolved email skin (charter D28 relocation) ──────────────────────
+  #
+  # The brand/rule/page-bg colours were compile-time module attributes frozen to
+  # evergreen at BEAM compile. They are now RUNTIME functions taking a `theme`
+  # threaded from `Render.render_html(opts[:theme])`. The `theme` is EITHER:
+  #
+  #   * a theme IDENTITY (atom/string id) — resolved through the theme-keyed
+  #     `TokensGen` (evergreen this wave; unknown/nil/empty → evergreen), or
+  #   * a MAP of `{slot => value}` overrides merged over the resolved evergreen
+  #     skin — the ts-w4b fixture-theme seam and the positive-proof test, i.e.
+  #     the live end of the thread that proves a non-evergreen theme moves bytes.
+  #
+  # Evergreen (the default) stays VERBATIM the captured paperEmail hand hex —
+  # NOT TokensGen's HSL-derived brand/rule (#1e5243/#e4e4e7), which are drifted
+  # from the byte-locked email golden. So email bytes ship unretinted; w3
+  # reconciles the two slots.
   @doc false
-  def email_palette do
+  def email_skin(theme \\ @default_theme)
+
+  def email_skin(theme) when is_map(theme),
+    do: Map.merge(TokensGen.email_skin(@default_theme), Map.take(theme, @skin_keys))
+
+  def email_skin(theme), do: TokensGen.email_skin(theme)
+
+  @doc false
+  def brand(theme \\ @default_theme), do: email_skin(theme).brand
+  @doc false
+  def brand_text(theme \\ @default_theme), do: email_skin(theme).brand_text
+  @doc false
+  def rule(theme \\ @default_theme), do: email_skin(theme).rule
+  @doc false
+  def page_bg(theme \\ @default_theme), do: email_skin(theme).page_bg
+
+  @doc false
+  def email_palette(theme \\ @default_theme) do
+    s = email_skin(theme)
+
     %{
       style: :email,
       font_body: @font_body,
       font_heading: @font_body,
       width: @default_width,
-      bg: @page_bg,
-      paper: TokensGen.email_paper(),
-      text: TokensGen.email_text(),
-      muted: TokensGen.email_muted(),
-      rule: @rule,
-      accent: @brand,
-      link_color: @brand,
-      code_bg: TokensGen.email_code_bg()
+      bg: s.page_bg,
+      paper: s.paper,
+      text: s.text,
+      muted: s.muted,
+      rule: s.rule,
+      accent: s.brand,
+      link_color: s.brand,
+      code_bg: s.code_bg,
+      # The primary-action button foreground (walk.ex button/2) — was the
+      # compile-time @brand_text; carried on the palette so the walker flips it
+      # with the theme.
+      brand_text: s.brand_text
     }
   end
 
   @doc false
-  def article_palette do
+  def article_palette(theme \\ @default_theme) do
+    s = email_skin(theme)
     # All colour fields embed `var(--paper-*, <hex>)` rather than a bare hex.
     # When the rendered HTML lives inside `.bp-paper-surface` (Studio + the
     # editor panes — see root.html.heex ~:1973/:1989), the CSS variables
@@ -99,18 +132,22 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       # render lands outside a `.bp-paper-surface` context (paper.html.heex, an
       # email backend), so they MUST come from the same captured paperEmail hex
       # as the email palette above — never a re-typed literal.
-      bg: "var(--paper-bg-deep, #{TokensGen.email_page_bg()})",
-      paper: "var(--paper-bg, #{TokensGen.email_paper()})",
-      text: "var(--paper-ink, #{TokensGen.email_text()})",
-      muted: "var(--paper-ink-soft, #{TokensGen.email_muted()})",
-      rule: "var(--paper-rule, #{TokensGen.email_rule()})",
-      accent: "var(--paper-accent, #{TokensGen.email_brand()})",
-      link_color: "var(--paper-accent, #{TokensGen.email_brand()})",
-      code_bg: "var(--paper-bg-deep, #{TokensGen.email_code_bg()})"
+      bg: "var(--paper-bg-deep, #{s.page_bg})",
+      paper: "var(--paper-bg, #{s.paper})",
+      text: "var(--paper-ink, #{s.text})",
+      muted: "var(--paper-ink-soft, #{s.muted})",
+      rule: "var(--paper-rule, #{s.rule})",
+      accent: "var(--paper-accent, #{s.brand})",
+      link_color: "var(--paper-accent, #{s.brand})",
+      code_bg: "var(--paper-bg-deep, #{s.code_bg})",
+      # Primary-action button foreground (walk.ex button/2) — the raw skin hex
+      # (no var(): the button fg is not a `--paper-*` role), flips with theme.
+      brand_text: s.brand_text
     }
   end
 
   @doc false
-  def palette_for(:article), do: article_palette()
-  def palette_for(_), do: email_palette()
+  def palette_for(style, theme \\ @default_theme)
+  def palette_for(:article, theme), do: article_palette(theme)
+  def palette_for(_, theme), do: email_palette(theme)
 end

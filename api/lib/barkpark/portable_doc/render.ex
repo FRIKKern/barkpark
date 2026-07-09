@@ -75,11 +75,17 @@ defmodule Barkpark.PortableDoc.Render do
     * `:style` — render palette: `:email` (default, the module constants) or
       `:article` (native paper-article serif/parchment palette). Opt-in only; the
       `:email` default keeps existing output byte-unchanged.
+    * `:theme` — theme identity (charter D28): an id (atom/string; `:evergreen`
+      default, unknown → evergreen) or a `{slot => value}` override map. Threads
+      to `Palettes.palette_for/2` → every colour the walker emits. `:evergreen`
+      keeps output byte-identical; a non-evergreen theme moves the bytes.
   """
   def render_html(root, opts \\ %{}) do
+    theme = Map.get(opts, :theme, :evergreen)
+
     palette =
       Map.get(opts, :style, :email)
-      |> Palettes.palette_for()
+      |> Palettes.palette_for(theme)
       # Wikilink resolution rides the palette (already threaded to every walk/3).
       # `:wikilinks` is a caller-supplied %{raw_target => %{id: ...}} map — the
       # caller pre-resolves targets (via Content.resolve_wikilink) and passes it.
@@ -175,12 +181,13 @@ defmodule Barkpark.PortableDoc.Render do
   """
   def render_block(block, opts \\ %{}) when is_map(block) do
     style = Map.get(opts, :style, :email)
+    theme = Map.get(opts, :theme, :evergreen)
 
     block
     |> resolve_ref_title(opts)
     |> resolve_code_label(opts)
     |> redact_encrypted_value()
-    |> compose_block(style)
+    |> compose_block(style, theme)
     |> render_html(Map.put(opts, :doctype, false))
   end
 
@@ -254,7 +261,8 @@ defmodule Barkpark.PortableDoc.Render do
   """
   def render_document(blocks, opts \\ %{}) when is_list(blocks) do
     style = Map.get(opts, :style, :email)
-    palette = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
+    theme = Map.get(opts, :theme, :evergreen)
+    palette = Barkpark.PortableDoc.Render.Palettes.palette_for(style, theme)
     body = render_blocks(blocks, opts)
 
     card =
@@ -279,6 +287,9 @@ defmodule Barkpark.PortableDoc.Render do
 
   @doc false
   defdelegate compose_block(block, style), to: Compose
+
+  @doc false
+  defdelegate compose_block(block, style, theme), to: Compose
 
   @doc """
   Escape the five HTML-significant characters in the EXACT order `& < > " '`.

@@ -52,8 +52,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   import Barkpark.PortableDoc.Render.Util,
     only: [escape_html: 1, escape_attr: 1, safe_url: 1, tone_palette: 1]
 
+  # Mono font is theme-INVARIANT (charter D28) — stays a compile-time constant.
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
-  @brand_text Barkpark.PortableDoc.Render.Palettes.brand_text()
 
   # Max cells a single sheet merge may cover before this public render path
   # drops it. Papers never pass the sheet plugin's before_save merge
@@ -821,7 +821,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     href = safe_url(Map.get(n, "href", ""))
 
     if Map.get(n, "priority") == "primary" do
-      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;background:#{pal.accent};color:#{@brand_text};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
+      ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;background:#{pal.accent};color:#{pal.brand_text};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
     else
       ~s(<a href="#{href}" style="display:inline-block;padding:10px 20px;border:2px solid #{pal.accent};color:#{pal.accent};text-decoration:none;font-weight:bold;border-radius:0">#{label}</a>)
     end

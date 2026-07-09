@@ -7,42 +7,89 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   palettes), generated from design/tokens.json. Regenerate with
   `node design/emit.mjs --write`; never hand-edit. Emits the verbatim
   paper-email skin (email_* — consumed by palettes.ex / data_viz.ex), the
-  callout tone tints (callout/1 — util.ex tone_palette/1), the semantic
+  callout tone tints (callout/2 — util.ex tone_palette/1), the semantic
   status tones, and the tokenized reading accent + reading type. The email
   brand/rule are the verbatim email_* hex, NOT color.primary/border (those
   HSL-derived slots are drifted from the byte-locked email golden; w3
   reconciles the two).
+
+  ## Theme-keying (charter D28)
+
+  Every COLOUR-bearing token is theme-keyed: the value lives in a per-theme
+  map and the accessor takes an optional `theme` defaulting `:evergreen`.
+  `evergreen` is the only theme this wave; an unknown / empty / binary theme
+  resolves to `:evergreen` (Resolve semantics). Adding theme N+1 is one more
+  key in each map — no accessor changes. Non-colour tokens (reading_font /
+  heading weight / body size) are theme-INVARIANT and stay plain.
   """
 
+  # Known theme ids (evergreen only this wave). resolve/1 folds an unknown /
+  # empty / binary theme onto :evergreen so every accessor is total.
+  @themes [:evergreen]
+  @doc "Known theme ids (evergreen this wave)."
+  def themes, do: @themes
+  defp resolve(theme) when theme in @themes, do: theme
+
+  defp resolve(theme) when is_binary(theme),
+    do: Enum.find(@themes, :evergreen, &(Atom.to_string(&1) == theme))
+
+  defp resolve(_), do: :evergreen
+
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
-  def tone_ok, do: "#137236"
-  def tone_info, do: "#3b82f6"
-  def tone_warn, do: "#ba7008"
-  def tone_danger, do: "#b42222"
+  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}}
+  def tone_ok(theme \\ :evergreen), do: @status[resolve(theme)].ok
+  def tone_info(theme \\ :evergreen), do: @status[resolve(theme)].info
+  def tone_warn(theme \\ :evergreen), do: @status[resolve(theme)].warn
+  def tone_danger(theme \\ :evergreen), do: @status[resolve(theme)].danger
 
   # Warm reading accent — the paper terracotta, tokenized.
-  def reading_accent, do: "#a23925"
+  @reading_accent %{evergreen: "#a23925"}
+  def reading_accent(theme \\ :evergreen), do: @reading_accent[resolve(theme)]
 
-  # Reading type (design/tokens.json font.reading / type.reading).
+  # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.
   @reading_font "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"
   def reading_font, do: @reading_font
   def reading_heading_weight, do: 600
   def reading_body_size, do: 18
 
   # Paper email surface — verbatim hand hex (light-only; email has no dark mode).
-  def email_brand, do: "#1e5347"
-  def email_brand_text, do: "#ffffff"
-  def email_rule, do: "#dde7e2"
-  def email_page_bg, do: "#eaf1ee"
-  def email_paper, do: "#ffffff"
-  def email_text, do: "#15211d"
-  def email_muted, do: "#55635e"
-  def email_code_bg, do: "#eaf1ee"
+  @email %{
+    evergreen: %{
+      brand: "#1e5347",
+      brand_text: "#ffffff",
+      rule: "#dde7e2",
+      page_bg: "#eaf1ee",
+      paper: "#ffffff",
+      text: "#15211d",
+      muted: "#55635e",
+      code_bg: "#eaf1ee"
+    }
+  }
+  @doc "The whole per-theme email skin map (palettes.ex / data_viz.ex read it in one shot)."
+  def email_skin(theme \\ :evergreen), do: @email[resolve(theme)]
+  def email_brand(theme \\ :evergreen), do: email_skin(theme).brand
+  def email_brand_text(theme \\ :evergreen), do: email_skin(theme).brand_text
+  def email_rule(theme \\ :evergreen), do: email_skin(theme).rule
+  def email_page_bg(theme \\ :evergreen), do: email_skin(theme).page_bg
+  def email_paper(theme \\ :evergreen), do: email_skin(theme).paper
+  def email_text(theme \\ :evergreen), do: email_skin(theme).text
+  def email_muted(theme \\ :evergreen), do: email_skin(theme).muted
+  def email_code_bg(theme \\ :evergreen), do: email_skin(theme).code_bg
 
   # Callout tone tints — verbatim {bg, fg} pairs (util.ex tone_palette/1).
-  def callout(:success), do: %{bg: "#e7f2ec", fg: "#1e6b52"}
-  def callout(:warning), do: %{bg: "#f7f0df", fg: "#8a6420"}
-  def callout(:danger), do: %{bg: "#f7e9e6", fg: "#a63a2e"}
-  def callout(:info), do: %{bg: "#e9eff7", fg: "#2d5e8f"}
-  def callout(:neutral), do: %{bg: "#edf0ee", fg: "#4a544f"}
+  @callout %{
+    evergreen: %{
+      success: %{bg: "#e7f2ec", fg: "#1e6b52"},
+      warning: %{bg: "#f7f0df", fg: "#8a6420"},
+      danger: %{bg: "#f7e9e6", fg: "#a63a2e"},
+      info: %{bg: "#e9eff7", fg: "#2d5e8f"},
+      neutral: %{bg: "#edf0ee", fg: "#4a544f"}
+    }
+  }
+  def callout(tone, theme \\ :evergreen)
+  def callout(:success, theme), do: @callout[resolve(theme)].success
+  def callout(:warning, theme), do: @callout[resolve(theme)].warning
+  def callout(:danger, theme), do: @callout[resolve(theme)].danger
+  def callout(:info, theme), do: @callout[resolve(theme)].info
+  def callout(:neutral, theme), do: @callout[resolve(theme)].neutral
 end
