@@ -1334,21 +1334,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       :ok
     end
 
-    test "card → expand → details opens the inspector with claim, description, evidence, lineage",
+    test "an in-flight card greets you expanded; details opens the inspector",
          %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/admin/projects")
+      {:ok, view, html} = live(conn, "/admin/projects")
 
-      # wave 21: the card click expands; the details button (or a gantt row)
-      # opens the inspector.
-      view
-      |> element(~s{[data-role="task-card"][data-doc-id="pk-epic"]})
-      |> render_click()
-
-      assert_patch(view, "/admin/projects?expand=pk-epic")
+      # wave 23: pk-epic is in flight, so the gantt is ALREADY open on load.
+      assert html =~ ~s(data-role="gantt")
 
       view |> element(~s{[data-role="expand-details"]}) |> render_click()
 
-      assert_patch(view, "/admin/projects?expand=pk-epic&task=pk-epic")
+      assert_patch(view, "/admin/projects?task=pk-epic")
       html = render(view)
 
       assert html =~ ~s(data-role="peek")
@@ -1562,31 +1557,62 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute deck =~ ~s(draggable="true")
       refute deck =~ ~s(phx-hook="BarkparkBoardDrag")
 
-      # click → the card widens in place into the family timeline (wave 21)…
-      view
-      |> element(~s{[data-role="task-card"][data-doc-id="dk-epic"]})
-      |> render_click()
-
-      assert_patch(view, "/admin/projects?expand=dk-epic")
-      html = render(view)
+      # wave 23: the in-flight epic greets you EXPANDED — gantt on load, the
+      # list is the chart (root row first, family beneath).
       assert html =~ ~s(data-role="gantt")
       assert html =~ ~s(data-role="gantt-bar")
-      # …the list IS the chart: root row first, family rows beneath.
       [_, gantt] = String.split(html, ~s(data-role="gantt"), parts: 2)
       assert gantt =~ ~s(data-doc-id="dk-epic")
       assert gantt =~ ~s(data-doc-id="dk-child")
 
-      # a gantt row click peeks that task with the timeline still open.
+      # clicking a NON-expanded card narrows the expansion to it…
       view
-      |> element(~s{[data-role="gantt-row"][data-doc-id="dk-child"] button})
+      |> element(~s{[data-role="task-card"][data-doc-id="dk-ready"]})
       |> render_click()
 
-      assert_patch(view, "/admin/projects?expand=dk-epic&task=dk-child")
+      assert_patch(view, "/admin/projects?expand=dk-ready")
+      narrowed = render(view)
+      # …the explicit selection collapses the auto-expanded epic.
+      assert occurrences(narrowed, ~s(data-role="gantt")) == 1
+
+      # a gantt row click peeks that task with the timeline still open.
+      view
+      |> element(~s{[data-role="gantt-row"][data-doc-id="dk-ready"] button})
+      |> render_click()
+
+      assert_patch(view, "/admin/projects?expand=dk-ready&task=dk-ready")
       assert render(view) =~ ~s(data-role="peek")
 
-      # × collapses back (peek stays).
+      # × collapses to the QUIET deck — the explicit none sentinel (peek stays).
       view |> element(~s{[data-role="expand-close"]}) |> render_click()
-      assert_patch(view, "/admin/projects?task=dk-child")
+      assert_patch(view, "/admin/projects?expand=none&task=dk-ready")
+      refute render(view) =~ ~s(data-role="gantt-bar")
+    end
+
+    test "in-flight cards auto-expand by default; criteria ride the chart as segments (wave 23)",
+         %{conn: conn} do
+      task("dk-crit", "Claimed with checks",
+        lifecycle: "in_progress",
+        assignee: "studio:kalle",
+        criteria: [
+          %{"criterion" => "first check met", "met" => true},
+          %{"criterion" => "second check open", "met" => false}
+        ]
+      )
+
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      # both in-flight cards are open; the ready card is not.
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+      assert occurrences(deck, "is-expanded") >= 2
+      # criteria render as CHECKS + SEGMENT BARS on the claimed card's chart:
+      assert deck =~ ~s(data-role="gantt-criterion")
+      assert deck =~ "first check met"
+      assert deck =~ ~s(data-role="gantt-crit-bar")
+      # the met slice fills, the next unmet slice pulses.
+      assert deck =~ "bp-gantt-bar--crit is-met"
+      assert deck =~ "bp-gantt-bar--crit is-next"
     end
   end
 
