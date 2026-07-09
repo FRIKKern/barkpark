@@ -124,7 +124,9 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       route: "/w/:workspace_slug/p/:project_slug/studio/settings",
       disposition: :mount,
       url: {:scoped, "/studio/settings"},
-      active: :none
+      # ssp-w3: Settings now has its own admin top-menu tab, so its route
+      # highlights itself (a page must tell you where you are).
+      active: "Settings"
     },
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{

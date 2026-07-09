@@ -2,17 +2,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   @moduledoc """
   **Workspace Settings** — the admin control panel for one workspace.
 
-  ## Route + scope (sdl-w1-admin-canonical)
-
-  Mounts at the workspace-scoped canonical
-  `/w/:ws/p/:proj/studio/settings` (dataset-less — settings are
-  workspace-level). `BarkparkWeb.LiveScope.:resolve` in the on_mount chain
-  resolves + membership-authorizes the workspace from the URL and assigns
-  `current_workspace`, so every per-workspace read/write below targets the
-  URL workspace — NOT the seeded Default that `StudioChrome`'s flat fallback
-  would otherwise pin. The flat `/studio/settings` spelling 302s here via
-  `BarkparkWeb.AdminStudioRedirectController`.
-
   Three stacked sections, most-reached first:
 
     1. **Workspace theme** — the persisted theme identity (`render_theme_section/1`).
@@ -61,26 +50,73 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     {"top_menu", "Top menu only"}
   ]
 
+  # Scoped mount (ssp-w3, charter D15). On `/w/:ws/p/:proj/d/:dataset/studio/
+  # settings` LiveScope has already bound `current_workspace` from the URL — the
+  # panel is URL-scoped, so the switcher RE-BINDS it and every write targets the
+  # workspace the admin is looking at (the mount-pinned-Default hazard is gone).
   @impl true
+  def mount(%{"workspace_slug" => _, "project_slug" => _}, _session, socket) do
+    {:ok, assign_page(socket)}
+  end
+
+  # Flat `/studio/settings` — a compatibility entry with no scope in its URL.
+  # StudioChrome pinned the seeded Default scope; redirect to that scope's
+  # canonical scoped Settings URL so the panel is ALWAYS URL-bound (D15). An
+  # unseeded tenancy (no default workspace) has nowhere to go — render in place.
   def mount(_params, _session, socket) do
-    {:ok,
+    case scoped_settings_path(socket) do
+      {:ok, path} -> {:ok, push_navigate(socket, to: path)}
+      :error -> {:ok, assign_page(socket)}
+    end
+  end
+
+  # Re-derive the URL-bound view on every scoped patch. A scope switch fired
+  # from here is a `push_navigate` remount (mount re-runs), but LiveScope also
+  # re-binds `current_workspace` on a same-session `handle_params`, so refresh
+  # the theme + plugin rows here too — they must never lag the bound scope.
+  @impl true
+  def handle_params(_params, _uri, socket) do
+    {:noreply,
      socket
-     |> assign(
-       page_title: "Workspace Settings",
-       plugin_name: "",
-       settings_json: "",
-       settings_fields: [],
-       typed_form: %{},
-       revealed: %{},
-       masked: true,
-       loaded?: false,
-       error: nil,
-       placement_labels: @placement_labels,
-       # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
-       # resolved by the StudioChrome on_mount hook (nil on an unseeded tenancy).
-       known_themes: Tenancy.known_themes()
-     )
+     |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
      |> assign_plugin_rows()}
+  end
+
+  defp assign_page(socket) do
+    socket
+    |> assign(
+      page_title: "Workspace Settings",
+      plugin_name: "",
+      settings_json: "",
+      settings_fields: [],
+      typed_form: %{},
+      revealed: %{},
+      masked: true,
+      loaded?: false,
+      error: nil,
+      placement_labels: @placement_labels,
+      # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
+      # resolved by LiveScope + StudioChrome (nil on an unseeded tenancy).
+      known_themes: Tenancy.known_themes(),
+      # A scope switch fired from Settings re-opens Settings under the NEW
+      # scope, not the desk (chrome D16 seam) — StudioChrome appends this to
+      # the target's studio_root.
+      scope_subpath: "/settings"
+    )
+    |> assign_plugin_rows()
+  end
+
+  # The canonical scoped Settings URL for the socket's currently-bound scope
+  # (StudioChrome pins Default on the flat route). :error when the tenancy is
+  # unseeded so the flat route can degrade to an in-place render.
+  defp scoped_settings_path(socket) do
+    with %{slug: ws_slug} when is_binary(ws_slug) <- socket.assigns[:current_workspace],
+         %{slug: proj_slug} when is_binary(proj_slug) <- socket.assigns[:current_project],
+         dataset when is_binary(dataset) <- socket.assigns[:dataset] do
+      {:ok, "/w/#{ws_slug}/p/#{proj_slug}/d/#{dataset}/studio/settings"}
+    else
+      _ -> :error
+    end
   end
 
   @impl true
@@ -203,7 +239,115 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # re-renders → the `BpThemeMirror` hook stamps `document.documentElement`
   # instantly (preview with no reload). The server-side stamp on the next full
   # load comes from StudioChrome resolving the persisted value.
-  def handle_event("set_workspace_theme", %{"theme" => theme}, socket) do
+  def handle_event("set_workspace_theme", %{"theme" => theme} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      do_set_workspace_theme(socket, theme)
+    end)
+  end
+
+  # ── Per-workspace plugin surfacing (studio-structure-polish D2/D4/D10) ──
+  #
+  # An admin flips an installed plugin on/off for THIS workspace, or moves it
+  # between the MAIN Desk Structure / the Plugins folder / the top menu. State
+  # persists into `workspaces.settings["plugins"]` (merged, so the theme key is
+  # preserved) and is re-read through `Enablement.effective/1` so the row always
+  # reflects the merged declaration-default + override truth. Disabling never
+  # deletes: the doc types move to the …Rest folder.
+  def handle_event("toggle_plugin", %{"plugin" => name} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      case current_row(socket, name) do
+        %{enabled: enabled} ->
+          put_plugin_override(socket, name, %{"enabled" => not enabled},
+            flash:
+              if(enabled,
+                do: "Disabled #{display_name(name)} for this workspace.",
+                else: "Enabled #{display_name(name)} for this workspace."
+              )
+          )
+
+        nil ->
+          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+      end
+    end)
+  end
+
+  def handle_event(
+        "set_plugin_placement",
+        %{"plugin" => name, "placement" => placement} = params,
+        socket
+      )
+      when placement in ["main", "plugins", "top_menu"] do
+    guard_bound_ws(socket, params, fn ->
+      # Same unknown-plugin guard as toggle_plugin: a forged plugin name must not
+      # persist a junk override entry into the workspace settings.
+      case current_row(socket, name) do
+        %{} ->
+          put_plugin_override(socket, name, %{"placement" => placement},
+            flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+          )
+
+        nil ->
+          {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+      end
+    end)
+  end
+
+  # ── Fail-closed scope-write guard (ssp-w3, charter D17) ─────────────────
+  #
+  # Every workspace-scoped WRITE (theme / plugin toggle / placement) stamps the
+  # RENDERED workspace id into its control (`phx-value-ws` / a hidden `ws`
+  # field). Here we compare that snapshot against the LIVE URL-bound
+  # `current_workspace.id` — LiveScope's independent truth, re-bound from the
+  # URL on every scoped navigation. A mismatch means the DOM the admin acted on
+  # is stale relative to the bound scope (a scope switch raced the click): we
+  # REFUSE, flash, and re-bind the rows — NEVER silently retarget another
+  # workspace's settings. `credentials` are installation-global (settings.ex),
+  # so they are out of this guard's scope by design.
+  #
+  # A control that omits `ws` (a legacy/forged event) falls through to the write,
+  # which still targets the URL-bound `current_workspace` — the scoping itself,
+  # not this stamp, is what kills the wrong-workspace hazard; the stamp is the
+  # belt-and-suspenders that refuses a visibly-stale action.
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("studio: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  defp guard_bound_ws(socket, params, fun) do
+    bound =
+      case socket.assigns[:current_workspace] do
+        %{id: id} -> id
+        _ -> nil
+      end
+
+    rendered = params["ws"]
+
+    cond do
+      is_nil(bound) ->
+        {:noreply, put_flash(socket, :error, "No workspace in scope to configure.")}
+
+      is_binary(rendered) and rendered != bound ->
+        {:noreply,
+         socket
+         |> assign_plugin_rows()
+         |> put_flash(
+           :error,
+           "Scope changed — nothing was saved. Reloaded this workspace's settings."
+         )}
+
+      true ->
+        fun.()
+    end
+  end
+
+  # Workspace theme write, invoked by `set_workspace_theme` inside the
+  # fail-closed scope guard. Persists `settings["theme"]` on the URL-bound
+  # workspace and re-assigns `:bp_theme` so the `#bp-theme-mirror` hook stamps
+  # `document.documentElement` instantly (preview with no reload).
+  defp do_set_workspace_theme(socket, theme) do
     case socket.assigns[:current_workspace] do
       %{id: _} = ws ->
         case Tenancy.set_workspace_theme(ws.id, theme) do
@@ -226,65 +370,31 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     end
   end
 
-  # ── Per-workspace plugin surfacing (studio-structure-polish D2/D4/D10) ──
-  #
-  # An admin flips an installed plugin on/off for THIS workspace, or moves it
-  # between the MAIN Desk Structure / the Plugins folder / the top menu. State
-  # persists into `workspaces.settings["plugins"]` (merged, so the theme key is
-  # preserved) and is re-read through `Enablement.effective/1` so the row always
-  # reflects the merged declaration-default + override truth. Disabling never
-  # deletes: the doc types move to the …Rest folder.
-  def handle_event("toggle_plugin", %{"plugin" => name}, socket) do
-    case current_row(socket, name) do
-      %{enabled: enabled} ->
-        put_plugin_override(socket, name, %{"enabled" => not enabled},
-          flash:
-            if(enabled,
-              do: "Disabled #{display_name(name)} for this workspace.",
-              else: "Enabled #{display_name(name)} for this workspace."
-            )
-        )
-
-      nil ->
-        {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-    end
-  end
-
-  def handle_event("set_plugin_placement", %{"plugin" => name, "placement" => placement}, socket)
-      when placement in ["main", "plugins", "top_menu"] do
-    # Same unknown-plugin guard as toggle_plugin: a forged plugin name must not
-    # persist a junk override entry into the workspace settings.
-    case current_row(socket, name) do
-      %{} ->
-        put_plugin_override(socket, name, %{"placement" => placement},
-          flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
-        )
-
-      nil ->
-        {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
-    end
-  end
-
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("studio: unhandled event #{inspect(event)}")
-    {:noreply, socket}
-  end
-
   @impl true
   def render(assigns) do
     ~H"""
     <div class="settings-live" style="max-width: 720px; margin: 2rem auto; font-family: ui-sans-serif, system-ui;">
       <h1 style="margin-bottom:.25rem;">Workspace Settings</h1>
-      <p style="color: var(--fg-muted); margin-top:0;">
-        Theme, plugins and credentials for
-        <%= if @current_workspace do %>
-          <strong>{@current_workspace.name}</strong>.
-        <% else %>
-          this workspace.
-        <% end %>
-      </p>
+      <%= if @current_workspace do %>
+        <p style="color: var(--fg-muted); margin-top:0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
+          <span>Theme, plugins and credentials for</span>
+          <span
+            data-test-id="settings-bound-workspace"
+            data-workspace-id={@current_workspace.id}
+            style="display:inline-flex; align-items:center; gap:.35rem; font-weight:600; color:var(--fg); border:1px solid var(--border); border-radius:999px; padding:.1rem .6rem;"
+          >
+            {@current_workspace.name}
+          </span>
+        </p>
+        <p style="color: var(--fg-muted); margin-top:0; font-size:.9em;">
+          Everything here writes to <strong>{@current_workspace.name}</strong>.
+          Switch workspace from the top bar to configure another.
+        </p>
+      <% else %>
+        <p style="color: var(--fg-muted); margin-top:0;">
+          Theme, plugins and credentials for this workspace.
+        </p>
+      <% end %>
 
       <%= if msg = Phoenix.Flash.get(@flash, :info) do %>
         <div role="status" style="background:var(--success-bg); color:var(--success); padding:.5rem; margin:.5rem 0;">{msg}</div>
@@ -374,6 +484,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         </p>
 
         <form phx-change="set_workspace_theme">
+          <input type="hidden" name="ws" value={@current_workspace.id} />
           <label>
             Theme
             <select name="theme" style="margin-left:.5rem;">
@@ -462,6 +573,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                     checked={row.enabled}
                     phx-click="toggle_plugin"
                     phx-value-plugin={row.name}
+                    phx-value-ws={@current_workspace.id}
                   />
                   <span style={enabled_span_style(row.enabled)}>
                     {if row.enabled, do: "Enabled", else: "Disabled"}
@@ -470,6 +582,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
                 <form phx-change="set_plugin_placement" style="margin:0;">
                   <input type="hidden" name="plugin" value={row.name} />
+                  <input type="hidden" name="ws" value={@current_workspace.id} />
                   <label style="display:inline-flex; align-items:center; gap:.4rem; color:var(--fg-muted); font-size:.9em;">
                     Placement
                     <select name="placement" disabled={not row.enabled}>
