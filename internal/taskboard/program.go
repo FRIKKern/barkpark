@@ -1226,12 +1226,22 @@ func (m Model) readingWidth() int {
 }
 
 // readingViewportHeight is the number of body lines a pushed frame gets — it MUST
-// match Compose's layout math (narrow: breadcrumb + footer reserved; wide: the
-// breadcrumb spans the top) or the free-scroll clamp desyncs from the paint.
+// match Compose's layout math or the free-scroll clamp desyncs from the paint
+// (under-scrolls by one, hiding the last body line under a stuck ↓-more marker).
+// It mirrors Compose→composeAt's height chain EXACTLY: Compose floors height at 8,
+// prepends ONE blank row and hands composeAt height-1, which floors again at 8.
+// So the window composeAt actually paints is (height-1, re-floored) minus the
+// chrome it reserves — breadcrumb + footer in narrow (−2), the spanning
+// breadcrumb in wide (−1). The leading-blank hop is the off-by-one that a naive
+// height-1 / height-2 split (measuring Compose's height, not composeAt's) missed.
 func (m Model) readingViewportHeight() int {
 	h := m.height
 	if h < 8 {
 		h = 8
+	}
+	h = h - 1 // Compose's leading blank row eats one line before composeAt
+	if h < 8 {
+		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
 		return h - 1
