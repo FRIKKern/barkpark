@@ -467,6 +467,82 @@ ever touches a live cloud: Azure and Hetzner APIs are faked/recorded in tests.
     a SCOPED grid modifier on the instance workspace only — the 260px
     `.detail-grid` is shared with site-deploys, which must not widen.
 
+36. –42. **Ratified at W6 planning, recorded in the Wave 2026-07-09j log
+    entry** (D36 identity set, D39 SigV4 conduit, D40 resurrect-rides-the-7-
+    steps / never-warm-assigns, D41 azure base-install freshen, D42 honesty
+    flips atomic with the capability).
+43. **Resurrect claim decodes into a DEDICATED spec; the worker env owns the
+    bundle credentials.** The claim's `bundle_ref` is a STRING
+    (router.ex:6876 Map.puts it onto claim_json; provision_job.bundle_ref is
+    `:string`) while Go's `JobSpec.BundleRef` is a *struct* under the SAME
+    json tag — a direct unmarshal fails. The drain decodes a dedicated
+    resurrect spec (provision claim fields + `BundleRef string`), then
+    TRANSLATES: BundleStore built from WORKER ENV (`objstore.NewClient` +
+    `cloud.NewObjstoreBundleStore` over HETZNER_S3_ACCESS_KEY /
+    HETZNER_S3_SECRET_KEY / BARKPARK_BUNDLE_BUCKET; location
+    BARKPARK_BUNDLE_S3_LOCATION, default fsn1), manifest via
+    `cloud.ReadManifest` at the pinned prefix, KEK injected from
+    BARKPARK_BUNDLE_KEK. Creds/KEK NEVER ride the claim JSON (env-at-claim
+    sanctioned). `BundleRef.Key` = prefix, `.Store` = bucket (informational —
+    the driver rebuilds its client from env, never parses Store). Missing env
+    fails the JOB with actionable copy; the drain survives.
+    deploy/barkpark-provisioner.env.example grows the four vars (+ location);
+    the S3 creds stay the Console-minted human gate — offline gates never
+    need them.
+44. **No archive-time manifest shape change for W7.**
+    provisioner.BundleManifest's MediaPaths/SchemaVersion have no source in
+    cloud.BundleManifest — translation leaves them zero. The RestoreDriver
+    reads member names from the fixed bp-bundle-v1 constants (db.dump /
+    media.tar.gz / secrets.enc), unpacks media to the fixed uploads root,
+    takes DBName from the manifest (defaults barkpark_prod), migrate stays
+    best-effort.
+45. **RunOnceResurrect mirrors PROVISION's orphan-teardown branch** (a
+    resurrected box is a billed box; succeed-report-failed must tear down),
+    runs as a 4th goroutine on the same worker token, and is purely
+    additive: RunOnce/claim untouched, the Elixir provision-claim refutes
+    (provider_neutral_launch_test.exs:158+ no-kind/no-credentials,
+    resurrect_route_test.exs:256-257) stay green UNMODIFIED — no re-baseline.
+46. **The real RestoreDriver is a COMPOSE of proven primitives (package
+    cloud); the coarse 7-step feed is the bar.** CreateHost =
+    CreateWithFallback (cold, D40); Freshen = FreshenPlan(kind) scripts over
+    the runner (azure = base-install); InstallSecrets = unseal with the
+    CARRIED ref.KEK via the openSecrets primitive (NOT the env-reading
+    OpenSecrets — keeps the roundtrip kekSeen assertion meaningful) +
+    secretsInstallStep-style idempotent .env merge; RestoreData = the
+    instImportScript inverse (drop → createdb → pg_restore --no-owner →
+    uploads untar → best-effort migrate → restart) streamed over a NEW
+    stdin-capable feed on the runner seam (instSSHFeed lifted into cloud;
+    SSHStepRunner's `</dev/null` stays for existing steps); service restart
+    AFTER secrets+data both landed; Verify = the existing golden-path probe
+    (no duplicated health logic). No progress-sink seam change this wave.
+    Offline gate = the REAL driver + FakeBundleStore preloaded with a real
+    WriteBundle output + a recording runner asserting script bytes + the
+    round trip fired THROUGH THE DRAIN (claim → translate → restore → live).
+47. **Server-side newest = TEAM-newest; store-down stays honest.** POST
+    /v1/resurrect with absent bundle_ref resolves the head of
+    ArchiveStore.list_archives(team.id) (already newest-first) — team-wide,
+    NOT per-fqdn (the route carries no source instance); the response echoes
+    the resolved bundle_ref so nothing is silent. No archives → honest
+    not_found; store unreachable/unconfigured → degrade exactly like
+    GET /v1/archives, never a fabricated "no archive". Router-only change —
+    the changeset/registry bundle_ref requirement stays. The console button
+    rides a specific archive ROW and posts that row's bundle_ref explicitly
+    (no team-newest ambiguity in the UI); the CLI's client-side newest stays
+    the operator escape hatch.
+48. **Spec hints split into their own Go micro-slice; retention LEAVES as
+    its own slice.** resurrect-ux was a 3-language slice — the archive-time
+    {region,server_type} stamping (thread instTarget's hcloud srv into
+    BundleWriteSpec.Spec at cloud_instance_archive_cmd.go:231) is Go-only
+    and file-disjoint from S14f → azh-w7-spec-hints [small]. The absorb
+    condition for azh-w6-agent-events-retention was FALSE (S14f opens no
+    Elixir files) — it ships as its own P2 slice naming BOTH tables:
+    revoke-superseded-at-mint for agent_tokens + an Oban maintenance pruner
+    (StaleProvisionJobReaper sibling, daily) keeping 14d of agent_events and
+    dropping tokens 30d past revoked/expired, frozen-clock tested.
+    registry.ex is shared with resurrect-ux only in far-apart regions
+    (~2100+/2960+ vs ~800) → retention integrates LAST, rebase-only, no
+    union branch.
+
 ## Roadmap
 
 Integration order. Sizes: small / medium / large. Wave assignment in brackets.
