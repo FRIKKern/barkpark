@@ -142,6 +142,11 @@ disabled, `--tools all` still starts (bridge-only, after a one-line stderr
 warning) whereas the default `--tools tasks` refuses — there are no task verbs to
 back the curated tools.
 
+### Validation
+
+`bp mcp serve` is proven against a live server (real JSON-RPC transcript, not a
+fixture) in [`../ops/mcp-serve-validation.md`](../ops/mcp-serve-validation.md).
+
 ## Troubleshooting
 
 - **`bp: command not found` in Cursor's terminal** — the installer puts `bp` in
