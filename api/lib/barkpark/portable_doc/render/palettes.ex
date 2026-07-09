@@ -5,11 +5,14 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
 
   A `palette` is the per-render context threaded through `walk/3`. The DEFAULT
   is `:email` — its values are the module constants, so existing call sites
-  that pass no `:style` are byte-identical to before. `:article` mirrors
-  doc.css `:root` (serif body, parchment bg, terracotta accent) for the
-  native paper-article surface. The palette also carries `:style` so the
-  compose / walk clauses that diverge by mode (headings, eyebrow, byline,
-  ingress) can branch on it.
+  that pass no `:style` are byte-identical to before. `:article` mirrors the
+  `.bp-paper-surface` reading skin (serif body, cool near-white ground): its
+  chrome accent (`accent`/`link_color` — links, wikilinks, buttons, chips,
+  embeds) is the **evergreen** `--paper-accent`, and its `reading_accent`
+  (pullquote border, code-block bar — the reading-character cues) is the warm
+  **terracotta** `--paper-reading-accent` (`color.reading-accent`, tokenized in
+  `TokensGen`). The palette also carries `:style` so the compose / walk clauses
+  that diverge by mode (headings, eyebrow, byline, ingress) can branch on it.
 
   Extracted verbatim from `Barkpark.PortableDoc.Render` (module location only —
   NO logic change). The constants are re-exported as `0`-arity functions so the
@@ -77,6 +80,18 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
   @doc false
   def page_bg(theme \\ @default_theme), do: email_skin(theme).page_bg
 
+  # The article reading accent (charter D8): the warm terracotta that paints the
+  # reading-character cues (pullquote border + code-block bar) — the render-path
+  # consumer of `color.reading-accent`. Emitted as `var(--paper-reading-accent,
+  # <hex>)`: inside `.bp-paper-surface` (reader + editor) the CSS var flips the
+  # hue with the host theme (light terracotta / dark warm-clay); a stylesheet-less
+  # render (email backend, bare export) falls back to the TokensGen hex — sourced,
+  # never a re-typed literal. Distinct from `brand`/`accent` (the evergreen chrome
+  # accent whose TUI twin is ChromeAccent); THIS token's TUI twin is ReadingAccent.
+  @doc false
+  def article_reading_accent(theme \\ @default_theme),
+    do: "var(--paper-reading-accent, #{TokensGen.reading_accent(theme)})"
+
   @doc false
   def email_palette(theme \\ @default_theme) do
     s = email_skin(theme)
@@ -139,6 +154,10 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       rule: "var(--paper-rule, #{s.rule})",
       accent: "var(--paper-accent, #{s.brand})",
       link_color: "var(--paper-accent, #{s.brand})",
+      # The reading-character accent — terracotta, tokenized. ONLY the pullquote
+      # border + code-block bar (whose TUI twins are ReadingAccent) draw on it;
+      # links/buttons/chips/embeds stay on the evergreen chrome `accent` above.
+      reading_accent: article_reading_accent(theme),
       code_bg: "var(--paper-bg-deep, #{s.code_bg})",
       # Primary-action button foreground (walk.ex button/2) — the raw skin hex
       # (no var(): the button fg is not a `--paper-*` role), flips with theme.

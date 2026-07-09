@@ -109,6 +109,7 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.15);
   --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --paper-reading-accent: #a23925;
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
@@ -150,6 +151,7 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.2);
   --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --paper-reading-accent: #d98a6a;
 }
 
 :root[data-bp-theme="evergreen"], :host([data-bp-theme="evergreen"]) {
@@ -360,7 +362,7 @@
 .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78rem; }
 .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9rem; }
 .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28rem; }
-.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
+.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2rem; }
 /* editable-table: the three reader table class rules, mirrored byte-for-byte from
  * paper-surface.css `.bp-paper-surface .bp-table*` (the embedder sink — the standalone
  * bundle has no `.bp-paper-surface` ancestor, so it carries the hand-copied mirror).
@@ -417,7 +419,7 @@
  * is byte-aligned AND theme-aligned with the VIEW block (figures.ex
  * code_block_html/1). Keep BYTE-IDENTICAL with the root.html.heex copy. */
 .bp-paper-editor-body pre.bp-canvas-code {
-  background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-accent); border-radius: var(--bp-codeblock-radius);
+  background: var(--paper-bg-deep); border: 0; border-left: var(--bp-codeblock-accent-w) solid var(--paper-reading-accent); border-radius: var(--bp-codeblock-radius);
   padding: var(--bp-codeblock-pad); margin: var(--bp-codeblock-margin); font-family: var(--paper-font-mono); font-size: var(--bp-codeblock-size); line-height: var(--bp-codeblock-lh);
   color: var(--paper-ink); white-space: normal; overflow-x: auto;
 }

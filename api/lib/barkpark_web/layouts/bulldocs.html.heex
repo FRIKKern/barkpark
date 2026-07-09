@@ -76,6 +76,11 @@
       --paper-ink-soft:   #55635e;
       --paper-rule:       #dde7e2;
       --paper-accent:     #1e5347;
+      /* Terracotta reading accent (pullquote border + code-block bar; TUI twin
+         ReadingAccent). The dark block below MUST re-skin it — otherwise the
+         OS-dark reader keeps this light value. Mirrors paper-surface.css's
+         hand `--paper-reading-accent` block. */
+      --paper-reading-accent: #a23925;
       /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
          read it). Light value matches the shared source's fallback; the dark
          block below MUST re-skin it — otherwise dark-mode link borders resolve
@@ -96,6 +101,10 @@
         --paper-ink-soft:   #9aaaa3;
         --paper-rule:       rgba(231, 237, 233, 0.13);
         --paper-accent:     #45b394;
+        /* Warm-clay reading accent — byte-mirrors paper-surface.css's
+           `html[data-theme="dark"]` `--paper-reading-accent`; without it the
+           OS-dark reader's pullquote/code bar keeps the light terracotta. */
+        --paper-reading-accent: #d98a6a;
         /* Warm-dark link border (same value as Studio's html[data-theme=dark]
            block in paper-surface.css) — without it links keep the light-theme
            rgba(162,57,37,0.10) border, invisible on the dark page. */
