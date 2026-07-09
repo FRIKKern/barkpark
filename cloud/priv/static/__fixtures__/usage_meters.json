@@ -1,5 +1,6 @@
 {
   "meters": [
+    { "name": "instances", "label": "Instances" },
     { "name": "documents", "label": "Documents" },
     { "name": "datasets", "label": "Datasets" },
     { "name": "webhooks", "label": "Webhooks" },

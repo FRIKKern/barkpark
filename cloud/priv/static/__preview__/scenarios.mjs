@@ -495,6 +495,27 @@ const activeSub = {
   trial_days_remaining: null,
 };
 
+// ── usage envelope (GET /v1/barkparks/:id/usage — Usage.compose/1 shape) ──────
+// Each meter is {value|"unmetered", quota, warn_at, source, measured_at}; a
+// numeric quota lights the SPA's OC7 bar (ok/warn/over), a nil quota is honestly
+// bar-less. This one envelope carries every quota tone across four meters so a
+// single Usage shot proves the whole ladder: instances ok-under-warn, seats warn,
+// documents over (+the Manage-plan recovery), datasets metered-but-unlimited.
+const m = (value, over) => Object.assign({ value, quota: null, warn_at: null, source: "preview", measured_at: null }, over || {});
+const quotaBarsUsage = {
+  meters: {
+    instances: m(3, { quota: 10, warn_at: 8 }),                     // ok — 30% under the warn line
+    seats: m(8, { quota: 10, warn_at: 8, source: "control-plane.team_members", pending_invitations: 1 }), // warn — at warn_at
+    documents: m(1240, { quota: 1000, warn_at: 900, source: "instance.documents" }),                       // over — recovery action
+    datasets: m(4, { source: "instance.datasets" }),                // metered but unlimited (quota nil) → bar-less
+    webhooks: m("unmetered", { source: "instance.webhooks" }),
+    db_size: m("unmetered", { source: "telemetry.pg_size_bytes" }),
+    disk: m("unmetered", { source: "telemetry.disk_used_percent" }),
+    api_requests: m("unmetered", { source: "not-metered" }),
+    bandwidth: m("unmetered", { source: "not-metered" }),
+  },
+};
+
 // ── the scenario table ───────────────────────────────────────────────────────
 // authed:   whether mock.js should seed a session token (false = logged out).
 // deepLink: the hash a shot / smoke should open to exercise the scenario's view.
@@ -552,6 +573,23 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: [],
+    },
+  },
+  // ── Usage quota bars (OC7 / D25) ──────────────────────────────────────────
+  // The Usage sub-tab with real plan ceilings: an ok bar, a warn bar, an over
+  // bar that carries the one Manage-plan recovery action, and a metered-but-
+  // unlimited meter that stays honestly bar-less. Deep-links straight to the tab.
+  "usage-quota": {
+    label: "Usage sub-tab — quota bars across ok / warn / over + an unlimited meter",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/usage",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      usage: quotaBarsUsage,
     },
   },
   // ── rollback/redeploy (charter D7 + D25) ──────────────────────────────────
@@ -859,6 +897,13 @@ export function route(name, method, path) {
     return d.auditDenied
       ? { status: 403, body: { error: "forbidden" } }
       : { status: 200, body: { events: d.audit } };
+  }
+
+  // C10/OC7: the instance usage envelope (the meter wall the Usage sub-tab paints).
+  // A scenario without a `usage` fixture answers the honest all-unmetered v1 shape
+  // (never a 404 that would read as "instance gone").
+  if (/^\/v1\/barkparks\/[^/]+\/usage$/.test(p)) {
+    return { status: 200, body: { usage: d.usage || { meters: {} } } };
   }
 
   // C8: the instance event history (agent events + verify runs, newest first).

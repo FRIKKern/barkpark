@@ -8254,6 +8254,7 @@
   // The fixed meter vocabulary + render order (mirrors Usage.compose/1). Each
   // spec names the meter key, its human label, and how to format a real number.
   var USAGE_METERS = [
+    { key: "instances", label: "Instances", fmt: "count" },
     { key: "seats", label: "Team members", fmt: "count" },
     { key: "documents", label: "Documents", fmt: "count" },
     { key: "datasets", label: "Datasets", fmt: "count" },
@@ -8293,15 +8294,48 @@
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
-    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending };
+    // OC7 — the quota bar model. A bar is drawn ONLY when a real ceiling is
+    // present (numeric quota > 0) AND the meter reports a real number; a nil/zero
+    // quota is an honest "unlimited" — no bar, no fake ceiling. Tone: "over" once
+    // the value reaches the ceiling (inclusive, mirroring the create-time guard),
+    // "warn" once it crosses a numeric warn_at, else "ok". pct clamps at 100 so an
+    // over-limit meter fills the whole track rather than overflowing it.
+    var bar = null;
+    if (!unmetered && typeof meter.quota === "number" && meter.quota > 0) {
+      var pct = Math.min(100, Math.round((meter.value / meter.quota) * 100));
+      var tone = meter.value >= meter.quota ? "over"
+        : (typeof meter.warn_at === "number" && meter.value >= meter.warn_at) ? "warn"
+          : "ok";
+      bar = { pct: pct, tone: tone, quota: c10FmtValue(spec.fmt, meter.quota), quotaText: value + " / " + c10FmtValue(spec.fmt, meter.quota) };
+    }
+    return { label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, bar: bar };
   }
 
   function usageMeterHtml(spec, meter) {
     var d = usageMeterDisplay(spec, meter);
     var sub = [d.freshness, d.pending].filter(Boolean).join(" · ");
-    return '<div class="fleet-row">' +
+    // The quota bar (when present) lives under the meter name. The OVER state is a
+    // terminal one, so per D25 it carries exactly ONE recovery action — a "Manage
+    // plan" link to the Settings billing view (never a dead end).
+    var barHtml = "";
+    if (d.bar) {
+      var manage = d.bar.tone === "over"
+        ? '<a class="usage-bar-action" href="#settings/billing">Manage plan</a>'
+        : "";
+      var quotaCls = d.bar.tone === "ok" ? "usage-bar-quota dim" : "usage-bar-quota";
+      barHtml =
+        '<div class="usage-bar usage-bar--' + d.bar.tone + '" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + d.bar.pct + '">' +
+          '<span class="usage-bar-fill" style="width:' + d.bar.pct + '%"></span>' +
+        "</div>" +
+        '<div class="usage-bar-meta token-meta">' +
+          '<span class="' + quotaCls + '">' + esc(d.bar.quotaText) + "</span>" +
+          manage +
+        "</div>";
+    }
+    return '<div class="fleet-row' + (d.bar ? " usage-row usage-row--" + d.bar.tone : "") + '">' +
       '<div class="fleet-main"><div class="fleet-name">' + esc(d.label) + "</div>" +
-      (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") + "</div>" +
+      (sub ? '<div class="token-meta dim">' + esc(sub) + "</div>" : "") +
+      barHtml + "</div>" +
       '<div class="fleet-badges">' +
       (d.unmetered ? '<span class="dim">' + esc(d.value) + "</span>" : "<strong>" + esc(d.value) + "</strong>") +
       "</div></div>";
@@ -9663,6 +9697,9 @@
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml,
+      // OC7: the registered Settings views, so the quota bar's "Manage plan"
+      // recovery route can be proved to land on a real view (never a dead end).
+      settingsViews: SETTINGS_VIEWS.slice(),
     });
   }
 })();

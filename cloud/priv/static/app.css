@@ -2631,3 +2631,41 @@ select.form-input {
   margin-top: 6px;
   font-size: 12px;
 }
+
+/* ── Usage quota bars (OC7) ────────────────────────────────────────────────
+   A meter with a real plan ceiling draws a track + fill under its name; the
+   fill tone escalates ok → warn → over. Neutral track (--muted-surface) so an
+   unfilled bar never reads as an alarm; tones reuse the S4 role tokens (no new
+   literals). An unlimited/unmetered meter draws no bar at all (honest — set in
+   the renderer, not here). */
+.usage-bar {
+  margin-top: 8px;
+  height: 6px;
+  border-radius: var(--radius-sm);
+  background: var(--muted-surface);
+  overflow: hidden;
+}
+.usage-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--ok);
+  transition: width var(--t);
+}
+.usage-bar--warn .usage-bar-fill { background: var(--warn); }
+.usage-bar--over .usage-bar-fill { background: var(--danger); }
+.usage-bar-meta {
+  justify-content: space-between;
+}
+.usage-bar-quota {
+  font-family: var(--mono);
+}
+.usage-row--warn .usage-bar-quota { color: var(--warn); }
+.usage-row--over .usage-bar-quota { color: var(--danger); }
+.usage-bar-action {
+  font-weight: 600;
+  color: var(--danger);
+}
+@media (prefers-reduced-motion: reduce) {
+  .usage-bar-fill { transition: none; }
+}

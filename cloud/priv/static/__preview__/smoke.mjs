@@ -316,6 +316,15 @@ const EXPECTATIONS = {
     container: "instance-body",
     includes: ["inst-tabs", '/timeline" aria-current="page"'],
   },
+  // C10/OC7: the Usage sub-tab routes on its deep link. The meter wall itself
+  // mounts through element-level querySelector (kept inert by this shim, exactly
+  // like Timeline) — the quota-bar rendering is pinned in __app.test.mjs; here we
+  // prove the tab strip registers Usage and marks it current.
+  "usage-quota": {
+    what: "the instance workspace routes the Usage tab",
+    container: "instance-body",
+    includes: ["inst-tabs", '/usage" aria-current="page"', 'id="instance-tabpanel"', ">Usage<"],
+  },
   // C8: the golden-path verify card renders from the events feed on Overview.
   "verify-pass": {
     what: "verify chips — three green probes + the quiet re-check",
