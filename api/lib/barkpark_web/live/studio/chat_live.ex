@@ -508,10 +508,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
-  # per-tab `rail_expanded` map is keyed by task_id; default collapsed, a manual
-  # toggle flips it. Never broadcast — a co-viewer's expand is their own.
+  # per-tab `rail_expanded` map is keyed by task_id; default EXPANDED (user
+  # mandate 2026-07-09: "we want to be able to see what is happening in the
+  # workflow"), a manual toggle is the per-tab override that wins. Never
+  # broadcast — a co-viewer's collapse is their own.
   def handle_event("rail-toggle", %{"id" => id}, socket) do
-    current = Map.get(socket.assigns.rail_expanded, id, false)
+    current = rail_open?(socket.assigns.rail_expanded, id)
     {:noreply, assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
   end
 
@@ -2527,18 +2529,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             class="btn text-xs"
             phx-click="rail-toggle"
             phx-value-id={entry["task_id"]}
-            aria-expanded={to_string(Map.get(@rail_expanded, entry["task_id"], false))}
+            aria-expanded={to_string(rail_open?(@rail_expanded, entry["task_id"]))}
             style="flex: none; padding: 1px 8px; opacity: 0.8;"
           >
-            <%= if Map.get(@rail_expanded, entry["task_id"], false), do: "collapse", else: "expand" %>
+            <%= if rail_open?(@rail_expanded, entry["task_id"]), do: "collapse", else: "expand" %>
           </button>
         </div>
 
-        <%!-- The phase→agent tree, per-tab expandable (charter D47). Phase nodes
-              head a group; agent nodes indent beneath with model + breathing
-              state glyph + token count. --%>
+        <%!-- The phase→agent tree, expanded by default so a live workflow's
+              agents are visible without a click; the per-tab toggle is the
+              override (charter D47). Phase nodes head a group; agent nodes
+              indent beneath with model + breathing state glyph + token count. --%>
         <div
-          :if={Map.get(@rail_expanded, entry["task_id"], false) and rail_workflow_nodes(entry) != []}
+          :if={rail_open?(@rail_expanded, entry["task_id"]) and rail_workflow_nodes(entry) != []}
           style="padding-left: 16px; margin-top: 2px;"
         >
           <div
@@ -2555,8 +2558,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <% _ -> %>
                 <span
                   aria-hidden="true"
-                  class={rail_node_running?(node) && "bp-chat-agent-run"}
-                  style={"flex: none; color: #{if rail_node_running?(node), do: "var(--primary)", else: "var(--text-dim)"};"}
+                  class={rail_node_running?(entry, node) && "bp-chat-agent-run"}
+                  style={"flex: none; color: #{if rail_node_running?(entry, node), do: "var(--primary)", else: "var(--text-dim)"};"}
                 >
                   ●
                 </span>
@@ -4242,6 +4245,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp default_agent_open?(agent), do: agent[:task_status] in [nil, "running"]
 
+  # Rail workflow rows default EXPANDED — the whole point of the rail is seeing
+  # what the workflow is doing; a manual per-tab toggle is the override that
+  # wins (the `agent_open?` idiom, keyed by task_id).
+  defp rail_open?(overrides, task_id) do
+    case Map.fetch(overrides, task_id) do
+      {:ok, v} -> v
+      :error -> true
+    end
+  end
+
   # A sub-agent is running only while its task_status says so — a terminal (or
   # interrupted, D45) block shows its report, never a spinner.
   defp agent_running?(agent), do: agent[:task_status] == "running"
@@ -4336,7 +4349,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp rail_node_running?(node), do: node["state"] in ["running", "in_progress", "active"]
+  # A node breathes only while its ENTRY is live — a replayed interrupted
+  # workflow's tree (visible now that rows default expanded) must never show a
+  # running agent off a stale node state.
+  defp rail_node_running?(entry, node),
+    do: rail_running?(entry) and node["state"] in ["running", "in_progress", "active"]
 
   defp rail_status_label("completed"), do: "done"
   defp rail_status_label("interrupted"), do: "interrupted"
