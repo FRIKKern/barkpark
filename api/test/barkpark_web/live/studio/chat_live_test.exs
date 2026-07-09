@@ -121,6 +121,30 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view) =~ "Hello!"
     end
 
+    test "completed blocks render as components BEFORE the message finishes", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("## Findings\n")})
+      send(view.pid, {:claude_chat_event, stream_delta("\nstill typing")})
+
+      html = render(view)
+      # the finished heading block is already paper-rendered mid-stream…
+      assert html =~ "Findings"
+      refute html =~ "## Findings"
+      # …while the unfinished tail stays plain text with the cursor
+      assert html =~ "still typing"
+      assert html =~ "▌"
+    end
+
+    test "an unclosed fence is never half-rendered mid-stream", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph TD\n")})
+      send(view.pid, {:claude_chat_event, stream_delta("\n\nA-->B")})
+
+      html = render(view)
+      # the boundary must not advance into the open fence: no diagram figure yet,
+      # the raw fence text remains visible as the plain tail
+      refute html =~ "bp-paper-surface bp-chat-md\" style=\"overflow-wrap: anywhere; padding: 2px 0; font-size: 0.925rem;\">\n<figure"
+      assert html =~ "```mermaid"
+    end
+
     test "the complete assistant message supersedes the streamed preview", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("Hel")})
 
@@ -236,6 +260,68 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       assert html =~ "offline"
       assert html =~ "exit 1"
+    end
+
+    test "a permission ask renders an approval card; Allow resolves it", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "req-7",
+           tool_name: "Write",
+           input: %{"file_path" => "/opt/x.txt"},
+           title: "Claude wants to write /opt/x.txt",
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Allow Write?"
+      assert html =~ "Claude wants to write /opt/x.txt"
+      assert html =~ ~s(phx-click="approve")
+
+      html = render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=req-7])))
+      assert html =~ "✓ allowed"
+      refute html =~ "Allow Write?"
+    end
+
+    test "Deny resolves the card as denied", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{request_id: "req-8", tool_name: "Bash", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      html = render_click(element(view, ~s(button[phx-click=deny][phx-value-rid=req-8])))
+      assert html =~ "✗ denied"
+    end
+
+    test "a stale approval click after resolution is a no-op", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{request_id: "req-9", tool_name: "Bash", input: %{}, title: nil, decision_reason: nil}}
+      )
+
+      render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=req-9])))
+      # second click on the (now gone) card — drive the event directly
+      render_hook(view, "deny", %{"rid" => "req-9"})
+      html = render(view)
+      assert html =~ "✓ allowed"
+      refute html =~ "✗ denied"
+    end
+
+    test "switching mode restarts the session and says so", %{view: view} do
+      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      assert html =~ "Permission mode → default"
+      assert html =~ "ask to act"
+    end
+
+    test "mode selector clamps junk to plan (no-op when already plan)", %{view: view} do
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      html = render(view)
+      refute html =~ "Permission mode → bypass"
+      assert html =~ "plan (read-only)"
     end
 
     test "an unknown stale event does not crash the LiveView", %{view: view} do

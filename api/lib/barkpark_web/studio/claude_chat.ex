@@ -33,6 +33,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   require Logger
 
   @default_binary "claude"
+  @modes ~w(plan default acceptEdits)
+  @default_mode "plan"
 
   @doc """
   Whether the chat may run on this host. ON by default; requires the flag
@@ -67,16 +69,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   in streaming print mode, plan permission mode. Overridable via config
   (tests inject a trivial command so they don't require `claude`).
   """
-  @spec command() :: {String.t(), [String.t()]}
-  def command do
+  @spec command(String.t()) :: {String.t(), [String.t()]}
+  def command(mode \\ @default_mode) do
     case Keyword.get(config(), :command) do
       {exe, args} when is_binary(exe) and is_list(args) -> {exe, args}
-      _ -> {binary(), default_args()}
+      _ -> {binary(), default_args(mode)}
     end
   end
 
-  defp default_args do
-    [
+  @doc "Permission modes the chat may run in. `plan` is read-only; the others ask."
+  @spec modes() :: [String.t()]
+  def modes, do: @modes
+
+  @doc "Clamp an arbitrary mode string to a supported one (fail-closed to plan)."
+  @spec normalize_mode(term()) :: String.t()
+  def normalize_mode(mode) when mode in @modes, do: mode
+  def normalize_mode(_), do: @default_mode
+
+  defp default_args(mode) do
+    base = [
       "--print",
       "--verbose",
       "--input-format",
@@ -85,10 +96,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "stream-json",
       "--include-partial-messages",
       "--permission-mode",
-      "plan",
+      mode,
       "--append-system-prompt",
       render_appendix()
     ]
+
+    # Outside plan mode the CLI must route permission asks to us instead of
+    # auto-denying: `--permission-prompt-tool stdio` makes it emit
+    # `control_request` (subtype `can_use_tool`) NDJSON events, which the
+    # Session forwards as `{:claude_chat_permission, …}` and answers via
+    # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
+    if mode == "plan", do: base, else: base ++ ["--permission-prompt-tool", "stdio"]
   end
 
   # Replies render through Barkpark's paper engine (FromMarkdown -> blocks ->
@@ -133,12 +151,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
   """
-  @spec start_session(%{sink: pid()}) :: {:ok, pid()} | {:error, term()}
-  def start_session(%{sink: sink}) when is_pid(sink) do
+  @spec start_session(%{:sink => pid(), optional(:mode) => String.t()}) ::
+          {:ok, pid()} | {:error, term()}
+  def start_session(%{sink: sink} = opts) when is_pid(sink) do
     cond do
       not enabled?() -> {:error, :disabled}
-      true -> __MODULE__.Session.start(%{sink: sink})
+      true -> __MODULE__.Session.start(%{sink: sink, mode: normalize_mode(opts[:mode])})
     end
+  end
+
+  @doc """
+  Answer a pending `{:claude_chat_permission, …}` ask. `decision` is `:allow`
+  or `{:deny, message}`; the message travels back to the model so it can
+  adjust its approach (t3's deny_message).
+  """
+  @spec respond_permission(pid(), String.t(), :allow | {:deny, String.t()}) :: :ok
+  def respond_permission(session, request_id, decision)
+      when is_pid(session) and is_binary(request_id) do
+    GenServer.cast(session, {:respond_permission, request_id, decision})
   end
 
   @doc "Send a user turn to the session as a stream-json user message."
@@ -201,8 +231,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     def start(opts), do: GenServer.start(__MODULE__, opts)
 
     @impl true
-    def init(%{sink: sink}) do
-      {exe, args} = ClaudeChat.command()
+    def init(%{sink: sink} = opts) do
+      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"))
 
       case System.find_executable(exe) do
         nil ->
@@ -239,12 +269,33 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       {:noreply, state}
     end
 
+    def handle_cast({:respond_permission, request_id, decision}, state) do
+      payload =
+        case decision do
+          :allow -> %{"behavior" => "allow"}
+          {:deny, message} -> %{"behavior" => "deny", "message" => to_string(message)}
+        end
+
+      line =
+        Jason.encode!(%{
+          "type" => "control_response",
+          "response" => %{
+            "subtype" => "success",
+            "request_id" => request_id,
+            "response" => payload
+          }
+        }) <> "\n"
+
+      safe_command(state.port, line)
+      {:noreply, state}
+    end
+
     def handle_cast(:close, state), do: {:stop, :normal, state}
 
     @impl true
     def handle_info({port, {:data, chunk}}, %{port: port} = state) do
       {events, rest} = ClaudeChat.parse_chunk(state.buffer, chunk)
-      Enum.each(events, &send(state.sink, {:claude_chat_event, &1}))
+      Enum.each(events, &dispatch_event(&1, state))
       {:noreply, %{state | buffer: rest}}
     end
 
@@ -269,6 +320,50 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     def terminate(_reason, _state), do: :ok
+
+    # Permission asks become a dedicated sink message; any other control
+    # request gets an immediate error response so the CLI never hangs waiting
+    # on a capability this bridge doesn't implement. Everything else flows
+    # through as a plain chat event.
+    defp dispatch_event(
+           %{
+             "type" => "control_request",
+             "request_id" => request_id,
+             "request" => %{"subtype" => "can_use_tool"} = request
+           },
+           state
+         ) do
+      send(
+        state.sink,
+        {:claude_chat_permission,
+         %{
+           request_id: request_id,
+           tool_name: Map.get(request, "tool_name", "tool"),
+           input: Map.get(request, "input", %{}),
+           title: Map.get(request, "title"),
+           decision_reason: Map.get(request, "decision_reason")
+         }}
+      )
+    end
+
+    defp dispatch_event(
+           %{"type" => "control_request", "request_id" => request_id, "request" => request},
+           state
+         ) do
+      line =
+        Jason.encode!(%{
+          "type" => "control_response",
+          "response" => %{
+            "subtype" => "error",
+            "request_id" => request_id,
+            "error" => "unsupported control request: #{Map.get(request, "subtype", "?")}"
+          }
+        }) <> "\n"
+
+      safe_command(state.port, line)
+    end
+
+    defp dispatch_event(event, state), do: send(state.sink, {:claude_chat_event, event})
 
     defp safe_command(port, data) when is_port(port) do
       Port.command(port, data)

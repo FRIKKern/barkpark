@@ -73,6 +73,106 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  describe "permission modes" do
+    test "plan mode has no permission bridge; asking modes add stdio prompt tool" do
+      {_exe, plan_args} = with_default_command(fn -> ClaudeChat.command("plan") end)
+      {_exe, ask_args} = with_default_command(fn -> ClaudeChat.command("default") end)
+
+      refute "--permission-prompt-tool" in plan_args
+      assert Enum.chunk_every(ask_args, 2, 1) |> Enum.member?(["--permission-prompt-tool", "stdio"])
+      assert Enum.chunk_every(ask_args, 2, 1) |> Enum.member?(["--permission-mode", "default"])
+    end
+
+    test "normalize_mode fails closed to plan" do
+      assert ClaudeChat.normalize_mode("acceptEdits") == "acceptEdits"
+      assert ClaudeChat.normalize_mode("bypassPermissions") == "plan"
+      assert ClaudeChat.normalize_mode(nil) == "plan"
+    end
+
+    defp with_default_command(fun) do
+      prev = Application.get_env(:barkpark, :claude_chat)
+      Application.put_env(:barkpark, :claude_chat, enabled: true)
+
+      try do
+        fun.()
+      after
+        if prev,
+          do: Application.put_env(:barkpark, :claude_chat, prev),
+          else: Application.delete_env(:barkpark, :claude_chat)
+      end
+    end
+  end
+
+  describe "permission bridge (control protocol)" do
+    @can_use_tool ~s({"type":"control_request","request_id":"req-1","request":{"subtype":"can_use_tool","tool_name":"Write","input":{"file_path":"/tmp/x"},"title":"Claude wants to write /tmp/x"}})
+
+    test "can_use_tool asks become {:claude_chat_permission, ...} sink messages" do
+      script = ~s(printf '%s\n' '#{@can_use_tool}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_permission,
+                      %{
+                        request_id: "req-1",
+                        tool_name: "Write",
+                        input: %{"file_path" => "/tmp/x"},
+                        title: "Claude wants to write /tmp/x"
+                      }},
+                     2_000
+    end
+
+    test "respond_permission writes an allow control_response (loopback via cat)" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ClaudeChat.respond_permission(session, "req-9", :allow)
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{
+                          "subtype" => "success",
+                          "request_id" => "req-9",
+                          "response" => %{"behavior" => "allow"}
+                        }
+                      }},
+                     2_000
+    end
+
+    test "deny carries the message back to the model" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ClaudeChat.respond_permission(session, "req-9", {:deny, "not now"})
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "response" => %{
+                          "response" => %{"behavior" => "deny", "message" => "not now"}
+                        }
+                      }},
+                     2_000
+    end
+
+    test "unsupported control requests are auto-answered with an error (never hang)" do
+      req = ~s({"type":"control_request","request_id":"req-2","request":{"subtype":"mystery_capability"}})
+      script = ~s(printf '%s\n' '#{req}'; cat)
+      put_chat_config(command: {"sh", ["-c", script]})
+
+      {:ok, _session} = ClaudeChat.start_session(%{sink: self()})
+
+      assert_receive {:claude_chat_event,
+                      %{
+                        "type" => "control_response",
+                        "response" => %{"subtype" => "error", "request_id" => "req-2"}
+                      }},
+                     2_000
+
+      refute_receive {:claude_chat_permission, _}, 200
+    end
+  end
+
   describe "session subprocess" do
     test "round-trips a user message through a real Port (cat echo)" do
       put_chat_config(command: {"cat", []})
