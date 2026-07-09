@@ -160,6 +160,34 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert followed.resp_body =~ "Shared via a direct link"
   end
 
+  # preview-contract pc-w2 (charter A8/A13): when the link's tenancy scope no
+  # longer resolves, `/s/:token` falls back to the STATIC paper render — that
+  # path must (a) not KeyError on the shared template's backlinks/driven-tasks
+  # sections and (b) still carry the branded social-share head, because a share
+  # link IS the sharing flow.
+  test "a PAPER link whose scope no longer resolves serves the static render with a branded share head",
+       %{conn: conn, scope_str: scope} do
+    %{"token" => token} =
+      mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
+
+    # Simulate a link whose workspace/project can no longer be resolved (the
+    # serve/3 `with` chain falls through to serve_paper_static).
+    {1, _} =
+      Repo.update_all(Barkpark.Sharing.ShareLink, set: [workspace_id: nil, project_id: nil])
+
+    resp = get(build_conn(), "/s/#{token}")
+
+    assert resp.status == 200
+    # The article body renders (no KeyError on @backlinks_html/@driven_tasks_html).
+    assert resp.resp_body =~ "Shared via a direct link"
+    # The share head: og/twitter tags with the paper title and (no manifest
+    # image on this classic doc) the branded default card.
+    assert resp.resp_body =~ ~s(property="og:title" content="Demo Paper")
+    assert resp.resp_body =~ ~s(property="og:site_name" content="Barkpark")
+    assert resp.resp_body =~ "/images/og-default.jpg"
+    assert resp.resp_body =~ ~s(name="twitter:card" content="summary_large_image")
+  end
+
   test "JSON-API errors use the canonical envelope (code + request_id)", %{conn: conn} do
     # Missing scope/kind on mint → 422. Was a bare `%{"error" => "…required"}`;
     # now a keyable code + the human message + a request_id.

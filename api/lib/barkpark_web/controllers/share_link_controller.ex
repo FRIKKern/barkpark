@@ -71,7 +71,13 @@ defmodule BarkparkWeb.ShareLinkController do
           body_html: paper_body_html(paper),
           preview: preview,
           page_title: preview["title"],
-          slug: link.ref_id
+          slug: link.ref_id,
+          # The shared ScopedPaperHTML :show template unconditionally renders
+          # @backlinks_html / @driven_tasks_html ("" ⇒ no markup). This static
+          # fallback serves the bare article — without these the render
+          # KeyErrors (charter A8's latent bug).
+          backlinks_html: "",
+          driven_tasks_html: ""
         )
 
       _ ->
@@ -81,7 +87,8 @@ defmodule BarkparkWeb.ShareLinkController do
 
   # Preview manifest for the share-link static render (preview-contract pc-w2).
   defp paper_preview(%{content: content} = paper, slug) when is_map(content),
-    do: BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
+    do:
+      BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
 
   defp paper_preview(_paper, slug),
     do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
