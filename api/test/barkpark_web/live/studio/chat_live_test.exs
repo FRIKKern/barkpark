@@ -4342,6 +4342,307 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # ══ gutter geometry matrix — rendered-HTML flush-text assertions (D50) ══════
+  #
+  # Three alignment bugs shipped this week — #1844 (pre-wrap template whitespace),
+  # #1849 (paper first-block margin), and the tool-row wrap — from ONE blind spot:
+  # nothing asserted rendered-HTML GEOMETRY. The existing #1844/#1849 regression
+  # tests are string-presence proxies (#1849's passes with zero matching elements;
+  # #1844's fires on the setup's user row). This matrix closes the class:
+  #
+  #   (1) a generic flush guard (`assert_flush_gutter_text/1`) over every
+  #       `data-gutter-text` carrier — a gutter TEXT node that MUST begin flush
+  #       after its opening tag. The #1844 defect lived in the SERIALIZED bytes
+  #       (an interpolation on its own indented template line baked a leading
+  #       "\n<indent>" INTO a pre-wrap text node), so the RAW render string is
+  #       more faithful here than a normalizing parser.
+  #   (2) a first-block structural check (`assert_first_block_flush_rule/1`) at
+  #       the honest ceiling — computed margin-top is unobservable from static
+  #       HTML (no headless browser), so we assert what IS observable: the
+  #       `.bp-paper-surface.bp-chat-md > :first-child` EXISTS and is a block
+  #       element the #1849 rule targets, plus the rule text is present.
+  #       Rule-presence-and-structure, NOT computed geometry — documented as such.
+  #   (3) each gutter ROW TYPE × the content shapes it actually renders, driven
+  #       by fixture frames through the REAL Recorder (or the live-chrome path
+  #       for streaming/thinking) — a new row type inherits the guard by adding
+  #       one line, never a bespoke assertion.
+  describe "gutter geometry matrix — flush-text assertions (charter D50)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    # ── ❯ user prompt × real prose shapes ────────────────────────────────────
+    test "❯ user rows render flush for every shape (plain / multiline / wrapped / long-word)",
+         %{conn: conn} do
+      sid = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: sid, cwd: "/tmp", mode: "plan"})
+      long_word = String.duplicate("z", 90)
+
+      for md <- [
+            "a plain single-line prompt",
+            "first line\nsecond line\nthird line",
+            String.duplicate("wrap ", 45),
+            "before-#{long_word}-after"
+          ] do
+        {:ok, _} = StudioChat.append_message(sid, %{role: "user", source_markdown: md})
+      end
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "a plain single-line prompt"
+      assert html =~ "second line"
+      assert html =~ long_word
+      # the ❯ glyph pairs with a flush pre-wrap text node — no leading newline
+      # baked into any user prompt (the #1844 class), across all four shapes
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ● assistant paper-html × (heading-first / paragraph / multiline) ──────
+    test "● assistant heading-first bubble: the first block is a rule-targeted block element, flush",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [%{"type" => "text", "text" => "# Big heading\n\nThen a paragraph."}]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Big heading"
+      # #1849: the bubble's first block starts flush with the ● glyph — rule text
+      # present AND the first child is a block element the rule targets (an <h1>)
+      assert_first_block_flush_rule(html, "h1")
+      assert_flush_gutter_text(html)
+    end
+
+    test "● assistant paragraph-first and multiline bubbles keep the first-block rule",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "Just prose, no heading.\n\nA second paragraph too."}
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Just prose, no heading."
+      assert html =~ "A second paragraph too."
+      # a paragraph-first bubble's first child is a <p> the same rule targets
+      assert_first_block_flush_rule(html, "p")
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ● tool row + ⎿ output (inline single-line + multiline <pre>) ──────────
+    test "● tool row + ⎿ multiline output render flush (the pre carries no template indent)",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_gm",
+                 "name" => "Bash",
+                 "input" => %{"command" => "mix test"}
+               }
+             ]
+           }
+         }}
+      )
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_gm",
+                 "content" => "line one\nline two\nline three"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      # the ● tool row (a plain, non-spawn label) and its ⎿ multiline <pre>
+      assert html =~ "Bash"
+      assert html =~ "⎿"
+      assert html =~ "line one"
+      assert html =~ "line three"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ✻ thinking (the live pulse) ──────────────────────────────────────────
+    test "✻ thinking pulse renders the cumulative counter and keeps every carrier flush",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(42)})
+      send(view.pid, {:claude_chat_event, thinking_tokens(128)})
+
+      html = render(view)
+      assert html =~ "✻" or html =~ "bp-chat-spinner"
+      assert html =~ "128"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── todo card (☐ / ◐ / ☒) ────────────────────────────────────────────────
+    test "the todo card items render flush across the three statuses",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        todo_frame("toolu_todo", [
+          %{"content" => "explore the tree", "status" => "completed"},
+          %{"content" => "write the matrix", "status" => "in_progress", "activeForm" => "Writing"},
+          %{"content" => "run the gate", "status" => "pending"}
+        ])
+      )
+
+      html = render(view)
+      assert html =~ "Update todos"
+      assert html =~ "explore the tree"
+      assert html =~ "write the matrix"
+      assert html =~ "run the gate"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── agent drill-down block (header + running line + ⎿ report) ─────────────
+    test "the agent block header, running line, nested child, and ⎿ report render flush",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_ag", "Task", "Audit the recorder"))
+      send_frame(sid, task_started("toolu_ag", "task_gm"))
+      send_frame(sid, task_progress("toolu_ag", "reading recorder.ex"))
+      send_frame(sid, agent_child("toolu_ag", "toolu_ag_kid", "grep -rn task_started"))
+      send_frame(sid, tool_result_frame("toolu_ag", "subreport line one\nsubreport line two"))
+
+      html = render(view)
+      assert html =~ "Agent(explore — Audit the recorder)"
+      assert html =~ "Running: reading recorder.ex"
+      # the nested child (rendered byte-identically via message_body) AND the ⎿
+      # multiline report <pre> both carry the gutter-text guard
+      assert html =~ ~s(data-parent="toolu_ag")
+      assert html =~ "grep -rn task_started"
+      assert html =~ "⎿"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── plan body via its .bp-paper-surface.bp-chat-md class (D50 forbids ─────
+    #    touching the :plan branch — S3 owns it; here we only ASSERT geometry) ─
+    test "the proposed-plan card body shares the .bp-chat-md first-block rule",
+         %{view: view} do
+      # a live ExitPlanMode ask paints the pending plan card; its body renders the
+      # plan markdown through the SAME paper engine + .bp-chat-md class, so the
+      # #1849 first-child rule covers it too (asserted, never re-broken here)
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "plan it"})
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "gm-plan",
+           tool_name: "ExitPlanMode",
+           input: %{"plan" => "# Plan heading\n\nStep one.\n\nStep two."},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "proposed plan"
+      assert html =~ "Plan heading"
+      # the plan body's first block is a rule-targeted <h1>, flush like any bubble
+      assert_first_block_flush_rule(html, "h1")
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ⧗ queued mid-turn ❯ row ───────────────────────────────────────────────
+    test "a mid-turn queued ❯ row renders flush with its badge", %{view: view} do
+      # the setup's "go" turn is still live (cat never sends a result), so a second
+      # send is mid-turn → an echoed ❯ row wearing the ⧗ queued badge
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "queued prompt"})
+      assert html =~ "queued prompt"
+      assert html =~ "⧗ queued"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── live-chrome: the streaming tail (charter D37/D41) ─────────────────────
+    test "the live streaming tail (live-chrome) renders flush", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("streaming prose with no leading indent")})
+
+      html = render(view)
+      assert html =~ "streaming prose with no leading indent"
+      assert_flush_gutter_text(html)
+    end
+  end
+
+  # ── D50 generic assertions (module-scope; shared by the matrix above) ───────
+
+  # Block-level tags the #1849 `.bp-paper-surface.bp-chat-md > :first-child`
+  # margin rule can meaningfully target. A gutter bubble's first child is always
+  # one of these; an inline/text first child would mean the paper engine changed
+  # shape and the rule silently stopped applying.
+  @gutter_block_tags ~w(h1 h2 h3 h4 h5 h6 p ul ol pre blockquote table div)
+
+  # Every `data-gutter-text` node is a gutter TEXT node — the text paired with a
+  # ❯/●/✻/⎿ glyph, which MUST render flush after its opening tag. This refutes the
+  # #1844 class (a leading template newline/indent baked into the serialized text)
+  # for the whole class in one pass; it is deliberately raw-string, not parsed,
+  # because the defect lives in the bytes a normalizing parser would swallow.
+  defp assert_flush_gutter_text(html) do
+    assert html =~ "data-gutter-text",
+           "expected at least one data-gutter-text carrier in the render (guard would be vacuous)"
+
+    refute html =~ ~r/data-gutter-text[^>]*>\s*\n/,
+           "a data-gutter-text node begins with template whitespace — the #1844 alignment-bug class"
+
+    html
+  end
+
+  # The #1849 first-block check at the HONEST CEILING. Computed margin-top is not
+  # observable from static HTML, so this proves (a) the rule TEXT is present and
+  # (b) the `.bp-paper-surface.bp-chat-md > :first-child` element EXISTS and is a
+  # block element the rule targets, pinned to the expected tag. This is
+  # rule-presence-AND-structure, NOT geometry — no headless browser, by design.
+  defp assert_first_block_flush_rule(html, expected_tag) do
+    assert html =~ ".bp-paper-surface.bp-chat-md > :first-child",
+           "the #1849 first-child margin rule text is missing"
+
+    assert html =~ "margin-top: 0", "the #1849 margin-top:0 declaration is missing"
+
+    first = html |> LazyHTML.from_fragment() |> LazyHTML.query(".bp-paper-surface.bp-chat-md > :first-child")
+
+    assert Enum.count(first) >= 1,
+           "no .bp-paper-surface.bp-chat-md > :first-child element — the #1849 rule targets nothing"
+
+    [tag | _] = LazyHTML.tag(first)
+
+    assert tag in @gutter_block_tags,
+           "the bubble's first child is <#{tag}>, not a block element the margin rule can target"
+
+    assert tag == expected_tag, "expected first block <#{expected_tag}>, got <#{tag}>"
+
+    html
+  end
+
   # Is the on-screen chat in a turn-active state (thinking/interrupting)?
   defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
 
