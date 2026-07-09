@@ -2034,21 +2034,27 @@ defmodule BarkparkCloud.Registry do
   ## Providers
 
   @doc """
-  Connect a cloud `Provider` of `kind` (`hetzner`/etc.) for `team`, storing the
-  account `token` ENCRYPTED at rest (`Vault.encrypt/1`). The plaintext token is
-  never persisted. `opts` may carry `:label`.
+  Connect a cloud `Provider` of `kind` (`hetzner`/`azure`) for `team`, storing
+  the account `credential` ENCRYPTED at rest (`Vault.encrypt/1`). The plaintext
+  credential is never persisted — for `hetzner` it is the API token string, for
+  `azure` the `{tenant_id, client_id, client_secret, subscription_id}` JSON
+  blob. Its per-kind shape is validated by the changeset before insert. `opts`
+  may carry `:label`.
 
   Returns `{:ok, %Provider{}}` or `{:error, %Ecto.Changeset{}}`.
   """
   @spec connect_provider(Team.t() | binary(), String.t(), binary(), keyword()) ::
           {:ok, Provider.t()} | {:error, Ecto.Changeset.t()}
-  def connect_provider(team, kind, token, opts \\ []) when is_binary(token) do
+  def connect_provider(team, kind, credential, opts \\ []) when is_binary(credential) do
     %Provider{}
     |> Provider.changeset(%{
       team_id: team_id(team),
       kind: kind,
       label: Keyword.get(opts, :label),
-      encrypted_token: Vault.encrypt(token)
+      # The virtual :credential drives the per-kind shape gate; :encrypted_token
+      # is the single stored home (ciphertext of the same plaintext).
+      credential: credential,
+      encrypted_token: Vault.encrypt(credential)
     })
     |> Repo.insert()
   end

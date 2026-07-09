@@ -113,4 +113,62 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(nil) == nil
     assert FailureCopy.humanize(:oops) == :oops
   end
+
+  # ── Azure provider classes (provider-neutral hosting) — each names the exact
+  # Azure Portal fix, and none collides with the Hetzner classes above.
+
+  test "azure quota-exceeded-per-family → the vCPU-quota copy naming the portal fix" do
+    quota =
+      "Your Azure subscription's vCPU quota for this VM family is exhausted. In the Azure Portal → Subscriptions → your subscription → Usage + quotas, filter to the family and choose Request increase, then retry."
+
+    assert FailureCopy.humanize(
+             "QuotaExceeded: Operation results in exceeding approved standardDPSv5Family Cores quota"
+           ) == quota
+
+    assert FailureCopy.humanize("Compute quota (vCPU) exceeded") == quota
+    # Idempotent — the copy re-maps to itself (it contains quota + vcpu + family).
+    assert FailureCopy.humanize(quota) == quota
+  end
+
+  test "azure region-capacity → the region-capacity copy" do
+    capacity =
+      "This Azure region has no capacity for this VM size right now. In the Azure Portal → Virtual machines, pick another region or size — or retry shortly, since capacity is transient per region and size."
+
+    assert FailureCopy.humanize("SkuNotAvailable: the requested size is not available") ==
+             capacity
+
+    assert FailureCopy.humanize("AllocationFailed: unable to allocate") == capacity
+    assert FailureCopy.humanize("ZonalAllocationFailed in zone 2") == capacity
+    assert FailureCopy.humanize(capacity) == capacity
+  end
+
+  test "azure missing-RBAC-role → the role-assignment copy, before the generic auth class" do
+    rbac =
+      "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
+
+    assert FailureCopy.humanize(
+             "AuthorizationFailed: The client does not have authorization to perform action"
+           ) == rbac
+
+    assert FailureCopy.humanize("does not have permission to write") == rbac
+    assert FailureCopy.humanize(rbac) == rbac
+  end
+
+  test "the azure classes do not steal the Hetzner capacity string" do
+    # Hetzner's spaced 'account quota exceeded' still reads as capacity, NOT the
+    # azure family-quota copy (no 'quotaexceeded'/'family'/'vcpu' token).
+    assert FailureCopy.humanize("account quota exceeded for servers") ==
+             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+  end
+
+  # ── connect_remediation/1 — verify-before-save copy naming the exact console.
+
+  test "connect_remediation names the exact Hetzner + Azure console fix" do
+    assert FailureCopy.connect_remediation("hetzner") =~ "Hetzner Cloud Console"
+    assert FailureCopy.connect_remediation("hetzner") =~ "API tokens"
+    assert FailureCopy.connect_remediation("azure") =~ "App registrations"
+    assert FailureCopy.connect_remediation("azure") =~ "Certificates & secrets"
+    # Unknown kind falls back to a provider-agnostic, actionable line.
+    assert FailureCopy.connect_remediation("gcp") =~ "verify"
+  end
 end

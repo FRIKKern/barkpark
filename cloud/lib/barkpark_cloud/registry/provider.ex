@@ -1,15 +1,28 @@
 defmodule BarkparkCloud.Registry.Provider do
   @moduledoc """
   A connected cloud account a Team links so the control plane can provision
-  Barkparks into it (e.g. a Hetzner project's API token). Belongs to one Team.
+  Barkparks into it. Belongs to one Team. Two kinds ship today:
 
-  ## The token is encrypted at rest
+    * `hetzner` — the account's Hetzner Cloud API token (a bare string).
+    * `azure`   — a service principal, stored as a JSON blob of
+      `{tenant_id, client_id, client_secret, subscription_id}`.
 
-  `encrypted_token` NEVER holds the plaintext API token. The context
-  (`Registry.connect_provider/3`) runs the plaintext through
-  `BarkparkCloud.Registry.Vault.encrypt/1` (AES-256-GCM) before it reaches the
-  changeset, and the field is `redact: true` so it stays out of logs / inspect.
+  ## One credential home — `encrypted_token`
+
+  `encrypted_token` is the SINGLE credential column for BOTH kinds (there is no
+  second store, no per-kind column). It NEVER holds plaintext — it holds the
+  Base64 of `BarkparkCloud.Registry.Vault.encrypt/1` (AES-256-GCM), and the
+  field is `redact: true` so it stays out of logs / inspect. For `hetzner` the
+  encrypted plaintext is the token string; for `azure` it is the JSON blob.
   Decryption happens on demand in the context, never as a stored column.
+
+  ## Per-kind credential-shape validation
+
+  The changeset validates the credential SHAPE through a virtual `:credential`
+  field (the plaintext the context is about to encrypt) — so a malformed
+  credential is rejected before it is ever stored, while the stored column stays
+  purely ciphertext. `hetzner` demands a non-blank token string; `azure` demands
+  a JSON object carrying all four service-principal fields.
 
   Real key management (rotation, KMS, per-tenant keys) is a later/human concern;
   see `BarkparkCloud.Registry.Vault` for the seam. What ships now is the
@@ -23,14 +36,22 @@ defmodule BarkparkCloud.Registry.Provider do
 
   # The provider kinds we know how to provision into. Kept as a list (not a free
   # string) so a typo can't silently create a dead provider row; grow it when a
-  # second backend actually lands (YAGNI).
-  @kinds ~w(hetzner)
+  # backend actually lands (YAGNI).
+  @kinds ~w(hetzner azure)
+
+  # The four fields an azure service-principal credential blob must carry. The
+  # control plane exchanges these for a token and lists a tagged resource before
+  # it ever persists the row (verified-connect, see Registry + Web.Router).
+  @azure_fields ~w(tenant_id client_id client_secret subscription_id)
 
   schema "providers" do
     field :kind, :string
     field :label, :string
     # Ciphertext (Base64 of Vault.encrypt/1 output) — never the plaintext token.
     field :encrypted_token, :string, redact: true
+    # The plaintext credential, VALIDATED then encrypted by the context. Never
+    # persisted (virtual) and never logged (redact) — the shape gate only.
+    field :credential, :string, virtual: true, redact: true
 
     belongs_to :team, BarkparkCloud.Accounts.Team
 
@@ -41,17 +62,72 @@ defmodule BarkparkCloud.Registry.Provider do
 
   def kinds, do: @kinds
 
+  @doc "The fields an azure service-principal credential blob must carry."
+  def azure_fields, do: @azure_fields
+
   @doc """
   Changeset for a connected provider. `kind`, `team_id`, and `encrypted_token`
   are required; `encrypted_token` is expected to ALREADY be ciphertext — the
-  context encrypts the plaintext before building the changeset.
+  context encrypts the plaintext before building the changeset. When the
+  plaintext is passed as `:credential`, its per-kind SHAPE is validated (a
+  non-blank token for hetzner; the four-field JSON blob for azure).
   """
   def changeset(provider, attrs) do
     provider
     |> cast(attrs, [:kind, :label, :encrypted_token, :team_id])
+    # The credential is cast with empty_values: [] so a blank/whitespace-only
+    # value REACHES the per-kind shape gate (default cast trims + drops it as
+    # "missing", which would silently skip the gate on an empty token).
+    |> cast(attrs, [:credential], empty_values: [])
     |> validate_required([:kind, :team_id, :encrypted_token])
     |> validate_inclusion(:kind, @kinds)
     |> validate_length(:label, max: 255)
+    |> validate_credential_shape()
     |> assoc_constraint(:team)
+  end
+
+  # Per-kind credential-shape gate. Only runs when a plaintext `:credential` was
+  # supplied (the context always supplies it; a changeset built without one — a
+  # relabel, say — skips the gate). Fails on the virtual field so the error
+  # attaches to the credential the caller sent, never the ciphertext column.
+  defp validate_credential_shape(changeset) do
+    case get_field(changeset, :credential) do
+      nil -> changeset
+      credential -> validate_credential_shape(changeset, get_field(changeset, :kind), credential)
+    end
+  end
+
+  defp validate_credential_shape(changeset, "hetzner", credential) do
+    if is_binary(credential) and String.trim(credential) != "" do
+      changeset
+    else
+      add_error(changeset, :credential, "a Hetzner API token can't be blank")
+    end
+  end
+
+  defp validate_credential_shape(changeset, "azure", credential) do
+    with true <- is_binary(credential),
+         {:ok, blob} when is_map(blob) <- Jason.decode(credential),
+         [] <- Enum.reject(@azure_fields, &present_field?(blob, &1)) do
+      changeset
+    else
+      _ ->
+        add_error(
+          changeset,
+          :credential,
+          "azure credentials require #{Enum.join(@azure_fields, ", ")}"
+        )
+    end
+  end
+
+  # Unknown kind: validate_inclusion already flags it; don't double-error the
+  # credential.
+  defp validate_credential_shape(changeset, _kind, _credential), do: changeset
+
+  defp present_field?(blob, field) do
+    case Map.get(blob, field) do
+      value when is_binary(value) -> String.trim(value) != ""
+      _ -> false
+    end
   end
 end
