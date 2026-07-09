@@ -304,7 +304,7 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 
 	connectTarget := fleetTarget(creds.URL, creds.Host)
 	if connectTarget == "" {
-		out.errf("logged in — %q has no URL to connect to yet (still provisioning?). Try `bp barkparks`.", only.Name)
+		out.errf("logged in — %q has no address yet (still provisioning). Re-run `bp setup --target cloud` once it's up.", only.Name)
 		return
 	}
 
