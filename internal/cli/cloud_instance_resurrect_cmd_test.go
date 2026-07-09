@@ -1,28 +1,39 @@
 package cli
 
+// cloud_instance_resurrect_cmd_test.go proves the provider-neutral portable
+// resurrect against a fake control plane: the CLI POSTs /v1/resurrect on the
+// USER-BEARER plane (the same plane as `bp launch` — the route is require_user +
+// team-admin, S14c), threads bundle_ref (an explicit --bundle verbatim; else the
+// newest bundle resolved from the store), rejects azure --fast honestly, and
+// fails clean when not logged in or when no bundle exists. Zero live anything.
+
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
 
-// resurrectFakeCP stands up a control plane that only answers POST /v1/resurrect,
-// recording the request body so the test can assert what the CLI sent.
-func resurrectFakeCP(t *testing.T, status int, resp string) (*httptest.Server, *map[string]any) {
+// resurrectFakeCP stands up a control plane that only answers POST /v1/resurrect
+// with the S14c 202 receipt, recording the request body + auth so the test can
+// assert what the CLI sent.
+func resurrectFakeCP(t *testing.T, status int, resp string) (*map[string]any, *string) {
 	t.Helper()
 	var got map[string]any
+	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/v1/resurrect" {
 			t.Errorf("unexpected request %s %s (resurrect must POST /v1/resurrect only)", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		if auth := r.Header.Get("Authorization"); auth != "Bearer wtok" {
-			t.Errorf("missing/wrong worker bearer: %q", auth)
-		}
+		auth = r.Header.Get("Authorization")
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &got)
 		w.Header().Set("Content-Type", "application/json")
@@ -30,27 +41,47 @@ func resurrectFakeCP(t *testing.T, status int, resp string) (*httptest.Server, *
 		_, _ = io.WriteString(w, resp)
 	}))
 	t.Cleanup(srv.Close)
-	return srv, &got
+	withTempConfigHome(t)
+	seedCloudLogin(t, srv.URL)
+	return &got, &auth
+}
+
+// seedResurrectBundle writes one complete bp-bundle-v1 for fqdn into the swapped
+// fake store at the given instant and returns its prefix.
+func seedResurrectBundle(t *testing.T, st *cloud.FakeBundleStore, fqdn string, at time.Time) string {
+	t.Helper()
+	man, err := cloud.WriteBundle(context.Background(), st, cloud.BundleWriteSpec{
+		FQDN: fqdn, SourceProvider: cloud.ProviderHetzner, CreatedAt: at,
+		DB: strings.NewReader("d"),
+	})
+	if err != nil {
+		t.Fatalf("seed bundle: %v", err)
+	}
+	return man.Prefix()
 }
 
 // TestResurrectPortablePostsControlPlane proves the azure (portable-only) resurrect
-// POSTs /v1/resurrect with {name, provider} and reports the enqueued job.
+// POSTs /v1/resurrect with {name, provider, bundle_ref} on the USER bearer, with
+// the NEWEST bundle resolved from the store when no --bundle is passed.
 func TestResurrectPortablePostsControlPlane(t *testing.T) {
-	srv, got := resurrectFakeCP(t, http.StatusAccepted,
-		`{"job_id":"job-42","status":"queued","bundle":"bundles/newest.tar.zst","follow_url":"https://barkpark.cloud/new/job-42"}`)
+	got, auth := resurrectFakeCP(t, http.StatusAccepted, `{"ok":true,"id":"bp-9","job_id":"job-42"}`)
+	st := withFakeBundleStore(t)
+	seedResurrectBundle(t, st, "okey.barkpark.cloud", time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	newest := seedResurrectBundle(t, st, "okey.barkpark.cloud", time.Date(2026, 7, 9, 8, 0, 0, 0, time.UTC))
 
 	stdout, stderr, code := runHzCLI(t, "json",
-		"instance", "resurrect", "okey.barkpark.cloud",
-		"--provider", "azure",
-		"--control-url", srv.URL, "--worker-token", "wtok")
+		"instance", "resurrect", "okey.barkpark.cloud", "--provider", "azure")
 	if code != 0 {
 		t.Fatalf("resurrect exited %d, stderr: %s", code, stderr)
+	}
+	if *auth != "Bearer sess-abc" {
+		t.Errorf("resurrect must ride the USER bearer (bp login session), got %q", *auth)
 	}
 	if (*got)["name"] != "okey.barkpark.cloud" || (*got)["provider"] != "azure" {
 		t.Errorf("resurrect POST body wrong: %+v", *got)
 	}
-	if _, pinned := (*got)["bundle"]; pinned {
-		t.Errorf("no --bundle was passed, so the body must omit it (newest-default): %+v", *got)
+	if (*got)["bundle_ref"] != newest {
+		t.Errorf("no --bundle passed → the NEWEST bundle prefix must be resolved and sent as bundle_ref:\n got:  %v\n want: %s", (*got)["bundle_ref"], newest)
 	}
 	var out map[string]any
 	if err := json.Unmarshal([]byte(stdout), &out); err != nil {
@@ -61,21 +92,41 @@ func TestResurrectPortablePostsControlPlane(t *testing.T) {
 	}
 }
 
-// TestResurrectBundlePinnedThreads proves --bundle is threaded to the control plane.
+// TestResurrectBundlePinnedThreads proves --bundle is threaded verbatim as
+// bundle_ref (no store lookup needed).
 func TestResurrectBundlePinnedThreads(t *testing.T) {
-	srv, got := resurrectFakeCP(t, http.StatusAccepted, `{"job_id":"j1","status":"queued"}`)
+	got, _ := resurrectFakeCP(t, http.StatusAccepted, `{"ok":true,"id":"bp-1","job_id":"j1"}`)
 	_, stderr, code := runHzCLI(t, "json",
 		"instance", "resurrect", "vega.barkpark.cloud",
-		"--provider", "hetzner", "--bundle", "bundles/pinned.tar.zst",
-		"--control-url", srv.URL, "--worker-token", "wtok")
+		"--provider", "hetzner", "--bundle", "archives/t1/vega.barkpark.cloud/20260101T000000Z/")
 	if code != 0 {
 		t.Fatalf("resurrect exited %d, stderr: %s", code, stderr)
 	}
-	if (*got)["bundle"] != "bundles/pinned.tar.zst" {
-		t.Errorf("--bundle not threaded to the control plane: %+v", *got)
+	if (*got)["bundle_ref"] != "archives/t1/vega.barkpark.cloud/20260101T000000Z/" {
+		t.Errorf("--bundle not threaded as bundle_ref: %+v", *got)
 	}
 	if (*got)["provider"] != "hetzner" {
 		t.Errorf("provider wrong: %+v", *got)
+	}
+}
+
+// TestResurrectNoBundleIsHonest proves a flag-less resurrect with NO archive in
+// the store fails not-found with copy naming both fixes (archive it / --bundle),
+// and never POSTs the control plane.
+func TestResurrectNoBundleIsHonest(t *testing.T) {
+	withTempConfigHome(t)
+	seedCloudLogin(t, "http://127.0.0.1:0") // any POST would fail loudly — none may happen
+	withFakeBundleStore(t)
+
+	stdout, stderr, code := runHzCLI(t, "table",
+		"instance", "resurrect", "ghost.barkpark.cloud", "--provider", "azure")
+	if code != exitNotFound {
+		t.Fatalf("no bundle should exit %d (not found), got %d\n%s", exitNotFound, code, stderr)
+	}
+	for _, want := range []string{"no portable archive", "bp cloud instance archive", "--bundle"} {
+		if !strings.Contains(stdout+stderr, want) {
+			t.Errorf("no-bundle error missing %q:\n%s\n%s", want, stdout, stderr)
+		}
 	}
 }
 
@@ -84,8 +135,7 @@ func TestResurrectBundlePinnedThreads(t *testing.T) {
 func TestResurrectAzureFastRejected(t *testing.T) {
 	stdout, stderr, code := runHzCLI(t, "json",
 		"instance", "resurrect", "okey.barkpark.cloud",
-		"--provider", "azure", "--fast",
-		"--control-url", "http://127.0.0.1:0", "--worker-token", "wtok")
+		"--provider", "azure", "--fast")
 	if code != exitUsage {
 		t.Fatalf("azure --fast should be a usage error (exit %d), got %d; stderr: %s", exitUsage, code, stderr)
 	}
@@ -94,18 +144,18 @@ func TestResurrectAzureFastRejected(t *testing.T) {
 	}
 }
 
-// TestResurrectNeedsControlPlane proves the portable path fails with an auth error
-// (not a crash) when no worker token is available — the bundle store lives there.
-func TestResurrectNeedsControlPlane(t *testing.T) {
-	t.Setenv("WORKER_TOKEN", "")
-	t.Setenv("BARKPARK_CONTROL_URL", "")
+// TestResurrectNeedsLogin proves the portable path fails with the standard
+// not-logged-in auth error (the /v1/resurrect route is require_user — the same
+// plane as `bp launch`), not a crash.
+func TestResurrectNeedsLogin(t *testing.T) {
+	withTempConfigHome(t) // no cloud token seeded
 	stdout, stderr, code := runHzCLI(t, "json",
 		"instance", "resurrect", "okey.barkpark.cloud", "--provider", "azure")
 	if code != exitAuth {
-		t.Fatalf("resurrect with no control plane should exit %d (auth), got %d; stderr: %s", exitAuth, code, stderr)
+		t.Fatalf("resurrect with no login should exit %d (auth), got %d; stderr: %s", exitAuth, code, stderr)
 	}
-	if !strings.Contains(stdout+stderr, "WORKER_TOKEN") {
-		t.Errorf("auth error should name WORKER_TOKEN: %s / %s", stdout, stderr)
+	if !strings.Contains(stdout+stderr, "bp login") {
+		t.Errorf("auth error should point at `bp login`: %s / %s", stdout, stderr)
 	}
 }
 

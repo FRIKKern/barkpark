@@ -3,12 +3,14 @@ package cli
 // cloud_instance_resurrect_cmd.go is the PROVIDER-NEUTRAL resurrect surface
 // (charter S14, Decisions 12 + 20-21):
 //
-//	bp cloud instance resurrect <name|fqdn> --provider hetzner|azure [--bundle <key>] [--fast]
+//	bp cloud instance resurrect <name|fqdn> --provider hetzner|azure [--bundle <prefix>] [--fast]
 //
 // A resurrect rebuilds a whole instance from a PORTABLE archive bundle (manifest +
 // pg_dump + media + sealed identity secrets) — the bold cross-provider bet: a box
 // archived on Hetzner comes back on Azure and vice-versa. The default path POSTs
-// /v1/resurrect to the control plane, which enqueues a resurrect job the worker
+// /v1/resurrect to the control plane AS THE LOGGED-IN USER (the route is
+// require_user + team-admin + entitlement-gated, exactly like `bp launch` —
+// resurrecting stands up a billed box), which enqueues a resurrect job the worker
 // restores in RESTORE MODE (never a warm-assign, D40) and the /new-style step feed
 // narrates. `--fast` is a HETZNER-ONLY optimization that boots the newest Hetzner
 // snapshot instead — byte-identical to the legacy `bp cloud hetzner instance
@@ -16,11 +18,15 @@ package cli
 //
 // Azure has no snapshot substrate, so azure resurrect is portable-only; `--fast`
 // on azure is a usage error, not a silent lie.
+//
+// The control plane requires an explicit bundle_ref (it holds no store reader on
+// the write path yet), so with no --bundle the CLI resolves the NEWEST bundle for
+// the instance from the bundle store itself — the same store env the archive verb
+// writes through.
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
+	"context"
+	"path"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
@@ -65,15 +71,15 @@ func splitFastFlag(args []string) (fast bool, rest []string) {
 	return fast, rest
 }
 
-// runResurrectPortable POSTs /v1/resurrect to the control plane to restore a
-// portable bundle onto a fresh box for `kind`, then reports the enqueued job so the
-// caller can follow the same live step feed a /new launch renders. With no
-// --bundle the control plane resolves the NEWEST bundle for the instance. It needs
-// the control plane (a WORKER_TOKEN) — the bundle store + resurrect queue live
-// there, never on the box.
-func runResurrectPortable(out *writer, g globals, kind string, args []string) int {
-	usage := "bp cloud instance resurrect <name|fqdn> --provider " + kind + " [--bundle <key>] [--control-url <u>] [--worker-token <t>]"
-	a, err := parseHzArgs(args, []string{"bundle", "control-url", "worker-token"}, nil, usage)
+// runResurrectPortable POSTs /v1/resurrect to the control plane (user Bearer, the
+// `bp launch` plane) to restore a portable bundle onto a fresh box for `kind`,
+// then reports the enqueued job — `bp barkparks` and the console /new feed track
+// the live restore steps. With no --bundle the CLI resolves the NEWEST bundle for
+// the instance from the bundle store (the same env the archive verb writes
+// through); a named --bundle prefix is threaded verbatim as bundle_ref.
+func runResurrectPortable(out *writer, _ globals, kind string, args []string) int {
+	usage := "bp cloud instance resurrect <name|fqdn> --provider " + kind + " [--bundle <key-prefix>] [--zone <z>]"
+	a, err := parseHzArgs(args, []string{"bundle", "zone", "team"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -82,84 +88,89 @@ func runResurrectPortable(out *writer, g globals, kind string, args []string) in
 	}
 	name := strings.TrimSpace(a.pos[0])
 
-	cp := instCP(a)
-	if cp == nil {
-		return useError(out, "auth",
-			"resurrect needs the control plane (the bundle store + resurrect queue) — set WORKER_TOKEN (or --worker-token)",
-			exitAuth)
+	cfg, okc := requireCloud(out)
+	if !okc {
+		return exitAuth
 	}
 
-	body := map[string]any{"name": name, "provider": kind}
-	if b := strings.TrimSpace(a.val("bundle")); b != "" {
-		body["bundle"] = b
+	bundleRef := strings.TrimSpace(a.val("bundle"))
+	if bundleRef == "" {
+		// Newest-default: the control plane requires an explicit bundle_ref, so
+		// resolve the newest complete bundle for this instance from the store.
+		zone := a.val("zone")
+		if zone == "" {
+			zone = instDefaultZone
+		}
+		fqdn := name
+		if !strings.Contains(fqdn, ".") {
+			fqdn = fqdn + "." + zone
+		}
+		store, sok := bundleStoreProvider(out)
+		if !sok {
+			return exitAuth
+		}
+		prefix, found, nerr := newestBundlePrefixFor(cloudInstanceCtx(), store, fqdn)
+		if nerr != nil {
+			return useError(out, "failed", "resurrect "+name+": find newest bundle: "+nerr.Error(), exitGeneric)
+		}
+		if !found {
+			return useError(out, "failed",
+				"no portable archive found for "+fqdn+" — create one with `bp cloud instance archive "+fqdn+"`, or name one with --bundle (see `bp cloud instance archives`)",
+				exitNotFound)
+		}
+		bundleRef = prefix
 	}
-	res, rerr := cp.Resurrect(body)
+
+	res, rerr := cfg.CloudClient().Resurrect(cloudCtx(), kind, name, bundleRef)
 	if rerr != nil {
-		return useError(out, "failed", "resurrect "+name+": "+rerr.Error(), exitGeneric)
+		if code, msg, is402 := noSubscriptionError(rerr); is402 {
+			return useError(out, "failed", msg, code)
+		}
+		return cloudFail(out, "resurrect", rerr)
 	}
 
 	report := map[string]any{
-		"ok":       true,
-		"provider": kind,
-		"action":   cloud.VerbResurrect,
-		"instance": map[string]any{"name": name},
-		"job_id":   res.JobID,
-		"status":   res.Status,
-	}
-	if res.Bundle != "" {
-		report["bundle"] = res.Bundle
-	}
-	if res.FollowURL != "" {
-		report["follow_url"] = res.FollowURL
+		"ok":         true,
+		"provider":   kind,
+		"action":     cloud.VerbResurrect,
+		"instance":   map[string]any{"id": res.ID, "name": name},
+		"job_id":     res.JobID,
+		"bundle_ref": bundleRef,
 	}
 	if out.emitStructured(report) {
 		return exitOK
 	}
 	out.outf("✓ resurrect of %s queued on %s (job %s)", name, kind, res.JobID)
-	if res.Bundle != "" {
-		out.info("restoring from bundle %s", res.Bundle)
-	}
-	if res.FollowURL != "" {
-		out.info("follow the live step feed: %s", res.FollowURL)
-	}
+	out.info("restoring from bundle %s", bundleRef)
+	out.info("track it with `bp barkparks` or the console's /new step feed")
 	return exitOK
 }
 
-// cpResurrectResult is the control plane's response to POST /v1/resurrect (charter
-// S14): the enqueued resurrect job the worker restores + the /new-style feed
-// narrates. Fields are additive/omitempty so an older control plane that returns
-// only {job_id,status} still decodes.
-type cpResurrectResult struct {
-	JobID     string `json:"job_id"`
-	Status    string `json:"status"`
-	Bundle    string `json:"bundle"`
-	FollowURL string `json:"follow_url"`
-	Error     string `json:"error"`
-}
-
-// Resurrect enqueues a portable-bundle resurrect on the control plane. The body
-// carries {name, provider, bundle?}; the control plane resolves the newest bundle
-// when none is named, seals the carried KEK into the claim, and queues a
-// kind=resurrect job the worker restores.
-func (cp *cpFleet) Resurrect(body map[string]any) (*cpResurrectResult, error) {
-	resp, err := cp.do(http.MethodPost, "/v1/resurrect", body)
+// newestBundlePrefixFor scans the store's archives/ tree for the newest COMPLETE
+// bundle whose manifest names fqdn, across every team prefix (a deprovisioned
+// box's registry row is gone, so the team segment can't be re-derived — the
+// manifest is the source of truth). Returns ("", false, nil) when the instance
+// has no bundle yet.
+func newestBundlePrefixFor(ctx context.Context, store cloud.BundleStore, fqdn string) (string, bool, error) {
+	keys, err := store.List(ctx, "archives/")
 	if err != nil {
-		return nil, fmt.Errorf("control plane resurrect: %w", err)
+		return "", false, err
 	}
-	defer resp.Body.Close()
-	var res cpResurrectResult
-	_ = json.NewDecoder(resp.Body).Decode(&res)
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusAccepted, http.StatusCreated:
-		if res.JobID == "" {
-			return nil, fmt.Errorf("control plane resurrect: accepted but returned no job id")
+	best := ""
+	var bestMan cloud.BundleManifest
+	for _, key := range keys {
+		if path.Base(key) != "manifest.json" {
+			continue
 		}
-		return &res, nil
-	default:
-		what := res.Error
-		if what == "" {
-			what = fmt.Sprintf("HTTP %d", resp.StatusCode)
+		prefix := strings.TrimSuffix(key, "manifest.json")
+		man, merr := cloud.ReadManifest(ctx, store, prefix)
+		if merr != nil || man.FQDN != fqdn {
+			continue // torn/foreign bundles are skipped, not fatal
 		}
-		return nil, fmt.Errorf("control plane resurrect: %s", what)
+		if best == "" || man.CreatedAt.After(bestMan.CreatedAt) ||
+			(man.CreatedAt.Equal(bestMan.CreatedAt) && prefix > best) {
+			best, bestMan = prefix, man
+		}
 	}
+	return best, best != "", nil
 }

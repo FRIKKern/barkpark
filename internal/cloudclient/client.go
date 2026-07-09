@@ -648,6 +648,41 @@ func (c *Client) GoLive(ctx context.Context, name, plan string) (Barkpark, error
 	return c.launchLike(ctx, "/v1/go-live", req)
 }
 
+// ResurrectReceipt is the control plane's 202 receipt for POST /v1/resurrect
+// (portable-archive restore, charter S14): the fresh barkpark row's id + the
+// enqueued resurrect job the worker restores.
+type ResurrectReceipt struct {
+	OK    bool   `json:"ok"`
+	ID    string `json:"id"`
+	JobID string `json:"job_id"`
+}
+
+// Resurrect enqueues a portable-bundle resurrect via POST /v1/resurrect (Bearer
+// — the route is require_user + team-admin + entitlement-gated, same plane as
+// Launch). name is the new row's display name; provider is the RESTORE TARGET
+// kind (which may differ from the bundle's source provider — that difference IS
+// the migration story); bundleRef is the object-storage bundle prefix to
+// restore from (required — the control plane does not resolve a newest bundle
+// server-side yet, so callers resolve it before posting).
+func (c *Client) Resurrect(ctx context.Context, provider, name, bundleRef string) (ResurrectReceipt, error) {
+	req := map[string]string{"name": name, "provider": provider, "bundle_ref": bundleRef}
+	status, body, err := c.do(ctx, "POST", "/v1/resurrect", true, req)
+	if err != nil {
+		return ResurrectReceipt{}, err
+	}
+	if !ok(status) {
+		return ResurrectReceipt{}, cloudError(status, body)
+	}
+	var out ResurrectReceipt
+	if err := json.Unmarshal(body, &out); err != nil {
+		return ResurrectReceipt{}, fmt.Errorf("decode resurrect response: %w", err)
+	}
+	if out.JobID == "" {
+		return ResurrectReceipt{}, fmt.Errorf("control plane accepted the resurrect but returned no job id")
+	}
+	return out, nil
+}
+
 // launchLike is the shared POST-then-unwrap-{"barkpark":…} core behind Launch and
 // GoLive — both return a single provisioned Barkpark row in the same envelope.
 func (c *Client) launchLike(ctx context.Context, path string, req map[string]string) (Barkpark, error) {
