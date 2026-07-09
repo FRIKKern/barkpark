@@ -3862,3 +3862,82 @@ test("S14: a client transport failure never surfaces a raw internal token as a s
   assert.ok(m.message.indexOf("network_error") === -1); // the sentinel never reaches the operator
   assert.match(m.message, /try again/i);
 });
+
+// ── azh-w7: the console Resurrect flow (pure request/outcome/sheet builders) ──
+test("azh-w7: the resurrect helpers are exported", () => {
+  for (const name of ["resurrectRequestBody", "resurrectOutcome", "resurrectModalHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("azh-w7: resurrectRequestBody — name=slug, THIS row's bundle_ref, chosen provider", () => {
+  const row = { slug: "shop", bundleRef: "s3://bundles/shop.tar.zst", providerKind: "hetzner" };
+  // Picking azure (portable) overrides the source provider.
+  const b = hooks.resurrectRequestBody(row, "azure");
+  assert.equal(b.name, "shop");
+  assert.equal(b.bundle_ref, "s3://bundles/shop.tar.zst");
+  assert.equal(b.provider, "azure");
+  // No explicit pick → falls back to the source provider.
+  assert.equal(hooks.resurrectRequestBody(row).provider, "hetzner");
+});
+
+test("azh-w7: resurrectRequestBody — a source-less bundle omits provider (server default)", () => {
+  const body = hooks.resurrectRequestBody({ slug: "x", bundleRef: "ref" }, "");
+  assert.equal(body.name, "x");
+  assert.equal(body.bundle_ref, "ref");
+  assert.ok(!("provider" in body)); // never a blank provider on the wire
+});
+
+test("azh-w7: resurrectOutcome — a 202 hands off to the /new step feed", () => {
+  const out = hooks.resurrectOutcome({ status: 202, data: { ok: true, id: "bp-1", bundle_ref: "ref" } });
+  assert.equal(out.action, "progress");
+  assert.equal(out.id, "bp-1");
+});
+
+test("azh-w7: resurrectOutcome — provider_not_connected surfaces the SERVER remediation (D19)", () => {
+  const remediation = "Connect your Azure account in Settings → Providers, then try again.";
+  const out = hooks.resurrectOutcome({
+    status: 422,
+    data: { error: "provider_not_connected", provider: "azure", remediation: remediation },
+  });
+  assert.equal(out.action, "remediate");
+  // Verbatim server copy — NOT re-derived through friendly() (which drops it).
+  assert.equal(out.message, remediation);
+});
+
+test("azh-w7: resurrectOutcome — provider_not_connected w/o remediation still yields a message", () => {
+  const out = hooks.resurrectOutcome({ status: 422, data: { error: "provider_not_connected" } });
+  assert.equal(out.action, "remediate");
+  assert.ok(typeof out.message === "string" && out.message.length > 0);
+});
+
+test("azh-w7: resurrectOutcome — any other failure is a plain error sentence", () => {
+  const out = hooks.resurrectOutcome({ status: 500, data: { error: "enqueue_failed" } });
+  assert.equal(out.action, "error");
+  assert.ok(typeof out.message === "string" && out.message.length > 0);
+  // A bare 404/no-body never white-screens.
+  assert.equal(hooks.resurrectOutcome({ status: 404 }).action, "error");
+  assert.equal(hooks.resurrectOutcome(undefined).action, "error");
+});
+
+test("azh-w7: resurrectModalHtml — title, typed echo, provider picker, disarmed button", () => {
+  const html = hooks.resurrectModalHtml(
+    { slug: "shop", bundleRef: "ref", providerKind: "hetzner" }, "hetzner");
+  assert.match(html, /Resurrect shop\?/);
+  // The portable provider picker carries BOTH available clouds.
+  assert.match(html, /data-resurrect-tabs/);
+  assert.match(html, /data-kind="hetzner"/);
+  assert.match(html, /data-kind="azure"/);
+  // Typed-echo proof-of-attention + a server-owned inline error slot.
+  assert.match(html, /Type <span class="cm-name">shop<\/span> to confirm/);
+  assert.match(html, /id="resurrect-typed"/);
+  assert.match(html, /id="resurrect-error"/);
+  // The Resurrect action ships DISABLED — the typed echo arms it.
+  assert.match(html, /id="resurrect-go"[^>]*disabled/);
+});
+
+test("azh-w7: resurrectModalHtml — the slug is HTML-escaped (no markup injection)", () => {
+  const html = hooks.resurrectModalHtml({ slug: '<img src=x>', bundleRef: "ref" }, "hetzner");
+  assert.ok(html.indexOf("<img src=x>") === -1);
+  assert.match(html, /&lt;img/);
+});

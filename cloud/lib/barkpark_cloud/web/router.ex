@@ -5352,13 +5352,24 @@ defmodule BarkparkCloud.Web.Router do
   # any row/job exists so a bad request never strands a half-built instance.
   #
   #   * no team / not admin        → 422 no_team / 403 forbidden
-  #   * blank name / bundle_ref    → 422 name_required / bundle_ref_required
+  #   * blank name                 → 422 name_required
   #   * unknown provider           → 422 invalid_provider
   #   * azure w/o a verified row    → 422 provider_not_connected + remediation (D17)
   #   * a LIVE box already named X  → 422 live_twin (resurrect would double it)
   #
+  # The bundle_ref is RESOLVED, not required (azh-w7 / D47): an explicit
+  # bundle_ref rides verbatim (the escape hatch — resurrect THIS exact bundle);
+  # absent, the team's NEWEST archive is resolved server-side via
+  # `ArchiveStore.list_archives/1` (newest-first, team-scoped by key prefix) — so
+  # "resurrect my latest" needs no client bookkeeping. An empty store is an honest
+  # 404 no_archives; an unconfigured / unreachable store degrades EXACTLY like GET
+  # /v1/archives (502 + the same server-owned copy) — NEVER a fabricated
+  # "no archives" that would say your box is gone when the store is merely down.
+  #
   # On success: a FRESH barkpark row (provider/region/size nil-honest — D23) + a
-  # pending `resurrect` job carrying the bundle_ref → 202 {ok, id, job_id}.
+  # pending `resurrect` job carrying the resolved bundle_ref → 202
+  # {ok, id, job_id, bundle_ref} (the resolved ref is echoed so the console can
+  # name which bundle it restored).
   defp resurrect(conn) do
     conn = Auth.require_user(conn, [])
 
@@ -5385,9 +5396,6 @@ defmodule BarkparkCloud.Web.Router do
       not present_param?(conn.body_params["name"]) ->
         json(conn, 422, %{error: "name_required"})
 
-      not present_param?(conn.body_params["bundle_ref"]) ->
-        json(conn, 422, %{error: "bundle_ref_required"})
-
       launch_provider(conn.body_params["provider"]) == :error ->
         json(conn, 422, %{
           error: "invalid_provider",
@@ -5407,62 +5415,125 @@ defmodule BarkparkCloud.Web.Router do
       ) ->
         json(conn, 422, %{error: "live_twin", name: conn.body_params["name"]})
 
+      # The bundle_ref resolution is the LAST gate — it may cost a store round
+      # trip, so every cheap 4xx above fires first (nothing stood up yet). An
+      # explicit ref rides verbatim; absent, the team's newest archive resolves;
+      # an empty store is 404, a down/unconfigured store degrades to 502 (D47).
       true ->
-        team = conn.assigns.current_team
-        name = conn.body_params["name"]
-        bundle_ref = String.trim(conn.body_params["bundle_ref"])
-        slug = slugify(name)
-        # provider validated above (:error already 422'd) → a known slug or the
-        # hetzner default; region/size ride through nil-honest (D23).
-        provider = launch_provider(conn.body_params["provider"])
-        region = string_param_or_nil(conn.body_params["region"])
-        server_type = string_param_or_nil(conn.body_params["server_type"])
+        case resolve_resurrect_bundle_ref(conn) do
+          {:ok, bundle_ref} ->
+            do_resurrect(conn, bundle_ref)
 
-        case Registry.register_managed_barkpark(team, name, slug,
-               provider: provider,
-               region: region,
-               server_type: server_type
-             ) do
-          {:ok, barkpark} ->
-            case Registry.enqueue_resurrect_job(barkpark, bundle_ref) do
-              {:ok, job} ->
-                # Live-push the new restoring row to any open dashboard tab.
-                push_event(team.id, "fleet")
-                json(conn, 202, %{ok: true, id: barkpark.id, job_id: job.id})
+          {:error, :no_archives} ->
+            json(conn, 404, %{error: "no_archives"})
 
-              # A resurrect is USELESS without its job (the worker pulls the
-              # bundle), so — unlike go_live's best-effort enqueue — an enqueue
-              # failure is surfaced honestly rather than a lying 202. Rare (a DB
-              # blip; the fresh row can't already hold an active resurrect job).
-              # Roll back the just-created row so it neither bills nor blocks a
-              # name re-resurrect via the live-twin guard.
-              {:error, reason} ->
-                Logger.error(
-                  "resurrect: failed to enqueue resurrect job for barkpark #{barkpark.id}: " <>
-                    inspect(reason)
-                )
+          {:error, :invalid_bundle_ref} ->
+            json(conn, 422, %{error: "invalid_bundle_ref"})
 
-                Registry.delete_barkpark(barkpark)
-                json(conn, 500, %{error: "enqueue_failed"})
-            end
-
-          # The quota backstop fired in register_barkpark/2 — surface as 403 (never
-          # a 500), mirroring go_live.
-          {:error, :limit_reached} ->
-            json(conn, 403, %{
-              error: "limit_reached",
-              limit: Billing.barkpark_limit(team),
-              upgrade_path: "/v1/billing/checkout"
-            })
-
-          {:error, %Ecto.Changeset{} = changeset} ->
-            json(conn, 422, %{error: "invalid", details: errors(changeset)})
+          {:error, {:store, reason}} ->
+            json(conn, 502, %{ok: false, error: archive_store_error(reason)})
         end
     end
   end
 
+  # Resolve the bundle to resurrect from. An explicit (non-blank) bundle_ref is
+  # the verbatim escape hatch — resurrect THIS exact bundle. Absent or blank, the
+  # team's NEWEST archive is resolved via the same store GET /v1/archives reads
+  # (newest-first, team-scoped by the `archives/<team_id>/` key prefix), so a
+  # console "Resurrect latest" needs no client bookkeeping.
+  #
+  # Honest degrade (D47): the store is never allowed to fabricate an absence —
+  #   * `{:ok, [newest | _]}` → resurrect its bundle_ref;
+  #   * `{:ok, []}`           → `{:error, :no_archives}` (a TRUE empty → 404);
+  #   * `{:error, reason}`    → `{:error, {:store, reason}}` (down/unconfigured →
+  #     502 with the same server-owned copy GET /v1/archives uses), so a store
+  #     outage never reads as "your archives are gone".
+  defp resolve_resurrect_bundle_ref(conn) do
+    case conn.body_params["bundle_ref"] do
+      ref when is_binary(ref) ->
+        case String.trim(ref) do
+          "" -> newest_bundle_ref(conn.assigns.current_team)
+          trimmed -> {:ok, trimmed}
+        end
+
+      nil ->
+        newest_bundle_ref(conn.assigns.current_team)
+
+      # A NON-STRING bundle_ref (a number, a map…) is a malformed request, never
+      # "absent": silently resolving the newest archive would stand up a billed
+      # box from a bundle the caller never named.
+      _other ->
+        {:error, :invalid_bundle_ref}
+    end
+  end
+
+  defp newest_bundle_ref(team) do
+    case ArchiveStore.list_archives(team.id) do
+      {:ok, [%{bundle_ref: ref} | _]} -> {:ok, ref}
+      {:ok, []} -> {:error, :no_archives}
+      {:error, reason} -> {:error, {:store, reason}}
+    end
+  end
+
+  # Stand up the fresh row + enqueue the resurrect job for a resolved bundle_ref.
+  # All cheap 4xx gates already passed in resurrect/1; only the register/enqueue
+  # (and quota) outcomes remain.
+  defp do_resurrect(conn, bundle_ref) do
+    team = conn.assigns.current_team
+    name = conn.body_params["name"]
+    slug = slugify(name)
+    # provider validated in resurrect/1 (:error already 422'd) → a known slug or
+    # the hetzner default; region/size ride through nil-honest (D23).
+    provider = launch_provider(conn.body_params["provider"])
+    region = string_param_or_nil(conn.body_params["region"])
+    server_type = string_param_or_nil(conn.body_params["server_type"])
+
+    case Registry.register_managed_barkpark(team, name, slug,
+           provider: provider,
+           region: region,
+           server_type: server_type
+         ) do
+      {:ok, barkpark} ->
+        case Registry.enqueue_resurrect_job(barkpark, bundle_ref) do
+          {:ok, job} ->
+            # Live-push the new restoring row to any open dashboard tab.
+            push_event(team.id, "fleet")
+            # Echo the RESOLVED bundle_ref so a "resurrect latest" caller learns
+            # which bundle was chosen (the console names it in the step feed).
+            json(conn, 202, %{ok: true, id: barkpark.id, job_id: job.id, bundle_ref: bundle_ref})
+
+          # A resurrect is USELESS without its job (the worker pulls the
+          # bundle), so — unlike go_live's best-effort enqueue — an enqueue
+          # failure is surfaced honestly rather than a lying 202. Rare (a DB
+          # blip; the fresh row can't already hold an active resurrect job).
+          # Roll back the just-created row so it neither bills nor blocks a
+          # name re-resurrect via the live-twin guard.
+          {:error, reason} ->
+            Logger.error(
+              "resurrect: failed to enqueue resurrect job for barkpark #{barkpark.id}: " <>
+                inspect(reason)
+            )
+
+            Registry.delete_barkpark(barkpark)
+            json(conn, 500, %{error: "enqueue_failed"})
+        end
+
+      # The quota backstop fired in register_barkpark/2 — surface as 403 (never
+      # a 500), mirroring go_live.
+      {:error, :limit_reached} ->
+        json(conn, 403, %{
+          error: "limit_reached",
+          limit: Billing.barkpark_limit(team),
+          upgrade_path: "/v1/billing/checkout"
+        })
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        json(conn, 422, %{error: "invalid", details: errors(changeset)})
+    end
+  end
+
   # A request param is "present" when it is a non-blank binary (a whitespace-only
-  # name/bundle_ref is as absent as nil).
+  # name is as absent as nil).
   defp present_param?(v) when is_binary(v), do: String.trim(v) != ""
   defp present_param?(_), do: false
 
