@@ -33,11 +33,13 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import Barkpark.TenancyFixtures, only: [create_workspace!: 0]
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Bootstrap
   alias Barkpark.Plugins.OnixEdit
   alias Barkpark.Plugins.Registry
+  alias Barkpark.Tenancy
 
   @plugin_name "onixedit"
   @admin_token "barkpark-dev-token"
@@ -256,14 +258,30 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
   end
 
   # ── Block 4 — Registry.collect_* returns plugin contributions ────────────
+  #
+  # OnixEdit is off by default. The directly-rendered TOP-MENU collector gates
+  # an off-by-default plugin on a workspace-less ctx (snav-w1-gating-determinism),
+  # so to prove OnixEdit's TAB still reaches the collector end-to-end we thread a
+  # workspace_id whose effective enablement turns OnixEdit on — the same axis the
+  # render path uses (nav.ex passes `workspace_id` into the collector ctx). The
+  # DESK collectors stay unfiltered on a nil workspace (Barkpark.Structure tiers
+  # them itself), so those assertions keep the workspace-less ctx.
+
+  # Fresh workspace with OnixEdit explicitly enabled; returns the collector ctx
+  # (dataset + workspace_id, plus any extras) that surfaces OnixEdit's tab.
+  defp onixedit_enabled_ctx(extra) do
+    ws = create_workspace!()
+    {:ok, _} = Tenancy.set_workspace_plugin_settings(ws.id, %{@plugin_name => %{"enabled" => true}})
+    Map.merge(%{dataset: "production", workspace_id: ws.id}, extra)
+  end
 
   describe "Registry.collect_* — direct resolver-chain verification" do
-    test "collect_top_menu_entries includes the Bokbasen entry", ctx do
+    test "collect_top_menu_entries includes the Bokbasen entry when OnixEdit is enabled", ctx do
       if skip_unless_loaded(ctx) do
         entries =
           Registry.collect_top_menu_entries(
             baseline: [],
-            ctx: %{dataset: "production", current_path: "/studio/production"}
+            ctx: onixedit_enabled_ctx(%{current_path: "/studio/production"})
           )
 
         labels = Enum.map(entries, &(&1[:label] || &1["label"]))
@@ -273,8 +291,25 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       end
     end
 
+    test "off by default: the workspace-less top-menu collector gates OnixEdit's Bokbasen tab out",
+         ctx do
+      if skip_unless_loaded(ctx) do
+        # The determinism guarantee: with no workspace_id resolved, OnixEdit
+        # (off by default) never leaks its Bokbasen tab into the directly-
+        # rendered top menu — the workspace-less collector falls to declaration
+        # defaults (snav-w1-gating-determinism) instead of the raw installed list.
+        tab_labels =
+          Registry.collect_top_menu_entries(baseline: [], ctx: %{dataset: "production"})
+          |> Enum.map(&(&1[:label] || &1["label"]))
+
+        refute "Bokbasen" in tab_labels
+      end
+    end
+
     test "collect_desk_items includes the Pending submissions entry", ctx do
       if skip_unless_loaded(ctx) do
+        # DESK collectors stay unfiltered workspace-less (Structure re-filters),
+        # so OnixEdit's desk contribution is reachable here without a workspace.
         items =
           Registry.collect_desk_items(
             baseline: [],

@@ -91,14 +91,17 @@ defmodule Barkpark.Plugins.RegistryTopMenuTest do
       assert is_list(Registry.collect_top_menu_entries())
     end
 
-    test "OnixEdit's Bokbasen tab is reachable through the collector" do
+    test "OnixEdit is off by default — its Bokbasen tab does NOT leak on the workspace-less collector" do
+      # snav-w1-gating-determinism: `collect_top_menu_entries/0` reads the
+      # cached snapshot, computed workspace-less at registration. That path now
+      # resolves via `Enablement.effective(nil)` → declaration defaults, and
+      # OnixEdit declares `default_enabled? == false`, so its Bokbasen tab is
+      # gated OFF rather than leaking on every workspace-less surface. (Surfacing
+      # when a workspace enables OnixEdit is covered in resolver_outputs_test.)
       tabs = Registry.collect_top_menu_entries()
 
-      bokbasen = Enum.find(tabs, &(&1.label == "Bokbasen"))
-
-      assert bokbasen, "expected OnixEdit's Bokbasen tab in collected entries"
-      assert bokbasen.path == "/admin/onixedit/staleness"
-      assert bokbasen.order == 50
+      refute Enum.any?(tabs, &(&1.label == "Bokbasen")),
+             "OnixEdit is off by default; its Bokbasen tab must not surface workspace-less"
     end
   end
 end

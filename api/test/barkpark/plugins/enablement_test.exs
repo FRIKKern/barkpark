@@ -9,7 +9,11 @@ defmodule Barkpark.Plugins.EnablementTest do
       accessors (theme-preserving), and
     * the resolver-chain surfacing filter — `collect_desk_items/1`,
       `collect_top_menu_entries/1`, and the attributed collector skip
-      per-workspace-disabled plugins only when `ctx` carries a `workspace_id`.
+      per-workspace-disabled plugins when `ctx` carries a `workspace_id`. On a
+      nil/absent `workspace_id` the TOP-MENU collector falls to declaration
+      defaults (`Enablement.effective(nil)`, snav-w1-gating-determinism — it is
+      rendered directly with no downstream filter), while the desk collectors
+      stay unfiltered (their consumer `Barkpark.Structure` re-filters itself).
 
   Uses `DataCase` for the Repo sandbox and resets the singleton Registry in
   setup (the two leak channels `RegistryCase` documents) so fake-plugin
@@ -260,7 +264,7 @@ defmodule Barkpark.Plugins.EnablementTest do
   # ── Resolver-chain surfacing filter ────────────────────────────────────────
 
   describe "collect_desk_items/1 enablement filter" do
-    test "without a workspace_id every plugin's items appear (byte-identical legacy)" do
+    test "without a workspace_id every DESK plugin's items appear (Structure re-filters downstream)" do
       register!(MainEnabledPlugin, "fake-main-#{unique()}")
       register!(OffPlugin, "fake-off-#{unique()}")
 
@@ -268,6 +272,11 @@ defmodule Barkpark.Plugins.EnablementTest do
         Registry.collect_desk_items(baseline: [], ctx: %{dataset: "production"})
         |> Enum.map(& &1.label)
 
+      # DESK collectors keep the legacy nil→unfiltered contract: their consumer
+      # `Barkpark.Structure` collects unfiltered on purpose and tiers by the
+      # workspace's effective map itself (incl. a resolution mode that needs
+      # every plugin). Only the directly-rendered TOP-MENU collector falls to
+      # declaration defaults on a nil workspace (snav-w1-gating-determinism).
       assert "Main link" in labels
       assert "Off link" in labels
     end
