@@ -811,7 +811,11 @@ defmodule Barkpark.StudioChat.RecorderTest do
     test "task_progress stamps the live line; task_notification stamps the terminal status",
          %{sid: sid, recorder: recorder} do
       frame(recorder, spawn_frame("toolu_spawn"))
-      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
+      frame(
+        recorder,
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"})
+      )
 
       frame(
         recorder,
@@ -843,10 +847,19 @@ defmodule Barkpark.StudioChat.RecorderTest do
     test "task_progress persists COARSELY — an unchanged line does not rewrite the row",
          %{sid: sid, recorder: recorder} do
       frame(recorder, spawn_frame("toolu_spawn"))
-      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
       frame(
         recorder,
-        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L1"})
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"})
+      )
+
+      frame(
+        recorder,
+        task_event("task_progress", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "description" => "L1"
+        })
       )
 
       # Externally poison the row's line, then send the SAME progress line again.
@@ -856,7 +869,11 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
       frame(
         recorder,
-        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L1"})
+        task_event("task_progress", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "description" => "L1"
+        })
       )
 
       assert spawn_row(sid, "toolu_spawn").metadata["task_progress"] == "SENTINEL"
@@ -864,7 +881,11 @@ defmodule Barkpark.StudioChat.RecorderTest do
       # A genuinely CHANGED line does write through.
       frame(
         recorder,
-        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L2"})
+        task_event("task_progress", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "description" => "L2"
+        })
       )
 
       assert spawn_row(sid, "toolu_spawn").metadata["task_progress"] == "L2"
@@ -873,14 +894,21 @@ defmodule Barkpark.StudioChat.RecorderTest do
     test "task_updated (task_id ONLY) resolves the spawn row via the session-lifetime index",
          %{sid: sid, recorder: recorder} do
       frame(recorder, spawn_frame("toolu_spawn"))
-      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
+      frame(
+        recorder,
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"})
+      )
 
       # a NEW turn begins between start and completion — the index must survive it
       frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
 
       frame(
         recorder,
-        task_event("task_updated", %{"task_id" => "t", "patch" => %{"status" => "completed", "end_time" => 1}})
+        task_event("task_updated", %{
+          "task_id" => "t",
+          "patch" => %{"status" => "completed", "end_time" => 1}
+        })
       )
 
       assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "completed"
@@ -908,9 +936,19 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert StudioChat.merge_tool_metadata(sid, "toolu_ghost", %{"x" => 1}) == :noop
     end
 
-    test "every task_* frame rebroadcasts verbatim to subscribers", %{sid: sid, recorder: recorder} do
+    test "every task_* frame rebroadcasts verbatim to subscribers", %{
+      sid: sid,
+      recorder: recorder
+    } do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
-      ev = %{"type" => "system", "subtype" => "task_started", "task_id" => "t", "tool_use_id" => "x"}
+
+      ev = %{
+        "type" => "system",
+        "subtype" => "task_started",
+        "task_id" => "t",
+        "tool_use_id" => "x"
+      }
+
       frame(recorder, {:claude_chat_event, ev})
       assert_receive {:claude_chat_event, ^ev}
     end
@@ -918,7 +956,12 @@ defmodule Barkpark.StudioChat.RecorderTest do
     test "teardown flips a still-running task to interrupted (all death paths)",
          %{sid: sid, recorder: recorder} do
       frame(recorder, spawn_frame("toolu_spawn"))
-      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
+      frame(
+        recorder,
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"})
+      )
+
       assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "running"
 
       ref = Process.monitor(recorder)
@@ -933,9 +976,14 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, spawn_frame("toolu_a"))
       frame(recorder, spawn_frame("toolu_b"))
       frame(recorder, task_event("task_started", %{"task_id" => "a", "tool_use_id" => "toolu_a"}))
+
       frame(
         recorder,
-        task_event("task_notification", %{"task_id" => "b", "tool_use_id" => "toolu_b", "status" => "completed"})
+        task_event("task_notification", %{
+          "task_id" => "b",
+          "tool_use_id" => "toolu_b",
+          "status" => "completed"
+        })
       )
 
       assert StudioChat.interrupt_running_tasks(sid) == 1
@@ -944,6 +992,39 @@ defmodule Barkpark.StudioChat.RecorderTest do
       # the already-completed task is untouched, and its input survives
       assert spawn_row(sid, "toolu_b").metadata["task_status"] == "completed"
       assert spawn_row(sid, "toolu_a").metadata["input"]["prompt"] == "count them"
+    end
+
+    test "task_* frames never feed the sidebar activity surface (charter D45)",
+         %{sid: sid, recorder: recorder} do
+      # The drill-down is a transcript surface — a chatty sub-agent's heartbeat
+      # must not flicker the sidebar's activity line.
+      frame(recorder, spawn_frame("toolu_spawn"))
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+
+      frame(
+        recorder,
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"})
+      )
+
+      frame(
+        recorder,
+        task_event("task_progress", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "description" => "Running"
+        })
+      )
+
+      frame(
+        recorder,
+        task_event("task_notification", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "status" => "completed"
+        })
+      )
+
+      refute_receive {:chat_activity, ^sid, _}, 100
     end
   end
 
