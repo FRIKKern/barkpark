@@ -54,20 +54,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # settings` LiveScope has already bound `current_workspace` from the URL — the
   # panel is URL-scoped, so the switcher RE-BINDS it and every write targets the
   # workspace the admin is looking at (the mount-pinned-Default hazard is gone).
+  # SettingsLive mounts ONLY via the scoped-admin canonical
+  # `/w/:ws/p/:proj/studio/settings` — the flat `/studio/settings` spelling
+  # 302s there via AdminStudioRedirectController, so no flat-compat mount
+  # branch exists here (a hand-built dataset-full redirect target would land
+  # in the StudioLive catch-all and trips studio-link-lint).
   @impl true
-  def mount(%{"workspace_slug" => _, "project_slug" => _}, _session, socket) do
-    {:ok, assign_page(socket)}
-  end
-
-  # Flat `/studio/settings` — a compatibility entry with no scope in its URL.
-  # StudioChrome pinned the seeded Default scope; redirect to that scope's
-  # canonical scoped Settings URL so the panel is ALWAYS URL-bound (D15). An
-  # unseeded tenancy (no default workspace) has nowhere to go — render in place.
   def mount(_params, _session, socket) do
-    case scoped_settings_path(socket) do
-      {:ok, path} -> {:ok, push_navigate(socket, to: path)}
-      :error -> {:ok, assign_page(socket)}
-    end
+    {:ok, assign_page(socket)}
   end
 
   # Re-derive the URL-bound view on every scoped patch. A scope switch fired
@@ -106,18 +100,6 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     |> assign_plugin_rows()
   end
 
-  # The canonical scoped Settings URL for the socket's currently-bound scope
-  # (StudioChrome pins Default on the flat route). :error when the tenancy is
-  # unseeded so the flat route can degrade to an in-place render.
-  defp scoped_settings_path(socket) do
-    with %{slug: ws_slug} when is_binary(ws_slug) <- socket.assigns[:current_workspace],
-         %{slug: proj_slug} when is_binary(proj_slug) <- socket.assigns[:current_project],
-         dataset when is_binary(dataset) <- socket.assigns[:dataset] do
-      {:ok, "/w/#{ws_slug}/p/#{proj_slug}/d/#{dataset}/studio/settings"}
-    else
-      _ -> :error
-    end
-  end
 
   @impl true
   def handle_event("update_name", %{"plugin_name" => name}, socket) do
