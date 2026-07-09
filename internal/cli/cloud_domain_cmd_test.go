@@ -220,16 +220,18 @@ func TestRunCloudDomainJSONFailExit(t *testing.T) {
 }
 
 // TestRunCloudDomainColorRoles: with color on, an ok rung paints green, a
-// pending rung cyan (info), and a failed rung red — the same statusRole seam as every
-// other table — while the colorless run of the same envelope carries no ANSI.
+// pending rung blue (info), and a failed rung red — the same statusRole seam as every
+// other table — while the colorless run of the same envelope carries no ANSI. info
+// is BLUE (34) at the basic-16 floor, the deliberate cross-surface retint (S6): the
+// old cyan (36) is gone.
 func TestRunCloudDomainColorRoles(t *testing.T) {
 	newDomainServer(t, 200, domainFailedEnvelope)
 	colored, _, _ := runDomain(t, "table", true, "status", testInstanceID)
 	if !strings.Contains(colored, "\033[31m") { // failed → red
 		t.Fatalf("want a red (failed) cell in colored output:\n%q", colored)
 	}
-	if !strings.Contains(colored, "\033[36m") { // pending → info (cyan)
-		t.Fatalf("want a cyan (pending) cell in colored output:\n%q", colored)
+	if !strings.Contains(colored, "\033[34m") { // pending → info (blue, retinted from cyan)
+		t.Fatalf("want a blue (pending/info) cell in colored output:\n%q", colored)
 	}
 
 	newDomainServer(t, 200, domainFixture(t, "all_serving"))

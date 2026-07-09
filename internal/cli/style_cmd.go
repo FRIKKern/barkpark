@@ -39,11 +39,17 @@ func runStyle(out *writer, g globals, args []string) int {
 
 	// Colour off (NO_COLOR, --no-color, or a pipe) ⇒ the ASCII fallback mode:
 	// ASCIIGlyph glyphs (no tofu on a dumb terminal) and no SGR. Colour on ⇒ the
-	// unicode glyphs painted through lipgloss's auto-detected profile. The two
-	// modes are exactly the two committed golden fixtures.
+	// unicode glyphs painted down the resolved colour ladder. Binding lipgloss's
+	// global profile to out.colorProfile (the same BP_COLOR/auto ladder the tables
+	// paint through) makes `bp style` a faithful PREVIEW of each rung — a
+	// BP_COLOR=16 run shows exactly the pinned 16-floor swatches. One-shot: the CLI
+	// renders once and exits (same pattern as the paper render path). The per-profile
+	// golden fixtures freeze each rung byte-for-byte (style_golden_test.go).
 	mode := styleColor
 	if !out.color {
 		mode = styleNoColor
+	} else {
+		lipgloss.SetColorProfile(paperTermenvProfile(out.colorProfile))
 	}
 	io.WriteString(out.stdout, renderStyleSheet(mode))
 	io.WriteString(out.stdout, renderThemeSlate(mode))
