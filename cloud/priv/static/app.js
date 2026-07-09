@@ -2477,8 +2477,11 @@
               (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
           "</p></div>";
       }
-      body.innerHTML = rollupStrip(sum) + queueHtml + '<div id="overview-digest"></div>';
+      body.innerHTML = rollupStrip(sum) +
+        '<div id="overview-fleet-usage"></div>' +
+        queueHtml + '<div id="overview-digest"></div>';
       wireFleetRows(body);
+      loadFleetUsageStrip(); // wave-3: the whole fleet's usage from cached samples
       loadOverviewDigest();
     });
   }
@@ -8385,6 +8388,149 @@
     });
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── Wave 3 (OC16/OC18/OC6): Overview fleet usage strip ────────────────────
+  // Open Overview and the WHOLE fleet's usage answers instantly — from CACHED
+  // sampler rows, NEVER a live per-instance fan-out (the ~15s hang disqualifies
+  // it, charter OC10/OC18). This region reads GET /v1/usage/summary (the pure
+  // sampler read shaped by BarkparkCloud.Usage) and paints: one team-level
+  // instances quota bar (reusing the C10 renderer, so ok/warn/over tones + the
+  // over-state Manage-plan recovery come for free) plus one compact cell per
+  // instance with its headline meters DOCS · DB · DISK · SEATS, each stamped with
+  // its OWN sample freshness. A null measured_at is the honest "no sample yet" —
+  // never a fake zero, never fake-fresh. Refresh rides the EXISTING `fleet` SSE
+  // (TYPE_ACTIONS.fleet → invalidateFleet re-runs loadOverview), so ZERO new SSE
+  // vocabulary (OC6/D2). Append-only: does not touch the C10 / Metrics regions.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // The headline meters shown per instance cell (a subset of the nine), in the
+  // charter's order: DOCS · DB · DISK · SEATS. Labels are short for the compact
+  // cell; the number format is pulled from the shared USAGE_METERS spec so a
+  // formatting change can never drift between the strip and the Usage tab.
+  var FLEET_STRIP_METERS = [
+    { key: "documents", label: "Docs" },
+    { key: "db_size", label: "DB" },
+    { key: "disk", label: "Disk" },
+    { key: "seats", label: "Seats" }
+  ];
+
+  function fleetStripSpecFor(key) {
+    for (var i = 0; i < USAGE_METERS.length; i++) if (USAGE_METERS[i].key === key) return USAGE_METERS[i];
+    return { key: key, label: key, fmt: "count" };
+  }
+
+  // Fold the quota tones of a row's headline cells to the worst present:
+  // over > warn > ok. Returns null when no headline cell carries a quota bar
+  // (nothing to accent) — in v1 only `instances` has a ceiling, so most rows
+  // fold to null, but the fold lights up for free the moment a headline meter
+  // gains a limit.
+  function fleetStripWorst(meters) {
+    var order = { ok: 1, warn: 2, over: 3 };
+    var worst = null;
+    FLEET_STRIP_METERS.forEach(function (h) {
+      var d = usageMeterDisplay(fleetStripSpecFor(h.key), (meters || {})[h.key]);
+      if (d.bar && (worst === null || order[d.bar.tone] > order[worst])) worst = d.bar.tone;
+    });
+    return worst;
+  }
+
+  // Pure: the strip's whole display model from the /v1/usage/summary `usage`
+  // object { team, instances }. teamMeter is the raw team.instances meter (fed
+  // straight to the shared usageMeterHtml). Each row carries its headline cells +
+  // its own sample freshness; a null measured_at → noSample (the honest "no
+  // sample yet" cell — an unmetered envelope with a real absence, not a zero).
+  function fleetStripModel(usage) {
+    usage = usage || {};
+    var team = usage.team || {};
+    var teamMeter = team.instances || null;
+    var list = Array.isArray(usage.instances) ? usage.instances : [];
+    var rows = list.map(function (inst) {
+      inst = inst || {};
+      var meters = inst.meters || {};
+      var measuredAt = inst.measured_at || null;
+      var noSample = !measuredAt;
+      var cells = FLEET_STRIP_METERS.map(function (h) {
+        var d = usageMeterDisplay(fleetStripSpecFor(h.key), meters[h.key]);
+        // A compact cell shows a short em-dash for an unmetered meter rather than
+        // the full "Not yet metered" sentence the Usage tab uses.
+        return { key: h.key, label: h.label, value: d.unmetered ? "—" : d.value, unmetered: d.unmetered };
+      });
+      return {
+        id: inst.id != null ? String(inst.id) : "",
+        label: inst.name || inst.slug || inst.host || "Instance",
+        measured_at: measuredAt,
+        asOf: measuredAt ? relTime(measuredAt) : null,
+        noSample: noSample,
+        cells: cells,
+        worstState: noSample ? null : fleetStripWorst(meters)
+      };
+    });
+    var teamDisplay = teamMeter ? usageMeterDisplay(fleetStripSpecFor("instances"), teamMeter) : null;
+    return {
+      teamMeter: teamMeter,
+      // Surfaces the team bar's quota tone for a headline test without HTML.
+      teamState: teamDisplay && teamDisplay.bar ? teamDisplay.bar.tone : null,
+      rows: rows
+    };
+  }
+
+  // Pure: one instance cell. Native <a href="#instance/<id>/usage"> so the click
+  // is a plain hash navigation (no JS wiring, mirroring rollupCard). A no-sample
+  // instance renders the honest empty cell, never a wall of dashes.
+  function fleetStripCellHtml(row) {
+    var href = "#instance/" + encodeURIComponent(row.id) + "/usage";
+    if (row.noSample) {
+      return '<a class="fleet-usage-cell fleet-usage-cell--nosample" href="' + href + '">' +
+        '<div class="fleet-usage-cell-name">' + esc(row.label) + "</div>" +
+        '<div class="fleet-usage-cell-empty">No sample yet</div>' +
+      "</a>";
+    }
+    var metrics = row.cells.map(function (c) {
+      return '<span class="fleet-usage-metric">' +
+        '<span class="fleet-usage-metric-k">' + esc(c.label) + "</span>" +
+        '<span class="fleet-usage-metric-v' + (c.unmetered ? " dim" : "") + '">' + esc(c.value) + "</span>" +
+      "</span>";
+    }).join("");
+    var toneCls = row.worstState && row.worstState !== "ok" ? " fleet-usage-cell--" + row.worstState : "";
+    return '<a class="fleet-usage-cell' + toneCls + '" href="' + href + '">' +
+      '<div class="fleet-usage-cell-name">' + esc(row.label) + "</div>" +
+      '<div class="fleet-usage-cell-metrics">' + metrics + "</div>" +
+      '<div class="fleet-usage-cell-asof token-meta dim">as of ' + esc(row.asOf) + "</div>" +
+    "</a>";
+  }
+
+  // Pure: the whole strip. The team quota bar reuses usageMeterHtml with the
+  // `instances` spec — identical ok/warn/over tones and the over-state
+  // Manage-plan recovery (D25). No teamMeter → no bar (honest, never a fake).
+  function fleetStripHtml(model) {
+    var teamBar = model.teamMeter ? usageMeterHtml(fleetStripSpecFor("instances"), model.teamMeter) : "";
+    var cells = model.rows.map(fleetStripCellHtml).join("");
+    return '<section class="fleet-usage-strip" aria-label="Fleet usage">' +
+      '<div class="overview-sub"><h2>Fleet usage</h2></div>' +
+      teamBar +
+      '<div class="fleet-usage-grid">' + cells + "</div>" +
+    "</section>";
+  }
+
+  // Mount the strip into its Overview container via its OWN async fetch of the
+  // cached summary — NEVER a per-instance /usage call from Overview. Like the
+  // activity digest, a failed or empty read hides the strip rather than scaring
+  // the operator: Overview's primary content (the attention queue) stands alone,
+  // and the per-instance Usage tab is where a real failure gets full recovery.
+  function loadFleetUsageStrip() {
+    var box = $("#overview-fleet-usage");
+    if (!box) return;
+    box.innerHTML = '<div class="fleet-usage-strip fleet-usage-loading">Loading fleet usage&hellip;</div>';
+    api("GET", "/v1/usage/summary").then(function (r) {
+      box = $("#overview-fleet-usage");
+      if (!box) return; // navigated away mid-flight
+      if (!r.ok || !r.data || !r.data.usage) { box.innerHTML = ""; return; }
+      var model = fleetStripModel(r.data.usage);
+      if (!model.rows.length && !model.teamMeter) { box.innerHTML = ""; return; }
+      box.innerHTML = fleetStripHtml(model);
+    });
+  }
+
   // ── Metrics tab (S12: the on-box agent vitals beat) ─────────────────────────
   // The Metrics tab renders the monitoring truth the on-box agent reports (charter
   // Decision 13/32): CPU / memory / disk / load sparklines over a rolling window +
@@ -9697,6 +9843,13 @@
       assignableRoles: assignableRoles, membersFailureCopy: membersFailureCopy,
       memberRowHtml: memberRowHtml, invitationRowHtml: invitationRowHtml,
       membersPanelHtml: membersPanelHtml,
+      // Wave 3 (OC16/OC18): the Overview fleet usage strip. Pure model + render
+      // helpers node-pinned; the DOM mount (loadFleetUsageStrip) is browser-
+      // verified. fleetStripModel does the headline-subset selection + worst-state
+      // fold; the strip meter subset is exported so the harness pins its names.
+      fleetStripMeters: FLEET_STRIP_METERS.map(function (m) { return m.key; }),
+      fleetStripModel: fleetStripModel, fleetStripWorst: fleetStripWorst,
+      fleetStripCellHtml: fleetStripCellHtml, fleetStripHtml: fleetStripHtml,
       // OC7: the registered Settings views, so the quota bar's "Manage plan"
       // recovery route can be proved to land on a real view (never a dead end).
       settingsViews: SETTINGS_VIEWS.slice(),

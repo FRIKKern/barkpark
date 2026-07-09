@@ -2669,3 +2669,89 @@ select.form-input {
 @media (prefers-reduced-motion: reduce) {
   .usage-bar-fill { transition: none; }
 }
+
+/* ── Wave 3: Overview fleet usage strip ─────────────────────────────────────
+   The whole fleet's usage from cached samples. The team quota bar reuses the
+   C10 .usage-bar chrome (already styled above); these rules cover the strip
+   frame + the per-instance sample cells. Append-only; no token-block edits. */
+.fleet-usage-strip {
+  margin-bottom: 8px;
+}
+.fleet-usage-loading {
+  color: var(--muted-text);
+  font-size: 13px;
+  padding: 8px 0;
+}
+.fleet-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+.fleet-usage-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-left-color: var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  transition: border-color var(--t), box-shadow var(--t);
+}
+.fleet-usage-cell:hover {
+  text-decoration: none;
+  box-shadow: var(--shadow-sm);
+}
+.fleet-usage-cell--warn { border-left-color: var(--warn); }
+.fleet-usage-cell--warn:hover { border-color: hsl(var(--warn-hsl) / 0.4); }
+.fleet-usage-cell--over { border-left-color: var(--danger); }
+.fleet-usage-cell--over:hover { border-color: hsl(var(--danger-hsl) / 0.4); }
+.fleet-usage-cell--nosample {
+  border-left-color: var(--border);
+  opacity: 0.72;
+}
+.fleet-usage-cell-name {
+  font-weight: 600;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-usage-cell-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 12px;
+}
+.fleet-usage-metric {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+.fleet-usage-metric-k {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-text);
+}
+.fleet-usage-metric-v {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fleet-usage-metric-v.dim { color: var(--muted-text); font-weight: 400; }
+.fleet-usage-cell-asof {
+  font-size: 11px;
+}
+.fleet-usage-cell-empty {
+  font-size: 12px;
+  color: var(--muted-text);
+  padding: 6px 0 2px;
+}
