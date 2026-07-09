@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
 
 // bundleClock is the archive timestamp source — a var so a test can pin it.
@@ -215,7 +216,7 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 		zone = instDefaultZone
 	}
 
-	host, fqdn, code, ok := resolveArchiveTarget(out, g, kind, a, zone)
+	host, fqdn, spec, code, ok := resolveArchiveTarget(out, g, kind, a, zone)
 	if !ok {
 		return code
 	}
@@ -233,6 +234,7 @@ func runNeutralArchive(out *writer, g globals, kind string, rest []string) int {
 		Slug:           slug,
 		TeamID:         team,
 		SourceProvider: kind,
+		Spec:           spec,
 		CreatedAt:      bundleClock(),
 		DB:             bytes.NewReader(payload.DB),
 		Media:          bytes.NewReader(payload.Media),
@@ -270,43 +272,64 @@ func teamOrStandalone(team string) string {
 }
 
 // resolveArchiveTarget resolves the box's SSH host + its fqdn identity through the
-// provider seam. hetzner uses the hz client (offline-testable via the fake API);
-// azure uses the swappable escape-hatch builder; the fake provider needs no host
-// (its payload is synthetic) and returns an empty host with the normalised fqdn.
-func resolveArchiveTarget(out *writer, g globals, kind string, a *hzArgs, zone string) (host, fqdn string, code int, ok bool) {
+// provider seam, plus the resurrection SPEC HINTS ({region, server_type}) read off
+// the live box so a later resurrect can re-shape its target. hetzner uses the hz
+// client (offline-testable via the fake API) and stamps the hints from the hcloud
+// server; azure uses the swappable escape-hatch builder; the fake provider needs
+// no host (its payload is synthetic). Hints are BEST-EFFORT: any provider whose
+// server carries no shape info returns an empty BundleSpec — empty hints are
+// tolerated everywhere (charter Decision 12), never an archive failure.
+func resolveArchiveTarget(out *writer, g globals, kind string, a *hzArgs, zone string) (host, fqdn string, spec cloud.BundleSpec, code int, ok bool) {
 	switch kind {
 	case cloud.ProviderHetzner:
 		c, cok := hetznerClient(out, g)
 		if !cok {
-			return "", "", exitAuth, false
+			return "", "", cloud.BundleSpec{}, exitAuth, false
 		}
 		srv, f, terr := instTarget(hetznerCtx(), c.HCloud(), a.pos[0], zone, a.val("fqdn"))
 		if terr != nil {
-			return "", "", hzFail(out, "archive", terr), false
+			return "", "", cloud.BundleSpec{}, hzFail(out, "archive", terr), false
 		}
 		if srv == nil {
-			return "", "", useError(out, "failed", "archive "+f+": no server carries that identity (see `bp cloud hetzner instance audit`)", exitNotFound), false
+			return "", "", cloud.BundleSpec{}, useError(out, "failed", "archive "+f+": no server carries that identity (see `bp cloud hetzner instance audit`)", exitNotFound), false
 		}
 		ip := hzIPv4(srv)
 		if ip == "" {
-			return "", "", useError(out, "failed", "archive "+f+": server has no public IPv4 to collect from", exitGeneric), false
+			return "", "", cloud.BundleSpec{}, useError(out, "failed", "archive "+f+": server has no public IPv4 to collect from", exitGeneric), false
 		}
-		return ip, f, exitOK, true
+		return ip, f, hzBundleSpec(srv), exitOK, true
 	case cloud.ProviderAzure:
 		p, pcode, pok := azureEscapeProviderFromFlags(out, a)
 		if !pok {
-			return "", "", pcode, false
+			return "", "", cloud.BundleSpec{}, pcode, false
 		}
 		f := normalizeArchiveFqdn(a, zone)
 		host, herr := seamHostFor(p, a.pos[0], f)
 		if herr != nil {
-			return "", "", useError(out, "failed", "archive "+f+": "+herr.Error(), exitGeneric), false
+			return "", "", cloud.BundleSpec{}, useError(out, "failed", "archive "+f+": "+herr.Error(), exitGeneric), false
 		}
-		return host, f, exitOK, true
+		// Azure carries no shape hints through this escape-hatch seam (D20): the
+		// bundle records empty hints, which resurrect tolerates.
+		return host, f, cloud.BundleSpec{}, exitOK, true
 	default:
-		// The fake / any synthetic provider: no host, fqdn normalised from the arg.
-		return "", normalizeArchiveFqdn(a, zone), exitOK, true
+		// The fake / any synthetic provider: no host, no shape hints.
+		return "", normalizeArchiveFqdn(a, zone), cloud.BundleSpec{}, exitOK, true
 	}
+}
+
+// hzBundleSpec reads the resurrection shape hints off a live hcloud server:
+// region (location, else the datacenter's location) and server-type slug. A nil
+// server or missing fields yield empty strings — the resurrect path tolerates
+// empty hints and re-shapes onto the target provider's nearest size.
+func hzBundleSpec(srv *hcloud.Server) cloud.BundleSpec {
+	if srv == nil {
+		return cloud.BundleSpec{}
+	}
+	spec := cloud.BundleSpec{Region: hzServerLocation(srv)}
+	if srv.ServerType != nil {
+		spec.ServerType = srv.ServerType.Name
+	}
+	return spec
 }
 
 // seamHostFor finds a box's public IP through the core seam List, matching by
