@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
 // usageMetersCLIFixturePath is the shared meter-vocabulary fixture, read
@@ -284,6 +286,110 @@ func TestRunCloudUsageHelp(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "bp cloud usage") {
 		t.Fatalf("help must name the command:\n%s", stdout)
+	}
+}
+
+// usageQuotaEnvelope is a live box carrying plan limits: documents past its
+// warn line (near_limit), datasets sitting EXACTLY on its ceiling (over_limit —
+// the inclusive guard), webhooks well under both (a limit present but no state
+// tripped → live), and instances (the 9th meter) live under its cap. The
+// unmetered meters keep the honest dash.
+const usageQuotaEnvelope = `{"usage":{"meters":{` +
+	`"documents":{"value":850,"quota":1000,"warn_at":800,"source":"instance.documents","measured_at":null},` +
+	`"datasets":{"value":50,"quota":50,"warn_at":40,"source":"instance.datasets","measured_at":null},` +
+	`"webhooks":{"value":3,"quota":100,"warn_at":80,"source":"instance.webhooks.production","measured_at":null},` +
+	`"db_size":{"value":"unmetered","quota":null,"warn_at":null,"source":"telemetry.pg_size_bytes","measured_at":null},` +
+	`"disk":{"value":"unmetered","quota":null,"warn_at":null,"source":"telemetry.disk_used_percent","measured_at":null},` +
+	`"seats":{"value":2,"quota":null,"warn_at":null,"source":"control-plane.team_members","measured_at":null,"pending_invitations":0},` +
+	`"api_requests":{"value":"unmetered","quota":null,"warn_at":null,"source":"not-metered","measured_at":null},` +
+	`"bandwidth":{"value":"unmetered","quota":null,"warn_at":null,"source":"not-metered","measured_at":null},` +
+	`"instances":{"value":3,"quota":5,"warn_at":4,"source":"control-plane.team_instances","measured_at":null}}}}`
+
+// TestUsageStateToken pins the pure quota-state logic: over_limit is inclusive at
+// the ceiling (matching the create-time guard), near_limit fires at/above warn_at
+// but under the ceiling, over_limit wins when a value is past BOTH lines, either
+// limit works alone, and an unmetered/absent meter can never read as a quota
+// state (no fake ceiling on a quiet pipe).
+func TestUsageStateToken(t *testing.T) {
+	cases := []struct {
+		name    string
+		present bool
+		meter   cloudclient.UsageMeter
+		want    string
+	}{
+		{"absent meter is unmetered", false, cloudclient.UsageMeter{Value: "unmetered"}, "unmetered"},
+		{"unmetered sentinel is unmetered", true, cloudclient.UsageMeter{Value: "unmetered"}, "unmetered"},
+		{"metered, no limit is live", true, cloudclient.UsageMeter{Value: 128.0}, "live"},
+		{"metered under warn is live", true, cloudclient.UsageMeter{Value: 700.0, Quota: fp(1000), WarnAt: fp(800)}, "live"},
+		{"metered at warn is near_limit", true, cloudclient.UsageMeter{Value: 800.0, Quota: fp(1000), WarnAt: fp(800)}, "near_limit"},
+		{"metered above warn is near_limit", true, cloudclient.UsageMeter{Value: 950.0, Quota: fp(1000), WarnAt: fp(800)}, "near_limit"},
+		{"metered AT quota is over_limit (inclusive)", true, cloudclient.UsageMeter{Value: 1000.0, Quota: fp(1000), WarnAt: fp(800)}, "over_limit"},
+		{"metered above quota is over_limit", true, cloudclient.UsageMeter{Value: 1200.0, Quota: fp(1000), WarnAt: fp(800)}, "over_limit"},
+		{"over_limit wins when past both lines", true, cloudclient.UsageMeter{Value: 1000.0, Quota: fp(1000), WarnAt: fp(500)}, "over_limit"},
+		{"warn_at alone (no quota) → near_limit", true, cloudclient.UsageMeter{Value: 90.0, WarnAt: fp(80)}, "near_limit"},
+		{"quota alone (no warn) at ceiling → over_limit", true, cloudclient.UsageMeter{Value: 100.0, Quota: fp(100)}, "over_limit"},
+	}
+	for _, c := range cases {
+		if got := usageStateToken(c.meter, c.present); got != c.want {
+			t.Errorf("%s: usageStateToken = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestRunCloudUsageQuotaStates renders an envelope carrying plan limits and
+// proves the STATE cell is the quota-state token (near_limit/over_limit) with the
+// "value / quota" fraction in LIMIT, that an at-ceiling meter reads over_limit,
+// and that a limited-but-untripped meter stays "live".
+func TestRunCloudUsageQuotaStates(t *testing.T) {
+	newUsageServer(t, 200, usageQuotaEnvelope)
+	stdout, _, code := runUsage(t, "table", false, testInstanceID)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+
+	docs := usageTestRow(t, stdout, "Documents")
+	if !strings.Contains(docs, "near_limit") {
+		t.Fatalf("documents past warn_at must read near_limit:\n%s", docs)
+	}
+	if !strings.Contains(docs, "850 / 1000") {
+		t.Fatalf("documents LIMIT must show the value/quota fraction:\n%s", docs)
+	}
+
+	// datasets sits EXACTLY on its ceiling (50/50) → over_limit, not near_limit.
+	sets := usageTestRow(t, stdout, "Datasets")
+	if !strings.Contains(sets, "over_limit") {
+		t.Fatalf("datasets at exactly quota must read over_limit:\n%s", sets)
+	}
+	if strings.Contains(sets, "near_limit") {
+		t.Fatalf("an at-ceiling meter must NOT also read near_limit:\n%s", sets)
+	}
+	if !strings.Contains(sets, "50 / 50") {
+		t.Fatalf("datasets LIMIT must show the value/quota fraction:\n%s", sets)
+	}
+
+	// webhooks carries a limit but is well under warn → plain live (no fake alarm).
+	hooks := usageTestRow(t, stdout, "Webhooks")
+	if !strings.Contains(hooks, "live") || strings.Contains(hooks, "limit") {
+		t.Fatalf("a limited-but-untripped meter must stay live:\n%s", hooks)
+	}
+
+	// the 9th meter renders honestly (live, under its cap).
+	if !strings.Contains(stdout, "Instances") {
+		t.Fatalf("the instances meter row must render:\n%s", stdout)
+	}
+}
+
+// TestRunCloudUsageQuotaStateColors proves the quota-state STATE cells paint
+// through the shared statusRole seam: near_limit → warn/yellow, over_limit →
+// danger/red — the same tones a dashboard meter draws.
+func TestRunCloudUsageQuotaStateColors(t *testing.T) {
+	newUsageServer(t, 200, usageQuotaEnvelope)
+	colored, _, _ := runUsage(t, "table", true, testInstanceID)
+	if !strings.Contains(colored, "\033[33m") {
+		t.Fatalf("want a yellow (warn) near_limit STATE cell:\n%q", colored)
+	}
+	if !strings.Contains(colored, "\033[31m") {
+		t.Fatalf("want a red (danger) over_limit STATE cell:\n%q", colored)
 	}
 }
 

@@ -5079,7 +5079,15 @@ defmodule BarkparkCloud.Web.Router do
     # datasets COUNT is its length; documents + webhooks FAN OUT over the same
     # slug set and sum. All inputs are resolved BEFORE compose, so the pure shaper
     # only ever sees the (possibly failed / partial) results — never does IO.
-    datasets = usage_instance_datasets(bp)
+    #
+    # The WHOLE 1+2N inventory gather (list + documents fan-out + webhooks
+    # fan-out) shares ONE monotonic wall-clock `deadline` (`usage_fanout_budget_ms/0`,
+    # ~10s) so even a many-dataset / slow box returns a (degraded) envelope inside
+    # the SPA's ~15s skeleton budget rather than 1+2N × 15s ≈ 98s. The fan-outs
+    # themselves run CONCURRENTLY (`sum_across_datasets/3`); a source that can't be
+    # totalled inside the shared budget degrades that ONE meter (never a 500).
+    deadline = System.monotonic_time(:millisecond) + usage_fanout_budget_ms()
+    datasets = usage_instance_datasets(bp, deadline)
     slugs = usage_fanout_slugs(datasets)
 
     Usage.compose(%{
@@ -5087,9 +5095,43 @@ defmodule BarkparkCloud.Web.Router do
       seats: usage_seats(team),
       pending_invitations: usage_pending_invitations(team),
       datasets: usage_dataset_count(datasets),
-      documents: usage_instance_documents(bp, slugs),
-      webhooks: usage_instance_webhooks(bp, slugs)
+      documents: usage_instance_documents(bp, slugs, deadline),
+      webhooks: usage_instance_webhooks(bp, slugs, deadline),
+      instances: usage_instances(team)
     })
+  end
+
+  # The fleet meter (OC11) — the fleet's ONE enforcement-backed ceiling. `value`
+  # is the team's live managed-instance count; `quota` is the plan ceiling the
+  # create-time 402 guard and the quota reconciler both enforce
+  # (`Billing.barkpark_limit/1`), but ONLY when it is an honest wall to draw:
+  #
+  #   * NO active subscription → nil. An unsubscribed team's ceiling is owned by
+  #     the ENTITLEMENT gate (the 402 `no_active_subscription`), not a quota bar —
+  #     mirroring `barkpark_limit_reached?/1` returning false for it. `barkpark_limit/1`
+  #     would resolve the "none" ceiling (0) here, which is not a real quota.
+  #   * a "forever"-tier placeholder (>= 100_000) → nil. 1_000_000 is a stand-in
+  #     for "effectively unlimited", not a wall; a bar to a million is a lie.
+  #
+  # A pure control-plane read that returns even when every instance is down.
+  # Rescued so a repo hiccup degrades THIS meter (→ "unmetered"), never 500s the
+  # envelope (D51). The renderer computes over/at-limit as `value >= quota`
+  # (inclusive, matching the create-time guard); the envelope carries no `over`.
+  defp usage_instances(team) do
+    %{value: Registry.count_barkparks(team), quota: usage_instance_quota(team)}
+  rescue
+    _ -> %{value: nil, quota: nil}
+  end
+
+  defp usage_instance_quota(team) do
+    case Billing.active_subscription(team) do
+      nil ->
+        nil
+
+      %{} ->
+        limit = Billing.barkpark_limit(team)
+        if is_integer(limit) and limit < 100_000, do: limit
+    end
   end
 
   # The latest health beat, normalized — the SAME read the /telemetry route does
@@ -5123,15 +5165,20 @@ defmodule BarkparkCloud.Web.Router do
   # ── instance-inventory gatherers (C11 — real documents/datasets/webhooks) ──
   #
   # Every gatherer fetches SERVER-SIDE with the vault-stored admin token over the
-  # SAME transport seam the proxy uses (`instance_api_http_client/0`), bounded by
-  # that client's timeout (`Billing.HttpClient`: 10s connect / 15s total — well
-  # under the SPA's ~15s skeleton budget, so a hung box can never wedge the poll).
-  # In EVERY branch the admin token stays in the request HEADER and NEVER appears
-  # in a return value, a log line, or an error tuple — so it can never reach the
+  # SAME transport seam the proxy uses (`instance_api_http_client/0`). Each single
+  # call is bounded by that client's timeout (`Billing.HttpClient`: 10s connect /
+  # 15s total), but a PER-CALL bound is not enough: the inventory is 1+2N calls
+  # (list + documents fan-out + webhooks fan-out, N ≤ 24), so 15s-per-call summed
+  # SEQUENTIALLY is ~98s — far past the SPA's ~15s skeleton. So the fan-outs run
+  # CONCURRENTLY (`sum_across_datasets/3`, `@usage_fanout_concurrency` at a time)
+  # AND the WHOLE 1+2N gather shares one monotonic `deadline` (~10s aggregate);
+  # anything not totalled inside the shared budget degrades that ONE meter. In
+  # EVERY branch the admin token stays in the request HEADER and NEVER appears in
+  # a return value, a log line, or an error tuple — so it can never reach the
   # response body (the `usage_route_test` regex-scan pins this). A not-live /
-  # token-less instance has nothing to fetch → `:unmetered`; a transport or shape
-  # failure → `{:error, _}`; both let `Usage.instance_meter/2` degrade that ONE
-  # meter honestly (D51 — never a fake zero, never a 500'd envelope).
+  # token-less instance has nothing to fetch → `:unmetered`; a transport, shape,
+  # or deadline failure → `{:error, _}`; both let `Usage.instance_meter/2` degrade
+  # that ONE meter honestly (D51 — never a fake zero, never a 500'd envelope).
 
   # Cap on the per-request inventory FAN-OUT. A box with more datasets than this
   # can't be totalled inside the skeleton budget without risking a hang, so the
@@ -5139,27 +5186,82 @@ defmodule BarkparkCloud.Web.Router do
   # — the datasets COUNT itself still lands (it is one list call, not a fan-out).
   @usage_max_fanout_datasets 24
 
+  # How many per-dataset inventory calls run at once inside a fan-out. Bounded so a
+  # wide box doesn't open 24 sockets in a burst, high enough that the fan-out
+  # finishes well inside the aggregate deadline for any healthy instance.
+  @usage_fanout_concurrency 8
+
+  # Per-CALL ceiling for one dataset's fetch inside the fan-out — matches the
+  # transport's own 15s total; the aggregate deadline below is the real bound.
+  @usage_fanout_call_ms 15_000
+
+  # The AGGREGATE wall-clock budget for the entire 1+2N inventory gather. A slow /
+  # many-dataset box degrades the fanned meters instead of wedging the poll past
+  # the SPA skeleton. Overridable (tests drive it down to prove the deadline).
+  @usage_fanout_budget_default_ms 10_000
+
+  defp usage_fanout_budget_ms do
+    Application.get_env(
+      :barkpark_cloud,
+      :usage_fanout_budget_ms,
+      @usage_fanout_budget_default_ms
+    )
+  end
+
+  # Run `fun` bounded by the time remaining until `deadline`. Returns the fun's
+  # value, or `{:error, :deadline_exceeded}` when the budget is spent (or already
+  # gone). Crash-safe: any raise / exit inside `fun` becomes `{:error, :exception}`
+  # and a task that overruns is brutally killed — so a hung / crashing instance
+  # NEVER takes the caller (the request process) down. This is what makes the
+  # SHARED deadline real: `Task.async_stream`'s own `:timeout` is per-ELEMENT, so
+  # it can't bound a whole fan-out, let alone a fan-out plus the list before it.
+  defp within_deadline(deadline, fun) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :deadline_exceeded}
+    else
+      task =
+        Task.async(fn ->
+          try do
+            fun.()
+          rescue
+            _ -> {:error, :exception}
+          catch
+            _, _ -> {:error, :exception}
+          end
+        end)
+
+      case Task.yield(task, remaining) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} -> result
+        _ -> {:error, :deadline_exceeded}
+      end
+    end
+  end
+
   # The instance's dataset list, fetched once (the WorkspaceController datasets
   # envelope on the Default workspace/project — the same Default scope the flat
   # admin token operates in). `{:ok, [slug]}` on success; `:unmetered` when the
   # box is not live / token-less; `{:error, _}` on a transport or shape failure.
-  defp usage_instance_datasets(bp) do
+  defp usage_instance_datasets(bp, deadline) do
     with {:ok, base} <- instance_base_url(bp),
          {:ok, admin_token} <- instance_admin_token(bp) do
-      request = %{
-        method: :get,
-        url: base <> "/api/workspaces/default/projects/default/datasets",
-        headers: instance_api_headers(admin_token),
-        body: ""
-      }
+      within_deadline(deadline, fn ->
+        request = %{
+          method: :get,
+          url: base <> "/api/workspaces/default/projects/default/datasets",
+          headers: instance_api_headers(admin_token),
+          body: ""
+        }
 
-      case instance_api_http_client().request(request) do
-        {:ok, %{status: status, body: body}} when status in 200..299 ->
-          parse_dataset_slugs(body)
+        case instance_api_http_client().request(request) do
+          {:ok, %{status: status, body: body}} when status in 200..299 ->
+            parse_dataset_slugs(body)
 
-        _ ->
-          {:error, :unreachable}
-      end
+          _ ->
+            {:error, :unreachable}
+        end
+      end)
     else
       {:error, _} -> :unmetered
     end
@@ -5184,40 +5286,59 @@ defmodule BarkparkCloud.Web.Router do
   # Cross-dataset DOCUMENT total: sum every dataset's `total_documents` (the
   # instance analytics endpoint). Any per-dataset failure degrades the WHOLE meter
   # (a partial sum silently undercounts — a lie).
-  defp usage_instance_documents(bp, {:ok, slugs}) do
+  defp usage_instance_documents(bp, {:ok, slugs}, deadline) do
     with {:ok, base} <- instance_base_url(bp),
          {:ok, admin_token} <- instance_admin_token(bp) do
-      sum_across_datasets(slugs, fn slug -> count_documents(base, admin_token, slug) end)
+      sum_across_datasets(
+        slugs,
+        fn slug -> count_documents(base, admin_token, slug) end,
+        deadline
+      )
     else
       {:error, _} -> :unmetered
     end
   end
 
-  defp usage_instance_documents(_bp, other), do: other
+  defp usage_instance_documents(_bp, other, _deadline), do: other
 
   # Cross-dataset WEBHOOK total: sum every dataset's webhook-list length (C11 —
   # the meter is no longer `production`-only; the `instance.webhooks` source label
   # says so).
-  defp usage_instance_webhooks(bp, {:ok, slugs}) do
+  defp usage_instance_webhooks(bp, {:ok, slugs}, deadline) do
     with {:ok, base} <- instance_base_url(bp),
          {:ok, admin_token} <- instance_admin_token(bp) do
-      sum_across_datasets(slugs, fn slug -> count_webhooks(base, admin_token, slug) end)
+      sum_across_datasets(slugs, fn slug -> count_webhooks(base, admin_token, slug) end, deadline)
     else
       {:error, _} -> :unmetered
     end
   end
 
-  defp usage_instance_webhooks(_bp, other), do: other
+  defp usage_instance_webhooks(_bp, other, _deadline), do: other
 
-  # Sum a per-dataset count across the set, SHORT-CIRCUITING to `{:error, _}` the
-  # instant any dataset's fetch fails or returns an unexpected shape — a partial
-  # cross-dataset total would silently undercount, so the whole meter degrades.
-  defp sum_across_datasets(slugs, fetch_one) do
-    Enum.reduce_while(slugs, {:ok, 0}, fn slug, {:ok, acc} ->
-      case fetch_one.(slug) do
-        {:ok, n} when is_integer(n) and n >= 0 -> {:cont, {:ok, acc + n}}
-        _ -> {:halt, {:error, :dataset_fetch_failed}}
-      end
+  # Sum a per-dataset count across the set CONCURRENTLY (`@usage_fanout_concurrency`
+  # at a time), bounded by the shared `deadline`. SHORT-CIRCUITS to `{:error, _}`
+  # the instant ANY element is not a landed `{:ok, n>=0}` — a per-dataset failure,
+  # a bad shape, a per-call timeout (`{:exit, :timeout}`), or the whole fan-out
+  # overrunning the aggregate budget — because a partial cross-dataset total would
+  # silently undercount (a lie); the whole meter degrades to "unmetered" instead.
+  # `ordered: false` lets fast datasets report while a slow one is still in flight;
+  # the sum is order-independent so nothing is lost.
+  defp sum_across_datasets(slugs, fetch_one, deadline) do
+    within_deadline(deadline, fn ->
+      slugs
+      |> Task.async_stream(fetch_one,
+        max_concurrency: @usage_fanout_concurrency,
+        timeout: @usage_fanout_call_ms,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+      |> Enum.reduce_while({:ok, 0}, fn
+        {:ok, {:ok, n}}, {:ok, acc} when is_integer(n) and n >= 0 ->
+          {:cont, {:ok, acc + n}}
+
+        _other, _acc ->
+          {:halt, {:error, :dataset_fetch_failed}}
+      end)
     end)
   end
 

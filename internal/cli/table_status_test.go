@@ -40,6 +40,9 @@ func TestStatusRoleMapping(t *testing.T) {
 		// "suspended" stays reserved for the system-imposed instance state.
 		"degraded": "warn", "unknown": "warn", "suspended": "warn", "inactive": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
+		// Usage-meter quota states (bp cloud usage STATE cell): near_limit warns as
+		// a meter approaches its plan ceiling, over_limit is danger at/past it.
+		"near_limit": "warn", "over_limit": "danger",
 		// Unknown strings get NO role (never a guess).
 		"":                    "",
 		"banana":              "",

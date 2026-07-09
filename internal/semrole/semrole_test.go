@@ -13,8 +13,8 @@ import (
 var cloudTokens = []string{
 	"live", "up", "online", "ok",
 	"queued", "building", "pushing", "provisioning", "pending", "removing", "behind",
-	"degraded", "unknown", "suspended",
-	"failed", "error", "offline", "removal_failed",
+	"degraded", "unknown", "suspended", "near_limit",
+	"failed", "error", "offline", "removal_failed", "over_limit",
 }
 
 // TestForCloudVocabulary pins the cloud/deploy/health tokens moved verbatim
@@ -29,6 +29,8 @@ func TestForCloudVocabulary(t *testing.T) {
 		"behind":   "info",
 		"degraded": "warn", "unknown": "warn", "suspended": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
+		// Usage-meter quota states: near_limit warns, over_limit is danger.
+		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",
 		// Unknown strings get NO role.
 		"":                    "",
 		"banana":              "",

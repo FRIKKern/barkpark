@@ -4,9 +4,11 @@ defmodule BarkparkCloud.UsageTest do
   (charter decision D48 — two honesty tiers). These tests exercise it directly,
   no DB, no HTTP:
 
-    * the meter vocabulary is FIXED and ALWAYS fully present (8 meters)
+    * the meter vocabulary is FIXED and ALWAYS fully present (9 meters)
     * every meter is the uniform `{value, quota, warn_at, source, measured_at}`
-      shape; quota/warn_at are always nil in v1 (display precedes enforcement)
+      shape; quota/warn_at are nil for every meter WITHOUT an enforcement-backed
+      ceiling — all but `instances` (OC11), which carries the fleet's one honest
+      quota when the router resolves a real, subscription-backed limit
     * FLOW meters (api_requests, bandwidth) are ALWAYS "unmetered" — never a fake
       zero, whatever the input
     * inventory / telemetry / seats ship a real number when their source lands,
@@ -21,7 +23,7 @@ defmodule BarkparkCloud.UsageTest do
 
   alias BarkparkCloud.Usage
 
-  @meter_keys ~w(documents datasets webhooks db_size disk seats api_requests bandwidth)a
+  @meter_keys ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)a
 
   # A `Telemetry.normalize/1`-shaped envelope with a snapshot time.
   defp telemetry(overrides \\ %{}) do
@@ -41,22 +43,29 @@ defmodule BarkparkCloud.UsageTest do
   defp meters(inputs), do: Usage.compose(inputs).meters
 
   describe "envelope shape — fixed vocabulary, uniform meters" do
-    test "ALL eight meters are present, even on empty input" do
+    test "ALL nine meters are present, even on empty input" do
       m = meters(%{})
       assert Map.keys(m) |> Enum.sort() == Enum.sort(@meter_keys)
     end
 
-    test "every meter is the uniform shape; quota + warn_at are always nil" do
+    test "every meter is the uniform shape; only instances may carry a quota" do
       m = meters(full_inputs())
 
-      for {_key, meter} <- m do
+      for {key, meter} <- m do
         assert Map.has_key?(meter, :value)
-        assert Map.get(meter, :quota) == nil
-        assert Map.get(meter, :warn_at) == nil
+        assert Map.has_key?(meter, :quota)
+        assert Map.has_key?(meter, :warn_at)
         assert is_binary(meter.source)
         assert match?(nil, meter.measured_at) or is_binary(meter.measured_at)
         # value is a number OR the literal "unmetered" — never anything else.
         assert is_number(meter.value) or meter.value == "unmetered"
+
+        # Every meter WITHOUT an enforcement-backed ceiling stays quota/warn_at
+        # nil — no invented limits (OC7). That is every meter but `instances`.
+        unless key == :instances do
+          assert meter.quota == nil
+          assert meter.warn_at == nil
+        end
       end
     end
 
@@ -68,6 +77,7 @@ defmodule BarkparkCloud.UsageTest do
       assert m.db_size.source == "telemetry.pg_size_bytes"
       assert m.disk.source == "telemetry.disk_used_percent"
       assert m.seats.source == "control-plane.team_members"
+      assert m.instances.source == "control-plane.team_instances"
       assert m.api_requests.source == "not-metered"
       assert m.bandwidth.source == "not-metered"
     end
@@ -210,6 +220,78 @@ defmodule BarkparkCloud.UsageTest do
     end
   end
 
+  describe "instances meter — the fleet's one honest quota (OC11)" do
+    test "value is the live count; a resolved quota + derived warn_at ride along" do
+      m = meters(%{instances: %{value: 2, quota: 3}})
+      assert m.instances.value == 2
+      assert m.instances.quota == 3
+      # warn_at = min(quota-1, ceil(quota*0.8)) = min(2, 3) = 2
+      assert m.instances.warn_at == 2
+      # A live control-plane read — no snapshot time.
+      assert m.instances.measured_at == nil
+    end
+
+    test "no quota resolved → quota AND warn_at nil (no bar to nowhere)" do
+      # The router hands quota: nil for an unsubscribed team or the forever
+      # placeholder; the count still renders honestly.
+      m = meters(%{instances: %{value: 4, quota: nil}})
+      assert m.instances.value == 4
+      assert m.instances.quota == nil
+      assert m.instances.warn_at == nil
+    end
+
+    test "a true zero instances is a real 0, not the degrade" do
+      m = meters(%{instances: %{value: 0, quota: 3}})
+      assert m.instances.value == 0
+    end
+
+    test "warn_at boundary cases across the ceiling" do
+      # quota of 1 has no room for a warning tier → nil.
+      assert warn_at(1) == nil
+      # quota 2: min(1, ceil(1.6)=2) = 1
+      assert warn_at(2) == 1
+      # quota 3: min(2, ceil(2.4)=3) = 2
+      assert warn_at(3) == 2
+      # quota 5: min(4, ceil(4.0)=4) = 4
+      assert warn_at(5) == 4
+      # quota 10: min(9, ceil(8.0)=8) = 8
+      assert warn_at(10) == 8
+    end
+
+    test "a non-positive / garbage quota is not a real ceiling → quota + warn_at nil" do
+      for bad <- [0, -1, "3", 2.5, %{}] do
+        m = meters(%{instances: %{value: 1, quota: bad}})
+        assert m.instances.quota == nil
+        assert m.instances.warn_at == nil
+      end
+    end
+
+    test "a missing / non-integer count degrades to unmetered (never a fake zero)" do
+      assert meters(%{instances: %{value: nil, quota: 3}}).instances.value == "unmetered"
+      assert meters(%{instances: %{value: -1, quota: 3}}).instances.value == "unmetered"
+      assert meters(%{instances: %{value: "2", quota: 3}}).instances.value == "unmetered"
+      # A degraded count still carries its resolved quota — the ceiling is known
+      # even when the tally isn't.
+      assert meters(%{instances: %{value: nil, quota: 3}}).instances.quota == 3
+    end
+
+    test "an absent instances input degrades to unmetered, source still named" do
+      m = meters(%{})
+      assert m.instances.value == "unmetered"
+      assert m.instances.quota == nil
+      assert m.instances.warn_at == nil
+      assert m.instances.source == "control-plane.team_instances"
+    end
+
+    test "a garbage instances input degrades rather than crashes" do
+      for junk <- [42, "nope", {:weird, :tuple}, []] do
+        m = meters(%{instances: junk})
+        assert m.instances.value == "unmetered"
+        assert m.instances.quota == nil
+      end
+    end
+  end
+
   describe "totality — never raises, always honest" do
     test "compose/0 yields the all-unmetered envelope" do
       m = Usage.compose().meters
@@ -236,7 +318,11 @@ defmodule BarkparkCloud.UsageTest do
     end
   end
 
-  # A fully-populated input set for shape assertions.
+  # The instances meter's derived warn_at for a given resolved ceiling.
+  defp warn_at(quota), do: meters(%{instances: %{value: 1, quota: quota}}).instances.warn_at
+
+  # A fully-populated input set for shape assertions — instances carries a real
+  # quota so the shape test proves it's the ONE meter allowed a ceiling.
   defp full_inputs do
     %{
       telemetry: telemetry(),
@@ -244,7 +330,8 @@ defmodule BarkparkCloud.UsageTest do
       pending_invitations: 1,
       webhooks: {:ok, 4},
       documents: :unmetered,
-      datasets: :unmetered
+      datasets: :unmetered,
+      instances: %{value: 2, quota: 3}
     }
   end
 end
