@@ -5046,11 +5046,39 @@ defmodule BarkparkCloud.Web.Router do
           known_templates: Registry.known_templates()
         })
 
+      # Provider-neutral launch (charter Decision 9): the provider must be one we
+      # host. An unknown/malformed provider is rejected HERE — a 4xx at the button,
+      # never a burned box. Absent/blank → hetzner (the default), always valid.
+      launch_provider(conn.body_params["provider"]) == :error ->
+        json(conn, 422, %{
+          error: "invalid_provider",
+          known_providers: BarkparkCloud.Registry.Provider.kinds()
+        })
+
+      # Azure REQUIRES a verified connected azure provider row (Decision 4/9): the
+      # credential that PROVISIONS the box lives on the team's providers row, saved
+      # only after the verify-before-save preflight. No row → fail at the button
+      # with remediation, never mid-provision on a box that can't be created.
+      launch_provider(conn.body_params["provider"]) == "azure" and
+          is_nil(provider_of_kind(conn.assigns.current_team, "azure")) ->
+        json(conn, 422, %{
+          error: "provider_not_connected",
+          provider: "azure",
+          remediation: FailureCopy.provider_not_connected_remediation("azure")
+        })
+
       true ->
         team = conn.assigns.current_team
         name = conn.body_params["name"]
         slug = if(is_binary(name), do: slugify(name), else: nil)
         template = template_or_nil(conn.body_params["template"])
+        # Provider-neutral launch config (charter Decision 9). The provider was
+        # validated by the cond above (:error already 422'd), so it is a known
+        # slug or the hetzner default here; region/server_type ride through as
+        # given (nil → the claim's warm-pool fallback).
+        provider = launch_provider(conn.body_params["provider"])
+        region = string_param_or_nil(conn.body_params["region"])
+        server_type = string_param_or_nil(conn.body_params["server_type"])
 
         with true <- is_binary(name) and name != "",
              # Clean-first FQDN: `<slug>.barkpark.cloud` when the slug is free
@@ -5060,7 +5088,12 @@ defmodule BarkparkCloud.Web.Router do
              # claim_json reads the DNS label back off the stored `url` so the
              # provisioned FQDN == the customer-facing FQDN (clean or suffixed).
              {:ok, barkpark} <-
-               Registry.register_managed_barkpark(team, name, slug, template: template) do
+               Registry.register_managed_barkpark(team, name, slug,
+                 template: template,
+                 provider: provider,
+                 region: region,
+                 server_type: server_type
+               ) do
           # activity-audit-log: record `barkpark.go_live` POST-COMMIT, best-effort.
           # register_managed_barkpark is clean-first-then-suffix: its FIRST insert
           # may hit the url unique index and RECOVER by retrying with the suffixed
@@ -5270,6 +5303,33 @@ defmodule BarkparkCloud.Web.Router do
   defp template_or_nil(t) when is_binary(t) and t != "", do: t
   defp template_or_nil(_), do: nil
 
+  # Normalize the launch `provider` param (charter Decision 9). Absent/blank → the
+  # hetzner default (a provider-less launch is Hetzner, as before). A known slug →
+  # itself. Anything else (an unknown string, a non-binary) → `:error`, which the
+  # go_live cond maps to a 422 invalid_provider before any row/box exists.
+  defp launch_provider(p) when is_binary(p) do
+    cond do
+      p == "" -> "hetzner"
+      p in BarkparkCloud.Registry.Provider.kinds() -> p
+      true -> :error
+    end
+  end
+
+  defp launch_provider(nil), do: "hetzner"
+  defp launch_provider(_), do: :error
+
+  # A request param coerced to a trimmed non-blank binary, else nil — so a bare or
+  # whitespace-only region/server_type leaves the column NULL (the claim's
+  # warm-pool fallback), never persists "".
+  defp string_param_or_nil(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp string_param_or_nil(_), do: nil
+
   defp barkpark_json(bp, provision \\ nil, deprovision \\ nil) do
     base = %{
       id: bp.id,
@@ -5284,6 +5344,12 @@ defmodule BarkparkCloud.Web.Router do
       git_commit: bp.git_commit,
       last_seen_at: bp.last_seen_at,
       team_id: bp.team_id,
+      # Provider-neutral hosting (charter Decision 9): the cloud this box lives on
+      # (the SPA fleet provider-chip) + the launch placement/size. Identity only —
+      # never a status axis. `provider` defaults to hetzner on legacy rows.
+      provider: bp.provider,
+      region: bp.region,
+      server_type: bp.server_type,
       # Billing-suspension axis (subscription-billing) — the dashboard renders a
       # "suspended (billing)" state distinct from a health-down box.
       suspended: bp.suspended,
@@ -6392,7 +6458,7 @@ defmodule BarkparkCloud.Web.Router do
   # globally unique or two tenants collide. This is the SAME value stored in the
   # Barkpark's `:url`, so the provisioned FQDN == the customer-facing FQDN.
   defp claim_json(job, barkpark) do
-    %{
+    base = %{
       job_id: job.id,
       # claim-fence (bp-c55): the token stamped on this claim. The worker echoes it
       # back on succeed/fail/release so the server can fence a swept-and-re-claimed
@@ -6400,8 +6466,15 @@ defmodule BarkparkCloud.Web.Router do
       claim_token: job.claim_token,
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
-      region: Registry.default_region(),
-      server_type: Registry.default_server_type(),
+      # Region/size come from the row (charter Decision 9), with a PROVIDER-AWARE
+      # fallback when a launch didn't pin them: a Hetzner/default row emits the
+      # warm-pool defaults (nbg1/cax11 — the claim payload stays byte-identical),
+      # while a non-Hetzner row emits nil so the worker's provider fills its OWN
+      # platform defaults (azure: eastus/Standard_B1s, env-overridable). Leaking a
+      # Hetzner slug into an azure claim would fail at ARM, in the job, after the
+      # button — the exact failure Decision 17 exists to prevent.
+      region: claim_region(barkpark),
+      server_type: claim_server_type(barkpark),
       # The decrypted team + instance env, merged most-specific-wins. The worker
       # bakes these into the box's runtime env at provision time. Resolved at
       # CLAIM time so a retry / stale-claim re-pick carries rotated values. Sent
@@ -6413,7 +6486,47 @@ defmodule BarkparkCloud.Web.Router do
       # no bootstrap; an OLD worker ignores the key.
       template: barkpark.template
     }
+
+    add_provider_claim_fields(base, barkpark)
   end
+
+  # The claim's region/size with a provider-aware fallback. Only hetzner (and the
+  # legacy nil provider) may inherit the warm-pool defaults; any other provider
+  # emits the pinned value or nil — the Go provider owns its platform defaults.
+  defp claim_region(%Barkpark{provider: provider, region: region})
+       when provider in [nil, "hetzner"],
+       do: region || Registry.default_region()
+
+  defp claim_region(%Barkpark{region: region}), do: region
+
+  defp claim_server_type(%Barkpark{provider: provider, server_type: server_type})
+       when provider in [nil, "hetzner"],
+       do: server_type || Registry.default_server_type()
+
+  defp claim_server_type(%Barkpark{server_type: server_type}), do: server_type
+
+  # Fold the provider routing fields into the claim payload (charter Decision 9).
+  #
+  # Hetzner (the default) → the payload is BYTE-IDENTICAL to the pre-provider-neutral
+  # shape: no `kind`, no `credentials`. The Go worker reads a missing/"hetzner" kind
+  # as the existing warm-pool path, so the prod Hetzner claim is unchanged.
+  #
+  # Azure → `kind: "azure"` routes the worker to a pool-size-zero cold create, and
+  # `credentials` carries the DECRYPTED 4-field service-principal (the single
+  # sanctioned plaintext crossing, mirroring env-at-claim above) so the worker
+  # resolves the provider through `ProviderFor` at provision time. The credential is
+  # omitted only if the team's azure provider row vanished after launch — the worker
+  # then fails the job with an honest incomplete-credentials error rather than crash.
+  defp add_provider_claim_fields(base, %Barkpark{provider: "azure"} = barkpark) do
+    base = Map.put(base, :kind, "azure")
+
+    case Registry.resolved_azure_credentials_for_barkpark(barkpark) do
+      creds when is_map(creds) -> Map.put(base, :credentials, creds)
+      _ -> base
+    end
+  end
+
+  defp add_provider_claim_fields(base, _barkpark), do: base
 
   defp env_var_json(%Registry.EnvVar{} = e) do
     # value_encrypted is NEVER serialized — the value stays at rest. The list

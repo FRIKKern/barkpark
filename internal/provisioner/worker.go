@@ -135,6 +135,20 @@ type JobSpec struct {
 	Slug       string `json:"slug"`
 	Region     string `json:"region"`
 	ServerType string `json:"server_type"`
+	// Kind is the provider slug the box is provisioned into (charter Decision 9).
+	// Empty OR "hetzner" → the existing Hetzner warm-pool path, byte-for-byte
+	// unchanged (an OLD control plane omits the key, so the zero value MUST route
+	// Hetzner). "azure" → an honest pool-size-zero cold create resolved through
+	// cloud.ProviderFor at provision time. omitempty keeps the Hetzner claim
+	// payload identical to the pre-provider-neutral shape.
+	Kind string `json:"kind,omitempty"`
+	// Credentials is the provider's per-kind credential map (Azure's decrypted
+	// {tenant_id,client_id,client_secret,subscription_id} 4-tuple), the single
+	// sanctioned plaintext crossing on the worker-token internal channel. Present
+	// ONLY for a provider that reads auth from credentials (azure); Hetzner reads
+	// HCLOUD_TOKEN from the worker env, so its payload omits this key entirely.
+	// NEVER logged — it is handed straight to the provider factory.
+	Credentials map[string]string `json:"credentials,omitempty"`
 	// Template is the OPTIONAL content-template slug (dwb-4) the owner picked at
 	// launch, validated by the control plane against the known catalog. Empty →
 	// no content bootstrap: the pre-template behavior exactly.
