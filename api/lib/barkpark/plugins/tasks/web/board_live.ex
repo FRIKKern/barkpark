@@ -379,6 +379,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      )}
   end
 
+  # × collapses to a QUIET deck — the explicit "none" sentinel, because the
+  # bare URL means "default" and the default auto-expands in-flight cards.
   def handle_event("expand-close", _params, socket) do
     {:noreply,
      patch_to(
@@ -386,7 +388,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        socket.assigns.group_by,
        socket.assigns.filters,
        socket.assigns.peek && socket.assigns.peek.doc_id,
-       nil
+       "none"
      )}
   end
 
@@ -1663,6 +1665,44 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         margin: 0 0 3px; padding-left: 0; -webkit-line-clamp: 2;
       }
       .bp-gantt-detail .bp-crits--row { margin: 0; padding-left: 0; }
+      /* Wave 23: criteria as CHECKS + GANTT PARTS. display:contents lets each
+         criterion contribute a label cell and a track cell to the row grid,
+         so segments align with the task bars above them. */
+      .bp-gantt-crits { display: contents; }
+      .bp-gantt-crit-label {
+        display: flex; align-items: center; gap: 6px; min-width: 0;
+        padding: 1px 4px 1px calc(var(--d) * 12px + 24px);
+        font-size: 11px; color: var(--text);
+      }
+      .bp-gantt-crit-label .gi { font-size: 10px; }
+      .bp-gantt-crit-label.is-met { color: var(--muted-text); }
+      .bp-gantt-crit-label.is-met .bp-crits-t {
+        text-decoration: line-through;
+        text-decoration-color: color-mix(in srgb, var(--muted-text) 45%, transparent);
+      }
+      .bp-gantt-track--crit {
+        height: 7px; background: transparent; border-right: 0;
+        align-self: center;
+      }
+      .bp-gantt-bar--crit {
+        position: absolute; top: 0; bottom: 0; border-radius: 999px;
+        background: transparent;
+        border: 1px solid color-mix(in srgb, var(--muted-text) 40%, transparent);
+      }
+      .bp-gantt-bar--crit.is-met {
+        background: var(--ok); border-color: var(--ok); opacity: 0.85;
+      }
+      .bp-gantt-bar--crit.is-next {
+        background: var(--info-soft); border-color: var(--info);
+        animation: bp-crit-pulse 2s ease-in-out infinite;
+      }
+      @keyframes bp-crit-pulse {
+        0%   { opacity: 0.45; }
+        50%  { opacity: 1; }
+        100% { opacity: 0.45; }
+      }
+      /* while expanded, the plain checklist yields to the chart's segments */
+      .bp-phone.is-expanded > .bp-crits { display: none; }
       /* Wave 19: the card READS, not just scans — the root's brief under the
          title, the ongoing task's text under its row, a paper chip when the
          detailed description lives as a PortableDoc design paper. */
@@ -1957,6 +1997,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .m-bump { animation: none; }
         .bp-notice { animation: none; }
         .bp-peek { animation: none; }
+        .bp-gantt-bar--crit.is-next { animation: none; opacity: 1; }
         .bp-chip { transition: none; }
       }
     </style>
@@ -2801,10 +2842,17 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   </span>
                 </div>
 
-                <div :if={row[:desc] || row[:crits]} class="bp-gantt-detail" data-role="gantt-detail">
-                  <p :if={row[:desc]} class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
-                  <ul :if={row[:crits]} class="bp-crits bp-crits--row" data-role="family-criteria">
-                    <li :for={c <- row.crits} class={c.met && "is-met"} data-role="family-criterion">
+                <div :if={row[:desc]} class="bp-gantt-detail" data-role="gantt-detail">
+                  <p class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
+                </div>
+
+                <div :if={row[:crits]} class="bp-gantt-crits" data-role="gantt-criteria">
+                  <%= for {c, i} <- Enum.with_index(row.crits) do %>
+                    <span
+                      class={["bp-gantt-crit-label", c.met && "is-met"]}
+                      style={"--d: #{row.depth};"}
+                      data-role="gantt-criterion"
+                    >
                       <span
                         class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")}
                         aria-hidden="true"
@@ -2812,8 +2860,20 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                         <%= if c.met, do: "✓", else: "○" %>
                       </span>
                       <span class="bp-crits-t"><%= c.text %></span>
-                    </li>
-                  </ul>
+                    </span>
+                    <div class="bp-gantt-track bp-gantt-track--crit">
+                      <span
+                        class={[
+                          "bp-gantt-bar--crit",
+                          c.met && "is-met",
+                          !c.met && i == next_unmet_index(row.crits) && "is-next"
+                        ]}
+                        data-role="gantt-crit-bar"
+                        style={crit_seg_style(row, i, length(row.crits))}
+                      >
+                      </span>
+                    </div>
+                  <% end %>
                 </div>
               </div>
               <p :if={card[:family] && card.family.more > 0} class="bp-fam-more">
@@ -2923,6 +2983,13 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp deck_state(:in_progress), do: "in flight"
   defp deck_state(col), do: col |> Atom.to_string() |> String.replace("_", " ")
 
+  # Which cards are expanded (wave 23): with NO ?expand= param the flight
+  # deck greets you OPEN — every in-flight card renders its gantt by default.
+  # An explicit ?expand=<id> narrows to that one card; the "none" sentinel
+  # (what × patches to) collapses everything. The bare URL stays the default
+  # experience.
+  defp expanded?(nil, card), do: card.col == :in_progress
+  defp expanded?("none", _card), do: false
   defp expanded?(expanded, card), do: is_binary(expanded) and expanded == card.doc_id
 
   # ── wave 21: the gantt maths (pure) ─────────────────────────────────────────
@@ -2943,10 +3010,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         color_role: card.color_role,
         glyph: card.glyph,
         worker: card.worker,
-        # the root's own brief/checklist already render above the chart —
-        # never doubled as a gantt detail row
+        # the root's brief renders above the chart (never doubled); its
+        # CRITERIA ride the chart as segment bars when the root is claimed
+        # (wave 23) — the plain checklist hides while expanded.
         desc: nil,
-        crits: nil,
+        crits: (card.lifecycle_status == "in_progress" && card[:criteria_list]) || nil,
         created_at: card[:created_at],
         updated_at: card.updated_at
       }
@@ -2994,6 +3062,19 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   defp gantt_ts(_), do: nil
 
   defp clamp_pct(v, lo, hi), do: v |> max(lo) |> min(max(hi, lo)) |> Kernel.*(1.0)
+
+  # Criteria as GANTT PARTS (wave 23): criterion i of n owns the i-th slice of
+  # its task's bar — not a time claim, a progress geometry riding the same
+  # track. Met slices fill; the FIRST unmet slice is "next" and pulses.
+  defp crit_seg_style(row, i, n) do
+    n = max(n, 1)
+    seg = row.width / n
+    left = row.left + seg * i
+    width = max(seg - 0.6, 0.8)
+    "left: #{Float.round(left, 2)}%; width: #{Float.round(width, 2)}%;"
+  end
+
+  defp next_unmet_index(crits), do: Enum.find_index(crits, &(!&1.met))
 
   # ── Render helpers ──────────────────────────────────────────────────────────
 
