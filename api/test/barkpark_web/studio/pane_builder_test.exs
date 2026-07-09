@@ -381,5 +381,54 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       assert editor.type == "book"
       assert editor.doc.doc_id =~ "b1"
     end
+
+    test "a disabled plugin's owned type reveals via …Rest when documents exist" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+      dataset = "pb_disabled_rest_book"
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      insert_schema!(%{
+        name: "book",
+        title: "Books",
+        icon: "book",
+        visibility: "private",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}]
+      })
+
+      {:ok, _} =
+        Content.create_document(
+          "book",
+          %{"_id" => "b1", "title" => "Book 1"},
+          dataset,
+          source: :studio,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      # OnixEdit stays OFF by declaration default (`default_enabled?: false`) —
+      # no settings write. Its owned private `book` type is rejected from the
+      # Settings group by OWNERSHIP and, holding a document, falls to the …Rest
+      # census: hidden-but-honest, never silently dropped.
+      {panes, editor} = PaneBuilder.build(dataset, ["book", "b1"], scope: scope)
+
+      root = hd(panes)
+
+      refute Enum.any?(root.items, &(Map.get(&1, :id) in ["book", "plugins"])),
+             "a disabled plugin surfaces neither its type nor a Plugins column at the root"
+
+      # The reveal: the stale top-level ["book", id] path normalizes UNDER the
+      # …Rest node — root highlights …Rest and the walk drills to the doc.
+      assert root.selected == "rest",
+             "the stale path is normalized so …Rest is the selected reveal"
+
+      assert length(panes) == 3, "root → …Rest → book: the census column is drilled open"
+      assert List.last(panes).type_name == "book"
+
+      assert is_map(editor), "the disabled plugin's doc still opens its editor"
+      assert editor.type == "book"
+      assert editor.doc.doc_id =~ "b1"
+    end
   end
 end
