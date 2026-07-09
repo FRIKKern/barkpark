@@ -267,9 +267,24 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.scheduleBackstop(), m.refetchCmd(false))
 }
 
-// Update is the single message reducer. Navigation and expansion mutate
-// UIState in place; the live messages drive the refetch loop in live.go.
+// Update is the single message entry point: it runs the reducer, then re-syncs
+// the board's remembered viewport top (UIState.SpineScroll) against whatever
+// the message changed — cursor, folds, rows, geometry — so the next paint
+// slides minimally instead of re-centering (Amendment 8). One sync point after
+// EVERY message means no cursor-mutating path can forget it.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	nm, cmd := m.reduce(msg)
+	if mm, ok := nm.(Model); ok {
+		w, h := mm.boardGeometry()
+		mm.ui.SpineScroll = SpineTopFor(mm.board, mm.ui, w, h, mm.now())
+		return mm, cmd
+	}
+	return nm, cmd
+}
+
+// reduce is the single message reducer. Navigation and expansion mutate
+// UIState in place; the live messages drive the refetch loop in live.go.
+func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -1093,8 +1108,9 @@ func (m Model) frameStopCount() int {
 	return len(stops)
 }
 
-// moveStopCursor steps the top frame's stop cursor by delta and puts the frame
-// into cursor-follow (Scroll=scrollFollow), clamped to the stop list.
+// moveStopCursor steps the top frame's stop cursor by delta, clamped to the
+// stop list, then slides the viewport the MINIMUM needed to keep the stop
+// visible (Amendment 8 — the prose holds still while the cursor walks it).
 func (m *Model) moveStopCursor(delta int) {
 	n := m.frameStopCount()
 	if n <= 0 || len(m.stack) == 0 {
@@ -1109,12 +1125,13 @@ func (m *Model) moveStopCursor(delta int) {
 		c = n - 1
 	}
 	top.Cursor = c
-	top.Scroll = scrollFollow
+	m.followStop(top)
 }
 
-// setTopCursor jumps the top frame's stop cursor (g/G) into cursor-follow,
-// clamped to the stop list. With no stops it falls back to the absolute top
-// (Scroll=0) so g on a stop-less frame still scrolls to the beginning.
+// setTopCursor jumps the top frame's stop cursor (g/G), clamped to the stop
+// list, sliding the viewport minimally to the target. With no stops it falls
+// back to the absolute top (Scroll=0) so g on a stop-less frame still scrolls
+// to the beginning.
 func (m *Model) setTopCursor(c int) {
 	if len(m.stack) == 0 {
 		return
@@ -1131,7 +1148,30 @@ func (m *Model) setTopCursor(c int) {
 	if c > n-1 {
 		c = n - 1
 	}
-	top.Cursor, top.Scroll = c, scrollFollow
+	top.Cursor = c
+	m.followStop(top)
+}
+
+// followStop writes the frame's Scroll as the minimal slide that keeps the
+// cursor stop's line in view (Amendment 8 — never a re-centering jump). The
+// prior top is the frame's absolute Scroll; a frame still in cursor-follow
+// (Scroll<0, e.g. restored older state) seeds from the follow top currently
+// painted so the first press moves smoothly from where the eye is.
+func (m *Model) followStop(top *Frame) {
+	body, stops := m.frameContent(*top, m.readingWidth(), m.now())
+	avail := m.readingViewportHeight()
+	if avail < 1 {
+		avail = 1
+	}
+	prev := top.Scroll
+	if prev < 0 {
+		prev = followTop(len(body), stops, top.Cursor, avail)
+	}
+	line := 0
+	if top.Cursor >= 0 && top.Cursor < len(stops) {
+		line = stops[top.Cursor].Line
+	}
+	top.Scroll = slideTop(prev, line, avail, len(body))
 }
 
 // freeScroll pans the reading viewport by delta lines WITHOUT moving the cursor

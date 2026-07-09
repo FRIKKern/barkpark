@@ -1,6 +1,9 @@
 package taskboard
 
 import (
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1420,5 +1423,67 @@ func TestEnterOnMoreLineExpandsSection(t *testing.T) {
 	key := rows[moreAt].docID
 	if !m.sectionExpandedByKey(key) {
 		t.Fatalf("section %q not in modeExpanded after enter on its fold line", key)
+	}
+}
+
+// TestBoardScrollsOneLineAtATime is the Amendment 8 interaction guard: driving
+// j through a tall flat board, the viewport holds STILL while the cursor walks
+// the visible window, then slides exactly ONE line per press once the cursor
+// rides the bottom edge — never the old re-centering jump. k back up mirrors
+// it: still first, then one line per press at the top edge.
+func TestBoardScrollsOneLineAtATime(t2 *testing.T) {
+	tasks := make([]Task, 40)
+	for i := range tasks {
+		tasks[i] = readyTask(fmt.Sprintf("row-%02d", i))
+	}
+	m := testModel(activeOrphans(tasks...))
+	m.ui.Conn = ConnLive
+	m.ui.LastSync = time.Unix(1, 0)
+	m.now = func() time.Time { return time.Unix(2, 0) }
+	m.width, m.height = 80, 24
+
+	above := func() int {
+		frame := ansi.Strip(m.View())
+		mm := regexp.MustCompile(`↑ (\d+) more above`).FindStringSubmatch(frame)
+		if mm == nil {
+			return 0
+		}
+		n, _ := strconv.Atoi(mm[1])
+		return n
+	}
+
+	if got := above(); got != 0 {
+		t2.Fatalf("fresh board should start at the top, got %d hidden above", got)
+	}
+	// Walk down 30 rows (adjacent single-line stops): each press may scroll the
+	// window by AT MOST one line, and it must not scroll at all until the
+	// cursor reaches the bottom edge.
+	prev, scrolled := 0, false
+	for i := 0; i < 30; i++ {
+		m, _ = step(t2, m, runes("j"))
+		got := above()
+		if got < prev || got > prev+1 {
+			t2.Fatalf("press %d: hidden-above went %d -> %d, want a slide of at most one line", i, prev, got)
+		}
+		if got > prev {
+			scrolled = true
+		}
+		prev = got
+	}
+	if !scrolled {
+		t2.Fatalf("30 presses on a 40-row board at height 24 never scrolled — the window is stuck")
+	}
+	// Walking back up: the window holds still (cursor descends through the
+	// visible rows) before sliding one line per press at the top edge.
+	for i := 0; i < 30; i++ {
+		m, _ = step(t2, m, runes("k"))
+		got := above()
+		if got > prev || got < prev-1 {
+			t2.Fatalf("k press %d: hidden-above went %d -> %d, want a slide of at most one line", i, prev, got)
+		}
+		prev = got
+	}
+	if got := above(); got != 0 {
+		t2.Fatalf("after walking back to the top %d lines stayed hidden above", got)
 	}
 }

@@ -80,6 +80,36 @@ func Compose(m Model) string {
 	return sb.String()
 }
 
+// boardGeometry is the width/height composeAt hands Render for the board
+// frame — Compose's gutter/clamp math re-derived in one place so Update's
+// spine-scroll sync (SpineTopFor) is computed against the same surface the
+// next View paints. A drift here is self-healing (Render clamps the cursor
+// into view at paint time), but keep it byte-equal to Compose/composeAt.
+func (m Model) boardGeometry() (int, int) {
+	width, height := m.width, m.height
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	gl, gr := 1, 3
+	if width < 56 {
+		gl, gr = 1, 2
+	}
+	width, height = width-gl-gr, height-1
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	if m.wide {
+		return boardPaneWidth, height - 1 // left pane, under the breadcrumb
+	}
+	return width, height
+}
+
 func composeAt(m Model, width, height int) string {
 	if width < 20 {
 		width = 20

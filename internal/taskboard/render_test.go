@@ -767,3 +767,33 @@ func TestFirstPaintGoldens(t *testing.T) {
 		}
 	}
 }
+
+// TestSlideTopMinimalScroll pins the Amendment 8 windowing math: inside the
+// window the top never moves; at an edge it follows the cursor 1:1; jumps land
+// with the one-line affordance margin; and a cursor-less body just clamps.
+func TestSlideTopMinimalScroll(t *testing.T) {
+	cases := []struct {
+		name                       string
+		prev, cursorLine, avail, n int
+		want                       int
+	}{
+		{"fits whole", 5, 3, 20, 10, 0},
+		{"inside window holds still", 10, 15, 10, 100, 10},
+		{"at bottom margin holds", 10, 18, 10, 100, 10},
+		{"one past bottom margin slides one", 10, 19, 10, 100, 11},
+		{"two past bottom margin slides two", 10, 20, 10, 100, 12},
+		{"one above top margin slides one", 10, 10, 10, 100, 9},
+		{"at top margin holds", 10, 11, 10, 100, 10},
+		{"jump far below lands cursor above the ↓ margin", 0, 50, 10, 100, 42},
+		{"jump to line 0 unclamps fully", 43, 0, 10, 100, 0},
+		{"prev clamped when rows shrank", 95, -1, 10, 100, 90},
+		{"no cursor keeps prev", 7, -1, 10, 100, 7},
+		{"tiny viewport drops the margin", 5, 7, 3, 100, 5},
+	}
+	for _, tc := range cases {
+		if got := slideTop(tc.prev, tc.cursorLine, tc.avail, tc.n); got != tc.want {
+			t.Errorf("%s: slideTop(%d,%d,%d,%d) = %d, want %d",
+				tc.name, tc.prev, tc.cursorLine, tc.avail, tc.n, got, tc.want)
+		}
+	}
+}

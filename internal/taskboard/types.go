@@ -239,6 +239,14 @@ type UIState struct {
 	Conn           ConnState
 	LastSync       time.Time
 	Strip          ActionStrip // the one-line action status above the footer
+	// SpineScroll is the board viewport's remembered top line (Amendment 8:
+	// minimal scrolling — the cursor walks a stable window, and the window
+	// slides only when the cursor would leave it, 1:1 with the cursor's line
+	// movement, never a re-centering jump). The shell re-syncs it after every
+	// update via SpineTopFor; Render recomputes the same slide at paint time,
+	// so a stale value only ever costs one self-healing clamp, never a hidden
+	// cursor.
+	SpineScroll int
 	// Frame is the animation frame index: advanced by the heartbeat tick ONLY
 	// while the board is alive (Alive()), 0 at rest and in cold paints.
 	// Injected like now() so motion states golden deterministically.
