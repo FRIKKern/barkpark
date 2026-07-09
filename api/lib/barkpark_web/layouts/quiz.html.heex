@@ -11,9 +11,15 @@
        Studio chrome): this is the public player/host page. */
     *, *::before, *::after { box-sizing: border-box; }
     :root {
-      --bg: #0f1020; --panel: #1a1c33; --ink: #f4f4fb; --ink-soft: #a6a8c8;
-      --c0: #e2483d; --c1: #2b7fff; --c2: #f5a524; --c3: #2bb673;
-      --accent: #7c5cff;
+      /* Game-surface palette: the projector-dark chrome + Kahoot-style 4-colour
+         answer vocabulary are the game's OWN identity, not Studio chrome — the
+         quadrant hues are load-bearing game semantics (phones and projector must
+         agree on them), the same class of documented exception as the terminal
+         traffic dots. Re-skinning the CHROME vars (--bg/--panel/--ink*) onto
+         derive(theme) is filed as hq-w2-theme-reskin (charter Decision E). */
+      --bg: #0f1020; --panel: #1a1c33; --ink: #f4f4fb; --ink-soft: #a6a8c8; /* lit-allow */
+      --c0: #e2483d; --c1: #2b7fff; --c2: #f5a524; --c3: #2bb673; /* lit-allow */
+      --accent: #7c5cff; /* lit-allow */
     }
     body {
       margin: 0; background: var(--bg); color: var(--ink);
@@ -38,13 +44,13 @@
     @media (max-width: 560px) { .q-grid { grid-template-columns: 1fr; } }
     .q-choice {
       appearance: none; border: 0; cursor: pointer; text-align: left;
-      color: #fff; font-size: 1.1rem; font-weight: 600; padding: 22px 20px;
+      color: #fff; font-size: 1.1rem; font-weight: 600; padding: 22px 20px; /* lit-allow: white-on-quadrant is game vocabulary */
       border-radius: 14px; min-height: 88px; transition: transform .08s ease, filter .12s ease;
       font-family: inherit; width: 100%;
     }
     .q-choice:hover { filter: brightness(1.08); }
     .q-choice:active { transform: scale(0.98); }
-    .q-choice.is-picked { outline: 3px solid #fff; }
+    .q-choice.is-picked { outline: 3px solid #fff; } /* lit-allow: picked ring rides the game palette */
     .q-choice[disabled] { cursor: default; opacity: 0.92; }
     .c0 { background: var(--c0); } .c1 { background: var(--c1); }
     .c2 { background: var(--c2); } .c3 { background: var(--c3); }
