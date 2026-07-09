@@ -451,6 +451,45 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  MERGE a metadata patch onto a tool row, matched by its metadata `tool_use_id`
+  (charter D45 — the agent-lifecycle merge seam). This is how a Task/Agent
+  spawn row grows its lifecycle facts: the CLI emits
+  `task_started`/`task_progress`/`task_updated`/`task_notification` frames that
+  correlate to the spawn by `tool_use_id`, and each stamps `task_id`,
+  `task_status`, and the live `task_progress` line onto the row that spawned it.
+
+  UNLIKE `update_tool_input/3`, this MERGES into the existing metadata rather than
+  replacing a key — so the spawn's `{description, prompt, subagent_type}` input is
+  never clobbered (calling `update_tool_input/3` here would destroy it). `:noop`
+  when no row matches — a lifecycle frame for a spawn we never persisted (e.g. it
+  arrived before its assistant frame) must not raise.
+  """
+  @spec merge_tool_metadata(String.t(), String.t(), map()) ::
+          {:ok, Message.t()} | {:error, term()} | :noop
+  def merge_tool_metadata(session_id, tool_use_id, patch)
+      when is_binary(session_id) and is_binary(tool_use_id) and is_map(patch) do
+    row =
+      Repo.one(
+        from(m in Message,
+          where:
+            m.session_id == ^session_id and
+              fragment("?->>'tool_use_id' = ?", m.metadata, ^tool_use_id),
+          limit: 1
+        )
+      )
+
+    case row do
+      nil ->
+        :noop
+
+      %Message{} = m ->
+        m
+        |> Ecto.Changeset.change(metadata: Map.merge(m.metadata || %{}, patch))
+        |> Repo.update()
+    end
+  end
+
+  @doc """
   True when a tool_use `input` is TodoWrite-shaped (charter D39): a non-empty
   `todos` list where every item is a map carrying a `content` and a `status`.
   Dispatch on SHAPE, never a tool NAME — names are host-binary-dependent (the
@@ -613,6 +652,37 @@ defmodule Barkpark.StudioChat do
       |> Repo.update_all(set: [pending_approvals: 0, updated_at: DateTime.utc_now()])
 
       length(pending)
+    end)
+    |> case do
+      {:ok, count} -> count
+      _ -> 0
+    end
+  end
+
+  @doc """
+  Force every still-`running` agent task for a session to `interrupted` (charter
+  D45) — the death-path teardown flip. When the subprocess exits (crash, idle
+  reap, clean exit), an in-flight sub-agent can never report its result, so its
+  spawn row must NOT keep claiming "running" forever on reopen. Flips each row's
+  `metadata.task_status` from `"running"` to `"interrupted"`; every OTHER key
+  (task_id, the last progress line, the spawn's input) is preserved. Mirrors
+  `cancel_pending_approvals/1`. Returns the number of tasks interrupted.
+  """
+  @spec interrupt_running_tasks(String.t()) :: non_neg_integer()
+  def interrupt_running_tasks(session_id) do
+    Repo.transaction(fn ->
+      running =
+        Message
+        |> where([m], m.session_id == ^session_id)
+        |> where([m], fragment("?->>'task_status' = 'running'", m.metadata))
+        |> Repo.all()
+
+      Enum.each(running, fn message ->
+        meta = Map.put(message.metadata || %{}, "task_status", "interrupted")
+        message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
+      end)
+
+      length(running)
     end)
     |> case do
       {:ok, count} -> count

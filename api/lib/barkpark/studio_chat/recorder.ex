@@ -164,7 +164,15 @@ defmodule Barkpark.StudioChat.Recorder do
       # flushed as a compact `"thinking"` row the instant the turn's assistant
       # blocks (or the terminal result) land so replay renders the pulse in-order.
       # nil ⇒ no active bout.
-      pending_thinking: nil
+      pending_thinking: nil,
+      # Agent-lifecycle correlation (charter D45). Maps a sub-agent's `task_id`
+      # → `%{tool_use_id, last_line}`: the spawn's tool_use_id (so a
+      # `task_updated` frame — which carries task_id ONLY — resolves the row it
+      # belongs to) and the last progress line we persisted (so a chatty agent's
+      # repeated `task_progress` heartbeat writes the row only on a real change).
+      # SESSION-LIFETIME — never reset on the per-turn `system/init` boundary; a
+      # spawn started in one turn may still complete after a fresh init.
+      task_index: %{}
     }
   end
 
@@ -271,6 +279,53 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:claude_chat_event, %{"type" => "stream_event"}} = msg, state) do
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "writing…"}) |> touch()}
+  end
+
+  # ── agent lifecycle: task_* frames stamp the spawn row (charter D45) ─────────
+  # A Task/Agent spawn persists as a plain tool row keyed by its `tool_use_id`;
+  # the CLI then interleaves `task_started` / `task_progress` / `task_updated` /
+  # `task_notification` system frames on the SAME stream, each correlating to the
+  # spawn by that id. We MERGE the lifecycle facts (task_id, task_status, the live
+  # "Running …" line) onto the spawn row so replay reconstructs the agent block's
+  # terminal state, while every frame rebroadcasts VERBATIM so a live tab animates
+  # the drill-down. These clauses MUST precede the generic `{:claude_chat_event,
+  # _ev}` catch-all below (which would otherwise merely rebroadcast them). No
+  # `publish_activity` here — the drill-down is its own surface, not a sidebar
+  # line (charter D45).
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_started"} = ev} = msg,
+        state
+      ) do
+    state = task_started(state, ev)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_progress"} = ev} = msg,
+        state
+      ) do
+    state = task_progress(state, ev)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_updated"} = ev} = msg,
+        state
+      ) do
+    state = task_updated(state, ev)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "task_notification"} = ev} = msg,
+        state
+      ) do
+    state = task_notification(state, ev)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
   end
 
   def handle_info({:claude_chat_event, _ev} = msg, state) do
@@ -517,8 +572,117 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp session_exited(session_id) do
     StudioChat.cancel_pending_approvals(session_id)
+    # Any sub-agent still "running" at teardown can never report — flip it to
+    # "interrupted" so a reopened block never lies "running" forever (charter D45).
+    StudioChat.interrupt_running_tasks(session_id)
     StudioChat.mark_exited(session_id)
   end
+
+  # ── agent lifecycle (charter D45) ──────────────────────────────────────────
+
+  # A sub-agent begins. Correlate the spawn row (by tool_use_id) with the task_id,
+  # stamp its `running` status (a status transition — always persisted), and
+  # remember the id pair so a later task_id-only `task_updated` finds the row.
+  defp task_started(state, ev) do
+    tid = ev["task_id"]
+    tuid = ev["tool_use_id"]
+
+    if is_binary(tid) and is_binary(tuid) do
+      stamp_task(state.session_id, tuid, %{"task_id" => tid, "task_status" => "running"})
+      put_task(state, tid, tuid)
+    else
+      state
+    end
+  end
+
+  # A live progress line (the `description` field carries "Running …"). The caller
+  # rebroadcasts every frame, but we PERSIST coarsely — only when the line
+  # actually CHANGED — so a heartbeating agent can't rewrite the row endlessly.
+  defp task_progress(state, ev) do
+    tid = ev["task_id"]
+    tuid = ev["tool_use_id"] || tool_use_for(state, tid)
+    line = ev["description"]
+
+    cond do
+      not (is_binary(tuid) and is_binary(line)) ->
+        state
+
+      line == last_line(state, tid) ->
+        state
+
+      true ->
+        stamp_task(state.session_id, tuid, %{"task_progress" => line})
+        put_line(state, tid, tuid, line)
+    end
+  end
+
+  # task_updated carries ONLY task_id + patch{status,end_time}. Resolve the spawn
+  # row via the session-lifetime index; a task_id we never saw start (or a patch
+  # with no status) drops harmlessly. Terminal status is a transition — persisted.
+  defp task_updated(state, ev) do
+    tid = ev["task_id"]
+    status = get_in(ev, ["patch", "status"])
+
+    with tuid when is_binary(tuid) <- tool_use_for(state, tid),
+         s when is_binary(s) <- status do
+      stamp_task(state.session_id, tuid, %{"task_status" => s})
+    end
+
+    state
+  end
+
+  # The PRIMARY completion driver — it carries `tool_use_id` directly, so no index
+  # lookup is needed; the terminal status is stamped straight onto the spawn row.
+  # Also (re)records the id pair in case task_started was somehow missed.
+  defp task_notification(state, ev) do
+    tid = ev["task_id"]
+    tuid = ev["tool_use_id"] || tool_use_for(state, tid)
+    status = ev["status"]
+
+    if is_binary(tuid) and is_binary(status) do
+      stamp_task(state.session_id, tuid, %{"task_status" => status})
+    end
+
+    if is_binary(tid) and is_binary(tuid), do: put_task(state, tid, tuid), else: state
+  end
+
+  # Merge a lifecycle patch onto the spawn row (never clobbering its input, D45).
+  defp stamp_task(session_id, tool_use_id, patch) do
+    case StudioChat.merge_tool_metadata(session_id, tool_use_id, patch) do
+      {:error, reason} ->
+        Logger.warning(
+          "studio chat recorder: failed to stamp task metadata: #{inspect(reason)}"
+        )
+
+      _ ->
+        :ok
+    end
+  end
+
+  # task_index helpers (session-lifetime; %{task_id => %{tool_use_id, last_line}}).
+  defp put_task(state, tid, tuid) do
+    entry = state.task_index |> Map.get(tid, %{}) |> Map.put(:tool_use_id, tuid)
+    %{state | task_index: Map.put(state.task_index, tid, entry)}
+  end
+
+  defp put_line(state, tid, tuid, line) do
+    entry =
+      state.task_index
+      |> Map.get(tid, %{})
+      |> Map.merge(%{tool_use_id: tuid, last_line: line})
+
+    %{state | task_index: Map.put(state.task_index, tid, entry)}
+  end
+
+  defp tool_use_for(state, tid) when is_binary(tid),
+    do: get_in(state.task_index, [tid, :tool_use_id])
+
+  defp tool_use_for(_state, _), do: nil
+
+  defp last_line(state, tid) when is_binary(tid),
+    do: get_in(state.task_index, [tid, :last_line])
+
+  defp last_line(_state, _), do: nil
 
   defp persist(session_id, attrs, kind) do
     case StudioChat.append_message(session_id, attrs) do

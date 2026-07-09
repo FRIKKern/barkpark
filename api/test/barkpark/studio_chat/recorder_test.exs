@@ -753,6 +753,200 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "agent lifecycle: task_* frames stamp the spawn row (charter D45)" do
+    # A Task/Agent spawn persists as a plain tool row keyed by its tool_use_id —
+    # exactly what the assistant-frame path already writes.
+    defp spawn_frame(tool_use_id) do
+      {:claude_chat_event,
+       %{
+         "type" => "assistant",
+         "message" => %{
+           "content" => [
+             %{
+               "type" => "tool_use",
+               "id" => tool_use_id,
+               "name" => "Task",
+               "input" => %{
+                 "description" => "Count files",
+                 "prompt" => "count them",
+                 "subagent_type" => "general-purpose"
+               }
+             }
+           ]
+         }
+       }}
+    end
+
+    defp task_event(subtype, fields),
+      do: {:claude_chat_event, Map.merge(%{"type" => "system", "subtype" => subtype}, fields)}
+
+    defp spawn_row(sid, tool_use_id),
+      do:
+        StudioChat.list_messages(sid)
+        |> Enum.find(&(&1.metadata["tool_use_id"] == tool_use_id))
+
+    test "task_started stamps task_id + running onto the spawn row, preserving its input",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+
+      frame(
+        recorder,
+        task_event("task_started", %{
+          "task_id" => "task-1",
+          "tool_use_id" => "toolu_spawn",
+          "subagent_type" => "general-purpose",
+          "description" => "Count files in directory"
+        })
+      )
+
+      row = spawn_row(sid, "toolu_spawn")
+      assert row.metadata["task_id"] == "task-1"
+      assert row.metadata["task_status"] == "running"
+      # the merge NEVER clobbers the spawn's own input (the D45 anti-pattern)
+      assert row.metadata["input"]["description"] == "Count files"
+      assert row.metadata["input"]["subagent_type"] == "general-purpose"
+      assert row.metadata["tool"] == "Task"
+    end
+
+    test "task_progress stamps the live line; task_notification stamps the terminal status",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
+      frame(
+        recorder,
+        task_event("task_progress", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "description" => "Running the count"
+        })
+      )
+
+      assert spawn_row(sid, "toolu_spawn").metadata["task_progress"] == "Running the count"
+
+      frame(
+        recorder,
+        task_event("task_notification", %{
+          "task_id" => "t",
+          "tool_use_id" => "toolu_spawn",
+          "status" => "completed",
+          "summary" => "9 files"
+        })
+      )
+
+      row = spawn_row(sid, "toolu_spawn")
+      assert row.metadata["task_status"] == "completed"
+      # the running progress line is preserved through the terminal merge
+      assert row.metadata["task_progress"] == "Running the count"
+    end
+
+    test "task_progress persists COARSELY — an unchanged line does not rewrite the row",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+      frame(
+        recorder,
+        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L1"})
+      )
+
+      # Externally poison the row's line, then send the SAME progress line again.
+      # A coarse writer (line unchanged since last persist) must NOT overwrite it.
+      {:ok, _} =
+        StudioChat.merge_tool_metadata(sid, "toolu_spawn", %{"task_progress" => "SENTINEL"})
+
+      frame(
+        recorder,
+        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L1"})
+      )
+
+      assert spawn_row(sid, "toolu_spawn").metadata["task_progress"] == "SENTINEL"
+
+      # A genuinely CHANGED line does write through.
+      frame(
+        recorder,
+        task_event("task_progress", %{"task_id" => "t", "tool_use_id" => "toolu_spawn", "description" => "L2"})
+      )
+
+      assert spawn_row(sid, "toolu_spawn").metadata["task_progress"] == "L2"
+    end
+
+    test "task_updated (task_id ONLY) resolves the spawn row via the session-lifetime index",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+
+      # a NEW turn begins between start and completion — the index must survive it
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "t", "patch" => %{"status" => "completed", "end_time" => 1}})
+      )
+
+      assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "completed"
+    end
+
+    test "task_updated for an unknown task_id drops harmlessly", %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "ghost", "patch" => %{"status" => "completed"}})
+      )
+
+      assert Process.alive?(recorder)
+      refute spawn_row(sid, "toolu_spawn").metadata["task_status"]
+    end
+
+    test "a task frame for an unknown tool_use_id is a safe noop", %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_ghost"})
+      )
+
+      assert Process.alive?(recorder)
+      assert StudioChat.merge_tool_metadata(sid, "toolu_ghost", %{"x" => 1}) == :noop
+    end
+
+    test "every task_* frame rebroadcasts verbatim to subscribers", %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+      ev = %{"type" => "system", "subtype" => "task_started", "task_id" => "t", "tool_use_id" => "x"}
+      frame(recorder, {:claude_chat_event, ev})
+      assert_receive {:claude_chat_event, ^ev}
+    end
+
+    test "teardown flips a still-running task to interrupted (all death paths)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_spawn"))
+      frame(recorder, task_event("task_started", %{"task_id" => "t", "tool_use_id" => "toolu_spawn"}))
+      assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "running"
+
+      ref = Process.monitor(recorder)
+      send(recorder, {:claude_chat_exit, 0})
+      assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
+
+      assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "interrupted"
+    end
+
+    test "interrupt_running_tasks/1 only touches running rows, preserving other metadata",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, spawn_frame("toolu_a"))
+      frame(recorder, spawn_frame("toolu_b"))
+      frame(recorder, task_event("task_started", %{"task_id" => "a", "tool_use_id" => "toolu_a"}))
+      frame(
+        recorder,
+        task_event("task_notification", %{"task_id" => "b", "tool_use_id" => "toolu_b", "status" => "completed"})
+      )
+
+      assert StudioChat.interrupt_running_tasks(sid) == 1
+
+      assert spawn_row(sid, "toolu_a").metadata["task_status"] == "interrupted"
+      # the already-completed task is untouched, and its input survives
+      assert spawn_row(sid, "toolu_b").metadata["task_status"] == "completed"
+      assert spawn_row(sid, "toolu_a").metadata["input"]["prompt"] == "count them"
+    end
+  end
+
   test "the runtime survives a viewer's death — the whole point",
        %{sid: sid, recorder: recorder} do
     # a "tab": subscribes, then dies
