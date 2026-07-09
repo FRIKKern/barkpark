@@ -361,6 +361,15 @@ defmodule BarkparkCloud.DeviceAuthTest do
       refute String.contains?(s["verification_uri"], "barkpark.cloud")
       assert s["verification_uri_complete"] == s["verification_uri"] <> "?code=" <> s["user_code"]
     end
+
+    test "a lookalike host (evilbarkpark.cloud) is NOT boxed — the subdomain match needs the dot" do
+      start =
+        call(:post, "https://evilbarkpark.cloud/v1/auth/device/start", %{client_name: "bp"})
+
+      assert start.status == 200
+      s = jbody(start)
+      assert s["verification_uri"] == "https://evilbarkpark.cloud/activate"
+    end
   end
 
   describe "HTTP: auth gating (the 2FA guarantee)" do
