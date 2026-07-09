@@ -27,6 +27,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.StudioLinkFakeHttpClient, as: Fake
   alias BarkparkCloud.Web.Router
@@ -147,14 +148,17 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
 
       assert Enum.sort(Map.keys(m)) ==
                Enum.sort(
-                 ~w(documents datasets webhooks db_size disk seats api_requests bandwidth)
+                 ~w(documents datasets webhooks db_size disk seats instances api_requests bandwidth)
                )
 
-      for {_name, meter} <- m do
+      for {name, meter} <- m do
         assert Map.has_key?(meter, "value")
-        assert meter["quota"] == nil
-        assert meter["warn_at"] == nil
         assert is_binary(meter["source"])
+
+        # No meter invents a ceiling — and this team has no subscription, so even
+        # `instances` (the ONE quota-bearing meter) resolves quota nil here.
+        assert meter["quota"] == nil, "#{name} should carry no quota for an unsubscribed team"
+        assert meter["warn_at"] == nil
       end
     end
 
@@ -439,6 +443,83 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert m["webhooks"]["value"] == "unmetered"
       assert m["datasets"]["value"] == "unmetered"
       assert Fake.requests() == []
+    end
+  end
+
+  describe "instances meter — the fleet's one honest quota (OC11)" do
+    # Stamp an active subscription on a team WITHOUT going through the gateway —
+    # the row is all `barkpark_limit/1` + `active_subscription/1` read.
+    defp subscribe(team, plan) do
+      {:ok, sub} =
+        %Subscription{}
+        |> Subscription.changeset(%{team_id: team.id, plan: plan, status: "active"})
+        |> Repo.insert()
+
+      sub
+    end
+
+    test "no active subscription → live count present, quota nil (entitlement gate owns the ceiling)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      program_simple()
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      instances = meters(conn)["instances"]
+
+      # The one registered instance is counted; no subscription → no quota bar.
+      assert instances["value"] == 1
+      assert instances["quota"] == nil
+      assert instances["warn_at"] == nil
+      assert instances["source"] == "control-plane.team_instances"
+      assert instances["measured_at"] == nil
+    end
+
+    test "an active subscription → quota is the plan ceiling, warn_at derived" do
+      {user, team} = user_with_team()
+      # supporter → ceiling 3 (default limits). warn_at = min(2, ceil(2.4)=3) = 2.
+      subscribe(team, "supporter")
+      bp = live_barkpark(team)
+      program_simple()
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      instances = meters(conn)["instances"]
+
+      assert instances["value"] == 1
+      assert instances["quota"] == 3
+      assert instances["warn_at"] == 2
+    end
+
+    test "the forever placeholder ceiling (1_000_000) → quota nil, no bar to a million" do
+      {user, team} = user_with_team()
+      subscribe(team, "forever")
+      bp = live_barkpark(team)
+      program_simple()
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      instances = meters(conn)["instances"]
+
+      # Counted honestly, but the placeholder ceiling is not an honest wall.
+      assert instances["value"] == 1
+      assert instances["quota"] == nil
+      assert instances["warn_at"] == nil
+    end
+
+    test "counts EVERY managed instance the team holds, not just the one in the path" do
+      {user, team} = user_with_team()
+      subscribe(team, "support_plus")
+      bp = live_barkpark(team)
+      # Two more registered (still-provisioning) instances the team holds.
+      _second = barkpark_fixture(team)
+      _third = barkpark_fixture(team)
+      program_simple()
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      instances = meters(conn)["instances"]
+
+      assert instances["value"] == 3
+      # support_plus → ceiling 10; warn_at = min(9, ceil(8.0)=8) = 8.
+      assert instances["quota"] == 10
+      assert instances["warn_at"] == 8
     end
   end
 

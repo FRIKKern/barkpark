@@ -13,18 +13,30 @@ defmodule BarkparkCloud.Usage do
 
       documents      datasets      webhooks       — instance-sourced inventory counts
       db_size        disk                          — telemetry-sourced (the agent's health beat)
-      seats                                         — control-plane-sourced (team members)
+      seats          instances                     — control-plane-sourced (team members / fleet count)
       api_requests   bandwidth                     — FLOW meters, D31-sequenced (see below)
 
   Every meter is the SAME shape:
 
       %{
         value: number | "unmetered",
-        quota: nil,          # quota DISPLAY precedes enforcement — always null in v1 (D48)
-        warn_at: nil,        # ditto
+        quota: non_neg_integer | nil,   # the enforced ceiling when one exists, else nil
+        warn_at: non_neg_integer | nil, # the amber threshold when a quota is present, else nil
         source: String.t(),  # always names where the number does / would come from
         measured_at: String.t() | nil   # RFC3339 snapshot time, or nil for a live/current read
       }
+
+  ## Quotas — honest ceilings only (OC7 / OC11)
+
+  `quota`/`warn_at` are nil for every meter that has NO enforcement-backed
+  ceiling — which in v1 is all but one. Drawing a bar "to nowhere" for an
+  unlimited meter is exactly the dishonesty the wish forbids. The lone exception
+  is `instances`: the managed-instance count IS enforced today (the create-time
+  402 guard and the quota reconciler both key on `Billing.barkpark_limit/1`), so
+  it carries a real `quota` — but only when the router resolves one (a
+  subscription-backed, non-placeholder ceiling; see the input contract). Given a
+  quota, `warn_at` is `min(quota - 1, ceil(quota * 0.8))` once `quota >= 2` (a
+  ceiling of 1 has no room for a warning tier), else nil.
 
   The `seats` meter additionally carries `:pending_invitations` (a non-negative
   integer, or absent when unavailable) — a cheap extra detail beside the seat
@@ -52,7 +64,13 @@ defmodule BarkparkCloud.Usage do
         pending_invitations: non_neg_integer | nil,
         documents: {:ok, non_neg_integer} | :unmetered | {:error, term} | nil,
         datasets:  {:ok, non_neg_integer} | :unmetered | {:error, term} | nil,
-        webhooks:  {:ok, non_neg_integer} | :unmetered | {:error, term} | nil
+        webhooks:  {:ok, non_neg_integer} | :unmetered | {:error, term} | nil,
+        # The fleet meter (OC11). `value` is the live managed-instance count;
+        # `quota` is the enforced plan ceiling ONLY when the router resolved a
+        # real one (a subscription-backed, non-placeholder limit), else nil. The
+        # router owns that policy (it needs the subscription read); this module
+        # just shapes what it is handed and derives `warn_at` from the quota.
+        instances: %{value: non_neg_integer | nil, quota: non_neg_integer | nil} | nil
       }
 
   `compose/0` (or `compose(%{})`) yields the all-`"unmetered"` envelope — the
@@ -74,6 +92,9 @@ defmodule BarkparkCloud.Usage do
   @src_db_size "telemetry.pg_size_bytes"
   @src_disk "telemetry.disk_used_percent"
   @src_seats "control-plane.team_members"
+  # The fleet meter is a pure control-plane read (the team's managed-instance
+  # count) — it returns even when every instance is down.
+  @src_instances "control-plane.team_instances"
   # The flow meters have no source yet — the label is the honest "not built".
   @src_not_metered "not-metered"
 
@@ -95,6 +116,7 @@ defmodule BarkparkCloud.Usage do
         db_size: db_size_meter(telemetry, measured_at),
         disk: disk_meter(telemetry, measured_at),
         seats: seats_meter(Map.get(inputs, :seats), Map.get(inputs, :pending_invitations)),
+        instances: instances_meter(Map.get(inputs, :instances)),
         # FLOW meters — always unmetered, whatever anyone passes (D31).
         api_requests: meter(@unmetered, @src_not_metered, nil),
         bandwidth: meter(@unmetered, @src_not_metered, nil)
@@ -149,10 +171,40 @@ defmodule BarkparkCloud.Usage do
     end
   end
 
-  # The uniform meter shape. `quota`/`warn_at` are always nil in v1 (display
-  # precedes enforcement, D48).
-  defp meter(value, source, measured_at) do
-    %{value: value, quota: nil, warn_at: nil, source: source, measured_at: measured_at}
+  # The fleet meter (OC11 — the fleet's one honest quota). `value` is the live
+  # managed-instance count (a control-plane read, so no snapshot time); `quota`
+  # is whatever ceiling the router resolved — a real, subscription-backed limit,
+  # or nil when there is no honest wall to draw (no active subscription, or the
+  # "forever" placeholder). `warn_at` is derived from that quota alone. A missing
+  # / non-integer count degrades to "unmetered" — never a fake zero on a team we
+  # couldn't tally.
+  defp instances_meter(%{} = input) do
+    quota = valid_quota(Map.get(input, :quota))
+    meter(instance_count(Map.get(input, :value)), @src_instances, nil, quota, warn_at_for(quota))
+  end
+
+  defp instances_meter(_), do: meter(@unmetered, @src_instances, nil, nil, nil)
+
+  defp instance_count(n) when is_integer(n) and n >= 0, do: n
+  defp instance_count(_), do: @unmetered
+
+  # Only a positive integer is a real ceiling; anything else (nil, 0, garbage)
+  # means "no honest quota to display" → nil, no bar.
+  defp valid_quota(n) when is_integer(n) and n >= 1, do: n
+  defp valid_quota(_), do: nil
+
+  # The amber threshold: one below the ceiling, or 80% rounded up, whichever is
+  # lower — but only once the ceiling has room for a warning tier (>= 2). `ceil/1`
+  # returns an integer, so warn_at is always an integer or nil.
+  defp warn_at_for(quota) when is_integer(quota) and quota >= 2,
+    do: min(quota - 1, ceil(quota * 0.8))
+
+  defp warn_at_for(_), do: nil
+
+  # The uniform meter shape. `quota`/`warn_at` default to nil — the honest state
+  # for every meter without an enforcement-backed ceiling (all but `instances`).
+  defp meter(value, source, measured_at, quota \\ nil, warn_at \\ nil) do
+    %{value: value, quota: quota, warn_at: warn_at, source: source, measured_at: measured_at}
   end
 
   # ── Input coercion (stay total) ─────────────────────────────────────────────
