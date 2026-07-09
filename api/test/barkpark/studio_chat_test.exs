@@ -891,4 +891,130 @@ defmodule Barkpark.StudioChatTest do
       assert %Message{} = hd(loaded.messages)
     end
   end
+
+  describe "agents rail: signature + pure folds (charter D47)" do
+    test "set_rail_snapshot round-trips the jsonb column and get_session carries it" do
+      s = new_session()
+      rail = %{"t" => %{"row" => %{"description" => "run"}, "status" => "running"}}
+      {:ok, _} = StudioChat.set_rail_snapshot(s.id, rail)
+      assert StudioChat.get_session(s.id).rail_snapshot == rail
+    end
+
+    test "rail_signature ignores token/usage churn but reflects structure + state" do
+      base = %{
+        "t" => %{
+          "row" => %{"task_type" => "local_workflow", "description" => "run"},
+          "status" => "running",
+          "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 10}]
+        }
+      }
+
+      # only tokens + usage advanced ⇒ SAME signature (change-only guard)
+      token_tick =
+        put_in(base, ["t", "workflow"], [
+          %{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 9_000}
+        ])
+        |> put_in(["t", "usage"], %{"total_tokens" => 9_000})
+
+      assert StudioChat.rail_signature(base) == StudioChat.rail_signature(token_tick)
+
+      # a STATE flip ⇒ different signature
+      state_flip = put_in(base, ["t", "status"], "completed")
+      refute StudioChat.rail_signature(base) == StudioChat.rail_signature(state_flip)
+
+      # a NEW row ⇒ different signature
+      row_added = Map.put(base, "u", %{"row" => %{"description" => "another"}, "status" => "running"})
+      refute StudioChat.rail_signature(base) == StudioChat.rail_signature(row_added)
+    end
+
+    test "rail_apply_background upserts live rows and completes the vanished" do
+      rail =
+        StudioChat.rail_apply_background(%{}, %{
+          "tasks" => [
+            %{"task_id" => "a", "task_type" => "local_workflow", "description" => "one"},
+            %{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}
+          ]
+        })
+
+      assert rail["a"]["status"] == "running"
+      assert rail["b"]["status"] == "running"
+
+      # "a" drops from the snapshot ⇒ completed; entries are never deleted
+      rail2 =
+        StudioChat.rail_apply_background(rail, %{
+          "tasks" => [%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}]
+        })
+
+      assert rail2["a"]["status"] == "completed"
+      assert rail2["b"]["status"] == "running"
+    end
+
+    test "rail_apply_background never resurrects an interrupted entry" do
+      rail = %{"a" => %{"status" => "interrupted", "seq" => 1, "row" => %{"description" => "x"}}}
+      # "a" is absent from the new snapshot — it stays interrupted, not completed
+      out = StudioChat.rail_apply_background(rail, %{"tasks" => []})
+      assert out["a"]["status"] == "interrupted"
+    end
+
+    test "rail_capture_progress only touches the rail with a tree or existing entry" do
+      # bare heartbeat for an unknown task ⇒ no noise
+      assert StudioChat.rail_capture_progress(%{}, %{"task_id" => "ghost"}) == %{}
+
+      rail =
+        StudioChat.rail_capture_progress(%{}, %{
+          "task_id" => "t",
+          "workflow_progress" => [%{"type" => "workflow_phase", "title" => "Plan"}],
+          "usage" => %{"total_tokens" => 5}
+        })
+
+      assert rail["t"]["workflow"] == [%{"type" => "workflow_phase", "title" => "Plan"}]
+      assert rail["t"]["usage"]["total_tokens"] == 5
+    end
+
+    test "rail_stamp_status only stamps a task that already has an entry" do
+      assert StudioChat.rail_stamp_status(%{}, "ghost", "completed") == %{}
+
+      rail = %{"t" => %{"status" => "running", "row" => %{"description" => "x"}}}
+      out = StudioChat.rail_stamp_status(rail, "t", "completed")
+      assert out["t"]["status"] == "completed"
+      assert out["t"]["row"]["description"] == "x"
+    end
+
+    test "the rail caps at 20, pruning oldest-terminal first and never a runner" do
+      # 21 terminal entries + 1 running; the running one must survive the cap
+      tasks =
+        for i <- 1..21 do
+          %{"task_id" => "done-#{i}", "task_type" => "local_workflow", "description" => "d#{i}"}
+        end
+
+      # seed all as running, then drain all but keep one running
+      rail = StudioChat.rail_apply_background(%{}, %{"tasks" => tasks})
+      rail = StudioChat.rail_stamp_status(rail, "done-1", "running")
+
+      # everything vanishes except done-1 ⇒ 20 complete, done-1 stays running
+      rail =
+        StudioChat.rail_apply_background(rail, %{
+          "tasks" => [%{"task_id" => "done-1", "task_type" => "local_workflow", "description" => "d1"}]
+        })
+
+      assert map_size(rail) <= 20
+      assert rail["done-1"]["status"] == "running"
+    end
+
+    test "interrupt_running_tasks/1 flips running rail entries to interrupted, sparing the rest" do
+      s = new_session()
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "live" => %{"status" => "running", "row" => %{"description" => "a"}},
+          "done" => %{"status" => "completed", "row" => %{"description" => "b"}}
+        })
+
+      StudioChat.interrupt_running_tasks(s.id)
+
+      rail = StudioChat.get_session(s.id).rail_snapshot
+      assert rail["live"]["status"] == "interrupted"
+      assert rail["done"]["status"] == "completed"
+    end
+  end
 end

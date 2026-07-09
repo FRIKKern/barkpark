@@ -92,6 +92,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # runs and collapsed once terminal; a manual toggle always wins. Never
          # broadcast (a co-viewer's expand is their own), reset on session load.
          agent_expanded: %{},
+         # The agents rail (charter D47): the task_id-keyed mission-control
+         # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
+         # the live map (hydrated from `rail_snapshot` on reopen, folded by the
+         # background_tasks_changed / task_progress / task_* frames); `rail_sig`
+         # caches its structural signature so a token-only tick is a no-op render
+         # (D46 value-equality). `rail_expanded` is the per-tab expand override
+         # (task_id => bool) for a workflow row's phase→agent tree — never
+         # broadcast, reset on session load (agent_expanded precedent).
+         rail: %{},
+         rail_sig: [],
+         rail_expanded: %{},
          mode: "plan",
          model_choice: "default",
          status: :new,
@@ -425,6 +436,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
+  # per-tab `rail_expanded` map is keyed by task_id; default collapsed, a manual
+  # toggle flips it. Never broadcast — a co-viewer's expand is their own.
+  def handle_event("rail-toggle", %{"id" => id}, socket) do
+    current = Map.get(socket.assigns.rail_expanded, id, false)
+    {:noreply, assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -1100,13 +1119,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     )
   end
 
-  # A progress heartbeat: the latest "Running: …" line. The wire field is
-  # `description` (never `line`). Keeps the block running so the breathing line
-  # shows even if task_started was missed.
+  # A progress heartbeat: the latest "Running: …" line AND the rail's phase→agent
+  # tree (charter D46/D47). The wire field is `description` (never `line`). Keeps
+  # the block running so the breathing line shows even if task_started was missed.
   def handle_info(
         {:claude_chat_event, %{"type" => "system", "subtype" => "task_progress"} = ev},
         socket
       ) do
+    socket = fold_rail(socket, StudioChat.rail_capture_progress(socket.assigns.rail, ev))
+
     merge_task_row(
       socket,
       by_tool_use_id(ev["tool_use_id"]),
@@ -1115,11 +1136,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Completion notification (tool_use_id aboard): flip to the terminal status so
-  # the block collapses to its ⎿ report and the spinner stops.
+  # the block collapses to its ⎿ report and the spinner stops; the rail entry
+  # settles to the same status (charter D47).
   def handle_info(
         {:claude_chat_event, %{"type" => "system", "subtype" => "task_notification"} = ev},
         socket
       ) do
+    socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], ev["status"]))
+
     merge_task_row(
       socket,
       by_tool_use_id(ev["tool_use_id"]),
@@ -1135,11 +1159,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
       ) do
     case get_in(ev, ["patch", "status"]) do
       status when is_binary(status) ->
+        socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], status))
         merge_task_row(socket, by_task_id(ev["task_id"]), %{task_status: status})
 
       _ ->
         {:noreply, socket}
     end
+  end
+
+  # The agents rail's row set (charter D47): a task_id-keyed snapshot that adds
+  # rows on launch and empties on completion. Folded into the mission-control
+  # rail below the composer — this is the frame the user's Workflow emitted that
+  # the catch-all below silently dropped. Value-equality guarded (fold_rail).
+  def handle_info(
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed"} = ev},
+        socket
+      ) do
+    {:noreply, fold_rail(socket, StudioChat.rail_apply_background(socket.assigns.rail, ev))}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -2225,7 +2262,113 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <p class="text-xs text-dim" style="max-width: 860px; margin: 4px auto 0; font-family: var(--font-mono); opacity: 0.7;">
           esc interrupt · / commands · ↵ send
         </p>
+
+        <%!-- Agents rail (charter D47): the Claude-Code-TUI mission-control view,
+              directly below the composer. One row per background task; a workflow
+              row expands (per-tab) into its phase→agent tree with breathing state
+              glyphs, models, and token counts. Hydrated from `rail_snapshot` on
+              reopen; a dead "running" entry reads "interrupted", never a spinner. --%>
+        <.agents_rail :if={map_size(@rail) > 0} rail={@rail} rail_expanded={@rail_expanded} />
       </div>
+      </div>
+    </div>
+    """
+  end
+
+  # The agents rail (charter D47) — mission control below the composer. Distinct
+  # from the D45/D46 transcript spawn rows BY DESIGN (this is live state, that is
+  # history); no dedup. All chrome via emitted tokens.
+  attr :rail, :map, required: true
+  attr :rail_expanded, :map, required: true
+
+  defp agents_rail(assigns) do
+    ~H"""
+    <div
+      data-role="agents-rail"
+      style="max-width: 860px; margin: 10px auto 0; border-top: 1px solid var(--border-muted); padding-top: 8px; font-family: var(--font-mono);"
+    >
+      <div class="text-xs text-dim" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: 0.75;">
+        <span aria-hidden="true">▚</span>
+        <span>agents · <%= map_size(@rail) %></span>
+      </div>
+
+      <div
+        :for={entry <- rail_rows(@rail)}
+        data-rail-task={entry["task_id"]}
+        data-rail-status={entry["status"]}
+        style="padding: 3px 0;"
+      >
+        <div class="text-xs" style="display: flex; align-items: baseline; gap: 6px;">
+          <span
+            aria-hidden="true"
+            class={rail_running?(entry) && "bp-chat-agent-run"}
+            style={"flex: none; color: #{if rail_running?(entry), do: "var(--primary)", else: "var(--text-dim)"};"}
+          >
+            <%= rail_glyph_type(entry) %>
+          </span>
+          <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
+            <span style="font-weight: 600;"><%= rail_label(entry) %></span>
+            <span
+              class="text-dim"
+              style={"margin-left: 6px; opacity: 0.75; color: #{rail_status_color(entry["status"])};"}
+            >
+              · <%= rail_status_label(entry["status"]) %>
+            </span>
+            <span :if={rail_tokens(entry)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+              · <%= rail_tokens(entry) %> tok
+            </span>
+          </span>
+          <button
+            :if={rail_workflow_nodes(entry) != []}
+            type="button"
+            class="btn text-xs"
+            phx-click="rail-toggle"
+            phx-value-id={entry["task_id"]}
+            aria-expanded={to_string(Map.get(@rail_expanded, entry["task_id"], false))}
+            style="flex: none; padding: 1px 8px; opacity: 0.8;"
+          >
+            <%= if Map.get(@rail_expanded, entry["task_id"], false), do: "collapse", else: "expand" %>
+          </button>
+        </div>
+
+        <%!-- The phase→agent tree, per-tab expandable (charter D47). Phase nodes
+              head a group; agent nodes indent beneath with model + breathing
+              state glyph + token count. --%>
+        <div
+          :if={Map.get(@rail_expanded, entry["task_id"], false) and rail_workflow_nodes(entry) != []}
+          style="padding-left: 16px; margin-top: 2px;"
+        >
+          <div
+            :for={node <- rail_workflow_nodes(entry)}
+            data-rail-node={node["type"]}
+            class="text-xs"
+            style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
+          >
+            <%= case node["type"] do %>
+              <% "workflow_phase" -> %>
+                <span style="font-weight: 600; color: var(--text);">
+                  <%= node["title"] || node["label"] || "phase" %>
+                </span>
+              <% _ -> %>
+                <span
+                  aria-hidden="true"
+                  class={rail_node_running?(node) && "bp-chat-agent-run"}
+                  style={"flex: none; color: #{if rail_node_running?(node), do: "var(--primary)", else: "var(--text-dim)"};"}
+                >
+                  ●
+                </span>
+                <span style="min-width: 0; flex: 1;">
+                  <%= node["label"] || node["title"] || "agent" %>
+                  <span :if={node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+                    <%= node["model"] %>
+                  </span>
+                  <span :if={rail_node_tokens(node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+                    · <%= rail_node_tokens(node) %> tok
+                  </span>
+                </span>
+            <% end %>
+          </div>
+        </div>
       </div>
     </div>
     """
@@ -2531,6 +2674,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Agent drill-down overrides reset on reopen (charter D46): a replayed
       # terminal agent starts collapsed to its report, a mid-run one open.
       agent_expanded: %{},
+      # Rail replay parity (charter D47): hydrate the mission-control rail from
+      # the stored `rail_snapshot` so a reopened session shows its last-known
+      # agents. `interrupt_running_tasks/1` already flipped any dead "running"
+      # entry to "interrupted" on teardown, so this never shows a fake spinner.
+      rail: session.rail_snapshot || %{},
+      rail_sig: StudioChat.rail_signature(session.rail_snapshot || %{}),
+      rail_expanded: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -2605,6 +2755,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       open_menu_session: nil,
       plan_expanded: MapSet.new(),
       agent_expanded: %{},
+      # A new chat has no background agents yet (charter D47).
+      rail: %{},
+      rail_sig: [],
+      rail_expanded: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -3816,6 +3970,78 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp by_task_id(id), do: fn m -> is_binary(id) and m[:task_id] == id end
 
   defp drop_nil(map), do: :maps.filter(fn _k, v -> not is_nil(v) end, map)
+
+  # ── agents rail (charter D47) ──────────────────────────────────────────────
+
+  # Apply a folded rail with the SAME structural change-only guard the Recorder
+  # persists on: a token-only progress tick (same rows/tree/states, only tokens
+  # advanced) yields an equal signature and is a no-op — `@messages`/the rail are
+  # a flat comprehension, so every reassign is an O(n) render per tab, and the
+  # guard turns the hot workflow_progress heartbeat into render-on-change.
+  defp fold_rail(socket, new_rail) do
+    sig = StudioChat.rail_signature(new_rail)
+
+    if sig == socket.assigns.rail_sig,
+      do: socket,
+      else: assign(socket, rail: new_rail, rail_sig: sig)
+  end
+
+  # Rail entries in stable insertion order (seq), for a deterministic render.
+  defp rail_rows(rail) do
+    rail
+    |> Enum.sort_by(fn {_tid, entry} -> StudioChat.rail_seq(entry) end)
+    |> Enum.map(fn {tid, entry} -> Map.put(entry, "task_id", tid) end)
+  end
+
+  defp rail_running?(entry), do: entry["status"] == "running"
+
+  # The row's one-line label: the background task's description, else its type.
+  defp rail_label(entry) do
+    row = entry["row"] || %{}
+    row["description"] || row["task_type"] || "agent"
+  end
+
+  defp rail_glyph_type(entry) do
+    case (entry["row"] || %{})["task_type"] do
+      "local_workflow" -> "⚙"
+      t when is_binary(t) -> "◆"
+      _ -> "◆"
+    end
+  end
+
+  # A rail workflow tree normalized to ordered nodes for render: phase headers and
+  # the agent rows beneath them. Tolerant of a nil/absent tree.
+  defp rail_workflow_nodes(entry) do
+    case entry["workflow"] do
+      nodes when is_list(nodes) -> Enum.filter(nodes, &is_map/1)
+      _ -> []
+    end
+  end
+
+  defp rail_node_running?(node), do: node["state"] in ["running", "in_progress", "active"]
+
+  defp rail_status_label("completed"), do: "done"
+  defp rail_status_label("interrupted"), do: "interrupted"
+  defp rail_status_label(_), do: "running"
+
+  defp rail_status_color("completed"), do: "var(--ok)"
+  defp rail_status_color("interrupted"), do: "var(--warn)"
+  defp rail_status_color(_), do: "var(--primary)"
+
+  # The rail entry's last-known token total (charter D47), or nil.
+  defp rail_tokens(entry) do
+    case entry["usage"] do
+      %{"total_tokens" => n} when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
+  defp rail_node_tokens(node) do
+    case node["tokens"] do
+      n when is_integer(n) -> n
+      _ -> nil
+    end
+  end
 
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"

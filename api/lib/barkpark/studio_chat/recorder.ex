@@ -172,8 +172,28 @@ defmodule Barkpark.StudioChat.Recorder do
       # repeated `task_progress` heartbeat writes the row only on a real change).
       # SESSION-LIFETIME — never reset on the per-turn `system/init` boundary; a
       # spawn started in one turn may still complete after a fresh init.
-      task_index: %{}
+      task_index: %{},
+      # The agents-rail snapshot (charter D47), task_id-keyed — the mission-
+      # control view below the composer. Driven by `background_tasks_changed`
+      # (the row set), `task_progress.workflow_progress` (the phase→agent tree +
+      # last-known usage), and task_updated/task_notification (status). HYDRATED
+      # from the store on start so a restarted Recorder never loses the history
+      # (replay reads the same column). SESSION-LIFETIME — never reset per turn.
+      # Persisted COARSELY: only a structural/state change (rail_signature) hits
+      # the store; a token-only progress tick updates memory but skips Repo.
+      rail_snapshot: load_rail_snapshot(id)
     }
+  end
+
+  # Seed the rail from the persisted column (charter D47) so a Recorder that
+  # restarts mid-run keeps the last-known rows/tree as its change-only baseline —
+  # otherwise the first `background_tasks_changed` would overwrite the stored
+  # history with only the currently-live rows.
+  defp load_rail_snapshot(session_id) do
+    case StudioChat.get_session(session_id) do
+      %{rail_snapshot: rail} when is_map(rail) -> rail
+      _ -> %{}
+    end
   end
 
   @impl true
@@ -324,6 +344,21 @@ defmodule Barkpark.StudioChat.Recorder do
         state
       ) do
     state = task_notification(state, ev)
+    broadcast(state, msg)
+    {:noreply, touch(state)}
+  end
+
+  # The agents rail's row set (charter D47). `background_tasks_changed` is a
+  # task_id-keyed SNAPSHOT with NO tool_use_id — it replaces the live rows and,
+  # by omission, marks vanished tasks terminal. This clause MUST precede the
+  # generic catch-all below (which would merely rebroadcast the frame, exactly
+  # why the user saw no agents). Broadcasts every frame so live tabs animate.
+  def handle_info(
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed"} = ev} = msg,
+        state
+      ) do
+    state = background_tasks_changed(state, ev)
     broadcast(state, msg)
     {:noreply, touch(state)}
   end
@@ -595,10 +630,18 @@ defmodule Barkpark.StudioChat.Recorder do
     end
   end
 
-  # A live progress line (the `description` field carries "Running …"). The caller
-  # rebroadcasts every frame, but we PERSIST coarsely — only when the line
-  # actually CHANGED — so a heartbeating agent can't rewrite the row endlessly.
+  # A live progress line (the `description` field carries "Running …") AND the
+  # crown-jewel `workflow_progress` phase→agent tree for the rail (charter D47).
+  # The caller rebroadcasts every frame, but we PERSIST coarsely on BOTH surfaces:
+  # the spawn-row line writes only when it CHANGED; the rail writes only when its
+  # STRUCTURE changed (a token-only tick updates memory but skips Repo).
   defp task_progress(state, ev) do
+    state
+    |> stamp_progress_line(ev)
+    |> rail_capture_progress(ev)
+  end
+
+  defp stamp_progress_line(state, ev) do
     tid = ev["task_id"]
     tuid = ev["tool_use_id"] || tool_use_for(state, tid)
     line = ev["description"]
@@ -628,7 +671,7 @@ defmodule Barkpark.StudioChat.Recorder do
       stamp_task(state.session_id, tuid, %{"task_status" => s})
     end
 
-    state
+    rail_stamp_status(state, tid, status)
   end
 
   # The PRIMARY completion driver — it carries `tool_use_id` directly, so no index
@@ -643,7 +686,8 @@ defmodule Barkpark.StudioChat.Recorder do
       stamp_task(state.session_id, tuid, %{"task_status" => status})
     end
 
-    if is_binary(tid) and is_binary(tuid), do: put_task(state, tid, tuid), else: state
+    state = if is_binary(tid) and is_binary(tuid), do: put_task(state, tid, tuid), else: state
+    rail_stamp_status(state, tid, status)
   end
 
   # Merge a lifecycle patch onto the spawn row (never clobbering its input, D45).
@@ -683,6 +727,44 @@ defmodule Barkpark.StudioChat.Recorder do
     do: get_in(state.task_index, [tid, :last_line])
 
   defp last_line(_state, _), do: nil
+
+  # ── agents rail (charter D47) ──────────────────────────────────────────────
+  #
+  # The PURE folds live in StudioChat (rail_apply_background / rail_capture_progress
+  # / rail_stamp_status) so the Recorder and ChatLive fold identically off the same
+  # code — the Recorder wraps each with commit_rail (persist-on-structural-change),
+  # ChatLive wraps them with its own render guard.
+
+  defp background_tasks_changed(state, ev),
+    do: commit_rail(state, StudioChat.rail_apply_background(state.rail_snapshot, ev))
+
+  defp rail_capture_progress(state, ev),
+    do: commit_rail(state, StudioChat.rail_capture_progress(state.rail_snapshot, ev))
+
+  defp rail_stamp_status(state, tid, status),
+    do: commit_rail(state, StudioChat.rail_stamp_status(state.rail_snapshot, tid, status))
+
+  # Persist the rail COARSELY (charter D47): only when the token/usage-stripped
+  # structural signature actually changed. A token-only progress tick updates the
+  # in-memory copy (so the last-known totals ride the next structural persist) but
+  # never issues a Repo.update. ONE shared signature fn with ChatLive.
+  defp commit_rail(state, new_rail) do
+    if StudioChat.rail_signature(new_rail) != StudioChat.rail_signature(state.rail_snapshot) do
+      persist_rail(state.session_id, new_rail)
+    end
+
+    %{state | rail_snapshot: new_rail}
+  end
+
+  defp persist_rail(session_id, rail) do
+    case StudioChat.set_rail_snapshot(session_id, rail) do
+      {:error, reason} ->
+        Logger.warning("studio chat recorder: failed to persist rail: #{inspect(reason)}")
+
+      _ ->
+        :ok
+    end
+  end
 
   defp persist(session_id, attrs, kind) do
     case StudioChat.append_message(session_id, attrs) do

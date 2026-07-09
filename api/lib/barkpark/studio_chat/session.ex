@@ -65,6 +65,13 @@ defmodule Barkpark.StudioChat.Session do
     field :last_context_tokens, :integer
     field :context_window, :integer
 
+    # Agents-rail mission-control snapshot (charter D47), a task_id-keyed map —
+    # see the migration for the shape. SET in place by the Recorder as
+    # background Workflow agents run; hydrated on reopen so the rail replays its
+    # last-known state (a reopened mid-run session shows "interrupted", never a
+    # fake spinner — `StudioChat.interrupt_running_tasks/1` flips it on teardown).
+    field :rail_snapshot, :map
+
     has_many :messages, Barkpark.StudioChat.Message,
       foreign_key: :session_id,
       preload_order: [asc: :seq]
