@@ -92,11 +92,15 @@ func TestCloudFleetPickNumberedPickResolvesCredentials(t *testing.T) {
 }
 
 // TestCloudFleetPickBlankSelectionStaysLoggedIn: a blank / EOF selection is not a
-// dead end — it finishes logged-in.
+// dead end — it finishes logged-in. (Two Barkparks so the numbered pick — not the
+// single-Barkpark fast path — is exercised.)
 func TestCloudFleetPickBlankSelectionStaysLoggedIn(t *testing.T) {
 	w, _, _ := newTestWriter()
 	client := &fakeFleetClient{
-		list:  []cloudclient.Barkpark{{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"}},
+		list: []cloudclient.Barkpark{
+			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"},
+			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com"},
+		},
 		creds: map[string]cloudclient.Credentials{"bp-1": {AdminToken: "t", URL: "https://alpha.example.com"}},
 	}
 	res, err := cloudFleetPick(w, client, strings.NewReader("\n"))
@@ -113,7 +117,10 @@ func TestCloudFleetPickBlankSelectionStaysLoggedIn(t *testing.T) {
 func TestCloudFleetPickOutOfRangeStaysLoggedIn(t *testing.T) {
 	w, _, _ := newTestWriter()
 	client := &fakeFleetClient{
-		list:  []cloudclient.Barkpark{{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"}},
+		list: []cloudclient.Barkpark{
+			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"},
+			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com"},
+		},
 		creds: map[string]cloudclient.Credentials{"bp-1": {AdminToken: "t", URL: "https://alpha.example.com"}},
 	}
 	res, err := cloudFleetPick(w, client, strings.NewReader("9\n"))
@@ -126,11 +133,15 @@ func TestCloudFleetPickOutOfRangeStaysLoggedIn(t *testing.T) {
 }
 
 // TestCloudFleetPickNoAdminTokenOffersManualPaste: a no_admin_token 404 on the
-// picked Barkpark offers a manual token paste, which feeds the same connect.
+// picked Barkpark offers a manual token paste, which feeds the same connect. (Two
+// Barkparks so the pick — not the fast path — runs; #1 is the one that 404s.)
 func TestCloudFleetPickNoAdminTokenManualPaste(t *testing.T) {
 	w, _, _ := newTestWriter()
 	client := &fakeFleetClient{
-		list:     []cloudclient.Barkpark{{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"}},
+		list: []cloudclient.Barkpark{
+			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"},
+			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com"},
+		},
 		credErrs: map[string]error{"bp-1": errors.New("no_admin_token")},
 	}
 	// Pick #1, then paste a token when prompted.
@@ -154,7 +165,10 @@ func TestCloudFleetPickNoAdminTokenManualPaste(t *testing.T) {
 func TestCloudFleetPickNoAdminTokenBlankStaysLoggedIn(t *testing.T) {
 	w, _, _ := newTestWriter()
 	client := &fakeFleetClient{
-		list:     []cloudclient.Barkpark{{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"}},
+		list: []cloudclient.Barkpark{
+			{ID: "bp-1", Name: "alpha", URL: "https://alpha.example.com"},
+			{ID: "bp-2", Name: "bravo", URL: "https://bravo.example.com"},
+		},
 		credErrs: map[string]error{"bp-1": errors.New("no_admin_token")},
 	}
 	res, err := cloudFleetPick(w, client, strings.NewReader("1\n\n"))
@@ -163,6 +177,121 @@ func TestCloudFleetPickNoAdminTokenBlankStaysLoggedIn(t *testing.T) {
 	}
 	if !res.LoggedInOnly {
 		t.Fatalf("declining the paste must stay logged-in, got %+v", res)
+	}
+}
+
+// TestCloudFleetPickSingleBarkparkAutoConnects: the overwhelmingly common case —
+// exactly one Barkpark — skips the numbered pick, resolves its credentials, and
+// returns the connect target with NO input read. The auto-selection is announced
+// on stderr and the admin token never leaks.
+func TestCloudFleetPickSingleBarkparkAutoConnects(t *testing.T) {
+	w, out, errb := newTestWriter()
+	client := &fakeFleetClient{
+		list:  []cloudclient.Barkpark{{ID: "bp-1", Name: "solo", URL: "https://solo.example.com"}},
+		creds: map[string]cloudclient.Credentials{"bp-1": {AdminToken: "solo-secret", URL: "https://solo.example.com"}},
+	}
+	// Empty reader: a fast path must never block on a pick prompt.
+	res, err := cloudFleetPick(w, client, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("single-Barkpark auto-connect should succeed, got: %v", err)
+	}
+	if res.LoggedInOnly {
+		t.Fatalf("a single Barkpark must auto-connect, not stay logged-in: %+v", res)
+	}
+	if res.Server != "https://solo.example.com" || res.Token != "solo-secret" || res.Name != "solo" {
+		t.Fatalf("resolved target wrong: %+v", res)
+	}
+	// The choice is announced on stderr; the numbered pick prompt never appears.
+	if !strings.Contains(errb.String(), "solo") {
+		t.Fatalf("single-Barkpark choice should be announced on stderr:\n%s", errb.String())
+	}
+	if strings.Contains(errb.String(), "Pick a Barkpark") || strings.Contains(out.String(), "Your Barkparks:") {
+		t.Fatalf("single Barkpark must skip the numbered pick; stdout=%q stderr=%q", out.String(), errb.String())
+	}
+	if strings.Contains(out.String()+errb.String(), "solo-secret") {
+		t.Fatalf("admin token leaked into output:\nstdout:%s\nstderr:%s", out.String(), errb.String())
+	}
+}
+
+// TestCloudFleetPickSingleBarkparkNoAdminTokenPaste: the single-Barkpark fast path
+// still honors the no_admin_token fallback — it prompts for a manual token paste,
+// reading the FIRST line as the token (no pick line to consume first).
+func TestCloudFleetPickSingleBarkparkNoAdminTokenPaste(t *testing.T) {
+	w, _, _ := newTestWriter()
+	client := &fakeFleetClient{
+		list:     []cloudclient.Barkpark{{ID: "bp-1", Name: "solo", URL: "https://solo.example.com"}},
+		credErrs: map[string]error{"bp-1": errors.New("no_admin_token")},
+	}
+	res, err := cloudFleetPick(w, client, strings.NewReader("pasted-token\n"))
+	if err != nil {
+		t.Fatalf("single-Barkpark no-admin-token paste should succeed, got: %v", err)
+	}
+	if res.Server != "https://solo.example.com" || res.Token != "pasted-token" {
+		t.Fatalf("resolved target wrong: %+v", res)
+	}
+	if res.LoggedInOnly {
+		t.Fatal("a pasted token must resolve a connect, not LoggedInOnly")
+	}
+}
+
+// TestCloudFleetPickStillProvisioningStaysLoggedIn: when the picked Barkpark's
+// credentials carry no URL or host yet (still provisioning), the flow finishes
+// LOGGED IN rather than erroring — a complete outcome, never a dead end.
+func TestCloudFleetPickStillProvisioningStaysLoggedIn(t *testing.T) {
+	w, out, _ := newTestWriter()
+	client := &fakeFleetClient{
+		// Single Barkpark whose creds have neither url nor host (still coming up).
+		list:  []cloudclient.Barkpark{{ID: "bp-1", Name: "warming", URL: "https://warming.example.com"}},
+		creds: map[string]cloudclient.Credentials{"bp-1": {AdminToken: "tok"}},
+	}
+	res, err := cloudFleetPick(w, client, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("still-provisioning must be a clean success, got: %v", err)
+	}
+	if !res.LoggedInOnly {
+		t.Fatalf("still-provisioning must stay logged-in, got %+v", res)
+	}
+	if res.Server != "" || res.Token != "" {
+		t.Fatalf("still-provisioning must not resolve a server/token, got %+v", res)
+	}
+	if !strings.Contains(out.String(), "still provisioning") {
+		t.Fatalf("still-provisioning output should explain the wait:\n%s", out.String())
+	}
+}
+
+// TestCloudFleetPickHostOnlyCanonicalizesToHTTPS: a Barkpark reachable only by a
+// scheme-less host resolves to a canonical https://<host> connect target, so the
+// W2 steal-guard's normalizeServerURL comparison sees a real URL.
+func TestCloudFleetPickHostOnlyCanonicalizesToHTTPS(t *testing.T) {
+	w, _, _ := newTestWriter()
+	client := &fakeFleetClient{
+		list:  []cloudclient.Barkpark{{ID: "bp-1", Name: "iponly", Host: "203.0.113.7"}},
+		creds: map[string]cloudclient.Credentials{"bp-1": {AdminToken: "tok", Host: "203.0.113.7"}},
+	}
+	res, err := cloudFleetPick(w, client, strings.NewReader(""))
+	if err != nil {
+		t.Fatalf("host-only auto-connect should succeed, got: %v", err)
+	}
+	if res.Server != "https://203.0.113.7" {
+		t.Fatalf("host-only server = %q, want https://203.0.113.7", res.Server)
+	}
+}
+
+// TestFleetTargetCanonicalizesScheme: fleetTarget always returns a scheme+host
+// URL — full URLs pass through, scheme-less hosts gain https://, and an all-blank
+// input yields "".
+func TestFleetTargetCanonicalizesScheme(t *testing.T) {
+	cases := []struct{ url, host, want string }{
+		{"https://a.example.com", "a.example.com", "https://a.example.com"}, // URL wins
+		{"http://a.example.com", "", "http://a.example.com"},                // scheme preserved
+		{"", "b.example.com", "https://b.example.com"},                      // host promoted
+		{"", "203.0.113.7", "https://203.0.113.7"},                          // ip host promoted
+		{"  ", "  ", ""},                                                     // all blank
+	}
+	for _, c := range cases {
+		if got := fleetTarget(c.url, c.host); got != c.want {
+			t.Errorf("fleetTarget(%q,%q) = %q, want %q", c.url, c.host, got, c.want)
+		}
 	}
 }
 
