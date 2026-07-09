@@ -45,7 +45,12 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
   This test is intentionally UN-tagged: it runs in the default suite. An
   excluded guard is a vacuous guard.
   """
-  use ExUnit.Case, async: true
+  # async: false — this file asserts WALL CLOCK. Running it concurrently with
+  # up to max_cases other test files adds scheduler contention that only ever
+  # pushes the measured time UP, spending the flake headroom on noise instead
+  # of regressions. Serial costs ~2 s of suite time; a flaky perf guard costs
+  # trust.
+  use ExUnit.Case, async: false
 
   alias Barkpark.Plugins.Sheets.Core
   alias Barkpark.Plugins.Sheets.Engine
@@ -104,9 +109,9 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
     # super-linearly blow up the time. Both grids use the per-tab fast path (no
     # cross-tab refs) so they share one code path, and both stay far below the
     # cap so this probe is cheap. The ceiling is deliberately loose — it flags a
-    # quadratic CLIFF, not constant-factor or GC noise. We warm each grid once
-    # (drop first-run JIT/alloc noise) and floor the small time to avoid
-    # divide-by-noise at millisecond scale.
+    # quadratic CLIFF, not constant-factor or GC noise. Best-of-3 (min) per grid
+    # absorbs first-run alloc noise and GC spikes, and the small time is floored
+    # to avoid divide-by-noise at millisecond scale.
     test "recompute scales roughly linearly, not quadratically, with cell count" do
       small = fast_path_content(@lin_small_rows)
       big = fast_path_content(@lin_small_rows * @lin_factor)
@@ -198,7 +203,9 @@ defmodule Barkpark.Plugins.Sheets.EnginePerfTest do
       end
 
     cells =
-      Map.put(refs, a1(2, 1), %{"f" => "SUM(Data!#{a1(@value_cols + 2, 1)}:#{a1(@value_cols + 2, @rows)})"})
+      Map.put(refs, a1(2, 1), %{
+        "f" => "SUM(Data!#{a1(@value_cols + 2, 1)}:#{a1(@value_cols + 2, @rows)})"
+      })
 
     %{"name" => name, "cells" => cells}
   end
