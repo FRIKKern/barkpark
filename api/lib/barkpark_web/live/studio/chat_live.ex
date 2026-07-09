@@ -1184,6 +1184,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           padding: 2px 0;
           background: transparent;
         }
+        /* The paper engine gives paragraphs/headings a top margin — inside a
+           gutter row that pushes the FIRST line a full line below the ● glyph.
+           The bubble's first block starts flush so glyph and text align. */
+        .bp-paper-surface.bp-chat-md > :first-child {
+          margin-top: 0;
+        }
         /* Primary (evergreen) fill, NOT --border-muted: the dark theme's border
            tone is an 11%-lightness gray on a dark bg — the shapes rendered
            invisible. Primary reads in both schemes; the pulse keeps it a ghost. */

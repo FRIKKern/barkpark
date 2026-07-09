@@ -615,6 +615,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-skel="diagram")
     end
 
+    test "the bubble's first block has no top margin (● gutter alignment)", %{view: view} do
+      # regression: the paper engine's paragraph top margin pushed the first
+      # text line a full line below the ● glyph in the gutter row.
+      html = render(view)
+      assert html =~ ".bp-paper-surface.bp-chat-md > :first-child"
+    end
+
     test "chat bubbles neutralize the paper PAGE rules (skeleton stays inline)", %{view: view} do
       html = render(view)
       # regression: .bp-paper-surface is the reader PAGE class — its
