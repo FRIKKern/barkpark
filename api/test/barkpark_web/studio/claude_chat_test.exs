@@ -789,7 +789,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
   defp read_frame(file), do: file |> wait_for_file() |> String.trim() |> Jason.decode!()
 
-  defp wait_for_file(file, tries \\ 150) do
+  # 400 × 20ms = 8s ceiling: under full-suite load the OS can take well past the
+  # old 3s to schedule the fake-binary shell and flush its first write (observed
+  # as a "capture file never written" flake). The happy path still returns on
+  # the first poll; only a genuinely-dead fake pays the ceiling.
+  defp wait_for_file(file, tries \\ 400) do
     cond do
       File.exists?(file) and File.read!(file) != "" -> File.read!(file)
       tries <= 0 -> flunk("capture file never written: #{file}")
