@@ -571,7 +571,20 @@ defmodule Barkpark.StudioChat do
 
     cost = fnum(Map.get(frame, :total_cost_usd, Map.get(usage, :total_cost_usd, 0)))
 
-    # Snapshot (SET): the tokens riding in the model's context on THIS turn.
+    # Snapshot (SET, never inc): the tokens riding in the model's context on THIS
+    # turn. SET is what makes the ring HONEST across compaction (charter D27) — the
+    # turn AFTER the CLI compacts reports a small window occupancy, so the ring
+    # shrinks to the post-compaction reality instead of a stale summed high-water
+    # mark. Two known imprecisions we live with (directional gauge, not an
+    # accountant) — DO NOT "fix" by changing the sum:
+    #   * One-turn mid-compaction inflation: on the exact turn compaction fires,
+    #     the frame can report both the pre-compaction read and the post-compaction
+    #     context, briefly over-stating occupancy. It self-corrects on the next
+    #     turn's frame (which this SET overwrites).
+    #   * Multi-round-trip cache_read overcount: a single turn may make several
+    #     internal model round-trips, and cache_read_input_tokens can sum across
+    #     them — so this figure can exceed the true resident context. It is the
+    #     best signal the frame carries; the ring is a headroom cue, not a ledger.
     last_context = input + cache_read + cache_creation + output
 
     set = [last_active_at: DateTime.utc_now(), last_context_tokens: last_context]

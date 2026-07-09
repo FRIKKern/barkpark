@@ -440,8 +440,10 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     # Outbound control_request (interrupt / set_permission_mode / set_model).
     # The CLI answers with a control_response echoing this request_id. We map
     # request_id → kind here so the inbound ack dispatches as a TYPED
-    # {:claude_chat_control, kind, response} (charter D17) — otherwise the ack
-    # falls through to the generic sink event and the ChatLive catch-all eats it.
+    # {:claude_chat_control, kind, request_id, response} (charter D17/D23) —
+    # otherwise the ack falls through to the generic sink event and the ChatLive
+    # catch-all eats it. The request_id rides the dispatch so the consumer can
+    # ignore a stale ack from a superseded switch (correlate, don't guess).
     def handle_cast({:control_request, request_id, request}, state) do
       line =
         Jason.encode!(%{
@@ -559,19 +561,29 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     # The CLI's ack for one of OUR control_requests (interrupt / set_mode /
     # set_model). Match it by the request_id we minted and dispatch a TYPED
-    # {:claude_chat_control, kind, response} (charter D17) so ChatLive can assert
-    # the echoed mode instead of trusting a bare subtype:success (D12). An
-    # untracked control_response (not one we sent) flows through as a plain event
-    # — the previous behavior for any ack the LiveView doesn't correlate.
+    # {:claude_chat_control, kind, request_id, response} (charter D17/D23) so
+    # ChatLive can (a) assert the echoed mode instead of trusting a bare
+    # subtype:success (D12) AND (b) correlate the ack to the SPECIFIC outbound
+    # request by its id — a rapid double mode-switch acks twice and only the
+    # LATEST outstanding request per kind may commit/revert; a stale ack is
+    # dropped by the consumer. An untracked control_response (not one we sent)
+    # flows through as a plain event — the previous behavior for any ack the
+    # LiveView doesn't correlate.
     defp dispatch_event(%{"type" => "control_response", "response" => response} = event, state)
          when is_map(response) do
-      case pop_pending(state, Map.get(response, "request_id")) do
+      request_id = Map.get(response, "request_id")
+
+      case pop_pending(state, request_id) do
         {nil, state} ->
           send(state.sink, {:claude_chat_event, event})
           state
 
         {kind, state} ->
-          send(state.sink, {:claude_chat_control, kind, Map.get(response, "response") || %{}})
+          send(
+            state.sink,
+            {:claude_chat_control, kind, request_id, Map.get(response, "response") || %{}}
+          )
+
           state
       end
     end

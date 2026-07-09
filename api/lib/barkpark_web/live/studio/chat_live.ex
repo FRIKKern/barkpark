@@ -71,7 +71,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          streaming: nil,
          composer_rev: 0,
          interrupt_requested: false,
-         mode_switch_from: nil,
+         pending_mode: nil,
          detached: false,
          last_result: nil,
          ring: blank_ring(),
@@ -189,9 +189,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # control frame (key `mode`, charter D12) — the model's context is preserved,
   # no respawn. With no live subprocess (the common case now that spawn is lazy)
   # it is a silent selector update; the next spawn carries the mode via
-  # build_args. Either way we PERSIST the switch (charter D17) so a reopened
-  # session shows the mode you chose and the next lazy `--resume` spawn carries
-  # it — the store row no longer keeps its stale creation mode.
+  # build_args.
+  #
+  # Persistence is ACK-driven for a live session (charter D23): the store's mode
+  # is the last value the CLI actually confirmed, never the optimistic guess.
+  # We record the minted request_id in `pending_mode` (with the mode to revert to
+  # if it fails) so ONLY the ack matching the LATEST outstanding switch may commit
+  # or revert — a stale ack from a superseded rapid switch is ignored, never a
+  # mis-revert. With no live session there is no ack to wait on, so we persist
+  # immediately and the next lazy `--resume` spawn carries the mode.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
@@ -200,21 +206,22 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       session = socket.assigns.session ->
-        # Optimistic: move the selector + persist now, but remember the prior
-        # mode so the echoed control_response can revert it if the switch didn't
-        # take (the CLI acks subtype:success even for a silent no-op — D12).
-        prev = socket.assigns.mode
-        ClaudeChat.set_permission_mode(session, mode)
-        persist_mode(socket, mode)
+        # Optimistic: move the selector now for instant feedback, but DON'T
+        # persist yet — the persisted mode is the last ACKED value (D23). Remember
+        # the request_id (latest-outstanding correlation) and the revert target:
+        # the last known-good mode, which a chain of unconfirmed rapid switches
+        # must preserve rather than fold into an intermediate optimistic value.
+        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
+        revert_to = revert_target(socket)
 
         {:noreply,
          socket
-         |> assign(mode: mode, mode_switch_from: prev)
+         |> assign(mode: mode, pending_mode: %{req: request_id, revert_to: revert_to})
          |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
 
       true ->
         persist_mode(socket, mode)
-        {:noreply, assign(socket, mode: mode)}
+        {:noreply, assign(socket, mode: mode, pending_mode: nil)}
     end
   end
 
@@ -407,34 +414,53 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, refresh_sessions(socket)}
   end
 
-  # The CLI acked a permission-mode switch (charter D17). NEVER trust the bare
-  # subtype:success — assert the ECHOED mode (D12 vacuous-green: the alt wire key
-  # no-ops silently, returning an empty echo). A confirmed echo clears the revert
-  # marker; an empty/mismatched echo reverts the optimistic selector + persisted
-  # mode and says so honestly, so the UI never claims a switch that didn't land.
-  def handle_info({:claude_chat_control, :set_mode, response}, socket) do
-    echoed = if is_map(response), do: response["mode"], else: nil
+  # The CLI acked a permission-mode switch (charter D17/D23). Two guards, in
+  # order:
+  #
+  #   1. CORRELATE by request_id — only the ack matching the LATEST outstanding
+  #      switch may act. A stale ack (a rapid re-switch superseded this one) is
+  #      dropped: acting on it would mis-revert a switch the user has already
+  #      moved past. This is the fix for the wave-2 seam (acks were value-matched).
+  #   2. Never trust the bare subtype:success — assert the ECHOED mode (D12
+  #      vacuous-green: the alt wire key no-ops silently, returning an empty echo).
+  #
+  # A confirmed echo COMMITS: it persists the acked mode (the store's mode is the
+  # last confirmed value, D23) and clears the pending marker. An empty/mismatched
+  # echo REVERTS the optimistic selector to the pending switch's known-good mode,
+  # persists that, and says so honestly — the UI never claims a switch that didn't
+  # land.
+  def handle_info({:claude_chat_control, :set_mode, request_id, response}, socket) do
+    case socket.assigns[:pending_mode] do
+      %{req: ^request_id} = pending ->
+        echoed = if is_map(response), do: response["mode"], else: nil
 
-    if echoed == socket.assigns.mode do
-      {:noreply, assign(socket, mode_switch_from: nil)}
-    else
-      revert_to = socket.assigns[:mode_switch_from] || socket.assigns.mode
-      persist_mode(socket, revert_to)
+        if echoed == socket.assigns.mode do
+          persist_mode(socket, echoed)
+          {:noreply, assign(socket, pending_mode: nil)}
+        else
+          revert_to = pending.revert_to
+          persist_mode(socket, revert_to)
 
-      {:noreply,
-       socket
-       |> assign(mode: revert_to, mode_switch_from: nil)
-       |> append_message(
-         :system,
-         "Couldn't switch permission mode — still #{mode_label(revert_to)}."
-       )}
+          {:noreply,
+           socket
+           |> assign(mode: revert_to, pending_mode: nil)
+           |> append_message(
+             :system,
+             "Couldn't switch permission mode — still #{mode_label(revert_to)}."
+           )}
+        end
+
+      _ ->
+        # Stale ack (superseded switch) or no pending switch at all — ignore it.
+        {:noreply, socket}
     end
   end
 
   # Interrupt / set_model acks need no UI action: the interrupt's real outcome
   # arrives as the terminal `result` frame, and set_model has no surface. Swallow
   # them so they never fall to the noisy catch-all.
-  def handle_info({:claude_chat_control, _kind, _response}, socket), do: {:noreply, socket}
+  def handle_info({:claude_chat_control, _kind, _request_id, _response}, socket),
+    do: {:noreply, socket}
 
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
@@ -463,6 +489,29 @@ defmodule BarkparkWeb.Studio.ChatLive do
        next_id: id + 1
      )
      |> refresh_sessions()}
+  end
+
+  # The CLI compacted the conversation to reclaim context window (charter D27).
+  # Today this system subtype is eaten by the catch-all below — but compaction is
+  # exactly the moment the headroom ring resets, so an unexplained shrink would
+  # read as a bug. Surface an honest, EPHEMERAL system line naming the trigger and
+  # the pre-compaction size. Deliberately NOT persisted (D7 store is display
+  # history; a compaction is a live event, and the next result's snapshot already
+  # tells the durable story via the ring).
+  def handle_info(
+        {:claude_chat_event, %{"type" => "system", "subtype" => "compact_boundary"} = ev},
+        socket
+      ) do
+    meta = ev["compact_metadata"] || %{}
+    pre = meta["pre_tokens"]
+
+    line =
+      case meta["trigger"] do
+        "manual" -> "Conversation compacted manually#{compact_size(pre)}."
+        _ -> "Conversation compacted automatically#{compact_size(pre)}."
+      end
+
+    {:noreply, append_message(socket, :system, line)}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -1159,7 +1208,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
       interrupt_requested: false,
-      mode_switch_from: nil,
+      pending_mode: nil,
       detached: false,
       last_result: nil,
       # Reopen must show the last-known headroom (charter D19) — read the snapshot
@@ -1192,7 +1241,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: 0,
       streaming: nil,
       interrupt_requested: false,
-      mode_switch_from: nil,
+      pending_mode: nil,
       detached: false,
       last_result: nil,
       ring: blank_ring(),
@@ -1256,6 +1305,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
       |> append_message(:system, message)
       |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
       |> refresh_sessions()
+    end
+  end
+
+  # The mode to fall back to if the pending switch fails: the last known-good
+  # mode. When a switch is already in flight, keep ITS revert target (the mode
+  # confirmed before the chain started) rather than the current optimistic value
+  # — otherwise a failed second switch would revert to an unconfirmed first.
+  defp revert_target(socket) do
+    case socket.assigns[:pending_mode] do
+      %{revert_to: rt} -> rt
+      _ -> socket.assigns.mode
     end
   end
 
@@ -1651,6 +1711,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp mode_label("default"), do: "ask to act"
   defp mode_label("acceptEdits"), do: "auto-accept edits"
   defp mode_label(other), do: other
+
+  # The "(was ~N tokens)" tail on a compaction line — only when the CLI reports a
+  # pre-compaction size, so we never invent a number we don't have.
+  defp compact_size(pre) when is_integer(pre) and pre > 0, do: " (was ~#{pre} tokens)"
+  defp compact_size(_), do: ""
 
   defp status_label(:new), do: "new chat"
   defp status_label(:resumable), do: "resumable"
