@@ -185,11 +185,15 @@ defmodule BarkparkCloud.FailureCopyTest do
   # ── capability_gap_reason/2 — the honest-degradation copy for a FALSE
   # capability, server-owned so the SPA + CLI read one reason (charter D8/D16).
 
-  test "azure archive/resurrect/adopt gaps are each named specifically (S9 facet split)" do
-    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "Azure has no archive"
-    assert FailureCopy.capability_gap_reason("azure", "archive") =~ "unrecoverable"
-    assert FailureCopy.capability_gap_reason("azure", "resurrect") =~ "archive"
+  test "azure adopt is the ONE named gap; archive + resurrect are live capabilities (S14)" do
     assert FailureCopy.capability_gap_reason("azure", "adopt") =~ "clone-swap"
+
+    # archive (S14b, portable bp-bundle-v1) and resurrect (S14d, bundle restore
+    # target) are LIVE capabilities now, so their bespoke gap clauses are gone —
+    # both fall through to the generic terminal clause, kept only as defensive
+    # coverage, never advertised as a gap.
+    refute FailureCopy.capability_gap_reason("azure", "archive") =~ "Azure has no archive"
+    refute FailureCopy.capability_gap_reason("azure", "resurrect") =~ "Azure has no archives"
   end
 
   test "hetzner pause gap explains a stopped Hetzner box still bills → archive instead" do

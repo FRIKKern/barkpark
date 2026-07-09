@@ -39,11 +39,14 @@ func TestLifecycleDispatchRegistersFacets(t *testing.T) {
 		t.Fatalf("ProviderFor(azure): %v", err)
 	}
 	az := cloud.DetectCapabilities(cloud.ProviderAzure, p)
-	if !(az.Decommission && az.Audit) {
-		t.Errorf("azure should register decommission+audit: %+v", az)
+	// archive (S14b, Decision 42: the portable bp-bundle-v1) and resurrect (S14d:
+	// the portable-bundle restore target) are both registered via lifecycleDispatch;
+	// only adopt stays unclaimed (a snapshot-based clone-swap).
+	if !(az.Decommission && az.Audit && az.Archive && az.Resurrect) {
+		t.Errorf("azure should register archive+decommission+audit+resurrect: %+v", az)
 	}
-	if az.Archive || az.Resurrect || az.Adopt {
-		t.Errorf("azure must NOT claim archive/resurrect/adopt: %+v", az)
+	if az.Adopt {
+		t.Errorf("azure must NOT claim adopt (snapshot clone-swap): %+v", az)
 	}
 }
 
@@ -65,15 +68,14 @@ func TestHetznerDispatchMatchesRegisteredVerbs(t *testing.T) {
 
 // ── hetzner neutral == escape hatch (byte-identical) ─────────────────────────
 
-// TestNeutralHetznerLifecycleByteIdentical runs the SAME archive scenario two ways
-// — `bp cloud hetzner instance archive` and `bp cloud instance archive --provider
-// hetzner` — and asserts identical stdout + exit. That is the refute that the
-// neutral surface only strips --provider and forwards to the existing free
-// function, guts untouched.
+// TestNeutralHetznerLifecycleByteIdentical pins the S14b contract (Decision 42):
+// the neutral archive is now the PORTABLE bp-bundle-v1, and `--fast` is the
+// hetzner snapshot escape that stays BYTE-IDENTICAL to `bp cloud hetzner instance
+// archive`. So two things must hold: neutral (no --fast) writes a bundle (a
+// manifest lands in the store, and the receipt carries NO snapshot image id);
+// `--fast` output equals the escape hatch's, byte-for-byte.
 func TestNeutralHetznerLifecycleByteIdentical(t *testing.T) {
-	run := func(args ...string) (string, int) {
-		instTestTuning(t)
-		f := newFakeHzAPI(t)
+	wire := func(f *fakeHzAPI) {
 		f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Query().Get("name") != "" {
 				hzWriteJSON(w, 200, `{"servers":[]}`)
@@ -87,20 +89,58 @@ func TestNeutralHetznerLifecycleByteIdentical(t *testing.T) {
 		f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 			hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success","progress":100}]}`)
 		})
+	}
+	runSnapshot := func(args ...string) (string, int) {
+		instTestTuning(t)
+		f := newFakeHzAPI(t)
+		wire(f)
 		stdout, _, code := runHzCLI(t, "json", args...)
 		return stdout, code
 	}
 
-	escOut, escCode := run("hetzner", "instance", "archive", "okey.barkpark.cloud")
-	neuOut, neuCode := run("instance", "archive", "--provider", "hetzner", "okey.barkpark.cloud")
-	if escCode != exitOK || neuCode != exitOK {
-		t.Fatalf("archive exit codes: escape=%d neutral=%d", escCode, neuCode)
+	// --fast == the escape hatch, byte-for-byte (the snapshot path is untouched).
+	escOut, escCode := runSnapshot("hetzner", "instance", "archive", "okey.barkpark.cloud")
+	fastOut, fastCode := runSnapshot("instance", "archive", "--provider", "hetzner", "--fast", "okey.barkpark.cloud")
+	if escCode != exitOK || fastCode != exitOK {
+		t.Fatalf("archive exit codes: escape=%d fast=%d", escCode, fastCode)
 	}
-	if escOut != neuOut {
-		t.Errorf("neutral hetzner archive is NOT byte-identical to the escape hatch:\n escape:  %q\n neutral: %q", escOut, neuOut)
+	if escOut != fastOut {
+		t.Errorf("--fast hetzner archive is NOT byte-identical to the escape hatch:\n escape: %q\n fast:   %q", escOut, fastOut)
 	}
-	if !strings.Contains(neuOut, "777") {
-		t.Errorf("archive receipt missing the image id: %s", neuOut)
+	if !strings.Contains(fastOut, "777") {
+		t.Errorf("--fast snapshot receipt missing the image id: %s", fastOut)
+	}
+
+	// Neutral (no --fast) writes a PORTABLE bundle, not a snapshot.
+	st := withFakeBundleStore(t)
+	withFakeRemoteStream(t, cannedBundleTar(t))
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+	wire(f)
+	stdout, stderr, code := runHzCLI(t, "json", "instance", "archive", "--provider", "hetzner", "okey.barkpark.cloud")
+	if code != exitOK {
+		t.Fatalf("neutral bundle archive exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	keys := bundleManifestKeys(t, st)
+	if len(keys) != 1 {
+		t.Fatalf("neutral archive should land exactly one bp-bundle-v1 manifest, got %v", keys)
+	}
+	if !strings.Contains(keys[0], "okey.barkpark.cloud") || !strings.HasPrefix(keys[0], "archives/") {
+		t.Errorf("manifest key is not the pinned archives/<team>/<fqdn>/<stamp>/ layout: %s", keys[0])
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("report not JSON: %v: %s", err, stdout)
+	}
+	if report["ok"] != true {
+		t.Errorf("bundle archive not ok: %v", report)
+	}
+	b, _ := report["bundle"].(map[string]any)
+	if b == nil || b["format"] != "bp-bundle-v1" {
+		t.Errorf("neutral archive receipt missing the bp-bundle-v1 bundle: %v", report)
+	}
+	if strings.Contains(stdout, "image_id") {
+		t.Errorf("neutral archive must NOT take a snapshot (no image_id):\n%s", stdout)
 	}
 }
 
@@ -441,18 +481,19 @@ func TestAzureAuditExemptsWarmBox(t *testing.T) {
 
 // ── honest degradation ───────────────────────────────────────────────────────
 
-// TestNeutralLifecycleDegrades: azure archive (a facet azure lacks) and a
-// genuinely facet-less provider both degrade with a printed reason; an unknown
-// provider is a usage error. None of the degrade paths touch the network.
+// TestNeutralLifecycleDegrades: azure ADOPT (its one remaining gap now that
+// archive (S14b) and resurrect (S14d) ride the portable bundle) and a genuinely
+// facet-less provider both degrade with a printed reason; an unknown provider is
+// a usage error. None of these paths touch the network.
 func TestNeutralLifecycleDegrades(t *testing.T) {
-	// azure lacks the archive facet (dispatch entry has only decommission+audit).
-	_, stderr, code := runInstanceCapture(t, "table", "archive", "--provider", "azure", "web-1")
+	// azure lacks the adopt facet (dispatch has archive+resurrect+decommission+audit).
+	_, stderr, code := runInstanceCapture(t, "table", "adopt", "--provider", "azure", "box.barkpark.cloud", "acme")
 	if code != exitGeneric {
-		t.Fatalf("azure archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
+		t.Fatalf("azure adopt should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
 	}
-	for _, want := range []string{"azure", "does not support", "archive"} {
+	for _, want := range []string{"azure", "does not support", "adopt"} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("azure archive degrade missing %q:\n%s", want, stderr)
+			t.Errorf("azure adopt degrade missing %q:\n%s", want, stderr)
 		}
 	}
 	// A registered provider that satisfies ONLY cloud.CloudProvider (no facet
@@ -461,12 +502,12 @@ func TestNeutralLifecycleDegrades(t *testing.T) {
 	cloud.Register("s9facetless", func(map[string]string) (cloud.CloudProvider, error) {
 		return coreOnlyProvider{}, nil
 	})
-	_, stderr, code = runInstanceCapture(t, "table", "archive", "--provider", "s9facetless", "web-1")
+	_, stderr, code = runInstanceCapture(t, "table", "resurrect", "--provider", "s9facetless", "web-1")
 	if code != exitGeneric {
-		t.Fatalf("facet-less archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
+		t.Fatalf("facet-less resurrect should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
 	}
 	if !strings.Contains(stderr, "does not support") {
-		t.Errorf("facet-less archive degrade missing the honest reason:\n%s", stderr)
+		t.Errorf("facet-less resurrect degrade missing the honest reason:\n%s", stderr)
 	}
 	// unknown provider → usage.
 	_, stderr, code = runInstanceCapture(t, "table", "audit", "--provider", "gcp")
@@ -484,7 +525,10 @@ func TestNeutralLifecycleDegrades(t *testing.T) {
 // inputs, decommission of a seeded box succeeds while an unknown box is a
 // not-found error, and audit reports a clean cross-check. Zero network.
 func TestNeutralFakeFacetsExecute(t *testing.T) {
-	// archive → synthetic receipt carrying the fake archive id.
+	// archive → a PORTABLE bp-bundle-v1 lands in the store (Decision 42), and the
+	// receipt keeps the fake archive-id lineage. This proves the full write path
+	// offline: synthetic payload → the S14a writer → FakeBundleStore.
+	st := withFakeBundleStore(t)
 	stdout, stderr, code := runInstanceCapture(t, "json", "archive", "--provider", "fake", "web-1")
 	if code != exitOK {
 		t.Fatalf("fake archive should succeed, got exit %d\n%s\n%s", code, stdout, stderr)
@@ -498,6 +542,12 @@ func TestNeutralFakeFacetsExecute(t *testing.T) {
 	}
 	if a, _ := arch["archive"].(map[string]any); a == nil || !strings.Contains(a["id"].(string), "fake-archive-web-1") {
 		t.Errorf("archive receipt missing the synthetic id: %v", arch["archive"])
+	}
+	if b, _ := arch["bundle"].(map[string]any); b == nil || b["format"] != "bp-bundle-v1" {
+		t.Errorf("fake archive receipt missing the bp-bundle-v1 bundle: %v", arch["bundle"])
+	}
+	if keys := bundleManifestKeys(t, st); len(keys) != 1 {
+		t.Errorf("fake archive should write exactly one manifest, got %v", keys)
 	}
 
 	// adopt validates its two inputs and succeeds.

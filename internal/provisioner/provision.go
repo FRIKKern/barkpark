@@ -125,6 +125,17 @@ type Seams struct {
 	// barkpark-agent.service. Same value main() passes to the worker's own claim
 	// loop; empty (tests that don't exercise the agent) skips the agent install.
 	ControlURL string
+
+	// Restore (charter S14, Decision 12) executes the provider + object-store actions
+	// of a portable-bundle RESURRECT — a cold create, DNS repoint, sealed-identity
+	// install, and database restore. ProvisionWith uses it ONLY when a job carries a
+	// BundleRef (a resurrect claim); every normal launch leaves it nil and never
+	// touches this seam. The real driver (wired at S14a/b/c integration) creates the
+	// box via ProvisionOneShot in restore mode + runs pg_restore over the box runner;
+	// tests inject a recorder so the round-trip is proven offline. nil on a restore
+	// job → ProvisionWith fails loud (a resurrect with no restore driver is a
+	// misconfiguration, never a silent normal provision).
+	Restore RestoreDriver
 }
 
 // BootstrapOutputs is what a template bootstrap produced — reported to the
@@ -246,6 +257,14 @@ type Teardown func(ctx context.Context) error
 // crypto/rand suffix (oneShotServerName), guarding the Hetzner duplicate-name path
 // even if two jobs ever carried an identical subdomain.
 func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, string, *BootstrapOutputs, Teardown, error) {
+	// A resurrect claim (charter S14, Decision 12) carries a BundleRef and routes to
+	// the RESTORE path BEFORE any normal-provision setup — it is a distinct chain (cold
+	// create, sealed-identity install, database restore), never a template launch. Every
+	// normal launch has BundleRef nil and falls through to the byte-for-byte unchanged
+	// path below.
+	if job.BundleRef != nil {
+		return provisionRestore(ctx, seams, job)
+	}
 	if seams.Provider == nil {
 		return "", "", nil, nil, fmt.Errorf("provisioner: a CloudProvider must be set")
 	}

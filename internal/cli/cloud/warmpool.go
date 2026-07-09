@@ -32,6 +32,25 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
+// AzureBaseInstallScript is the repo-relative from-scratch base install a resurrect
+// (or a cold one-shot) runs on a fresh AZURE box (charter S14, Decision 41). Azure
+// has no warm-image snapshot, so the box is built up from a bare OS — apt
+// postgres/caddy/tooling + asdf erlang/elixir + go + clone + build — where Hetzner
+// simply boots the baked warm-image.
+const AzureBaseInstallScript = "deploy/azure-base-install.sh"
+
+// FreshenPlan describes how the freshen step brings a fresh box up to a runnable
+// Barkpark for kind. Hetzner rides the baked, snapshot-current warm-image (fast);
+// Azure has no snapshot substrate, so it runs the from-scratch base install. It is a
+// pure descriptor consumed by the resurrect step feed's `freshen` caption so the
+// operator sees WHICH path a cross-provider restore took.
+func FreshenPlan(kind string) string {
+	if kind == ProviderAzure {
+		return "azure base-install (" + AzureBaseInstallScript + ")"
+	}
+	return "hetzner warm-image"
+}
+
 // adminTokenAlphabet is the EXACT shape setup.GenerateAdminToken mints:
 // bp_admin_ + base64url (no padding). It deliberately excludes the shell/elixir
 // metacharacters (quotes, $, ;, backticks) so single-quoting the token into the

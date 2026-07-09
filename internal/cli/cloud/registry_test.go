@@ -98,14 +98,17 @@ func TestCapabilityFixtureParity(t *testing.T) {
 	}
 }
 
-// TestFixtureAzureRowHonest asserts the azure fixture row is the HONEST S9 shape
-// (charter Decision 20's facet split): core + labels + pause + decommission +
-// audit on, but archive/resurrect/adopt OFF. Azure has no snapshot-based archive
-// or resurrect and no clone-swap adopt, so it advertises only the lifecycle
-// facets it genuinely honours (its decommission + audit are CLI-level, registered
-// via RegisterLifecycleVerbs in the cli package). The live azure-vs-fixture parity
-// is proven in the cli package where the azure package + its verb registration are
-// linked; here we only pin the committed claim so a drift in the JSON is caught.
+// TestFixtureAzureRowHonest asserts the azure fixture row is the HONEST S14 shape:
+// core + labels + pause + decommission + audit + ARCHIVE + RESURRECT on, but adopt
+// still OFF. Portable archives (charter Decision 12) make Azure both a bundle
+// SOURCE (S14b: `bp cloud instance archive` collects any box into a bp-bundle-v1 —
+// no snapshot substrate needed) and a resurrect TARGET (S14d: a bundle archived on
+// Hetzner or Azure is restored onto a fresh Azure box). Both flips are backed by
+// real cli-package dispatch entries registered via RegisterLifecycleVerbs. ADOPT
+// stays false (a snapshot-based clone-swap — revisit on the bundle substrate). The
+// live azure-vs-fixture parity is proven in the cli package where the azure package
+// + its verb registration are linked; here we only pin the committed claim so a
+// drift in the JSON is caught.
 func TestFixtureAzureRowHonest(t *testing.T) {
 	fixture, err := LoadCapabilities()
 	if err != nil {
@@ -115,9 +118,9 @@ func TestFixtureAzureRowHonest(t *testing.T) {
 	if !ok {
 		t.Fatal("fixture is missing the azure row")
 	}
-	want := Capabilities{Core: true, Labels: true, Pause: true, Decommission: true, Audit: true}
+	want := Capabilities{Core: true, Labels: true, Pause: true, Archive: true, Resurrect: true, Decommission: true, Audit: true}
 	if az.Capabilities != want {
-		t.Errorf("azure fixture row drifted:\n  got:  %+v\n  want: %+v\n(core/labels/pause/decommission/audit on; catalog/archive/resurrect/adopt off)", az.Capabilities, want)
+		t.Errorf("azure fixture row drifted:\n  got:  %+v\n  want: %+v\n(core/labels/pause/archive/resurrect/decommission/audit on; catalog/adopt off)", az.Capabilities, want)
 	}
 	if az.Tier != "" {
 		t.Errorf("azure is a shippable provider, not dev-tier; got tier=%q", az.Tier)

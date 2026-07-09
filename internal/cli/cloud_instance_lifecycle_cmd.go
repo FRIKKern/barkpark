@@ -51,16 +51,38 @@ type lifecycleHandler func(out *writer, g globals, args []string) int
 // it — the "a claim needs a real dispatch entry" invariant (Decision 21).
 var lifecycleDispatch = map[string]map[string]lifecycleHandler{
 	cloud.ProviderHetzner: {
-		cloud.VerbArchive:      runInstanceArchive,
-		cloud.VerbResurrect:    runInstanceResurrect,
+		cloud.VerbArchive: runInstanceArchive,
+		// resurrect defaults to the PORTABLE bundle path (drop→restore→migrate onto a
+		// fresh box, cross-provider). `--fast` selects the legacy snapshot restore
+		// (runInstanceResurrect), byte-identical to `bp cloud hetzner instance resurrect`.
+		cloud.VerbResurrect:    runHetznerResurrect,
 		cloud.VerbDecommission: runInstanceDecommission,
 		cloud.VerbAdopt:        runInstanceAdopt,
 		cloud.VerbAudit:        runInstanceAudit,
 	},
 	cloud.ProviderAzure: {
+		// archive is the PORTABLE bp-bundle-v1 (charter Decision 42): azure now
+		// honours it through the neutral bundle writer, NOT a snapshot. The entry
+		// exists so RegisterLifecycleVerbs advertises the capability (Decision 21);
+		// the verb itself is intercepted in runCloudInstanceLifecycle and routed to
+		// runNeutralArchive, so this handler is the fallback, not the hot path.
+		cloud.VerbArchive:      runAzureArchive,
 		cloud.VerbDecommission: runAzureInstanceDecommission,
 		cloud.VerbAudit:        runAzureInstanceAudit,
+		// Azure has no snapshot substrate, so its ONLY resurrect is the portable
+		// bundle path (charter S14, Decision 12): a Hetzner-or-Azure archive bundle is
+		// restored onto a fresh Azure box (never a warm-assign — D40). This dispatch
+		// entry is what makes the azure fixture's resurrect:true a real capability
+		// (Decision 21 — a claim needs a real dispatch entry).
+		cloud.VerbResurrect: runAzureInstanceResurrect,
 	},
+}
+
+// runAzureArchive is the azure column's VerbArchive dispatch fallback — it routes
+// to the provider-neutral portable-bundle writer. Kept a real function (not the
+// old degrade) so the dispatch table is an honest capability source.
+func runAzureArchive(out *writer, g globals, args []string) int {
+	return runNeutralArchive(out, g, cloud.ProviderAzure, args)
 }
 
 // init registers each provider's dispatched lifecycle verbs into the seam so
@@ -104,6 +126,17 @@ func runCloudInstanceLifecycle(out *writer, g globals, verb string, args []strin
 	kind, rest, err := splitProviderFlag(args)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	// archive is the PORTABLE-BUNDLE verb for EVERY provider (Decision 42): it no
+	// longer routes to a per-kind snapshot handler — it collects the box into a
+	// bp-bundle-v1 in object storage, resurrectable on the OTHER provider. hetzner
+	// keeps `--fast` as the snapshot escape (handled inside runNeutralArchive). An
+	// unknown provider is still a usage error naming the known slugs.
+	if verb == cloud.VerbArchive {
+		if !providerKnown(kind) {
+			return useError(out, "usage", fmt.Sprintf("unknown provider %q (known: %s)", kind, strings.Join(cloud.RegisteredProviders(), ", ")), exitUsage)
+		}
+		return runNeutralArchive(out, g, kind, rest)
 	}
 	verbs, known := lifecycleDispatch[kind]
 	if !known {

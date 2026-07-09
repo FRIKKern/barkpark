@@ -148,18 +148,20 @@ func TestRunCloudProvidersJSON(t *testing.T) {
 		t.Errorf("fake must be tier=dev: %q", fk.Tier)
 	}
 
-	// Azure: REGISTERED, core+labels+pause + the decommission+audit lifecycle facets
-	// honoured (CLI-level, registered from the dispatch table), but catalog and the
-	// archive/resurrect/adopt facets OFF (Decision 20); authenticated null (no creds).
+	// Azure: REGISTERED, core+labels+pause + the archive+decommission+audit+resurrect
+	// lifecycle facets honoured (CLI-level, registered from the dispatch table —
+	// archive is the portable bp-bundle-v1 (Decision 42) and resurrect is the
+	// portable-bundle restore target (charter S14)), but catalog and the adopt facet
+	// OFF; authenticated null (no creds).
 	az := env.Providers[byslug["azure"]]
 	if !az.Registered {
 		t.Errorf("azure must be registered now that S5 wires it: %+v", az)
 	}
-	if !(az.Capabilities.Core && az.Capabilities.Labels && az.Capabilities.Pause && az.Capabilities.Decommission && az.Capabilities.Audit) {
-		t.Errorf("azure should honour core+labels+pause+decommission+audit: %+v", az.Capabilities)
+	if !(az.Capabilities.Core && az.Capabilities.Labels && az.Capabilities.Pause && az.Capabilities.Archive && az.Capabilities.Decommission && az.Capabilities.Audit && az.Capabilities.Resurrect) {
+		t.Errorf("azure should honour core+labels+pause+archive+decommission+audit+resurrect: %+v", az.Capabilities)
 	}
-	if az.Capabilities.Catalog || az.Capabilities.Archive || az.Capabilities.Resurrect || az.Capabilities.Adopt {
-		t.Errorf("azure must NOT claim catalog/archive/resurrect/adopt: %+v", az.Capabilities)
+	if az.Capabilities.Catalog || az.Capabilities.Adopt {
+		t.Errorf("azure must NOT claim catalog/adopt: %+v", az.Capabilities)
 	}
 	if az.Authenticated != nil {
 		t.Errorf("azure authenticated must be json null (no creds), got %+v", az.Authenticated)

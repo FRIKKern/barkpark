@@ -162,6 +162,61 @@ type JobSpec struct {
 	// Empty when an OLD control plane omits the key → the worker skips the agent
 	// install (the box serves, just without the beat). NEVER logged.
 	AgentToken string `json:"agent_token,omitempty"`
+	// BundleRef (charter S14, Decision 12) turns a normal provision into a RESTORE:
+	// present ONLY on a resurrect claim, it points the job at the portable archive
+	// bundle to rebuild the box FROM (manifest + pg_dump + media + sealed identity
+	// secrets) and carries the KEK that unseals those secrets. When set, ProvisionWith
+	// routes to the restore path — a cold create that NEVER warm-assigns (D40), whose
+	// content phase is a database restore instead of a template bootstrap, and whose
+	// configure phase installs the bundle's sealed identity (the KEK is CARRIED here,
+	// never minted on this path). nil (every normal launch) → the byte-for-byte
+	// unchanged provision. NEVER logged — it carries the KEK.
+	BundleRef *BundleRef `json:"bundle_ref,omitempty"`
+}
+
+// BundleRef locates a portable archive bundle and carries what a cross-provider
+// restore needs (charter S14, Decision 12). It mirrors the pinned-claim shape the
+// control plane stamps: WHERE the bundle lives (Store + Key in object storage), the
+// KEK that unseals its identity secrets (CARRIED from the archive time, never minted
+// at restore time — a resurrected box keeps its prior identity so links/tokens
+// survive), and the Manifest describing what to rebuild.
+type BundleRef struct {
+	// Store is the object-storage locator the bundle lives under (bucket/endpoint).
+	Store string `json:"store"`
+	// Key is the bundle's object key within Store (the specific archive, or the
+	// control-plane-resolved newest one when the caller didn't pin a bundle).
+	Key string `json:"key"`
+	// KEK is the key-encryption-key that unseals secrets.enc. It is CARRIED from the
+	// archive — NEVER minted on the restore path, or the box would come back with a
+	// new identity (defaultSecretGen must not run for a resurrect). NEVER logged.
+	KEK string `json:"kek"`
+	// Manifest describes the box being rebuilt: its fqdn, the database to restore, the
+	// media to unpack, and where it was archived FROM (a Hetzner bundle can land on
+	// Azure and vice-versa — the bold cross-provider bet).
+	Manifest BundleManifest `json:"manifest"`
+}
+
+// BundleManifest is the portable archive's self-description — the fidelity contract
+// a restore round-trips (charter S14). Everything the restore needs to name the
+// target and rebuild its data lives here, so the same bundle restores identically on
+// either provider.
+type BundleManifest struct {
+	// SourceProvider is the provider the box was archived FROM (hetzner|azure). The
+	// TARGET provider (job.Kind) may differ — that difference IS the migration story.
+	SourceProvider string `json:"source_provider"`
+	// Fqdn is the instance's public host — the A-record the restore repoints and the
+	// origin the verify gate probes.
+	Fqdn string `json:"fqdn"`
+	// DBName is the database the restore DROPs + CREATEs + pg_restores into. Named by
+	// the MANIFEST (not re-derived on the box) so the restore lands in the right place.
+	DBName string `json:"db_name"`
+	// MediaPaths are the media roots the restore unpacks from the bundle.
+	MediaPaths []string `json:"media_paths,omitempty"`
+	// ArchivedAt is the RFC3339 instant the bundle was cut (audit + newest-selection).
+	ArchivedAt string `json:"archived_at,omitempty"`
+	// SchemaVersion pins the schema the dump was taken at, so the restore's best-effort
+	// migrate knows whether it is catching up.
+	SchemaVersion int `json:"schema_version,omitempty"`
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns

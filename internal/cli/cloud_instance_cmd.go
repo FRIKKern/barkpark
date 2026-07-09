@@ -71,6 +71,8 @@ func runCloudInstance(out *writer, g globals, args []string) int {
 		return runCloudInstanceIP(out, rest)
 	case "label":
 		return runCloudInstanceLabel(out, rest)
+	case "archives":
+		return runInstanceArchivesList(out, rest)
 	case cloud.VerbArchive, cloud.VerbResurrect, cloud.VerbDecommission, cloud.VerbAdopt, cloud.VerbAudit:
 		return runCloudInstanceLifecycle(out, g, verb, rest)
 	case "pause", "resume":
