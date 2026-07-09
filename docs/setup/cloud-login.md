@@ -36,8 +36,8 @@ Once you approve, the poll returns and stores the token. You're signed in — an
 ## After sign-in: auto-register
 
 Signing in isn't the finish line. `bp` resolves your fleet and lands you in a
-working barkpark — identical for `bp login` and the wizard's **Barkpark Cloud**
-target (one shared path).
+working barkpark — for `bp login` and the wizard's **Barkpark Cloud** target
+alike.
 
 - **One barkpark** (usual case) — `bp` fetches its admin credentials and
   connects automatically:
@@ -46,10 +46,11 @@ target (one shared path).
   Connected to <name> — <url>
   ```
 
-  then the connection summary. On a terminal it offers `Press Enter to open the
-  desk (or q + Enter to quit)` — Enter drops you into the `bp` desk against the
-  just-connected barkpark; `q` or a non-interactive stream exits with `run bp to
-  open the desk`.
+  then the connection summary. On a full terminal `bp login` ends with
+  `Press Enter to open the desk (or type n to stay here)` — Enter drops you
+  into the desk against the just-connected barkpark; `n` leaves `Run 'bp' any
+  time to open the desk.` The wizard instead announces the auto-pick and
+  continues straight into the desk.
 - **Several barkparks** — `bp` prints a numbered list to pick from. If stdin is
   piped, it prints the fleet plus a one-line connect command.
 
@@ -59,15 +60,15 @@ You're always signed in; none of these dead-end:
 
 - **Empty fleet** — no barkparks yet; `bp` shows how to launch or deploy one;
   exits 0.
-- **Still provisioning** — `you are logged in; <name> is still provisioning —
-  re-run bp setup when it is ready`.
-- **No admin token** — none minted yet; `bp` lets you paste one (into the
-  Connect path) or finish signed in.
+- **Still provisioning** — `<name> has no address yet`; you stay logged in —
+  re-run `bp setup` (wizard) or `bp setup --target cloud` (login) once it's up.
+- **No admin token** — the wizard offers to paste one (same Connect path);
+  `bp login` points at `bp setup --target cloud`; either way you finish signed in.
 - **Already connected elsewhere** — an active server that isn't this barkpark:
-  `already connected to <saved>; your cloud fleet has <name> — bp setup to
-  switch`. `bp` does **not** take over.
-- **Fleet unreachable** — login still succeeded; `bp` warns `logged in —
-  couldn't resolve your fleet right now; run bp barkparks` and exits 0.
+  `bp is currently connected to <server> — leaving that as is.` plus a one-line
+  connect command. `bp` does **not** take over.
+- **Fleet unreachable** — login still succeeded; `bp` warns on stderr
+  (`logged in, but couldn't reach your fleet … — try bp barkparks`), exits 0.
 
 ## `-o json` and headless
 
@@ -104,8 +105,7 @@ untouched. `--device` forces it. `--url <base>` overrides the control-plane URL
   consumed on first use (a replayed poll fails closed) and expire 600s after
   start. **Deny** cancels a request immediately.
 - **Approval needs your browser session** — preserving the 2FA gate; the CLI can
-  never approve itself, and no token ever rides in the URL (only the short code;
-  the token arrives over the polled channel).
+  never approve itself, and no token ever rides in the URL.
 
 ## Troubleshooting
 
@@ -116,4 +116,4 @@ untouched. `--device` forces it. `--url <base>` overrides the control-plane URL
 | **`slow_down` / rate-limited poll** | The CLI backs off automatically; just wait. |
 | **Headless machine, no browser** | Use email + password: `bp login --email you@example.com`. |
 | **Approve page won't load / logged out** | Log in to barkpark.cloud in the same browser first, then reopen the link. |
-| **Signed in but no barkpark connected** | `logged in to Barkpark Cloud but no barkpark connected — run bp setup`. |
+| **Signed in but no barkpark connected** | `bp` says so and points at `bp setup` to connect one. |
