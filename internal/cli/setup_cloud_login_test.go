@@ -175,3 +175,40 @@ func TestCloudFleetPickListErrorSurfaces(t *testing.T) {
 		t.Fatal("a list error must surface, got nil")
 	}
 }
+
+// TestCloudSetupLoginUsesDeviceFlowOnTTY: the wizard's Barkpark Cloud target
+// logs in through the SAME device-link routine as bare `bp login` (charter
+// decision 13 — no duplicated login): with no BARKPARK_PASSWORD and both
+// streams a TTY, cloudSetupDeviceLogin drives /v1/auth/device/start → poll and
+// stores the minted token, never touching /v1/auth/login.
+func TestCloudSetupLoginUsesDeviceFlowOnTTY(t *testing.T) {
+	withTempConfigHome(t)
+	withInstantDevicePolls(t, 10)
+	forceDeviceTTY(t, true)
+	stubBrowserOpener(t)
+	t.Setenv("BARKPARK_PASSWORD", "")
+
+	var ds deviceServer
+	srv := newDeviceServer(t, &ds, 1, "sess-wizard", "team-wiz")
+
+	// Point the saved config's CloudURL at the fake control plane (no token yet).
+	if err := SaveConfig(&Config{CloudURL: srv.URL}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	w, _, _ := newTestWriter()
+	w.output = "table"
+	cfg, err := cloudSetupDeviceLogin(w)
+	if err != nil {
+		t.Fatalf("cloudSetupDeviceLogin: %v", err)
+	}
+	if ds.startHits.Load() != 1 {
+		t.Fatalf("device/start hits = %d, want 1 (the device flow must run)", ds.startHits.Load())
+	}
+	if ds.loginHits.Load() != 0 {
+		t.Fatalf("password /v1/auth/login must not be hit; got %d", ds.loginHits.Load())
+	}
+	if cfg.CloudToken != "sess-wizard" {
+		t.Fatalf("CloudToken = %q, want the device-minted session", cfg.CloudToken)
+	}
+}

@@ -50,14 +50,11 @@ func cloudLoginHook(_ setup.Options) (setup.CloudLoginResult, error) {
 // logged-in config (CloudURL/CloudToken/CloudTeam persisted 0600, exactly like
 // `bp login`). An existing session is reused with no re-prompt.
 //
-// INTEGRATION POINT: bp-login-ux-w1-cli-device-login lands the copy-a-link browser
-// device flow in internal/cli/login_device.go (runDeviceLoginFlow). This is the
-// single call site to swap onto it — assign `cloudSetupDeviceLogin =
-// runDeviceLoginFlow` (or wrap it) once that merges. Until then it reuses the
-// control plane's existing email+password login, which the charter keeps as the
-// permanent headless/CI fallback anyway — so the wizard's cloud target is a
-// complete, tested path today. It is a var precisely so the swap is one line and
-// tests can stub it.
+// The login itself is the SAME routine bare `bp login` runs, chosen by the same
+// gating rule (charter decision 11): the copy-a-link browser device flow
+// (runDeviceLoginFlow, login_device.go) whenever there is no BARKPARK_PASSWORD
+// and both streams are a genuine TTY; otherwise the email+password prompt — the
+// permanent headless/CI fallback. It is a var so tests can stub the whole login.
 var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -73,6 +70,16 @@ var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 	// user ran `bp login` before opening the wizard.
 	if cfg.HasCloudToken() {
 		out.outf("Using your Barkpark Cloud session (%s).", base)
+		return cfg, nil
+	}
+
+	// The wizard runs on a TTY, so this is the normal path: the same boxed
+	// URL + code browser approve as bare `bp login`. runDeviceLoginFlow saves the
+	// config itself (0600) and prints its own success surface.
+	if deviceRequested(false, "", "") {
+		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName()); derr != nil {
+			return nil, derr
+		}
 		return cfg, nil
 	}
 
