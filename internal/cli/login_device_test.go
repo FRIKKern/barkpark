@@ -287,6 +287,132 @@ func TestDeviceLoginTimeoutExitsAuth(t *testing.T) {
 	}
 }
 
+// TestOfferOpenDeskEnterReturnsSentinel: on a terminal, a bare Enter at the
+// "open the desk" offer returns the ExitOpenDesk sentinel main() reads to launch
+// the TUI in-process. The prompt is written to stderr (chrome), never stdout.
+func TestOfferOpenDeskEnterReturnsSentinel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	w.isTTY = true // force the interactive path (a buffer is not a real tty)
+
+	var code int
+	withStdin(t, "\n", func() { code = offerOpenDesk(w) })
+
+	if code != ExitOpenDesk {
+		t.Fatalf("bare Enter should return ExitOpenDesk (%d); got %d", ExitOpenDesk, code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte("open the desk")) {
+		t.Fatalf("the offer prompt should print to stderr; got:\n%s", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("the offer must not write to stdout; got:\n%s", stdout.String())
+	}
+}
+
+// TestOfferOpenDeskDeclineStaysPut: typing n declines — exitOK (not the
+// sentinel), with a one-line reminder rather than a dead prompt.
+func TestOfferOpenDeskDeclineStaysPut(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	w.isTTY = true
+
+	var code int
+	withStdin(t, "n\n", func() { code = offerOpenDesk(w) })
+
+	if code != exitOK {
+		t.Fatalf("declining should return exitOK; got %d", code)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("Run 'bp'")) {
+		t.Fatalf("declining should print a reminder; got:\n%s", stdout.String())
+	}
+}
+
+// TestOfferOpenDeskSilentOnMachinePath: the report branch (-o json) and any
+// non-tty are a SILENT no-op — no prompt, no stdin read, exitOK — so the
+// {ok,…} envelope and headless callers are never disturbed.
+func TestOfferOpenDeskSilentOnMachinePath(t *testing.T) {
+	cases := []struct {
+		name   string
+		output string
+		isTTY  bool
+	}{
+		{"json output even on a tty", "json", true},
+		{"yaml output even on a tty", "yaml", true},
+		{"table but non-tty (piped)", "table", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			w := newWriter(&stdout, &stderr)
+			w.output = tc.output
+			w.isTTY = tc.isTTY
+
+			// Stdin is primed with an Enter; the guard must return BEFORE reading it.
+			var code int
+			withStdin(t, "\n", func() { code = offerOpenDesk(w) })
+
+			if code != exitOK {
+				t.Fatalf("machine/non-tty path should return exitOK; got %d", code)
+			}
+			if stderr.Len() != 0 || stdout.Len() != 0 {
+				t.Fatalf("machine/non-tty path must print nothing; stderr=%q stdout=%q", stderr.String(), stdout.String())
+			}
+		})
+	}
+}
+
+// TestLoggedInWithoutServer covers the hint-hole predicate main() uses: a Cloud
+// token with no active content server is the one true "logged in but not
+// connected" state; a saved server, an env server, or no token all read false.
+func TestLoggedInWithoutServer(t *testing.T) {
+	// Neutralize any ambient server env so the config is the sole signal.
+	t.Setenv("BARKPARK_API_URL", "")
+	t.Setenv("BARKPARK_SERVER", "")
+
+	t.Run("cloud token, no server → true", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{CloudURL: "https://api.barkpark.cloud", CloudToken: "sess"}); err != nil {
+			t.Fatal(err)
+		}
+		if !LoggedInWithoutServer() {
+			t.Fatal("cloud token + empty server should be logged-in-without-server")
+		}
+	})
+
+	t.Run("cloud token WITH a server → false", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{CloudToken: "sess", Server: "https://my.barkpark"}); err != nil {
+			t.Fatal(err)
+		}
+		if LoggedInWithoutServer() {
+			t.Fatal("a connected server means NOT logged-in-without-server")
+		}
+	})
+
+	t.Run("no cloud token → false", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{}); err != nil {
+			t.Fatal(err)
+		}
+		if LoggedInWithoutServer() {
+			t.Fatal("without a cloud token there is nothing logged in")
+		}
+	})
+
+	t.Run("env server overrides → false", func(t *testing.T) {
+		withTempConfigHome(t)
+		if err := SaveConfig(&Config{CloudToken: "sess"}); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("BARKPARK_API_URL", "https://env.barkpark")
+		if LoggedInWithoutServer() {
+			t.Fatal("an explicit env server IS an active server")
+		}
+	})
+}
+
 // TestLoginGatingTable is the CORE backward-compat proof: only a
 // zero-credential + both-TTY (or --device) invocation takes the device path;
 // every credential input, and any non-TTY, takes the password path verbatim

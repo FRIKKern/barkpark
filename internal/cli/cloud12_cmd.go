@@ -33,6 +33,66 @@ import (
 // threading one through every signature; today it is the process background.
 var cloudCtx = context.Background
 
+// ExitOpenDesk is a SENTINEL "exit code" a login-connect path returns from
+// cli.Execute to ask main() to open the TUI desk IN-PROCESS instead of exiting.
+// It is never a real process status: main.go intercepts it before os.Exit and
+// launches runTUI against the just-saved server (see cmd/barkpark/main.go). The
+// value sits well outside the real 0–8 exit scheme AND the 0–255 range a shell
+// can read, so it can never be mistaken for a genuine status — if it ever leaked
+// to os.Exit that is a wiring bug, not a valid code.
+const ExitOpenDesk = 256
+
+// offerOpenDesk is the tail of a SUCCESSFUL auto-connect: the user is signed in
+// AND a real content server was just saved, so we offer to drop them straight
+// into the working desk rather than leave them at a hint. On a bare Enter it
+// returns the ExitOpenDesk sentinel main() reads to launch the TUI in-process;
+// declining (typing n / no) returns exitOK with a one-line reminder so the
+// prompt is never a trap.
+//
+// The offer appears ONLY on the interactive human path — a real TTY and a
+// non-machine output shape. On -o json/yaml (the report branch), a pipe, or any
+// non-tty it is a SILENT no-op returning exitOK, so the {ok,…} envelope and
+// headless/CI callers are untouched (charter decision 12: no chrome, no prompts
+// on the machine path). The caller must only invoke it when auto-connect
+// actually ran. The read is cooked-mode Fscanln — the same terminal-safe read
+// the wizard→desk fall-through already relies on.
+func offerOpenDesk(out *writer) int {
+	if !out.isTTY || out.machineOut() {
+		return exitOK
+	}
+	fmt.Fprint(out.stderr, "Press Enter to open the desk (or type n to stay here): ")
+	var line string
+	// Fscanln returns an error on a bare Enter (no token scanned) — that empty
+	// line IS the default "yes, open it". Only an explicit n / no declines; any
+	// other input is treated as assent, since the prompt asked for Enter.
+	_, _ = fmt.Fscanln(os.Stdin, &line)
+	line = strings.TrimSpace(line)
+	if line == "n" || line == "N" || strings.EqualFold(line, "no") {
+		out.outf("Run 'bp' any time to open the desk.")
+		return exitOK
+	}
+	return ExitOpenDesk
+}
+
+// LoggedInWithoutServer reports the "signed in to Barkpark Cloud but no barkpark
+// connected" state: a Cloud session token is stored, yet no active CONTENT
+// server is resolvable (no BARKPARK_* server env, no saved active server). In
+// that state the TUI falls to the baked localhost floor, fails to load schemas,
+// and — because saving the Cloud token makes FirstRun() false — would otherwise
+// print the misleading "Is the Phoenix API running?" hint. main() consults this
+// to print setup guidance instead. Exported and side-effect-free (a pure read of
+// env + on-disk config) so it is unit-testable.
+func LoggedInWithoutServer() bool {
+	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+		return false
+	}
+	c, err := LoadConfig()
+	if err != nil || c == nil {
+		return false
+	}
+	return c.HasCloudToken() && strings.TrimSpace(c.Server) == ""
+}
+
 // cloudFail maps a cloud-client error onto the CLI's exit contract. cloudclient
 // prefixes every 401 with "unauthorized:" precisely so callers can read the auth
 // failure — an expired/revoked CloudToken exits exitAuth with a `bp login` hint,

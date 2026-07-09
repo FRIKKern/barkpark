@@ -17,7 +17,16 @@ import (
 // path is identical to before this split.
 func main() {
 	if len(os.Args) > 1 {
-		os.Exit(cli.Execute(os.Args[1:]))
+		code := cli.Execute(os.Args[1:])
+		// A login-connect path can ask, on a terminal, to drop the user straight
+		// into the TUI desk after a successful auto-connect ("Press Enter to open
+		// the desk"). It signals that in-process wish with the ExitOpenDesk
+		// sentinel — never a real process status — so we launch the desk here
+		// against the freshly-saved server instead of os.Exit-ing the code.
+		if code == cli.ExitOpenDesk {
+			os.Exit(runTUI())
+		}
+		os.Exit(code)
 	}
 	os.Exit(runTUI())
 }
@@ -51,9 +60,16 @@ func runTUI() int {
 	loaded, err := ds.LoadSchemas()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading schemas: %v\n", err)
-		if cli.FirstRun() {
+		switch {
+		case cli.FirstRun():
 			fmt.Fprintf(os.Stderr, "No server is configured yet — run `bp setup` to connect to one or bring one up.\n")
-		} else {
+		case cli.LoggedInWithoutServer():
+			// Signed in to Barkpark Cloud but no barkpark connected: saving the
+			// Cloud token made FirstRun() false, so without this branch the user
+			// would hit the misleading "Is the Phoenix API running?" hint below
+			// (they never asked for a local Phoenix). Point them at setup instead.
+			fmt.Fprintf(os.Stderr, "logged in to Barkpark Cloud but no barkpark connected — run `bp setup` to connect one.\n")
+		default:
 			fmt.Fprintf(os.Stderr, "Is the Phoenix API running? Start it with: cd api && mix phx.server\n")
 		}
 		return 1
