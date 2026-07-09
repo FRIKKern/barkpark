@@ -117,6 +117,51 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # Two tabs on one session (or a takeover racing the old owner) can both read
+  # the same MAX(seq) and try to claim it. next_seq is SELECT-max+1, so the
+  # UNIQUE [session_id, seq] index is the backstop and append_message RETRIES
+  # the mapped conflict up to 3x — a same-session race must NEVER silently drop
+  # a message (the old bug: callers discarded {:error, _}).
+  describe "append_message/2 — concurrent-seq discipline (charter D20b)" do
+    test "a burst of appends never drops — seqs are contiguous 1..N" do
+      s = new_session()
+
+      results =
+        for i <- 1..25, do: StudioChat.append_message(s, %{role: "user", source_markdown: "m#{i}"})
+
+      assert Enum.all?(results, &match?({:ok, _}, &1))
+      assert StudioChat.list_messages(s.id) |> Enum.map(& &1.seq) == Enum.to_list(1..25)
+      assert StudioChat.get_session(s.id).message_count == 25
+    end
+
+    test "the UNIQUE [session_id, seq] index maps to a retriable changeset, not a raise" do
+      # The PRECONDITION for the retry loop: a duplicate seq must come back as
+      # {:error, changeset} carrying the NAMED constraint — if the schema ever
+      # dropped `unique_constraint`, Repo.insert would RAISE and this fails.
+      s = new_session()
+      attrs = %{session_id: s.id, seq: 1, role: "user", source_markdown: "x"}
+
+      assert {:ok, _} = %Message{} |> Message.changeset(attrs) |> Barkpark.Repo.insert()
+
+      assert {:error, changeset} =
+               %Message{}
+               |> Message.changeset(%{attrs | source_markdown: "y"})
+               |> Barkpark.Repo.insert()
+
+      assert Enum.any?(changeset.errors, fn {_field, {_msg, opts}} ->
+               opts[:constraint] == :unique and
+                 opts[:constraint_name] == "chat_messages_session_id_seq_index"
+             end)
+    end
+
+    test "a non-seq failure (unknown-session FK) surfaces immediately — not looped" do
+      ghost = Ecto.UUID.generate()
+
+      assert {:error, %Ecto.Changeset{}} =
+               StudioChat.append_message(ghost, %{role: "user", source_markdown: "orphan"})
+    end
+  end
+
   describe "append_message/2 — denormalised bumps" do
     test "message_count, summary, and last_active_at track the latest message" do
       s = new_session()

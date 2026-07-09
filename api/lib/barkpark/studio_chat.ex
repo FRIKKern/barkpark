@@ -117,6 +117,13 @@ defmodule Barkpark.StudioChat do
   # messages
   # ---------------------------------------------------------------------------
 
+  # A truly-concurrent same-session append is retried this many times before we
+  # give up: two tabs (or a takeover racing the old owner) can both read the
+  # same MAX(seq) and try to claim seq N — the UNIQUE index rejects the loser,
+  # and a fresh transaction re-reads MAX and takes N+1. Three attempts covers
+  # any realistic contention on one session (charter D20b).
+  @append_retries 3
+
   @doc """
   Append a completed message to a session in ONE transaction: allocate the next
   `seq` (max + 1, per session), insert the row, and bump the session's
@@ -126,6 +133,16 @@ defmodule Barkpark.StudioChat do
   `:role`; `:source_markdown` and `:metadata` are optional. `:seq` is IGNORED —
   always allocated here.
 
+  ## Concurrent-append discipline (charter D20b)
+
+  `next_seq/1` is a SELECT-max + 1: two writers on the same session can compute
+  the same seq and collide on the UNIQUE `[session_id, seq]` index. That is a
+  transient, self-healing conflict — the loser retries with a FRESH max and
+  wins the next slot. We retry the mapped `chat_messages_session_id_seq_index`
+  changeset error up to #{@append_retries} times so a same-session race NEVER
+  silently drops a message. Any OTHER error (or exhausted retries) surfaces as
+  `{:error, _}` — callers must not discard it.
+
   Returns `{:ok, %Message{}}` or `{:error, reason}`.
   """
   @spec append_message(Session.t() | String.t(), map()) ::
@@ -133,25 +150,52 @@ defmodule Barkpark.StudioChat do
   def append_message(%Session{id: id}, attrs), do: append_message(id, attrs)
 
   def append_message(session_id, attrs) when is_binary(session_id) do
-    attrs = normalize_keys(attrs)
+    do_append(session_id, normalize_keys(attrs), @append_retries)
+  end
+
+  defp do_append(session_id, attrs, attempts) do
     now = DateTime.utc_now()
 
-    Repo.transaction(fn ->
-      next_seq = next_seq(session_id)
+    result =
+      Repo.transaction(fn ->
+        next_seq = next_seq(session_id)
 
-      message_attrs =
-        attrs
-        |> Map.put(:session_id, session_id)
-        |> Map.put(:seq, next_seq)
+        message_attrs =
+          attrs
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:seq, next_seq)
 
-      case %Message{} |> Message.changeset(message_attrs) |> Repo.insert() do
-        {:ok, message} ->
-          bump_on_append(session_id, message, now)
-          message
+        case %Message{} |> Message.changeset(message_attrs) |> Repo.insert() do
+          {:ok, message} ->
+            bump_on_append(session_id, message, now)
+            message
 
-        {:error, changeset} ->
-          Repo.rollback(changeset)
-      end
+          {:error, changeset} ->
+            Repo.rollback(changeset)
+        end
+      end)
+
+    case result do
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if attempts > 1 and seq_conflict?(changeset) do
+          do_append(session_id, attrs, attempts - 1)
+        else
+          {:error, changeset}
+        end
+
+      other ->
+        other
+    end
+  end
+
+  # True when the failure is the UNIQUE [session_id, seq] index specifically —
+  # the ONLY error we retry (a foreign-key or validation error must surface, not
+  # loop). Matched by the mapped constraint NAME so it is robust to which field
+  # Ecto pins the error on.
+  defp seq_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, opts}} ->
+      Keyword.get(opts, :constraint) == :unique and
+        Keyword.get(opts, :constraint_name) == "chat_messages_session_id_seq_index"
     end)
   end
 

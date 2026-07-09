@@ -274,6 +274,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     "bp-req-" <> (8 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower))
   end
 
+  @doc """
+  Take over a running session's event stream (charter D20 — single writer).
+
+  Two tabs must never each spawn a `claude --resume` process against the same
+  session: two OS processes writing the CLI's own transcript concurrently. The
+  `Session` registers under `{:via, Barkpark.StudioChat.SessionRegistry, uuid}`
+  when its `session_id` is pinned, so the SECOND tab's `start_session/1` returns
+  `{:error, {:already_started, pid}}` instead of spawning. That tab calls this
+  to become the sole sink: the `Session` demonitors the previous sink, monitors
+  the caller, and sends `{:claude_chat_detached}` to the old sink so its tab can
+  show an honest "opened in another tab" banner and disable its composer. The
+  old tab takes back the same way on its next send. Adopting into the SAME sink
+  is a harmless no-op.
+  """
+  @spec adopt_sink(pid(), pid()) :: :ok
+  def adopt_sink(session, new_sink) when is_pid(session) and is_pid(new_sink) do
+    GenServer.cast(session, {:adopt_sink, new_sink})
+  end
+
   @doc "Terminate the session subprocess."
   @spec close(pid()) :: :ok
   def close(session) when is_pid(session) do
@@ -324,8 +343,34 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     alias BarkparkWeb.Studio.ClaudeChat
 
+    # Single-writer registry (charter D20). When a session id is pinned, the
+    # process registers here under the uuid so a SECOND tab that tries to start
+    # the same session gets `{:error, {:already_started, pid}}` and adopts the
+    # running process rather than spawning a second `claude --resume` writer.
+    @registry Barkpark.StudioChat.SessionRegistry
+
     @spec start(%{sink: pid()}) :: {:ok, pid()} | {:error, term()}
-    def start(opts), do: GenServer.start(__MODULE__, opts)
+    def start(opts) do
+      case pinned_session_id(opts) do
+        nil ->
+          # Anonymous one-shot (no session identity) — nothing to serialize on,
+          # so it stays unnamed (two anonymous chats never share a transcript).
+          GenServer.start(__MODULE__, opts)
+
+        uuid ->
+          GenServer.start(__MODULE__, opts, name: {:via, Registry, {@registry, uuid}})
+      end
+    end
+
+    # A pinned OR resumed session both key on the same minted uuid — the whole
+    # point of D8's one-identity design: `--session-id` and `--resume` name the
+    # same transcript, so both must register under it.
+    defp pinned_session_id(opts) do
+      case Map.get(opts, :session_opts, %{}) do
+        %{session_id: id} when is_binary(id) -> id
+        _ -> nil
+      end
+    end
 
     @impl true
     def init(%{sink: sink} = opts) do
@@ -343,8 +388,11 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
               [:binary, :exit_status, :hide, args: args, cd: ClaudeChat.cwd()]
             )
 
-          Process.monitor(sink)
-          {:ok, %{port: port, sink: sink, buffer: ""}}
+          # Keep the monitor ref so an adopt can cleanly demonitor the outgoing
+          # sink (a bare Process.monitor/1 leaks a ref that would fire a stale
+          # DOWN and stop a session the new owner is still driving).
+          sink_ref = Process.monitor(sink)
+          {:ok, %{port: port, sink: sink, sink_ref: sink_ref, buffer: ""}}
       end
     rescue
       e ->
@@ -401,6 +449,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
       safe_command(state.port, line)
       {:noreply, state}
+    end
+
+    # Single-writer takeover (charter D20). A second tab that found this session
+    # already running adopts it as the sole sink: demonitor the outgoing sink
+    # (flush any in-flight DOWN so it can't stop us), monitor the newcomer, and
+    # tell the old sink it was detached so its tab shows the honest banner. The
+    # session lifetime now follows the NEW sink; the old tab takes back the same
+    # way on its next send.
+    def handle_cast({:adopt_sink, new_sink}, %{sink: old_sink} = state)
+        when is_pid(new_sink) do
+      if new_sink == old_sink do
+        {:noreply, state}
+      else
+        if ref = state[:sink_ref], do: Process.demonitor(ref, [:flush])
+        new_ref = Process.monitor(new_sink)
+        send(old_sink, {:claude_chat_detached})
+        {:noreply, %{state | sink: new_sink, sink_ref: new_ref}}
+      end
     end
 
     def handle_cast(:close, state), do: {:stop, :normal, state}

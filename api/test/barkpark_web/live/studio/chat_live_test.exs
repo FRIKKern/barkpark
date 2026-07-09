@@ -271,6 +271,33 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "working"
     end
 
+    # Single-writer honesty (charter D20): when another tab adopts this session,
+    # the Session sends {:claude_chat_detached}. The composer must be REPLACED by
+    # an honest banner — never left live to spawn a second `claude --resume`
+    # writer — with a Take-over affordance to re-acquire it.
+    test "a detach notice freezes the composer behind a take-over banner", %{view: view} do
+      send(view.pid, {:claude_chat_detached})
+      html = render(view)
+
+      assert html =~ "open in another tab"
+      assert html =~ "Take over here"
+      assert html =~ ~s(phx-click="take_over")
+      # the send form is gone while detached — no path to a second writer
+      refute has_element?(view, "form[phx-submit=send]")
+    end
+
+    test "take over dismisses the banner and restores the composer", %{view: view} do
+      send(view.pid, {:claude_chat_detached})
+      refute has_element?(view, "form[phx-submit=send]")
+
+      render_click(element(view, "button[phx-click=take_over]"))
+
+      assert has_element?(view, "form[phx-submit=send]")
+      # the banner + its button are gone (the persisted system line still quotes
+      # the phrase, so assert the control element, not raw text)
+      refute has_element?(view, "button[phx-click=take_over]")
+    end
+
     test "init event surfaces the model in the header", %{view: view} do
       send(
         view.pid,

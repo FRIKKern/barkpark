@@ -416,6 +416,122 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # Single-writer discipline (charter D20). A pinned/resumed session registers
+  # under its minted uuid in Barkpark.StudioChat.SessionRegistry, so a SECOND
+  # tab on the same session gets `{:already_started, pid}` and ADOPTS the running
+  # process instead of spawning a second `claude --resume` writer on the CLI's
+  # own transcript. adopt_sink swaps ownership: the old sink is detached, and the
+  # session's lifetime follows the NEW sink.
+  describe "single-writer registry + adopt_sink (charter D20)" do
+    test "a pinned session registers — a second start on the same id is already_started" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, s1} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      # NOT a new process: the registry returns the incumbent pid, so no second
+      # writer is spawned against the same transcript.
+      assert {:error, {:already_started, ^s1}} =
+               ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      ClaudeChat.close(s1)
+    end
+
+    test "a resume keys on the SAME uuid — it collides with a live pinned session" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, s1} = ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      assert {:error, {:already_started, ^s1}} =
+               ClaudeChat.start_session(%{
+                 sink: self(),
+                 session_opts: %{session_id: uuid, resume: true}
+               })
+
+      ClaudeChat.close(s1)
+    end
+
+    test "distinct session ids each start their own process" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, a} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: Ecto.UUID.generate()}})
+
+      {:ok, b} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: Ecto.UUID.generate()}})
+
+      assert a != b
+      ClaudeChat.close(a)
+      ClaudeChat.close(b)
+    end
+
+    test "anonymous sessions (no session id) stay unnamed — two coexist" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, a} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, b} = ClaudeChat.start_session(%{sink: self()})
+
+      assert a != b
+      ClaudeChat.close(a)
+      ClaudeChat.close(b)
+    end
+
+    test "adopt_sink detaches the old sink and re-homes the session on the new one" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+      observer = self()
+
+      old_sink = spawn_sink(observer, :old)
+      new_sink = spawn_sink(observer, :new)
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: old_sink, session_opts: %{session_id: uuid}})
+
+      ref = Process.monitor(session)
+
+      ClaudeChat.adopt_sink(session, new_sink)
+
+      # The old tab is told it lost ownership (→ honest banner in the LV).
+      assert_receive {:old, {:claude_chat_detached}}, 2_000
+
+      # Old sink death no longer stops the session — it was demonitored.
+      Process.exit(old_sink, :kill)
+      refute_receive {:DOWN, ^ref, :process, ^session, _}, 400
+
+      # The session's lifetime now follows the NEW sink (single owner).
+      Process.exit(new_sink, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+    end
+
+    test "adopting into the same sink is a harmless no-op (no self-detach)" do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
+
+      ClaudeChat.adopt_sink(session, self())
+      refute_receive {:claude_chat_detached}, 300
+
+      ClaudeChat.close(session)
+    end
+  end
+
+  # A bare receiver that forwards every message it gets to `observer`, tagged, so
+  # a test can watch what each sink receives (detach notice, DOWN, …).
+  defp spawn_sink(observer, tag) do
+    spawn(fn -> sink_loop(observer, tag) end)
+  end
+
+  defp sink_loop(observer, tag) do
+    receive do
+      msg ->
+        send(observer, {tag, msg})
+        sink_loop(observer, tag)
+    end
+  end
+
   # --- capture helpers (argv echo + stdin frame capture) --------------------
 
   defp capture_path(kind) do
