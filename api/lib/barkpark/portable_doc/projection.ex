@@ -50,6 +50,7 @@ defmodule Barkpark.PortableDoc.Projection do
   `render_opts` it already builds for `body_html`.
   """
 
+  alias Barkpark.Preview
   alias Barkpark.PortableDoc.Render
 
   @typedoc "A portable-doc block — a string-keyed map."
@@ -134,9 +135,26 @@ defmodule Barkpark.PortableDoc.Projection do
     {bound, free} = partition(blocks)
     prior = for b <- old_blocks, bound?(b), do: b["fieldName"]
 
-    content
-    |> project_bound_fields(prior, bound)
-    |> Map.put("body", project_body(free, render_opts))
+    projected =
+      content
+      |> project_bound_fields(prior, bound)
+      |> Map.put("body", project_body(free, render_opts))
+
+    # Project-on-write, part two: derive content["preview"] — the OpenGraph-shaped
+    # per-document card — from the SAME block walk, right beside content["body"],
+    # so its coverage + no-drift profile are identical to body's. Pure: the ONE
+    # media lookup a rich image needs is an injected closure in
+    # `render_opts[:preview]` (callers that hold Repo + scope build it via
+    # `Barkpark.Preview.media_resolver/1`); with no such key the manifest degrades
+    # to a valid, media-less card. `Render.render_blocks/2` ignores the extra key.
+    Map.put(projected, "preview", Preview.project(projected, blocks, preview_opts(render_opts)))
+  end
+
+  defp preview_opts(render_opts) do
+    case Map.get(render_opts, :preview) do
+      opts when is_map(opts) -> opts
+      _ -> %{}
+    end
   end
 
   # Drop the field names that were bound in the prior block list but are no

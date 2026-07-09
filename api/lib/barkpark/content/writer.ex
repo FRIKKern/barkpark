@@ -31,6 +31,7 @@ defmodule Barkpark.Content.Writer do
   alias Barkpark.Content.Papers.BlockOps
 
   alias Barkpark.PortableDoc.{Projection, Synthesis}
+  alias Barkpark.Preview
 
   # W7a step 1 — task documents carry a tight `content` field contract
   # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
@@ -386,7 +387,7 @@ defmodule Barkpark.Content.Writer do
     content =
       provided
       |> Map.put("blocks", blocks)
-      |> Projection.project(blocks, Labels.render_opts(dataset))
+      |> Projection.project(blocks, doc_render_opts(dataset, schema.name, attrs))
 
     Map.put(attrs, "content", content)
   end
@@ -580,13 +581,41 @@ defmodule Barkpark.Content.Writer do
         Map.put(
           attrs,
           "content",
-          Projection.project(content, blocks, Labels.render_opts(dataset))
+          Projection.project(content, blocks, doc_render_opts(dataset, Map.get(attrs, "type"), attrs))
         )
 
       _ ->
         attrs
     end
   end
+
+  # render_opts for the document projection paths, carrying the :preview sub-map
+  # so Projection.project derives content["preview"] on a block-bearing whole-doc
+  # write. doc_type is the raw type; the media resolver is bound to the write's
+  # tenancy scope. A paper (unusual on this generic path) also gets its reader
+  # url; other doctypes leave manifest["url"] nil. Render.render_blocks ignores
+  # the extra key, so body_html is byte-unchanged.
+  defp doc_render_opts(dataset, type, attrs) do
+    scope = [
+      workspace_id: Map.get(attrs, "workspace_id"),
+      project_id: Map.get(attrs, "project_id")
+    ]
+
+    preview =
+      %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+      |> maybe_put_preview_url(type, attrs)
+
+    Map.put(Labels.render_opts(dataset), :preview, preview)
+  end
+
+  defp maybe_put_preview_url(preview, "paper", %{"doc_id" => doc_id}) when is_binary(doc_id) do
+    case DraftId.published_id(doc_id) do
+      slug when slug != "" -> Map.put(preview, :url, "/papers/#{slug}")
+      _ -> preview
+    end
+  end
+
+  defp maybe_put_preview_url(preview, _type, _attrs), do: preview
 
   # Field-encryption write chokepoint (Phase 2, core-auth). Replaces each
   # `encrypted: true` schema field's value in `content` with a ciphertext

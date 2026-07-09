@@ -24,6 +24,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.{Broadcast, Document, DraftId, Encryption, Labels, Sheets}
   alias Barkpark.Content.Papers
   alias Barkpark.PortableDoc.{Patch, Projection, Render}
+  alias Barkpark.Preview
 
   @paper_type "paper"
   @paper_default_dataset "production"
@@ -197,7 +198,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # the bound-field index + content["body"] from it. The SOLE writer of
       # content[fieldName]/content["body"], alongside apply_paper_block_op/3.
       # An HTML-only (legacy) write with no blocks skips projection untouched.
-      |> maybe_project(blocks, dataset)
+      |> maybe_project(blocks, dataset, slug, paper_scope(existing, scope_attrs))
 
     title = paper_title(content, slug)
 
@@ -358,7 +359,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # block list we just computed, so Classic queries stay in sync with the
         # blocks and never drift. Threads the PRE-patch `blocks` as old_blocks so
         # an unbind (fieldName→nil) clears the now-orphaned content[fieldName].
-        |> Projection.project(blocks, new_blocks, render_opts)
+        |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
 
       title = paper_title(content, slug)
 
@@ -469,7 +470,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
             |> Map.put("rev", rev)
             # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
             # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
-            |> Projection.project(blocks, new_blocks, render_opts)
+            |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
 
           title = paper_title(content, slug)
 
@@ -721,7 +722,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # for this document, identical to the paper path. Bound title → "title",
         # free body blocks → content["body"]. Pre-patch `blocks` as old_blocks so
         # a Beta-editor unbind clears the orphaned content[fieldName].
-        |> Projection.project(blocks, new_blocks, Labels.render_opts(dataset))
+        |> Projection.project(blocks, new_blocks, doc_project_opts(dataset, type, doc))
 
       # Derive the row title from the bound title field if present (matches the
       # Classic-save title precedence), else keep the document's current title.
@@ -1224,11 +1225,53 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # HTML-only legacy paper write (no blocks) leaves content[fieldName]/body
   # untouched — projection is the SOLE writer, so a no-block write must not
   # invent an empty body.
-  defp maybe_project(content, blocks, dataset) when is_list(blocks) do
-    Projection.project(content, blocks, Labels.render_opts(dataset))
+  defp maybe_project(content, blocks, dataset, slug, scope) when is_list(blocks) do
+    render_opts = Map.put(Labels.render_opts(dataset), :preview, paper_preview_opts(slug, scope))
+    Projection.project(content, blocks, render_opts)
   end
 
-  defp maybe_project(content, _blocks, _dataset), do: content
+  defp maybe_project(content, _blocks, _dataset, _slug, _scope), do: content
+
+  # The :preview sub-map injected into render_opts so Projection.project derives a
+  # rich content["preview"] card for a paper: the media resolver (bound to this
+  # paper's tenancy scope so it never resolves another tenant's blob), the reader
+  # url, and the raw doctype. Render.render_blocks ignores the extra key.
+  defp paper_preview_opts(slug, scope) do
+    %{
+      media_resolver: Preview.media_resolver(scope),
+      url: "/papers/#{slug}",
+      doc_type: @paper_type
+    }
+  end
+
+  # Add the paper :preview sub-map to an already-built render_opts (the streaming
+  # block-op paths, where `doc` carries the tenancy scope).
+  defp project_opts(render_opts, slug, %Document{} = doc) do
+    scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+    Map.put(render_opts, :preview, paper_preview_opts(slug, scope))
+  end
+
+  # The :preview sub-map for a generic (non-paper) block-bearing document — the
+  # raw doctype + a scope-bound media resolver. No reader url (arbitrary doctypes
+  # have no canonical public page); Preview leaves manifest["url"] nil.
+  defp doc_project_opts(dataset, type, %Document{} = doc) do
+    scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
+
+    Map.put(Labels.render_opts(dataset), :preview, %{
+      media_resolver: Preview.media_resolver(scope),
+      doc_type: type
+    })
+  end
+
+  # Tenancy scope for the media resolver: an explicit caller scope wins, else the
+  # existing row's scope, else global (nil) — matching how the paper row itself
+  # resolves its workspace/project.
+  defp paper_scope(existing, scope_attrs) do
+    [
+      workspace_id: scope_attrs["workspace_id"] || (existing && existing.workspace_id),
+      project_id: scope_attrs["project_id"] || (existing && existing.project_id)
+    ]
+  end
 
   # Field-encryption CHOKEPOINT for the paper write path. Encrypt the bound
   # block values of any schema field marked `encrypted: true` by routing the
