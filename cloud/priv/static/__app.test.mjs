@@ -3186,3 +3186,219 @@ test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () 
   assert.match(tabs, /data-kind="azure" aria-pressed="true"/);
   assert.match(tabs, /data-kind="hetzner" aria-pressed="false"/);
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// S11b — console lifecycle action row (conduit-driven; azure-hetzner hosting)
+// ════════════════════════════════════════════════════════════════════════════
+//
+// The ratified POST-S9 capability-facet payload the /v1/providers/capabilities
+// conduit serves (built in parallel by azh-w3-s11-capability-conduit). Shape:
+//   { default_gap, providers: { <kind>: { tier?, capabilities:{…}, gaps:{…} } } }
+// capabilities keys: core/catalog/labels/pause/archive/resurrect/decommission/
+// adopt/audit. This inline sample mirrors the committed cross-surface fixture at
+// internal/cli/cloud/providers_capabilities.json (S1) evolved to the facet shape;
+// the conduit slice owns cloud/priv/static/__fixtures__/providers_capabilities.json.
+const CAP_PAYLOAD = {
+  default_gap: "Not available on this provider yet.",
+  providers: {
+    // hetzner: every lifecycle verb is a seam capability EXCEPT pause (no
+    // primitive) — so the wired-later verbs are CLI affordances and pause is a
+    // disabled control carrying Hetzner's own gap reason.
+    hetzner: {
+      capabilities: {
+        core: true, catalog: false, labels: true, pause: false,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: { pause: "Hetzner has no pause primitive." },
+    },
+    // azure: adopt carries an explicit gap reason; audit is false WITHOUT a
+    // per-verb gap → the model falls back to the payload's own default_gap.
+    azure: {
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: false, audit: false,
+      },
+      gaps: { adopt: "Adopt needs an existing resource-group import." },
+    },
+    // fake: dev-tier — the console does not operate it (filtered).
+    fake: {
+      tier: "dev",
+      capabilities: {
+        core: true, catalog: true, labels: true, pause: true,
+        archive: true, resurrect: true, decommission: true, adopt: true, audit: true,
+      },
+      gaps: {},
+    },
+  },
+};
+
+test("S11b: every new lifecycle-console pure helper is exported", () => {
+  for (const name of ["lifecyclePillState", "lifecyclePill", "fleetInfraLine",
+    "showLifecycleRow", "lifecycleActionsModel", "lifecycleActionRowHtml", "lifecycleOptimistic"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+  // The verb set the row surfaces (destructive last).
+  assert.deepEqual([...hooks.lifecycleVerbs].sort(),
+    ["adopt", "archive", "audit", "decommission", "pause", "resurrect"]);
+});
+
+// ── lifecyclePillState: client-derived states → the seven S4 token states ────
+test("S11b: lifecyclePillState folds each client state onto a canonical S4 state", () => {
+  assert.equal(hooks.lifecyclePillState({ host: "h" }), "live");
+  assert.equal(hooks.lifecyclePillState({}), "provisioning"); // no host, not failed
+  assert.equal(hooks.lifecyclePillState({ provision_status: "failed" }), "degraded");
+  assert.equal(hooks.lifecyclePillState({ deprovision_status: "failed", host: "h" }), "degraded");
+  assert.equal(hooks.lifecyclePillState({ host: "h", suspended: true }), "stopped");
+  assert.equal(hooks.lifecyclePillState({ deprovision_status: "pending", host: "h" }), "decommissioned");
+  // The pill descriptor threads the label + the S4 class.
+  const p = hooks.lifecyclePill({ host: "h" });
+  assert.equal(p.state, "live");
+  assert.equal(p.label, "Live");
+  assert.equal(p.cls, "bp-inst--live");
+});
+
+// ── fleetInfraLine: region · size, blank-tolerant (pre-S6 rows) ─────────────
+test("S11b: fleetInfraLine renders present dimensions and stays empty when absent", () => {
+  assert.equal(hooks.fleetInfraLine({}), ""); // old row: no region/server_type → nothing
+  assert.equal(hooks.fleetInfraLine({ region: null, server_type: null }), "");
+  assert.match(hooks.fleetInfraLine({ region: "nbg1" }), /nbg1/);
+  assert.ok(hooks.fleetInfraLine({ region: "nbg1" }).indexOf("·") === -1); // no dangling separator
+  const both = hooks.fleetInfraLine({ region: "nbg1", server_type: "cax11" });
+  assert.match(both, /nbg1 · cax11/);
+});
+
+// ── showLifecycleRow: the row appears where teardown makes sense ────────────
+test("S11b: showLifecycleRow gates on host|failed, hides the transient states", () => {
+  assert.equal(hooks.showLifecycleRow({ host: "h" }), true); // live
+  assert.equal(hooks.showLifecycleRow({ host: "h", suspended: true }), true); // stopped
+  assert.equal(hooks.showLifecycleRow({ provision_status: "failed" }), true); // failed → teardown the wreckage
+  assert.equal(hooks.showLifecycleRow({}), false); // clean provisioning → timeline owns it
+  assert.equal(hooks.showLifecycleRow({ deprovision_status: "pending", host: "h" }), false); // removing
+  assert.equal(hooks.showLifecycleRow({ deprovision_status: "failed", host: "h" }), false); // header's Retry removal
+});
+
+// ── lifecycleActionsModel: loading shell — decommission live from frame 1 ────
+test("S11b: undefined payload → loading shell with decommission still live", () => {
+  const m = hooks.lifecycleActionsModel(undefined, { provider: "hetzner", host: "h", name: "web" });
+  assert.equal(m.loading, true);
+  assert.equal(m.available, false);
+  assert.equal(m.retry, false); // nothing to retry — the fetch is still in flight
+  assert.equal(m.actions.length, 1);
+  assert.equal(m.actions[0].verb, "decommission");
+  assert.equal(m.actions[0].mode, "live");
+  assert.equal(m.actions[0].resourceName, "web");
+});
+
+// ── lifecycleActionsModel: payload unavailable → one honest state + Retry ───
+test("S11b: null/404 payload → 'capabilities unavailable' + Retry, decommission live", () => {
+  const m = hooks.lifecycleActionsModel(null, { provider: "hetzner", host: "h", name: "web" });
+  assert.equal(m.available, false);
+  assert.equal(m.loading, false);
+  assert.equal(m.retry, true);
+  assert.equal(m.devTier, false);
+  assert.equal(m.actions.length, 1);
+  assert.equal(m.actions[0].mode, "live"); // decommission predates the conduit
+  // A kind absent from the payload degrades the same way.
+  const gone = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "gcp", host: "h", name: "web" });
+  assert.equal(gone.retry, true);
+  assert.equal(gone.actions.length, 1);
+});
+
+// ── lifecycleActionsModel: dev-tier provider is filtered (not operated) ─────
+test("S11b: a dev-tier provider is filtered — no Retry, decommission still live", () => {
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "fake", host: "h", name: "web" });
+  assert.equal(m.available, false);
+  assert.equal(m.devTier, true);
+  assert.equal(m.retry, false); // a dev box has nothing to re-fetch
+  assert.equal(m.actions.length, 1);
+  assert.equal(m.actions[0].verb, "decommission");
+});
+
+// ── lifecycleActionsModel: a wired provider → per-verb honest degrade ───────
+test("S11b: hetzner model — CLI affordances, a disabled verb with the SERVER reason, live decommission", () => {
+  const bp = { provider: "hetzner", host: "h", name: "web" };
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
+  assert.equal(m.available, true);
+  const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
+  // capability true but console-unwired → CLI affordance with the exact command.
+  assert.equal(byVerb.archive.mode, "cli");
+  assert.equal(byVerb.archive.cli, "bp cloud instance archive web");
+  assert.equal(byVerb.audit.mode, "cli");
+  // capability false → disabled, carrying Hetzner's OWN gap reason verbatim.
+  assert.equal(byVerb.pause.mode, "disabled");
+  assert.equal(byVerb.pause.reason, "Hetzner has no pause primitive.");
+  // decommission is always the live console action.
+  assert.equal(byVerb.decommission.mode, "live");
+  assert.equal(byVerb.decommission.resourceName, "web");
+});
+
+test("S11b: azure model — a false verb with no per-verb gap falls back to the payload default_gap, never invented", () => {
+  const bp = { provider: "azure", host: "h", name: "az1" };
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, bp);
+  const byVerb = Object.fromEntries(plain(m.actions).map((a) => [a.verb, a]));
+  assert.equal(byVerb.adopt.mode, "disabled");
+  assert.equal(byVerb.adopt.reason, "Adopt needs an existing resource-group import.");
+  // audit: capability false, NO per-verb gap → the payload's own default_gap.
+  assert.equal(byVerb.audit.mode, "disabled");
+  assert.equal(byVerb.audit.reason, "Not available on this provider yet.");
+  // pause is a capability here → a CLI affordance, not disabled.
+  assert.equal(byVerb.pause.mode, "cli");
+});
+
+test("S11b: a box with no provider defaults to the hetzner capability lane", () => {
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { host: "h", name: "legacy" });
+  assert.equal(m.kind, "hetzner");
+  assert.equal(m.available, true);
+  assert.equal(m.provider, null); // the IDENTITY chip stays empty — no fabricated provider
+});
+
+test("S11b: JS never invents a reason — a false verb with no gap and no default renders no copy", () => {
+  const payload = { providers: { hetzner: { capabilities: { decommission: true, archive: false }, gaps: {} } } };
+  const m = hooks.lifecycleActionsModel(payload, { provider: "hetzner", host: "h", name: "web" });
+  const archive = plain(m.actions).find((a) => a.verb === "archive");
+  assert.equal(archive.mode, "disabled");
+  assert.equal(archive.reason, ""); // no server reason, no default → empty, NEVER fabricated
+  const html = hooks.lifecycleActionRowHtml(m);
+  assert.ok(html.indexOf("inst-life-reason") === -1); // and the render shows no reason span
+});
+
+// ── lifecycleActionRowHtml: the three modes render honestly ────────────────
+test("S11b: lifecycleActionRowHtml renders the pill class, CLI chip, disabled reason, and danger decommission", () => {
+  const m = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" });
+  const html = hooks.lifecycleActionRowHtml(m);
+  assert.match(html, /inst-life-pill bp-inst--live/); // S4 token consumed on the pill
+  assert.match(html, /Live/);
+  assert.match(html, /bp cloud instance archive web/); // CLI affordance verbatim
+  assert.match(html, /via the bp CLI/);
+  assert.match(html, /Hetzner has no pause primitive\./); // server-owned reason
+  assert.match(html, /data-life-verb="decommission"/); // the live, wired verb
+  assert.match(html, /btn-danger/);
+});
+
+test("S11b: the loading + unavailable renders show their honest states", () => {
+  const loading = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(undefined, { provider: "hetzner", host: "h", name: "web" }));
+  assert.match(loading, /Checking capabilities/);
+  assert.match(loading, /data-life-verb="decommission"/); // teardown never absent
+  const unavail = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(null, { provider: "hetzner", host: "h", name: "web" }));
+  assert.match(unavail, /Capabilities unavailable/);
+  assert.match(unavail, /data-life-retry/); // retry offered
+  const dev = hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "fake", host: "h", name: "web" }));
+  assert.match(dev, /Developer-tier provider/);
+  assert.ok(dev.indexOf("data-life-retry") === -1); // a dev box has nothing to retry
+});
+
+// ── lifecycleOptimistic: decommission flips the pill, failure rolls it back ─
+test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back verbatim", () => {
+  const base = hooks.lifecycleActionsModel(CAP_PAYLOAD, { provider: "hetzner", host: "h", name: "web" });
+  assert.equal(base.pill.state, "live");
+  const optimistic = hooks.lifecycleOptimistic(base, "decommission");
+  assert.equal(optimistic.pill.state, "decommissioned");
+  assert.equal(optimistic.pill.cls, "bp-inst--decommissioned");
+  assert.equal(optimistic.pill.label, "Decommissioning");
+  // rollback restores the exact prior pill and clears the bookkeeping.
+  const rolled = hooks.lifecycleOptimistic(optimistic, "rollback");
+  assert.deepEqual(plain(rolled.pill), plain(base.pill));
+  assert.equal(rolled._rollback, undefined);
+  // rollback with nothing remembered is a no-op (total, never throws).
+  assert.equal(hooks.lifecycleOptimistic(base, "rollback"), base);
+});

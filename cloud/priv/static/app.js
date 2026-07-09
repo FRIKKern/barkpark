@@ -653,6 +653,198 @@
     return INSTANCE_LIFECYCLE.indexOf(state) !== -1 ? "bp-inst--" + state : "";
   }
 
+  // ---- S11b lifecycle-console pure helpers (azure-hetzner hosting) ------------
+  // The console operates the instance through a conduit-driven action row. Every
+  // rule here is a node-pinned pure function; the DOM mount (wireLifecycleActions)
+  // is browser-verified. Charter decisions 20-22 / roadmap S11b.
+
+  // Human labels for the seven S4 lifecycle-token states. `decommissioned` is an
+  // in-flight teardown from the operator's seat, so it reads "Decommissioning".
+  var LIFECYCLE_PILL_LABEL = {
+    provisioning: "Provisioning", live: "Live", degraded: "Degraded",
+    stopped: "Stopped", archived: "Archived", decommissioned: "Decommissioning",
+    adopted: "Adopted",
+  };
+
+  // Map the client-derived instance state (instanceLifecycle booleans, the same
+  // fold the fleet row and header read) onto ONE canonical S4 lifecycle-token
+  // state — NO server lifecycle_state column this wave. removing wins first
+  // (a teardown in flight is the display truth), then the error/paused folds.
+  // "" for a state we can't place, so instanceLifecycleClass degrades to no tint.
+  function lifecyclePillState(bp) {
+    var lc = instanceLifecycle(bp || {});
+    if (lc.removing) return "decommissioned";
+    if (lc.failed || lc.removeFailed) return "degraded";
+    if (lc.suspended) return "stopped";
+    if (lc.provisioning) return "provisioning";
+    if (lc.live) return "live";
+    return "";
+  }
+
+  // The lifecycle pill descriptor for a box: token state + its label + the S4
+  // `.bp-inst--<state>` class. Shared by the fleet row and the action-row model
+  // so the two never disagree about which hue a state wears.
+  function lifecyclePill(bp) {
+    var state = lifecyclePillState(bp);
+    return { state: state, label: LIFECYCLE_PILL_LABEL[state] || "Unknown", cls: instanceLifecycleClass(state) };
+  }
+
+  // Region · size meta for a fleet row (blank-tolerant — pre-S6 rows carry null
+  // region/server_type). Renders nothing when both are absent so an old row never
+  // shows an empty "·". Presentation only; the values are server-stamped slugs.
+  function fleetInfraLine(bp) {
+    bp = bp || {};
+    var parts = [];
+    if (bp.region) parts.push(String(bp.region));
+    if (bp.server_type) parts.push(String(bp.server_type));
+    return parts.length ? '<div class="fleet-infra">' + esc(parts.join(" · ")) + "</div>" : "";
+  }
+
+  // The instance name a lifecycle CLI chip / destroy-echo names. Stable slug/id
+  // preferred; falls back to the display name so the chip is never empty.
+  function lifecycleCliName(bp) {
+    bp = bp || {};
+    return String(bp.name || bp.slug || bp.id || "");
+  }
+
+  // Whether the workspace shows the lifecycle action row at all. It owns teardown
+  // wherever the old bare Remove button used to sit (live/host boxes + a failed
+  // provision), and stays hidden for the transient in-flight states the header
+  // already narrates (removing → nothing to do; removeFailed → header's Retry
+  // removal; clean provisioning → the timeline is the surface).
+  function showLifecycleRow(bp) {
+    var lc = instanceLifecycle(bp || {});
+    return !lc.removing && !lc.removeFailed && (!!(bp && bp.host) || lc.failed);
+  }
+
+  // The lifecycle verbs the console surfaces, in operator order (destructive last).
+  // decommission is the ONE console-wired verb — every other verb degrades to a
+  // CLI affordance (capability true) or a disabled control (capability false).
+  var LIFECYCLE_VERBS = [
+    { verb: "archive", label: "Archive" },
+    { verb: "resurrect", label: "Resurrect" },
+    { verb: "adopt", label: "Adopt" },
+    { verb: "audit", label: "Audit" },
+    { verb: "pause", label: "Pause" },
+    { verb: "decommission", label: "Decommission" },
+  ];
+
+  // The always-live decommission action: it drives the console's own deprovision
+  // (the existing Remove/DELETE path) and predates the capability conduit, so it
+  // stays wired even when the payload is missing or claims decommission=false.
+  function decommissionAction(bp) {
+    return { verb: "decommission", label: "Decommission", mode: "live", resourceName: lifecycleCliName(bp) };
+  }
+
+  // Pure model for the lifecycle action row from the /v1/providers/capabilities
+  // conduit payload {providers:{kind:{tier,capabilities,gaps}}, default_gap} and
+  // the instance. Three honest degrade paths, none hidden / dead / faked:
+  //   capPayload === undefined → loading shell (decommission live from frame 1)
+  //   payload null/malformed / kind missing → "capabilities unavailable" + Retry
+  //   provider tier === "dev"  → an fake/dev box we don't operate from the console
+  // A wired provider yields one action per verb: capability true → CLI affordance,
+  // capability false → disabled with the SERVER-OWNED gap reason (never invented;
+  // falls back only to the payload's own default_gap).
+  function lifecycleActionsModel(capPayload, bp) {
+    bp = bp || {};
+    var kind = bp.provider || "hetzner";
+    var pill = lifecyclePill(bp);
+    var decommission = decommissionAction(bp);
+
+    if (capPayload === undefined) {
+      return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
+        loading: true, retry: false, devTier: false, actions: [decommission] };
+    }
+
+    var providers = capPayload && typeof capPayload === "object" ? capPayload.providers : null;
+    var entry = providers && typeof providers === "object" ? providers[kind] : null;
+    var devTier = !!(entry && entry.tier === "dev");
+
+    if (!entry || devTier) {
+      return { kind: kind, provider: bp.provider || null, pill: pill, available: false,
+        loading: false, retry: !devTier, devTier: devTier, actions: [decommission] };
+    }
+
+    var caps = entry.capabilities || {};
+    var gaps = entry.gaps || {};
+    var defaultGap = capPayload && typeof capPayload.default_gap === "string" ? capPayload.default_gap : "";
+    var actions = LIFECYCLE_VERBS.map(function (v) {
+      if (v.verb === "decommission") return decommission;
+      if (caps[v.verb] === true) {
+        return { verb: v.verb, label: v.label, mode: "cli",
+          cli: "bp cloud instance " + v.verb + " " + lifecycleCliName(bp) };
+      }
+      var reason = typeof gaps[v.verb] === "string" && gaps[v.verb].trim() !== "" ? gaps[v.verb] : defaultGap;
+      return { verb: v.verb, label: v.label, mode: "disabled", reason: reason };
+    });
+    return { kind: kind, provider: bp.provider || null, pill: pill, available: true,
+      loading: false, retry: false, devTier: false, actions: actions };
+  }
+
+  // Pure optimistic-transition reducer for the live decommission: applies the
+  // decommissioned pill immediately (remembering the prior pill), and rolls back
+  // to it verbatim on failure. The DOM (runDecommission) mirrors this exactly —
+  // the model is what the harness proves.
+  function lifecycleOptimistic(model, ev) {
+    if (!model) return model;
+    if (ev === "decommission") {
+      var next = instanceLifecycleClass("decommissioned");
+      return Object.assign({}, model, {
+        pill: { state: "decommissioned", label: LIFECYCLE_PILL_LABEL.decommissioned, cls: next },
+        _rollback: model.pill,
+      });
+    }
+    if (ev === "rollback") {
+      if (!model._rollback) return model;
+      var restored = Object.assign({}, model, { pill: model._rollback });
+      delete restored._rollback;
+      return restored;
+    }
+    return model;
+  }
+
+  // Pure render of ONE action into its honest control.
+  function lifecycleActionHtml(a) {
+    if (!a) return "";
+    if (a.mode === "live") {
+      return '<button class="btn btn-danger btn-sm" type="button" data-life-verb="' + esc(a.verb) +
+        '" data-life-name="' + esc(a.resourceName || "") + '">' + esc(a.label) + "</button>";
+    }
+    if (a.mode === "cli") {
+      // Capability true but console-unwired: the exact command + a static
+      // "via the bp CLI" label (presentation, SPA-authored — allowed).
+      return '<div class="inst-life-cli"><span class="inst-life-verb">' + esc(a.label) + "</span>" +
+        cliChipHtml(a.cli) + '<span class="inst-life-via">via the bp CLI</span></div>';
+    }
+    // Capability false: disabled control carrying the SERVER-OWNED gap reason.
+    // JS never invents copy — an absent reason shows the label alone.
+    return '<div class="inst-life-disabled"><button class="btn btn-sm" type="button" disabled' +
+      (a.reason ? ' title="' + esc(a.reason) + '"' : "") + ">" + esc(a.label) + "</button>" +
+      (a.reason ? '<span class="inst-life-reason">' + esc(a.reason) + "</span>" : "") + "</div>";
+  }
+
+  // Pure render of the whole action row from its model.
+  function lifecycleActionRowHtml(model) {
+    if (!model) return "";
+    var pill = '<span class="inst-life-pill ' + model.pill.cls + '">' +
+      '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(model.pill.label) + "</span>";
+
+    var status = "";
+    if (model.loading) {
+      status = '<span class="inst-life-note">Checking capabilities&hellip;</span>';
+    } else if (!model.available) {
+      status = '<span class="inst-life-note' + (model.retry ? " inst-life-note--warn" : "") + '">' +
+        esc(model.devTier
+          ? "Developer-tier provider — operate it with the bp CLI."
+          : "Capabilities unavailable.") + "</span>" +
+        (model.retry ? '<button class="btn btn-ghost btn-sm" type="button" data-life-retry>Retry</button>' : "");
+    }
+
+    return '<div class="inst-life-head">' + pill +
+      (status ? '<div class="inst-life-status">' + status + "</div>" : "") + "</div>" +
+      '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>";
+  }
+
   // Azure four-field validator: every service-principal field must be a non-empty
   // (trimmed) string before we spend a verify-before-save round trip.
   function azureFieldsValid(fields) {
@@ -1772,9 +1964,10 @@
   // The single .status-pill component — one dot + label + optional detail,
   // coloured by the semantic role. This is the only status affordance in a
   // fleet row and the instance-detail header (charter decision 6).
-  function statusPill(bp) {
+  function statusPill(bp, extraClass) {
     var s = statusOf(bp);
-    return '<span class="status-pill status-pill--' + esc(s.role) + '">' +
+    return '<span class="status-pill status-pill--' + esc(s.role) +
+      (extraClass ? " " + extraClass : "") + '">' +
       '<span class="status-pill-dot" aria-hidden="true"></span>' +
       '<span class="status-pill-label">' + esc(s.label) + "</span>" +
       (s.detail ? '<span class="status-pill-detail">' + esc(s.detail) + "</span>" : "") +
@@ -1809,8 +2002,10 @@
 
     // The whole provision/suspend/health/agent/update collapse is now ONE pill
     // (charter decision 6); the health/agent/update breakdown moved to the
-    // instance-detail rail only.
-    var pill = statusPill(bp);
+    // instance-detail rail only. S11b: the pill also carries its S4 lifecycle
+    // token class so the fleet row's status IS the lifecycle pill (identity chip
+    // stays separate — never a status stand-in).
+    var pill = statusPill(bp, instanceLifecycleClass(lifecyclePillState(bp)));
 
     // dwb-7 one-click Studio entry: live boxes (host set, nothing in-flight)
     // get an Open Studio button — server-minted single-use link, no token paste.
@@ -1823,6 +2018,9 @@
       '<div class="fleet-main">' +
         '<div class="fleet-name">' + esc(bp.name) + "</div>" +
         urlHtml +
+        // Region · size, server-stamped (S6). Blank-tolerant: pre-S6 rows carry
+        // no region/server_type and render nothing here.
+        fleetInfraLine(bp) +
       "</div>" +
       '<div class="fleet-badges">' +
         // Provider IDENTITY chip — renders ONLY when the payload carries
@@ -2091,6 +2289,7 @@
       }
       box.innerHTML = instanceDetailHtml(bp, tab, { ready: showReady });
       wireInstanceActions(bp);
+      wireLifecycleActions(bp); // S11b: fill the lifecycle action-row slot (conduit-driven)
       var panel = box.querySelector("#instance-tabpanel");
       if (tab === "webhooks") {
         mountWebhooksTab(panel, bp);
@@ -2135,7 +2334,16 @@
   // the timeline slot into the shared ready panel (A4 — the provision→live moment).
   function instanceDetailHtml(bp, tab, opts) {
     tab = instanceTabOf(tab);
+    // S11b: the persistent lifecycle action row sits between the header and the
+    // tabs — a workspace affordance visible on every tab. The slot is filled
+    // async by wireLifecycleActions (the /v1/providers/capabilities conduit); it
+    // renders ONLY where teardown makes sense (showLifecycleRow), so a clean
+    // provisioning box keeps the timeline as its sole surface.
+    var lifeSlot = showLifecycleRow(bp)
+      ? '<div id="inst-lifecycle-actions" class="inst-lifecycle-actions" data-inst="' + esc(bp.id) + '"></div>'
+      : "";
     return instanceHeaderHtml(bp) +
+      lifeSlot +
       instanceTabStripHtml(bp, tab) +
       '<div id="instance-tabpanel" class="inst-tabpanel" data-inst="' + esc(bp.id) + '">' +
         (tab === "overview" ? instanceOverviewHtml(bp, opts) : "") +
@@ -2209,18 +2417,22 @@
       ? '<button class="btn btn-ghost btn-sm" id="inst-domain" type="button">Attach domain</button>'
       : "";
 
+    // S11b: the bare Remove button is SUPERSEDED by the lifecycle action row's
+    // typed-confirm Decommission (one teardown affordance, not two). The header
+    // keeps Retry removal (a distinct retry of a FAILED teardown, which the
+    // conduit doesn't cover). Failed provisions get their teardown from the
+    // action row + Retry from the timeline, so the header stays action-free.
     var actions =
       lc.removing
         ? ""
         : lc.removeFailed
           ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
           : lc.failed
-            ? '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>' // Retry lives in the timeline (data-tl-retry)
+            ? "" // teardown lives in the lifecycle action row; Retry in the timeline (data-tl-retry)
             : bp.host
               ? updateBtn +
                 '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
-                domainBtn +
-                '<button class="btn btn-ghost btn-sm" id="inst-remove" type="button">Remove</button>'
+                domainBtn
               : "";
 
     // The failed case is owned by the timeline now (its fail block shows the
@@ -2305,10 +2517,87 @@
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
     var retry = $("#inst-retry");
     if (retry) retry.addEventListener("click", function () { retryInstance(bp, retry); });
-    var remove = $("#inst-remove");
-    if (remove) remove.addEventListener("click", function () { confirmRemoveInstance(bp); });
+    // The bare Remove button is superseded by the lifecycle action row's typed
+    // Decommission (see wireLifecycleActions); the header keeps only Retry removal.
     var removeRetry = $("#inst-remove-retry");
     if (removeRetry) removeRetry.addEventListener("click", function () { removeInstance(bp, removeRetry); });
+  }
+
+  // The thin DOM mount for the lifecycle action row — an extension of the
+  // wireInstanceActions pattern (add-listener-if-present), called right after it.
+  // Paints the live-decommission frame immediately, then queries the capability
+  // conduit and repaints with the honest per-verb model. Browser-verified only;
+  // ALL of the logic lives in the pure helpers above.
+  function wireLifecycleActions(bp) {
+    var box = $("#inst-lifecycle-actions");
+    if (!box) return;
+    // Frame 1: decommission is live from the first paint (it predates the
+    // conduit), with a "checking capabilities" note — teardown is never absent.
+    paintLifecycleActions(box, bp, lifecycleActionsModel(undefined, bp));
+    api("GET", "/v1/providers/capabilities").then(function (r) {
+      if (!box.isConnected && box.isConnected !== undefined) return; // navigated away
+      // 404 (conduit not deployed yet) / 5xx / network → null → the honest
+      // "capabilities unavailable" + Retry state, decommission still live.
+      var payload = r && r.ok && r.data ? r.data : null;
+      paintLifecycleActions(box, bp, lifecycleActionsModel(payload, bp));
+    });
+  }
+
+  function paintLifecycleActions(box, bp, model) {
+    box.innerHTML = lifecycleActionRowHtml(model);
+    var retry = box.querySelector("[data-life-retry]");
+    if (retry) retry.addEventListener("click", function () { wireLifecycleActions(bp); });
+    var decomm = box.querySelector('[data-life-verb="decommission"]');
+    if (decomm) decomm.addEventListener("click", function () { confirmDecommission(bp); });
+  }
+
+  // The destroy-tier typed-confirm for Decommission (charter decision 21). Reuses
+  // the EXACT deprovision request path the old Remove drove; the typed name echo
+  // is the proof-of-attention gate (confirmModal DESTROY tier).
+  function confirmDecommission(bp) {
+    var live = !!bp.host;
+    openConfirmModal({
+      tier: "destroy",
+      title: "Decommission " + bp.name + "?",
+      resourceName: bp.name,
+      consequences: live
+        ? ["Permanently tears down the server and stops billing.", "This can't be undone."]
+        : ["Removes the instance from your dashboard.", "This can't be undone."],
+      confirmLabel: "Decommission",
+      busyLabel: "Decommissioning…",
+      onConfirm: function (ctl) { runDecommission(bp, ctl); },
+    });
+  }
+
+  // The live decommission with an optimistic pill + rollback (mirrors the pure
+  // lifecycleOptimistic reducer). Same DELETE the Remove button issued.
+  function runDecommission(bp, ctl) {
+    var pill = $("#inst-lifecycle-actions .inst-life-pill");
+    var prev = pill ? pill.outerHTML : null;
+    if (pill) {
+      pill.className = "inst-life-pill " + instanceLifecycleClass("decommissioned");
+      pill.innerHTML = '<span class="inst-life-dot" aria-hidden="true"></span>' + esc(LIFECYCLE_PILL_LABEL.decommissioned);
+    }
+    api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
+      if (r.status === 200 || r.status === 202) {
+        fleetCache = null;
+        ctl.succeed();
+        toast({
+          kind: "success",
+          title: "Decommissioning " + bp.name,
+          body: r.status === 200 ? bp.name + " is gone." : "Tearing down the server — billing stops once it's gone.",
+        });
+        location.hash = "#fleet";
+        return;
+      }
+      // Rollback the optimistic pill, then offer an in-modal retry.
+      var back = $("#inst-lifecycle-actions .inst-life-pill");
+      if (back && prev) back.outerHTML = prev;
+      ctl.fail(friendly(r.data, "Please try again."), "Try again", function (c) {
+        c.busy();
+        runDecommission(bp, c);
+      });
+    });
   }
 
   function retryInstance(bp, btn) {
@@ -2328,22 +2617,10 @@
     });
   }
 
-  function confirmRemoveInstance(bp) {
-    var live = !!bp.host;
-    var sub = live
-      ? "This permanently tears down the server and stops billing. It can't be undone."
-      : "This removes the instance from your dashboard. It can't be undone.";
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Remove ' + esc(bp.name) + "?</h2>" +
-      '<p class="modal-sub">' + esc(sub) + "</p>" +
-      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
-        '<button class="btn btn-danger" type="button" id="remove-go">Remove</button></div>'
-    );
-    $("#remove-go").addEventListener("click", function () { removeInstance(bp); });
-  }
-
+  // removeInstance is the "Retry removal" handler for a box whose teardown FAILED
+  // (id="inst-remove-retry"). The initial teardown is now the lifecycle action
+  // row's typed Decommission (runDecommission); confirmRemoveInstance retired.
   function removeInstance(bp, btn) {
-    btn = btn || $("#remove-go");
     if (btn) { btn.disabled = true; btn.textContent = "Removing…"; }
     api("DELETE", "/v1/barkparks/" + encodeURIComponent(bp.id)).then(function (r) {
       closeModal();
@@ -8257,6 +8534,14 @@
       catalogSizeRowsHtml: catalogSizeRowsHtml, catalogPanelHtml: catalogPanelHtml,
       azureFieldKeys: AZURE_FIELDS.map(function (f) { return f.key; }),
       availableProviderKinds: PROVIDERS.filter(function (p) { return p.available; }).map(function (p) { return p.kind; }),
+      // S11b (azure-hetzner hosting): the console lifecycle action-row pure
+      // helpers — the S4 pill state mapper, the conduit-driven action model, its
+      // render, the fleet infra line, the row gate, and the optimistic reducer.
+      // The DOM mount (wireLifecycleActions/runDecommission) is browser-verified.
+      lifecyclePillState: lifecyclePillState, lifecyclePill: lifecyclePill,
+      fleetInfraLine: fleetInfraLine, showLifecycleRow: showLifecycleRow,
+      lifecycleActionsModel: lifecycleActionsModel, lifecycleActionRowHtml: lifecycleActionRowHtml,
+      lifecycleOptimistic: lifecycleOptimistic, lifecycleVerbs: LIFECYCLE_VERBS.map(function (v) { return v.verb; }),
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,
