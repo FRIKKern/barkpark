@@ -35,6 +35,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
+  alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
 
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
@@ -727,9 +728,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
+          # Thread the FULL input + tool name so the diff renderer (D38) can
+          # dispatch on input SHAPE; the store already persists both verbatim
+          # (recorder.ex), so live and replay render the identical diff.
           append_message(acc, :tool, tool_line(name, block["input"]),
             tool_use_id: block["id"],
-            output: nil
+            output: nil,
+            tool: name,
+            input: block["input"]
           )
 
         _block, acc ->
@@ -1452,6 +1458,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   <span style="color: var(--primary);">●</span>
                   <span><%= message.text %></span>
                 </div>
+                <%!-- D38: a file-mutating tool call renders as a real colored
+                      diff (dispatch on input SHAPE, not tool name) beneath the
+                      ● header; a non-diff shape renders nothing here and keeps
+                      the generic ⎿ row below. --%>
+                <ChatToolRenderer.tool_diff
+                  :if={ChatToolRenderer.diff?(message[:input])}
+                  input={message.input}
+                />
                 <%!-- The terminal's ⎿ result line: first line inline; multi-
                       line outputs expand on click (details/summary). --%>
                 <div
@@ -2461,14 +2475,21 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
   end
 
-  # A tool row replays with its captured output so the ⎿ line survives reopen.
+  # A tool row replays with its captured output so the ⎿ line survives reopen,
+  # AND its input + tool name so the diff renderer (D38) reproduces the identical
+  # colored diff a reopened session — replay parity is first-class.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    meta = meta || %{}
+
     %{
       id: seq,
       role: :tool,
       text: md,
       html: nil,
-      output: Map.get(meta || %{}, "output")
+      output: Map.get(meta, "output"),
+      tool: Map.get(meta, "tool"),
+      input: Map.get(meta, "input"),
+      tool_use_id: Map.get(meta, "tool_use_id")
     }
   end
 
