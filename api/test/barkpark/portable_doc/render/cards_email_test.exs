@@ -135,6 +135,18 @@ defmodule Barkpark.PortableDoc.Render.CardsEmailTest do
     assert prov =~ ">seed.ex</div>"
   end
 
+  # ── the theme-aware /3 seam moves bytes (charter D1/D2) ──────────────────────
+
+  test "compose_block/3 threads the theme through the card skin" do
+    # ember paper (#fdfcfb) is the ember card surface; evergreen would be #ffffff
+    %{"kind" => "_raw", "html" => ember} =
+      Compose.compose_block(%{"type" => "card", "tone" => "info", "title" => "C"}, :email, :ember)
+
+    assert ember =~ "background:#fdfcfb"
+    # card tones are theme-invariant (manifest, not skin)
+    assert ember =~ "border-top:3px solid #{tone_light("info")}"
+  end
+
   # ── escaping ─────────────────────────────────────────────────────────────────
 
   test "author strings are escaped across the fleet" do
