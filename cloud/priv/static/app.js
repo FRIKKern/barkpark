@@ -2492,7 +2492,9 @@
     // block stays quiet (no floating "Sites" heading over an empty slot, no
     // loading flash). loadInstanceSites keeps the slot honest either way.
     return timeline + verifySlot +
-      '<div class="detail-grid">' +
+      // detail-grid--instance widens the rail (the domain checklist lives there);
+      // the site-deploys grid keeps the bare .detail-grid (byte-identical).
+      '<div class="detail-grid detail-grid--instance">' +
         '<div class="detail-main">' + (hasHost ? "<h2>Sites</h2>" : "") +
           '<div id="instance-sites">' + (hasHost ? '<div class="loading">Loading sites&hellip;</div>' : "") + "</div></div>" +
         '<aside class="detail-rail"><h2>Details</h2>' +
@@ -3966,9 +3968,10 @@
 
   // The canonical fold: the domain-status envelope → a render-ready model. Each
   // host carries its rolled-up overall (role-mapped) + its rung rows. `terminal`
-  // is true when nothing is still pending/active (every host's rungs are all
-  // ok-or-failed) — the DOM mount stops polling there. `empty` (no attached
-  // domains) keeps the original single Domain rail row.
+  // is true when nothing more can change on its own — every host's rungs are all
+  // ok-or-failed, EXCEPT a failed SERVING rung (see below) — and the DOM mount
+  // stops polling there. `empty` (no attached domains) keeps the original single
+  // Domain rail row.
   function domainStages(payload, now) {
     now = (typeof now === "number") ? now : Date.now();
     var domains = (payload && Array.isArray(payload.domains)) ? payload.domains : [];
@@ -3985,7 +3988,17 @@
       };
     });
     var terminal = out.every(function (d) {
-      return d.rows.every(function (r) { return r.role === "ok" || r.role === "failed"; });
+      return d.rows.every(function (r) {
+        // A failed SERVING rung stays NON-terminal: tls:ok + serving:failed is a
+        // modeled state (the domain + cert are wired, the app behind them is
+        // down) that an app restart heals — so we keep polling to catch the heal.
+        // Every OTHER failed rung is terminal (a misconfiguration the operator
+        // must fix; a genuinely-terminal DNS/points failure already keeps polling
+        // via its trailing skipped-pending rungs, so this stays narrow — never
+        // broaden it to every failed rung or a real dead-end infinite-polls).
+        if (r.role === "failed" && r.stage === "serving") return false;
+        return r.role === "ok" || r.role === "failed";
+      });
     });
     return {
       ok: !!(payload && payload.ok),

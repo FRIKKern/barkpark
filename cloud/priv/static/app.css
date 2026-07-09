@@ -1110,6 +1110,12 @@ select.form-input {
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .detail-head h1 { margin-bottom: 4px; }
 .detail-grid { display: grid; grid-template-columns: 1fr 260px; gap: 28px; align-items: start; }
+/* The instance workspace rail hosts the per-host domain checklist (#instance-
+   domains), which needs room for a rung's label + evidence code on one line — so
+   its rail is wider than the shared 260px. SCOPED to the instance workspace: the
+   site-deploys grid (bare .detail-grid) is byte-identical. The ≤900px collapse
+   below still wins (it's later in source), so this only widens the desktop rail. */
+.detail-grid--instance { grid-template-columns: 1fr 340px; }
 .detail-main h2 { margin-bottom: 12px; }
 .detail-rail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
 .detail-rail h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-text); margin-bottom: 6px; }

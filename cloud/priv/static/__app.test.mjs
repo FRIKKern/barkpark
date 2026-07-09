@@ -3411,34 +3411,27 @@ test("S11b: lifecycleOptimistic applies the decommissioned pill then rolls back 
 // terminal (poll-stop) flag, and the server-owned remediation gate are pinned
 // here; the DOM mount + 4s poll are browser-verified.
 
-const DOMAIN_SERVING = {
-  ok: true, checked_at: "2026-07-09T10:00:00Z",
-  instance: { id: "i1", host: "blog.barkpark.cloud" },
-  domains: [{
-    host: "blog.barkpark.cloud", kind: "platform", overall: "ok",
-    stages: [
-      { stage: "dns_found", label: "DNS found", status: "ok", evidence: "A → 91.99.1.2", remediation: "" },
-      { stage: "points_here", label: "Points here", status: "ok", evidence: "this instance", remediation: "" },
-      { stage: "tls", label: "TLS issued", status: "ok", evidence: "valid", remediation: "" },
-      { stage: "serving", label: "Serving", status: "ok", evidence: "HTTPS 200", remediation: "" },
-    ],
-  }],
-};
+// The all-serving / mid-issuance / serving-failed envelopes are NOT authored
+// here — they are the REAL DomainStatus.check/2 output, read from the ONE
+// cross-surface fixture that the Elixir suite regenerates + drift-gates and the
+// Go CLI test also reads (a label/evidence/shape change reds all three
+// runtimes). Their rung labels are the real server strings ("DNS resolves" /
+// "Points to this instance" / "TLS certificate" / "Serving traffic"), and ok
+// rungs carry remediation:null (domainStageRows coerces non-strings → "").
+const DOMAIN_FIXTURE = JSON.parse(
+  fs.readFileSync(new URL("./__fixtures__/domain-status.json", import.meta.url), "utf8"),
+);
+const DOMAIN_SERVING = DOMAIN_FIXTURE.all_serving;
+const DOMAIN_PENDING = DOMAIN_FIXTURE.mid_issuance;
+// [ok, ok, ok, failed] — the domain + cert are wired but the app is down. A
+// failed serving rung is RECOVERABLE (an app restart heals it), so the fold
+// keeps it NON-terminal and the DOM mount keeps polling.
+const DOMAIN_SERVING_FAILED = DOMAIN_FIXTURE.serving_failed;
 
-const DOMAIN_PENDING = {
-  ok: false, checked_at: "2026-07-09T10:00:00Z",
-  instance: { id: "i1", host: "blog.barkpark.cloud" },
-  domains: [{
-    host: "shop.example.com", kind: "custom", overall: "pending",
-    stages: [
-      { stage: "dns_found", label: "DNS found", status: "ok", evidence: "A → 91.99.1.2", remediation: "" },
-      { stage: "points_here", label: "Points here", status: "ok", evidence: "this instance", remediation: "" },
-      { stage: "tls", label: "TLS issued", status: "pending", evidence: "issuing", remediation: "TLS takes a few minutes — keep this open." },
-      { stage: "serving", label: "Serving", status: "pending", evidence: "waiting on TLS", remediation: "" },
-    ],
-  }],
-};
-
+// DOMAIN_FAILED stays hand-authored: a lone failed-first rung with a
+// skipped-pending tail is a fold-logic edge the real check/2 never emits (a DNS
+// miss is pending, never failed), so it isn't part of the generated fixture — it
+// exercises the terminal/active fold, not the server contract.
 const DOMAIN_FAILED = {
   ok: false, checked_at: "2026-07-09T10:00:00Z",
   instance: { id: "i1", host: "blog.barkpark.cloud" },
@@ -3484,13 +3477,21 @@ test("S13: a mid-issuance domain promotes the first pending rung to the active f
 test("S13: remediation shows ONLY under a non-ok rung that carries server copy, verbatim", () => {
   const rows = hooks.domainStageRows(DOMAIN_PENDING.domains[0].stages);
   const tls = rows.find((r) => r.stage === "tls");
-  const serving = rows.find((r) => r.stage === "serving");
-  // tls: active (non-ok) + has copy → shown, verbatim.
+  const dns = rows.find((r) => r.stage === "dns_found");
+  // tls: active (non-ok) + server copy → shown, verbatim (the REAL server string).
   assert.equal(tls.showRemediation, true);
-  assert.equal(tls.remediation, "TLS takes a few minutes — keep this open.");
-  // serving: pending (non-ok) but EMPTY remediation → not shown (no dangling row).
-  assert.equal(serving.showRemediation, false);
-  assert.equal(serving.remediation, "");
+  assert.match(tls.remediation, /issued and renewed automatically by the platform/);
+  // An ok rung never shows remediation (the fixture nulls it → coerced "").
+  assert.equal(dns.role, "ok");
+  assert.equal(dns.showRemediation, false);
+  assert.equal(dns.remediation, "");
+  // The "empty remediation → no dangling row" logic (a non-ok rung the server
+  // left reason-less — rare: FailureCopy's default clause means the real server
+  // never does, so this is synthetic) must still suppress the row.
+  const bare = hooks.domainStageRows([{ stage: "serving", status: "pending", remediation: "" }]);
+  assert.equal(bare[0].role, "pending");
+  assert.equal(bare[0].showRemediation, false);
+  assert.equal(bare[0].remediation, "");
 });
 
 test("S13: a failed rung settles, but a skipped-pending rung downstream keeps polling (the operator can fix + watch)", () => {
@@ -3504,6 +3505,32 @@ test("S13: a failed rung settles, but a skipped-pending rung downstream keeps po
   const dns = m.domains[0].rows[0];
   assert.equal(dns.showRemediation, true);
   assert.equal(dns.remediation, "Add an A record for shop.example.com → 91.99.1.2.");
+});
+
+test("S13: a failed SERVING rung stays NON-terminal — an app restart heals it, so keep polling", () => {
+  const m = hooks.domainStages(DOMAIN_SERVING_FAILED, 0);
+  const roles = [...m.domains[0].rows.map((r) => r.role)];
+  // domain + cert wired, the app behind them is down.
+  assert.deepEqual(roles, ["ok", "ok", "ok", "failed"]);
+  assert.equal(m.domains[0].overallRole, "failed");
+  // NARROW: a failed serving rung is recoverable (tls:ok + serving:failed is a
+  // modeled state), so the fold keeps it NON-terminal and the mount keeps
+  // polling to catch the heal.
+  assert.equal(m.terminal, false);
+  const serving = m.domains[0].rows[3];
+  assert.equal(serving.stage, "serving");
+  assert.equal(serving.showRemediation, true); // server copy under the failed rung
+  // Narrowness guard: a failed NON-serving rung with no pending tail IS terminal
+  // (a genuine dead-end — broadening the rule would infinite-poll it). Synthetic:
+  // the real server always trails a points/dns failure with skipped-pending rungs.
+  const deadEnd = hooks.domainStages({
+    ok: false,
+    domains: [{ host: "h", overall: "failed", stages: [
+      { stage: "dns_found", status: "ok" },
+      { stage: "points_here", status: "failed" },
+    ] }],
+  }, 0);
+  assert.equal(deadEnd.terminal, true);
 });
 
 test("S13: an empty domain set folds to empty+terminal (keeps the static Domain rail row)", () => {
@@ -3532,12 +3559,12 @@ test("S13: domainChecklistHtml renders one vf-card per host with escaped, role-m
   const m = hooks.domainStages(DOMAIN_PENDING, 0);
   const html = hooks.domainChecklistHtml(m, {});
   assert.match(html, /vf-card/);
-  assert.match(html, /shop\.example\.com/);
+  assert.match(html, /blog-22222222\.barkpark\.cloud/);
   assert.match(html, /vf-chip--pass/);    // the two ok rungs
   assert.match(html, /vf-chip--unknown/); // active + pending render as neutral chips
-  assert.match(html, /TLS takes a few minutes/); // remediation surfaced verbatim
+  assert.match(html, /issued and renewed automatically by the platform/); // remediation surfaced verbatim
   // The kind chip is present.
-  assert.match(html, /custom/);
+  assert.match(html, /platform/);
 });
 
 test("S13: domainRungChip escapes a hostile label + evidence (no raw markup leaks)", () => {

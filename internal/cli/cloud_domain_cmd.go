@@ -296,6 +296,11 @@ WHAT IT DOES
   'bp login'. A domain still being set up shows pending rungs with the server's
   own next-step guidance under each — it is a normal result, never a CLI error.
 
+  A failed Serving rung (DNS + TLS green, but the box isn't answering) means the
+  domain is wired but the app behind it is down — recoverable: bring the instance
+  back (an app restart heals it) and re-run this command. The exit stays non-zero
+  until it serves, so a go-live gate never passes a box that isn't live.
+
 OUTPUT + EXIT
   a header per host, then one row per rung: status (green ok / cyan pending /
   red failed), the rung label, and the server's evidence; a non-ok rung carries
