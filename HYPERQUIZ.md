@@ -19,10 +19,11 @@ grounded in the built code, not byte-copies of the lost bodies.)
 
 ## Status
 
-The engine exists on local branch `hyperquiz-p1-recovered` — 28 commits,
-+2,952 lines / 35 files, **99 tests green** when applied to current main
-(verified by a port attempt 2026-07-09). Landing that stranded engine on main
-beats any new feature work.
+Wave 1 (2026-07-10) ported the engine onto main as `Barkpark.Plugins.Quiz` —
+**99 tests green** (`mix test $(git ls-files 'test' | grep -i quiz)`). The
+source branch `hyperquiz-p1-recovered` (28 commits, +2,952 lines / 35 files)
+remains as evidence-of-work only. Still open: theme re-skin (Decision E) and
+the live browser verification on guerrilla.
 
 ## Architecture — land as a `Barkpark.Plugin` (Decision D)
 
