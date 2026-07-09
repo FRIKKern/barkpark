@@ -198,17 +198,12 @@ defmodule BarkparkCloud.FailureCopy do
   """
   @spec capability_gap_reason(String.t(), String.t()) :: String.t()
 
-  # Azure lifecycle facets. Azure honours decommission + audit + RESURRECT (charter
-  # S14: a portable bundle — archived on Hetzner or Azure — is restored onto a fresh
-  # Azure box, so Azure is a valid resurrect TARGET even without a snapshot
-  # substrate). The two it still lacks — ARCHIVE (Azure can't yet be the bundle
-  # SOURCE; S14b) and ADOPT (a snapshot-based clone-swap) — are named specifically so
-  # the console can say WHY, not just "no". There is deliberately NO azure/resurrect
-  # gap clause: resurrect is a live capability, so it never degrades.
-  def capability_gap_reason("azure", "archive") do
-    "Azure can't archive to a bundle yet — there's no snapshot substrate there, so an Azure decommission is unrecoverable. (Azure can still be RESTORED onto from a Hetzner or Azure bundle — resurrect works.)"
-  end
-
+  # Azure lifecycle facets. Azure now honours archive (S14b: the PORTABLE
+  # bp-bundle-v1 — no snapshot substrate needed), resurrect (S14d: a bundle
+  # archived on Hetzner or Azure restores onto a fresh Azure box), decommission
+  # and audit. Its ONE remaining gap is ADOPT (a snapshot-based clone-swap),
+  # named specifically so the console can say WHY, not just "no". The dead
+  # archive/resurrect gap clauses are gone: live capabilities never degrade.
   def capability_gap_reason("azure", "adopt") do
     "Adopt is a snapshot-based clone-swap on Hetzner; Azure has no equivalent yet, so the same verb would quietly mean something different."
   end
