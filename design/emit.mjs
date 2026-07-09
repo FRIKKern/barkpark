@@ -16,10 +16,65 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
+import { derive } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const repoRoot = join(here, "..");
-export const tokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
+
+// ── the w4 seam (charter D22) ────────────────────────────────────────────────
+// `rawTokens` is design/tokens.json parsed VERBATIM — the frozen structure and,
+// for evergreen, the byte-for-byte characterization mirror. `tokens` (the export
+// every builder reads) is that raw tree with its color palette swapped for a
+// CLONE overlaid by derive(activeTheme): a clone-and-overlay adapter, never a
+// tree built from scratch. structuredClone preserves every leaf verbatim; the
+// overlay only re-stamps the 156 theme-varying SLOTS derive() emits (dotted paths
+// under color.*), so the non-derived leaves survive untouched — status.warn.strong
+// (bool, read below to emit --warn-strong), color._convention, and the 11 D21
+// passthrough families derive() deliberately does not resolve. With
+// activeTheme=evergreen the overlay is byte-identical to the raw color tree
+// (check.mjs Part F proves derive(evergreen) === tokens.json), so NOTHING the
+// emitter writes moves. Swapping activeTheme is the multitheme switch (w4b+).
+export const rawTokens = JSON.parse(readFileSync(join(here, "tokens.json"), "utf8"));
+const activeTheme = JSON.parse(readFileSync(join(here, "themes", "evergreen.json"), "utf8"));
+
+// structural deep-equality — used by the seam guard. Compares by shape and
+// primitive value (order-independent for objects), so a non-string leaf that
+// silently drifted (e.g. status.warn.strong flipping) is caught, not skipped.
+function deepEqualColor(a, b, path = "color") {
+  if (a === b) return true;
+  if (typeof a !== typeof b) throw new Error(`seam guard: type drift at ${path} — ${typeof a} vs ${typeof b}`);
+  if (a === null || b === null || typeof a !== "object") {
+    if (a !== b) throw new Error(`seam guard: value drift at ${path} — ${JSON.stringify(a)} vs ${JSON.stringify(b)}`);
+    return true;
+  }
+  const ak = Object.keys(a), bk = Object.keys(b);
+  if (ak.length !== bk.length) throw new Error(`seam guard: key-count drift at ${path} — ${ak.length} vs ${bk.length}`);
+  for (const k of ak) {
+    if (!Object.prototype.hasOwnProperty.call(b, k)) throw new Error(`seam guard: missing key at ${path}.${k}`);
+    deepEqualColor(a[k], b[k], `${path}.${k}`);
+  }
+  return true;
+}
+
+const adaptedColor = structuredClone(rawTokens.color);
+{
+  const derived = derive(activeTheme).values;
+  for (const [slot, value] of Object.entries(derived)) {
+    const keys = slot.split(".");
+    let node = adaptedColor;
+    for (let i = 0; i < keys.length - 1; i++) node = node[keys[i]];
+    node[keys[keys.length - 1]] = value;
+  }
+  // Seam guard: for evergreen the overlay MUST be byte-identical to the raw color
+  // tree INCLUDING non-string leaves (status.warn.strong, color._convention). This
+  // is what makes the byte-identity proof total — if a derive(evergreen) slot ever
+  // drifts from the shipped byte, fail loudly here rather than silently emit a
+  // retinted artifact. Guarded on evergreen because a real alternate theme is
+  // SUPPOSED to differ from the raw tree (that is the whole point of w4b).
+  if ((activeTheme.name || "evergreen") === "evergreen")
+    deepEqualColor(adaptedColor, rawTokens.color);
+}
+export const tokens = { ...rawTokens, color: adaptedColor };
 
 // ── shared vocabulary ───────────────────────────────────────────────────────
 export const BASE_ROLES = [

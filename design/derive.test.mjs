@@ -9,6 +9,7 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   parseColor,
   passthrough,
@@ -27,7 +28,10 @@ import {
   darkInvert,
   derive,
   deriveSpine,
+  PASSTHROUGH_FAMILIES,
+  SLOTS,
 } from "./derive.mjs";
+import { tokens, rawTokens } from "./emit.mjs";
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 
@@ -354,4 +358,63 @@ test("derive: onMiss is invoked for every reported AA miss", () => {
     { onMiss: (m) => seen.push(m) },
   );
   assert.equal(seen.length, out.misses.length);
+});
+
+// ── the w4 seam (charter D22) — emit.mjs consumes derive(evergreen) via a
+//    clone-and-overlay adapter with ZERO artifact diff. These tests are the
+//    committed proof for ts-w4a criterion 0: the overlay is byte-identical to
+//    the raw color tree for evergreen INCLUDING non-string leaves, and every
+//    non-derived leaf (status.warn.strong, _convention, the 11 D21 passthrough
+//    families) survives untouched.
+test("seam: emit.tokens.color deep-equals raw color tree for evergreen (all leaves)", () => {
+  // adapted != raw by reference (clone, never mutate the source of truth) …
+  assert.notEqual(tokens.color, rawTokens.color);
+  // … but byte-identical by value, non-string leaves included (deepStrictEqual
+  // walks booleans/numbers, so a silently-flipped status.warn.strong would trip).
+  assert.deepStrictEqual(tokens.color, rawTokens.color);
+});
+
+test("seam: status.warn.strong survives as the boolean true (non-string leaf, not a derive SLOT)", () => {
+  assert.equal(tokens.color.status.warn.strong, true);
+  assert.equal(typeof tokens.color.status.warn.strong, "boolean");
+  // it is deliberately NOT a derive SLOT — only status.warn.{light,dark} are.
+  assert.ok(!SLOTS.includes("status.warn.strong"));
+});
+
+test("seam: color._convention survives verbatim (never a derive SLOT)", () => {
+  assert.ok(tokens.color._convention);
+  assert.deepStrictEqual(tokens.color._convention, rawTokens.color._convention);
+});
+
+test("seam: all 11 D21 passthrough families survive verbatim in adapted tokens", () => {
+  assert.equal(PASSTHROUGH_FAMILIES.length, 11);
+  // 9 passthrough families live under color.* (presence/provider/…); lifecycle and
+  // instanceLifecycle are top-level tokens families. derive() resolves none of them
+  // — each must survive verbatim wherever it lives (color clone / top-level spread).
+  for (const fam of PASSTHROUGH_FAMILIES) {
+    const inColor = fam in rawTokens.color;
+    const got = inColor ? tokens.color[fam] : tokens[fam];
+    const want = inColor ? rawTokens.color[fam] : rawTokens[fam];
+    assert.ok(got !== undefined, `passthrough family ${fam} missing from adapted tokens`);
+    assert.deepStrictEqual(got, want, `passthrough family ${fam} drifted`);
+  }
+});
+
+test("seam: every derive(evergreen) SLOT is present as a leaf in adapted tokens", () => {
+  const rawEvergreen = JSON.parse(
+    readFileSync(new URL("./themes/evergreen.json", import.meta.url), "utf8"),
+  );
+  const derived = derive(rawEvergreen).values;
+  for (const slot of SLOTS) {
+    const leaf = slot.split(".").reduce((o, k) => (o == null ? undefined : o[k]), tokens.color);
+    assert.equal(leaf, derived[slot], `slot ${slot} not overlaid onto adapted tokens`);
+  }
+});
+
+test("seam: non-color top-level families pass through by the top-level spread", () => {
+  // {...rawTokens, color: adaptedColor} — every non-color family is the same ref.
+  for (const k of ["type", "font", "lifecycle", "instanceLifecycle"]) {
+    if (rawTokens[k] === undefined) continue;
+    assert.equal(tokens[k], rawTokens[k], `non-color family ${k} was not passed through by reference`);
+  }
 });
