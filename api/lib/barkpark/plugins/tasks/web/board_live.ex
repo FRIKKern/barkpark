@@ -1653,6 +1653,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       .bp-gantt-bar.is-done { background: var(--ok); opacity: 0.9; }
       .bp-gantt-bar.is-blocked { background: var(--warn); opacity: 0.9; }
       .bp-gantt-bar.is-ready { background: var(--muted-text); opacity: 0.75; }
+      /* Wave 22: ACTIVE gantt rows keep the list's readability — the ongoing
+         task's brief + checklist span under its bar line. */
+      .bp-gantt-detail {
+        grid-column: 1 / -1; min-width: 0;
+        padding: 1px 8px 5px calc(var(--d) * 12px + 24px);
+      }
+      .bp-gantt-detail .bp-fam-desc {
+        margin: 0 0 3px; padding-left: 0; -webkit-line-clamp: 2;
+      }
+      .bp-gantt-detail .bp-crits--row { margin: 0; padding-left: 0; }
       /* Wave 19: the card READS, not just scans — the root's brief under the
          title, the ongoing task's text under its row, a paper chip when the
          detailed description lives as a PortableDoc design paper. */
@@ -2790,6 +2800,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   >
                   </span>
                 </div>
+
+                <div :if={row[:desc] || row[:crits]} class="bp-gantt-detail" data-role="gantt-detail">
+                  <p :if={row[:desc]} class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
+                  <ul :if={row[:crits]} class="bp-crits bp-crits--row" data-role="family-criteria">
+                    <li :for={c <- row.crits} class={c.met && "is-met"} data-role="family-criterion">
+                      <span
+                        class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")}
+                        aria-hidden="true"
+                      >
+                        <%= if c.met, do: "✓", else: "○" %>
+                      </span>
+                      <span class="bp-crits-t"><%= c.text %></span>
+                    </li>
+                  </ul>
+                </div>
               </div>
               <p :if={card[:family] && card.family.more > 0} class="bp-fam-more">
                 + <%= card.family.more %> more inside
@@ -2918,6 +2943,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         color_role: card.color_role,
         glyph: card.glyph,
         worker: card.worker,
+        # the root's own brief/checklist already render above the chart —
+        # never doubled as a gantt detail row
+        desc: nil,
+        crits: nil,
         created_at: card[:created_at],
         updated_at: card.updated_at
       }

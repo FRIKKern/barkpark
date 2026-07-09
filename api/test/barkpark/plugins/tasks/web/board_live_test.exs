@@ -1663,6 +1663,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       refute html =~ "QUIET-CRITERION"
     end
 
+    test "the gantt keeps the readability: active rows show brief + criteria (wave 22)",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?expand=rd-epic")
+
+      # the expanded chart carries the in-flight child's detail under its bar…
+      [_, gantt] = String.split(html, ~s(data-role="gantt"), parts: 2)
+      gantt = gantt |> String.split("</main>", parts: 2) |> hd()
+      assert gantt =~ ~s(data-role="gantt-detail")
+      assert gantt =~ "Porting the columns renderer"
+      assert gantt =~ "solver flag flipped for columns"
+      assert gantt =~ "golden-diff green at 3 widths"
+      # …quiet rows stay bare in the chart too.
+      refute gantt =~ "NEVER-ON-THE-ROW"
+      refute gantt =~ "QUIET-CRITERION"
+    end
+
     test "the peek links the full design paper", %{conn: conn} do
       {:ok, _view, html} = live(conn, "/admin/projects?task=rd-epic")
 
