@@ -299,6 +299,8 @@ func (m Model) reduce(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case changeMsg:
 		return m.handleChange(msg)
 	case pulseMsg:
@@ -422,6 +424,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		(&m).popFrame()
 		return m, nil
+	case "M":
+		return m.toggleMouse()
 	}
 
 	if m.topFrame().Kind == FrameBoard {
@@ -540,6 +544,125 @@ func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
 		return m.openTask(t)
 	}
 	return m, nil
+}
+
+// ── Mouse: clickable footer verbs + the M mouse-mode toggle (charter D96) ─────
+//
+// The board footer's c/x/o hints are click targets (buildBoardFooter emits their
+// spans). A left click on a verb fires the SAME reducer as its key — claim and
+// studio dispatch straight through, and close keeps its existing two-click guard
+// (the pendingClose machine, arm-then-fire on the same task under the cursor). A
+// click that is NOT on a verb disarms a pending close, exactly as a stray key
+// does. Motion updates the hover tint. When the mouse is released (M), the shell
+// ignores stray events and the footer shows the mode. Nothing here paints — the
+// render state (mode + hover) lives on UIState so the frozen-signature renderer
+// reads it.
+
+// handleMouse routes a mouse event: motion paints the footer-verb hover; a left
+// press either fires the verb under the pointer or disarms a pending close. All
+// other buttons/actions (wheel, release, right/middle) are inert this slice —
+// scroll and row clicks are sibling slices — so an unhandled event is a clean
+// no-op, never a surprise.
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.ui.MouseReleased {
+		// Mouse reporting is off; a straggler event (an in-flight report from the
+		// instant before DisableMouse landed) must not act or paint hover.
+		return m, nil
+	}
+	switch msg.Action {
+	case tea.MouseActionMotion:
+		if verb, ok := m.footerVerbAt(msg.X, msg.Y); ok {
+			m.ui.HoverFooterVerb = verb
+		} else {
+			m.ui.HoverFooterVerb = 0
+		}
+		return m, nil
+	case tea.MouseActionPress:
+		if msg.Button != tea.MouseButtonLeft {
+			return m, nil
+		}
+		verb, ok := m.footerVerbAt(msg.X, msg.Y)
+		if !ok {
+			// A click off the verbs disarms the close guard and clears the transient
+			// strip — the mouse analog of "any other key cancels the pending close".
+			m.pendingClose = ""
+			m.ui.Strip = ActionStrip{}
+			return m, nil
+		}
+		return m.clickFooterVerb(verb)
+	}
+	return m, nil
+}
+
+// clickFooterVerb dispatches a clicked board verb through the EXACT keyboard
+// reducer (charter D96: "verb click == key press"), so claim/close/studio share
+// one code path with c/x/o and can never drift. It mirrors handleKey's two
+// cross-cutting rules first: the click clears the transient strip, and anything
+// but a repeated x-affordance click disarms the close guard — so a second click
+// on the x verb (with pendingClose still armed from the first) is the one input
+// that reaches closeTask's fire branch.
+func (m Model) clickFooterVerb(verb rune) (tea.Model, tea.Cmd) {
+	key := string(verb)
+	if key != "x" {
+		m.pendingClose = ""
+	}
+	m.ui.Strip = ActionStrip{}
+	return m.handleBoardKey(key)
+}
+
+// footerVerbAt maps an absolute terminal click (x,y) to the board footer verb
+// whose span contains it, or (0,false). NARROW board mode only — the portrait
+// primary surface: wide two-pane and the reading frames expose no footer verb
+// targets (the reading footer omits c/x/o by charter). The geometry mirrors
+// Compose byte-for-byte: the footer is the last painted row (Y == height-1 after
+// Compose's clamps and its one blank top row), inset by the left gutter gl, and
+// the spans are computed at the same inner width renderFooter paints at.
+func (m Model) footerVerbAt(x, y int) (rune, bool) {
+	if m.wide || m.topFrame().Kind != FrameBoard {
+		return 0, false
+	}
+	width, height := m.width, m.height
+	if width < 20 {
+		width = 20
+	}
+	if height < 8 {
+		height = 8
+	}
+	if y != height-1 {
+		return 0, false
+	}
+	gl, gr := 1, 3
+	if width < 56 {
+		gl, gr = 1, 2
+	}
+	inner := width - gl - gr
+	if inner < 20 {
+		inner = 20
+	}
+	col := x - gl
+	_, spans := buildBoardFooter(inner, m.ui.MouseReleased)
+	for _, s := range spans {
+		if col >= s.start && col < s.end {
+			return s.verb, true
+		}
+	}
+	return 0, false
+}
+
+// toggleMouse is the M key: flip mouse reporting and emit the matching bubbletea
+// command (charter D96). Releasing clears any hover and, honestly, the footer
+// switches to the released-mode note; re-arming restores all-motion reporting so
+// hover and clicks work again. The command is the ONLY thing that changes the
+// terminal's mouse state — the model flag just tracks it for the render + the
+// stray-event guard.
+func (m Model) toggleMouse() (tea.Model, tea.Cmd) {
+	if m.ui.MouseReleased {
+		m.ui.MouseReleased = false
+		return m, tea.EnableMouseAllMotion
+	}
+	m.ui.MouseReleased = true
+	m.ui.HoverFooterVerb = 0
+	return m, tea.DisableMouse
 }
 
 // ── Act verbs: claim / close / open-in-Studio ────────────────────────────────
@@ -1302,7 +1425,13 @@ func Run(cfg Config) error {
 		Server:   serverHost(cfg.BaseURL),
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	// Mouse is ON by default (all-motion, so footer verbs hover and click —
+	// charter D96). It degrades honestly: a terminal without mouse reporting
+	// simply never sends events and the keyboard flow is untouched, and M
+	// (tea.DisableMouse/EnableMouseAllMotion) hands clicks back to the terminal
+	// for native text selection — the footer's etiquette footnote teaches both
+	// the M toggle and the opt/shift-click bypass.
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	wireLive(p, client, cfg.Token)
 
 	_, err := p.Run()

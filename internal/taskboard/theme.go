@@ -133,6 +133,14 @@ var (
 	dimStyle   = lipgloss.NewStyle().Foreground(dimColor)
 	titleStyle = lipgloss.NewStyle().Foreground(titleColor).Bold(true)
 	boldStyle  = lipgloss.NewStyle().Bold(true)
+
+	// verbHoverStyle is the pointer-hover affordance on a clickable footer verb
+	// (charter D96): a background TINT drawn from the existing chrome tokens (near-
+	// foreground ink on the zinc mid-chrome), never a new color — "color = state"
+	// stays intact because this is a transient pointer state, painted only while a
+	// verb is under the cursor. The board vocabulary has no button chrome, so a
+	// background fill on the whole verb token IS the terminal's hover/pressed idiom.
+	verbHoverStyle = lipgloss.NewStyle().Foreground(titleColor).Background(neutralColor)
 )
 
 // glyphStyleFor paints the STATUS GLYPH by the spec §1 brightness+meaning ladder
