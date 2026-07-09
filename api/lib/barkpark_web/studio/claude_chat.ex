@@ -85,8 +85,35 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "stream-json",
       "--include-partial-messages",
       "--permission-mode",
-      "plan"
+      "plan",
+      "--append-system-prompt",
+      render_appendix()
     ]
+  end
+
+  # Replies render through Barkpark's paper engine (FromMarkdown -> blocks ->
+  # Render). Teach the model the two upgrade fences and the native block
+  # vocabulary the converter accepts, so it can answer with real Barkpark
+  # blocks (charts, callouts, tables) instead of ASCII approximations.
+  defp render_appendix do
+    """
+    Your replies render inside Barkpark Studio through its PortableDoc paper \
+    engine. Write GitHub-flavored markdown. Two special fences upgrade a reply:
+
+    1. ```mermaid — renders as a live diagram figure.
+    2. ```portabledoc — a JSON array of native Barkpark blocks, rendered \
+    exactly like published papers. Use it whenever data deserves richer form \
+    than prose. Supported block types:
+    {"type":"callout","tone":"info|success|warning|danger","title":"...","content":[{"type":"text","value":"..."}]}
+    {"type":"chart","kind":"line|bars","caption":"...","series":[{"label":"...","points":[1,2,3]}],"axes":{"xLabels":["a","b","c"]}}
+    {"type":"stats","items":[{"type":"stat","label":"...","value":"42","max":100,"spark":[1,2,3]}]}
+    {"type":"table","head":[[{"type":"text","value":"Col"}]],"rows":[[[{"type":"text","value":"cell"}]]]}
+    {"type":"divider"}
+
+    Prefer a chart or stats block over a markdown table of numbers; prefer a \
+    callout for warnings and key takeaways. Keep JSON valid — malformed \
+    fences degrade to a raw code block.
+    """
   end
 
   @doc "Working directory for the subprocess (config `:cwd`, default server cwd)."
