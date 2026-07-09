@@ -1735,6 +1735,114 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # ── send is instant and never loses your words (optimistic echo, D24) ──────
+  describe "send: optimistic echo + restore-on-failure (charter D24)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    test "the user bubble lands in the FIRST diff, before phase 2 runs", %{view: view} do
+      # Arm a dispatch FAILURE so the echo can't be riding on a successful
+      # spawn/persist: it must already be on screen from phase 1, which returns
+      # before the deferred {:dispatch_send} ever runs.
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      html =
+        render_submit(element(view, "form[phx-submit=send]"), %{"message" => "did you get this"})
+
+      # This is the phase-1 render (the handle_event reply) — the words + the
+      # working status are here INSTANTLY, before any subprocess work.
+      assert html =~ "did you get this"
+      assert html =~ "working"
+      assert html =~ ~s(data-role="user")
+    end
+
+    test "a spawn failure withdraws the echo, restores the words verbatim, and leaves no orphan message row",
+         %{view: view} do
+      # Deterministic hard failure: disable AFTER mount so the lazy spawn returns
+      # {:error, :disabled} in phase 2 (the create/spawn 'session nil' path).
+      Application.put_env(:barkpark, :public_demo_studio, true)
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "keep my words"})
+      # let phase 2 (the deferred {:dispatch_send}) run
+      _ = render(view)
+
+      # the optimistic user bubble is withdrawn (no stranded row that never sent)…
+      refute has_element?(view, ~s([data-role="user"]))
+      # …the words are handed back to the composer VERBATIM (server-bound value)…
+      assert has_element?(view, ~s(input#chat-composer[value="keep my words"]))
+      # …an honest line explains why, and we are NOT stuck thinking…
+      assert render(view) =~ "not enabled on this host"
+      assert lv_assigns(view)[:status] == :offline
+      refute turn_active_status?(view)
+
+      # …and NO orphan chat_messages row was persisted (persist is gated on a
+      # dispatched frame — the session row exists but carries zero messages).
+      sid = store_id(view)
+      assert is_binary(sid)
+      assert StudioChat.list_messages(sid) == []
+    end
+
+    test "the composer is server-bound: value tracks the draft while typing and clears on send",
+         %{view: view} do
+      # phx-change keeps the server draft in step; the input renders it as value=
+      render_change(element(view, "form[phx-submit=send]"), %{"message" => "half typed"})
+      assert has_element?(view, ~s(input#chat-composer[value="half typed"]))
+
+      # a send clears the composer — the input value is no longer the typed text
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "half typed"})
+      refute has_element?(view, ~s(input#chat-composer[value="half typed"]))
+    end
+
+    test "a DISPATCHED send whose persist is rejected keeps the echo and stays CLEARED (no double-send)",
+         %{conn: conn} do
+      sid = seed_session("Doomed store")
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+
+      # Delete the row so the post-dispatch append hits the terminal {:error} of
+      # do_append (a vanished-session FK). A true concurrent seq-conflict cannot
+      # be forced on one sandbox connection; this exercises the SAME exhaustion
+      # branch of persist_user_message with a deterministic {:error}.
+      Barkpark.Repo.delete!(StudioChat.get_session(sid))
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "resend me"})
+      _ = render(view)
+
+      # The model DID get the turn (cat dispatched it), so the echo STAYS…
+      assert has_element?(view, ~s([data-role="user"]))
+      html = render(view)
+      assert html =~ "resend me"
+      # …the honest warn line fires…
+      assert html =~ "could not be saved"
+      # …and the composer stays CLEARED — restoring here would DOUBLE-SEND.
+      refute has_element?(view, ~s(input#chat-composer[value="resend me"]))
+    end
+
+    test "reopening after an optimistically-echoed send shows exactly ONE user bubble",
+         %{conn: conn, view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "just once"})
+      sid = store_id(view)
+      # finish the turn cleanly
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      render(view)
+
+      # Reopen in a fresh mount — replay rebuilds SOLELY from the store, so the
+      # optimistic echo is replaced by the one persisted row (never doubled).
+      {:ok, view2, _html} = live(conn, "/studio/chat/#{sid}")
+      html2 = render(view2)
+      assert html2 =~ "just once"
+      assert count_substring(html2, ~s(data-role="user")) == 1
+    end
+  end
+
+  # Is the on-screen chat in a turn-active state (thinking/interrupting)?
+  defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
+
+  defp count_substring(haystack, needle), do: length(String.split(haystack, needle)) - 1
+
   defp stream_delta(text) do
     %{
       "type" => "stream_event",
