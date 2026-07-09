@@ -40,6 +40,7 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"
@@ -86,6 +87,7 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
       - "api/lib/barkpark_web/**/*.heex"

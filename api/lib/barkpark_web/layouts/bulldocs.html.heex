@@ -25,6 +25,7 @@
           its own 820/720px shell above, so nothing here clobbers it. --%>
     <%= raw(Barkpark.PortableDoc.Render.Stylesheet.css()) %>
 
+    /* BEGIN GENERATED: tokens (design/tokens.json — regenerate: node design/emit.mjs --write; do not hand-edit) */
     /* Article chrome — applied only when BulldocsLive marks the doc as
        `content["style"] == "article"` (the LiveView stamps the
        `.bp-paper-article` class on its <main>). Cool bp-theme page, a
@@ -99,6 +100,23 @@
         --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
       }
     }
+    /* Mail-client popup chrome (color.mailChrome) — the --mail-* window skin
+       for the Email view, relocated here (from #bp-mailapp) so the reader
+       palette + the mail chrome are single-sourced in ONE marker region; the
+       #bp-mailapp consumers stay below. Theme-aware like a real dark mail
+       client showing a light HTML email; the served email bytes never change
+       with the theme. */
+    #bp-mailapp {
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+    }
+    @media (prefers-color-scheme: dark) {
+      #bp-mailapp {
+        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
+      }
+    }
+    /* END GENERATED: tokens */
     .bp-paper-shell.bp-paper-article {
       max-width: 720px;
       padding: 56px 40px 96px;
@@ -530,8 +548,8 @@
        dark mail client showing a light HTML email, exactly like real clients —
        but the message bytes never change with the theme. */
     #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
-      --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
+      /* --mail-* window-chrome vars are GENERATED into the reader-skin marker
+         region above (design/tokens.json color.mailChrome → design/emit.mjs). */
       display: none;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     }
@@ -550,10 +568,6 @@
       overflow: hidden;
     }
     @media (prefers-color-scheme: dark) {
-      #bp-mailapp {
-        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
-        --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
-      }
       body.bp-email { background: #0a100e; }
       body.bp-email #bp-mailapp { box-shadow: 0 24px 70px rgba(0,0,0,0.55); }
     }
