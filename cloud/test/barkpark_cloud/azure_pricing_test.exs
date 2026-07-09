@@ -122,11 +122,11 @@ defmodule BarkparkCloud.AzurePricingTest do
       assert Fake.requests() == []
     end
 
-    test "past the TTL it re-fetches (fresh sheet wins)" do
+    test "past the TTL, serve-stale: the stale value now, the fresh sheet on the next read" do
       Fake.program([ok200(@page1), ok200(@page2)])
       assert Pricing.monthly_prices(0)["Standard_D2s_v5"] == 64.24
 
-      # A cheaper sheet, one page, fetched only after the window elapses.
+      # A cheaper sheet, one page, that a background refresh will pick up.
       cheaper = ~s({"Items":[
         {"armSkuName":"Standard_D2s_v5","armRegionName":"eastus","retailPrice":0.05,
          "meterName":"D2s v5","skuName":"D2s v5","productName":"Virtual Machines Dsv5 Series",
@@ -134,7 +134,49 @@ defmodule BarkparkCloud.AzurePricingTest do
 
       Fake.program([ok200(cheaper)])
       ttl_ms = 24 * 60 * 60 * 1000
-      assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 36.5
+
+      # The read that crosses the TTL serves the STALE value immediately and hands
+      # ONE demand-triggered refresh to the GenServer — the caller never waits.
+      assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 64.24
+
+      # Drain that background refresh deterministically (no sleeps).
+      assert Pricing.flush() == :ok
+
+      # The next read now sees the freshly-fetched, cheaper sheet.
+      assert Pricing.monthly_prices(ttl_ms + 2)["Standard_D2s_v5"] == 36.5
+    end
+
+    test "concurrent stale reads coalesce into ONE background refresh (in-flight guard)" do
+      Fake.program([ok200(@page1), ok200(@page2)])
+      assert Pricing.monthly_prices(0)["Standard_D2s_v5"] == 64.24
+
+      # A single fresh one-page sheet for the refresh; the request log resets here.
+      cheaper = ~s({"Items":[
+        {"armSkuName":"Standard_D2s_v5","armRegionName":"eastus","retailPrice":0.05,
+         "meterName":"D2s v5","skuName":"D2s v5","productName":"Virtual Machines Dsv5 Series",
+         "serviceName":"Virtual Machines","type":"Consumption","currencyCode":"USD"}]})
+
+      Fake.program([ok200(cheaper)])
+      ttl_ms = 24 * 60 * 60 * 1000
+
+      # Two stale reads at the same instant each serve stale and each hand a
+      # refresh to the GenServer. The in-flight guard (and the cache re-check)
+      # collapse them into a SINGLE fetch — no thundering herd. The GenServer is
+      # SUSPENDED across the two reads so the refresh provably cannot land
+      # between them (without this, a fast background fetch could freshen the
+      # cache before the second read and flake the 64.24 assertion) — both casts
+      # queue, and on resume the guard sees them back-to-back: the worst case
+      # for coalescing.
+      :ok = :sys.suspend(Pricing)
+      assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 64.24
+      assert Pricing.monthly_prices(ttl_ms + 1)["Standard_D2s_v5"] == 64.24
+      :ok = :sys.resume(Pricing)
+      assert Pricing.flush() == :ok
+
+      # Exactly one page was fetched. A second refresh would pop the now-empty
+      # queue and record a second request — so a count of 1 proves coalescing.
+      assert length(Fake.requests()) == 1
+      assert Pricing.monthly_prices(ttl_ms + 2)["Standard_D2s_v5"] == 36.5
     end
   end
 
