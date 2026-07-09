@@ -52,17 +52,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: compose_field_color(b, theme)
 
   def compose_block(%{"type" => "stat"} = b, style, theme) when style != :article,
-    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stat_email_html(b, theme)}
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.DataViz.stat_email_html(b, theme)
+    }
 
   def compose_block(%{"type" => t} = b, style, theme)
       when t in ["stats", "stat-grid"] and style != :article,
-      do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stats_email_html(b, theme)}
+      do: %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.DataViz.stats_email_html(b, theme)
+      }
 
   def compose_block(%{"type" => "heatmap"} = b, style, theme) when style != :article,
-    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_email_html(b, theme)}
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_email_html(b, theme)
+    }
 
   def compose_block(%{"type" => "chart"} = b, style, theme) when style != :article,
-    do: %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)}
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)
+    }
 
   def compose_block(b, style, _theme), do: compose_block(b, style)
 
