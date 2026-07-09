@@ -28,36 +28,75 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
+  alias Barkpark.StudioChat
   alias BarkparkWeb.Studio.ClaudeChat
 
+  # Mount no longer spawns (the eager-spawn contract is inverted, charter D8/D14):
+  # mount lays out the chrome + loads the sidebar session list; `handle_params/3`
+  # is the single source of truth for WHICH session is on screen. A subprocess is
+  # started lazily only on the first user send, never on mount and never on
+  # reopen — reopening replays OUR persisted history instantly and resumes the
+  # CLI's memory on the next send via `--resume`.
   @impl true
   def mount(_params, _session, socket) do
     if ClaudeChat.enabled?() do
-      socket =
-        socket
-        |> assign(
-          page_title: "chat",
-          nav_section: :chat,
-          dataset: default_dataset(),
-          current_path: "/studio/chat",
-          session: nil,
-          mode: "plan",
-          status: :starting,
-          init: nil,
-          messages: [],
-          next_id: 0,
-          streaming: nil,
-          composer_rev: 0,
-          last_result: nil
-        )
-
-      {:ok, if(connected?(socket), do: start_session(socket), else: socket)}
+      {:ok,
+       socket
+       |> assign(
+         page_title: "chat",
+         nav_section: :chat,
+         dataset: default_dataset(),
+         current_path: "/studio/chat",
+         session: nil,
+         store_session_id: nil,
+         session_id: nil,
+         sessions: StudioChat.list_sessions(),
+         mode: "plan",
+         status: :new,
+         init: nil,
+         messages: [],
+         next_id: 0,
+         streaming: nil,
+         composer_rev: 0,
+         last_result: nil
+       )}
     else
       {:ok,
        socket
        |> put_flash(:error, "Claude chat is not enabled on this instance.")
        |> redirect(to: "/studio")}
     end
+  end
+
+  # Single source of truth for the on-screen session. Fires on the initial mount
+  # AND on every `push_patch` (sidebar click, new-chat, first-send self-patch).
+  @impl true
+  def handle_params(%{"session_id" => sid}, _uri, socket) do
+    cond do
+      # A `push_patch` to the session we already own (e.g. right after a fresh
+      # send minted + patched to its own uuid) — keep the live state untouched.
+      socket.assigns.store_session_id == sid ->
+        {:noreply, assign(socket, session_id: sid)}
+
+      true ->
+        case StudioChat.get_session(sid) do
+          nil ->
+            # Unknown/deleted session — fall back to the new-chat state with an
+            # honest notice. (A mount-time push_patch would fight the initial
+            # navigation; resetting in place is simpler and just as clear.)
+            {:noreply,
+             socket
+             |> reset_to_new_chat()
+             |> put_flash(:error, "That chat is no longer available.")}
+
+          session ->
+            {:noreply, load_stored_session(socket, session)}
+        end
+    end
+  end
+
+  def handle_params(_params, _uri, socket) do
+    {:noreply, reset_to_new_chat(socket)}
   end
 
   @impl true
@@ -67,7 +106,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     if text == "" do
       {:noreply, socket}
     else
-      socket = if socket.assigns.session, do: socket, else: start_session(socket)
+      socket = ensure_session(socket)
 
       case socket.assigns.session do
         nil ->
@@ -78,28 +117,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
           {:noreply,
            socket
+           |> persist_user_message(text)
            |> append_message(:user, text)
            |> assign(status: :thinking, composer_rev: socket.assigns.composer_rev + 1)}
       end
     end
   end
 
-  # Switching permission mode restarts the subprocess (the CLI fixes its mode
-  # at spawn). The transcript survives in the LiveView; the model's context
-  # does not — an honest system line says so.
+  # Switching permission mode. With no live subprocess yet (the common case now
+  # that mount is lazy), it is a plain selector update — the mode is applied when
+  # the next send spawns. With a live subprocess, the CLI fixes its mode at
+  # spawn, so we tear it down and re-resume on the next send under the new mode;
+  # an honest system line says the in-process context reset. (Mid-session mode
+  # via a control frame is S4's job — this preserves the current contract.)
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
-    if mode == socket.assigns.mode do
-      {:noreply, socket}
-    else
-      if session = socket.assigns.session, do: ClaudeChat.close(session)
+    cond do
+      mode == socket.assigns.mode ->
+        {:noreply, socket}
 
-      {:noreply,
-       socket
-       |> assign(mode: mode, session: nil, streaming: nil)
-       |> append_message(:system, "Permission mode → #{mode}. New session started.")
-       |> start_session()}
+      session = socket.assigns.session ->
+        ClaudeChat.close(session)
+
+        {:noreply,
+         socket
+         |> assign(mode: mode, session: nil, streaming: nil)
+         |> append_message(:system, "Permission mode → #{mode}. The session will resume under the new mode on your next message.")}
+
+      true ->
+        {:noreply, assign(socket, mode: mode)}
     end
   end
 
@@ -162,8 +209,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
           acc
       end)
 
-    # The complete message supersedes the accumulated preview.
-    {:noreply, assign(socket, streaming: nil)}
+    # Persist on COMPLETION (D7) — the whole assistant message is here, so this
+    # is the message boundary, never a per-delta write. Streaming deltas only
+    # touch the `:streaming` assign; nothing hits the store mid-turn.
+    persist_assistant_blocks(socket, blocks)
+
+    # The complete message supersedes the accumulated preview, and the sidebar
+    # picks up the fresh summary/message_count.
+    {:noreply, socket |> assign(streaming: nil) |> refresh_sessions()}
   end
 
   def handle_info({:claude_chat_event, %{"type" => "result"} = ev}, socket) do
@@ -173,8 +226,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
         subtype -> append_message(socket, :system, "The turn ended with an error (#{subtype}).")
       end
 
+    record_result(socket, ev)
     last_result = %{duration_ms: ev["duration_ms"], cost_usd: ev["total_cost_usd"]}
-    {:noreply, assign(socket, status: :ready, streaming: nil, last_result: last_result)}
+
+    {:noreply,
+     socket
+     |> assign(status: :ready, streaming: nil, last_result: last_result)
+     |> refresh_sessions()}
   end
 
   def handle_info({:claude_chat_permission, ask}, socket) do
@@ -200,13 +258,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
   def handle_info({:claude_chat_exit, status}, socket) do
+    if store_id = socket.assigns.store_session_id, do: StudioChat.mark_exited(store_id)
+
     {:noreply,
      socket
      |> append_message(
        :system,
-       "Claude session ended (exit #{status}). Send a message to start a new one."
+       "Claude session ended (exit #{status}). Send a message to resume it."
      )
-     |> assign(session: nil, status: :offline, streaming: nil)}
+     |> assign(session: nil, status: :offline, streaming: nil)
+     |> refresh_sessions()}
   end
 
   def handle_info({:DOWN, _ref, :process, pid, _reason}, socket) do
@@ -228,7 +289,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg);">
+    <div style="flex: 1; display: flex; flex-direction: row; min-height: 0; background: var(--bg);">
       <style>
         @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.22; } 50% { opacity: 0.55; } }
         /* Primary (evergreen) fill, NOT --border-muted: the dark theme's border
@@ -244,7 +305,78 @@ defmodule BarkparkWeb.Studio.ChatLive do
           background: var(--primary);
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
+        .bp-chat-session { display: block; }
+        .bp-chat-session:hover { background: hsl(var(--primary-hsl) / 0.08) !important; }
       </style>
+      <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
+        <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
+          <span class="h3" style="display: flex; align-items: center; gap: 8px; flex: 1;">
+            <.icon name="message-circle" size={15} /> chats
+          </span>
+          <.link
+            patch="/studio/chat"
+            class="btn btn-primary text-xs"
+            style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
+          >
+            <.icon name="plus" size={13} /> New
+          </.link>
+        </div>
+
+        <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px;">
+          <div
+            :if={@sessions == []}
+            class="text-xs text-dim"
+            style="padding: 14px 10px; line-height: 1.55;"
+          >
+            <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
+              No chats yet
+            </div>
+            <p style="margin: 0 0 8px;">
+              This is your remembered agent workspace. Every conversation with
+              <code>claude</code> on this host is saved here — reopen one to pick up
+              exactly where you left off. Admins only.
+            </p>
+            <p style="margin: 0;">
+              Try: <em>“Walk the studio LiveViews and sketch how a request flows.”</em>
+            </p>
+          </div>
+
+          <nav :if={@sessions != []} style="display: flex; flex-direction: column; gap: 2px;">
+            <% active_id = @session_id %>
+            <.link
+              :for={s <- @sessions}
+              patch={"/studio/chat/#{s.id}"}
+              class="bp-chat-session"
+              style={session_row_style(s.id == active_id)}
+            >
+              <% {pill_class, pill_text} = session_pill(s.status) %>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
+                  <%= pill_text %>
+                </span>
+                <span class="text-xs text-dim" style="margin-left: auto;">
+                  <%= session_stamp(s) %>
+                </span>
+              </div>
+              <div
+                class="text-sm"
+                style="font-weight: 600; color: var(--text); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+              >
+                <%= s.title %>
+              </div>
+              <div
+                :if={s.summary}
+                class="text-xs text-dim"
+                style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+              >
+                <%= s.summary %>
+              </div>
+            </.link>
+          </nav>
+        </div>
+      </aside>
+
+      <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
       <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;">
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
@@ -405,6 +537,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           last turn: <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
       </div>
+      </div>
     </div>
     """
   end
@@ -463,16 +596,51 @@ defmodule BarkparkWeb.Studio.ChatLive do
     """
   end
 
-  # ── internals ──────────────────────────────────────────────────────────
+  # ── session lifecycle (mount-lazy, handle_params-driven) ────────────────
 
-  defp start_session(socket) do
-    case ClaudeChat.start_session(%{sink: self(), mode: socket.assigns.mode}) do
+  # Called on the first send with no live subprocess. Fresh chat: mint the
+  # session uuid (D2), create the store row, spawn with `--session-id`, and
+  # `push_patch` to the session's own URL so it becomes a place. Reopened chat:
+  # a store row already exists (store_session_id set by replay) — spawn with
+  # `--resume` to rehydrate the CLI's memory. Never eager-respawn; never scrape
+  # ids off hook_* frames (D8).
+  defp ensure_session(%{assigns: %{session: session}} = socket) when is_pid(session), do: socket
+
+  defp ensure_session(socket) do
+    {store_id, resume?, socket} =
+      case socket.assigns.store_session_id do
+        nil ->
+          id = Ecto.UUID.generate()
+
+          {:ok, _} =
+            StudioChat.create_session(%{
+              id: id,
+              cwd: ClaudeChat.cwd(),
+              mode: socket.assigns.mode
+            })
+
+          {id, false,
+           socket
+           |> assign(store_session_id: id, session_id: id, status: :working)
+           |> push_patch(to: "/studio/chat/#{id}")}
+
+        id ->
+          {id, true, socket}
+      end
+
+    case ClaudeChat.start_session(%{
+           sink: self(),
+           mode: socket.assigns.mode,
+           session_id: store_id,
+           resume: resume?
+         }) do
       {:ok, session} ->
         Process.monitor(session)
+        StudioChat.update_status(store_id, :working)
         # Ready as soon as the subprocess is up. The CLI emits its init event
         # only when the FIRST turn starts — gating the composer on init would
         # deadlock the tab (nothing sent → no init → composer never enables).
-        assign(socket, session: session, status: :ready)
+        socket |> assign(session: session, status: :ready) |> refresh_sessions()
 
       {:error, reason} ->
         socket
@@ -480,6 +648,125 @@ defmodule BarkparkWeb.Studio.ChatLive do
         |> assign(session: nil, status: :offline)
     end
   end
+
+  # Replay a remembered session INSTANTLY from our own store — no subprocess is
+  # started (D8: reopen is display-only until the next send lazy-resumes). Any
+  # subprocess from the previously-viewed session is torn down so we never leak.
+  defp load_stored_session(socket, session) do
+    if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+
+    messages = replay_messages(session.id)
+
+    assign(socket,
+      session: nil,
+      store_session_id: session.id,
+      session_id: session.id,
+      mode: session.mode || "plan",
+      status: :resumable,
+      init: replay_init(session),
+      messages: messages,
+      next_id: length(messages),
+      streaming: nil,
+      last_result: nil
+    )
+  end
+
+  # The new-chat empty state: no store row, no subprocess. A previously-viewed
+  # session's subprocess is closed (navigating away from a live turn tears it
+  # down; the CLI keeps the memory for a later `--resume`).
+  defp reset_to_new_chat(socket) do
+    if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+
+    assign(socket,
+      session: nil,
+      store_session_id: nil,
+      session_id: nil,
+      mode: "plan",
+      status: :new,
+      init: nil,
+      messages: [],
+      next_id: 0,
+      streaming: nil,
+      last_result: nil
+    )
+  end
+
+  defp refresh_sessions(socket), do: assign(socket, sessions: StudioChat.list_sessions())
+
+  # ── persistence (D7 — source markdown, on completion only) ──────────────
+
+  defp persist_user_message(socket, text) do
+    if store_id = socket.assigns.store_session_id do
+      StudioChat.append_message(store_id, %{role: "user", source_markdown: text, metadata: %{}})
+    end
+
+    refresh_sessions(socket)
+  end
+
+  defp persist_assistant_blocks(socket, blocks) do
+    if store_id = socket.assigns.store_session_id do
+      Enum.each(blocks, fn
+        %{"type" => "text", "text" => text} when is_binary(text) ->
+          if String.trim(text) != "",
+            do: StudioChat.append_message(store_id, %{role: "assistant", source_markdown: text})
+
+        %{"type" => "tool_use", "name" => name} = block ->
+          StudioChat.append_message(store_id, %{
+            role: "tool",
+            source_markdown: tool_line(name, block["input"]),
+            metadata: %{"tool" => name, "input" => block["input"]}
+          })
+
+        _ ->
+          :ok
+      end)
+    end
+
+    :ok
+  end
+
+  defp record_result(socket, ev) do
+    if store_id = socket.assigns.store_session_id do
+      StudioChat.record_result_metrics(store_id, %{
+        input_tokens: get_in(ev, ["usage", "input_tokens"]),
+        output_tokens: get_in(ev, ["usage", "output_tokens"]),
+        total_cost_usd: ev["total_cost_usd"],
+        model: result_model(ev)
+      })
+
+      StudioChat.update_status(store_id, :active)
+    end
+
+    :ok
+  end
+
+  defp result_model(%{"modelUsage" => usage}) when is_map(usage) do
+    usage |> Map.keys() |> List.first()
+  end
+
+  defp result_model(_), do: nil
+
+  # Rebuild the transcript message list from the persisted store. Assistant
+  # markdown re-renders through the SAME paper engine used live, so the improving
+  # renderer wins on every reopen (D7).
+  defp replay_messages(session_id) do
+    session_id
+    |> StudioChat.list_messages()
+    |> Enum.map(fn m ->
+      role = String.to_existing_atom(m.role)
+
+      html =
+        if role == :assistant and String.trim(m.source_markdown) != "",
+          do: render_paper_html(m.source_markdown)
+
+      %{id: m.seq, role: role, text: m.source_markdown, html: html}
+    end)
+  end
+
+  defp replay_init(%{model: model}) when is_binary(model),
+    do: %{model: model, session_id: nil, permission_mode: nil}
+
+  defp replay_init(_), do: nil
 
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id
@@ -658,13 +945,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp mode_label("acceptEdits"), do: "auto-accept edits"
   defp mode_label(other), do: other
 
+  defp status_label(:new), do: "new chat"
+  defp status_label(:resumable), do: "resumable"
   defp status_label(:starting), do: "starting"
   defp status_label(:ready), do: "ready"
+  defp status_label(:working), do: "working"
   defp status_label(:thinking), do: "working"
   defp status_label(:offline), do: "offline"
 
-  defp composer_placeholder(:offline), do: "Send a message to start a new session…"
+  defp composer_placeholder(:new), do: "Message Claude to begin…"
+  defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
+  defp composer_placeholder(:offline), do: "Send a message to resume this session…"
   defp composer_placeholder(_), do: "Message Claude…"
+
+  # ── sidebar helpers ─────────────────────────────────────────────────────
+
+  # Store status → tokenized pill. Priority read is Working > idle(active) >
+  # offline(exited); PendingApproval elevation is live-only (approval state is
+  # per-mount, not persisted this wave) and is an S4 follow-up.
+  defp session_pill("working"), do: {"badge-chat-working", "working"}
+  defp session_pill("exited"), do: {"badge-chat-offline", "offline"}
+  defp session_pill(_), do: {"badge-chat-idle", "idle"}
+
+  # The active row wears the evergreen accent; the rest are transparent (hover
+  # tint lives in the render <style>). All colours are emitted tokens.
+  defp session_row_style(true),
+    do:
+      "padding: 8px 9px; border-radius: 8px; text-decoration: none; border: 1px solid hsl(var(--primary-hsl) / 0.35); background: var(--primary-soft);"
+
+  defp session_row_style(false),
+    do:
+      "padding: 8px 9px; border-radius: 8px; text-decoration: none; border: 1px solid transparent; background: transparent;"
+
+  # Coarse relative age off `last_active_at` (fallback `inserted_at`). Copied
+  # from board_live.ex age_label/age_words — no shared module exists.
+  defp age_label(%DateTime{} = dt), do: age_words(DateTime.diff(DateTime.utc_now(), dt))
+
+  defp age_label(%NaiveDateTime{} = dt),
+    do: age_words(NaiveDateTime.diff(NaiveDateTime.utc_now(), dt))
+
+  defp age_label(_), do: nil
+
+  defp age_words(s) when s < 60, do: "now"
+  defp age_words(s) when s < 3_600, do: "#{div(s, 60)}m"
+  defp age_words(s) when s < 86_400, do: "#{div(s, 3_600)}h"
+  defp age_words(s) when s < 604_800, do: "#{div(s, 86_400)}d"
+  defp age_words(s), do: "#{div(s, 604_800)}w"
+
+  defp session_stamp(%{last_active_at: t}) when not is_nil(t), do: age_label(t)
+  defp session_stamp(%{inserted_at: t}), do: age_label(t)
+  defp session_stamp(_), do: nil
 
   defp format_duration(ms) when is_integer(ms) and ms >= 1000,
     do: "#{Float.round(ms / 1000, 1)}s"

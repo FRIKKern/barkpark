@@ -66,14 +66,17 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   @doc """
   The subprocess command as `{executable, args}`. Defaults to the Claude CLI
-  in streaming print mode, plan permission mode. Overridable via config
-  (tests inject a trivial command so they don't require `claude`).
+  in streaming print mode, threading the session flags built by `build_args/2`.
+  Overridable via config: a `:command` override is verbatim (Port-plumbing
+  tests only — it BYPASSES `build_args`, so flag assertions through it are
+  vacuous, D9); a `:binary` override keeps `build_args` (the argv-echo seam
+  that proves `--session-id`/`--resume` end-to-end).
   """
-  @spec command(String.t()) :: {String.t(), [String.t()]}
-  def command(mode \\ @default_mode) do
+  @spec command(String.t(), map()) :: {String.t(), [String.t()]}
+  def command(mode \\ @default_mode, session_opts \\ %{}) do
     case Keyword.get(config(), :command) do
       {exe, args} when is_binary(exe) and is_list(args) -> {exe, args}
-      _ -> {binary(), default_args(mode)}
+      _ -> {binary(), build_args(mode, session_opts)}
     end
   end
 
@@ -86,8 +89,23 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def normalize_mode(mode) when mode in @modes, do: mode
   def normalize_mode(_), do: @default_mode
 
-  defp default_args(mode) do
-    base = [
+  @doc """
+  Pure/public flag assembly (charter D9, the vacuous-green law). The session
+  seam lives here so it can be unit-tested directly and threaded end-to-end via
+  an argv-echo `:binary` fake — never asserted through the `:command` override.
+
+    * fresh session  ⇒ `--session-id <uuid>` (we mint the id, D2)
+    * resumed session ⇒ `--resume <uuid>` and NOT `--session-id`
+
+  `session_opts` keys: `:session_id` (binary) and `:resume` (boolean).
+  """
+  @spec build_args(String.t(), map()) :: [String.t()]
+  def build_args(mode, session_opts \\ %{}) do
+    base_args(mode) ++ session_args(session_opts) ++ permission_prompt_args(mode)
+  end
+
+  defp base_args(mode) do
+    [
       "--print",
       "--verbose",
       "--input-format",
@@ -100,14 +118,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "--append-system-prompt",
       render_appendix()
     ]
-
-    # Outside plan mode the CLI must route permission asks to us instead of
-    # auto-denying: `--permission-prompt-tool stdio` makes it emit
-    # `control_request` (subtype `can_use_tool`) NDJSON events, which the
-    # Session forwards as `{:claude_chat_permission, …}` and answers via
-    # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
-    if mode == "plan", do: base, else: base ++ ["--permission-prompt-tool", "stdio"]
   end
+
+  # Resume takes precedence: a session we are reopening must carry `--resume`,
+  # never `--session-id` (the CLI mints/rehydrates from its own transcript).
+  defp session_args(%{resume: true, session_id: id}) when is_binary(id), do: ["--resume", id]
+  defp session_args(%{session_id: id}) when is_binary(id) and id != "", do: ["--session-id", id]
+  defp session_args(_), do: []
+
+  # Outside plan mode the CLI must route permission asks to us instead of
+  # auto-denying: `--permission-prompt-tool stdio` makes it emit
+  # `control_request` (subtype `can_use_tool`) NDJSON events, which the
+  # Session forwards as `{:claude_chat_permission, …}` and answers via
+  # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
+  defp permission_prompt_args("plan"), do: []
+  defp permission_prompt_args(_), do: ["--permission-prompt-tool", "stdio"]
 
   # Replies render through Barkpark's paper engine (FromMarkdown -> blocks ->
   # Render). Teach the model the two upgrade fences and the native block
@@ -151,12 +176,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
   """
-  @spec start_session(%{:sink => pid(), optional(:mode) => String.t()}) ::
-          {:ok, pid()} | {:error, term()}
+  @spec start_session(%{
+          :sink => pid(),
+          optional(:mode) => String.t(),
+          optional(:session_id) => String.t() | nil,
+          optional(:resume) => boolean()
+        }) :: {:ok, pid()} | {:error, term()}
   def start_session(%{sink: sink} = opts) when is_pid(sink) do
     cond do
-      not enabled?() -> {:error, :disabled}
-      true -> __MODULE__.Session.start(%{sink: sink, mode: normalize_mode(opts[:mode])})
+      not enabled?() ->
+        {:error, :disabled}
+
+      true ->
+        __MODULE__.Session.start(%{
+          sink: sink,
+          mode: normalize_mode(opts[:mode]),
+          session_id: opts[:session_id],
+          resume: opts[:resume] == true
+        })
     end
   end
 
@@ -232,7 +269,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def init(%{sink: sink} = opts) do
-      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"))
+      session_opts = %{session_id: Map.get(opts, :session_id), resume: Map.get(opts, :resume) == true}
+      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"), session_opts)
 
       case System.find_executable(exe) do
         nil ->

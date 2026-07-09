@@ -4,12 +4,21 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   overridden via config (`cat` echo — no real `claude`), and stream-json
   events are driven by sending `{:claude_chat_event, …}` straight to the
   LiveView, exactly the shape the Session forwards.
+
+  Wave 1 (studio-claude-chat) inverts the eager-spawn mount: mount lays out the
+  chrome + session sidebar and spawns NOTHING; `handle_params/3` is the single
+  source of truth; a subprocess starts lazily only on the first send. The tests
+  below assert that inversion explicitly (a history-only assertion is vacuous if
+  mount eagerly respawns), and prove the resume flag end-to-end through an
+  argv-echo `:binary` fake (never the `:command` override — charter D9).
   """
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
+  alias Barkpark.StudioChat
+  alias BarkparkWeb.Studio.ClaudeChat
 
   @admin_token "chat-admin-test-token"
   @junior_token "chat-junior-test-token"
@@ -40,6 +49,81 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end)
   end
 
+  # An argv-echo fake wired as the `:binary` (NOT the `:command` override, which
+  # bypasses build_args and would make the flag assertion vacuous — D9). It keeps
+  # the CLI's default_args and records its OWN argv (the real `build_args`
+  # output) to a marker file on spawn, so the test can prove `--session-id` vs
+  # `--resume` reached the subprocess without depending on stdout render timing.
+  # Returns the marker path.
+  defp enable_argv_echo_chat do
+    prev = Application.get_env(:barkpark, :claude_chat)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+
+    suffix = System.unique_integer([:positive])
+    path = Path.join(System.tmp_dir!(), "bp-argv-echo-#{suffix}.sh")
+    marker = Path.join(System.tmp_dir!(), "bp-argv-marker-#{suffix}.txt")
+
+    File.write!(path, """
+    #!/bin/sh
+    printf '%s\\n' "$@" > #{marker}
+    cat
+    """)
+
+    File.chmod!(path, 0o755)
+
+    Application.put_env(:barkpark, :claude_chat, enabled: true, binary: path)
+    Application.put_env(:barkpark, :public_demo_studio, false)
+
+    on_exit(fn ->
+      File.rm(path)
+      File.rm(marker)
+
+      if prev,
+        do: Application.put_env(:barkpark, :claude_chat, prev),
+        else: Application.delete_env(:barkpark, :claude_chat)
+
+      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+
+    marker
+  end
+
+  defp read_marker(path, tries \\ 80) do
+    cond do
+      File.exists?(path) -> File.read!(path)
+      tries <= 0 -> flunk("argv marker was never written by the fake binary: #{path}")
+      true -> Process.sleep(25) && read_marker(path, tries - 1)
+    end
+  end
+
+  # LiveView internals — the ONLY honest way to assert "no subprocess started"
+  # (a rendered history is identical whether or not mount respawned).
+  defp lv_assigns(view), do: :sys.get_state(view.pid).socket.assigns
+  defp session_pid(view), do: lv_assigns(view)[:session]
+  defp store_id(view), do: lv_assigns(view)[:store_session_id]
+
+  defp seed_session(title, opts \\ []) do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    StudioChat.rename(id, title)
+    if status = opts[:status], do: StudioChat.update_status(id, status)
+    id
+  end
+
+  defp seed_session_with_history do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "prev question"})
+
+    {:ok, _} =
+      StudioChat.append_message(id, %{
+        role: "assistant",
+        source_markdown: "## Prior answer\n\nSome remembered text."
+      })
+
+    id
+  end
+
   describe "gate" do
     test "disabled → mount redirects even for an admin", %{conn: conn} do
       Application.put_env(:barkpark, :claude_chat, enabled: false)
@@ -59,6 +143,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       enable_fake_chat()
       conn = init_test_session(conn, %{"api_token" => @junior_token})
       assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/chat")
+    end
+
+    test "the :session_id route inherits the same admin gate", %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @junior_token})
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/chat/#{Ecto.UUID.generate()}")
     end
 
     test "public-demo host hard-refuses even an admin", %{conn: conn} do
@@ -93,6 +183,25 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "the args seam (build_args, charter D9)" do
+    test "threads --session-id for a fresh session and --resume for a reopen" do
+      fresh = ClaudeChat.build_args("plan", %{session_id: "uuid-1", resume: false})
+      assert "--session-id" in fresh
+      assert "uuid-1" in fresh
+      refute "--resume" in fresh
+
+      resumed = ClaudeChat.build_args("plan", %{session_id: "uuid-1", resume: true})
+      assert "--resume" in resumed
+      assert "uuid-1" in resumed
+      refute "--session-id" in resumed
+
+      # No session opts → neither flag (back-compat).
+      bare = ClaudeChat.build_args("plan", %{})
+      refute "--session-id" in bare
+      refute "--resume" in bare
+    end
+  end
+
   describe "enabled + admin" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -101,13 +210,15 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view: view, html: html}
     end
 
-    # Regression: the CLI emits system/init only when the FIRST turn starts, so
-    # a composer gated on init can never be used — the tab must be ready (and
-    # the composer enabled) immediately after the connected mount.
-    test "composer is enabled immediately after mount (no init deadlock)", %{view: view} do
-      assert render(view) =~ "ready"
+    # Mount no longer spawns (the eager-spawn contract is inverted): the tab is
+    # a new-chat empty state, the composer is enabled immediately, and NO
+    # subprocess exists until the first send.
+    test "mount is a new-chat state with an enabled composer and no subprocess", %{view: view} do
+      assert render(view) =~ "new chat"
       refute has_element?(view, "input[name=message][disabled]")
       refute has_element?(view, "button[type=submit][disabled]")
+      assert session_pid(view) == nil
+      assert store_id(view) == nil
     end
 
     test "renders the composer and the chat tab in the top menu", %{html: html} do
@@ -117,7 +228,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "studio-tab active"
     end
 
-    test "sending a message renders the user bubble", %{view: view} do
+    test "sending a message renders the user bubble and goes to working", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hei Claude"})
       assert html =~ "hei Claude"
       assert html =~ "working"
@@ -375,6 +486,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "a permission ask renders an approval card; Allow resolves it", %{view: view} do
+      # approvals only happen inside a live turn — spawn one first
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+
       send(
         view.pid,
         {:claude_chat_permission,
@@ -398,6 +512,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "Deny resolves the card as denied", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+
       send(
         view.pid,
         {:claude_chat_permission,
@@ -409,6 +525,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "a stale approval click after resolution is a no-op", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "act"})
+
       send(
         view.pid,
         {:claude_chat_permission,
@@ -423,9 +541,20 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       refute html =~ "✗ denied"
     end
 
-    test "switching mode restarts the session and says so", %{view: view} do
+    test "switching mode on a live session tears it down and says so", %{view: view} do
+      # mount is lazy now — establish a live subprocess first
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      refute session_pid(view) == nil
+
       html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
       assert html =~ "Permission mode → default"
+      assert html =~ "ask to act"
+      assert session_pid(view) == nil
+    end
+
+    test "mode change with no live session just updates the selector", %{view: view} do
+      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      refute html =~ "New session started"
       assert html =~ "ask to act"
     end
 
@@ -441,6 +570,181 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_hook(view, "totally-unknown-event", %{})
       send(view.pid, {:claude_chat_event, %{"type" => "mystery"}})
       assert Process.alive?(view.pid)
+    end
+  end
+
+  describe "sessions become a place (persistence + resume, S3)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "the sidebar teaches when there are no sessions yet", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/chat")
+      assert html =~ "No chats yet"
+      assert html =~ "remembered agent workspace"
+    end
+
+    test "the sidebar lists sessions recency-desc with tokenized status pills", %{conn: conn} do
+      older = seed_session("Older chat")
+      # nudge recency so the ordering is deterministic
+      StudioChat.update_status(older, "active")
+      Process.sleep(5)
+      newer = seed_session("Newer chat", status: "working")
+
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      assert html =~ "Older chat"
+      assert html =~ "Newer chat"
+      # recency-desc: the more-recently-active session appears first in the DOM
+      {newer_at, _} = :binary.match(html, "Newer chat")
+      {older_at, _} = :binary.match(html, "Older chat")
+      assert newer_at < older_at
+      # tokenized lifecycle pills (never the undefined .bp-pill)
+      assert html =~ "badge-chat-working"
+      refute html =~ "bp-pill"
+    end
+
+    test "reopening a stored session replays its history with NO spawn", %{conn: conn} do
+      sid = seed_session_with_history()
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # the persisted history is on screen, assistant markdown re-rendered
+      # through the paper engine (heading text, not raw markdown syntax)
+      assert html =~ "prev question"
+      assert html =~ "Prior answer"
+      assert html =~ "bp-paper-surface"
+      # the transcript rendered the heading as HTML, not as literal source
+      refute html =~ "## Prior answer"
+
+      # …and NOTHING was spawned (the vacuous-green trap: a rendered history is
+      # identical whether or not mount respawned — assert the assign directly)
+      assert session_pid(view) == nil
+      assert store_id(view) == sid
+    end
+
+    test "a fresh send mints a session, patches to its url, and persists the user message",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      assert session_pid(view) == nil
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello there"})
+
+      sid = store_id(view)
+      assert is_binary(sid)
+      assert_patched(view, "/studio/chat/#{sid}")
+
+      # the user message is persisted (source markdown, D7)
+      roles = StudioChat.list_messages(sid) |> Enum.map(&{&1.role, &1.source_markdown})
+      assert {"user", "hello there"} in roles
+    end
+
+    test "streaming deltas never write to the store; completion does", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "start"})
+      sid = store_id(view)
+      # the user send persisted exactly one row
+      assert StudioChat.get_session(sid).message_count == 1
+
+      # streaming deltas must NOT touch the store
+      send(view.pid, {:claude_chat_event, stream_delta("partial ")})
+      send(view.pid, {:claude_chat_event, stream_delta("answer")})
+      render(view)
+      assert StudioChat.get_session(sid).message_count == 1
+
+      # the completed assistant message persists (on the message boundary)
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "assistant", "message" => %{"content" => [%{"type" => "text", "text" => "done"}]}}}
+      )
+
+      render(view)
+      assert StudioChat.get_session(sid).message_count == 2
+    end
+
+    test "a result frame records usage metrics onto the session", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "measure me"})
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{
+           "type" => "result",
+           "subtype" => "success",
+           "duration_ms" => 900,
+           "total_cost_usd" => 0.02,
+           "usage" => %{"input_tokens" => 111, "output_tokens" => 22}
+         }}
+      )
+
+      render(view)
+      s = StudioChat.get_session(sid)
+      assert s.input_tokens == 111
+      assert s.output_tokens == 22
+      assert_in_delta s.total_cost_usd, 0.02, 0.0001
+      assert s.status == "active"
+    end
+
+    test "switching sessions via a sidebar patch link keeps the same LiveView pid", %{conn: conn} do
+      sid1 = seed_session("Alpha")
+      sid2 = seed_session("Beta")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid1}")
+      pid = view.pid
+      assert store_id(view) == sid1
+
+      view |> element(~s(a[href="/studio/chat/#{sid2}"])) |> render_click()
+
+      assert view.pid == pid
+      assert_patched(view, "/studio/chat/#{sid2}")
+      assert store_id(view) == sid2
+    end
+
+    test "a missing session id falls back to the new-chat state with a notice", %{conn: conn} do
+      ghost = Ecto.UUID.generate()
+      {:ok, view, html} = live(conn, "/studio/chat/#{ghost}")
+      assert store_id(view) == nil
+      assert session_pid(view) == nil
+      assert html =~ "No chats yet"
+    end
+  end
+
+  describe "resume flag end-to-end (argv-echo :binary fake, D9)" do
+    setup %{conn: conn} do
+      marker = enable_argv_echo_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token}), marker: marker}
+    end
+
+    test "the first send after reopening resumes the CLI with --resume <uuid>",
+         %{conn: conn, marker: marker} do
+      sid = seed_session_with_history()
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      # reopen did not spawn — the resume happens lazily on this send
+      assert session_pid(view) == nil
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "continue please"})
+
+      # the fake binary recorded the argv the real build_args produced
+      argv = read_marker(marker)
+      assert argv =~ "--resume"
+      assert argv =~ sid
+      refute argv =~ "--session-id"
+    end
+
+    test "a fresh send spawns with --session-id (never --resume)",
+         %{conn: conn, marker: marker} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "brand new"})
+
+      sid = store_id(view)
+      argv = read_marker(marker)
+      assert argv =~ "--session-id"
+      assert argv =~ sid
+      refute argv =~ "--resume"
     end
   end
 

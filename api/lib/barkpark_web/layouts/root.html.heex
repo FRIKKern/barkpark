@@ -383,6 +383,12 @@
     .badge-public { background: var(--ok-soft); color: var(--success); }
     .badge-private { background: var(--warn-soft); color: var(--warning); }
     .badge-active { background: var(--primary-soft); color: var(--primary); }
+    /* Studio Claude chat — session lifecycle pills (studio-claude-chat w1).
+       Tokenized so the sidebar honors the same evergreen palette as the rest
+       of Studio; priority read is Working > idle(active) > offline(exited). */
+    .badge-chat-working { background: var(--primary-soft); color: var(--primary); }
+    .badge-chat-idle { background: var(--ok-soft); color: var(--success); }
+    .badge-chat-offline { background: var(--warn-soft); color: var(--warning); }
     .badge::before {
       content: ''; width: 6px; height: 6px; border-radius: 50%;
       background: currentColor;
