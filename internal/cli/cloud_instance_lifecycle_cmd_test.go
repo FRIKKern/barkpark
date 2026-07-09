@@ -310,6 +310,135 @@ func TestAzureAuditFlagsResidue(t *testing.T) {
 	}
 }
 
+// TestAzureCreateThenAuditIsClean proves the identity loop closes: a box created
+// through the COMMAND PATH (`bp cloud azure create`, which stamps barkpark-fqdn in
+// doInstanceCreate) audits clean with NO manual LabelServer — unlike
+// TestAzureAuditOfflineSkipsArchives, which hand-stamps the tag. This is the whole
+// point of the slice: create gives the box its identity so audit stops flagging it.
+func TestAzureCreateThenAuditIsClean(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	azFake := cloud.NewFakeProvider()
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+
+	// Create via the escape-hatch command — NO manual LabelServer. doInstanceCreate
+	// stamps barkpark-fqdn=web-1.barkpark.cloud on the fake through ServerLabeler.
+	stdout, stderr, code := runAzureCapture(t, "json", "create", "--name", "web-1")
+	if code != exitOK {
+		t.Fatalf("azure create exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	// The receipt must carry the stamped identity.
+	if !strings.Contains(stdout, "web-1.barkpark.cloud") {
+		t.Fatalf("create receipt missing the stamped %s identity:\n%s", cloud.FQDNLabelKey, stdout)
+	}
+	// And it is on the box as a real tag (not just a printed string).
+	got, err := azFake.ListByLabel(context.Background(), cloud.FQDNLabelKey, "web-1.barkpark.cloud")
+	if err != nil || len(got) != 1 || got[0].Name != "web-1" {
+		t.Fatalf("create did not stamp %s on the box: %+v (err=%v)", cloud.FQDNLabelKey, got, err)
+	}
+
+	cp := newFakeCP(t, []cpBarkpark{{
+		ID: "row-az", Slug: "web-1", DNSLabel: "web-1",
+		URL: "https://web-1.barkpark.cloud", Mode: "managed",
+	}})
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrsets":[{"id":"web-1/A","name":"web-1","type":"A","records":[{"value":"20.0.0.9"}]}]}`)
+	})
+
+	stdout, stderr, code = runHzCLI(t, "json", "instance", "audit", "--provider", "azure",
+		"--control-url", cp.srv.URL, "--worker-token", "wtok")
+	if code != exitOK {
+		t.Fatalf("audit of a command-created box should be clean; exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if strings.Contains(stdout, "unlabeled-vm") {
+		t.Errorf("a command-created box must NOT be flagged unlabeled:\n%s", stdout)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("report not JSON: %v: %s", err, stdout)
+	}
+	if report["ok"] != true {
+		t.Errorf("clean audit expected; findings=%v", report["findings"])
+	}
+}
+
+// TestAzureAuditFlagsTrulyUnlabeledVM refutes over-exemption: a managed VM with
+// NO barkpark-fqdn and NO barkpark-warm tag (a real orphan) still surfaces as an
+// unlabeled-vm finding with a non-zero exit — the warm exemption must not swallow
+// genuine orphans.
+func TestAzureAuditFlagsTrulyUnlabeledVM(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	azFake := cloud.NewFakeProvider()
+	// Managed (Create stamps barkpark-managed) but never given its fqdn identity.
+	if _, err := azFake.Create(context.Background(), cloud.ServerSpec{Name: "ghost-vm"}); err != nil {
+		t.Fatalf("seed vm: %v", err)
+	}
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrsets":[]}`)
+	})
+
+	stdout, _, code := runHzCLI(t, "json", "instance", "audit", "--provider", "azure")
+	if code != exitGeneric {
+		t.Fatalf("a truly unlabeled managed VM should exit %d, got %d\n%s", exitGeneric, code, stdout)
+	}
+	if !strings.Contains(stdout, "unlabeled-vm") {
+		t.Errorf("audit should flag the unlabeled managed VM:\n%s", stdout)
+	}
+}
+
+// TestAzureAuditExemptsWarmBox proves the exemption: a pre-baked warm box carries
+// barkpark-warm but no barkpark-fqdn (its identity is stamped only at assign), so
+// the audit must NOT flag it as unlabeled — it is inventory, not an orphan.
+func TestAzureAuditExemptsWarmBox(t *testing.T) {
+	instTestTuning(t)
+	f := newFakeHzAPI(t)
+
+	azFake := cloud.NewFakeProvider()
+	if _, err := azFake.Create(context.Background(), cloud.ServerSpec{Name: "warm-9"}); err != nil {
+		t.Fatalf("seed warm box: %v", err)
+	}
+	// Mark it warm — legitimately fqdn-less until an assign stamps its identity.
+	if err := azFake.LabelServer(context.Background(), "warm-9", cloud.WarmLabelKey, "true"); err != nil {
+		t.Fatalf("mark warm: %v", err)
+	}
+	oldBuilder := azureProviderBuilder
+	azureProviderBuilder = func(map[string]string) (cloud.CloudProvider, error) { return azFake, nil }
+	t.Cleanup(func() { azureProviderBuilder = oldBuilder })
+
+	// Empty zone: no DNS records, no registry — the warm box is the only survivor,
+	// and it must not become a finding.
+	f.mux.HandleFunc("GET /zones/barkpark.cloud/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrsets":[]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "instance", "audit", "--provider", "azure")
+	if code != exitOK {
+		t.Fatalf("a fleet of only a warm box should audit clean; exit=%d stderr=%s stdout=%s", code, stderr, stdout)
+	}
+	if strings.Contains(stdout, "unlabeled-vm") {
+		t.Errorf("a warm box must be EXEMPT from the unlabeled-vm finding:\n%s", stdout)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("report not JSON: %v: %s", err, stdout)
+	}
+	if report["servers"].(float64) != 1 {
+		t.Errorf("the warm box is still a counted managed VM: %v", report["servers"])
+	}
+	if report["ok"] != true {
+		t.Errorf("warm-only fleet should audit ok; findings=%v", report["findings"])
+	}
+}
+
 // ── honest degradation ───────────────────────────────────────────────────────
 
 // TestNeutralLifecycleDegrades: azure archive (a facet azure lacks) and a
