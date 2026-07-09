@@ -416,6 +416,37 @@
       "writes": false
     },
     {
+      "args": [],
+      "auth_tier": "read",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "worker",
+          "summary": "Narrow in_progress to this worker's claims.",
+          "type": "string"
+        },
+        {
+          "default": 10,
+          "name": "limit",
+          "summary": "Ready-head and event-window size.",
+          "type": "int"
+        }
+      ],
+      "http": {
+        "method": "GET",
+        "path_template": "/v1/tasks/prime"
+      },
+      "id": "task.prime",
+      "noun": "task",
+      "paginated": false,
+      "source": "plugin:tasks",
+      "summary": "One-call agent rehydration: my in-progress claims, the ready head, recent events, lifecycle counts.",
+      "verb": "prime",
+      "writes": false
+    },
+    {
       "args": [
         {
           "name": "doc_id",
