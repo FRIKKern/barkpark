@@ -2959,6 +2959,15 @@ defmodule BarkparkCloud.Registry do
   `{:ok, plaintext, %AgentToken{}}` — the PLAINTEXT is shown ONCE here and never
   stored; only its SHA-256 hash is persisted.
 
+  Single-active-token-per-scope invariant: minting SUPERSEDES the barkpark's
+  prior live tokens of the SAME `scope`, revoking them in the SAME transaction as
+  the new insert. S12c re-mints a `"report"` token on EVERY provision claim /
+  stale-reclaim (web/router.ex `put_agent_token`), so without this the
+  `agent_tokens` table grows an unbounded trail of never-revoked rows per box and
+  a superseded credential stays valid. Revoke-then-insert is atomic: a crash can
+  never leave the box with zero live tokens (old revoked, new never written) nor
+  two (both live).
+
   `opts`:
     * `:expires_at` — a `DateTime` after which the token is invalid (default: no
       expiry).
@@ -2967,15 +2976,30 @@ defmodule BarkparkCloud.Registry do
           {:ok, binary(), AgentToken.t()} | {:error, Ecto.Changeset.t()}
   def mint_agent_token(barkpark, scope, opts \\ []) do
     plaintext = generate_token()
+    bp_id = barkpark_id(barkpark)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
     attrs = %{
-      barkpark_id: barkpark_id(barkpark),
+      barkpark_id: bp_id,
       scope: scope,
       token_hash: AgentToken.hash_token(plaintext),
       expires_at: Keyword.get(opts, :expires_at)
     }
 
-    case %AgentToken{} |> AgentToken.changeset(attrs) |> Repo.insert() do
+    Repo.transaction(fn ->
+      # Revoke the barkpark's prior LIVE (never-revoked) same-scope tokens before
+      # the new one lands, so exactly one active token of this scope survives.
+      from(t in AgentToken,
+        where: t.barkpark_id == ^bp_id and t.scope == ^scope and is_nil(t.revoked_at)
+      )
+      |> Repo.update_all(set: [revoked_at: now, updated_at: now])
+
+      case %AgentToken{} |> AgentToken.changeset(attrs) |> Repo.insert() do
+        {:ok, token} -> token
+        {:error, changeset} -> Repo.rollback(changeset)
+      end
+    end)
+    |> case do
       {:ok, token} -> {:ok, plaintext, token}
       {:error, changeset} -> {:error, changeset}
     end

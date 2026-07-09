@@ -1208,3 +1208,149 @@ azh-s14d-azure-base-install-live-smoke filed + published by the S14d builder.
 - After S14f: S8 hetzner-native cutover, S11c infra tab, S15 styleguide
   completeness, S16 hetzner journey polish (fold in: archives panel live
   look; the S14e live-Hetzner-S3 signing smoke, network-gated).
+
+### Wave 2026-07-09k — The bold bet fires (W7: S14f + resurrect UX) — PLANNED
+
+Wave 6 merged (#1792–#1796). The gap named in its log is this wave's spine:
+resurrect enqueues honestly and sits pending forever — no worker drains
+/v1/internal/resurrect-jobs/claim (the CONTROL-PLANE router, cloud/…/router.
+ex:3442 — not api/), the claim's STRING bundle_ref never becomes S14d's
+BundleRef struct, and the real RestoreDriver is a seam with only fakes behind
+it. Decisions 43–48 ratified (the key premise correction from exploration:
+JobSpec cannot decode the resurrect claim at all — bundle_ref string vs
+*BundleRef struct share the json tag — so the drain gets a dedicated decode +
+translate step; also the deployed worker env has NONE of the four bundle
+vars yet). Four slices, integration order S14f → resurrect-ux → spec-hints →
+retention:
+
+- **azh-w7-s14f-resurrect-drain** [P0, large, Go] — 4th drain loop with a
+  dedicated resurrect decode + env-sourced BundleStore/KEK translation (D43),
+  real RestoreDriver composed from instImportScript / secretsInstallStep /
+  FreshenPlan / golden-path primitives with a NEW stdin-capable runner feed
+  (D46), provision-style orphan teardown (D45), env.example vars. Offline
+  round trip THROUGH THE DRAIN; hetzner provision claim refutes green
+  unmodified. Does NOT touch cloud_instance_archive_cmd.go.
+- **azh-w7-resurrect-ux** [P1, medium, Elixir+app.js] — POST /v1/resurrect
+  resolves TEAM-newest server-side via ArchiveStore when bundle_ref is
+  absent (honest not_found; store-down degrades like GET /v1/archives —
+  D47); console Resurrect button on each archive row (row's bundle_ref,
+  typed-confirm, provider picker, in-sheet 422 remediation, 202 →
+  newStartProgress step feed — free, resurrect rides the same 7 steps).
+- **azh-w7-spec-hints** [P2, small, Go] — stamp BundleWriteSpec.Spec
+  {region,server_type} from instTarget's hcloud srv at archive time; empty
+  hints stay tolerated everywhere (D48). Does not touch S14f's files.
+- **azh-w6-agent-events-retention** [P2, medium, Elixir] — revoke-superseded-
+  at-mint for agent_tokens + Oban retention pruner (14d agent_events / 30d
+  dead tokens), frozen-clock tested. Integrates LAST (registry.ex shared
+  with resurrect-ux in far-apart regions; rebase-only).
+
+NOT this wave (network/human-gated, stay open): azh-w7-live-resurrect-smoke,
+azh-w6-live-agent-smoke, azh-s14d-azure-base-install-live-smoke,
+azh-w3-pricing-live-join-verify.
+
+Non-negotiables carried: mix format/gofmt before every commit; ALL gates
+offline (stateful FakeBundleStore + fake providers — no live cloud, no live
+buckets); FULL cloud suite at integration for cloud/ slices; hetzner-visible
+changes need refute-tests; api/ AuditWebhooksTest + StudioLiveSheetPresenceTest
+reds on untouched api/ are rerun-worthy; app.js work stays in the node:vm
+__bpTestHook harness; shared-file unions ride ONE declared reviewer branch,
+and -r branches that merge sibling -r branches go LAST in integration order.
+Done = the offline round trip fires THROUGH THE DRAIN (claim → translate →
+restore → live), not through hand-built JobSpecs.
+
+### Wave 2026-07-09l — The bold bet fires (W7: S14f + resurrect UX) — BUILT + REVIEWED
+
+NOTE: the 09k planning entry above never landed on main — this commit carries
+it (the W6 precedent). All four slices built green and reviewer-passed.
+WHOLE-WAVE INTEGRATION PROVEN on a scratch merge of all four final branches
+(Go whole-tree build/vet/test fresh, node harness 295/0, FULL cloud suite
+1664/0). Integrate in order S14f-r → resurrect-ux-r → spec-hints →
+retention-r:
+
+- **S14f · resurrect drain + real RestoreDriver** — merge
+  `loop-epic/s14f-cross-provider-resurrect-fires-end--0-r` (REVIEWER FIX). 4th
+  drain loop claims /v1/internal/resurrect-jobs/claim with the D43 dedicated
+  decode (bundle_ref STRING) + worker-env translate (ResolveBundleEnv,
+  creds/KEK never in claim JSON); real driver = provisioner.CloudRestoreDriver
+  (thin adapter — the brief's "in package cloud" was structurally impossible,
+  import cycle; endorse the deviation) over cloud.RestoreExecutor
+  (CreateWithFallback cold + fail-closed fqdn label, FreshenPlan, DNS repoint,
+  carried-KEK unseal via new OpenSecretsWithKEK, pg_restore streamed over the
+  NEW StdinStepRunner.RunFeed); offline gate fires THROUGH THE DRAIN. Reviewer
+  fixes (real money-edge bug): a restore failing AFTER create
+  (freshen/secure/configure/content/verify) leaked a live BILLED box with no
+  orphan label — SweepOrphans only reclaims `barkpark-orphaned=true`, so
+  nothing could ever find it. provisionRestore.failStep now tears the box down
+  on a fresh bounded context (cleanupHost precedent), the teardown facet
+  carries the claim's creds so an azure teardown can resolve its provider
+  (nil creds could never work), identity-secret KEYS are shape-fenced like
+  values, and the missing-env test is hermetic against dev machines carrying
+  real S3 creds. Protective test: TestResurrectMidChainFailureTearsDownTheBox.
+- **resurrect-ux · flag-less POST /v1/resurrect + console Resurrect button** —
+  merge `loop-epic/resurrect-without-creds-server-side-newe-1-r` (REVIEWER
+  FIX). Server-side TEAM-newest resolution (D47: explicit ref verbatim +
+  store-never-dialed; blank==absent; empty store → honest 404 no_archives;
+  down/unconfigured store → 502 with the exact GET /v1/archives copy);
+  resolution is the LAST gate (cheap 4xx first — endorse the ordering move);
+  202 echoes the resolved bundle_ref. Console: Resurrect button per archive
+  row → typed-confirm sheet + portable provider picker + in-sheet server-owned
+  provider_not_connected remediation (D19) + 202 → the /new step feed. Reviewer
+  fix: a NON-STRING bundle_ref (number/map) fell into the absent branch and
+  silently resolved team-newest — a malformed request standing up a billed box
+  from a bundle the caller never named; now 422 invalid_bundle_ref, store
+  never dialed, tested.
+- **spec-hints · archives carry {region,server_type}** — merge
+  `loop-epic/archive-bundles-carry-region-server-type-2` (CLEAN — no reviewer
+  changes). hzBundleSpec off the resolved hcloud server (location else
+  datacenter.location; nil-guarded), stamped into BundleWriteSpec.Spec at
+  archive time; azure/fake/nil-server → empty hints, tolerated everywhere
+  (regression-tested). Hetzner-only per D20.
+- **retention · agent_events + agent_tokens bounded (D48)** — merge
+  `loop-epic/agent-events-agent-token-retention-prune-3-r` LAST (CLEAN code —
+  this -r branch carries only the wave-log charter sync). mint_agent_token
+  revokes prior LIVE same-scope tokens in the SAME transaction (S12c's
+  per-claim re-mint now leaves exactly one active per scope);
+  AgentRetentionWorker (Oban :maintenance, daily 03:30) keeps 14d of
+  agent_events + drops tokens 30d past revoked/expired; frozen-relative-clock
+  tests; the runtime race test's second token moved to a distinct scope
+  (intended behavior change, documented in-test).
+
+**Lead must close on merge:** the "PR merged" criterion on all four tasks
+(S14f ac[5], resurrect-ux ac[4], spec-hints ac[3], retention ac[3]) +
+lifecycle (re-claim for a fresh epoch; current claims are lapsed).
+
+**Gate quirk:** the S14f/spec-hints literal gates' bare `go vet` fails on this
+host via the cc-alias-shadows-compiler issue — run vet with CC=clang (the
+analysis itself is clean; done here).
+
+**Ledger:** all four tasks were evidence-stamped by builders but sat
+lifecycle:"open" with lapsed claims (the W6 `bp task ready` double-work
+hazard again) — reviewer patched all four to in_progress + republished;
+`bp task ready` now shows none of them. Non-wave tasks verified untouched
+(live-smoke + pricing-verify stay open).
+
+**Carried / next wave:**
+- The spec hints are STAMPED but never CONSUMED: translateResurrect drops
+  cloud.BundleManifest.Spec (provisioner.BundleManifest carries no spec
+  fields), so a resurrect's create still ignores the archived box's shape.
+  Wire manifest.Spec into the create base when the claim carries no pin and
+  the target kind matches the source provider (cross-provider size mapping is
+  a design call — do not guess it).
+- Hetzner resurrect Freshen is a benign `true` marker, not the dwb-17
+  origin/main rebuild — a resurrected hetzner box serves the baked warm-image
+  code until its next self-update. Within W7 scope; consider a freshen-real
+  follow-up or an explicit self-update trigger post-restore.
+- CreateWithFallback's ladder is Hetzner-typed — an azure resurrect succeeds
+  on its base candidate but its FALLBACK candidates are hetzner-shaped (the
+  existing provision-path degeneracy). Fold into the azure live smoke.
+- RestoreData buffers db.dump + media fully in memory to build the sized
+  stdin tar — fine for typical archives; file a streaming/S3-HEAD-sized path
+  for multi-GB dumps.
+- A resurrect 402 (no_active_subscription) renders the generic in-sheet error,
+  not an upgrade CTA (S16 polish).
+- THE WIRED SMOKE is now unblocked and is the wave's payoff proof:
+  azh-w7-live-resurrect-smoke (archive a real box → resurrect cross-provider
+  through the deployed drain; needs the four bundle env vars on the
+  provisioner — Console-minted S3 creds are the human gate). Then S8
+  hetzner-native cutover, S11c infra tab, S15 styleguide completeness, S16
+  hetzner journey polish.

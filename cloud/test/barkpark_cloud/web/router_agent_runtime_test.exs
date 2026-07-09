@@ -166,8 +166,12 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
 
     test "two agents racing on the same box never both claim the same row" do
       {token1, bp, site} = agent_setup()
-      # Mint a second agent token for the same barkpark.
-      {:ok, token2, _} = Registry.mint_agent_token(bp, "runtime")
+      # Mint a second live agent token for the same barkpark. It must carry a
+      # DISTINCT scope — mint_agent_token now supersedes a box's prior same-scope
+      # token (azh-w6 single-active-per-scope invariant), so re-minting "runtime"
+      # would revoke token1. require_agent gates on token validity, not scope, so
+      # both credentials authorize the claim and the race is preserved.
+      {:ok, token2, _} = Registry.mint_agent_token(bp, "runtime-b")
 
       # 4 pushing deployments, 6 racing claims (2 from each token).
       _ds = for _ <- 1..4, do: pushing_deployment(site)
