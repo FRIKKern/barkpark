@@ -1267,13 +1267,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
-  # A real port exit (exit_status frame). Run the shared honest teardown.
-  def handle_info({:claude_chat_exit, status}, socket) do
-    {:noreply,
-     teardown_session(
-       socket,
-       "Claude session ended (exit #{status}). Send a message to resume it."
-     )}
+  # A real port exit (exit_status frame). Run the shared honest teardown, and
+  # tell the truth about a DOOMED spawn (charter D54): a nonzero exit BEFORE any
+  # system/init frame means the argv was rejected — zero frames emitted, the
+  # reason on stderr — so a resume would re-run the same command and re-die.
+  # Surface the captured stderr reason and DO NOT invite a resume. A death AFTER
+  # init resumes cleanly (lazy `--resume` rehydrates), so keep the invite and
+  # append the reason when the CLI wrote one. `init` is nil until the first init
+  # frame arrives, so it is the "did this session initialize?" signal.
+  def handle_info({:claude_chat_exit, status, stderr_tail}, socket) do
+    reason = stderr_reason(stderr_tail)
+    init_seen? = not is_nil(socket.assigns[:init])
+
+    message =
+      if not init_seen? and failed_start?(status) do
+        "Claude failed to start (exit #{status})" <>
+          if reason != "", do: ": #{reason}", else: "."
+      else
+        base = "Claude session ended (exit #{status}). Send a message to resume it."
+        if reason != "", do: base <> "\n" <> reason, else: base
+      end
+
+    {:noreply, teardown_session(socket, message)}
   end
 
   # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
@@ -3016,6 +3031,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # cancel-persisting pending approvals, marking the row exited — is the
   # Recorder's job (it owns the runtime and outlives every tab). This flips the
   # visible cards, posts the honest line, and re-reads the sidebar.
+  # A nonzero OS exit status (integer). The crash/idle-reap paths carry an atom
+  # (`:crashed`/`:idle_reaped`) and never count as a rejected-argv start.
+  defp failed_start?(status), do: is_integer(status) and status != 0
+
+  # The captured stderr tail, trimmed for display; nil-safe for the paths that
+  # carry no stderr (already bounded to a few lines at the Session, charter D54).
+  defp stderr_reason(tail) when is_binary(tail), do: String.trim(tail)
+  defp stderr_reason(_), do: ""
+
   defp teardown_session(socket, message) do
     if socket.assigns.status == :offline do
       socket

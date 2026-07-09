@@ -385,8 +385,10 @@ defmodule Barkpark.StudioChat.Recorder do
     {:noreply, touch(state)}
   end
 
-  def handle_info({:claude_chat_exit, _status} = msg, state) do
+  def handle_info({:claude_chat_exit, _status, _stderr_tail} = msg, state) do
     session_exited(state.session_id)
+    # Rebroadcast verbatim so the stderr tail (charter D54) rides through to
+    # every viewer's ChatLive; the tail is what lets it refuse a doomed resume.
     broadcast(state, msg)
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
@@ -396,7 +398,7 @@ defmodule Barkpark.StudioChat.Recorder do
   # the viewers the same honest story an exit tells.
   def handle_info({:DOWN, _ref, :process, session, _reason}, %{session: session} = state) do
     session_exited(state.session_id)
-    broadcast(state, {:claude_chat_exit, :crashed})
+    broadcast(state, {:claude_chat_exit, :crashed, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end
@@ -408,7 +410,7 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info(:idle_reap, state) do
     if pid = state.session, do: ClaudeChat.close(pid)
     session_exited(state.session_id)
-    broadcast(state, {:claude_chat_exit, :idle_reaped})
+    broadcast(state, {:claude_chat_exit, :idle_reaped, nil})
     publish_activity(state, %{state: :offline, line: nil})
     {:stop, :normal, %{state | session: nil}}
   end

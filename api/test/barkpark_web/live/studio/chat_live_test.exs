@@ -864,10 +864,54 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "subprocess exit flips the chat offline with a system line", %{view: view} do
-      send(view.pid, {:claude_chat_exit, 1})
+      # No init frame arrived → a nonzero exit reads as a doomed start (D54).
+      send(view.pid, {:claude_chat_exit, 1, ""})
       html = render(view)
       assert html =~ "offline"
       assert html =~ "exit 1"
+    end
+
+    # ── honest dead spawns (charter D54) ──────────────────────────────────────
+
+    test "a pre-init dead spawn surfaces the stderr reason and refuses a resume",
+         %{view: view} do
+      # A rejected argv exits nonzero BEFORE any system/init frame; a resume
+      # would re-run the same command and re-die, so no resume invite.
+      send(view.pid, {:claude_chat_exit, 1, "error: unknown option '--nope'"})
+      html = render(view)
+
+      assert html =~ "offline"
+      assert html =~ "failed to start"
+      assert html =~ "unknown option"
+      refute html =~ "Send a message to resume it"
+    end
+
+    test "a death AFTER init keeps the resume invite and appends the reason",
+         %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "m"}}
+      )
+
+      send(view.pid, {:claude_chat_exit, 1, "segfault at 0xdead"})
+      html = render(view)
+
+      assert html =~ "Send a message to resume it"
+      assert html =~ "segfault at 0xdead"
+      refute html =~ "failed to start"
+    end
+
+    test "a clean exit keeps the plain resume invite", %{view: view} do
+      send(
+        view.pid,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "m"}}
+      )
+
+      send(view.pid, {:claude_chat_exit, 0, ""})
+      html = render(view)
+
+      assert html =~ "Send a message to resume it"
+      refute html =~ "failed to start"
     end
 
     test "a permission ask renders an approval card; Allow resolves it", %{view: view} do
@@ -1458,7 +1502,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert has_element?(view, ~s(button[phx-click=approve][phx-value-rid=req-crash]))
 
-      send(view.pid, {:claude_chat_exit, 1})
+      send(view.pid, {:claude_chat_exit, 1, ""})
       html = render(view)
 
       # POSITIVELY assert the cancellation, then refute the live buttons — a
@@ -1674,7 +1718,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
       pid = session_pid(view)
 
-      send(view.pid, {:claude_chat_exit, 2})
+      # an initialized (running) session, then the process exits — resume is legit
+      send(
+        view.pid,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "m"}}
+      )
+
+      send(view.pid, {:claude_chat_exit, 2, ""})
       # the DOWN that follows the process death — teardown already ran, so this
       # must find no matching session pid and no-op (never a second system line)
       send(view.pid, {:DOWN, make_ref(), :process, pid, :normal})
