@@ -140,8 +140,11 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
   # ── S2 realization: the View emitter/composer realizes each projection ───────
 
   # `raw_html/1` renders the container types (columns/terminal) that compose to a
-  # `_raw` HTML node rather than a `Components.*` emitter.
-  defp raw_html(input), do: Compose.compose_block(input)["html"]
+  # `_raw` HTML node rather than a `Components.*` emitter. Pinned to `:article`:
+  # these tests assert the CLASSED projection, and since the fleet email variants
+  # (gp-w4c) the containers are style-branched — `compose_block/1`'s `:email`
+  # default would take the inline-styled table variant instead.
+  defp raw_html(input), do: Compose.compose_block(input, :article)["html"]
 
   # Assert the substrings appear in `html` in the given order (an ordered-spine check).
   defp assert_ordered(html, needles) do
