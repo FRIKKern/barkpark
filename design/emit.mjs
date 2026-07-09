@@ -51,6 +51,9 @@ export const PAPER_ROLES = [
   "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule",
   "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border",
 ];
+// Callout tones in the SAME order util.ex tone_palette/1 clauses read them, so
+// the emitted TokensGen.callout/1 clauses line up with their consumer.
+export const CALLOUT_TONES = ["success", "warning", "danger", "info", "neutral"];
 
 const softAlpha = tokens.color._convention.softAlpha;   // { light, dark }
 const strongAlpha = tokens.color._convention.strongAlpha; // { light, dark, _note }
@@ -651,6 +654,8 @@ function elixirTokensGen() {
   const c = tokens.color;
   const st = c.status;
   const r = tokens.type.reading;
+  const em = tokens.paperEmail; // verbatim email skin (Wave 1 CAPTURE)
+  const co = tokens.paperCallout; // verbatim callout tone tints
   const hx = (role) => hslToHex(c[role].light);
   const stx = (role) => hslToHex(st[role].light);
   return [
@@ -688,6 +693,29 @@ function elixirTokensGen() {
     "  def reading_font, do: @reading_font",
     `  def reading_heading_weight, do: ${r.headingWeight}`,
     `  def reading_body_size, do: ${r.body.size}`,
+    "",
+    // ── Paper EMAIL surface skin (theme-system Wave 1 CAPTURE — tokens.json
+    // paperEmail). Verbatim hand values, NOT derived from color.primary/border:
+    // those HSL-round-tripped brand/rule slots ABOVE (#1e5243/#e4e4e7) are drifted
+    // from the live email hexes (#1e5347/#dde7e2), so palettes.ex / data_viz.ex
+    // consume THESE instead — zero email-golden retint. w3 reconciles the two.
+    "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
+    `  def email_brand, do: "${em["brand"]}"`,
+    `  def email_brand_text, do: "${em["brand-text"]}"`,
+    `  def email_rule, do: "${em["rule"]}"`,
+    `  def email_page_bg, do: "${em["page-bg"]}"`,
+    `  def email_paper, do: "${em["paper"]}"`,
+    `  def email_text, do: "${em["text"]}"`,
+    `  def email_muted, do: "${em["muted"]}"`,
+    `  def email_code_bg, do: "${em["code-bg"]}"`,
+    "",
+    // ── Paper CALLOUT tones (tokens.json paperCallout). The five light {bg,fg}
+    // tint pairs util.ex tone_palette/1 emits — a DIFFERENT value set from the
+    // status tone_* roles above; never fold them together.
+    "  # Callout tone tints — verbatim {bg, fg} pairs (util.ex tone_palette/1).",
+    ...CALLOUT_TONES.map(
+      (t) => `  def callout(:${t}), do: %{bg: "${co[t].bg}", fg: "${co[t].fg}"}`,
+    ),
     "end",
     "",
   ].join("\n");
