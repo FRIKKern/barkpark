@@ -1,5 +1,5 @@
 {
-  "hetzner": { "core": true,  "catalog": false, "lifecycle": false, "pause": false, "labels": true },
-  "fake":    { "core": true,  "catalog": true,  "lifecycle": true,  "pause": true,  "labels": true },
-  "azure":   { "core": false, "catalog": false, "lifecycle": false, "pause": false, "labels": false }
+  "hetzner": {                "core": true,  "catalog": false, "lifecycle": false, "pause": false, "labels": true },
+  "fake":    { "tier": "dev", "core": true,  "catalog": true,  "lifecycle": true,  "pause": true,  "labels": true },
+  "azure":   {                "core": true,  "catalog": false, "lifecycle": false, "pause": true,  "labels": true }
 }

@@ -20,8 +20,8 @@ import (
 
 // Provider slugs the registry knows beyond ProviderHetzner (provider.go). Fake
 // is the in-memory provider every provisioning test runs against; Azure is a
-// DECLARED slug (it appears in providers_capabilities.json as an all-false
-// placeholder) that is NOT registered here yet — see the init() note below.
+// real provider (internal/cli/cloud/azure) that self-registers via its own
+// init() when its package is linked — see the init() note below.
 const (
 	ProviderFake  = "fake"
 	ProviderAzure = "azure"
@@ -87,34 +87,54 @@ func init() {
 	Register(ProviderHetzner, func(map[string]string) (CloudProvider, error) {
 		return HcloudProvider{}, nil
 	})
-	// Fake — the in-memory provider for tests. All capabilities honoured.
+	// Fake — the in-memory provider for tests. All capabilities honoured. It is
+	// dev-tier (providers_capabilities.json marks it tier=dev), so `bp cloud
+	// providers` hides it from the default matrix (a real operator never picks
+	// the fake) — `--all` reveals it.
 	Register(ProviderFake, func(map[string]string) (CloudProvider, error) {
 		return NewFakeProvider(), nil
 	})
-	// Azure slots in HERE once S2 ships internal/cli/cloud/azure (implementing
-	// the CloudProvider + capability interfaces on azure-sdk-for-go) and S5
-	// wires it. It is intentionally NOT registered now: registering it here
-	// would pull the Azure SDK into every `bp` build and risk an import cycle,
-	// so the azure package self-registers via its own init() when imported —
+	// Azure is NOT registered here — registering it in this package would pull
+	// the Azure SDK into every `bp` build and, worse, create an import cycle
+	// (the azure package imports THIS package to implement the seam). Instead
+	// the azure package self-registers in its OWN init():
 	//
-	//     Register(ProviderAzure, azure.Factory)
+	//     func init() { cloud.Register(cloud.ProviderAzure, Factory) }
 	//
-	// Until then azure is a fixture-declared, all-false placeholder that
-	// `bp cloud providers` surfaces as "planned", and the parity test only
-	// checks REGISTERED providers.
+	// so the registry is populated whenever the azure package is linked into a
+	// binary (the `bp` CLI imports it; the cloud package's own test binary does
+	// NOT, so azure stays unregistered here — see TestRegistryAzureWiredByImport).
 }
 
 //go:embed providers_capabilities.json
 var capabilitiesFixture []byte
 
+// ProviderRow is one entry of the providers_capabilities.json fixture: a
+// provider's honest capability set PLUS its go-to-market Tier (charter
+// Decision 16). Capabilities is EMBEDDED — its json fields (core/catalog/…) are
+// promoted, so a fixture row is one flat object `{"tier":"dev","core":true,…}`
+// and the parity test compares row.Capabilities against the provider's ACTUAL
+// interface satisfaction while Tier rides alongside untouched.
+//
+// Tier is deliberately a field on THIS wrapper and NOT on Capabilities: putting
+// it on Capabilities would red the parity test (DetectCapabilities can't report
+// a tier), and a bare fixture key with no struct field is silently dropped by
+// the plain unmarshal — the wrapper is the only shape that carries tier without
+// lying about capabilities. Tier is "" for the shippable providers and "dev" for
+// the in-memory fake, which `bp cloud providers` hides unless `--all` is passed.
+type ProviderRow struct {
+	Tier         string `json:"tier,omitempty"`
+	Capabilities        // embedded: core/catalog/lifecycle/pause/labels promote to the row
+}
+
 // LoadCapabilities decodes the committed providers_capabilities.json fixture —
 // the cross-surface capability contract (Decision 8). The map is keyed by
-// provider slug; each value is the honest capability row that provider claims
-// today. This is the SAME file the Elixir control plane and the SPA read, so
-// its shape is an API: change it here and every surface (plus the parity test)
-// re-checks in CI.
-func LoadCapabilities() (map[string]Capabilities, error) {
-	var m map[string]Capabilities
+// provider slug; each value is the honest capability row (+ tier) that provider
+// claims today. This is the SAME file the Elixir control plane and the SPA read,
+// so its shape is an API: change it here and every surface (plus the parity
+// test) re-checks in CI.
+func LoadCapabilities() (map[string]ProviderRow, error) {
+	var m map[string]ProviderRow
 	if err := json.Unmarshal(capabilitiesFixture, &m); err != nil {
 		return nil, fmt.Errorf("cloud: decode providers_capabilities.json: %w", err)
 	}

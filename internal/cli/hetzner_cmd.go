@@ -88,6 +88,10 @@ func runCloud(out *writer, g globals, args []string) int {
 	switch args[0] {
 	case "hetzner":
 		return runCloudHetzner(out, g, args[1:])
+	case "azure":
+		return runCloudAzure(out, g, args[1:])
+	case "instance", "instances":
+		return runCloudInstance(out, g, args[1:])
 	case "providers":
 		return runCloudProviders(out, g, args[1:])
 	case "status":

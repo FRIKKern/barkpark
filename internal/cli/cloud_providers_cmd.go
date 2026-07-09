@@ -19,14 +19,25 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
 )
 
-// runCloudProviders renders the provider capability matrix.
+// runCloudProviders renders the provider capability matrix. By default it hides
+// dev-tier providers (the in-memory fake) — a real operator never picks them;
+// `--all` reveals them.
 func runCloudProviders(out *writer, g globals, args []string) int {
 	if g.help || (len(args) > 0 && args[0] == "help") {
 		printCloudProvidersHelp(out)
 		return exitOK
 	}
-	if len(args) > 0 {
-		return useError(out, "usage", "bp cloud providers takes no arguments (run `bp cloud providers -h` for usage)", exitUsage)
+	// --all is a GLOBAL bool flag, so parseGlobals consumes it into g.all before
+	// the tail reaches here; the loop additionally accepts a literal --all / -a in
+	// args (the path unit tests drive) so both forms enable the dev-tier reveal.
+	all := g.all
+	for _, a := range args {
+		switch a {
+		case "--all", "-a":
+			all = true
+		default:
+			return useError(out, "usage", "bp cloud providers accepts only --all (run `bp cloud providers -h` for usage)", exitUsage)
+		}
 	}
 
 	fixture, err := cloud.LoadCapabilities()
@@ -40,7 +51,7 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 	}
 
 	// The provider universe is every DECLARED slug in the fixture, sorted for a
-	// stable render — registered providers plus the planned placeholders.
+	// stable render — registered providers plus any planned placeholders.
 	slugs := make([]string, 0, len(fixture))
 	for slug := range fixture {
 		slugs = append(slugs, slug)
@@ -49,8 +60,14 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 
 	rows := make([]providerView, 0, len(slugs))
 	anyPlanned := false
+	hiddenDev := 0
 	for _, slug := range slugs {
-		v := providerView{slug: slug, registered: registered[slug], caps: fixture[slug]}
+		row := fixture[slug]
+		if row.Tier == "dev" && !all {
+			hiddenDev++
+			continue
+		}
+		v := providerView{slug: slug, registered: registered[slug], tier: row.Tier, caps: row.Capabilities}
 		if v.registered {
 			v.auth = providerAuthState(slug)
 		}
@@ -86,7 +103,11 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 	renderHzTable(out, headers, table)
 	if anyPlanned {
 		out.outf("")
-		out.outf("planned providers are declared in the capability fixture but not yet wired — they light up as later slices ship (azure: S2 builds it, S5 wires it).")
+		out.outf("planned providers are declared in the capability fixture but not yet wired — they light up as later slices ship.")
+	}
+	if hiddenDev > 0 {
+		out.outf("")
+		out.outf("%d dev-tier provider(s) hidden — pass --all to include them.", hiddenDev)
 	}
 	return exitOK
 }
@@ -95,6 +116,7 @@ func runCloudProviders(out *writer, g globals, args []string) int {
 type providerView struct {
 	slug       string
 	registered bool
+	tier       string
 	auth       *bool // nil = unknown / not applicable (planned, or no auth check)
 	caps       cloud.Capabilities
 }
@@ -120,6 +142,7 @@ func (v providerView) structured() map[string]any {
 	m := map[string]any{
 		"slug":       v.slug,
 		"registered": v.registered,
+		"tier":       v.tier,
 		"capabilities": map[string]any{
 			"core":      v.caps.Core,
 			"catalog":   v.caps.Catalog,
@@ -165,12 +188,13 @@ func printCloudProvidersHelp(out *writer) {
 	const help = `bp cloud providers — the honest capability matrix for every cloud provider.
 
 USAGE
-  bp cloud providers [-o json|yaml]
+  bp cloud providers [--all] [-o json|yaml]
 
 Reads the committed cross-surface capability fixture and shows, per provider,
 whether it is registered (wired to a real implementation) or planned (declared
 but not yet built), a best-effort auth state, and which seam capabilities it
-honours today:
+honours today. Dev-tier providers (the in-memory fake) are hidden by default;
+--all reveals them.
 
   CORE       create / ip / delete / list a host
   CATALOG    a normalized, priced region + server-type menu
