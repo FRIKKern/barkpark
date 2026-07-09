@@ -157,18 +157,19 @@ defmodule Barkpark.Tenancy do
   # the `settings` jsonb bag under `"theme"` and is resolved server-side so the
   # reader / Studio / email stamp it with no flash and no client round-trip.
   #
-  # `@known_themes` is the allowlist the compiler can emit today. It is
-  # deliberately a small in-code list rather than a runtime read of
-  # `design/themes/*.json`: the validation must never depend on shipped asset
-  # files being present, and a workspace pinned to a theme that was later
-  # removed must degrade to the default, not 500. Wave 5 (`ts-w5-alt-themes`)
-  # extends this list as each new theme ships its one file.
-  @known_themes ~w(evergreen)
+  # The theme allowlist is the GENERATED theme list — `TokensGen.themes/0`, which
+  # design/emit.mjs derives by looping `design/themes/*.json` (charter D33: adding
+  # theme N+1 = one new file, and every generated surface — including this one —
+  # grows by exactly one id). It is a COMPILE-TIME generated module, not a runtime
+  # read of the asset files, so validation still never depends on shipped assets
+  # being present; a workspace pinned to a since-removed theme degrades to the
+  # default (workspace_theme/1), not a 500.
   @default_theme "evergreen"
 
-  @doc "The theme ids the compiler knows (the picker's option list)."
+  @doc "The theme ids the compiler knows (the picker's option list); one per generated theme."
   @spec known_themes() :: [String.t()]
-  def known_themes, do: @known_themes
+  def known_themes,
+    do: Enum.map(Barkpark.PortableDoc.Render.TokensGen.themes(), &Atom.to_string/1)
 
   @doc "The baked-in default theme id — the `:root` palette every surface ships."
   @spec default_theme() :: String.t()
@@ -185,8 +186,10 @@ defmodule Barkpark.Tenancy do
   """
   @spec workspace_theme(Workspace.t() | nil) :: String.t()
   def workspace_theme(%Workspace{settings: settings}) when is_map(settings) do
+    # `known_themes/0` is a function call (a generated list), so the membership
+    # test is a function-body check, not a module-attribute guard.
     case settings["theme"] do
-      theme when theme in @known_themes -> theme
+      theme when is_binary(theme) -> if theme in known_themes(), do: theme, else: @default_theme
       _ -> @default_theme
     end
   end
@@ -204,10 +207,21 @@ defmodule Barkpark.Tenancy do
   """
   @spec set_workspace_theme(Workspace.t() | binary(), String.t()) ::
           {:ok, Workspace.t()} | {:error, :unknown_theme | :not_found | Ecto.Changeset.t()}
-  def set_workspace_theme(_workspace, theme) when theme not in @known_themes,
-    do: {:error, :unknown_theme}
+  def set_workspace_theme(workspace_or_id, theme) when is_binary(theme) do
+    # Theme membership is a generated-list check (known_themes/0), so it can no
+    # longer live in a guard — validate first, then dispatch on the target shape.
+    # Validating before the DB lookup preserves the old guard-first semantics:
+    # an unknown theme is rejected without ever touching the row.
+    if theme in known_themes() do
+      do_set_workspace_theme(workspace_or_id, theme)
+    else
+      {:error, :unknown_theme}
+    end
+  end
 
-  def set_workspace_theme(%Workspace{} = workspace, theme) when is_binary(theme) do
+  def set_workspace_theme(_workspace_or_id, _theme), do: {:error, :unknown_theme}
+
+  defp do_set_workspace_theme(%Workspace{} = workspace, theme) do
     settings = Map.put(workspace.settings || %{}, "theme", theme)
 
     workspace
@@ -219,12 +233,14 @@ defmodule Barkpark.Tenancy do
     |> Repo.update()
   end
 
-  def set_workspace_theme(id, theme) when is_binary(id) and is_binary(theme) do
+  defp do_set_workspace_theme(id, theme) when is_binary(id) do
     case get_workspace_by_id(id) do
       nil -> {:error, :not_found}
-      %Workspace{} = workspace -> set_workspace_theme(workspace, theme)
+      %Workspace{} = workspace -> do_set_workspace_theme(workspace, theme)
     end
   end
+
+  defp do_set_workspace_theme(_workspace_or_id, _theme), do: {:error, :not_found}
 
   @doc "Fetch a Project by its id, or nil. `nil` or malformed id returns nil."
   @spec get_project_by_id(binary() | nil) :: Project.t() | nil

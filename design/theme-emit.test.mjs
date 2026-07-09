@@ -21,6 +21,7 @@ const read = (p) => JSON.parse(readFileSync(join(here, p), "utf8"));
 
 const evergreen = read("themes/evergreen.json");
 const fixture = read("fixtures/theme-fixture.json");
+const EVER = [{ name: "evergreen", spec: evergreen }];
 const THEMES = [
   { name: "evergreen", spec: evergreen },
   { name: "fixture", spec: fixture },
@@ -115,6 +116,75 @@ test("mirror: a [data-bp-theme] paper-surface scope is de-scoped, NOT skipped or
   const base = generated.match(/^:root, :host \{([\s\S]*?)\}/m);
   assert.match(base[1], /--paper-bg: #ffffff;/);
   assert.doesNotMatch(base[1], /#123456/);
+});
+
+// ── the GENERATED (non-CSS) surfaces: Go x4 + Elixir TokensGen (ts-w5b) ──────
+// The four Go builders + elixirTokensGen carry one keyed entry per committed
+// theme. The evergreen entry REFERENCES the Gen* vars (Go) / equals the base
+// hex (Elixir) so N=1 stays byte-identical; theme N+1 stamps a derived literal
+// entry. Each map's evergreen segment must survive byte-for-byte when a second
+// (fixture) theme is injected — the loop is additive, never a rewrite.
+const GEN = [
+  // [suffix, evergreen-entry anchor (present at N=1 AND unchanged at N=2)]
+  ["taskboard/tokens_gen.go", '"evergreen": {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},'],
+  ["pdrender/tokens_gen.go", "ToneNeutral:         GenToneNeutral,"],
+  ["semrole/tokens_gen.go", '"evergreen": {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},'],
+  ["semrole/chrome_gen.go", '"evergreen": {Chrome: GenChrome},'],
+];
+
+test("Go builders: N=1 references Gen* vars and emits no second theme", () => {
+  for (const [suffix, anchor] of GEN) {
+    const n1 = build(suffix, EVER);
+    assert.ok(n1.includes(anchor), `${suffix}: evergreen Gen* reference missing at N=1`);
+    assert.ok(!n1.includes('"fixture"'), `${suffix}: N=1 leaked a fixture entry`);
+  }
+});
+
+test("Go builders: N=2 keeps the evergreen Gen* entry byte-identical AND adds a fixture literal entry", () => {
+  for (const [suffix, anchor] of GEN) {
+    const n2 = build(suffix, THEMES);
+    assert.ok(n2.includes(anchor), `${suffix}: evergreen entry drifted when a second theme was injected`);
+    assert.ok(n2.includes('"fixture": {'), `${suffix}: fixture entry missing — the loop did not generalize`);
+  }
+});
+
+test("pdrender: the whole evergreen genPalette entry is byte-identical N=1 vs N=2", () => {
+  // Non-anchor proof: extract the evergreen map block (up to its closing `\t},`)
+  // and demand it is unchanged — no reorder, no retint, no Gen*→literal swap.
+  const block = (s) => s.match(/\t"evergreen": \{[\s\S]*?\n\t\},/)[0];
+  assert.equal(block(build("pdrender/tokens_gen.go", THEMES)), block(build("pdrender/tokens_gen.go", EVER)));
+});
+
+test("Go builders: the fixture entry carries DERIVED literals, not Gen* references", () => {
+  // pdrender's fixture ChromeAccent must be the indigo-derived hex, proving the
+  // non-evergreen entry stamps themePalette values (not a copy of the Gen* var).
+  const n2 = build("pdrender/tokens_gen.go", THEMES);
+  const fx = n2.match(/\t"fixture": \{[\s\S]*?\n\t\},/)[0];
+  assert.match(fx, /ChromeAccent:\s+lipgloss\.AdaptiveColor\{Light: "#[0-9a-f]{6}", Dark: "#[0-9a-f]{6}"\}/);
+  assert.doesNotMatch(fx, /GenChromeAccent/);
+});
+
+test("semrole: Themes() enumerates the committed theme dir and grows by one per theme", () => {
+  assert.ok(build("semrole/tokens_gen.go", EVER).includes('func Themes() []string { return []string{"evergreen"} }'));
+  assert.ok(build("semrole/tokens_gen.go", THEMES).includes('func Themes() []string { return []string{"evergreen", "fixture"} }'));
+});
+
+test("Elixir TokensGen: @themes + every colour map gains the fixture; N=1 is evergreen-only", () => {
+  const n1 = build("render/tokens_gen.ex", EVER);
+  assert.ok(n1.includes("@themes [:evergreen]"), "N=1 @themes is not evergreen-only");
+  assert.ok(!n1.includes(":fixture") && !n1.includes("fixture:"), "N=1 leaked a fixture entry");
+
+  const n2 = build("render/tokens_gen.ex", THEMES);
+  assert.ok(n2.includes("@themes [:evergreen, :fixture]"), "@themes did not gain :fixture");
+  // status + reading_accent (one-liners) and email + callout (block maps) each key fixture.
+  assert.match(n2, /@status %\{evergreen: %\{[^}]*\}, fixture: %\{/);
+  assert.match(n2, /@reading_accent %\{evergreen: "[^"]*", fixture: "[^"]*"\}/);
+  assert.ok(n2.includes("    fixture: %{"), "email/callout block maps missing the fixture entry");
+});
+
+test("Elixir TokensGen: the evergreen @status entry is byte-identical N=1 vs N=2", () => {
+  const status = (s) => s.match(/  @status %\{evergreen: %\{[^}]*\}/)[0];
+  assert.equal(status(build("render/tokens_gen.ex", THEMES)), status(build("render/tokens_gen.ex", EVER)));
 });
 
 test("mirror: a token scope mixing theme identity across comma-parts is a hard error", () => {
