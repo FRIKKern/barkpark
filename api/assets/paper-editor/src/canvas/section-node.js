@@ -329,14 +329,27 @@ export const Section = Node.create({
       let syncingTitle = false;
 
       // STEP-6: write per-child grid-column/order onto the DIRECT grid items from the
-      // bpId-keyed cells map. Passing a null/absent map CLEARS all placement (the
-      // grid→stack strip). These are `el.style.*` writes only — NO reader class
-      // literal is introduced, so the canvas⇄reader parity gate §3 stays green.
-      const applyCellPlacement = (cells) => {
+      // bpId-keyed cells map, and mirror the reader cell's `min-width:0`. Passing
+      // grid=false (the grid→stack strip) CLEARS all placement AND the min-width so
+      // the flex-column child DOM is restored byte-for-byte. These are `el.style.*`
+      // writes only — NO reader class literal (`bp-section__cell`) is introduced, so
+      // the canvas⇄reader parity gate §3 stays green.
+      //
+      // PARITY (divergence c): the reader wraps each grid child in a
+      // `<div class="bp-section__cell">` carrying `min-width:0` (paper-surface.css:691
+      // + root.html.heex) so a wide child (a <pre>, a long word) cannot blow out its
+      // `minmax(0,1fr)` track. The canvas CANNOT add that wrapper — a PM contentDOM
+      // child is the block itself, and emitting the `bp-section__cell` class would be
+      // a second HTML producer (§3 RED). So it mirrors the wrapper's RESOLVED geometry
+      // (grid-column/order) AND its `min-width:0` onto the wrapper-less grid item.
+      const applyCellPlacement = (cells, grid) => {
         const map =
           cells && typeof cells === "object" && !Array.isArray(cells) ? cells : null;
         for (const el of Array.from(body.children)) {
           if (!el || !el.style) continue;
+          // Mirror `.bp-section__cell { min-width: 0 }` onto the wrapper-less grid
+          // item; stack mode has no cell, so strip it (restores default min-width).
+          el.style.minWidth = grid ? "0" : "";
           const id = el.getAttribute ? el.getAttribute("data-bp-id") : null;
           const cell = map && id != null ? map[id] : null;
           const span = cell ? cellSpan(cell.span) : null;
@@ -369,7 +382,7 @@ export const Section = Node.create({
           // reader emits `grid-column:span N;order:K` on its .bp-section__cell wrapper;
           // the canvas has no wrapper, so we mirror the placement onto the grid item
           // itself — parity of the resolved geometry (RISK #5).
-          applyCellPlacement(n.attrs && n.attrs.cells);
+          applyCellPlacement(n.attrs && n.attrs.cells, true);
         } else {
           body.className = "bp-section__body";
           body.style.removeProperty("--bp-tracks");
@@ -381,7 +394,7 @@ export const Section = Node.create({
           tracksInc.style.display = "none";
           // STEP-6: a grid→stack flip must STRIP any per-child placement left on the
           // body children (else a stale grid-column/order survives into stack mode).
-          applyCellPlacement(null);
+          applyCellPlacement(null, false);
         }
         // Controls are edit-only: hidden entirely in view mode.
         controls.style.display = editor.isEditable ? "" : "none";
