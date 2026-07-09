@@ -42,13 +42,10 @@ func loadBoardFixture(t *testing.T) Board {
 }
 
 // fixtureUIState pins a cursor-selected spine row so the goldens exercise the ▎
-// selection marker. After Amendment 6 (charter D84/D86) the scrolling list is the
-// TOP region and its selectable rows own the FIRST indices [0, S); the pinned band
-// (NEXT then NOW) is the TAIL at [S, …). So the cursor indexes the SHELL's inverted
-// visibleRows order (spine header + children + clusters + orphans, THEN NEXT, THEN
-// NOW). The claimed tasks render ONLY in the pinned band at the bottom (NOW de-dup),
-// so index 3 lands on a spine row near the top of the list — a deliberate spine-row
-// marker (the pinned-band ▎ is exhaustively covered by the parity guards). Inline
+// selection marker. The spine is the whole cursor space (Amendment 7 — the
+// pinned NOW/NEXT band is retired), so the cursor indexes the SHELL's
+// visibleRows order (spine headers + children + clusters + orphans) directly;
+// index 3 lands on a spine row near the top of the list. Inline
 // expand is gone (charter D11): enter PUSHES a detail frame the compositor paints,
 // so the BOARD golden is a single calm line per row.
 //
@@ -429,10 +426,10 @@ func TestRenderAtRestGolden(t *testing.T) {
 }
 
 // motionBoard is the in-flight scene the motion goldens pin: one claim running
-// in the NOW band (age 4m30s → LiveElapsed's seconds vocabulary), an epic whose
-// children include the running claim, a just-created ready row and a settled
-// (unchanged) row. motionUIState marks the claim as a level-2 (bright) flash and
-// the just-created row as a level-1 (fading) flash at Frame 4.
+// in place as a spinner row inside its epic (charter D56 — the pinned band is
+// retired), a just-created ready row and a settled (unchanged) row.
+// motionUIState marks the claim as a level-2 (bright) flash and the
+// just-created row as a level-1 (fading) flash at Frame 4.
 func motionBoard() Board {
 	claimed := fixedNow.Add(-(4*time.Minute + 30*time.Second))
 	claim := &Claim{Worker: "opus-3", Epoch: 4, ClaimedAt: claimed}
@@ -445,18 +442,21 @@ func motionBoard() Board {
 		Epics: []Epic{{
 			Root: Task{DocID: "motion-epic", Title: "Motion epic", Lifecycle: "in_progress",
 				Kind: "goal", UpdatedAt: fixedNow},
-			// flash-now is claimed, so after the NOW de-dup it renders ONLY in the
-			// pinned band, never as a duplicate spine child.
+			// flash-now is claimed and renders IN PLACE as a spinner row (charter
+			// D56 — the retired band was the only other home it ever had).
 			Children: []Task{
+				{DocID: "flash-now", Title: "Ship the live bridge", Lifecycle: "in_progress",
+					ParentID: "motion-epic", Criteria: &Criteria{Met: 1, Total: 3},
+					Claim: claim, UpdatedAt: claimed},
 				{DocID: "flash-spine", Title: "Reticulate the splines", Lifecycle: "ready",
 					ParentID: "motion-epic", Priority: "P2", UpdatedAt: fixedNow.Add(-2 * time.Second)},
 				{DocID: "calm-row", Title: "A settled unchanged row", Lifecycle: "ready",
 					ParentID: "motion-epic", Priority: "P3", UpdatedAt: fixedNow.Add(-time.Hour)},
 			},
 			DoneFolded: 2,
-			// Active (owns the NOW claim flash-now) → focus neighborhood over both
-			// ready children (charter D51 / wave-11).
-			FocusSet: focusOf("flash-spine", "calm-row"),
+			// Active (owns the live claim flash-now) → focus neighborhood over the
+			// claim and both ready children (charter D51 / wave-11).
+			FocusSet: focusOf("flash-now", "flash-spine", "calm-row"),
 		}},
 		Counts: map[string]int{"in_progress": 1, "blocked": 0, "done": 2},
 		Events: []Event{
@@ -478,12 +478,11 @@ func motionUIState() UIState {
 	}
 }
 
-// TestRenderMotionGolden pins the visible (ANSI-stripped) motion at 60 and 100
-// cols: the NOW card's ticking "4m30s" elapsed. The calm-board subtraction
-// retired the ticker's cycling working head, so the only surviving visible motion
-// is the NOW-band stopwatch. The flash tint is foreground-only (decision 17) so
-// it does not survive the strip — TestFlashPaintedInFrame proves it in the
-// styled frame instead.
+// TestRenderMotionGolden pins the visible (ANSI-stripped) in-flight frame at 60
+// and 100 cols: the claimed task as an agent-attributed spinner row inside its
+// epic (charter D56). The flash tint is foreground-only (decision 17) so it
+// does not survive the strip — TestFlashPaintedInFrame proves it in the styled
+// frame instead.
 func TestRenderMotionGolden(t *testing.T) {
 	old := Chrome
 	Chrome = ChromeInfo{RepoName: "barkpark", Branch: "work/doc-fresh", Server: "guerrilla"}
@@ -510,33 +509,11 @@ func TestRenderMotionGolden(t *testing.T) {
 				t.Errorf("motion frame at %d cols diverged from %s\n--- got ---\n%s\n--- want ---\n%s",
 					width, path, got, want)
 			}
-			// The one surviving visible motion must be present: the NOW card's
-			// ticking seconds.
-			if !strings.Contains(got, "4m30s") {
-				t.Errorf("width %d: motion frame missing the ticking 4m30s:\n%s", width, got)
+			// The in-flight claim must render in place, agent-attributed.
+			if !strings.Contains(got, "Ship the live bridge") {
+				t.Errorf("width %d: motion frame missing the claimed row:\n%s", width, got)
 			}
 		})
-	}
-}
-
-// TestRenderMotionElapsedIsNowBandOnly proves the ticking second-hand runs ONLY
-// where real work runs (decision 19): the NOW card shows the seconds form
-// "4m30s", and that seconds vocabulary appears on exactly ONE line — the pinned
-// NOW card's meta line — never anywhere else (the claim is de-duped out of the
-// spine, so it can only ever tick in the band).
-func TestRenderMotionElapsedIsNowBandOnly(t *testing.T) {
-	frame := plainFrame(motionBoard(), motionUIState(), 100, goldenHeight)
-	if !strings.Contains(frame, "4m30s") {
-		t.Errorf("NOW card is missing the ticking LiveElapsed token:\n%s", frame)
-	}
-	n := 0
-	for _, ln := range strings.Split(frame, "\n") {
-		if strings.Contains(ln, "4m30s") {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("the seconds vocabulary appears on %d lines, want exactly 1 (the NOW card only):\n%s", n, frame)
 	}
 }
 
@@ -672,38 +649,6 @@ func TestRenderStaleAgesAndCount(t *testing.T) {
 	}
 }
 
-// TestNowCardIsAgentFirst proves a pinned NOW card is ONE agent-first line
-// (charter wave-12 D59): the live Braille spinner (frame 0 ⠋ at rest), then the
-// WORKER as the subject BEFORE the title, then bare criteria DIGITS (no ▰▱ bar)
-// and the ticking age — no twin ⧉ marker, no epic breadcrumb.
-func TestNowCardIsAgentFirst(t *testing.T) {
-	claimed := Task{
-		DocID: "sum1", Title: "Add the SUM() function", Lifecycle: "in_progress",
-		TwinOf: "sum2", Criteria: &Criteria{Met: 2, Total: 3}, UpdatedAt: fixedNow,
-		Claim: &Claim{Worker: "opus-3", Epoch: 1, ClaimedAt: fixedNow.Add(-4 * time.Minute)},
-	}
-	lines := NowCard(claimed, false, 80, 0, fixedNow)
-	if len(lines) != 1 {
-		t.Fatalf("NOW card should be exactly ONE line now, got %d: %q", len(lines), lines)
-	}
-	l0 := ansi.Strip(lines[0])
-	if !strings.HasPrefix(strings.TrimLeft(l0, " "), "⠋ opus-3") {
-		t.Errorf("NOW card should lead with ⠋ spinner + worker (agent-first), got %q", l0)
-	}
-	// The worker (subject) precedes the title.
-	wi := strings.Index(l0, "opus-3")
-	ti := strings.Index(l0, "Add the SUM() function")
-	if wi < 0 || ti < 0 || wi > ti {
-		t.Errorf("worker must lead the title (agent-first), got %q", l0)
-	}
-	if strings.Contains(l0, "⧉") {
-		t.Errorf("NOW card should not wear a twin ⧉ marker: %q", l0)
-	}
-	if !strings.Contains(l0, "2/3") || strings.Contains(l0, "▰") || strings.Contains(l0, "▱") {
-		t.Errorf("NOW card should show bare criteria digits, no bar: %q", l0)
-	}
-}
-
 // TestRenderFooterCalmVerbs proves the footer advertises the subtracted verb set
 // (no more `t tag`, and `enter open`) — and that at the 60-col charter minimum
 // EVERY verb still paints (the compact variant drops the word "move", never the
@@ -738,33 +683,35 @@ func TestRenderSyncingStateIsHonest(t *testing.T) {
 }
 
 // firstPaintHeight is a compact pane the first-paint frames fit whole into, so
-// the goldens show the full header + NOW band + spine a first launch presents.
+// the goldens show the full header + spine a first launch presents.
 const firstPaintHeight = 24
 
 // firstPaintBoard is the modest board a fresh launch paints from its cache: one
-// in-progress claim in the NOW band and one epic with a ready + a blocked child.
-// It is a hand-built Board (not a BuildBoard result) so these goldens stay
-// pinned to the RENDER, independent of any later re-tuning of the board policy —
-// the same discipline as board_fixture.json.
+// in-progress claim rendering in place inside its epic (charter D56) beside a
+// ready + a blocked sibling. It is a hand-built Board (not a BuildBoard result)
+// so these goldens stay pinned to the RENDER, independent of any later
+// re-tuning of the board policy — the same discipline as board_fixture.json.
 func firstPaintBoard() Board {
+	claim := Task{
+		DocID: "sse-loop", Title: "SSE reconnect backoff", Lifecycle: lifeInProgress,
+		Claim:    &Claim{Worker: "opus-3", Epoch: 2, ClaimedAt: fixedNow.Add(-12 * time.Minute)},
+		Criteria: &Criteria{Met: 1, Total: 3},
+		ParentID: "cloud",
+	}
 	return Board{
 		Counts: map[string]int{"in_progress": 1, "blocked": 1, "done": 5},
-		Now: []Task{{
-			DocID: "sse-loop", Title: "SSE reconnect backoff", Lifecycle: lifeInProgress,
-			Claim:    &Claim{Worker: "opus-3", Epoch: 2, ClaimedAt: fixedNow.Add(-12 * time.Minute)},
-			Criteria: &Criteria{Met: 1, Total: 3},
-			ParentID: "cloud",
-		}},
+		Now:    []Task{claim},
 		Epics: []Epic{{
 			Root: Task{DocID: "cloud", Title: "Cloud GUI epic", Lifecycle: lifeInProgress},
 			Children: []Task{
+				claim,
 				{DocID: "role-seam", Title: "Reconcile the #979 role seam", Lifecycle: lifeReady, UpdatedAt: fixedNow.Add(-20 * time.Minute)},
 				{DocID: "banner", Title: "Ship the offline banner", Lifecycle: lifeBlocked, DependencyCount: 1, UpdatedAt: fixedNow.Add(-40 * time.Minute)},
 			},
-			// Active (owns the NOW claim) with a focus neighborhood over both children
-			// (charter D51 / wave-11), so the epic renders its context, not header-only.
+			// Active (owns the live claim) with a focus neighborhood over all three
+			// children (charter D51 / wave-11), so the epic renders its context.
 			Active:   true,
-			FocusSet: focusOf("role-seam", "banner"),
+			FocusSet: focusOf("sse-loop", "role-seam", "banner"),
 		}},
 	}
 }

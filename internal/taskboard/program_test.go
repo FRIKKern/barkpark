@@ -26,17 +26,18 @@ func focusOf(ids ...string) map[string]bool {
 	return m
 }
 
-// sampleBoard is a fixture exercising every row kind: two NOW cards, three
-// epics, and one loose task under a focused "(no epic)" header. Each section
+// sampleBoard is a fixture exercising every row kind: three epics, one loose
+// task under a focused "(no epic)" header, plus two Now entries (model state
+// only — the pinned band is retired, so they own no rows). Each section
 // carries a FocusSet over ALL its children (charter D51 / wave-11), so every
 // child renders — the fixture proves the row structure, while bigEpicBoard (no
 // focus → header-only) proves the fold/expand cycle.
 //
-// Fresh (nothing collapsed) it flattens to 11 navigable rows:
+// Fresh (nothing collapsed) it flattens to 9 navigable rows:
 //
-//	0 now n1      3 child c1     6 child cx      9 orphan header
-//	1 now n2      4 child c2     7 header e3    10 orphan o1
-//	2 header e1   5 header e2    8 child c3
+//	0 header e1   3 header e2    6 child c3
+//	1 child c1    4 child cx     7 orphan header
+//	2 child c2    5 header e3    8 orphan o1
 func sampleBoard() Board {
 	return Board{
 		Now: []Task{t("n1"), t("n2")},
@@ -75,9 +76,8 @@ func runes(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: [
 func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 	m := testModel(sampleBoard())
 	rows := m.visibleRows()
-	// Amendment 6 (charter D84/D86): the scrolling list is the TOP region, so its
-	// selectable spine rows own the FIRST indices; the pinned band (NEXT then NOW)
-	// is the TAIL. sampleBoard carries no NEXT, so the two NOW cards land last.
+	// The spine is the whole cursor space (Amendment 7 — the pinned NOW/NEXT band
+	// is retired): sampleBoard's Now entries own no cursor rows.
 	want := []struct {
 		kind  rowKind
 		docID string
@@ -91,8 +91,6 @@ func TestVisibleRowsOrderAndKinds(t2 *testing.T) {
 		{rowChild, "c3"},
 		{rowOrphanHeader, orphansFoldKey}, // the loose bucket is a navigable header now
 		{rowOrphan, "o1"},
-		{rowNow, "n1"}, // pinned band at the tail now (charter D84)
-		{rowNow, "n2"},
 	}
 	if len(rows) != len(want) {
 		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -193,8 +191,8 @@ func TestVisibleRowsExcludeFoldedOrphans(t2 *testing.T) {
 //
 //	0 header e1     6 child c3             12 orphan header
 //	1 child c1      7 clusterHeader alpha  13 orphan o1
-//	2 child c2      8 clusterMember a1     14 now n1
-//	3 header e2     9 clusterMember a2     15 now n2
+//	2 child c2      8 clusterMember a1
+//	3 header e2     9 clusterMember a2
 //	4 child cx     10 clusterHeader beta
 //	5 header e3    11 clusterMember b1
 func clusterBoard() Board {
@@ -232,8 +230,6 @@ func TestVisibleRowsWithClusters(t2 *testing.T) {
 		{rowClusterMember, "b1"},
 		{rowOrphanHeader, orphansFoldKey}, // loose bucket header, then its rows
 		{rowOrphan, "o1"},
-		{rowNow, "n1"}, // pinned band at the tail now (charter D84)
-		{rowNow, "n2"},
 	}
 	if len(rows) != len(want) {
 		t2.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
@@ -502,8 +498,8 @@ func TestCursorParityWithPhaseAndNesting(t2 *testing.T) {
 // leave the navigable list entirely, so the cursor never lands on a hidden row.
 func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 	m := testModel(clusterBoard())
-	if got := len(m.visibleRows()); got != 16 {
-		t2.Fatalf("unfolded cluster board = %d rows, want 16", got)
+	if got := len(m.visibleRows()); got != 14 {
+		t2.Fatalf("unfolded cluster board = %d rows, want 14", got)
 	}
 
 	// Put the cursor on the alpha cluster header (index 7 — the spine leads now,
@@ -514,8 +510,8 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 		t2.Fatalf("h on a cluster header did not record the fold")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 14 { // a1 + a2 (2 members) gone
-		t2.Fatalf("after folding alpha: %d rows, want 14", len(rows))
+	if len(rows) != 12 { // a1 + a2 (2 members) gone
+		t2.Fatalf("after folding alpha: %d rows, want 12", len(rows))
 	}
 	for _, r := range rows {
 		if r.docID == "a1" || r.docID == "a2" {
@@ -531,8 +527,8 @@ func TestClusterFoldHidesMembersAndMovesCursorAcross(t2 *testing.T) {
 	// enter on the alpha header (back up one row) unfolds it again.
 	m.ui.Cursor = 7
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
-	if len(m.visibleRows()) != 16 {
-		t2.Fatalf("enter did not unfold alpha: %d rows, want 16", len(m.visibleRows()))
+	if len(m.visibleRows()) != 14 {
+		t2.Fatalf("enter did not unfold alpha: %d rows, want 14", len(m.visibleRows()))
 	}
 }
 
@@ -565,7 +561,7 @@ func TestActVerbsReachClusterMembers(t2 *testing.T) {
 // --- cursor movement ---------------------------------------------------------
 
 func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
-	m := testModel(sampleBoard()) // 11 rows (head cap shows every small section whole)
+	m := testModel(sampleBoard()) // 9 rows (head cap shows every small section whole)
 
 	// k at the top is a no-op (clamps at 0).
 	m, _ = step(t2, m, runes("k"))
@@ -573,12 +569,12 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("k at top moved cursor to %d, want 0", m.ui.Cursor)
 	}
 
-	// j walks down and clamps at the last row (index 10).
+	// j walks down and clamps at the last row (index 8).
 	for i := 0; i < 20; i++ {
 		m, _ = step(t2, m, runes("j"))
 	}
-	if m.ui.Cursor != 10 {
-		t2.Fatalf("j past the bottom left cursor at %d, want 10", m.ui.Cursor)
+	if m.ui.Cursor != 8 {
+		t2.Fatalf("j past the bottom left cursor at %d, want 8", m.ui.Cursor)
 	}
 
 	// G / g jump to bottom / top.
@@ -587,8 +583,8 @@ func TestCursorMovesAndClampsAtEnds(t2 *testing.T) {
 		t2.Fatalf("g left cursor at %d, want 0", m.ui.Cursor)
 	}
 	m, _ = step(t2, m, runes("G"))
-	if m.ui.Cursor != 10 {
-		t2.Fatalf("G left cursor at %d, want 10", m.ui.Cursor)
+	if m.ui.Cursor != 8 {
+		t2.Fatalf("G left cursor at %d, want 8", m.ui.Cursor)
 	}
 
 	// Arrow keys are equivalent to j/k.
@@ -617,8 +613,8 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 	if m.ui.CollapsedEpics["e1"] {
 		t2.Fatal("enter on a focus header should record an explicit expand (false), not collapse")
 	}
-	if len(m.visibleRows()) != 11 {
-		t2.Fatalf("after expand: %d rows, want 11", len(m.visibleRows()))
+	if len(m.visibleRows()) != 9 {
+		t2.Fatalf("after expand: %d rows, want 9", len(m.visibleRows()))
 	}
 
 	// enter again collapses the now-expanded section to just its header, dropping
@@ -628,8 +624,8 @@ func TestEnterOnEpicHeaderTogglesCollapse(t2 *testing.T) {
 		t2.Fatal("second enter did not collapse the expanded epic")
 	}
 	rows := m.visibleRows()
-	if len(rows) != 9 {
-		t2.Fatalf("after collapsing e1: %d rows, want 9", len(rows))
+	if len(rows) != 7 {
+		t2.Fatalf("after collapsing e1: %d rows, want 7", len(rows))
 	}
 	if rows[1].docID != "e2" { // e1 header now immediately followed by e2 header
 		t2.Fatalf("row 1 after collapse = %q, want e2 header", rows[1].docID)
@@ -730,7 +726,7 @@ func TestExpandedInactiveEpicHasNoPhantomCollapse(t2 *testing.T) {
 
 func TestHAndLOnTaskAreNoOps(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 9 // now card n1 (a task, not a header) — the pinned band is the tail now (charter D84/D86)
+	m.ui.Cursor = 1 // child c1 (a task, not a header)
 	m, _ = step(t2, m, runes("l"))
 	m, _ = step(t2, m, runes("h"))
 	// h/l are the section-fold controls; on a task row they must do NOTHING — no
@@ -748,19 +744,19 @@ func TestHAndLOnTaskAreNoOps(t2 *testing.T) {
 // board's own row count, and esc pops back to the board.
 func TestEnterOnTaskPushesFrameTask(t2 *testing.T) {
 	m := testModel(sampleBoard())
-	m.ui.Cursor = 9 // now card n1 — the pinned band is the tail now (charter D84/D86)
+	m.ui.Cursor = 8 // orphan o1
 
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEnter})
 	if len(m.stack) != 2 {
-		t2.Fatalf("enter on a NOW card did not push a frame: stack depth %d, want 2", len(m.stack))
+		t2.Fatalf("enter on a task row did not push a frame: stack depth %d, want 2", len(m.stack))
 	}
 	top := m.topFrame()
-	if top.Kind != FrameTask || top.Ref != "n1" {
-		t2.Fatalf("pushed frame = {%v %q}, want {FrameTask n1}", top.Kind, top.Ref)
+	if top.Kind != FrameTask || top.Ref != "o1" {
+		t2.Fatalf("pushed frame = {%v %q}, want {FrameTask o1}", top.Kind, top.Ref)
 	}
 	// The board's own visible-row list is unchanged under the pushed frame.
-	if len(m.visibleRows()) != 11 {
-		t2.Fatalf("pushing a detail frame changed board row count to %d, want 11", len(m.visibleRows()))
+	if len(m.visibleRows()) != 9 {
+		t2.Fatalf("pushing a detail frame changed board row count to %d, want 9", len(m.visibleRows()))
 	}
 	// esc ascends back to the board (stack root).
 	m, _ = step(t2, m, tea.KeyMsg{Type: tea.KeyEsc})
@@ -954,12 +950,12 @@ func TestClaimKeyOnNonReadyRowExplainsInstead(t2 *testing.T) {
 // must not stay silently armed. (The calm-board subtraction retired the `t` tag
 // verb; this pins the same behavior on a claim result.)
 func TestActionResultDisarmsCloseGuard(t2 *testing.T) {
-	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m := testModel(activeOrphans(claimedTask("c1", 7)))
 	m.now = func() time.Time { return time.Unix(10, 0) }
 	m.fetch = func(*apiclient.Client) (Snapshot, DetailIndex, error) {
 		return Snapshot{FetchedAt: time.Unix(10, 0)}, nil, nil
 	}
-	m.ui.Cursor = 0
+	m.ui.Cursor = 1 // c1 (row 0 is the loose-bucket header)
 
 	m, _ = step(t2, m, runes("x")) // arm the close guard
 	if m.pendingClose != "c1" {
@@ -975,8 +971,8 @@ func TestActionResultDisarmsCloseGuard(t2 *testing.T) {
 // consecutive x fires DoClose with the OBSERVED epoch.
 func TestCloseKeyDoublePressFiresWithObservedEpoch(t2 *testing.T) {
 	t2.Setenv("BARKPARK_WORKER_ID", "opus-9")
-	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
-	m.ui.Cursor = 0
+	m := testModel(activeOrphans(claimedTask("c1", 7)))
+	m.ui.Cursor = 1 // c1 (row 0 is the loose-bucket header)
 
 	var gotDoc, gotWorker string
 	var gotEpoch int
@@ -1016,8 +1012,8 @@ func TestCloseKeyDoublePressFiresWithObservedEpoch(t2 *testing.T) {
 // Any key other than a repeated x disarms the close guard (and clears the strip).
 func TestCloseGuardDisarmsOnOtherKey(t2 *testing.T) {
 	fired := false
-	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
-	m.ui.Cursor = 0
+	m := testModel(activeOrphans(claimedTask("c1", 7)))
+	m.ui.Cursor = 1 // c1 (row 0 is the loose-bucket header)
 	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
 		fired = true
 		return ActionResult{}
@@ -1036,7 +1032,7 @@ func TestCloseGuardDisarmsOnOtherKey(t2 *testing.T) {
 	}
 
 	// A subsequent lone x must RE-ARM (cursor returned to c1), never fire.
-	m.ui.Cursor = 0
+	m.ui.Cursor = 1
 	_, cmd := step(t2, m, runes("x"))
 	if cmd != nil || fired {
 		t2.Fatal("x after a disarm fired a close instead of re-arming")
@@ -1134,16 +1130,16 @@ func TestActionReconcileKeepsConfirmationStrip(t2 *testing.T) {
 // was wiped must RE-ARM (with a fresh prompt), never fire invisibly.
 func TestSnapshotDisarmsCloseGuard(t2 *testing.T) {
 	fired := false
-	m := testModel(Board{Now: []Task{claimedTask("c1", 7)}})
+	m := testModel(activeOrphans(claimedTask("c1", 7)))
 	m.now = func() time.Time { return time.Unix(10, 0) }
 	m.build = func(Snapshot, RepoContext, time.Time) Board {
-		return Board{Now: []Task{claimedTask("c1", 7)}}
+		return activeOrphans(claimedTask("c1", 7))
 	}
 	m.doClose = func(*apiclient.Client, string, string, int) ActionResult {
 		fired = true
 		return ActionResult{}
 	}
-	m.ui.Cursor = 0
+	m.ui.Cursor = 1 // c1 (row 0 is the loose-bucket header)
 
 	m, _ = step(t2, m, runes("x")) // arm
 	m, _ = step(t2, m, snapshotMsg{snap: Snapshot{FetchedAt: time.Unix(10, 0)}})
@@ -1424,29 +1420,5 @@ func TestEnterOnMoreLineExpandsSection(t *testing.T) {
 	key := rows[moreAt].docID
 	if !m.sectionExpandedByKey(key) {
 		t.Fatalf("section %q not in modeExpanded after enter on its fold line", key)
-	}
-}
-
-// TestInvertedIndexOrder pins Amendment 6 (charter D84/D86): the spine selectable
-// rows own [0, S), then NEXT [S, S+lenNext), then NOW [S+lenNext, …) — the pinned
-// band is the TAIL of the index space, so the cursor flows top→bottom through the
-// list first and continues down into the claimable band.
-func TestInvertedIndexOrder(t *testing.T) {
-	m := testModel(nextBoard())
-	rows := m.visibleRows()
-	s := selectableSpineCount(m.board, m.ui)
-	if s <= 0 {
-		t.Fatalf("fixture must have spine rows, got S=%d", s)
-	}
-	for i := 0; i < s; i++ {
-		if rows[i].kind == rowNow || rows[i].kind == rowNext {
-			t.Fatalf("row %d is a pinned band kind %v — the band must follow the spine", i, rows[i].kind)
-		}
-	}
-	if rows[s].kind != rowNext {
-		t.Fatalf("row S (%d) is %v, want the first NEXT row", s, rows[s].kind)
-	}
-	if rows[s+len(m.board.Next)].kind != rowNow {
-		t.Fatalf("row S+lenNext is %v, want the first NOW row", rows[s+len(m.board.Next)].kind)
 	}
 }

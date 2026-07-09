@@ -24,14 +24,16 @@ var Chrome = ChromeInfo{RepoName: "—", Branch: "—", Server: "—"}
 // gutter + indent + weight, never a border.
 const childIndent = 2
 
-// Render draws the whole portrait frame for a 60–100col × 100+row pane, INVERTED
+// Render draws the whole portrait frame for a 60–100col × 100+row pane
 // (charter Amendment 6 / D83): a one-line identity strip pinned at the very top,
 // then the scrolling epic spine (a window around st.Cursor) filling the top
-// region, then the pinned band at the BOTTOM (NEXT above NOW), then the momentum
-// line + progress bar + ticker + footer as fixed bottom status chrome. Cursor
-// order follows the visual top→bottom order: spine rows first, then NEXT, then
-// NOW (charter D84/D86). It is pure — no I/O, no tea, no network — so goldens are
-// the primary gate. Below 60 cols rows shed their right-meta and keep glyph+title.
+// region, then the momentum line + progress bar + ticker + footer as fixed
+// bottom status chrome. The spine IS the whole cursor space (Amendment 7: the
+// pinned NEXT/NOW band is retired — claims already render in place as spinner
+// rows per D56, and intent is the ready rows themselves, so the band only
+// duplicated the list while eating its window). It is pure — no I/O, no tea, no
+// network — so goldens are the primary gate. Below 60 cols rows shed their
+// right-meta and keep glyph+title.
 //
 // @canonical capability:taskboard-render aka:portrait,tui,task board,glance pane doc:docs/cards/tui.md
 func Render(b Board, st UIState, width, height int, now time.Time) string {
@@ -61,55 +63,7 @@ func Render(b Board, st UIState, width, height int, now time.Time) string {
 	}
 	chrome = append(chrome, renderFooter(width))
 
-	// S is the number of SELECTABLE spine rows — the base offset the pinned band's
-	// cursor indices sit ABOVE now that the list is the top region (charter D86).
-	// Single source, computed once and read by both band renderers, so visibleRows
-	// (which walks the SAME spineRows) and flattenSpine agree by construction.
-	s := selectableSpineCount(b, st)
-
-	// SHEDDABLE PINNED BAND (NOW + NEXT), budgeted off the BOTTOM (charter D87):
-	// identity + 2 blanks + the fixed chrome are reserved, the spine keeps at least
-	// minSpine lines. NOW reserves FIRST (last to shed); NEXT gets the remainder and
-	// folds before the spine starves. An empty NOW+NEXT collapses the band to
-	// NOTHING — no labels, no blank spacers (the all-clear lives in the momentum
-	// line's "0 in flight"), so an idle board stays byte-stable.
-	const minSpine = 4
-	var band []string
-	if len(b.Now) > 0 || len(b.Next) > 0 {
-		bandBudget := height - len(identityTop) - 2 - len(chrome) - minSpine
-		if bandBudget < 2 {
-			bandBudget = 2 // one honest row, whatever the pane size
-		}
-		// Reserve NEXT its single collapse line BEFORE NOW spends the budget, so a
-		// greedy NOW can never orphan a NEXT cursor stop (charter D63: NEXT folds to
-		// "+N intent", it never silently vanishes while it owns rows). Under the very
-		// tightest budget both bands collapse to one catch line apiece.
-		nowBudget := bandBudget
-		if len(b.Next) > 0 {
-			nowBudget = bandBudget - 1
-			if nowBudget < 1 {
-				nowBudget = 1
-			}
-		}
-		// NOW's cursor base is AFTER the spine AND after NEXT (NOW is the very last
-		// selectable band; NEXT sits above it — charter D84/D86).
-		nowLines := renderNowBand(b, st, width, nowBudget, s+len(b.Next), now)
-		nextBudget := bandBudget - len(nowLines)
-		if nextBudget < 0 {
-			nextBudget = 0
-		}
-		// NEXT's cursor base is immediately after the spine (charter D86).
-		nextLines := renderNextBand(b, st, width, nextBudget, s, now)
-
-		band = append(band, "")           // blank between the spine and the band
-		band = append(band, nextLines...) // NEXT ABOVE NOW (charter D84)
-		band = append(band, nowLines...)
-		band = append(band, "") // blank between the band and the status chrome
-	}
-
-	bottom := make([]string, 0, len(band)+len(chrome))
-	bottom = append(bottom, band...)
-	bottom = append(bottom, chrome...)
+	bottom := chrome
 
 	spineLines, cursorLine := flattenSpine(b, st, width, now)
 
@@ -373,113 +327,6 @@ func connGlyphWord(c ConnState) (string, string) {
 	}
 }
 
-// ── NOW band (pinned) ────────────────────────────────────────────────────────
-
-// renderNowBand renders the WHO half of the pinned band (charter wave-12 D59):
-// one agent-first line per live claim, within maxLines. An empty NOW returns nil
-// — NO "NOW" label, NO "nothing claimed" line: the empty band collapses and the
-// all-clear lives in the momentum line's "0 in flight". NOW cards are the LAST
-// selectable rows now that the list is the top region (charter D84/D86): base is
-// S+len(b.Next), so a NOW card is a cursor stop at [base, base+len(b.Now)) — the
-// very bottom of the index space, directly above the momentum status bar. The row
-// at st.Cursor wears the selection marker; when more claims exist than fit, the
-// rest fold into a dim "+N more claimed" line that CATCHES a folded-row selection,
-// never vanishing silently.
-func renderNowBand(b Board, st UIState, width, maxLines, base int, now time.Time) []string {
-	if len(b.Now) == 0 {
-		return nil
-	}
-	n := len(b.Now)
-	// Fully collapsed: only one line fits (the tightest supported panes, where NEXT
-	// has reserved the band's other line). Drop the "NOW" label and fold EVERY claim
-	// into one dim "+N claimed" catch line that still marks a folded NOW-row cursor,
-	// so no claim cursor stop is ever left unmarked (the parity floor).
-	if maxLines < 2 {
-		sel := st.Cursor >= base && st.Cursor < base+n
-		return []string{dimStyle.Render(truncate(
-			SelectionMarker(sel)+fmt.Sprintf("  +%d claimed", n), width))}
-	}
-	lines := []string{boldStyle.Render("NOW")}
-	shown := n
-	if 1+n > maxLines {
-		shown = maxLines - 2 // reserve the header + fold line
-		if shown < 0 {
-			shown = 0
-		}
-	}
-	for i, t := range b.Now[:shown] {
-		// flashTitle lights the title if this claim just changed; NowCard's ansi-
-		// aware truncation carries the emphasis through width-safely.
-		lines = append(lines, NowCard(flashTitle(t, st, now), st.Cursor == base+i, width, st.Frame, now)...)
-	}
-	if folded := n - shown; folded > 0 {
-		sel := st.Cursor >= base+shown && st.Cursor < base+n
-		lines = append(lines, dimStyle.Render(truncate(
-			SelectionMarker(sel)+fmt.Sprintf("  +%d more claimed", folded), width)))
-	}
-	return lines
-}
-
-// renderNextBand renders the INTENT half of the pinned band (charter wave-12
-// D60): a tiny NEXT strip directly ABOVE NOW showing what the system is ABOUT to
-// work on — resumables first, then the priority head of the ready queue. The
-// "NEXT" label is DIM (intent is subordinate to active work; NOW's label is bold,
-// so the weight difference encodes active > intent). Now that the list is the top
-// region (charter D84/D86), NEXT sits immediately after the spine: base = S =
-// selectableSpineCount, so each row is a real cursor stop at [S, S+len(b.Next)),
-// with the NOW rows following below. When the rows don't fit maxLines they fold to
-// a dim "+N intent" catch line (the visual collapse of the folded cursor rows, NOT
-// a separate stop). A display-only "+N ready" tail points at the spine below and
-// sheds FIRST under height pressure. Empty NEXT => nil.
-func renderNextBand(b Board, st UIState, width, maxLines, base int, now time.Time) []string {
-	if len(b.Next) == 0 || maxLines < 1 {
-		return nil
-	}
-	n := len(b.Next)
-	// Fully collapsed: only one line fits (the tightest supported panes). Drop the
-	// "NEXT" label and fold EVERY intent row into one dim "+N intent" catch line that
-	// still marks a folded NEXT-row cursor — the charter D63 guarantee that NEXT
-	// sheds to "+N intent" rather than vanishing while it owns cursor stops.
-	if maxLines < 2 {
-		sel := st.Cursor >= base && st.Cursor < base+n
-		return []string{dimStyle.Render(truncate(
-			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", n), width))}
-	}
-	label := "NEXT"
-	if b.IndependentReady > 1 {
-		// The D66 capacity read: how many non-interfering neighborhoods hold
-		// ready work — the honest "we could send out N agents" number.
-		label = fmt.Sprintf("NEXT · %d independent", b.IndependentReady)
-	}
-	lines := []string{dimStyle.Render(truncate(label, width))}
-
-	// Rows take priority over the display-only "+N ready" tail. Show as many rows
-	// as fit under maxLines (reserving the label); fold the remainder to "+N intent".
-	shown := n
-	if 1+n > maxLines {
-		shown = maxLines - 2 // label + fold line
-		if shown < 0 {
-			shown = 0
-		}
-	}
-	for i := 0; i < shown; i++ {
-		lines = append(lines, renderNextRow(b.Next[i], st.Cursor == base+i, width, now))
-	}
-	if folded := n - shown; folded > 0 {
-		sel := st.Cursor >= base+shown && st.Cursor < base+n
-		lines = append(lines, dimStyle.Render(truncate(
-			SelectionMarker(sel)+fmt.Sprintf("  +%d intent", folded), width)))
-	}
-	// The "+N ready" tail is a display-only pointer to the ready rows in the spine
-	// below (never a cursor stop, never counted in len(b.Next)). It sheds FIRST
-	// under height pressure, so append it only when a spare line remains.
-	if b.NextReadyMore > 0 && len(lines) < maxLines {
-		lines = append(lines, dimStyle.Render(truncate(
-			fmt.Sprintf("   +%d ready", b.NextReadyMore), width)))
-	}
-	return lines
-}
-
 // ── Motion paint (flash + live elapsed) ──────────────────────────────────────
 
 // flashTitle lights a row's title with the one-shot flash emphasis when the
@@ -501,42 +348,19 @@ func flashTitle(t Task, st UIState, now time.Time) Task {
 
 // ── Epic spine (scrolls) ─────────────────────────────────────────────────────
 
-// selectableSpineCount is the number of SELECTABLE rows the ONE spine producer
-// (spineRows, charter D42) emits — the base index the pinned NEXT/NOW band sits
-// ABOVE now that the list is the top region (charter Amendment 6 / D86). Render
-// computes it once and passes it to renderNextBand (base = S) and renderNowBand
-// (base = S+len(b.Next)); visibleRows walks the SAME spineRows Selectable subset,
-// so the two agree by construction and cursor-parity stays STRUCTURAL.
-func selectableSpineCount(b Board, st UIState) int {
-	n := 0
-	for _, sr := range spineRows(b, st) {
-		if sr.Selectable {
-			n++
-		}
-	}
-	return n
-}
-
 // flattenSpine renders every spine display line and reports the line index of
-// the cursor-selected row when it lives in the spine (-1 when the cursor is on
-// a pinned NEXT/NOW row, which the spine window never needs to chase).
+// the cursor-selected row.
 //
 // It consumes the ONE ordered spine producer (spineRows, charter D42): the shell
 // and the renderer read the SAME list, so the selection index space is
-// structural. Now that the list is the TOP region (charter Amendment 6 / D86),
-// the SPINE owns the FIRST indices [0, S): each spineRow that is Selectable
-// consumes the next index in emission order (headers, then their nested children,
-// then clusters, then orphans); the pinned band (NEXT then NOW) follows AFTER the
-// spine at [S, …). Separators, "+K more" folds and phase sub-bands are
-// Selectable:false and never touch the cursor. A cursor in the band is >= S, so
-// markSel never fires and cursorLine stays -1 — the spine window never chases a
-// pinned cursor (the SAME behavior as before, just re-based). Any divergence is
-// impossible: visibleRows filters the SAME producer to its Selectable set.
+// structural. The spine IS the whole cursor space (Amendment 7 — the pinned
+// NEXT/NOW band is retired): each spineRow that is Selectable consumes the next
+// index in emission order (headers, then their nested children, then clusters,
+// then orphans). Separators, "+K more" folds and phase sub-bands are
+// Selectable:false and never touch the cursor. Any divergence is impossible:
+// visibleRows filters the SAME producer to its Selectable set.
 func flattenSpine(b Board, st UIState, width int, now time.Time) (lines []string, cursorLine int) {
 	cursorLine = -1
-	// The spine owns the first indexes now (charter D86): its first selectable row
-	// is cursor 0. The pinned band (NEXT then NOW) follows at [S, …), where S =
-	// selectableSpineCount — so a band cursor is >= S and markSel below never fires.
 	selIdx := 0
 	emit := func(s string) { lines = append(lines, s) }
 	markSel := func() bool {

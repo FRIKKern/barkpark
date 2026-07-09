@@ -71,9 +71,7 @@ const (
 type rowKind int
 
 const (
-	rowNow           rowKind = iota // a NOW-band card (an unexpired claim)
-	rowNext                         // a NEXT intent-strip row (resumable / ready head, charter wave-12 D60)
-	rowEpicHeader                   // an epic section header
+	rowEpicHeader    rowKind = iota // an epic section header
 	rowChild                        // a visible child task inside an expanded epic
 	rowClusterHeader                // a derived-cluster section header
 	rowClusterMember                // a task inside an unfolded cluster section
@@ -454,14 +452,6 @@ func (m Model) handleBoardKey(key string) (tea.Model, tea.Cmd) {
 			m.setStrip("no task under the cursor to claim", RoleWarn)
 			return m, nil
 		}
-		// A resumable NEXT row is routed AROUND the local ready-gate (charter D62):
-		// a live resumable is `open` and outside prime's clamped ready overlay, so
-		// claimTask's ready-gate would wrongly refuse it — but it was provably
-		// claimable moments ago, and the SERVER is the real arbiter (an honest strip
-		// renders on a genuine refusal). Every other row keeps the ready-gate path.
-		if r.kind == rowNext && m.nextKindOf(r.docID) == nextResume {
-			return m, m.claimCmd(t.DocID, ResolveWorker())
-		}
 		return m.claimTask(t)
 	case "x":
 		t, ok := m.taskUnderCursor()
@@ -668,21 +658,9 @@ func (m Model) taskUnderCursor() (Task, bool) {
 	return m.taskByID(r.docID)
 }
 
-// taskByID finds a task anywhere on the board (NOW band, NEXT intent strip, epic
-// roots, epic children, cluster members, orphans) by doc id.
+// taskByID finds a task anywhere on the board (epic roots, epic children,
+// cluster members, orphans) by doc id.
 func (m Model) taskByID(id string) (Task, bool) {
-	for _, t := range m.board.Now {
-		if t.DocID == id {
-			return t, true
-		}
-	}
-	// A NEXT row (charter wave-12 D61) — a resumable can be a folded orphan absent
-	// from Now/Epics/Clusters/Orphans, so c/enter/o must find it here.
-	for _, ni := range m.board.Next {
-		if ni.Task.DocID == id {
-			return ni.Task, true
-		}
-	}
 	for _, e := range m.board.Epics {
 		if e.Root.DocID == id {
 			return e.Root, true
@@ -785,7 +763,7 @@ func (m Model) activateBoard() Model {
 		// expanded) toggles back, mirroring the header.
 		m.ui.CollapsedEpics[r.docID] = m.sectionExpandedByKey(r.docID)
 		m.clampCursor()
-	case rowNow, rowNext, rowChild, rowClusterMember, rowOrphan:
+	case rowChild, rowClusterMember, rowOrphan:
 		title := r.docID
 		if t, found := m.taskByID(r.docID); found && t.Title != "" {
 			title = t.Title
@@ -793,18 +771,6 @@ func (m Model) activateBoard() Model {
 		(&m).pushFrame(Frame{Kind: FrameTask, Ref: r.docID, Title: title})
 	}
 	return m
-}
-
-// nextKindOf reports the NextKind of a NEXT row by doc id (charter wave-12 D62),
-// so the c handler can route a resumable around the local ready-gate. Defaults to
-// nextReady for any id not in the strip.
-func (m Model) nextKindOf(docID string) NextKind {
-	for _, ni := range m.board.Next {
-		if ni.Task.DocID == docID {
-			return ni.Kind
-		}
-	}
-	return nextReady
 }
 
 // setEpicFoldUnderCursor is h (fold) / l (unfold): deterministic, idempotent
@@ -963,42 +929,24 @@ func (m *Model) clampCursor() {
 // into the flattened visible-row list"). The order is the frozen contract
 // between this shell and the render slice:
 //
-//  1. the pinned NOW cards (unexpired claims — the READY TO CLAIM head is retired,
-//     charter D52 / wave-11)
-//  2. each epic: its header, then — per epicMode (charter D51) — its focus
+//  1. each epic: its header, then — per epicMode (charter D51) — its focus
 //     neighborhood (modeFocus), all children (modeExpanded), or nothing
 //     (modeHeader/modeCollapsed); an explicit CollapsedEpics entry wins (D54)
-//  3. each derived cluster: its header, then its members per clusterMode
-//  4. the loose "(no epic)" header, then its orphan rows per orphansMode
+//  2. each derived cluster: its header, then its members per clusterMode
+//  3. the loose "(no epic)" header, then its orphan rows per orphansMode
 //
-// Both this and the renderer's flattenSpine read the SAME spineRows producer, so
-// the focus filter lives inside spineRows and cursor-parity stays structural.
+// The spine IS the whole cursor space (Amendment 7 — the pinned NEXT/NOW band
+// is retired). Both this and the renderer's flattenSpine read the SAME
+// spineRows producer — headers, nested children, cluster members, orphans and
+// "+K more" folds in emission order; separators, phase bands and dead epics are
+// Selectable:false and skipped, so j/k never lands on a line that is not a
+// cursor stop and cursor-parity stays structural.
 func (m Model) visibleRows() []row {
 	var rows []row
-	// Amendment 6 (charter D86): the scrolling list is the TOP region, so its
-	// selectable rows own the FIRST cursor indices [0, S). The SAME spineRows
-	// producer flattenSpine renders — headers, nested children, cluster members,
-	// orphans, and "+K more" folds are read in emission order; separators, phase
-	// bands and folds are Selectable:false and skipped, so j/k never lands on a
-	// line that is not a cursor stop. Because both paths read this one producer,
-	// the cursor can no longer desync.
 	for _, sr := range spineRows(m.board, m.ui) {
 		if sr.Selectable {
 			rows = append(rows, row{kind: sr.RK, docID: sr.Ref})
 		}
-	}
-	// Then the pinned BOTTOM band, the cursor flowing DOWN into it (charter D84):
-	// the NEXT intent rows (each a claimable cursor stop) ABOVE the NOW rows (live
-	// claims, at the very bottom). Height-independent — always len(Next)+len(Now)
-	// rows; the renderers' folds are purely visual, so parity holds against
-	// Render's S / S+len(Next) pinned bases (the band is now the TAIL of the index
-	// space). The wave-7 READY TO CLAIM head is retired (charter D52 / wave-11 —
-	// ONE list): claim-forward stays via the cursor landing on any ready row.
-	for i := range m.board.Next {
-		rows = append(rows, row{kind: rowNext, docID: m.board.Next[i].Task.DocID})
-	}
-	for _, t := range m.board.Now {
-		rows = append(rows, row{kind: rowNow, docID: t.DocID})
 	}
 	return rows
 }
