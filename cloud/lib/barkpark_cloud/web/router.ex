@@ -224,6 +224,14 @@ defmodule BarkparkCloud.Web.Router do
   ## same shell as "/"; the JSON API is entirely under /v1/*, so no collision.
   get("/new", do: send_dashboard(conn))
 
+  ## bp-login-ux W1 — "/activate" is the device-login approve page. A REAL path
+  ## (like "/new") so `bp login`'s boxed verification_uri deep-links straight to
+  ## it and a refresh/paste lands the SPA shell; app.js detects location.pathname
+  ## === "/activate", reads an optional ?code= prefill, and drives the
+  ## inspect → Approve/Deny flow against POST /v1/auth/device/* (owned by S1).
+  ## Served by the same shell as "/"; the JSON API is entirely under /v1/*.
+  get("/activate", do: send_dashboard(conn))
+
   ## Stripe Checkout returns the customer to the SPA root with a ?checkout=
   ## success|cancel flag (see Billing.StripeGateway / #282) — no dedicated route
   ## is needed since "/" already serves the SPA and it's hash-routed. app.js

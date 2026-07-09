@@ -1751,8 +1751,10 @@
     var aria = themeToggleAria(t);
     setText($("#theme-label"), label);
     setText($("#new-theme-label"), label); // /new screen's own toggle, kept in sync
+    setText($("#activate-theme-label"), label); // /activate screen's own toggle, kept in sync
     var tt = $("#theme-toggle"); if (tt) tt.setAttribute("aria-label", aria);
     var nt = $("#new-theme-toggle"); if (nt) nt.setAttribute("aria-label", aria);
+    var at = $("#activate-theme-toggle"); if (at) at.setAttribute("aria-label", aria);
   }
   function initTheme() {
     var t = localStorage.getItem(THEME) || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
@@ -8913,6 +8915,266 @@
     if (v === "members") loadMembers();
   }
 
+  // =========================================================== DEVICE LOGIN (/activate)
+  // The browser half of `bp login`'s copy-link device flow (bp-login-ux W1,
+  // charter decisions 5/6/10). `bp` prints https://barkpark.cloud/activate + an
+  // XXXX-XXXX code and polls; the user opens that URL, we confirm WHICH machine
+  // is asking (client_name / ip / user-agent), and an EXPLICIT Approve stamps
+  // the request so the CLI poll can mint a session. NEVER auto-approve — a page
+  // load must not authorize a device (login-CSRF defense, charter D5/D6).
+  //
+  // Endpoint contract (FROZEN in charter decision 10; owned by task
+  // bp-login-ux-w1-cloud-device-auth — build against it even while S1 is unmerged):
+  //   POST /v1/auth/device/inspect {user_code}  (Bearer) → 200 {client_name,
+  //        ip_address, user_agent, expires_at} | 404 {error:"expired_or_invalid"}
+  //   POST /v1/auth/device/approve {user_code}  (Bearer) → 200 {ok:true} | 404
+  //   POST /v1/auth/device/deny    {user_code}  (Bearer) → 200 {ok:true} | 404
+  //
+  // Logged-out landings ride the invitation/instance-login precedent verbatim:
+  // park the code in sessionStorage, scrub ?code= from the address bar, banner
+  // the standard login card, and resume on the first authed render() — so 2FA
+  // and OAuth are handled by the ordinary web login for free.
+  var ACTIVATE_KEY = "bpcloud.activate";
+  // charter D7: the unambiguous CSPRNG alphabet the control plane draws user_codes
+  // from (no 0/1/I/L/O/U). Input normalization folds to exactly this set.
+  var ACTIVATE_ALPHABET = "23456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+  // Pure: fold raw user input into the canonical user_code. Uppercase, drop
+  // separators + anything outside the alphabet, cap at 8, render as XXXX-XXXX.
+  // Sub-8 input keeps a live dash after the 4th char so typing reads naturally;
+  // a complete code is the exact string the terminal printed and the wire form.
+  function normalizeUserCode(raw) {
+    var up = String(raw == null ? "" : raw).toUpperCase();
+    var kept = "";
+    for (var i = 0; i < up.length && kept.length < 8; i++) {
+      if (ACTIVATE_ALPHABET.indexOf(up.charAt(i)) !== -1) kept += up.charAt(i);
+    }
+    if (kept.length <= 4) return kept;
+    return kept.slice(0, 4) + "-" + kept.slice(4);
+  }
+  // Pure: a complete, sendable code is exactly 8 alphabet chars.
+  function userCodeComplete(code) {
+    return normalizeUserCode(code).replace("-", "").length === 8;
+  }
+  // Pure: pull + normalize the ?code= prefill out of a location.search string.
+  // Malformed queries degrade to "" — never throw inside render().
+  function activateCodeFromSearch(search) {
+    var params;
+    try { params = new URLSearchParams(search || ""); }
+    catch (e) { return ""; }
+    return normalizeUserCode(params.get("code") || "");
+  }
+  // Pure: fold an inspect/approve/deny response into a view state. The server
+  // folds expired/unknown/consumed/denied into ONE opaque 404 (no enumeration
+  // signal), so 404 → "gone"; a 200 with a body → "confirm"; else retryable.
+  function activateInspectState(status, data) {
+    if (status === 404) return "gone";
+    if (status === 200 && data) return "confirm";
+    return "error";
+  }
+  // Pure: humane countdown to the code's expiry. Past/absent/unparseable → "".
+  function activateExpiryText(expiresAt, nowMs) {
+    if (!expiresAt) return "";
+    var ms = Date.parse(expiresAt) - nowMs;
+    if (isNaN(ms)) return "";
+    if (ms <= 0) return "expired";
+    var mins = Math.floor(ms / 60000);
+    var secs = Math.floor((ms % 60000) / 1000);
+    return mins > 0 ? "expires in " + mins + "m " + secs + "s" : "expires in " + secs + "s";
+  }
+
+  function isActivateFlow() { return location.pathname === "/activate"; }
+  function activateCodePrefill() { return activateCodeFromSearch(location.search); }
+  function parkedActivateCode() {
+    try { return sessionStorage.getItem(ACTIVATE_KEY); } catch (e) { return null; }
+  }
+  function parkActivateCode(c) {
+    try { sessionStorage.setItem(ACTIVATE_KEY, c); } catch (e) {}
+  }
+  function clearParkedActivateCode() {
+    try { sessionStorage.removeItem(ACTIVATE_KEY); } catch (e) {}
+  }
+
+  function showActivateScreen() {
+    hide($("#auth-screen"));
+    hide($("#app-shell"));
+    hide($("#new-screen"));
+    show($("#activate-screen"));
+  }
+  function activateSetBody(html) { var b = $("#activate-body"); if (b) b.innerHTML = html; }
+  function activatePanel(inner) { return '<div class="new-card card">' + inner + "</div>"; }
+  function activateHead(title, desc) {
+    return '<span class="new-eyebrow">Barkpark Cloud · Device sign-in</span>' +
+      '<h1 class="new-title">' + esc(title) + "</h1>" +
+      (desc ? '<p class="new-desc">' + desc + "</p>" : "");
+  }
+  function activateCodeChip(code) {
+    return '<div class="rail-row"><span class="k">Code</span>' +
+      '<span class="v" style="font-size:15px;letter-spacing:0.12em">' + esc(code) + "</span></div>";
+  }
+
+  // The authed approve page. Reads the ?code= prefill (parks + scrubs it — a
+  // shareable secret must not linger in history), then either inspects a
+  // complete parked code or shows the manual entry form.
+  function renderActivateApprove() {
+    showActivateScreen();
+    var prefill = activateCodePrefill();
+    if (prefill) parkActivateCode(prefill);
+    // Scrub the code + any cosmetic hash the login round-trip left behind.
+    if (typeof history !== "undefined" && history.replaceState) {
+      history.replaceState(null, "", "/activate");
+    }
+    var code = parkedActivateCode() || "";
+    if (userCodeComplete(code)) activateInspect(normalizeUserCode(code));
+    else renderActivateEntry(code);
+  }
+
+  // Manual code entry (no/partial prefill, or "enter a different code").
+  function renderActivateEntry(prefill) {
+    activateSetBody(activatePanel(
+      activateHead("Approve a device sign-in",
+        "Enter the code shown in your terminal to approve <b>bp</b> signing in on this account.") +
+      '<form id="activate-form" novalidate>' +
+        '<div class="field"><label class="label" for="activate-code">Code</label>' +
+          '<input class="form-input" id="activate-code" type="text" inputmode="latin" autocomplete="off" ' +
+          'autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX" ' +
+          'style="font-family:var(--mono);letter-spacing:0.12em" value="' + esc(normalizeUserCode(prefill || "")) + '" /></div>' +
+        '<p class="form-error" id="activate-error" role="alert" hidden></p>' +
+        '<button class="btn btn-primary btn-block" id="activate-continue" type="submit">Continue</button>' +
+      "</form>"
+    ));
+    var input = $("#activate-code");
+    if (input) {
+      // Live-normalize as the user types/pastes (dash + uppercase + valid chars).
+      input.addEventListener("input", function () {
+        var norm = normalizeUserCode(input.value);
+        if (norm !== input.value) input.value = norm;
+      });
+      input.focus();
+    }
+    var form = $("#activate-form");
+    if (form) form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var err = $("#activate-error");
+      hide(err);
+      var code = normalizeUserCode(($("#activate-code") || {}).value || "");
+      if (!userCodeComplete(code)) { setText(err, "Enter the full 8-character code."); show(err); return; }
+      parkActivateCode(code);
+      activateInspect(code);
+    });
+  }
+
+  // POST inspect (Bearer) → the confirm screen (or gone/error).
+  function activateInspect(code) {
+    activateSetBody(activatePanel(activateHead("Checking the request…", "") +
+      '<div class="loading">Looking up <span style="font-family:var(--mono)">' + esc(code) + "</span>&hellip;</div>"));
+    api("POST", "/v1/auth/device/inspect", { user_code: code }).then(function (r) {
+      var state = activateInspectState(r.status, r.data);
+      if (state === "confirm") { renderActivateConfirm(code, r.data); return; }
+      if (state === "gone") { renderActivateResult("gone"); return; }
+      renderActivateError(code, r.data);
+    });
+  }
+
+  // The confirmation screen — WHICH machine is asking + explicit Approve/Deny.
+  function renderActivateConfirm(code, data) {
+    data = data || {};
+    var expiry = activateExpiryText(data.expires_at, Date.now());
+    var rows =
+      activateCodeChip(code) +
+      '<div class="rail-row"><span class="k">Device</span><span class="v plain">' +
+        esc(data.client_name || "Unknown device") + "</span></div>" +
+      (data.ip_address ? '<div class="rail-row"><span class="k">IP address</span><span class="v">' + esc(data.ip_address) + "</span></div>" : "") +
+      (data.user_agent ? '<div class="rail-row"><span class="k">Client</span><span class="v plain">' + esc(data.user_agent) + "</span></div>" : "") +
+      (expiry ? '<div class="rail-row"><span class="k">Expiry</span><span class="v plain">' + esc(expiry) + "</span></div>" : "");
+    activateSetBody(activatePanel(
+      activateHead("Approve this sign-in?",
+        "A device is asking to sign in to your Barkpark Cloud account. Approve it only if you started this from your terminal.") +
+      '<div class="activate-rail">' + rows + "</div>" +
+      '<button class="btn btn-primary btn-block" id="activate-approve" type="button" style="margin-top:16px">Approve sign-in</button>' +
+      '<button class="btn btn-ghost btn-block" id="activate-deny" type="button" style="margin-top:8px">Deny</button>' +
+      '<p class="new-fineprint dim" style="margin-top:12px">Approving lets this device act as you until you revoke it. Didn\'t start this? Deny — nothing is shared.</p>'
+    ));
+    var approve = $("#activate-approve");
+    var deny = $("#activate-deny");
+    if (approve) approve.addEventListener("click", function () { submitActivateDecision(code, "approve", approve, deny); });
+    if (deny) deny.addEventListener("click", function () { submitActivateDecision(code, "deny", approve, deny); });
+  }
+
+  function submitActivateDecision(code, decision, approveBtn, denyBtn) {
+    if (approveBtn) approveBtn.disabled = true;
+    if (denyBtn) denyBtn.disabled = true;
+    var active = decision === "approve" ? approveBtn : denyBtn;
+    if (active) active.textContent = decision === "approve" ? "Approving…" : "Denying…";
+    api("POST", "/v1/auth/device/" + decision, { user_code: code }).then(function (r) {
+      if (r.status === 200) { renderActivateResult(decision === "approve" ? "approved" : "denied"); return; }
+      if (r.status === 404) { renderActivateResult("gone"); return; }
+      // Transient failure — nothing changed; re-arm the buttons and explain.
+      if (approveBtn) { approveBtn.disabled = false; approveBtn.textContent = "Approve sign-in"; }
+      if (denyBtn) { denyBtn.disabled = false; denyBtn.textContent = "Deny"; }
+      toast({ kind: "error", title: "Couldn't reach the server", body: friendly(r.data, "Nothing changed — please try again.") });
+    });
+  }
+
+  // Terminal states. Each consumes the parked code (a reload must not replay it).
+  function renderActivateResult(state) {
+    clearParkedActivateCode();
+    var dashboard = '<a class="btn btn-ghost btn-block" href="/" style="margin-top:8px">Go to your dashboard</a>';
+    if (state === "approved") {
+      activateSetBody(activatePanel(
+        '<span class="new-eyebrow ok">✓ Approved</span>' +
+        '<h1 class="new-title">You\'re signed in</h1>' +
+        '<p class="new-desc">Return to your terminal — <b>bp</b> is finishing sign-in and will connect automatically. You can close this tab.</p>' +
+        dashboard));
+      return;
+    }
+    if (state === "denied") {
+      activateSetBody(activatePanel(
+        activateHead("Request denied", "Nothing was shared and no device was signed in. You can safely close this tab.") +
+        dashboard));
+      return;
+    }
+    // "gone": expired / unknown / already used.
+    activateSetBody(activatePanel(
+      activateHead("This code has expired or was already used",
+        "Device codes are single-use and short-lived. Start again from your terminal, then enter the fresh code here.") +
+      '<button class="btn btn-primary btn-block" id="activate-retry" type="button">Enter a different code</button>' +
+      dashboard));
+    var retry = $("#activate-retry");
+    if (retry) retry.addEventListener("click", function () { renderActivateEntry(""); });
+  }
+
+  // A transient (non-404) inspect failure: retryable, code preserved.
+  function renderActivateError(code, data) {
+    activateSetBody(activatePanel(
+      activateHead("Something went wrong",
+        "We couldn't check that code just now — nothing has changed. Give it another try.") +
+      '<button class="btn btn-primary btn-block" id="activate-again" type="button">Try again</button>' +
+      '<button class="btn btn-ghost btn-block" id="activate-other" type="button" style="margin-top:8px">Enter a different code</button>'));
+    var again = $("#activate-again");
+    var other = $("#activate-other");
+    if (again) again.addEventListener("click", function () { activateInspect(code); });
+    if (other) other.addEventListener("click", function () { renderActivateEntry(""); });
+  }
+
+  // The logged-out companion: a banner on the sign-in card saying what logging
+  // in will do. Static copy — inspect needs auth, and probing would leak nothing
+  // useful anyway (the code is a bearer-approvable secret, not a lookup key).
+  function showAuthActivateBanner(code) {
+    var loginCard = $("#login-card");
+    if (!loginCard) return;
+    var slot = document.getElementById("auth-activate");
+    if (!slot) {
+      slot = document.createElement("div");
+      slot.id = "auth-activate";
+      slot.className = "auth-invite";
+      loginCard.insertBefore(slot, loginCard.firstChild);
+    }
+    slot.innerHTML = '<span class="auth-invite-title">Approve a device sign-in.</span> ' +
+      "Log in — or create an account — to approve <b>bp</b> signing in" +
+      (userCodeComplete(code) ? ' with code <span class="auth-invite-email">' + esc(normalizeUserCode(code)) + "</span>." : ".");
+  }
+
   // =========================================================== RENDER
   function render() {
     // A returning OAuth callback lands a session token on the fragment; consume
@@ -8930,8 +9192,23 @@
       return;
     }
 
+    // bp-login-ux: a device-login (/activate) round-trip through OAuth lands
+    // back at the callback's fixed "/" with the user_code still parked — bounce
+    // straight back to the approve page, now authed. (Email+password login stays
+    // on /activate and is caught by the authed intercept just below.)
+    if (didOAuth && parkedActivateCode() && session() && session().token) {
+      location.href = "/activate";
+      return;
+    }
+
     // The /new deploy flow owns the whole screen when we're on that path.
     if (isNewFlow()) { renderNewFlow(); return; }
+
+    // The /activate device-login approve page owns the whole screen once signed
+    // in. Logged out, we fall through to the auth screen — the banner + park
+    // below rides the normal web login (incl 2FA/OAuth), and this intercept
+    // fires on the first authed render() to resume the approve.
+    if (isActivateFlow() && session() && session().token) { renderActivateApprove(); return; }
 
     var s = session();
     if (!s || !s.token) {
@@ -8984,6 +9261,18 @@
           showAuthStudioBanner(studioLoginUrl);
         } else if (parkedStudioLogin()) {
           showAuthStudioBanner(parkedStudioLogin());
+        }
+        // A device-login deep link (/activate?code=…) landed while logged out:
+        // park the code, scrub ?code= from the address bar (it's a bearer-
+        // approvable secret), and banner what signing in will do. The first
+        // authed render() resumes the approve — riding 2FA/OAuth for free.
+        if (isActivateFlow()) {
+          var actCode = activateCodePrefill();
+          if (actCode) parkActivateCode(actCode);
+          if (typeof history !== "undefined" && history.replaceState) {
+            history.replaceState(null, "", "/activate");
+          }
+          showAuthActivateBanner(parkedActivateCode() || "");
         }
         $("#auth-email").focus();
       }
@@ -9124,12 +9413,16 @@
 
     window.addEventListener("hashchange", function () {
       if (isNewFlow()) return; // the /new deploy flow is path+query driven, not hash-routed
+      if (isActivateFlow()) return; // the /activate device-login screen is real-path, not hash-routed
       if (session() && session().token) applyRoute();
     });
 
     // /new screen has its own theme toggle (it renders outside the app shell).
     var newTheme = $("#new-theme-toggle");
     if (newTheme) newTheme.addEventListener("click", toggleTheme);
+    // /activate screen likewise renders outside the app shell — its own toggle.
+    var activateTheme = $("#activate-theme-toggle");
+    if (activateTheme) activateTheme.addEventListener("click", toggleTheme);
 
     render();
   }
@@ -9220,6 +9513,10 @@
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,
+      // bp-login-ux W1 — /activate device-login approve page pure helpers.
+      normalizeUserCode: normalizeUserCode, userCodeComplete: userCodeComplete,
+      activateCodeFromSearch: activateCodeFromSearch, activateInspectState: activateInspectState,
+      activateExpiryText: activateExpiryText, activateAlphabet: ACTIVATE_ALPHABET,
       failureCopy: failureCopy, failureTone: failureTone, liveEventTypes: Object.keys(TYPE_ACTIONS),
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
       // worker's report vocabulary + the ProvisionJob @steps whitelist.
