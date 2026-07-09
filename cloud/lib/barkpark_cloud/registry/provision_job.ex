@@ -37,7 +37,14 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   @foreign_key_type :binary_id
 
   @statuses ~w(pending claimed succeeded failed)
-  @kinds ~w(provision deprovision attach_domain)
+  # azh-w6 (S14c) — `resurrect` is the portable-archive restore kind: recreate a
+  # torn-down instance from an object-storage bundle. It rides the SAME step
+  # machine as `provision` (charter D40 — no new step kind; the create→live chain
+  # is provider-neutral) and the SAME claim/stale-recovery machinery, but is
+  # claimed by a kind-filtered query so no provision worker grabs it. Its one
+  # extra payload is `bundle_ref` — the archive to restore from (required when
+  # kind == "resurrect", NULL for every other kind).
+  @kinds ~w(provision deprovision attach_domain resurrect)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
   # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the
@@ -93,6 +100,12 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # can't grow the row unbounded. Surfaced on the barkpark row json
     # (:provision_console) so /new renders a live console. Best-effort telemetry.
     field :console, {:array, :map}, default: []
+    # azh-w6 (S14c): the object-storage archive this job restores from. Set ONLY
+    # on `resurrect` jobs (required there, validated below); NULL for provision /
+    # deprovision / attach_domain. Threaded into the worker's resurrect claim
+    # payload (router `resurrect_claim_json`) so the Go worker knows which bundle
+    # to pull and rehydrate onto the fresh box.
+    field :bundle_ref, :string
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
 
@@ -136,12 +149,18 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       :attempts,
       :steps,
       :console,
+      :bundle_ref,
       :barkpark_id
     ])
     |> validate_required([:status, :kind, :barkpark_id])
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:kind, @kinds)
     |> validate_number(:attempts, greater_than_or_equal_to: 0)
+    # azh-w6 (S14c): a resurrect job is meaningless without the archive to restore
+    # from, so `bundle_ref` is required exactly when kind == "resurrect". Every
+    # other kind leaves it NULL (an accidental bundle_ref on a provision row is
+    # harmless — the claim payload only reads it on the resurrect path).
+    |> validate_resurrect_bundle_ref()
     |> assoc_constraint(:barkpark)
     # dwb-11 money-path backstop: at most ONE ACTIVE (pending|claimed) job of each
     # kind per barkpark. Backed by the partial unique index
@@ -156,5 +175,17 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       name: :provision_jobs_one_active_per_barkpark_kind_idx,
       message: "an active job of this kind already exists for this barkpark"
     )
+  end
+
+  # azh-w6 (S14c): require `bundle_ref` on (and only on) a resurrect job. The kind
+  # is read off the changeset (falling back to the struct for a partial update),
+  # so a resurrect insert without the archive reference fails the shape gate
+  # instead of enqueuing a job the worker can't run.
+  defp validate_resurrect_bundle_ref(changeset) do
+    if get_field(changeset, :kind) == "resurrect" do
+      validate_required(changeset, [:bundle_ref])
+    else
+      changeset
+    end
   end
 end

@@ -114,6 +114,10 @@ defmodule BarkparkWeb.StatusController do
       /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
       html[data-bp-theme="evergreen"] { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
       @media (prefers-color-scheme: dark){ html[data-bp-theme="evergreen"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
+      html[data-bp-theme="ember"] { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
+      @media (prefers-color-scheme: dark){ html[data-bp-theme="ember"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
+      html[data-bp-theme="fjord"] { --bg:#ffffff; --fg:#111827; --muted:#6b7280; --card:#f9fafb; --line:#e5e7eb; }
+      @media (prefers-color-scheme: dark){ html[data-bp-theme="fjord"]{ --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; } }
       /* END GENERATED: tokens */
       body{ margin:0; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--fg); }
       .wrap{ max-width:760px; margin:0 auto; padding:2.5rem 1.25rem; }

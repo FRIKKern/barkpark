@@ -148,6 +148,14 @@
         <div class="topbar-right">
           <a class="topbar-link" href="https://github.com/FRIKKern/barkpark" target="_blank" rel="noopener" id="nav-docs">Docs</a>
           <a class="topbar-link" href="https://github.com/FRIKKern/barkpark/issues" target="_blank" rel="noopener" id="nav-help">Help</a>
+          <!-- Theme IDENTITY picker — orthogonal to the light/dark toggle beside it
+               (theme-system D36). Options are hardcoded; an id whose CSS block is
+               absent falls back to the evergreen declarations, so it never breaks. -->
+          <select class="btn btn-ghost btn-sm" id="bp-theme-picker" aria-label="Theme palette">
+            <option value="evergreen">Evergreen</option>
+            <option value="ember">Ember</option>
+            <option value="fjord">Fjord</option>
+          </select>
           <button class="btn btn-ghost btn-sm" id="theme-toggle" type="button" aria-label="Switch to dark theme">
             <span id="theme-label">Dark</span>
           </button>
@@ -209,6 +217,16 @@
           </header>
 
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
+
+          <!-- S14 portable archives: a team's archived-instance bundles, read
+               straight from object storage. The console shows each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance (it does not
+               execute resurrect this wave). loadArchives() fills #archives-body. -->
+          <section class="archives-panel" aria-labelledby="archives-heading">
+            <h2 id="archives-heading" class="archives-title">Archives</h2>
+            <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>
+            <div id="archives-body" class="archives-body" aria-live="polite"></div>
+          </section>
         </section>
 
         <!-- LAUNCH is no longer a view (A4/D66) — it is the launchFlow() component,

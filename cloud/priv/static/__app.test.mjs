@@ -573,6 +573,41 @@ test("theme aria-label CONTAINS the visible word (label-in-name), both themes", 
   assert.equal(hooks.themeToggleAria("light"), "Switch to dark theme");
 });
 
+// ── theme IDENTITY picker (D36) ─────────────────────────────────────────────
+// data-bp-theme swaps the whole palette; it is a SECOND, orthogonal switch to
+// the light/dark toggle above. normalizeBpTheme is the safety net: any id the
+// build doesn't ship (stale localStorage, a retired theme) collapses to
+// evergreen so a bad value never leaves the SPA on an undefined palette.
+
+test("bp-theme picker helpers are exported", () => {
+  assert.equal(typeof hooks.normalizeBpTheme, "function");
+  assert.equal(typeof hooks.applyBpTheme, "function");
+  assert.ok(Array.isArray(hooks.bpThemes));
+});
+
+test("bpThemes pins the known identity list (matches the index.html <option>s)", () => {
+  assert.deepEqual([...hooks.bpThemes], ["evergreen", "ember", "fjord"]);
+});
+
+test("normalizeBpTheme passes known ids through and folds anything else to evergreen", () => {
+  for (const id of ["evergreen", "ember", "fjord"]) {
+    assert.equal(hooks.normalizeBpTheme(id), id);
+  }
+  // Unknown / hostile / empty inputs all fall back — never an undefined palette.
+  for (const bad of ["", "EMBER", "midnight", null, undefined, "evergreen ", "0"]) {
+    assert.equal(hooks.normalizeBpTheme(bad), "evergreen", `${JSON.stringify(bad)} → evergreen`);
+  }
+});
+
+test("applyBpTheme returns the applied (normalized) id — the DOM stamp is no-op in the sandbox", () => {
+  // document.documentElement.setAttribute + $("#bp-theme-picker") are inert here;
+  // the return value is the contract the wiring persists to localStorage.
+  assert.equal(hooks.applyBpTheme("ember"), "ember");
+  assert.equal(hooks.applyBpTheme("fjord"), "fjord");
+  assert.equal(hooks.applyBpTheme("evergreen"), "evergreen");
+  assert.equal(hooks.applyBpTheme("bogus"), "evergreen");
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // C3 — provisioning timeline: ONE fold (provisionSteps), THREE mounts.
 // ════════════════════════════════════════════════════════════════════════════
@@ -3732,4 +3767,98 @@ test("S12: metricsHealthHtml — failing checks surface; absent counts hide (nev
   const bad = hooks.metricsHealthHtml({ pass: 2, total: 3, failing: ["disk", "http"] });
   assert.match(bad, /Health 2\/3/);
   assert.match(bad, /failing: disk, http/);
+});
+
+// ── S14 portable archives: the console archives panel (pure projection) ──────
+test("S14: the archives helpers are exported", () => {
+  for (const name of ["archivesModel", "archiveRowHtml", "archivesPanelHtml"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("S14: archivesModel — undefined payload is the loading shell", () => {
+  const m = hooks.archivesModel(undefined);
+  assert.equal(m.loading, true);
+  assert.equal(m.error, false);
+  assert.deepEqual([...m.rows], []);
+  // The panel renders a spinner, not an empty/error state.
+  assert.match(hooks.archivesPanelHtml(m), /Loading archives/);
+});
+
+test("S14: archivesModel — {ok:true, archives:[]} is a TRUE empty, not an error", () => {
+  const m = hooks.archivesModel({ ok: true, archives: [] });
+  assert.equal(m.loading, false);
+  assert.equal(m.error, false);
+  assert.equal(m.rows.length, 0);
+  const html = hooks.archivesPanelHtml(m);
+  assert.match(html, /No archives yet/);
+  // The empty state teaches the archive command as a copy affordance.
+  assert.match(html, /bp cloud instance archive/);
+});
+
+test("S14: archivesModel — a bundle row carries the exact resurrect command per provider", () => {
+  const m = hooks.archivesModel({
+    ok: true,
+    archives: [
+      { fqdn: "api.barkpark.cloud", slug: "api-2", source_provider: "azure",
+        created_at: "2026-07-08T00:00:00Z", bundle_ref: "archives/t/api-2/",
+        spec: { region: "eastus", server_type: "Standard_B1s" } },
+      { fqdn: "web.barkpark.cloud", slug: "web-1", source_provider: "hetzner",
+        created_at: "2026-07-01T00:00:00Z", bundle_ref: "archives/t/web-1/",
+        spec: { region: "nbg1", server_type: "cax11" } },
+    ],
+  });
+  assert.equal(m.rows.length, 2);
+  // Order is the server's (newest-first) — the model is a faithful projection.
+  assert.equal(m.rows[0].slug, "api-2");
+  assert.equal(m.rows[0].providerKind, "azure");
+  assert.equal(m.rows[0].resurrectCommand, "bp cloud instance resurrect api-2 --provider azure");
+  assert.equal(m.rows[1].resurrectCommand, "bp cloud instance resurrect web-1 --provider hetzner");
+  assert.equal(m.rows[1].region, "nbg1");
+  assert.equal(m.rows[1].serverType, "cax11");
+});
+
+test("S14: archiveRowHtml — identity + provider chip + a copy-paste resurrect chip", () => {
+  const m = hooks.archivesModel({
+    ok: true,
+    archives: [{ fqdn: "web.barkpark.cloud", slug: "web-1", source_provider: "hetzner",
+      created_at: "2026-07-01T00:00:00Z", spec: { region: "nbg1", server_type: "cax11" } }],
+  });
+  const html = hooks.archiveRowHtml(m.rows[0]);
+  assert.match(html, /web\.barkpark\.cloud/);
+  assert.match(html, /provider-chip--hetzner/); // IDENTITY chip (Decision 7)
+  assert.match(html, /nbg1 · cax11/);
+  // The resurrect command rides the shared copy affordance (data-copy).
+  assert.match(html, /data-copy="bp cloud instance resurrect web-1 --provider hetzner"/);
+});
+
+test("S14: an unknown provider fakes no identity chip; a slugless bundle has no resurrect command", () => {
+  const m = hooks.archivesModel({
+    ok: true,
+    archives: [{ fqdn: "mystery.example", slug: "", source_provider: "gcp", spec: {} }],
+  });
+  const row = m.rows[0];
+  assert.equal(row.resurrectCommand, ""); // no slug → no paste-fail command
+  const html = hooks.archiveRowHtml(row);
+  assert.ok(html.indexOf("provider-chip--") === -1); // unknown kind → no chip, not a fake one
+  assert.ok(html.indexOf("archive-resurrect") === -1); // no resurrect affordance rendered
+});
+
+test("S14: archivesModel — a 502 {ok:false,error} surfaces the SERVER message + Retry", () => {
+  const m = hooks.archivesModel({ ok: false, error: "Archive storage isn't configured for this deployment." });
+  assert.equal(m.error, true);
+  assert.equal(m.message, "Archive storage isn't configured for this deployment.");
+  const html = hooks.archivesPanelHtml(m);
+  // esc() HTML-escapes the apostrophe — assert on escaping-stable fragments.
+  assert.match(html, /Archive storage isn/);
+  assert.match(html, /configured for this deployment/);
+  assert.match(html, /data-archives-retry/);
+});
+
+test("S14: a client transport failure never surfaces a raw internal token as a server reason", () => {
+  // api() returns {error:"network_error"} (NO ok:false) on a fetch reject.
+  const m = hooks.archivesModel({ error: "network_error" });
+  assert.equal(m.error, true);
+  assert.ok(m.message.indexOf("network_error") === -1); // the sentinel never reaches the operator
+  assert.match(m.message, /try again/i);
 });

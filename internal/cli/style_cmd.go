@@ -46,6 +46,7 @@ func runStyle(out *writer, g globals, args []string) int {
 		mode = styleNoColor
 	}
 	io.WriteString(out.stdout, renderStyleSheet(mode))
+	io.WriteString(out.stdout, renderThemeSlate(mode))
 	return exitOK
 }
 
@@ -153,6 +154,91 @@ func renderStyleSheet(mode styleMode) string {
 	} else {
 		b.WriteString("  frames: " + strings.Join(taskboard.GenBrailleFrames[:], " ") + "\n")
 		b.WriteString("  still:  " + taskboard.GenBrailleStill + "\n")
+	}
+
+	return b.String()
+}
+
+// themeChromeRoles are the CLI/TUI chrome slots the theme slate previews per
+// theme — the accent + the wizard/TUI selection pair (the last blue holdouts
+// D19 retinted to derive natively from primary). Kept a fixed vocabulary (not
+// the whole chrome map) so the slate reads as a focused "what moves when the
+// theme identity changes" strip rather than a token dump.
+var themeChromeRoles = []string{"chrome-accent", "chrome-selection-fg", "chrome-selection-bg"}
+
+// renderThemeSlate is the THEME dimension of `bp style`: for every registered
+// theme (semrole.Themes()) it renders one slate — the four status roles, the
+// lifecycle glyphs, and the chrome accent/selection strip — each painted through
+// the THEME-parameterized accessors (RoleColorFor / LifecycleColorFor /
+// ChromeColorFor). It loops semrole.Themes() at render time, so when ts-w5c
+// lands ember + fjord the slate grows 1 block → 3 with ZERO code edits here
+// (the "adding theme N+1 touches exactly one new file" invariant, made visible
+// on the terminal). With only evergreen registered it renders one block whose
+// tones are byte-identical to the default-theme rows above — the showroom's
+// terminal peer.
+//
+// Like renderStyleSheet it hardcodes no colour profile: the SGR bytes for a
+// coloured swatch depend on the ambient lipgloss profile (the golden pins it).
+func renderThemeSlate(mode styleMode) string {
+	ascii := mode == styleNoColor
+	var b strings.Builder
+
+	b.WriteString("\nThemes — per-theme slate (theme identity × the status / lifecycle / chrome roles)\n")
+	b.WriteString("rendered from semrole.Themes() via the theme-keyed *For accessors — grows when a theme lands\n")
+
+	for _, theme := range semrole.Themes() {
+		b.WriteString("\n" + theme + "\n")
+
+		// Status roles — RoleColorFor(theme, role).
+		b.WriteString("  status:   ")
+		for i, role := range semrole.Roles() {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			swatch := "##"
+			if !ascii {
+				swatch = "██"
+				if color, ok := semrole.RoleColorFor(theme, role); ok {
+					swatch = lipgloss.NewStyle().Foreground(color).Render(swatch)
+				}
+			}
+			b.WriteString(swatch + " " + role)
+		}
+		b.WriteString("\n")
+
+		// Lifecycle glyphs — LifecycleColorFor(theme, state), canonical order.
+		b.WriteString("  glyphs:   ")
+		for i, state := range taskboard.GenLifecycleOrder {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			tok := taskboard.GenLifecycle[state]
+			glyph := tok.Glyph
+			if ascii {
+				glyph = tok.ASCIIGlyph
+			} else if color, ok := semrole.LifecycleColorFor(theme, state); ok {
+				glyph = lipgloss.NewStyle().Foreground(color).Render(glyph)
+			}
+			b.WriteString(glyph + " " + state)
+		}
+		b.WriteString("\n")
+
+		// Chrome accent / selection — ChromeColorFor(theme, role).
+		b.WriteString("  chrome:   ")
+		for i, role := range themeChromeRoles {
+			if i > 0 {
+				b.WriteString("  ")
+			}
+			swatch := "##"
+			if !ascii {
+				swatch = "██"
+				if color, ok := semrole.ChromeColorFor(theme, role); ok {
+					swatch = lipgloss.NewStyle().Foreground(color).Render(swatch)
+				}
+			}
+			b.WriteString(swatch + " " + role)
+		}
+		b.WriteString("\n")
 	}
 
 	return b.String()

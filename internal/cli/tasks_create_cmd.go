@@ -20,6 +20,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -71,35 +72,39 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		return exitGeneric
 	}
 
-	client := apiclient.New(apiclient.Config{
-		BaseURL:   ctx.Server,
-		Token:     ctx.Token,
-		Workspace: ctx.Workspace,
-		Project:   ctx.Project,
-		Dataset:   ctx.Dataset,
-	})
-
-	results, err := client.MutateResults(mutations)
+	httpStatus, respBody, err := sendTaskMutations(ctx, mutations)
 	if err != nil {
 		out.userErr("task create: %v", err)
 		return exitGeneric
 	}
-	if len(results) == 0 || results[0].ID == "" {
+	if httpStatus < 200 || httpStatus >= 300 {
+		out.userErr("task create: %s", mutateErrorMessage(httpStatus, respBody))
+		return exitGeneric
+	}
+	draftID, ok := firstMutationID(respBody)
+	if !ok || draftID == "" {
 		out.userErr("task create: server returned no id")
 		return exitGeneric
 	}
 
 	// The server hands back a "drafts.<type>-<n>" id; the BARE published id (used
 	// by publish/get) is that with the "drafts." prefix stripped.
-	draftID := results[0].ID
 	bareID := strings.TrimPrefix(draftID, "drafts.")
 	status := "draft"
 
 	if publish {
-		if err := client.Publish("task", bareID); err != nil {
-			// The draft exists — surface the id so the caller can retry the
-			// publish, rather than losing the created task.
-			out.userErr("task create: created %s but publish failed: %v", bareID, err)
+		// Publish is a second mutation over the same scoped-mutate endpoint; the
+		// server's Content.publish_document derives the drafts. twin from the bare
+		// id. A publish failure leaves the draft in place, so surface the id for a
+		// retry rather than losing the created task.
+		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
+		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
+		if pErr != nil {
+			out.userErr("task create: created %s but publish failed: %v", bareID, pErr)
+			return exitGeneric
+		}
+		if pStatus < 200 || pStatus >= 300 {
+			out.userErr("task create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody))
 			return exitGeneric
 		}
 		status = "published"
@@ -115,6 +120,83 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	}
 	out.outf("created task %s (%s)", bareID, status)
 	return exitOK
+}
+
+// sendTaskMutations POSTs a mutate batch to /v1/data/mutate/<dataset> and
+// returns the raw HTTP status + response body, never rendering. It is the
+// headless send primitive for the task-create path: runTaskCreate calls it to
+// file the {create:{_type:task}} mutation (and then the follow-up publish), and
+// the MCP task_create tool calls it to file a task headlessly and hand the raw
+// response body back to the client verbatim. It rides the same scoped mutate
+// endpoint + bearer auth apiclient.MutateResults uses, over the CLI's shared
+// 30s doRequest transport (the same budget every manifest write gets), so the
+// two never drift on the task write contract. Writes nothing to stdout.
+func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, []byte, error) {
+	endpoint := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/data/mutate/"+ctx.Dataset)
+	body, err := json.Marshal(map[string]any{"mutations": mutations})
+	if err != nil {
+		return 0, nil, err
+	}
+	headers := map[string]string{"Content-Type": "application/json"}
+	if ctx.Token != "" {
+		headers["Authorization"] = "Bearer " + ctx.Token
+	}
+	return doRequest("POST", endpoint, headers, body)
+}
+
+// firstMutationID pulls the first result id out of a raw mutate response
+// ({"results":[{"id":"drafts.task-N",…}]}). The create mutation carries no _id,
+// so the server generates one and returns it here — that id is how the caller
+// publishes/selects the new task. A body that fails to decode (or carries no
+// result) returns "",false.
+func firstMutationID(body []byte) (string, bool) {
+	var out struct {
+		Results []struct {
+			ID string `json:"id"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", false
+	}
+	if len(out.Results) == 0 {
+		return "", false
+	}
+	return out.Results[0].ID, out.Results[0].ID != ""
+}
+
+// mutateErrorMessage turns a non-2xx mutate response into a one-line human
+// message, mirroring apiclient.humanAPIError so the raw-bytes task-create path
+// keeps the same "validation_failed — kind: is required · …" feedback the
+// apiclient path produced. Unknown shapes fall back to the clamped body verbatim
+// so nothing is ever swallowed.
+func mutateErrorMessage(status int, body []byte) string {
+	var env struct {
+		Error struct {
+			Code    string              `json:"code"`
+			Message string              `json:"message"`
+			Details map[string][]string `json:"details"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
+		msg := env.Error.Message
+		if msg == "" {
+			msg = env.Error.Code
+		}
+		var parts []string
+		for field, reasons := range env.Error.Details {
+			parts = append(parts, field+": "+strings.Join(reasons, "; "))
+		}
+		sort.Strings(parts) // deterministic over the map
+		if len(parts) > 0 {
+			msg += " — " + strings.Join(parts, " · ")
+		}
+		return msg
+	}
+	raw := strings.TrimSpace(string(body))
+	if r := []rune(raw); len(r) > 200 {
+		raw = string(r[:200]) + "…"
+	}
+	return fmt.Sprintf("error %d: %s", status, raw)
 }
 
 // parseTaskCreateArgs folds the positional title + flags into the create body

@@ -30,7 +30,7 @@ Own a server? `bp setup --target deploy` installs over SSH.
 
 Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex`, then `.\scripts\setup-windows.ps1`.
 
-[Quickstart](docs/setup/QUICKSTART.md) · [Learn & own](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
+[Quickstart](docs/setup/QUICKSTART.md) · [Cursor](docs/setup/CURSOR.md) · [Learn & own](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
 
 ## Create fast
 
@@ -133,8 +133,7 @@ recomputes these live:
 | Contract | 100 | Dependencies | 94 | **Bloat** | **78** |
 | **Aesthetics** | **84** | | | | |
 
-Honest: Architecture counts 5 real layering violations; critique in
-[`GRADE-CRITIQUE.md`](tooling/quality/GRADE-CRITIQUE.md).
+Honest: 5 real layering violations counted — [critique](tooling/quality/GRADE-CRITIQUE.md).
 
 ## Documentation
 

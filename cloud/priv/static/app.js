@@ -13,6 +13,11 @@
 
   var STORE = "bpcloud.session";
   var THEME = "bpcloud.theme";
+  // Theme IDENTITY (data-bp-theme) is orthogonal to light/dark MODE (data-theme):
+  // two independent switches (theme-system D23/D36). The pre-paint inline script
+  // in index.html seeds data-bp-theme from this same key; the picker mutates it.
+  var BP_THEME = "bp_theme";
+  var BP_THEMES = ["evergreen", "ember", "fjord"];
 
   // ----------------------------------------------------------- tiny DOM utils
   function $(sel) { return document.querySelector(sel); }
@@ -845,6 +850,101 @@
       '<div class="inst-life-actions">' + model.actions.map(lifecycleActionHtml).join("") + "</div>";
   }
 
+  // ---- S14 portable-archives pure helpers (azure-hetzner hosting) ------------
+  // The console makes a team's archived-instance bundles VISIBLE (charter S14 /
+  // D39). GET /v1/archives serves the manifests straight from object storage;
+  // this is a pure PROJECTION of that envelope — the console does NOT execute
+  // resurrect this wave, it hands the operator the exact CLI command (the S11b
+  // CLI-affordance precedent). Every rule is a node-pinned pure function; the
+  // DOM mount (loadArchives) is browser-verified.
+
+  // Pure model for the archives panel from the GET /v1/archives payload
+  // {ok, archives:[{fqdn, slug, source_provider, created_at, bundle_ref,
+  // spec:{region,server_type}}]}. Four honest states, none faked:
+  //   undefined            → loading shell (fetch in flight)
+  //   {ok:false, error}    → error state carrying the SERVER-OWNED message + Retry
+  //   {ok:true, archives:[]} → true empty (the store answered; no bundles yet)
+  //   {ok:true, archives}  → one row per bundle, each with a copy-paste resurrect
+  //                          command `bp cloud instance resurrect <slug> --provider <kind>`
+  // Order is the server's (newest-first); this stays a faithful projection.
+  function archivesModel(payload) {
+    if (payload === undefined) return { loading: true, error: false, rows: [] };
+    if (!payload || payload.ok !== true) {
+      // Server-owned copy ONLY when the server explicitly said {ok:false,error}
+      // (the 502 degrade). A client-side transport failure (api()'s
+      // {error:"network_error"} sentinel, no ok:false) gets a generic client
+      // message — never a raw internal token surfaced as if the server sent it.
+      var serverMsg = payload && payload.ok === false && typeof payload.error === "string" &&
+        payload.error.trim() !== "" ? payload.error : null;
+      return { loading: false, error: true,
+        message: serverMsg || "Couldn't load your archives — try again shortly.", rows: [] };
+    }
+    var archives = Array.isArray(payload.archives) ? payload.archives : [];
+    var rows = archives.map(function (a) {
+      a = a || {};
+      var kind = String(a.source_provider || "");
+      var slug = String(a.slug || "");
+      var spec = a.spec && typeof a.spec === "object" ? a.spec : {};
+      return {
+        fqdn: String(a.fqdn || slug || ""),
+        slug: slug,
+        providerKind: kind,
+        createdAt: String(a.created_at || ""),
+        createdLabel: a.created_at ? relTime(a.created_at) : "",
+        region: String(spec.region || ""),
+        serverType: String(spec.server_type || ""),
+        bundleRef: String(a.bundle_ref || ""),
+        // The copy-paste affordance — empty when we can't name a slug (never a
+        // command that would fail on paste).
+        resurrectCommand: slug
+          ? ("bp cloud instance resurrect " + slug + (kind ? " --provider " + kind : ""))
+          : "",
+      };
+    });
+    return { loading: false, error: false, rows: rows };
+  }
+
+  // One archive row: identity (fqdn + provider chip), when, region · size, and
+  // the resurrect CLI chip. Provider chip is IDENTITY only (Decision 7); it
+  // renders nothing for an unknown kind rather than faking one.
+  function archiveRowHtml(row) {
+    if (!row) return "";
+    var meta = [];
+    if (row.region) meta.push(esc(row.region));
+    if (row.serverType) meta.push(esc(row.serverType));
+    var metaLine = meta.length ? '<div class="archive-meta">' + meta.join(" · ") + "</div>" : "";
+    var when = row.createdLabel
+      ? '<span class="archive-when" title="' + esc(row.createdAt) + '">' + esc(row.createdLabel) + "</span>"
+      : "";
+    return '<div class="archive-row">' +
+      '<div class="archive-id">' +
+        '<span class="archive-fqdn">' + esc(row.fqdn) + "</span>" +
+        providerChipHtml(row.providerKind) + when +
+        metaLine +
+      "</div>" +
+      (row.resurrectCommand
+        ? '<div class="archive-resurrect">' + cliChipHtml(row.resurrectCommand) + "</div>"
+        : "") +
+    "</div>";
+  }
+
+  // The whole panel body from the model — loading / error+Retry / empty / rows.
+  function archivesPanelHtml(model) {
+    if (!model || model.loading) {
+      return '<div class="loading">Loading archives&hellip;</div>';
+    }
+    if (model.error) {
+      return '<div class="archives-note archives-note--warn"><p>' + esc(model.message) + "</p>" +
+        '<button class="btn btn-ghost btn-sm" type="button" data-archives-retry>Retry</button></div>';
+    }
+    if (!model.rows.length) {
+      return '<div class="archives-note"><p>No archives yet. Archive an instance with ' +
+        cliChipHtml("bp cloud instance archive <name>") +
+        " to keep a portable, cross-provider bundle you can resurrect on Hetzner or Azure.</p></div>";
+    }
+    return '<div class="archive-list">' + model.rows.map(archiveRowHtml).join("") + "</div>";
+  }
+
   // Azure four-field validator: every service-principal field must be a non-empty
   // (trimmed) string before we spend a verify-before-save round trip.
   function azureFieldsValid(fields) {
@@ -1547,6 +1647,31 @@
     applyTheme(next);
   }
 
+  // ------------------------------------------------- theme IDENTITY (data-bp-theme)
+  // The identity picker mirrors toggleTheme() one axis over: it swaps the whole
+  // palette (evergreen / ember / fjord) via [data-bp-theme], which the emitted
+  // per-theme CSS blocks in app.css re-skin every var off. An unknown id (stale
+  // localStorage, a retired theme) falls back to evergreen so a bad value never
+  // white-screens — the bare declarations in app.css ARE the evergreen fallback.
+  function normalizeBpTheme(id) {
+    return BP_THEMES.indexOf(id) === -1 ? "evergreen" : id;
+  }
+  function applyBpTheme(id) {
+    var t = normalizeBpTheme(id);
+    document.documentElement.setAttribute("data-bp-theme", t);
+    var sel = $("#bp-theme-picker");
+    if (sel && sel.value !== t) sel.value = t; // keep the control in sync on init/restore
+    return t;
+  }
+  function initBpTheme() {
+    applyBpTheme(localStorage.getItem(BP_THEME) || "evergreen");
+  }
+  function selectBpTheme(id) {
+    var t = normalizeBpTheme(id);
+    localStorage.setItem(BP_THEME, t);
+    return applyBpTheme(t);
+  }
+
   // =========================================================== AUTH SCREEN
   var authMode = "login";
 
@@ -2108,6 +2233,7 @@
     filter = filter || null;
     var body = $("#fleet-body");
     body.innerHTML = '<div class="loading">Loading fleet&hellip;</div>';
+    loadArchives(); // S14: the archives panel loads independently of live boxes
     api("GET", "/v1/barkparks").then(function (r) {
       if (!r.ok) {
         body.innerHTML = '<div class="empty-state"><h2>Couldn\'t load fleet</h2><p>' +
@@ -2132,6 +2258,25 @@
       }
       body.innerHTML = bar + shown.map(fleetRow).join("");
       wireFleetRows(body);
+    });
+  }
+
+  // S14 portable archives — the ONE archives mount. Fetches GET /v1/archives and
+  // paints #archives-body through the pure archivesModel/archivesPanelHtml. Honest
+  // states throughout: loading shell first, then rows / true-empty / error+Retry
+  // (api() never rejects, so a store outage lands in the error branch with a
+  // working Retry, never a dead spinner). The panel lives in the fleet view and
+  // is a no-op when its mount is absent.
+  function loadArchives() {
+    var panel = document.getElementById("archives-body");
+    if (!panel) return;
+    panel.innerHTML = archivesPanelHtml(archivesModel(undefined));
+    api("GET", "/v1/archives").then(function (r) {
+      // The route emits {ok, archives|error} in the body on BOTH 200 and 502;
+      // api() surfaces that body as r.data, so the model reads it uniformly.
+      panel.innerHTML = archivesPanelHtml(archivesModel(r.data));
+      var retry = panel.querySelector("[data-archives-retry]");
+      if (retry) retry.addEventListener("click", loadArchives);
     });
   }
 
@@ -8775,6 +8920,7 @@
   // =========================================================== WIRE-UP
   function init() {
     initTheme();
+    initBpTheme();
     wireModal();
 
     // Auth.
@@ -8798,6 +8944,8 @@
 
     // Shell.
     $("#theme-toggle").addEventListener("click", toggleTheme);
+    var bpPicker = $("#bp-theme-picker");
+    if (bpPicker) bpPicker.addEventListener("change", function () { selectBpTheme(bpPicker.value); });
     $("#acct-btn").addEventListener("click", openAccountModal);
 
     // Views. A4/D66: Launch is an ACTION — the Overview and Fleet header buttons
@@ -8997,6 +9145,10 @@
       billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
       // a11y (label-in-name): visible word and accessible name derive together.
       themeLabelText: themeLabelText, themeToggleAria: themeToggleAria,
+      // Theme IDENTITY picker (D36): normalize (unknown → evergreen) + the DOM
+      // stamp (returns the applied id). The known-theme list is pinned too.
+      normalizeBpTheme: normalizeBpTheme, applyBpTheme: applyBpTheme,
+      bpThemes: BP_THEMES.slice(),
       // C3 provisioning timeline: the one fold + its three presentations + the
       // fake-DOM mount seam (the wiring smoke drives mountInstanceTimeline).
       provisionSteps: provisionSteps, stepElapsed: stepElapsed, fmtDur: fmtDur,
@@ -9050,6 +9202,11 @@
       metricsAgeText: metricsAgeText, metricsValueText: metricsValueText,
       metricsPanelHtml: metricsPanelHtml, metricsCardHtml: metricsCardHtml,
       metricsHealthHtml: metricsHealthHtml, metricsKeys: METRIC_SPECS.map(function (s) { return s.key; }),
+      // S14 (azure-hetzner hosting): the archives panel. Only the pure projection
+      // (archivesModel) + its render helpers are node-pinned; the DOM mount
+      // (loadArchives) is browser-verified.
+      archivesModel: archivesModel, archiveRowHtml: archiveRowHtml,
+      archivesPanelHtml: archivesPanelHtml,
       // Liveness chip (OC6): topbar SSE health dot + honest "as of" freshness.
       // Pure state helpers + the DOM seams (fake-DOM smoke drives the mount/paint,
       // the same way mountInstanceTimeline is exercised — real browser is live).

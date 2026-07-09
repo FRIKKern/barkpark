@@ -108,6 +108,82 @@ html[data-bp-theme="evergreen"][data-theme="dark"] {
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
+html[data-bp-theme="ember"] {
+  --primary: hsl(20 82% 42%);
+  --primary-hover: hsl(20 82% 36%);
+  --primary-fg: hsl(0 0% 100%);
+  --bg: hsl(30 40% 99%);
+  --surface: hsl(30 40% 99%);
+  --muted-surface: hsl(16.48 26.29% 95.68%);
+  --text: hsl(22 24% 11%);
+  --muted-text: hsl(16.54 4.67% 41.31%);
+  --border: hsl(16.5 12.96% 87.95%);
+  --ring: hsl(20 82% 50%);
+  --accent: hsl(20 82% 42%);
+  --primary-hsl: 20 82% 42%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
+  --ok-hsl: 138.34 50.65% 34.78%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 3.67 50.42% 48.54%; --info-hsl: 221.2 49.02% 51.79%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="ember"][data-theme="dark"] {
+  --primary: hsl(30 92% 60%);
+  --primary-hover: hsl(30 92% 68%);
+  --primary-fg: hsl(30 45% 8%);
+  --bg: hsl(24 22% 8%);
+  --surface: hsl(24 26% 6%);
+  --muted-surface: hsl(26.83 17% 5.24%);
+  --text: hsl(32 24% 92%);
+  --muted-text: hsl(26.68 6.42% 60.11%);
+  --border: hsl(26.78 12.03% 7.72%);
+  --ring: hsl(30 92% 60%);
+  --accent: hsl(30 92% 60%);
+  --primary-hsl: 30 92% 60%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
+  --ok-hsl: 134.02 37.1% 56.89%; --warn-hsl: 37.47 67.56% 50.7%; --danger-hsl: 5.31 83.22% 69.77%; --info-hsl: 220.6 86.84% 72.26%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="fjord"] {
+  --primary: hsl(222 58% 44%);
+  --primary-hover: hsl(222 58% 38%);
+  --primary-fg: hsl(0 0% 100%);
+  --bg: hsl(210 36% 99%);
+  --surface: hsl(210 36% 99%);
+  --muted-surface: hsl(219.67 25.15% 95.91%);
+  --text: hsl(220 30% 11%);
+  --muted-text: hsl(219.7 4.2% 41.73%);
+  --border: hsl(219.67 12.06% 88.27%);
+  --ring: hsl(222 58% 52%);
+  --accent: hsl(222 58% 44%);
+  --primary-hsl: 222 58% 44%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.15);
+  --ok-hsl: 137.23 45.13% 35.85%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.05 47.78% 48.54%; --info-hsl: 221.08 46.09% 51.46%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="fjord"][data-theme="dark"] {
+  --primary: hsl(213 74% 66%);
+  --primary-hover: hsl(213 74% 74%);
+  --primary-fg: hsl(213 45% 8%);
+  --bg: hsl(220 28% 8%);
+  --surface: hsl(216 30% 6%);
+  --muted-surface: hsl(213.45 15.36% 5.53%);
+  --text: hsl(212 26% 92%);
+  --muted-text: hsl(213.51 6.24% 60.93%);
+  --border: hsl(213.47 11.04% 8.02%);
+  --ring: hsl(213 74% 66%);
+  --accent: hsl(213 74% 66%);
+  --primary-hsl: 213 74% 66%;
+  --primary-soft: hsl(var(--primary-hsl) / 0.2);
+  --ok-hsl: 132.78 31.44% 58.66%; --warn-hsl: 35.93 57.77% 55.07%; --danger-hsl: 5.83 69.33% 69.33%; --info-hsl: 220.37 70.04% 71.14%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
 /* END GENERATED: tokens */
 
 :root {
@@ -2471,4 +2547,76 @@ select.form-input {
 @media (max-width: 720px) {
   .live-chip-label, .live-chip-ago { display: none; }
   .live-chip { padding: 0 7px; gap: 0; }
+}
+
+/* ============================================================================
+   S14 portable archives — the fleet-view Archives panel. Archived-instance
+   bundles read from object storage, each with a copy-paste resurrect command.
+   Reuses the shared surface / border / text tokens (no raw color).
+   ========================================================================== */
+.archives-panel {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.archives-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.archives-sub {
+  font-size: 13px;
+  margin: 2px 0 14px;
+}
+.archives-body { display: block; }
+.archives-note {
+  font-size: 13px;
+  color: var(--muted-text);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.archives-note p { margin: 0; }
+.archives-note--warn { color: var(--text); }
+
+.archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.archive-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.archive-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.archive-fqdn {
+  font-weight: 600;
+  font-size: 14px;
+}
+.archive-when {
+  font-size: 12px;
+  color: var(--muted-text);
+}
+.archive-meta {
+  flex-basis: 100%;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted-text);
+}
+.archive-resurrect {
+  flex: 0 0 auto;
 }

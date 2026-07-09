@@ -51,6 +51,10 @@
     /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
     html[data-bp-theme="evergreen"] { --info: #2563eb; --ring: var(--info); }
     @media (prefers-color-scheme: dark) { html[data-bp-theme="evergreen"] { --info: #3b82f6; } }
+    html[data-bp-theme="ember"] { --info: #2563eb; --ring: var(--info); }
+    @media (prefers-color-scheme: dark) { html[data-bp-theme="ember"] { --info: #3b82f6; } }
+    html[data-bp-theme="fjord"] { --info: #2563eb; --ring: var(--info); }
+    @media (prefers-color-scheme: dark) { html[data-bp-theme="fjord"] { --info: #3b82f6; } }
     /* END GENERATED: tokens */
     body {
       margin: 0; background: var(--paper-bg-deep); color: var(--paper-ink);

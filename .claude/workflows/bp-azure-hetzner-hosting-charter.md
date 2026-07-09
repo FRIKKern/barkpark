@@ -1105,3 +1105,106 @@ correctly still open backlog). No ledger fixes were needed.
 - Deploy note: S12c changes provisioning (Go worker) + claim (CP) — both ride
   one merge like the D23 pin fix; agents on EXISTING boxes appear only after
   their next self-update or the manual install recipe in the go-live doc.
+
+### Wave 2026-07-09j — Portable archives (W6: S14a–e) — BUILT + REVIEWED
+
+The bold bet, built in five parallel slices (decisions D36–D42 ratified at
+planning: D36 identity set = bp-export-v1 + BARKPARK_KEK/+PREVIOUS-when-set;
+D39 CP archive read = dep-free SigV4 conduit; D40 resurrect rides the SAME 7
+provision steps, never warm-assigns; D41 azure freshen = from-scratch
+base-install script; D42 honesty flips atomic with the capability). NOTE: the
+planning entry never landed in this file — this entry carries it. Whole-wave
+integration PROVEN on a scratch merge of all five final branches (Go
+whole-tree build/vet/test fresh, gofmt clean, node harness 282/0, FULL cloud
+suite 1651/0). Integrate S14a → S14b-r → S14c → S14d-r → S14e-r (the -r
+branches already contain their upstream siblings — S14b-r has S14a merged;
+S14d-r has S14a+S14b-r merged with the fixture-line union resolved):
+
+- **S14a · bundle library** — merge
+  `loop-epic/s14a-bp-bundle-v1-portable-bundle-format-0` (CLEAN — no reviewer
+  changes). Pinned bp-bundle-v1 manifest (byte-locked test), manifest-last
+  completeness fence, newest-first reader, AES-256-GCM secrets envelope
+  (SHA256(BARKPARK_BUNDLE_KEK) key derivation — a cross-language sealer must
+  replicate it, noted), D36 identity set, BundleStore seam + objstore adapter
+  + exported stateful FakeBundleStore; FakeProvider archives became stateful.
+- **S14b · neutral archive = the bundle** — merge
+  `loop-epic/s14b-neutral-archive-portable-bundle-eve-1-r`. REVIEWER DID THE
+  S14A INTEGRATION: the builder's offline stand-in substrate had drifted off
+  the pinned contract (own manifest shape provider/team/created, own stamp
+  format, and — the real bug — an objBundleStore that stored identity secrets
+  UNSEALED) and its collection script omitted BARKPARK_KEK(+PREVIOUS), a D36
+  violation. Rewired to cloud.WriteBundle (secrets sealed for real,
+  sealed-at-rest asserted in tests), script keys now derive from
+  cloud.IdentitySecretKeys, CLI-side D36 filter via SelectIdentitySecrets,
+  loud BARKPARK_BUNDLE_KEK gate BEFORE collection, archives list reads via
+  ReadManifest. --fast==escape-hatch byte-identity kept; azure archive:true
+  honesty flip kept.
+- **S14c · CP resurrect plumbing** — merge
+  `loop-epic/s14c-resurrect-rides-the-job-machine-cp--2` (CLEAN — no reviewer
+  changes). kind=resurrect (4th kind, same 7 steps, one-active guard,
+  bundle_ref required-when-resurrect), POST /v1/resurrect (require_user +
+  team-admin + ENTITLEMENT-gated — the builder's added 402 is right: a
+  resurrect stands up a billed box), nil-honest fresh row, live-twin 422,
+  enqueue-failure rolls the row back (no lying 202), worker claim route =
+  provision claim payload + bundle_ref. Hetzner provision claim refute passes
+  UNMODIFIED.
+- **S14d · cross-provider restore** — merge
+  `loop-epic/s14d-cross-provider-resurrect-restore-on-3-r` AFTER S14c.
+  RestoreDriver seam + provisionRestore (7-step feed, cold create, KEK
+  carried-never-minted refused-if-missing, drop→pg_restore→migrate content
+  phase, template suppressed), deploy/azure-base-install.sh (D41), round-trip
+  proven offline BOTH directions. Reviewer fixes (two REAL contract bugs
+  proven against S14c's route): the portable-resurrect CLI POSTed on the
+  WORKER token where the route is require_user (every real call would 401) —
+  now cloudclient.Resurrect on the user-bearer `bp launch` plane; and it sent
+  the archive as "bundle" where the route requires "bundle_ref" (422 always).
+  Newest-default is resolved CLIENT-side from the bundle store (S14c 422s a
+  blank bundle_ref); no archive → honest not-found, CP never POSTed. Also the
+  fixture-union merge: azure archive+resurrect both true, adopt stays false,
+  degrade test moved to adopt, FailureCopy's dead azure archive+resurrect
+  clauses both removed.
+- **S14e · console archives panel** — merge
+  `loop-epic/s14e-archives-visible-in-the-console-dep-4-r` last. Dep-free
+  SigV4 GET conduit (AWS known-answer vectors — non-vacuous), :xmerl added to
+  extra_applications (OTP app, NOT a hex dep — release-correctness over the
+  literal "mix.exs untouched" criterion; endorse), team-prefix scoping proven,
+  502-never-lying-empty, honest 4-state SPA panel + copy-paste resurrect
+  affordance. Reviewer fix: bundle_ref fallback now the bundle PREFIX (minus
+  manifest.json) so a console row's ref is directly consumable as --bundle /
+  POST bundle_ref.
+
+**What is NOT yet live (the honest end-to-end gap, next wave's spine):** the
+worker never POLLS /v1/internal/resurrect-jobs/claim — S14d keys restore off
+JobSpec.BundleRef, but no drain translates S14c's claim (bundle_ref STRING)
+into S14d's BundleRef struct {store,key,kek,manifest}, and nobody decides how
+the worker gets BARKPARK_BUNDLE_KEK + store creds (worker env is the obvious
+answer — the KEK must NOT ride the claim JSON unless deliberately sanctioned
+like env-at-claim). The RestoreDriver's real implementation (ProvisionOneShot
+in restore mode + pg_restore over the box runner + media unpack) is also
+behind the seam, offline-proven but unwired. File "S14f · resurrect drain +
+real RestoreDriver" as the wave-after slice; until it lands, resurrect
+enqueues honestly and the job sits pending.
+
+**Ledger:** five tasks evidence-stamped by builders; claims had lapsed AND
+lifecycle sat "open" — S14a–d were showing in `bp task ready` (double-work
+hazard). Reviewer patched all five to in_progress + republished. "PR merged"
+criteria stay open — the LEAD closes them + lifecycle on merge (re-claim for
+a fresh epoch; claims are lapsed). Human-gated follow-up
+azh-s14d-azure-base-install-live-smoke filed + published by the S14d builder.
+
+**Carried / next wave:**
+- **S14f (file it): the resurrect worker drain** — poll the claim route, map
+  claim bundle_ref → BundleRef (store creds + KEK from worker env), implement
+  RestoreDriver for real (restore-mode one-shot, pg_restore, media unpack),
+  then ONE wired smoke: archive a real box → resurrect cross-provider.
+- Server-side newest-bundle resolution on POST /v1/resurrect via S14e's
+  ArchiveStore (the CLI's client-side resolution needs platform S3 creds —
+  fine for operators, wrong for team admins long-term); console "Resurrect"
+  button rides the same route once the drain exists.
+- Bundle spec hints (region/server_type) are always empty at archive time —
+  populate best-effort so a resurrect can re-shape the target.
+- Two same-second archives of one fqdn share a prefix (whole-second stamp) —
+  last write wins; harmless today, note for the drain.
+- After S14f: S8 hetzner-native cutover, S11c infra tab, S15 styleguide
+  completeness, S16 hetzner journey polish (fold in: archives panel live
+  look; the S14e live-Hetzner-S3 signing smoke, network-gated).

@@ -1,0 +1,40 @@
+{
+  "name": "ember",
+  "_note": "Warm terracotta/amber — campfire-at-the-park. Accent rides ~H30 (burnt orange light, glowing amber dark); the neutral ladder and paper ground re-hue warm off the accent, so paper/ink visibly carry heat, never grey. The dark amber accent is the on-accent flip's live test (bright fill → near-ink text).",
+  "modes": {
+    "light": {
+      "bg": "30 40% 99%",
+      "ink": "22 24% 11%",
+      "accent": "20 82% 42%"
+    },
+    "dark": {
+      "bg": "24 22% 8%",
+      "ink": "32 24% 92%",
+      "accent": "30 92% 60%"
+    }
+  },
+  "overrides": {
+    "reading-accent.light": "8 74% 43%",
+    "reading-accent.dark": "16 88% 66%",
+    "surface.dark": "24 26% 6%"
+  },
+  "_overrideReasons": {
+    "reading-accent.light": "formula rotates the H20 accent −40° to HSL340 (a hot rose-pink) — off-temperature for a warm family; pinned to a warm brick-red rust sibling (code.fg.light tracks this, so it warms too)",
+    "reading-accent.dark": "formula's HSL350 is a cool pink; pinned to a bright warm coral so the dark reading/code accent stays in the ember family",
+    "surface.dark": "the neutral-ladder OKLCH L0.095 pick collapses to ~1% HSL-L — a crushed pure-black that loses the warm tint; pinned to a designed warm near-black that grounds the page under bg (8%) and holds the campfire temperature"
+  },
+  "_aaExceptions": [],
+  "passthrough": [
+    "presence",
+    "sheetCf",
+    "matchQuality",
+    "provider",
+    "statusHealth",
+    "statusChrome",
+    "errorPage",
+    "readerInfo",
+    "lifecycle",
+    "instanceLifecycle",
+    "authButton"
+  ]
+}
