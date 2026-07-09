@@ -187,10 +187,10 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert StudioChat.get_session(sid).pending_approvals == 1
 
     ref = Process.monitor(recorder)
-    send(recorder, {:claude_chat_exit, 0})
+    send(recorder, {:claude_chat_exit, 0, ""})
     assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
 
-    assert_receive {:claude_chat_exit, 0}
+    assert_receive {:claude_chat_exit, 0, _tail}
     s = StudioChat.get_session(sid)
     assert s.status == "exited"
     assert s.pending_approvals == 0
@@ -209,7 +209,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     ref = Process.monitor(recorder)
     assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
-    assert_receive {:claude_chat_exit, :idle_reaped}
+    assert_receive {:claude_chat_exit, :idle_reaped, _tail}
 
     assert StudioChat.get_session(other).status == "exited"
     assert Recorder.whereis(other) == nil
@@ -685,7 +685,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     test "an exit publishes offline", %{sid: sid, recorder: recorder} do
       ref = Process.monitor(recorder)
-      send(recorder, {:claude_chat_exit, 0})
+      send(recorder, {:claude_chat_exit, 0, ""})
       assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
       assert_receive {:chat_activity, ^sid, %{state: :offline}}
     end
@@ -965,7 +965,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "running"
 
       ref = Process.monitor(recorder)
-      send(recorder, {:claude_chat_exit, 0})
+      send(recorder, {:claude_chat_exit, 0, ""})
       assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
 
       assert spawn_row(sid, "toolu_spawn").metadata["task_status"] == "interrupted"
