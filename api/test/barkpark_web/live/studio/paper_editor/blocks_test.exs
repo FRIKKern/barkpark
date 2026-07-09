@@ -430,10 +430,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
 
     # View shows the EDITED text (re-streamed from the current blocks), and the
-    # superseded original text is gone.
+    # superseded original text is gone. Scope to the paper shell: since pc-w3b
+    # the Papers LIST rows render the preview-manifest description (stamped at
+    # write time), so the original intro text legitimately lingers in the list
+    # pane until the row rebuilds — only the EDITOR must not show it.
     refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
-    assert view_html =~ "Edited while in edit mode."
-    refute view_html =~ "Original intro text."
+    shell_html = view |> element(~s([data-test-id="studio-paper-shell"])) |> render()
+    assert shell_html =~ "Edited while in edit mode."
+    refute shell_html =~ "Original intro text."
 
     # No remount.
     assert view.pid == pid_before
