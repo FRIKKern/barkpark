@@ -1,6 +1,9 @@
 defmodule BarkparkWeb.Admin.PluginsLive do
   @moduledoc """
-  Task barkpark-otv — admin LiveView at `/studio/:dataset/_plugins`.
+  Task barkpark-otv — admin LiveView at
+  `/w/:ws/p/:proj/d/:dataset/studio/_plugins` (moved under the scoped
+  canonical by sdl-w1-admin-canonical; the flat `/studio/:dataset/_plugins`
+  spelling 302s here).
 
   Closes the "why doesn't my plugin work?" debug loop: lists every
   registered plugin, surfaces which `Barkpark.Plugin` callbacks the
@@ -12,10 +15,11 @@ defmodule BarkparkWeb.Admin.PluginsLive do
 
   ## Auth
 
-  Mounted inside the `live_session :admin_studio_dataset` block in
+  Mounted inside the `live_session :scoped_admin_studio_dataset` block in
   `BarkparkWeb.Router`. The session uses the `BarkparkWeb.LiveAuth.:admin`
-  on_mount hook — same gate as `/studio/settings`. Tokens without the
-  `"admin"` permission redirect to `/studio` with a flash.
+  on_mount hook (global `"admin"` permission — the surface is the global
+  plugin registry scoped by dataset, so no per-workspace membership gate).
+  Tokens without the `"admin"` permission redirect to `/studio` with a flash.
 
   ## Reload semantics
 
@@ -175,7 +179,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
                 <div class="bp-plugin-card-header-actions">
                   <%= if row.has_settings do %>
                     <.link
-                      navigate={~p"/studio/#{@dataset}/_plugins/#{row.name}/settings"}
+                      navigate={plugin_settings_path(@scope_prefix, @dataset, row.name)}
                       class="btn btn-sm"
                       data-test-action="open-settings"
                     >
@@ -247,6 +251,15 @@ defmodule BarkparkWeb.Admin.PluginsLive do
     </div>
     """
   end
+
+  # ── scoped path builders (sdl-w1-admin-canonical) ───────────────────
+  # This LV now mounts under `/w/:ws/p/:proj/d/:dataset/studio/_plugins`, so
+  # its own links carry the scope prefix (assigned by StudioChrome from the
+  # URL params). A plain-string builder rather than `~p` — the prefix is
+  # dynamic, so verified-route sigils can't statically anchor it (the epic's
+  # `Paths` builder consolidates this in sdl-w1-builder).
+  defp plugin_settings_path(scope_prefix, dataset, name),
+    do: "#{scope_prefix}/d/#{dataset}/studio/_plugins/#{name}/settings"
 
   # ── data loaders ────────────────────────────────────────────────────
 

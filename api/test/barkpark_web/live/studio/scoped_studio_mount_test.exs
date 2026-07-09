@@ -311,7 +311,12 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       refute html =~ ~s{href="/studio/#{@dataset}/media"}
     end
 
-    test "the flat _plugins admin surface still renders flat hrefs", %{conn: conn} do
+    test "the flat _plugins admin surface 302s to the scoped canonical (sdl-w1-admin-canonical)",
+         %{conn: conn} do
+      # The flat `/studio/:dataset/_plugins` admin mount MOVED under the scoped
+      # canonical `/w/:ws/p/:proj/d/:dataset/studio/_plugins`; the flat spelling
+      # now 302s there (session-resolved workspace/project), so there is no
+      # longer a flat-surface render with scope_prefix == "".
       raw = "plugin-href-flat-admin-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
@@ -321,12 +326,15 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
           "admin"
         ])
 
-      conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/_plugins")
+      {ws, proj} = ensure_default_scope!()
 
-      # scope_prefix == "" → default_top_menu_entries/2 keeps the legacy
-      # flat tab paths (they ride the flat→scoped 302 funnel by design).
-      assert html =~ ~s{href="/studio/#{@dataset}/media"}
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => raw})
+        |> get("/studio/#{@dataset}/_plugins")
+
+      assert redirected_to(conn, 302) ==
+               "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_plugins"
     end
   end
 
