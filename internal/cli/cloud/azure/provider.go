@@ -316,9 +316,13 @@ func managedTags() map[string]*string {
 // PublicIP — never the shared group/VNet) if any step, INCLUDING the final IP
 // read-back, fails. The cleanup runs on a fresh context so a cancelled/timed-out
 // create still gets to delete what it made — no billed orphan, no stranded NIC.
-func (p *AzureProvider) Create(ctx context.Context, spec cloud.ServerSpec) (cloud.Server, error) {
-	if err := p.ready(); err != nil {
-		return cloud.Server{}, err
+// If that cleanup ITSELF fails, the operator would otherwise be left with a
+// silent billed orphan, so the cleanup error is appended to the returned error
+// (mirroring HcloudProvider's inline teardown-failure reporting) — a failed
+// teardown is always visible, never swallowed.
+func (p *AzureProvider) Create(ctx context.Context, spec cloud.ServerSpec) (srv cloud.Server, err error) {
+	if rerr := p.ready(); rerr != nil {
+		return cloud.Server{}, rerr
 	}
 	if strings.TrimSpace(spec.Name) == "" {
 		return cloud.Server{}, errors.New("azure: create: spec.Name is required")
@@ -328,10 +332,13 @@ func (p *AzureProvider) Create(ctx context.Context, spec cloud.ServerSpec) (clou
 
 	success := false
 	defer func() {
-		if !success {
-			dctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
-			_ = p.cleanupBox(dctx, box) // best-effort; error already surfaced by Create
+		if success {
+			return
+		}
+		dctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if cerr := p.cleanupBox(dctx, box); cerr != nil {
+			err = fmt.Errorf("%w; AND cleanup of the partially-created box %q failed (a billed orphan may remain): %v", err, box, cerr)
 		}
 	}()
 

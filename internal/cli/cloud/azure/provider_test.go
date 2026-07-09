@@ -99,6 +99,38 @@ func TestCreate_FailedReadbackDeletesOrphan(t *testing.T) {
 	}
 }
 
+func TestCreate_CleanupFailureSurfacesOrphan(t *testing.T) {
+	// The IP read-back fails (no address) AND the orphan cleanup's VM delete then
+	// fails (500). The operator now has a possibly-billed orphan they can't see
+	// unless Create says so — the returned error must name BOTH the original
+	// read-back fault and the cleanup failure (Hetzner-parity honesty).
+	routes := createRoutes()
+	for i := range routes {
+		if routes[i].name == "pip-get" {
+			routes[i].fixtures = []string{"publicip_get_noip.json"}
+		}
+	}
+	// VM delete during cleanup returns 403 (a non-404 error the cleanup can't
+	// swallow — e.g. RBAC revoked mid-op; a non-retryable status keeps the test fast).
+	routes = append(routes,
+		fakeRoute{name: "vm-delete", method: "DELETE", contains: []string{"/virtualmachines/"}, fixtures: []string{"delete_error.json"}},
+		fakeRoute{name: "nic-delete", method: "DELETE", contains: []string{"/networkinterfaces/"}, fixtures: []string{"delete_ok.json"}},
+		fakeRoute{name: "pip-delete", method: "DELETE", contains: []string{"/publicipaddresses/"}, fixtures: []string{"delete_ok.json"}},
+	)
+
+	p, _ := newTestProvider(t, routes)
+	_, err := p.Create(context.Background(), cloud.ServerSpec{Name: "acme-1", Region: "eastus", ServerType: "Standard_B1s"})
+	if err == nil {
+		t.Fatal("Create with an unreadable IP AND a failing cleanup returned nil error")
+	}
+	if !strings.Contains(err.Error(), "ip read-back") {
+		t.Errorf("error %q should still name the original ip read-back failure", err.Error())
+	}
+	if !strings.Contains(err.Error(), "orphan may remain") {
+		t.Errorf("error %q should warn a billed orphan may remain when cleanup fails", err.Error())
+	}
+}
+
 func TestDelete_Idempotent(t *testing.T) {
 	p, ft := newTestProvider(t, append(authRoutes(), deleteRoutes()...))
 	if err := p.Delete(context.Background(), "acme-1"); err != nil {
