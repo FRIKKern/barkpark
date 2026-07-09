@@ -94,7 +94,7 @@ defmodule BarkparkCloud.Usage do
   @src_seats "control-plane.team_members"
   # The fleet meter is a pure control-plane read (the team's managed-instance
   # count) — it returns even when every instance is down.
-  @src_instances "control_plane"
+  @src_instances "control-plane.team_instances"
   # The flow meters have no source yet — the label is the honest "not built".
   @src_not_metered "not-metered"
 

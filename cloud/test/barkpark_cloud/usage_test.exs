@@ -77,7 +77,7 @@ defmodule BarkparkCloud.UsageTest do
       assert m.db_size.source == "telemetry.pg_size_bytes"
       assert m.disk.source == "telemetry.disk_used_percent"
       assert m.seats.source == "control-plane.team_members"
-      assert m.instances.source == "control_plane"
+      assert m.instances.source == "control-plane.team_instances"
       assert m.api_requests.source == "not-metered"
       assert m.bandwidth.source == "not-metered"
     end
@@ -280,7 +280,7 @@ defmodule BarkparkCloud.UsageTest do
       assert m.instances.value == "unmetered"
       assert m.instances.quota == nil
       assert m.instances.warn_at == nil
-      assert m.instances.source == "control_plane"
+      assert m.instances.source == "control-plane.team_instances"
     end
 
     test "a garbage instances input degrades rather than crashes" do

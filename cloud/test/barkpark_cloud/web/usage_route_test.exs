@@ -470,7 +470,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert instances["value"] == 1
       assert instances["quota"] == nil
       assert instances["warn_at"] == nil
-      assert instances["source"] == "control_plane"
+      assert instances["source"] == "control-plane.team_instances"
       assert instances["measured_at"] == nil
     end
 
