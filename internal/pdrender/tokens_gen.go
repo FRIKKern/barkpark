@@ -27,8 +27,9 @@ var (
 )
 
 // Generated CLI-chrome tokens (design/tokens.json color.cliChrome → hex).
-// pdrender's own copy (it can't import internal/semrole); threaded by
-// theme.go's pdAccent/pdInk/pdBody/pdDim chrome vars.
+// pdrender's own copy (it can't import internal/semrole); referenced by the
+// evergreen genPalette entry below and threaded through theme.go's buildTheme
+// (pal.ChromeAccent/ChromeInk/ChromeTextSecondary/ChromeDim, via Resolve).
 var (
 	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
@@ -47,6 +48,26 @@ const (
 	GenReadingFontStack     = "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, Charter, Georgia, \"Source Serif 4\", serif"
 	GenReadingHeadingWeight = 600
 	GenReadingBodySize      = 18
+)
+
+// Generated categorical viz palettes (design/tokens.json color.pdrenderChart /
+// color.pdrenderHeatmap → hex). NOT status roles — theme-invariant categorical
+// data-viz values (the presence / matchQuality passthrough precedent, D21).
+// GenChartSeries is chart.go's per-series TrueColor cycle; GenHeatmapBase/Peak
+// are heatmap.go's dark→bright gradient endpoints. Byte-faithful to the former
+// hand literals, so the render is unchanged.
+var GenChartSeries = []lipgloss.Color{
+	lipgloss.Color("#60a5fa"),
+	lipgloss.Color("#f472b6"),
+	lipgloss.Color("#4ade80"),
+	lipgloss.Color("#fbbf24"),
+	lipgloss.Color("#a78bfa"),
+	lipgloss.Color("#22d3ee"),
+}
+
+const (
+	GenHeatmapBase = "#0d1117"
+	GenHeatmapPeak = "#39d353"
 )
 
 // DefaultTheme is the built-in evergreen skin. Resolve defaults to it for any

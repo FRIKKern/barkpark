@@ -328,7 +328,14 @@ function cloudBlock(themes = loadThemes()) {
 // fallback so a pre-paint no-data-theme load still gets the light bp theme).
 function paperColorVars(theme, indent, t = tokens) {
   const s = t.color.paper.surface;
-  return PAPER_ROLES.map((role) => indent + `--paper-${role}: ${s[role][theme]};`).join("\n");
+  return [
+    ...PAPER_ROLES.map((role) => indent + `--paper-${role}: ${s[role][theme]};`),
+    // S7 STUB (charter Decision 6): the warm reading accent (color.reading-accent,
+    // theme-derived) emitted onto the reading surface but UNCONSUMED — S8 (the
+    // article terracotta pullquote/rule) reads it. Additive W1 posture; the
+    // paper-editor mirror picks it up automatically.
+    indent + `--paper-reading-accent: ${hslToHex(t.color["reading-accent"][theme])};`,
+  ].join("\n");
 }
 
 // Paper theme block: the `--paper-*` reading-surface skin + status tones under
@@ -818,8 +825,9 @@ function pdrenderGo(themes = loadThemes()) {
     ")",
     "",
     "// Generated CLI-chrome tokens (design/tokens.json color.cliChrome → hex).",
-    "// pdrender's own copy (it can't import internal/semrole); threaded by",
-    "// theme.go's pdAccent/pdInk/pdBody/pdDim chrome vars.",
+    "// pdrender's own copy (it can't import internal/semrole); referenced by the",
+    "// evergreen genPalette entry below and threaded through theme.go's buildTheme",
+    "// (pal.ChromeAccent/ChromeInk/ChromeTextSecondary/ChromeDim, via Resolve).",
     "var (",
     ...alignEq([
       cliChrome("Accent", "chrome-accent"), cliChrome("Ink", "chrome-ink"),
@@ -837,6 +845,21 @@ function pdrenderGo(themes = loadThemes()) {
     `\tGenReadingFontStack     = ${JSON.stringify(tokens.font.reading.stack)}`,
     `\tGenReadingHeadingWeight = ${r.headingWeight}`,
     `\tGenReadingBodySize      = ${r.body.size}`,
+    ")",
+    "",
+    "// Generated categorical viz palettes (design/tokens.json color.pdrenderChart /",
+    "// color.pdrenderHeatmap → hex). NOT status roles — theme-invariant categorical",
+    "// data-viz values (the presence / matchQuality passthrough precedent, D21).",
+    "// GenChartSeries is chart.go's per-series TrueColor cycle; GenHeatmapBase/Peak",
+    "// are heatmap.go's dark→bright gradient endpoints. Byte-faithful to the former",
+    "// hand literals, so the render is unchanged.",
+    "var GenChartSeries = []lipgloss.Color{",
+    ...tokens.color.pdrenderChart.series.map((h) => `\tlipgloss.Color(${JSON.stringify(h)}),`),
+    "}",
+    "",
+    "const (",
+    `\tGenHeatmapBase = ${JSON.stringify(tokens.color.pdrenderHeatmap.base)}`,
+    `\tGenHeatmapPeak = ${JSON.stringify(tokens.color.pdrenderHeatmap.peak)}`,
     ")",
     "",
     // ── theme resolution seam (ts-w4c) ──────────────────────────────────────
@@ -1527,7 +1550,10 @@ const bulldocsThemeBlock = (name, t) => {
   const mc = t.color.mailChrome;
   const cd = t.color.paperCallout.dark;
   const p = `html[data-bp-theme="${name}"]`;
-  const readerVars = (r, extra = []) =>
+  // S7 stub: the warm reading accent (color.reading-accent, theme-derived),
+  // UNCONSUMED until S8 reads it for the article terracotta.
+  const ra = (theme) => `--paper-reading-accent: ${hslToHex(t.color["reading-accent"][theme])};`;
+  const readerVars = (r, theme, extra = []) =>
     [
       `--paper-bg: ${r["bg"]};`,
       `--paper-bg-deep: ${r["bg-deep"]};`,
@@ -1536,6 +1562,7 @@ const bulldocsThemeBlock = (name, t) => {
       `--paper-rule: ${r["rule"]};`,
       `--paper-accent: ${r["accent"]};`,
       `--paper-accent-soft: ${r["accent-soft"]};`,
+      ra(theme),
       ...extra,
     ].map((l) => "        " + l);
   const darkExtra = [
@@ -1556,12 +1583,12 @@ const bulldocsThemeBlock = (name, t) => {
   return [
     `    ${p} body:has(.bp-paper-article),`,
     `    ${p} body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
-    ...readerVars(rl).map((l) => l.replace(/^ {8}/, "      ")),
+    ...readerVars(rl, "light").map((l) => l.replace(/^ {8}/, "      ")),
     "    }",
     "    @media (prefers-color-scheme: dark) {",
     `      ${p} body:has(.bp-paper-article),`,
     `      ${p} body:has(.bp-paper-article) .bp-paper-shell.bp-paper-article {`,
-    ...readerVars(rd, darkExtra),
+    ...readerVars(rd, "dark", darkExtra),
     "      }",
     "    }",
     `    ${p} #bp-mailapp {`,
@@ -1580,6 +1607,8 @@ function bulldocsBlock(themes = loadThemes()) {
   const rd = tokens.color.paper.reader.dark;
   const mc = tokens.color.mailChrome;
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
+  // S7 stub: the warm reading accent (color.reading-accent), UNCONSUMED until S8.
+  const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
   const themed = themeBlocks(themes, bulldocsThemeBlock);
   return [
     "    /* Article chrome — applied only when BulldocsLive marks the doc as",
@@ -1618,6 +1647,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "         block below MUST re-skin it — otherwise dark-mode link borders resolve",
     "         to this light rgba and vanish against the dark page. */",
     `      --paper-accent-soft: ${rl["accent-soft"]};`,
+    `      --paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
     "    }",
     "    body:has(.bp-paper-article) {",
     "      background: var(--paper-bg-deep);",
@@ -1637,6 +1667,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "           block in paper-surface.css) — without it links keep the light-theme",
     "           rgba(162,57,37,0.10) border, invisible on the dark page. */",
     `        --paper-accent-soft: ${rd["accent-soft"]};`,
+    `        --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
     "        /* Callout TONE tokens + faint ink + chrome — the SAME reason as the",
     "           --paper-* above: paper-surface.css keys their DARK values on",
     "           `html[data-theme=\"dark\"]`, which the reader NEVER stamps, so an",

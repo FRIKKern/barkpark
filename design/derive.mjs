@@ -941,7 +941,8 @@ export const SLOTS = (() => {
 // (D21). A theme.json `passthrough` array outside this set is a schema red — it
 // can not opt a derivable family out of characterization.
 export const PASSTHROUGH_FAMILIES = [
-  "presence", "sheetCf", "matchQuality", "provider", "statusHealth", "statusChrome",
+  "presence", "sheetCf", "matchQuality", "pdrenderChart", "pdrenderHeatmap",
+  "provider", "statusHealth", "statusChrome",
   "errorPage", "readerInfo", "lifecycle", "instanceLifecycle", "authButton",
 ];
 
