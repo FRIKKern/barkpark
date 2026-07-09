@@ -23,7 +23,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   alias Barkpark.Tenancy.Membership
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
+    # Truthful return path (charter D5): held so a scoped surface's link here
+    # (?return_to=<canonical path>) survives for a back affordance. Sanitized
+    # against open-redirect; nil when arrived at flat/directly.
+    socket = assign(socket, return_to: BarkparkWeb.Studio.ReturnTo.sanitize(params["return_to"]))
     {:ok, load(socket)}
   end
 

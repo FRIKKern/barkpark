@@ -16,6 +16,7 @@ defmodule BarkparkWeb.LoginTicketTest do
 
   import Ecto.Query, only: [where: 2]
   import Phoenix.LiveViewTest
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth
   alias Barkpark.Auth.LoginTicket
@@ -24,7 +25,14 @@ defmodule BarkparkWeb.LoginTicketTest do
   @admin_token "dwb7-admin-token-abcdef"
   @reader_token "dwb7-reader-token-123456"
 
+  # SettingsLive moved to `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical).
+  @settings_path "/w/default/p/default/studio/settings"
+
   setup do
+    # Default must exist before the admin token is minted so it auto-binds as a
+    # Default member (the scoped settings route's LiveScope gate).
+    ensure_default_scope!()
+
     {:ok, _} =
       Auth.create_token(@admin_token, "dwb7 admin", "production", ["read", "write", "admin"])
 
@@ -78,7 +86,7 @@ defmodule BarkparkWeb.LoginTicketTest do
 
       # Carry the freshly-set session cookie forward into a LiveView mount.
       conn = recycle(conn)
-      assert {:ok, _view, _html} = live(conn, "/studio/settings")
+      assert {:ok, _view, _html} = live(conn, @settings_path)
     end
 
     test "a second consume of the same ticket fails (single-use)", %{conn: conn} do

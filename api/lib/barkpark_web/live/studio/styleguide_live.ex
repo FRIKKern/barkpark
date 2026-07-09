@@ -95,10 +95,14 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
   ]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(params, _session, socket) do
     {:ok,
      assign(socket,
        page_title: "Style guide",
+       # Truthful return path (charter D5): held so a scoped surface's link here
+       # (?return_to=<canonical path>) survives for a back affordance. Sanitized
+       # against open-redirect; nil when arrived at flat/directly.
+       return_to: BarkparkWeb.Studio.ReturnTo.sanitize(params["return_to"]),
        theme: "light",
        palette: @palette,
        status: @status,

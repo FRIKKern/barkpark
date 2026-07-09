@@ -56,14 +56,14 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
       conn = init_test_session(conn, %{})
 
       assert {:error, {:redirect, %{to: "/studio"}}} =
-               live(conn, "/studio/production/_plugins/onixedit/settings")
+               live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
     end
 
     test "redirects to /studio for non-admin tokens", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @junior_token})
 
       assert {:error, {:redirect, %{to: "/studio"}}} =
-               live(conn, "/studio/production/_plugins/onixedit/settings")
+               live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
     end
   end
 
@@ -71,15 +71,25 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
     test "unknown plugin redirects to /_plugins with flash", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
-      assert {:error, {:redirect, %{to: "/studio/production/_plugins", flash: %{"error" => msg}}}} =
-               live(conn, "/studio/production/_plugins/no-such-plugin/settings")
+      assert {:error,
+              {:redirect,
+               %{
+                 to: "/w/default/p/default/d/production/studio/_plugins",
+                 flash: %{"error" => msg}
+               }}} =
+               live(
+                 conn,
+                 "/w/default/p/default/d/production/studio/_plugins/no-such-plugin/settings"
+               )
 
       assert msg =~ "not registered"
     end
 
     test "renders one group + one input per declared field", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       assert html =~ "onixedit settings"
       assert html =~ "Bokbasen"
@@ -112,7 +122,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       # The input still renders (masked as a password box) …
       assert has_element?(view, ~s|[data-test-input="bokbasen.client_id"]|)
@@ -123,7 +135,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
     test "renders a Save button", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       assert has_element?(view, ~s|button[data-test-action="save"]|)
     end
@@ -132,7 +146,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   describe "save" do
     test "stores submitted values flat in the bokbasen row", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       view
       |> form(~s|[data-test-id="plugin-settings-form"]|,
@@ -155,7 +171,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
     test "flashes success after a clean save", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       view
       |> form(~s|[data-test-id="plugin-settings-form"]|,
@@ -185,7 +203,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       refute render(view) =~ "shhh-hidden"
 
@@ -207,7 +227,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       view
       |> element(~s|button[data-test-action="reveal-bokbasen.client_secret"]|)
@@ -233,7 +255,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       refute render(view) =~ "reveal-me-id"
 
@@ -248,7 +272,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   describe "validation" do
     test "missing required field surfaces inline per-field error", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       html =
         view
@@ -270,7 +296,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
     test "non-URL value in a :url field surfaces inline error", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       html =
         view
@@ -304,7 +332,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       view
       |> form(~s|[data-test-id="plugin-settings-form"]|,
@@ -334,7 +364,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
         })
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       view
       |> form(~s|[data-test-id="plugin-settings-form"]|,
@@ -385,7 +417,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
     test "a failed encrypted write flashes an error and preserves the form", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       html =
         view
@@ -421,7 +455,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
   describe "dispatch fall-through keeps the session alive" do
     test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       render_hook(view, "totally-unknown-stale-event", %{"leftover" => "true"})
 
@@ -431,7 +467,9 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
     test "a stray/unmatched message does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins/onixedit/settings")
+
+      {:ok, view, _html} =
+        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
       send(view.pid, {:some_unrouted_pubsub, %{"payload" => 1}})
       send(view.pid, :bare_unknown_atom)

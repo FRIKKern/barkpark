@@ -57,15 +57,15 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
   ## RESIDUAL GAP (settings / org-admin highlight nothing)
 
-  `/studio/settings` and `/studio/org-admin` are FLAT routes with no
-  `:dataset` segment, so the nav's tab paths (built from the default
-  dataset → `/studio/production/...`) never prefix-match the page path.
-  None of the wave-1 code slices (current-path hook / nav-model dedup /
-  gating determinism) adds a Settings or Org-admin top-tab, so post-fix
-  these surfaces still highlight NO primary tab. That is encoded here as
-  `active: :none` (the shell is still identical — parity holds — it just
-  doesn't falsely highlight). If a later slice promotes them to real
-  tabs, flip `:active` and this test enforces it.
+  The scoped `/w/:ws/p/:proj/studio/settings` (moved off the flat
+  `/studio/settings` by sdl-w1-admin-canonical) and the flat
+  `/studio/org-admin` are BOTH dataset-less: the nav's built-in tab paths
+  carry a `/d/:dataset/studio` segment, so neither page path prefix-matches
+  a Structure/Media/API tab. No wave-1 slice adds a Settings or Org-admin
+  top-tab, so these surfaces still highlight NO primary tab. That is
+  encoded here as `active: :none` (the shell is still identical — parity
+  holds — it just doesn't falsely highlight). If a later slice promotes
+  them to real tabs, flip `:active` and this test enforces it.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -113,8 +113,19 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/d/production/studio/post"},
       active: "Structure"
     },
-    # ── flat admin singletons ──
-    %{route: "/studio/settings", disposition: :mount, url: "/studio/settings", active: :none},
+    # ── admin singletons ──
+    # settings moved to the workspace-scoped canonical
+    # /w/:ws/p/:proj/studio/settings (sdl-w1-admin-canonical): SettingsLive
+    # edits ONE workspace's substance, so its home is scoped. The flat
+    # /studio/settings is now a 302 (AdminStudioRedirectController), NOT a
+    # studio-layout live route — it reflects out of this table. org-admin
+    # stays genuinely flat/scope-free (still highlights no tab).
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/studio/settings",
+      disposition: :mount,
+      url: {:scoped, "/studio/settings"},
+      active: :none
+    },
     %{route: "/studio/org-admin", disposition: :mount, url: "/studio/org-admin", active: :none},
     %{
       route: "/studio/styleguide",
@@ -122,17 +133,22 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: "/studio/styleguide",
       active: "Style"
     },
-    # ── dataset-scoped admin LVs (/studio/:dataset/_plugins*) ──
+    # ── dataset-scoped admin LVs — moved under the canonical
+    #    /w/:ws/p/:proj/d/:ds/studio/_plugins[...] (sdl-w1-admin-canonical),
+    #    declared before the :scoped_studio /*path catch-all. Still
+    #    Structure's territory: the scoped _plugins path is a boundary prefix
+    #    of the scoped Structure tab base (/w/.../d/:ds/studio), so it
+    #    highlights Structure exactly as the flat form did (prefix match). ──
     %{
-      route: "/studio/:dataset/_plugins",
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins",
       disposition: :mount,
-      url: "/studio/production/_plugins",
+      url: {:scoped, "/d/production/studio/_plugins"},
       active: "Structure"
     },
     %{
-      route: "/studio/:dataset/_plugins/:plugin/settings",
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins/:plugin/settings",
       disposition: :mount,
-      url: "/studio/production/_plugins/onixedit/settings",
+      url: {:scoped, "/d/production/studio/_plugins/onixedit/settings"},
       active: "Structure"
     },
 

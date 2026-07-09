@@ -40,21 +40,21 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
       conn = init_test_session(conn, %{})
 
       assert {:error, {:redirect, %{to: "/studio"}}} =
-               live(conn, "/studio/production/_plugins")
+               live(conn, "/w/default/p/default/d/production/studio/_plugins")
     end
 
     test "redirects to /studio for non-admin tokens", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @junior_token})
 
       assert {:error, {:redirect, %{to: "/studio"}}} =
-               live(conn, "/studio/production/_plugins")
+               live(conn, "/w/default/p/default/d/production/studio/_plugins")
     end
   end
 
   describe "render" do
     test "shows plugin card with callback impl/default markers", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       assert html =~ "Plugins"
 
@@ -78,7 +78,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
 
     test "renders one row per callback (8 callbacks excluding manifest)", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       for cb <- ~w(register_schemas action_handlers external_sync_entries codelist_seeders
                    register_routes register_workers validate_settings checkers) do
@@ -96,7 +96,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
       RunStatus.reset()
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       # Last bootstrap is "never" before the reload click.
       assert render(view) =~ "never"
@@ -114,7 +114,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
 
     test "reload-all flashes the aggregate result", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       view
       |> element(~s|button[data-test-action="reload-all"]|)
@@ -125,7 +125,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
 
     test "refresh button re-renders without changing state", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       view
       |> element(~s|button[data-test-action="refresh"]|)
@@ -141,7 +141,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
   describe "dispatch fall-through keeps the session alive" do
     test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       render_hook(view, "totally-unknown-stale-event", %{"leftover" => "true"})
 
@@ -151,7 +151,7 @@ defmodule BarkparkWeb.Admin.PluginsLiveTest do
 
     test "a stray/unmatched message does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/production/_plugins")
+      {:ok, view, _html} = live(conn, "/w/default/p/default/d/production/studio/_plugins")
 
       send(view.pid, {:some_unrouted_pubsub, %{"payload" => 1}})
       send(view.pid, :bare_unknown_atom)

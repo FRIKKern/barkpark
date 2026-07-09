@@ -56,8 +56,9 @@ defmodule Barkpark.Plugins.Github do
       provisioned App is worse than a dark one, so validation refuses it.
     * `desk_items/1` — one Structure-desk link to the (future) sync-health
       console at `/admin/github`. The path lives under `/admin` (not `/studio`):
-      the host's `scoped_plugin_href` rewrites `/studio/<x>` links assuming
-      `<x>` is a dataset, which mangles the path — the pulse/onixedit precedent.
+      the host's plugin-link canonicaliser (`Paths.plugin_link_href/2`) rewrites
+      `/studio/<x>` links assuming `<x>` is a dataset, which mangles the path —
+      the pulse/onixedit precedent.
 
   Plugin off = zero routes, zero workers, dark tables. It is NOT added to any
   `BARKPARK_PLUGINS` whitelist by default — provisioning the GitHub App and
@@ -202,8 +203,8 @@ defmodule Barkpark.Plugins.Github do
   @doc """
   Surface the sync-health console in the Structure desk. The link points at
   `/admin/github` (an `/admin` path, NOT `/studio/...`) so the host's
-  `scoped_plugin_href` leaves it intact on both flat and scoped desks — the
-  same shape pulse/onixedit use. The console itself lands in a later wave; the
+  plugin-link canonicaliser (`Paths.plugin_link_href/2`) leaves it intact on
+  both flat and scoped desks — the same shape pulse/onixedit use. The console itself lands in a later wave; the
   link is harmless until then (routes it to a host 404, not a crash).
   """
   @impl Barkpark.Plugin

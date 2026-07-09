@@ -1,11 +1,24 @@
 defmodule BarkparkWeb.Studio.StudioLive.Paths do
   @moduledoc """
-  Pure Studio URL builders extracted from `BarkparkWeb.Studio.StudioLive`.
-  `studio_path_for/3` contributes the `/d/:dataset/studio[/...]` suffix;
-  `desk_chip_href/4` and `scoped_plugin_href/2` compose the scoped/flat hrefs
-  the render template emits. No socket — the socket-aware `studio_path/4`
-  choke point stays in StudioLive and prefixes `scope_prefix` before calling
-  `studio_path_for/3`.
+  THE Studio URL builder — the single owner of the Studio path grammar.
+
+  Every Studio URL string is produced here, socket-free: each builder takes
+  an explicit `scope_prefix` (the `/w/:ws/p/:proj` prefix on a scoped
+  surface, or `""`/`nil` on a flat one) rather than reaching into a socket.
+
+    * `studio_path_for/3` contributes the `/d/:dataset/studio[/...]` suffix.
+    * `studio_path/4` prefixes `scope_prefix` in front of that suffix. It is
+      the socket-free twin of the socket-aware choke point
+      `BarkparkWeb.Studio.StudioLive.Shared.studio_path/4` — that function
+      just reads `scope_prefix` off the socket and delegates straight here.
+    * `scoped_root/3` / `flat_root/1` build the Studio root the chrome
+      `push_navigate`s to — ONE owner each for the scoped and the
+      deliberate-flat grammars.
+    * `paper_path/2` builds the standalone paper reader URL.
+    * `desk_chip_href/4` composes desk-chip hrefs; `plugin_link_href/2`
+      canonicalises a plugin's flat `:plugin_link` href against the current
+      scope — called at SOURCE in `PaneBuilder.list_items`, so no
+      render-time shim survives.
   """
 
   @doc false
@@ -18,6 +31,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
         "/d/#{dataset}/studio/" <> Enum.join(segments, "/"),
         opts
       )
+
+  @doc """
+  Full Studio path: `scope_prefix` + the `/d/:dataset/studio[/segments]`
+  suffix. `scope_prefix` is the `/w/:ws/p/:proj` prefix on a scoped surface,
+  or `""`/`nil` on a flat one. Every hand-interpolated `…/d/…/studio` call
+  site routes through here.
+  """
+  def studio_path(scope_prefix, segments, dataset, opts \\ []) do
+    (scope_prefix || "") <> studio_path_for(segments, dataset, opts)
+  end
+
+  @doc """
+  The scoped Studio root — `/w/:ws/p/:proj/d/:dataset/studio`. The canonical
+  destination the chrome `push_navigate`s to.
+  """
+  def scoped_root(ws_slug, proj_slug, dataset),
+    do: "/w/#{ws_slug}/p/#{proj_slug}/d/#{dataset}/studio"
+
+  @doc """
+  The deliberate-flat Studio root — `/studio/:dataset`. Used on surfaces
+  with no `/w/:ws/p/:proj` scope; these ride the flat→scoped 302 funnel,
+  which re-resolves the workspace from the session. ONE owner for the flat
+  grammar too.
+  """
+  def flat_root(dataset), do: "/studio/#{dataset}"
+
+  @doc """
+  Standalone paper reader URL — `scope_prefix` + `/papers/:slug`.
+  """
+  def paper_path(scope_prefix, slug), do: (scope_prefix || "") <> "/papers/#{slug}"
 
   @doc false
   def append_desk_query(path, opts) do
@@ -37,24 +80,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
     (scope_prefix || "") <> studio_path_for(nav_path, dataset, desk: desk)
   end
 
-  # Render-side scoping for `:plugin_link` hrefs. Structure/PaneBuilder emit
-  # them in the legacy FLAT shape `/studio/<ds>[/...]` — Structure has no
-  # scope knowledge, so the rewrite happens here, where `@scope_prefix` is
-  # in hand. On the scoped surface the flat shape would ride the
+  # Canonicalise a plugin `:plugin_link` href against the current scope.
+  # Structure/PaneBuilder emit them in the legacy FLAT shape
+  # `/studio/<ds>[/...]` — Structure has no scope knowledge, so the rewrite
+  # happens at SOURCE, in `PaneBuilder.list_items`, where `scope_prefix` is
+  # threaded in. On the scoped surface the flat shape would ride the
   # flat→scoped 302 funnel, which re-resolves the workspace from the
   # SESSION and can teleport the user out of the workspace they're on, so
-  # rewrite to the /d/ canonical instead. Empty prefix (flat surfaces, e.g.
-  # the /studio/:dataset/_plugins admin LV) keeps the flat path — mirrors
-  # the branch in StudioComponents.default_top_menu_entries/2.
+  # rewrite to the `/d/` canonical instead. Empty prefix (flat surfaces,
+  # e.g. the `/studio/:dataset/_plugins` admin LV) keeps the flat path —
+  # mirrors the flat branch in
+  # `StudioComponents.Nav.default_top_menu_entries/4`. Non-`/studio` hrefs
+  # (e.g. a plugin's `/admin/...` console) pass through untouched.
   @doc false
-  def scoped_plugin_href("", href), do: href
+  def plugin_link_href("", href), do: href
 
-  def scoped_plugin_href(scope_prefix, "/studio/" <> rest) when is_binary(scope_prefix) do
+  def plugin_link_href(scope_prefix, "/studio/" <> rest) when is_binary(scope_prefix) do
     case String.split(rest, "/", parts: 2) do
       [ds, suffix] -> "#{scope_prefix}/d/#{ds}/studio/#{suffix}"
       [ds] -> "#{scope_prefix}/d/#{ds}/studio"
     end
   end
 
-  def scoped_plugin_href(_scope_prefix, href), do: href
+  def plugin_link_href(_scope_prefix, href), do: href
 end

@@ -2,6 +2,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   @moduledoc """
   **Workspace Settings** — the admin control panel for one workspace.
 
+  ## Route + scope (sdl-w1-admin-canonical)
+
+  Mounts at the workspace-scoped canonical
+  `/w/:ws/p/:proj/studio/settings` (dataset-less — settings are
+  workspace-level). `BarkparkWeb.LiveScope.:resolve` in the on_mount chain
+  resolves + membership-authorizes the workspace from the URL and assigns
+  `current_workspace`, so every per-workspace read/write below targets the
+  URL workspace — NOT the seeded Default that `StudioChrome`'s flat fallback
+  would otherwise pin. The flat `/studio/settings` spelling 302s here via
+  `BarkparkWeb.AdminStudioRedirectController`.
+
   Three stacked sections, most-reached first:
 
     1. **Workspace theme** — the persisted theme identity (`render_theme_section/1`).

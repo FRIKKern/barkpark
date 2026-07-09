@@ -265,11 +265,13 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
 
   describe "plugin-link hrefs are /d/-canonical on the scoped surface" do
     # Structure emits :plugin_link hrefs in the legacy FLAT shape
-    # ("/studio/<ds>/media" — it has no scope knowledge); StudioLive's
-    # scoped_plugin_href/2 rewrites them at render time so clicks stay in
-    # the CURRENT workspace instead of riding the flat→scoped 302 funnel
-    # (which re-resolves the workspace from the session and can teleport
-    # the user). The flat _plugins admin LV keeps flat hrefs.
+    # ("/studio/<ds>/media" — it has no scope knowledge); PaneBuilder
+    # canonicalises them at SOURCE, threading the scope_prefix into
+    # list_items/2 (via Paths.plugin_link_href/2), so the href is already
+    # /d/-canonical by the time it renders. Clicks stay in the CURRENT
+    # workspace instead of riding the flat→scoped 302 funnel (which
+    # re-resolves the workspace from the session and can teleport the
+    # user). The flat _plugins admin LV (scope_prefix "") keeps flat hrefs.
     setup do
       # Both media schemas → the "Media Library" :plugin_link nests inside
       # the "media-desk" group (Structure.build_media_group/2). The rows
@@ -299,7 +301,7 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       prefix = "/w/#{ws_a.slug}/p/#{proj_a.slug}"
 
       # The pane row specifically (not the top-nav Media tab, which is
-      # already scoped via default_top_menu_entries/2).
+      # already scoped via default_top_menu_entries/4).
       assert has_element?(
                view,
                ~s{#plugin-link-media-library[href="#{prefix}/d/#{@dataset}/studio/media"]}
@@ -309,7 +311,12 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       refute html =~ ~s{href="/studio/#{@dataset}/media"}
     end
 
-    test "the flat _plugins admin surface still renders flat hrefs", %{conn: conn} do
+    test "the flat _plugins admin surface 302s to the scoped canonical (sdl-w1-admin-canonical)",
+         %{conn: conn} do
+      # The flat `/studio/:dataset/_plugins` admin mount MOVED under the scoped
+      # canonical `/w/:ws/p/:proj/d/:dataset/studio/_plugins`; the flat spelling
+      # now 302s there (session-resolved workspace/project), so there is no
+      # longer a flat-surface render with scope_prefix == "".
       raw = "plugin-href-flat-admin-#{System.unique_integer([:positive])}"
 
       {:ok, _} =
@@ -319,12 +326,15 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
           "admin"
         ])
 
-      conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
-      {:ok, _view, html} = live(conn, "/studio/#{@dataset}/_plugins")
+      {ws, proj} = ensure_default_scope!()
 
-      # scope_prefix == "" → default_top_menu_entries/2 keeps the legacy
-      # flat tab paths (they ride the flat→scoped 302 funnel by design).
-      assert html =~ ~s{href="/studio/#{@dataset}/media"}
+      conn =
+        conn
+        |> Plug.Test.init_test_session(%{"api_token" => raw})
+        |> get("/studio/#{@dataset}/_plugins")
+
+      assert redirected_to(conn, 302) ==
+               "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/_plugins"
     end
   end
 
