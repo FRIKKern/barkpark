@@ -2,12 +2,13 @@ defmodule BarkparkCloud.Usage do
   @moduledoc """
   Compose the console's usage envelope — every meter the Usage tab renders — as
   ONE stable, honest shape (epic charter decision D48: "meters without truth are
-  lies"). This module is PURE and TOTAL: it never touches the network or the DB,
+  lies"). `compose/1` is PURE and TOTAL: it never touches the network or the DB,
   never raises whatever it is handed, and always emits the FULL, fixed meter
-  vocabulary so a consumer can always destructure it. The router
-  (`BarkparkCloud.Web.Router`) does the IO — telemetry lookup, team-member count,
-  the server-side instance count fetch with the vault-stored admin token — and
-  hands the resolved (possibly partial / failed) inputs here to be shaped.
+  vocabulary so a consumer can always destructure it. The IO that FEEDS it —
+  telemetry lookup, team-member count, the server-side instance-inventory
+  fan-out with the vault-stored admin token, the fleet-quota read — lives in this
+  same module (`gather/1` and friends, below), resolving the (possibly partial /
+  failed) inputs before handing them to the pure shaper.
 
   ## The meter vocabulary is FIXED and always fully present
 
@@ -76,7 +77,33 @@ defmodule BarkparkCloud.Usage do
   `compose/0` (or `compose(%{})`) yields the all-`"unmetered"` envelope — the
   honest shape for a still-provisioning or wholly-unreachable box, where the
   control-plane meters (seats) still return.
+
+  ## IO gather + cached fleet samples (cloud-console wave 3)
+
+  `compose/1` above stays PURE. The IO that FEEDS it — the instance-API fan-out
+  (documents / datasets / webhooks over the vault admin token), the telemetry
+  lookup, the seat count, the fleet-quota read — lives here too, in `gather/1`,
+  so it has ONE home (the router's `/usage` route delegates; the sampler worker
+  and the summary read reuse it). Two disciplines are enforced in this one place:
+
+    * the WHOLE 1+2N inventory fan-out shares ONE monotonic wall-clock deadline
+      (`fanout_budget_ms/0`, ~10s) so even a slow / many-dataset box returns a
+      degraded envelope well inside the SPA's ~15s skeleton, never ~98s;
+    * the decrypted admin token stays in the request `Authorization` header and
+      NEVER appears in a return value, a log line, or the composed envelope — so
+      it can never reach a response body OR a persisted `usage_samples` row.
+
+  `gather/1` is the LIVE read (an instance fan-out). `record_sample/1` gathers +
+  persists a `Usage.Sample` row; `summary/1` is the PURE-READ fleet view — the
+  latest cached row per checkable instance, ZERO instance HTTP on the path — so
+  the Overview fleet strip never pays the live-fan-out latency.
   """
+
+  import Ecto.Query, only: [from: 2]
+
+  alias BarkparkCloud.{Accounts, Billing, Registry, Repo, Telemetry}
+  alias BarkparkCloud.Registry.Barkpark
+  alias BarkparkCloud.Usage.Sample
 
   # Source labels — each NAMES where the number does (or would) come from, so a
   # degraded meter still tells the operator which pipe went quiet.
@@ -219,5 +246,446 @@ defmodule BarkparkCloud.Usage do
       s when is_binary(s) -> s
       _ -> nil
     end
+  end
+
+  # ── IO gather (the router's /usage route + the sampler worker) ───────────────
+
+  @doc """
+  Gather every meter's source input for one instance and shape it through the
+  pure `compose/1`. Loads the instance's team internally (seats / fleet-quota are
+  team-scoped control-plane reads that return even when the box is down). Each
+  gatherer is fail-soft: a source that errors degrades its ONE meter to
+  "unmetered", never the whole envelope. Never raises; never leaks the admin
+  token into the returned envelope.
+  """
+  @spec gather(Barkpark.t()) :: %{meters: map()}
+  def gather(%Barkpark{} = bp) do
+    team = Accounts.get_team(bp.team_id)
+
+    # The WHOLE 1+2N inventory gather (list + documents fan-out + webhooks
+    # fan-out) shares ONE monotonic deadline so a slow / many-dataset box returns
+    # a (degraded) envelope inside the SPA's ~15s skeleton, not 1+2N × 15s ≈ 98s.
+    deadline = System.monotonic_time(:millisecond) + fanout_budget_ms()
+    datasets = instance_datasets(bp, deadline)
+    slugs = fanout_slugs(datasets)
+
+    compose(%{
+      telemetry: telemetry(bp),
+      seats: seats(team),
+      pending_invitations: pending_invitations(team),
+      datasets: dataset_count(datasets),
+      documents: instance_documents(bp, slugs, deadline),
+      webhooks: instance_webhooks(bp, slugs, deadline),
+      instances: instances_input(team)
+    })
+  end
+
+  @doc """
+  Gather (a live instance fan-out) + persist a `Usage.Sample` row. The sampler
+  worker calls this once per checkable instance per tick, writing a row EVERY
+  time — even for an unreachable box, whose instance-sourced meters degrade to
+  "unmetered" while `measured_at` stays a real timestamp. Returns the Repo
+  insert result.
+  """
+  @spec record_sample(Barkpark.t()) :: {:ok, Sample.t()} | {:error, Ecto.Changeset.t()}
+  def record_sample(%Barkpark{} = bp) do
+    %Sample{}
+    |> Sample.changeset(%{
+      barkpark_id: bp.id,
+      envelope: gather(bp),
+      measured_at: DateTime.utc_now()
+    })
+    |> Repo.insert()
+  end
+
+  # ── Pure fleet read (GET /v1/usage/summary) ──────────────────────────────────
+
+  @doc """
+  The team's fleet meter strip — a PURE DB read, ZERO instance HTTP. Returns the
+  live fleet-quota meter (`team.instances`, an OC11 control-plane read) beside
+  the LATEST cached sample per checkable instance. An instance with no sample yet
+  serves the honest all-"unmetered" envelope with `measured_at: nil`.
+  """
+  @spec summary(Accounts.Team.t()) :: %{team: map(), instances: [map()]}
+  def summary(team) do
+    %{
+      team: %{instances: team_instances_meter(team)},
+      instances: team |> checkable_barkparks() |> Enum.map(&instance_summary/1)
+    }
+  end
+
+  @doc """
+  The LIVE fleet-quota meter for a team (OC11) — the managed-instance count with
+  its enforcement-backed ceiling, shaped through `compose/1`. A control-plane
+  read (no instance HTTP), so it stays live on the otherwise-cached summary.
+  """
+  @spec team_instances_meter(Accounts.Team.t()) :: map()
+  def team_instances_meter(team) do
+    compose(%{instances: instances_input(team)}).meters.instances
+  end
+
+  # The team's checkable instances — the SAME predicate the sampler enumerates
+  # (`Registry.update_checkable_barkparks/0`: host set, not billing-suspended),
+  # scoped to this team so the summary is team-private.
+  defp checkable_barkparks(team) do
+    team
+    |> Registry.list_barkparks()
+    |> Enum.filter(fn bp -> is_binary(bp.host) and bp.host != "" and bp.suspended == false end)
+  end
+
+  # One instance's summary row: identity + its latest cached meters + the sample
+  # time. No cached row (never sampled) → the honest all-"unmetered" envelope,
+  # measured_at nil.
+  defp instance_summary(bp) do
+    base = %{id: bp.id, name: bp.name, slug: bp.slug, host: bp.host}
+
+    case latest_sample(bp) do
+      %Sample{envelope: %{"meters" => meters}, measured_at: at} ->
+        Map.merge(base, %{measured_at: at, meters: meters})
+
+      _ ->
+        Map.merge(base, %{measured_at: nil, meters: compose(%{}).meters})
+    end
+  end
+
+  # The newest sample for an instance, or nil. The composite index makes this an
+  # index range-scan (LIMIT 1) per instance.
+  defp latest_sample(bp) do
+    from(s in Sample,
+      where: s.barkpark_id == ^bp.id,
+      order_by: [desc: s.measured_at],
+      limit: 1
+    )
+    |> Repo.one()
+  end
+
+  # ── control-plane gatherers (return even when the instance is down) ──────────
+
+  # The latest health beat, normalized — the newest health event in the recent
+  # window. Carries `reported_at` for the telemetry meters' `measured_at`. nil
+  # when the box has never phoned home.
+  defp telemetry(bp) do
+    case Enum.find(Registry.recent_events(bp, 100), &(&1.type == "health")) do
+      nil -> nil
+      event -> Telemetry.normalize(event)
+    end
+  end
+
+  # Seat count = the team's members. Rescued to nil (→ seats "unmetered") so a
+  # transient repo hiccup / missing team degrades one meter, never the envelope.
+  defp seats(team) do
+    length(Accounts.list_team_members(team))
+  rescue
+    _ -> nil
+  end
+
+  defp pending_invitations(team) do
+    length(Accounts.list_invitations(team))
+  rescue
+    _ -> nil
+  end
+
+  # The fleet meter input (OC11). `value` is the team's live managed-instance
+  # count; `quota` is the plan ceiling the create-time 402 guard + the quota
+  # reconciler both enforce (`Billing.barkpark_limit/1`), but ONLY when it is an
+  # honest wall to draw:
+  #
+  #   * NO active subscription → nil. An unsubscribed team's ceiling is owned by
+  #     the ENTITLEMENT gate (the 402), not a quota bar.
+  #   * a "forever"-tier placeholder (>= 100_000) → nil. A bar to a million is a
+  #     lie.
+  #
+  # Rescued so a repo hiccup / missing team degrades THIS meter (→ "unmetered"),
+  # never the envelope. `compose/1` derives `warn_at` from the quota.
+  defp instances_input(team) do
+    %{value: Registry.count_barkparks(team), quota: instance_quota(team)}
+  rescue
+    _ -> %{value: nil, quota: nil}
+  end
+
+  defp instance_quota(team) do
+    case Billing.active_subscription(team) do
+      nil ->
+        nil
+
+      %{} ->
+        limit = Billing.barkpark_limit(team)
+        if is_integer(limit) and limit < 100_000, do: limit
+    end
+  end
+
+  # ── instance-inventory gatherers (C11 — real documents/datasets/webhooks) ────
+  #
+  # Every gatherer fetches SERVER-SIDE with the vault-stored admin token over the
+  # SAME transport seam the router proxy uses (`instance_api_http_client/0`). In
+  # EVERY branch the token stays in the request HEADER and NEVER appears in a
+  # return value, a log line, or an error tuple. A not-live / token-less instance
+  # has nothing to fetch → `:unmetered`; a transport / shape / deadline failure →
+  # `{:error, _}`; both let `instance_meter/2` degrade that ONE meter honestly.
+
+  # Cap on the per-request inventory FAN-OUT. A box with more datasets than this
+  # can't be totalled inside the skeleton budget without risking a hang, so the
+  # fanned meters degrade to "unmetered" — the datasets COUNT itself still lands.
+  @max_fanout_datasets 24
+
+  # How many per-dataset inventory calls run at once inside a fan-out.
+  @fanout_concurrency 8
+
+  # Per-CALL ceiling for one dataset's fetch — matches the transport's own 15s
+  # total; the aggregate deadline below is the real bound.
+  @fanout_call_ms 15_000
+
+  # The AGGREGATE wall-clock budget for the entire 1+2N inventory gather.
+  # Overridable (tests drive it down to prove the deadline).
+  @fanout_budget_default_ms 10_000
+
+  defp fanout_budget_ms do
+    Application.get_env(:barkpark_cloud, :usage_fanout_budget_ms, @fanout_budget_default_ms)
+  end
+
+  # Run `fun` bounded by the time remaining until `deadline`. Returns the fun's
+  # value, or `{:error, :deadline_exceeded}` when the budget is spent. Crash-safe:
+  # a raise / exit inside `fun` becomes `{:error, :exception}` and an overrun task
+  # is brutally killed — so a hung / crashing instance NEVER takes the caller
+  # down. This is what makes the SHARED deadline real: `Task.async_stream`'s own
+  # `:timeout` is per-ELEMENT, so it can't bound a whole fan-out plus the list.
+  defp within_deadline(deadline, fun) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :deadline_exceeded}
+    else
+      task =
+        Task.async(fn ->
+          try do
+            fun.()
+          rescue
+            _ -> {:error, :exception}
+          catch
+            _, _ -> {:error, :exception}
+          end
+        end)
+
+      case Task.yield(task, remaining) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} -> result
+        _ -> {:error, :deadline_exceeded}
+      end
+    end
+  end
+
+  # The instance's dataset list, fetched once. `{:ok, [slug]}` on success;
+  # `:unmetered` when the box is not live / token-less; `{:error, _}` on a
+  # transport or shape failure.
+  defp instance_datasets(bp, deadline) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      within_deadline(deadline, fn ->
+        request = %{
+          method: :get,
+          url: base <> "/api/workspaces/default/projects/default/datasets",
+          headers: instance_api_headers(admin_token),
+          body: ""
+        }
+
+        case instance_api_http_client().request(request) do
+          {:ok, %{status: status, body: body}} when status in 200..299 ->
+            parse_dataset_slugs(body)
+
+          _ ->
+            {:error, :unreachable}
+        end
+      end)
+    else
+      {:error, _} -> :unmetered
+    end
+  end
+
+  # The datasets METER count = how many datasets the list returned. A failure /
+  # not-live passes through verbatim so `instance_meter/2` degrades it.
+  defp dataset_count({:ok, slugs}), do: {:ok, length(slugs)}
+  defp dataset_count(other), do: other
+
+  # The slug set the documents + webhooks fan-outs iterate. A successful list
+  # within the cap → `{:ok, slugs}`; over the cap → an honest error; a not-live /
+  # failed list passes through so both fanned meters degrade in lockstep.
+  defp fanout_slugs({:ok, slugs}) when length(slugs) <= @max_fanout_datasets, do: {:ok, slugs}
+  defp fanout_slugs({:ok, _slugs}), do: {:error, :too_many_datasets}
+  defp fanout_slugs(other), do: other
+
+  # Cross-dataset DOCUMENT total: sum every dataset's `total_documents`. Any
+  # per-dataset failure degrades the WHOLE meter (a partial sum undercounts).
+  defp instance_documents(bp, {:ok, slugs}, deadline) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      sum_across_datasets(
+        slugs,
+        fn slug -> count_documents(base, admin_token, slug) end,
+        deadline
+      )
+    else
+      {:error, _} -> :unmetered
+    end
+  end
+
+  defp instance_documents(_bp, other, _deadline), do: other
+
+  # Cross-dataset WEBHOOK total: sum every dataset's webhook-list length.
+  defp instance_webhooks(bp, {:ok, slugs}, deadline) do
+    with {:ok, base} <- instance_base_url(bp),
+         {:ok, admin_token} <- instance_admin_token(bp) do
+      sum_across_datasets(slugs, fn slug -> count_webhooks(base, admin_token, slug) end, deadline)
+    else
+      {:error, _} -> :unmetered
+    end
+  end
+
+  defp instance_webhooks(_bp, other, _deadline), do: other
+
+  # Sum a per-dataset count across the set CONCURRENTLY (`@fanout_concurrency` at
+  # a time), bounded by the shared `deadline`. SHORT-CIRCUITS to `{:error, _}` the
+  # instant ANY element is not a landed `{:ok, n>=0}` — a per-dataset failure, a
+  # bad shape, a per-call timeout, or the whole fan-out overrunning the aggregate
+  # budget — because a partial cross-dataset total would silently undercount.
+  # `ordered: false` lets fast datasets report while a slow one is still in flight.
+  defp sum_across_datasets(slugs, fetch_one, deadline) do
+    within_deadline(deadline, fn ->
+      slugs
+      |> Task.async_stream(fetch_one,
+        max_concurrency: @fanout_concurrency,
+        timeout: @fanout_call_ms,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+      |> Enum.reduce_while({:ok, 0}, fn
+        {:ok, {:ok, n}}, {:ok, acc} when is_integer(n) and n >= 0 ->
+          {:cont, {:ok, acc + n}}
+
+        _other, _acc ->
+          {:halt, {:error, :dataset_fetch_failed}}
+      end)
+    end)
+  end
+
+  # One dataset's webhook count — `{"webhooks": [...]}` (instance
+  # WebhookController.index). Any other shape is an honest degrade.
+  defp count_webhooks(base, admin_token, dataset) do
+    request = %{
+      method: :get,
+      url: base <> "/v1/webhooks/" <> dataset,
+      headers: instance_api_headers(admin_token),
+      body: ""
+    }
+
+    case instance_api_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        decode_list_count(body, "webhooks")
+
+      _ ->
+        {:error, :unreachable}
+    end
+  end
+
+  # One dataset's document total — `{"total_documents": n, ...}` (instance
+  # AnalyticsController.index). A single cheap read per dataset.
+  defp count_documents(base, admin_token, dataset) do
+    request = %{
+      method: :get,
+      url: base <> "/v1/data/analytics/" <> dataset,
+      headers: instance_api_headers(admin_token),
+      body: ""
+    }
+
+    case instance_api_http_client().request(request) do
+      {:ok, %{status: status, body: body}} when status in 200..299 ->
+        decode_scalar_total(body, "total_documents")
+
+      _ ->
+        {:error, :unreachable}
+    end
+  end
+
+  # `{"<key>": [...]}` → `{:ok, length}`; any other shape → an honest degrade.
+  defp decode_list_count(body, key) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{^key => list}} when is_list(list) -> {:ok, length(list)}
+      _ -> {:error, :bad_shape}
+    end
+  end
+
+  defp decode_list_count(_, _key), do: {:error, :bad_shape}
+
+  # `{"<key>": n}` → `{:ok, n}` for a non-negative integer; else degrade.
+  defp decode_scalar_total(body, key) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{^key => n}} when is_integer(n) and n >= 0 -> {:ok, n}
+      _ -> {:error, :bad_shape}
+    end
+  end
+
+  defp decode_scalar_total(_, _key), do: {:error, :bad_shape}
+
+  # The datasets-list envelope → a slug list (skipping any malformed row).
+  defp parse_dataset_slugs(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"datasets" => list}} when is_list(list) ->
+        {:ok, for(%{"slug" => s} <- list, is_binary(s) and s != "", do: s)}
+
+      _ ->
+        {:error, :bad_shape}
+    end
+  end
+
+  defp parse_dataset_slugs(_), do: {:error, :bad_shape}
+
+  # ── instance-API transport primitives (shared with the router proxy) ─────────
+  #
+  # These are the ONE home for the control plane's instance-API read transport:
+  # the router's proxy relay delegates here too (`Router.instance_base_url/1` etc.
+  # are thin wrappers), so the base-URL / token-custody / headers / client-seam
+  # rules live in a single place.
+
+  @doc "A live instance has a non-empty `url`; trims a trailing slash. `{:error, :not_live}` otherwise."
+  @spec instance_base_url(Barkpark.t()) :: {:ok, String.t()} | {:error, :not_live}
+  def instance_base_url(%Barkpark{url: url}) when is_binary(url) and url != "",
+    do: {:ok, String.trim_trailing(url, "/")}
+
+  def instance_base_url(_), do: {:error, :not_live}
+
+  @doc """
+  Decrypt the stored per-instance admin token server-side. `{:ok, nil}` (a
+  pre-feature row) is `:no_admin_token`; a tampered ciphertext fails closed.
+  """
+  @spec instance_admin_token(Barkpark.t()) ::
+          {:ok, String.t()} | {:error, :no_admin_token | :decrypt_failed}
+  def instance_admin_token(bp) do
+    case Registry.reveal_admin_token(bp) do
+      {:ok, nil} -> {:error, :no_admin_token}
+      {:ok, token} -> {:ok, token}
+      :error -> {:error, :decrypt_failed}
+    end
+  end
+
+  @doc "The instance-API request headers — the admin token rides ONLY here, never in a body/return."
+  @spec instance_api_headers(String.t()) :: [{String.t(), String.t()}]
+  def instance_api_headers(admin_token) do
+    [
+      {"Authorization", "Bearer " <> admin_token},
+      {"Accept", "application/json"},
+      {"Content-Type", "application/json"}
+    ]
+  end
+
+  @doc """
+  The instance-API transport seam — the SAME swappable client the studio-link /
+  self-update / site-url relays use (`:studio_link_http_client`; tests wire
+  `StudioLinkFakeHttpClient`). Default is the verified-TLS :httpc client.
+  """
+  @spec instance_api_http_client() :: module()
+  def instance_api_http_client do
+    Application.get_env(
+      :barkpark_cloud,
+      :studio_link_http_client,
+      BarkparkCloud.Billing.HttpClient
+    )
   end
 end

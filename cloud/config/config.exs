@@ -213,10 +213,16 @@ config :barkpark_cloud, Oban,
        # box, wait for it to settle `current`, then advance). Cheap per tick (≤1
        # refresh or ≤1 trigger); rides the hourly :17 sweep's `behind` verdicts.
        {"*/5 * * * *", BarkparkCloud.Workers.AutoupdateRolloutWorker},
-       # azh-w6: daily retention prune of the two unbounded agent tables
-       # (agent_events >14d, dead agent_tokens >30d past revoked/expired). Runs
-       # off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a missed
-       # tick is harmless (max_attempts: 1 — the next day catches up).
+       # cloud-console-w3: the fleet usage sampler — every 15 min (offset off the
+       # quarter-hours so it never stampedes the :00/:05 sweeps) cache one usage
+       # envelope per checkable instance so GET /v1/usage/summary answers the
+       # Overview fleet strip with ZERO live instance HTTP. max_attempts: 1 — a
+       # missed tick just re-samples next quarter-hour.
+       {"7,22,37,52 * * * *", BarkparkCloud.Workers.UsageSamplerWorker},
+       # azh-w6: daily retention prune of the unbounded agent tables (agent_events
+       # >14d, dead agent_tokens >30d past revoked/expired, usage_samples >14d).
+       # Runs off-peak at 03:30 so it never stampedes the on-the-hour sweeps; a
+       # missed tick is harmless (max_attempts: 1 — the next day catches up).
        {"30 3 * * *", BarkparkCloud.Workers.AgentRetentionWorker}
      ]}
   ]

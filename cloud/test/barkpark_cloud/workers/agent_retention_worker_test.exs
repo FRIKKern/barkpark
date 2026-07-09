@@ -13,8 +13,9 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
   use BarkparkCloud.DataCase, async: true
   use Oban.Testing, repo: BarkparkCloud.Repo
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Registry, Usage}
   alias BarkparkCloud.Registry.{AgentEvent, AgentToken}
+  alias BarkparkCloud.Usage.Sample
   alias BarkparkCloud.Workers.AgentRetentionWorker
 
   ## Fixtures (mirror StaleProvisionJobReaperTest)
@@ -128,7 +129,39 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
     assert Repo.get(AgentToken, live.id)
   end
 
-  ## 5. Idempotency — a clean run is a no-op and never raises.
+  ## 5. usage_samples — older than 14 days pruned, the window kept.
+
+  # A cached usage sample, timestamped `days` old (measured_at is a plain field,
+  # so we set the age directly at insert — no backdate needed).
+  defp aged_sample(bp, days) do
+    {:ok, s} =
+      %Sample{}
+      |> Sample.changeset(%{
+        barkpark_id: bp.id,
+        envelope: Usage.compose(%{}),
+        measured_at: days_ago(days)
+      })
+      |> Repo.insert()
+
+    s.id
+  end
+
+  test "prunes usage_samples older than 14 days and keeps the window" do
+    team = team_fixture()
+    bp = barkpark_fixture(team)
+
+    old = aged_sample(bp, 20)
+    keep_boundary = aged_sample(bp, 13)
+    keep_fresh = aged_sample(bp, 1)
+
+    assert {:ok, %{samples_deleted: 1}} = perform_job(AgentRetentionWorker, %{})
+
+    refute Repo.get(Sample, old)
+    assert Repo.get(Sample, keep_boundary)
+    assert Repo.get(Sample, keep_fresh)
+  end
+
+  ## 6. Idempotency — a clean run is a no-op and never raises.
 
   test "perform is a no-op when nothing is old enough" do
     team = team_fixture()
@@ -136,7 +169,7 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorkerTest do
     _fresh_event = aged_event(bp, 2)
     {:ok, _pt, _live} = Registry.mint_agent_token(bp, "report")
 
-    assert {:ok, %{events_deleted: 0, tokens_deleted: 0}} =
+    assert {:ok, %{events_deleted: 0, tokens_deleted: 0, samples_deleted: 0}} =
              perform_job(AgentRetentionWorker, %{})
   end
 end
