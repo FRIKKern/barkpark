@@ -3111,7 +3111,13 @@ defmodule Barkpark.Plugins.Sheets.EngineTest do
     end
 
     test "distinct cells draw independently within one save (pure per {seed, tab, col, row})" do
-      out = run(%{"A1" => %{"f" => "=RAND()"}, "A2" => %{"f" => "=RAND()"}, "B1" => %{"f" => "=RAND()"}})
+      out =
+        run(%{
+          "A1" => %{"f" => "=RAND()"},
+          "A2" => %{"f" => "=RAND()"},
+          "B1" => %{"f" => "=RAND()"}
+        })
+
       vals = [out["A1"]["v"], out["A2"]["v"], out["B1"]["v"]]
       assert length(Enum.uniq(vals)) == 3
     end
