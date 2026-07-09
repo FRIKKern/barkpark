@@ -57,6 +57,11 @@ defmodule BarkparkWeb.ShareLinkController do
   defp serve_paper_static(conn, %ShareLink{} = link) do
     case Content.get_paper(link.ref_id, link.dataset, scope(link)) do
       %Content.Document{} = paper ->
+        # Social-share head (preview-contract pc-w2): a share link IS the sharing
+        # flow, so this static render must carry the og/twitter/JSON-LD too. The
+        # `:bulldocs` root layout reads `:preview` + `:page_title`.
+        preview = paper_preview(paper, link.ref_id)
+
         conn
         |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
         |> put_layout(false)
@@ -64,6 +69,8 @@ defmodule BarkparkWeb.ShareLinkController do
         |> render(:show,
           article?: paper_article?(paper),
           body_html: paper_body_html(paper),
+          preview: preview,
+          page_title: preview["title"],
           slug: link.ref_id
         )
 
@@ -71,6 +78,13 @@ defmodule BarkparkWeb.ShareLinkController do
         not_found_html(conn)
     end
   end
+
+  # Preview manifest for the share-link static render (preview-contract pc-w2).
+  defp paper_preview(%{content: content} = paper, slug) when is_map(content),
+    do: BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
+
+  defp paper_preview(_paper, slug),
+    do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
   defp serve(conn, %ShareLink{kind: "doc"} = link) do
     case Content.get_document(link.ref_id, link.ref_type, link.dataset, scope(link)) do

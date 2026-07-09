@@ -933,4 +933,68 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert is_binary(render(view))
     end
   end
+
+  # preview-contract pc-w2: the reader emits the social-share head (og/twitter/
+  # JSON-LD) from the paper's preview manifest — in the DEAD (disconnected)
+  # render, because crawlers + unfurlers (Slack/Discord/iMessage/LinkedIn) run
+  # no JS. We assert against `get/2` (the crawler's view), not the live socket.
+  describe "social-share head (og/twitter/JSON-LD)" do
+    test "the dead render carries the og/twitter head for a paper", %{conn: conn} do
+      seed_paper(~s(<section id="block-1"><h1>Shareable</h1></section>))
+
+      conn = get(conn, "/papers/#{@slug}")
+      html = html_response(conn, 200)
+      base = BarkparkWeb.Endpoint.url()
+
+      # A paper's raw type maps to og:type=article (D8), with the canonical,
+      # absolutized og:url (D3) present exactly once.
+      assert html =~ ~s(<meta property="og:type" content="article")
+      assert html =~ ~s(<meta property="og:url" content="#{base}/papers/#{@slug}")
+      assert length(String.split(html, ~s(property="og:url"))) - 1 == 1
+
+      # Branded default card at emission (D5) — no featured image on this paper.
+      assert html =~ ~s(<meta property="og:image" content="#{base}/images/og-default.jpg")
+      assert html =~ ~s(<meta property="og:image:width" content="1200")
+
+      # twitter card, name= discipline.
+      assert html =~ ~s(<meta name="twitter:card" content="summary_large_image")
+
+      # JSON-LD Article for a paper.
+      assert html =~ ~s(<script type="application/ld+json">)
+      assert html =~ ~s("@type":"Article")
+
+      # The share head sits BEFORE the multi-KB inline <style> blob (Slack reads
+      # only the first 32 KB).
+      assert byte_index(html, ~s(property="og:image")) < byte_index(html, "<style")
+    end
+
+    test "the <title> reflects the paper title, not the hardcoded default", %{conn: conn} do
+      # A titled article paper — `derive_title/2` sets the row title from the
+      # `role: "title"` block's text (pdd-t4 doctrine).
+      {:ok, _} =
+        Content.upsert_paper(%{
+          slug: "titled-share-paper",
+          blocks: [
+            %{"type" => "heading", "role" => "title", "text" => "A Branded Title"},
+            %{"type" => "paragraph", "text" => "Body."}
+          ]
+        })
+
+      conn = get(conn, "/papers/titled-share-paper")
+      html = html_response(conn, 200)
+
+      assert html =~ "<title>A Branded Title · Barkpark</title>"
+      assert html =~ ~s(<meta property="og:title" content="A Branded Title")
+      refute html =~ "<title>Paper · Barkpark</title>"
+    end
+  end
+
+  # Byte offset of the first occurrence of `needle` in `html` (or a large
+  # sentinel when absent), for ordering assertions.
+  defp byte_index(html, needle) do
+    case :binary.match(html, needle) do
+      {start, _len} -> start
+      :nomatch -> 1_000_000_000
+    end
+  end
 end
