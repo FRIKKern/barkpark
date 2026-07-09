@@ -90,12 +90,42 @@ defmodule BarkparkWeb.Icons do
     # Scoped-sharing affordance (Studio Shares panel + Share buttons). Lucide
     # v0.460 share-2 path; zero JS dependency.
     "share-2" =>
-      ~s(<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>)
+      ~s(<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/>),
+    # Desk-tree + top-bar type icons (task sup-w1-icon-authority). Every document
+    # type resolves to a distinct glyph; plugin desk links (columns/zap/github/
+    # clock) and the sibling top-bar slice (folder-tree/zap/palette/terminal/
+    # messages-square) consume these names. Lucide v0.460 paths; zero JS dep.
+    "newspaper" =>
+      ~s(<path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/>),
+    "table" =>
+      ~s(<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>),
+    "ticket" =>
+      ~s(<path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/>),
+    "puzzle" =>
+      ~s(<path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/>),
+    "folder-tree" =>
+      ~s(<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/>),
+    "columns" =>
+      ~s(<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/>),
+    "kanban" =>
+      ~s(<path d="M6 5v11"/><path d="M12 5v6"/><path d="M18 5v14"/>),
+    "check-square" =>
+      ~s(<path d="M21 10.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h12.5"/><path d="m9 11 3 3L22 4"/>),
+    "zap" =>
+      ~s(<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>),
+    "github" =>
+      ~s(<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/><path d="M9 18c-4.51 2-5-2-7-2"/>),
+    "clock" =>
+      ~s(<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>),
+    "sticky-note" =>
+      ~s(<path d="M15.5 3H5a2 2 0 0 0-2 2v14c0 1.1.9 2 2 2h9.5L21 15.5V5a2 2 0 0 0-2-2z"/><path d="M15 21v-5a1 1 0 0 1 1-1h5"/>),
+    "messages-square" =>
+      ~s(<path d="M16 10a2 2 0 0 1-2 2H6l-4 4V4c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2z"/><path d="M20 9a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>)
   }
 
   @emoji_map %{
     "📄" => "file-text",
-    "📑" => "file",
+    "📑" => "sticky-note",
     "👤" => "user",
     "🏷" => "tag",
     "💼" => "briefcase",
@@ -105,7 +135,12 @@ defmodule BarkparkWeb.Icons do
     "📁" => "folder",
     "📂" => "folder",
     "🖼" => "image",
-    "✅" => "file-text"
+    "✅" => "check-square",
+    "📰" => "newspaper",
+    "📊" => "table",
+    "🎫" => "ticket",
+    "🧩" => "puzzle",
+    "🗂" => "folder-tree"
   }
 
   def icon_name(emoji), do: Map.get(@emoji_map, emoji, "file")
