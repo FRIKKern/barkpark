@@ -1563,9 +1563,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     <div
                       class="text-sm"
                       style="white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 550; padding-top: 1px;"
-                    >
-                      <%= message.text %>
-                    </div>
+                    >{message.text}</div>
                   </div>
                   <%!-- Queue-honest badge (charter D43): a mid-turn send lands
                         immediately and is dispatched right away — the binary runs
@@ -1600,9 +1598,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       :if={message.html == nil}
                       class="text-sm"
                       style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                    >
-                      <%= message.text %>
-                    </div>
+                    >{message.text}</div>
                   </div>
                 </div>
               <% :tool -> %>
@@ -1610,14 +1606,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
                       ● gutter plus the sub-agent's description; the frames it
                       emits interleave below, indented under it. A plain tool row
                       keeps the terse mono line. --%>
-                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
-                  <span style="color: var(--primary);">●</span>
-                  <span style="font-weight: 650;"><%= message[:spawn_label] || message.text %></span>
-                  <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+                <%!-- Hanging indent: glyph and text are flex columns, so a
+                      wrapped line continues under the TEXT, never under the ●. --%>
+                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
+                  <span style="color: var(--primary); flex: none;">●</span>
+                  <span style="min-width: 0; overflow-wrap: anywhere;">
+                    <span style="font-weight: 650;">{message[:spawn_label] || message.text}</span>
+                    <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+                  </span>
                 </div>
-                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
-                  <span style="color: var(--primary);">●</span>
-                  <span><%= message.text %></span>
+                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
+                  <span style="color: var(--primary); flex: none;">●</span>
+                  <span style="min-width: 0; overflow-wrap: anywhere;">{message.text}</span>
                 </div>
                 <%!-- D38: a file-mutating tool call renders as a real colored
                       diff (dispatch on input SHAPE, not tool name) beneath the
@@ -1799,9 +1799,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span :if={@thinking_pulse.text in [nil, ""]}>
               thinking… ~<%= @thinking_pulse.tokens %> tokens
             </span>
-            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;">
-              <%= @thinking_pulse.text %>
-            </span>
+            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;">{@thinking_pulse.text}</span>
           </div>
 
           <div :if={@streaming} style="opacity: 0.92;">
@@ -1814,17 +1812,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </div>
             <%= case classify_tail(streaming_tail(@streaming)) do %>
               <% {:text, tail} -> %>
-                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">
-                  <%= tail %><span class="text-dim">▌</span>
-                </div>
+                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">{tail}<span class="text-dim">▌</span></div>
               <% {:component, kind, prose} -> %>
                 <div
                   :if={String.trim(prose) != ""}
                   class="text-sm"
                   style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
-                >
-                  <%= prose %>
-                </div>
+                >{prose}</div>
                 <.skeleton kind={kind} />
             <% end %>
           </div>

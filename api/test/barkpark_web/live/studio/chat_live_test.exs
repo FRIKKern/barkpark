@@ -2590,6 +2590,28 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "replayed output"
     end
 
+    test "pre-wrap text nodes carry NO template whitespace (alignment regression)", %{
+      view: view,
+      sid: sid
+    } do
+      # regression: `<%= message.text %>` on its own indented template line put a
+      # literal newline + ~22 spaces INSIDE the pre-wrap text node — the ❯ sat
+      # alone on a blank first line and the prompt rendered "centered" below it.
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{"content" => [%{"type" => "text", "text" => "plain reply"}]}
+         }}
+      )
+
+      html = render(view)
+      # the text node begins immediately after the tag — no template newline
+      refute html =~ ~r/pre-wrap[^>]*>\s*\n\s+go</
+      assert html =~ ~r/pre-wrap[^"]*"[^>]*>go</
+    end
+
     test "the user prompt wears the ❯ gutter, not a bubble", %{view: view} do
       html = render(view)
       assert html =~ "❯"
