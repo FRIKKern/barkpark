@@ -5,7 +5,7 @@ package cli_test
 // in-memory transport tests in mcp-w1-core never touch the REAL process channel.
 // Only an exec'd binary proves it — this file builds bp, drives a scripted
 // JSON-RPC session over actual pipes, and asserts the stdout stream is BYTE-PURE
-// newline-delimited JSON-RPC with exactly the five curated task tools.
+// newline-delimited JSON-RPC with exactly the six curated task tools.
 //
 // Framing note: verified against github.com/modelcontextprotocol/go-sdk@v1.6.1
 // mcp/transport.go — stdio is newline-delimited JSON (ndjson: one JSON value per
@@ -72,10 +72,10 @@ func (s *mcpSmokeSink) Bytes() []byte {
 }
 
 // mcpSmokeCuratedTools is the exact tool set `bp mcp serve` exposes under the
-// default --tools tasks (charter decision 5 — the curated five, hand-mapped, not
+// default --tools tasks (charter decision 5 — the curated six, hand-mapped, not
 // 1:1 verb aliases). Sorted for set comparison.
 var mcpSmokeCuratedTools = []string{
-	"task_close", "task_create", "task_next", "task_ready", "task_show",
+	"task_close", "task_create", "task_next", "task_prime", "task_ready", "task_show",
 }
 
 // mcpSmokeRPCMsg is the sliver of a JSON-RPC frame the smoke gate inspects.
@@ -205,7 +205,7 @@ func mcpSmokeExitCode(err error) int {
 }
 
 // TestMCPServeStdioSmoke builds the real bp binary and drives `mcp serve` over
-// actual process stdio, asserting byte-pure JSON-RPC stdout and exactly the five
+// actual process stdio, asserting byte-pure JSON-RPC stdout and exactly the six
 // curated tools. No network: the manifest comes from the committed fixture via
 // the BARKPARK_MANIFEST file-override seam (load.go), the API URL/token are
 // stubs, and the driven session stops at tools/list (which never dials the API).
@@ -331,7 +331,7 @@ func TestMCPServeStdioSmoke(t *testing.T) {
 func TestMCPStdoutBytePurityHarness(t *testing.T) {
 	initResult := `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"barkpark","version":"0"},"capabilities":{"tools":{}}}}`
 	toolsResult := `{"jsonrpc":"2.0","id":2,"result":{"tools":[` +
-		`{"name":"task_ready"},{"name":"task_next"},{"name":"task_show"},{"name":"task_close"},{"name":"task_create"}]}}`
+		`{"name":"task_ready"},{"name":"task_next"},{"name":"task_show"},{"name":"task_close"},{"name":"task_create"},{"name":"task_prime"}]}}`
 	cleanStr := initResult + "\n" + toolsResult + "\n"
 	clean := []byte(cleanStr)
 
@@ -340,7 +340,7 @@ func TestMCPStdoutBytePurityHarness(t *testing.T) {
 	if err != nil {
 		t.Fatalf("clean ndjson stream rejected by the purity check: %v", err)
 	}
-	// ...and yields exactly the five curated tool names.
+	// ...and yields exactly the six curated tool names.
 	names, ok := mcpSmokeToolNames(msgs)
 	if !ok {
 		t.Fatal("tool-name extraction found no tools/list result in a clean stream")

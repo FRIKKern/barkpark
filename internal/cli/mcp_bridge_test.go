@@ -167,15 +167,15 @@ func TestBridgeInputSchema_Derivation(t *testing.T) {
 	}
 }
 
-// TestBridgeShadowing proves the four curated-twin IDs are shadowed while the
+// TestBridgeShadowing proves the five curated-twin IDs are shadowed while the
 // distinct by-id claim and a non-covered doc verb still generate — over a real
 // MCP session's tools/list. doc.create is synthesised (the fixture carries only
 // doc.get/ls/query/mutate) so the test asserts the shadow set is scoped to
-// EXACTLY the four twins and never over-shadows a sibling verb.
+// EXACTLY the five twins and never over-shadows a sibling verb.
 func TestBridgeShadowing(t *testing.T) {
 	m := loadFixtureManifest(t)
 	// Synthesize doc.create so we can assert it generates (not covered by the
-	// curated five, must NOT be shadowed).
+	// curated six, must NOT be shadowed).
 	m.Commands = append(m.Commands, manifest.Command{
 		ID:     "doc.create",
 		Noun:   "doc",
@@ -188,7 +188,7 @@ func TestBridgeShadowing(t *testing.T) {
 	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
 	tools := listAllTools(t, cs)
 
-	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close"}
+	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close", "bp_task_prime"}
 	for _, name := range absent {
 		if _, ok := tools[name]; ok {
 			t.Errorf("shadowed tool %q should be absent (curated twin covers it)", name)
@@ -311,6 +311,24 @@ func TestBridgeRoundTrip_ArgPlacement(t *testing.T) {
 	}
 	if !reflect.DeepEqual(bridgeReq.body, cliReq.body) {
 		t.Errorf("body mismatch: bridge=%v cli=%v", bridgeReq.body, cliReq.body)
+	}
+}
+
+// TestBridgeAnnotations proves the Writes bit drives the MCP behaviour hints: a
+// read command is ReadOnlyHint:true with no DestructiveHint; a write command is
+// ReadOnlyHint:false + DestructiveHint:true (conservative — the manifest can't
+// tell additive from destructive). Idempotent/OpenWorld stay unset.
+func TestBridgeAnnotations(t *testing.T) {
+	read := bridgeAnnotations(manifest.Command{Noun: "task", Verb: "get", Writes: false})
+	if read == nil || read.ReadOnlyHint != true || read.DestructiveHint != nil {
+		t.Errorf("read annotations = %+v, want ReadOnlyHint:true, no DestructiveHint", read)
+	}
+	if read.OpenWorldHint != nil || read.IdempotentHint != false {
+		t.Errorf("read annotations leaked Idempotent/OpenWorld hints: %+v", read)
+	}
+	write := bridgeAnnotations(manifest.Command{Noun: "doc", Verb: "create", Writes: true})
+	if write == nil || write.ReadOnlyHint != false || write.DestructiveHint == nil || *write.DestructiveHint != true {
+		t.Errorf("write annotations = %+v, want ReadOnlyHint:false + DestructiveHint:true", write)
 	}
 }
 
