@@ -116,6 +116,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # on every session load — a bypass is never armed by a select alone.
          arming_bypass: false,
          bypass_confirm: "",
+         # Bypass arming is a LIVE act (charter D55). `bypass_live_armed` is the
+         # socket-local twin of the persisted mode: arming happens ONLY through
+         # the type-"bypass" ceremony this lifetime, never inherited from the
+         # stored row. Spawn's dangerous-flag gate is this token AND the persisted
+         # bypassPermissions mode — a reopened bypass session fail-closes to plan
+         # until the ceremony re-runs. `bypass_disarmed` drives the honest
+         # auto-opened panel line on reopening such a session.
+         bypass_live_armed: false,
+         bypass_disarmed: false,
          status: :new,
          init: nil,
          messages: [],
@@ -378,13 +387,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # The mode is unchanged until the ceremony completes — a plain select can't
   # arm dangerous bypass.
   def handle_event("set-mode", %{"mode" => "bypassPermissions"}, socket) do
-    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "")}
+    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "", bypass_disarmed: false)}
   end
 
   def handle_event("set-mode", %{"mode" => mode}, socket) do
+    # Steering to any non-bypass mode drops the live arming token (charter D55):
+    # the next resume of what was a bypass session can never fail open.
     {:noreply,
      socket
-     |> assign(arming_bypass: false, bypass_confirm: "")
+     |> assign(
+       arming_bypass: false,
+       bypass_confirm: "",
+       bypass_disarmed: false,
+       bypass_live_armed: false
+     )
      |> change_mode(ClaudeChat.normalize_mode(mode))}
   end
 
@@ -411,9 +427,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
             "⚠ Bypass permissions ARMED — it takes effect on the next resume, not the running turn.",
           else: "⚠ Bypass permissions ARMED — it takes effect when this chat next runs."
 
+      # The ceremony is the ONLY thing that flips the live token (charter D55) —
+      # a reopened bypass session lands here disarmed and re-arms only through
+      # this branch, so the next spawn's build_args gate (live token AND
+      # persisted mode) can emit --allow-dangerously-skip-permissions.
       socket =
         socket
-        |> assign(mode: "bypassPermissions", arming_bypass: false, bypass_confirm: "")
+        |> assign(
+          mode: "bypassPermissions",
+          arming_bypass: false,
+          bypass_confirm: "",
+          bypass_live_armed: true,
+          bypass_disarmed: false
+        )
         |> append_message(:system, line)
 
       {:noreply, socket}
@@ -424,7 +450,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("cancel-arm-bypass", _params, socket) do
-    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "")}
+    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "", bypass_disarmed: false)}
   end
 
   # Pick the brain (wave 5). The choice persists on the session row (intent)
@@ -2411,6 +2437,17 @@ defmodule BarkparkWeb.Studio.ChatLive do
           aria-label="Arm bypass permissions"
           style="max-width: 860px; margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--danger); border-radius: 8px; background: hsl(var(--danger-hsl) / 0.08);"
         >
+          <%!-- Honest reopen affordance (charter D55): a remembered bypass
+                session lands here disarmed — the mode persisted but the live
+                arming did not, so the next resume fail-closes to plan until the
+                ceremony re-runs. --%>
+          <p
+            :if={@bypass_disarmed}
+            class="text-xs"
+            style="color: var(--danger); font-weight: 600; margin: 0 0 4px;"
+          >
+            ⚠ Bypass disarmed — re-arm to enable. This session remembers bypassPermissions, but arming never survives a reopen.
+          </p>
           <p class="text-xs" style="color: var(--danger); font-weight: 600; margin: 0 0 4px;">
             ⚠ Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.
           </p>
@@ -2721,9 +2758,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
              resume: resume?,
              model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
              effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
-             # Armed strictly off the PERSISTED row (charter D48), never a live
-             # assign — build_args needs BOTH mode == bypassPermissions AND this.
-             bypass_armed: StudioChat.bypass_armed?(store_id)
+             # Bypass arming is a LIVE act (charter D55): the dangerous flag
+             # rides ONLY when the type-"bypass" ceremony ran THIS lifetime
+             # (`bypass_live_armed`) AND the persisted row is bypassPermissions.
+             # A reopened bypass session has the mode but not the live token, so
+             # it fail-closes to plan (build_args' normalize path, D48b) until
+             # the user re-runs the ceremony — the persisted mode alone can never
+             # silently re-arm.
+             bypass_armed:
+               socket.assigns[:bypass_live_armed] == true and
+                 StudioChat.bypass_armed?(store_id)
            }),
          {:ok, session} <- Recorder.session_pid(recorder) do
       StudioChat.update_status(store_id, "working")
@@ -2845,9 +2889,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
       model_choice: session.model_choice || "default",
       effort_choice: session.effort_choice || "default",
       # A reopen resets any in-flight arm ceremony — arming is never carried
-      # across a session load (charter D48).
-      arming_bypass: false,
+      # across a session load (charter D48). Bypass arming is a LIVE act
+      # (charter D55): the live token drops to false on every reopen, so a
+      # remembered bypassPermissions session is DISARMED until the ceremony
+      # re-runs. When the reopened row is bypass, auto-open the arm panel with an
+      # honest "disarmed" line — the selector keeps showing bypassPermissions but
+      # the next resume fail-closes to plan until the user re-arms.
+      arming_bypass: reopened_bypass?(session),
       bypass_confirm: "",
+      bypass_live_armed: false,
+      bypass_disarmed: reopened_bypass?(session),
       status: status,
       init: replay_init(session),
       messages: messages,
@@ -2907,6 +2958,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> refresh_sessions()
   end
 
+  # A reopened session whose persisted mode is bypassPermissions (charter D55).
+  # Drives the auto-opened, honest "bypass disarmed — re-arm to enable" panel:
+  # the mode survives in the store (the selector keeps showing it) but arming
+  # never survives a reopen, so the panel tells the user to re-run the ceremony.
+  defp reopened_bypass?(%{mode: "bypassPermissions"}), do: true
+  defp reopened_bypass?(_), do: false
+
   # The live SESSION pid for a store id, reached through its Recorder — or nil.
   # Charter D22/D28: consulted BEFORE any store write so a reopen of a session
   # whose runtime is still running keeps its pending approvals answerable
@@ -2952,6 +3010,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       effort_choice: StudioChat.recent_effort_choice() || "default",
       arming_bypass: false,
       bypass_confirm: "",
+      # A new chat is never armed (charter D55) — the live token starts false.
+      bypass_live_armed: false,
+      bypass_disarmed: false,
       status: :new,
       init: nil,
       messages: [],
