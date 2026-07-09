@@ -35,40 +35,56 @@ var (
 	cliDate   = ""
 )
 
-// runCommand executes one manifest command: resolves positional args + flags,
-// builds the request via manifest.BuildURL, applies the tier-appropriate
-// credential, honours --dry-run and the prod write-guard, sends, then renders
-// the result or maps the error envelope to an exit code.
-func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
-	out.resolveOutputForCommand(g, cmd.DefaultOutput)
+// manifestRequest is the fully resolved HTTP request for one manifest command:
+// method + absolute URL + headers + the body (or a streaming reader for a
+// multipart media upload). It is what buildManifestRequest produces and
+// sendManifestRequest consumes — the seam between "resolve the request" and
+// "send it" that lets both the CLI render path and the headless MCP dispatch
+// path share one build+send pipeline without either writing to stdout.
+type manifestRequest struct {
+	method  string
+	url     string
+	headers map[string]string
+	body    []byte
+	stream  io.Reader // non-nil only for a streamed multipart media upload
+}
 
+// dispatchError is a build-stage failure (bad args / URL / body) surfaced by
+// buildManifestRequest. withUsage records whether the CLI human path should also
+// print the per-command usage block (splitArgs/bindArgs do; BuildURL/buildBody
+// don't), so runCommand reproduces the exact rendering of the old inline path.
+// It satisfies error so execManifestCommand can return it verbatim to headless
+// callers, which surface only the message.
+type dispatchError struct {
+	msg       string
+	withUsage bool
+}
+
+func (e *dispatchError) Error() string { return e.msg }
+
+// buildManifestRequest resolves tail into a ready-to-send manifestRequest:
+// splitArgs → bindArgs → BuildURL → applyQuery → buildBody → authHeaders. It
+// writes NOTHING to stdout; every failure comes back as a *dispatchError so the
+// caller owns rendering. This is the build half of the dispatch seam — a pure
+// resolution step with one caveat: buildBody may consume os.Stdin for --file -,
+// so it must run exactly once per invocation.
+func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (*manifestRequest, *dispatchError) {
 	// Split tail into positional args and command-local flags.
 	posArgs, cmdFlags, err := splitArgs(cmd, tail)
 	if err != nil {
-		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.userErr("%v", err)
-			usageCommand(out, cmd)
-		}
-		return exitUsage
+		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
 	// Bind positional args to the command's declared arg names.
 	argMap, err := bindArgs(cmd, posArgs)
 	if err != nil {
-		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.userErr("%v", err)
-			usageCommand(out, cmd)
-		}
-		return exitUsage
+		return nil, &dispatchError{msg: err.Error(), withUsage: true}
 	}
 
 	// Build the absolute URL (fills :placeholders + prepends scoped_prefix).
 	rawURL, err := m.BuildURL(cmd, ctx, argMap)
 	if err != nil {
-		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.userErr("%v", err)
-		}
-		return exitUsage
+		return nil, &dispatchError{msg: err.Error(), withUsage: false}
 	}
 
 	// Apply query-string params: pagination, manifest-declared query flags, and
@@ -80,10 +96,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// file-typed arg on a media route is sent as multipart/form-data instead.
 	body, stream, contentType, err := buildBody(cmd, cmdFlags, argMap)
 	if err != nil {
-		if !renderErrorEnvelope(out, "usage", err.Error(), "", "") {
-			out.userErr("%v", err)
-		}
-		return exitUsage
+		return nil, &dispatchError{msg: err.Error(), withUsage: false}
 	}
 
 	// Tier-appropriate credential.
@@ -92,9 +105,68 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		headers["Content-Type"] = contentType
 	}
 
+	return &manifestRequest{
+		method:  cmd.HTTP.Method,
+		url:     rawURL,
+		headers: headers,
+		body:    body,
+		stream:  stream,
+	}, nil
+}
+
+// sendManifestRequest is the send half of the dispatch seam: it performs the
+// HTTP call for an already-built manifestRequest and returns the raw status +
+// body, never rendering. A multipart upload rides the streaming transfer client
+// (no wall-clock Timeout — a large/slow media body must not be killed at 30s);
+// every other request keeps the 30s doRequest client, byte-identical.
+func sendManifestRequest(req *manifestRequest) (int, []byte, error) {
+	if req.stream != nil {
+		return doRequestStream(req.method, req.url, req.headers, req.stream, -1)
+	}
+	return doRequest(req.method, req.url, req.headers, req.body)
+}
+
+// execManifestCommand is the headless dispatch primitive: it resolves tail into
+// a request and sends it, returning the raw HTTP status + response body with no
+// dry-run, no prod write-guard, no --all pagination loop, and no rendering. It
+// writes NOTHING to stdout. The CLI render path (runCommand) layers the guards
+// and the renderer on top; the MCP tool handlers call this directly and turn the
+// raw body into a tool result. Headless callers must set g.yes so the prod guard
+// (which lives in runCommand, not here) never blocks them.
+func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (int, []byte, error) {
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	if derr != nil {
+		return 0, nil, derr
+	}
+	return sendManifestRequest(req)
+}
+
+// runCommand executes one manifest command for the CLI: it resolves the request
+// via buildManifestRequest, applies the CLI-only guards (--dry-run, the prod
+// write-guard, and the --all pagination loop), sends via sendManifestRequest,
+// then renders the result or maps the error envelope to an exit code. The
+// build+send machinery is the dispatch seam (buildManifestRequest /
+// sendManifestRequest / execManifestCommand) so the MCP server can drive the
+// same pipeline headlessly. buildManifestRequest runs exactly once here — the
+// guards that need the resolved request (--dry-run, --all) read it in place, so
+// os.Stdin (--file -) is never consumed twice.
+func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
+	out.resolveOutputForCommand(g, cmd.DefaultOutput)
+
+	req, derr := buildManifestRequest(g, ctx, m, cmd, tail)
+	if derr != nil {
+		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
+			out.userErr("%v", derr)
+			if derr.withUsage {
+				usageCommand(out, cmd)
+			}
+		}
+		return exitUsage
+	}
+
 	// --dry-run: print the resolved request and exit 0 WITHOUT sending (A1).
 	if g.dryRun {
-		return dryRun(out, cmd, rawURL, headers, body)
+		return dryRun(out, cmd, req.url, req.headers, req.body)
 	}
 
 	// Prod write-guard: a write against a prod-looking target needs confirmation
@@ -109,21 +181,10 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 
 	// Paginated reads with --all loop over offset pages.
 	if cmd.Paginated && g.all && !cmd.Writes {
-		return runPaginatedAll(out, cmd, rawURL, headers)
+		return runPaginatedAll(out, cmd, req.url, req.headers)
 	}
 
-	// A multipart upload rides the streaming transfer client (no wall-clock
-	// Timeout — a large/slow media body must not be killed at 30s); every other
-	// write keeps the 30s doRequest client, byte-identical.
-	var (
-		status   int
-		respBody []byte
-	)
-	if stream != nil {
-		status, respBody, err = doRequestStream(cmd.HTTP.Method, rawURL, headers, stream, -1)
-	} else {
-		status, respBody, err = doRequest(cmd.HTTP.Method, rawURL, headers, body)
-	}
+	status, respBody, err := sendManifestRequest(req)
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)

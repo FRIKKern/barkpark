@@ -1,11 +1,13 @@
 package cli
 
 import (
-	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // mcp_bridge.go — the generic capabilities→MCP bridge (charter decisions 7,8):
@@ -13,44 +15,25 @@ import (
 // Command and, under `--tools all`, exposes each as one MCP tool named
 // bp_<noun>_<verb> whose inputSchema is auto-derived from the command's Args and
 // Flags. A tool's handler translates the MCP arguments object back into the CLI
-// positional+flag tail and hands it to execManifestCommand — so ArgLocation
-// inference (path/query/body), --set typing, MutationOp/SetKey wrapping, auth,
-// and body serialization all ride the EXISTING run.go builder unchanged. The
-// bridge re-implements none of that; it only shapes tool metadata and rebuilds
-// the tail.
+// positional+flag tail and hands it to execManifestCommand (run.go, the same
+// dispatch seam the curated task tools ride) — so ArgLocation inference
+// (path/query/body), --set typing, MutationOp/SetKey wrapping, auth, and body
+// serialization all ride the EXISTING run.go builder unchanged. The bridge
+// re-implements none of that; it only shapes tool metadata and rebuilds the
+// tail. Results follow charter decision 9: the raw response JSON as one text
+// content block, IsError on HTTP >= 400 (mcpRun, mcp_tasks.go).
 //
 // Opt-in rationale: Cursor hard-caps 40 MCP tools across ALL enabled servers and
 // silently drops the excess, while a live guerrilla manifest is ~107 commands.
-// So `--tools all` is deliberate, and the curated five (mcp-w1-core) stay the
+// So `--tools all` is deliberate, and the curated five (mcp_tasks.go) stay the
 // default. Where the curated overlay already covers a command, the bridge
 // SHADOWS its twin (see bridgeShadowedIDs) so the same capability is not exposed
 // twice under two names.
-//
-// ── Integration note (mcp-w1-bridge depends on mcp-w1-core) ──────────────────
-// This slice rewrites the mcp_bridge.go stub that mcp-w1-core creates and is the
-// designated SOLE file overlap between the two slices. Two symbols below —
-// bridgeRegistrar (the tool-registration seam) and execManifestCommand (the
-// capture-and-run bridge) — are the mcp-w1-core CONTRACT. They are defined here,
-// clearly fenced, ONLY so this slice compiles and gate-passes standalone before
-// core lands. At integration the reviewer keeps core's canonical mcpServer +
-// execManifestCommand (which live in mcp_serve.go / mcp_tasks.go) and drops the
-// fenced shim below; core's server type already satisfies bridgeRegistrar
-// structurally, so registerBridgeTools and every helper here are unchanged.
-
-// bridgeRegistrar is the seam registerBridgeTools writes tools through. The
-// mcp-w1-core MCP server implements RegisterTool with exactly this signature, so
-// it satisfies this interface structurally with no shared struct type crossing
-// the boundary — which keeps mcp_bridge.go the sole file overlap. The handler
-// returns the tool's textual result (the command's JSON output) or an error the
-// server maps to an MCP tool error.
-type bridgeRegistrar interface {
-	RegisterTool(name, description string, inputSchema map[string]any, handler func(args map[string]any) (string, error))
-}
 
 // bridgeShadowedIDs is the set of manifest command IDs the curated overlay
-// (mcp-w1-core, mcp_tasks.go) already exposes under a hand-tuned name, so the
-// bridge must NOT also generate a bp_<noun>_<verb> twin for them. Only the four
-// queue/read/close verbs the curated five cover are shadowed:
+// (mcp_tasks.go) already exposes under a hand-tuned name, so the bridge must NOT
+// also generate a bp_<noun>_<verb> twin for them. Only the four queue/read/close
+// verbs the curated five cover are shadowed:
 //
 //   - task.ready  → curated task_ready
 //   - task.next   → curated task_next  (atomic queue-claim)
@@ -60,12 +43,13 @@ type bridgeRegistrar interface {
 // task.claim is NOT shadowed: the curated task_next is the ATOMIC queue-claim,
 // whereas task.claim claims a SPECIFIC id — a distinct capability, so
 // bp_task_claim generates. doc.create is likewise not covered by the curated
-// five and generates as bp_doc_create.
+// five and generates as bp_doc_create. (task_create has no manifest verb at all,
+// so there is no twin to shadow.)
 //
 // This set is kept here next to the bridge because the bridge is what consults
-// it; at integration it is the single source of truth the curated registration
-// in mcp_tasks.go must stay in sync with (charter: keep the shadowed-ID set
-// adjacent to curated registration so the two never drift).
+// it; it is the single source of truth the curated registration in mcp_tasks.go
+// must stay in sync with (charter: keep the shadowed-ID set adjacent to curated
+// registration so the two never drift).
 var bridgeShadowedIDs = map[string]bool{
 	"task.ready": true,
 	"task.next":  true,
@@ -74,30 +58,41 @@ var bridgeShadowedIDs = map[string]bool{
 }
 
 // registerBridgeTools walks m.Commands and registers one MCP tool per command
-// (skipping the curated-shadowed IDs) through reg. It is the whole of the
+// (skipping the curated-shadowed IDs) on srv. It is the whole of the
 // `--tools all` surface: pure over the manifest, so a new plugin command becomes
-// an MCP tool with zero code change here. ctx and g are captured by each tool's
+// an MCP tool with zero code change here. g and ctx are captured by each tool's
 // handler and forwarded to execManifestCommand at call time.
-func registerBridgeTools(reg bridgeRegistrar, m *manifest.Manifest, ctx manifest.Context, g globals) {
+func registerBridgeTools(srv *mcp.Server, g globals, ctx manifest.Context, m *manifest.Manifest) error {
 	for i := range m.Commands {
 		cmd := m.Commands[i] // capture by value per iteration for the closure
 		if bridgeShadowedIDs[cmd.ID] {
 			continue
 		}
-		name := bridgeToolName(cmd)
-		schema := bridgeInputSchema(cmd)
-		reg.RegisterTool(name, cmd.Summary, schema, func(args map[string]any) (string, error) {
+		schema, err := json.Marshal(bridgeInputSchema(cmd))
+		if err != nil {
+			return fmt.Errorf("derive schema for %s: %w", cmd.ID, err)
+		}
+		srv.AddTool(&mcp.Tool{
+			Name:        bridgeToolName(cmd),
+			Description: cmd.Summary,
+			InputSchema: json.RawMessage(schema),
+		}, func(c context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			var args map[string]any
+			if err := decodeMCPArgs(req, &args); err != nil {
+				return mcpArgError(err), nil
+			}
 			tail := buildCommandTail(cmd, args)
-			return execManifestCommand(g, ctx, m, cmd, tail)
+			return mcpRun(execManifestCommand(g, ctx, m, cmd, tail)), nil
 		})
 	}
+	return nil
 }
 
 // bridgeToolName renders the MCP tool name for a command: bp_<noun>_<verb> with
 // any character outside [A-Za-z0-9_] folded to '_' so a hyphenated noun like
 // "ticket-key" yields a valid tool name (bp_ticket_key_mint) — MCP clients key
 // tools by this string and the safe common denominator is underscores, matching
-// the curated bp_task_* names.
+// the curated task_* names.
 func bridgeToolName(cmd manifest.Command) string {
 	return "bp_" + sanitizeToolSegment(cmd.Noun) + "_" + sanitizeToolSegment(cmd.Verb)
 }
@@ -258,40 +253,4 @@ func isTruthy(v any) bool {
 	default:
 		return false
 	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// mcp-w1-core CONTRACT SHIM — provisional; delete at integration.
-//
-// execManifestCommand is owned by mcp-w1-core (expected in mcp_serve.go): the
-// curated five call it too. It runs one manifest command through the SAME
-// run.go dispatch the CLI uses and captures its stdout as the tool result — the
-// bridge re-implements no request assembly. It is defined here ONLY so this
-// slice compiles and its gate is green before mcp-w1-core merges. Because
-// mcp_bridge.go is the designated sole file overlap, the reviewer removes this
-// block at integration and keeps core's canonical version verbatim; every
-// symbol above is untouched by that removal.
-// ─────────────────────────────────────────────────────────────────────────────
-
-func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) (string, error) {
-	var stdout, stderr bytes.Buffer
-	// MCP is a non-interactive, machine surface: force JSON output for a
-	// parseable result, and --yes so a prod write-guard never blocks on a stdin
-	// prompt that can never be answered.
-	g.output = "json"
-	g.outputSet = true
-	g.yes = true
-
-	out := newWriter(&stdout, &stderr)
-	out.applyGlobals(g)
-
-	code := runCommand(out, g, ctx, m, cmd, tail)
-	if code != exitOK {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			msg = strings.TrimSpace(stdout.String())
-		}
-		return stdout.String(), fmt.Errorf("bp %s %s exited %d: %s", cmd.Noun, cmd.Verb, code, msg)
-	}
-	return stdout.String(), nil
 }

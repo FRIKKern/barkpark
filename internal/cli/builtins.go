@@ -300,7 +300,7 @@ func whoamiSourceLabel(source string, active bool) string {
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "cloud", "cmux", "completion", "deploy",
 	"doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
-	"logout", "make", "media", "migrate", "paper", "plugin", "provider", "register",
+	"logout", "make", "mcp", "media", "migrate", "paper", "plugin", "provider", "register",
 	"schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
 	"sites", "style", "subscribe", "task", "tasks", "tinker", "token", "uninstall", "upgrade",
 	"use", "vercel", "version", "webhook", "whoami", "workspace",

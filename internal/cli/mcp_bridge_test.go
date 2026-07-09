@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,32 +14,59 @@ import (
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// captureRegistrar is a test bridgeRegistrar that records every tool
-// registerBridgeTools emits, keyed by name, preserving handlers so a test can
-// invoke a specific tool's round-trip.
-type captureRegistrar struct {
-	tools map[string]capturedTool
+// newBridgeSession registers the bridge tools on a real mcp.Server and connects
+// a client over the SDK's in-memory transport (StdioTransport hardcodes
+// os.Stdout), returning the live client session. Cleanup is automatic.
+func newBridgeSession(t *testing.T, g globals, ctx manifest.Context, m *manifest.Manifest) *mcp.ClientSession {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "bridge-test", Version: "0"}, nil)
+	if err := registerBridgeTools(srv, g, ctx, m); err != nil {
+		t.Fatalf("registerBridgeTools: %v", err)
+	}
+	serverT, clientT := mcp.NewInMemoryTransports()
+	bg := context.Background()
+	ss, err := srv.Connect(bg, serverT, nil)
+	if err != nil {
+		t.Fatalf("server connect: %v", err)
+	}
+	t.Cleanup(func() { ss.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "bridge-test-client", Version: "0"}, nil)
+	cs, err := client.Connect(bg, clientT, nil)
+	if err != nil {
+		t.Fatalf("client connect: %v", err)
+	}
+	t.Cleanup(func() { cs.Close() })
+	return cs
 }
 
-type capturedTool struct {
-	description string
-	schema      map[string]any
-	handler     func(args map[string]any) (string, error)
+// listAllTools drains tools/list across pagination cursors (the fixture
+// manifest generates far more tools than one page may carry).
+func listAllTools(t *testing.T, cs *mcp.ClientSession) map[string]*mcp.Tool {
+	t.Helper()
+	bg := context.Background()
+	tools := map[string]*mcp.Tool{}
+	var cursor string
+	for {
+		res, err := cs.ListTools(bg, &mcp.ListToolsParams{Cursor: cursor})
+		if err != nil {
+			t.Fatalf("ListTools: %v", err)
+		}
+		for _, tool := range res.Tools {
+			tools[tool.Name] = tool
+		}
+		if res.NextCursor == "" {
+			return tools
+		}
+		cursor = res.NextCursor
+	}
 }
 
-func newCaptureRegistrar() *captureRegistrar {
-	return &captureRegistrar{tools: map[string]capturedTool{}}
-}
-
-func (c *captureRegistrar) RegisterTool(name, description string, inputSchema map[string]any, handler func(args map[string]any) (string, error)) {
-	c.tools[name] = capturedTool{description: description, schema: inputSchema, handler: handler}
-}
-
-func (c *captureRegistrar) names() []string {
-	out := make([]string, 0, len(c.tools))
-	for n := range c.tools {
+func toolNames(tools map[string]*mcp.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for n := range tools {
 		out = append(out, n)
 	}
 	sort.Strings(out)
@@ -140,10 +168,10 @@ func TestBridgeInputSchema_Derivation(t *testing.T) {
 }
 
 // TestBridgeShadowing proves the four curated-twin IDs are shadowed while the
-// distinct by-id claim and a non-covered doc verb still generate. doc.create is
-// synthesised (the fixture carries only doc.get/ls/query/mutate) so the test
-// asserts the shadow set is scoped to EXACTLY the four twins and never
-// over-shadows a sibling verb.
+// distinct by-id claim and a non-covered doc verb still generate — over a real
+// MCP session's tools/list. doc.create is synthesised (the fixture carries only
+// doc.get/ls/query/mutate) so the test asserts the shadow set is scoped to
+// EXACTLY the four twins and never over-shadows a sibling verb.
 func TestBridgeShadowing(t *testing.T) {
 	m := loadFixtureManifest(t)
 	// Synthesize doc.create so we can assert it generates (not covered by the
@@ -157,20 +185,20 @@ func TestBridgeShadowing(t *testing.T) {
 		Args:   []manifest.Arg{{Name: "type", Required: true, Type: "string", Summary: "doc type"}},
 	})
 
-	reg := newCaptureRegistrar()
-	registerBridgeTools(reg, m, manifest.Context{}, globals{})
+	cs := newBridgeSession(t, globals{}, manifest.Context{Server: "http://x"}, m)
+	tools := listAllTools(t, cs)
 
 	absent := []string{"bp_task_ready", "bp_task_next", "bp_task_get", "bp_task_close"}
 	for _, name := range absent {
-		if _, ok := reg.tools[name]; ok {
+		if _, ok := tools[name]; ok {
 			t.Errorf("shadowed tool %q should be absent (curated twin covers it)", name)
 		}
 	}
 
 	present := []string{"bp_task_claim", "bp_task_ls", "bp_doc_create"}
 	for _, name := range present {
-		if _, ok := reg.tools[name]; !ok {
-			t.Errorf("tool %q should generate; have %v", name, reg.names())
+		if _, ok := tools[name]; !ok {
+			t.Errorf("tool %q should generate; have %v", name, toolNames(tools))
 		}
 	}
 }
@@ -185,10 +213,11 @@ type capturedRequest struct {
 }
 
 // TestBridgeRoundTrip_ArgPlacement is the core proof: an arg lands in the PATH,
-// a body arg in the BODY, and a flag in the QUERY string — and the bridge tool
-// handler produces the EXACT same HTTP request a direct CLI dispatch of the same
-// command does. A POST command with a :id path placeholder, a body arg, and a
-// query-bound flag exercises all three placements through one call.
+// a body arg in the BODY, and a flag in the QUERY string — and the bridge tool,
+// called over a real MCP session, produces the EXACT same HTTP request a direct
+// CLI dispatch of the same command does. A POST command with a :id path
+// placeholder, a body arg, and a query-bound flag exercises all three
+// placements through one call.
 func TestBridgeRoundTrip_ArgPlacement(t *testing.T) {
 	var got capturedRequest
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -225,15 +254,20 @@ func TestBridgeRoundTrip_ArgPlacement(t *testing.T) {
 	ctx := manifest.Context{Server: srv.URL, Dataset: "production"}
 	g := globals{yes: true}
 
-	// (1) Bridge dispatch: register tools, find bp_thing_create, invoke handler.
-	reg := newCaptureRegistrar()
-	registerBridgeTools(reg, m, ctx, g)
-	tool, ok := reg.tools["bp_thing_create"]
-	if !ok {
-		t.Fatalf("bp_thing_create not registered; have %v", reg.names())
+	// (1) Bridge dispatch over a live MCP session.
+	cs := newBridgeSession(t, g, ctx, m)
+	res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "bp_thing_create",
+		Arguments: map[string]any{"id": "abc", "name": "widget", "tag": "blue"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool bp_thing_create: %v", err)
 	}
-	if _, err := tool.handler(map[string]any{"id": "abc", "name": "widget", "tag": "blue"}); err != nil {
-		t.Fatalf("bridge handler error: %v", err)
+	if res.IsError {
+		t.Fatalf("bridge call unexpectedly IsError: %s", mcpContentText(res))
+	}
+	if !strings.Contains(mcpContentText(res), `"ok":true`) {
+		t.Fatalf("bridge result = %q, want the raw response body", mcpContentText(res))
 	}
 	bridgeReq := got
 
@@ -280,9 +314,9 @@ func TestBridgeRoundTrip_ArgPlacement(t *testing.T) {
 	}
 }
 
-// TestBuildCommandTail_NonStringScalarAndRepeatable checks the tail
-// reconstruction: a non-string scalar is stringified, a repeatable flag repeats,
-// and a bool flag emits a bare --name when truthy.
+// TestBuildCommandTail checks the tail reconstruction: a non-string scalar is
+// stringified, a repeatable flag repeats, and a bool flag emits a bare --name
+// when truthy.
 func TestBuildCommandTail(t *testing.T) {
 	cmd := manifest.Command{
 		Noun: "task", Verb: "close",

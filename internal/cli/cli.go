@@ -181,6 +181,21 @@ func Execute(args []string) int {
 		// agent panes; `install` prints the hook wiring; `status` shows this pane's
 		// worker/task/lease. Everything after the noun rides in rest.
 		return runCmux(out, g, ctx, rest[1:])
+	case "mcp":
+		// `bp mcp serve [--tools tasks|all]` — a stdio Model-Context-Protocol
+		// server exposing Barkpark Tasks to MCP clients (Cursor, Claude Desktop).
+		// A client-side builtin like cmux/doctor: `mcp` is not a manifest noun, so
+		// this intercept shadows nothing and needs no server change. It loads the
+		// manifest ONCE (inside runMCPServe, honouring --manifest/$BARKPARK_MANIFEST)
+		// and reuses the manifest-driven request machinery to back each MCP tool.
+		if verb == "serve" {
+			return runMCPServe(out, g, ctx, tail)
+		}
+		if g.help || verb == "" {
+			printMCPServeHelp(out)
+			return exitOK
+		}
+		return usageErrf(out, func() { printMCPServeHelp(out) }, "unknown command %q %q", noun, verb)
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
