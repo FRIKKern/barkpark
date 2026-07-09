@@ -130,3 +130,13 @@ stdio transport before it replies. The captured run used a subprocess driver
 that writes one frame, reads its response, then sends the next. Stay read-only:
 `task_ready` / `task_show` only — never `task_next` / `task_close` /
 `task_create` against a real board.
+
+## Post-catalog re-run (2026-07-09, reviewer, wave-2 integrated)
+
+Re-driven against live guerrilla with the full wave-2 branch (catalog +
+resources merged): `tools/list` now returns **6** curated tools (`task_prime`
+added) with honest annotations (`task_prime` `readOnlyHint:true`, `task_close`
+`destructiveHint:true`); `resources/list` returned **65** published papers
+(`barkpark://papers/<id>`, heading-derived titles), `resources/templates/list`
+the `{id}` template, and a `resources/read` round-tripped a real 24.8 KB paper
+verbatim. `task_ready` live, stdout byte-pure, exit 0 on stdin close.
