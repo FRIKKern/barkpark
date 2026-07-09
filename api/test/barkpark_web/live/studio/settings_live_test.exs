@@ -488,4 +488,130 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
         where: a.plugin_name == ^plugin and a.action == ^action
     )
   end
+
+  describe "scoped-by-URL write hazard closed (D15/D17)" do
+    setup %{conn: conn} do
+      {:ok, token} = Auth.verify_token(@admin_token)
+
+      {:ok, ws_a} = Barkpark.Tenancy.create_workspace(%{slug: "ssp-wa", name: "SSP Workspace A"})
+      {:ok, proj_a} = Barkpark.Tenancy.create_project_with_dataset(ws_a, %{name: "PA"})
+      {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "ssp-wb", name: "SSP Workspace B"})
+      {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "PB"})
+
+      # The admin token must be a MEMBER of both scopes for LiveScope to resolve
+      # them (membership + the token's :read permission).
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_a.id, token.id, "admin")
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, token.id, "admin")
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+
+      {:ok, conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b}
+    end
+
+    defp settings_url(ws, proj), do: "/w/#{ws.slug}/p/#{proj.slug}/studio/settings"
+
+    test "the panel binds its workspace FROM the URL (not the seeded Default)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a
+    } do
+      {:ok, view, html} = live(conn, settings_url(ws_a, proj_a))
+
+      # URL-bound, not Default-pinned.
+      assert :sys.get_state(view.pid).socket.assigns.current_workspace.id == ws_a.id
+      # The header names the bound workspace prominently.
+      assert html =~ ~s(data-test-id="settings-bound-workspace")
+      assert html =~ ~s(data-workspace-id="#{ws_a.id}")
+      assert html =~ ws_a.name
+    end
+
+    test "a scope switch FROM Settings lands on the NEW scope's Settings, and writes land there — not the old (D16)",
+         %{conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, settings_url(ws_a, proj_a))
+      assert :sys.get_state(view.pid).socket.assigns.current_workspace.id == ws_a.id
+
+      # Switching to B from Settings navigates to B's SETTINGS URL (scope_subpath
+      # seam), never the desk root.
+      render_click(view, "scope-open", %{
+        "ws" => ws_b.slug,
+        "proj" => proj_b.slug,
+        "ds" => "production"
+      })
+
+      assert_redirect(view, settings_url(ws_b, proj_b))
+
+      # Under B's Settings, a toggle writes to B — and A stays untouched.
+      {:ok, view_b, _html} = live(conn, settings_url(ws_b, proj_b))
+      name = pick_plugin()
+      render_click(view_b, "toggle_plugin", %{"plugin" => name, "ws" => ws_b.id})
+
+      assert Map.has_key?(
+               Barkpark.Tenancy.workspace_plugin_settings(
+                 Barkpark.Tenancy.get_workspace_by_id(ws_b.id)
+               ),
+               name
+             ),
+             "the write must land on the URL-bound workspace B"
+
+      refute Map.has_key?(
+               Barkpark.Tenancy.workspace_plugin_settings(
+                 Barkpark.Tenancy.get_workspace_by_id(ws_a.id)
+               ),
+               name
+             ),
+             "the write must NOT leak into workspace A (the old mount-pinned hazard)"
+    end
+
+    test "a toggle carrying a forged ws id (≠ the URL-bound scope) is REFUSED — no write", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      {:ok, view, _html} = live(conn, settings_url(ws_a, proj_a))
+      name = pick_plugin()
+
+      # Forge B's id into a control rendered under A's scope: the guard compares
+      # it to the URL-bound A and refuses.
+      html = render_click(view, "toggle_plugin", %{"plugin" => name, "ws" => ws_b.id})
+
+      assert html =~ "Scope changed"
+
+      refute Map.has_key?(
+               Barkpark.Tenancy.workspace_plugin_settings(
+                 Barkpark.Tenancy.get_workspace_by_id(ws_a.id)
+               ),
+               name
+             ),
+             "a forged-scope toggle must not persist on the bound workspace"
+
+      refute Map.has_key?(
+               Barkpark.Tenancy.workspace_plugin_settings(
+                 Barkpark.Tenancy.get_workspace_by_id(ws_b.id)
+               ),
+               name
+             ),
+             "a forged-scope toggle must not persist on the forged workspace either"
+    end
+
+    test "a set_workspace_theme carrying a forged ws id is REFUSED — theme unchanged", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      {:ok, view, _html} = live(conn, settings_url(ws_a, proj_a))
+
+      before_a = Barkpark.Tenancy.workspace_theme(Barkpark.Tenancy.get_workspace_by_id(ws_a.id))
+
+      html =
+        render_change(view, "set_workspace_theme", %{"theme" => "evergreen", "ws" => ws_b.id})
+
+      assert html =~ "Scope changed"
+
+      assert Barkpark.Tenancy.workspace_theme(Barkpark.Tenancy.get_workspace_by_id(ws_a.id)) ==
+               before_a,
+             "a forged-scope theme write must not change the bound workspace's theme"
+    end
+  end
 end

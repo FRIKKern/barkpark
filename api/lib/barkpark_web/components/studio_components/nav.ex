@@ -441,7 +441,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       }
     ] ++
       tmux_console_entry(admin?, return_path) ++
-      claude_chat_entry(admin?, return_path) ++ styleguide_entry(admin?, return_path)
+      claude_chat_entry(admin?, return_path) ++
+      styleguide_entry(admin?, return_path) ++ settings_entry(base, scope_prefix, admin?)
   end
 
   # The living token style guide tab (unified-aesthetic W2, /studio/styleguide).
@@ -474,6 +475,27 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # installed; hard-refused on public-demo hosts). The route is admin-gated
   # regardless — this just keeps the tab out of non-admin chrome. Flat
   # singleton path: one chat surface per host, like the tmux console.
+  # The Workspace Settings tab (ssp-w3, charter D15). Admin-only — mirrors the
+  # Style/tmux/chat gating (the route itself is admin-gated). Scope-prefixed:
+  # on a scoped surface it addresses the SAME workspace/project/dataset the page
+  # is on (the canonical `/w/:ws/p/:proj/d/:dataset/studio/settings` route); on a
+  # flat surface (scope_prefix "") it points at the flat `/studio/settings`
+  # compat entry, which resolves the Default scope and redirects to the scoped URL.
+  defp settings_entry(_base, scope_prefix, true) do
+    # Main's canonical Settings route is PROJECT-level (/w/:ws/p/:proj/studio/
+    # settings — no dataset segment; SettingsLive binds the workspace, #1936),
+    # so the tab derives from scope_prefix, not the dataset-ful desk base.
+    path =
+      case scope_prefix || "" do
+        "" -> "/studio/settings"
+        prefix -> "#{prefix}/studio/settings"
+      end
+
+    [%{label: "Settings", path: path, icon: nil, order: 60, active_when: path}]
+  end
+
+  defp settings_entry(_base, _scope_prefix, _), do: []
+
   defp claude_chat_entry(admin?, return_path) do
     if admin? and BarkparkWeb.Studio.ClaudeChat.enabled?() do
       [
