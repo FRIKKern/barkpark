@@ -189,6 +189,14 @@ if config_env() == :prod do
       token: nil
   end
 
+  # azure-retail-pricing: wire the REAL transport for the credential-free Azure
+  # Retail Prices client only in prod — the same built-in verified-TLS :httpc
+  # client the billing/oauth/github seams use (no new dep). The Retail Prices API
+  # is unauthenticated and global, so no credential is threaded here; dev/test
+  # leave this nil (config.exs) and never hit the wire.
+  config :barkpark_cloud, BarkparkCloud.Azure.Pricing,
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1
+
   # Web (cloud-12a): the JSON API's listen port in prod, from PORT (default 4100).
   config :barkpark_cloud, BarkparkCloud.Web.Endpoint,
     server: true,

@@ -109,6 +109,9 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       body = json_body(conn)
 
       assert body["regions"] == [%{"slug" => "hel1", "name" => "Helsinki"}]
+      # Hetzner quotes in EUR — the neutral shape carries it so a side-by-side
+      # with Azure (USD) is honest.
+      assert body["currency"] == "EUR"
       # The deprecated cax11 is dropped; cax21 carries the threaded price.
       assert [st] = body["server_types"]
 
@@ -131,6 +134,8 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
 
       assert is_list(body["regions"]) and body["regions"] != []
       assert is_list(body["server_types"]) and body["server_types"] != []
+      # Azure Retail prices are quoted in USD.
+      assert body["currency"] == "USD"
       assert Enum.all?(body["server_types"], &(Enum.sort(Map.keys(&1)) == @server_type_keys))
     end
 
@@ -143,8 +148,8 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       hz = json_body(call(:get, "/v1/providers/hetzner/catalog", nil, session_token(user)))
       az = json_body(call(:get, "/v1/providers/azure/catalog", nil, session_token(user)))
 
-      assert Map.keys(hz) |> Enum.sort() == ["regions", "server_types"]
-      assert Map.keys(az) |> Enum.sort() == ["regions", "server_types"]
+      assert Map.keys(hz) |> Enum.sort() == ["currency", "regions", "server_types"]
+      assert Map.keys(az) |> Enum.sort() == ["currency", "regions", "server_types"]
 
       for body <- [hz, az], st <- body["server_types"] do
         assert Enum.sort(Map.keys(st)) == @server_type_keys

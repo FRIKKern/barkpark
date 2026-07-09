@@ -335,13 +335,20 @@ defmodule BarkparkCloud.Registry.HetznerCatalog do
   Map raw hcloud `server_types` + `locations` lists into the neutral catalog.
   Deprecated server types are dropped; rows missing a usable name are dropped.
   `monthly_price` is the cheapest gross monthly across the type's per-location
-  prices (`nil` when hcloud lists none).
+  prices (`nil` when hcloud lists none). Carries `currency: "EUR"` — hcloud
+  quotes prices in EUR — so a side-by-side Hetzner-vs-Azure (USD) price
+  comparison is honest, not silently mixed.
   """
-  @spec normalize([map()], [map()]) :: %{regions: [region()], server_types: [server_type()]}
+  @spec normalize([map()], [map()]) :: %{
+          regions: [region()],
+          server_types: [server_type()],
+          currency: String.t()
+        }
   def normalize(server_types, locations) when is_list(server_types) and is_list(locations) do
     %{
       regions: locations |> Enum.map(&region/1) |> Enum.reject(&is_nil/1),
-      server_types: server_types |> Enum.map(&server_type/1) |> Enum.reject(&is_nil/1)
+      server_types: server_types |> Enum.map(&server_type/1) |> Enum.reject(&is_nil/1),
+      currency: "EUR"
     }
   end
 

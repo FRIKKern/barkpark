@@ -133,6 +133,14 @@ config :barkpark_cloud, BarkparkCloud.OAuth,
 # reads PORT in prod. NOT Phoenix — there is no dashboard yet (a later task).
 config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
 
+# azure-retail-pricing: the transport for the credential-free Azure Retail Prices
+# client (BarkparkCloud.Azure.Pricing). Default nil in dev/test → the client
+# fails CLOSED (:http_client_not_configured), so no byte reaches
+# prices.azure.com and the azure catalog simply degrades to nil prices. prod
+# (runtime.exs) wires the real verified-TLS :httpc transport; tests may program
+# a per-process fake.
+config :barkpark_cloud, BarkparkCloud.Azure.Pricing, http_client: nil
+
 # oban-substrate: the cloud control plane's job + cron engine. Postgres-backed
 # on BarkparkCloud.Repo (no Redis). A near-verbatim port of the proven api/ Oban
 # setup (api/config/config.exs:81-118), trimmed to what the control plane needs

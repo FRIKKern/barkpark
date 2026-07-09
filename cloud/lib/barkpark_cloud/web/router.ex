@@ -5703,10 +5703,31 @@ defmodule BarkparkCloud.Web.Router do
     with {:ok, credential} <- Registry.reveal_provider_token(provider),
          {:ok, creds} when is_map(creds) <- Jason.decode(credential),
          {:ok, %{locations: locations, vm_sizes: vm_sizes}} <- Azure.list_catalog(creds) do
-      {:ok, AzureCatalog.normalize(List.wrap(locations), List.wrap(vm_sizes))}
+      priced = enrich_azure_prices(List.wrap(vm_sizes))
+      {:ok, AzureCatalog.normalize(List.wrap(locations), priced)}
     else
       _ -> {:error, :unavailable}
     end
+  end
+
+  # Stamp REAL retail monthly USD onto each vm size BEFORE AzureCatalog.normalize
+  # (the normalizer already reads "monthlyPriceUsd"). Prices come from the global,
+  # unauthenticated Retail Prices sheet via the credential-free Azure.Pricing
+  # cache — joined by armSkuName == the size's slug. A pricing outage returns %{}
+  # → sizes keep whatever price they carried (nil in prod) and the catalog STILL
+  # serves; never the 502 catalog_unavailable. A slug we have no price for is left
+  # untouched (nil monthly_price renders "price unavailable", not a fake number).
+  defp enrich_azure_prices(vm_sizes) do
+    prices = Azure.Pricing.monthly_prices()
+
+    Enum.map(vm_sizes, fn size ->
+      with %{"name" => slug} <- size,
+           usd when is_number(usd) <- Map.get(prices, slug) do
+        Map.put(size, "monthlyPriceUsd", usd)
+      else
+        _ -> size
+      end
+    end)
   end
 
   # A single authenticated hetzner GET returning the decoded JSON map, or an

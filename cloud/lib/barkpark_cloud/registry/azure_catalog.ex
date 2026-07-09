@@ -42,13 +42,20 @@ defmodule BarkparkCloud.Registry.AzureCatalog do
 
   @doc """
   Map raw Azure `locations` + `vm_sizes` lists into the neutral catalog. Rows
-  missing a usable `name`/slug are dropped (never emitted half-formed).
+  missing a usable `name`/slug are dropped (never emitted half-formed). Carries
+  `currency: "USD"` — Azure Retail prices are quoted in USD — so a side-by-side
+  Azure-vs-Hetzner (EUR) price comparison is honest, not silently mixed.
   """
-  @spec normalize([map()], [map()]) :: %{regions: [region()], server_types: [server_type()]}
+  @spec normalize([map()], [map()]) :: %{
+          regions: [region()],
+          server_types: [server_type()],
+          currency: String.t()
+        }
   def normalize(locations, vm_sizes) when is_list(locations) and is_list(vm_sizes) do
     %{
       regions: locations |> Enum.map(&region/1) |> Enum.reject(&is_nil/1),
-      server_types: vm_sizes |> Enum.map(&server_type/1) |> Enum.reject(&is_nil/1)
+      server_types: vm_sizes |> Enum.map(&server_type/1) |> Enum.reject(&is_nil/1),
+      currency: "USD"
     }
   end
 

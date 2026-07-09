@@ -27,6 +27,13 @@ defmodule BarkparkCloud.Application do
         # challenge (mirrors Coolify's RateLimiter::for('two-factor')). Started
         # in every env — in test it's a singleton with reset/0 for determinism.
         BarkparkCloud.Accounts.TwoFactorRateLimiter,
+        # azure-retail-pricing: an ETS-backed ~24h cache of Azure's global,
+        # UNAUTHENTICATED Retail Prices sheet (no tenant, no credential), read to
+        # stamp real monthly USD onto the neutral catalog's azure server types.
+        # Same table-owning-GenServer shape as TwoFactorRateLimiter above; started
+        # in every env so the cache table exists (a pricing outage degrades to nil
+        # prices, never a broken catalog).
+        BarkparkCloud.Azure.Pricing,
         # The :pg scope behind the live dashboard's SSE stream
         # (BarkparkCloud.Events). Started here (not in web_children) so it is up
         # in EVERY env — including test, where broadcasts are harmless no-ops —
