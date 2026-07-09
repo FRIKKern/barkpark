@@ -227,6 +227,184 @@ defmodule BarkparkWeb.Studio.StyleguideLive do
         </div>
       </section>
 
+      <section data-test-id="sg-controls" style="margin: 0 0 2.5rem;">
+        <h2 style="margin: 0 0 .25rem;">Controls</h2>
+        <p style="color: var(--muted-text); font-size: 13px; margin: 0 0 1.25rem; max-width: 68ch;">
+          Every interactive control-kit class Studio chrome ships, rendered DIRECTLY from the
+          <code style="font-family: var(--font-mono);">.btn</code> /
+          <code style="font-family: var(--font-mono);">.form-*</code> /
+          <code style="font-family: var(--font-mono);">.card</code> /
+          <code style="font-family: var(--font-mono);">.badge</code> /
+          <code style="font-family: var(--font-mono);">.perspective-tabs</code>
+          rules in <code style="font-family: var(--font-mono);">layouts/root.html.heex</code> —
+          so a retint or a control-shape edit shows here first. Each specimen is labelled with its
+          class in muted mono; flip the theme above to prove every state in both modes. These are
+          the class primitives (not the Elixir component wrappers) — the living contract a human
+          eyeballs before sign-off.
+        </p>
+
+        <%!-- Buttons — every variant, enabled + disabled --%>
+        <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Buttons · .btn
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 20px;">
+            <div :for={
+              {label, cls} <- [
+                {".btn", "btn"},
+                {".btn .btn-primary", "btn btn-primary"},
+                {".btn .btn-ghost", "btn btn-ghost"},
+                {".btn .btn-destructive", "btn btn-destructive"},
+                {".btn .btn-sm", "btn btn-sm"}
+              ]
+            } style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" class={cls}>Button</button>
+                <button type="button" class={cls} disabled style="opacity: .5; cursor: not-allowed;">
+                  Disabled
+                </button>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">{label}</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <button type="button" class="btn btn-icon" aria-label="Icon button">
+                  <span aria-hidden="true">＋</span>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-icon"
+                  aria-label="Icon button, disabled"
+                  disabled
+                  style="opacity: .5; cursor: not-allowed;"
+                >
+                  <span aria-hidden="true">＋</span>
+                </button>
+              </div>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.btn .btn-icon</span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Text + select inputs --%>
+        <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Inputs · .form-input
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; max-width: 720px;">
+            <label style="display: flex; flex-direction: column; gap: 6px;">
+              <span class="form-label">Text input</span>
+              <input type="text" class="form-input" value="Fleet at a glance" aria-label="Text input specimen" />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">input.form-input</span>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px;">
+              <span class="form-label">Text input · placeholder</span>
+              <input type="text" class="form-input" placeholder="Search documents…" aria-label="Placeholder input specimen" />
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">input.form-input::placeholder</span>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px;">
+              <span class="form-label">Select · themed chevron</span>
+              <select class="form-input" aria-label="Select specimen">
+                <option>Published</option>
+                <option>Drafts</option>
+                <option>Raw</option>
+              </select>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">select.form-input</span>
+            </label>
+            <label style="display: flex; flex-direction: column; gap: 6px;">
+              <span class="form-label">Textarea</span>
+              <textarea class="form-input" aria-label="Textarea specimen">Multi-line content, own vertical rhythm.</textarea>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">textarea.form-input</span>
+            </label>
+          </div>
+        </div>
+
+        <%!-- Checkbox + switch --%>
+        <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Toggles · .form-checkbox / .form-switch
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start;">
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label class="form-checkbox">
+                <input type="checkbox" checked /> Checked
+              </label>
+              <label class="form-checkbox">
+                <input type="checkbox" /> Unchecked
+              </label>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-checkbox</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+              <label class="form-switch">
+                <input type="checkbox" checked />
+                <span class="form-switch-track"></span>
+                <span class="form-switch-state">On</span>
+              </label>
+              <label class="form-switch">
+                <input type="checkbox" />
+                <span class="form-switch-track"></span>
+                <span class="form-switch-state">Off</span>
+              </label>
+              <label class="form-switch" style="opacity: .5; cursor: not-allowed;">
+                <input type="checkbox" checked disabled />
+                <span class="form-switch-track"></span>
+                <span class="form-switch-state">Disabled</span>
+              </label>
+              <span style="font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.form-switch</span>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Card with header --%>
+        <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Card · .card / .card-header
+          </div>
+          <div class="card" style="max-width: 420px;">
+            <div class="card-header">
+              <strong style="font-size: 14px;">Card header</strong>
+              <span class="badge badge-active">active</span>
+            </div>
+            <div style="padding: 16px 20px; color: var(--muted-text); font-size: 13px;">
+              Card body — a panel container with a divided header. The card owns its
+              border and radius from the token system.
+            </div>
+          </div>
+          <span style="display: block; margin-top: 6px; font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.card · .card-header</span>
+        </div>
+
+        <%!-- Badge family --%>
+        <div data-test-id="sg-control-group" style="margin: 0 0 1.5rem;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Badges · .badge
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+            <span
+              :for={
+                variant <- ~w(published draft public private active chat-approval chat-working chat-idle chat-offline)
+              }
+              class={"badge badge-#{variant}"}
+            >
+              {variant}
+            </span>
+          </div>
+          <span style="display: block; margin-top: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.badge .badge-&lt;variant&gt;</span>
+        </div>
+
+        <%!-- Perspective tabs --%>
+        <div data-test-id="sg-control-group" style="margin: 0;">
+          <div style="font-family: var(--font-mono); font-size: 11px; color: var(--muted-text); margin: 0 0 .6rem; letter-spacing: .04em; text-transform: uppercase;">
+            Segmented · .perspective-tabs
+          </div>
+          <div class="perspective-tabs">
+            <button type="button" class="perspective-tab active">Published</button>
+            <button type="button" class="perspective-tab">Drafts</button>
+            <button type="button" class="perspective-tab">Raw</button>
+          </div>
+          <span style="display: block; margin-top: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--muted-text);">.perspective-tabs · .perspective-tab.active</span>
+        </div>
+      </section>
+
       <section style="margin: 0 0 2.5rem;">
         <h2 style="margin: 0 0 .75rem;">Palette</h2>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px;">
