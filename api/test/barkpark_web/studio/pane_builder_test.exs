@@ -246,6 +246,75 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     end
   end
 
+  describe "preview manifest row meta (Preview Contract D17)" do
+    # A block doc (paper/sheet/form) carries a write-time OG manifest at
+    # content["preview"]; its description becomes the row meta a doc-list row
+    # never had. The manifest's PRESENCE is the switch — PaneBuilder never
+    # branches on the document type — so a `post` here stands in for any
+    # block doc whose write stamped a manifest.
+    test "a doc with a stamped manifest surfaces the description as row meta" do
+      dataset = "pb_preview_manifest"
+      seed_basic(dataset)
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{
+            "_id" => "pm1",
+            "title" => "Stamped",
+            "content" => %{
+              "preview" => %{
+                "title" => "Stamped",
+                "type" => "post",
+                "description" => "A calm intro to the theme system.",
+                "url" => "/papers/stamped",
+                "image" => nil,
+                "extensions" => %{}
+              }
+            }
+          },
+          dataset
+        )
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["post"])
+      [_, post_pane] = panes
+
+      pm1 = Enum.find(post_pane.items, &(&1.id == "pm1"))
+      assert pm1.meta == "A calm intro to the theme system."
+      # The sparse share manifest carries no badge vocabulary.
+      assert pm1.badge == nil
+
+      # A sibling post with NO manifest and no list_preview stays blank — the
+      # manifest is per-doc, not per-schema.
+      p1 = Enum.find(post_pane.items, &(&1.id == "p1"))
+      assert p1.meta == nil
+      assert p1.badge == nil
+    end
+
+    test "a manifest with a blank description falls through to a blank row" do
+      dataset = "pb_preview_blank_desc"
+      seed_basic(dataset)
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{
+            "_id" => "pb1",
+            "title" => "No prose",
+            "content" => %{"preview" => %{"description" => nil}}
+          },
+          dataset
+        )
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["post"])
+      [_, post_pane] = panes
+
+      pb1 = Enum.find(post_pane.items, &(&1.id == "pb1"))
+      assert pb1.meta == nil
+      assert pb1.badge == nil
+    end
+  end
+
   describe "mediaAsset explorer view" do
     test "browsing mediaAsset list without a doc opens the media explorer editor" do
       dataset = "pb_media_explorer"

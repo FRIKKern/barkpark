@@ -120,3 +120,42 @@ func TestPreviewValue(t *testing.T) {
 		t.Errorf("missing field must skip the prefix too: %q", got)
 	}
 }
+
+// rowMeta (Preview Contract D17): block docs fall back to the write-time
+// preview manifest's OG description; fieldful docs keep their list_preview.
+func TestRowMetaManifestDescriptionFallback(t *testing.T) {
+	// No list_preview spec (paper/sheet/form) → the manifest description,
+	// hoisted onto the envelope as Extra["preview"], becomes the row meta.
+	doc := Doc{Extra: map[string]json.RawMessage{
+		"preview": json.RawMessage(`{"description":"A calm intro to the theme system."}`),
+	}}
+	if got := rowMeta(doc, apiclient.ListPreview{}); got != "A calm intro to the theme system." {
+		t.Errorf("manifest description meta: %q", got)
+	}
+}
+
+func TestRowMetaListPreviewWinsWhenBothPresent(t *testing.T) {
+	// Defensive: a doc carrying BOTH a schema list_preview meta spec and a
+	// stamped manifest keeps the declared spec — fieldful task/ticket rows
+	// never regress to the sparse OG description.
+	doc := Doc{Extra: map[string]json.RawMessage{
+		"priority": json.RawMessage(`1`),
+		"preview":  json.RawMessage(`{"description":"should not win"}`),
+	}}
+	preview := apiclient.ListPreview{Meta: &apiclient.PreviewSpec{Field: "priority", Prefix: "P"}}
+	if got := rowMeta(doc, preview); got != "P1" {
+		t.Errorf("list_preview meta must win over the manifest: %q", got)
+	}
+}
+
+func TestRowMetaEmptyWhenNeither(t *testing.T) {
+	// No spec, no manifest → "" (the pre-manifest render, unchanged).
+	if got := rowMeta(Doc{}, apiclient.ListPreview{}); got != "" {
+		t.Errorf("spec-less, manifest-less row meta: %q", got)
+	}
+	// A manifest with a blank/absent description also degrades to "".
+	doc := Doc{Extra: map[string]json.RawMessage{"preview": json.RawMessage(`{"description":""}`)}}
+	if got := rowMeta(doc, apiclient.ListPreview{}); got != "" {
+		t.Errorf("blank manifest description must render no meta: %q", got)
+	}
+}
