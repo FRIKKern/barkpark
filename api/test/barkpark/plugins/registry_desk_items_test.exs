@@ -83,25 +83,53 @@ defmodule Barkpark.Plugins.RegistryDeskItemsStructureTest do
   use Barkpark.DataCase, async: false
 
   # Reads the plugin registry via `Structure.build/1`; reset to the baseline
-  # plugin set so a sibling test's leaked fakes can't perturb the built tree.
+  # plugin set so a sibling test's leaked fakes can't perturb the built tree —
+  # and reset again on exit so OUR registered fakes can't leak out either.
   setup do
     Barkpark.Plugins.Registry.reset()
+    on_exit(fn -> Barkpark.Plugins.Registry.reset() end)
     :ok
   end
 
-  test "Structure.build/1 appends plugin desk items after schema-discovery items" do
+  defmodule FakeTierDeskPlugin do
+    def desk_items(_dataset), do: [%{type: :link, label: "Tier link", path: "/admin/tier"}]
+  end
+
+  test "Structure.build/1 places plugin desk items under the Plugins tier as :plugin_link" do
+    # OnixEdit ships default_enabled?: false (studio-structure-polish), so an
+    # unscoped build (declaration defaults) no longer surfaces its nodes.
+    # Register a FAKE plugin — unknown to Enablement → enabled + :plugins —
+    # and assert its declarative :link arrives translated to :plugin_link,
+    # grouped under the Plugins tier node.
+    name = "fake-tier-desk-#{System.unique_integer([:positive])}"
+    :ok = Barkpark.Plugins.Registry.register(FakeTierDeskPlugin, %{"plugin_name" => name})
+
     structure = Barkpark.Structure.build("production")
 
-    # OnixEdit's "Pending submissions" link node renders with type
-    # :plugin_link (translated by Structure from the plugin's
-    # declarative :link shape).
+    plugins_tier = Enum.find(structure.items, &(Map.get(&1, :id) == "plugins"))
+    assert plugins_tier, "expected the Plugins tier node in the built structure"
+    assert plugins_tier.type == :list
+
     plugin_link =
-      Enum.find(structure.items, fn node ->
-        Map.get(node, :type) == :plugin_link and
-          Map.get(node, :title) == "Pending submissions"
+      plugins_tier.items
+      |> Enum.flat_map(fn group -> [group | group.items || []] end)
+      |> Enum.find(fn node ->
+        Map.get(node, :type) == :plugin_link and Map.get(node, :title) == "Tier link"
       end)
 
-    assert plugin_link, "expected OnixEdit's Pending submissions link in built structure"
-    assert plugin_link.filter == "/admin/onixedit/staleness"
+    assert plugin_link, "expected the fake plugin's link under the Plugins tier"
+    assert plugin_link.filter == "/admin/tier"
+  end
+
+  test "Structure.build/1 drops a default-disabled plugin's desk items (OnixEdit)" do
+    structure = Barkpark.Structure.build("production")
+
+    titles =
+      structure.items
+      |> Enum.flat_map(fn node -> [node | node.items || []] end)
+      |> Enum.map(&Map.get(&1, :title))
+
+    refute "Pending submissions" in titles,
+           "OnixEdit is off by default — its desk nodes must not surface unscoped"
   end
 end

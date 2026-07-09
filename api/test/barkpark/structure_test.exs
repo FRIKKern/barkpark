@@ -365,12 +365,20 @@ defmodule Barkpark.StructureTest do
 
       {:ok, _} =
         Content.upsert_schema(
-          %{"name" => "mediaAsset", "title" => "Media Assets", "visibility" => "private", "fields" => []},
+          %{
+            "name" => "mediaAsset",
+            "title" => "Media Assets",
+            "visibility" => "private",
+            "fields" => []
+          },
           dataset,
           scope
         )
 
-      {:ok, _} = Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{"media" => %{"placement" => "main"}})
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "media" => %{"placement" => "main"}
+        })
 
       tree = Structure.build(dataset, scope)
 
@@ -429,12 +437,17 @@ defmodule Barkpark.StructureTest do
 
       # Enable OnixEdit but keep its default :plugins placement.
       {:ok, _} =
-        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{"onixedit" => %{"enabled" => true}})
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "onixedit" => %{"enabled" => true}
+        })
 
       tree = Structure.build(dataset, scope)
 
       plugins = plugins_node(tree)
-      assert %Node{type: :list} = plugins, "expected a Plugins tier node when a :plugins plugin is enabled"
+
+      assert %Node{type: :list} = plugins,
+             "expected a Plugins tier node when a :plugins plugin is enabled"
+
       assert plugins.title == "Plugins"
 
       # The books group landed UNDER the Plugins node (placement :plugins), not

@@ -93,9 +93,12 @@ defmodule BarkparkWeb.StructureControllerTest do
 
     rest = Enum.find(root["items"], &(&1["id"] == "rest"))
     assert rest, "expected a …Rest node when orphaned/unplaced doc types exist"
-    assert rest["type"] == "list", "…Rest must be a plain :list — old TUI binaries drop unknown types"
+
+    assert rest["type"] == "list",
+           "…Rest must be a plain :list — old TUI binaries drop unknown types"
 
     rest_titles = Enum.map(rest["items"], & &1["title"])
+
     assert Enum.any?(rest_titles, &(&1 == "ghostType (1)")),
            "orphaned types surface in …Rest with an honest count — never silently hidden"
 

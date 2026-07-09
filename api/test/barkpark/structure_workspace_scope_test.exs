@@ -97,6 +97,17 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     # OnixEdit's Bokbasen contribution (a divider + an admin-page link, neither
     # carrying a schema type) is tagged `requires_schema: "book"`. It must
     # appear only in a workspace that registered the `book` schema.
+    #
+    # OnixEdit ships default_enabled?: false (studio-structure-polish) —
+    # enable it in BOTH workspaces so this test isolates the requires_schema
+    # gate, not the enablement filter.
+    for ws <- [ctx.ws_a, ctx.ws_b] do
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "onixedit" => %{"enabled" => true}
+        })
+    end
+
     register_schema!("book", "Book (ONIX 3.0)", scope(ctx.ws_a, ctx.proj_a))
 
     a_titles = Structure.build(@dataset, scope(ctx.ws_a, ctx.proj_a)) |> titles()
