@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "body": {
+    "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Network/publicIPAddresses/acme-1-ip",
+    "name": "acme-1-ip",
+    "location": "eastus",
+    "sku": { "name": "Standard" },
+    "properties": {
+      "provisioningState": "Succeeded",
+      "publicIPAllocationMethod": "Static",
+      "publicIPAddressVersion": "IPv4"
+    }
+  }
+}

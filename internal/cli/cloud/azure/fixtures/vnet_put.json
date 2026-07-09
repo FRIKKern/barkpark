@@ -1,0 +1,15 @@
+{
+  "status": 200,
+  "body": {
+    "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Network/virtualNetworks/barkpark-fleet-vnet",
+    "name": "barkpark-fleet-vnet",
+    "location": "eastus",
+    "properties": {
+      "provisioningState": "Succeeded",
+      "addressSpace": { "addressPrefixes": ["10.0.0.0/16"] },
+      "subnets": [
+        { "name": "default", "properties": { "addressPrefix": "10.0.0.0/24", "provisioningState": "Succeeded" } }
+      ]
+    }
+  }
+}

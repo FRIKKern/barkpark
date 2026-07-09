@@ -1,0 +1,43 @@
+{
+  "status": 200,
+  "body": {
+    "value": [
+      {
+        "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Compute/virtualMachines/acme-1",
+        "name": "acme-1",
+        "type": "Microsoft.Compute/virtualMachines",
+        "location": "eastus",
+        "tags": {
+          "barkpark-managed": "true",
+          "barkpark-orphaned": "true",
+          "barkpark-fqdn": "acme-1.barkpark.cloud"
+        }
+      },
+      {
+        "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Compute/virtualMachines/warm-9",
+        "name": "warm-9",
+        "type": "Microsoft.Compute/virtualMachines",
+        "location": "eastus",
+        "tags": {
+          "barkpark-managed": "true",
+          "barkpark-warm": "true"
+        }
+      },
+      {
+        "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet/providers/Microsoft.Compute/virtualMachines/unmanaged-x",
+        "name": "unmanaged-x",
+        "type": "Microsoft.Compute/virtualMachines",
+        "location": "eastus"
+      },
+      {
+        "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/other-fleet/providers/Microsoft.Compute/virtualMachines/foreign-7",
+        "name": "foreign-7",
+        "type": "Microsoft.Compute/virtualMachines",
+        "location": "westus",
+        "tags": {
+          "barkpark-managed": "true"
+        }
+      }
+    ]
+  }
+}

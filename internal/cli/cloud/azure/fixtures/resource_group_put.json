@@ -1,0 +1,9 @@
+{
+  "status": 200,
+  "body": {
+    "id": "/subscriptions/33333333-3333-3333-3333-333333333333/resourceGroups/barkpark-fleet",
+    "name": "barkpark-fleet",
+    "location": "eastus",
+    "properties": { "provisioningState": "Succeeded" }
+  }
+}
