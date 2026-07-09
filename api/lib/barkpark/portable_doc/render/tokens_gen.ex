@@ -25,7 +25,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
 
   # Known theme ids (evergreen only this wave). resolve/1 folds an unknown /
   # empty / binary theme onto :evergreen so every accessor is total.
-  @themes [:evergreen]
+  @themes [:evergreen, :ember, :fjord]
   @doc "Known theme ids (evergreen this wave)."
   def themes, do: @themes
   defp resolve(theme) when theme in @themes, do: theme
@@ -36,14 +36,14 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   defp resolve(_), do: :evergreen
 
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
-  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}}
+  @status %{evergreen: %{ok: "#137236", info: "#3b82f6", warn: "#ba7008", danger: "#b42222"}, ember: %{ok: "#2c8647", info: "#486ec0", warn: "#986600", danger: "#ba453d"}, fjord: %{ok: "#32854a", info: "#4a6ebc", warn: "#986600", danger: "#b74941"}}
   def tone_ok(theme \\ :evergreen), do: @status[resolve(theme)].ok
   def tone_info(theme \\ :evergreen), do: @status[resolve(theme)].info
   def tone_warn(theme \\ :evergreen), do: @status[resolve(theme)].warn
   def tone_danger(theme \\ :evergreen), do: @status[resolve(theme)].danger
 
   # Warm reading accent — the paper terracotta, tokenized.
-  @reading_accent %{evergreen: "#a23925"}
+  @reading_accent %{evergreen: "#a23925", ember: "#bf321d", fjord: "#0f8299"}
   def reading_accent(theme \\ :evergreen), do: @reading_accent[resolve(theme)]
 
   # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.
@@ -63,6 +63,26 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       text: "#15211d",
       muted: "#55635e",
       code_bg: "#eaf1ee"
+    },
+    ember: %{
+      brand: "#c34e13",
+      brand_text: "#ffffff",
+      rule: "#e2dcda",
+      page_bg: "#f4ece9",
+      paper: "#fdfcfb",
+      text: "#291d19",
+      muted: "#5b504c",
+      code_bg: "#f4ece9"
+    },
+    fjord: %{
+      brand: "#2f56b1",
+      brand_text: "#ffffff",
+      rule: "#dbdee2",
+      page_bg: "#eaeef5",
+      paper: "#fcfcfd",
+      text: "#1c202a",
+      muted: "#4e535c",
+      code_bg: "#eaeef5"
     }
   }
   @doc "The whole per-theme email skin map (palettes.ex / data_viz.ex read it in one shot)."
@@ -84,6 +104,20 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
       danger: %{bg: "#f7e9e6", fg: "#a63a2e"},
       info: %{bg: "#e9eff7", fg: "#2d5e8f"},
       neutral: %{bg: "#edf0ee", fg: "#4a544f"}
+    },
+    ember: %{
+      success: %{bg: "#ddf7e1", fg: "#236436"},
+      warning: %{bg: "#ffecd3", fg: "#734c00"},
+      danger: %{bg: "#ffe9e6", fg: "#843d36"},
+      info: %{bg: "#e7efff", fg: "#38538c"},
+      neutral: %{bg: "#f0eeee", fg: "#585453"}
+    },
+    fjord: %{
+      success: %{bg: "#def6e2", fg: "#286438"},
+      warning: %{bg: "#feecd4", fg: "#734c02"},
+      danger: %{bg: "#ffe9e6", fg: "#823e38"},
+      info: %{bg: "#e7efff", fg: "#3a5389"},
+      neutral: %{bg: "#eeeff0", fg: "#545558"}
     }
   }
   def callout(tone, theme \\ :evergreen)

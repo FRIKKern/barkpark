@@ -436,6 +436,74 @@ html[data-bp-theme="evergreen"][data-theme="dark"] .bp-paper-surface, html[data-
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
 }
+html[data-bp-theme="ember"] .bp-paper-surface, html[data-bp-theme="ember"] .bp-paper-body {
+  --paper-bg: #fef9f7;
+  --paper-bg-deep: #f4ece9;
+  --paper-ink: #291d19;
+  --paper-ink-soft: #5b504c;
+  --paper-ink-faint: #827a76;
+  --paper-rule: rgba(41, 29, 25, 0.09);
+  --paper-edit-hover: rgba(41, 29, 25, 0.08);
+  --paper-accent: #c34e13;
+  --paper-accent-soft: rgba(195, 78, 19, 0.10);
+  --paper-chrome-bg: #fef9f7;
+  --paper-chrome-border: rgba(41, 29, 25, 0.12);
+  --ok-hsl: 138.34 50.65% 34.78%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 3.67 50.42% 48.54%; --info-hsl: 221.2 49.02% 51.79%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="ember"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #0d0805;
+  --paper-bg-deep: #18120d;
+  --paper-ink: #e4ddd8;
+  --paper-ink-soft: #a59d98;
+  --paper-ink-faint: #716b67;
+  --paper-rule: rgba(228, 221, 216, 0.10);
+  --paper-edit-hover: rgba(228, 221, 216, 0.09);
+  --paper-accent: #f7993b;
+  --paper-accent-soft: rgba(247, 153, 59, 0.16);
+  --paper-chrome-bg: #18120d;
+  --paper-chrome-border: rgba(228, 221, 216, 0.13);
+  --ok-hsl: 134.02 37.1% 56.89%; --warn-hsl: 37.47 67.56% 50.7%; --danger-hsl: 5.31 83.22% 69.77%; --info-hsl: 220.6 86.84% 72.26%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
+html[data-bp-theme="fjord"] .bp-paper-surface, html[data-bp-theme="fjord"] .bp-paper-body {
+  --paper-bg: #f8fafe;
+  --paper-bg-deep: #eaeef5;
+  --paper-ink: #1c202a;
+  --paper-ink-soft: #4e535c;
+  --paper-ink-faint: #787c83;
+  --paper-rule: rgba(28, 32, 42, 0.09);
+  --paper-edit-hover: rgba(28, 32, 42, 0.08);
+  --paper-accent: #2f56b1;
+  --paper-accent-soft: rgba(47, 86, 177, 0.10);
+  --paper-chrome-bg: #f8fafe;
+  --paper-chrome-border: rgba(28, 32, 42, 0.12);
+  --ok-hsl: 137.23 45.13% 35.85%; --warn-hsl: 40.11 100% 29.89%; --danger-hsl: 4.05 47.78% 48.54%; --info-hsl: 221.08 46.09% 51.46%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+  --warn-strong: hsl(var(--warn-hsl) / 0.28);
+}
+html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-surface, html[data-bp-theme="fjord"][data-theme="dark"] .bp-paper-body {
+  --paper-bg: #06090e;
+  --paper-bg-deep: #0f1319;
+  --paper-ink: #dadfe5;
+  --paper-ink-soft: #9aa0a7;
+  --paper-ink-faint: #686d72;
+  --paper-rule: rgba(218, 223, 229, 0.10);
+  --paper-edit-hover: rgba(218, 223, 229, 0.09);
+  --paper-accent: #68a2e8;
+  --paper-accent-soft: rgba(104, 162, 232, 0.16);
+  --paper-chrome-bg: #0f1319;
+  --paper-chrome-border: rgba(218, 223, 229, 0.13);
+  --ok-hsl: 132.78 31.44% 58.66%; --warn-hsl: 35.93 57.77% 55.07%; --danger-hsl: 5.83 69.33% 69.33%; --info-hsl: 220.37 70.04% 71.14%;
+  --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+  --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+  --warn-strong: hsl(var(--warn-hsl) / 0.34);
+}
 /* END GENERATED: tokens */
 
 .bp-paper-surface .bp-tasks {

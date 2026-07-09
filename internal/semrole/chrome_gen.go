@@ -53,6 +53,38 @@ type ThemeChrome struct {
 // genChrome keys each theme's chrome map by id (evergreen REFERENCES GenChrome).
 var genChrome = map[string]ThemeChrome{
 	"evergreen": {Chrome: GenChrome},
+	"ember": {Chrome: map[string]lipgloss.AdaptiveColor{
+			"chrome-accent": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
+			"chrome-dim": lipgloss.AdaptiveColor{Light: "#aaa6a4", Dark: "#6a6561"},
+			"chrome-ink": lipgloss.AdaptiveColor{Light: "#342c28", Dark: "#dad5d0"},
+			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#59534f", Dark: "#a09b97"},
+			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#f8ebe4", Dark: "#2f2114"},
+			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f8ad62"},
+			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d6d4d2", Dark: "#a4a09b"},
+			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f9f8f7", Dark: "#211c18"},
+			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#f3f1f0", Dark: "#2e2925"},
+			"chrome-border": lipgloss.AdaptiveColor{Light: "#e4dedc", Dark: "#161311"},
+			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#486ec0", Dark: "#7ba3f6"},
+			"chrome-label": lipgloss.AdaptiveColor{Light: "#6e6764", Dark: "#a09993"},
+			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#c34e13", Dark: "#f7993b"},
+			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#1e140b"},
+	}},
+	"fjord": {Chrome: map[string]lipgloss.AdaptiveColor{
+			"chrome-accent": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#68a2e8"},
+			"chrome-dim": lipgloss.AdaptiveColor{Light: "#a3a6ab", Dark: "#60646b"},
+			"chrome-ink": lipgloss.AdaptiveColor{Light: "#262b36", Dark: "#d0d5db"},
+			"chrome-text-secondary": lipgloss.AdaptiveColor{Light: "#4e525b", Dark: "#969aa1"},
+			"chrome-selection-bg": lipgloss.AdaptiveColor{Light: "#e7ecf6", Dark: "#18212f"},
+			"chrome-selection-fg": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#8cb8ee"},
+			"chrome-field-border": lipgloss.AdaptiveColor{Light: "#d2d4d6", Dark: "#9a9fa5"},
+			"chrome-toolbar-bg": lipgloss.AdaptiveColor{Light: "#f7f8f9", Dark: "#171b23"},
+			"chrome-cursor-bg": lipgloss.AdaptiveColor{Light: "#f0f1f3", Dark: "#24282f"},
+			"chrome-border": lipgloss.AdaptiveColor{Light: "#dde0e5", Dark: "#121417"},
+			"chrome-border-active": lipgloss.AdaptiveColor{Light: "#4a6ebc", Dark: "#82a4e9"},
+			"chrome-label": lipgloss.AdaptiveColor{Light: "#66696f", Dark: "#959ba2"},
+			"chrome-primary-cta": lipgloss.AdaptiveColor{Light: "#2f56b1", Dark: "#68a2e8"},
+			"chrome-on-primary": lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#0b131e"},
+	}},
 }
 
 // ResolveChrome returns a theme's chrome role map, defaulting to evergreen.

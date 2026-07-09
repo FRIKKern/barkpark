@@ -91,6 +91,42 @@ defmodule BarkparkWeb.SessionHTML do
         --btn-fg: hsl(0 0% 100%);
         --btn-bg-hover: hsl(163 45% 26%);
       }
+      html[data-bp-theme="ember"] .bp-auth {
+        --primary: hsl(20 82% 42%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(20 82% 50%);
+        --ring-soft: hsl(20 82% 50% / 0.15);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: hsl(163 46% 17%);
+      }
+      html[data-bp-theme="ember"][data-theme="dark"] .bp-auth {
+        --primary: hsl(30 92% 60%);
+        --primary-fg: hsl(30 45% 8%);
+        --ring: hsl(30 92% 60%);
+        --ring-soft: hsl(30 92% 60% / 0.2);
+        --btn-bg: hsl(163 45% 30%);
+        --btn-fg: hsl(0 0% 100%);
+        --btn-bg-hover: hsl(163 45% 26%);
+      }
+      html[data-bp-theme="fjord"] .bp-auth {
+        --primary: hsl(222 58% 44%);
+        --primary-fg: hsl(0 0% 100%);
+        --ring: hsl(222 58% 52%);
+        --ring-soft: hsl(222 58% 52% / 0.15);
+        --btn-bg: var(--primary);
+        --btn-fg: var(--primary-fg);
+        --btn-bg-hover: hsl(163 46% 17%);
+      }
+      html[data-bp-theme="fjord"][data-theme="dark"] .bp-auth {
+        --primary: hsl(213 74% 66%);
+        --primary-fg: hsl(213 45% 8%);
+        --ring: hsl(213 74% 66%);
+        --ring-soft: hsl(213 74% 66% / 0.2);
+        --btn-bg: hsl(163 45% 30%);
+        --btn-fg: hsl(0 0% 100%);
+        --btn-bg-hover: hsl(163 45% 26%);
+      }
       /* END GENERATED: tokens */
       .bp-auth {
         min-height: 100vh;
