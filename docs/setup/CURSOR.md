@@ -61,11 +61,72 @@ bp task create "Fix the flaky search test" --publish \
 
 Open Cursor, ask the agent to pick up the next ready task, and watch the board.
 
-## MCP (optional, coming)
+## MCP (Model Context Protocol)
 
-`bp mcp serve` — a stdio MCP server exposing tasks as first-class MCP tools for
-Cursor's non-terminal surfaces — is in flight. Until it lands, the rules file
-above is the complete integration; it needs nothing but the `bp` binary.
+Section 3 is path A — the agent shells out to `bp` from Cursor's terminal. Path B
+gives MCP-native surfaces the same board as **first-class tools**: `bp mcp serve`
+runs a stdio MCP server that turns the CLI's capability manifest into a tool
+catalog the Agent calls directly — claim, read the brief, close with epoch-CAS,
+never touching a shell.
+
+### Register it
+
+Add one server to Cursor's MCP config. Put it in `~/.cursor/mcp.json` (**global** —
+every project) or `.cursor/mcp.json` in the repo root (**per-project**); the shape
+is identical and project config wins where both name the same server:
+
+```json
+{
+  "mcpServers": {
+    "barkpark": {
+      "command": "bp",
+      "args": ["mcp", "serve"],
+      "env": {
+        "BARKPARK_API_URL": "https://guerrilla.barkpark.cloud",
+        "BARKPARK_API_TOKEN": "${env:BARKPARK_API_TOKEN}"
+      }
+    }
+  }
+}
+```
+
+Restart Cursor (or reload MCP servers in Settings) and the task tools show up in
+the Agent's tool list. `${env:BARKPARK_API_TOKEN}` reads the token from your shell
+environment, so the secret never lands in a committed file — set it in your
+profile (`export BARKPARK_API_TOKEN=…`).
+
+### Retargeting without `bp setup`
+
+The `env` block is the whole instance override. `bp`'s environment layer sits
+**above** the `~/.config/barkpark/` config file, so `BARKPARK_API_URL` +
+`BARKPARK_API_TOKEN` in the stanza aim this server at any Barkpark — a hosted
+instance, a teammate's, or `http://localhost:4000` — no matter what `bp setup`
+saved. A server whose Tasks plugin is disabled fails fast at startup with a
+clear `manifest has no task.<verb> verb` error on stderr — better than coming up
+healthy-looking with zero tools. Point the stanza at a Barkpark with Tasks
+enabled.
+
+### The tools
+
+Five curated task tools ship by default (`--tools tasks`), each carrying the
+claim-first contract in its own description:
+
+- **`task_ready`** — list ready (unblocked) tasks in priority order.
+- **`task_next`** — atomically claim the next ready task; returns the brief and
+  the claim epoch. Claim before working.
+- **`task_show`** — fetch one task by id (brief, criteria, children).
+- **`task_close`** — close a claimed task with the claim epoch (epoch-CAS); mark
+  acceptance criteria met with evidence in the same atomic write.
+- **`task_create`** — file new work (injects `kind` + `lifecycle_status`).
+
+### `--tools all` (expert only)
+
+`"args": ["mcp", "serve", "--tools", "all"]` exposes **every** manifest verb as a
+tool (`bp_<noun>_<verb>`), auto-derived from the live capabilities — a new plugin's
+verbs appear with zero code changes. Caveat: **Cursor hard-caps 40 MCP tools across
+all enabled servers and silently drops the excess.** The full Barkpark manifest is
+~107 commands, so `all` blows past the cap. Keep the default `tasks` unless you
+know exactly which handful you need.
 
 ## Troubleshooting
 
