@@ -1028,6 +1028,170 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "agents rail: background_tasks_changed + workflow_progress (charter D47)" do
+    defp bg_frame(tasks),
+      do:
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed", "tasks" => tasks}}
+
+    defp progress_frame(fields),
+      do:
+        {:claude_chat_event,
+         Map.merge(%{"type" => "system", "subtype" => "task_progress"}, fields)}
+
+    defp session_rail(sid), do: StudioChat.get_session(sid).rail_snapshot || %{}
+
+    test "background_tasks_changed persists a task_id-keyed row; a vanished task completes",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([
+          %{"task_id" => "a", "task_type" => "local_workflow", "description" => "Build the rail"},
+          %{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}
+        ])
+      )
+
+      rail = session_rail(sid)
+      assert rail["a"]["row"]["description"] == "Build the rail"
+      assert rail["a"]["status"] == "running"
+      assert rail["b"]["status"] == "running"
+
+      # "a" vanishes from the snapshot → it completed; entries are never deleted.
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "Write the tests"}])
+      )
+
+      rail = session_rail(sid)
+      assert rail["a"]["status"] == "completed"
+      assert rail["b"]["status"] == "running"
+    end
+
+    test "rail_snapshot is SESSION-LIFETIME — it survives a system/init turn boundary",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "a", "task_type" => "local_workflow", "description" => "long agent"}])
+      )
+
+      # a fresh turn begins mid-run — the rail must NOT reset (unlike per-turn state)
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      assert session_rail(sid)["a"]["status"] == "running"
+    end
+
+    test "task_progress captures workflow_progress; a token-only tick does NOT re-persist",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(
+        recorder,
+        progress_frame(%{
+          "task_id" => "t",
+          "workflow_progress" => [
+            %{"type" => "workflow_phase", "title" => "Plan"},
+            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 10}
+          ],
+          "usage" => %{"total_tokens" => 10}
+        })
+      )
+
+      assert get_in(session_rail(sid), ["t", "workflow"]) |> Enum.at(1) |> Map.get("label") ==
+               "explorer"
+
+      # Poison the persisted column, then send a TOKEN-ONLY tick (same tree
+      # structure + states, only tokens advanced). A coarse writer must NOT
+      # overwrite the sentinel — the structural signature is unchanged.
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, %{"SENTINEL" => %{"status" => "running"}})
+
+      frame(
+        recorder,
+        progress_frame(%{
+          "task_id" => "t",
+          "workflow_progress" => [
+            %{"type" => "workflow_phase", "title" => "Plan"},
+            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 9_999}
+          ],
+          "usage" => %{"total_tokens" => 9_999}
+        })
+      )
+
+      assert Map.has_key?(session_rail(sid), "SENTINEL"),
+             "a token-only tick re-persisted the rail — the change-only guard failed"
+
+      # A genuine STRUCTURAL change (agent state → completed) persists through.
+      frame(
+        recorder,
+        progress_frame(%{
+          "task_id" => "t",
+          "workflow_progress" => [
+            %{"type" => "workflow_phase", "title" => "Plan"},
+            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "completed", "tokens" => 9_999}
+          ]
+        })
+      )
+
+      refute Map.has_key?(session_rail(sid), "SENTINEL")
+      assert get_in(session_rail(sid), ["t", "workflow"]) |> Enum.at(1) |> Map.get("state") ==
+               "completed"
+    end
+
+    test "task_notification / task_updated stamp the rail entry's status",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "run"}])
+      )
+
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "t", "patch" => %{"status" => "completed"}})
+      )
+
+      assert session_rail(sid)["t"]["status"] == "completed"
+    end
+
+    test "a lifecycle status frame for a task with NO rail entry drops harmlessly",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        task_event("task_updated", %{"task_id" => "ghost", "patch" => %{"status" => "completed"}})
+      )
+
+      refute Map.has_key?(session_rail(sid), "ghost")
+    end
+
+    test "interrupt_running_tasks/1 flips running rail entries to interrupted",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        bg_frame([
+          %{"task_id" => "live", "task_type" => "local_workflow", "description" => "still going"}
+        ])
+      )
+
+      # a second task that already completed must stay completed
+      frame(
+        recorder,
+        bg_frame([
+          %{"task_id" => "live", "task_type" => "local_workflow", "description" => "still going"},
+          %{"task_id" => "done", "task_type" => "local_workflow", "description" => "finished"}
+        ])
+      )
+
+      frame(recorder, task_event("task_notification", %{"task_id" => "done", "status" => "completed"}))
+
+      StudioChat.interrupt_running_tasks(sid)
+
+      rail = session_rail(sid)
+      assert rail["live"]["status"] == "interrupted"
+      assert rail["done"]["status"] == "completed"
+    end
+  end
+
   test "the runtime survives a viewer's death — the whole point",
        %{sid: sid, recorder: recorder} do
     # a "tab": subscribes, then dies

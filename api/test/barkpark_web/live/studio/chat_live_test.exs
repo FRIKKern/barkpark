@@ -3241,6 +3241,167 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "agents rail — mission control below the composer (charter D47)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp bg_changed(tasks),
+      do:
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed", "tasks" => tasks}}
+
+    defp wf_progress(task_id, workflow, usage),
+      do:
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "task_progress",
+           "task_id" => task_id,
+           "workflow_progress" => workflow,
+           "usage" => usage
+         }}
+
+    test "background_tasks_changed renders a live rail row below the composer",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "Build the rail"}
+        ])
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-role="agents-rail")
+      assert html =~ ~s(data-rail-task="t")
+      assert html =~ ~s(data-rail-status="running")
+      assert html =~ "Build the rail"
+    end
+
+    test "a workflow row expands into its phase→agent tree with model + token counts",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            %{"type" => "workflow_phase", "title" => "Explore"},
+            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 128}
+          ],
+          %{"total_tokens" => 128}
+        )
+      )
+
+      # collapsed by default → the phase→agent tree is hidden
+      refute render(view) =~ "explorer"
+
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      html = render(view)
+      assert html =~ "Explore"
+      assert html =~ "explorer"
+      assert html =~ "fable"
+      assert html =~ "128 tok"
+    end
+
+    test "a token-only workflow tick does NOT re-render the rail; a state flip does",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 10}],
+          %{"total_tokens" => 10}
+        )
+      )
+
+      sig1 = lv_assigns(view)[:rail_sig]
+
+      # identical structure, only tokens advanced ⇒ value-equality no-op
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 9_999}],
+          %{"total_tokens" => 9_999}
+        )
+      )
+
+      assert lv_assigns(view)[:rail_sig] == sig1
+
+      # a state flip is structural ⇒ the signature (and render) changes
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "completed", "tokens" => 9_999}],
+          %{}
+        )
+      )
+
+      refute lv_assigns(view)[:rail_sig] == sig1
+    end
+
+    test "a vanished task flips its rail row to done, keeping the entry",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "a", "task_type" => "local_workflow", "description" => "one"},
+          %{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}
+        ])
+      )
+
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}])
+      )
+
+      html = render(view)
+      # "a" is gone from the wire but its row survives as done
+      assert html =~ ~s(data-rail-task="a")
+      assert lv_assigns(view)[:rail]["a"]["status"] == "completed"
+    end
+
+    test "replay hydrates the rail; a reopened interrupted entry shows no running row",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "was running"},
+            "status" => "interrupted",
+            "seq" => 1,
+            "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running"}]
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = render(view)
+
+      assert html =~ ~s(data-rail-task="t")
+      assert html =~ ~s(data-rail-status="interrupted")
+      assert html =~ "interrupted"
+      assert html =~ "was running"
+      # the honest last-known rail: NOTHING renders as a live running row
+      refute html =~ ~s(data-rail-status="running")
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
