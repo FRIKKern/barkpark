@@ -1,5 +1,6 @@
 barkpark · tasks                                                           ⇄ guerrilla  ● live · now
-▎ Motion epic ·················································································· 2/4
+▎ Motion epic ·················································································· 2/5
+   ⠼ Ship the live bridge                                                                 1/3 opus-3
    ○ Reticulate the splines                                                                       P2
    ○ A settled unchanged row                                                                      P3
   +2 done
@@ -38,8 +39,7 @@ barkpark · tasks                                                           ⇄ 
 
 
 
-NOW
- ⠼ opus-3 Ship the live bridge                                                             1/3 4m30s
+
 
 ⠼ 1 in flight · ○ 2 ready · ✓ 2 done                                                             67%
 ███████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░

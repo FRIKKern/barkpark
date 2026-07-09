@@ -399,11 +399,11 @@ func TestActivityFocus(t *testing.T) {
 			}
 		}
 	}
-	// With NOW empty the WHO band collapses, but the INTENT strip still surfaces
-	// what to pick up next (charter wave-12): the resumable + the ready head. The
-	// board is never a dead-end all-clear when there IS follow-up work.
-	if f := ansi.Strip(Render(emptyNow, st, 72, 80, corpusFixedNow)); !strings.Contains(f, "NEXT") {
-		t.Errorf("empty-NOW board did not surface the NEXT intent strip:\n%s", f)
+	// With NOW empty the board still resolves Next intent as MODEL state (the
+	// resumable + the ready head) — the display band is retired (Amendment 7),
+	// but the follow-up work stays queryable, never a dead-end.
+	if len(emptyNow.Next) == 0 {
+		t.Errorf("empty-NOW board resolved no Next intent — follow-up work went dark")
 	}
 
 	// D51: the merged window — BOTH claims' parents (auth-w1, auth-w2) are in the

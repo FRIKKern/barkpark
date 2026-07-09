@@ -37,9 +37,9 @@ barkpark · tasks                                                            ⇄
 
 
 
-NOW
- ⠋ pelle Debounce the refetch loop                                                             1m30s
- ⠋ opus-3 Wire the SSE live bridge                                                         2/3 4m00s
+
+
+
 
 ⠋ 3 in flight · ○ 7 ready · ✓ 41 done · 2 stale                                                  85%
 █████████████████████████████████████████████████████████████████████████████████████░░░░░░░░░░░░░░░

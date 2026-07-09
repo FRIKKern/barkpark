@@ -64,14 +64,14 @@ barkpark · tasks                ⇄ guerrilla  ● live · 1m
 
 
 
-NEXT · 6 independent
- ↩ resume 'wire the Studio user-logi… · lease expired 8m
- ○ P1 append-only event … · continues Enterprise-ready …
- ○ P1 task-resolver -> live snapshot
-   +6 ready
-NOW
- ⠋ opus-3 wire the append-only audit sink          5m00s
- ⠋ fable-1 map SAML group claims to roles          8m00s
+
+
+
+
+
+
+
+
 
 ⠋ 2 in flight · ○ 8 ready · ✓ 30 done · 1 stale      55%
 ██████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░
