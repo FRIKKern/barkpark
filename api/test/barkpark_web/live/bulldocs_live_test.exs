@@ -983,9 +983,14 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       conn = get(conn, "/papers/titled-share-paper")
       html = html_response(conn, 200)
 
-      assert html =~ "<title>A Branded Title · Barkpark</title>"
+      # `<.live_title>` (A7) emits `<title data-default=… data-suffix=…>` so the
+      # LiveView reader updates the browser tab when the title changes — assert
+      # on the rendered title CONTENT, robust to the tag attributes. The
+      # `>…</title>` anchor keeps the refute honest: the default string also
+      # appears inside the `data-default`/`data-suffix` attributes.
+      assert html =~ "A Branded Title · Barkpark</title>"
       assert html =~ ~s(<meta property="og:title" content="A Branded Title")
-      refute html =~ "<title>Paper · Barkpark</title>"
+      refute html =~ ">Paper · Barkpark</title>"
     end
   end
 

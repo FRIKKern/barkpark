@@ -10,7 +10,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content={get_csrf_token()} />
-  <title>{(assigns[:page_title] && assigns[:page_title] <> " · Barkpark") || "Paper · Barkpark"}</title>
+  <%!-- A7: the reader is a LiveView — <.live_title> keeps the browser tab in
+        sync when :page_title changes (the static ternary never updated live).
+        The default carries NO site name: live_title appends the suffix to the
+        default too, so "Paper · Barkpark" + suffix would double the brand. --%>
+  <.live_title default="Paper" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>
   <%!-- Social-share head (preview-contract pc-w2): og/twitter/JSON-LD emitted
         from the paper's preview manifest, IMMEDIATELY after <title> and BEFORE
         the multi-KB inline style blob (Slack reads only the first 32 KB). The

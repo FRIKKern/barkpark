@@ -601,7 +601,8 @@ defmodule BarkparkWeb.BulldocsLive do
   # emission, D3). A missing paper still yields a valid degraded manifest, so
   # the not-found reader unfurls as a branded default card rather than blank.
   defp paper_preview(%{content: content} = paper, slug) when is_map(content),
-    do: BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
+    do:
+      BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
 
   defp paper_preview(_paper, slug),
     do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
