@@ -110,7 +110,6 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.15);
   --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
-  --paper-reading-accent: #a23925;
 }
 
 :root[data-theme="dark"], :host([data-theme="dark"]) {
@@ -153,7 +152,6 @@
   --danger-soft: hsl(var(--danger-hsl) / 0.2);
   --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
-  --paper-reading-accent: #d98a6a;
 }
 
 :root[data-bp-theme="evergreen"], :host([data-bp-theme="evergreen"]) {
