@@ -209,13 +209,15 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ ~s(data-skel="diagram")
     end
 
-    test "skeleton shapes use the accent fill, never the invisible border tone", %{view: view} do
+    test "skeleton shapes use the primary fill, never the invisible border tone", %{view: view} do
       send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph")})
       html = render(view)
       assert html =~ "bp-skel-shape"
       # regression: dark-theme --border-muted is an 11%-lightness gray — shapes
-      # filled with it are invisible. The stylesheet must key on the accent.
-      assert html =~ "background: var(--accent"
+      # filled with it are invisible. The stylesheet must key on the primary
+      # token (no literal fallback — the studio-literal-check gate forbids it).
+      assert html =~ "background: var(--primary"
+      refute html =~ "background: var(--border-muted"
     end
 
     test "prose before a forming component still streams as text", %{view: view} do
