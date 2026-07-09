@@ -118,3 +118,24 @@ under ~/.claude/projects/<proj>/<session>/subagents/workflows/wf_*/:
   role words like "You are an EXPLORER…"). Design for that honestly: group by
   inferred role or flat list, never fake phase boxes.
 - Run liveness: dir mtime / any agent file written in the last N seconds.
+
+## Wave-9 ground truth: settings surface + plans-as-Papers (lead probes 2026-07-09)
+
+- `--effort <low|medium|high|xhigh|max>` EXISTS and works (verified: --effort high
+  --model opus → OK). The composer's model control should become model+effort
+  ("Fable · high") per the user's mock.
+- `--permission-mode` REAL choices: acceptEdits, auto, bypassPermissions, manual,
+  dontAsk, plan. NOTE: "default" (our current middle mode) is NOT in the CLI's
+  list — audit what we actually pass today. bypassPermissions additionally
+  requires --allow-dangerously-skip-permissions (arming flag); exposing it is
+  consistent with the tmux-tab trust model (admin already has full shell), but
+  it must be visually loud + explicitly armed, never a casual dropdown pick.
+- set_permission_mode control frame (key 'mode') steers a LIVE session; whether
+  the CLI accepts an effort control verb mid-session is UNPROBED — spawn-time
+  --effort is the proven path.
+- PLANS AS PAPERS: the chat lives inside the API app — on ExitPlanMode approve
+  (or on ask), create a real Bulldocs Paper from input.plan markdown via the
+  server-side document context (workspace/project/dataset scoping applies),
+  persist the paper id/URL onto the plan row's metadata, link it from the plan
+  card, and let the paper radiate to reader + TUI. Plans stop being chat
+  ephemera and become first-class documents.
