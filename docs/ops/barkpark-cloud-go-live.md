@@ -112,6 +112,30 @@ Hetzner bills on create (hourly, no sandbox), so a real funded account is unavoi
    connected, backup scheduled. The provisioner already fails closed on a red gate.
 5. Monitor the first real customer server; confirm the replacement warm host was created.
 
+## Monitoring agent on adopted / existing-fleet boxes
+
+Every **provisioned** box (Hetzner or Azure) gets the monitoring beat for free: the control plane
+mints a per-instance report token at claim time and threads it in the claim payload, and the
+provisioner's `configure` step builds `barkpark-agent`, writes `/etc/barkpark/agent.token` (0600),
+writes `/etc/barkpark/agent.env` (`BARKPARK_CONTROL_URL` + `BARKPARK_HEALTH_URL`), and enables
+`barkpark-agent.service` (charter Decision 33). `deploy/instance-deploy.sh` re-installs the unit on
+every self-update, so a code refresh never drops the beat.
+
+A box you **adopted** (`bp register ssh …`) or an existing self-hosted fleet member never ran that
+claim, so it has no agent. `bp agent install` is render-only by design (it prints the command, runs
+nothing). To arm such a box manually, on the box as root:
+
+```bash
+# 1. mint a report token in the control plane (mix console on the CP box):
+#    Registry.mint_agent_token(barkpark, "report") → the plaintext (shown once)
+install -d /etc/barkpark && umask 077
+printf '%s' "<the-minted-plaintext>" > /etc/barkpark/agent.token && chmod 600 /etc/barkpark/agent.token
+printf 'BARKPARK_CONTROL_URL=%s\nBARKPARK_HEALTH_URL=%s\n' 'https://api.barkpark.cloud' "https://$(hostname -f)" > /etc/barkpark/agent.env
+( cd /opt/barkpark && go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent )
+install -m 0644 /opt/barkpark/deploy/systemd/barkpark-agent.service /etc/systemd/system/barkpark-agent.service
+systemctl daemon-reload && systemctl enable --now barkpark-agent
+```
+
 ## Rollback / safety
 
 - The provisioner is **fail-closed**: a failed health-gate errors before the server is registered

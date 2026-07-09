@@ -177,6 +177,14 @@ defmodule BarkparkCloud.Web.ProviderNeutralLaunchTest do
       # existing warm-pool path both read the same routing bytes (no kind/creds).
       refute Map.has_key?(payload, "kind")
       refute Map.has_key?(payload, "credentials")
+
+      # charter Decision 33 (NAMED intentional improvement — the old bytes lacked
+      # this key). The claim now carries a per-instance agent token for EVERY
+      # provider so barkpark-agent.service can report home; the hash is stored, the
+      # plaintext crosses ONCE here. verify_agent_token is a by-hash lookup, so a
+      # live (non-revoked, unexpired) token ROW provably exists post-claim.
+      assert is_binary(payload["agent_token"]) and payload["agent_token"] != ""
+      assert %Barkpark{} = Registry.verify_agent_token(payload["agent_token"])
     end
 
     test "a pinned hetzner region/size rides through the claim" do
@@ -219,6 +227,11 @@ defmodule BarkparkCloud.Web.ProviderNeutralLaunchTest do
       assert payload["server_type"] == "Standard_B2s"
       # The decrypted 4-tuple mirrors env-at-claim — the single sanctioned crossing.
       assert payload["credentials"] == @azure_creds
+      # charter Decision 33 — the agent token is minted for BOTH providers (the
+      # monitoring beat is provider-neutral; azure has no warm pool but the same
+      # on-box agent).
+      assert is_binary(payload["agent_token"]) and payload["agent_token"] != ""
+      assert %Barkpark{} = Registry.verify_agent_token(payload["agent_token"])
     end
 
     test "an UNPINNED azure claim emits nil region/size — never the Hetzner warm-pool defaults" do

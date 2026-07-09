@@ -118,6 +118,13 @@ type Seams struct {
 	// line before it leaves the worker (the minted admin token + secret patterns).
 	// nil (tests, an old wiring) disables console reporting silently.
 	ConsoleReporter ConsoleReporter
+
+	// ControlURL (charter Decision 33) is the control-plane origin the on-box
+	// barkpark-agent reports to. It rides into the GoLiveSpec so the configure step
+	// can write /etc/barkpark/agent.env (BARKPARK_CONTROL_URL) and enable
+	// barkpark-agent.service. Same value main() passes to the worker's own claim
+	// loop; empty (tests that don't exercise the agent) skips the agent install.
+	ControlURL string
 }
 
 // BootstrapOutputs is what a template bootstrap produced — reported to the
@@ -363,6 +370,13 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		Zone: Zone,
 		App:  AppPort,
 		Spec: base,
+		// charter Decision 33 — thread the per-instance agent token (minted at
+		// claim) + the control-plane origin into the go-live so configureHost writes
+		// /etc/barkpark/agent.token and enables barkpark-agent.service. Both empty
+		// (an old control plane / a test) → the configure step skips the agent
+		// install, the box serves without the beat.
+		AgentToken: job.AgentToken,
+		ControlURL: seams.ControlURL,
 	}
 
 	// Acquire a configured, live host. When the warm pool is enabled (dwb-10), try

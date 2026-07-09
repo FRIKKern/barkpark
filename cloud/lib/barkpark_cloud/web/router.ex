@@ -6616,7 +6616,36 @@ defmodule BarkparkCloud.Web.Router do
       template: barkpark.template
     }
 
-    add_provider_claim_fields(base, barkpark)
+    base
+    |> put_agent_token(barkpark)
+    |> add_provider_claim_fields(barkpark)
+  end
+
+  # Charter Decision 33 — the monitoring beat goes live. Mint a per-instance agent
+  # token (scope "report") at CLAIM time and thread the PLAINTEXT into the claim
+  # payload for EVERY provider, mirroring env-at-claim above: the single sanctioned
+  # plaintext crossing, sent ONLY over the worker-token-authed internal channel.
+  # Only the SHA-256 hash is persisted server-side (plaintext-once) — the worker
+  # writes the plaintext to /etc/barkpark/agent.token and enables
+  # barkpark-agent.service so the box reports its health + vitals home. Resolved at
+  # CLAIM time (not launch), so a stale-reclaim / retry carries a FRESH token, and
+  # the box the worker actually configures holds a live credential.
+  #
+  # Fail-OPEN: a mint error omits the key and logs — a monitoring hiccup must never
+  # strand a provision (an old worker ignores the key too). The box then serves
+  # without the beat rather than never coming up.
+  defp put_agent_token(base, barkpark) do
+    case Registry.mint_agent_token(barkpark, "report") do
+      {:ok, plaintext, _token} ->
+        Map.put(base, :agent_token, plaintext)
+
+      {:error, changeset} ->
+        Logger.error(
+          "claim_json: mint_agent_token failed for barkpark #{barkpark.id}: #{inspect(changeset)}"
+        )
+
+        base
+    end
   end
 
   # The claim's region/size come straight off the row — the PINNED value or nil,
