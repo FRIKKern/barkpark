@@ -1,16 +1,23 @@
-// bp-chat-composer.js — paste + drag-drop image attachments for the Studio
-// Claude chat composer (charter D25).
+// bp-chat-composer.js — the Studio Claude chat composer's client half.
 //
 // Defines `window.BarkparkChatComposer`, a LiveView hook mounted on the composer
-// <form>. It captures paste and drop events, filters them to accepted image
-// files, and feeds them into the form's `allow_upload(:attachments)` via the
-// LiveView JS `this.upload(name, files)` API — the SAME upload the send handler
-// consumes, stores under the chat-owned dir, and base64-encodes onto the wire.
-// It NEVER touches /media/files (the public media plugin, the D6 leak).
+// <form>. It does two jobs:
 //
-// Text paste is left alone: paste is only intercepted (preventDefault) when the
-// clipboard actually carries image files, so pasting text into the input still
-// works normally.
+//   1. Image attachments (charter D25): captures paste + drop events, filters to
+//      accepted image files, and feeds them into `allow_upload(:attachments)` via
+//      the LiveView JS `this.upload(name, files)` API — the SAME upload the send
+//      handler consumes. It NEVER touches /media/files (the D6 leak). Text paste
+//      is left alone (only image files trigger preventDefault).
+//
+//   2. Slash-command combobox (charter D36b): a leading "/" opens an ARIA
+//      listbox of commands (the server stamps the vocabulary on the form as
+//      `data-commands`; the client filters + renders it — the bp-sheet-grid.js
+//      fn-autocomplete pattern). ArrowUp/Down move the active option,
+//      Enter/Tab select, Escape closes. Selecting writes the input value AND
+//      dispatches a native `input` event so the server-bound composer_draft
+//      (value={@composer_draft} + phx-change) stays in sync (charter D24) — the
+//      builtins /plan · /default · /model then route server-side on submit;
+//      advertised commands submit as plain user text.
 (function () {
   const UPLOAD = "attachments";
   const ACCEPT = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -27,6 +34,7 @@
 
   window.BarkparkChatComposer = {
     mounted() {
+      // ── image attachments ──────────────────────────────────────────────
       this._onPaste = (e) => {
         const files = imageFiles(e.clipboardData && e.clipboardData.files);
         if (files.length) {
@@ -52,12 +60,197 @@
       this.el.addEventListener("paste", this._onPaste);
       this.el.addEventListener("dragover", this._onDragOver);
       this.el.addEventListener("drop", this._onDrop);
+
+      // ── slash-command combobox ─────────────────────────────────────────
+      this._input = this.el.querySelector("#chat-composer");
+      this._menu = this.el.querySelector("#chat-slash-menu");
+      this._active = -1; // highlighted option index, -1 = none
+      this._items = []; // the currently-filtered vocabulary
+
+      if (this._input && this._menu) {
+        this._onInput = () => this._refreshMenu();
+        this._onKeyDown = (e) => this._onSlashKey(e);
+        this._onBlur = () => this._closeMenu();
+
+        this._input.addEventListener("input", this._onInput);
+        this._input.addEventListener("keydown", this._onKeyDown);
+        this._input.addEventListener("blur", this._onBlur);
+      }
+    },
+
+    updated() {
+      // The server may broadcast a richer command list after the initialize ack
+      // (charter D36a) — re-filter if the menu is open so it reflects the fresh
+      // vocabulary without the user retyping.
+      if (this._menu && !this._menu.hidden) this._refreshMenu();
     },
 
     destroyed() {
       this.el.removeEventListener("paste", this._onPaste);
       this.el.removeEventListener("dragover", this._onDragOver);
       this.el.removeEventListener("drop", this._onDrop);
+
+      if (this._input) {
+        this._input.removeEventListener("input", this._onInput);
+        this._input.removeEventListener("keydown", this._onKeyDown);
+        this._input.removeEventListener("blur", this._onBlur);
+      }
+    },
+
+    // The server-stamped vocabulary (re-read each time — the form's
+    // data-commands is patched when the advertised list changes).
+    _vocab() {
+      try {
+        const raw = this.el.getAttribute("data-commands");
+        const parsed = raw ? JSON.parse(raw) : [];
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (_e) {
+        return [];
+      }
+    },
+
+    // The leading command token being typed, or null when the value is not a
+    // command-in-progress (no leading "/", or the name is already complete —
+    // a space means the argument is being typed, so the menu closes).
+    _query() {
+      const v = this._input.value || "";
+      if (v[0] !== "/") return null;
+      if (/\s/.test(v)) return null;
+      return v;
+    },
+
+    _refreshMenu() {
+      const q = this._query();
+      if (q === null) return this._closeMenu();
+
+      const ql = q.toLowerCase();
+      this._items = this._vocab().filter(
+        (c) => c && typeof c.name === "string" && c.name.toLowerCase().indexOf(ql) === 0
+      );
+
+      if (this._items.length === 0) return this._closeMenu();
+
+      this._active = 0;
+      this._render();
+      this._openMenu();
+    },
+
+    _render() {
+      const menu = this._menu;
+      menu.textContent = "";
+
+      this._items.forEach((cmd, i) => {
+        const li = document.createElement("li");
+        li.id = "chat-slash-opt-" + i;
+        li.setAttribute("role", "option");
+        li.setAttribute("aria-selected", i === this._active ? "true" : "false");
+        li.style.cssText =
+          "display:flex; flex-direction:column; gap:2px; padding:6px 8px; border-radius:6px; cursor:pointer; " +
+          (i === this._active ? "background: var(--primary-soft);" : "background: transparent;");
+
+        const head = document.createElement("div");
+        head.style.cssText = "display:flex; align-items:baseline; gap:8px;";
+
+        const name = document.createElement("span");
+        name.textContent = cmd.name;
+        name.style.cssText = "font-family: var(--font-mono); font-weight:600;";
+        head.appendChild(name);
+
+        if (cmd.argumentHint) {
+          const hint = document.createElement("span");
+          hint.textContent = cmd.argumentHint;
+          hint.className = "text-xs text-dim";
+          hint.style.cssText = "font-family: var(--font-mono);";
+          head.appendChild(hint);
+        }
+
+        li.appendChild(head);
+
+        if (cmd.description) {
+          const desc = document.createElement("span");
+          desc.textContent = cmd.description;
+          desc.className = "text-xs text-dim";
+          li.appendChild(desc);
+        }
+
+        // mousedown (not click) + preventDefault: keep focus on the input so the
+        // blur handler doesn't close the menu before the selection lands.
+        li.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          this._select(i);
+        });
+
+        menu.appendChild(li);
+      });
+
+      this._input.setAttribute(
+        "aria-activedescendant",
+        this._active >= 0 ? "chat-slash-opt-" + this._active : ""
+      );
+    },
+
+    _openMenu() {
+      this._menu.hidden = false;
+      this._input.setAttribute("aria-expanded", "true");
+    },
+
+    _closeMenu() {
+      if (!this._menu) return;
+      this._menu.hidden = true;
+      this._menu.textContent = "";
+      this._items = [];
+      this._active = -1;
+      this._input.setAttribute("aria-expanded", "false");
+      this._input.setAttribute("aria-activedescendant", "");
+    },
+
+    _onSlashKey(e) {
+      if (this._menu.hidden) return;
+
+      switch (e.key) {
+        case "ArrowDown":
+          e.preventDefault();
+          this._active = (this._active + 1) % this._items.length;
+          this._render();
+          break;
+        case "ArrowUp":
+          e.preventDefault();
+          this._active = (this._active - 1 + this._items.length) % this._items.length;
+          this._render();
+          break;
+        case "Enter":
+        case "Tab":
+          if (this._active >= 0) {
+            e.preventDefault();
+            this._select(this._active);
+          }
+          break;
+        case "Escape":
+          e.preventDefault();
+          this._closeMenu();
+          break;
+        default:
+          break;
+      }
+    },
+
+    // Insert the chosen command. A command that takes an argument leaves the
+    // menu ready for typing (name + trailing space); a no-argument command runs
+    // immediately (requestSubmit). BOTH first write the value + dispatch a native
+    // input event so the server-bound draft (charter D24) is in sync.
+    _select(i) {
+      const cmd = this._items[i];
+      if (!cmd) return;
+
+      const takesArg = !!cmd.argumentHint;
+      this._input.value = takesArg ? cmd.name + " " : cmd.name;
+      this._input.dispatchEvent(new Event("input", { bubbles: true }));
+      this._closeMenu();
+      this._input.focus();
+
+      if (!takesArg && typeof this.el.requestSubmit === "function") {
+        this.el.requestSubmit();
+      }
     }
   };
 })();

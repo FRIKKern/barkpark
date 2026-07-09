@@ -2171,6 +2171,115 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "composer power — slash builtins + sticky draft/model (wave 6, charter D36)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "the composer stamps the builtin slash vocabulary on the form", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      assert html =~ ~s(id="chat-slash-menu")
+      assert html =~ ~s(role="combobox")
+      # The three control builtins are the hard floor, always offered.
+      assert html =~ "/plan"
+      assert html =~ "/default"
+      assert html =~ "/model"
+    end
+
+    test "a /default slash submit switches permission mode WITHOUT sending a turn",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      assert lv_assigns(view)[:mode] == "plan"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/default"})
+
+      assert lv_assigns(view)[:mode] == "default"
+      # No turn started, no user bubble — a builtin never reaches the model.
+      refute turn_active_status?(view)
+      assert session_pid(view) == nil
+      refute render(view) =~ ~s(data-role="user")
+    end
+
+    test "a /model opus slash submit switches the model WITHOUT sending a turn",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model opus"})
+
+      assert lv_assigns(view)[:model_choice] == "opus"
+      refute turn_active_status?(view)
+      assert render(view) =~ "Model →"
+    end
+
+    test "a bare /model submit shows usage and changes nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model"})
+
+      assert html =~ "Usage: /model"
+      assert lv_assigns(view)[:model_choice] == "default"
+    end
+
+    test "an advertised (non-builtin) slash command is sent as plain user text",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/compact"})
+
+      # Not a builtin → flows through the normal send path (user bubble + turn).
+      assert html =~ "/compact"
+      assert html =~ ~s(data-role="user")
+      assert turn_active_status?(view)
+    end
+
+    test "a chat_commands broadcast populates the advertised menu vocabulary",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      send(view.pid, {:chat_commands, "any", [%{"name" => "review", "description" => "Code review"}]})
+      html = render(view)
+
+      # The stamped vocab now carries the advertised command AND still floors the
+      # builtins — dedupe keeps all four present.
+      assert html =~ "review"
+      assert html =~ "/plan"
+    end
+
+    test "a sticky draft round-trips across a session switch and clears on send",
+         %{conn: conn} do
+      a = seed_session("Session A")
+      b = seed_session("Session B")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{a}")
+
+      # Type a draft into A, then switch to B and back.
+      render_change(element(view, "form[phx-submit=send]"), %{"message" => "unfinished A thought"})
+      render_patch(view, "/studio/chat/#{b}")
+      render_patch(view, "/studio/chat/#{a}")
+
+      # A's unsent words are restored verbatim (server-bound value assign, D24).
+      assert lv_assigns(view)[:composer_draft] == "unfinished A thought"
+      assert StudioChat.get_session(a).draft == "unfinished A thought"
+
+      # Sending clears the persisted draft — a reopen shows a clean composer.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "actually send"})
+      assert StudioChat.get_session(a).draft == nil
+    end
+
+    test "a new chat inherits the last non-default model choice (sticky model)",
+         %{conn: conn} do
+      prev = seed_session("picked opus")
+      {:ok, _} = StudioChat.set_model_choice(prev, "opus")
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      assert lv_assigns(view)[:model_choice] == "opus"
+    end
+  end
+
   # Is the on-screen chat in a turn-active state (thinking/interrupting)?
   defp turn_active_status?(view), do: lv_assigns(view)[:status] in [:thinking, :interrupting]
 

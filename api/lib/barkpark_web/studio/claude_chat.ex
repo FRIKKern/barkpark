@@ -305,6 +305,20 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     control_request(session, %{"subtype" => "set_model", "model" => model})
   end
 
+  @doc """
+  Ask the CLI for its capability + slash-command list (charter D36a). Writes a
+  bare `{"subtype":"initialize"}` control_request on stdin — proven on the real
+  binary v2.1.205 to answer IMMEDIATELY at spawn, BEFORE any turn, with
+  `response.commands` (`[%{"name", "description", "argumentHint", "aliases"}]`).
+  Sent right after spawn by the Recorder; the ack dispatches as a TYPED
+  `{:claude_chat_control, :initialize, request_id, response}` so it is not eaten
+  by the catch-all. Returns the minted `request_id`.
+  """
+  @spec initialize(pid()) :: {:ok, String.t()}
+  def initialize(session) when is_pid(session) do
+    control_request(session, %{"subtype" => "initialize"})
+  end
+
   # Mint a request_id and cast an outbound control_request frame. The id lets
   # the caller correlate the CLI's control_response ack (forwarded to the sink).
   defp control_request(session, request) when is_map(request) do
@@ -651,6 +665,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp control_kind(%{"subtype" => "interrupt"}), do: :interrupt
     defp control_kind(%{"subtype" => "set_permission_mode"}), do: :set_mode
     defp control_kind(%{"subtype" => "set_model"}), do: :set_model
+    defp control_kind(%{"subtype" => "initialize"}), do: :initialize
     defp control_kind(_), do: nil
 
     # Pull a pending control's kind by request_id (nil if untracked/absent).

@@ -706,6 +706,74 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "set_draft/2 — sticky composer draft (charter D36c)" do
+    test "persists and restores a draft on the FULL struct" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "half a thought")
+
+      # get_session carries `draft` (the reopen restore path reads it here).
+      assert StudioChat.get_session(s.id).draft == "half a thought"
+    end
+
+    test "list_sessions never selects the draft column (kept off the sidebar)" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "sidebar must not carry this")
+
+      # The select omits :draft, so a listed row reads the struct default (nil).
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert listed.draft == nil
+    end
+
+    test "a blank / whitespace draft clears the column (nil, not \"\")" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "something")
+      {:ok, _} = StudioChat.set_draft(s.id, "   ")
+      assert StudioChat.get_session(s.id).draft == nil
+
+      {:ok, _} = StudioChat.set_draft(s.id, "again")
+      {:ok, _} = StudioChat.set_draft(s.id, nil)
+      assert StudioChat.get_session(s.id).draft == nil
+    end
+
+    test "does NOT bump last_active_at (a draft must not reorder the sidebar)" do
+      s = new_session()
+      before = StudioChat.get_session(s.id).last_active_at
+      {:ok, _} = StudioChat.set_draft(s.id, "typing…")
+      assert StudioChat.get_session(s.id).last_active_at == before
+    end
+
+    test "a missing session is a clean :not_found" do
+      assert {:error, :not_found} = StudioChat.set_draft(Ecto.UUID.generate(), "x")
+    end
+  end
+
+  describe "recent_model_choice/0 — sticky model default seed (charter D36d)" do
+    test "returns the most-recently-active NON-default model_choice" do
+      older = new_session()
+      {:ok, _} = StudioChat.set_model_choice(older.id, "haiku")
+      # older's set_model_choice bumped last_active_at; make newer strictly later
+      newer = new_session()
+      {:ok, _} = StudioChat.set_model_choice(newer.id, "opus")
+
+      assert StudioChat.recent_model_choice() == "opus"
+    end
+
+    test "ignores nil and literal \"default\" choices (never seeds \"default\")" do
+      a = new_session()
+      {:ok, _} = StudioChat.set_model_choice(a.id, "sonnet")
+      b = new_session()
+      {:ok, _} = StudioChat.set_model_choice(b.id, "default")
+
+      # b is newer but its choice is "default" — the seed skips it.
+      assert StudioChat.recent_model_choice() == "sonnet"
+    end
+
+    test "nil when no session ever picked a non-default model" do
+      _ = new_session()
+      assert StudioChat.recent_model_choice() == nil
+    end
+  end
+
   describe "schema wiring" do
     test "known statuses, title sources, and modes are enumerable" do
       assert "working" in Session.statuses()

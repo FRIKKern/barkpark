@@ -250,6 +250,69 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  describe "slash-command handshake (charter D36a)" do
+    test "the initialize ack is HELD so a late-joining tab still gets the list",
+         %{recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-x",
+         %{
+           "commands" => [
+             %{"name" => "compact", "description" => "Compact", "argumentHint" => nil}
+           ]
+         }}
+      )
+
+      # A tab that opens AFTER the ack fired reads the held vocabulary directly.
+      assert [%{"name" => "compact"}] = Recorder.advertised_commands(recorder)
+    end
+
+    test "the ack broadcasts the vocabulary to a subscribed tab",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-y",
+         %{"commands" => [%{"name" => "review"}]}}
+      )
+
+      assert_receive {:chat_commands, ^sid, [%{"name" => "review"}]}
+    end
+
+    test "system/init slash_commands is the name-only FALLBACK when no ack landed",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "slash_commands" => ["clear", "cost"]}}
+      )
+
+      assert_receive {:chat_commands, ^sid, cmds}
+      assert Enum.map(cmds, & &1["name"]) == ["clear", "cost"]
+      assert [%{"name" => "clear"} | _] = Recorder.advertised_commands(recorder)
+    end
+
+    test "the rich ack OVERRIDES the name-only fallback", %{recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "slash_commands" => ["clear"]}}
+      )
+
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-z",
+         %{"commands" => [%{"name" => "compact", "description" => "rich"}]}}
+      )
+
+      assert [%{"name" => "compact", "description" => "rich"}] =
+               Recorder.advertised_commands(recorder)
+    end
+  end
+
   test "the runtime survives a viewer's death — the whole point",
        %{sid: sid, recorder: recorder} do
     # a "tab": subscribes, then dies

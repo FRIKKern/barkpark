@@ -395,6 +395,53 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  The most-recently-active session's non-default `model_choice` (charter D36d) —
+  the seed for a NEW chat's model picker, so "opus" stays sticky across new
+  chats. A DEDICATED query on purpose: `list_sessions` selects sidebar fields and
+  OMITS `model_choice`, so seeding off a listed row reads `nil` forever (the
+  vacuous-green trap). Returns the alias string or `nil` (no session ever picked
+  a non-default model). Ignores archive state — the last intent is the last
+  intent regardless of shelf.
+  """
+  @spec recent_model_choice() :: String.t() | nil
+  def recent_model_choice do
+    Session
+    |> where([s], not is_nil(s.model_choice) and s.model_choice != "default")
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(1)
+    |> select([s], s.model_choice)
+    |> Repo.one()
+  end
+
+  @doc """
+  Persist the sticky composer draft (charter D36c). `draft` is the unsent text
+  (nil/`""` clears it). Deliberately does NOT bump `last_active_at` — leaving a
+  draft must not reorder the sidebar. Restored on reopen from the full session
+  struct (`get_session`), NEVER from `list_sessions` (whose select omits it).
+  Returns `{:ok, session}` or `{:error, :not_found}`.
+  """
+  @spec set_draft(String.t(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, :not_found}
+  def set_draft(session_id, draft) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(draft: blank_to_nil(draft))
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(draft) when is_binary(draft) do
+    case String.trim(draft) do
+      "" -> nil
+      _ -> draft
+    end
+  end
+
+  @doc """
   Mark a session `exited` (its port died — crash or clean exit). Next send
   lazy-resumes. `:noop` if the session is gone.
   """

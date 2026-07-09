@@ -71,6 +71,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
          messages: [],
          next_id: 0,
          streaming: nil,
+         # Advertised slash commands (charter D36a) — the CLI's initialize list,
+         # held by the Recorder and delivered on subscribe + broadcast. The
+         # composer's slash menu merges these with the builtin floor.
+         commands: [],
          # Server-bound composer (charter D24): the input renders `value=` from
          # this draft, so a send can clear it and a failed dispatch can restore
          # the words verbatim — an uncontrolled DOM input is invisible to render/1.
@@ -118,6 +122,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, assign(socket, session_id: sid)}
 
       true ->
+        # Switch-away moment (charter D36c): persist the draft of the session we
+        # are LEAVING before anything else, so its unsent words survive the swap
+        # and reload when it is reopened.
+        socket = capture_draft(socket)
+
         case StudioChat.get_session(sid) do
           nil ->
             # Unknown/deleted session — fall back to the new-chat state with an
@@ -135,7 +144,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_params(_params, _uri, socket) do
-    {:noreply, reset_to_new_chat(socket)}
+    {:noreply, socket |> capture_draft() |> reset_to_new_chat()}
+  end
+
+  # Persist the leaving session's composer draft (charter D36c). No-op on the
+  # new-chat state (no store row yet) — a fresh chat's draft is discarded, never
+  # persisted to a row that doesn't exist. Blank drafts clear the column.
+  defp capture_draft(socket) do
+    if sid = socket.assigns[:store_session_id] do
+      StudioChat.set_draft(sid, socket.assigns[:composer_draft])
+    end
+
+    socket
   end
 
   # Keep the server-bound composer draft in step with what the user types
@@ -157,35 +177,60 @@ defmodule BarkparkWeb.Studio.ChatLive do
     text = String.trim(text)
     has_attachments? = socket.assigns.uploads.attachments.entries != []
 
-    # No send queue (t3 item 10): while a turn runs the only control is Stop —
-    # a stray Enter-submit must not fire a second overlapping turn. Enter is a
-    # server-side no-op here; the composer shows Stop, not Send. An image-only
-    # turn (text blank but attachments present) is a valid send (charter D25).
-    cond do
-      text == "" and not has_attachments? ->
-        {:noreply, socket}
+    # A leading-slash BUILTIN (charter D36b) never reaches the model: /plan and
+    # /default steer the permission mode, /model switches the brain. Routing them
+    # here (server-side, on submit) keeps the JS slash menu a pure insert widget
+    # and makes the routing testable. Advertised (non-builtin) slash commands
+    # fall through as plain user text — the CLI executes them itself.
+    case builtin_command(text) do
+      {:set_mode, mode} ->
+        {:noreply, socket |> clear_persisted_draft() |> change_mode(mode) |> clear_composer()}
 
-      turn_active?(socket.assigns.status) ->
-        {:noreply, socket}
+      {:set_model, choice} ->
+        {:noreply, socket |> clear_persisted_draft() |> change_model(choice) |> clear_composer()}
 
-      true ->
-        # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
-        # every failure-prone step to {:dispatch_send}. An image-only turn gets
-        # its bubble in phase 2 when the staged files are consumed (D25) — the
-        # attachment strip keeps showing the thumbnails until that next diff,
-        # so nothing visually vanishes in between.
-        echo_id = socket.assigns.next_id
-        send(self(), {:dispatch_send, text})
-
-        socket =
-          if text == "" do
-            assign(socket, pending_echo_id: nil)
-          else
-            socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
-          end
-
+      :model_usage ->
         {:noreply,
-         assign(socket, status: :thinking, interrupt_requested: false, composer_draft: "")}
+         socket
+         |> clear_persisted_draft()
+         |> append_message(:system, "Usage: /model haiku · sonnet · opus · fable")
+         |> clear_composer()}
+
+      :none ->
+        # No send queue (t3 item 10): while a turn runs the only control is
+        # Stop — a stray Enter-submit must not fire a second overlapping turn.
+        # An image-only turn (text blank but attachments present) is valid (D25).
+        cond do
+          text == "" and not has_attachments? ->
+            {:noreply, socket}
+
+          turn_active?(socket.assigns.status) ->
+            {:noreply, socket}
+
+          true ->
+            # PHASE 1 (charter D24): echo instantly, clear the composer, and defer
+            # every failure-prone step to {:dispatch_send}. An image-only turn gets
+            # its bubble in phase 2 when the staged files are consumed (D25) — the
+            # attachment strip keeps showing the thumbnails until that next diff,
+            # so nothing visually vanishes in between.
+            echo_id = socket.assigns.next_id
+            send(self(), {:dispatch_send, text})
+
+            socket =
+              if text == "" do
+                assign(socket, pending_echo_id: nil)
+              else
+                socket |> append_message(:user, text) |> assign(pending_echo_id: echo_id)
+              end
+
+            # The stuck draft is history the instant a turn dispatches (charter
+            # D36c): clear the persisted column so a reopen shows a clean composer,
+            # not the words that just went to the model.
+            socket = clear_persisted_draft(socket)
+
+            {:noreply,
+             assign(socket, status: :thinking, interrupt_requested: false, composer_draft: "")}
+        end
     end
   end
 
@@ -239,30 +284,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # mis-revert. With no live session there is no ack to wait on, so we persist
   # immediately and the next lazy `--resume` spawn carries the mode.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
-    mode = ClaudeChat.normalize_mode(mode)
-
-    cond do
-      mode == socket.assigns.mode ->
-        {:noreply, socket}
-
-      session = socket.assigns.session ->
-        # Optimistic: move the selector now for instant feedback, but DON'T
-        # persist yet — the persisted mode is the last ACKED value (D23). Remember
-        # the request_id (latest-outstanding correlation) and the revert target:
-        # the last known-good mode, which a chain of unconfirmed rapid switches
-        # must preserve rather than fold into an intermediate optimistic value.
-        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
-        revert_to = revert_target(socket)
-
-        {:noreply,
-         socket
-         |> assign(mode: mode, pending_mode: %{req: request_id, revert_to: revert_to})
-         |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
-
-      true ->
-        persist_mode(socket, mode)
-        {:noreply, assign(socket, mode: mode, pending_mode: nil)}
-    end
+    {:noreply, change_mode(socket, ClaudeChat.normalize_mode(mode))}
   end
 
   # Pick the brain (wave 5). The choice persists on the session row (intent)
@@ -271,16 +293,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # trap), so we do not pend/revert on it: the next init/result frame reports
   # the answering model as fact, rendered beside the picker.
   def handle_event("set-model", %{"model" => raw}, socket) do
-    choice = ClaudeChat.normalize_model(raw)
-    label = if choice, do: model_label(choice), else: "the CLI default"
-
-    if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
-    if session = socket.assigns[:session], do: ClaudeChat.set_model(session, choice || "default")
-
-    {:noreply,
-     socket
-     |> assign(model_choice: choice || "default")
-     |> append_message(:system, "Model → #{label}.")}
+    {:noreply, change_model(socket, ClaudeChat.normalize_model(raw))}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -362,6 +375,81 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Stale/unknown client events must never crash the chat — mirror the other
   # admin LVs' tolerant catch-all.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
+
+  # ── composer command routing (charter D36b) — shared by the selectors and
+  #    the slash builtins, kept OUT of the handle_event group ─────────────────
+
+  # Switch permission mode — shared by the header selector and the /plan ·
+  # /default slash builtins. See the `set_mode` ack handler for the ack-driven
+  # persistence contract (D23): a live switch persists only the confirmed value.
+  defp change_mode(socket, mode) do
+    cond do
+      mode == socket.assigns.mode ->
+        socket
+
+      session = socket.assigns.session ->
+        # Optimistic: move the selector now for instant feedback, but DON'T
+        # persist yet — the persisted mode is the last ACKED value (D23). Remember
+        # the request_id (latest-outstanding correlation) and the revert target:
+        # the last known-good mode, which a chain of unconfirmed rapid switches
+        # must preserve rather than fold into an intermediate optimistic value.
+        {:ok, request_id} = ClaudeChat.set_permission_mode(session, mode)
+        revert_to = revert_target(socket)
+
+        socket
+        |> assign(mode: mode, pending_mode: %{req: request_id, revert_to: revert_to})
+        |> append_message(:system, "Permission mode → #{mode_label(mode)}.")
+
+      true ->
+        persist_mode(socket, mode)
+        assign(socket, mode: mode, pending_mode: nil)
+    end
+  end
+
+  # Switch the brain — shared by the header picker and the /model slash builtin.
+  # `choice` is an already-normalized alias or nil (= CLI default).
+  defp change_model(socket, choice) do
+    label = if choice, do: model_label(choice), else: "the CLI default"
+
+    if sid = socket.assigns[:store_session_id], do: StudioChat.set_model_choice(sid, choice)
+    if session = socket.assigns[:session], do: ClaudeChat.set_model(session, choice || "default")
+
+    socket
+    |> assign(model_choice: choice || "default")
+    |> append_message(:system, "Model → #{label}.")
+  end
+
+  # Classify a submitted composer line as a BUILTIN slash command (charter D36b)
+  # or `:none` (send it to the model as-is). Only EXACT builtins route — a
+  # `/plan` with trailing prose is ambiguous, so it falls through as user text.
+  # The floor is /plan · /default · /model; session-mutating CLI commands
+  # (/compact, /clear) are NOT builtins — they ride through as plain user text
+  # so the CLI handles them itself, and our store identity is pinned by
+  # `--session-id`/`--resume` regardless of what a slash-turn result echoes (D8;
+  # spot-check assumption per D36b — we never scrape ids off frames).
+  defp builtin_command("/plan"), do: {:set_mode, "plan"}
+  defp builtin_command("/default"), do: {:set_mode, "default"}
+  defp builtin_command("/model"), do: :model_usage
+
+  defp builtin_command(text) when is_binary(text) do
+    case String.split(text, ~r/\s+/, trim: true) do
+      ["/model", arg] -> {:set_model, ClaudeChat.normalize_model(arg)}
+      _ -> :none
+    end
+  end
+
+  defp builtin_command(_), do: :none
+
+  # Clear the server-bound composer input (charter D24 — an uncontrolled input's
+  # DOM text is invisible to render/1, so the clear must go through the assign).
+  defp clear_composer(socket), do: assign(socket, composer_draft: "")
+
+  # Clear the persisted sticky draft for the on-screen session (charter D36c) —
+  # a no-op when there is no store row yet (a fresh chat before its first send).
+  defp clear_persisted_draft(socket) do
+    if sid = socket.assigns[:store_session_id], do: StudioChat.set_draft(sid, nil)
+    socket
+  end
 
   # PHASE 2 of send (charter D24): the deferred, failure-prone work. Bring the
   # session up (creating the store row + resuming the CLI as needed), write the
@@ -549,6 +637,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # shows it, whichever session it belongs to.
   def handle_info({:chat_title, _session_id, _title}, socket) do
     {:noreply, refresh_sessions(socket)}
+  end
+
+  # The CLI's advertised slash commands landed (charter D36a), broadcast by the
+  # Recorder after its initialize ack. We subscribe to exactly ONE session topic
+  # at a time, so any list on the wire belongs to the on-screen session — stamp
+  # it so the composer's slash menu offers the real command vocabulary.
+  def handle_info({:chat_commands, _session_id, commands}, socket) do
+    {:noreply, assign(socket, commands: commands)}
   end
 
   # The CLI acked a permission-mode switch (charter D17/D23). Two guards, in
@@ -1206,6 +1302,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           phx-hook="ChatComposer"
           phx-submit="send"
           phx-change="composer-change"
+          data-commands={Jason.encode!(slash_vocab(@commands))}
           style="display: flex; flex-direction: column; gap: 8px; max-width: 860px; margin: 0 auto;"
         >
           <%!-- The upload the paste/drop hook feeds (charter D25). Kept in the
@@ -1265,15 +1362,36 @@ defmodule BarkparkWeb.Studio.ChatLive do
           </p>
 
           <div style="display: flex; gap: 8px;">
-            <input
-              id="chat-composer"
-              type="text"
-              name="message"
-              value={@composer_draft}
-              autocomplete="off"
-              placeholder={composer_placeholder(@status)}
-              style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
-            />
+            <%!-- Slash-command combobox (charter D36b): typing a leading "/"
+                  opens the listbox below; the ChatComposer hook filters the
+                  server-stamped vocab (data-commands on the form), handles
+                  ArrowUp/Down/Enter/Escape + aria-activedescendant, and on
+                  select writes the input value AND dispatches a native input
+                  event so the server-bound draft stays in sync (D24). --%>
+            <div style="position: relative; flex: 1;">
+              <input
+                id="chat-composer"
+                type="text"
+                name="message"
+                value={@composer_draft}
+                autocomplete="off"
+                role="combobox"
+                aria-expanded="false"
+                aria-autocomplete="list"
+                aria-controls="chat-slash-menu"
+                aria-activedescendant=""
+                placeholder={composer_placeholder(@status)}
+                style="width: 100%; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
+              />
+              <ul
+                id="chat-slash-menu"
+                role="listbox"
+                aria-label="Slash commands"
+                hidden
+                style="position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; max-height: 240px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border-muted); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18); z-index: 20;"
+              >
+              </ul>
+            </div>
             <%!-- While a turn runs, Stop replaces Send — the ONLY safe control is
                   to cancel, never to queue a second turn (t3: no send queue). --%>
             <button
@@ -1454,6 +1572,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       socket
       |> subscribe_session(store_id)
       |> assign(session: session, status: :ready)
+      # Late-join the slash vocabulary (charter D36a): the initialize ack may
+      # have already landed on the Recorder before we subscribed, so read the
+      # held list now; the broadcast covers the ack that arrives after.
+      |> assign(commands: Recorder.advertised_commands(recorder))
       |> refresh_sessions()
     else
       {:error, reason} ->
@@ -1563,6 +1685,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
       status: status,
       init: replay_init(session),
       messages: messages,
+      # Sticky draft (charter D36c): restore the unsent words left behind when
+      # this session was last switched away from (nil column → clean composer).
+      # From the FULL struct — list_sessions omits `draft`.
+      composer_draft: session.draft || "",
+      # A live runtime may already hold the CLI's advertised slash commands
+      # (charter D36a) — read the held list on reopen; a dead session floors to
+      # builtins (empty advertised list).
+      commands: runtime_commands(session.id),
       # Strictly past every replayed id (seqs are 1-based), so a live append
       # never collides with a replayed message's id.
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
@@ -1580,9 +1710,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Any half-open sidebar affordance is stale after a navigation.
       renaming_session: nil,
       open_menu_session: nil,
-      # A reopened session starts with a clean composer (charter D24): any draft
-      # or in-flight echo belonged to the session we navigated away from.
-      composer_draft: "",
+      # The reopened session's own sticky draft is restored above (charter D36c);
+      # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil
     )
     # Both branches mutate the stored row (cancel-persist, or mark "working" on
@@ -1606,6 +1735,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # The advertised slash commands a session's live Recorder is holding (charter
+  # D36a) — the vocabulary a reopened LIVE session already knows. `[]` for a dead
+  # or absent runtime (the composer floors to builtins).
+  defp runtime_commands(session_id) do
+    case Recorder.whereis(session_id) do
+      recorder when is_pid(recorder) -> Recorder.advertised_commands(recorder)
+      _ -> []
+    end
+  end
+
   # The new-chat empty state: no store row, nothing subscribed. A previously-
   # viewed session's runtime keeps running under its Recorder (wave 4) — we
   # only stop listening to it.
@@ -1617,12 +1756,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
       store_session_id: nil,
       session_id: nil,
       mode: "plan",
-      model_choice: "default",
+      # Sticky model default (charter D36d): a new chat inherits the last
+      # non-default model you picked, via a DEDICATED query (list_sessions omits
+      # model_choice — seeding off it reads nil forever). nil → "default".
+      model_choice: StudioChat.recent_model_choice() || "default",
       status: :new,
       init: nil,
       messages: [],
       next_id: 0,
       streaming: nil,
+      # A new chat has no runtime yet, so no advertised commands — the slash menu
+      # floors to builtins until the first send spawns + initializes (D36a).
+      commands: [],
       interrupt_requested: false,
       pending_mode: nil,
       last_result: nil,
@@ -2153,12 +2298,79 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp approval_outcome_label(:canceled), do: "✗ canceled"
   defp approval_outcome_label(_), do: "✗ denied"
 
-  defp composer_placeholder(:new), do: "Message Claude to begin…"
+  defp composer_placeholder(:new), do: "Message Claude to begin… (/ for commands)"
   defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
   defp composer_placeholder(:offline), do: "Send a message to resume this session…"
   defp composer_placeholder(:thinking), do: "Claude is working — press Stop to interrupt…"
   defp composer_placeholder(:interrupting), do: "Stopping…"
-  defp composer_placeholder(_), do: "Message Claude…"
+  defp composer_placeholder(_), do: "Message Claude… (/ for commands)"
+
+  # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
+
+  # The builtin floor — always offered, even with no live runtime. `builtin:
+  # true` marks the three that route to a control path on submit (the JS just
+  # inserts their text; `handle_event("send")` does the routing).
+  @slash_builtins [
+    %{
+      "name" => "/plan",
+      "description" => "Plan mode — read-only; the agent proposes before acting",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
+    %{
+      "name" => "/default",
+      "description" => "Default mode — the agent asks approval before acting",
+      "argumentHint" => nil,
+      "builtin" => true
+    },
+    %{
+      "name" => "/model",
+      "description" => "Switch the model for this session",
+      "argumentHint" => "haiku | sonnet | opus | fable",
+      "builtin" => true
+    }
+  ]
+
+  # The composer's slash vocabulary, JSON-stamped on the form for the client
+  # combobox (charter D36b — server-stamped vocab, client listbox). The CLI's
+  # advertised commands are AUTHORITATIVE (commands[] wins); the builtin floor
+  # fills in only the names the CLI did not advertise, so the three control
+  # builtins are always present. Deduped by normalized `/name`.
+  defp slash_vocab(commands) do
+    advertised =
+      commands
+      |> List.wrap()
+      |> Enum.map(&normalize_slash_command/1)
+      |> Enum.reject(&is_nil/1)
+
+    seen = MapSet.new(advertised, & &1["name"])
+    floor = Enum.reject(@slash_builtins, &MapSet.member?(seen, &1["name"]))
+
+    advertised ++ floor
+  end
+
+  # Normalize one advertised command map into the client menu shape, ensuring a
+  # leading slash on the name (the CLI advertises bare names). Drops anything
+  # without a usable name.
+  defp normalize_slash_command(cmd) when is_map(cmd) do
+    case cmd["name"] || cmd[:name] do
+      name when is_binary(name) and name != "" ->
+        %{
+          "name" => ensure_slash(name),
+          "description" => cmd["description"] || cmd[:description],
+          "argumentHint" => cmd["argumentHint"] || cmd[:argumentHint] || cmd[:argument_hint],
+          "builtin" => false
+        }
+
+      _ ->
+        nil
+    end
+  end
+
+  defp normalize_slash_command(_), do: nil
+
+  defp ensure_slash("/" <> _ = name), do: name
+  defp ensure_slash(name), do: "/" <> name
 
   # ── sidebar helpers ─────────────────────────────────────────────────────
 

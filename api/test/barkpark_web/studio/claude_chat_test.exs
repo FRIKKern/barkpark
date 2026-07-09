@@ -452,6 +452,21 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       ClaudeChat.close(session)
     end
 
+    test "initialize/1 writes a control_request with subtype 'initialize' (charter D36a)" do
+      file = capture_path("frame")
+      put_chat_config(command: frame_capture_command(file))
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, request_id} = ClaudeChat.initialize(session)
+
+      frame = read_frame(file)
+      assert frame["type"] == "control_request"
+      assert frame["request"]["subtype"] == "initialize"
+      assert frame["request_id"] == request_id
+
+      ClaudeChat.close(session)
+    end
+
     test "each control frame mints a distinct request_id" do
       file = capture_path("frame")
       put_chat_config(command: frame_capture_command(file))
@@ -518,6 +533,17 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       assert_receive {:claude_chat_control, :interrupt, ^rid, response}, 2_000
       assert is_map(response)
+      ClaudeChat.close(session)
+    end
+
+    test "an initialize ack dispatches {:claude_chat_control, :initialize, rid, commands} (charter D36a)" do
+      put_chat_config(command: {"sh", ["-c", commands_reflector()]})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      {:ok, rid} = ClaudeChat.initialize(session)
+
+      assert_receive {:claude_chat_control, :initialize, ^rid, response}, 2_000
+      assert [%{"name" => "compact"} | _] = response["commands"]
       ClaudeChat.close(session)
     end
 
@@ -677,6 +703,18 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     IFS= read -r line
     rid=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')
     printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"mode":"acceptEdits"}}}\\n' "$rid"
+    cat
+    """
+  end
+
+  # Reads our outbound initialize control_request, extracts its minted
+  # request_id, and echoes a control_response carrying a `commands` list keyed by
+  # that id — the shape the real binary answers `initialize` with (charter D36a).
+  defp commands_reflector do
+    """
+    IFS= read -r line
+    rid=$(printf '%s' "$line" | sed -n 's/.*"request_id":"\\([^"]*\\)".*/\\1/p')
+    printf '{"type":"control_response","response":{"subtype":"success","request_id":"%s","response":{"commands":[{"name":"compact","description":"Compact the conversation","argumentHint":null}]}}}\\n' "$rid"
     cat
     """
   end
