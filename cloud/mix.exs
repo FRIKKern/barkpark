@@ -35,8 +35,12 @@ defmodule BarkparkCloud.MixProject do
       mod: {BarkparkCloud.Application, []},
       # :inets + :ssl back the built-in :httpc transport that
       # BarkparkCloud.Billing.HttpClient uses to reach api.stripe.com over
-      # verified TLS — no new dependency (cloud-17).
-      extra_applications: [:logger, :inets, :ssl]
+      # verified TLS — no new dependency (cloud-17). :xmerl is the OTP XML app
+      # BarkparkCloud.ArchiveStore parses ListObjectsV2 responses with (S14/D39)
+      # — an OTP-bundled library app (like :inets/:ssl), NOT a hex dependency;
+      # listed so `mix release` includes it (its modules aren't pulled in
+      # transitively by any other app).
+      extra_applications: [:logger, :inets, :ssl, :xmerl]
     ]
   end
 
