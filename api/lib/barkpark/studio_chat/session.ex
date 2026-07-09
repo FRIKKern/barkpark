@@ -43,6 +43,12 @@ defmodule Barkpark.StudioChat.Session do
     field :output_tokens, :integer, default: 0
     field :total_cost_usd, :float, default: 0.0
 
+    # Per-turn context snapshot (charter D19) — the LATEST result frame's window
+    # occupancy, SET (never inc). Nullable: unknown until the first result, and
+    # the header ring renders hollow rather than a fake arc when they are nil.
+    field :last_context_tokens, :integer
+    field :context_window, :integer
+
     has_many :messages, Barkpark.StudioChat.Message,
       foreign_key: :session_id,
       preload_order: [asc: :seq]

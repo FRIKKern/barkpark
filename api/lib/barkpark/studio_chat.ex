@@ -303,10 +303,21 @@ defmodule Barkpark.StudioChat do
 
   @doc """
   Accumulate usage from a claude result frame onto the session's denormalised
-  totals, atomically (`UPDATE ... SET x = x + ?`). Model-agnostic: reads token
-  counts from a flat map or a nested `usage` sub-map, and cost from
-  `total_cost_usd`. Unknown/absent keys count as zero. Also refreshes
-  `last_active_at`.
+  totals, atomically. Model-agnostic: reads token counts from a flat map or a
+  nested `usage` sub-map, and cost from `total_cost_usd`. Unknown/absent keys
+  count as zero. Also refreshes `last_active_at`.
+
+  Two axes are updated in one UPDATE (charter D19):
+
+    * The lifetime totals `input_tokens` / `output_tokens` / `total_cost_usd`
+      are `inc:`-summed across turns (cost + usage history).
+    * The context-headroom snapshot `last_context_tokens` / `context_window` is
+      **SET** (not inc) from THIS frame only — the ring shows how full the window
+      is *right now*, not a cumulative sum. `last_context_tokens =
+      input + cache_read + cache_creation + output` of this frame; `context_window`
+      is the integer the caller extracted from `modelUsage.<model>.contextWindow`.
+      A nil/absent `context_window` leaves the prior value untouched (never
+      clobbers a known window to unknown — honest headroom).
 
   Accepts string- or atom-keyed maps. Returns `{:ok, session}` or
   `{:error, :not_found}`.
@@ -319,15 +330,31 @@ defmodule Barkpark.StudioChat do
 
     input = num(Map.get(frame, :input_tokens, Map.get(usage, :input_tokens, 0)))
     output = num(Map.get(frame, :output_tokens, Map.get(usage, :output_tokens, 0)))
+    cache_read = num(Map.get(usage, :cache_read_input_tokens, Map.get(frame, :cache_read_input_tokens, 0)))
+
+    cache_creation =
+      num(Map.get(usage, :cache_creation_input_tokens, Map.get(frame, :cache_creation_input_tokens, 0)))
+
     cost = fnum(Map.get(frame, :total_cost_usd, Map.get(usage, :total_cost_usd, 0)))
 
-    set = [last_active_at: DateTime.utc_now()]
+    # Snapshot (SET): the tokens riding in the model's context on THIS turn.
+    last_context = input + cache_read + cache_creation + output
+
+    set = [last_active_at: DateTime.utc_now(), last_context_tokens: last_context]
 
     # Track the model that actually answered (callers derive it from the
     # result frame's modelUsage keys) so a reopened session can show it.
     set =
       case Map.get(frame, :model) do
         model when is_binary(model) and model != "" -> [{:model, model} | set]
+        _ -> set
+      end
+
+    # Capture the window ONLY when the frame carries it — never clobber a known
+    # window to unknown, and never invent one from a hardcoded model→window map.
+    set =
+      case num_or_nil(Map.get(frame, :context_window)) do
+        window when is_integer(window) and window > 0 -> [{:context_window, window} | set]
         _ -> set
       end
 
@@ -353,7 +380,8 @@ defmodule Barkpark.StudioChat do
   # Accept string- OR atom-keyed maps from callers/JSON frames — normalise the
   # keys we care about to atoms. Only atomises known keys (no atom-exhaustion).
   @known_keys ~w(role source_markdown metadata session_id seq usage input_tokens
-                 output_tokens total_cost_usd model)a
+                 output_tokens total_cost_usd model cache_read_input_tokens
+                 cache_creation_input_tokens context_window)a
   @known_key_strings Enum.map(@known_keys, &Atom.to_string/1)
 
   defp normalize_keys(map) when is_map(map) do
@@ -372,6 +400,12 @@ defmodule Barkpark.StudioChat do
   defp num(n) when is_integer(n), do: n
   defp num(n) when is_float(n), do: trunc(n)
   defp num(_), do: 0
+
+  # Like num/1 but preserves the "absent" signal: nil/garbage → nil (so the
+  # window-capture can distinguish "no window in this frame" from a real zero).
+  defp num_or_nil(n) when is_integer(n), do: n
+  defp num_or_nil(n) when is_float(n), do: trunc(n)
+  defp num_or_nil(_), do: nil
 
   defp fnum(n) when is_number(n), do: n / 1
   defp fnum(_), do: 0.0
