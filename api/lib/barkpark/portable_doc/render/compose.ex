@@ -76,6 +76,35 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b, theme)
     }
 
+  # Task-family fleet email variants (gp-w4a). Same three-clause split as the
+  # data-viz slate: the theme-aware /3 entry threads `theme` into the inline-
+  # styled emitters; the classed article emitters (Components.*_html) stay
+  # byte-locked below on the /2 :article clauses.
+  def compose_block(%{"type" => t} = b, style, theme)
+      when t in ["tasks", "task-list"] and style != :article,
+      do: %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.FleetEmail.tasks_email_html(b, theme)
+      }
+
+  def compose_block(%{"type" => "task-detail"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.FleetEmail.task_detail_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "task-board"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.FleetEmail.task_board_email_html(b, theme)
+    }
+
+  def compose_block(%{"type" => "roadmap"} = b, style, theme) when style != :article,
+    do: %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.FleetEmail.roadmap_email_html(b, theme)
+    }
+
   def compose_block(b, style, _theme), do: compose_block(b, style)
 
   @doc false
@@ -799,24 +828,50 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # (block carries a resolved `snapshot` list, same contract as the sheet embed);
   # the pure emitter lives in Render.Components. `"tasks"` is the canonical type;
   # `"task-list"` is an accepted alias.
-  def compose_block(%{"type" => t} = b, _style) when t in ["tasks", "task-list"] do
+  # :article rides the classed Components emitters (paper-surface.css owns the
+  # look — byte-locked by canvas_reader_parity_gate). Every other style takes the
+  # inline-styled FleetEmail variants (gp-w4a): the `.bp-*` classes + CSS Braille
+  # spinner render as unstyled text runs in a stylesheet-less mail client. The
+  # /2 `_style` clause defaults to evergreen (the /3 clause above carries theme);
+  # a task-list nested inside a `terminal` recurses through render_blocks/2 and
+  # thereby gets its EMAIL variant at evergreen (charter D1).
+  def compose_block(%{"type" => t} = b, :article) when t in ["tasks", "task-list"] do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.tasks_html(b)}
+  end
+
+  def compose_block(%{"type" => t} = b, _style) when t in ["tasks", "task-list"] do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.FleetEmail.tasks_email_html(b)}
   end
 
   # Task detail — the "open a task and SEE it" card: conditional sections (meta,
   # timeline, criteria+evidence, deps-in-words, children & papers rails). Pure,
   # snapshot-carried (`task` map on the block).
-  def compose_block(%{"type" => "task-detail"} = b, _style) do
+  def compose_block(%{"type" => "task-detail"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_detail_html(b)}
   end
 
+  def compose_block(%{"type" => "task-detail"} = b, _style) do
+    %{
+      "kind" => "_raw",
+      "html" => Barkpark.PortableDoc.Render.FleetEmail.task_detail_email_html(b)
+    }
+  end
+
   # Task board (kanban by lifecycle) and roadmap (author-dated phase/task bars).
-  def compose_block(%{"type" => "task-board"} = b, _style) do
+  def compose_block(%{"type" => "task-board"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.task_board_html(b)}
   end
 
-  def compose_block(%{"type" => "roadmap"} = b, _style) do
+  def compose_block(%{"type" => "task-board"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.FleetEmail.task_board_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "roadmap"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.roadmap_html(b)}
+  end
+
+  def compose_block(%{"type" => "roadmap"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.FleetEmail.roadmap_email_html(b)}
   end
 
   def compose_block(%{"type" => "notes"} = b, _style) do
