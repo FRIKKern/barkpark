@@ -121,6 +121,8 @@ before declaring done).
 | One telling | status is told **once per row/header** — the pill. Detail is a quiet text line below it |
 | Pill shape | role + a **≤3-word** label ("Provisioning", "Removal failed") |
 | Raw provider strings | appear **only** in the timeline's fail/console fold — never in a pill, never on the home screen |
+| Provider identity ≠ status | Provider colour (`--provider-hetzner` / `--provider-azure`, generated from `design/tokens.json` `color.provider`) is **identity only**. It may tint a **chip mark or a chip/row border** — **never a pill background**. The status roles above stay the sole state voice, so a Hetzner box and an Azure box that are both *live* read the SAME green pill and differ only by a provider chip. |
+| Instance lifecycle | The seven instance states — `provisioning · live · degraded · stopped · archived · decommissioned · adopted` — each map to **one** status role (live→ok, degraded→warn, decommissioned→danger, provisioning/adopted→info, stopped/archived→neutral). The SPA tints its glyph through that role via the generated `.bp-inst--<state>` classes; the CLI/TUI paints the same seven from `GenInstanceLifecycle` (`internal/semrole/chrome_gen.go`) — one vocabulary, dual-emitted, so browser and terminal never diverge (`design/check.mjs` Part D gates it). |
 
 > **RATIFY: accent (D59) — neutral primary in BOTH themes.** Light keeps the near-black
 > primary (`--primary: hsl(240 5.9% 10%)`, `app.css:13`) — the login page is the ratified

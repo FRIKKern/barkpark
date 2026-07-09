@@ -42,3 +42,40 @@ var GenChrome = map[string]lipgloss.AdaptiveColor{
 	"chrome-primary-cta":    GenChromePrimaryCta,
 	"chrome-on-primary":     GenChromeOnPrimary,
 }
+
+// GenProviderMark is the generated cloud-provider IDENTITY palette
+// (design/tokens.json color.provider → hex). Identity ONLY (Decision 7):
+// tint a chip mark or a chip/row border, NEVER a pill background — the
+// status roles stay the only state voice. Unconsumed until a later wave
+// threads it through the CLI provider-chip / table renderers.
+var GenProviderMark = map[string]lipgloss.AdaptiveColor{
+	"hetzner": {Light: "#c4123a", Dark: "#f0728a"},
+	"azure":   {Light: "#0f6cbd", Dark: "#4aa3e0"},
+}
+
+// GenInstanceLifecycleToken mirrors one design/tokens.json instanceLifecycle
+// state. Hue is the state's status-role tone resolved to hex (role "" → the
+// muted-text neutral); the CLI reads colour THROUGH the role, never a bespoke
+// per-state hue (Decision 7).
+type GenInstanceLifecycleToken struct {
+	Glyph      string
+	ASCIIGlyph string
+	Role       string
+	HueLight   string
+	HueDark    string
+}
+
+// GenInstanceLifecycle is the generated 1:1 mirror of tokens.instanceLifecycle
+// (glyph + role + role-derived hue).
+var GenInstanceLifecycle = map[string]GenInstanceLifecycleToken{
+	"provisioning":   {Glyph: "◌", ASCIIGlyph: "~", Role: "info", HueLight: "#3b82f6", HueDark: "#3b82f6"},
+	"live":           {Glyph: "●", ASCIIGlyph: "*", Role: "ok", HueLight: "#137236", HueDark: "#45c474"},
+	"degraded":       {Glyph: "◐", ASCIIGlyph: "!", Role: "warn", HueLight: "#ba7008", HueDark: "#f8ab25"},
+	"stopped":        {Glyph: "○", ASCIIGlyph: "o", Role: "", HueLight: "#71717a", HueDark: "#a1a1aa"},
+	"archived":       {Glyph: "▢", ASCIIGlyph: "#", Role: "", HueLight: "#71717a", HueDark: "#a1a1aa"},
+	"decommissioned": {Glyph: "✕", ASCIIGlyph: "x", Role: "danger", HueLight: "#b42222", HueDark: "#ef6161"},
+	"adopted":        {Glyph: "◈", ASCIIGlyph: "+", Role: "info", HueLight: "#3b82f6", HueDark: "#3b82f6"},
+}
+
+// GenInstanceLifecycleOrder is the canonical emission order (matches source).
+var GenInstanceLifecycleOrder = []string{"provisioning", "live", "degraded", "stopped", "archived", "decommissioned", "adopted"}

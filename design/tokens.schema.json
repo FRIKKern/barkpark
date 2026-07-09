@@ -29,6 +29,12 @@
             "danger": { "$ref": "#/$defs/hslPair" },
             "info": { "$ref": "#/$defs/hslPair" }
           }
+        },
+        "provider": {
+          "type": "object",
+          "patternProperties": {
+            "^(hetzner|azure)$": { "$ref": "#/$defs/hexPair" }
+          }
         }
       },
       "patternProperties": {
@@ -93,6 +99,13 @@
       "patternProperties": {
         "^(in_progress|blocked|done|closed|cancelled|ready|open)$": { "$ref": "#/$defs/lifecycleEntry" }
       }
+    },
+    "instanceLifecycle": {
+      "type": "object",
+      "required": ["provisioning", "live", "degraded", "stopped", "archived", "decommissioned", "adopted"],
+      "patternProperties": {
+        "^(provisioning|live|degraded|stopped|archived|decommissioned|adopted)$": { "$ref": "#/$defs/instanceLifecycleEntry" }
+      }
     }
   },
   "$defs": {
@@ -125,6 +138,17 @@
           "type": "array",
           "items": { "type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$" }
         }
+      }
+    },
+    "instanceLifecycleEntry": {
+      "type": "object",
+      "required": ["role", "glyph", "codepoint", "asciiGlyph"],
+      "description": "Like lifecycleEntry but with NO bespoke color: an instance state's colour is read through its status role (Decision 7), so identity never doubles as status.",
+      "properties": {
+        "role": { "type": "string", "enum": ["ok", "info", "warn", "danger", ""] },
+        "glyph": { "type": "string", "minLength": 1 },
+        "codepoint": { "type": "string", "pattern": "^U\\+[0-9A-F]{4,6}$" },
+        "asciiGlyph": { "type": "string", "minLength": 1 }
       }
     }
   }
