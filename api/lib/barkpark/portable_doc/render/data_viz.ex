@@ -34,7 +34,6 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
-  alias Barkpark.PortableDoc.Render.TokensGen
 
   # ── stat ─────────────────────────────────────────────────────────────────────
 
@@ -360,32 +359,42 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # bgcolor cells (intensity mixed into the accent IN ELIXIR), and the chart as
   # an honest per-series summary box — never a broken picture.
 
-  # Email-safe palette — sourced VERBATIM from design/tokens.json paperEmail via
-  # TokensGen (theme-system Wave 1 CAPTURE), the same captured hex the email
-  # palette and article var() fallbacks draw on. Single source, zero re-typing.
-  @email_ink TokensGen.email_text()
-  @email_muted TokensGen.email_muted()
-  @email_accent TokensGen.email_brand()
-  @email_ground TokensGen.email_page_bg()
-  @email_border TokensGen.email_rule()
-  @email_paper TokensGen.email_paper()
+  # Email-safe skin — resolved PER THEME at render time (charter D28 relocation).
+  # Was a block of compile-time @email_* module attributes frozen to evergreen;
+  # every email emitter now takes a `theme` (defaulting :evergreen) and reads the
+  # skin through here. Sourced from the same captured paperEmail hex the email
+  # palette and article var() fallbacks draw on (Palettes.email_skin/1 — single
+  # source, zero re-typing). Evergreen output is byte-identical to the old attrs.
+  # The two RGB tuples for the heatmap accent-over-ground mix (no color-mix() in
+  # email) derive HERE at render time from the resolved accent/ground hex — was
+  # the compile-time @email_accent_rgb / @email_ground_rgb.
+  defp email_skin(theme) do
+    s = Barkpark.PortableDoc.Render.Palettes.email_skin(theme)
 
-  # RGB tuples for the heatmap accent-over-ground mix, DERIVED at compile time
-  # from the same captured accent/ground hex above — never a re-stamped literal.
-  # The anonymous parser lives in a module attribute so it is a compile-time
-  # constant (module-local functions aren't callable during compilation).
-  @hex_to_rgb fn "#" <> <<r::binary-2, g::binary-2, b::binary-2>> ->
-    {String.to_integer(r, 16), String.to_integer(g, 16), String.to_integer(b, 16)}
+    %{
+      ink: s.text,
+      muted: s.muted,
+      accent: s.brand,
+      ground: s.page_bg,
+      border: s.rule,
+      paper: s.paper,
+      accent_rgb: hex_to_rgb(s.brand),
+      ground_rgb: hex_to_rgb(s.page_bg)
+    }
   end
-  @email_accent_rgb @hex_to_rgb.(@email_accent)
-  @email_ground_rgb @hex_to_rgb.(@email_ground)
+
+  defp hex_to_rgb("#" <> <<r::binary-2, g::binary-2, b::binary-2>>),
+    do: {String.to_integer(r, 16), String.to_integer(g, 16), String.to_integer(b, 16)}
 
   @doc "Email-safe stat cell: inline-styled value/bar/label, no SVG."
-  def stat_email_html(block) when is_map(block) do
+  def stat_email_html(block, theme \\ :evergreen)
+
+  def stat_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
     value = block |> get("value") |> display_string()
 
     if value == "" do
-      empty_email("stat")
+      empty_email("stat", theme)
     else
       label = block |> get("label") |> display_string()
       max = numeric(get(block, "max"))
@@ -398,7 +407,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
               v -> clamp(v / max, 0.0, 1.0)
             end
 
-          ~s|<div style="height:6px;border-radius:3px;background:#{@email_border};margin-bottom:6px"><div style="height:6px;border-radius:3px;width:#{fmt(pct * 100)}%;background:#{@email_accent}"></div></div>|
+          ~s|<div style="height:6px;border-radius:3px;background:#{sk.border};margin-bottom:6px"><div style="height:6px;border-radius:3px;width:#{fmt(pct * 100)}%;background:#{sk.accent}"></div></div>|
         else
           ""
         end
@@ -407,31 +416,37 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         if label == "",
           do: "",
           else:
-            ~s|<div style="font-size:12px;color:#{@email_muted};margin-top:2px">#{escape_html(label)}</div>|
+            ~s|<div style="font-size:12px;color:#{sk.muted};margin-top:2px">#{escape_html(label)}</div>|
 
-      ~s|<div style="display:inline-block;min-width:120px;background:#{@email_ground};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
+      ~s|<div style="display:inline-block;min-width:120px;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         bar <>
-        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{@email_ink};line-height:1.1">#{escape_html(value)}</div>| <>
+        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}</div>| <>
         label_html <> "</div>"
     end
   end
 
-  def stat_email_html(_), do: empty_email("stat")
+  def stat_email_html(_, theme), do: empty_email("stat", theme)
 
   @doc "Email-safe KPI grid: one row of stat cells."
-  def stats_email_html(block) when is_map(block) do
+  def stats_email_html(block, theme \\ :evergreen)
+
+  def stats_email_html(block, theme) when is_map(block) do
     items = block |> get("items") |> as_list() |> Enum.filter(&is_map/1)
 
     case items do
-      [] -> empty_email("stats")
-      _ -> ~s|<div>| <> Enum.map_join(items, "", &stat_email_html/1) <> "</div>"
+      [] -> empty_email("stats", theme)
+      _ -> ~s|<div>| <> Enum.map_join(items, "", &stat_email_html(&1, theme)) <> "</div>"
     end
   end
 
-  def stats_email_html(_), do: empty_email("stats")
+  def stats_email_html(_, theme), do: empty_email("stats", theme)
 
   @doc "Email-safe heatmap: a real <table>, intensity baked into bgcolor."
-  def heatmap_email_html(block) when is_map(block) do
+  def heatmap_email_html(block, theme \\ :evergreen)
+
+  def heatmap_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
+
     grid =
       block
       |> get("cells")
@@ -440,7 +455,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       |> Enum.reject(&(&1 == []))
 
     if grid == [] do
-      empty_email("heatmap")
+      empty_email("heatmap", theme)
     else
       max_val =
         case numeric(get(block, "max")) do
@@ -453,7 +468,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
 
       label_td =
-        ~s|style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{@email_muted};padding:2px 8px 2px 0;text-align:right"|
+        ~s|style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 8px 2px 0;text-align:right"|
 
       head =
         if col_labels == [] do
@@ -464,7 +479,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           "<tr>" <>
             corner <>
             Enum.map_join(0..(cols - 1), "", fn j ->
-              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{@email_muted};padding:2px 3px;text-align:center">#{escape_html(Enum.at(col_labels, j) || "")}</td>|
+              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};padding:2px 3px;text-align:center">#{escape_html(Enum.at(col_labels, j) || "")}</td>|
             end) <> "</tr>"
         end
 
@@ -482,24 +497,28 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             Enum.map_join(0..(cols - 1), "", fn j ->
               v = Enum.at(row, j) || 0.0
 
-              ~s|<td style="width:22px;height:18px;border-radius:3px;background:#{mix_hex(clamp(v / max_val, 0.0, 1.0))}" title="#{fmt(v)}"></td>|
+              ~s|<td style="width:22px;height:18px;border-radius:3px;background:#{mix_hex(clamp(v / max_val, 0.0, 1.0), sk)}" title="#{fmt(v)}"></td>|
             end) <> "</tr>"
         end)
 
-      ~s|<div style="display:inline-block;background:#{@email_paper};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+      ~s|<div style="display:inline-block;background:#{sk.paper};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
         ~s|<table cellspacing="3" cellpadding="0" style="border-collapse:separate">| <>
         head <> body <> "</table></div>"
     end
   end
 
-  def heatmap_email_html(_), do: empty_email("heatmap")
+  def heatmap_email_html(_, theme), do: empty_email("heatmap", theme)
 
   @doc """
   Email-safe chart: an honest per-series summary (label · min→max · last) —
   a broken SVG is worse than no picture; the live chart is one click away in
   the reader.
   """
-  def chart_email_html(block) when is_map(block) do
+  def chart_email_html(block, theme \\ :evergreen)
+
+  def chart_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
+
     series =
       block
       |> get("series")
@@ -514,7 +533,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
     case series do
       [] ->
-        empty_email("chart")
+        empty_email("chart", theme)
 
       _ ->
         caption = block |> get("caption") |> display_string()
@@ -523,7 +542,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           if caption == "",
             do: "",
             else:
-              ~s|<div style="font-size:13px;font-weight:600;color:#{@email_ink};margin-bottom:6px">#{escape_html(caption)}</div>|
+              ~s|<div style="font-size:13px;font-weight:600;color:#{sk.ink};margin-bottom:6px">#{escape_html(caption)}</div>|
 
         rows =
           series
@@ -532,23 +551,24 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
             label = if s.label == "", do: "series #{si + 1}", else: s.label
             last = List.last(s.points)
 
-            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{@email_muted};margin:2px 0"><span style="display:inline-block;width:12px;height:3px;border-radius:2px;background:#{@email_accent};margin-right:8px;vertical-align:middle"></span>#{escape_html(label)} · #{tick(Enum.min(s.points))} → #{tick(Enum.max(s.points))} · now #{tick(last)}</div>|
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.muted};margin:2px 0"><span style="display:inline-block;width:12px;height:3px;border-radius:2px;background:#{sk.accent};margin-right:8px;vertical-align:middle"></span>#{escape_html(label)} · #{tick(Enum.min(s.points))} → #{tick(Enum.max(s.points))} · now #{tick(last)}</div>|
           end)
 
-        ~s|<div style="background:#{@email_ground};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+        ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
           cap_html <>
           rows <>
-          ~s|<div style="font-size:11px;color:#{@email_muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
     end
   end
 
-  def chart_email_html(_), do: empty_email("chart")
+  def chart_email_html(_, theme), do: empty_email("chart", theme)
 
   # accent mixed over the ground at intensity t, computed here because email
-  # has no color-mix() — the same read the stylesheet gives the reader.
-  defp mix_hex(t) do
-    {ar, ag, ab} = @email_accent_rgb
-    {gr, gg, gb} = @email_ground_rgb
+  # has no color-mix() — the same read the stylesheet gives the reader. The
+  # accent/ground RGB tuples come from the theme-resolved skin (charter D28).
+  defp mix_hex(t, sk) do
+    {ar, ag, ab} = sk.accent_rgb
+    {gr, gg, gb} = sk.ground_rgb
     mix = fn a, g -> round(a * t + g * (1 - t)) end
 
     "#" <>
@@ -557,9 +577,11 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       end)
   end
 
-  defp empty_email(kind),
-    do:
-      ~s|<div style="border:1px dashed #{@email_border};border-radius:10px;padding:10px 13px;color:#{@email_muted};font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;margin:12px 0">#{escape_html(kind)} — no data</div>|
+  defp empty_email(kind, theme) do
+    sk = email_skin(theme)
+
+    ~s|<div style="border:1px dashed #{sk.border};border-radius:10px;padding:10px 13px;color:#{sk.muted};font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;margin:12px 0">#{escape_html(kind)} — no data</div>|
+  end
 
   # ── small helpers (Components conventions) ───────────────────────────────────
 
