@@ -562,7 +562,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # workflow"), a manual toggle is the per-tab override that wins. Never
   # broadcast — a co-viewer's collapse is their own.
   def handle_event("rail-toggle", %{"id" => id}, socket) do
-    current = rail_open?(socket.assigns.rail_expanded, id)
+    entry = Map.put(Map.get(socket.assigns.rail, id) || %{}, "task_id", id)
+    current = rail_open?(socket.assigns.rail_expanded, entry)
     {:noreply, assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
   end
 
@@ -2572,85 +2573,145 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <span>agents · <%= map_size(@rail) %></span>
       </div>
 
-      <div
+      <.rail_entry
         :for={entry <- rail_rows(@rail)}
-        data-rail-task={entry["task_id"]}
-        data-rail-status={entry["status"]}
-        style="padding: 3px 0;"
-      >
-        <div class="text-xs" style="display: flex; align-items: baseline; gap: 6px;">
-          <span
-            aria-hidden="true"
-            class={rail_running?(entry) && "bp-chat-agent-run"}
-            style={"flex: none; color: #{if rail_running?(entry), do: "var(--primary)", else: "var(--text-dim)"};"}
-          >
-            <%= rail_glyph_type(entry) %>
-          </span>
-          <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
-            <span style="font-weight: 600;"><%= rail_label(entry) %></span>
-            <span
-              class="text-dim"
-              style={"margin-left: 6px; opacity: 0.75; color: #{rail_status_color(entry["status"])};"}
-            >
-              · <%= rail_status_label(entry["status"]) %>
-            </span>
-            <span :if={rail_tokens(entry)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-              · <%= rail_tokens(entry) %> tok
-            </span>
-          </span>
-          <button
-            :if={rail_workflow_nodes(entry) != []}
-            type="button"
-            class="btn text-xs"
-            phx-click="rail-toggle"
-            phx-value-id={entry["task_id"]}
-            aria-expanded={to_string(rail_open?(@rail_expanded, entry["task_id"]))}
-            style="flex: none; padding: 1px 8px; opacity: 0.8;"
-          >
-            <%= if rail_open?(@rail_expanded, entry["task_id"]), do: "collapse", else: "expand" %>
-          </button>
-        </div>
+        entry={entry}
+        open={rail_open?(@rail_expanded, entry)}
+      />
+    </div>
+    """
+  end
 
-        <%!-- The phase→agent tree, expanded by default so a live workflow's
-              agents are visible without a click; the per-tab toggle is the
-              override (charter D47). Phase nodes head a group; agent nodes
-              indent beneath with model + breathing state glyph + token count. --%>
-        <div
-          :if={rail_open?(@rail_expanded, entry["task_id"]) and rail_workflow_nodes(entry) != []}
-          style="padding-left: 16px; margin-top: 2px;"
+  # One rail entry rendered as a phase JOURNEY (charter D57/D58/wave-11): the
+  # header line settles by status, and — when expanded — completed phases collapse
+  # to one quiet line, the active phase breathes with its live agents, and future
+  # phases render dim by name. The whole projection is `StudioChat.workflow_journey/1`
+  # — no numbers invented in the view. A non-workflow row (no phases) keeps the
+  # simple one-line render.
+  attr :entry, :map, required: true
+  attr :open, :boolean, required: true
+
+  defp rail_entry(assigns) do
+    journey = StudioChat.workflow_journey(assigns.entry)
+    assigns = assign(assigns, journey: journey, workflow?: journey.phases != [])
+
+    ~H"""
+    <div
+      data-rail-task={@entry["task_id"]}
+      data-rail-status={@entry["status"]}
+      style="padding: 3px 0;"
+    >
+      <div class="text-xs" style="display: flex; align-items: baseline; gap: 6px;">
+        <span
+          aria-hidden="true"
+          class={rail_running?(@entry) && "bp-chat-agent-run"}
+          style={"flex: none; color: #{rail_status_color(@entry["status"])};"}
         >
-          <div
-            :for={node <- rail_workflow_nodes(entry)}
-            data-rail-node={node["type"]}
-            class="text-xs"
-            style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
+          <%= rail_entry_glyph(@entry) %>
+        </span>
+        <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
+          <span style="font-weight: 600;"><%= rail_label(@entry) %></span>
+          <span
+            class="text-dim"
+            style={"margin-left: 6px; opacity: 0.85; color: #{rail_status_color(@entry["status"])};"}
           >
-            <%= case node["type"] do %>
-              <% "workflow_phase" -> %>
-                <span style="font-weight: 600; color: var(--text);">
-                  <%= node["title"] || node["label"] || "phase" %>
-                </span>
-              <% _ -> %>
-                <span
-                  aria-hidden="true"
-                  class={rail_node_running?(entry, node) && "bp-chat-agent-run"}
-                  style={"flex: none; color: #{if rail_node_running?(entry, node), do: "var(--primary)", else: "var(--text-dim)"};"}
-                >
-                  ●
-                </span>
-                <span style="min-width: 0; flex: 1;">
-                  <%= node["label"] || node["title"] || "agent" %>
-                  <span :if={node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-                    <%= node["model"] %>
-                  </span>
-                  <span :if={rail_node_tokens(node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-                    · <%= rail_node_tokens(node) %> tok
-                  </span>
-                </span>
-            <% end %>
-          </div>
-        </div>
+            · <%= rail_header_summary(@entry, @journey) %>
+          </span>
+        </span>
+        <button
+          :if={@workflow?}
+          type="button"
+          class="btn text-xs"
+          phx-click="rail-toggle"
+          phx-value-id={@entry["task_id"]}
+          aria-expanded={to_string(@open)}
+          style="flex: none; padding: 1px 8px; opacity: 0.8;"
+        >
+          <%= if @open, do: "collapse", else: "expand" %>
+        </button>
       </div>
+
+      <%!-- The phase journey. Expanded by default while a cycle lives (a completed
+            cycle defaults collapsed to the one summary line above; the per-tab
+            toggle overrides both ways, charter D61). --%>
+      <div :if={@open and @workflow?} style="padding-left: 16px; margin-top: 2px;">
+        <.rail_phase :for={phase <- @journey.phases} phase={phase} entry={@entry} />
+      </div>
+    </div>
+    """
+  end
+
+  # A single phase in the journey — settled phases are one quiet line; the active
+  # (or interrupted-frontier) phase heads its nested agent rows.
+  attr :phase, :map, required: true
+  attr :entry, :map, required: true
+
+  defp rail_phase(assigns) do
+    ~H"""
+    <div data-rail-phase={@phase.status} style="padding: 1px 0;">
+      <div
+        class="text-xs"
+        style="display: flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere;"
+      >
+        <span aria-hidden="true" style={"flex: none; color: #{rail_phase_color(@phase.status)};"}>
+          <%= rail_phase_glyph(@phase.status) %>
+        </span>
+        <span style={"min-width: 0; flex: 1; color: #{rail_phase_color(@phase.status)};"}>
+          <span style="font-weight: 600;"><%= @phase.title %></span>
+          <span :if={@phase.status == :done} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            · <%= @phase.total %> <%= pluralize(@phase.total, "agent") %> · <%= StudioChat.format_tokens(@phase.tokens) %> tok
+          </span>
+          <span :if={@phase.status == :skipped} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+            · skipped
+          </span>
+        </span>
+      </div>
+
+      <div
+        :if={@phase.status in [:active, :interrupted]}
+        style="padding-left: 16px; margin-top: 1px;"
+      >
+        <.rail_agent :for={node <- @phase.agents} node={node} entry={@entry} />
+      </div>
+    </div>
+    """
+  end
+
+  # A single agent row: state glyph · two-part label · model family · tokens. It
+  # breathes ONLY while its entry is live and its state is non-terminal — a dead
+  # (interrupted) entry's non-terminal agents never spin (no fake spinners law).
+  attr :node, :map, required: true
+  attr :entry, :map, required: true
+
+  defp rail_agent(assigns) do
+    ~H"""
+    <div
+      data-rail-node="workflow_agent"
+      class="text-xs"
+      style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
+    >
+      <span
+        aria-hidden="true"
+        class={rail_node_running?(@entry, @node) && "bp-chat-agent-run"}
+        title={@node["error"]}
+        style={"flex: none; color: #{rail_agent_color(@entry, @node)};"}
+      >
+        <%= rail_agent_glyph(@node) %>
+      </span>
+      <span style="min-width: 0; flex: 1;">
+        <%= case StudioChat.workflow_label_parts(@node["label"]) do %>
+          <% {:pair, kind, rest} -> %>
+            <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
+          <% {:bare, label} -> %>
+            <span><%= label || "agent" %></span>
+        <% end %>
+        <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+          <%= StudioChat.model_family(@node["model"]) %>
+        </span>
+        <span :if={rail_node_tokens(@node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+          · <%= StudioChat.format_tokens(rail_node_tokens(@node)) %> tok
+        </span>
+      </span>
     </div>
     """
   end
@@ -4415,13 +4476,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp default_agent_open?(agent), do: agent[:task_status] in [nil, "running"]
 
-  # Rail workflow rows default EXPANDED — the whole point of the rail is seeing
-  # what the workflow is doing; a manual per-tab toggle is the override that
-  # wins (the `agent_open?` idiom, keyed by task_id).
-  defp rail_open?(overrides, task_id) do
-    case Map.fetch(overrides, task_id) do
+  # Terminal collapse is a status-aware DEFAULT (charter D61): a completed cycle
+  # defaults COLLAPSED to its one settled summary line; a running or interrupted
+  # entry defaults EXPANDED (the interrupted frontier must be visible). The
+  # explicit per-tab toggle is the override that wins BOTH ways — including across
+  # a running→completed flip (the `default_agent_open?` idiom, keyed by task_id).
+  defp rail_open?(overrides, entry) when is_map(entry) do
+    case Map.fetch(overrides, entry["task_id"]) do
       {:ok, v} -> v
-      :error -> true
+      :error -> entry["status"] != "completed"
     end
   end
 
@@ -4502,51 +4565,121 @@ defmodule BarkparkWeb.Studio.ChatLive do
     row["description"] || row["task_type"] || "agent"
   end
 
-  defp rail_glyph_type(entry) do
+  # The leading glyph by entry lifecycle: a running cycle shows its kind glyph
+  # (⚙ workflow / ◆ other) and breathes; a completed cycle settles to ✓; an
+  # interrupted (dead) one reads ✕ — never a spinner.
+  defp rail_entry_glyph(%{"status" => "completed"}), do: "✓"
+  defp rail_entry_glyph(%{"status" => "interrupted"}), do: "✕"
+
+  defp rail_entry_glyph(entry) do
     case (entry["row"] || %{})["task_type"] do
       "local_workflow" -> "⚙"
-      t when is_binary(t) -> "◆"
       _ -> "◆"
     end
   end
 
-  # A rail workflow tree normalized to ordered nodes for render: phase headers and
-  # the agent rows beneath them. Tolerant of a nil/absent tree.
-  defp rail_workflow_nodes(entry) do
-    case entry["workflow"] do
-      nodes when is_list(nodes) -> Enum.filter(nodes, &is_map/1)
-      _ -> []
+  # The entry header summary AFTER the row label — the aggregate truth, all of it
+  # from `workflow_journey/1`'s summary, none invented (charter wave-11). A
+  # non-workflow row (no phases) keeps the plain status word + token total.
+  defp rail_header_summary(entry, %{phases: []}) do
+    base = rail_status_label(entry["status"])
+
+    case rail_tokens(entry) do
+      n when is_integer(n) -> "#{base} · #{StudioChat.format_tokens(n)} tok"
+      _ -> base
     end
   end
 
-  # A node breathes only while its ENTRY is live — a replayed interrupted
-  # workflow's tree (visible now that rows default expanded) must never show a
-  # running agent off a stale node state.
-  defp rail_node_running?(entry, node),
-    do: rail_running?(entry) and rail_node_state_running?(node)
-
-  # TERMINAL-SET semantics (wave-10 real-binary truth): the CLI emits only
-  # "start" and "done" for a workflow agent's state — never "running". A positive
-  # running-set (the old ["running","in_progress","active"]) matched none of them,
-  # so a live agent never breathed. Instead: "done" and the obvious failure
-  # terminals are settled; ANYTHING ELSE (incl. "start", "queued") is running.
-  @rail_node_terminal ~w(done completed failed error canceled cancelled aborted)
-  defp rail_node_state_running?(node) when is_map(node) do
-    case node["state"] do
-      s when is_binary(s) -> String.downcase(s) not in @rail_node_terminal
-      _ -> false
-    end
+  defp rail_header_summary(%{"status" => "completed"}, %{summary: s}) do
+    "#{s.phases_run} of #{s.phase_total} phases" <>
+      skipped_part(s.skipped) <>
+      " · #{s.agents_total} #{pluralize(s.agents_total, "agent")} · #{StudioChat.format_tokens(s.tokens)} tok"
   end
 
-  defp rail_node_state_running?(_), do: false
+  defp rail_header_summary(%{"status" => "interrupted"}, %{summary: s}) do
+    where =
+      case s.active do
+        %{index: i, title: t} -> "interrupted in #{t} (#{i}/#{s.phase_total})"
+        _ -> "interrupted"
+      end
+
+    "#{where} · #{s.running} running · #{s.done} done · #{StudioChat.format_tokens(s.tokens)} tok"
+  end
+
+  defp rail_header_summary(_entry, %{summary: s}) do
+    head =
+      case s.active do
+        %{index: i, title: t} -> "#{t} #{i}/#{s.phase_total}"
+        _ -> "starting"
+      end
+
+    "#{head} · #{s.running} running · #{s.done} done" <>
+      failed_part(s.failed) <> " · #{StudioChat.format_tokens(s.tokens)} tok"
+  end
+
+  defp skipped_part(0), do: ""
+  defp skipped_part(n), do: " · #{n} skipped"
+  defp failed_part(0), do: ""
+  defp failed_part(n), do: " · #{n} failed"
+
+  defp pluralize(1, word), do: word
+  defp pluralize(_, word), do: word <> "s"
 
   defp rail_status_label("completed"), do: "done"
   defp rail_status_label("interrupted"), do: "interrupted"
   defp rail_status_label(_), do: "running"
 
-  defp rail_status_color("completed"), do: "var(--ok)"
-  defp rail_status_color("interrupted"), do: "var(--warn)"
-  defp rail_status_color(_), do: "var(--primary)"
+  # The rail speaks the lifecycle palette (charter D60): a settled cycle is
+  # --life-done, a live one --life-in_progress, an interrupted one --life-blocked.
+  defp rail_status_color("completed"), do: "var(--life-done)"
+  defp rail_status_color("interrupted"), do: "var(--life-blocked)"
+  defp rail_status_color(_), do: "var(--life-in_progress)"
+
+  # Phase-row glyph + color by journey status (charter D58/D60).
+  defp rail_phase_glyph(:done), do: "✓"
+  defp rail_phase_glyph(:active), do: "◆"
+  defp rail_phase_glyph(:interrupted), do: "◆"
+  defp rail_phase_glyph(_), do: "○"
+
+  defp rail_phase_color(:done), do: "var(--life-done)"
+  defp rail_phase_color(:active), do: "var(--life-in_progress)"
+  defp rail_phase_color(:interrupted), do: "var(--life-blocked)"
+  defp rail_phase_color(_), do: "var(--life-open)"
+
+  # Agent-row glyph + color: a failed agent is ✕ in --danger (its error string in
+  # the title=), a settled one ✓, a live one ●. A non-terminal agent on a DEAD
+  # (interrupted) entry reads --life-open (stalled) and never breathes.
+  defp rail_agent_glyph(node) do
+    cond do
+      rail_node_failed?(node) -> "✕"
+      StudioChat.workflow_node_terminal?(node) -> "✓"
+      true -> "●"
+    end
+  end
+
+  defp rail_agent_color(entry, node) do
+    cond do
+      rail_node_failed?(node) -> "var(--danger)"
+      StudioChat.workflow_node_terminal?(node) -> "var(--life-done)"
+      rail_running?(entry) -> "var(--life-in_progress)"
+      true -> "var(--life-open)"
+    end
+  end
+
+  @rail_node_failed ~w(error failed aborted)
+  defp rail_node_failed?(node) when is_map(node) do
+    case node["state"] do
+      s when is_binary(s) -> String.downcase(s) in @rail_node_failed
+      _ -> false
+    end
+  end
+
+  defp rail_node_failed?(_), do: false
+
+  # A node breathes only while its ENTRY is live AND its state is non-terminal — a
+  # replayed interrupted workflow's tree (visible on reopen) must never breathe.
+  defp rail_node_running?(entry, node),
+    do: rail_running?(entry) and not StudioChat.workflow_node_terminal?(node)
 
   # The rail entry's last-known token total (charter D47), or nil.
   defp rail_tokens(entry) do
