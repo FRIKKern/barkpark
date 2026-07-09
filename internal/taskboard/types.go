@@ -256,6 +256,29 @@ type UIState struct {
 	// highlight via FlashLevel; the heartbeat prunes expired entries. Never
 	// populated by a first snapshot or a cache load — cold paints are still.
 	Flashes map[string]time.Time
+	// HoverTarget is the Ref (task doc_id / fold key) of the selectable spine
+	// row currently under the mouse pointer, "" for none (charter D94/D95). It
+	// is resolved by the ttm-s1 compose-level hit map from a Motion MouseMsg and
+	// set through setHoverTarget (the hover-changed guard IS the debounce — a
+	// Motion onto the same row is a no-op, so an all-motion stream never
+	// re-renders). Render paints hoverStyle over exactly this row; a "" target
+	// paints nothing, so a board with no mouse is byte-identical. Cleared on any
+	// key input, so the keyboard flow is untouched.
+	HoverTarget string
+	// MouseReleased is the mouse-mode toggle (charter D96): false (the zero
+	// value, and the program's start state) means mouse reporting is ON — the
+	// board's footer verbs are clickable and hover tints; true means the user
+	// pressed M to RELEASE the mouse so the terminal owns clicks again (native
+	// text selection). The footer reflects the mode and clears any hover while
+	// released. It is UIState (not a Model field) so the frozen-signature Render
+	// can read it — mouse mode is render state, the click plumbing is the shell.
+	MouseReleased bool
+	// HoverFooterVerb is the board footer verb (c/x/o) the pointer is currently
+	// over, 0 when none — set on mouse motion, cleared when the pointer leaves
+	// the spans or the mouse is released. The footer paints the hovered verb with
+	// a background tint (the terminal's hover vocabulary); at rest (0) the footer
+	// is one dim span, byte-identical to the pre-mouse footer, so goldens stay calm.
+	HoverFooterVerb rune
 }
 
 // ActionStrip is the single role-colored status line rendered directly above

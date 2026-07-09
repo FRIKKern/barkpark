@@ -9,6 +9,7 @@ package taskboard
 // fixed clock; reuses render_test.go's -update flag.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -346,6 +347,116 @@ func TestFreeScrollUpSettlesAtTop(t *testing.T) {
 	}
 }
 
+// ── Reading viewport clamp matches the paint (off-by-one guard) ──────────────
+
+// longBodyFixture is the compose fixture with the subject task's detail padded to
+// a body far taller than any tested pane, so the reading window is always full
+// and the free-scroll clamp is genuinely exercised.
+func longBodyFixture() Model {
+	m := composeFixture()
+	d := m.details[composeSubjectID]
+	var b strings.Builder
+	b.WriteString(d.Description)
+	b.WriteString("\n\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&b, "- body line %02d marks a distinct paragraph in the reading frame\n", i)
+	}
+	d.Description = b.String()
+	m.details[composeSubjectID] = d
+	return m
+}
+
+// paintedBodyWindow counts the reading-window lines Compose ACTUALLY painted for a
+// pushed frame — the ground truth readingViewportHeight() must equal. Compose
+// prepends one blank row and composeAt reserves the breadcrumb in both modes plus
+// the footer in narrow, so the window is total lines minus that chrome. Measuring
+// the real paint (not re-deriving the formula) is what makes this a regression
+// guard: change composeAt's reserved chrome and this count moves with it.
+func paintedBodyWindow(t *testing.T, m Model) int {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(Compose(m)), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("compose produced too few lines to hold a window: %d", len(lines))
+	}
+	if m.wide {
+		return len(lines) - 2 // leading blank + spanning breadcrumb
+	}
+	return len(lines) - 3 // leading blank + breadcrumb + footer
+}
+
+// readingViewportHeight() must equal the body-window Compose paints, at EVERY
+// height in both modes — the helper fed Compose height while the paint runs at
+// composeAt's height-1 (the leading blank row), so a naive split under-clamped
+// free-scroll by one and hid the last body line under a stuck ↓-more marker.
+func TestReadingViewportHeightMatchesPaint(t *testing.T) {
+	withChrome(t)
+	for _, wide := range []bool{false, true} {
+		for h := 8; h <= 30; h++ {
+			m := longBodyFixture()
+			m.wide = wide
+			if wide {
+				m.width = 120 // above the two-pane threshold
+			} else {
+				m.width = 80
+			}
+			m.height = h
+			(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+			want := paintedBodyWindow(t, m)
+			if got := m.readingViewportHeight(); got != want {
+				t.Errorf("wide=%v h=%d: readingViewportHeight()=%d but Compose painted %d body-window lines",
+					wide, h, got, want)
+			}
+		}
+	}
+}
+
+// Free-scrolling to the clamp on a long body must land on the LAST body line with
+// NO ↓-more marker — proving the clamp reaches bottom (the off-by-one under-scroll
+// left the final line hidden). Both modes.
+func TestFreeScrollReachesLastBodyLine(t *testing.T) {
+	withChrome(t)
+	for _, wide := range []bool{false, true} {
+		m := longBodyFixture()
+		m.wide = wide
+		if wide {
+			m.width = 120
+		} else {
+			m.width = 80
+		}
+		m.height = 20
+		(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+
+		body, _ := m.frameContent(m.topFrame(), m.readingWidth(), m.now())
+		avail := m.readingViewportHeight()
+		if len(body) <= avail {
+			t.Fatalf("wide=%v: fixture must overflow the pane (body %d <= avail %d)", wide, len(body), avail)
+		}
+		// Scroll down past the end; the clamp must settle exactly at the bottom
+		// window (top = len(body)-avail), not one short of it.
+		for i := 0; i < len(body); i++ {
+			(&m).freeScroll(1)
+		}
+		if got, wantTop := m.topFrame().Scroll, len(body)-avail; got != wantTop {
+			t.Errorf("wide=%v: scroll clamp settled at %d, want the bottom window %d", wide, got, wantTop)
+		}
+		frame := ansi.Strip(Compose(m))
+		if strings.Contains(frame, "more below") {
+			t.Errorf("wide=%v: ↓-more marker still shown after scrolling to the bottom:\n%s", wide, frame)
+		}
+		// The last non-blank body line is on screen.
+		lastIdx := len(body) - 1
+		for lastIdx >= 0 && strings.TrimSpace(ansi.Strip(body[lastIdx])) == "" {
+			lastIdx--
+		}
+		if lastIdx >= 0 {
+			last := strings.TrimSpace(ansi.Strip(body[lastIdx]))
+			if last != "" && !strings.Contains(frame, last) {
+				t.Errorf("wide=%v: last body line %q not painted at the bottom:\n%s", wide, last, frame)
+			}
+		}
+	}
+}
+
 // ── Reading cursor grammar (charter D18/D29) ─────────────────────────────────
 
 // j/k move the frame's stop cursor (not the board's) and snap the viewport back;
@@ -419,6 +530,233 @@ func TestReadingActTargetsSubject(t *testing.T) {
 	}
 	if strings.Contains(m.ui.Strip.Message, "nothing to act on") {
 		t.Fatalf("c treated the reading subject as un-actionable: %q", m.ui.Strip.Message)
+	}
+}
+
+// ── Wide two-pane mouse routing (charter D12) ────────────────────────────────
+
+// lineContaining returns the 0-based index of the first line whose stripped text
+// contains sub, or -1. Used to locate a painted row by its visible text so the
+// mouse tests never hand-compute the layout.
+func lineContaining(frame, sub string) int {
+	for i, ln := range strings.Split(frame, "\n") {
+		if strings.Contains(ansi.Strip(ln), sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+// visibleRowIndex is the cursor index of the board row with the given doc id.
+func visibleRowIndex(m Model, docID string) int {
+	for i, r := range m.visibleRows() {
+		if r.docID == docID {
+			return i
+		}
+	}
+	return -1
+}
+
+// wideClick builds a left-press mouse event at a composeAt-local (x,y): the
+// router strips the Compose gutter (gl=1 pad + one blank top row), so screen
+// X = x+1 and screen Y = y+1.
+func wideClick(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{X: x + 1, Y: y + 1, Button: tea.MouseButtonLeft, Action: tea.MouseActionPress}
+}
+
+func wideWheel(x, y int, up bool) tea.MouseMsg {
+	b := tea.MouseButtonWheelDown
+	if up {
+		b = tea.MouseButtonWheelUp
+	}
+	return tea.MouseMsg{X: x + 1, Y: y + 1, Button: b, Action: tea.MouseActionPress}
+}
+
+// A left click on a board row selects it — the SAME cursor arrowing to it would
+// land on (charter/wish: "click a task row to select it, same effect as arrowing
+// to it"), and the FULL row is the target (the X is deep in the row, not on the
+// glyph).
+func TestWideMouseBoardRowClickSelects(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 0 // header selected → the short board never scrolls
+	_, _, inner := m.wideGeom()
+	board := Render(m.board, m.ui, boardPaneWidth, inner, m.now())
+	pl := lineContaining(board, "Wire the SSE")
+	if pl < 0 {
+		t.Fatalf("subject row not painted in the board pane:\n%s", ansi.Strip(board))
+	}
+	want := visibleRowIndex(m, composeSubjectID)
+	if want < 0 {
+		t.Fatal("subject is not a visible board row")
+	}
+	// composeAt Y = pl+1 (row 0 is the breadcrumb); X=20 is deep in the 46-col row.
+	m2, cmd := m.handleWideMouse(wideClick(20, pl+1))
+	nm := m2
+	if cmd != nil {
+		t.Errorf("a board select fired a command: %v", cmd)
+	}
+	if nm.ui.Cursor != want {
+		t.Fatalf("board click selected cursor %d, want %d (the subject)", nm.ui.Cursor, want)
+	}
+
+	// A second click on the now-selected row ACTIVATES it — the narrow board's
+	// select-then-activate grammar (wish: "click again / double-click to expand"):
+	// a task row descends into its FrameTask.
+	m3, _ := nm.handleWideMouse(wideClick(20, pl+1))
+	if len(m3.stack) != 2 || m3.topFrame().Kind != FrameTask || m3.topFrame().Ref != composeSubjectID {
+		t.Fatalf("second click on the selected task row did not descend: depth=%d kind=%v ref=%q",
+			len(m3.stack), m3.topFrame().Kind, m3.topFrame().Ref)
+	}
+}
+
+// A click on the identity strip / status chrome / the dead inter-pane gutter is a
+// no-op — honest degradation, never a mis-select.
+func TestWideMouseInertRegionsNoOp(t *testing.T) {
+	withChrome(t)
+	base := func() Model {
+		m := composeFixture()
+		m.width, m.height, m.wide = 120, 40, true
+		m.ui.Cursor = 1
+		return m
+	}
+	_, _, inner := base().wideGeom()
+	cases := []struct {
+		name string
+		ev   tea.MouseMsg
+	}{
+		{"identity-strip", wideClick(20, 1)},          // composeAt Y=1 → board pane line 0 (identity top)
+		{"dead-gutter", wideClick(boardPaneWidth, 3)}, // x=46 → the 2-col gutter
+		{"crumb-row", wideClick(20, 0)},               // composeAt Y=0 → the breadcrumb
+		{"below-frame", wideClick(20, inner+5)},       // past the last pane row
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := base()
+			m2, cmd := m.handleWideMouse(c.ev)
+			if m2.ui.Cursor != 1 || cmd != nil {
+				t.Fatalf("%s moved the cursor to %d / fired %v, want no-op", c.name, m2.ui.Cursor, cmd)
+			}
+		})
+	}
+}
+
+// The wheel over the board pane steps the cursor one row (#1878: one line at a
+// time, never a recenter jump) — up and down, clamped.
+func TestWideMouseBoardWheelStepsCursor(t *testing.T) {
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 1
+	down, _ := m.handleWideMouse(wideWheel(20, 2, false))
+	if down.ui.Cursor != 2 {
+		t.Fatalf("wheel-down stepped cursor to %d, want 2", down.ui.Cursor)
+	}
+	up, _ := down.handleWideMouse(wideWheel(20, 2, true))
+	if up.ui.Cursor != 1 {
+		t.Fatalf("wheel-up stepped cursor to %d, want 1", up.ui.Cursor)
+	}
+}
+
+// At depth 0 the right pane is a non-interactive preview — clicks AND wheel
+// no-op honestly (cursor unmoved, stack unchanged, no command).
+func TestWideMouseDepth0PreviewInert(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 40, true
+	m.ui.Cursor = 1
+	rightX := boardPaneWidth + paneGutter2 + 4 // deep in the right preview pane
+	for _, ev := range []tea.MouseMsg{
+		wideClick(rightX, 3),
+		wideWheel(rightX, 3, false),
+		wideWheel(rightX, 3, true),
+	} {
+		m2, cmd := m.handleWideMouse(ev)
+		if m2.ui.Cursor != 1 || len(m2.stack) != 1 || cmd != nil {
+			t.Fatalf("preview event %v was not inert: cursor=%d depth=%d cmd=%v",
+				ev, m2.ui.Cursor, len(m2.stack), cmd)
+		}
+	}
+}
+
+// Depth>0: a click on a rail stop in the right pane selects that stop (the frame
+// cursor moves, viewport follows) — resolved via Stop.Line + the painted window
+// offset, the FULL row a target.
+func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 60, true // tall enough that the detail body fits
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	_, _, inner := m.wideGeom()
+	rightW := 120 - 1 - 3 - boardPaneWidth - paneGutter2
+	body, stops := m.frameContent(m.topFrame(), rightW, m.now())
+	if len(body) > inner {
+		t.Fatalf("fixture body (%d) must fit the pane (%d) so stops are on-screen", len(body), inner)
+	}
+	if len(stops) < 2 {
+		t.Fatalf("need >=2 rail stops to prove selection moves, got %d", len(stops))
+	}
+	// Click stop index 1 (a fresh frame opens on cursor 0, so 1 proves movement).
+	target := stops[1]
+	// composeAt Y = pane line + 1; the body fits so pane line == body line.
+	m2, cmd := m.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
+	if cmd != nil {
+		t.Errorf("a rail select fired a command: %v", cmd)
+	}
+	if got := m2.topFrame().Cursor; got != 1 {
+		t.Fatalf("rail click selected stop %d, want 1", got)
+	}
+
+	// A second click on the now-selected stop DESCENDS onto it, exactly like
+	// enter — the narrow reading grammar (select, then click-again opens).
+	m3, _ := m2.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
+	if len(m3.stack) != 3 || m3.topFrame().Ref != target.Ref {
+		t.Fatalf("second click on the selected stop did not descend: depth=%d ref=%q want ref=%q",
+			len(m3.stack), m3.topFrame().Ref, target.Ref)
+	}
+}
+
+// Depth>0: the wheel over the right reading pane free-scrolls one line, exactly
+// like the keyboard's space/u/d — so mouse and keyboard never disagree about the
+// viewport (#1878).
+func TestWideMouseRightWheelFreeScrolls(t *testing.T) {
+	withChrome(t)
+	m := composeFixture()
+	m.width, m.height, m.wide = 120, 16, true // short pane so the body overflows
+	(&m).pushFrame(Frame{Kind: FrameTask, Ref: composeSubjectID, Title: "subj"})
+	body, _ := m.frameContent(m.topFrame(), m.readingWidth(), m.now())
+	if len(body) <= m.readingViewportHeight() {
+		t.Fatalf("fixture must overflow the short pane (body %d <= avail %d)", len(body), m.readingViewportHeight())
+	}
+	rightX := boardPaneWidth + paneGutter2 + 3
+	m2, _ := m.handleWideMouse(wideWheel(rightX, 3, false))
+	if got := m2.topFrame().Scroll; got != 1 {
+		t.Fatalf("one wheel-down scrolled to %d, want 1 (one line, like space)", got)
+	}
+	m3, _ := m2.handleWideMouse(wideWheel(rightX, 3, true))
+	if got := m3.topFrame().Scroll; got != 0 {
+		t.Fatalf("wheel-up back to %d, want 0", got)
+	}
+}
+
+// The Y hit-map addresses EXACTLY the painted composeAt rows — the crumb plus one
+// per pane line, no more — so a click can never resolve to a row that was never
+// drawn (length parity, including the crumb row).
+func TestWideMouseHitMapParity(t *testing.T) {
+	withChrome(t)
+	for _, wh := range [][2]int{{120, 40}, {160, 24}, {110, 50}} {
+		m := composeFixture()
+		m.width, m.height, m.wide = wh[0], wh[1], true
+		rowmap := m.wideRowMap()
+		_, innerW, _ := m.wideGeom()
+		lines := strings.Split(composeAt(m, innerW, m.height-1), "\n")
+		if len(rowmap) != len(lines) {
+			t.Fatalf("%dx%d: hit-map length %d != painted composeAt rows %d",
+				wh[0], wh[1], len(rowmap), len(lines))
+		}
+		if rowmap[0] != rowCrumb {
+			t.Fatalf("%dx%d: row 0 is not the breadcrumb", wh[0], wh[1])
+		}
 	}
 }
 
