@@ -1714,6 +1714,60 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "inline peek (wave 24) — the detail opens below the pressed row" do
+    setup do
+      task("il-epic", "Inline epic", lifecycle: "in_progress", assignee: "lead")
+
+      task("il-child", "Inline child",
+        lifecycle: "in_progress",
+        parent_id: "il-epic",
+        assignee: "w2"
+      )
+
+      task("il-quiet", "Quiet root", lifecycle: "open")
+      b = task("il-done", "Inline shipped", lifecycle: "done")
+      _ = b
+      :ok
+    end
+
+    test "a gantt row's detail expands beneath it — no side panel, no scrim", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      view
+      |> element(~s{[data-role="gantt-row"][data-doc-id="il-child"] [data-role="gantt-label"]})
+      |> render_click()
+
+      html = render(view)
+      # hosted inline within the pressed row's gantt…
+      assert html =~ ~s(data-role="peek-host")
+      [_, row] = String.split(html, ~s(data-role="gantt-row" data-doc-id="il-child"), parts: 2)
+      row_scope = row |> String.split(~s(data-role="gantt-row"), parts: 2) |> hd()
+      assert row_scope =~ ~s(data-role="peek-host")
+      assert row_scope =~ ~s(data-role="peek-state")
+      assert row_scope =~ "bp task show il-child"
+      # …never the aside/scrim.
+      refute html =~ ~s(data-role="peek-scrim")
+      refute html =~ "<aside"
+    end
+
+    test "a done-ledger row hosts its detail inline too", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?task=il-done")
+
+      [_, ledger] = String.split(html, ~s(data-role="done-ledger"), parts: 2)
+      assert ledger =~ ~s(data-role="peek-host")
+      refute html =~ ~s(data-role="peek-scrim")
+    end
+
+    test "a peeked task with no visible row falls back to the side panel", %{conn: conn} do
+      # il-quiet is an open, non-expanded root — no gantt row hosts it.
+      {:ok, _view, html} = live(conn, "/admin/projects?task=il-quiet")
+
+      assert html =~ ~s(data-role="peek-scrim")
+      assert html =~ "<aside"
+      assert html =~ "Quiet root"
+    end
+  end
+
   describe "settled lanes (wave 11) — grouped" do
     setup do
       task("sl-live", "Live under goal-live", lifecycle: "open", parent_id: "goal-live")
