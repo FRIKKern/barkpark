@@ -363,6 +363,14 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   @max_col 16_384
   @max_row 1_048_576
 
+  # Hard cap on the spill re-topo fixpoint (charter D3). Each phase widens spill
+  # visibility by one dependency level, so a chain of depth d settles in d+1
+  # phases; ten covers any realistic nesting. The loop is NOT provably monotone
+  # (a pathological anchor could oscillate between #SPILL! and a region), so the
+  # cap is load-bearing: on exhaustion recompute falls back to the last computed
+  # map rather than hanging.
+  @spill_max_phases 10
+
   # Guard on pure array generation (SEQUENCE): a rows*cols request beyond this
   # is #NUM!, so a fat-fingered SEQUENCE(1000000) can't materialise a runaway
   # intermediate list.
@@ -1126,21 +1134,18 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {computed, residual} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base)
       computed = mark_cycles(computed, residual)
 
-      # Two-phase spill in the cross-tab graph, identical to the fast path: a
-      # spill inside a cross-tab document still distributes and its readers see
-      # the region in phase 2 (spill keys carry the tab index).
-      computed =
-        if any_array_result?(computed) do
-          spill = unified_spill_map(tabs, parsed, computed)
-          base2 = with_spill(base, spill)
+      # N-phase spill fixpoint in the cross-tab graph, identical to the fast
+      # path (charter D3): a spill inside a cross-tab document distributes and
+      # its readers see the region, and a spill chain crossing tabs converges
+      # instead of stalling one level per phase. Spill keys carry the tab index.
+      recompute = fn base_k ->
+        {c, residual} = topo_unified(queue, computed0, in_deg, out_edges, node_asts, base_k)
+        mark_cycles(c, residual)
+      end
 
-          {computed2, residual2} =
-            topo_unified(queue, computed0, in_deg, out_edges, node_asts, base2)
+      spill_of = fn c -> unified_spill_map(tabs, parsed, c) end
 
-          mark_cycles(computed2, residual2)
-        else
-          computed
-        end
+      computed = spill_fixpoint(computed, base, spill_of, recompute)
 
       write_back_unified(content, tabs, parsed, computed)
     end
@@ -1360,21 +1365,26 @@ defmodule Barkpark.Plugins.Sheets.Engine do
       {computed, residual} = topo(queue, computed0, in_deg, out_edges, node_asts, base)
       computed = mark_cycles(computed, residual)
 
-      # Two-phase spill (design §3.3): when a formula's top-level result spills,
-      # phase 1 (above) fixes every anchor's array; phase 2 re-evaluates with the
-      # materialised spill map visible via cell_at, so a reader (`=A2`) sees the
-      # spilled value and a range over an anchor reads its top-left, not the whole
-      # array. Bounded — ONLY when array formulas are present; a zero-array
-      # document never enters this branch and stays single-pass byte-identical.
-      computed =
-        if any_array_result?(computed) do
-          {_cells, spill} = spill_distribution(cells, parsed, computed)
-          base2 = with_spill(base, spill)
-          {computed2, residual2} = topo(queue, computed0, in_deg, out_edges, node_asts, base2)
-          mark_cycles(computed2, residual2)
-        else
-          computed
-        end
+      # N-phase spill fixpoint (design §3.3, charter D3): when a formula's
+      # top-level result spills, re-topo with the materialised spill map visible
+      # via cell_at until that map stops changing, so a reader (`=A2`) sees the
+      # spilled value and — critically — a spill whose SOURCE is itself spilled
+      # (`E1=SORT(C1:C3)` where `C1=SORT(A1:A3)`) converges instead of reading a
+      # stale, one-level-behind region. Bounded — ONLY when array formulas are
+      # present; a zero-array document never enters and stays single-pass
+      # byte-identical (regression lock). Depth-1 settles in exactly one extra
+      # phase, byte-identical to the prior two-phase engine.
+      recompute = fn base_k ->
+        {c, residual} = topo(queue, computed0, in_deg, out_edges, node_asts, base_k)
+        mark_cycles(c, residual)
+      end
+
+      spill_of = fn c ->
+        {_cells, spill} = spill_distribution(cells, parsed, c)
+        spill
+      end
+
+      computed = spill_fixpoint(computed, base, spill_of, recompute)
 
       write_back(cells, parsed, computed)
     end
@@ -1474,6 +1484,44 @@ defmodule Barkpark.Plugins.Sheets.Engine do
   defp spillable_array?(_), do: false
 
   defp any_array_result?(computed), do: Enum.any?(computed, fn {_k, v} -> spillable_array?(v) end)
+
+  # The spill re-topo fixpoint shared by BOTH recompute paths (charter D3). The
+  # zero-array guard is preserved here — a document with no top-level array
+  # result never re-topos and stays single-pass byte-identical (regression
+  # lock). Otherwise iterate { spill_k = spill_of(computed_k); computed_k+1 =
+  # recompute(with_spill(base, spill_k)) } until the spill map stops changing.
+  # `spill_of` and `recompute` are the per-path closures (fast: spill_distribution
+  # + topo; unified: unified_spill_map + topo_unified), so ONE fixpoint drives
+  # both — fixing only one path would silently leave cross-tab depth-2 broken.
+  # Only the returned (final) computed map is written back, so a transient
+  # #SPILL! from an intermediate phase is never persisted.
+  defp spill_fixpoint(computed, base, spill_of, recompute) do
+    if any_array_result?(computed) do
+      converge_spill(computed, nil, base, spill_of, recompute, @spill_max_phases)
+    else
+      computed
+    end
+  end
+
+  # Drive the fixpoint to a stable spill map or the hard cap. On `spill == prev`
+  # the region has settled — return the current computed (its readers already saw
+  # this exact map). On fuel exhaustion fall back to the last computed rather
+  # than looping: the iteration is not provably monotone, so the cap guarantees
+  # termination for any input.
+  defp converge_spill(computed, _prev_spill, _base, _spill_of, _recompute, 0), do: computed
+
+  defp converge_spill(computed, prev_spill, base, spill_of, recompute, fuel) do
+    spill = spill_of.(computed)
+
+    if spill == prev_spill do
+      computed
+    else
+      base
+      |> with_spill(spill)
+      |> recompute.()
+      |> converge_spill(spill, base, spill_of, recompute, fuel - 1)
+    end
+  end
 
   # Phase-2 base: expose the materialised spill map to cell_at AND fold the
   # spilled positions into the occupied set so a RANGE aggregate over a spill
