@@ -34,6 +34,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.StudioChat
   alias BarkparkWeb.Studio.ClaudeChat
 
+  # How long a Stop may sit in `:interrupting` before we force-close a wedged
+  # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
+  @default_interrupt_timeout_ms 8_000
+
   # Mount no longer spawns (the eager-spawn contract is inverted, charter D8/D14):
   # mount lays out the chrome + loads the sidebar session list; `handle_params/3`
   # is the single source of truth for WHICH session is on screen. A subprocess is
@@ -65,6 +69,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          streaming: nil,
          composer_rev: 0,
          interrupt_requested: false,
+         mode_switch_from: nil,
          last_result: nil,
          title_source: "default",
          title_kicked: false
@@ -152,6 +157,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `interrupt_requested` so the result classifies as "interrupted", never an
   # error, and flip to a transient `:interrupting` status for honest feedback.
   # A late ack (or a duplicate Stop) is harmless — the cast is idempotent.
+  #
+  # Stopping cannot wedge (charter D18): we arm an {:interrupt_timeout, sid}
+  # timer. If a terminal `result` arrives first, status leaves `:interrupting`
+  # and the timer no-ops; if the CLI wedges (no result), the timer force-closes
+  # the subprocess and runs the shared honest teardown so the composer never
+  # sticks at "Stopping…" forever.
   def handle_event("stop_turn", _params, socket) do
     case socket.assigns.session do
       nil ->
@@ -159,6 +170,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       session ->
         ClaudeChat.interrupt(session)
+
+        Process.send_after(
+          self(),
+          {:interrupt_timeout, socket.assigns[:store_session_id]},
+          interrupt_timeout_ms()
+        )
+
         {:noreply, assign(socket, interrupt_requested: true, status: :interrupting)}
     end
   end
@@ -167,7 +185,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # control frame (key `mode`, charter D12) — the model's context is preserved,
   # no respawn. With no live subprocess (the common case now that spawn is lazy)
   # it is a silent selector update; the next spawn carries the mode via
-  # build_args.
+  # build_args. Either way we PERSIST the switch (charter D17) so a reopened
+  # session shows the mode you chose and the next lazy `--resume` spawn carries
+  # it — the store row no longer keeps its stale creation mode.
   def handle_event("set-mode", %{"mode" => mode}, socket) do
     mode = ClaudeChat.normalize_mode(mode)
 
@@ -176,14 +196,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       session = socket.assigns.session ->
+        # Optimistic: move the selector + persist now, but remember the prior
+        # mode so the echoed control_response can revert it if the switch didn't
+        # take (the CLI acks subtype:success even for a silent no-op — D12).
+        prev = socket.assigns.mode
         ClaudeChat.set_permission_mode(session, mode)
+        persist_mode(socket, mode)
 
         {:noreply,
          socket
-         |> assign(mode: mode)
+         |> assign(mode: mode, mode_switch_from: prev)
          |> append_message(:system, "Permission mode → #{mode_label(mode)}.")}
 
       true ->
+        persist_mode(socket, mode)
         {:noreply, assign(socket, mode: mode)}
     end
   end
@@ -366,6 +392,35 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, refresh_sessions(socket)}
   end
 
+  # The CLI acked a permission-mode switch (charter D17). NEVER trust the bare
+  # subtype:success — assert the ECHOED mode (D12 vacuous-green: the alt wire key
+  # no-ops silently, returning an empty echo). A confirmed echo clears the revert
+  # marker; an empty/mismatched echo reverts the optimistic selector + persisted
+  # mode and says so honestly, so the UI never claims a switch that didn't land.
+  def handle_info({:claude_chat_control, :set_mode, response}, socket) do
+    echoed = if is_map(response), do: response["mode"], else: nil
+
+    if echoed == socket.assigns.mode do
+      {:noreply, assign(socket, mode_switch_from: nil)}
+    else
+      revert_to = socket.assigns[:mode_switch_from] || socket.assigns.mode
+      persist_mode(socket, revert_to)
+
+      {:noreply,
+       socket
+       |> assign(mode: revert_to, mode_switch_from: nil)
+       |> append_message(
+         :system,
+         "Couldn't switch permission mode — still #{mode_label(revert_to)}."
+       )}
+    end
+  end
+
+  # Interrupt / set_model acks need no UI action: the interrupt's real outcome
+  # arrives as the terminal `result` frame, and set_model has no surface. Swallow
+  # them so they never fall to the noisy catch-all.
+  def handle_info({:claude_chat_control, _kind, _response}, socket), do: {:noreply, socket}
+
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
 
@@ -388,35 +443,42 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
 
-  # A subprocess crash/exit must never leave the UI lying. Fail the in-flight
-  # turn (drop the streaming buffer), force-cancel EVERY pending approval —
-  # their control-response can never be delivered, so a hanging Allow/Deny
-  # would be a dead button — mark the persisted session exited (nil-safe), and
-  # let the sidebar pill go offline. The CLI keeps the memory: the next send
-  # lazy-resumes.
+  # A real port exit (exit_status frame). Run the shared honest teardown.
   def handle_info({:claude_chat_exit, status}, socket) do
-    messages =
-      Enum.map(socket.assigns.messages, fn
-        %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
-        m -> m
-      end)
-
-    mark_session_exited(socket.assigns[:store_session_id])
-
     {:noreply,
-     socket
-     |> assign(messages: messages)
-     |> append_message(
-       :system,
+     teardown_session(
+       socket,
        "Claude session ended (exit #{status}). Send a message to resume it."
-     )
-     |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
-     |> refresh_sessions()}
+     )}
   end
 
+  # The interrupt timed out (charter D18). CRITICAL: `ClaudeChat.close/1` does
+  # NOT emit {:claude_chat_exit} (only a real port exit_status does), so this
+  # path must force-close AND run teardown itself. Guarded: a `result` arriving
+  # first left `:interrupting`, and a session switch changed `store_session_id`
+  # — both make a stale timer a no-op.
+  def handle_info({:interrupt_timeout, sid}, socket) do
+    if socket.assigns.status == :interrupting and socket.assigns[:store_session_id] == sid do
+      if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+
+      {:noreply,
+       teardown_session(
+         socket,
+         "Stopping timed out — the session was force-closed. Send a message to resume it."
+       )}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
+  # the DOWN that follows our own force-close). Only act while WE still own that
+  # pid — after a teardown set `session: nil`, the double-fire DOWN finds no
+  # match and no-ops; teardown itself is idempotent besides.
   def handle_info({:DOWN, _ref, :process, pid, _reason}, socket) do
     if socket.assigns.session == pid do
-      {:noreply, assign(socket, session: nil, status: :offline, streaming: nil)}
+      {:noreply,
+       teardown_session(socket, "Claude session ended unexpectedly. Send a message to resume it.")}
     else
       {:noreply, socket}
     end
@@ -1012,6 +1074,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
       streaming: nil,
       interrupt_requested: false,
+      mode_switch_from: nil,
       last_result: nil,
       # Title state follows the STORED session: a titled (ai/human) session
       # never re-kicks; a still-default one may kick on its next good turn.
@@ -1040,6 +1103,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       next_id: 0,
       streaming: nil,
       interrupt_requested: false,
+      mode_switch_from: nil,
       last_result: nil,
       title_source: "default",
       title_kicked: false,
@@ -1066,6 +1130,49 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       socket
     end
+  end
+
+  # ONE idempotent honest teardown for a dead/wedged subprocess (charter D18),
+  # shared by the port-exit handler, the interrupt-timeout guard, and the DOWN
+  # handler. Fail the in-flight turn (drop the streaming buffer), force-cancel
+  # EVERY pending approval — their control-response can never be delivered, so a
+  # hanging Allow/Deny would be a dead button — mark the persisted session exited
+  # (nil-safe), and go offline. The CLI keeps the memory: the next send
+  # lazy-resumes. Idempotent: already `:offline` ⇒ no-op, so a close-then-DOWN
+  # double-fire never duplicates the system line or re-cancels approvals.
+  defp teardown_session(socket, message) do
+    if socket.assigns.status == :offline do
+      socket
+    else
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
+          m -> m
+        end)
+
+      mark_session_exited(socket.assigns[:store_session_id])
+
+      socket
+      |> assign(messages: messages)
+      |> append_message(:system, message)
+      |> assign(session: nil, status: :offline, streaming: nil, interrupt_requested: false)
+      |> refresh_sessions()
+    end
+  end
+
+  # Persist a mode switch onto the store row (charter D17) — no-op with no store
+  # session yet (a brand-new chat before its first send has no row to write).
+  defp persist_mode(socket, mode) do
+    if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
+    :ok
+  end
+
+  defp interrupt_timeout_ms do
+    Application.get_env(
+      :barkpark,
+      :studio_chat_interrupt_timeout_ms,
+      @default_interrupt_timeout_ms
+    )
   end
 
   # ── persistence (D7 — source markdown, on completion only) ──────────────

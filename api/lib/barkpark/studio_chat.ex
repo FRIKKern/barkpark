@@ -292,6 +292,26 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Persist a mid-session permission-mode switch (charter D17). Mirrors
+  `update_status/2`: `validate_inclusion` against `Session.modes/0` and refresh
+  `last_active_at`, so a reopened session shows the mode you switched to AND the
+  next lazy `--resume` spawn's `build_args` carries it. Returns `{:ok, session}`,
+  `{:error, changeset}`, or `{:error, :not_found}`.
+  """
+  @spec set_mode(String.t(), String.t()) ::
+          {:ok, Session.t()} | {:error, Ecto.Changeset.t() | :not_found}
+  def set_mode(session_id, mode) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(mode: mode, last_active_at: DateTime.utc_now())
+      |> Ecto.Changeset.validate_inclusion(:mode, Session.modes())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
   Mark a session `exited` (its port died — crash or clean exit). Next send
   lazy-resumes. `:noop` if the session is gone.
   """

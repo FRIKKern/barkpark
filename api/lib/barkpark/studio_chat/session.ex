@@ -22,6 +22,9 @@ defmodule Barkpark.StudioChat.Session do
   # exited   — the process died (crash or clean exit); next send lazy-resumes
   @statuses ~w(active working exited)
   @title_sources ~w(default ai human)
+  # Permission modes the CLI accepts (mirrors BarkparkWeb.Studio.ClaudeChat.modes/0,
+  # kept here so the context layer validates a mode without reaching into web).
+  @modes ~w(plan default acceptEdits)
 
   @primary_key {:id, Ecto.UUID, autogenerate: false}
   @foreign_key_type Ecto.UUID
@@ -59,6 +62,9 @@ defmodule Barkpark.StudioChat.Session do
 
   @doc "Legal title sources."
   def title_sources, do: @title_sources
+
+  @doc "Legal permission modes."
+  def modes, do: @modes
 
   @create_fields ~w(id title title_source cwd mode model status last_active_at summary)a
 

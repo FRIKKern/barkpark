@@ -206,6 +206,30 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "set_mode/2 — mid-session mode persistence (charter D17)" do
+    test "persists a valid mode so a reopened session shows it" do
+      s = new_session(%{mode: "plan"})
+      assert s.mode == "plan"
+
+      {:ok, switched} = StudioChat.set_mode(s.id, "acceptEdits")
+      assert switched.mode == "acceptEdits"
+      # a reopen reads the switched mode, not the creation mode
+      assert StudioChat.get_session(s.id).mode == "acceptEdits"
+    end
+
+    test "an invalid mode is rejected (validate_inclusion)" do
+      s = new_session(%{mode: "plan"})
+      assert {:error, changeset} = StudioChat.set_mode(s.id, "bypassPermissions")
+      assert %{mode: _} = errors_on(changeset)
+      # the row is untouched
+      assert StudioChat.get_session(s.id).mode == "plan"
+    end
+
+    test "set_mode on a missing session is honest" do
+      assert {:error, :not_found} = StudioChat.set_mode(Ecto.UUID.generate(), "default")
+    end
+  end
+
   describe "titles — clobber guard (charter D13)" do
     test "AI title lands on a default title, then a human rename overrides it" do
       s = new_session()
@@ -408,9 +432,10 @@ defmodule Barkpark.StudioChatTest do
   end
 
   describe "schema wiring" do
-    test "known statuses and title sources are enumerable" do
+    test "known statuses, title sources, and modes are enumerable" do
       assert "working" in Session.statuses()
       assert "human" in Session.title_sources()
+      assert "acceptEdits" in Session.modes()
     end
 
     test "messages preload in seq order via the association" do
