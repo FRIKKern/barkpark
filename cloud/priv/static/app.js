@@ -9373,6 +9373,273 @@
     }
   }
 
+  // =========================================================== COMMAND PALETTE (Cmd+K)
+  // A fleet-wide launcher: every instance, site, and view two keystrokes away.
+  // (metaKey||ctrlKey)+K opens a centered modal whose first focusable is a search
+  // input; typing fuzzy-filters a ranked registry of nav destinations, live
+  // instances, sites, and safe actions; ArrowUp/Down move the selection and Enter
+  // runs it. It REUSES the shared openModal focus-trap seam — Escape + Tab are
+  // already handled by the modal keydown at wireModal(), so this block only adds
+  // the input re-render + Arrow/Enter. Instances come from the fleet cache
+  // (ensureFleet at open) and sites from a GET /v1/sites kicked at open; both fill
+  // in when they land, so the palette opens INSTANTLY on the static + instances
+  // rows. Every pure helper (registry builder, fuzzy match, filter/rank, selection
+  // reducer) is node-pinned via __bpTestHook. Mirrors the SHAPE of the paper-editor
+  // command palette (fuzzy subsequence over label+group) but is fresh vanilla — that
+  // one is TipTap-bound and not importable.
+
+  // Pure: case-insensitive subsequence match — every char of the query appears, in
+  // order, somewhere in the haystack (gaps allowed). Empty query passes everything.
+  function paletteFuzzy(query, hay) {
+    var q = String(query == null ? "" : query).trim().toLowerCase();
+    if (!q) return true;
+    var h = String(hay == null ? "" : hay).toLowerCase();
+    var qi = 0;
+    for (var hi = 0; hi < h.length && qi < q.length; hi++) {
+      if (h[hi] === q[qi]) qi++;
+    }
+    return qi === q.length;
+  }
+
+  // Pure: filter + rank a registry by the query over `label + " " + group`. Empty
+  // query → the registry unchanged (order-preserving). A non-empty query keeps only
+  // subsequence matches, then STABLE-sorts by match quality: a haystack that
+  // contains the query as a contiguous SUBSTRING outranks a mere subsequence, and an
+  // earlier substring hit outranks a later one. Registry order breaks every tie, so
+  // grouped rows stay grouped. Never throws; tolerates missing label/group.
+  function paletteFilter(items, query) {
+    items = items || [];
+    var q = String(query == null ? "" : query).trim().toLowerCase();
+    if (!q) return items.slice();
+    var scored = [];
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var hay = (String((it && it.label) || "") + " " + String((it && it.group) || "")).toLowerCase();
+      if (!paletteFuzzy(q, hay)) continue;
+      var idx = hay.indexOf(q);
+      scored.push({ it: it, score: idx === -1 ? 1e9 : idx, ord: i });
+    }
+    scored.sort(function (a, b) { return a.score - b.score || a.ord - b.ord; });
+    return scored.map(function (s) { return s.it; });
+  }
+
+  // Pure: the selection-index reducer. Move the highlighted row over `count` rows
+  // on "up"/"down" (WRAPPING), snap to ends on "home"/"end"; any other dir just
+  // clamps the current index into range. count 0 → -1 (nothing selectable). Never
+  // throws — an out-of-range index resets to the first row.
+  function paletteMoveIndex(index, count, dir) {
+    count = count | 0;
+    if (count <= 0) return -1;
+    var i = index | 0;
+    if (i < 0 || i >= count) i = 0;
+    if (dir === "down") return (i + 1) % count;
+    if (dir === "up") return (i - 1 + count) % count;
+    if (dir === "home") return 0;
+    if (dir === "end") return count - 1;
+    return i;
+  }
+
+  // Nav run(): close the palette, then route. A same-hash set fires no hashchange,
+  // so re-apply the route explicitly (mirrors the launch-resume repaint seam).
+  function paletteNavRun(target) {
+    return function () {
+      closeModal();
+      if (location.hash === target) applyRoute();
+      else location.hash = target;
+    };
+  }
+
+  var PAL_SETTINGS_LABEL = {
+    billing: "Billing", providers: "Providers",
+    notifications: "Notifications", tokens: "Tokens", members: "Members",
+  };
+
+  // Pure: the STATIC nav registry — the frozen IA (D17) plus the three Fleet lenses
+  // and every registered Settings view. `run` closes over paletteNavRun; the label
+  // + group + kind are inspectable without invoking it.
+  function paletteNavItems() {
+    var nav = [
+      { id: "nav-overview", label: "Overview", group: "Go to", target: "#overview" },
+      { id: "nav-fleet", label: "Fleet", group: "Go to", target: "#fleet" },
+      { id: "nav-fleet-attention", label: "Fleet · needs attention", group: "Go to", target: "#fleet/attention" },
+      { id: "nav-fleet-inflight", label: "Fleet · in flight", group: "Go to", target: "#fleet/inflight" },
+      { id: "nav-fleet-healthy", label: "Fleet · healthy", group: "Go to", target: "#fleet/healthy" },
+      { id: "nav-sites", label: "Sites", group: "Go to", target: "#sites" },
+      { id: "nav-activity", label: "Activity", group: "Go to", target: "#activity" },
+    ];
+    SETTINGS_VIEWS.forEach(function (v) {
+      nav.push({ id: "nav-settings-" + v, label: "Settings · " + (PAL_SETTINGS_LABEL[v] || v),
+        group: "Settings", target: "#settings/" + v });
+    });
+    return nav.map(function (n) {
+      return { id: n.id, label: n.label, group: n.group, kind: "nav", run: paletteNavRun(n.target) };
+    });
+  }
+
+  // Pure: the safe-action registry — existing functions ONLY (no new behavior). The
+  // launch/account actions open their own modal (openModal replaces the palette body
+  // in place); the theme toggle has no modal, so it closes the palette itself.
+  function paletteActionItems() {
+    return [
+      { id: "act-launch", label: "Launch a new instance", group: "Actions", hint: "New", kind: "action",
+        run: function () { openLaunchModal(); } },
+      { id: "act-theme", label: "Toggle light / dark theme", group: "Actions", kind: "action",
+        run: function () { toggleTheme(); closeModal(); } },
+      { id: "act-account", label: "Account & sessions", group: "Actions", kind: "action",
+        run: function () { openAccountModal(); } },
+    ];
+  }
+
+  // Pure: instance rows from the fleet list — label = display name, hint = the ONE
+  // status pill's label (statusOf), run drills into #instance/<id>.
+  function paletteInstanceItems(list) {
+    return (list || []).map(function (bp) {
+      return {
+        id: "inst-" + String(bp && bp.id),
+        label: String((bp && (bp.name || bp.slug || bp.id)) || "instance"),
+        group: "Instances",
+        hint: statusOf(bp).label,
+        kind: "nav",
+        run: paletteNavRun("#instance/" + encodeURIComponent(String(bp && bp.id))),
+      };
+    });
+  }
+
+  // Pure: site rows — label = primary domain (slug/name/id fallbacks), hint = the
+  // framework, run drills into #site/<id>.
+  function paletteSiteItems(list) {
+    return (list || []).map(function (s) {
+      var domain = (s && s.domains && s.domains[0]) || (s && (s.slug || s.name)) || String(s && s.id);
+      return {
+        id: "site-" + String(s && s.id),
+        label: String(domain),
+        group: "Sites",
+        hint: s && s.framework ? String(s.framework) : "site",
+        kind: "nav",
+        run: paletteNavRun("#site/" + encodeURIComponent(String(s && s.id))),
+      };
+    });
+  }
+
+  // Pure: the full registry for a data snapshot. Order = static nav, actions,
+  // instances, sites — so the palette paints a complete slate the instant it opens
+  // (static + cached instances) and sites slot in when their fetch lands.
+  function paletteRegistry(data) {
+    data = data || {};
+    return paletteNavItems()
+      .concat(paletteActionItems())
+      .concat(paletteInstanceItems(data.instances))
+      .concat(paletteSiteItems(data.sites));
+  }
+
+  function paletteRowsHtml(items, index) {
+    if (!items.length) return '<div class="cmdk-empty">No matches</div>';
+    return items.map(function (it, i) {
+      var active = i === index;
+      return '<div class="cmdk-row' + (active ? " is-active" : "") + '" role="option"' +
+        ' id="cmdk-row-' + i + '" data-i="' + i + '"' + (active ? ' aria-selected="true"' : "") + ">" +
+        '<span class="cmdk-row-label">' + esc(it.label) + "</span>" +
+        '<span class="cmdk-row-meta">' +
+          (it.hint ? '<span class="cmdk-row-hint">' + esc(it.hint) + "</span>" : "") +
+          '<span class="cmdk-row-group">' + esc(it.group || "") + "</span>" +
+        "</span>" +
+      "</div>";
+    }).join("");
+  }
+
+  function paletteBodyHtml() {
+    return '<div class="cmdk">' +
+      '<div class="cmdk-search-wrap">' +
+        '<input class="cmdk-search" id="cmdk-input" type="text" role="combobox"' +
+        ' aria-expanded="true" aria-controls="cmdk-list" aria-activedescendant=""' +
+        ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"' +
+        ' placeholder="Search instances, sites, and actions…" aria-label="Command palette search" />' +
+      "</div>" +
+      '<div class="cmdk-list" id="cmdk-list" role="listbox" aria-label="Commands"></div>' +
+      '<div class="cmdk-foot">' +
+        '<span class="cmdk-hint"><kbd>↑</kbd><kbd>↓</kbd> navigate</span>' +
+        '<span class="cmdk-hint"><kbd>↵</kbd> select</span>' +
+        '<span class="cmdk-hint"><kbd>esc</kbd> close</span>' +
+      "</div>" +
+    "</div>";
+  }
+
+  // Generation guard: a second open supersedes the first, so a late ensureFleet /
+  // sites resolve from a stale palette never repaints the live one.
+  var paletteGen = 0;
+
+  function openCommandPalette() {
+    var root = document.getElementById("modal-root");
+    if (root && !root.hidden) return; // one modal root — never stack over an open dialog
+    var gen = ++paletteGen;
+
+    // Instant slate: static nav + actions + whatever fleet is already cached.
+    var data = { instances: Array.isArray(fleetCache) ? fleetCache : [], sites: [] };
+    var items = paletteRegistry(data);
+    var visible = items.slice();
+    var index = items.length ? 0 : -1;
+
+    var body = openModal(paletteBodyHtml());
+    if (!body) return;
+    var input = document.getElementById("cmdk-input");
+    var listEl = document.getElementById("cmdk-list");
+    if (!input || !listEl) return;
+
+    function alive() {
+      if (gen !== paletteGen) return false;
+      var r = document.getElementById("modal-root");
+      return !!(r && !r.hidden);
+    }
+    function repaint() {
+      visible = paletteFilter(items, input.value);
+      index = paletteMoveIndex(index, visible.length, null); // clamp into the new range
+      listEl.innerHTML = paletteRowsHtml(visible, index);
+      input.setAttribute("aria-activedescendant", index >= 0 ? "cmdk-row-" + index : "");
+      var activeRow = listEl.querySelector(".cmdk-row.is-active");
+      if (activeRow && activeRow.scrollIntoView) activeRow.scrollIntoView({ block: "nearest" });
+    }
+    function rebuild() {
+      if (!alive()) return;
+      items = paletteRegistry(data);
+      repaint();
+    }
+    function runSelected() {
+      var it = visible[index];
+      if (it && typeof it.run === "function") it.run();
+    }
+
+    repaint();
+
+    input.addEventListener("input", function () { index = 0; repaint(); });
+    // Arrow/Enter live on the modal body; Escape + Tab stay owned by wireModal().
+    body.addEventListener("keydown", function (e) {
+      if (e.key === "ArrowDown") { e.preventDefault(); index = paletteMoveIndex(index, visible.length, "down"); repaint(); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); index = paletteMoveIndex(index, visible.length, "up"); repaint(); }
+      else if (e.key === "Home" && !input.value) { e.preventDefault(); index = paletteMoveIndex(index, visible.length, "home"); repaint(); }
+      else if (e.key === "End" && !input.value) { e.preventDefault(); index = paletteMoveIndex(index, visible.length, "end"); repaint(); }
+      else if (e.key === "Enter") { e.preventDefault(); runSelected(); }
+    });
+    listEl.addEventListener("click", function (e) {
+      var row = e.target.closest && e.target.closest(".cmdk-row[data-i]");
+      if (!row) return;
+      var it = visible[parseInt(row.getAttribute("data-i"), 10)];
+      if (it && typeof it.run === "function") it.run();
+    });
+
+    // Fill instances in when the fleet wasn't cached, and sites always (no cache
+    // exists). Both re-render on arrival; a failed load simply omits that group —
+    // the palette stays usable for everything else (never a dead spinner).
+    if (!data.instances.length) {
+      ensureFleet().then(function (list) {
+        if (Array.isArray(list) && list.length) { data.instances = list; rebuild(); }
+      });
+    }
+    api("GET", "/v1/sites").then(function (r) {
+      data.sites = (r.ok && r.data && r.data.sites) || [];
+      rebuild();
+    });
+  }
+
   // =========================================================== WIRE-UP
   function init() {
     initTheme();
@@ -9449,6 +9716,21 @@
       if (isNewFlow()) return; // the /new deploy flow is path+query driven, not hash-routed
       if (isActivateFlow()) return; // the /activate device-login screen is real-path, not hash-routed
       if (session() && session().token) applyRoute();
+    });
+
+    // Cmd/Ctrl+K — the global command palette. preventDefault is UNCONDITIONAL for
+    // the combo (Ctrl+K is readline kill-line inside inputs — never let it fire);
+    // opening then no-ops while any modal is open (one modal root), before sign-in,
+    // and on the real-path /new + /activate screens (which render outside the shell).
+    document.addEventListener("keydown", function (e) {
+      if ((e.key === "k" || e.key === "K") && (e.metaKey || e.ctrlKey) && !e.altKey) {
+        e.preventDefault();
+        var mroot = document.getElementById("modal-root");
+        if (mroot && !mroot.hidden) return;
+        if (isNewFlow() || isActivateFlow()) return;
+        if (!(session() && session().token)) return;
+        openCommandPalette();
+      }
     });
 
     // /new screen has its own theme toggle (it renders outside the app shell).
@@ -9700,6 +9982,13 @@
       // OC7: the registered Settings views, so the quota bar's "Manage plan"
       // recovery route can be proved to land on a real view (never a dead end).
       settingsViews: SETTINGS_VIEWS.slice(),
+      // Cmd+K command palette (wave 3): pure registry builder + fuzzy match +
+      // filter/rank + selection reducer. The DOM mount (openCommandPalette) and its
+      // Cmd/Ctrl+K keydown are browser-verified; these helpers are node-pinned.
+      paletteFuzzy: paletteFuzzy, paletteFilter: paletteFilter,
+      paletteMoveIndex: paletteMoveIndex, paletteNavItems: paletteNavItems,
+      paletteActionItems: paletteActionItems, paletteInstanceItems: paletteInstanceItems,
+      paletteSiteItems: paletteSiteItems, paletteRegistry: paletteRegistry,
     });
   }
 })();
