@@ -77,4 +77,4 @@ barkpark · tasks                                ⇄ guerrilla  ● live · 1m
 ███████████████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░
 ────────────────────────────────────────────────────────────────────────
 ⠋ claimed 'auth-w1-claim' · 5m
-jk move · enter open · esc back · c claim · x close · o studio
+jk move · enter open · esc back · c claim · x close · o studio · M mouse

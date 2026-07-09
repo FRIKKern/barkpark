@@ -690,12 +690,25 @@ func footerEtiquette(mouseReleased bool) string {
 	return "opt/shift-click selects · M mouse"
 }
 
+// footerEtiquetteShort is the compressed footnote the ladder falls back to when
+// the full etiquette line does not fit: it keeps the M toggle discoverable at
+// every canonical portrait width (Compose insets 4, so the full board note needs
+// a >=102-col terminal — the whole 60–100-col portrait vision would otherwise
+// never see it). Captured mode names the toggle; released mode names the re-arm.
+func footerEtiquetteShort(mouseReleased bool) string {
+	if mouseReleased {
+		return "M on"
+	}
+	return "M mouse"
+}
+
 // buildBoardFooter assembles the board footer's segments at the given inner width
 // and mouse mode, plus the click spans for the c/x/o verbs (charter D93/D96). The
-// width ladder, widest-that-fits: the etiquette footnote sheds FIRST (before any
-// verb hint), THEN the nav hint drops its "move" word, THEN the whole line
-// trailing-truncates as the sub-60 floor. verbSpans clips a verb the truncation
-// would cut, so the returned spans always align with fully-painted verb tokens.
+// width ladder, widest-that-fits: the etiquette footnote COMPRESSES first (full
+// note → the short M-toggle form) and sheds entirely before any verb hint, THEN
+// the nav hint drops its "move" word, THEN the whole line trailing-truncates as
+// the sub-60 floor. verbSpans clips a verb the truncation would cut, so the
+// returned spans always align with fully-painted verb tokens.
 func buildBoardFooter(width int, mouseReleased bool) (segs []footerSeg, spans []footerVerbSpan) {
 	verbs := []footerSeg{
 		{"enter open", 0},
@@ -704,19 +717,20 @@ func buildBoardFooter(width int, mouseReleased bool) (segs []footerSeg, spans []
 		{"x close", 'x'},
 		{"o studio", 'o'},
 	}
-	assemble := func(nav string, withTail bool) []footerSeg {
+	assemble := func(nav, tail string) []footerSeg {
 		out := make([]footerSeg, 0, len(verbs)+2)
 		out = append(out, footerSeg{nav, 0})
 		out = append(out, verbs...)
-		if withTail {
-			out = append(out, footerSeg{footerEtiquette(mouseReleased), 0})
+		if tail != "" {
+			out = append(out, footerSeg{tail, 0})
 		}
 		return out
 	}
 	for _, cand := range [][]footerSeg{
-		assemble("jk move", true),
-		assemble("jk move", false),
-		assemble("jk", false),
+		assemble("jk move", footerEtiquette(mouseReleased)),
+		assemble("jk move", footerEtiquetteShort(mouseReleased)),
+		assemble("jk move", ""),
+		assemble("jk", ""),
 	} {
 		if segsWidth(cand) <= width {
 			return cand, verbSpans(cand, width)
@@ -724,7 +738,7 @@ func buildBoardFooter(width int, mouseReleased bool) (segs []footerSeg, spans []
 	}
 	// Sub-60 floor: the shortest line, trailing-truncated to width by renderFooter;
 	// verbs the cut clips drop their spans.
-	segs = assemble("jk", false)
+	segs = assemble("jk", "")
 	return segs, verbSpans(segs, width)
 }
 

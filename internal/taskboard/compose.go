@@ -250,16 +250,20 @@ func crumbSeg(f Frame) string {
 // frame kind). It teaches the reading grammar: move between stops, descend,
 // ascend, free-scroll prose. It OMITS the c/x/o act verbs (they follow the reader
 // as keys, not clickable footer targets — charter D96); it only gains the
-// mouse-mode etiquette footnote, and only when the width is generous. Like the
-// board footer, the footnote sheds first: the nav word "move" drops before it,
-// and the footnote is appended only when the whole line still fits.
+// mouse-mode etiquette footnote, and only when the width allows. Like the
+// board footer, the footnote yields first: it compresses to the short M-toggle
+// form, then sheds entirely; the nav word "move" drops before either form, and
+// a footnote is appended only when the whole line still fits.
 func readingFooter(st UIState, width int) string {
 	hint := "jk move · enter open · esc back · space scroll"
 	if disp(hint) > width {
 		hint = "jk · enter open · esc back · space scroll"
 	}
-	if tail := footerEtiquette(st.MouseReleased); disp(hint)+disp(footerSep)+disp(tail) <= width {
-		hint += footerSep + tail
+	for _, tail := range []string{footerEtiquette(st.MouseReleased), footerEtiquetteShort(st.MouseReleased)} {
+		if disp(hint)+disp(footerSep)+disp(tail) <= width {
+			hint += footerSep + tail
+			break
+		}
 	}
 	return dimStyle.Render(truncate(hint, width))
 }

@@ -47,18 +47,21 @@ func TestFooterVerbSpansAlignWithPaintedVerbs(t *testing.T) {
 		width        int
 		wantVerbs    []rune // spans expected, in order
 		wantNav      string // the nav hint the ladder chose
-		wantFootnote bool
+		wantFootnote string // "full", "short" or "none"
 	}{
-		// Full ladder + footnote (the 100-col portrait ceiling).
-		{"full+footnote", 100, []rune{'c', 'x', 'o'}, "jk move", true},
-		// Footnote sheds first — verbs + long nav still paint.
-		{"full-no-footnote", 80, []rune{'c', 'x', 'o'}, "jk move", false},
+		// Full ladder + footnote (a >=98-col inner pane).
+		{"full+footnote", 100, []rune{'c', 'x', 'o'}, "jk move", "full"},
+		// The footnote compresses first — the short M-toggle form rides along at
+		// every canonical portrait width, verbs + long nav still paint.
+		{"short-footnote", 80, []rune{'c', 'x', 'o'}, "jk move", "short"},
+		// The footnote sheds entirely before any verb hint.
+		{"no-footnote", 70, []rune{'c', 'x', 'o'}, "jk move", "none"},
 		// Nav word "move" sheds next — every verb still clickable at the 60 floor.
-		{"jk-short", 60, []rune{'c', 'x', 'o'}, "jk", false},
+		{"jk-short", 60, []rune{'c', 'x', 'o'}, "jk", "none"},
 		// Sub-60 truncation: "c claim" still lands fully inside 40 cols (ends at
 		// col 36) so it keeps its span, but "x close" (start 39) and "o studio" run
 		// past the cut and lose theirs — the clipped verbs are not clickable.
-		{"truncated", 40, []rune{'c'}, "jk", false},
+		{"truncated", 40, []rune{'c'}, "jk", "none"},
 	}
 
 	for _, tc := range cases {
@@ -70,10 +73,16 @@ func TestFooterVerbSpansAlignWithPaintedVerbs(t *testing.T) {
 			if !strings.HasPrefix(line, tc.wantNav+" ") && line != tc.wantNav {
 				t.Errorf("nav hint: line %q does not start with %q", line, tc.wantNav)
 			}
-			// Footnote presence.
-			hasFootnote := strings.Contains(line, "opt/shift-click selects")
-			if hasFootnote != tc.wantFootnote {
-				t.Errorf("footnote present=%v, want %v (line %q)", hasFootnote, tc.wantFootnote, line)
+			// Footnote form: the full note contains the short one, so classify by
+			// the selection-bypass wording first.
+			gotFootnote := "none"
+			if strings.Contains(line, "opt/shift-click selects") {
+				gotFootnote = "full"
+			} else if strings.Contains(line, "M mouse") {
+				gotFootnote = "short"
+			}
+			if gotFootnote != tc.wantFootnote {
+				t.Errorf("footnote form=%q, want %q (line %q)", gotFootnote, tc.wantFootnote, line)
 			}
 
 			// Every returned span covers exactly its verb token, and lands inside
@@ -95,19 +104,64 @@ func TestFooterVerbSpansAlignWithPaintedVerbs(t *testing.T) {
 	}
 }
 
-// TestFooterEtiquetteShedsBeforeVerbs proves the shed ORDER: at a width that
-// holds the verbs but not the footnote, the verbs survive and the footnote is
-// gone — the footnote is the lowest-priority tail (charter D96 criterion 4).
+// TestFooterEtiquetteShedsBeforeVerbs proves the shed ORDER: under width
+// pressure the footnote yields before any verb hint — first compressing to the
+// short M-toggle form, then shedding entirely — so the verbs always survive it
+// (charter D96 criterion 4). The short form must be present across the whole
+// 72–97 inner-width range: Compose insets 4, so this is what keeps the M toggle
+// discoverable at the epic's entire 60–100-col portrait vision (the full
+// 98-col note would need a >=102-col terminal).
 func TestFooterEtiquetteShedsBeforeVerbs(t *testing.T) {
-	// 80 cols: the 62-col verb line fits, the 98-col +footnote does not.
-	line := ansi.Strip(renderFooter(UIState{}, 80))
-	for _, verb := range []string{"c claim", "x close", "o studio"} {
-		if !strings.Contains(line, verb) {
-			t.Errorf("verb %q shed before the footnote (line %q)", verb, line)
+	for inner := 72; inner <= 97; inner++ {
+		line := ansi.Strip(renderFooter(UIState{}, inner))
+		for _, verb := range []string{"c claim", "x close", "o studio"} {
+			if !strings.Contains(line, verb) {
+				t.Errorf("inner %d: verb %q shed before the footnote (line %q)", inner, verb, line)
+			}
+		}
+		if strings.Contains(line, "opt/shift-click") {
+			t.Errorf("inner %d: full footnote did not compress: %q", inner, line)
+		}
+		if !strings.Contains(line, "M mouse") {
+			t.Errorf("inner %d: short footnote missing — the M toggle is undiscoverable: %q", inner, line)
 		}
 	}
-	if strings.Contains(line, "opt/shift-click") {
-		t.Errorf("footnote did not shed first at 80 cols: %q", line)
+	// Below the short form's 72-col line the footnote sheds entirely; the verbs
+	// still paint.
+	line := ansi.Strip(renderFooter(UIState{}, 71))
+	for _, verb := range []string{"c claim", "x close", "o studio"} {
+		if !strings.Contains(line, verb) {
+			t.Errorf("inner 71: verb %q shed with the footnote (line %q)", verb, line)
+		}
+	}
+	if strings.Contains(line, "M mouse") {
+		t.Errorf("inner 71: footnote did not shed below its floor: %q", line)
+	}
+}
+
+// TestReadingFooterEtiquetteCompresses proves the reading footer rides the same
+// footnote ladder: full note when generous, the short M-toggle form at the
+// canonical portrait widths (compose inner 56/76/96), shed only when even the
+// short form cannot fit.
+func TestReadingFooterEtiquetteCompresses(t *testing.T) {
+	full := ansi.Strip(readingFooter(UIState{}, 96))
+	if !strings.Contains(full, "opt/shift-click selects") {
+		t.Errorf("inner 96: reading footer missing the full etiquette: %q", full)
+	}
+	for _, inner := range []int{56, 76} {
+		line := ansi.Strip(readingFooter(UIState{}, inner))
+		if strings.Contains(line, "opt/shift-click") {
+			t.Errorf("inner %d: full footnote did not compress: %q", inner, line)
+		}
+		if !strings.Contains(line, "M mouse") {
+			t.Errorf("inner %d: short footnote missing from the reading footer: %q", inner, line)
+		}
+		if !strings.Contains(line, "esc back") {
+			t.Errorf("inner %d: nav hint shed before the footnote: %q", inner, line)
+		}
+	}
+	if line := ansi.Strip(readingFooter(UIState{}, 55)); strings.Contains(line, "M mouse") {
+		t.Errorf("inner 55: footnote did not shed below its floor: %q", line)
 	}
 }
 
