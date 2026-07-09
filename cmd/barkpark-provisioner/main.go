@@ -187,6 +187,10 @@ func run(args []string) int {
 			ControlURL: *controlURL,
 			Token:      tok,
 		}).Report,
+		// charter Decision 33 — the control-plane origin the on-box barkpark-agent
+		// reports to. Threaded into every go-live's spec so the configure step can
+		// enable barkpark-agent.service pointed home. Same origin as the claim loop.
+		ControlURL: *controlURL,
 		// Health/Caddy/Secrets left nil → the real cloud-package defaults.
 	}
 

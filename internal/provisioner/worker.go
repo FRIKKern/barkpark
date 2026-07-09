@@ -153,6 +153,15 @@ type JobSpec struct {
 	// launch, validated by the control plane against the known catalog. Empty →
 	// no content bootstrap: the pre-template behavior exactly.
 	Template string `json:"template,omitempty"`
+	// AgentToken (charter Decision 33) is the per-instance monitoring token the
+	// control plane mints at CLAIM time (scope "report") and threads in plaintext
+	// here — the same sanctioned crossing as env/credentials, over the worker-token
+	// internal channel. The configure step writes it to /etc/barkpark/agent.token
+	// (0600) and enables barkpark-agent.service so the box reports its health +
+	// vitals home. Present for BOTH providers; only its hash is stored server-side.
+	// Empty when an OLD control plane omits the key → the worker skips the agent
+	// install (the box serves, just without the beat). NEVER logged.
+	AgentToken string `json:"agent_token,omitempty"`
 }
 
 // ProvisionFunc runs the warm-pool provisioning for one claimed job and returns

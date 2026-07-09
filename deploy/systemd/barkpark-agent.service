@@ -1,0 +1,31 @@
+# barkpark-agent — the transparent on-box monitoring agent (cloud-10 / charter
+# Decision 33). It reports the instance's health + vitals to the control plane
+# and runs APPROVED commands from a poll-based queue (internal/agent). It keeps
+# no hidden state; `bp agent uninstall` removes it.
+#
+# Installed + enabled by the provisioner's `configure` step
+# (internal/cli/cloud/warmpool.go agentInstallStep), which also writes:
+#   /etc/barkpark/agent.token  (0600)  — the per-instance report bearer, minted
+#                                        at claim time and stored hashed server-side
+#   /etc/barkpark/agent.env             — BARKPARK_CONTROL_URL + BARKPARK_HEALTH_URL
+# The URLs live in agent.env (EnvironmentFile) — NOT baked into ExecStart — so
+# deploy/instance-deploy.sh can re-install this SAME committed unit on every
+# self-update without knowing the control URL. Keep the two token/env files off
+# this checkout; only the unit is source-controlled.
+[Unit]
+Description=Barkpark on-box agent (health + vitals beat)
+Documentation=file:///opt/barkpark/deploy/systemd/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+# Fail cleanly (not restart-looping) if the provisioner has not written these yet.
+EnvironmentFile=/etc/barkpark/agent.env
+ExecStart=/usr/local/bin/barkpark-agent --control-url ${BARKPARK_CONTROL_URL} --token-file /etc/barkpark/agent.token --checkout /opt/barkpark --health-url ${BARKPARK_HEALTH_URL}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

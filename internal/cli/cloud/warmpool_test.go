@@ -1404,6 +1404,153 @@ func TestValidateSecrets(t *testing.T) {
 	}
 }
 
+// ── charter Decision 33: the monitoring beat ──────────────────────────────
+
+// agentSpec is acmeSpec ARMED with the per-instance agent token + control URL the
+// control plane threads at claim time (Decision 33), so the configure step runs
+// agentInstallStep. The token is a base64url-shaped value (what the CP mints).
+func agentSpec() GoLiveSpec {
+	s := acmeSpec()
+	s.AgentToken = "agent-report-tok_AbC123"
+	s.ControlURL = "https://api.barkpark.cloud"
+	return s
+}
+
+// TestAgentInstallStep_ShapeAndRedaction pins the EXACT on-box writes + commands
+// the configure step issues to light up the beat: build the binary, write the
+// 0600 token file (value via $BP_AGENT_TOK, never the script text/Cmd), write
+// agent.env with both URLs, install the committed unit, enable the service. The
+// token is redacted and never leaks into the narrated Title/Cmd.
+func TestAgentInstallStep_ShapeAndRedaction(t *testing.T) {
+	const tok = "agent-report-tok_AbC123"
+	s := agentInstallStep(tok, "https://api.barkpark.cloud", "https://acme.barkpark.cloud")
+
+	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
+		t.Fatalf("agentInstallStep argv = %v, want [bash -lc <script>]", s.Argv)
+	}
+	script := s.Argv[2]
+	for _, want := range []string{
+		"export BP_AGENT_TOK='" + tok + "'",                              // token rides in via env
+		"go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent", // binary built on-box
+		`printf '%s' "$BP_AGENT_TOK" > /etc/barkpark/agent.token`,        // token written from env, never the literal
+		"chmod 600 /etc/barkpark/agent.token",                            // root-only token file
+		`printf 'BARKPARK_CONTROL_URL=%s\nBARKPARK_HEALTH_URL=%s\n' 'https://api.barkpark.cloud' 'https://acme.barkpark.cloud' > /etc/barkpark/agent.env`, // URLs to env file
+		"install -m 0644 /opt/barkpark/deploy/systemd/barkpark-agent.service /etc/systemd/system/barkpark-agent.service",                                  // committed unit installed
+		"systemctl daemon-reload",
+		"systemctl enable --now barkpark-agent", // enabled + started
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("agent step script missing %q; script:\n%s", want, script)
+		}
+	}
+	// The token must NEVER appear literally after its single-quoted env assignment
+	// (i.e. it is not printf'd into the script text) and never in the narration.
+	if strings.Contains(s.Title, tok) || strings.Contains(s.Cmd, tok) {
+		t.Errorf("agent token leaked into Title/Cmd: title=%q cmd=%q", s.Title, s.Cmd)
+	}
+	found := false
+	for _, r := range s.Redact {
+		if r == tok {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("agent step Redact does not list the token: %v", s.Redact)
+	}
+}
+
+// TestValidateAgentURL accepts a real http(s) origin and rejects an empty or
+// shell-unsafe URL (the guard before the URL is single-quoted into the script).
+func TestValidateAgentURL(t *testing.T) {
+	for _, ok := range []string{
+		"https://api.barkpark.cloud",
+		"http://10.0.0.1:4000",
+		"https://acme.barkpark.cloud/health?probe=1&x=2",
+	} {
+		if err := validateAgentURL("control-url", ok); err != nil {
+			t.Errorf("safe URL %q should pass: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "has space", "has'quote", "has;semi", "has$var", "back`tick"} {
+		if err := validateAgentURL("control-url", bad); err == nil {
+			t.Errorf("unsafe URL %q should be rejected", bad)
+		}
+	}
+}
+
+// TestProvision_InstallsAgentWhenClaimed proves the end-to-end wiring: a claim
+// carrying an agent token + control URL makes the go-live chain build + enable
+// barkpark-agent (the monitoring beat), and the box still registers green.
+func TestProvision_InstallsAgentWhenClaimed(t *testing.T) {
+	spec := agentSpec()
+	wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+	ctx := context.Background()
+
+	if _, err := wp.Provision(ctx, spec); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	// The agent step ran through the injected runner.
+	sawAgent := false
+	for _, ti := range runner.titles {
+		if ti == "install + enable the on-box monitoring agent" {
+			sawAgent = true
+		}
+	}
+	if !sawAgent {
+		t.Errorf("agent install step did not run; titles:\n%s", strings.Join(runner.titles, "\n"))
+	}
+	// The exact writes/commands reached the box (asserted on the recorded Argv).
+	all := runnerArgvJoined(runner)
+	for _, want := range []string{
+		"go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent",
+		"> /etc/barkpark/agent.token",
+		"systemctl enable --now barkpark-agent",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("agent commands missing %q; ran:\n%s", want, all)
+		}
+	}
+	// The box still went live (agent install is part of a green go-live).
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+}
+
+// TestProvision_SkipsAgentWhenUnclaimed proves the additive contract: a claim
+// WITHOUT an agent token/control URL (an old control plane) runs the chain
+// byte-for-byte as before — no agent build/install commands, box still green.
+func TestProvision_SkipsAgentWhenUnclaimed(t *testing.T) {
+	spec := acmeSpec() // no AgentToken / ControlURL
+	wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+	ctx := context.Background()
+
+	if _, err := wp.Provision(ctx, spec); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	all := runnerArgvJoined(runner)
+	for _, forbidden := range []string{"barkpark-agent", "/etc/barkpark/agent.token"} {
+		if strings.Contains(all, forbidden) {
+			t.Errorf("agent commands ran for an unclaimed box (should skip); found %q in:\n%s", forbidden, all)
+		}
+	}
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+}
+
+// runnerArgvJoined flattens every recorded step's Argv into one string so a test
+// can assert on the on-box script content (the writes live in the Argv, not Cmd).
+func runnerArgvJoined(r *recordingRunner) string {
+	var b strings.Builder
+	for _, argv := range r.argvs {
+		for _, a := range argv {
+			b.WriteString(a)
+			b.WriteByte('\n')
+		}
+	}
+	return b.String()
+}
+
 // TestDefaultSecretGen_FourIndependentDraws asserts the default generator mints a
 // KEK/cloak/preview that are each base64 of EXACTLY 32 bytes (the KEK's hard
 // requirement — runtime.exs Base.decode64's it to 32 bytes) and that all four

@@ -234,6 +234,25 @@ systemctl enable "barkpark-slot@$TARGET" >/dev/null 2>&1 || true
 systemctl disable --now "barkpark-slot@$OTHER" >/dev/null 2>&1 || true
 systemctl disable --now barkpark >/dev/null 2>&1 || true
 
+# ---- Refresh the on-box monitoring agent (charter Decision 33), best-effort.
+# Only touch boxes the provisioner ARMED with the agent (its token file exists);
+# a plain/legacy box is left untouched. Rebuild barkpark-agent from the just-
+# deployed code, re-install the COMMITTED unit, and (re)enable it so a self-update
+# never drops the beat. The control/health URLs persist in /etc/barkpark/agent.env
+# (written at provision time), so this step needs no knowledge of them. NON-FATAL:
+# a monitoring hiccup must never fail a zero-downtime deploy — the app is already
+# live on the new slot at this point.
+if [ -f /etc/barkpark/agent.token ]; then
+  log "refreshing barkpark-agent (monitoring beat)"
+  if command -v go >/dev/null 2>&1 && go build -o /usr/local/bin/barkpark-agent ./cmd/barkpark-agent; then
+    install -m 0644 "$APP/deploy/systemd/barkpark-agent.service" /etc/systemd/system/barkpark-agent.service
+    systemctl daemon-reload
+    if systemctl enable --now barkpark-agent >/dev/null 2>&1; then log "barkpark-agent enabled"; else log "WARN: barkpark-agent enable failed — beat down until next deploy"; fi
+  else
+    log "WARN: barkpark-agent rebuild skipped/failed — keeping the running agent"
+  fi
+fi
+
 echo "$NEW" > "$STATE"
 log "HEALTHY — slot $TARGET live at $(git rev-parse --short HEAD)"
 exit 0

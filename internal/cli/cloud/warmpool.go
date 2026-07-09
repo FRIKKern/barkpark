@@ -63,6 +63,15 @@ type GoLiveSpec struct {
 	App     int        // local app port, e.g. 4000
 	Spec    ServerSpec // the spec used to create REPLACEMENT warm hosts
 	BaseURL string     // health-gate target override (tests); empty → https://<fqdn>
+	// AgentToken + ControlURL (charter Decision 33) drive the configure step's
+	// barkpark-agent install: the per-instance report token written to
+	// /etc/barkpark/agent.token (0600), and the control-plane origin the agent
+	// beats to (written to /etc/barkpark/agent.env). BOTH must be non-empty for the
+	// agent step to run; either empty (an old control plane, a test) skips it and
+	// the box goes live WITHOUT the monitoring beat — telemetry never blocks a
+	// go-live. NEVER logged (the token rides in via env, redacted).
+	AgentToken string
+	ControlURL string
 }
 
 // fqdn renders the full public hostname for this go-live: "<name>.<zone>".
@@ -529,6 +538,66 @@ func adminTokenStep(token string) CaddyStep {
 		// This step also `. /opt/barkpark/.env`, so a failure could echo the DB
 		// password / SECRET_KEY_BASE / cloak key. Pattern-scrub those too.
 		RedactEnvSecrets: true,
+	}
+}
+
+// agentURLSafe is the safe shape a control-plane / health URL must match before
+// it is single-quoted into agentInstallStep's shell script. It admits the
+// characters a real http(s) origin carries and EXCLUDES the shell/quote
+// metacharacters (space, $, ;, backticks, single quote) so single-quoting the
+// value into the script is injection-safe — mirroring secretValueAlphabet.
+var agentURLSafe = regexp.MustCompile(`^[A-Za-z0-9:/._~%?=&+-]+$`)
+
+// validateAgentURL rejects an empty or unsafe-shaped URL — the guard before the
+// control/health URL is interpolated into the agent-install step. Mirrors
+// validateSecretValue so a future control-url with an unsafe char fails loudly
+// (and the agent install is skipped) rather than shelling out a broken command.
+func validateAgentURL(name, val string) error {
+	if val == "" {
+		return fmt.Errorf("%s is empty; refusing to install the agent without it", name)
+	}
+	if !agentURLSafe.MatchString(val) {
+		return fmt.Errorf("%s has an unexpected shape; refusing to interpolate it into a shell command", name)
+	}
+	return nil
+}
+
+// agentInstallStep (charter Decision 33) is the configure sub-step that lights up
+// the monitoring beat. It builds the on-box barkpark-agent binary, writes the
+// per-instance report `token` to /etc/barkpark/agent.token (0600), writes the
+// control + health URLs to /etc/barkpark/agent.env, installs the COMMITTED
+// deploy/systemd/barkpark-agent.service unit, and enables it — so the box reports
+// its health + vitals home (S12). The token rides in via $BP_AGENT_TOK (Argv only,
+// redacted) so it never lands in the narrated Title/Cmd; `controlURL`/`healthURL`
+// are validated shell-safe (validateAgentURL) and single-quoted. asdf is sourced
+// (the non-interactive SSH shell skips ~/.bashrc) so `go build` finds the toolchain
+// — the binary is built from the checkout freshen brought to origin/main. The unit
+// reads its URLs from agent.env (via EnvironmentFile), so deploy/instance-deploy.sh
+// can re-install the SAME committed unit on every self-update without knowing the
+// control URL. `umask 077` + chmod 600 keep the token file root-only.
+func agentInstallStep(token, controlURL, healthURL string) CaddyStep {
+	const (
+		binPath   = "/usr/local/bin/barkpark-agent"
+		tokenPath = "/etc/barkpark/agent.token"
+		envPath   = "/etc/barkpark/agent.env"
+		unitSrc   = "/opt/barkpark/deploy/systemd/barkpark-agent.service"
+		unitDst   = "/etc/systemd/system/barkpark-agent.service"
+	)
+	script := `set -e; export BP_AGENT_TOK='` + token + `'; ` +
+		`. /root/.asdf/asdf.sh 2>/dev/null || true; ` +
+		`cd /opt/barkpark && go build -o ` + binPath + ` ./cmd/barkpark-agent; ` +
+		`mkdir -p /etc/barkpark; umask 077; ` +
+		`printf '%s' "$BP_AGENT_TOK" > ` + tokenPath + `; chmod 600 ` + tokenPath + `; ` +
+		`printf 'BARKPARK_CONTROL_URL=%s\nBARKPARK_HEALTH_URL=%s\n' '` + controlURL + `' '` + healthURL + `' > ` + envPath + `; ` +
+		`install -m 0644 ` + unitSrc + ` ` + unitDst + `; ` +
+		`systemctl daemon-reload; systemctl enable --now barkpark-agent`
+	return CaddyStep{
+		Title: "install + enable the on-box monitoring agent",
+		Cmd:   "build barkpark-agent + write " + tokenPath + " (value redacted) + agent.env + enable barkpark-agent.service",
+		Argv:  []string{"bash", "-lc", script},
+		// The token rides in the Argv (base64'd over SSH); scrub it from any captured
+		// output so a step failure never surfaces the value.
+		Redact: []string{token},
 	}
 }
 
@@ -1152,6 +1221,28 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 	if err := runner.Run(ctx, adminTokenStep(secrets.AdminToken)); err != nil {
 		wp.progress("configure", "failed", "admin-token")
 		return LiveServer{}, fmt.Errorf("admin-token: %w", err)
+	}
+
+	// 7b. agent (charter Decision 33) — light up the monitoring beat. Build +
+	// enable the on-box barkpark-agent, pointed at the control plane with the
+	// per-instance report token minted at claim. NON-FATAL, mirroring freshen:
+	// telemetry must NEVER fail a go-live, so a missing Go toolchain / systemd quirk
+	// degrades loudly in the worker journal and the box still ships (it just runs
+	// without the beat until the next self-update re-installs the agent). Skipped
+	// silently when the claim carried no token/control-url (an old control plane) —
+	// the pre-agent behaviour, byte-for-byte.
+	if spec.AgentToken != "" && spec.ControlURL != "" {
+		wp.progress("configure", "progress", "Enabling the monitoring agent…")
+		switch {
+		case validateSecretValue("agent token", spec.AgentToken) != nil:
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent token rejected on %s (box serves without the monitoring beat)\n", host.IP)
+		case validateAgentURL("control-url", spec.ControlURL) != nil:
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent control-url rejected on %s (box serves without the monitoring beat): %v\n", host.IP, validateAgentURL("control-url", spec.ControlURL))
+		default:
+			if err := runner.Run(ctx, agentInstallStep(spec.AgentToken, spec.ControlURL, spec.healthTarget())); err != nil {
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent install on %s degraded (box serves without the monitoring beat): %v\n", host.IP, err)
+			}
+		}
 	}
 	wp.progress("configure", "done", "")
 
