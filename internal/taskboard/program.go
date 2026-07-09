@@ -554,8 +554,10 @@ func (m Model) handleReadingKey(key string) (tea.Model, tea.Cmd) {
 // ignored; wide two-pane is ttm-s5 and no-ops. A terminal without mouse reporting
 // simply never reaches here — the keyboard flow is untouched.
 
-// handleMouse is the mouse reducer. It ignores hover motion (ttm-s3) and no-ops
-// in wide two-pane mode (ttm-s5); every other event is non-x input, so — exactly
+// handleMouse is the mouse reducer. It ignores hover motion (ttm-s3), button
+// RELEASES (a press already acted; disarming on the paired release would defeat
+// any press-armed two-step, e.g. ttm-s4's two-click close) and no-ops in wide
+// two-pane mode (ttm-s5); every remaining event is non-x input, so — exactly
 // like handleKey — it clears the transient action strip and disarms the close
 // guard before acting.
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -564,6 +566,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.Action == tea.MouseActionMotion {
 		return m, nil // hover is ttm-s3
+	}
+	if msg.Action == tea.MouseActionRelease {
+		return m, nil // the press acted; the release is not an input of its own
 	}
 	m.pendingClose = ""
 	m.ui.Strip = ActionStrip{}
