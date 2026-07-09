@@ -120,6 +120,10 @@ defmodule Barkpark.Plugins.Bulldocs do
       # defaults to `Content.paper_default_dataset()` (back-compat).
       {:live, "/d/:dataset/papers/:slug", BarkparkWeb.BulldocsLive, :index,
        auth: :public_root, root_layout: {BarkparkWeb.Layouts, :bulldocs}},
+      # The paper as the exact email byte stream — authors preview what a mail
+      # backend would send (same :public_root visibility as the reader).
+      {:get, "/papers/:slug/email", BarkparkWeb.BulldocsEmailController, :show,
+       auth: :public_root},
       {:post, "/bulldocs/papers", BarkparkWeb.BulldocsIngestController, :ingest, auth: :ingest},
       {:post, "/bulldocs/papers/:slug/ops", BarkparkWeb.BulldocsIngestController, :apply_op,
        auth: :ingest},

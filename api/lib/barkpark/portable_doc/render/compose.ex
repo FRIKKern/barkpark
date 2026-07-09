@@ -36,16 +36,15 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     text = stringish(Map.get(b, "text", ""))
     level = heading_level(Map.get(b, "level"))
 
-    # Article mode emits a real semantic heading node (`PdHeading` → `<h1>` /
-    # `<h2>` / `<h3>`) so screen readers, the outline tree, and CSS `hN`
-    # selectors all see a genuine heading — the styled `<span>` it used to be
-    # registered as 0 real headings in the DOM. Email mode keeps the original
-    # single bold span, byte-identical to the pre-article behaviour.
-    if style == :article do
-      %{"kind" => "PdHeading", "level" => level, "children" => [text]}
-    else
-      %{"kind" => "PdText", "weight" => "bold", "children" => [text]}
-    end
+    # EVERY style emits a real semantic heading node (`PdHeading` → `<h1>` /
+    # `<h2>` / `<h3>`): screen readers, the outline tree, and CSS `hN`
+    # selectors see a genuine heading. The walker styles it per palette —
+    # article gets the bare element (the stylesheet owns typography), email
+    # gets the level-sized INLINE rule (never unstyled off-surface). Email
+    # headings were bold `<span>`s until the email-view wave (gp-w3): a mailed
+    # paper deserves the same typographic skeleton the reader shows.
+    _ = style
+    %{"kind" => "PdHeading", "level" => level, "children" => [text]}
   end
 
   def compose_block(%{"type" => "eyebrow"} = b, style) do
@@ -96,14 +95,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   def compose_block(%{"type" => "paragraph"} = b, style) do
-    # Article mode emits a real `<p>` (PdParagraph) so the editor's
-    # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` CSS rule
-    # (root.html.heex ~:2068) matches in the desk View pane — paragraphs
-    # used to collapse against each other because they rendered as bare
-    # spans with no block-level margins. Email/default mode keeps PdText
-    # (`<span>`) so the email backend's byte-stable export is untouched.
-    kind = if style == :article, do: "PdParagraph", else: "PdText"
-    %{"kind" => kind, "children" => compose_inline_children(Map.get(b, "content", []))}
+    # EVERY style emits a real `<p>` (PdParagraph): in article the stylesheet
+    # owns the margins; in email the client's default paragraph spacing does —
+    # both beat the bare `<span>`s email used to get, which collapsed every
+    # paragraph into one unbroken run (gp-w3 email-view wave).
+    _ = style
+    %{"kind" => "PdParagraph", "children" => compose_inline_children(Map.get(b, "content", []))}
   end
 
   # Pullquote — italic serif, larger, muted, with a 3px terracotta left-border
@@ -887,20 +884,39 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Browser twins of the TUI creative slate (pdrender stat.go/heatmap.go/
   # chart.go). Pure snapshot emitters in Render.DataViz; `stat-grid` is the
   # accepted alias of `stats` (mirrors the pdrender registry).
-  def compose_block(%{"type" => "stat"} = b, _style) do
+  # :article rides the classed/SVG emitters (paper-surface.css owns the look);
+  # every other style takes the inline-styled email-safe variants — a classed
+  # SVG in a stylesheet-less client paints as black filled blobs.
+  def compose_block(%{"type" => "stat"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stat_html(b)}
   end
 
-  def compose_block(%{"type" => t} = b, _style) when t in ["stats", "stat-grid"] do
+  def compose_block(%{"type" => "stat"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stat_email_html(b)}
+  end
+
+  def compose_block(%{"type" => t} = b, :article) when t in ["stats", "stat-grid"] do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stats_html(b)}
   end
 
-  def compose_block(%{"type" => "heatmap"} = b, _style) do
+  def compose_block(%{"type" => t} = b, _style) when t in ["stats", "stat-grid"] do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.stats_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "heatmap"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_html(b)}
   end
 
-  def compose_block(%{"type" => "chart"} = b, _style) do
+  def compose_block(%{"type" => "heatmap"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.heatmap_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "chart"} = b, :article) do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_html(b)}
+  end
+
+  def compose_block(%{"type" => "chart"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
   # Unknown / unregistered block type — degrade gracefully instead of crashing
@@ -1285,7 +1301,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
             if caption == "",
               do: "",
               else:
-                ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #6a6a6a);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{Figures.figcaption_inner(caption)}</figcaption>|
+                ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{Figures.figcaption_inner(caption)}</figcaption>|
 
           {~s(<figure style="margin:1.6rem 0">), c}
 

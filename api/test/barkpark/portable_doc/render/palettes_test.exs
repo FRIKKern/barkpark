@@ -5,16 +5,16 @@ defmodule Barkpark.PortableDoc.Render.PalettesTest do
   alias Barkpark.PortableDoc.Render.Palettes
 
   describe "constant accessors" do
-    test "font_body returns the system-font stack" do
-      assert Palettes.font_body() == "-apple-system,'SF Pro Text',system-ui,sans-serif"
+    test "font_body returns the profile serif stack" do
+      assert Palettes.font_body() == "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
     end
 
     test "font_mono returns the monospace stack" do
       assert Palettes.font_mono() == "ui-monospace,Menlo,monospace"
     end
 
-    test "brand returns the indigo hex" do
-      assert Palettes.brand() == "#4f46e5"
+    test "brand returns the evergreen hex" do
+      assert Palettes.brand() == "#1e5347"
     end
 
     test "default_width returns 600" do

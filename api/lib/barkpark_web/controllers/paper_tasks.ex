@@ -33,12 +33,12 @@ defmodule BarkparkWeb.PaperTasks do
   # `.bp-paper-surface`, which defines the `--paper-*` tokens with light AND dark
   # variants (paper-surface.css) — so we reference the tokens, with the original
   # parchment hex as the fallback for any surface that doesn't define them. This is
-  # what keeps a driven-task TITLE visible in dark mode (a hardcoded `#1a1a1a`
+  # what keeps a driven-task TITLE visible in dark mode (a hardcoded `#15211d`
   # title was invisible on the dark reader — the #1217 dark-token bug class).
-  @ink "var(--paper-ink, #1a1a1a)"
-  @muted "var(--paper-ink-soft, #6a6a6a)"
-  @rule "var(--paper-rule, #e6e2d8)"
-  @accent "var(--paper-accent, #a23925)"
+  @ink "var(--paper-ink, #15211d)"
+  @muted "var(--paper-ink-soft, #55635e)"
+  @rule "var(--paper-rule, #dde7e2)"
+  @accent "var(--paper-accent, #1e5347)"
 
   @doc """
   Render the "Driven tasks" section for a `driven_tasks/2` result (or a bare

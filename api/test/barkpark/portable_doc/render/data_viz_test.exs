@@ -178,6 +178,29 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     end
   end
 
+  test "email style takes the inline-styled variants — no classed SVG blobs" do
+    for {block, marker} <- [
+          {%{"type" => "stat", "value" => "14/14", "label" => "parity", "spark" => [1, 2]},
+           "font-size:24px"},
+          {%{"type" => "stats", "items" => [%{"value" => "6"}]}, "font-size:24px"},
+          {%{"type" => "heatmap", "cells" => [[1.0, 0.5]]}, "<table"},
+          {%{"type" => "chart", "series" => [%{"label" => "a", "points" => [1, 5, 3]}]},
+           "1 → 5 · now 3"}
+        ] do
+      %{"kind" => "_raw", "html" => html} = Compose.compose_block(block, :email)
+      assert html =~ marker
+      refute html =~ "<svg"
+      refute html =~ ~s(class="bp-)
+    end
+
+    # heatmap intensity is baked into bgcolor in Elixir: 1.0 → the accent.
+    %{"kind" => "_raw", "html" => heat} =
+      Compose.compose_block(%{"type" => "heatmap", "cells" => [[1.0, 0.0]]}, :email)
+
+    assert heat =~ "background:#1e5347"
+    assert heat =~ "background:#eaf1ee"
+  end
+
   test "author strings are escaped" do
     html =
       DataViz.stat_html(%{"type" => "stat", "value" => "<b>x</b>", "label" => "<script>"})

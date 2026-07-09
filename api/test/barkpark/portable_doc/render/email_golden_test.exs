@@ -71,7 +71,7 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             "font-style:italic",
             "text-decoration:underline",
             "text-decoration:line-through",
-            "color:#a23925",
+            "color:#1e5347",
             # inline row
             ~s(<a href="https://example.com"),
             "<code style=",
@@ -104,13 +104,13 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             "background:#fef3c7",
             "color:#dc2626",
             # callouts (tones + collapsible)
-            "border-left:4px solid #047857",
-            "border-left:4px solid #b91c1c",
+            "border-left:4px solid #1e6b52",
+            "border-left:4px solid #a63a2e",
             "<details",
             "<summary",
             # box geometry
             "flex-direction:row",
-            "border:2px solid #a23925",
+            "border:2px solid #1e5347",
             # id-pin wikilink fast path (paper pin + alias label; task pin chips)
             ~s(href="/papers/pin-1"),
             ">the pinned paper</a>",

@@ -47,7 +47,7 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       # S9: the terracotta left-accent is now token-bound (--bp-codeblock-accent-w,
       # 3px fallback) so View↔Edit share ONE source; the accent colour still binds
       # --paper-accent for dark-mode theming.
-      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #a23925)"
+      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #1e5347)"
     end
 
     test "HTML-escapes the value inside the code block" do

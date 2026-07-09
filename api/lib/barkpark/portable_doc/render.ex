@@ -245,6 +245,26 @@ defmodule Barkpark.PortableDoc.Render do
   defp resolve_code_label(block, _opts), do: block
 
   @doc """
+  Render a full portable-doc block list as a COMPLETE standalone HTML document
+  — the email envelope: `<!doctype>` + tinted page background + a centered
+  paper card at the palette width, every style inline (email clients strip
+  `<style>`; Outlook is the contract). This is the EXACT byte stream a mail
+  backend should send, and what `GET /papers/:slug/email` serves so authors
+  can see it.
+  """
+  def render_document(blocks, opts \\ %{}) when is_list(blocks) do
+    style = Map.get(opts, :style, :email)
+    palette = Barkpark.PortableDoc.Render.Palettes.palette_for(style)
+    body = render_blocks(blocks, opts)
+
+    card =
+      ~s(<div style="max-width:#{palette.width}px;margin:0 auto;padding:28px 24px;background:#{palette.paper};border-radius:12px;">) <>
+        body <> "</div>"
+
+    document(~s(<div style="padding:28px 12px;">) <> card <> "</div>", palette)
+  end
+
+  @doc """
   Render a full portable-doc block list to one concatenated HTML fragment, in
   order. Used to refresh the `body_html` cache from the block source of truth.
   """
