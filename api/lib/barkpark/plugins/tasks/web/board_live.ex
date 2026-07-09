@@ -1680,53 +1680,43 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-size: 11px; opacity: 0.85;
       }
       .bp-gantt-detail .bp-crits--row { margin: 0; padding-left: 0; }
-      /* Wave 23: criteria as CHECKS + GANTT PARTS. display:contents lets each
-         criterion contribute a label cell and a track cell to the row grid,
-         so segments align with the task bars above them. */
-      .bp-gantt-crits { display: contents; }
-      .bp-gantt-crit-label {
-        display: flex; align-items: center; gap: 6px; min-width: 0;
-        padding: 0 4px 0 calc(var(--d) * 12px + 24px);
-        font-size: 11px; line-height: 1.9; color: var(--muted-text);
+      /* Wave 24: criteria as HORIZONTAL POINTS — a premium flex strip of
+         check chips under the task: met chips lit, the NEXT one pulsing,
+         the rest quiet outlines. The task bar keeps the time story. */
+      .bp-chips {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+        grid-column: 1 / -1; min-width: 0;
+        padding: 3px 4px 5px calc(var(--d, 0) * 12px + 24px);
       }
-      .bp-gantt-crit-label .bp-crits-t {
-        display: block; overflow: hidden; text-overflow: ellipsis;
-        white-space: nowrap; -webkit-line-clamp: unset;
+      .bp-chips--card { padding: 0; }
+      .bp-check {
+        display: inline-flex; align-items: center; gap: 5px; min-width: 0;
+        max-width: 30ch; padding: 3px 10px; border-radius: 999px;
+        font-size: 11px; line-height: 1.5; color: var(--muted-text);
+        border: 1px solid var(--border); background: transparent;
       }
-      .bp-gantt-crit-more {
-        padding-left: calc(var(--d) * 12px + 40px);
-        font-size: 10.5px; color: var(--muted-text);
-        font-variant-numeric: tabular-nums; line-height: 1.8;
+      .bp-check-gi { flex: 0 0 auto; font-size: 10px; }
+      .bp-check-t {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .bp-gantt-crit-label .gi { font-size: 10px; }
-      .bp-gantt-crit-label.is-met { color: var(--muted-text); }
-      .bp-gantt-crit-label.is-met .bp-crits-t {
-        text-decoration: line-through;
-        text-decoration-color: color-mix(in srgb, var(--muted-text) 45%, transparent);
+      .bp-check.is-met {
+        color: var(--ok); background: var(--ok-soft);
+        border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
       }
-      .bp-gantt-track--crit {
-        height: 5px; background: transparent; border-right: 0;
-        align-self: center;
-      }
-      .bp-gantt-bar--crit {
-        position: absolute; top: 0; bottom: 0; border-radius: 999px;
-        background: transparent;
-        border: 1px solid color-mix(in srgb, var(--muted-text) 40%, transparent);
-      }
-      .bp-gantt-bar--crit.is-met {
-        background: var(--ok); border-color: var(--ok); opacity: 0.85;
-      }
-      .bp-gantt-bar--crit.is-next {
-        background: var(--info-soft); border-color: var(--info);
+      .bp-check.is-next {
+        color: var(--info); background: var(--info-soft);
+        border-color: color-mix(in srgb, var(--info) 50%, var(--border));
         animation: bp-crit-pulse 2s ease-in-out infinite;
       }
+      .bp-check--more { font-variant-numeric: tabular-nums; flex: 0 0 auto; }
       @keyframes bp-crit-pulse {
-        0%   { opacity: 0.45; }
+        0%   { opacity: 0.5; }
         50%  { opacity: 1; }
-        100% { opacity: 0.45; }
+        100% { opacity: 0.5; }
       }
-      /* while expanded, the plain checklist yields to the chart's segments */
-      .bp-phone.is-expanded > .bp-crits { display: none; }
+      /* while expanded, the card strip yields to the chart's chips */
+      .bp-phone.is-expanded > .bp-chips--card { display: none; }
       /* ── inline peek (wave 24): the detail opens BELOW the pressed row ── */
       .bp-peek-host { grid-column: 1 / -1; min-width: 0; padding: 4px 0 6px; }
       .bp-peek-inline {
@@ -2036,7 +2026,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         .m-bump { animation: none; }
         .bp-notice { animation: none; }
         .bp-peek { animation: none; }
-        .bp-gantt-bar--crit.is-next { animation: none; opacity: 1; }
+        .bp-check.is-next { animation: none; opacity: 1; }
         .bp-chip { transition: none; }
       }
     </style>
@@ -2828,18 +2818,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           no brief — add a description or link a design paper
         </p>
 
-        <ul
+        <div
           :if={card.lifecycle_status == "in_progress" && card[:criteria_list]}
-          class="bp-crits"
+          class="bp-chips bp-chips--card"
           data-role="card-criteria"
         >
-          <li :for={c <- card.criteria_list} class={c.met && "is-met"} data-role="card-criterion">
-            <span class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")} aria-hidden="true">
-              <%= if c.met, do: "✓", else: "○" %>
-            </span>
-            <span class="bp-crits-t"><%= c.text %></span>
-          </li>
-        </ul>
+          <span
+            :for={c <- card.criteria_list}
+            class={["bp-check", c.met && "is-met"]}
+            data-role="card-criterion"
+            title={c.text}
+          >
+            <span class="bp-check-gi" aria-hidden="true"><%= if c.met, do: "✓", else: "○" %></span>
+            <span class="bp-check-t"><%= c.text %></span>
+          </span>
+        </div>
 
         <p
           :if={card.col == :in_progress && !card[:family] && focus_of(card)}
@@ -2931,38 +2924,35 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
                   <p class="bp-fam-desc" data-role="family-desc"><%= row.desc %></p>
                 </div>
 
-                <div :if={row[:crits]} class="bp-gantt-crits" data-role="gantt-criteria">
-                  <%= for {c, i} <- Enum.with_index(Enum.take(row.crits, 4)) do %>
+                <div
+                  :if={row[:crits]}
+                  class="bp-chips"
+                  style={"--d: #{row.depth};"}
+                  data-role="gantt-criteria"
+                >
+                  <%= for {c, i} <- Enum.with_index(Enum.take(row.crits, 8)) do %>
                     <span
-                      class={["bp-gantt-crit-label", c.met && "is-met"]}
-                      style={"--d: #{row.depth};"}
+                      class={[
+                        "bp-check",
+                        c.met && "is-met",
+                        !c.met && i == next_unmet_index(row.crits) && "is-next"
+                      ]}
                       data-role="gantt-criterion"
+                      title={c.text}
                     >
-                      <span
-                        class={"gi " <> if(c.met, do: "gi--done", else: "gi--ready")}
-                        aria-hidden="true"
-                      >
+                      <span class="bp-check-gi" aria-hidden="true">
                         <%= if c.met, do: "✓", else: "○" %>
                       </span>
-                      <span class="bp-crits-t"><%= c.text %></span>
+                      <span class="bp-check-t"><%= c.text %></span>
                     </span>
-                    <div class="bp-gantt-track bp-gantt-track--crit">
-                      <span
-                        class={[
-                          "bp-gantt-bar--crit",
-                          c.met && "is-met",
-                          !c.met && i == next_unmet_index(row.crits) && "is-next"
-                        ]}
-                        data-role="gantt-crit-bar"
-                        style={crit_seg_style(row, i, length(row.crits))}
-                      >
-                      </span>
-                    </div>
                   <% end %>
-                  <span :if={length(row.crits) > 4} class="bp-gantt-crit-more" data-role="gantt-crit-more">
-                    + <%= length(row.crits) - 4 %> more checks
+                  <span
+                    :if={length(row.crits) > 8}
+                    class="bp-check bp-check--more"
+                    data-role="gantt-crit-more"
+                  >
+                    +<%= length(row.crits) - 8 %>
                   </span>
-                  <span :if={length(row.crits) > 4} class="bp-gantt-track bp-gantt-track--crit"></span>
                 </div>
 
                 <div
@@ -3182,17 +3172,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
 
   defp clamp_pct(v, lo, hi), do: v |> max(lo) |> min(max(hi, lo)) |> Kernel.*(1.0)
 
-  # Criteria as GANTT PARTS (wave 23): criterion i of n owns the i-th slice of
-  # its task's bar — not a time claim, a progress geometry riding the same
-  # track. Met slices fill; the FIRST unmet slice is "next" and pulses.
-  defp crit_seg_style(row, i, n) do
-    n = max(n, 1)
-    seg = row.width / n
-    left = row.left + seg * i
-    width = max(seg - 0.6, 0.8)
-    "left: #{Float.round(left, 2)}%; width: #{Float.round(width, 2)}%;"
-  end
-
+  # The FIRST unmet criterion is "next" — the chip that pulses.
   defp next_unmet_index(crits), do: Enum.find_index(crits, &(!&1.met))
 
   # ── Render helpers ──────────────────────────────────────────────────────────

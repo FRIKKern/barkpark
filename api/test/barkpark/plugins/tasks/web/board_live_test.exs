@@ -1606,13 +1606,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
       deck = deck |> String.split("</main>", parts: 2) |> hd()
       assert occurrences(deck, "is-expanded") >= 2
-      # criteria render as CHECKS + SEGMENT BARS on the claimed card's chart:
+      # criteria render as HORIZONTAL CHECK CHIPS on the claimed card's chart:
       assert deck =~ ~s(data-role="gantt-criterion")
       assert deck =~ "first check met"
-      assert deck =~ ~s(data-role="gantt-crit-bar")
-      # the met slice fills, the next unmet slice pulses.
-      assert deck =~ "bp-gantt-bar--crit is-met"
-      assert deck =~ "bp-gantt-bar--crit is-next"
+      # the met chip lights, the next unmet chip pulses.
+      assert deck =~ "bp-check is-met"
+      assert deck =~ "bp-check is-next"
     end
   end
 
