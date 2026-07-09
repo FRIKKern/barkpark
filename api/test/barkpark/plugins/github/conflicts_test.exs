@@ -98,6 +98,38 @@ defmodule Barkpark.Plugins.Github.ConflictsTest do
                Conflicts.record(base(%{detail: nil}))
     end
 
+    test "a refresh MERGES detail from independent sources — no source clobbers another" do
+      # First record: an out_of_band_edit carrying the observed drift fingerprint
+      # + the ledger-owned GitHub fields that diverged (the MirrorJob update path).
+      assert {:ok, first} =
+               Conflicts.record(
+                 base(%{detail: %{"observed_fp" => 7, "github_fields" => %{"title" => "hand-edited"}}})
+               )
+
+      # A LATER touch on the SAME {repo,issue,kind} from a DIFFERENT source — e.g.
+      # a Projects-v2 GraphQL projection error folded into the frozen
+      # out_of_band_edit kind — must not clobber the human-drift detail.
+      assert {:ok, second} =
+               Conflicts.record(base(%{detail: %{"source" => "graphql", "graphql_error" => "RATE_LIMITED"}}))
+
+      # Same open row, and BOTH sources survive on it.
+      assert first.id == second.id
+      assert second.detail["observed_fp"] == 7
+      assert second.detail["github_fields"] == %{"title" => "hand-edited"}
+      assert second.detail["source"] == "graphql"
+      assert second.detail["graphql_error"] == "RATE_LIMITED"
+      assert Repo.aggregate(Conflict, :count, :id) == 1
+    end
+
+    test "a nil incoming detail never nulls the accumulated detail" do
+      assert {:ok, first} = Conflicts.record(base(%{detail: %{"observed_fp" => 3}}))
+      assert {:ok, second} = Conflicts.record(base(%{detail: nil}))
+
+      assert first.id == second.id
+      # the prior detail is preserved, not overwritten with an empty map
+      assert second.detail == %{"observed_fp" => 3}
+    end
+
     test "a numeric-string issue dedups against an integer issue (same key)" do
       assert {:ok, first} = Conflicts.record(base(%{issue: 42}))
       # a JSON/form caller handing issue as "42" must land on the SAME open row,

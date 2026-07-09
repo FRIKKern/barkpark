@@ -60,6 +60,7 @@ defmodule Barkpark.Plugins.Github.Health do
   @typedoc "Fully-shaped sync-health snapshot; every field is always present."
   @type t :: %{
           active: boolean(),
+          db_ok: boolean(),
           repo: String.t() | nil,
           conflicts: %{
             out_of_band_edit: non_neg_integer(),
@@ -105,6 +106,13 @@ defmodule Barkpark.Plugins.Github.Health do
 
     %{
       active: safe(fn -> Settings.active?() end, false),
+      # Liveness bit for the whole snapshot: a trivial round-trip to Postgres. On
+      # a healthy DB it is `true`; if the DB is down/unreachable the `SELECT 1`
+      # raises or exits and `safe/2` degrades it to `false` — the ONE field that
+      # distinguishes a genuinely healthy zero-snapshot from the all-zeros a dead
+      # DB would otherwise silently produce (every section falls back to zeros).
+      # The console/`bp github status` reads it to tell "quiet" from "blind".
+      db_ok: safe(fn -> Repo.query!("SELECT 1"); true end, false),
       repo: repo,
       conflicts: conflicts_snapshot(repo),
       datasets: datasets_snapshot(),

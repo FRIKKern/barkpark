@@ -28,8 +28,8 @@ defmodule BarkparkWeb.GithubAdoptControllerTest do
     end)
   end
 
-  defp adopt(params) do
-    build_conn() |> GithubAdoptController.adopt(params)
+  defp adopt(params, conn \\ build_conn()) do
+    GithubAdoptController.adopt(conn, params)
   end
 
   describe "status mapping" do
@@ -39,7 +39,12 @@ defmodule BarkparkWeb.GithubAdoptControllerTest do
       conn = adopt(%{"id" => "gh-42", "dataset" => "production"})
 
       assert %{"ok" => true, "task" => "gh-42", "state" => "adopted"} = json_response(conn, 200)
-      assert_received {:adopt_called, "gh-42", "production", []}
+      # The controller threads ScopeHelpers.scope_opts(conn) (D15), not a
+      # hardcoded []. A flat/unscoped conn carries no workspace/project assigns,
+      # so the scope keys are absent (nil-safe → seeded-Default at the service).
+      assert_received {:adopt_called, "gh-42", "production", opts}
+      assert Keyword.get(opts, :workspace_id) == nil
+      assert Keyword.get(opts, :project_id) == nil
     end
 
     test "defaults the dataset to production when absent" do
@@ -48,7 +53,26 @@ defmodule BarkparkWeb.GithubAdoptControllerTest do
       conn = adopt(%{"id" => "gh-7"})
 
       assert json_response(conn, 200)
-      assert_received {:adopt_called, "gh-7", "production", []}
+      assert_received {:adopt_called, "gh-7", "production", _opts}
+    end
+
+    test "threads the resolved tenant scope into the adopt seam (D15)" do
+      stub_adopt({:ok, %{doc_id: "gh-99"}})
+
+      # Simulate the scoped /w/:ws/p/:proj mirror: the ResolveWorkspace /
+      # ResolveProject plugs have set the resolved workspace/project assigns.
+      # `scope_opts/1` must lift them into the Adopt call so a non-default-tenant
+      # intake is loaded and written under its OWN scope.
+      conn =
+        build_conn()
+        |> Plug.Conn.assign(:current_workspace, %{id: "ws-abc"})
+        |> Plug.Conn.assign(:current_project, %{id: "proj-xyz"})
+
+      _conn = adopt(%{"id" => "gh-99", "dataset" => "production"}, conn)
+
+      assert_received {:adopt_called, "gh-99", "production", opts}
+      assert Keyword.get(opts, :workspace_id) == "ws-abc"
+      assert Keyword.get(opts, :project_id) == "proj-xyz"
     end
 
     test "not_intake → 409" do

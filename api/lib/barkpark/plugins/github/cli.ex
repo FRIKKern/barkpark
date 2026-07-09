@@ -56,7 +56,11 @@ defmodule Barkpark.Plugins.Github.CLI do
         paginated: false,
         dry_run: false,
         default_output: "minimal",
-        scoped_prefix: nil
+        # D15: the token bucket now has a `/w/:ws/p/:proj/v1/plugins` scoped
+        # mirror, so `bp github adopt` can address a specific workspace/project
+        # and the CLI knows how to build that scoped URL. Absent a scope flag it
+        # falls back to the flat path (Default tenant) — today's behavior.
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       },
       %{
         id: "github.status",
@@ -81,7 +85,10 @@ defmodule Barkpark.Plugins.Github.CLI do
         # "valid output, zero information" degradation). JSON is the honest,
         # legible default for a nested observability payload.
         default_output: "json",
-        scoped_prefix: nil
+        # D15: the token bucket's `/w/:ws/p/:proj/v1/plugins` scoped mirror lets
+        # `bp github status` report health for a specific workspace/project.
+        # Absent a scope flag it falls back to the flat path (Default tenant).
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       }
     ]
   end
