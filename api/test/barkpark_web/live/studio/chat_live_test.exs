@@ -2276,6 +2276,150 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "terminal look (w6.5)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    test "a tool call renders the ● row and its result the ⎿ line", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_1",
+                 "name" => "Bash",
+                 "input" => %{"command" => "mix test"}
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Bash"
+      refute html =~ "⎿"
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_1",
+                 "content" => "247 tests, 0 failures"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "⎿"
+      assert html =~ "247 tests, 0 failures"
+    end
+
+    test "a multiline output collapses behind details with a line count", %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "id" => "toolu_2", "name" => "Read", "input" => %{}}
+             ]
+           }
+         }}
+      )
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_2",
+                 "content" => "line one\nline two\nline three"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "<details>"
+      assert html =~ "line one"
+      assert html =~ "+2 lines"
+    end
+
+    test "the reopened transcript replays the ⎿ output from the store", %{conn: conn, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_use", "id" => "toolu_3", "name" => "Bash", "input" => %{}}
+             ]
+           }
+         }}
+      )
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_3",
+                 "content" => "replayed output"
+               }
+             ]
+           }
+         }}
+      )
+
+      {:ok, _view2, html} = live(conn, "/studio/chat/#{sid}")
+      assert html =~ "⎿"
+      assert html =~ "replayed output"
+    end
+
+    test "the user prompt wears the ❯ gutter, not a bubble", %{view: view} do
+      html = render(view)
+      assert html =~ "❯"
+      assert html =~ "go"
+    end
+
+    test "the turn clock ticks while working and the spinner shows", %{view: view} do
+      html = render(view)
+      assert html =~ "bp-chat-spinner"
+      assert html =~ "working…"
+
+      send(view.pid, :turn_tick)
+      send(view.pid, :turn_tick)
+      assert render(view) =~ "2s"
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()

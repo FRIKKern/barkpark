@@ -215,6 +215,71 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert Recorder.whereis(other) == nil
   end
 
+  describe "tool results (terminal look, w6.5)" do
+    test "a tool_use persists its id; the tool_result frame attaches the output",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_abc",
+                 "name" => "Bash",
+                 "input" => %{"command" => "ls"}
+               }
+             ]
+           }
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "tool"))
+      assert row.metadata["tool_use_id"] == "toolu_abc"
+      refute row.metadata["output"]
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_abc",
+                 "content" => "a.txt\nb.txt"
+               }
+             ]
+           }
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "tool"))
+      assert row.metadata["output"] == "a.txt\nb.txt"
+    end
+
+    test "a result for an unknown tool_use_id is a safe noop", %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{"type" => "tool_result", "tool_use_id" => "toolu_ghost", "content" => "x"}
+             ]
+           }
+         }}
+      )
+
+      assert Process.alive?(recorder)
+      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "tool")) == []
+    end
+  end
+
   describe "live activity feed (wave 5)" do
     setup %{sid: sid} do
       Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
@@ -344,8 +409,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
       frame(
         recorder,
-        {:claude_chat_control, :initialize, "bp-req-y",
-         %{"commands" => [%{"name" => "review"}]}}
+        {:claude_chat_control, :initialize, "bp-req-y", %{"commands" => [%{"name" => "review"}]}}
       )
 
       assert_receive {:chat_commands, ^sid, [%{"name" => "review"}]}
