@@ -68,14 +68,48 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   The subprocess command as `{executable, args}`. Defaults to the Claude CLI
   in streaming print mode, plan permission mode. Overridable via config
   (tests inject a trivial command so they don't require `claude`).
+
+  `session_opts` threads session identity onto the real argv through the pure
+  `build_args/2` seam (`%{session_id: uuid}` ⇒ `--session-id`,
+  `%{session_id: uuid, resume: true}` ⇒ `--resume`).
+
+  VACUOUS-GREEN LAW: the `:command` config override returns its tuple
+  **verbatim**, bypassing `build_args/2` entirely — never assert session/mode
+  flags through a `:command` fake. Assert flags either against `build_args/2`
+  directly, or end-to-end through a `:binary` override (which keeps
+  `build_args/2`).
   """
-  @spec command(String.t()) :: {String.t(), [String.t()]}
-  def command(mode \\ @default_mode) do
+  @spec command(String.t(), map()) :: {String.t(), [String.t()]}
+  def command(mode \\ @default_mode, session_opts \\ %{}) do
     case Keyword.get(config(), :command) do
       {exe, args} when is_binary(exe) and is_list(args) -> {exe, args}
-      _ -> {binary(), default_args(mode)}
+      _ -> {binary(), build_args(mode, session_opts)}
     end
   end
+
+  @doc """
+  Pure assembly of the CLI argv for a given `mode` and `session_opts`. This is
+  the single seam where session identity reaches the real process — kept pure
+  and public so flag behavior is unit-testable without spawning a Port.
+
+  Session flags (charter D8/D9), appended after the base args:
+
+    * fresh session — `%{session_id: uuid}` ⇒ `["--session-id", uuid]`
+      (we mint the uuid, so persistence needs no wire-protocol id scraping)
+    * resume — `%{session_id: uuid, resume: true}` ⇒ `["--resume", uuid]`,
+      and NEVER `--session-id` (the two are mutually exclusive on the binary)
+    * absent — no `session_id` ⇒ neither flag (back-compat with w1–w2c)
+  """
+  @spec build_args(String.t(), map()) :: [String.t()]
+  def build_args(mode, session_opts \\ %{}) do
+    default_args(mode) ++ session_args(session_opts)
+  end
+
+  # Resume wins over a fresh pin: --resume and --session-id are mutually
+  # exclusive, so a resume never also emits --session-id.
+  defp session_args(%{session_id: id, resume: true}) when is_binary(id), do: ["--resume", id]
+  defp session_args(%{session_id: id}) when is_binary(id), do: ["--session-id", id]
+  defp session_args(_), do: []
 
   @doc "Permission modes the chat may run in. `plan` is read-only; the others ask."
   @spec modes() :: [String.t()]
@@ -150,13 +184,27 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
   The session monitors the sink and shuts the subprocess down when the sink
   dies, so an abandoned LiveView never leaks a `claude` process.
+
+  `:session_opts` (charter D8) pins or resumes a session: `%{session_id: uuid}`
+  starts a fresh pinned session, `%{session_id: uuid, resume: true}` resumes an
+  existing one. Absent ⇒ an anonymous one-shot session (w1–w2c behavior).
   """
-  @spec start_session(%{:sink => pid(), optional(:mode) => String.t()}) ::
-          {:ok, pid()} | {:error, term()}
+  @spec start_session(%{
+          :sink => pid(),
+          optional(:mode) => String.t(),
+          optional(:session_opts) => map()
+        }) :: {:ok, pid()} | {:error, term()}
   def start_session(%{sink: sink} = opts) when is_pid(sink) do
     cond do
-      not enabled?() -> {:error, :disabled}
-      true -> __MODULE__.Session.start(%{sink: sink, mode: normalize_mode(opts[:mode])})
+      not enabled?() ->
+        {:error, :disabled}
+
+      true ->
+        __MODULE__.Session.start(%{
+          sink: sink,
+          mode: normalize_mode(opts[:mode]),
+          session_opts: Map.get(opts, :session_opts, %{})
+        })
     end
   end
 
@@ -177,30 +225,53 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     GenServer.cast(session, {:send_user_message, text})
   end
 
-  # NOTE: interrupt/2 + set_permission_mode/2 are the control-frame seam owned
-  # by `scc-w1-wire-seam` (S2). Provided here in a minimal, spec-faithful form
-  # so the honest-turns slice (S4) compiles and tests in isolation; S2's
-  # canonical version (with build_args + set_model) supersedes on integration.
-
   @doc """
-  Interrupt the running turn via a `control_request`/`interrupt` frame on
-  stdin (proven on the raw wire). The turn aborts with a terminal `result`
-  (`terminal_reason: "aborted_streaming"`) but the SESSION survives — the next
-  user message runs normally. Idempotent: a duplicate interrupt is harmless.
+  Interrupt the running turn (charter D10). Writes a `control_request` frame
+  with subtype `interrupt` on stdin — proven on the raw wire 2026-07-09: the
+  CLI acks with a `control_response` (subtype `success`), aborts the turn, and
+  the session SURVIVES (the terminal `result` carries
+  `terminal_reason: "aborted_streaming"`, which the LiveView discriminates from
+  a real error). Returns the minted `request_id` so the caller can match the
+  ack (forwarded to the sink as a `{:claude_chat_event, control_response}`).
   """
-  @spec interrupt(pid()) :: :ok
+  @spec interrupt(pid()) :: {:ok, String.t()}
   def interrupt(session) when is_pid(session) do
-    GenServer.cast(session, :interrupt)
+    control_request(session, %{"subtype" => "interrupt"})
   end
 
   @doc """
-  Steer the LIVE session's permission mode via a `set_permission_mode` control
-  frame (key `mode` — the alt key `permission_mode` is a silent no-op). The
-  model's context is preserved; no respawn.
+  Switch the permission mode of a live session in place (charter D12),
+  replacing the context-destroying respawn. The wire key MUST be `mode`: the
+  real binary treats the plausible-looking `permission_mode` key as a silent
+  no-op (returns success with an EMPTY response). Returns the minted
+  `request_id`; the LiveView must confirm the echoed `response.mode` before
+  trusting the switch (subtype `success` alone is a vacuous-green trap).
   """
-  @spec set_permission_mode(pid(), String.t()) :: :ok
+  @spec set_permission_mode(pid(), String.t()) :: {:ok, String.t()}
   def set_permission_mode(session, mode) when is_pid(session) and is_binary(mode) do
-    GenServer.cast(session, {:set_permission_mode, normalize_mode(mode)})
+    control_request(session, %{"subtype" => "set_permission_mode", "mode" => mode})
+  end
+
+  @doc """
+  Switch the model of a live session in place. Returns the minted `request_id`;
+  the caller should verify the next `result` frame's `modelUsage` key actually
+  changed before trusting the switch (the CLI acks `success` regardless).
+  """
+  @spec set_model(pid(), String.t()) :: {:ok, String.t()}
+  def set_model(session, model) when is_pid(session) and is_binary(model) do
+    control_request(session, %{"subtype" => "set_model", "model" => model})
+  end
+
+  # Mint a request_id and cast an outbound control_request frame. The id lets
+  # the caller correlate the CLI's control_response ack (forwarded to the sink).
+  defp control_request(session, request) when is_map(request) do
+    request_id = mint_request_id()
+    GenServer.cast(session, {:control_request, request_id, request})
+    {:ok, request_id}
+  end
+
+  defp mint_request_id do
+    "bp-req-" <> (8 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower))
   end
 
   @doc "Terminate the session subprocess."
@@ -258,7 +329,8 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def init(%{sink: sink} = opts) do
-      {exe, args} = ClaudeChat.command(Map.get(opts, :mode, "plan"))
+      {exe, args} =
+        ClaudeChat.command(Map.get(opts, :mode, "plan"), Map.get(opts, :session_opts, %{}))
 
       case System.find_executable(exe) do
         nil ->
@@ -316,13 +388,18 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       {:noreply, state}
     end
 
-    def handle_cast(:interrupt, state) do
-      write_control_request(state.port, "interrupt", %{})
-      {:noreply, state}
-    end
+    # Outbound control_request (interrupt / set_permission_mode / set_model).
+    # The CLI answers with a control_response echoing this request_id, which
+    # flows to the sink through the fallback dispatch clause below.
+    def handle_cast({:control_request, request_id, request}, state) do
+      line =
+        Jason.encode!(%{
+          "type" => "control_request",
+          "request_id" => request_id,
+          "request" => request
+        }) <> "\n"
 
-    def handle_cast({:set_permission_mode, mode}, state) do
-      write_control_request(state.port, "set_permission_mode", %{"mode" => mode})
+      safe_command(state.port, line)
       {:noreply, state}
     end
 
@@ -400,20 +477,6 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     defp dispatch_event(event, state), do: send(state.sink, {:claude_chat_event, event})
-
-    # Control-request frame on stdin: `{type, request_id, request{subtype,…}}`.
-    # A minted request_id keeps each in-band control uniquely correlatable with
-    # its `control_response` ack (which we tolerate, not require).
-    defp write_control_request(port, subtype, extra) do
-      line =
-        Jason.encode!(%{
-          "type" => "control_request",
-          "request_id" => "#{subtype}-#{System.unique_integer([:positive, :monotonic])}",
-          "request" => Map.merge(%{"subtype" => subtype}, extra)
-        }) <> "\n"
-
-      safe_command(port, line)
-    end
 
     defp safe_command(port, data) when is_port(port) do
       Port.command(port, data)
