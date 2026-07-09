@@ -9,11 +9,20 @@ defmodule BarkparkWeb.PulseController do
 
     * unknown channel → 404 (nothing is open unless explicitly configured)
     * strict schema validation + byte ceiling (`Barkpark.Pulse.validate_payload/2`)
-    * per-IP token bucket (sustained `rate_per_min`, burst 3)
+    * per-IP token bucket on writes (sustained `rate_per_min`, burst 3)
     * per-channel UTC-day ceiling (`daily_cap`)
+    * per-IP read bucket on `recent`/`stats` (generous: 30 burst, 10/sec
+      refill) — `recent` is DB read-amplification with zero backpressure
+      otherwise, and a flood there is the one remaining unmetered seam.
 
   A leaked/scripted client can therefore inflate a vanity counter and noise
   an ephemeral 24h feed — never touch documents, media, or tokens.
+
+  Caps are billed HERE, at the plugin's own call sites, via the core generic
+  `Barkpark.RateLimiter` — never a plug on the `:public_api` pipeline (that
+  would collaterally throttle every other public plugin route). Same law as
+  PublicCors: mechanism in core, policy in the plugin. Full caps table +
+  client backoff contract: `Barkpark.Plugins.Pulse` @moduledoc.
   """
 
   use BarkparkWeb, :controller
@@ -22,6 +31,12 @@ defmodule BarkparkWeb.PulseController do
   alias Barkpark.RateLimiter
 
   @burst 3
+
+  # Read-path bucket (recent/stats): deliberately GENEROUS so a NAT'd office
+  # sharing one egress IP survives normal polling, while a scripted flood from
+  # a single IP still hits backpressure. 30-token burst, 10 tokens/sec refill.
+  @read_capacity 30
+  @read_refill_per_sec 10.0
 
   # POST /v1/plugins/pulse/:channel/events
   def create(conn, %{"channel" => channel} = params) do
@@ -51,22 +66,25 @@ defmodule BarkparkWeb.PulseController do
 
   # GET /v1/plugins/pulse/:channel/recent?since=<cursor>&limit=<n>
   def recent(conn, %{"channel" => channel} = params) do
-    case channel_or_404(conn, channel) do
-      {:ok, _cfg} ->
-        since = parse_int(params["since"], 0)
-        limit = parse_int(params["limit"], 100)
-        json(conn, Pulse.recent(channel, since, limit))
-
-      {:halted, conn} ->
-        conn
+    with {:ok, _cfg} <- channel_or_404(conn, channel),
+         :ok <- check_read_bucket(conn, channel) do
+      since = parse_int(params["since"], 0)
+      limit = parse_int(params["limit"], 100)
+      json(conn, Pulse.recent(channel, since, limit))
+    else
+      {:halted, conn} -> conn
+      {:rate_limited, retry_after} -> rate_limited(conn, retry_after)
     end
   end
 
   # GET /v1/plugins/pulse/:channel/stats
   def stats(conn, %{"channel" => channel}) do
-    case channel_or_404(conn, channel) do
-      {:ok, _cfg} -> json(conn, Pulse.stats(channel))
+    with {:ok, _cfg} <- channel_or_404(conn, channel),
+         :ok <- check_read_bucket(conn, channel) do
+      json(conn, Pulse.stats(channel))
+    else
       {:halted, conn} -> conn
+      {:rate_limited, retry_after} -> rate_limited(conn, retry_after)
     end
   end
 
@@ -105,6 +123,21 @@ defmodule BarkparkWeb.PulseController do
     if Pulse.count_today(channel) < cfg["daily_cap"],
       do: :ok,
       else: {:rate_limited, 3600}
+  end
+
+  # Read-path backpressure for recent/stats. A DISTINCT bucket key from the
+  # write path so a client's writes and reads never share a budget, keyed
+  # per-IP + per-channel. Generous cap (see @read_capacity) so shared-IP
+  # visitors polling normally never trip it; a single-IP flood does. Retry
+  # of 1s: at 10 tokens/sec a client is clear again almost immediately.
+  defp check_read_bucket(conn, channel) do
+    case RateLimiter.check({:pulse_read, client_ip(conn), channel},
+           capacity: @read_capacity,
+           refill_per_sec: @read_refill_per_sec
+         ) do
+      :ok -> :ok
+      :rate_limited -> {:rate_limited, 1}
+    end
   end
 
   # RemoteIp-style header awareness is deliberately minimal: trust the first
