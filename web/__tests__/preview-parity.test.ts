@@ -30,14 +30,22 @@ import {
 
 const API = "https://api.example";
 
+type FixtureManifest = {
+  title: string;
+  type: string;
+  url: string;
+  description: string | null;
+  image: { url: string; width: number; height: number; alt: string | null; type: string } | null;
+};
+
 const fixture = JSON.parse(
   readFileSync(
     fileURLToPath(new URL("./fixtures/preview-parity.json", import.meta.url)),
     "utf8",
   ),
 ) as {
-  rich: { manifest: Record<string, any> };
-  core: { manifest: Record<string, any> };
+  rich: { manifest: FixtureManifest & { image: NonNullable<FixtureManifest["image"]> } };
+  core: { manifest: FixtureManifest };
 };
 
 type OgView = { type?: string; title?: unknown; url?: unknown; description?: unknown; images?: unknown };
