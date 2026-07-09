@@ -326,6 +326,16 @@ func TestNeutralLifecycleDegrades(t *testing.T) {
 			t.Errorf("azure archive degrade missing %q:\n%s", want, stderr)
 		}
 	}
+	// fake has the facet INTERFACES but no CLI dispatch entry, so the neutral
+	// verb degrades (its capability row stays honest for the seam; the CLI-level
+	// wiring is deliberately hetzner+azure only).
+	_, stderr, code = runInstanceCapture(t, "table", "archive", "--provider", "fake", "web-1")
+	if code != exitGeneric {
+		t.Fatalf("fake archive should degrade with exit %d, got %d\n%s", exitGeneric, code, stderr)
+	}
+	if !strings.Contains(stderr, "does not support") {
+		t.Errorf("fake archive degrade missing the honest reason:\n%s", stderr)
+	}
 	// unknown provider → usage.
 	_, stderr, code = runInstanceCapture(t, "table", "audit", "--provider", "gcp")
 	if code != exitUsage {
