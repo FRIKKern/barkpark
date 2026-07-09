@@ -87,5 +87,21 @@ defmodule Barkpark.Tenancy.WorkspaceThemeTest do
       assert is_list(themes) and themes != []
       assert Tenancy.default_theme() in themes
     end
+
+    test "delegates to the generated TokensGen theme list (atoms → strings)" do
+      # The allowlist is no longer a hand-kept module attribute — it is the
+      # generated theme set (design/emit.mjs loops design/themes/*.json → the
+      # TokensGen.themes/0 atom list). Adding theme N+1 grows both in lockstep.
+      generated = Enum.map(Barkpark.PortableDoc.Render.TokensGen.themes(), &Atom.to_string/1)
+      assert Tenancy.known_themes() == generated
+      assert "evergreen" in Tenancy.known_themes()
+    end
+
+    test "an unknown id is still rejected by set_workspace_theme/2 (function-body guard)" do
+      ws = workspace!()
+      refute "ferngully-9000" in Tenancy.known_themes()
+      assert {:error, :unknown_theme} = Tenancy.set_workspace_theme(ws, "ferngully-9000")
+      assert Tenancy.get_workspace_by_id(ws.id).settings == %{}
+    end
   end
 end

@@ -205,6 +205,11 @@ export function hslToHex(channels) {
 // "U+280B" -> "⠋"
 export const glyphOf = (cp) => String.fromCodePoint(parseInt(cp.slice(2), 16));
 
+// A lipgloss.AdaptiveColor{Light,Dark} Go literal — the value a non-evergreen Go
+// theme entry stamps directly (the evergreen entry keeps its Gen* var reference,
+// so N=1 stays byte-identical; only theme N+1 grows a literal entry per map).
+const goAdaptive = (light, dark) => `lipgloss.AdaptiveColor{Light: "${light}", Dark: "${dark}"}`;
+
 // ── CSS var fragments (shared by every CSS surface) ─────────────────────────
 // Each helper reads from a tokens-shaped palette `t` (default: the base tokens
 // singleton). The bare/evergreen callers pass no `t` and get identical bytes to
@@ -627,13 +632,37 @@ function goHeader(pkg) {
   ].join("\n");
 }
 
-function taskboardGo() {
+function taskboardGo(themes = loadThemes()) {
   const life = tokens.lifecycle;
   const rows = LIFE_ORDER.map((s) => {
     const e = life[s];
     return `\t"${s}": {Glyph: "${glyphOf(e.codepoint)}", ASCIIGlyph: ${JSON.stringify(e.asciiGlyph)}, Role: ${JSON.stringify(e.role)}, ColorLight: "${e.color.light}", ColorDark: "${e.color.dark}"},`;
   });
   const frames = life.in_progress.frames.map((f) => `"${glyphOf(f)}"`).join(", ");
+  // One genLifecycleThemes entry per committed theme. evergreen REFERENCES the
+  // GenLifecycle/GenBrailleFrames/GenBrailleStill vars (byte-identical to today);
+  // a non-evergreen theme stamps its lifecycle set as literals from themePalette.
+  // Lifecycle hues are theme-INVARIANT passthrough (charter D21), so an alternate
+  // theme's values equal evergreen's — the literal entry still proves the loop.
+  const themeEntry = ({ name, spec }) => {
+    if (name === DEFAULT_THEME)
+      return [`\t${JSON.stringify(name)}: {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},`];
+    const pl = themePalette(spec).lifecycle;
+    const litRows = LIFE_ORDER.map((s) => {
+      const e = pl[s];
+      return `\t\t\t"${s}": {Glyph: "${glyphOf(e.codepoint)}", ASCIIGlyph: ${JSON.stringify(e.asciiGlyph)}, Role: ${JSON.stringify(e.role)}, ColorLight: "${e.color.light}", ColorDark: "${e.color.dark}"},`;
+    });
+    const litFrames = pl.in_progress.frames.map((f) => `"${glyphOf(f)}"`).join(", ");
+    return [
+      `\t${JSON.stringify(name)}: {`,
+      "\t\tLifecycle: map[string]GenLifecycleToken{",
+      ...litRows,
+      "\t\t},",
+      `\t\tBrailleFrames: [10]string{${litFrames}},`,
+      `\t\tBrailleStill: "${glyphOf(pl.in_progress.framesStill)}",`,
+      "\t},",
+    ];
+  };
   return [
     goHeader("taskboard"),
     "// GenLifecycleToken mirrors one design/tokens.json lifecycle state.",
@@ -676,7 +705,7 @@ function taskboardGo() {
     "// genLifecycleThemes keys each theme's lifecycle set by id (evergreen REFERENCES",
     "// GenLifecycle/GenBrailleFrames/GenBrailleStill — no re-typed literals).",
     "var genLifecycleThemes = map[string]ThemeLifecycle{",
-    `\t${JSON.stringify(DEFAULT_THEME)}: {Lifecycle: GenLifecycle, BrailleFrames: GenBrailleFrames, BrailleStill: GenBrailleStill},`,
+    ...themes.flatMap(themeEntry),
     "}",
     "",
     "// Resolve returns a theme's lifecycle token set, defaulting to evergreen for an",
@@ -694,7 +723,7 @@ function taskboardGo() {
 // ── surface: Go pdrender (internal/pdrender/tokens_gen.go) ────────────────────
 // Reading tokens + the four semantic status tones as hex AdaptiveColors.
 // Additive stub — pdrender's hand-tuned tone*/pd* vars are untouched.
-function pdrenderGo() {
+function pdrenderGo(themes = loadThemes()) {
   const c = tokens.color;
   const st = c.status;
   const r = tokens.type.reading;
@@ -718,6 +747,50 @@ function pdrenderGo() {
   // Neutral callout tone (color.cliCalloutNeutral → hex) — the neutral peer of
   // the four status tones, consumed by Theme.Callout's "neutral" arm.
   const neut = c.cliCalloutNeutral;
+  // The evergreen genPalette entry, byte-for-byte as before (Gen* references so
+  // N=1 is byte-identical); a non-evergreen entry stamps literals from its skin.
+  const EVERGREEN_FIELDS = [
+    "\t\tChromeAccent: GenChromeAccent,",
+    "\t\tChromeInk: GenChromeInk,",
+    "\t\tChromeTextSecondary: GenChromeTextSecondary,",
+    "\t\tChromeDim: GenChromeDim,",
+    "\t\tRule: GenRule,",
+    "\t\tCodeFg: GenCodeFg,",
+    "\t\tCodeBg: GenCodeBg,",
+    "\t\tReadingMuted: GenDim,",
+    "\t\tReadingAccent: GenReadingAccent,",
+    "\t\tToneInfo: GenToneInfo,",
+    "\t\tToneOK: GenToneOK,",
+    "\t\tToneWarn: GenToneWarn,",
+    "\t\tToneDanger: GenToneDanger,",
+    "\t\tToneNeutral: GenToneNeutral,",
+  ];
+  const litFields = (p) => {
+    const col = p.color;
+    const hx = (o) => goAdaptive(o.light, o.dark);            // stored hex (chrome/code/neutral)
+    const hs = (o) => goAdaptive(hslToHex(o.light), hslToHex(o.dark)); // HSL channels → hex
+    return [
+      `\t\tChromeAccent: ${hx(col.cliChrome["chrome-accent"])},`,
+      `\t\tChromeInk: ${hx(col.cliChrome["chrome-ink"])},`,
+      `\t\tChromeTextSecondary: ${hx(col.cliChrome["chrome-text-secondary"])},`,
+      `\t\tChromeDim: ${hx(col.cliChrome["chrome-dim"])},`,
+      `\t\tRule: ${hs(col.border)},`,
+      `\t\tCodeFg: ${hx(col.code.fg)},`,
+      `\t\tCodeBg: ${hx(col.code.bg)},`,
+      `\t\tReadingMuted: ${hs(col["muted-text"])},`,
+      `\t\tReadingAccent: ${hs(col["reading-accent"])},`,
+      `\t\tToneInfo: ${hs(col.status.info)},`,
+      `\t\tToneOK: ${hs(col.status.ok)},`,
+      `\t\tToneWarn: ${hs(col.status.warn)},`,
+      `\t\tToneDanger: ${hs(col.status.danger)},`,
+      `\t\tToneNeutral: ${hx(col.cliCalloutNeutral)},`,
+    ];
+  };
+  const pdThemeEntry = ({ name, spec }) => [
+    `\t${JSON.stringify(name)}: {`,
+    ...alignMap(name === DEFAULT_THEME ? EVERGREEN_FIELDS : litFields(themePalette(spec))),
+    "\t},",
+  ];
   return [
     goHeader("pdrender"),
     'import "github.com/charmbracelet/lipgloss"',
@@ -794,24 +867,7 @@ function pdrenderGo() {
     "// genPalette keys each theme's Palette by id. Values REFERENCE the Gen* vars",
     "// above (no re-typed literals) so the evergreen skin is byte-identical to them.",
     "var genPalette = map[string]Palette{",
-    `\t${JSON.stringify(DEFAULT_THEME)}: {`,
-    ...alignMap([
-      "\t\tChromeAccent: GenChromeAccent,",
-      "\t\tChromeInk: GenChromeInk,",
-      "\t\tChromeTextSecondary: GenChromeTextSecondary,",
-      "\t\tChromeDim: GenChromeDim,",
-      "\t\tRule: GenRule,",
-      "\t\tCodeFg: GenCodeFg,",
-      "\t\tCodeBg: GenCodeBg,",
-      "\t\tReadingMuted: GenDim,",
-      "\t\tReadingAccent: GenReadingAccent,",
-      "\t\tToneInfo: GenToneInfo,",
-      "\t\tToneOK: GenToneOK,",
-      "\t\tToneWarn: GenToneWarn,",
-      "\t\tToneDanger: GenToneDanger,",
-      "\t\tToneNeutral: GenToneNeutral,",
-    ]),
-    "\t},",
+    ...themes.flatMap(pdThemeEntry),
     "}",
     "",
     "// Resolve returns the pdrender Palette for a theme id, defaulting to evergreen",
@@ -836,13 +892,36 @@ const SEMROLE_TONES = [["OK", "ok"], ["Info", "info"], ["Warn", "warn"], ["Dange
 const SEMROLE_ANSI16 = { ok: 32, info: 34, warn: 33, danger: 31 }; // green/blue/yellow/red
 const pascal = (s) => s.split("_").map((w) => w[0].toUpperCase() + w.slice(1)).join("");
 
-function semroleGo() {
+function semroleGo(themes = loadThemes()) {
   const st = tokens.color.status;
   const life = tokens.lifecycle;
   const tone = (name, role) =>
     `\tGen${name} = lipgloss.AdaptiveColor{Light: "${hslToHex(st[role].light)}", Dark: "${hslToHex(st[role].dark)}"}`;
   const hue = (s) =>
     `\tGen${pascal(s)}Hue = lipgloss.AdaptiveColor{Light: "${life[s].color.light}", Dark: "${life[s].color.dark}"}`;
+  // One genTones entry per committed theme. evergreen REFERENCES the Gen* maps
+  // (byte-identical to today); a non-evergreen theme stamps its status + lifecycle
+  // maps as literals from its skin (ANSI16 is a theme-invariant SGR floor).
+  const tonesEntry = ({ name, spec }) => {
+    if (name === DEFAULT_THEME)
+      return [`\t${JSON.stringify(name)}: {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},`];
+    const p = themePalette(spec);
+    const pst = p.color.status;
+    const plife = p.lifecycle;
+    return [
+      `\t${JSON.stringify(name)}: {`,
+      "\t\tStatusTone: map[string]lipgloss.AdaptiveColor{",
+      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${goAdaptive(hslToHex(pst[role].light), hslToHex(pst[role].dark))},`),
+      "\t\t},",
+      "\t\tLifecycleHue: map[string]lipgloss.AdaptiveColor{",
+      ...LIFE_ORDER.map((s) => `\t\t\t"${s}": ${goAdaptive(plife[s].color.light, plife[s].color.dark)},`),
+      "\t\t},",
+      "\t\tANSI16: map[string]int{",
+      ...SEMROLE_TONES.map(([, role]) => `\t\t\t"${role}": ${SEMROLE_ANSI16[role]},`),
+      "\t\t},",
+      "\t},",
+    ];
+  };
   return [
     goHeader("semrole"),
     'import "github.com/charmbracelet/lipgloss"',
@@ -893,7 +972,7 @@ function semroleGo() {
     "// genTones keys each theme's tones by id. The evergreen entry REFERENCES the",
     "// Gen* maps above (no re-typed literals) so it is byte-identical to them.",
     "var genTones = map[string]ThemeTones{",
-    `\t${JSON.stringify(DEFAULT_THEME)}: {StatusTone: GenStatusTone, LifecycleHue: GenLifecycleHue, ANSI16: GenANSI16},`,
+    ...themes.flatMap(tonesEntry),
     "}",
     "",
     "// Resolve returns a theme's status/lifecycle/ANSI-16 token set, defaulting to",
@@ -904,6 +983,11 @@ function semroleGo() {
     "\t}",
     "\treturn genTones[DefaultTheme]",
     "}",
+    "",
+    "// Themes lists every generated theme id in dir order (evergreen first). bp style",
+    "// and the styleguide showroom enumerate it to iterate skins; it grows by exactly",
+    "// one id when theme N+1 ships its file.",
+    `func Themes() []string { return []string{${themes.map((t) => JSON.stringify(t.name)).join(", ")}} }`,
     "",
   ].join("\n");
 }
@@ -931,23 +1015,38 @@ const CLI_CHROME_REUSE = [
 // Resolve a 'var(--role)' reference to its {light,dark} HSL channels. Status
 // roles live under color.status (var(--info) → color.status.info); base roles
 // sit directly on color.*.
-function resolveChromeRef(ref) {
+function resolveChromeRef(ref, t = tokens) {
   const role = ref.replace(/^var\(--/, "").replace(/\)$/, "");
-  return STATUS_ROLES.includes(role) ? tokens.color.status[role] : tokens.color[role];
+  return STATUS_ROLES.includes(role) ? t.color.status[role] : t.color[role];
 }
-// {light,dark} hex for a cliChrome role: NEW roles are hex already; REUSE roles
-// resolve their reference to HSL channels then convert to hex.
-function cliChromeHex(role) {
-  const v = tokens.color.cliChrome[role];
-  if (typeof v === "string") { const ch = resolveChromeRef(v); return { light: hslToHex(ch.light), dark: hslToHex(ch.dark) }; }
+// {light,dark} hex for a cliChrome role in palette `t` (default: base tokens →
+// byte-identical evergreen). NEW roles are hex already; REUSE roles resolve their
+// reference to HSL channels then convert to hex — the whole family re-tints when
+// a non-evergreen skin moves --primary / the status roles it points at.
+function cliChromeHex(role, t = tokens) {
+  const v = t.color.cliChrome[role];
+  if (typeof v === "string") { const ch = resolveChromeRef(v, t); return { light: hslToHex(ch.light), dark: hslToHex(ch.dark) }; }
   return { light: v.light, dark: v.dark };
 }
-function cliChromeGo() {
+function cliChromeGo(themes = loadThemes()) {
   const line = (name, role) => {
     const h = cliChromeHex(role);
     return `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${h.light}", Dark: "${h.dark}"}`;
   };
   const all = [...CLI_CHROME_NEW, ...CLI_CHROME_REUSE];
+  // One genChrome entry per committed theme. evergreen REFERENCES GenChrome
+  // (byte-identical); a non-evergreen theme stamps the whole role map as literals
+  // resolved against its own skin (REUSE roles re-tint with --primary / status).
+  const chromeEntry = ({ name, spec }) => {
+    if (name === DEFAULT_THEME)
+      return [`\t${JSON.stringify(name)}: {Chrome: GenChrome},`];
+    const p = themePalette(spec);
+    return [
+      `\t${JSON.stringify(name)}: {Chrome: map[string]lipgloss.AdaptiveColor{`,
+      ...all.map(([, role]) => { const h = cliChromeHex(role, p); return `\t\t\t"${role}": ${goAdaptive(h.light, h.dark)},`; }),
+      "\t}},",
+    ];
+  };
   // Cloud-console families (charter azure-hetzner Decision 7), emitted into the
   // SAME sibling (chrome_gen.go) so tokens_gen.go stays byte-stable. Provider
   // IDENTITY marks (hex) + the instance-lifecycle glyph/role/hue map. An
@@ -988,7 +1087,7 @@ function cliChromeGo() {
     "",
     "// genChrome keys each theme's chrome map by id (evergreen REFERENCES GenChrome).",
     "var genChrome = map[string]ThemeChrome{",
-    `\t${JSON.stringify(DEFAULT_THEME)}: {Chrome: GenChrome},`,
+    ...themes.flatMap(chromeEntry),
     "}",
     "",
     "// ResolveChrome returns a theme's chrome role map, defaulting to evergreen.",
@@ -1038,14 +1137,42 @@ function cliChromeGo() {
 // tokenized terracotta reading accent, and the reading type. kind "elixir"
 // (whole-file, like go/ts): check.mjs Part A byte-compares it. Additive — do
 // NOT edit palettes.ex; that consumer lands in wave 2 (Decision 8).
-function elixirTokensGen() {
-  const c = tokens.color;
-  const st = c.status;
-  const r = tokens.type.reading;
-  const em = tokens.color.paperEmail; // verbatim email skin (Wave 1 CAPTURE)
-  const co = tokens.color.paperCallout.light; // verbatim light callout tone tints (dark pairs → bulldocs reader skin)
-  const hx = (role) => hslToHex(c[role].light);
-  const stx = (role) => hslToHex(st[role].light);
+function elixirTokensGen(themes = loadThemes()) {
+  const r = tokens.type.reading; // reading type is theme-INVARIANT
+  // Every COLOUR-bearing @attr is a per-theme map. Each theme's values come from
+  // themePalette(spec) — for evergreen that equals the base tokens byte-for-byte
+  // (check.mjs Part F: derive(evergreen) === tokens.json), so N=1 is byte-identical;
+  // a non-evergreen theme yields its own literal hex. All Elixir values are LITERAL
+  // hex (no Gen* var indirection), so every theme entry is uniform.
+  const statusEntry = ({ name, spec }) => {
+    const st = themePalette(spec).color.status;
+    const h = (role) => hslToHex(st[role].light);
+    return `${name}: %{ok: "${h("ok")}", info: "${h("info")}", warn: "${h("warn")}", danger: "${h("danger")}"}`;
+  };
+  const readingAccentEntry = ({ name, spec }) =>
+    `${name}: "${hslToHex(themePalette(spec).color["reading-accent"].light)}"`;
+  const EMAIL_KEYS = [
+    ["brand", "brand"], ["brand_text", "brand-text"], ["rule", "rule"],
+    ["page_bg", "page-bg"], ["paper", "paper"], ["text", "text"],
+    ["muted", "muted"], ["code_bg", "code-bg"],
+  ];
+  const emailEntry = ({ name, spec }, last) => {
+    const em = themePalette(spec).color.paperEmail;
+    return [
+      `    ${name}: %{`,
+      ...EMAIL_KEYS.map(([k, src], i) => `      ${k}: "${em[src]}"${i === EMAIL_KEYS.length - 1 ? "" : ","}`),
+      `    }${last ? "" : ","}`,
+    ];
+  };
+  const calloutEntry = ({ name, spec }, last) => {
+    const co = themePalette(spec).color.paperCallout.light;
+    return [
+      `    ${name}: %{`,
+      ...CALLOUT_TONES.map((t, i) => `      ${t}: %{bg: "${co[t].bg}", fg: "${co[t].fg}"}${i === CALLOUT_TONES.length - 1 ? "" : ","}`),
+      `    }${last ? "" : ","}`,
+    ];
+  };
+  const isLast = (i) => i === themes.length - 1;
   return [
     "# Code generated by design/emit.mjs from design/tokens.json. DO NOT EDIT.",
     "# Regenerate: node design/emit.mjs --write",
@@ -1074,7 +1201,7 @@ function elixirTokensGen() {
     "",
     "  # Known theme ids (evergreen only this wave). resolve/1 folds an unknown /",
     "  # empty / binary theme onto :evergreen so every accessor is total.",
-    "  @themes [:evergreen]",
+    `  @themes [${themes.map((t) => ":" + t.name).join(", ")}]`,
     "  @doc \"Known theme ids (evergreen this wave).\"",
     "  def themes, do: @themes",
     "  defp resolve(theme) when theme in @themes, do: theme",
@@ -1085,14 +1212,14 @@ function elixirTokensGen() {
     "  defp resolve(_), do: :evergreen",
     "",
     "  # Semantic status tones (design/tokens.json color.status, light theme → hex).",
-    `  @status %{evergreen: %{ok: "${stx("ok")}", info: "${stx("info")}", warn: "${stx("warn")}", danger: "${stx("danger")}"}}`,
+    `  @status %{${themes.map(statusEntry).join(", ")}}`,
     "  def tone_ok(theme \\\\ :evergreen), do: @status[resolve(theme)].ok",
     "  def tone_info(theme \\\\ :evergreen), do: @status[resolve(theme)].info",
     "  def tone_warn(theme \\\\ :evergreen), do: @status[resolve(theme)].warn",
     "  def tone_danger(theme \\\\ :evergreen), do: @status[resolve(theme)].danger",
     "",
     "  # Warm reading accent — the paper terracotta, tokenized.",
-    `  @reading_accent %{evergreen: "${hx("reading-accent")}"}`,
+    `  @reading_accent %{${themes.map(readingAccentEntry).join(", ")}}`,
     "  def reading_accent(theme \\\\ :evergreen), do: @reading_accent[resolve(theme)]",
     "",
     "  # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.",
@@ -1111,16 +1238,7 @@ function elixirTokensGen() {
     // consume THESE instead — zero email-golden retint. w3 reconciles the two.
     "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
     "  @email %{",
-    "    evergreen: %{",
-    `      brand: "${em["brand"]}",`,
-    `      brand_text: "${em["brand-text"]}",`,
-    `      rule: "${em["rule"]}",`,
-    `      page_bg: "${em["page-bg"]}",`,
-    `      paper: "${em["paper"]}",`,
-    `      text: "${em["text"]}",`,
-    `      muted: "${em["muted"]}",`,
-    `      code_bg: "${em["code-bg"]}"`,
-    "    }",
+    ...themes.flatMap((t, i) => emailEntry(t, isLast(i))),
     "  }",
     '  @doc "The whole per-theme email skin map (palettes.ex / data_viz.ex read it in one shot)."',
     "  def email_skin(theme \\\\ :evergreen), do: @email[resolve(theme)]",
@@ -1138,12 +1256,7 @@ function elixirTokensGen() {
     // status tone_* roles above; never fold them together.
     "  # Callout tone tints — verbatim {bg, fg} pairs (util.ex tone_palette/1).",
     "  @callout %{",
-    "    evergreen: %{",
-    ...CALLOUT_TONES.map(
-      (t, i) =>
-        `      ${t}: %{bg: "${co[t].bg}", fg: "${co[t].fg}"}${i === CALLOUT_TONES.length - 1 ? "" : ","}`,
-    ),
-    "    }",
+    ...themes.flatMap((t, i) => calloutEntry(t, isLast(i))),
     "  }",
     "  def callout(tone, theme \\\\ :evergreen)",
     ...CALLOUT_TONES.map(

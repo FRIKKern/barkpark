@@ -80,3 +80,8 @@ func Resolve(theme string) ThemeTones {
 	}
 	return genTones[DefaultTheme]
 }
+
+// Themes lists every generated theme id in dir order (evergreen first). bp style
+// and the styleguide showroom enumerate it to iterate skins; it grows by exactly
+// one id when theme N+1 ships its file.
+func Themes() []string { return []string{"evergreen"} }
