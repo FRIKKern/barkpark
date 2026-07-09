@@ -196,6 +196,15 @@ func Execute(args []string) int {
 			return exitOK
 		}
 		return usageErrf(out, func() { printMCPServeHelp(out) }, "unknown command %q %q", noun, verb)
+	case "onramp":
+		// `bp onramp <cursor|claude-code|codex|cursor-cloud>` — print the exact
+		// MCP-registration config for one AI-agent surface (agent-onramps epic,
+		// wave 1). A client-side builtin like cmux/mcp: `onramp` is not a manifest
+		// noun, so this intercept shadows nothing and needs no server change.
+		// PRINT-ONLY in v1 (the cmux_install.go precedent) — it never writes a
+		// file. --server/--token are global flags already folded into g; the
+		// target and any trailing tokens ride in rest[1:].
+		return runOnramp(out, g, rest[1:])
 	case "use":
 		// `bp use <name|url>` — flip the active server locally (no network).
 		return runUse(out, rest[1:])
