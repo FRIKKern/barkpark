@@ -18,6 +18,8 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
+  alias Barkpark.PortableDoc.Render.Palettes
+  alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.TokensGen
 
   @admin_token "styleguide-admin-test-token"
@@ -106,9 +108,19 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
           Regex.scan(~r/#[0-9a-fA-F]{6}/, style) |> Enum.map(fn [h] -> String.downcase(h) end)
         end)
 
+      # The mail-chrome showroom rows apply email-skin hex inline (bytes a mail
+      # client renders, not CSS vars) — generated + theme-keyed from
+      # Palettes.email_skin/1, the same documented exception as the categorical
+      # swatches. Whitelist every known theme's skin values.
+      mail_hex =
+        Tenancy.known_themes()
+        |> Enum.flat_map(fn theme -> Map.values(Palettes.email_skin(theme)) end)
+        |> Enum.filter(&is_binary/1)
+        |> Enum.filter(&String.match?(&1, ~r/^#[0-9a-fA-F]{6}$/))
+
       categorical =
         (TokensGen.presence_palette() ++
-           TokensGen.sheet_cf_backgrounds() ++ TokensGen.sheet_tab_colors())
+           TokensGen.sheet_cf_backgrounds() ++ TokensGen.sheet_tab_colors() ++ mail_hex)
         |> Enum.map(&String.downcase/1)
 
       # non-vacuous: the categorical swatches DID apply hex inline
@@ -152,6 +164,79 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
     case String.split(html, ~s(id="sg-root"), parts: 2) do
       [_, tail] -> tail
       _ -> html
+    end
+  end
+
+  describe "theme showroom (ts-w5d — every theme × both modes on one screen)" do
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, html} = live(conn, "/studio/styleguide")
+      {:ok, view: view, html: html, region: styleguide_region(html)}
+    end
+
+    test "renders one iframe cell per known theme × [light, dark]", %{region: region} do
+      themes = Tenancy.known_themes()
+
+      # cell count follows the enumeration — grows to N×2 with no code edit when a
+      # theme registers (the zero-edit-growth property).
+      cells = Regex.scan(~r/data-test-id="sg-theme-cell"/, region)
+      assert length(cells) == length(themes) * 2
+
+      # each theme × mode pairs to a swatch iframe on the admin-gated route
+      for theme <- themes, mode <- ~w(light dark) do
+        assert region =~ ~s(data-cell-theme="#{theme}" data-cell-mode="#{mode}")
+        assert region =~ "/studio/styleguide/swatch?theme=#{theme}&amp;mode=#{mode}"
+      end
+    end
+
+    test "mail-chrome row per theme paints generated email_skin hex (no hand-copied hex)", %{
+      region: region
+    } do
+      # one mail row region per theme, and the applied hex is the generated skin
+      assert Regex.scan(~r/data-test-id="sg-theme-row"/, region) |> length() ==
+               length(Tenancy.known_themes())
+
+      for theme <- Tenancy.known_themes() do
+        skin = Palettes.email_skin(theme)
+        assert region =~ "background: #{skin.brand}"
+        assert region =~ "background: #{skin.page_bg}"
+      end
+    end
+  end
+
+  describe "swatch cell (the iframe target — its own <html data-bp-theme>)" do
+    setup %{conn: conn} do
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "admin renders a swatch that forces the requested mode + paints via var(--…)", %{
+      conn: conn
+    } do
+      {:ok, _view, html} = live(conn, "/studio/styleguide/swatch?theme=evergreen&mode=dark")
+
+      # the mode is forced client-side (data-theme is otherwise client-owned)
+      assert html =~ ~s(document.documentElement.dataset.theme = "dark")
+      # samples paint through shipped CSS vars, never inline role hex
+      assert html =~ "background: var(--primary)"
+      assert html =~ "background: var(--ok)"
+      assert html =~ "class=\"bp-paper-surface\""
+      assert html =~ "var(--paper-ink)"
+      # the cell records its identity for the matrix
+      assert html =~ ~s(data-swatch-theme="evergreen")
+      assert html =~ ~s(data-swatch-mode="dark")
+    end
+
+    test "unknown theme / mode degrade to defaults (never 500)", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/styleguide/swatch?theme=bogus&mode=sideways")
+      assert html =~ ~s(data-swatch-theme="#{Tenancy.default_theme()}")
+      assert html =~ ~s(data-swatch-mode="light")
+    end
+
+    test "non-admin is redirected off the swatch route", %{conn: _conn} do
+      anon = init_test_session(build_conn(), %{})
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               live(anon, "/studio/styleguide/swatch?theme=evergreen&mode=light")
     end
   end
 

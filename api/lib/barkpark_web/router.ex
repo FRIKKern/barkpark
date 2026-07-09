@@ -622,6 +622,18 @@ defmodule BarkparkWeb.Router do
       live("/chat", ChatLive)
       live("/chat/:session_id", ChatLive)
     end
+
+    # Styleguide theme-showroom swatch cell (ts-w5d) — admin-gated, rendered
+    # through the BARE `:swatch` layout (no Studio chrome) because StyleguideLive
+    # loads it in an IFRAME, one per known theme × [light, dark]. Its own
+    # live_session so the layout override is scoped to this route; the
+    # studio-chrome / status / reader skins are html[data-bp-theme]-anchored, so
+    # the cell must own its <html> (SwatchLive stamps data-bp-theme + data-theme).
+    live_session :admin_swatch,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      layout: {BarkparkWeb.Layouts, :swatch} do
+      live("/styleguide/swatch", SwatchLive)
+    end
   end
 
   # ── Back-compat redirects: legacy host-namespaced admin URLs ──────────

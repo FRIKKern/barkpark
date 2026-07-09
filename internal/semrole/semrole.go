@@ -98,6 +98,13 @@ func For(status string) string {
 // (GenANSI16) in tokens_gen.go.
 func Roles() []string { return []string{"ok", "info", "warn", "danger"} }
 
+// Themes (the enumeration seam the all-themes surfaces loop — `bp style`'s
+// per-theme slate, the Studio showroom matrix) is GENERATED in tokens_gen.go
+// (ts-w5b): design/emit.mjs stamps one id per design/themes/*.json, default
+// theme first. TestThemes pins its contract (default-first, sorted tail, 1:1
+// with genTones) so the generated list can never drift from what the
+// RoleColorFor/LifecycleColorFor accessors resolve.
+
 // RoleColor returns the generated adaptive tone for one of the four semantic
 // roles (ok/info/warn/danger), reading GenStatusTone directly — the role IS the
 // key, no status-token resolution. It returns the lipgloss.AdaptiveColor
