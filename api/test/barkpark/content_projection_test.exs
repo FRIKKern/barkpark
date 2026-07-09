@@ -96,6 +96,39 @@ defmodule Barkpark.ContentProjectionTest do
       assert rendered["featuredImage"] == "/hero.jpg"
       assert rendered["body"]["html"] =~ "Free body text."
     end
+
+    test "stamps content[\"preview\"] beside content[\"body\"] — write-time manifest (pc-w1)" do
+      slug = "exp-preview-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{
+          "id" => "t",
+          "type" => "field-string",
+          "fieldName" => "title",
+          "value" => "Preview Title"
+        },
+        %{
+          "id" => "p",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Lead paragraph."}]
+        }
+      ]
+
+      {:ok, doc} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+
+      # The injected :preview render_opts (epic preview-contract) stamp an
+      # OpenGraph-shaped manifest on every block-bearing paper write.
+      preview = doc.content["preview"]
+      assert preview["type"] == "paper"
+      assert preview["url"] == "/papers/#{slug}"
+      assert preview["title"] == "Preview Title"
+      assert preview["description"] == "Lead paragraph."
+
+      # Re-save with the same blocks: the manifest recomputes byte-identically
+      # (same no-drift guarantee as content["body"]).
+      {:ok, doc2} = Content.upsert_paper(%{slug: slug, dataset: @dataset, blocks: blocks})
+      assert doc2.content["preview"] == preview
+    end
   end
 
   describe "editing a bound title block via apply_paper_block_op/3" do

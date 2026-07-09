@@ -581,7 +581,11 @@ defmodule Barkpark.Content.Writer do
         Map.put(
           attrs,
           "content",
-          Projection.project(content, blocks, doc_render_opts(dataset, Map.get(attrs, "type"), attrs))
+          Projection.project(
+            content,
+            blocks,
+            doc_render_opts(dataset, Map.get(attrs, "type"), attrs)
+          )
         )
 
       _ ->
