@@ -64,7 +64,8 @@ func TaskLifecycles() []string {
 //     plane): live/up/online/ok → ok; queued/building/pushing/provisioning/
 //     pending/removing/behind → info ("behind" is news, not an alarm);
 //     degraded/unknown/suspended → warn; failed/error/offline/removal_failed →
-//     danger.
+//     danger. The usage-meter quota states ride the same tones: near_limit →
+//     warn (approaching the plan ceiling), over_limit → danger (at/past it).
 //   - Task-lifecycle tokens (bp task … -o table, the portrait board): see
 //     taskLifecycleRoles above.
 //
@@ -84,9 +85,13 @@ func For(status string) string {
 		return "info"
 	// "inactive" is the webhook list's manually-switched-off state, kept
 	// distinct from "suspended" (the system-imposed instance state).
-	case "degraded", "unknown", "suspended", "inactive":
+	// "near_limit" is a usage meter approaching its plan quota (warn_at reached
+	// but the ceiling not yet crossed) — attention-worthy, not yet a fault.
+	case "degraded", "unknown", "suspended", "inactive", "near_limit":
 		return "warn"
-	case "failed", "error", "offline", "removal_failed":
+	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
+	// the operator must act on, so it paints the same danger tone as a failure.
+	case "failed", "error", "offline", "removal_failed", "over_limit":
 		return "danger"
 	default:
 		return "" // unknown token → neutral, never a guess
