@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       GET     /v1/barkparks/:id/usage user   the console's usage meters, honest per D48 (team-scoped)
+      GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
@@ -115,6 +116,7 @@ defmodule BarkparkCloud.Web.Router do
     Accounts,
     Azure,
     Billing,
+    DomainStatus,
     Events,
     FailureCopy,
     GitHub,
@@ -4691,6 +4693,38 @@ defmodule BarkparkCloud.Web.Router do
         case resolve_team_barkpark(team, conn.path_params["id"]) do
           nil -> json(conn, 404, %{error: "not_found"})
           %Barkpark{} = bp -> json(conn, 200, %{usage: build_usage(team, bp)})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/domain-status → 200 {ok, checked_at, instance, domains}
+  # — the per-domain, per-stage DNS/TLS/serving checklist (charter S13 /
+  # BarkparkCloud.DomainStatus). The control plane's honest answer to "why isn't
+  # my domain working?": for the platform FQDN (and the custom host when
+  # attached) it probes dns_found → points_here → tls → serving, each with a
+  # status + evidence + server-owned remediation, so the console (S13b) and CLI
+  # can render a Vercel-grade checklist. The probe is SYNCHRONOUS but bounded
+  # (per-probe transport timeouts, at most two hosts) and TOTAL over failure — a
+  # stuck domain is a normal 200 result with pending/failed stages, never a 502.
+  #
+  # USER-authed + TEAM-SCOPED with the SAME no-existence-leak 404 as the sibling
+  # telemetry / usage routes (wrong-team / absent / malformed id are
+  # indistinguishable). It reads only public DNS + the box's own TLS/HTTP — no
+  # admin token, no zone read — so unlike verify it needs no liveness gate.
+  get "/v1/barkparks/:id/domain-status" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case resolve_team_barkpark(conn.assigns.current_team, conn.path_params["id"]) do
+          nil -> json(conn, 404, %{error: "not_found"})
+          %Barkpark{} = bp -> json(conn, 200, DomainStatus.check(bp))
         end
     end
   end
