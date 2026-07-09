@@ -20,6 +20,7 @@ defmodule BarkparkWeb.LiveAuthTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth
 
@@ -27,7 +28,14 @@ defmodule BarkparkWeb.LiveAuthTest do
   @ops_token "wi5-auth-ops-token"
   @reader_token "wi5-auth-reader-token"
 
+  # SettingsLive moved to `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical).
+  @settings_path "/w/default/p/default/studio/settings"
+
   setup %{conn: conn} do
+    # Default must exist before the admin token is minted so `Auth.create_token`
+    # auto-binds it as a Default member (the scoped route's LiveScope gate).
+    ensure_default_scope!()
+
     {:ok, _} =
       Auth.create_token(@admin_token, "wi5 admin", "production", ["read", "write", "admin"])
 
@@ -66,18 +74,19 @@ defmodule BarkparkWeb.LiveAuthTest do
     end
   end
 
-  describe "/studio/settings — :admin on_mount hook (regression guard)" do
+  describe "scoped /studio/settings — :admin on_mount hook (regression guard)" do
     test "ops alone is NOT enough for the admin-gated settings LV", %{conn: conn} do
       # Critical invariant: the WI5 `ops` role is *additive* and must not
       # leak into the admin gate. Settings exposes plugin-secret reveal
-      # — operators must never reach it.
+      # — operators must never reach it. LiveAuth.:admin (first in the scoped
+      # on_mount chain) redirects to /studio before LiveScope runs.
       conn = init_test_session(conn, %{"api_token" => @ops_token})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/settings")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @settings_path)
     end
 
-    test "admin still grants /studio/settings", %{conn: conn} do
+    test "admin still grants the scoped settings surface", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      assert {:ok, _view, _html} = live(conn, "/studio/settings")
+      assert {:ok, _view, _html} = live(conn, @settings_path)
     end
   end
 end

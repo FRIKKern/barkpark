@@ -603,7 +603,12 @@ defmodule BarkparkWeb.Router do
     live_session :admin_studio,
       on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
       layout: {BarkparkWeb.Layouts, :studio} do
-      live("/settings", SettingsLive)
+      # `/studio/settings` moved to the workspace-scoped canonical
+      # `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical, charter D4):
+      # SettingsLive edits ONE workspace, so the flat route silently pinned the
+      # seeded Default workspace. The flat spelling now 302s — see the
+      # `AdminStudioRedirectController` scope below. org-admin stays flat
+      # (org-level, genuinely scope-free).
       live("/org-admin", OrgAdminLive)
       # Living token style guide (unified-aesthetic W1.4) — admin-gated; renders
       # the emitted design tokens (var(--…) from root.html.heex GENERATED block).
@@ -634,6 +639,19 @@ defmodule BarkparkWeb.Router do
       layout: {BarkparkWeb.Layouts, :swatch} do
       live("/styleguide/swatch", SwatchLive)
     end
+  end
+
+  # ── Scoped-in-substance admin flat → scoped 302 (sdl-w1-admin-canonical) ─
+  # `/studio/settings` is scoped-in-substance (SettingsLive edits ONE
+  # workspace) so its canonical home is `/w/:ws/p/:proj/studio/settings`.
+  # This flat spelling 302s there via the session-resolved workspace/project.
+  # Declared BEFORE the `/studio/:dataset` catch-all far below so
+  # `/studio/settings` never parses as dataset="settings". :soft_token
+  # supplies the optional session token the resolution keys off.
+  scope "/studio", BarkparkWeb do
+    pipe_through([:browser, :soft_token])
+
+    get("/settings", AdminStudioRedirectController, :settings)
   end
 
   # ── Back-compat redirects: legacy host-namespaced admin URLs ──────────
@@ -916,6 +934,28 @@ defmodule BarkparkWeb.Router do
     end
   end
 
+  # ── Scoped Workspace Settings — admin-gated, dataset-less (sdl-w1-admin-canonical) ─
+  # SettingsLive edits ONE workspace, so the canonical address carries the
+  # workspace/project (same dataset-less grammar as the scoped plugin admin
+  # scope above). LiveScope resolves + authorizes the workspace from the URL
+  # (membership-gated) so the panel binds to the URL workspace — never the
+  # seeded Default that StudioChrome's flat fallback pins. Declared BEFORE the
+  # `/w/:ws/p/:proj/studio/:dataset` back-compat wildcard below, or that
+  # `:dataset` segment would swallow `/settings` (dataset="settings").
+  scope "/w/:workspace_slug/p/:project_slug/studio", BarkparkWeb.Studio do
+    pipe_through(:browser)
+
+    live_session :scoped_admin_studio,
+      on_mount: [
+        {BarkparkWeb.LiveAuth, :admin},
+        {BarkparkWeb.LiveScope, :resolve},
+        {BarkparkWeb.StudioChrome, :default}
+      ],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      live("/settings", SettingsLive)
+    end
+  end
+
   scope "/w/:workspace_slug/p/:project_slug/studio" do
     pipe_through(:scoped_browser)
 
@@ -950,6 +990,28 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :scoped_admin])
 
     plugin_routes(scope: :api)
+  end
+
+  # ── Scoped plugins-admin LV — dataset-scoped, admin-gated (sdl-w1-admin-canonical) ─
+  # PluginsLive / PluginSettingsLive move under the canonical `/w/:ws/p/:proj/
+  # d/:dataset/studio/_plugins[...]` grammar. Auth stays the flat semantics
+  # (global `:admin` permission via LiveAuth) — the surface is the global
+  # plugin registry scoped by dataset, not a per-workspace substance — but the
+  # URL now carries the scope so `scope_prefix` (assigned by StudioChrome from
+  # the params) makes the admin chrome links workspace-truthful. The leading
+  # underscore keeps the namespace clear of schema-named paths.
+  #
+  # ORDERING: MUST be declared BEFORE the `:scoped_studio` `/*path` catch-all
+  # below, or StudioLive's wildcard swallows `/_plugins`.
+  scope "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", BarkparkWeb.Admin do
+    pipe_through(:browser)
+
+    live_session :scoped_admin_studio_dataset,
+      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
+      layout: {BarkparkWeb.Layouts, :studio} do
+      live("/_plugins", PluginsLive)
+      live("/_plugins/:plugin/settings", PluginSettingsLive)
+    end
   end
 
   # ── Scoped Studio (P1 of Scoped-by-URL — tsk-url-p1) ─────────────────────
@@ -1003,23 +1065,17 @@ defmodule BarkparkWeb.Router do
     get("/*path", StudioRedirectController, :legacy_scoped)
   end
 
-  # ── Studio admin LV — dataset-scoped, admin-gated ─────────────────────
-  # Task barkpark-otv: plugin admin LV at `/studio/:dataset/_plugins`.
-  # MUST come before the studio_public scope below — the catch-all
-  # `live "/*path", StudioLive` inside `:studio_public` would otherwise
-  # swallow the `_plugins` path. The leading underscore is a convention
-  # signalling "admin / system route" (mirrors `_/` patterns in many
-  # CMSes) and keeps the namespace clear of any future schema-named
-  # path collisions.
-  scope "/studio/:dataset", BarkparkWeb.Admin do
-    pipe_through(:browser)
+  # ── Flat plugins-admin → scoped 302 (sdl-w1-admin-canonical) ──────────
+  # The live `/studio/:dataset/_plugins[...]` mount moved to the canonical
+  # `/w/:ws/p/:proj/d/:dataset/studio/_plugins[...]` scope above; the flat
+  # spelling now 302s there (session-resolved workspace/project, dataset +
+  # `/:plugin/settings` tail preserved). MUST come before the `/studio/:dataset`
+  # catch-all below, which would otherwise 302 `_plugins` to StudioLive.
+  scope "/studio/:dataset", BarkparkWeb do
+    pipe_through([:browser, :soft_token])
 
-    live_session :admin_studio_dataset,
-      on_mount: [{BarkparkWeb.LiveAuth, :admin}, {BarkparkWeb.StudioChrome, :default}],
-      layout: {BarkparkWeb.Layouts, :studio} do
-      live("/_plugins", PluginsLive)
-      live("/_plugins/:plugin/settings", PluginSettingsLive)
-    end
+    get("/_plugins", AdminStudioRedirectController, :plugins)
+    get("/_plugins/:plugin/settings", AdminStudioRedirectController, :plugins)
   end
 
   # ── Flat Studio → scoped 302 (P3 cutover, Scoped-by-URL) ─────────────────

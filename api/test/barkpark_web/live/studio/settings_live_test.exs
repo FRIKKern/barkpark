@@ -2,6 +2,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   use BarkparkWeb.ConnCase, async: false
 
   import Phoenix.LiveViewTest
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.Auth
   alias Barkpark.Plugins.Settings
@@ -14,7 +15,19 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   @admin_token "admin-test-token"
   @junior_token "junior-test-token"
 
+  # SettingsLive moved to the workspace-scoped canonical
+  # `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical): LiveScope binds
+  # the panel to the URL workspace instead of the seeded Default the flat route
+  # pinned. `ensure_default_scope!` uses the "default"/"default" slugs.
+  @settings_path "/w/default/p/default/studio/settings"
+
   setup %{conn: conn} do
+    # Default workspace/project must exist BEFORE the token is minted:
+    # `Auth.create_token` auto-binds an "admin"-perm token as an admin MEMBER of
+    # the Default workspace, which is exactly the membership the scoped route's
+    # LiveScope authorizes against.
+    ensure_default_scope!()
+
     {:ok, _} =
       Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
 
@@ -26,17 +39,17 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "admin gate" do
     test "redirects to /studio when no session token", %{conn: conn} do
       conn = init_test_session(conn, %{})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/settings")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @settings_path)
     end
 
     test "redirects to /studio when token lacks admin permission", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @junior_token})
-      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/settings")
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, @settings_path)
     end
 
     test "renders form for admin token", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, _view, html} = live(conn, "/studio/settings")
+      {:ok, _view, html} = live(conn, @settings_path)
       # Reframed page: "Workspace Settings" with credentials demoted to a
       # labelled sub-section (still carrying the "Plugin name" input).
       assert html =~ "Workspace Settings"
@@ -46,7 +59,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
     test "an unknown/stale phx event does not crash the LiveView", %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       render_hook(view, "totally-unknown-stale-event", %{})
 
@@ -58,7 +71,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "workspace theme picker (ts-w4e)" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/studio/settings")
+      {:ok, view, html} = live(conn, @settings_path)
       {:ok, view: view, html: html}
     end
 
@@ -104,7 +117,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "load / save / reveal / delete" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
       {:ok, view: view}
     end
 
@@ -206,7 +219,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
 
     test "loading bokbasen renders 5 typed inputs (no raw textarea)", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       html =
         view
@@ -224,7 +237,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
 
     test "submitting the typed form persists via Settings.put", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       view
       |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
@@ -259,7 +272,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
         "client_role" => "publisher"
       })
 
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       html =
         view
@@ -274,7 +287,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     end
 
     test "rejects submit with missing required fields", %{conn: conn} do
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       view
       |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
@@ -304,7 +317,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
         "client_role" => "publisher"
       })
 
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       view
       |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
@@ -337,7 +350,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
         "client_role" => "publisher"
       })
 
-      {:ok, view, _html} = live(conn, "/studio/settings")
+      {:ok, view, _html} = live(conn, @settings_path)
 
       view
       |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
@@ -364,7 +377,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "plugins section (studio-structure-polish D2/D4/D10)" do
     setup %{conn: conn} do
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, view, html} = live(conn, "/studio/settings")
+      {:ok, view, html} = live(conn, @settings_path)
       {:ok, view: view, html: html}
     end
 
@@ -422,7 +435,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert effective[name].enabled == false
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
-      {:ok, _view, html} = live(conn, "/studio/settings")
+      {:ok, _view, html} = live(conn, @settings_path)
 
       # The row now advertises an override (no 'default' badge) and Disabled state.
       # Placement is left to whatever the declaration default resolves to.

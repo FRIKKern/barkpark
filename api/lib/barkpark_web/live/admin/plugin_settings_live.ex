@@ -1,12 +1,15 @@
 defmodule BarkparkWeb.Admin.PluginSettingsLive do
   @moduledoc """
-  Admin LiveView at `/studio/:dataset/_plugins/:plugin/settings` — the
+  Admin LiveView at
+  `/w/:ws/p/:proj/d/:dataset/studio/_plugins/:plugin/settings` — the
   browser-side form that replaces SSH + `mix run` for managing a
-  plugin's encrypted settings row.
+  plugin's encrypted settings row. (Moved under the scoped canonical by
+  sdl-w1-admin-canonical; the flat `/studio/:dataset/_plugins/...` spelling
+  302s here.)
 
   ## Auth
 
-  Mounted inside the `live_session :admin_studio_dataset` block in
+  Mounted inside the `live_session :scoped_admin_studio_dataset` block in
   `BarkparkWeb.Router`, same gate as `PluginsLive` — non-admins are
   redirected to `/studio` by `BarkparkWeb.LiveAuth.:admin`.
 
@@ -69,7 +72,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
           {:ok,
            socket
            |> put_flash(:error, "Plugin #{plugin_name} declares no settings.")
-           |> redirect(to: ~p"/studio/#{dataset}/_plugins")}
+           |> redirect(to: plugins_path(socket.assigns[:scope_prefix], dataset))}
         else
           stored = load_all_rows(fields)
 
@@ -94,7 +97,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
         {:ok,
          socket
          |> put_flash(:error, "Plugin #{plugin_name} is not registered.")
-         |> redirect(to: ~p"/studio/#{dataset}/_plugins")}
+         |> redirect(to: plugins_path(socket.assigns[:scope_prefix], dataset))}
     end
   end
 
@@ -263,7 +266,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
             reveal, and delete is recorded in <code>plugin_settings_audits</code>.
           </p>
         </div>
-        <.link navigate={~p"/studio/#{@dataset}/_plugins"} class="btn btn-sm">
+        <.link navigate={plugins_path(@scope_prefix, @dataset)} class="btn btn-sm">
           ← Back to plugins
         </.link>
       </div>
@@ -315,7 +318,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
         <% end %>
 
         <div class="bp-settings-actions">
-          <.link navigate={~p"/studio/#{@dataset}/_plugins"} class="btn btn-sm">
+          <.link navigate={plugins_path(@scope_prefix, @dataset)} class="btn btn-sm">
             Cancel
           </.link>
           <button type="submit" class="btn btn-sm btn-primary" data-test-action="save">
@@ -464,6 +467,15 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   end
 
   # ── helpers ───────────────────────────────────────────────────────────
+
+  # Scoped path back to the plugins list. This LV now mounts only under
+  # `/w/:ws/p/:proj/d/:dataset/studio/_plugins/...`, so `scope_prefix` (assigned
+  # by StudioChrome from the URL params) is always the `/w/:ws/p/:proj` prefix.
+  # A plain-string builder rather than `~p` — the prefix is dynamic, so
+  # verified-route sigils can't statically anchor it (consolidated by
+  # sdl-w1-builder's `Paths`).
+  defp plugins_path(scope_prefix, dataset),
+    do: "#{scope_prefix}/d/#{dataset}/studio/_plugins"
 
   defp resolve_schema(module) do
     cond do
