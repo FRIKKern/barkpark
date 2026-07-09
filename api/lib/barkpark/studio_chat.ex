@@ -667,12 +667,15 @@ defmodule Barkpark.StudioChat do
   defp rail_entry_signature(_), do: %{}
 
   # Keep only the STRUCTURE of a workflow tree — the phase titles, agent labels,
-  # models, and states — and drop the token/usage churn that ticks every frame.
+  # phase grouping, models, and states — and drop the token/usage churn that
+  # ticks every frame. `phaseIndex` rides the signature (charter D57) so the
+  # newly-rendered phase-journey grouping re-signs on a regrouping while a token
+  # tick still does not; a phase flip re-renders, a token tick never does.
   defp strip_workflow(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_workflow_node/1)
   defp strip_workflow(_), do: nil
 
   defp strip_workflow_node(node) when is_map(node),
-    do: Map.take(node, ["type", "title", "label", "model", "state"])
+    do: Map.take(node, ["type", "title", "label", "phaseIndex", "model", "state"])
 
   defp strip_workflow_node(other), do: other
 
@@ -686,13 +689,19 @@ defmodule Barkpark.StudioChat do
   `"completed"` UNLESS already terminal (a `"interrupted"` is never resurrected).
   Entries are NEVER deleted (replay shows the last-known rail), only capped.
 
-  PROVENANCE GATE (wave-10 real-binary truth): workflow-origin entries (added by
-  `rail_capture_progress`) and foreground-task entries NEVER appear in ANY
-  `background_tasks_changed` snapshot — proven zero such frames in the workflow
-  and foreground captures. So the vanish→completed flip touches ONLY
-  background-origin entries; an unrelated background snapshot can no longer
-  falsely complete a still-running workflow. PURE — the Recorder and ChatLive
-  fold identically off this ONE function (D47 shared-fold law).
+  PROVENANCE GATE (charter D62, corrected against the committed fixtures): a
+  local_workflow task DOES ride a `background_tasks_changed` snapshot — the
+  committed `workflow_progress.ndjson` (and `epic_cycle_*.ndjson`) opens with a
+  bg-add listing the workflow task, so workflow entries ARE background-origin and
+  their "completed" arrives redundantly (the vanish→completed flip ∪ task_updated
+  ∪ task_notification all agree). The true law is narrower: the vanish→completed
+  flip fires ONLY for an entry that WAS seen in a bg snapshot (`origin =>
+  "background"`) and is now absent — an entry NEVER listed in any bg snapshot can
+  never be vanish-completed by an unrelated snapshot. (Watch item, not built
+  speculatively: no real capture shows a workflow blinking OUT mid-run; if one
+  ever does, gate the flip on "no non-terminal workflow agents".) PURE — the
+  Recorder and ChatLive fold identically off this ONE function (D47 shared-fold
+  law).
   """
   @spec rail_apply_background(map(), map()) :: map()
   def rail_apply_background(rail, ev) when is_map(rail) and is_map(ev) do
@@ -832,6 +841,269 @@ defmodule Barkpark.StudioChat do
 
     Map.drop(rail, drop_ids)
   end
+
+  # ── Wave-11 phase-journey derivation (charter D57–D59) ──────────────────────
+  #
+  # The agents rail renders an epic-cycle run as a PHASE JOURNEY (mission
+  # control), not a flat node list. Every bit of that structure is derived at
+  # RENDER time from the same stored flat `workflow` node list + entry `status`
+  # the Recorder already persists — `recorder.ex` is untouched and old
+  # `rail_snapshot` rows replay for free (charter D57). These are pure public
+  # helpers so fixture-fed unit tests drive them directly, and ChatLive's markup
+  # (S2) consumes them without duplicating the truth logic.
+
+  # The one owner of the workflow-agent terminal-state SUPERSET (charter D58).
+  # `done`/`completed` are SUCCESS terminals; `failed`/`error`/`canceled`/
+  # `cancelled`/`aborted` are FAILURE terminals — an `error` node (real: 304
+  # nodes across 507 runs, even inside completed workflows) renders ✕ and is
+  # NEVER counted as done. `start`/`progress` are the live (breathing) states;
+  # a nil/absent state is treated as live (it has not settled).
+  @workflow_node_terminal ~w(done completed failed error canceled cancelled aborted)
+  @workflow_node_failed ~w(failed error canceled cancelled aborted)
+
+  @doc """
+  True when a workflow-agent node (or a bare state string) has reached a terminal
+  state (charter D58). The ONE owner of the terminal superset — ChatLive's rail
+  render and the journey folds below both consult it, so the "which states
+  breathe" truth lives in a single place. Case-insensitive.
+  """
+  @spec workflow_node_terminal?(any()) :: boolean()
+  def workflow_node_terminal?(%{"state" => s}), do: workflow_node_terminal?(s)
+
+  def workflow_node_terminal?(s) when is_binary(s),
+    do: String.downcase(s) in @workflow_node_terminal
+
+  def workflow_node_terminal?(_), do: false
+
+  # A FAILURE terminal (✕) — terminal but never a success. Kept private; the
+  # summary counts (agents_done vs agents_failed) are the public surface.
+  defp workflow_node_failed?(%{"state" => s}), do: workflow_node_failed?(s)
+  defp workflow_node_failed?(s) when is_binary(s), do: String.downcase(s) in @workflow_node_failed
+  defp workflow_node_failed?(_), do: false
+
+  @doc """
+  Derive the phase JOURNEY of a rail entry (charter D57–D59) — pure, render-time.
+
+  Input is a rail entry: `%{"workflow" => flat_node_list, "status" => ...}` (the
+  exact shape the Recorder persists). Returns
+  `%{phases: [phase, …], summary: map}` where each `phase` is
+  `%{index, title, status, agents, agent_count, tokens, model}` and `status` is
+  one of the four-state truth table (D58):
+
+    * `:done`       — has agents, all terminal, and it is behind the frontier (a
+                      later phase has agents) or the whole cycle completed.
+    * `:active`     — the highest-index phase WITH agents while the entry lives
+                      (the one that breathes).
+    * `:interrupted`— the frontier phase (highest WITH agents) of a dead entry
+                      ("died in Explore").
+    * `:future`     — an agentless phase while the entry still runs.
+    * `:skipped`    — an agentless phase on a COMPLETED entry (Perfect is
+                      conditional — an honest cycle reads "6 of 7 phases ·
+                      1 skipped", never a fake 7/7).
+    * `:unreached`  — an agentless phase on an INTERRUPTED entry.
+
+  Phases are strictly sequential (proven ~15ms handoffs; parallelism is
+  intra-phase only), so exactly one phase is `:active`/`:interrupted` at a time.
+  Tokens are settle-on-state numbers, never live counters (charter D57): every
+  aggregate is summed from the persisted node payloads.
+  """
+  @spec workflow_journey(map()) :: %{phases: list(map()), summary: map()}
+  def workflow_journey(entry) when is_map(entry) do
+    nodes = List.wrap(entry["workflow"])
+    kind = entry_lifecycle(entry["status"])
+
+    phase_nodes =
+      nodes
+      |> Enum.filter(&(&1["type"] == "workflow_phase"))
+      |> Enum.sort_by(&phase_index/1)
+
+    agents_by_phase =
+      nodes
+      |> Enum.filter(&(&1["type"] == "workflow_agent"))
+      |> Enum.group_by(& &1["phaseIndex"])
+
+    # the frontier = highest phase index that actually has agents (nil if none)
+    frontier =
+      phase_nodes
+      |> Enum.filter(fn p -> Map.get(agents_by_phase, phase_index(p), []) != [] end)
+      |> Enum.map(&phase_index/1)
+      |> case do
+        [] -> nil
+        idxs -> Enum.max(idxs)
+      end
+
+    phases =
+      Enum.map(phase_nodes, fn p ->
+        idx = phase_index(p)
+        agents = Map.get(agents_by_phase, idx, [])
+
+        %{
+          index: idx,
+          title: p["title"],
+          status: phase_status(agents, idx, frontier, kind),
+          agents: agents,
+          agent_count: length(agents),
+          tokens: sum_node_tokens(agents),
+          model: phase_model(agents)
+        }
+      end)
+
+    %{phases: phases, summary: journey_summary(phases, kind)}
+  end
+
+  def workflow_journey(_), do: %{phases: [], summary: empty_journey_summary()}
+
+  # Entry lifecycle from the rail-entry status: "interrupted" is its own dead
+  # frontier; any other terminal (completed/done/…) means the cycle finished;
+  # everything else (running) is live.
+  defp entry_lifecycle("interrupted"), do: :interrupted
+
+  defp entry_lifecycle(s) when is_binary(s) do
+    if String.downcase(s) in @workflow_node_terminal, do: :completed, else: :live
+  end
+
+  defp entry_lifecycle(_), do: :live
+
+  defp phase_index(%{"index" => i}) when is_integer(i), do: i
+  defp phase_index(_), do: 0
+
+  # An agentless phase reads the entry's fate; a phase with agents reads the
+  # frontier + lifecycle (D58 four-state truth table).
+  defp phase_status([], _idx, _frontier, :live), do: :future
+  defp phase_status([], _idx, _frontier, :interrupted), do: :unreached
+  defp phase_status([], _idx, _frontier, :completed), do: :skipped
+
+  defp phase_status(_agents, idx, frontier, :interrupted) when idx == frontier, do: :interrupted
+  defp phase_status(_agents, _idx, _frontier, :interrupted), do: :done
+  defp phase_status(_agents, idx, frontier, :live) when idx == frontier, do: :active
+  defp phase_status(_agents, _idx, _frontier, :live), do: :done
+  defp phase_status(_agents, _idx, _frontier, :completed), do: :done
+
+  # A phase's model family (charter D57 — per-phase model derives from its
+  # agents). The first agent's family; nil when the phase has no agents.
+  defp phase_model([agent | _]), do: model_family(agent["model"])
+  defp phase_model(_), do: nil
+
+  defp sum_node_tokens(agents) do
+    Enum.reduce(agents, 0, fn a, acc ->
+      case a["tokens"] do
+        n when is_integer(n) -> acc + n
+        _ -> acc
+      end
+    end)
+  end
+
+  # The entry-row aggregates (D57) — every number here settles on a state flip;
+  # none is a live counter. `current_*` is the active/interrupted phase (the m in
+  # "m/n"); nil on a completed cycle, which collapses to "k of n phases" instead.
+  defp journey_summary(phases, kind) do
+    all_agents = Enum.flat_map(phases, & &1.agents)
+
+    current =
+      Enum.find(phases, fn p -> p.status in [:active, :interrupted] end)
+
+    %{
+      entry_status: kind,
+      phases_total: length(phases),
+      phases_done: Enum.count(phases, &(&1.status == :done)),
+      phases_skipped: Enum.count(phases, &(&1.status == :skipped)),
+      current_index: current && current.index,
+      current_title: current && current.title,
+      agents_total: length(all_agents),
+      agents_running: Enum.count(all_agents, &(not workflow_node_terminal?(&1))),
+      agents_done:
+        Enum.count(all_agents, &(workflow_node_terminal?(&1) and not workflow_node_failed?(&1))),
+      agents_failed: Enum.count(all_agents, &workflow_node_failed?/1),
+      tokens_total: sum_node_tokens(all_agents)
+    }
+  end
+
+  defp empty_journey_summary do
+    %{
+      entry_status: :live,
+      phases_total: 0,
+      phases_done: 0,
+      phases_skipped: 0,
+      current_index: nil,
+      current_title: nil,
+      agents_total: 0,
+      agents_running: 0,
+      agents_done: 0,
+      agents_failed: 0,
+      tokens_total: 0
+    }
+  end
+
+  @doc """
+  Split a workflow-agent label into its two rendered parts (charter D59) — a
+  GENERIC grammar, never epic-cycle-hardcoded. Split at the FIRST colon iff the
+  head is a short slug (`[a-z0-9_-]{1,16}`): `"design:encryption"` →
+  `{:pair, "design", "encryption"}`, `"verify:encryption:leak"` →
+  `{:pair, "verify", "encryption:leak"}` (the rest keeps its colons). A bare
+  role (`"strategist"`) or a head that is not a slug (a raw-prompt fallback) →
+  `{:bare, label}` — render raw, CSS-truncate, never invent.
+  """
+  @spec workflow_label_parts(any()) ::
+          {:pair, String.t(), String.t()} | {:bare, String.t()}
+  def workflow_label_parts(label) when is_binary(label) do
+    case String.split(label, ":", parts: 2) do
+      [kind, rest] ->
+        if kind =~ ~r/\A[a-z0-9_-]{1,16}\z/, do: {:pair, kind, rest}, else: {:bare, label}
+
+      _ ->
+        {:bare, label}
+    end
+  end
+
+  def workflow_label_parts(other), do: {:bare, to_string(other)}
+
+  @doc """
+  Map a model WIRE id to its family name (charter D59). Rail nodes carry raw wire
+  ids like `"claude-opus-4-8[1m]"` (which the picker-oriented `model_label/1`
+  falls through verbatim — the trap this closes). Prefix map:
+  `claude-fable-*` → "Fable", `claude-opus-*` → "Opus", `claude-sonnet-*` →
+  "Sonnet", `claude-haiku-*` → "Haiku"; the short picker slugs (fable/opus/
+  sonnet/haiku) still resolve; anything unknown returns raw.
+  """
+  @spec model_family(any()) :: String.t() | nil
+  def model_family(nil), do: nil
+
+  def model_family(id) when is_binary(id) do
+    down = String.downcase(id)
+
+    cond do
+      String.starts_with?(down, "claude-fable") or down == "fable" -> "Fable"
+      String.starts_with?(down, "claude-opus") or down == "opus" -> "Opus"
+      String.starts_with?(down, "claude-sonnet") or down == "sonnet" -> "Sonnet"
+      String.starts_with?(down, "claude-haiku") or down == "haiku" -> "Haiku"
+      true -> id
+    end
+  end
+
+  def model_family(other), do: other
+
+  @doc """
+  Abbreviate a token count for the rail (charter D59): `< 1_000` raw ("845");
+  `< 10_000` one decimal k ("9.6k"); `< 1_000_000` integer k ("145k"); else one
+  decimal M ("1.2M"). Non-integers render "—" (an honest unknown, never a fake 0).
+  """
+  @spec format_tokens(any()) :: String.t()
+  def format_tokens(n) when is_integer(n) and n < 0, do: "—"
+  def format_tokens(n) when is_integer(n) and n < 1_000, do: Integer.to_string(n)
+
+  def format_tokens(n) when is_integer(n) and n < 10_000 do
+    "#{Float.round(n / 1_000, 1)}k"
+  end
+
+  def format_tokens(n) when is_integer(n) and n < 1_000_000 do
+    "#{round(n / 1_000)}k"
+  end
+
+  def format_tokens(n) when is_integer(n) do
+    "#{Float.round(n / 1_000_000, 1)}M"
+  end
+
+  def format_tokens(_), do: "—"
 
   @doc """
   Mark a session `exited` (its port died — crash or clean exit). Next send
