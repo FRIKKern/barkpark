@@ -99,23 +99,33 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     :ok
   end
 
-  # ── Instance-API programming (C11 fan-out order) ────────────────────────────
+  # ── Instance-API programming (C11 fan-out — PATH-KEYED) ─────────────────────
   #
-  # build_usage fires, in order: (1) the dataset LIST, then (2) the DOCUMENTS
-  # analytics fan-out (one call per dataset, in list order), then (3) the
-  # WEBHOOKS fan-out (one per dataset). `program_instance/1` queues exactly that
-  # sequence from a list of `{slug, doc_count, webhook_count}`.
+  # build_usage fetches (1) the dataset LIST, then fans the DOCUMENTS + WEBHOOKS
+  # calls out CONCURRENTLY (one per dataset) — so their arrival order is
+  # non-deterministic and a FIFO queue can't address them. We program the fake
+  # PATH-KEYED instead: each dataset's analytics + webhook URLs are distinct, so a
+  # concurrent out-of-order child still gets the right body. The owner-keyed shared
+  # store also lets those Task-child requests be recorded where `Fake.requests/0`
+  # (on the test process) can see them — token-custody / URL asserts stay real.
+  @ds_path "/api/workspaces/default/projects/default/datasets"
+  defp analytics_path(slug), do: "/v1/data/analytics/#{slug}"
+  defp webhooks_path(slug), do: "/v1/webhooks/#{slug}"
+
   defp program_instance(datasets) do
     ds_body = Jason.encode!(%{datasets: Enum.map(datasets, fn {s, _d, _w} -> %{slug: s} end)})
 
-    doc_resps =
-      for {_s, d, _w} <- datasets, do: ok_json(200, Jason.encode!(%{total_documents: d}))
+    responses =
+      Enum.reduce(datasets, %{@ds_path => ok_json(200, ds_body)}, fn {s, d, w}, acc ->
+        acc
+        |> Map.put(analytics_path(s), ok_json(200, Jason.encode!(%{total_documents: d})))
+        |> Map.put(
+          webhooks_path(s),
+          ok_json(200, Jason.encode!(%{webhooks: List.duplicate(%{id: "wh"}, w)}))
+        )
+      end)
 
-    wh_resps =
-      for {_s, _d, w} <- datasets,
-          do: ok_json(200, Jason.encode!(%{webhooks: List.duplicate(%{id: "wh"}, w)}))
-
-    Fake.program([ok_json(200, ds_body) | doc_resps ++ wh_resps])
+    Fake.program(responses)
   end
 
   # A single-production-dataset healthy instance with the given doc/webhook count.
@@ -299,7 +309,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
       # Empty dataset list → no fan-out; sums are a true 0.
-      Fake.program([ok_json(200, ~s({"datasets":[]}))])
+      Fake.program(%{@ds_path => ok_json(200, ~s({"datasets":[]}))})
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -316,7 +326,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       bp = live_barkpark(team)
       seed_health(bp, %{"pg_size_bytes" => 42})
       # The very first call (dataset list) fails → nothing to enumerate.
-      Fake.program([{:error, {:http_client, :timeout}}])
+      Fake.program(%{@ds_path => {:error, {:http_client, :timeout}}})
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
 
@@ -335,14 +345,14 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     test "a partial webhook fan-out failure degrades ONLY webhooks (no undercount)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      # Datasets list ok (2), both analytics ok, but the SECOND webhook call 500s.
-      Fake.program([
-        ok_json(200, ~s({"datasets":[{"slug":"production"},{"slug":"staging"}]})),
-        ok_json(200, ~s({"total_documents":10})),
-        ok_json(200, ~s({"total_documents":5})),
-        ok_json(200, ~s({"webhooks":[{"id":"a"}]})),
-        ok_json(500, ~s({"error":"boom"}))
-      ])
+      # Datasets list ok (2), both analytics ok, but the staging webhook call 500s.
+      Fake.program(%{
+        @ds_path => ok_json(200, ~s({"datasets":[{"slug":"production"},{"slug":"staging"}]})),
+        analytics_path("production") => ok_json(200, ~s({"total_documents":10})),
+        analytics_path("staging") => ok_json(200, ~s({"total_documents":5})),
+        webhooks_path("production") => ok_json(200, ~s({"webhooks":[{"id":"a"}]})),
+        webhooks_path("staging") => ok_json(500, ~s({"error":"boom"}))
+      })
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -359,11 +369,11 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
 
-      Fake.program([
-        ok_json(200, ~s({"datasets":[{"slug":"production"}]})),
-        ok_json(200, ~s({"not_total":true})),
-        ok_json(200, ~s({"webhooks":[]}))
-      ])
+      Fake.program(%{
+        @ds_path => ok_json(200, ~s({"datasets":[{"slug":"production"}]})),
+        analytics_path("production") => ok_json(200, ~s({"not_total":true})),
+        webhooks_path("production") => ok_json(200, ~s({"webhooks":[]}))
+      })
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -377,7 +387,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
     test "a garbage-shaped dataset list degrades ALL instance meters, endpoint 200" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
-      Fake.program([ok_json(200, ~s({"not_datasets":true}))])
+      Fake.program(%{@ds_path => ok_json(200, ~s({"not_datasets":true}))})
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -394,7 +404,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       # 30 datasets — over the fan-out cap (24). The list call alone reveals the
       # count; documents/webhooks refuse to fan out that wide and degrade.
       slugs = for i <- 1..30, do: %{slug: "ds#{i}"}
-      Fake.program([ok_json(200, Jason.encode!(%{datasets: slugs}))])
+      Fake.program(%{@ds_path => ok_json(200, Jason.encode!(%{datasets: slugs}))})
 
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
       m = meters(conn)
@@ -439,6 +449,88 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       assert m["webhooks"]["value"] == "unmetered"
       assert m["datasets"]["value"] == "unmetered"
       assert Fake.requests() == []
+    end
+  end
+
+  describe "concurrent fan-out — cross-process capture + aggregate deadline" do
+    test "fan-out requests run in Task children yet are served + captured (RED under a process-dict fake)" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      # 3 datasets → 1 list + 3 analytics + 3 webhook calls = 7 upstream requests;
+      # the six fan-out calls are made in `Task.async_stream` CHILD processes. A
+      # process-dictionary fake would (a) serve those children the empty-queue
+      # default, so the sums could never be real, and (b) record their requests in
+      # dead workers' dicts, invisible here. The owner-keyed store resolves each
+      # child's owner via `$callers`, so both survive.
+      program_instance([{"a", 1, 1}, {"b", 2, 2}, {"c", 3, 3}])
+
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      m = meters(conn)
+
+      # Real cross-dataset sums only land if the child requests reached the fake
+      # AND were served the programmed bodies — impossible under a process-dict fake.
+      assert m["datasets"]["value"] == 3
+      assert m["documents"]["value"] == 6
+      assert m["webhooks"]["value"] == 6
+
+      # All seven requests — including the six off-process fan-out calls — are
+      # visible to the test, each carrying the bearer, none leaking it.
+      assert length(Fake.requests()) == 7
+      assert_token_custody(conn)
+    end
+
+    test "a slow many-dataset box degrades the fanned meters within the budget, not ~98s" do
+      # Drive the aggregate wall-clock budget WAY down so the test is fast while
+      # still proving the deadline bounds a genuinely slow fan-out. (Global env, but
+      # every OTHER usage test's fake answers instantly, so a 500ms budget never
+      # bites them.)
+      prev = Application.get_env(:barkpark_cloud, :usage_fanout_budget_ms)
+      Application.put_env(:barkpark_cloud, :usage_fanout_budget_ms, 500)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark_cloud, :usage_fanout_budget_ms, prev),
+          else: Application.delete_env(:barkpark_cloud, :usage_fanout_budget_ms)
+      end)
+
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      # The LIST answers instantly (so the COUNT lands), but EVERY per-dataset
+      # inventory call sleeps 8s — far past the 500ms shared budget. Sequentially
+      # that is 6 × 8s = 48s; the aggregate deadline must cut it to ~the budget.
+      slow = fn body -> {:delay, 8_000, ok_json(200, body)} end
+
+      Fake.program(%{
+        @ds_path => ok_json(200, ~s({"datasets":[{"slug":"a"},{"slug":"b"},{"slug":"c"}]})),
+        analytics_path("a") => slow.(~s({"total_documents":1})),
+        analytics_path("b") => slow.(~s({"total_documents":1})),
+        analytics_path("c") => slow.(~s({"total_documents":1})),
+        webhooks_path("a") => slow.(~s({"webhooks":[]})),
+        webhooks_path("b") => slow.(~s({"webhooks":[]})),
+        webhooks_path("c") => slow.(~s({"webhooks":[]}))
+      })
+
+      started = System.monotonic_time(:millisecond)
+      conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      assert conn.status == 200
+      m = meters(conn)
+
+      # The list landed → the datasets COUNT is real...
+      assert m["datasets"]["value"] == 3
+      # ...but the fanned meters could not be totalled inside the shared budget, so
+      # they degrade honestly (never a partial/fake number, never a 500).
+      assert m["documents"]["value"] == "unmetered"
+      assert m["webhooks"]["value"] == "unmetered"
+      # A control-plane meter still returns.
+      assert m["seats"]["value"] == 1
+
+      # The whole call returned in ~the aggregate budget, NOT 6 × 8s. Generous
+      # ceiling to stay green on a loaded CI while still proving the deadline bit.
+      assert elapsed < 4_000,
+             "usage fan-out took #{elapsed}ms — the aggregate deadline did not bound it"
     end
   end
 
