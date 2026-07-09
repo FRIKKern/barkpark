@@ -459,18 +459,20 @@ defmodule Barkpark.StructureTest do
              "book is under Plugins, not top-level"
     end
 
-    test "a disabled plugin's doc types fall into …Rest with an honest count" do
+    test "a disabled plugin's PRIVATE doc type falls into …Rest, never Settings" do
       dataset = "structure_test_disabled_rest"
       seed_legacy(dataset)
 
-      # tickets is default-disabled. Register its schema (public, so the host
-      # Settings catch-all for private singletons does not surface it) so the
-      # …Rest node is drillable, and seed 3 published + 1 draft (count = 4).
+      # tickets is default-disabled and its `ticket` schema is PRIVATE (the real
+      # plugin declaration). The Settings catch-all rejects it by OWNERSHIP
+      # (charter Decision 12), so it must NOT masquerade as a Settings singleton
+      # — it falls to …Rest with an honest count instead. Seed 3 published +
+      # 1 draft (count = 4).
       insert_schema!(%{
         name: "ticket",
         title: "Tickets",
         icon: "🎫",
-        visibility: "public",
+        visibility: "private",
         dataset: dataset,
         fields: []
       })
@@ -483,11 +485,54 @@ defmodule Barkpark.StructureTest do
       refute "ticket" in all_type_names(rest_stripped(tree)),
              "a disabled plugin contributes no placed desk item"
 
+      # The ownership reject keeps a disabled plugin's private type OUT of the
+      # host Settings singleton group — no masquerade, no census theft.
+      settings = settings_node(tree)
+
+      if settings do
+        refute "ticket" in Enum.map(settings.items, & &1.type_name),
+               "a plugin-owned private type must not surface as a Settings singleton"
+      end
+
       rest = rest_node(tree)
       assert %Node{} = rest
       ticket_rest = Enum.find(rest.items, &(&1.type_name == "ticket"))
       assert %Node{type: :document_type_list} = ticket_rest
       assert ticket_rest.title == "ticket (4)", "count includes the draft — honest about the DB"
+    end
+
+    test "an enabled :main plugin's PRIVATE type does not double-list in Settings" do
+      dataset = "structure_test_no_double_list"
+      seed_legacy(dataset)
+
+      # sheets is enabled by default with placement :main and its `sheet` schema
+      # is PRIVATE. It renders as its own top-level MAIN group (build_sheets_
+      # group), so the Settings catch-all must reject it by ownership — a private
+      # owned type must never appear in BOTH MAIN and Settings.
+      insert_schema!(%{
+        name: "sheet",
+        title: "Sheets",
+        icon: "📊",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      # sheet is a top-level MAIN group.
+      assert Enum.any?(tree.items, fn n ->
+               n.type == :document_type_list and n.type_name == "sheet"
+             end),
+             "an enabled :main plugin's type lives top-level in MAIN"
+
+      # …and NOT also under Settings.
+      settings = settings_node(tree)
+
+      if settings do
+        refute "sheet" in Enum.map(settings.items, & &1.type_name),
+               "a plugin-owned private type must not double-list under Settings"
+      end
     end
 
     test "an orphaned doc type (no schema) still surfaces in …Rest as a plain node" do
