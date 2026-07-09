@@ -1911,52 +1911,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </aside>
 
       <div style="flex: 1; display: flex; flex-direction: column; min-height: 0;">
+      <%!-- Slim header (charter D44): title + one honest status label. The mode
+            select, model picker + observed-model fact, context ring, and Send/Stop
+            all moved into the composer footer cockpit below — where you type. --%>
       <div style="display: flex; align-items: center; gap: 10px; padding: 8px 16px; border-bottom: 1px solid var(--border-muted); flex: none;">
         <span class="h3" style="display: flex; align-items: center; gap: 8px;">
           <.icon name="message-circle" size={16} /> chat
         </span>
-        <span :if={@init} class="text-xs text-dim" style="font-family: var(--font-mono);">
-          <%= @init.model %>
-        </span>
-        <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
-          <select
-            name="mode"
-            class="text-xs"
-            style="background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 6px; padding: 2px 6px;"
-          >
-            <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
-              <%= mode_label(m) %>
-            </option>
-          </select>
-        </form>
-        <%!-- Model picker (wave 5): choose the brain. The choice is intent —
-              it rides the next spawn as `--model` and steers a live session
-              via the set_model control frame; the dim mono suffix is FACT
-              (the answering model observed off the last init/result). --%>
-        <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
-          <select
-            name="model"
-            class="text-xs"
-            aria-label="Model"
-            style="background: var(--bg); color: inherit; border: 1px solid hsl(var(--primary-hsl) / 0.35); border-radius: 6px; padding: 2px 6px; font-weight: 600;"
-          >
-            <option value="default" selected={@model_choice == "default"}>
-              model: default
-            </option>
-            <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
-              <%= model_label(m) %>
-            </option>
-          </select>
-          <span
-            :if={@init && @init.model}
-            class="text-xs text-dim"
-            style="font-family: var(--font-mono);"
-            title="The answering model, as reported by the CLI"
-          >
-            <%= @init.model %>
-          </span>
-        </form>
-        <.context_ring ring={@ring} />
         <span class="text-xs text-dim" style="margin-left: auto;">
           <%= status_label(@status) %> — Claude on this host, admins only.
         </span>
@@ -2162,26 +2123,98 @@ defmodule BarkparkWeb.Studio.ChatLive do
               >
               </ul>
             </div>
-            <%!-- While a turn runs the primary button becomes Stop (interrupt),
-                  but pressing ↵ still submits: a mid-turn send is queued honestly
-                  (charter D43) — dispatched immediately, run as the next turn. --%>
-            <button
-              :if={turn_active?(@status)}
-              type="button"
-              class="btn"
-              phx-click="stop_turn"
-              disabled={@status == :interrupting}
-              aria-label="Stop the current turn"
-              style="display: inline-flex; align-items: center; gap: 6px;"
-            >
-              <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
-              <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
-            </button>
-            <button :if={not turn_active?(@status)} type="submit" class="btn btn-primary">
-              <.icon name="send" size={14} />
-            </button>
           </div>
+
         </form>
+
+        <%!-- Composer cockpit footer (charter D44): the mode + model controls
+              live borderless on the left (KEEP the phx-change form wrappers —
+              the test selectors target them), the mini context ring + image
+              attach + Send/Stop cluster on the right. It reads as one composer
+              block but is a SIBLING of the form, never a child — nested <form>s
+              are invalid HTML (the parser drops them, breaking the selectors).
+              Send re-associates to the composer via `form="chat-composer-form"`;
+              the attach <label>'s `for` reaches the hidden input by id. --%>
+        <div style="display: flex; align-items: center; gap: 10px; max-width: 860px; margin: 8px auto 0;">
+            <div style="display: flex; align-items: center; gap: 8px; min-width: 0;">
+              <form phx-change="set-mode" style="display: inline-flex; align-items: center;">
+                <select
+                  name="mode"
+                  class="text-xs text-dim"
+                  style="background: transparent; color: inherit; border: none; border-radius: 6px; padding: 2px 4px; cursor: pointer;"
+                >
+                  <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
+                    <%= mode_label(m) %>
+                  </option>
+                </select>
+              </form>
+              <%!-- Model picker (wave 5): the choice is intent — it rides the next
+                    spawn as `--model` and steers a live session via the set_model
+                    control frame; the dim mono suffix is FACT (the answering model
+                    observed off the last init/result), sitting beside its intent. --%>
+              <form phx-change="set-model" style="display: inline-flex; align-items: center; gap: 6px;">
+                <select
+                  name="model"
+                  class="text-xs"
+                  aria-label="Model"
+                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                >
+                  <option value="default" selected={@model_choice == "default"}>
+                    model: default
+                  </option>
+                  <option :for={m <- ClaudeChat.models()} value={m} selected={m == @model_choice}>
+                    <%= model_label(m) %>
+                  </option>
+                </select>
+                <span
+                  :if={@init && @init.model}
+                  class="text-xs text-dim"
+                  style="font-family: var(--font-mono);"
+                  title="The answering model, as reported by the CLI"
+                >
+                  <%= @init.model %>
+                </span>
+              </form>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+              <.context_ring ring={@ring} size={:sm} show_cost={false} />
+              <%!-- Attach an image (charter D44/D25): a <label> for the hidden
+                    live_file_input (whose id is the upload ref) opens the native
+                    picker with ZERO hook change. The strip / paste-drop are below. --%>
+              <label
+                for={@uploads.attachments.ref}
+                class="btn"
+                aria-label="Attach an image"
+                title="Attach an image"
+                style="display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; cursor: pointer;"
+              >
+                <.icon name="image" size={16} />
+              </label>
+              <%!-- While a turn runs the primary button becomes Stop (interrupt),
+                    but pressing ↵ still submits: a mid-turn send is queued honestly
+                    (charter D43) — dispatched immediately, run as the next turn. --%>
+              <button
+                :if={turn_active?(@status)}
+                type="button"
+                class="btn"
+                phx-click="stop_turn"
+                disabled={@status == :interrupting}
+                aria-label="Stop the current turn"
+                style="display: inline-flex; align-items: center; gap: 6px;"
+              >
+                <span style="display: inline-block; width: 10px; height: 10px; background: currentColor; border-radius: 2px;"></span>
+                <%= if @status == :interrupting, do: "Stopping…", else: "Stop" %>
+              </button>
+              <button
+                :if={not turn_active?(@status)}
+                type="submit"
+                form="chat-composer-form"
+                class="btn btn-primary"
+              >
+                <.icon name="send" size={14} />
+              </button>
+            </div>
+        </div>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
@@ -3829,12 +3862,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp approval_outcome_label(:canceled), do: "✗ canceled"
   defp approval_outcome_label(_), do: "✗ denied"
 
-  defp composer_placeholder(:new), do: "Message Claude to begin… (/ for commands)"
+  # The idle/ready clause teaches the composer's verbs (charter D44) — never a
+  # mic, never @-mentions. Degraded states keep their honest, specific copy.
+  defp composer_placeholder(:new), do: "Plan, build… / for commands"
   defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
   defp composer_placeholder(:offline), do: "Send a message to resume this session…"
   defp composer_placeholder(:thinking), do: "Claude is working — press Stop to interrupt…"
   defp composer_placeholder(:interrupting), do: "Stopping…"
-  defp composer_placeholder(_), do: "Message Claude… (/ for commands)"
+  defp composer_placeholder(_), do: "Plan, build… / for commands"
 
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
@@ -4010,14 +4045,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp format_cost(_), do: "$0.0000"
 
   attr :ring, :map, required: true
+  attr :size, :atom, default: :md
+  attr :show_cost, :boolean, default: true
 
   defp context_ring(assigns) do
-    assigns = assign(assigns, :geo, ring_geometry(assigns.ring))
+    # Geometry is viewBox-relative (0 0 36 36) so the arc math is size-agnostic —
+    # only the pixel width/height and the 9px % label change between :md and :sm
+    # (charter D44: the miniature footer ring drops the label, keeping just the arc).
+    assigns =
+      assigns
+      |> assign(:geo, ring_geometry(assigns.ring))
+      |> assign(:px, if(assigns.size == :sm, do: 16, else: 30))
+      |> assign(:show_pct, assigns.size != :sm)
 
     ~H"""
     <div style="display: inline-flex; align-items: center; gap: 8px;" title={ring_title(@ring)}>
       <div style="position: relative; display: inline-flex; align-items: center; justify-content: center;">
-        <svg width="30" height="30" viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
+        <svg width={@px} height={@px} viewBox="0 0 36 36" style="display: block;" aria-hidden="true">
           <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--primary-soft)" stroke-width="3.5" />
           <circle
             :if={@geo.known}
@@ -4033,6 +4077,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           />
         </svg>
         <span
+          :if={@show_pct}
           class="text-dim"
           style="position: absolute; font-size: 9px; font-weight: 600; font-variant-numeric: tabular-nums;"
         >
@@ -4040,6 +4085,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </span>
       </div>
       <span
+        :if={@show_cost}
         class="text-xs text-dim"
         style="font-family: var(--font-mono); font-variant-numeric: tabular-nums;"
       >

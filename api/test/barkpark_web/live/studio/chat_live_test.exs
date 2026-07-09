@@ -459,7 +459,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert render(view_b) =~ "cross-tab hello"
     end
 
-    test "init event surfaces the model in the header", %{view: view} do
+    test "init event surfaces the observed model beside the footer picker", %{view: view} do
+      # The observed-model fact moved with the model picker into the composer
+      # footer cockpit (charter D44); the standalone header span is gone.
       send(
         view.pid,
         {:claude_chat_event, %{"type" => "system", "subtype" => "init", "model" => "opus-x"}}
@@ -813,11 +815,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       html = render(view)
       # 64000 / 200000 = 32% — the arc length IS the ratio (geometry encodes it).
-      assert html =~ "stroke-dasharray"
-      assert html =~ "32%"
+      # The composer-footer ring is :sm, so the 9px % label is hidden (charter
+      # D44) and the arc dasharray carries the proof: 0.32 × 97.39 = 31.16.
+      assert html =~ ~s(stroke-dasharray="31.16 97.39")
       # 32% is below 70% → the ok token, never warn/danger.
       assert html =~ "var(--ok)"
       assert html =~ "Context: 64000 / 200000 tokens"
+      # Cost renders from the D37 strip below the footer (the :sm ring passes
+      # show_cost=false to avoid double-rendering it).
       assert html =~ "$0.0500"
     end
 
@@ -830,7 +835,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       html = render_patch(view, "/studio/chat/#{id}")
 
-      assert html =~ "93%"
+      # 185000 / 200000 = 93% — the :sm footer ring hides the % label (charter
+      # D44), so the honest title + the danger ramp carry the last-known headroom.
+      assert html =~ "Context: 185000 / 200000 tokens"
       assert html =~ "var(--danger)"
     end
 
@@ -1240,13 +1247,13 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "while a turn runs, Stop replaces Send (attribute-level, not disabled)", %{view: view} do
       # render_submit bypasses the disabled attribute, so assert on the button
       # IDENTITY, not on disabled: the submit button is GONE, Stop is present.
-      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      refute has_element?(view, ~s(button[phx-click=stop_turn]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
-      assert has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
-      refute has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[phx-click=stop_turn]))
+      refute has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     # ── mid-turn sends queue honestly instead of dropping (charter D43) ──────
@@ -1381,7 +1388,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Interrupted"
       refute html =~ "ended with an error"
       assert html =~ "ready"
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     test "an aborted_streaming result reads as interrupted even without a prior Stop",
@@ -1562,10 +1569,12 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
 
-      # a near-full window pre-compaction: 180k / 200k = 90%
+      # a near-full window pre-compaction: 180k / 200k = 90%. The :sm footer ring
+      # hides the % label (charter D44), so the arc dasharray is the proof:
+      # 0.9 × 97.39 = 87.65.
       send_frame(store_id(view), {:claude_chat_event, big_result(180_000)})
       html = render(view)
-      assert html =~ "90%"
+      assert html =~ ~s(stroke-dasharray="87.65 97.39")
 
       # the CLI compacts…
       send(
@@ -1584,8 +1593,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # this refute would fail — the guard.
       send_frame(store_id(view), {:claude_chat_event, big_result(40_000)})
       html = render(view)
-      assert html =~ "20%"
-      refute html =~ "90%"
+      # 40k / 200k = 20% → 0.2 × 97.39 = 19.48; the pre-compaction 90% arc is gone.
+      assert html =~ ~s(stroke-dasharray="19.48 97.39")
+      refute html =~ ~s(stroke-dasharray="87.65 97.39")
     end
 
     # ── Stopping… cannot wedge (scc-w2, D18) ──────────────────────────────
@@ -1604,8 +1614,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "offline"
       assert html =~ "force-closed"
       # the composer is usable again — Stop is gone, Send is back
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
-      refute has_element?(view, ~s(form[phx-submit=send] button[phx-click=stop_turn]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
+      refute has_element?(view, ~s(button[phx-click=stop_turn]))
     end
 
     test "a result arriving before the timeout makes the timer a no-op", %{view: view} do
@@ -1677,7 +1687,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "ended unexpectedly"
       # the pending approval is force-canceled, never a dead button
       assert html =~ "✗ canceled"
-      assert has_element?(view, ~s(form[phx-submit=send] button[type=submit]))
+      assert has_element?(view, ~s(button[type=submit][form=chat-composer-form]))
     end
 
     test "an unknown stale event does not crash the LiveView", %{view: view} do
