@@ -1304,11 +1304,20 @@ defmodule Barkpark.StudioChatTest do
   defp fold_rail(frames) do
     Enum.reduce(frames, %{}, fn ev, rail ->
       case ev["subtype"] do
-        "background_tasks_changed" -> StudioChat.rail_apply_background(rail, ev)
-        "task_progress" -> StudioChat.rail_capture_progress(rail, ev)
-        "task_updated" -> StudioChat.rail_stamp_status(rail, ev["task_id"], get_in(ev, ["patch", "status"]))
-        "task_notification" -> StudioChat.rail_stamp_status(rail, ev["task_id"], ev["status"])
-        _ -> rail
+        "background_tasks_changed" ->
+          StudioChat.rail_apply_background(rail, ev)
+
+        "task_progress" ->
+          StudioChat.rail_capture_progress(rail, ev)
+
+        "task_updated" ->
+          StudioChat.rail_stamp_status(rail, ev["task_id"], get_in(ev, ["patch", "status"]))
+
+        "task_notification" ->
+          StudioChat.rail_stamp_status(rail, ev["task_id"], ev["status"])
+
+        _ ->
+          rail
       end
     end)
   end
@@ -1364,6 +1373,7 @@ defmodule Barkpark.StudioChatTest do
       assert design.title == "Design"
       assert design.agent_count == 4
       assert design.model == "Opus"
+
       assert Enum.map(design.agents, & &1["label"]) ==
                ~w(design:encryption design:visibility design:ownership design:hardening)
     end
@@ -1425,8 +1435,21 @@ defmodule Barkpark.StudioChatTest do
         "status" => "completed",
         "workflow" => [
           %{"type" => "workflow_phase", "index" => 1, "title" => "Judge"},
-          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "judge:ok", "state" => "done", "tokens" => 100},
-          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "judge:boom", "state" => "error", "error" => "kaboom", "tokens" => 50}
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:ok",
+            "state" => "done",
+            "tokens" => 100
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "judge:boom",
+            "state" => "error",
+            "error" => "kaboom",
+            "tokens" => 50
+          }
         ]
       }
 
@@ -1447,9 +1470,24 @@ defmodule Barkpark.StudioChatTest do
           %{"type" => "workflow_phase", "index" => 1, "title" => "Explore"},
           %{"type" => "workflow_phase", "index" => 2, "title" => "Build"},
           %{"type" => "workflow_phase", "index" => 3, "title" => "Review"},
-          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "explore", "state" => "done"},
-          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "build:a", "state" => "done"},
-          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "build:b", "state" => "start"}
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "explore",
+            "state" => "done"
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:a",
+            "state" => "done"
+          },
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "build:b",
+            "state" => "start"
+          }
         ]
       }
 
@@ -1468,19 +1506,37 @@ defmodule Barkpark.StudioChatTest do
         "wf" => %{
           "status" => "running",
           "workflow" => [
-            %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "start", "tokens" => 10}
+            %{
+              "type" => "workflow_agent",
+              "phaseIndex" => 1,
+              "label" => "a",
+              "state" => "start",
+              "tokens" => 10
+            }
           ]
         }
       }
 
       token_tick =
         put_in(base, ["wf", "workflow"], [
-          %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => "a", "state" => "start", "tokens" => 9_999}
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "a",
+            "state" => "start",
+            "tokens" => 9_999
+          }
         ])
 
       regrouped =
         put_in(base, ["wf", "workflow"], [
-          %{"type" => "workflow_agent", "phaseIndex" => 2, "label" => "a", "state" => "start", "tokens" => 10}
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 2,
+            "label" => "a",
+            "state" => "start",
+            "tokens" => 10
+          }
         ])
 
       # phaseIndex is now inside strip_workflow_node's take list (charter D57)
@@ -1496,7 +1552,9 @@ defmodule Barkpark.StudioChatTest do
 
   describe "workflow_label_parts/1 (charter D59)" do
     test "first-colon split for a slug head; multi-colon rest kept; bare otherwise" do
-      assert StudioChat.workflow_label_parts("design:encryption") == {:pair, "design", "encryption"}
+      assert StudioChat.workflow_label_parts("design:encryption") ==
+               {:pair, "design", "encryption"}
+
       assert StudioChat.workflow_label_parts("verify:encryption:leak") ==
                {:pair, "verify", "encryption:leak"}
 

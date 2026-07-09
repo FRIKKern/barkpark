@@ -869,7 +869,10 @@ defmodule Barkpark.StudioChat do
   """
   @spec workflow_node_terminal?(any()) :: boolean()
   def workflow_node_terminal?(%{"state" => s}), do: workflow_node_terminal?(s)
-  def workflow_node_terminal?(s) when is_binary(s), do: String.downcase(s) in @workflow_node_terminal
+
+  def workflow_node_terminal?(s) when is_binary(s),
+    do: String.downcase(s) in @workflow_node_terminal
+
   def workflow_node_terminal?(_), do: false
 
   # A FAILURE terminal (✕) — terminal but never a success. Kept private; the
