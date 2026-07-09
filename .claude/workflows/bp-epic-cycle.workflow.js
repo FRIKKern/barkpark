@@ -7,6 +7,8 @@ export const meta = {
     { title: 'Decide', detail: '1 Fable strategist-architect: synthesizes strategy + exploration, writes/updates the epic charter, cuts this wave of slices, files + publishes + PERFECTS a bp task per slice', model: 'fable' },
     { title: 'Build', detail: 'up to 5 Opus builders, worktree-isolated: CLAIM the bp task first, build, gate, honest self-review, commit, stamp evidence into the task', model: 'opus' },
     { title: 'Review', detail: '1 Fable reviewer: reviews EVERY green slice (code) + the task ledger, fixes obvious issues in place, re-gates, appends the charter wave log', model: 'fable' },
+    { title: 'Judge', detail: '1 Fable quality judge (Cody principles): grades the reviewed wave with honest commentary — never a bare number; verdict ship|fix with up to 3 named issues', model: 'fable' },
+    { title: 'Perfect', detail: 'conditional — only when the judge says fix: 1-3 Fable perfecters, worktree-isolated, each solves ONE judge-named issue on a -p branch, re-gates, stamps evidence', model: 'fable' },
   ],
 }
 
@@ -164,6 +166,48 @@ const REVIEW_SCHEMA = {
     wave_log_appended: { type: 'boolean', description: `true only after you actually appended the wave entry to ${CHARTER_PATH}` },
     next_wave: { type: 'string', description: 'what the next wave should take and why — the direction handoff' },
     overall_verdict: { type: 'string', description: 'did this wave move the WISH forward; cross-slice coherence; risks' },
+  },
+}
+
+const JUDGE_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['grade', 'commentary', 'verdict', 'issues'],
+  properties: {
+    grade: { type: 'string', description: 'letter grade A+..F for the wave AS REVIEWED (the -r branches), judged against the WISH' },
+    commentary: {
+      type: 'string',
+      description: 'the Cody mandate: honest agent-judged commentary that EARNS the grade — what is genuinely strong, what falls short and why, never a bare number. Judge correctness, completeness vs the wish, bloat, and aesthetics; tree-tidiness has no value.',
+    },
+    verdict: { type: 'string', enum: ['ship', 'fix'], description: 'ship = the wave honestly meets the Kinsta/Vercel bar as-is; fix = it does not, and the issues below are worth Fable time' },
+    issues: {
+      type: 'array', maxItems: 3,
+      description: 'REQUIRED non-empty when verdict=fix, empty when ship: the 1-3 highest-leverage defects/quality shortfalls, each concrete enough for one agent to solve without more context',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['title', 'branch', 'task_id', 'where', 'why', 'fix_direction', 'severity'],
+        properties: {
+          title: { type: 'string' },
+          branch: { type: 'string', description: 'the -r (or original) branch carrying the defect' },
+          task_id: { type: 'string', description: 'the bp task whose evidence the fix must update' },
+          where: { type: 'string', description: 'file:line anchors you actually read' },
+          why: { type: 'string', description: 'the failure scenario or quality shortfall, concretely' },
+          fix_direction: { type: 'string', description: 'the fix you would make — direction, not a diff' },
+          severity: { type: 'string', enum: ['blocking', 'quality'] },
+        },
+      },
+    },
+  },
+}
+
+const PERFECT_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  required: ['ok', 'issue_title', 'branch', 'summary', 'gate_passed'],
+  properties: {
+    ok: { type: 'boolean' },
+    issue_title: { type: 'string' },
+    branch: { type: 'string', description: 'the -p branch carrying your fix (the branch the lead must now integrate INSTEAD of its base)' },
+    summary: { type: 'string', description: 'what you changed and the proof it solves the judged issue' },
+    gate_passed: { type: 'boolean', description: 'the slice gate re-run green on the -p branch' },
   },
 }
 
@@ -325,6 +369,72 @@ for (const r of (review && review.reviewed) || []) reviewedByTask[r.task_id] = r
 const green = greenBuilt.map((b) => ({ ...b, reviewed: reviewedByTask[b.task_id] || null }))
   .filter((b) => !b.reviewed || b.reviewed.gate_passed)
 
+// ── Phase 6: Judge — one Fable agent decides whether the wave meets the bar ──
+// (Cody principles: the grade EARNS its honest commentary — never a bare
+// number; correctness/completeness/bloat/aesthetics count, tree-tidiness
+// does not. verdict=fix dispatches 1-3 Fable perfecters.)
+phase('Judge')
+let judgment = null
+let perfected = []
+if (review && green.length > 0) {
+  judgment = await agent(
+    `You are the QUALITY JUDGE of a just-reviewed Barkpark epic wave — one Fable mind deciding whether this wave actually meets the bar, AFTER the reviewer already fixed the obvious. You are in your OWN git worktree. You change NOTHING — you judge.
+
+${USER_WISH_BLOCK}
+
+Read the epic charter at ${CHARTER_PATH}. Then, for every slice below, check out its final branch and study the REAL diff vs its merge-base with origin/main — judge the code that will merge, not the summaries.
+
+REVIEWED WAVE (the reviewer's own verdicts are input, not truth — re-judge):
+${JSON.stringify(green.map((b) => ({ task_id: b.task_id, branch: (b.reviewed && b.reviewed.final_branch) || b.branch, summary: b.summary, reviewer_fixes: b.reviewed ? b.reviewed.fixes : null, reviewer_verdict: b.reviewed ? b.reviewed.verdict : null })), null, 2)}
+
+REVIEWER'S OVERALL VERDICT: ${review.overall_verdict}
+
+Cody principles (the grading law):
+- The grade gets honest agent-judged COMMENTARY that earns it — never a bare number. Name what is genuinely strong AND what falls short.
+- Judge against the WISH holistically: correctness (would it break?), completeness (does the wish's finished experience actually exist?), bloat (is there code that shouldn't be?), aesthetics (Kinsta/Vercel bar — honest states, legibility, feel).
+- Tree-tidiness has no value. Do not manufacture issues to look rigorous — 'ship' is the correct verdict for a wave that meets the bar.
+- Distrust vacuous green: a pass only counts if the RIGHT thing produced it — spot-check that the load-bearing tests actually pin the behavior claimed.
+
+Verdict 'fix' ONLY when you found 1-3 issues genuinely worth Fable time (real defects, missing wish-critical states, quality below the bar). Each issue must carry file:line anchors you read and a fix direction one agent can execute without more context.`,
+    { label: 'judge', phase: 'Judge', schema: JUDGE_SCHEMA, model: REVIEW_MODEL, isolation: 'worktree' }
+  )
+  if (judgment) log(`Judge: grade ${judgment.grade} — verdict ${judgment.verdict}${judgment.verdict === 'fix' ? ` (${(judgment.issues || []).length} issues)` : ''}`)
+
+  // ── Phase 7: Perfect — 1-3 Fable perfecters solve the judged issues ──
+  if (judgment && judgment.verdict === 'fix' && (judgment.issues || []).length > 0) {
+    phase('Perfect')
+    perfected = (await parallel(
+      judgment.issues.slice(0, 3).map((iss) => () =>
+        agent(
+          `You are a PERFECTER on a Barkpark epic wave — one Fable agent solving EXACTLY ONE judged issue, in your OWN git worktree. The reviewer and judge are behind you; you are the last hands before merge.
+
+${USER_WISH_BLOCK}
+
+Read the epic charter at ${CHARTER_PATH} first.
+
+THE ISSUE (severity: ${iss.severity}):
+${iss.title}
+WHERE: ${iss.where}
+WHY IT FAILS THE BAR: ${iss.why}
+FIX DIRECTION (judge's lean — follow the code where it disagrees): ${iss.fix_direction}
+BASE BRANCH: ${iss.branch}
+BP TASK: ${iss.task_id}
+
+Steps:
+1. \`git checkout -b ${iss.branch}-p ${iss.branch}\` — your fix lands as follow-up commit(s) on this -p branch. Never touch main or other slices' branches.
+2. Solve the issue properly — minimal, surgical, matching surrounding style. No redesigns, no ride-alongs beyond the issue.
+3. Re-run the slice's gate (find it in the bp task / charter) plus any test that pins your fix — add a protective test if the issue was a real defect with none. Green or report ok:false honestly.
+4. Stamp what you did into the bp task's evidence (bp doc patch + publish — do NOT close, do NOT flip merge-gated criteria).
+5. Report the -p branch — the lead integrates it INSTEAD of its base.
+${TASKS_BLOCK}`,
+          { label: `perfect:${slug(iss.title)}`, phase: 'Perfect', schema: PERFECT_SCHEMA, model: STRAT_MODEL, isolation: 'worktree' }
+        )
+      )
+    )).filter(Boolean)
+    log(`Perfect: ${perfected.filter((p) => p.ok && p.gate_passed).length}/${perfected.length} issues solved green`)
+  }
+}
+
 return {
   direction: strategist.direction,
   exploration: explorations.length,
@@ -348,4 +458,6 @@ return {
   wave_log_appended: review ? review.wave_log_appended : false,
   next_wave: review ? review.next_wave : null,
   overall_verdict: review ? review.overall_verdict : null,
+  judgment: judgment ? { grade: judgment.grade, verdict: judgment.verdict, commentary: judgment.commentary, issues: judgment.issues } : null,
+  perfected: perfected.map((p) => ({ issue: p.issue_title, branch: p.branch, ok: p.ok && p.gate_passed, summary: p.summary })),
 }
