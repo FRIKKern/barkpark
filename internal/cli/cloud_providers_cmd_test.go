@@ -42,7 +42,7 @@ func TestRunCloudProvidersTable(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
 	}
-	for _, want := range []string{"PROVIDER", "STATE", "AUTH", "CORE", "CATALOG", "LIFECYCLE", "PAUSE", "LABELS", "hetzner", "azure", "registered"} {
+	for _, want := range []string{"PROVIDER", "STATE", "AUTH", "CORE", "CATALOG", "ARCHIVE", "RESURRECT", "DECOMMISSION", "ADOPT", "AUDIT", "PAUSE", "LABELS", "hetzner", "azure", "registered"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("table missing %q:\n%s", want, stdout)
 		}
@@ -83,11 +83,15 @@ type providersJSONEnv struct {
 		Tier          string `json:"tier"`
 		Authenticated *bool  `json:"authenticated"`
 		Capabilities  struct {
-			Core      bool `json:"core"`
-			Catalog   bool `json:"catalog"`
-			Lifecycle bool `json:"lifecycle"`
-			Pause     bool `json:"pause"`
-			Labels    bool `json:"labels"`
+			Core         bool `json:"core"`
+			Catalog      bool `json:"catalog"`
+			Archive      bool `json:"archive"`
+			Resurrect    bool `json:"resurrect"`
+			Decommission bool `json:"decommission"`
+			Adopt        bool `json:"adopt"`
+			Audit        bool `json:"audit"`
+			Pause        bool `json:"pause"`
+			Labels       bool `json:"labels"`
 		} `json:"capabilities"`
 	} `json:"providers"`
 }
@@ -113,12 +117,17 @@ func TestRunCloudProvidersJSON(t *testing.T) {
 		t.Fatalf("providers not sorted by slug (want azure first): %+v", env.Providers)
 	}
 
-	// Hetzner: registered, core+labels only, authenticated true (token set), no tier.
+	// Hetzner: registered, core+labels + ALL five lifecycle facets (registered via
+	// the seam, since its lifecycle lives in free CLI functions), authenticated
+	// true (token set), no tier.
 	hz := env.Providers[byslug["hetzner"]]
 	if !hz.Registered || !hz.Capabilities.Core || !hz.Capabilities.Labels {
 		t.Errorf("hetzner row wrong: %+v", hz)
 	}
-	if hz.Capabilities.Catalog || hz.Capabilities.Lifecycle || hz.Capabilities.Pause {
+	if !(hz.Capabilities.Archive && hz.Capabilities.Resurrect && hz.Capabilities.Decommission && hz.Capabilities.Adopt && hz.Capabilities.Audit) {
+		t.Errorf("hetzner must honour all five lifecycle facets: %+v", hz.Capabilities)
+	}
+	if hz.Capabilities.Catalog || hz.Capabilities.Pause {
 		t.Errorf("hetzner claims a capability it does not honour today: %+v", hz.Capabilities)
 	}
 	if hz.Authenticated == nil || !*hz.Authenticated {
@@ -128,26 +137,29 @@ func TestRunCloudProvidersJSON(t *testing.T) {
 		t.Errorf("hetzner is not dev-tier: %q", hz.Tier)
 	}
 
-	// Fake: registered, all capabilities honoured, tier=dev.
+	// Fake: registered, all capabilities honoured (including every lifecycle
+	// facet), tier=dev.
 	fk := env.Providers[byslug["fake"]]
-	if !fk.Registered || !(fk.Capabilities.Core && fk.Capabilities.Catalog && fk.Capabilities.Lifecycle && fk.Capabilities.Pause && fk.Capabilities.Labels) {
+	fkAllLifecycle := fk.Capabilities.Archive && fk.Capabilities.Resurrect && fk.Capabilities.Decommission && fk.Capabilities.Adopt && fk.Capabilities.Audit
+	if !fk.Registered || !(fk.Capabilities.Core && fk.Capabilities.Catalog && fkAllLifecycle && fk.Capabilities.Pause && fk.Capabilities.Labels) {
 		t.Errorf("fake row should be all-true and registered: %+v", fk)
 	}
 	if fk.Tier != "dev" {
 		t.Errorf("fake must be tier=dev: %q", fk.Tier)
 	}
 
-	// Azure: REGISTERED (S5 wired it), core+labels+pause honoured, catalog+lifecycle
-	// off, authenticated null (no creds in the test env).
+	// Azure: REGISTERED, core+labels+pause + the decommission+audit lifecycle facets
+	// honoured (CLI-level, registered from the dispatch table), but catalog and the
+	// archive/resurrect/adopt facets OFF (Decision 20); authenticated null (no creds).
 	az := env.Providers[byslug["azure"]]
 	if !az.Registered {
 		t.Errorf("azure must be registered now that S5 wires it: %+v", az)
 	}
-	if !(az.Capabilities.Core && az.Capabilities.Labels && az.Capabilities.Pause) {
-		t.Errorf("azure should honour core+labels+pause: %+v", az.Capabilities)
+	if !(az.Capabilities.Core && az.Capabilities.Labels && az.Capabilities.Pause && az.Capabilities.Decommission && az.Capabilities.Audit) {
+		t.Errorf("azure should honour core+labels+pause+decommission+audit: %+v", az.Capabilities)
 	}
-	if az.Capabilities.Catalog || az.Capabilities.Lifecycle {
-		t.Errorf("azure must NOT claim catalog/lifecycle yet: %+v", az.Capabilities)
+	if az.Capabilities.Catalog || az.Capabilities.Archive || az.Capabilities.Resurrect || az.Capabilities.Adopt {
+		t.Errorf("azure must NOT claim catalog/archive/resurrect/adopt: %+v", az.Capabilities)
 	}
 	if az.Authenticated != nil {
 		t.Errorf("azure authenticated must be json null (no creds), got %+v", az.Authenticated)

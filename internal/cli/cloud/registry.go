@@ -27,6 +27,64 @@ const (
 	ProviderAzure = "azure"
 )
 
+// The fleet-lifecycle facet verbs (charter Decision 20). They name both the
+// `bp cloud instance <verb>` surface and the per-slug capability the fixture
+// claims, so one vocabulary spans the CLI dispatch, the seam registration, and
+// the honest-degradation matrix.
+const (
+	VerbArchive      = "archive"
+	VerbResurrect    = "resurrect"
+	VerbDecommission = "decommission"
+	VerbAdopt        = "adopt"
+	VerbAudit        = "audit"
+)
+
+// HetznerLifecycleVerbs is the canonical set of fleet-lifecycle facets the
+// hetzner CLI implements as free functions (internal/cli/hetzner_instance_cmd.go),
+// NOT as methods on the credential-less HcloudProvider struct — so
+// DetectCapabilities can only learn them through RegisterLifecycleVerbs, the
+// second detection source (Decision 21). The cloud package registers this set in
+// init() so its own test binary (which never links the cli package) sees the
+// honest hetzner truth for the parity test; the cli package re-registers the
+// identical set derived from its dispatch table (a cli test pins the two equal),
+// so a claim can only be satisfied by a real dispatch entry.
+var HetznerLifecycleVerbs = []string{VerbArchive, VerbResurrect, VerbDecommission, VerbAdopt, VerbAudit}
+
+// lifecycleVerbs is the second capability-detection source: kind → the set of
+// lifecycle verbs that kind dispatches at the CLI level. Guarded for concurrent
+// use like the factory registry.
+var lifecycleVerbs = struct {
+	mu sync.RWMutex
+	m  map[string]map[string]bool
+}{m: map[string]map[string]bool{}}
+
+// RegisterLifecycleVerbs records that provider `kind` honours `verbs`
+// (archive/resurrect/decommission/adopt/audit) at the CLI-dispatch level —
+// exactly the facets DetectCapabilities cannot learn from the provider struct
+// because hetzner/azure implement their lifecycle in free/CLI-level functions.
+// Idempotent-by-union: repeated calls merge, so the cloud-package baseline and
+// the cli-package dispatch-derived registration coexist without clobbering.
+func RegisterLifecycleVerbs(kind string, verbs ...string) {
+	lifecycleVerbs.mu.Lock()
+	defer lifecycleVerbs.mu.Unlock()
+	set := lifecycleVerbs.m[kind]
+	if set == nil {
+		set = map[string]bool{}
+		lifecycleVerbs.m[kind] = set
+	}
+	for _, v := range verbs {
+		set[v] = true
+	}
+}
+
+// lifecycleVerbRegistered reports whether kind registered verb — the OR side of
+// DetectCapabilities' two-source facet merge.
+func lifecycleVerbRegistered(kind, verb string) bool {
+	lifecycleVerbs.mu.RLock()
+	defer lifecycleVerbs.mu.RUnlock()
+	return lifecycleVerbs.m[kind][verb]
+}
+
 // ProviderFactory builds a CloudProvider from a provider's credentials (the
 // per-kind creds map the control plane's providers row carries — e.g.
 // {token:…} for Hetzner, {tenant_id,client_id,client_secret,subscription_id}
@@ -94,6 +152,12 @@ func init() {
 	Register(ProviderFake, func(map[string]string) (CloudProvider, error) {
 		return NewFakeProvider(), nil
 	})
+	// Hetzner's fleet-lifecycle facets live in free CLI functions, not on the
+	// HcloudProvider struct, so they can only reach DetectCapabilities through this
+	// registration (Decision 21). Registered here — not only from the cli package's
+	// dispatch table — so the cloud package's OWN test binary (which never links
+	// cli) still sees hetzner's honest all-true lifecycle for the parity test.
+	RegisterLifecycleVerbs(ProviderHetzner, HetznerLifecycleVerbs...)
 	// Azure is NOT registered here — registering it in this package would pull
 	// the Azure SDK into every `bp` build and, worse, create an import cycle
 	// (the azure package imports THIS package to implement the seam). Instead
@@ -114,7 +178,7 @@ var capabilitiesFixture []byte
 // Decision 16). Capabilities is EMBEDDED — its json fields (core/catalog/…) are
 // promoted, so a fixture row is one flat object `{"tier":"dev","core":true,…}`
 // and the parity test compares row.Capabilities against the provider's ACTUAL
-// interface satisfaction while Tier rides alongside untouched.
+// interface-OR-registration satisfaction while Tier rides alongside untouched.
 //
 // Tier is deliberately a field on THIS wrapper and NOT on Capabilities: putting
 // it on Capabilities would red the parity test (DetectCapabilities can't report
@@ -124,15 +188,16 @@ var capabilitiesFixture []byte
 // the in-memory fake, which `bp cloud providers` hides unless `--all` is passed.
 type ProviderRow struct {
 	Tier         string `json:"tier,omitempty"`
-	Capabilities        // embedded: core/catalog/lifecycle/pause/labels promote to the row
+	Capabilities        // embedded: core/catalog/archive/…/pause/labels promote to the row
 }
 
 // LoadCapabilities decodes the committed providers_capabilities.json fixture —
 // the cross-surface capability contract (Decision 8). The map is keyed by
 // provider slug; each value is the honest capability row (+ tier) that provider
-// claims today. This is the SAME file the Elixir control plane and the SPA read,
-// so its shape is an API: change it here and every surface (plus the parity
-// test) re-checks in CI.
+// claims today. This file is the CANONICAL Go source of that contract; the Elixir
+// control plane and the SPA consume a byte-COPY kept in lockstep by a byte-drift
+// gate (charter Decision 22), so its shape is an API: change it here and the
+// drift gate forces every surface (plus the parity test) to re-check in CI.
 func LoadCapabilities() (map[string]ProviderRow, error) {
 	var m map[string]ProviderRow
 	if err := json.Unmarshal(capabilitiesFixture, &m); err != nil {
