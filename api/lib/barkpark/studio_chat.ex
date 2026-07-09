@@ -202,6 +202,16 @@ defmodule Barkpark.StudioChat do
   # any realistic contention on one session (charter D20b).
   @append_retries 3
 
+  # The "needs you" role set (charter D31). A permission ask persists under one
+  # of three roles by its tool_name — "approval" (generic tool), "question"
+  # (AskUserQuestion), "plan" (ExitPlanMode) — but ALL THREE mean "the agent is
+  # waiting on the human", so every seam that gates on a pending ask
+  # (`pending_approvals` inc, cancel-all, find-by-request-id) treats them
+  # identically. Partial widening would leave the sidebar pill / cancel / replay
+  # lying for questions and plans. The denormalised `pending_approvals` counter
+  # stays THE one counter and now means "the agent needs you".
+  @needs_you_roles ~w(approval question plan)
+
   @doc """
   Append a completed message to a session in ONE transaction: allocate the next
   `seq` (max + 1, per session), insert the row, and bump the session's
@@ -295,11 +305,12 @@ defmodule Barkpark.StudioChat do
   # bump activity but never clobber the preview.
   @summary_roles ~w(user assistant)
   defp bump_on_append(session_id, %Message{source_markdown: md, role: role}, now) do
-    # An appended approval row is an ask — always pending at creation — so it
-    # raises the denormalised pending counter. The −1 lands when it resolves
-    # (`update_approval_status/3`) or is force-canceled (`cancel_pending_approvals/1`).
+    # An appended needs-you row (approval | question | plan) is an ask — always
+    # pending at creation — so it raises the denormalised pending counter. The
+    # −1 lands when it resolves (`update_approval_status/3`) or is force-canceled
+    # (`cancel_pending_approvals/1`).
     inc =
-      if role == "approval",
+      if role in @needs_you_roles,
         do: [message_count: 1, pending_approvals: 1],
         else: [message_count: 1]
 
@@ -395,6 +406,53 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  The most-recently-active session's non-default `model_choice` (charter D36d) —
+  the seed for a NEW chat's model picker, so "opus" stays sticky across new
+  chats. A DEDICATED query on purpose: `list_sessions` selects sidebar fields and
+  OMITS `model_choice`, so seeding off a listed row reads `nil` forever (the
+  vacuous-green trap). Returns the alias string or `nil` (no session ever picked
+  a non-default model). Ignores archive state — the last intent is the last
+  intent regardless of shelf.
+  """
+  @spec recent_model_choice() :: String.t() | nil
+  def recent_model_choice do
+    Session
+    |> where([s], not is_nil(s.model_choice) and s.model_choice != "default")
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(1)
+    |> select([s], s.model_choice)
+    |> Repo.one()
+  end
+
+  @doc """
+  Persist the sticky composer draft (charter D36c). `draft` is the unsent text
+  (nil/`""` clears it). Deliberately does NOT bump `last_active_at` — leaving a
+  draft must not reorder the sidebar. Restored on reopen from the full session
+  struct (`get_session`), NEVER from `list_sessions` (whose select omits it).
+  Returns `{:ok, session}` or `{:error, :not_found}`.
+  """
+  @spec set_draft(String.t(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, :not_found}
+  def set_draft(session_id, draft) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(draft: blank_to_nil(draft))
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  defp blank_to_nil(nil), do: nil
+
+  defp blank_to_nil(draft) when is_binary(draft) do
+    case String.trim(draft) do
+      "" -> nil
+      _ -> draft
+    end
+  end
+
+  @doc """
   Mark a session `exited` (its port died — crash or clean exit). Next send
   lazy-resumes. `:noop` if the session is gone.
   """
@@ -466,7 +524,7 @@ defmodule Barkpark.StudioChat do
     Repo.transaction(fn ->
       pending =
         Message
-        |> where([m], m.session_id == ^session_id and m.role == "approval")
+        |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
         |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
         |> Repo.all()
 
@@ -487,11 +545,12 @@ defmodule Barkpark.StudioChat do
     end
   end
 
-  # The approval message for a request_id (unique per ask). Newest wins if a
-  # request_id were ever reused; never raises on 0/N rows.
+  # The needs-you message (approval | question | plan) for a request_id (unique
+  # per ask). Newest wins if a request_id were ever reused; never raises on 0/N
+  # rows.
   defp find_approval(session_id, request_id) do
     Message
-    |> where([m], m.session_id == ^session_id and m.role == "approval")
+    |> where([m], m.session_id == ^session_id and m.role in ^@needs_you_roles)
     |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
     |> order_by([m], desc: m.seq)
     |> limit(1)

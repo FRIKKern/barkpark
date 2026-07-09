@@ -140,7 +140,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   def normalize_mode(_), do: @default_mode
 
   defp default_args(mode) do
-    base = [
+    [
       "--print",
       "--verbose",
       "--input-format",
@@ -150,16 +150,21 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
       "--include-partial-messages",
       "--permission-mode",
       mode,
+      # `--permission-prompt-tool stdio` ships in ALL modes, plan included
+      # (charter D33). It makes the CLI route permission asks to us as
+      # `control_request` (subtype `can_use_tool`) NDJSON events instead of
+      # auto-handling them — the Session forwards them as
+      # `{:claude_chat_permission, …}` and answers via `respond_permission/3`
+      # (the Agent SDK's canUseTool bridge, spoken raw). Plan mode is the
+      # product default and EVERY plan session hits ExitPlanMode; without the
+      # flag that ask never reaches Barkpark (the CLI auto-handles it), so the
+      # proposed-plan card could never render. Consequence accepted: other
+      # tools' asks in plan mode now also reach us as honest approval cards.
+      "--permission-prompt-tool",
+      "stdio",
       "--append-system-prompt",
       render_appendix()
     ]
-
-    # Outside plan mode the CLI must route permission asks to us instead of
-    # auto-denying: `--permission-prompt-tool stdio` makes it emit
-    # `control_request` (subtype `can_use_tool`) NDJSON events, which the
-    # Session forwards as `{:claude_chat_permission, …}` and answers via
-    # `respond_permission/3` — the Agent SDK's canUseTool bridge, spoken raw.
-    if mode == "plan", do: base, else: base ++ ["--permission-prompt-tool", "stdio"]
   end
 
   # Replies render through Barkpark's paper engine (FromMarkdown -> blocks ->
@@ -228,11 +233,23 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   end
 
   @doc """
-  Answer a pending `{:claude_chat_permission, …}` ask. `decision` is `:allow`
-  or `{:deny, message}`; the message travels back to the model so it can
-  adjust its approach (t3's deny_message).
+  Answer a pending `{:claude_chat_permission, …}` ask (charter D32). `decision`:
+
+    * `:allow` — approve, echoing the ORIGINAL ask input back as `updatedInput`
+      (the Session tracked it by `request_id` — never trust the caller to
+      round-trip it). A bare `{"behavior":"allow"}` FAILS ExitPlanMode on the
+      real binary (ZodError, mode stays plan); the CLI's own internal
+      `checkPermissions` shape requires `updatedInput`, so plain allow always
+      echoes it.
+    * `{:allow, updated_input}` — approve with a CALLER-supplied `updatedInput`
+      map. Question answers ride here as `%{"questions" => unchanged,
+      "answers" => %{<question string> => <value>}}` (proven: the CLI keys
+      internally by the question string; multiSelect = comma-joined labels).
+    * `{:deny, message}` — refuse; `message` (required by the schema) travels
+      back to the model so it can adjust (t3's deny_message).
   """
-  @spec respond_permission(pid(), String.t(), :allow | {:deny, String.t()}) :: :ok
+  @spec respond_permission(pid(), String.t(), :allow | {:allow, map()} | {:deny, String.t()}) ::
+          :ok
   def respond_permission(session, request_id, decision)
       when is_pid(session) and is_binary(request_id) do
     GenServer.cast(session, {:respond_permission, request_id, decision})
@@ -303,6 +320,20 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
   @spec set_model(pid(), String.t()) :: {:ok, String.t()}
   def set_model(session, model) when is_pid(session) and is_binary(model) do
     control_request(session, %{"subtype" => "set_model", "model" => model})
+  end
+
+  @doc """
+  Ask the CLI for its capability + slash-command list (charter D36a). Writes a
+  bare `{"subtype":"initialize"}` control_request on stdin — proven on the real
+  binary v2.1.205 to answer IMMEDIATELY at spawn, BEFORE any turn, with
+  `response.commands` (`[%{"name", "description", "argumentHint", "aliases"}]`).
+  Sent right after spawn by the Recorder; the ack dispatches as a TYPED
+  `{:claude_chat_control, :initialize, request_id, response}` so it is not eaten
+  by the catch-all. Returns the minted `request_id`.
+  """
+  @spec initialize(pid()) :: {:ok, String.t()}
+  def initialize(session) when is_pid(session) do
+    control_request(session, %{"subtype" => "initialize"})
   end
 
   # Mint a request_id and cast an outbound control_request frame. The id lets
@@ -436,7 +467,18 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           # DOWN and stop a session the new owner is still driving).
           sink_ref = Process.monitor(sink)
 
-          {:ok, %{port: port, sink: sink, sink_ref: sink_ref, buffer: "", pending_controls: %{}}}
+          {:ok,
+           %{
+             port: port,
+             sink: sink,
+             sink_ref: sink_ref,
+             buffer: "",
+             pending_controls: %{},
+             # request_id → the ORIGINAL ask input, tracked so a plain `:allow`
+             # echoes it back as `updatedInput` (charter D32 — a bare allow fails
+             # ExitPlanMode; the CLI wants its own checkPermissions shape).
+             pending_asks: %{}
+           }}
       end
     rescue
       e ->
@@ -462,10 +504,22 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     @impl true
     def handle_cast({:respond_permission, request_id, decision}, state) do
+      # Consume the tracked ask input (charter D32): a plain `:allow` echoes it
+      # verbatim as `updatedInput`; a `{:allow, updated}` carries the caller's
+      # map (question answers); a deny drops it. Pruned either way so the map
+      # never grows unbounded across a long session.
+      {original, pending_asks} = Map.pop(state.pending_asks, request_id)
+
       payload =
         case decision do
-          :allow -> %{"behavior" => "allow"}
-          {:deny, message} -> %{"behavior" => "deny", "message" => to_string(message)}
+          :allow ->
+            %{"behavior" => "allow", "updatedInput" => original || %{}}
+
+          {:allow, updated} when is_map(updated) ->
+            %{"behavior" => "allow", "updatedInput" => updated}
+
+          {:deny, message} ->
+            %{"behavior" => "deny", "message" => to_string(message)}
         end
 
       line =
@@ -479,7 +533,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
         }) <> "\n"
 
       safe_command(state.port, line)
-      {:noreply, state}
+      {:noreply, %{state | pending_asks: pending_asks}}
     end
 
     # Outbound control_request (interrupt / set_permission_mode / set_model).
@@ -571,19 +625,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
            },
            state
          ) do
+      input = Map.get(request, "input", %{})
+
       send(
         state.sink,
         {:claude_chat_permission,
          %{
            request_id: request_id,
            tool_name: Map.get(request, "tool_name", "tool"),
-           input: Map.get(request, "input", %{}),
+           input: input,
            title: Map.get(request, "title"),
            decision_reason: Map.get(request, "decision_reason")
          }}
       )
 
-      state
+      # Remember the ask's input so a plain `:allow` can echo it as
+      # `updatedInput` (charter D32) — the answer seam never reconstructs it
+      # from an untrusted round-trip.
+      put_in(state.pending_asks[request_id], input)
     end
 
     defp dispatch_event(
@@ -651,6 +710,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     defp control_kind(%{"subtype" => "interrupt"}), do: :interrupt
     defp control_kind(%{"subtype" => "set_permission_mode"}), do: :set_mode
     defp control_kind(%{"subtype" => "set_model"}), do: :set_model
+    defp control_kind(%{"subtype" => "initialize"}), do: :initialize
     defp control_kind(_), do: nil
 
     # Pull a pending control's kind by request_id (nil if untracked/absent).

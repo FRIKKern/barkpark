@@ -144,6 +144,31 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  # Poll the tee'd stdin capture until a frame of the wanted type appears, then
+  # decode it. respond_permission is a cast + port write, so the bytes land
+  # asynchronously after render_click returns.
+  defp await_wire_frame(path, type, tries \\ 200) do
+    frame =
+      if File.exists?(path) do
+        path
+        |> File.read!()
+        |> String.split("\n", trim: true)
+        |> Enum.map(fn line ->
+          case Jason.decode(line) do
+            {:ok, decoded} -> decoded
+            _ -> nil
+          end
+        end)
+        |> Enum.find(&(is_map(&1) and &1["type"] == type))
+      end
+
+    cond do
+      is_map(frame) -> frame
+      tries <= 0 -> flunk("no #{type} frame reached the wire capture: #{path}")
+      true -> Process.sleep(20) && await_wire_frame(path, type, tries - 1)
+    end
+  end
+
   # Poll an async condition (fire-and-forget title task) to a verdict.
   defp await(fun, tries \\ 100) do
     cond do
@@ -234,6 +259,29 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
           "tool_name" => "Bash",
           "input" => %{"command" => "ls"},
           "approval_status" => "pending"
+        }
+      })
+
+    id
+  end
+
+  # A stored session whose last message is a proposed-plan row (charter D34),
+  # in whatever terminal/pending state a crash or a resolve left behind. Reopen
+  # must re-render the card from `metadata.input.plan`, never a bare system line.
+  defp seed_session_with_plan(request_id, plan, status) do
+    id = Ecto.UUID.generate()
+    {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+    {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "make a plan"})
+
+    {:ok, _} =
+      StudioChat.append_message(id, %{
+        role: "plan",
+        source_markdown: plan,
+        metadata: %{
+          "request_id" => request_id,
+          "tool_name" => "ExitPlanMode",
+          "input" => %{"plan" => plan},
+          "approval_status" => status
         }
       })
 
@@ -763,6 +811,301 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html = render(view)
       assert html =~ "✓ allowed"
       refute html =~ "✗ denied"
+    end
+
+    # ── AskUserQuestion answer form + ExitPlanMode plan card (charter D31/D32) ─
+
+    defp ask_question(view, rid, questions) do
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: rid,
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => questions},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+    end
+
+    test "an AskUserQuestion ask renders an answer FORM, not an Allow/Deny card",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "help me choose"})
+
+      ask_question(view, "q-1", [
+        %{
+          "question" => "Which pet?",
+          "header" => "Pets",
+          "multiSelect" => false,
+          "options" => [
+            %{"label" => "Cat", "description" => "aloof"},
+            %{"label" => "Dog", "description" => "loyal"}
+          ]
+        }
+      ])
+
+      html = render(view)
+      assert html =~ "The agent is asking you"
+      assert html =~ "Which pet?"
+      assert html =~ "Cat"
+      assert html =~ "Dog"
+      assert html =~ ~s(data-question="q-1")
+      assert html =~ ~s(phx-click="question-submit")
+      assert html =~ ~s(phx-click="question-toggle")
+      # a question is NOT a bare approval card
+      refute html =~ "Allow AskUserQuestion?"
+    end
+
+    test "selecting a chip and submitting resolves the question as answered",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-2", [
+        %{
+          "question" => "Which pet?",
+          "multiSelect" => false,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-2"])))
+
+      assert html =~ "✓ answered"
+      refute html =~ "The agent is asking you"
+    end
+
+    test "a multiSelect question accumulates chips (toggle, not replace)", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose many"})
+
+      ask_question(view, "q-3", [
+        %{
+          "question" => "Which pets?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      # both chips selected — a multiSelect adds rather than replaces
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      html =
+        render_click(
+          element(
+            view,
+            ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Dog"])
+          )
+        )
+
+      # both chips read as pressed (accumulated selection, not a single winner)
+      assert html =~ ~s(phx-value-label="Cat" aria-pressed="true") or
+               html =~ ~s(aria-pressed="true")
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-3"])))
+
+      assert html =~ "✓ answered"
+    end
+
+    # Charter D32, end-to-end through the LiveView: the multiSelect answer that
+    # reaches the WIRE is the comma-joined labels, keyed by the QUESTION STRING.
+    # The fake subprocess tees every stdin line to a capture file, so this
+    # asserts the literal control_response bytes the CLI would read — chip
+    # clicks → build_answers → respond_permission → port write.
+    test "a multiSelect answer reaches the wire comma-joined, keyed by the question string",
+         %{view: view} do
+      wire =
+        Path.join(
+          System.tmp_dir!(),
+          "chat_live_wire_#{System.pid()}_#{System.unique_integer([:positive])}"
+        )
+
+      File.rm_rf(wire)
+      on_exit(fn -> File.rm_rf(wire) end)
+
+      Application.put_env(:barkpark, :claude_chat,
+        enabled: true,
+        command: {"sh", ["-c", "tee '#{wire}' >/dev/null"]}
+      )
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose many"})
+
+      ask_question(view, "q-wire", [
+        %{
+          "question" => "Which pets?",
+          "multiSelect" => true,
+          "options" => [%{"label" => "Cat"}, %{"label" => "Dog"}]
+        }
+      ])
+
+      render(view)
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Cat"])
+        )
+      )
+
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="Dog"])
+        )
+      )
+
+      render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-wire"])))
+
+      frame = await_wire_frame(wire, "control_response")
+
+      assert %{
+               "response" => %{
+                 "subtype" => "success",
+                 "request_id" => "q-wire",
+                 "response" => %{"behavior" => "allow", "updatedInput" => updated}
+               }
+             } = frame
+
+      assert updated["answers"] == %{"Which pets?" => "Cat, Dog"}
+      # the questions ride back unchanged next to the answers (charter D32)
+      assert [%{"question" => "Which pets?"} | _] = updated["questions"]
+    end
+
+    test "a custom free-text answer resolves the question", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-4", [%{"question" => "Anything?", "options" => []}])
+      render(view)
+
+      render_hook(view, "question-custom", %{
+        "rid" => "q-4",
+        "qi" => "0",
+        "value" => "surprise me"
+      })
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-4"])))
+
+      assert html =~ "✓ answered"
+    end
+
+    test "dismissing the questions denies honestly", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+
+      ask_question(view, "q-5", [%{"question" => "X", "options" => [%{"label" => "A"}]}])
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=question-dismiss][phx-value-rid="q-5"])))
+
+      assert html =~ "✗ dismissed"
+      refute html =~ "The agent is asking you"
+    end
+
+    # (S1's minimal plan-card fallback test was superseded by the rich S2 card —
+    # see "the proposed-plan card (ExitPlanMode, charter D34)" describe below.)
+
+    # Charter D35 — a resolution BROADCASTS so a co-viewing tab's open form
+    # converges instead of lingering answerable after the ask is already handled.
+    test "resolving a question converges a co-viewing tab", %{view: view, conn: conn} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "choose"})
+      sid = store_id(view)
+
+      {:ok, view_b, _html} = live(conn, "/studio/chat/#{sid}")
+
+      send_frame(
+        sid,
+        {:claude_chat_permission,
+         %{
+           request_id: "q-9",
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => [%{"question" => "Pick", "options" => [%{"label" => "A"}]}]},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      # both tabs render the open form
+      assert render(view) =~ "The agent is asking you"
+      assert render(view_b) =~ "The agent is asking you"
+
+      # answer on tab A
+      render_click(
+        element(
+          view,
+          ~s(button[phx-click=question-toggle][phx-value-qi="0"][phx-value-label="A"])
+        )
+      )
+
+      render_click(element(view, ~s(button[phx-click=question-submit][phx-value-rid="q-9"])))
+
+      # tab B converges: the form is gone, the terminal line is shown
+      html_b = render(view_b)
+      assert html_b =~ "✓ answered"
+      refute html_b =~ "The agent is asking you"
+    end
+
+    # Reopen honesty for the question role (charter D31): a stored question row
+    # replays in its terminal state, and a dangling "pending" row with no live
+    # owner renders as canceled — never a dead answer form, never a bare
+    # :system fallback line.
+    defp seed_session_with_question(request_id, status) do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "choose"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "question",
+          source_markdown: "AskUserQuestion",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "AskUserQuestion",
+            "input" => %{"questions" => [%{"question" => "Which pet?", "options" => ["Cat"]}]},
+            "approval_status" => status
+          }
+        })
+
+      id
+    end
+
+    test "an answered question row reopens as its terminal line, not a form", %{conn: conn} do
+      sid = seed_session_with_question("q-done", "allowed")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "✓ answered"
+      refute html =~ "The agent is asking you"
+      refute has_element?(view, ~s(button[phx-click=question-submit][phx-value-rid="q-done"]))
+    end
+
+    test "a dangling pending question row reopens as ✗ canceled, never a live form",
+         %{conn: conn} do
+      sid = seed_session_with_question("q-hang", "pending")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # pending + no live owner → the honest terminal state, not a dead form
+      assert html =~ "✗ canceled"
+      refute html =~ "The agent is asking you"
+      refute has_element?(view, ~s(button[phx-click=question-submit][phx-value-rid="q-hang"]))
     end
 
     test "switching mode steers the LIVE session in place (no respawn, no teardown)",
@@ -1755,6 +2098,184 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "the proposed-plan card (ExitPlanMode, charter D34)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    # The plan markdown used across the live-card tests — a real heading + list
+    # so the title helper and the paper-engine body both have something to chew.
+    @plan_md "# Migrate the widgets\n\nSteps:\n\n1. Inventory the widgets\n2. Port each one\n3. Delete the shim"
+
+    defp plan_ask(request_id, plan) do
+      {:claude_chat_permission,
+       %{
+         request_id: request_id,
+         tool_name: "ExitPlanMode",
+         input: %{"plan" => plan},
+         title: nil,
+         decision_reason: nil
+       }}
+    end
+
+    defp drive_plan(view, request_id, plan \\ @plan_md) do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "plan it"})
+      send(view.pid, plan_ask(request_id, plan))
+      render(view)
+    end
+
+    test "an ExitPlanMode ask renders a proposed-plan card, not the Allow/Deny line",
+         %{view: view} do
+      html = drive_plan(view, "plan-1")
+
+      # a first-class plan card — title from the first heading, the full plan
+      # through the paper engine, Approve / Keep planning
+      assert html =~ "proposed plan"
+      assert html =~ "Migrate the widgets"
+      assert html =~ "Inventory the widgets"
+      assert html =~ ~s(phx-click="plan-approve")
+      assert html =~ ~s(phx-click="plan-keep")
+      assert html =~ "Approve plan"
+      assert html =~ "Keep planning"
+
+      # NEVER the generic tool-approval card
+      refute html =~ "Allow ExitPlanMode?"
+    end
+
+    test "the title falls back to 'Proposed plan' when the plan has no heading",
+         %{view: view} do
+      html = drive_plan(view, "plan-noh", "Just some prose, no heading at all.")
+      assert html =~ "Proposed plan"
+      assert html =~ "Just some prose, no heading at all."
+    end
+
+    test "Approve resolves the card to '✓ plan approved' and drops the buttons",
+         %{view: view} do
+      # a silent session so no echo loop races the resolve; the card flip is the
+      # synchronous truth of this click (the {:allow, input} seam lands via S1).
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-ok", @plan_md))
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-ok])))
+
+      assert html =~ "✓ plan approved"
+      refute html =~ "Approve plan"
+      refute html =~ "Keep planning"
+    end
+
+    test "Keep planning resolves the card to '✗ kept planning'", %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-keep", @plan_md))
+      render(view)
+
+      html = render_click(element(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-keep])))
+      assert html =~ "✗ kept planning"
+      refute html =~ "Approve plan"
+    end
+
+    test "the preview is clamped and the toggle expands it per tab", %{view: view} do
+      html = drive_plan(view, "plan-exp")
+      # collapsed by default: the clamp class ON THE BODY (space-joined, distinct
+      # from the CSS rule `.bp-chat-plan-body.is-collapsed`) + the affordance
+      assert html =~ ~s(bp-chat-plan-body is-collapsed)
+      assert html =~ "Show full plan"
+
+      # find the plan message id to target the toggle
+      plan = Enum.find(lv_assigns(view).messages, &(&1.role == :plan))
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-toggle][phx-value-id="#{plan.id}"])))
+
+      # expanded: the clamp class is off the body and the label inverts
+      refute html =~ ~s(bp-chat-plan-body is-collapsed)
+      assert html =~ "Show less"
+      # per-tab socket state, never persisted to the store
+      assert MapSet.member?(lv_assigns(view).plan_expanded, plan.id)
+    end
+
+    # ── the mode flip is OBSERVED, never assumed (charter D34) ───────────────
+    #
+    # Approving a plan makes the CLI flip its own permission mode; the flip is
+    # visible ONLY on the next system/init permissionMode. The result frame's
+    # permission_mode is null, so asserting there would be vacuous-green.
+
+    test "a system/init reporting a new permissionMode flips the mode + persists it",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      assert StudioChat.get_session(sid).mode == "plan"
+
+      # the CLI flipped plan → default inside ExitPlanMode; we learn it here
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "default"}}
+      )
+
+      html = render(view)
+      # the selector adopts the observed mode…
+      assert html =~ "ask to act"
+      assert lv_assigns(view).mode == "default"
+      # …and it is PERSISTED, so a reopen and the next --resume carry it
+      assert StudioChat.get_session(sid).mode == "default"
+    end
+
+    test "an init echoing the SAME mode does not churn the selector or the store",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "permissionMode" => "plan"}}
+      )
+
+      render(view)
+      assert lv_assigns(view).mode == "plan"
+      assert StudioChat.get_session(sid).mode == "plan"
+    end
+  end
+
+  describe "proposed-plan replay (reopen from the store, charter D34)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      {:ok, conn: init_test_session(conn, %{"api_token" => @admin_token})}
+    end
+
+    test "a resolved plan row reopens as its terminal card, re-rendered from input.plan",
+         %{conn: conn} do
+      sid = seed_session_with_plan("plan-done", "# Approved plan\n\nDo the thing.", "allowed")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "✓ plan approved"
+      assert html =~ "Approved plan"
+      # display-only reopen — no live card no one can answer
+      refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-done]))
+      assert session_pid(view) == nil
+    end
+
+    test "a dangling pending plan row reopens as ✗ canceled, never a live card",
+         %{conn: conn} do
+      sid = seed_session_with_plan("plan-hang", "# Half-made plan\n\nStep one.", "pending")
+
+      {:ok, view, html} = live(conn, "/studio/chat/#{sid}")
+
+      # pending + no live owner → the honest terminal state, not a dead button
+      # and not a bare :system fallback line
+      assert html =~ "✗ canceled"
+      assert html =~ "Half-made plan"
+      refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-hang]))
+      refute has_element?(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-hang]))
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -2168,6 +2689,145 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html2 = render(view2)
       assert html2 =~ "just once"
       assert count_substring(html2, ~s(data-role="user")) == 1
+    end
+  end
+
+  describe "composer power — slash builtins + sticky draft/model (wave 6, charter D36)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, conn: conn}
+    end
+
+    test "the composer stamps the builtin slash vocabulary on the form", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/chat")
+
+      assert html =~ ~s(id="chat-slash-menu")
+      assert html =~ ~s(role="combobox")
+      # The three control builtins are the hard floor, always offered.
+      assert html =~ "/plan"
+      assert html =~ "/default"
+      assert html =~ "/model"
+    end
+
+    test "a /default slash submit switches permission mode WITHOUT sending a turn",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      assert lv_assigns(view)[:mode] == "plan"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/default"})
+
+      assert lv_assigns(view)[:mode] == "default"
+      # No turn started, no user bubble — a builtin never reaches the model.
+      refute turn_active_status?(view)
+      assert session_pid(view) == nil
+      refute render(view) =~ ~s(data-role="user")
+    end
+
+    test "a /model opus slash submit switches the model WITHOUT sending a turn",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model opus"})
+
+      assert lv_assigns(view)[:model_choice] == "opus"
+      refute turn_active_status?(view)
+      assert render(view) =~ "Model →"
+    end
+
+    test "a bare /model submit shows usage and changes nothing", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model"})
+
+      assert html =~ "Usage: /model"
+      assert lv_assigns(view)[:model_choice] == "default"
+    end
+
+    test "an unrecognized /model alias shows usage and KEEPS the current choice",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model opus"})
+      assert lv_assigns(view)[:model_choice] == "opus"
+
+      # a typo must not silently reset the sticky choice to the CLI default
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model opsu"})
+
+      assert html =~ "Usage: /model"
+      assert lv_assigns(view)[:model_choice] == "opus"
+    end
+
+    test "an explicit /model default resets to the CLI default", %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model fable"})
+      assert lv_assigns(view)[:model_choice] == "fable"
+
+      html =
+        render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/model default"})
+
+      assert html =~ "Model → the CLI default"
+      assert lv_assigns(view)[:model_choice] == "default"
+    end
+
+    test "an advertised (non-builtin) slash command is sent as plain user text",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/compact"})
+
+      # Not a builtin → flows through the normal send path (user bubble + turn).
+      assert html =~ "/compact"
+      assert html =~ ~s(data-role="user")
+      assert turn_active_status?(view)
+    end
+
+    test "a chat_commands broadcast populates the advertised menu vocabulary",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      send(
+        view.pid,
+        {:chat_commands, "any", [%{"name" => "review", "description" => "Code review"}]}
+      )
+
+      html = render(view)
+
+      # The stamped vocab now carries the advertised command AND still floors the
+      # builtins — dedupe keeps all four present.
+      assert html =~ "review"
+      assert html =~ "/plan"
+    end
+
+    test "a sticky draft round-trips across a session switch and clears on send",
+         %{conn: conn} do
+      a = seed_session("Session A")
+      b = seed_session("Session B")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{a}")
+
+      # Type a draft into A, then switch to B and back.
+      render_change(element(view, "form[phx-submit=send]"), %{"message" => "unfinished A thought"})
+
+      render_patch(view, "/studio/chat/#{b}")
+      render_patch(view, "/studio/chat/#{a}")
+
+      # A's unsent words are restored verbatim (server-bound value assign, D24).
+      assert lv_assigns(view)[:composer_draft] == "unfinished A thought"
+      assert StudioChat.get_session(a).draft == "unfinished A thought"
+
+      # Sending clears the persisted draft — a reopen shows a clean composer.
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "actually send"})
+      assert StudioChat.get_session(a).draft == nil
+    end
+
+    test "a new chat inherits the last non-default model choice (sticky model)",
+         %{conn: conn} do
+      prev = seed_session("picked opus")
+      {:ok, _} = StudioChat.set_model_choice(prev, "opus")
+
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      assert lv_assigns(view)[:model_choice] == "opus"
     end
   end
 

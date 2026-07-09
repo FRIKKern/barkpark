@@ -37,6 +37,10 @@ defmodule Barkpark.StudioChat.Session do
     field :mode, :string
     field :model, :string
     field :model_choice, :string
+    # Sticky composer draft (charter D36c): the unsent words left behind when the
+    # user switched away from this session. Nullable; restored on reopen (via the
+    # FULL struct — `list_sessions` deliberately omits it), cleared on send.
+    field :draft, :string
     field :status, :string, default: "active"
 
     field :last_active_at, :utc_datetime_usec

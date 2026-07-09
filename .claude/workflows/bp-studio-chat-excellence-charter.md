@@ -351,6 +351,98 @@ quality."
   faithfully reflects totalUsage and "fixing" it breaks the honest
   single-call case.
 
+### Wave-6 decisions (2026-07-09, decided from real-binary ground truth — v2.1.205, harnesses ask2/exitplan2/deny/wire_init*.py in session scratchpad)
+
+- **D31 — Permission asks get ROLES; the store is the router.** The single wire
+  message `{:claude_chat_permission, ask}` stays (it already carries
+  tool_name/input/title — claude_chat.ex dispatch_event); discrimination happens
+  DOWNSTREAM. `Recorder.persist_approval_ask` branches role by `ask.tool_name`:
+  `"AskUserQuestion"` → `"question"`, `"ExitPlanMode"` → `"plan"`, else
+  `"approval"` (Message.role is a free string — NO migration). Every seam that
+  today matches `role == "approval"` widens to ONE needs-you set
+  (`~w(approval question plan)`), threaded consistently: `bump_on_append`'s
+  pending_approvals inc, `cancel_pending_approvals`, `find_approval`, ChatLive's
+  `teardown_session` pending→canceled flip, and replay. The `pending_approvals`
+  counter remains THE one counter and now means "the agent needs you" (partial
+  widening leaves the sidebar pill lying for questions). Terminal statuses REUSE
+  `allowed|denied|canceled` — an answered question is `allowed` (answers in
+  metadata), keep-planning is `denied`; no new labels, so `@approval_terminal`
+  stands. ChatLive's `{:claude_chat_permission, ask}` handler applies the same
+  tool_name discrimination for live rendering.
+- **D32 — Allow ALWAYS echoes updatedInput; ONE answer seam widens.** PROVEN:
+  a bare `{"behavior":"allow"}` FAILED ExitPlanMode on the real binary
+  (ZodError, mode stayed plan); `{"behavior":"allow","updatedInput":<input>}`
+  succeeded — matching the CLI's own internal checkPermissions shape.
+  `respond_permission` decision becomes `:allow | {:allow, updated_input} |
+  {:deny, message}`; plain `:allow` echoes the ORIGINAL ask input as
+  updatedInput (Session tracks pending ask inputs by request_id — never trust
+  the caller to round-trip it), `{:allow, updated}` carries the caller's map.
+  Question answers ride `{:allow, %{"questions" => unchanged, "answers" =>
+  %{<question string> => <value>}}}` — the answers Record keys on the QUESTION
+  STRING (proven; the CLI keys internally by K.question), custom free-text
+  rides as the value, multiSelect = comma-joined labels (`"Cat, Dog"` proven).
+  Deny REQUIRES message (schema); a denied question surfaces the message as an
+  is_error tool_result — code-evidenced, spot-check when building the dismiss
+  path. Empty answers on allow → "The user did not answer the questions."
+- **D33 — Plan mode gets `--permission-prompt-tool stdio` too.** Today
+  build_args omits the flag in plan mode (claude_chat.ex:162), so ExitPlanMode
+  asks NEVER reach Barkpark — the CLI auto-handles them. Plan mode is the
+  product default; the flag ships in ALL modes. Consequence accepted: other
+  tools' asks in plan mode now also reach us and render as honest approval
+  cards. D9 applies — prove via build_args pure unit tests, never `:command`.
+- **D34 — Proposed-plan card: store markdown, render on read, OBSERVE the
+  flip.** `input.plan` IS the markdown and is already persisted in ask metadata
+  (D7 satisfied; `input.planFilePath` is a CLI side-effect file, ignore it).
+  Card: title = first heading via a ~3-line helper over `FromMarkdown.blocks`
+  (`%{"type"=>"heading","text"=>t}`); body = `render_paper_html(plan)` in FULL,
+  collapsed by CSS clamp (max-height + `var(--…)`-token fade) — NEVER
+  pre-truncate the markdown (an unbalanced fence degrades the whole doc to one
+  code block); expand/collapse = per-tab socket assign (kebab-menu pattern,
+  never broadcast). Approve = `{:allow, echoed input}`; the CLI flips its OWN
+  mode plan→prePlanMode(default) inside the tool — we send NO set_permission_mode
+  follow-up. The flip is observable ONLY on the NEXT turn's `system/init`
+  `permissionMode` (the terminal result frame's permission_mode is null —
+  asserting there is vacuous-green). Observe init's permissionMode and persist
+  via `set_mode/2` whenever it differs from the stored mode, so reopen and the
+  next lazy spawn carry the post-plan mode. Keep planning = `{:deny, "The user
+  wants to keep planning — continue in plan mode."}` (proven: model re-plans,
+  next init still plan).
+- **D35 — Resolutions BROADCAST; answer-in-progress stays per-tab.**
+  `resolve_permission` today mutates only the resolving tab (no PubSub) — a
+  co-viewing tab's card stays pending until reopen, and for questions that
+  means an open form for an already-answered ask. After `update_approval_status`
+  succeeds, broadcast the resolution on `studio_chat:<id>` (terminal status +
+  request_id + answers); all tabs converge their card. Chip selections /
+  custom-answer text / expand state remain socket-local. needs_you activity
+  vocabulary upgrades by role: question → "asking you", plan → "plan ready",
+  approval keeps "waiting: <tool>".
+- **D36 — Composer power: initialize handshake, slash menu, sticky drafts,
+  sticky model.** (a) Session sends `{"subtype":"initialize"}` right after
+  spawn (proven: the CLI answers immediately, BEFORE any turn; no capabilities
+  payload needed); `control_kind` learns `:initialize`; the ack's
+  `response.commands` (`{name, description, argumentHint, aliases?}`) is the
+  authoritative list, HELD in the Recorder runtime so a late-joining tab still
+  gets it; fallback = `system/init.slash_commands` names; hard floor = builtins
+  `/model /plan /default`. Permission routing is the stdio FLAG, not the
+  handshake (proven) — initialize is purely additive. (b) Slash menu: leading
+  "/" opens a combobox (adapt the bp-sheet-grid.js fn-autocomplete pattern:
+  server-stamped vocabulary, client listbox, ARIA combobox roles, arrow/enter/
+  escape nav); selection INSERTS text and dispatches a native `input` event so
+  the server-bound draft stays in sync (D24). Builtins route to our existing
+  control paths; advertised commands send as plain user text frames (proven to
+  execute, num_turns=0). GUARD: harness result frames echoed a DIFFERENT
+  session_id on slash turns — spot-check D8 pinning survives a slash command
+  before enabling session-mutating ones (/compact /clear), else ship those
+  insert-only with the assumption marked. (c) Sticky drafts: `draft` column on
+  chat_sessions (model_choice migration pattern); captured at the TOP of
+  handle_params BEFORE dispatch (the switch-away moment), restored in
+  load_stored_session (full struct — get_session carries it), persisted-cleared
+  on send. Write on switch-away, not per-keystroke. (d) Sticky model:
+  reset_to_new_chat seeds model_choice from a DEDICATED
+  most-recent-non-default-model_choice query — never from list_sessions' select
+  (it omits model_choice; the naive seed reads nil and ships "default" forever,
+  vacuous-green).
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -483,6 +575,34 @@ composer attachment strip, replay `<img>` rendering, and
 (S3 before S4: both touch `send_message` and the composer — S4 keeps its
 changes additive and the integrator reconciles on S3's call shape).
 
+## Wave 6 plan (decided 2026-07-09) — "when the agent asks, the product answers"
+
+Waves 1–5 made sessions durable, honest, server-owned, and alive. Wave 6 takes
+the two moments the agent needs the human — AskUserQuestion and ExitPlanMode
+(which EVERY session hits; plan mode is the default) — from a generic
+Allow/Deny lie to the best-rendered surfaces in the chat, then gives the
+composer its power features. Three slices, integration order **S1 → S2 → S3**.
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w6-ask-ui` | roles-in-store router + needs-you widening + updatedInput answer seam + plan-mode stdio flag + question form card + resolution broadcast (D31/D32/D33/D35) | none |
+| S2 | `scc-w6-plan-card` | the `"plan"` role's card ONLY: title helper, clamped PortableDoc preview, Approve/Keep-planning, observed mode-flip persist, plan replay (D34) | none |
+| S3 | `scc-w6-composer-power` | initialize handshake capture + slash-menu combobox + sticky per-session drafts + sticky model default (D36) | `draft` column |
+
+Region contract (chat_live.ex is hot — S1/S2 share the permission path, S3
+stays out of it): **S1 owns** the `{:claude_chat_permission}` render router,
+the `:question` card branch, replay/teardown/resolve widening for ALL new
+roles (including `"plan"` in the role set and a minimal honest `"plan"`
+fallback rendering), the resolution broadcast, and ALL studio_chat.ex +
+recorder.ex + claude_chat.ex respond/build_args changes. **S2 owns** only the
+`:plan` template branch + plan replay clause + expand toggle + approve/keep
+events + the init-frame mode observation — it does NOT touch studio_chat.ex
+role plumbing or claude_chat.ex. **S3 owns** the composer form region,
+handle_params draft capture, load_stored_session/reset_to_new_chat seeds, the
+initialize additions in claude_chat.ex (new public fn + control_kind clause —
+disjoint from S1's respond_permission region), and the Recorder commands hold.
+Builders build against main; the lead reconciles in S1 → S2 → S3 order.
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -492,6 +612,90 @@ changes additive and the integrator reconciles on S3's call shape).
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+### Wave 2026-07-09 (wave 6 BUILT + REVIEWED — when the agent asks, the product answers)
+
+All three slices built green and reviewed at the Kinsta/Vercel bar; nothing
+stalled. The reviewer serialized the wave into ONE integration chain — each
+`-r` branch contains everything before it — so the lead merges
+**`loop-epic/w6-s3-composer-power-slash-menu-off-the--2-r`** (chain head:
+S1-r → S2-r → S3-r, integration order per the plan) and gets the whole wave.
+Combined gate on the chain head: **300 tests 0 failures** across the five-file
+suite (seeds default/42/99999), studio-literal-check PASS,
+`mix compile --warnings-as-errors` clean. Main moved during the wave
+(#1733/#1734 theme work) — ZERO overlap with the chat files, the chain merges
+cleanly onto new main. S3 carries migration `20260709203417` (nullable `draft`
+column on chat_sessions). This charter copy on the chain head carries the
+wave-6 Decide content that was still uncommitted in the main checkout —
+merging the chain commits it.
+
+- **Landed**: the agent-asks/human-answers path end-to-end — respond_permission
+  widened to `:allow | {:allow, updated_input} | {:deny, msg}` with plain allow
+  ALWAYS echoing the tracked ask input as updatedInput (D32), the stdio
+  permission bridge in ALL modes incl. plan (D33), roles-in-store router
+  (question/plan/approval) + the ONE needs-you role set threaded through
+  pill/cancel/find/teardown/replay (D31), a real AskUserQuestion form (chips
+  with descriptions, multiSelect toggle, custom answer, N/M progress, one
+  submit keyed by question string, comma-joined multiSelect), and D35
+  resolution broadcasts converging co-viewing tabs (S1); the rich
+  proposed-plan card — first-heading title, FULL plan through the paper engine
+  clamped by CSS with a token fade, per-tab expand, Approve = allow-echo /
+  Keep planning = the exact D34 deny string, observed-init mode-flip persist,
+  plan replay in terminal/pending states (S2); composer power — initialize
+  handshake held in the Recorder with init-names fallback + builtins floor,
+  ARIA slash combobox (server-stamped vocab, native-input-event insert per
+  D24), builtins /plan · /default · /model routed server-side on submit,
+  sticky per-session drafts (switch-away capture, full-struct restore,
+  clear-on-send), sticky model default via a dedicated query (S3).
+- **Reviewer fixes worth knowing**: (1) S2's standalone `resolve_plan` was
+  replaced by routing plan-approve/plan-keep through S1's ONE resolve seam —
+  plan resolutions now broadcast to co-viewing tabs too (S2 built against bare
+  main and could not); S1's minimal plan fallback card deleted in favor of
+  S2's rich card (one `plan_outcome_label`, "✗ kept planning"). (2) S1's
+  declared blind spot closed: an end-to-end LV wire test (tee-captured stdin)
+  proves the multiSelect answer reaches the wire comma-joined, keyed by the
+  question string. (3) Question replay honesty tests added — answered row
+  reopens as the terminal line, dangling pending reopens "✗ canceled", never a
+  dead form. (4) `/model <typo>` no longer silently resets the sticky choice
+  to the CLI default — unknown alias shows usage; explicit `/model default`
+  resets (tests added). (5) Latent capture-file flake hardened (wait ceiling
+  3s → 8s; it fired once under full-suite load).
+- **Known seams (reviewed, deliberate, not blockers)**: (a) the
+  dismissed-question deny surfacing as an is_error tool_result is
+  code-evidenced, not re-proven on the real binary; (b) the JS combobox
+  keyboard nav (ArrowUp/Down/aria-activedescendant/insert) is verified by
+  reading + server-contract tests only — LiveViewTest cannot drive hooks;
+  (c) /compact · /clear ride as plain user text with the D8 pinning assumption
+  marked, unverified on the real binary; (d) the D35 broadcast carries
+  {request_id, status} without the answers payload — nothing renders answers
+  post-resolution today, deviation accepted; (e) a replayed pending question
+  under a live owner re-seeds a BLANK form (accepted D22 gap).
+- **Next wave should take**: (1) real-binary spot-checks — dismiss-deny
+  is_error surfacing, /compact · /clear session pinning, initialize commands
+  shape on the current CLI; (2) a real-browser pass over the slash combobox,
+  question chips, and the plan clamp/fade; (3) surface the CHOSEN answers on
+  the terminal question card (today just "✓ answered" — t3 shows the values);
+  (4) theme the new cards under the [data-bp-theme] blocks that landed
+  mid-wave (#1734); (5) wave-5 leftovers: turn elapsed-time on working cards,
+  activity in the tab title, per-model cost hints in the picker.
+
+- **2026-07-09 wave 6 DECIDED** (post-merge of waves 1–5: #1681 #1693 #1702
+  #1708 #1712; scc-w1..w5 closed): three slices filed as scc-w6-ask-ui /
+  scc-w6-plan-card / scc-w6-composer-power under epic `studio-claude-chat`
+  (D31–D36 above). Explorer corrections folded in, all proven on the real
+  binary v2.1.205: (1) bare `{"behavior":"allow"}` FAILS ExitPlanMode — every
+  allow must echo updatedInput (D32 upgrades this from "polish" to
+  prerequisite); (2) plan mode omits `--permission-prompt-tool stdio`, so
+  ExitPlanMode asks never reached us — the flag now ships in all modes (D33);
+  (3) the CLI flips its own mode on plan-approve; the flip is visible ONLY on
+  the next system/init permissionMode, never the result frame (D34); (4)
+  question answers ride `updatedInput.answers` keyed by the question STRING,
+  multiSelect comma-joined (D32); (5) initialize returns the rich command list
+  at spawn with no capabilities payload, and permission routing is the stdio
+  flag, not the handshake (D36); (6) 13 downstream sites assume
+  role=="approval" — the needs-you role set widens them all in one slice or
+  the sidebar pill/cancel/replay lie for questions (D31); (7) resolve does not
+  broadcast — co-viewing tabs keep a stale open form without D35.
 
 - **2026-07-09 wave 3 DECIDED** (post-merge of #1681 + #1693; D20c executed,
   1 test 0 failures): four slices filed as scc-w3-reopen-adopt /

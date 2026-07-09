@@ -66,6 +66,21 @@ defmodule Barkpark.StudioChat.Recorder do
     :exit, reason -> {:error, {:not_running, reason}}
   end
 
+  @doc """
+  The held slash-command vocabulary for a session (charter D36a) — the rich
+  advertised list from the initialize ack, the name-only `system/init` fallback,
+  or `[]`. A tab queries this on subscribe so it never has to wait for the
+  broadcast it may already have missed. `[]` on a dead/absent recorder.
+  """
+  @spec advertised_commands(pid()) :: [map()]
+  def advertised_commands(recorder) when is_pid(recorder) do
+    GenServer.call(recorder, :advertised_commands)
+  catch
+    :exit, _ -> []
+  end
+
+  def advertised_commands(_), do: []
+
   @doc "PubSub topic a viewer subscribes to for this session's frames."
   @spec topic(String.t()) :: String.t()
   def topic(session_id), do: "studio_chat:#{session_id}"
@@ -105,22 +120,50 @@ defmodule Barkpark.StudioChat.Recorder do
          }) do
       {:ok, session} ->
         Process.monitor(session)
-        {:ok, %{session_id: id, session: session, timer: arm_idle(nil), activity: nil}}
+        # Ask the CLI for its slash-command list right after spawn (charter D36a)
+        # — the ack lands as {:claude_chat_control, :initialize, …}, which we hold
+        # so a LATE-joining tab still gets the vocabulary (a one-shot broadcast
+        # alone would miss it).
+        ClaudeChat.initialize(session)
+        {:ok, new_state(id, session)}
 
       {:error, {:already_started, session}} ->
         # A Session survived its Recorder (recorder crash). Re-adopt it as our
         # sink so its frames flow again instead of casting into a dead pid.
         ClaudeChat.adopt_sink(session, self())
         Process.monitor(session)
-        {:ok, %{session_id: id, session: session, timer: arm_idle(nil), activity: nil}}
+        ClaudeChat.initialize(session)
+        {:ok, new_state(id, session)}
 
       {:error, reason} ->
         {:stop, {:shutdown, reason}}
     end
   end
 
+  defp new_state(id, session) do
+    %{
+      session_id: id,
+      session: session,
+      timer: arm_idle(nil),
+      activity: nil,
+      # The advertised slash-command list (charter D36a). `commands` is the rich
+      # authoritative list from the initialize ack; `slash_commands` is the
+      # name-only fallback captured off `system/init`; a live/late tab reads the
+      # best available via `advertised_commands/1`.
+      commands: nil,
+      slash_commands: nil
+    }
+  end
+
   @impl true
   def handle_call(:session_pid, _from, state), do: {:reply, {:ok, state.session}, state}
+
+  # Late-join query (charter D36a): a tab that opens AFTER the initialize ack
+  # already fired still gets the held vocabulary. Returns the best available
+  # list of `%{"name", "description", "argumentHint"}` maps (rich, then the
+  # name-only init fallback, then []).
+  def handle_call(:advertised_commands, _from, state),
+    do: {:reply, advertised(state), state}
 
   # ── sink messages: persist, then rebroadcast verbatim ──────────────────────
 
@@ -140,14 +183,37 @@ defmodule Barkpark.StudioChat.Recorder do
 
   # A turn is starting (the CLI emits init per TURN): the session is working.
   # Persist the status too so a COLD sidebar load (no live overlay yet) reads
-  # the same truth off the store.
+  # the same truth off the store. The init frame also carries `slash_commands`
+  # (names only) — hold it as the FALLBACK vocabulary (charter D36a) in case the
+  # richer initialize ack never landed, and broadcast if it upgrades what we hold.
   def handle_info(
-        {:claude_chat_event, %{"type" => "system", "subtype" => "init"}} = msg,
+        {:claude_chat_event, %{"type" => "system", "subtype" => "init"} = ev} = msg,
         state
       ) do
     StudioChat.update_status(state.session_id, "working")
+    state = maybe_capture_slash_commands(state, ev)
     broadcast(state, msg)
     {:noreply, state |> publish_activity(%{state: :working, line: "thinking…"}) |> touch()}
+  end
+
+  # The CLI's answer to our `initialize` control_request (charter D36a): the
+  # AUTHORITATIVE slash-command list. HOLD it in the runtime (so a late tab gets
+  # it via `advertised_commands/1`) and broadcast the vocabulary so live tabs
+  # populate their slash menu without polling. This clause MUST precede the
+  # generic control handler below, which would otherwise rebroadcast it raw.
+  def handle_info({:claude_chat_control, :initialize, _rid, response}, state) do
+    # An EMPTY commands payload never clobbers a held list — the CLI may answer
+    # with none, and a fake `cat` subprocess echoes our own initialize back into
+    # a spurious empty ack. Only a non-empty list updates + broadcasts.
+    case extract_commands(response) do
+      [] ->
+        {:noreply, touch(state)}
+
+      commands ->
+        state = %{state | commands: commands}
+        broadcast_commands(state)
+        {:noreply, touch(state)}
+    end
   end
 
   def handle_info({:claude_chat_event, %{"type" => "stream_event"}} = msg, state) do
@@ -166,7 +232,7 @@ defmodule Barkpark.StudioChat.Recorder do
 
     {:noreply,
      state
-     |> publish_activity(%{state: :needs_you, line: "waiting: #{ask.tool_name}"})
+     |> publish_activity(%{state: :needs_you, line: needs_you_line(ask.tool_name)})
      |> touch()}
   end
 
@@ -234,11 +300,12 @@ defmodule Barkpark.StudioChat.Recorder do
 
   defp persist_approval_ask(session_id, ask) do
     text = ask.title || tool_line(ask.tool_name, ask.input)
+    role = permission_role(ask.tool_name)
 
     persist(
       session_id,
       %{
-        role: "approval",
+        role: role,
         source_markdown: text,
         metadata: %{
           "request_id" => ask.request_id,
@@ -247,9 +314,24 @@ defmodule Barkpark.StudioChat.Recorder do
           "approval_status" => "pending"
         }
       },
-      "approval"
+      role
     )
   end
+
+  # The store is the router (charter D31): the same wire ask becomes one of
+  # three roles by its tool_name, each rendered as a distinct surface
+  # downstream. Message.role is a free string — no migration. All three count
+  # as "the agent needs you" (the widened needs-you role set in StudioChat).
+  defp permission_role("AskUserQuestion"), do: "question"
+  defp permission_role("ExitPlanMode"), do: "plan"
+  defp permission_role(_), do: "approval"
+
+  # The live-activity line the sidebar shows while an ask is pending (charter
+  # D35). A question is asking you something; a proposed plan is ready to
+  # review; any other tool is waiting on an approval named by its tool.
+  defp needs_you_line("AskUserQuestion"), do: "asking you"
+  defp needs_you_line("ExitPlanMode"), do: "plan ready"
+  defp needs_you_line(tool_name), do: "waiting: #{tool_name}"
 
   defp record_result(session_id, ev) do
     StudioChat.record_result_metrics(session_id, %{
@@ -317,6 +399,64 @@ defmodule Barkpark.StudioChat.Recorder do
     else
       state
     end
+  end
+
+  # ── slash-command vocabulary (charter D36a) ────────────────────────────────
+
+  # Normalize the initialize ack's `commands` into a stable list of
+  # `%{"name", "description", "argumentHint"}` maps. Anything non-list (or an
+  # empty payload — the fake-CLI echo path) yields [] so `advertised/1` falls
+  # back to the init names or the LiveView's builtin floor.
+  defp extract_commands(response) when is_map(response) do
+    case Map.get(response, "commands") do
+      list when is_list(list) -> list |> Enum.map(&normalize_command/1) |> Enum.reject(&is_nil/1)
+      _ -> []
+    end
+  end
+
+  defp extract_commands(_), do: []
+
+  defp normalize_command(%{"name" => name} = cmd) when is_binary(name) and name != "" do
+    %{
+      "name" => name,
+      "description" => Map.get(cmd, "description"),
+      "argumentHint" => Map.get(cmd, "argumentHint") || Map.get(cmd, "argument_hint")
+    }
+  end
+
+  defp normalize_command(_), do: nil
+
+  # Hold the name-only fallback from a `system/init` frame, but only while the
+  # richer initialize list hasn't arrived (that one is authoritative). Broadcast
+  # only when this actually changes what a tab would see.
+  defp maybe_capture_slash_commands(state, ev) do
+    names =
+      case Map.get(ev, "slash_commands") do
+        list when is_list(list) -> Enum.filter(list, &is_binary/1)
+        _ -> []
+      end
+
+    if names != [] and state.slash_commands != names do
+      state = %{state | slash_commands: names}
+      broadcast_commands(state)
+      state
+    else
+      state
+    end
+  end
+
+  # The best-available vocabulary: the rich initialize list wins; else synthesize
+  # name-only maps from the init fallback; else [].
+  defp advertised(%{commands: commands}) when is_list(commands) and commands != [], do: commands
+
+  defp advertised(%{slash_commands: names}) when is_list(names) and names != [] do
+    Enum.map(names, fn name -> %{"name" => name, "description" => nil, "argumentHint" => nil} end)
+  end
+
+  defp advertised(_), do: []
+
+  defp broadcast_commands(state) do
+    broadcast(state, {:chat_commands, state.session_id, advertised(state)})
   end
 
   # ── frame plumbing ──────────────────────────────────────────────────────────

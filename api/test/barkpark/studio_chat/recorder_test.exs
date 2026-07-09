@@ -125,6 +125,46 @@ defmodule Barkpark.StudioChat.RecorderTest do
     assert row.metadata["request_id"] == "req-1"
   end
 
+  test "the store is the router: AskUserQuestion persists a 'question' row (D31)",
+       %{sid: sid, recorder: recorder} do
+    frame(
+      recorder,
+      {:claude_chat_permission,
+       %{
+         request_id: "q-1",
+         tool_name: "AskUserQuestion",
+         input: %{"questions" => [%{"question" => "Pick"}]},
+         title: nil,
+         decision_reason: nil
+       }}
+    )
+
+    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "q-1"))
+    assert row.role == "question"
+    assert row.metadata["approval_status"] == "pending"
+    # a question STILL raises the one "needs you" counter (widened role set)
+    assert StudioChat.get_session(sid).pending_approvals == 1
+  end
+
+  test "the store is the router: ExitPlanMode persists a 'plan' row (D31)",
+       %{sid: sid, recorder: recorder} do
+    frame(
+      recorder,
+      {:claude_chat_permission,
+       %{
+         request_id: "p-1",
+         tool_name: "ExitPlanMode",
+         input: %{"plan" => "# Plan\n- step"},
+         title: nil,
+         decision_reason: nil
+       }}
+    )
+
+    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "p-1"))
+    assert row.role == "plan"
+    assert StudioChat.get_session(sid).pending_approvals == 1
+  end
+
   test "every frame rebroadcasts to PubSub subscribers", %{sid: sid, recorder: recorder} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
 
@@ -242,11 +282,105 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "waiting: Write"}}
     end
 
+    test "the needs-you line reads by role: 'asking you' / 'plan ready' (D35)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "q",
+           tool_name: "AskUserQuestion",
+           input: %{"questions" => []},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "asking you"}}
+
+      frame(
+        recorder,
+        {:claude_chat_permission,
+         %{
+           request_id: "p",
+           tool_name: "ExitPlanMode",
+           input: %{"plan" => "x"},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      assert_receive {:chat_activity, ^sid, %{state: :needs_you, line: "plan ready"}}
+    end
+
     test "an exit publishes offline", %{sid: sid, recorder: recorder} do
       ref = Process.monitor(recorder)
       send(recorder, {:claude_chat_exit, 0})
       assert_receive {:DOWN, ^ref, :process, ^recorder, :normal}, 2_000
       assert_receive {:chat_activity, ^sid, %{state: :offline}}
+    end
+  end
+
+  describe "slash-command handshake (charter D36a)" do
+    test "the initialize ack is HELD so a late-joining tab still gets the list",
+         %{recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-x",
+         %{
+           "commands" => [
+             %{"name" => "compact", "description" => "Compact", "argumentHint" => nil}
+           ]
+         }}
+      )
+
+      # A tab that opens AFTER the ack fired reads the held vocabulary directly.
+      assert [%{"name" => "compact"}] = Recorder.advertised_commands(recorder)
+    end
+
+    test "the ack broadcasts the vocabulary to a subscribed tab",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-y",
+         %{"commands" => [%{"name" => "review"}]}}
+      )
+
+      assert_receive {:chat_commands, ^sid, [%{"name" => "review"}]}
+    end
+
+    test "system/init slash_commands is the name-only FALLBACK when no ack landed",
+         %{sid: sid, recorder: recorder} do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
+
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "slash_commands" => ["clear", "cost"]}}
+      )
+
+      assert_receive {:chat_commands, ^sid, cmds}
+      assert Enum.map(cmds, & &1["name"]) == ["clear", "cost"]
+      assert [%{"name" => "clear"} | _] = Recorder.advertised_commands(recorder)
+    end
+
+    test "the rich ack OVERRIDES the name-only fallback", %{recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "init", "slash_commands" => ["clear"]}}
+      )
+
+      frame(
+        recorder,
+        {:claude_chat_control, :initialize, "bp-req-z",
+         %{"commands" => [%{"name" => "compact", "description" => "rich"}]}}
+      )
+
+      assert [%{"name" => "compact", "description" => "rich"}] =
+               Recorder.advertised_commands(recorder)
     end
   end
 

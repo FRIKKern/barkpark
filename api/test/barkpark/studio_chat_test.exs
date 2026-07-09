@@ -704,6 +704,131 @@ defmodule Barkpark.StudioChatTest do
       assert 0 == StudioChat.cancel_pending_approvals(s.id)
       assert reload(s.id).pending_approvals == 0
     end
+
+    # Charter D31 — the needs-you role set (approval | question | plan) is ONE
+    # counter. Every seam that gates on a pending ask must treat all three
+    # identically, or the sidebar pill / cancel / resolve lie for questions.
+    defp ask_role(session, request_id, role) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: role,
+          source_markdown: "ask #{request_id}",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => role,
+            "input" => %{},
+            "approval_status" => "pending"
+          }
+        })
+
+      m
+    end
+
+    test "question and plan asks BOTH raise the one pending counter (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      ask_role(s, "p-1", "plan")
+      ask_role(s, "a-1", "approval")
+
+      assert reload(s.id).pending_approvals == 3
+    end
+
+    test "a question ask resolves + decrements exactly like an approval (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      assert reload(s.id).pending_approvals == 1
+
+      assert {:ok, m} = StudioChat.update_approval_status(s.id, "q-1", "allowed")
+      assert m.metadata["approval_status"] == "allowed"
+      assert reload(s.id).pending_approvals == 0
+    end
+
+    test "cancel_pending_approvals cancels question AND plan rows too (D31)" do
+      s = new_session()
+      ask_role(s, "q-1", "question")
+      ask_role(s, "p-1", "plan")
+      ask_role(s, "a-1", "approval")
+      assert reload(s.id).pending_approvals == 3
+
+      assert 3 == StudioChat.cancel_pending_approvals(s.id)
+      assert reload(s.id).pending_approvals == 0
+
+      statuses =
+        StudioChat.list_messages(s.id)
+        |> Enum.filter(&(&1.role in ~w(approval question plan)))
+        |> Enum.map(& &1.metadata["approval_status"])
+        |> Enum.uniq()
+
+      assert statuses == ["canceled"]
+    end
+  end
+
+  describe "set_draft/2 — sticky composer draft (charter D36c)" do
+    test "persists and restores a draft on the FULL struct" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "half a thought")
+
+      # get_session carries `draft` (the reopen restore path reads it here).
+      assert StudioChat.get_session(s.id).draft == "half a thought"
+    end
+
+    test "list_sessions never selects the draft column (kept off the sidebar)" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "sidebar must not carry this")
+
+      # The select omits :draft, so a listed row reads the struct default (nil).
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert listed.draft == nil
+    end
+
+    test "a blank / whitespace draft clears the column (nil, not \"\")" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_draft(s.id, "something")
+      {:ok, _} = StudioChat.set_draft(s.id, "   ")
+      assert StudioChat.get_session(s.id).draft == nil
+
+      {:ok, _} = StudioChat.set_draft(s.id, "again")
+      {:ok, _} = StudioChat.set_draft(s.id, nil)
+      assert StudioChat.get_session(s.id).draft == nil
+    end
+
+    test "does NOT bump last_active_at (a draft must not reorder the sidebar)" do
+      s = new_session()
+      before = StudioChat.get_session(s.id).last_active_at
+      {:ok, _} = StudioChat.set_draft(s.id, "typing…")
+      assert StudioChat.get_session(s.id).last_active_at == before
+    end
+
+    test "a missing session is a clean :not_found" do
+      assert {:error, :not_found} = StudioChat.set_draft(Ecto.UUID.generate(), "x")
+    end
+  end
+
+  describe "recent_model_choice/0 — sticky model default seed (charter D36d)" do
+    test "returns the most-recently-active NON-default model_choice" do
+      older = new_session()
+      {:ok, _} = StudioChat.set_model_choice(older.id, "haiku")
+      # older's set_model_choice bumped last_active_at; make newer strictly later
+      newer = new_session()
+      {:ok, _} = StudioChat.set_model_choice(newer.id, "opus")
+
+      assert StudioChat.recent_model_choice() == "opus"
+    end
+
+    test "ignores nil and literal \"default\" choices (never seeds \"default\")" do
+      a = new_session()
+      {:ok, _} = StudioChat.set_model_choice(a.id, "sonnet")
+      b = new_session()
+      {:ok, _} = StudioChat.set_model_choice(b.id, "default")
+
+      # b is newer but its choice is "default" — the seed skips it.
+      assert StudioChat.recent_model_choice() == "sonnet"
+    end
+
+    test "nil when no session ever picked a non-default model" do
+      _ = new_session()
+      assert StudioChat.recent_model_choice() == nil
+    end
   end
 
   describe "schema wiring" do
