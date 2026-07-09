@@ -94,6 +94,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
          agent_expanded: %{},
          mode: "plan",
          model_choice: "default",
+         # Reasoning-effort intent (charter D48), the exact mirror of model_choice.
+         effort_choice: "default",
+         # Bypass arm ceremony (charter D48): `arming_bypass` opens the loud
+         # type-to-confirm panel; `bypass_confirm` tracks the typed word so the
+         # Arm button only enables on an exact "bypass". Both socket-local, reset
+         # on every session load — a bypass is never armed by a select alone.
+         arming_bypass: false,
+         bypass_confirm: "",
          status: :new,
          init: nil,
          messages: [],
@@ -224,8 +232,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     text = String.trim(text)
     has_attachments? = socket.assigns.uploads.attachments.entries != []
 
-    # A leading-slash BUILTIN (charter D36b) never reaches the model: /plan and
-    # /default steer the permission mode, /model switches the brain. Routing them
+    # A leading-slash BUILTIN (charter D36b) never reaches the model: /plan
+    # steers the permission mode, /model switches the brain. Routing them
     # here (server-side, on submit) keeps the JS slash menu a pure insert widget
     # and makes the routing testable. Advertised (non-builtin) slash commands
     # fall through as plain user text — the CLI executes them itself.
@@ -351,8 +359,58 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # or revert — a stale ack from a superseded rapid switch is ignored, never a
   # mis-revert. With no live session there is no ack to wait on, so we persist
   # immediately and the next lazy `--resume` spawn carries the mode.
+  # Picking bypassPermissions in the footer NEVER steers on the select alone
+  # (charter D48 fail-closed law): it opens the loud type-to-confirm arm panel.
+  # The mode is unchanged until the ceremony completes — a plain select can't
+  # arm dangerous bypass.
+  def handle_event("set-mode", %{"mode" => "bypassPermissions"}, socket) do
+    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "")}
+  end
+
   def handle_event("set-mode", %{"mode" => mode}, socket) do
-    {:noreply, change_mode(socket, ClaudeChat.normalize_mode(mode))}
+    {:noreply,
+     socket
+     |> assign(arming_bypass: false, bypass_confirm: "")
+     |> change_mode(ClaudeChat.normalize_mode(mode))}
+  end
+
+  # Track the confirm word as it's typed so the Arm button only enables on an
+  # exact "bypass" (net-new UX — a data-confirm dialog is NOT enough, charter D48).
+  def handle_event("bypass-confirm", %{"confirm" => text}, socket) do
+    {:noreply, assign(socket, bypass_confirm: text)}
+  end
+
+  # Arm bypass — the ONLY road that persists mode == bypassPermissions. Guarded
+  # server-side on the exact typed word (never trust the client's button-enabled
+  # state). Persists the mode (so the next spawn's build_args, gated on the
+  # PERSISTED row, emits --allow-dangerously-skip-permissions) and posts an
+  # honest line: bypass takes effect on the NEXT spawn, never the running turn —
+  # the live process was started without the arming flag, so we send NO
+  # set_permission_mode steer for it (unlike the other five modes).
+  def handle_event("arm-bypass", _params, socket) do
+    if String.trim(socket.assigns[:bypass_confirm] || "") == "bypass" do
+      if sid = socket.assigns[:store_session_id], do: StudioChat.set_mode(sid, "bypassPermissions")
+
+      line =
+        if socket.assigns[:session],
+          do:
+            "⚠ Bypass permissions ARMED — it takes effect on the next resume, not the running turn.",
+          else: "⚠ Bypass permissions ARMED — it takes effect when this chat next runs."
+
+      socket =
+        socket
+        |> assign(mode: "bypassPermissions", arming_bypass: false, bypass_confirm: "")
+        |> append_message(:system, line)
+
+      {:noreply, socket}
+    else
+      # Word mismatch — never arm; keep the panel open for another try.
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel-arm-bypass", _params, socket) do
+    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "")}
   end
 
   # Pick the brain (wave 5). The choice persists on the session row (intent)
@@ -362,6 +420,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the answering model as fact, rendered beside the picker.
   def handle_event("set-model", %{"model" => raw}, socket) do
     {:noreply, change_model(socket, ClaudeChat.normalize_model(raw))}
+  end
+
+  # Pick the reasoning-effort tier (charter D48). Intent-only: it persists on the
+  # row and rides the NEXT spawn as --effort. There is NO set_effort control verb
+  # (the four control subtypes are closed), so a mid-session change never steers
+  # the running turn — we post an honest "applies from the next resume" line.
+  def handle_event("set-effort", %{"effort" => raw}, socket) do
+    {:noreply, change_effort(socket, ClaudeChat.normalize_effort(raw))}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -565,8 +631,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── composer command routing (charter D36b) — shared by the selectors and
   #    the slash builtins, kept OUT of the handle_event group ─────────────────
 
-  # Switch permission mode — shared by the header selector and the /plan ·
-  # /default slash builtins. See the `set_mode` ack handler for the ack-driven
+  # Switch permission mode — shared by the header selector and the /plan slash
+  # builtin. See the `set_mode` ack handler for the ack-driven
   # persistence contract (D23): a live switch persists only the confirmed value.
   defp change_mode(socket, mode) do
     cond do
@@ -605,16 +671,33 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> append_message(:system, "Model → #{label}.")
   end
 
+  # Pick the reasoning-effort tier (charter D48) — shared by the footer selector.
+  # Intent-only: persist on the row (rides the next spawn as --effort) and post an
+  # honest line. There is NO live steer (no set_effort control verb exists), so a
+  # mid-session change applies from the next resume, never the running turn.
+  defp change_effort(socket, choice) do
+    if sid = socket.assigns[:store_session_id], do: StudioChat.set_effort_choice(sid, choice)
+
+    socket
+    |> assign(effort_choice: choice || "default")
+    |> append_message(:system, effort_line(choice, socket.assigns[:session]))
+  end
+
+  defp effort_line(choice, nil), do: "Effort → #{choice || "the CLI default"}."
+
+  defp effort_line(choice, _live),
+    do: "Effort → #{choice || "the CLI default"} (applies from the next resume)."
+
   # Classify a submitted composer line as a BUILTIN slash command (charter D36b)
   # or `:none` (send it to the model as-is). Only EXACT builtins route — a
   # `/plan` with trailing prose is ambiguous, so it falls through as user text.
-  # The floor is /plan · /default · /model; session-mutating CLI commands
+  # The floor is /plan · /model (the retired /default builtin is gone, charter
+  # D48 — `default` is no longer an offered mode); session-mutating CLI commands
   # (/compact, /clear) are NOT builtins — they ride through as plain user text
   # so the CLI handles them itself, and our store identity is pinned by
   # `--session-id`/`--resume` regardless of what a slash-turn result echoes (D8;
   # spot-check assumption per D36b — we never scrape ids off frames).
   defp builtin_command("/plan"), do: {:set_mode, "plan"}
-  defp builtin_command("/default"), do: {:set_mode, "default"}
   defp builtin_command("/model"), do: :model_usage
 
   defp builtin_command(text) when is_binary(text) do
@@ -2141,8 +2224,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <select
                   name="mode"
                   class="text-xs text-dim"
+                  aria-label="Permission mode"
                   style="background: transparent; color: inherit; border: none; border-radius: 6px; padding: 2px 4px; cursor: pointer;"
                 >
+                  <%!-- The retired middle mode surfaces ONLY while THIS session still
+                        carries it (charter D48) — a legacy row keeps spawning it
+                        verbatim, but it is never an offered choice for a fresh pick. --%>
+                  <option :if={@mode == "default"} value="default" selected>
+                    <%= mode_label("default") %>
+                  </option>
                   <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
                     <%= mode_label(m) %>
                   </option>
@@ -2174,6 +2264,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 >
                   <%= @init.model %>
                 </span>
+              </form>
+              <%!-- Effort picker (wave 9, charter D48): composed with the model as
+                    one "Fable · high" group — the dim "·" reads them as a pair. It
+                    is intent-only (rides the next spawn as `--effort`); a mid-session
+                    change never steers the running turn (no set_effort control verb). --%>
+              <span class="text-xs text-dim" aria-hidden="true">·</span>
+              <form phx-change="set-effort" style="display: inline-flex; align-items: center;">
+                <select
+                  name="effort"
+                  class="text-xs"
+                  aria-label="Reasoning effort"
+                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                >
+                  <option value="default" selected={@effort_choice == "default"}>
+                    effort: default
+                  </option>
+                  <option :for={e <- ClaudeChat.efforts()} value={e} selected={e == @effort_choice}>
+                    <%= effort_label(e) %>
+                  </option>
+                </select>
               </form>
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
@@ -2215,6 +2325,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <.icon name="send" size={14} />
               </button>
             </div>
+        </div>
+        <%!-- Bypass ARM panel (charter D48): opened only when the user picks
+              bypassPermissions. Loud via --danger tokens, type-the-word-"bypass"
+              + an explicit Arm button — a select alone can NEVER arm dangerous
+              bypass. Arming persists the mode (the next spawn's build_args, gated
+              on the persisted row, emits --allow-dangerously-skip-permissions);
+              it does NOT steer the running turn. --%>
+        <div
+          :if={@arming_bypass}
+          role="alertdialog"
+          aria-label="Arm bypass permissions"
+          style="max-width: 860px; margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--danger); border-radius: 8px; background: hsl(var(--danger-hsl) / 0.08);"
+        >
+          <p class="text-xs" style="color: var(--danger); font-weight: 600; margin: 0 0 4px;">
+            ⚠ Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.
+          </p>
+          <p class="text-xs text-dim" style="margin: 0 0 8px;">
+            Type <strong>bypass</strong> to confirm, then Arm. It takes effect on the next spawn, not the running turn.
+          </p>
+          <form phx-change="bypass-confirm" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <input
+              type="text"
+              name="confirm"
+              value={@bypass_confirm}
+              autocomplete="off"
+              placeholder="bypass"
+              aria-label="Type bypass to confirm"
+              class="text-xs"
+              style="flex: 0 1 160px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-family: var(--font-mono);"
+            />
+            <button
+              type="button"
+              phx-click="arm-bypass"
+              disabled={String.trim(@bypass_confirm || "") != "bypass"}
+              class="btn"
+              aria-label="Arm bypass permissions"
+              style={"padding: 4px 12px; font-weight: 600; color: var(--danger); border-color: var(--danger);" <> if(String.trim(@bypass_confirm || "") != "bypass", do: " opacity: 0.5; cursor: not-allowed;", else: "")}
+            >
+              Arm bypass
+            </button>
+            <button
+              type="button"
+              phx-click="cancel-arm-bypass"
+              class="btn text-xs text-dim"
+              aria-label="Cancel"
+              style="padding: 4px 10px;"
+            >
+              Cancel
+            </button>
+          </form>
         </div>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
@@ -2373,7 +2533,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
              session_id: store_id,
              mode: socket.assigns.mode,
              resume: resume?,
-             model: ClaudeChat.normalize_model(socket.assigns[:model_choice])
+             model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
+             effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
+             # Armed strictly off the PERSISTED row (charter D48), never a live
+             # assign — build_args needs BOTH mode == bypassPermissions AND this.
+             bypass_armed: StudioChat.bypass_armed?(store_id)
            }),
          {:ok, session} <- Recorder.session_pid(recorder) do
       StudioChat.update_status(store_id, "working")
@@ -2493,6 +2657,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: session.id,
       mode: session.mode || "plan",
       model_choice: session.model_choice || "default",
+      effort_choice: session.effort_choice || "default",
+      # A reopen resets any in-flight arm ceremony — arming is never carried
+      # across a session load (charter D48).
+      arming_bypass: false,
+      bypass_confirm: "",
       status: status,
       init: replay_init(session),
       messages: messages,
@@ -2585,6 +2754,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # non-default model you picked, via a DEDICATED query (list_sessions omits
       # model_choice — seeding off it reads nil forever). nil → "default".
       model_choice: StudioChat.recent_model_choice() || "default",
+      # Sticky effort default (charter D48), the exact mirror — a dedicated query,
+      # never list_sessions (which omits effort_choice). nil → "default".
+      effort_choice: StudioChat.recent_effort_choice() || "default",
+      arming_bypass: false,
+      bypass_confirm: "",
       status: :new,
       init: nil,
       messages: [],
@@ -2693,8 +2867,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # carry the post-plan mode. Skipped while a user-initiated switch is in flight
   # (its ack owns the mode, charter D17/D23) and for any unknown/echoed-same
   # value, so a routine init never churns the selector.
+  # Adopt the mode the CLI actually reports off an init frame. `default` STAYS
+  # adoptable here (charter D34: approving a plan flips the CLI's OWN mode plan →
+  # default — observe reflects that REALITY, and a persisted `default` spawns
+  # verbatim). Only bypassPermissions is excluded — the fail-closed law (D48):
+  # an echoed frame is an untrusted string and must never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
-       when is_binary(mode) and mode in ~w(plan default acceptEdits) do
+       when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
     if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
       if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
       assign(socket, mode: mode)
@@ -3824,9 +4003,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp model_label(m), do: m
 
   defp mode_label("plan"), do: "plan (read-only)"
-  defp mode_label("default"), do: "ask to act"
-  defp mode_label("acceptEdits"), do: "auto-accept edits"
+  defp mode_label("acceptEdits"), do: "accept edits"
+  defp mode_label("auto"), do: "auto-run"
+  defp mode_label("dontAsk"), do: "don't ask"
+  defp mode_label("manual"), do: "manual approve"
+  defp mode_label("bypassPermissions"), do: "bypass · dangerous"
+  # The retired middle mode: shown ONLY while a legacy session still carries it.
+  defp mode_label("default"), do: "ask (legacy)"
   defp mode_label(other), do: other
+
+  # Effort tiers render verbatim in the picker (charter D48 — "Fable · high").
+  defp effort_label(nil), do: "default"
+  defp effort_label("default"), do: "default"
+  defp effort_label(e), do: e
 
   # The "(was ~N tokens)" tail on a compaction line — only when the CLI reports a
   # pre-compaction size, so we never invent a number we don't have.
@@ -3884,12 +4073,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       "argumentHint" => nil,
       "builtin" => true
     },
-    %{
-      "name" => "/default",
-      "description" => "Default mode — the agent asks approval before acting",
-      "argumentHint" => nil,
-      "builtin" => true
-    },
+    # The /default builtin is RETIRED (charter D48) — `default` is no longer an
+    # offered mode; the picker's six modes + the armed bypass ceremony are the
+    # surface. /plan is the only mode builtin left.
     %{
       "name" => "/model",
       "description" => "Switch the model for this session",

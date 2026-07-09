@@ -110,7 +110,9 @@ defmodule Barkpark.StudioChat.Recorder do
     session_opts = %{
       session_id: id,
       resume: Map.get(opts, :resume, false),
-      model: Map.get(opts, :model)
+      model: Map.get(opts, :model),
+      effort: Map.get(opts, :effort),
+      bypass_armed: Map.get(opts, :bypass_armed, false)
     }
 
     case ClaudeChat.start_session(%{
