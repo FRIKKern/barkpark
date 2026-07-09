@@ -13,6 +13,11 @@
 
   var STORE = "bpcloud.session";
   var THEME = "bpcloud.theme";
+  // Theme IDENTITY (data-bp-theme) is orthogonal to light/dark MODE (data-theme):
+  // two independent switches (theme-system D23/D36). The pre-paint inline script
+  // in index.html seeds data-bp-theme from this same key; the picker mutates it.
+  var BP_THEME = "bp_theme";
+  var BP_THEMES = ["evergreen", "ember", "fjord"];
 
   // ----------------------------------------------------------- tiny DOM utils
   function $(sel) { return document.querySelector(sel); }
@@ -1545,6 +1550,31 @@
     var next = cur === "dark" ? "light" : "dark";
     localStorage.setItem(THEME, next);
     applyTheme(next);
+  }
+
+  // ------------------------------------------------- theme IDENTITY (data-bp-theme)
+  // The identity picker mirrors toggleTheme() one axis over: it swaps the whole
+  // palette (evergreen / ember / fjord) via [data-bp-theme], which the emitted
+  // per-theme CSS blocks in app.css re-skin every var off. An unknown id (stale
+  // localStorage, a retired theme) falls back to evergreen so a bad value never
+  // white-screens — the bare declarations in app.css ARE the evergreen fallback.
+  function normalizeBpTheme(id) {
+    return BP_THEMES.indexOf(id) === -1 ? "evergreen" : id;
+  }
+  function applyBpTheme(id) {
+    var t = normalizeBpTheme(id);
+    document.documentElement.setAttribute("data-bp-theme", t);
+    var sel = $("#bp-theme-picker");
+    if (sel && sel.value !== t) sel.value = t; // keep the control in sync on init/restore
+    return t;
+  }
+  function initBpTheme() {
+    applyBpTheme(localStorage.getItem(BP_THEME) || "evergreen");
+  }
+  function selectBpTheme(id) {
+    var t = normalizeBpTheme(id);
+    localStorage.setItem(BP_THEME, t);
+    return applyBpTheme(t);
   }
 
   // =========================================================== AUTH SCREEN
@@ -8775,6 +8805,7 @@
   // =========================================================== WIRE-UP
   function init() {
     initTheme();
+    initBpTheme();
     wireModal();
 
     // Auth.
@@ -8798,6 +8829,8 @@
 
     // Shell.
     $("#theme-toggle").addEventListener("click", toggleTheme);
+    var bpPicker = $("#bp-theme-picker");
+    if (bpPicker) bpPicker.addEventListener("change", function () { selectBpTheme(bpPicker.value); });
     $("#acct-btn").addEventListener("click", openAccountModal);
 
     // Views. A4/D66: Launch is an ACTION — the Overview and Fleet header buttons
@@ -8997,6 +9030,10 @@
       billingStatusBadge: billingStatusBadge, billingPeriodLine: billingPeriodLine,
       // a11y (label-in-name): visible word and accessible name derive together.
       themeLabelText: themeLabelText, themeToggleAria: themeToggleAria,
+      // Theme IDENTITY picker (D36): normalize (unknown → evergreen) + the DOM
+      // stamp (returns the applied id). The known-theme list is pinned too.
+      normalizeBpTheme: normalizeBpTheme, applyBpTheme: applyBpTheme,
+      bpThemes: BP_THEMES.slice(),
       // C3 provisioning timeline: the one fold + its three presentations + the
       // fake-DOM mount seam (the wiring smoke drives mountInstanceTimeline).
       provisionSteps: provisionSteps, stepElapsed: stepElapsed, fmtDur: fmtDur,
