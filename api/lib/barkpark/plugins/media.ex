@@ -14,6 +14,11 @@ defmodule Barkpark.Plugins.Media do
   use Barkpark.Plugin,
     manifest_path: "../../../priv/plugins/media/plugin.json"
 
+  # Media lives in the top menu, not the desk tree — visible in Structure
+  # only when a workspace override promotes it to `:main`.
+  @impl Barkpark.Plugin
+  def structure_placement, do: :top_menu
+
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.Document
   alias Barkpark.Media.Delivery.Events

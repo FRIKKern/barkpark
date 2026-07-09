@@ -43,6 +43,11 @@ defmodule Barkpark.Plugins.Frt do
   use Barkpark.Plugin,
     manifest_path: "../../../priv/plugins/frt/plugin.json"
 
+  # Installed but OFF by default — surfaced under the "Plugins" node only when
+  # an admin enables it for the workspace.
+  @impl Barkpark.Plugin
+  def default_enabled?, do: false
+
   alias Barkpark.Content.SchemaDefinition
 
   @plugin_name "frt"

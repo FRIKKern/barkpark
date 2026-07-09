@@ -306,12 +306,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :nav_section, :atom, default: nil
   attr :current_path, :string, default: nil
   attr :admin?, :boolean, default: false
+  attr :workspace_id, :string, default: nil
 
   def studio_tabs(assigns) do
+    # `:workspace_id` threads the current workspace into the resolver ctx so
+    # the top-menu surfacing collector can skip per-workspace-disabled plugins
+    # (ssp-w1-plugin-enablement). Nil on an unscoped surface → no filtering.
     ctx = %{
       dataset: assigns.dataset,
       current_path: assigns[:current_path],
-      scope_prefix: assigns[:scope_prefix] || ""
+      scope_prefix: assigns[:scope_prefix] || "",
+      workspace_id: assigns[:workspace_id]
     }
 
     baseline =

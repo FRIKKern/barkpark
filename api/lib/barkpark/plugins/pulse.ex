@@ -28,6 +28,11 @@ defmodule Barkpark.Plugins.Pulse do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
 
+  # Installed but OFF by default — surfaced under the "Plugins" node only when
+  # an admin enables it for the workspace.
+  @impl Barkpark.Plugin
+  def default_enabled?, do: false
+
   @impl Barkpark.Plugin
   def register_routes(_ctx) do
     [

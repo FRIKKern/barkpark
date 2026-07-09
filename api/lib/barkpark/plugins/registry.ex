@@ -209,6 +209,28 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  Attributed desk-item collector (ssp-w1-plugin-enablement) — returns the host
+  `:baseline` and each ENABLED plugin's own desk nodes keyed by plugin name:
+
+      %{host: [Node.t()], plugins: [{plugin_name, [Node.t()]}]}
+
+  The tiered-tree builder consumes this to slot plugin trees under the
+  "Plugins" node (or promote them per placement). The per-workspace enablement
+  filter applies when `:ctx` carries a `:workspace_id`; otherwise every
+  registered plugin's contribution is attributed. The legacy flat
+  `collect_desk_items/1` is unchanged. Accepts `:baseline` / `:ctx`.
+  """
+  @spec collect_desk_items_attributed(keyword()) :: %{
+          host: [Barkpark.Plugin.desk_item()],
+          plugins: [{String.t(), [Barkpark.Plugin.desk_item()]}]
+        }
+  def collect_desk_items_attributed(opts \\ []) do
+    baseline = Keyword.get(opts, :baseline, [])
+    ctx = Keyword.get(opts, :ctx, %{})
+    ResolverChain.collect_desk_items_attributed(baseline, ctx)
+  end
+
+  @doc """
   Drives the `resolve_checkers/2` chain → flat list of `{name, module}`
   checker pairs. Not cached; accepts `:baseline` / `:ctx`.
   """

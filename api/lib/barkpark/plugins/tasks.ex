@@ -54,6 +54,10 @@ defmodule Barkpark.Plugins.Tasks do
 
   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
 
+  # Tasks is core content — surfaced in the MAIN tier of the Desk Structure.
+  @impl Barkpark.Plugin
+  def structure_placement, do: :main
+
   require Logger
 
   @doc """

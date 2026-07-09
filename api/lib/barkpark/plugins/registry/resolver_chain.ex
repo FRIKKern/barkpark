@@ -55,6 +55,13 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
     resolve_cli_commands: {:cli_commands, 0, [], :list_concat}
   }
 
+  # The three SURFACING collectors (charter Decision 5). Only these skip
+  # per-workspace-disabled plugins — and only when `ctx` carries a
+  # `:workspace_id`. Lifecycle hooks, content renderers, routes, workers, and
+  # capabilities are deliberately NOT filtered: an installed plugin's
+  # data-integrity gates and public rendering always run.
+  @surfacing_callbacks [:resolve_desk_items, :resolve_top_menu_entries, :resolve_doc_actions]
+
   # ─── Resolver chain core ────────────────────────────────────────────────
   #
   # `reduce_resolvers/3` is the single internal driver every collector funnels
@@ -67,7 +74,7 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
     {additive, additive_arity, default, lift_kind} =
       Map.fetch!(@resolver_callbacks, callback_name)
 
-    Enum.reduce(load_ordered_plugins(), baseline, fn entry, prev ->
+    Enum.reduce(enablement_filtered_plugins(callback_name, ctx), baseline, fn entry, prev ->
       apply_resolver(
         entry,
         callback_name,
@@ -80,6 +87,42 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
       )
     end)
   end
+
+  # Per-workspace enablement filter (ssp-w1-plugin-enablement). Resolves the
+  # ordered plugin list, then — ONLY for a surfacing callback whose `ctx`
+  # carries a workspace_id — drops plugins the workspace has disabled.
+  #
+  # NEVER resolves enablement without a workspace. The Registry GenServer
+  # registration path (`refresh_snapshot/1`) drives the chain with `ctx = %{}`;
+  # `ctx_workspace_id/1` returns nil there, so no `Enablement.effective/1` call
+  # is made and no Repo read happens inside the registry process (which would
+  # deadlock). With no workspace_id the returned list is byte-identical to
+  # `load_ordered_plugins/0`, so the legacy collectors are unchanged.
+  @doc false
+  def enablement_filtered_plugins(callback_name, ctx) do
+    plugins = load_ordered_plugins()
+
+    case ctx_workspace_id(ctx) do
+      nil ->
+        plugins
+
+      workspace_id when callback_name in @surfacing_callbacks ->
+        effective = Barkpark.Plugins.Enablement.effective(workspace_id)
+        Enum.filter(plugins, &Barkpark.Plugins.Enablement.enabled?(effective, &1.name))
+
+      _workspace_id ->
+        plugins
+    end
+  end
+
+  defp ctx_workspace_id(ctx) when is_map(ctx) do
+    case Map.get(ctx, :workspace_id) do
+      id when is_binary(id) and id != "" -> id
+      _ -> nil
+    end
+  end
+
+  defp ctx_workspace_id(_), do: nil
 
   # Resolve the in-order list of registered plugin entries, source of truth
   # documented in the moduledoc. Application config wins when set; otherwise
@@ -218,6 +261,47 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
   # Defensive: a misbehaving additive return falls through to prev so a
   # malformed plugin can't corrupt the accumulator.
   defp lift(prev, _result, _lift_kind), do: prev
+
+  # ─── Attributed desk-item compute (ssp-w1-plugin-enablement) ────────────
+  #
+  # `collect_desk_items_attributed/2` returns the host baseline and each
+  # ENABLED plugin's own desk nodes, keyed by plugin name, so the tiered-tree
+  # builder can slot every plugin's tree under the "Plugins" node (or promote
+  # it per placement). Attribution is per-plugin: each plugin's resolver runs
+  # against an EMPTY `prev`, yielding exactly that plugin's contribution — the
+  # `use Barkpark.Plugin` default `resolve_desk_items([], ctx)` returns
+  # `desk_items(dataset)`. The enablement filter is applied via
+  # `enablement_filtered_plugins/2`, so a workspace-disabled plugin never
+  # appears. Plugins that contribute nothing are dropped.
+  #
+  # The chained `collect_desk_items/1` is UNCHANGED and stays byte-identical
+  # for the all-enabled case — this is a separate, additive entry point.
+  @doc false
+  @spec collect_desk_items_attributed([term()], map()) ::
+          %{host: [term()], plugins: [{String.t(), [term()]}]}
+  def collect_desk_items_attributed(baseline, ctx) do
+    {additive, additive_arity, default, lift_kind} =
+      Map.fetch!(@resolver_callbacks, :resolve_desk_items)
+
+    plugin_groups =
+      for entry <- enablement_filtered_plugins(:resolve_desk_items, ctx),
+          nodes =
+            apply_resolver(
+              entry,
+              :resolve_desk_items,
+              additive,
+              additive_arity,
+              default,
+              lift_kind,
+              [],
+              ctx
+            ),
+          is_list(nodes) and nodes != [] do
+        {entry.name, nodes}
+      end
+
+    %{host: baseline, plugins: plugin_groups}
+  end
 
   # ─── Top-menu compute ───────────────────────────────────────────────────
 
