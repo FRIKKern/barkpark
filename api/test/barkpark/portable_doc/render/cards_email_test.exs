@@ -138,7 +138,9 @@ defmodule Barkpark.PortableDoc.Render.CardsEmailTest do
   # ── escaping ─────────────────────────────────────────────────────────────────
 
   test "author strings are escaped across the fleet" do
-    html = CardsEmail.cards_email_html(%{"type" => "cards", "items" => [%{"title" => "<script>"}]})
+    html =
+      CardsEmail.cards_email_html(%{"type" => "cards", "items" => [%{"title" => "<script>"}]})
+
     refute html =~ "<script>"
     assert html =~ "&lt;script&gt;"
 
