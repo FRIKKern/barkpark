@@ -120,6 +120,8 @@ const ALLOW_RAW_COLORS = [
   { line: ".btn-vercel:hover { background: #111; text-decoration: none; }", why: "Vercel brand button hover" },
   { line: '[data-theme="dark"] .btn-vercel { background: #fff; color: #000; border-color: #fff; }', why: "Vercel brand button (dark)" },
   { line: '[data-theme="dark"] .btn-vercel:hover { background: #eee; }', why: "Vercel brand button hover (dark)" },
+  { line: "-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));", why: "mask ALPHA channel (opaque = keep), not a rendered colour — theme-invariant ring cutout" },
+  { line: "mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));", why: "mask ALPHA channel (opaque = keep), not a rendered colour — theme-invariant ring cutout" },
 ];
 
 // E5 — THE contrast manifest (decision 28). Each entry is a fg/bg pairing the
@@ -159,6 +161,13 @@ const CONTRAST_PAIRS = [
   { fg: "--primary-fg", bg: "--ok", min: 4.5, why: ".badge-current text / toast-success glyph / done step-dot" },
   { fg: "--primary-fg", bg: "--danger", min: 4.5, why: "toast-error glyph / failed step-dot" },
   { fg: "--primary-fg", bg: "--muted-text", min: 3, why: "toast-info icon glyph" },
+  // Cloud-console families (charter azure-hetzner S4). instanceLifecycle glyph
+  // tones read THROUGH a status role; the only role not already paired on
+  // --surface is --warn (degraded). Provider IDENTITY marks (--provider-*) are
+  // non-text tints on a card surface (dot/border), so 3:1.
+  { fg: "--warn", bg: "--surface", min: 3, why: ".bp-inst--degraded glyph tone" },
+  { fg: "--provider-hetzner", bg: "--surface", min: 3, why: "Hetzner identity mark / chip border" },
+  { fg: "--provider-azure", bg: "--surface", min: 3, why: "Azure identity mark / chip border" },
 ];
 
 // ── Read the tree ────────────────────────────────────────────────────────────
@@ -358,15 +367,22 @@ for (const m of jsRaw.matchAll(/classList\.(?:add|remove|toggle)\(\s*"([^"]+)"/g
 // `:root` re-declaration sits inside @media, later in the file — the first
 // match wins here by construction.) Token blocks contain no nested braces.
 
-function parseTokenBlock(re) {
-  const m = css.match(re);
-  if (!m) return {};
+// Union EVERY top-level token block in source order (later declaration wins,
+// the browser cascade). Anchored to column 0 (`^` + no leading space) so it
+// captures the bare `:root {` / `[data-theme="dark"] {` token blocks — BOTH the
+// generated block and the hand-authored one that follows — while EXCLUDING
+// @media-nested `:root` (indented) and scoped rules (`[data-theme="dark"] .foo {`,
+// which has non-brace text before `{`). Token blocks are flat (no nested braces),
+// so the non-greedy body stops at the block's own `}`.
+function parseTokenBlocks(re) {
   const map = {};
-  for (const d of m[1].matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+);/g)) map[d[1]] = d[2].trim();
+  for (const m of css.matchAll(re)) {
+    for (const d of m[1].matchAll(/(--[A-Za-z0-9_-]+)\s*:\s*([^;]+);/g)) map[d[1]] = d[2].trim();
+  }
   return map;
 }
-const lightTokens = parseTokenBlock(/:root\s*\{([\s\S]*?)\}/);
-const darkOverrides = parseTokenBlock(/\[data-theme="dark"\]\s*\{([\s\S]*?)\}/);
+const lightTokens = parseTokenBlocks(/^:root\s*\{([\s\S]*?)\}/gm);
+const darkOverrides = parseTokenBlocks(/^\[data-theme="dark"\]\s*\{([\s\S]*?)\}/gm);
 const darkTokens = { ...lightTokens, ...darkOverrides };
 
 /** Substitute var(--x) references until the value is literal. */

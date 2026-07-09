@@ -30,6 +30,17 @@ export const STATUS_ROLES = ["ok", "warn", "danger", "info"];
 export const LIFE_ORDER = [
   "in_progress", "blocked", "done", "closed", "cancelled", "ready", "open",
 ];
+// Cloud INSTANCE lifecycle emission order (matches tokens.instanceLifecycle).
+export const INST_ORDER = [
+  "provisioning", "live", "degraded", "stopped", "archived", "decommissioned", "adopted",
+];
+export const PROVIDERS = ["hetzner", "azure"];
+// An instance state's colour is READ THROUGH its status role (Decision 7): the
+// role picks a CSS var (SPA) and the {light,dark} channels its Go hue resolves
+// from. role "" (neutral: stopped/archived + _default) → the muted-text tone.
+export const INST_ROLE_CSS = { ok: "--ok", warn: "--warn", danger: "--danger", info: "--info", "": "--muted-text" };
+export const instRoleChannels = (role) =>
+  role === "" ? tokens.color["muted-text"] : tokens.color.status[role];
 // Chrome type-scale steps, largest → smallest (display order for the Studio type
 // ladder). Mirrors tokens.type.chrome; the emitter and check.mjs both key off it.
 export const TYPE_STEPS = ["2xl", "xl", "lg", "base", "sm", "xs"];
@@ -108,18 +119,42 @@ function primaryVars(theme, indent) {
 // Full base + status contract. Values mirror the committed :root today; this is
 // a check-against-committed surface (the generated block is additive and the
 // hand-authored :root that follows keeps the live values).
+//
+// PLUS the cloud-console families (charter azure-hetzner Decision 7): the
+// provider IDENTITY tints as --provider-<kind> custom properties (per-theme
+// hex), and the instance-lifecycle glyph-tone classes .bp-inst--<state> whose
+// colour is READ THROUGH the state's status role (var(--ok/--warn/--danger/
+// --info/--muted-text)) — identity never a state voice. Additive: no consumer
+// is rewired this slice (statusPill/bucketOf + CLI table renderers land later).
+function providerVars(theme, indent) {
+  const p = tokens.color.provider;
+  return PROVIDERS.map((k) => indent + `--provider-${k}: ${p[k][theme]};`).join("\n");
+}
+function instClasses() {
+  const il = tokens.instanceLifecycle;
+  return INST_ORDER
+    .map((s) => `.bp-inst--${s} { color: var(${INST_ROLE_CSS[il[s].role]}); }`)
+    .join("\n");
+}
 function cloudBlock() {
   return [
     ":root {",
     baseVars("light", "  "),
     primaryVars("light", "  "),
     statusVars("light", "  "),
+    providerVars("light", "  "),
     "}",
     '[data-theme="dark"] {',
     baseVars("dark", "  "),
     primaryVars("dark", "  "),
     statusVars("dark", "  "),
+    providerVars("dark", "  "),
     "}",
+    "/* instance-lifecycle glyph tones — colour READ THROUGH the state's status",
+    "   role (Decision 7: identity is never a state voice); theme-invariant since",
+    "   the referenced role var flips per theme. A later wave rewires statusPill/",
+    "   bucketOf onto these. */",
+    instClasses(),
   ].join("\n");
 }
 
@@ -511,6 +546,20 @@ function cliChromeGo() {
     return `\tGenChrome${name} = lipgloss.AdaptiveColor{Light: "${h.light}", Dark: "${h.dark}"}`;
   };
   const all = [...CLI_CHROME_NEW, ...CLI_CHROME_REUSE];
+  // Cloud-console families (charter azure-hetzner Decision 7), emitted into the
+  // SAME sibling (chrome_gen.go) so tokens_gen.go stays byte-stable. Provider
+  // IDENTITY marks (hex) + the instance-lifecycle glyph/role/hue map. An
+  // instance state's Hue is its status-role tone resolved to hex (role "" →
+  // muted-text neutral) — colour is read THROUGH the role, never bespoke.
+  const il = tokens.instanceLifecycle;
+  const provRows = PROVIDERS.map(
+    (k) => `\t"${k}": {Light: "${tokens.color.provider[k].light}", Dark: "${tokens.color.provider[k].dark}"},`,
+  );
+  const instRows = INST_ORDER.map((s) => {
+    const e = il[s];
+    const ch = instRoleChannels(e.role);
+    return `\t"${s}": {Glyph: "${glyphOf(e.codepoint)}", ASCIIGlyph: ${JSON.stringify(e.asciiGlyph)}, Role: ${JSON.stringify(e.role)}, HueLight: "${hslToHex(ch.light)}", HueDark: "${hslToHex(ch.dark)}"},`;
+  });
   return [
     goHeader("semrole"),
     'import "github.com/charmbracelet/lipgloss"',
@@ -526,6 +575,36 @@ function cliChromeGo() {
     "var GenChrome = map[string]lipgloss.AdaptiveColor{",
     ...alignMap(all.map(([name, role]) => `\t"${role}": GenChrome${name},`)),
     "}",
+    "",
+    "// GenProviderMark is the generated cloud-provider IDENTITY palette",
+    "// (design/tokens.json color.provider → hex). Identity ONLY (Decision 7):",
+    "// tint a chip mark or a chip/row border, NEVER a pill background — the",
+    "// status roles stay the only state voice. Unconsumed until a later wave",
+    "// threads it through the CLI provider-chip / table renderers.",
+    "var GenProviderMark = map[string]lipgloss.AdaptiveColor{",
+    ...alignMap(provRows),
+    "}",
+    "",
+    "// GenInstanceLifecycleToken mirrors one design/tokens.json instanceLifecycle",
+    "// state. Hue is the state's status-role tone resolved to hex (role \"\" → the",
+    "// muted-text neutral); the CLI reads colour THROUGH the role, never a bespoke",
+    "// per-state hue (Decision 7).",
+    "type GenInstanceLifecycleToken struct {",
+    "\tGlyph      string",
+    "\tASCIIGlyph string",
+    "\tRole       string",
+    "\tHueLight   string",
+    "\tHueDark    string",
+    "}",
+    "",
+    "// GenInstanceLifecycle is the generated 1:1 mirror of tokens.instanceLifecycle",
+    "// (glyph + role + role-derived hue).",
+    "var GenInstanceLifecycle = map[string]GenInstanceLifecycleToken{",
+    ...alignMap(instRows),
+    "}",
+    "",
+    "// GenInstanceLifecycleOrder is the canonical emission order (matches source).",
+    `var GenInstanceLifecycleOrder = []string{${INST_ORDER.map((s) => `"${s}"`).join(", ")}}`,
     "",
   ].join("\n");
 }

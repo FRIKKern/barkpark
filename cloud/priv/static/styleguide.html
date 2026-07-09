@@ -75,6 +75,23 @@
       .sg-toasts { display: flex; flex-direction: column; gap: 10px; max-width: 360px; }
       .sg-modal-demo .modal-card { max-width: 420px; }
       .sg-forms { max-width: 380px; }
+      /* Console-states demo chrome. The instanceLifecycle glyph tone rides the
+         GENERATED .bp-inst--<state> classes (colour = the state's status role);
+         provider chips consume the GENERATED --provider-<kind> tints as a border
+         + mark (identity only — never a pill background, DESIGN.md §5). */
+      .sg-inst-list { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+      .sg-inst-row { display: flex; align-items: center; gap: 12px; }
+      .sg-inst-glyph { font-family: var(--mono); font-size: 15px; line-height: 1; width: 20px; text-align: center; flex: 0 0 20px; }
+      .sg-prov-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+      .sg-prov-chip {
+        display: inline-flex; align-items: center; gap: 8px;
+        height: 26px; padding: 0 12px;
+        border-radius: var(--pill);
+        border: 1px solid var(--border);
+        background: var(--surface);
+        font-size: 12px; font-weight: 600; color: var(--text);
+      }
+      .sg-prov-mark { width: 9px; height: 9px; border-radius: var(--pill); flex: 0 0 auto; }
     </style>
   </head>
   <body>
@@ -264,6 +281,50 @@
             <div class="sg-row"><span class="sg-lc" style="color: var(--dim);">✕</span><span class="sg-type-tag">cancelled</span><span class="sg-kv">neutral · --dim</span></div>
             <div class="sg-row"><span class="sg-lc" style="color: var(--text);">○</span><span class="sg-type-tag">ready</span><span class="sg-kv">--text</span></div>
             <div class="sg-row"><span class="sg-lc" style="color: var(--muted-text);">○</span><span class="sg-type-tag">open</span><span class="sg-kv">--muted-text</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="sg-section">
+        <h2>Console states</h2>
+        <p class="sg-note">
+          The cloud console's two orthogonal axes (charter azure-hetzner). <strong>Instance
+          lifecycle</strong> is STATUS — each of the seven states maps to one semantic status
+          role, so the pill is the single state voice (top rows) and the shared CLI/TUI glyph
+          (below) is tinted live from that role via the generated <code>.bp-inst--&lt;state&gt;</code>
+          classes — the same seven states the Go chrome paints from
+          <code>GenInstanceLifecycle</code> in <code>internal/semrole/chrome_gen.go</code>.
+          <strong>Provider</strong> is IDENTITY, never status: the chip tints its border and mark
+          from <code>--provider-hetzner</code> / <code>--provider-azure</code> but never a pill
+          background (DESIGN.md §5). Change a status hue or a provider tint in
+          <code>tokens.json</code> and every element here re-tints in lock-step with the CLI.
+        </p>
+        <div class="sg-panes" data-sg-clone>
+          <div>
+            <div class="sg-row">
+              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Provisioning</span></span>
+              <span class="status-pill status-pill--ok"><span class="status-pill-dot"></span><span class="status-pill-label">Live</span></span>
+              <span class="status-pill status-pill--warn"><span class="status-pill-dot"></span><span class="status-pill-label">Degraded</span></span>
+              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Stopped</span></span>
+            </div>
+            <div class="sg-row">
+              <span class="status-pill status-pill--neutral"><span class="status-pill-dot"></span><span class="status-pill-label">Archived</span></span>
+              <span class="status-pill status-pill--danger"><span class="status-pill-dot"></span><span class="status-pill-label">Decommissioned</span></span>
+              <span class="status-pill status-pill--info"><span class="status-pill-dot"></span><span class="status-pill-label">Adopted</span></span>
+            </div>
+            <div class="sg-inst-list">
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--provisioning">◌</span><span class="sg-type-tag">provisioning</span><span class="sg-kv">role info · --info</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--live">●</span><span class="sg-type-tag">live</span><span class="sg-kv">role ok · --ok</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--degraded">◐</span><span class="sg-type-tag">degraded</span><span class="sg-kv">role warn · --warn</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--stopped">○</span><span class="sg-type-tag">stopped</span><span class="sg-kv">neutral · --muted-text</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--archived">▢</span><span class="sg-type-tag">archived</span><span class="sg-kv">neutral · --muted-text</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--decommissioned">✕</span><span class="sg-type-tag">decommissioned</span><span class="sg-kv">role danger · --danger</span></div>
+              <div class="sg-inst-row"><span class="sg-inst-glyph bp-inst--adopted">◈</span><span class="sg-type-tag">adopted</span><span class="sg-kv">role info · --info</span></div>
+            </div>
+            <div class="sg-prov-chips">
+              <span class="sg-prov-chip" style="border-color: var(--provider-hetzner);"><span class="sg-prov-mark" style="background: var(--provider-hetzner);"></span>Hetzner</span>
+              <span class="sg-prov-chip" style="border-color: var(--provider-azure);"><span class="sg-prov-mark" style="background: var(--provider-azure);"></span>Azure</span>
+            </div>
           </div>
         </div>
       </section>

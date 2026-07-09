@@ -34,6 +34,8 @@
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
   --warn-strong: hsl(var(--warn-hsl) / 0.28);
+  --provider-hetzner: #c4123a;
+  --provider-azure: #0f6cbd;
 }
 [data-theme="dark"] {
   --primary: hsl(160 42% 62%);
@@ -53,7 +55,20 @@
   --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
   --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
   --warn-strong: hsl(var(--warn-hsl) / 0.34);
+  --provider-hetzner: #f0728a;
+  --provider-azure: #4aa3e0;
 }
+/* instance-lifecycle glyph tones — colour READ THROUGH the state's status
+   role (Decision 7: identity is never a state voice); theme-invariant since
+   the referenced role var flips per theme. A later wave rewires statusPill/
+   bucketOf onto these. */
+.bp-inst--provisioning { color: var(--info); }
+.bp-inst--live { color: var(--ok); }
+.bp-inst--degraded { color: var(--warn); }
+.bp-inst--stopped { color: var(--muted-text); }
+.bp-inst--archived { color: var(--muted-text); }
+.bp-inst--decommissioned { color: var(--danger); }
+.bp-inst--adopted { color: var(--info); }
 /* END GENERATED: tokens */
 
 :root {
