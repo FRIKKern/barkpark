@@ -271,6 +271,96 @@ ever touches a live cloud: Azure and Hetzner APIs are faked/recorded in tests.
     GenServer flush). The live armSkuName==slug join verification SPLITS OUT
     into its own network-gated task — it is never an offline gate.
 
+25. **Domain truth is a CP-side prober behind three injectable seams; ONE
+    status shape serves console + CLI.** A browser cannot resolve DNS or dial
+    TLS, so the probe lives in the control plane (the conduit pattern — a
+    Go-side prober would mean two probers, two truths). New
+    `BarkparkCloud.DomainStatus` modeled on `Verify` (structured envelope,
+    total-over-failure, per-probe ~5s budgets, route stays bounded): three
+    resolved-at-call-time seams under ONE config key — DNS via
+    `:inet.getaddrs` (PUBLIC resolution, never a zone-read: the CP holds no
+    DNS token, and what the customer's resolver sees is the whole point),
+    HTTP via the proven verify_peer `:httpc` transport
+    (Verify.HttpClient idiom), and TLS attribution via a NEW dep-free
+    `:ssl.connect`/`:ssl.peercert` step (the one greenfield primitive;
+    validity window + issuer via `:public_key`). Route: `GET
+    /v1/barkparks/:id/domain-status` (require_user, team-scoped, sibling of
+    telemetry/usage). Estate = `Barkpark.provisioning_fqdn/1` (never ad-hoc
+    url parsing) + `custom_host` (a SCALAR — one custom host per instance;
+    multi-custom-domain needs a schema change, explicitly NOT this wave),
+    each compared against `bp.host`. Contract per host: ordered stages
+    `dns_found → points_here → tls → serving`, each
+    `{stage, label, status: ok|pending|failed, evidence, remediation}`;
+    a stage downstream of a non-ok stage is `pending` (skipped, never
+    probed-and-red); a fresh-attach DNS-propagation miss is `pending` with
+    retry copy, never a failure. Response envelope:
+    `{ok, checked_at, instance: {id, host}, domains: [{host, kind:
+    platform|custom, overall, stages: [...]}]}`.
+    `FailureCopy.domain_stage_remediation/2` owns ALL remediation copy
+    ("add this A record…", "cert pending — retry in ~60s"), and it knows the
+    fqdn cert is provision-time Caddy while the custom_host cert is on-demand
+    `/v1/tls/ask` — two different pending stories. JS and Go never invent
+    reasons (Decision 19 extended again).
+26. **CLI and SPA consume the domain-status route; neither probes.** Go: new
+    `cloudclient.DomainStatus(id)` (Bearer, VerifyInstance timeout-headroom
+    precedent) + `bp cloud domain status <name>`; `-o json` renders CP bytes
+    verbatim (the verify pattern — live state is a CP call, never an embedded
+    fixture). SPA: the instance-workspace Domain rail row grows into a
+    per-host stage checklist — a pure `domainStages(payload, now)` reducer
+    shaped like `provisionSteps` (pending/active/ok/failed rows), exported
+    via `__bpTestHook` and asserted in `__app.test.mjs`; DOM mount polls the
+    route on the /new 4s idiom while any stage is non-terminal; the attach
+    modal's fire-and-forget "DNS + TLS will be live shortly" toast is
+    replaced by the live checklist. Only the pure reducer is node-tested —
+    do not deepen the untested browser-mount zone.
+27. **S10 chrome = header-driven painting inside the ONE shared renderer.**
+    `renderHzTable` (already the single table path for all 33 cloud+hetzner
+    call sites, and it already holds `out *writer`) gains a paint step keyed
+    on COLUMN HEADER — `PROVIDER` → GenProviderMark tint by cell value;
+    `STATUS`/`STATE`/`LIFECYCLE` → GenInstanceLifecycle role hue by cell
+    value — zero call-site changes and zero value-collision risk (a server
+    named "live" in a NAME column never paints). Color rides lipgloss with
+    the style_cmd pinned-profile idiom (Gen* are AdaptiveColor; the raw-SGR
+    paintCell family cannot express them), gated on `writer.color`; with
+    color OFF the output is BYTE-IDENTICAL to today (tint only — no glyph or
+    byte injection into existing columns; `cloud.Server` carries no status
+    field, so NO invented state column). Goldens in both modes (TrueColor +
+    Ascii pinned, the style_golden_test recipe); consumers read Gen* SYMBOLS,
+    never hex (the #1563 lit-allow ratchet). Existing Contains-based table
+    tests stay Contains-based.
+28. **The fqdn-tag task is repointed to ground truth.** Go-live azure boxes
+    ALREADY get barkpark-fqdn: ProvisionWith routes azure through the same
+    ProvisionOneShot (provision.go:295-299 sets seams.Provider from
+    ProviderFor) and labelFQDN (warmpool.go:1273) stamps the tag fail-closed
+    via the ServerLabeler facet, which AzureProvider satisfies. The REAL gap:
+    the direct-create escape path (`bp cloud instance create`, BOTH
+    providers) stamps only barkpark-managed. Fix: `doInstanceCreate` stamps
+    `cloud.Fqdn(name, cloud.Zone)` post-Create through ServerLabeler
+    (mirroring labelFQDN), erroring loud with the created box's name if
+    labeling fails (never silent); the audit additionally exempts
+    `barkpark-warm` boxes (legitimately fqdn-less until assign — a latent
+    second defect in the same loop); a create-then-audit test proves a fresh
+    box audits clean + a refute keeps a truly unlabeled box flagged. NOT a
+    ServerSpec.FQDN threading (blast radius for zero gain) and NOT a derived
+    fqdn inside AzureProvider.Create (go-live create names are
+    oneShotServerName-mangled — the derivation would stamp a lie).
+29. **Fake lifecycle honesty = generic interface-driven executor (Option A);
+    fixture untouched.** At runCloudInstanceLifecycle's `!known` branch
+    (cloud_instance_lifecycle_cmd.go:108-117), replace degradeUnsupported
+    with a generic facet executor modeled on runCloudInstancePause: resolve
+    the provider off the seam → type-assert the verb's facet interface →
+    call → emit structured result; degrade ONLY when the assert fails.
+    hetzner/azure never route there (they sit in lifecycleDispatch), so
+    azure archive keeps degrading honestly (it implements no archive
+    facets) and hetzner is byte-untouched. TestNeutralLifecycleDegrades
+    flips its fake-archive assertion to success and loses the rationalizing
+    comment. Stated seam semantics: GENERIC dispatch is the default for any
+    provider satisfying a facet; the dispatch table is the override for
+    verbs needing collaborators (DNS/cpFleet/writer). Option B (dispatch-
+    truth detection) is REJECTED: it rewrites Decision 21's two-source
+    semantics, contradicts the fake's all-capable-reference doctrine, deads
+    five fake methods, and ripples the fixture byte-copy across surfaces.
+
 ## Roadmap
 
 Integration order. Sizes: small / medium / large. Wave assignment in brackets.
@@ -346,8 +436,9 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
   guts byte-untouched + refute-tested, azure decommission-without-archive +
   minus-archives audit, fixture facets + parity + providers matrix columns.
   The SPA half moved into S11b (the action row consumes the conduit).
-- **S10 · CLI chrome parity** [medium] — one table formatter for both providers
-  (provider glyph + lifecycle glyph from emitted Go tokens), golden-render tests.
+- **S10 · CLI chrome parity** [W4, medium] — header-driven painting in the one
+  shared renderer per Decision 27 (GenProviderMark + GenInstanceLifecycle
+  finally consumed), golden-render tests in color + NO_COLOR.
 - **S11a · Capability conduit** [W3, medium] — Decision 22: committed priv
   fixture copy + byte-drift ExUnit gate + `GET /v1/providers/capabilities`
   (tier + generic capability bools + FailureCopy gap reasons).
@@ -366,9 +457,12 @@ Integration order. Sizes: small / medium / large. Wave assignment in brackets.
   queue. NOT wave 3.
 - **S12 · Metrics: agent vitals beat + Metrics tab + `bp cloud instance top`**
   [large] — Decision 13.
-- **S13 · Domains/TLS checklist panel** [medium] — Vercel-grade per-domain
+- **S13 · Domains/TLS checklist** [W4, split] — Vercel-grade per-domain
   checklist (DNS found → points here → TLS issued → serving), same on both
-  providers + `bp cloud domain status`.
+  providers. S13a = CP prober + `GET /v1/barkparks/:id/domain-status` +
+  FailureCopy stage remediation (Decision 25, large). S13b = the two
+  consumers: `bp cloud domain status <name>` + the SPA stage checklist with
+  polling (Decision 26, large).
 - **S14 · Portable archives v1** [large] — manifest + object-storage bundle,
   cross-provider resurrect, Hetzner snapshot demoted to `--fast` (Decision 12).
 - **S15 · Console-states styleguide completeness + drift tripwire** [small] —
@@ -611,3 +705,133 @@ LEAD closes each "PR merged" criterion + lifecycle on merge.
   stays open backlog.
 - After this wave merges: S10 CLI chrome parity, S13 domains/TLS checklist,
   S12 metrics, S14 portable archives (the bold bet), S8 hetzner native cutover.
+
+### Wave 2026-07-09f — The domain story becomes provable (W4) — PLANNED
+
+Waves 1–3 fully MERGED and live (S11b re-greened + merged; #1714–#1720).
+Decisions 25–29 ratified this wave. Exploration corrections folded in:
+
+- **No domain-health truth exists anywhere**: attach is a fire-and-forget
+  ProvisionJob (worker-plan success ≠ domain healthy), the SPA shows one rail
+  row + a toast, and NO code in the CP resolves DNS / dials TLS / probes HTTP.
+  S13a builds the prober from zero, on the Verify template (the near-verbatim
+  precedent: injectable transport, structured probes, both surfaces already
+  consume it).
+- **The probe MUST be CP-side** — a browser cannot resolve DNS or dial TLS;
+  CLI-side probing would fork the truth. Confirmed the tentative architecture.
+- **The fqdn-tag task premise was half-wrong**: go-live azure boxes already
+  get barkpark-fqdn via ProvisionOneShot's fail-closed labelFQDN on the
+  kind-routed provider. Task repointed (Decision 28) at the real gaps: the
+  direct-create escape path (both providers) + the audit's missing
+  barkpark-warm exemption.
+- **S10 is not "build a formatter"** — renderHzTable is already the single
+  shared table path (33 call sites, both providers) and already holds the
+  writer; the work is a header-driven, color-gated paint step (Decision 27).
+  No byte-golden pins any hetzner table; the color-off byte-identity contract
+  is satisfiable by construction.
+- **The fake-honesty fix is small and additive** (Decision 29): the generic
+  facet executor mirrors runCloudInstancePause in the same file; azure/hetzner
+  routing untouched.
+
+Slices/tasks (children of azure-hetzner-hosting-epic):
+azh-w4-s13a-domain-status-prober (large, P0, Elixir-only),
+azh-w4-s13b-domain-status-surfaces (large, P1, Go cloudclient/CLI + the
+app.js slice — solo owner of app.js this wave),
+azh-w4-s10-cli-chrome-parity (medium, P1, Go CLI),
+azh-w4-azure-fqdn-tag-on-create (small, P1, ADOPTED + repointed),
+azh-w4-fake-lifecycle-dispatch-honesty (small, P2, Go CLI).
+All five build in parallel — S13b builds against the Decision 25 response
+contract (pinned in both tasks), integration order S13a → S13b. The two small
+Go slices touch different regions of cloud_instance_lifecycle_cmd.go{,_test}
+— auto-mergeable; integrate honesty → fqdn → S10. Non-negotiables carried:
+mix format/gofmt every commit; ALL gates offline (every prober primitive
+injectable, fail-closed); FULL cloud suite at integration for cloud/ slices;
+hetzner behavior changes need refute-tests; api/ AuditWebhooksTest +
+StudioLiveSheetPresenceTest reds on an untouched api/ tree are rerun-worthy.
+NOT this wave: S8 hetzner-native, S14 portable archives, S12 metrics,
+azh-w3-pricing-live-join-verify (network-gated), external-domain attach
+(the status shape is domain-agnostic; the attach surface is not built).
+
+### Wave 2026-07-09g — The domain story becomes provable (W4) — BUILT + REVIEWED
+
+All five slices green and reviewer-passed. Whole-wave integration PROVEN on a
+scratch merge of all five final branches (Go build/vet/test fresh, node 263/0,
+FULL cloud suite 1596/0). Integrate S13a → S13b, honesty → fqdn → S10:
+
+- **S13a · domain-status prober** — merge
+  `loop-epic/w4-s13a-domain-status-prober-cp-answers--0-r`.
+  BarkparkCloud.DomainStatus on the Verify template: 4 ordered stages
+  (dns_found → points_here → tls → serving), three fail-closed injectable
+  seams + offline test guard, FailureCopy.domain_stage_remediation/2
+  (platform-Caddy vs custom-/v1/tls/ask stories, terminal default), team-scoped
+  no-leak route. Reviewer fixes (one REAL product bug): (1) serving required
+  strict 2xx but a HEALTHY instance root returns 302 (proven live on prod) —
+  every live box would have shipped serving:failed; now <500 per the Verify
+  doctrine, protective 302-test added. (2) points_here canonicalizes a stored
+  IPv6 host through parse+ntoa (non-canonical form no longer reads "points
+  elsewhere"). (3) The greenfield TLS DER decode (the builder's own top blind
+  spot) is now exercised REAL against a loopback :ssl server (pkix_test_data
+  chain; RSA keys — the generator default can't satisfy TLS1.3 sig-algs) + a
+  refused-port error-path test. 24 tests; full suite 1596/0.
+- **S13b · both surfaces** — merge
+  `loop-epic/w4-s13b-domain-status-on-both-surfaces-b-1-r` AFTER S13a (the -r
+  branch already has S13a-r merged in; integrated gates green). Go
+  cloudclient.DomainStatus + `bp cloud domain status <name>` (server
+  remediation verbatim, -o json = CP bytes, exit 0 only when serving); SPA
+  domainStages pure fold + #instance-domains rail checklist w/ 4s poll,
+  attach-toast replaced by the live checklist. Reviewer fixes: comment/copy
+  accuracy only (pending paints cyan/info not yellow; a node test titled
+  "failed is terminal — no infinite poll" actually asserts NOT-terminal —
+  retitled: a skipped-pending rung downstream keeps polling so the operator
+  can fix + watch). Note: a hard-failed SERVING rung (all upstream ok) does
+  stop the poll — inconsistent with the fix-and-watch story; small S16-grade
+  follow-up if a live look wants it. Checklist may want a rail width tweak in
+  app.css after a live look (out of slice scope). A cross-surface fixture
+  pinning the envelope for Go+JS remains unfiled (builder + reviewer agree
+  it's the durable guard).
+- **honesty · fake lifecycle dispatch** — merge
+  `loop-epic/w4-fake-provider-lifecycle-verbs-actuall-4` (CLEAN — no reviewer
+  changes). runNeutralFacet generic facet executor at the !known branch only;
+  hetzner/azure byte-untouched; degrade refute now uses a genuinely facet-less
+  provider; fake archive/adopt/decommission(±not-found)/audit proven executing.
+  Fake resurrect success path is untested (a fresh per-call fake has no archive
+  to resurrect — honest not-found by construction).
+- **fqdn · direct-create identity** — merge
+  `loop-epic/direct-create-boxes-get-their-barkpark-f-3-r` AFTER honesty (the
+  -r branch already has honesty merged in — the shared-file auto-merge is
+  proven green). doInstanceCreate stamps cloud.Fqdn(name, instDefaultZone) via
+  ServerLabeler on BOTH providers, loud failure naming the box + copy-paste fix
+  command; azure audit exempts barkpark-warm boxes; create-then-audit-clean +
+  truly-unlabeled refute + warm-exemption + Tags-PATCH-Merge assert (transport
+  fake grew request-body capture). No reviewer code changes.
+- **S10 · CLI table chrome** — merge
+  `loop-epic/w4-s10-cli-table-chrome-provider-marks-l-2` (CLEAN — no reviewer
+  changes). Header-driven paint step in renderHzTable: PROVIDER →
+  GenProviderMark, STATUS/STATE/LIFECYCLE → GenInstanceLifecycle role hue;
+  unknown values + neutral-role states unpainted; color-off BYTE-IDENTICAL
+  (golden'd in TrueColor + Ascii + no-color byte-identity + strip-and-compare
+  tint-only). HONEST CAVEAT: no current caller emits a PROVIDER column and
+  hetzner STATUS cells carry raw hcloud vocab ("running") — operator-visible
+  tint lights up only when fleet rows emit the neutral vocabulary (S11b/S15
+  follow-on).
+
+**Ledger:** all five tasks claimed (epoch 1), in_progress, criteria stamped
+with honest evidence, "PR merged" left open — the LEAD closes it + lifecycle
+on merge. Builders' criteria patches changed each task's work_digest, so
+`bp task close` will 409 doc_changed_since_claim — re-read then close (by
+design). No ledger fixes were needed this wave.
+
+**Carried / next wave:**
+- The wish's last unbuilt first-class pillar is MONITORING — S12 (agent
+  vitals beat + Metrics tab + `bp cloud instance top`) is the biggest
+  remaining wish gap; S14 portable archives is the bold differentiator the
+  vision names as the payoff. Recommended: take S12 next (closes the wish's
+  five-pillar promise on both providers), with the small S10-activation work
+  (fleet rows emit PROVIDER + neutral lifecycle STATUS through renderHzTable)
+  riding along; then S14 as its own dedicated wave; S8/S11c/S15/S16 behind.
+- Small follow-ups worth filing with S16: domain-status cross-surface fixture
+  (Go+JS pin of the envelope); keep-polling-on-failed-serving; app.css rail
+  width for the domain checklist; fake resurrect round-trip once archives
+  hold state across invocations (S14 gives them a substrate).
+- Deploy note (S13a): the prober runs in-process on the CP — no migration, no
+  worker change; the route is live the moment cloud/ deploys.
