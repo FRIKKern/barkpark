@@ -1940,6 +1940,45 @@ select.form-input {
 }
 .inst-tabpanel { display: block; }
 
+/* ---------- Metrics tab (S12: the on-box agent vitals beat) ---------- */
+/* Colours READ the S4 role vars (var(--info)/--ok/--warn) — no new hex. The
+   sparkline strokes currentColor, inherited from the card's role class. */
+.metrics-fresh { margin: 0 0 12px; }
+.metrics-stale {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: var(--warn-soft);
+  color: var(--warn-strong);
+  font-size: 13px;
+}
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.metric-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+}
+.metric-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.metric-label { font-size: 13px; color: var(--muted-text); }
+.metric-value { font-size: 20px; font-weight: 650; color: var(--text); }
+.metric-spark { margin-top: 8px; color: var(--muted-text); }
+.metric-spark .spark { display: block; width: 100%; height: 40px; }
+.metric--info .metric-spark { color: var(--info); }
+.metric--ok .metric-spark { color: var(--ok); }
+.metric--warn .metric-spark { color: var(--warn); }
+.metrics-health { margin-top: 12px; }
+
 /* ---------- Webhooks tab ---------- */
 .wh-toolbar {
   display: flex;

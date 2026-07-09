@@ -478,6 +478,78 @@ func (c *Client) DomainStatus(ctx context.Context, id string) (DomainStatusResul
 	return res, nil
 }
 
+// MetricPoint is one sample of one vitals series as the control plane's GET
+// /v1/barkparks/:id/metrics route (charter S12) reports it. Value is a POINTER so
+// a dropped/missing sample decodes as nil — a GAP the renderer must honour, never
+// a fabricated zero (the whole honesty point of the metrics story).
+type MetricPoint struct {
+	At    string   `json:"at"`
+	Value *float64 `json:"value"`
+}
+
+// MetricsBeat is the on-box agent's heartbeat state. Status is one of
+// live|stale|absent: absent = no beat ever landed, stale = the beat went quiet
+// (the window is last-known), live = a fresh beat. AgeSeconds is the server's own
+// age of the last beat at collection time (the CLI never recomputes it).
+type MetricsBeat struct {
+	LastSeenAt string  `json:"last_seen_at"`
+	AgeSeconds float64 `json:"age_seconds"`
+	Status     string  `json:"status"`
+}
+
+// ServiceHealth is the rolled-up service-check summary the agent reports.
+type ServiceHealth struct {
+	Pass    int      `json:"pass"`
+	Total   int      `json:"total"`
+	Failing []string `json:"failing"`
+}
+
+// MetricsResult is a COMPLETED metrics roll-up: the control plane rolled the
+// agent's beat window and reported per-series points. This client NEVER computes
+// — it renders the CP's truth. Raw is the envelope BYTES verbatim so `-o json`
+// re-emits the contract without reshaping (the verify/domain-status idiom). The
+// series map is keyed by metric (cpu|mem|disk|load), each oldest-to-newest.
+type MetricsResult struct {
+	Raw         []byte `json:"-"`
+	OK          bool   `json:"ok"`
+	CollectedAt string `json:"collected_at"`
+	Instance    struct {
+		ID       string `json:"id"`
+		Host     string `json:"host"`
+		Provider string `json:"provider"`
+	} `json:"instance"`
+	Beat          MetricsBeat              `json:"beat"`
+	Points        int                      `json:"points"`
+	Series        map[string][]MetricPoint `json:"series"`
+	ServiceHealth ServiceHealth            `json:"service_health"`
+}
+
+// Metrics fetches the on-box agent vitals roll-up for a managed instance via GET
+// /v1/barkparks/:id/metrics (Bearer). Unlike DomainStatus/VerifyInstance the
+// control plane does NOT probe the live box inline — it serves an already-rolled
+// window from the agent's stored beats — so the shared DefaultTimeout is ample
+// (no widened headroom). `points` is the requested sample count (<=0 → the
+// server's default window). A 200 is a completed roll-up (read OK/beat.status for
+// the verdict); any non-2xx surfaces through cloudError.
+func (c *Client) Metrics(ctx context.Context, id string, points int) (MetricsResult, error) {
+	path := "/v1/barkparks/" + esc(id) + "/metrics"
+	if points > 0 {
+		path += fmt.Sprintf("?points=%d", points)
+	}
+	status, raw, err := c.do(ctx, "GET", path, true, nil)
+	if err != nil {
+		return MetricsResult{}, err
+	}
+	if !ok(status) {
+		return MetricsResult{}, cloudError(status, raw)
+	}
+	res := MetricsResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return MetricsResult{}, fmt.Errorf("decode metrics envelope: %w", err)
+	}
+	return res, nil
+}
+
 // VerifyTimeout is the wall-clock cap for a VerifyInstance call. The route is
 // SYNCHRONOUS: the control plane probes the live box inline (up to 6 upstream
 // requests, each with its own 5s connect + 5s recv bound — ~60s absolute worst
