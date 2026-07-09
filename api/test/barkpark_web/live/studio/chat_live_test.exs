@@ -3589,7 +3589,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
@@ -3602,10 +3604,22 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
             wf_phase(3, "Build"),
             wf_phase(4, "Review"),
             wf_agent("strategist", 1, "Strategize", "done", model: "fable", tokens: 9_600),
-            wf_agent("explore:a", 2, "Explore", "done", model: "claude-opus-4-8[1m]", tokens: 42_100),
-            wf_agent("explore:b", 2, "Explore", "done", model: "claude-opus-4-8[1m]", tokens: 38_700),
-            wf_agent("build:journey-render", 3, "Build", "start", model: "claude-opus-4-8[1m]", tokens: 145_000),
-            wf_agent("build:aggregates", 3, "Build", "start", model: "claude-opus-4-8[1m]", tokens: 88_300)
+            wf_agent("explore:a", 2, "Explore", "done",
+              model: "claude-opus-4-8[1m]",
+              tokens: 42_100
+            ),
+            wf_agent("explore:b", 2, "Explore", "done",
+              model: "claude-opus-4-8[1m]",
+              tokens: 38_700
+            ),
+            wf_agent("build:journey-render", 3, "Build", "start",
+              model: "claude-opus-4-8[1m]",
+              tokens: 145_000
+            ),
+            wf_agent("build:aggregates", 3, "Build", "start",
+              model: "claude-opus-4-8[1m]",
+              tokens: 88_300
+            )
           ],
           %{"total_tokens" => 323_700}
         )
@@ -3618,7 +3632,8 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Build 3/4"
       assert html =~ "2 running"
       assert html =~ "3 done"
-      assert html =~ "323k tok"
+      # 323_700 → nearest-k "324k" (format_tokens rounds, never floors)
+      assert html =~ "324k tok"
 
       # (2) settled phases collapse to one quiet line
       assert html =~ "Strategize"
@@ -3648,7 +3663,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
@@ -3693,7 +3710,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
@@ -3760,9 +3779,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
               wf_phase(1, "Strategize"),
               wf_phase(2, "Explore"),
               wf_phase(3, "Decide"),
-              wf_agent("strategist", 1, "Strategize", "done", model: "claude-fable-1[1m]", tokens: 9_600),
-              wf_agent("explore:wire", 2, "Explore", "progress", model: "claude-opus-4-8[1m]", tokens: 21_400),
-              wf_agent("explore:grammar", 2, "Explore", "progress", model: "claude-fable-1[1m]", tokens: 14_700)
+              wf_agent("strategist", 1, "Strategize", "done",
+                model: "claude-fable-1[1m]",
+                tokens: 9_600
+              ),
+              wf_agent("explore:wire", 2, "Explore", "progress",
+                model: "claude-opus-4-8[1m]",
+                tokens: 21_400
+              ),
+              wf_agent("explore:grammar", 2, "Explore", "progress",
+                model: "claude-fable-1[1m]",
+                tokens: 14_700
+              )
             ]
           }
         })
@@ -3793,7 +3821,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view, sid: sid} do
       send_frame(
         sid,
-        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}])
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "epic"}
+        ])
       )
 
       send_frame(
@@ -3802,7 +3832,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
           "t",
           [
             wf_phase(1, "Build"),
-            wf_agent("build:doomed", 1, "Build", "error", error: "context deadline exceeded", tokens: 12),
+            wf_agent("build:doomed", 1, "Build", "error",
+              error: "context deadline exceeded",
+              tokens: 12
+            ),
             wf_agent("build:live", 1, "Build", "start", tokens: 8)
           ],
           %{"total_tokens" => 20}
@@ -3817,6 +3850,35 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "✕"
       assert html =~ ~s(title="context deadline exceeded")
       assert html =~ "var(--danger)"
+
+      # a failure NEVER vanishes on completion: the collapsed summary line and
+      # the settled phase line both keep the honest failed count
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            wf_phase(1, "Build"),
+            wf_agent("build:doomed", 1, "Build", "error",
+              error: "context deadline exceeded",
+              tokens: 12
+            ),
+            wf_agent("build:live", 1, "Build", "done", tokens: 8)
+          ],
+          %{"total_tokens" => 20}
+        )
+      )
+
+      send_frame(sid, bg_changed([]))
+
+      collapsed = rail_html(view)
+      assert collapsed =~ ~s(data-rail-status="completed")
+      assert collapsed =~ "1 failed"
+
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      expanded = rail_html(view)
+      assert expanded =~ ~s(data-rail-phase="done")
+      assert expanded =~ "1 failed"
     end
 
     test "a token-only workflow tick does NOT re-render the rail; a state flip does",

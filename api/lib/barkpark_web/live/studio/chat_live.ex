@@ -2661,6 +2661,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <span :if={@phase.status == :done} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
             · <%= @phase.total %> <%= pluralize(@phase.total, "agent") %> · <%= StudioChat.format_tokens(@phase.tokens) %> tok
           </span>
+          <span
+            :if={@phase.status == :done and @phase.failed > 0}
+            style="margin-left: 6px; color: var(--danger);"
+          >
+            · <%= @phase.failed %> failed
+          </span>
           <span :if={@phase.status == :skipped} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
             · skipped
           </span>
@@ -4593,7 +4599,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp rail_header_summary(%{"status" => "completed"}, %{summary: s}) do
     "#{s.phases_run} of #{s.phase_total} phases" <>
       skipped_part(s.skipped) <>
-      " · #{s.agents_total} #{pluralize(s.agents_total, "agent")} · #{StudioChat.format_tokens(s.tokens)} tok"
+      " · #{s.agents_total} #{pluralize(s.agents_total, "agent")}" <>
+      failed_part(s.failed) <> " · #{StudioChat.format_tokens(s.tokens)} tok"
   end
 
   defp rail_header_summary(%{"status" => "interrupted"}, %{summary: s}) do
@@ -4651,7 +4658,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (interrupted) entry reads --life-open (stalled) and never breathes.
   defp rail_agent_glyph(node) do
     cond do
-      rail_node_failed?(node) -> "✕"
+      StudioChat.workflow_node_failed?(node) -> "✕"
       StudioChat.workflow_node_terminal?(node) -> "✓"
       true -> "●"
     end
@@ -4659,22 +4666,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp rail_agent_color(entry, node) do
     cond do
-      rail_node_failed?(node) -> "var(--danger)"
+      StudioChat.workflow_node_failed?(node) -> "var(--danger)"
       StudioChat.workflow_node_terminal?(node) -> "var(--life-done)"
       rail_running?(entry) -> "var(--life-in_progress)"
       true -> "var(--life-open)"
     end
   end
-
-  @rail_node_failed ~w(error failed aborted)
-  defp rail_node_failed?(node) when is_map(node) do
-    case node["state"] do
-      s when is_binary(s) -> String.downcase(s) in @rail_node_failed
-      _ -> false
-    end
-  end
-
-  defp rail_node_failed?(_), do: false
 
   # A node breathes only while its ENTRY is live AND its state is non-terminal — a
   # replayed interrupted workflow's tree (visible on reopen) must never breathe.
