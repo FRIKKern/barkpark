@@ -283,6 +283,32 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       assert_receive {:DOWN, ^ref, :process, ^session, _reason}, 2_000
     end
+
+    # send_message is a GenServer.call (charter D24): the reply carries the REAL
+    # write outcome so the composer can distinguish a dispatched turn from a lost
+    # one. safe_command no longer swallows failures to a false :ok.
+    test "send_message reports :ok when the frame reaches the port" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      assert ClaudeChat.send_message(session, "hi") == :ok
+
+      ClaudeChat.close(session)
+    end
+
+    test "send_message reports an honest {:error} once the session/port is gone — never a false :ok" do
+      put_chat_config(command: {"cat", []})
+
+      {:ok, session} = ClaudeChat.start_session(%{sink: self()})
+      ref = Process.monitor(session)
+      ClaudeChat.close(session)
+      assert_receive {:DOWN, ^ref, :process, ^session, _reason}, 2_000
+
+      # The subprocess (and its port) is gone; the write cannot land. The seam
+      # returns {:error, _}, so the LiveView withdraws the echo instead of
+      # rendering a message that never sent.
+      assert {:error, _reason} = ClaudeChat.send_message(session, "too late")
+    end
   end
 
   # End-to-end proof that session identity reaches the REAL spawned process

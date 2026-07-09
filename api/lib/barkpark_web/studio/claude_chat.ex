@@ -219,10 +219,25 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     GenServer.cast(session, {:respond_permission, request_id, decision})
   end
 
-  @doc "Send a user turn to the session as a stream-json user message."
-  @spec send_message(pid(), String.t()) :: :ok
+  @doc """
+  Send a user turn to the session as a stream-json user message.
+
+  A `GenServer.call` (charter D24) — the reply carries the REAL write outcome so
+  the caller can tell a DISPATCHED turn (the model has it; keep the optimistic
+  echo, clear the composer) from a failed one (withdraw the echo, hand the words
+  back). `:ok` means the frame reached the port; `{:error, reason}` means it did
+  not (a closed/absent port, a write that raised, or a session that has already
+  gone — never a false `:ok`). The honesty bar is DISPATCHED, not delivered: a
+  later result frame still reports the model's answer.
+  """
+  @spec send_message(pid(), String.t()) :: :ok | {:error, term()}
   def send_message(session, text) when is_pid(session) and is_binary(text) do
-    GenServer.cast(session, {:send_user_message, text})
+    GenServer.call(session, {:send_user_message, text})
+  catch
+    # The session GenServer died between the caller's `ensure_session` and this
+    # call (port exit, teardown). That is a failed dispatch, not a crash — the
+    # composer must restore, so surface it as an honest {:error}.
+    :exit, reason -> {:error, {:not_running, reason}}
   end
 
   @doc """
@@ -402,7 +417,7 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     end
 
     @impl true
-    def handle_cast({:send_user_message, text}, state) do
+    def handle_call({:send_user_message, text}, _from, state) do
       line =
         Jason.encode!(%{
           "type" => "user",
@@ -412,10 +427,12 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
           }
         }) <> "\n"
 
-      safe_command(state.port, line)
-      {:noreply, state}
+      # Reply with the REAL write outcome (charter D24) — the LiveView gates its
+      # optimistic echo on a DISPATCHED frame, so a swallowed failure would lie.
+      {:reply, safe_command(state.port, line), state}
     end
 
+    @impl true
     def handle_cast({:respond_permission, request_id, decision}, state) do
       payload =
         case decision do
@@ -598,15 +615,24 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     defp pop_pending(state, _), do: {nil, state}
 
+    # Honest write (charter D24): return the outcome instead of swallowing every
+    # failure to `:ok`. A port that has already closed is NOT in `Port.list/0`;
+    # writing to it would raise, so we check first and report `{:error, ...}`.
+    # Outbound acks/control frames ignore the return; the user-turn write threads
+    # it back to the composer so a lost frame is never rendered as sent.
     defp safe_command(port, data) when is_port(port) do
-      Port.command(port, data)
-      :ok
+      if port in Port.list() do
+        Port.command(port, data)
+        :ok
+      else
+        {:error, :port_closed}
+      end
     rescue
       e ->
         Logger.warning("claude chat: write to subprocess failed: #{inspect(e)}")
-        :ok
+        {:error, e}
     end
 
-    defp safe_command(_port, _data), do: :ok
+    defp safe_command(_port, _data), do: {:error, :no_port}
   end
 end

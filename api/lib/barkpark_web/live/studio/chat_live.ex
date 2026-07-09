@@ -69,7 +69,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
          messages: [],
          next_id: 0,
          streaming: nil,
-         composer_rev: 0,
+         # Server-bound composer (charter D24): the input renders `value=` from
+         # this draft, so a send can clear it and a failed dispatch can restore
+         # the words verbatim — an uncontrolled DOM input is invisible to render/1.
+         composer_draft: "",
+         # The id of the optimistic user echo awaiting a dispatch verdict. A hard
+         # failure withdraws exactly this row; a dispatched frame clears the marker.
+         pending_echo_id: nil,
          interrupt_requested: false,
          mode_switch_from: nil,
          detached: false,
@@ -117,6 +123,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
     {:noreply, reset_to_new_chat(socket)}
   end
 
+  # Keep the server-bound composer draft in step with what the user types
+  # (charter D24). Without this, `value={@composer_draft}` would fight the DOM:
+  # a restore-on-failure could never be SEEN and a clear-on-send could never
+  # stick. Enter still submits via the form's `phx-submit="send"`.
+  def handle_event("composer-change", %{"message" => text}, socket) do
+    {:noreply, assign(socket, composer_draft: text)}
+  end
+
+  # Two-phase send (charter D24). PHASE 1 is instant and pure UI: echo the user
+  # bubble, clear the composer, flip to `:thinking`, and return — the first diff
+  # carries the words before any spawn/write/persist runs. The slow, failure-prone
+  # work (ensure_session → wire write → persist) is handed to `{:dispatch_send}`
+  # so the tab never blocks on a subprocess. A hard failure there withdraws the
+  # echo and hands the words back verbatim; nothing is ever silently lost.
   @impl true
   def handle_event("send", %{"message" => text}, socket) do
     text = String.trim(text)
@@ -132,25 +152,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
         {:noreply, socket}
 
       true ->
-        socket = ensure_session(socket)
+        echo_id = socket.assigns.next_id
+        send(self(), {:dispatch_send, text})
 
-        case socket.assigns.session do
-          nil ->
-            {:noreply, socket}
-
-          session ->
-            ClaudeChat.send_message(session, text)
-
-            {:noreply,
-             socket
-             |> persist_user_message(text)
-             |> append_message(:user, text)
-             |> assign(
-               status: :thinking,
-               interrupt_requested: false,
-               composer_rev: socket.assigns.composer_rev + 1
-             )}
-        end
+        {:noreply,
+         socket
+         |> append_message(:user, text)
+         |> assign(
+           status: :thinking,
+           interrupt_requested: false,
+           composer_draft: "",
+           pending_echo_id: echo_id
+         )}
     end
   end
 
@@ -307,7 +320,45 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # admin LVs' tolerant catch-all.
   def handle_event(_event, _params, socket), do: {:noreply, socket}
 
+  # PHASE 2 of send (charter D24): the deferred, failure-prone work. Bring the
+  # session up (creating the store row + resuming the CLI as needed), write the
+  # user turn, and — only once the frame is DISPATCHED — persist it. Every hard
+  # failure withdraws the optimistic echo and restores the words verbatim so a
+  # send never disappears into a lie:
+  #
+  #   * create/spawn error → `ensure_session` already posted an honest system
+  #     line and went `:offline`; we just undo the echo + hand the words back.
+  #   * port-write error   → the model never got the turn; system line + go
+  #     offline (the next send lazy-resumes) + hand the words back.
+  #   * DISPATCHED + persist-exhaustion → the model DID get the turn, so the echo
+  #     STAYS and the composer stays CLEARED (restoring would double-send);
+  #     `persist_user_message` warns that this row may not survive a reopen.
   @impl true
+  def handle_info({:dispatch_send, text}, socket) do
+    socket = ensure_session(socket)
+
+    case socket.assigns.session do
+      nil ->
+        {:noreply, restore_failed_send(socket, text)}
+
+      session ->
+        case ClaudeChat.send_message(session, text) do
+          :ok ->
+            {:noreply,
+             socket
+             |> persist_user_message(text)
+             |> assign(status: :thinking, pending_echo_id: nil)}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> append_message(:system, send_error_text(reason))
+             |> assign(session: nil, status: :offline)
+             |> restore_failed_send(text)}
+        end
+    end
+  end
+
   def handle_info({:claude_chat_event, %{"type" => "system", "subtype" => "init"} = ev}, socket) do
     init = %{
       model: ev["model"],
@@ -951,12 +1002,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <form
           :if={not @detached}
           phx-submit="send"
+          phx-change="composer-change"
           style="display: flex; gap: 8px; max-width: 860px; margin: 0 auto;"
         >
           <input
-            id={"chat-composer-#{@composer_rev}"}
+            id="chat-composer"
             type="text"
             name="message"
+            value={@composer_draft}
             autocomplete="off"
             placeholder={composer_placeholder(@status)}
             style="flex: 1; background: var(--bg); color: inherit; border: 1px solid var(--border-muted); border-radius: 8px; padding: 8px 12px; font: inherit;"
@@ -1083,27 +1136,45 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp ensure_session(%{assigns: %{session: session}} = socket) when is_pid(session), do: socket
 
   defp ensure_session(socket) do
-    {store_id, resume?, socket} =
-      case socket.assigns.store_session_id do
-        nil ->
-          id = Ecto.UUID.generate()
+    case socket.assigns.store_session_id do
+      nil ->
+        id = Ecto.UUID.generate()
 
-          {:ok, _} =
-            StudioChat.create_session(%{
-              id: id,
-              cwd: ClaudeChat.cwd(),
-              mode: socket.assigns.mode
-            })
+        # De-fanged strict match (charter D24): a create failure must NOT crash
+        # the LiveView (a crashed tab restores nothing). Post an honest line and
+        # go offline; the caller withdraws the echo and hands the words back.
+        case StudioChat.create_session(%{
+               id: id,
+               cwd: ClaudeChat.cwd(),
+               mode: socket.assigns.mode
+             }) do
+          {:ok, _} ->
+            socket
+            |> assign(store_session_id: id, session_id: id, status: :working)
+            |> push_patch(to: "/studio/chat/#{id}")
+            |> spawn_session(id, false)
 
-          {id, false,
-           socket
-           |> assign(store_session_id: id, session_id: id, status: :working)
-           |> push_patch(to: "/studio/chat/#{id}")}
+          {:error, reason} ->
+            Logger.warning("studio chat: failed to create session row: #{inspect(reason)}")
 
-        id ->
-          {id, true, socket}
-      end
+            socket
+            |> append_message(
+              :system,
+              "⚠ Couldn't start a new chat — the session store is unavailable. Your message was kept; try again."
+            )
+            |> assign(session: nil, status: :offline)
+        end
 
+      id ->
+        spawn_session(socket, id, true)
+    end
+  end
+
+  # Bring the subprocess up for `store_id` (fresh: `--session-id`; reopen:
+  # `--resume`). Extracted from `ensure_session` so the create-vs-reopen fork
+  # stays legible. Adoption (another tab owns it) and a spawn error both stay
+  # honest: the composer never lies about a session that isn't there.
+  defp spawn_session(socket, store_id, resume?) do
     case ClaudeChat.start_session(%{
            sink: self(),
            mode: socket.assigns.mode,
@@ -1131,6 +1202,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
         |> append_message(:system, spawn_error_text(reason))
         |> assign(session: nil, status: :offline)
     end
+  end
+
+  # Undo the optimistic echo (charter D24): drop exactly the pending echo row and
+  # hand the words back to the composer verbatim so nothing is lost. Status/system
+  # lines are the caller's to set (they differ per failure). A no-op when there is
+  # no pending echo (idempotent).
+  defp restore_failed_send(socket, text) do
+    echo_id = socket.assigns[:pending_echo_id]
+
+    assign(socket,
+      messages: Enum.reject(socket.assigns.messages, &(&1.id == echo_id)),
+      composer_draft: text,
+      pending_echo_id: nil
+    )
   end
 
   # Replay a remembered session INSTANTLY from our own store — no subprocess is
@@ -1171,7 +1256,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title_kicked: false,
       # Any half-open sidebar affordance is stale after a navigation.
       renaming_session: nil,
-      open_menu_session: nil
+      open_menu_session: nil,
+      # A reopened session starts with a clean composer (charter D24): any draft
+      # or in-flight echo belonged to the session we navigated away from.
+      composer_draft: "",
+      pending_echo_id: nil
     )
   end
 
@@ -1199,7 +1288,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       title_source: "default",
       title_kicked: false,
       renaming_session: nil,
-      open_menu_session: nil
+      open_menu_session: nil,
+      composer_draft: "",
+      pending_echo_id: nil
     )
   end
 
@@ -1835,6 +1926,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp spawn_error_text(_),
     do: "Failed to start the Claude session."
+
+  # Honest line for a user turn that never reached the model (charter D24): the
+  # port write failed or the session had already gone. The words are restored to
+  # the composer, so this is a "try again", not a "your message is lost".
+  defp send_error_text(_reason),
+    do: "That message didn't reach Claude — the session dropped. Your words were kept; send again."
 
   defp default_dataset do
     case Barkpark.Content.list_datasets() do
