@@ -44,14 +44,27 @@ defmodule BarkparkCloud.Azure.Pricing do
   alongside a `NextPageLink` second page so the pagination + exclusion is
   proven, not assumed.
 
-  ## Cache — the `TwoFactorRateLimiter` shape
+  ## Cache — serve-stale-while-refreshing, demand-triggered (never a timer)
 
-  A GenServer whose only job is to own ONE public named ETS table; all logic
-  runs in the CALLING process against that table (so the injected transport runs
-  in the caller and a test can program it per-process). One row
-  `{:cache, prices, fetched_at}` with a ~24h TTL. Started in every env
-  (credential-free) as an application child. `reset/0` clears the table for test
-  determinism.
+  A GenServer owns ONE public named ETS table, row `{:cache, prices, fetched_at}`,
+  ~24h TTL. Reads run in the CALLING process against that public table and split
+  three ways off the one row (no shape change — presence distinguishes
+  stale-servable from absent):
+
+    * **fresh** → serve the cached sheet, no network;
+    * **absent** → nothing to serve, so fetch SYNCHRONOUSLY in the caller — the
+      first-ever fetch, and the nil-degrade-on-first-failure contract (an outage
+      with no cache is still `%{}`);
+    * **stale** → serve the last good sheet IMMEDIATELY and hand ONE refresh to
+      the GenServer. An in-flight guard in the GenServer state coalesces
+      concurrent stale reads into a single background fetch — no thundering herd
+      on the global sheet, and no caller ever waits on a refresh.
+
+  The stale refresh runs the injected transport OUT of the caller (in a task
+  under the GenServer), so the test transport is a cross-process collaborator,
+  not a per-process stub. `flush/0` blocks until an in-flight refresh settles
+  (test determinism); `reset/0` drains any refresh then clears the table.
+  Started in every env (credential-free) as an application child.
 
   ## Transport seam — the third Azure config key
 
@@ -90,38 +103,105 @@ defmodule BarkparkCloud.Azure.Pricing do
   @impl true
   def init(_) do
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-    {:ok, %{}}
+    # `refreshing?` is the in-flight guard that coalesces concurrent stale reads
+    # into ONE background fetch; `waiters` are `flush/0` callers parked until the
+    # in-flight refresh settles.
+    {:ok, %{refreshing?: false, waiters: []}}
   end
 
   @doc """
   Cheapest monthly USD per `armSkuName`, cached ~#{div(@ttl_ms, 3_600_000)}h.
-  Serves a fresh cache without touching the network; on a stale/absent cache it
-  fetches (following `NextPageLink`), reduces to the cheapest monthly per SKU,
-  caches, and returns. On ANY fetch failure it returns the last good cache if
-  present, else `%{}`. Never raises — a pricing outage degrades to nil prices,
-  never a broken catalog.
+
+  Serve-stale-while-refreshing, demand-triggered:
+
+    * a FRESH cache is served without touching the network;
+    * an ABSENT cache is fetched SYNCHRONOUSLY here (nothing to serve yet — this
+      is the first-fetch latency and the nil-degrade-on-first-failure contract);
+    * a STALE cache is served IMMEDIATELY and a single background refresh is
+      handed to the GenServer (concurrent stale reads coalesce behind its
+      in-flight guard).
+
+  On any fetch failure the last good cache wins if present, else `%{}`. Never
+  raises — a pricing outage degrades to nil prices, never a broken catalog.
   """
   @spec monthly_prices(integer()) :: %{optional(String.t()) => float()}
   def monthly_prices(now_ms \\ System.system_time(:millisecond)) when is_integer(now_ms) do
     case cached(now_ms) do
-      {:fresh, prices} -> prices
-      :stale_or_missing -> refresh(now_ms)
+      {:fresh, prices} ->
+        prices
+
+      {:stale, prices} ->
+        # Serve the last good sheet NOW; one demand-triggered refresh in the
+        # GenServer freshens it for the next read. Never a timer, never a wait.
+        GenServer.cast(__MODULE__, {:refresh, now_ms})
+        prices
+
+      :absent ->
+        # Nothing cached — fetch synchronously in the caller.
+        refresh(now_ms)
     end
   end
 
-  @doc "Clear the price cache (test determinism only)."
+  @doc """
+  Block until any in-flight background refresh has settled, then return `:ok`.
+  Returns immediately when nothing is refreshing. A deterministic barrier for
+  the serve-stale path: read across the TTL (serves stale + triggers the
+  refresh), `flush/0`, then read again to observe the fresh sheet.
+  """
+  @spec flush() :: :ok
+  def flush, do: GenServer.call(__MODULE__, :flush)
+
+  @doc "Drain any in-flight refresh, then clear the price cache (test determinism only)."
   @spec reset() :: :ok
   def reset do
+    if Process.whereis(__MODULE__), do: flush()
     if table?(), do: :ets.delete_all_objects(@table)
     :ok
   end
+
+  ## GenServer — background refresh + in-flight guard ──────────────────────────
+
+  # A prior queued refresh may have already freshened the cache, or one is
+  # already running: either way this stale read collapses into it (no thundering
+  # herd on prices.azure.com). Otherwise fetch OUT of the GenServer so it stays
+  # responsive, and reply to `flush/0` waiters once it settles.
+  @impl true
+  def handle_cast({:refresh, _now_ms}, %{refreshing?: true} = state), do: {:noreply, state}
+
+  def handle_cast({:refresh, now_ms}, state) do
+    case cached(now_ms) do
+      {:fresh, _prices} ->
+        {:noreply, state}
+
+      _ ->
+        server = self()
+
+        spawn(fn ->
+          _ = refresh(now_ms)
+          send(server, :refresh_done)
+        end)
+
+        {:noreply, %{state | refreshing?: true}}
+    end
+  end
+
+  @impl true
+  def handle_info(:refresh_done, state) do
+    Enum.each(state.waiters, &GenServer.reply(&1, :ok))
+    {:noreply, %{state | refreshing?: false, waiters: []}}
+  end
+
+  @impl true
+  def handle_call(:flush, _from, %{refreshing?: false} = state), do: {:reply, :ok, state}
+  def handle_call(:flush, from, state), do: {:noreply, %{state | waiters: [from | state.waiters]}}
 
   ## Cache ─────────────────────────────────────────────────────────────────────
 
   defp cached(now_ms) do
     case lookup() do
       {prices, fetched_at} when now_ms - fetched_at < @ttl_ms -> {:fresh, prices}
-      _ -> :stale_or_missing
+      {prices, _fetched_at} -> {:stale, prices}
+      nil -> :absent
     end
   end
 

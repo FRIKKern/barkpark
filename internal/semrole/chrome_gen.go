@@ -9,12 +9,12 @@ import "github.com/charmbracelet/lipgloss"
 // Nine NEW hex roles + five REUSE references resolved to their target role's
 // hex (chrome-primary-cta = evergreen --primary; chrome-on-primary = --primary-fg).
 var (
-	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"}
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
 	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}
 	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
 	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
-	GenChromeSelectionBg   = lipgloss.AdaptiveColor{Light: "#eff6ff", Dark: "#172554"}
-	GenChromeSelectionFg   = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#93c5fd"}
+	GenChromeSelectionBg   = lipgloss.AdaptiveColor{Light: "#e9eeec", Dark: "#141c1b"}
+	GenChromeSelectionFg   = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#92d3bd"}
 	GenChromeFieldBorder   = lipgloss.AdaptiveColor{Light: "#d4d4d8", Dark: "#3f3f46"}
 	GenChromeToolbarBg     = lipgloss.AdaptiveColor{Light: "#fafafa", Dark: "#0a0a0a"}
 	GenChromeCursorBg      = lipgloss.AdaptiveColor{Light: "#f4f4f5", Dark: "#18181b"}

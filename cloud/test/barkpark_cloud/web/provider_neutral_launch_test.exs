@@ -155,7 +155,7 @@ defmodule BarkparkCloud.Web.ProviderNeutralLaunchTest do
   end
 
   describe "provision-job claim threading" do
-    test "HETZNER claim payload is byte-identical (no kind, no credentials)" do
+    test "an UNPINNED hetzner claim emits nil region/size (warm-pool-compatible) + no kind/credentials" do
       {user, team} = user_with_team()
       subscribe!(team)
       assert call(:post, "/v1/launch", %{name: "My Prod"}, token_for(user)).status == 201
@@ -164,11 +164,17 @@ defmodule BarkparkCloud.Web.ProviderNeutralLaunchTest do
       assert conn.status == 200
       payload = json_body(conn)
 
-      # Region/type fall back to the warm-pool defaults for a default hetzner row.
-      assert payload["region"] == Registry.default_region()
-      assert payload["server_type"] == Registry.default_server_type()
-      # The provider-routing keys are ABSENT for hetzner — an old worker + the
-      # existing warm-pool path both read the exact same bytes as before.
+      # azh-w3 (NAMED intentional improvement — this claim previously stamped the
+      # Registry warm-pool defaults nbg1/cax11). An unpinned hetzner launch now
+      # emits nil region/server_type: the signal the Go warm pin-guard reads as
+      # "serve from the uniform pool". Stamping a default here differed from the
+      # pool's env truth (nbg1/cx23) and skipped the ≤15s warm path for EVERY
+      # unpinned launch. The worker's hetzner branch fills the env-derived default
+      # before any one-shot create, so the pool default is applied worker-side.
+      assert payload["region"] == nil
+      assert payload["server_type"] == nil
+      # The provider-routing keys are still ABSENT for hetzner — an old worker + the
+      # existing warm-pool path both read the same routing bytes (no kind/creds).
       refute Map.has_key?(payload, "kind")
       refute Map.has_key?(payload, "credentials")
     end

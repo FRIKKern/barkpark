@@ -6487,13 +6487,16 @@ defmodule BarkparkCloud.Web.Router do
       claim_token: job.claim_token,
       name: barkpark.name,
       slug: Barkpark.subdomain_from_url(barkpark),
-      # Region/size come from the row (charter Decision 9), with a PROVIDER-AWARE
-      # fallback when a launch didn't pin them: a Hetzner/default row emits the
-      # warm-pool defaults (nbg1/cax11 — the claim payload stays byte-identical),
-      # while a non-Hetzner row emits nil so the worker's provider fills its OWN
-      # platform defaults (azure: eastus/Standard_B1s, env-overridable). Leaking a
-      # Hetzner slug into an azure claim would fail at ARM, in the job, after the
-      # button — the exact failure Decision 17 exists to prevent.
+      # Region/size come straight off the row (charter Decision 9 + 23): the PINNED
+      # value or nil. An UNPINNED launch emits nil for EVERY provider — the worker
+      # fills its OWN platform default (hetzner: the env-derived FreshSpec; azure:
+      # eastus/Standard_B1s). azh-w3: stamping the Hetzner warm-pool default HERE
+      # was the warm-pool-pin bug — nbg1/cax11 made every unpinned launch look
+      # pinned, differing from the pool's env truth (nbg1/cx23) and skipping the
+      # ≤15s warm path; a nil unpinned claim is the signal the Go warm pin-guard
+      # reads as "serve from the pool". A Hetzner slug leaking into an azure claim
+      # would still fail at ARM after the button — the exact failure Decision 17
+      # exists to prevent.
       region: claim_region(barkpark),
       server_type: claim_server_type(barkpark),
       # The decrypted team + instance env, merged most-specific-wins. The worker
@@ -6511,18 +6514,14 @@ defmodule BarkparkCloud.Web.Router do
     add_provider_claim_fields(base, barkpark)
   end
 
-  # The claim's region/size with a provider-aware fallback. Only hetzner (and the
-  # legacy nil provider) may inherit the warm-pool defaults; any other provider
-  # emits the pinned value or nil — the Go provider owns its platform defaults.
-  defp claim_region(%Barkpark{provider: provider, region: region})
-       when provider in [nil, "hetzner"],
-       do: region || Registry.default_region()
-
+  # The claim's region/size come straight off the row — the PINNED value or nil,
+  # for EVERY provider (azh-w3). The Go worker fills its own provider default when
+  # nil (hetzner: the env-derived FreshSpec — which is the warm pool's OWN truth,
+  # so an unpinned launch stays warm-pool-compatible; azure: eastus/Standard_B1s).
+  # Registry.default_region/0 + default_server_type/0 survive as the public
+  # documented default (other callers keep them) — they are just no longer stamped
+  # into the claim, which is what wrongly made every unpinned launch look pinned.
   defp claim_region(%Barkpark{region: region}), do: region
-
-  defp claim_server_type(%Barkpark{provider: provider, server_type: server_type})
-       when provider in [nil, "hetzner"],
-       do: server_type || Registry.default_server_type()
 
   defp claim_server_type(%Barkpark{server_type: server_type}), do: server_type
 

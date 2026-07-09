@@ -134,13 +134,20 @@ defmodule Barkpark.Application do
           Barkpark.Plugins.Sheets.Session.ReplayRing,
           # Studio Claude chat single-writer registry (charter D20). A unique
           # Registry keyed by the minted session UUID: when a session id is
-          # pinned, `ClaudeChat.Session` registers under it, so a SECOND tab
-          # opening the same resumed session gets `{:already_started, pid}` and
-          # ADOPTS the running process instead of spawning a second
-          # `claude --resume` writer on the CLI's own transcript. NO
-          # DynamicSupervisor — session lifetime stays owner-tab-bound (dies
-          # with the current sink; the other tab lazy-resumes on its next send).
+          # pinned, `ClaudeChat.Session` registers under it, so a second start
+          # of the same session gets `{:already_started, pid}` and reuses the
+          # running process instead of spawning a second `claude --resume`
+          # writer on the CLI's own transcript.
           {Registry, keys: :unique, name: Barkpark.StudioChat.SessionRegistry},
+          # Server-owned chat runtime (wave 4, charter D28): one Recorder per
+          # live session is the Session's PERMANENT sink — it persists every
+          # durable outcome and rebroadcasts frames on PubSub, so tabs are
+          # viewers, not owners. Closing every tab no longer kills a running
+          # turn; the Recorder reaps itself after 30 min of frame-silence and
+          # the next send lazy-resumes.
+          {Registry, keys: :unique, name: Barkpark.StudioChat.RecorderRegistry},
+          {DynamicSupervisor,
+           name: Barkpark.StudioChat.RuntimeSupervisor, strategy: :one_for_one},
           # Start a worker by calling: Barkpark.Worker.start_link(arg)
           # {Barkpark.Worker, arg},
           BarkparkWeb.Presence,

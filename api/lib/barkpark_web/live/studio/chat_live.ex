@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ClaudeChat
 
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
@@ -78,7 +79,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          pending_echo_id: nil,
          interrupt_requested: false,
          pending_mode: nil,
-         detached: false,
+         subscribed_topic: nil,
          last_result: nil,
          ring: blank_ring(),
          title_source: "default",
@@ -259,15 +260,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Take the session back after another tab adopted it (charter D20). Clears the
-  # detached banner and re-acquires the live process via `ensure_session` —
-  # which, finding the other tab still registered, ADOPTS it (the other tab now
-  # sees the detached banner). One writer at a time, ownership ping-pongs
-  # honestly.
-  def handle_event("take_over", _params, socket) do
-    {:noreply, socket |> assign(detached: false) |> ensure_session()}
-  end
-
   def handle_event("approve", %{"rid" => request_id}, socket) do
     {:noreply, resolve_permission(socket, request_id, :allow)}
   end
@@ -400,6 +392,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     socket
                   end
 
+                # Co-viewing (wave 4): other tabs on this session get the user
+                # turn as a broadcast — the CLI never echoes it back as a frame,
+                # so without this their transcripts would diverge until reopen.
+                if topic = socket.assigns[:subscribed_topic] do
+                  images =
+                    Enum.map(attachments, fn a ->
+                      %{data_uri: data_uri(a.media_type, a.bytes)}
+                    end)
+
+                  Phoenix.PubSub.broadcast_from(
+                    Barkpark.PubSub,
+                    self(),
+                    topic,
+                    {:chat_user_message, text, images}
+                  )
+                end
+
                 {:noreply,
                  socket
                  |> persist_user_message(text, attachments)
@@ -470,7 +479,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # Persist on COMPLETION (D7) — the whole assistant message is here, so this
     # is the message boundary, never a per-delta write. Streaming deltas only
     # touch the `:streaming` assign; nothing hits the store mid-turn.
-    persist_assistant_blocks(socket, blocks)
 
     # The complete message supersedes the accumulated preview, and the sidebar
     # picks up the fresh summary/message_count.
@@ -582,11 +590,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       approval_status: :pending
     }
 
-    # Persist the ask as a "pending" approval row (D11) so it SURVIVES a crash
-    # or a tab close: on reopen the terminal-state card renders from the store.
-    # Appending bumps the session's `pending_approvals`, so `refresh_sessions`
-    # raises the "needs you" sidebar pill.
-    socket = persist_approval_ask(socket, ask, text)
+    # The Recorder already persisted this ask as a "pending" row (D11/D28);
+    # here we only render the card. `refresh_sessions` re-reads the bumped
+    # pending count so the "needs you" sidebar pill raises.
+    _ = text
 
     {:noreply,
      socket
@@ -650,29 +657,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Another tab took this session over (charter D20 single-writer). The session
-  # process now drives that tab; ours must stop pretending to own it. Drop the
-  # live pid, freeze the composer behind an honest banner, and let "Take over
-  # here" re-acquire it. Idempotent — a second detach (ownership ping-pong) is a
-  # no-op so the system line never stacks.
-  def handle_info({:claude_chat_detached}, socket) do
-    if socket.assigns[:detached] do
-      {:noreply, socket}
-    else
-      {:noreply,
-       socket
-       |> assign(
-         detached: true,
-         session: nil,
-         status: :detached,
-         streaming: nil,
-         interrupt_requested: false
-       )
-       |> append_message(
-         :system,
-         "This chat is now active in another tab. Use “Take over here” to continue."
-       )}
-    end
+  # A user message another tab on this session just dispatched (wave 4
+  # co-viewing): render it here too, so every viewer's transcript converges
+  # without a reopen. The sender excludes itself via broadcast_from.
+  def handle_info({:chat_user_message, text, images}, socket) do
+    id = socket.assigns.next_id
+    message = %{id: id, role: :user, text: text, html: nil, images: images}
+
+    {:noreply,
+     assign(socket,
+       messages: socket.assigns.messages ++ [message],
+       next_id: id + 1,
+       status: :thinking
+     )}
   end
 
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
@@ -689,12 +686,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info(_msg, socket), do: {:noreply, socket}
-
-  @impl true
-  def terminate(_reason, socket) do
-    if session = socket.assigns[:session], do: ClaudeChat.close(session)
-    :ok
-  end
 
   @impl true
   def render(assigns) do
@@ -1110,25 +1101,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       </div>
 
       <div style="flex: none; border-top: 1px solid var(--border-muted); padding: 10px 16px;">
-        <%!-- Single-writer honesty (charter D20): another tab holds this
-              session's process. Freeze the composer behind a banner rather than
-              spawn a second writer; "Take over here" re-acquires it. --%>
-        <div
-          :if={@detached}
-          style="display: flex; align-items: center; gap: 12px; max-width: 860px; margin: 0 auto; padding: 10px 12px; border: 1px solid var(--border-muted); border-left: 3px solid var(--warn); border-radius: 8px;"
-        >
-          <div style="flex: 1; min-width: 0;">
-            <div class="text-sm" style="font-weight: 600;">This chat is open in another tab</div>
-            <div class="text-xs text-dim">
-              Only one tab drives a session at a time, so its history never tears. Take over to continue here.
-            </div>
-          </div>
-          <button type="button" class="btn btn-primary" phx-click="take_over">
-            Take over here
-          </button>
-        </div>
         <form
-          :if={not @detached}
           id="chat-composer-form"
           phx-hook="ChatComposer"
           phx-submit="send"
@@ -1358,53 +1331,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  # Bring the subprocess up for `store_id` (fresh: `--session-id`; reopen:
-  # `--resume`). Extracted from `ensure_session` so the create-vs-reopen fork
-  # stays legible. Adoption (another tab owns it) and a spawn error both stay
-  # honest: the composer never lies about a session that isn't there.
+  # Bring the runtime up for `store_id` (fresh: `--session-id`; reopen:
+  # `--resume`) — via the RECORDER, never a tab-owned process (wave 4, charter
+  # D28). The Recorder is the Session's permanent sink: it persists frames and
+  # rebroadcasts them on PubSub, so this tab (and any other on the same
+  # session) just subscribes and renders. Closing the tab leaves the runtime
+  # running; a spawn error stays honest — the composer never lies about a
+  # session that isn't there.
   defp spawn_session(socket, store_id, resume?) do
-    case ClaudeChat.start_session(%{
-           sink: self(),
-           mode: socket.assigns.mode,
-           session_opts: %{session_id: store_id, resume: resume?}
-         }) do
-      {:ok, session} ->
-        Process.monitor(session)
-        StudioChat.update_status(store_id, "working")
-        # Ready as soon as the subprocess is up. The CLI emits its init event
-        # only when the FIRST turn starts — gating the composer on init would
-        # deadlock the tab (nothing sent → no init → composer never enables).
-        socket |> assign(session: session, status: :ready, detached: false) |> refresh_sessions()
-
-      # Another tab already owns this session's process (charter D20). Adopt it
-      # as the sole sink instead of spawning a second `claude --resume` writer —
-      # the other tab gets the detached banner. Single writer, no torn transcript.
-      #
-      # Harden the adopt (charter D22): the incumbent was alive when the registry
-      # handed it back, but it can die in the sliver before we take it over. If it
-      # has, adopting a corpse casts into the void and an immediate DOWN fires,
-      # yet the send path would still persist + echo a user turn the model never
-      # received. Re-check liveness: only a still-alive owner becomes our session
-      # pid. A dead one yields an honest system line and NO live pid — the send
-      # handler's nil-session branch then skips the phantom persist/echo, and the
-      # next send lazy-resumes once the registry has reaped the stale entry.
-      {:error, {:already_started, other}} when is_pid(other) ->
-        if Process.alive?(other) do
-          ClaudeChat.adopt_sink(other, self())
-          Process.monitor(other)
-          StudioChat.update_status(store_id, "working")
-          socket |> assign(session: other, status: :ready, detached: false) |> refresh_sessions()
-        else
-          socket
-          |> append_message(:system, "That chat's process just ended — send again to resume it.")
-          |> assign(session: nil, status: :offline)
-        end
-
+    with {:ok, recorder} <-
+           Recorder.ensure(%{session_id: store_id, mode: socket.assigns.mode, resume: resume?}),
+         {:ok, session} <- Recorder.session_pid(recorder) do
+      StudioChat.update_status(store_id, "working")
+      # Ready as soon as the subprocess is up. The CLI emits its init event
+      # only when the FIRST turn starts — gating the composer on init would
+      # deadlock the tab (nothing sent → no init → composer never enables).
+      socket
+      |> subscribe_session(store_id)
+      |> assign(session: session, status: :ready)
+      |> refresh_sessions()
+    else
       {:error, reason} ->
         socket
         |> append_message(:system, spawn_error_text(reason))
         |> assign(session: nil, status: :offline)
     end
+  end
+
+  # Follow exactly one session's frame topic at a time (PubSub). Idempotent for
+  # the same session; switching sessions swaps the subscription — never two
+  # topics at once (a stray frame from a previous chat must not render here).
+  defp subscribe_session(socket, store_id) do
+    current = socket.assigns[:subscribed_topic]
+    topic = Recorder.topic(store_id)
+
+    cond do
+      current == topic ->
+        socket
+
+      true ->
+        if current, do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, current)
+        if connected?(socket), do: Phoenix.PubSub.subscribe(Barkpark.PubSub, topic)
+        assign(socket, subscribed_topic: topic)
+    end
+  end
+
+  defp unsubscribe_session(socket) do
+    if t = socket.assigns[:subscribed_topic],
+      do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, t)
+
+    assign(socket, subscribed_topic: nil)
   end
 
   # Undo the optimistic echo (charter D24): drop exactly the pending echo row and
@@ -1433,37 +1409,34 @@ defmodule BarkparkWeb.Studio.ChatLive do
     )
   end
 
-  # Replay a remembered session from our own store. Registry-aware (charter D22):
-  # if ANOTHER tab is live-driving this exact session, ADOPT its running process
-  # instead of cancelling the approvals it can still resolve — the reopened tab
-  # becomes the sole sink, the replayed pending cards stay answerable through the
-  # adopted pid, and the old tab gets the honest detached banner. Only a session
-  # with NO live owner is truly dead; there (and only there) we cancel-persist
-  # its dangling approvals and go display-only until the next send lazy-resumes.
-  # Any subprocess from the previously-viewed session is torn down so we never leak.
+  # Replay a remembered session from our own store. Runtime-aware (charter
+  # D22/D28): if this session's Recorder is still running, the tab co-views it
+  # live (PubSub) and the replayed pending approval cards stay answerable
+  # through the running session pid. Only a session with NO live runtime is
+  # truly dead; there (and only there) we cancel-persist its dangling approvals
+  # and go display-only until the next send lazy-resumes.
   defp load_stored_session(socket, session) do
-    if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+    # Navigating away NEVER tears the previous session down (wave 4, charter
+    # D28): its Recorder owns the runtime; we only stop listening to it.
+    socket = socket |> unsubscribe_session() |> subscribe_session(session.id)
 
     {session_pid, status, live?} =
-      case live_owner(session.id) do
+      case live_runtime(session.id) do
         nil ->
-          # No live control channel: a still-"pending" approval can never be
-          # answered, so persist its cancellation BEFORE replay — the store then
-          # agrees with the canceled cards on screen and the sidebar "needs you"
-          # pill drops (D11). Replay is display-only (status :resumable).
+          # No live runtime: a still-"pending" approval can never be answered,
+          # so persist its cancellation BEFORE replay — the store then agrees
+          # with the canceled cards on screen and the sidebar "needs you" pill
+          # drops (D11). Replay is display-only (status :resumable).
           StudioChat.cancel_pending_approvals(session.id)
           {nil, :resumable, false}
 
-        owner ->
-          # Live elsewhere: take over as the single writer (charter D20/D22).
-          # adopt_sink transfers FUTURE frames only — a mid-turn reopen shows a
-          # brief gap until the next port frame (accepted gap: the Session never
-          # snapshots streaming/turn state). The old tab receives
-          # {:claude_chat_detached} and freezes behind its take-over banner.
-          ClaudeChat.adopt_sink(owner, self())
-          Process.monitor(owner)
-          StudioChat.update_status(session.id, "working")
-          {owner, :ready, true}
+        session_pid ->
+          # Live: the Recorder keeps driving; this tab co-views via PubSub
+          # (already subscribed above) and the replayed pending approval cards
+          # stay answerable through the running session pid. A mid-turn reopen
+          # shows a brief gap until the next frame (accepted gap: the Session
+          # never snapshots streaming/turn state).
+          {session_pid, :ready, true}
       end
 
     messages = replay_messages(session.id, live?)
@@ -1482,7 +1455,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
       streaming: nil,
       interrupt_requested: false,
       pending_mode: nil,
-      detached: false,
       last_result: nil,
       # Reopen must show the last-known headroom (charter D19) — read the snapshot
       # off the stored row; nil window renders hollow, never a fake arc.
@@ -1505,23 +1477,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> refresh_sessions()
   end
 
-  # The live process currently driving this session, or nil. Charter D22: the
-  # LiveView consults the single-writer registry BEFORE any store write so a
-  # reopen of a session another tab is actively driving ADOPTS it rather than
-  # cancelling approvals its live owner can still resolve. A registry entry that
-  # points at an already-dead pid (reaped asynchronously) is treated as no owner.
-  defp live_owner(session_id) do
-    case Registry.lookup(Barkpark.StudioChat.SessionRegistry, session_id) do
-      [{pid, _} | _] when is_pid(pid) -> if Process.alive?(pid), do: pid, else: nil
+  # The live SESSION pid for a store id, reached through its Recorder — or nil.
+  # Charter D22/D28: consulted BEFORE any store write so a reopen of a session
+  # whose runtime is still running keeps its pending approvals answerable
+  # instead of cancelling them. A recorder that dies between lookup and the
+  # session_pid call is treated as no runtime.
+  defp live_runtime(session_id) do
+    with recorder when is_pid(recorder) <- Recorder.whereis(session_id),
+         {:ok, session_pid} <- Recorder.session_pid(recorder),
+         true <- Process.alive?(session_pid) do
+      session_pid
+    else
       _ -> nil
     end
   end
 
-  # The new-chat empty state: no store row, no subprocess. A previously-viewed
-  # session's subprocess is closed (navigating away from a live turn tears it
-  # down; the CLI keeps the memory for a later `--resume`).
+  # The new-chat empty state: no store row, nothing subscribed. A previously-
+  # viewed session's runtime keeps running under its Recorder (wave 4) — we
+  # only stop listening to it.
   defp reset_to_new_chat(socket) do
-    if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
+    socket = unsubscribe_session(socket)
 
     assign(socket,
       session: nil,
@@ -1535,7 +1510,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
       streaming: nil,
       interrupt_requested: false,
       pending_mode: nil,
-      detached: false,
       last_result: nil,
       ring: blank_ring(),
       title_source: "default",
@@ -1577,6 +1551,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (nil-safe), and go offline. The CLI keeps the memory: the next send
   # lazy-resumes. Idempotent: already `:offline` ⇒ no-op, so a close-then-DOWN
   # double-fire never duplicates the system line or re-cancels approvals.
+  # UI-only since wave 4 (charter D28): the STORE side of a session's death —
+  # cancel-persisting pending approvals, marking the row exited — is the
+  # Recorder's job (it owns the runtime and outlives every tab). This flips the
+  # visible cards, posts the honest line, and re-reads the sidebar.
   defp teardown_session(socket, message) do
     if socket.assigns.status == :offline do
       socket
@@ -1586,14 +1564,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
           %{role: :approval, approval_status: :pending} = m -> %{m | approval_status: :canceled}
           m -> m
         end)
-
-      # Persist the cancellation too (D21): the store row must not stay
-      # "pending" forever — a reopen would otherwise revive a dead card. Zeroes
-      # the denormalised pending count so the sidebar "needs you" pill drops.
-      if store_id = socket.assigns[:store_session_id],
-        do: StudioChat.cancel_pending_approvals(store_id)
-
-      mark_session_exited(socket.assigns[:store_session_id])
 
       socket
       |> assign(messages: messages)
@@ -1738,53 +1708,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp upload_error_label(:too_many_files), do: "Up to 4 images per message."
   defp upload_error_label(_), do: "That file could not be attached."
 
-  # Persist an approval ask as a "pending" row. String metadata keys mirror the
-  # jsonb round-trip, so replay reads them back verbatim (request_id + tool_name
-  # rebuild the terminal-state card; approval_status carries the lifecycle).
-  defp persist_approval_ask(socket, ask, text) do
-    persist_store_logged(
-      socket,
-      %{
-        role: "approval",
-        source_markdown: text,
-        metadata: %{
-          "request_id" => ask.request_id,
-          "tool_name" => ask.tool_name,
-          "input" => ask.input,
-          "approval_status" => "pending"
-        }
-      },
-      "approval"
-    )
-
-    socket
-  end
-
-  defp persist_assistant_blocks(socket, blocks) do
-    Enum.each(blocks, fn
-      %{"type" => "text", "text" => text} when is_binary(text) ->
-        if String.trim(text) != "",
-          do:
-            persist_store_logged(socket, %{role: "assistant", source_markdown: text}, "assistant")
-
-      %{"type" => "tool_use", "name" => name} = block ->
-        persist_store_logged(
-          socket,
-          %{
-            role: "tool",
-            source_markdown: tool_line(name, block["input"]),
-            metadata: %{"tool" => name, "input" => block["input"]}
-          },
-          "tool"
-        )
-
-      _ ->
-        :ok
-    end)
-
-    :ok
-  end
-
   # Append to the store when a session row exists; `:no_store` when this chat is
   # still unsaved (a pre-first-send draft), otherwise the append result verbatim
   # so callers can react to `{:error, _}` (never silently drop it).
@@ -1795,62 +1718,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
-  defp persist_store_logged(socket, attrs, kind) do
-    case persist_store(socket, attrs) do
-      {:error, reason} ->
-        Logger.warning("studio chat: failed to persist #{kind} message: #{inspect(reason)}")
-
-      _ ->
-        :ok
-    end
-  end
-
   # Record the turn's usage AND capture the per-turn context snapshot for the
   # header ring (charter D19). The lifetime totals stay summed; last_context_tokens
   # / context_window are SET from THIS frame (input + both cache reads + output,
   # and the answering model's contextWindow — never a hardcoded window map). The
   # returned session drives the ring assign so the header updates on every result.
-  defp record_result(socket, ev) do
-    if store_id = socket.assigns.store_session_id do
-      result =
-        StudioChat.record_result_metrics(store_id, %{
-          input_tokens: get_in(ev, ["usage", "input_tokens"]),
-          output_tokens: get_in(ev, ["usage", "output_tokens"]),
-          cache_read_input_tokens: get_in(ev, ["usage", "cache_read_input_tokens"]),
-          cache_creation_input_tokens: get_in(ev, ["usage", "cache_creation_input_tokens"]),
-          total_cost_usd: ev["total_cost_usd"],
-          model: result_model(ev),
-          context_window: result_context_window(ev)
-        })
-
-      StudioChat.update_status(store_id, "active")
-
-      case result do
-        {:ok, session} -> assign(socket, ring: ring_from_session(session))
-        _ -> socket
-      end
+  # READ-ONLY since wave 4 (charter D28): the Recorder records the metrics the
+  # moment the result frame lands (it outlives every tab); each viewing tab
+  # only re-reads the row so its header ring reflects the fresh snapshot.
+  # Recording here too would double-sum the lifetime token totals.
+  defp record_result(socket, _ev) do
+    with store_id when is_binary(store_id) <- socket.assigns.store_session_id,
+         %{} = session <- StudioChat.get_session(store_id) do
+      assign(socket, ring: ring_from_session(session))
     else
-      socket
+      _ -> socket
     end
   end
-
-  defp result_model(%{"modelUsage" => usage}) when is_map(usage) do
-    usage |> Map.keys() |> List.first()
-  end
-
-  defp result_model(_), do: nil
-
-  # The context window for the answering model, read off the frame's modelUsage
-  # (never a hardcoded model→window map — that goes stale silently). nil when the
-  # frame doesn't carry it → the store keeps the last-known window, ring stays honest.
-  defp result_context_window(%{"modelUsage" => usage} = ev) when is_map(usage) do
-    case usage[result_model(ev)] do
-      %{"contextWindow" => cw} when is_integer(cw) and cw > 0 -> cw
-      _ -> nil
-    end
-  end
-
-  defp result_context_window(_), do: nil
 
   # Rebuild the transcript message list from the persisted store. Assistant
   # markdown re-renders through the SAME paper engine used live, so the improving
@@ -2132,7 +2016,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp status_label(:thinking), do: "working"
   defp status_label(:interrupting), do: "stopping…"
   defp status_label(:offline), do: "offline"
-  defp status_label(:detached), do: "open in another tab"
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
@@ -2142,9 +2025,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp approval_outcome_label(:allowed), do: "✓ allowed"
   defp approval_outcome_label(:canceled), do: "✗ canceled"
   defp approval_outcome_label(_), do: "✗ denied"
-
-  defp mark_session_exited(nil), do: :ok
-  defp mark_session_exited(id), do: StudioChat.mark_exited(id)
 
   defp composer_placeholder(:new), do: "Message Claude to begin…"
   defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"

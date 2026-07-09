@@ -103,7 +103,7 @@ func (t Theme) inlineCodeWith(emphasis lipgloss.Style) lipgloss.Style {
 // retint. pdLabel IS GenDim on purpose (its #71717a/#a1a1aa editor-label value
 // is exactly the reading muted-text tone).
 var (
-	pdAccent = GenChromeAccent        // legacy blue #1d4ed8/#60a5fa (cliChrome chrome-accent); evergreen migration is w3
+	pdAccent = GenChromeAccent        // evergreen #1e5243/#75c7ac (cliChrome chrome-accent = hslToHex(color.primary); retinted off legacy blue by theme-system D19)
 	pdInk    = GenChromeInk           // cliChrome chrome-ink (NOT GenInk — that's the reading family)
 	pdBody   = GenChromeTextSecondary // cliChrome chrome-text-secondary
 	pdDim    = GenChromeDim           // cliChrome chrome-dim (NOT GenDim — that's the reading family)

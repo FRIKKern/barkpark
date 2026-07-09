@@ -677,8 +677,8 @@ function elixirTokensGen() {
   const c = tokens.color;
   const st = c.status;
   const r = tokens.type.reading;
-  const em = tokens.paperEmail; // verbatim email skin (Wave 1 CAPTURE)
-  const co = tokens.paperCallout; // verbatim callout tone tints
+  const em = tokens.color.paperEmail; // verbatim email skin (Wave 1 CAPTURE)
+  const co = tokens.color.paperCallout.light; // verbatim light callout tone tints (dark pairs → bulldocs reader skin)
   const hx = (role) => hslToHex(c[role].light);
   const stx = (role) => hslToHex(st[role].light);
   return [
@@ -689,15 +689,14 @@ function elixirTokensGen() {
     '  @moduledoc """',
     "  Unified Aesthetic tokens for the paper render surface (emails + article",
     "  palettes), generated from design/tokens.json. Regenerate with",
-    "  `node design/emit.mjs --write`; never hand-edit. Additive until wave 2,",
-    "  when palettes.ex adopts it (email indigo → evergreen brand; article accent",
-    "  → tokenized terracotta).",
+    "  `node design/emit.mjs --write`; never hand-edit. Emits the verbatim",
+    "  paper-email skin (email_* — consumed by palettes.ex / data_viz.ex), the",
+    "  callout tone tints (callout/1 — util.ex tone_palette/1), the semantic",
+    "  status tones, and the tokenized reading accent + reading type. The email",
+    "  brand/rule are the verbatim email_* hex, NOT color.primary/border (those",
+    "  HSL-derived slots are drifted from the byte-locked email golden; w3",
+    "  reconciles the two).",
     '  """',
-    "",
-    "  # Evergreen brand — the paper/email accent, its foreground, and the hairline.",
-    `  def brand, do: "${hx("primary")}"`,
-    `  def brand_text, do: "${hx("primary-fg")}"`,
-    `  def rule, do: "${hx("border")}"`,
     "",
     "  # Semantic status tones (design/tokens.json color.status, light theme → hex).",
     `  def tone_ok, do: "${stx("ok")}"`,
@@ -924,13 +923,15 @@ function sheetsBlock() {
 // paper-surface skin on --paper-rule (solid vs rgba) — never collapsed onto the
 // shared tokens this wave (charter D4). The load-bearing rationale comments are
 // emitted VERBATIM so `emit --write` preserves them; the callout --bp-tone-*
-// re-stamps stay verbatim literals (they become the paperCallout family in ts-w2).
+// dark re-stamps are sourced from color.paperCallout.dark (the light pairs feed
+// TokensGen.callout/1) — byte-identical emission, single-sourced tone values.
 // Indented 4 spaces to sit inside the reader <style>; the marker block is CSS
 // comments, invisible to the browser.
 function bulldocsBlock() {
   const rl = tokens.color.paper.reader.light;
   const rd = tokens.color.paper.reader.dark;
   const mc = tokens.color.mailChrome;
+  const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
   return [
     "    /* Article chrome — applied only when BulldocsLive marks the doc as",
     "       `content[\"style\"] == \"article\"` (the LiveView stamps the",
@@ -999,11 +1000,11 @@ function bulldocsBlock() {
     `        --paper-ink-faint:    ${rd["ink-faint"]};`,
     `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `        --paper-chrome-border: ${rd["chrome-border"]};`,
-    "        --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;",
-    "        --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;",
-    "        --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;",
-    "        --bp-tone-danger-bg:  #2a1614; --bp-tone-danger-fg:  #f08a80;",
-    "        --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;",
+    `        --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
+    `        --bp-tone-success-bg: ${cd.success.bg}; --bp-tone-success-fg: ${cd.success.fg};`,
+    `        --bp-tone-warning-bg: ${cd.warning.bg}; --bp-tone-warning-fg: ${cd.warning.fg};`,
+    `        --bp-tone-danger-bg:  ${cd.danger.bg}; --bp-tone-danger-fg:  ${cd.danger.fg};`,
+    `        --bp-tone-neutral-bg: ${cd.neutral.bg}; --bp-tone-neutral-fg: ${cd.neutral.fg};`,
     "      }",
     "    }",
     "    /* Mail-client popup chrome (color.mailChrome) — the --mail-* window skin",

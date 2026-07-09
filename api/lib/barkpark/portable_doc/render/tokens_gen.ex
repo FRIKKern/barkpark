@@ -5,15 +5,14 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
   @moduledoc """
   Unified Aesthetic tokens for the paper render surface (emails + article
   palettes), generated from design/tokens.json. Regenerate with
-  `node design/emit.mjs --write`; never hand-edit. Additive until wave 2,
-  when palettes.ex adopts it (email indigo → evergreen brand; article accent
-  → tokenized terracotta).
+  `node design/emit.mjs --write`; never hand-edit. Emits the verbatim
+  paper-email skin (email_* — consumed by palettes.ex / data_viz.ex), the
+  callout tone tints (callout/1 — util.ex tone_palette/1), the semantic
+  status tones, and the tokenized reading accent + reading type. The email
+  brand/rule are the verbatim email_* hex, NOT color.primary/border (those
+  HSL-derived slots are drifted from the byte-locked email golden; w3
+  reconciles the two).
   """
-
-  # Evergreen brand — the paper/email accent, its foreground, and the hairline.
-  def brand, do: "#1e5243"
-  def brand_text, do: "#ffffff"
-  def rule, do: "#e4e4e7"
 
   # Semantic status tones (design/tokens.json color.status, light theme → hex).
   def tone_ok, do: "#137236"

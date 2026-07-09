@@ -260,6 +260,97 @@ quality."
   resolve, zero on cancel-all); `session_pill/1` precedence
   PendingApproval (`--warn`) > Working > Exited > Idle.
 
+### Wave-3 decisions (2026-07-09, decided from explorer ground truth)
+
+- **D22 — Reopen of a LIVE session ADOPTS; cancel-persist is only for the dead.**
+  `load_stored_session` consults the SessionRegistry BEFORE any store write:
+  `Registry.lookup(Barkpark.StudioChat.SessionRegistry, session.id)`. Live owner
+  ⇒ `ClaudeChat.adopt_sink(pid, self())` + `Process.monitor(pid)` + assign
+  `session: pid` with live status, and the unconditional
+  `cancel_pending_approvals` (chat_live.ex:1145) is SKIPPED — the replayed
+  pending approval cards (rebuilt from the store) stay ANSWERABLE because the
+  tab holds a live pid. No live owner ⇒ today's cancel path (approvals truly
+  dead). This makes "reopen of a live session" and "two-tab takeover on send"
+  ONE code path — both adopt; the old tab gets the already-built
+  `{:claude_chat_detached}` banner. Accepted honesty gap (deliberate): adopt_sink
+  hands over FUTURE frames only and mid-turn streaming is never persisted
+  (D7), so a mid-turn reopen shows a brief gap until the next port frame —
+  do NOT extend the Session to snapshot streaming state this wave. Adoption
+  hardening rides the same slice: the `{:already_started, other}` branch must
+  survive a pid that died between lookup and adopt (alive?/immediate-DOWN
+  guard) WITHOUT persisting+echoing a message the model never received.
+- **D23 — Control acks correlate by `request_id`, never by value.** The Session
+  already keys `pending_controls` on request_id (claude_chat.ex:445-459); the
+  dispatch to the sink must carry it — `{:claude_chat_control, kind,
+  request_id, resp}`. ChatLive records the request_id of each outbound
+  set_mode/set_model and matches acks against it; a stale ack from a rapid
+  double-switch can no longer mis-revert a newer optimistic assign. Persisted
+  mode = the LAST acked value.
+- **D24 — Send is two-phase: optimistic echo first, dispatch second; every
+  send-failure restores the full draft.** The composer becomes server-bound:
+  `value={@composer_draft}` + `phx-change` tracking — an uncontrolled input's
+  retained DOM text is invisible to `render/1`, so restore tests are vacuous
+  without the binding (clear = `draft: ""`, not just the id bump).
+  `handle_event("send")` assigns echo + `draft: ""` + `:thinking` and returns
+  immediately (first diff = instant echo); dispatch (ensure_session, wire
+  write, persist) continues via `send(self(), …)`. Failure taxonomy (matrix,
+  wave-3 exploration): create_session `{:error}` (DE-FANG the strict match at
+  chat_live.ex:1091 — a crashed LV cannot restore anything), spawn error,
+  dead-pid adopt, port-write failure ⇒ remove the echo, restore the draft
+  VERBATIM, honest system line, NO orphan user row (persist only after a
+  dispatched frame). Delivery honesty bar is "dispatched", not "delivered":
+  `send_message` becomes a call whose reply carries the real `safe_command`
+  outcome (it currently rescues everything to `:ok` — claude_chat.ex:601-610).
+  EXCEPTION: persist-exhaustion AFTER a dispatched frame is
+  save-may-not-survive, NOT send failure — echo stays, "⚠ could not be saved"
+  line, composer stays CLEARED (restoring would double-send to the model).
+- **D25 — Images = chat-scoped file store + data-URI inline render; the media
+  plugin is DISQUALIFIED.** Wire proven on the real binary (v2.1.205): a user
+  frame with `content: [{type:"text"},{type:"image",source:{type:"base64",
+  media_type,data}}]` is accepted and the model sees the image. Widen
+  `send_message` to accept a content-block list (text-only stays the default
+  shape). Store: bytes NEVER in jsonb (D7 smell) and NEVER via the media
+  plugin — `GET /media/files/*path` is public and "private" delivery is
+  any-token (access.ex:114), the exact leak D6 disqualified. Bytes go to a
+  chat-owned dir (`config :barkpark, Barkpark.StudioChat, :attachments_dir`),
+  pointer `{path, media_type, sha256, byte_size}` in message metadata jsonb
+  (no migration); replay reads the file and inlines `<img src="data:…">`
+  SERVER-SIDE in the admin LiveView — no HTTP route ever (D6), and no CSP is
+  set on the html pipelines so data: URIs render. `delete_session` removes the
+  session's attachment dir (files must not outlive the row). Composer
+  paste/drop = a phx-hook feeding `allow_upload` (accept png/jpeg/gif/webp,
+  max_file_size 3MB — base64 inflation ×4/3 must stay under the API's ~5MB
+  cap); NEVER reuse handlers/media.ex `upload_image` (routes bytes to the
+  public media URL). Malformed image bytes degrade SOFTLY at the API (success
+  result, model narrates) — not a restore-on-failure trigger.
+- **D26 — Checkpoint/rewind is CUT this wave, without regret.** Ground truth
+  killed the premise: `--fork-session` re-ids a FULL-memory branch — proven to
+  NOT drop turns (codeword test, v2.1.205), and no message-level rewind flag
+  exists. Memory-rewind-to-turn-N works only by truncating the CLI's
+  undocumented private transcript jsonl — version-fragile, violates D1
+  (never read `~/.claude/projects/*.jsonl`), and needs a per-turn cursor that
+  D8 deliberately omits. File-only rewind IS safe (hidden-ref
+  `GIT_INDEX_FILE` pipeline proven to leave HEAD/branch/index untouched) but:
+  whole-tree restore clobbers concurrent uncommitted edits in the shared
+  checkout, default plan mode means checkpoints capture no agent writes, and
+  `add -A` costs ~1s/turn. Park until the CLI exposes a real rewind
+  primitive; the git mechanics are banked in the wave-3 exploration report.
+- **D27 — The ring is honest across compaction; surface `compact_boundary`
+  instead of "fixing" anything.** Proven: `totalUsage` resets per user message
+  and `cache_read` tracks the CURRENT prompt prefix, so the ring self-corrects
+  on the first post-compaction turn — the "cache accounting keeps it inflated"
+  premise was WRONG. The real gap: the CLI's
+  `{"type":"system","subtype":"compact_boundary",compact_metadata:{trigger,
+  pre_tokens}}` frame is silently eaten by ChatLive's catch-all
+  (chat_live.ex:468). Add a handle_info clause appending an honest system line
+  ("Conversation compacted (was ~N tokens)", auto vs manual wording) + a guard
+  test: synthetic compact_boundary followed by a small result frame ⇒ ring
+  frac SHRINKS. Known one-turn wrinkle (mid-turn compaction inflates that
+  single turn's sum; multi-round-trip turns overcount cache_read per
+  round-trip) gets a code comment, NOT a formula change — the formula
+  faithfully reflects totalUsage and "fixing" it breaks the honest
+  single-call case.
+
 ### Wave-1 shared interfaces (parallel builders converge on these names)
 
 - `Barkpark.StudioChat` context (`api/lib/barkpark/studio_chat.ex`):
@@ -311,7 +402,7 @@ backend; Barkpark's own store is the display history.** Never read
    relative timestamps, usage/cost per session. ← titles + sidebar metadata in
    WAVE 1; headroom ring / cost surfacing deferred.
 4. **Queued messages / composer UX** — type while the agent works, queue sends.
-   (t3 verdict: NO queue — Stop gates the composer; optimistic echo later.)
+   (t3 verdict: NO queue — Stop gates the composer; optimistic echo ← WAVE 3.)
 5. **Polish to the bar** — empty states, error states, keyboard, density,
    evergreen aesthetic parity with the rest of Studio.
 
@@ -365,6 +456,33 @@ claude_chat.ex; S1+S2 before S5: pill rides list_sessions select, teardown fn
 absorbs the approval cancel-persist). Builders build against main; the
 integrator reconciles in that order.
 
+## Wave 3 plan (decided 2026-07-09) — "the conversation itself reaches the bar"
+
+Waves 1–2 made sessions a place and made that place trustworthy. Wave 3 takes
+the MESSAGE LOOP to the Kinsta/Vercel bar: instant echo that never loses your
+words, images riding the same turn, and the two honesty seams wave 2 knowingly
+shipped are CLOSED. Checkpoint/rewind was explored honestly and CUT (D26);
+sidebar search/filter stays deferred (cap-50 recency still serves); the
+compaction-ring "lie" was disproven and replaced by a cheap real feature (D27).
+
+| # | Slice (bp task) | Owns | Migration |
+|---|---|---|---|
+| S1 | `scc-w3-reopen-adopt` | reopen of a live session adopts via SessionRegistry; drop unconditional cancel-persist; dead-pid adopt hardening (D22) | none |
+| S2 | `scc-w3-control-honesty` | control acks correlated by request_id + compact_boundary honest system line + ring-shrink guard test (D23/D27) | none |
+| S3 | `scc-w3-send-honesty` | optimistic echo, `composer_draft` binding, dispatch-outcome seam, full failure-matrix restore tests (D24) | none |
+| S4 | `scc-w3-images` | composer paste/drop, content-block wire widening, chat-scoped attachment file store, data-URI replay, delete lifecycle (D25) | none (metadata jsonb) |
+
+File ownership: S1 owns `load_stored_session` + the `{:already_started}`
+adopt branch of `ensure_session`; S2 owns the control/system `handle_info`
+clauses in chat_live.ex + the control dispatch in claude_chat.ex; S3 owns the
+send handler + composer markup + `ensure_session`'s create branch + the
+`send_message` cast→call conversion in claude_chat.ex; S4 owns the
+`send_message` payload widening (additive: binary OR content-block list),
+composer attachment strip, replay `<img>` rendering, and
+`StudioChat` attachment store. Integration order **S1 → S2 → S3 → S4**
+(S3 before S4: both touch `send_message` and the composer — S4 keeps its
+changes additive and the integrator reconciles on S3's call shape).
+
 ## Gates
 
 - Elixir: `mix test test/barkpark_web/live/studio/chat_live_test.exs test/barkpark_web/studio/claude_chat_test.exs test/barkpark/portable_doc/from_markdown_test.exs`
@@ -374,6 +492,26 @@ integrator reconciles in that order.
   builders may replicate the pattern for new features.
 
 ## Wave log
+
+- **2026-07-09 wave 3 DECIDED** (post-merge of #1681 + #1693; D20c executed,
+  1 test 0 failures): four slices filed as scc-w3-reopen-adopt /
+  scc-w3-control-honesty / scc-w3-send-honesty / scc-w3-images under epic
+  `studio-claude-chat` (D22–D27 above). Explorer corrections folded in:
+  reopen=adopt is the seam-CLASS killer but NOT a 3-line fix (adopt_sink
+  transfers future frames only — pending cards reconstruct from the store,
+  streaming accepts a next-frame gap); "a failed send loses the text" is
+  FALSE today (composer_rev bumps only on success) — optimistic echo
+  INTRODUCES that hazard, so the slice re-establishes the guarantee with a
+  server-bound draft + de-fanged create_session strict match + a
+  dispatched-not-delivered honesty bar; media plugin DISQUALIFIED for image
+  bytes (public serve route + any-token "private" delivery = the D6 leak) —
+  chat-scoped file store + server-side data-URI inline wins (no CSP on html
+  pipelines, verified); checkpoint/rewind CUT — --fork-session proven to
+  keep FULL memory (no rewind primitive exists; transcript surgery violates
+  D1 + D8); compaction-ring lie DISPROVEN (totalUsage resets per user
+  message) — replaced by surfacing the silently-dropped compact_boundary
+  frame. Stale umbrella task `task-589350071374f35b` (w2 parity — substance
+  shipped across w2a/w2b/w2c + scc-w2-*) closed.
 
 ### Wave 2026-07-09 (wave 2 BUILT + REVIEWED — trustworthy and managed)
 
@@ -420,9 +558,9 @@ three-file gate green (134 tests), studio-literal-check PASS, and
   not request_id); (c) `take_over` stamps store status "working" even when
   no turn runs (mirrors the spawn path's convention; self-corrects on next
   result); (d) the kebab menu can clip at the scroll-container edge on the
-  last row; (e) real-binary E2E happy path is code-reviewed, not yet run on
-  this host (refuse path verified) — run `scripts/claude-chat-e2e.sh` once
-  before calling D20c proven.
+  last row; (e) RESOLVED 2026-07-09: `scripts/claude-chat-e2e.sh` was
+  EXECUTED on this host post-review — **1 test, 0 failures. D20c proven.**
+  Seams (a)/(b) are taken by wave 3 (D22/D23); (c)/(d) remain minor.
 - **Next wave should take**: (1) run the real-binary E2E once on the host
   (~$0.43) and stamp D20c; (2) registry-aware reopen (don't cancel approvals
   a live owner can still resolve; consider a live "view-only" reopen);
@@ -543,3 +681,37 @@ Next wave should take: (1) real-browser verify of paste/drop + adopt flows;
 (4) restore staged attachments on dispatch failure (today only text restores —
 the strip empties if the wire write fails after consume); (5) charter D20c
 follow-through: periodic real-binary E2E in a scheduled lane, not just on-demand.
+
+### Wave 2026-07-09 (wave 4 — server-owned runtime, LEAD-BUILT inline)
+
+**D28 — The server owns the agent runtime; tabs are viewers.** User mandate:
+"I should not be needed to hold my tab open for the chat to continue going."
+One `Barkpark.StudioChat.Recorder` per live session (Registry-keyed, under
+`RuntimeSupervisor`) is the Session's PERMANENT sink: it persists every durable
+outcome (assistant/tool rows, result metrics + context snapshot, approval asks,
+exit → cancel-pendings + mark-exited) and rebroadcasts every frame verbatim on
+PubSub `studio_chat:<id>`. ChatLive subscribes instead of owning: `terminate/2`
+no longer closes the session, navigating away only unsubscribes, and the w2/w3
+adopt/detach/take-over machinery is REPLACED by co-viewing (all tabs render
+live; sends still serialize through the single Session; user turns broadcast
+via {:chat_user_message} so transcripts converge). ChatLive store writes now:
+user-message persist + approval RESOLUTION only; `record_result` is read-only
+(recording there too would double-sum). Idle reaper: 30 min of frame-silence
+(config `:studio_chat_idle_reap_ms`) closes the subprocess honestly
+({:claude_chat_exit, :idle_reaped}) — invisible: next send lazy-resumes.
+
+Proof: 233 tests × 3 seeds green (9 new recorder tests own the persistence
+seam — including "runtime survives a viewer's death"); REAL-BINARY detached
+proof executed: turn sent, no viewer subscribed, `BARKPARK-DETACHED-OK`
+persisted to the store by the Recorder alone. warnings-as-errors clean,
+studio-literal-check PASS.
+
+Known accepted gaps → wave 5 candidates: (1) streaming tail is not snapshotted
+— a reopen mid-turn shows a gap until the next frame (Recorder could buffer
+the current turn's deltas and replay to a late subscriber); (2) the title kick
+still lives in ChatLive (needs an open tab on the FIRST turn; move to Recorder
+for fully-detached first turns); (3) interrupt-timeout force-close is
+tab-driven (move the D18 timer into the Recorder); (4) sidebar "working" pill
+while fully detached only updates on result frames; (5) subscribe-then-read
+replay window can double-render a message that persists in the gap (rare,
+cosmetic, converges on reopen).
