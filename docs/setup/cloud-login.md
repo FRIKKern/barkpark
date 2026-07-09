@@ -1,16 +1,15 @@
 <!-- doc-tier: human | canonical-for: bp-cloud-device-login | budget: 1400tok -->
 # Logging in to Barkpark Cloud
 
-`bp` connects to Barkpark Cloud with a login session token stored in
-`~/.config/barkpark/config.json` (mode `0600`). There are two ways to get
-that token: a **device-link browser flow** (the default on a terminal) and an
-**email + password fallback** (for CI and headless machines). Both end in the
-same place — a session token you never have to see or copy by hand.
+`bp` stores a Barkpark Cloud session token in `~/.config/barkpark/config.json`
+(`0600`). Two ways to get it: a **device-link browser flow** (default on a
+terminal) and an **email + password fallback** (CI and headless). Both end the
+same way — signed in, then auto-connected to a barkpark, no token copied by hand.
 
-## Default: device-link login on a TTY
+## Device-link login on a TTY
 
-Run bare `bp login` (or pick **Barkpark Cloud** in the first-run wizard) on an
-interactive terminal and `bp` starts a device-link handshake. It prints a box:
+Run bare `bp login` (or pick **Barkpark Cloud** in the first-run wizard) on a
+TTY; `bp` prints a box:
 
 ```
   ╭───────────────────────────────────────────────╮
@@ -25,87 +24,96 @@ interactive terminal and `bp` starts a device-link handshake. It prints a box:
   Waiting for you to approve in the browser…
 ```
 
-`bp` tries to open your browser at `https://barkpark.cloud/activate`. Approve
-there — riding your existing barkpark.cloud session, or logging in if you
-aren't yet. **Two-factor is handled by the web login**, so the CLI never sees
-your password or 2FA code. The approve page shows the requesting machine (host,
-IP, user-agent) so you can confirm it's really you, with **Approve** and
-**Deny** buttons — it never auto-approves.
+`bp` opens `https://barkpark.cloud/activate`. Approve there — riding your
+existing barkpark.cloud session, or logging in if you aren't yet. **Two-factor
+is handled by the web login**, so the CLI never sees your password or 2FA code.
+The approve page shows the requesting machine (host, IP, user-agent) with
+**Approve** / **Deny** buttons — it never auto-approves.
 
-Once you approve, the CLI's poll returns the session token and stores it at
-`~/.config/barkpark/config.json` (`0600`). You're logged in.
+Once you approve, the poll returns and stores the token. You're signed in — and
+`bp` keeps going.
 
-### `-o json`
+## After sign-in: auto-register
 
-The final success envelope is unchanged from the password path:
+Signing in isn't the finish line. `bp` resolves your fleet and lands you in a
+working barkpark — identical for `bp login` and the wizard's **Barkpark Cloud**
+target (one shared path).
+
+- **One barkpark** (usual case) — `bp` fetches its admin credentials and
+  connects automatically:
+
+  ```
+  Connected to <name> — <url>
+  ```
+
+  then the connection summary. On a terminal it offers `Press Enter to open the
+  desk (or q + Enter to quit)` — Enter drops you into the `bp` desk against the
+  just-connected barkpark; `q` or a non-interactive stream exits with `run bp to
+  open the desk`.
+- **Several barkparks** — `bp` prints a numbered list to pick from. If stdin is
+  piped, it prints the fleet plus a one-line connect command.
+
+### Complete non-connecting outcomes
+
+You're always signed in; none of these dead-end:
+
+- **Empty fleet** — no barkparks yet; `bp` shows how to launch or deploy one;
+  exits 0.
+- **Still provisioning** — `you are logged in; <name> is still provisioning —
+  re-run bp setup when it is ready`.
+- **No admin token** — none minted yet; `bp` lets you paste one (into the
+  Connect path) or finish signed in.
+- **Already connected elsewhere** — an active server that isn't this barkpark:
+  `already connected to <saved>; your cloud fleet has <name> — bp setup to
+  switch`. `bp` does **not** take over.
+- **Fleet unreachable** — login still succeeded; `bp` warns `logged in —
+  couldn't resolve your fleet right now; run bp barkparks` and exits 0.
+
+## `-o json` and headless
+
+The success envelope is unchanged from password login:
 
 ```json
 { "ok": true, "cloud_url": "https://api.barkpark.cloud", "team_id": "…" }
 ```
 
-All device-flow chrome (the box, spinner, "opening your browser" line) goes to
-stderr, so `bp login -o json` stays machine-parseable.
+All device-flow chrome and auto-register narration go to stderr, so `bp login
+-o json` stays machine-parseable. **The headless path never prompts and never
+auto-connects** — `-o json` / `-o yaml` and non-TTY streams get token storage
+only; the envelope is byte-identical to before.
 
-## The wizard's Barkpark Cloud target
+## Email + password fallback (CI, headless)
 
-On a fresh machine, `bp` starts the first-run wizard. **Barkpark Cloud — log in
-and pick your barkpark** now sits alongside Connect / Local / Deploy as a
-first-class choice. Pick it and:
-
-1. The device-link flow above logs you in.
-2. `bp` lists the barkparks on your team; you pick one by number.
-3. It fetches that barkpark's admin credentials and connects — you land in the
-   ordinary connected state, ready to run commands.
-
-Cloud login **is** a complete setup — no separate `bp login` step needed. If
-your fleet is empty, `bp` tells you how to launch or deploy one and exits
-successfully (you're still logged in). If a barkpark has no admin token yet,
-`bp` explains and lets you paste one or finish logged-in without connecting.
-
-## Headless / CI fallback: email + password
-
-The device flow needs a browser and an interactive terminal. On a headless box
-or in CI, pass credentials and `bp` uses the password path verbatim — no box,
-no browser, no polling:
+The device flow needs a browser and a TTY. On a headless box or in CI, pass
+credentials and `bp` uses the password path verbatim — no box or polling:
 
 ```bash
 bp login --email you@example.com          # prompts for the password
 BARKPARK_PASSWORD=… bp login --email you@example.com   # non-interactive (CI)
 ```
 
-The device flow engages **only** when there are no credential inputs (no
-`--email`/`--user`, no `--password`/`--pass`, no `BARKPARK_PASSWORD`) and both
-stdin and stdout are a TTY. Any credential flag or a non-TTY stream falls
-straight through to the password path — existing scripts are untouched.
-
-Force the device flow explicitly with `--device`:
-
-```bash
-bp login --device        # always use the browser link flow
-```
-
-`--url <base>` overrides the control-plane URL (defaults to the saved
-`CloudURL`, else the baked-in `https://api.barkpark.cloud`).
+The device flow engages **only** with no credential inputs (no `--email` /
+`--user`, `--password` / `--pass`, `BARKPARK_PASSWORD`) and both streams a TTY;
+any credential flag or non-TTY stream falls through to the password path,
+untouched. `--device` forces it. `--url <base>` overrides the control-plane URL
+(defaults to the saved `CloudURL`, else the baked-in `https://api.barkpark.cloud`).
 
 ## Security notes
 
-- **Single-use codes.** The `XXXX-XXXX` code and the underlying device code are
-  each consumed on first successful use; a replayed poll fails closed.
-- **10-minute expiry.** A device-link session expires 600 seconds after start.
-  An expired code can't be approved or polled.
-- **Approval needs your browser session.** The approve page requires an
-  authenticated barkpark.cloud session, which is what preserves the 2FA gate —
-  the CLI can never approve itself.
-- **No token in the URL.** The link carries only the short code; the session
-  token is delivered to the CLI over the polled channel, never in a URL.
-- **Deny** cancels a request immediately — use it if you didn't start the login.
+- **Single-use, 10-minute codes.** The `XXXX-XXXX` code and device code are each
+  consumed on first use (a replayed poll fails closed) and expire 600s after
+  start. **Deny** cancels a request immediately.
+- **Approval needs your browser session** — preserving the 2FA gate; the CLI can
+  never approve itself, and no token ever rides in the URL (only the short code;
+  the token arrives over the polled channel).
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| **Code expired** before you approved | Rerun `bp login` — you get a fresh code and 10-minute window. |
-| **Browser didn't open** | Copy the printed `https://barkpark.cloud/activate` URL to any device (phone, another laptop) and enter the code there. |
-| **`slow_down` / rate-limited poll** | The CLI backs off automatically; just wait. If it persists, rerun `bp login`. |
-| **Headless machine, no browser** | Use the email + password fallback: `bp login --email you@example.com` (or `BARKPARK_PASSWORD` in CI). |
-| **Approve page won't load / you're logged out** | Log in to barkpark.cloud in the same browser first, then reopen the activate link (or re-type the code). |
+| **Code expired** before you approved | Rerun `bp login` for a fresh code and window. |
+| **Browser didn't open** | Copy the printed `https://barkpark.cloud/activate` URL to any device and enter the code. |
+| **`slow_down` / rate-limited poll** | The CLI backs off automatically; just wait. |
+| **Headless machine, no browser** | Use email + password: `bp login --email you@example.com`. |
+| **Approve page won't load / logged out** | Log in to barkpark.cloud in the same browser first, then reopen the link. |
+| **Signed in but no barkpark connected** | `logged in to Barkpark Cloud but no barkpark connected — run bp setup`. |
