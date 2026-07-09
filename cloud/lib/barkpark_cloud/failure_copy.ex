@@ -198,17 +198,15 @@ defmodule BarkparkCloud.FailureCopy do
   """
   @spec capability_gap_reason(String.t(), String.t()) :: String.t()
 
-  # Azure lifecycle facets (S9 split the old all-or-nothing lifecycle bool into
-  # archive/resurrect/decommission/adopt/audit). Azure honours decommission +
-  # audit; the three it lacks are named specifically so the console can say WHY,
-  # not just "no". Azure has no snapshot substrate — portable archives (charter
-  # Decision 12) are the planned path.
+  # Azure lifecycle facets. Azure honours decommission + audit + RESURRECT (charter
+  # S14: a portable bundle — archived on Hetzner or Azure — is restored onto a fresh
+  # Azure box, so Azure is a valid resurrect TARGET even without a snapshot
+  # substrate). The two it still lacks — ARCHIVE (Azure can't yet be the bundle
+  # SOURCE; S14b) and ADOPT (a snapshot-based clone-swap) — are named specifically so
+  # the console can say WHY, not just "no". There is deliberately NO azure/resurrect
+  # gap clause: resurrect is a live capability, so it never degrades.
   def capability_gap_reason("azure", "archive") do
-    "Azure has no archive yet — there's no snapshot substrate there. Portable archives will bring it; until then an Azure decommission is unrecoverable."
-  end
-
-  def capability_gap_reason("azure", "resurrect") do
-    "Resurrect rebuilds a box from its archive, and Azure has no archives yet — portable archives will bring both."
+    "Azure can't archive to a bundle yet — there's no snapshot substrate there, so an Azure decommission is unrecoverable. (Azure can still be RESTORED onto from a Hetzner or Azure bundle — resurrect works.)"
   end
 
   def capability_gap_reason("azure", "adopt") do

@@ -181,14 +181,15 @@ func TestProviderForAzureConstructsOffline(t *testing.T) {
 		t.Error("azure provider must NOT claim Cataloger yet (catalog=false)")
 	}
 	// Azure implements NONE of the lifecycle FACET interfaces on the provider
-	// struct — its decommission + audit are CLI-level (registered via the dispatch
-	// table), and it has no archive/resurrect/adopt at all (Decision 20). So a
-	// direct type-assert for every facet interface must fail.
+	// struct — its decommission + audit + resurrect are CLI-level (registered via the
+	// dispatch table; resurrect is the portable-bundle restore path, charter S14), and
+	// it has no archive/adopt at all. So a direct type-assert for every facet
+	// interface must fail.
 	if _, ok := p.(cloud.Archiver); ok {
 		t.Error("azure provider must NOT implement Archiver (archive=false)")
 	}
 	if _, ok := p.(cloud.Resurrector); ok {
-		t.Error("azure provider must NOT implement Resurrector (resurrect=false)")
+		t.Error("azure provider must NOT implement Resurrector — azure resurrect is CLI-dispatch-level, not a provider method")
 	}
 	if _, ok := p.(cloud.Decommissioner); ok {
 		t.Error("azure Decommission is CLI-level, not a provider method — must NOT implement Decommissioner")

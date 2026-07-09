@@ -51,8 +51,11 @@ type lifecycleHandler func(out *writer, g globals, args []string) int
 // it — the "a claim needs a real dispatch entry" invariant (Decision 21).
 var lifecycleDispatch = map[string]map[string]lifecycleHandler{
 	cloud.ProviderHetzner: {
-		cloud.VerbArchive:      runInstanceArchive,
-		cloud.VerbResurrect:    runInstanceResurrect,
+		cloud.VerbArchive: runInstanceArchive,
+		// resurrect defaults to the PORTABLE bundle path (drop→restore→migrate onto a
+		// fresh box, cross-provider). `--fast` selects the legacy snapshot restore
+		// (runInstanceResurrect), byte-identical to `bp cloud hetzner instance resurrect`.
+		cloud.VerbResurrect:    runHetznerResurrect,
 		cloud.VerbDecommission: runInstanceDecommission,
 		cloud.VerbAdopt:        runInstanceAdopt,
 		cloud.VerbAudit:        runInstanceAudit,
@@ -60,6 +63,12 @@ var lifecycleDispatch = map[string]map[string]lifecycleHandler{
 	cloud.ProviderAzure: {
 		cloud.VerbDecommission: runAzureInstanceDecommission,
 		cloud.VerbAudit:        runAzureInstanceAudit,
+		// Azure has no snapshot substrate, so its ONLY resurrect is the portable
+		// bundle path (charter S14, Decision 12): a Hetzner-or-Azure archive bundle is
+		// restored onto a fresh Azure box (never a warm-assign — D40). This dispatch
+		// entry is what makes the azure fixture's resurrect:true a real capability
+		// (Decision 21 — a claim needs a real dispatch entry).
+		cloud.VerbResurrect: runAzureInstanceResurrect,
 	},
 }
 

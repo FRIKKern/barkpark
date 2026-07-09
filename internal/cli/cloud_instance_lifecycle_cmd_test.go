@@ -39,11 +39,11 @@ func TestLifecycleDispatchRegistersFacets(t *testing.T) {
 		t.Fatalf("ProviderFor(azure): %v", err)
 	}
 	az := cloud.DetectCapabilities(cloud.ProviderAzure, p)
-	if !(az.Decommission && az.Audit) {
-		t.Errorf("azure should register decommission+audit: %+v", az)
+	if !(az.Decommission && az.Audit && az.Resurrect) {
+		t.Errorf("azure should register decommission+audit+resurrect (portable-bundle restore target): %+v", az)
 	}
-	if az.Archive || az.Resurrect || az.Adopt {
-		t.Errorf("azure must NOT claim archive/resurrect/adopt: %+v", az)
+	if az.Archive || az.Adopt {
+		t.Errorf("azure must NOT claim archive/adopt (no snapshot substrate): %+v", az)
 	}
 }
 

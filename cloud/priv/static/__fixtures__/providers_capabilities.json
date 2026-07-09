@@ -1,5 +1,5 @@
 {
   "hetzner": {                "core": true,  "catalog": false, "archive": true,  "resurrect": true,  "decommission": true,  "adopt": true,  "audit": true,  "pause": false, "labels": true },
   "fake":    { "tier": "dev", "core": true,  "catalog": true,  "archive": true,  "resurrect": true,  "decommission": true,  "adopt": true,  "audit": true,  "pause": true,  "labels": true },
-  "azure":   {                "core": true,  "catalog": false, "archive": false, "resurrect": false, "decommission": true,  "adopt": false, "audit": true,  "pause": true,  "labels": true }
+  "azure":   {                "core": true,  "catalog": false, "archive": false, "resurrect": true,  "decommission": true,  "adopt": false, "audit": true,  "pause": true,  "labels": true }
 }
