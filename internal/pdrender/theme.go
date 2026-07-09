@@ -110,8 +110,8 @@ var (
 	pdRule   = GenRule                // same-package twin (styles.go dividerStyle value)
 	pdCodeBg = GenCodeBg
 	pdCodeFg = GenCodeFg
-	pdLabel  = GenDim                 // reading muted-text = styles.go editorLabelStyle value (#71717a/#a1a1aa)
-	pdTerra  = GenReadingAccent       // paper terracotta (pullquote / code bar)
+	pdLabel  = GenDim                                                    // reading muted-text = styles.go editorLabelStyle value (#71717a/#a1a1aa)
+	pdTerra  = GenReadingAccent                                          // paper terracotta (pullquote / code bar)
 	pdBtnFg  = lipgloss.AdaptiveColor{Light: "#ffffff", Dark: "#ffffff"} // lit-allow: contrasting fg on the filled primary action; no generated twin (au-w4-cli-chrome-tokens)
 	// Semantic status tones are token-sourced (see the Callout builder, which
 	// reads GenToneInfo/OK/Warn/Danger from tokens_gen.go). This is a DELIBERATE

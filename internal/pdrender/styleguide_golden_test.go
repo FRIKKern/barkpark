@@ -92,10 +92,10 @@ func TestPdrenderTokensGolden(t *testing.T) {
 		c    lipgloss.TerminalColor
 	}{
 		{"accent", th.Accent},
-		{"ink", th.Heading[0].GetForeground()},   // pdInk
-		{"body", th.Body.GetForeground()},        // pdBody
-		{"dim", th.Dim.GetForeground()},          // pdDim
-		{"rule", th.Rule.GetForeground()},        // pdRule
+		{"ink", th.Heading[0].GetForeground()}, // pdInk
+		{"body", th.Body.GetForeground()},      // pdBody
+		{"dim", th.Dim.GetForeground()},        // pdDim
+		{"rule", th.Rule.GetForeground()},      // pdRule
 		{"code-fg", th.InlineCode.GetForeground()},
 		{"code-bg", th.InlineCode.GetBackground()},
 		{"terra", th.PullquoteBar.GetForeground()}, // pdTerra
