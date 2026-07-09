@@ -489,6 +489,15 @@ func TestWideMouseBoardRowClickSelects(t *testing.T) {
 	if nm.ui.Cursor != want {
 		t.Fatalf("board click selected cursor %d, want %d (the subject)", nm.ui.Cursor, want)
 	}
+
+	// A second click on the now-selected row ACTIVATES it — the narrow board's
+	// select-then-activate grammar (wish: "click again / double-click to expand"):
+	// a task row descends into its FrameTask.
+	m3, _ := nm.handleWideMouse(wideClick(20, pl+1))
+	if len(m3.stack) != 2 || m3.topFrame().Kind != FrameTask || m3.topFrame().Ref != composeSubjectID {
+		t.Fatalf("second click on the selected task row did not descend: depth=%d kind=%v ref=%q",
+			len(m3.stack), m3.topFrame().Kind, m3.topFrame().Ref)
+	}
 }
 
 // A click on the identity strip / status chrome / the dead inter-pane gutter is a
@@ -585,6 +594,14 @@ func TestWideMouseRightRailClickSelectsStop(t *testing.T) {
 	}
 	if got := m2.topFrame().Cursor; got != 1 {
 		t.Fatalf("rail click selected stop %d, want 1", got)
+	}
+
+	// A second click on the now-selected stop DESCENDS onto it, exactly like
+	// enter — the narrow reading grammar (select, then click-again opens).
+	m3, _ := m2.handleWideMouse(wideClick(boardPaneWidth+paneGutter2+3, target.Line+1))
+	if len(m3.stack) != 3 || m3.topFrame().Ref != target.Ref {
+		t.Fatalf("second click on the selected stop did not descend: depth=%d ref=%q want ref=%q",
+			len(m3.stack), m3.topFrame().Ref, target.Ref)
 	}
 }
 

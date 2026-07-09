@@ -420,7 +420,11 @@ func (m Model) wideRowMap() []paneRow {
 
 // wideGeom re-derives composeAt's wide geometry (the left gl gutter, the inner
 // content width, and the pane height under the breadcrumb) so the mouse router
-// and the paint agree pixel-for-pixel. Kept byte-equal to Compose/composeAt.
+// and the paint agree pixel-for-pixel. Kept byte-equal to Compose/composeAt,
+// INCLUDING the height chain: Compose floors at 8, spends one line on the
+// leading blank row, and composeAt re-floors the remainder at 8 before
+// reserving the breadcrumb — skipping that re-floor would under-count the pane
+// by one row on a pathologically short (<=8-row) wide terminal.
 func (m Model) wideGeom() (gl, innerW, inner int) {
 	width, height := m.width, m.height
 	if width < 20 {
@@ -435,7 +439,11 @@ func (m Model) wideGeom() (gl, innerW, inner int) {
 		gr = 2
 	}
 	innerW = width - gl - gr
-	inner = height - 2 // composeAt height (height-1) minus the breadcrumb row
+	height-- // Compose's leading blank row
+	if height < 8 {
+		height = 8 // composeAt re-floors
+	}
+	inner = height - 1 // the breadcrumb row
 	if inner < 1 {
 		inner = 1
 	}
@@ -445,8 +453,10 @@ func (m Model) wideGeom() (gl, innerW, inner int) {
 // boardPaneMouse routes a click/wheel that landed in the wide left board pane —
 // identical semantics to the narrow board. Wheel steps the cursor one row; a
 // left click selects the FULL row under it (any X in the pane), exactly as
-// arrowing to it would. The identity strip, the bottom status chrome and the
-// ↑/↓ overflow markers are not rows and no-op honestly.
+// arrowing to it would, and a click on the ALREADY-selected row activates it
+// (activateBoard: descend a task, fold/unfold a section) — so a double-click
+// opens, exactly like the narrow board. The identity strip, the bottom status
+// chrome and the ↑/↓ overflow markers are not rows and no-op honestly.
 func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Model, tea.Cmd) {
 	switch ev.Button {
 	case tea.MouseButtonWheelUp:
@@ -461,7 +471,14 @@ func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Mo
 	}
 	idTop := len(renderIdentityTop(m.ui, boardPaneWidth, now))
 	bottom := len(bottomChrome(m.board, m.ui, boardPaneWidth, now))
-	avail := inner - idTop - bottom
+	// Render floors its height at 8 internally, so the painted layout is computed
+	// at max(8, inner) even when a pathologically short pane clips the frame —
+	// mirror that floor or the chrome/spine row boundaries drift by one there.
+	effH := inner
+	if effH < 8 {
+		effH = 8
+	}
+	avail := effH - idTop - bottom
 	if avail < 1 {
 		avail = 1
 	}
@@ -482,6 +499,9 @@ func (m Model) boardPaneMouse(ev tea.MouseMsg, pl, inner int, now time.Time) (Mo
 	owners := m.boardLineOwners()
 	if line < 0 || line >= len(owners) || owners[line] < 0 {
 		return m, nil // a separator / phase band / dead-epic line — display only
+	}
+	if m.ui.Cursor == owners[line] {
+		return m.activateBoard(), nil
 	}
 	m.ui.Cursor = owners[line]
 	return m, nil
@@ -512,7 +532,8 @@ func (m Model) boardLineOwners() []int {
 // wheel no-op honestly. At depth>0 it is the stack-top reading frame: wheel
 // free-scrolls ±1 (reusing freeScroll so mouse == keyboard), a click resolves to
 // the rail stop on the clicked body line (overflow markers skipped) and selects
-// it exactly as g/G/j would (viewport follows).
+// it exactly as g/G/j would (viewport follows); a click on the ALREADY-selected
+// stop descends onto it, exactly like enter — the narrow reading semantics.
 func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.Time) (Model, tea.Cmd) {
 	top := m.topFrame()
 	if top.Kind == FrameBoard {
@@ -544,6 +565,10 @@ func (m Model) rightPaneMouse(ev tea.MouseMsg, pl, innerW, inner int, now time.T
 	bodyLine := wtop + pl
 	for i, s := range stops {
 		if s.Line == bodyLine {
+			if top.Cursor == i {
+				nm, cmd := m.descend()
+				return nm.(Model), cmd
+			}
 			(&m).setTopCursor(i)
 			return m, nil
 		}
