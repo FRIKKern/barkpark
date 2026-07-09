@@ -212,14 +212,19 @@ defmodule BarkparkWeb.Studio.StudioLivePaperTest do
     # The editor now shows paper B...
     assert html_b =~ ~s(data-slug="#{other_slug}")
     assert html_b =~ "Totally different body."
-    # ...and NONE of paper A's block body lingers in the editor (the bug).
-    refute html_b =~ "First block streamed."
+    # ...and NONE of paper A's block body lingers in the EDITOR (the bug).
+    # Scoped: manifest-first list rows (pc-w3b) legitimately render each
+    # paper's first-paragraph text as its description in the Papers pane, so
+    # the old whole-page refute would catch the list, not the editor.
+    editor_b = view |> element(~s([data-test-id="studio-paper-editor"])) |> render()
+    refute editor_b =~ "First block streamed."
 
     # Jump back to paper A — A's content returns cleanly, B's is gone.
     html_a = render_patch(view, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
     assert html_a =~ ~s(data-slug="#{@slug}")
     assert html_a =~ "First block streamed."
-    refute html_a =~ "Totally different body."
+    editor_a = view |> element(~s([data-test-id="studio-paper-editor"])) |> render()
+    refute editor_a =~ "Totally different body."
 
     # Same process throughout — these are push_patch navigations, not remounts.
     assert view.pid == pid_before

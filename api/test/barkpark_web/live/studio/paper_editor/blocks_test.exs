@@ -430,10 +430,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.BlocksTest do
     view_html = view |> element(~s([data-test-id="paper-edit-toggle"])) |> render_click()
 
     # View shows the EDITED text (re-streamed from the current blocks), and the
-    # superseded original text is gone.
+    # superseded original text is gone FROM THE PAPER SURFACE. Scoped to the
+    # editor panel: the doc-list pane's row description (manifest-first rows,
+    # pc-w3b) refreshes on the mutation broadcast, which this click-render
+    # doesn't wait for — the whole-page refute would race it.
     refute view_html =~ ~s(data-test-id="studio-paper-block-editor")
     assert view_html =~ "Edited while in edit mode."
-    refute view_html =~ "Original intro text."
+    paper_html = view |> element(~s([data-test-id="studio-paper-editor"])) |> render()
+    refute paper_html =~ "Original intro text."
 
     # No remount.
     assert view.pid == pid_before
