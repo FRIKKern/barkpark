@@ -119,21 +119,26 @@ defmodule BarkparkWeb.ShareMeta do
   def manifest(content, url, doc_type, fallback_title \\ nil)
 
   def manifest(content, url, doc_type, fallback_title) when is_map(content) do
-    content["preview"] || read_time_manifest(content, url, doc_type) ||
+    content["preview"] || read_time_manifest(content, url, doc_type, fallback_title) ||
       degraded_manifest(content, url, doc_type, fallback_title)
   end
 
   def manifest(_content, url, doc_type, fallback_title),
     do: degraded_manifest(%{}, url, doc_type, fallback_title)
 
-  defp read_time_manifest(content, url, doc_type) do
+  defp read_time_manifest(content, url, doc_type, fallback_title) do
     if Code.ensure_loaded?(Barkpark.Preview) and
          function_exported?(Barkpark.Preview, :project, 3) do
       blocks = Map.get(content, "blocks") || []
 
       # apply/3 (not a literal call) keeps this module free of a compile-time
       # dependency on the pc-w1 module — integration order pc-w1 → pc-w2.
-      case apply(Barkpark.Preview, :project, [content, blocks, %{url: url, doc_type: doc_type}]) do
+      # `:title` is the ROW title — Preview.project's LAST title fallback, so a
+      # classic doc whose title lives on the row (not in content) still unfurls
+      # under its real name instead of the site default.
+      opts = %{url: url, doc_type: doc_type, title: fallback_title}
+
+      case apply(Barkpark.Preview, :project, [content, blocks, opts]) do
         # project/3 returns the manifest itself (D1); tolerate a wrapped
         # {"preview" => manifest} shape too, defensively.
         %{"preview" => %{} = m} -> m
@@ -203,7 +208,13 @@ defmodule BarkparkWeb.ShareMeta do
   defp normalize(m, _page_title) when is_map(m), do: m
 
   defp normalize(_nil, page_title) do
-    %{"title" => page_title, "type" => "website", "url" => nil, "description" => nil, "image" => nil}
+    %{
+      "title" => page_title,
+      "type" => "website",
+      "url" => nil,
+      "description" => nil,
+      "image" => nil
+    }
   end
 
   # D8 — paper/post → article, everything else → website.
