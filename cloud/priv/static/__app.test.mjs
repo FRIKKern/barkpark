@@ -2903,9 +2903,26 @@ test("C10: the Usage + Members helpers are exported", () => {
     "invitationRowHtml", "membersPanelHtml"]) {
     assert.equal(typeof hooks[name], "function", name + " must be exported");
   }
-  // The fixed 8-meter vocabulary, in render order (mirrors Usage.compose/1).
+  // The fixed 9-meter vocabulary, in SPA render order — `instances` leads as the
+  // headline quota meter (order is surface-local; the fixture tripwire below binds
+  // only the name SET, not the order).
   assert.deepEqual([...hooks.usageMeters.map((m) => m.key)],
-    ["seats", "documents", "datasets", "webhooks", "db_size", "disk", "api_requests", "bandwidth"]);
+    ["instances", "seats", "documents", "datasets", "webhooks", "db_size", "disk", "api_requests", "bandwidth"]);
+});
+
+// ── the meter vocabulary is name-SET-pinned against the shared fixture ───────
+// __fixtures__/usage_meters.json is the three-runtime tripwire: the Go CLI holds
+// it name+order+label, the Elixir Usage module names the same meters, and this is
+// the SPA leg. The SPA's render order is surface-local (instances leads), so it
+// binds only the name SET — a meter added/renamed/removed in one runtime reds the
+// others.
+test("C10: usageMeters key set equals the shared usage_meters.json fixture", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/usage_meters.json", import.meta.url), "utf8"),
+  );
+  const fixtureNames = fixture.meters.map((m) => m.name).sort();
+  const spaKeys = [...hooks.usageMeters.map((m) => m.key)].sort();
+  assert.deepEqual(spaKeys, fixtureNames);
 });
 
 test("C10: c10FmtBytes humanizes base-1024, echoes non-numbers", () => {
@@ -2964,10 +2981,73 @@ test("C10: usageMetersHtml renders the full grid; metered vs unmetered chrome di
   const empty = hooks.usageMetersHtml({});
   // Every meter label present even with an empty payload — the grid is always full.
   for (const spec of hooks.usageMeters) assert.ok(empty.includes(hooks.esc(spec.label)), spec.label + " missing");
-  assert.equal((empty.match(/Not yet metered/g) || []).length, 8);
+  assert.equal((empty.match(/Not yet metered/g) || []).length, 9);
   const metered = hooks.usageMetersHtml({ documents: { value: 7, measured_at: null } });
   assert.match(metered, /<strong>7<\/strong>/);          // real value is bold
   assert.match(metered, /<span class="dim">Not yet metered<\/span>/); // still-empty meters stay dim
+});
+
+// ── OC7 quota bars: the display model draws a bar ONLY for a real ceiling ────
+const instSpec = () => usageSpec("instances");
+
+test("C10/OC7: usageMeterDisplay — no bar for an unlimited (quota nil/zero) or unmetered meter", () => {
+  // The v1 shape (quota null) is honest: no ceiling, no bar, no fake number.
+  assert.equal(hooks.usageMeterDisplay(instSpec(), { value: 3, quota: null }).bar, null);
+  assert.equal(hooks.usageMeterDisplay(instSpec(), { value: 3, quota: 0 }).bar, null); // 0 is not a real ceiling
+  assert.equal(hooks.usageMeterDisplay(instSpec(), { value: 3 }).bar, null);           // absent quota
+  // An unmetered meter never draws a bar even if a quota rides along.
+  assert.equal(hooks.usageMeterDisplay(instSpec(), { value: "unmetered", quota: 10 }).bar, null);
+});
+
+test("C10/OC7: usageMeterDisplay — ok tone under warn_at, pct rounds", () => {
+  const d = hooks.usageMeterDisplay(instSpec(), { value: 3, quota: 10, warn_at: 8 });
+  assert.equal(d.bar.tone, "ok");
+  assert.equal(d.bar.pct, 30);
+  assert.equal(d.bar.quotaText, "3 / 10");
+});
+
+test("C10/OC7: usageMeterDisplay — warn tone once value reaches warn_at", () => {
+  const d = hooks.usageMeterDisplay(instSpec(), { value: 8, quota: 10, warn_at: 8 });
+  assert.equal(d.bar.tone, "warn"); // inclusive at warn_at
+  assert.equal(d.bar.pct, 80);
+  // No warn_at → never warns; it stays ok right up to the ceiling.
+  const noWarn = hooks.usageMeterDisplay(instSpec(), { value: 9, quota: 10 });
+  assert.equal(noWarn.bar.tone, "ok");
+});
+
+test("C10/OC7: usageMeterDisplay — over tone is inclusive at the ceiling, pct clamps at 100", () => {
+  const at = hooks.usageMeterDisplay(instSpec(), { value: 10, quota: 10, warn_at: 8 });
+  assert.equal(at.bar.tone, "over"); // value >= quota, inclusive
+  assert.equal(at.bar.pct, 100);
+  const over = hooks.usageMeterDisplay(instSpec(), { value: 25, quota: 10, warn_at: 8 });
+  assert.equal(over.bar.tone, "over");
+  assert.equal(over.bar.pct, 100); // clamped, never overflows the track
+  assert.equal(over.bar.quotaText, "25 / 10");
+});
+
+test("C10/OC7: usageMeterHtml — bar track + toned fill; only OVER carries the one recovery action", () => {
+  const ok = hooks.usageMeterHtml(instSpec(), { value: 3, quota: 10, warn_at: 8 });
+  assert.match(ok, /class="usage-bar usage-bar--ok"/);
+  assert.match(ok, /class="usage-bar-fill" style="width:30%"/);
+  assert.ok(!ok.includes("#settings/billing"), "an ok meter needs no recovery action");
+
+  const warn = hooks.usageMeterHtml(instSpec(), { value: 8, quota: 10, warn_at: 8 });
+  assert.match(warn, /usage-bar--warn/);
+  assert.ok(!warn.includes("#settings/billing"), "warn is not a dead end — no forced action yet");
+
+  const over = hooks.usageMeterHtml(instSpec(), { value: 12, quota: 10, warn_at: 8 });
+  assert.match(over, /usage-bar--over/);
+  // D25: exactly ONE recovery action, routing to a real Settings billing view.
+  assert.match(over, /<a class="usage-bar-action" href="#settings\/billing">Manage plan<\/a>/);
+  assert.equal((over.match(/usage-bar-action/g) || []).length, 1);
+  // The Settings billing view the link targets must actually be a registered view.
+  assert.ok(hooks.settingsViews.includes("billing"), "billing must be a real Settings view (no dead end)");
+});
+
+test("C10/OC7: usageMeterHtml — an unlimited meter renders byte-identically to today (bar-less)", () => {
+  const unlimited = hooks.usageMeterHtml(instSpec(), { value: 3, quota: null, measured_at: null });
+  assert.ok(!unlimited.includes("usage-bar"), "no bar chrome when there is no ceiling");
+  assert.match(unlimited, /<strong>3<\/strong>/); // the value renders exactly as a plain metered meter
 });
 
 test("C10: usageFailureCopy — 404 is a distinct honest line, else a retryable one", () => {
