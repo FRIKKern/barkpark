@@ -3,7 +3,8 @@
 
 These two surfaces run in someone else's cloud, so they cannot shell out to a
 local `bp`. The onramp is different for each, and honest about what ships
-today: **ChatGPT has a real, zero-code path; Claude.ai does not yet.** The
+today: **ChatGPT has a real, zero-code path; Claude.ai's connector waits on a
+remote endpoint we haven't shipped yet** (`ve-w2-remote-mcp-bearer`). The
 overview for CLI-capable agents (Claude Code, Codex, Cursor) lives in
 `docs/setup/AGENT-ONRAMPS.md`.
 
@@ -55,23 +56,26 @@ Caveats, stated honestly:
 - **Loose typing.** Request/response bodies are deliberately permissive
   (`Document` is `additionalProperties: true`), so the GPT gets thin
   field-level hints — spell out the fields you want in the prompt.
-- **MCP vs Actions.** ChatGPT's native MCP **connectors** are beta-gated to
-  Business/Enterprise/Edu. **Actions are the universal path** and need none of
-  that.
+- **MCP vs Actions.** Since 2026-03-13, ChatGPT's Developer-Mode remote MCP
+  gives **Plus/Pro read-only** connectors; **write** connectors stay
+  Business/Enterprise/Edu. So for a Plus/Pro individual, **Actions are the only
+  WRITE path** — and they need none of that gating.
 
 ## Claude.ai — the honest story
 
-**There is no Barkpark connector for Claude.ai today, and this repo does not
-ship one.** Claude.ai custom connectors are **remote-MCP only**: a public
-Streamable HTTP (SSE) endpoint, plus OAuth 2.1 / PKCE for protected servers.
-The shipped `bp mcp serve` is a **stdio** MCP server — it cannot be registered
-as a Claude.ai connector, and the `bp-mcp-serve-epic` will not build a remote
-one.
+Claude.ai custom connectors are **GA on every plan, including Free** — the gap
+is on OUR side, not Anthropic's. A connector needs a **remote-MCP** endpoint: a
+public Streamable HTTP (SSE) server, plus OAuth 2.1 / PKCE for protected
+servers. The shipped `bp mcp serve` is a **stdio** MCP server — it cannot be
+registered as a Claude.ai connector. Shipping the remote one is exactly what
+`ve-w2-remote-mcp-bearer` does (it supersedes the cancelled
+`ao-backlog-remote-mcp` backlog task).
 
-A hosted remote MCP endpoint (Phoenix-side Streamable HTTP + bearer/OAuth) is
-filed as **net-new** backlog work under `bp task ao-backlog-remote-mcp` —
-deliberately **not** a `bp-mcp-serve-epic` follow-on. Until it lands, use the
-manual HTTP path.
+That endpoint builds **Go-side**, not Phoenix: the vendored go-sdk v1.6.1
+already backing `bp mcp serve` ships `NewStreamableHTTPHandler` +
+`auth.RequireBearerToken`, which swap in for the stdio transport at
+`internal/cli/mcp_serve.go:101` and reuse the identical tool registration.
+Until it lands, use the manual HTTP path.
 
 <a id="claudeai-manual-http"></a>
 ### Manual path — direct HTTP with a scoped token
