@@ -5,6 +5,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/FRIKKern/barkpark/internal/pdrender"
+	"github.com/FRIKKern/barkpark/internal/semrole"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ansiRe matches an SGR color escape so the byte-identity tests can strip color
@@ -53,16 +58,153 @@ func TestStatusRoleMapping(t *testing.T) {
 	}
 }
 
-func TestAnsiForRole(t *testing.T) {
+// coloredWriter builds a color-ON writer whose paint ladder is pinned to profile p
+// (and a fixed background so AdaptiveColor light/dark selection is deterministic),
+// bypassing tty auto-detection — the buffer sinks make isatty report false.
+func coloredWriter(stdout, stderr *bytes.Buffer, p pdrender.Profile, dark bool) *writer {
+	w := newWriter(stdout, stderr)
+	w.color = true
+	w.isTTY = true
+	w.colorProfile = p
+	r := lipgloss.NewRenderer(stdout)
+	r.SetColorProfile(paperTermenvProfile(p))
+	r.SetHasDarkBackground(dark)
+	w.renderer = r
+	return w
+}
+
+// TestPaintCellANSI16Floor pins the basic-16 floor: role-keyed semrole.GenANSI16
+// SGR, with the DELIBERATE info cyan(36)→blue(34) retint (the cross-surface
+// coherence fix), and lifecycle states degrading to their status role (done→ok→32).
+func TestPaintCellANSI16Floor(t *testing.T) {
+	var so, se bytes.Buffer
+	w := coloredWriter(&so, &se, pdrender.ANSI16, true)
 	cases := map[string]string{
-		"ok": "\x1b[32m", "info": "\x1b[36m", "warn": "\x1b[33m", "danger": "\x1b[31m",
-		"": "", "nope": "",
+		"live":     "\033[32m", // ok → green
+		"failed":   "\033[31m", // danger → red
+		"suspended": "\033[33m", // warn → yellow
+		"building": "\033[34m", // info → BLUE (was cyan 36 before the retint)
+		"done":     "\033[32m", // lifecycle teal degrades to ok/green at the 16 floor
 	}
-	for role, want := range cases {
-		if got := ansiForRole(role); got != want {
-			t.Errorf("ansiForRole(%q) = %q, want %q", role, got, want)
+	for token, want := range cases {
+		got := w.paintCell(token, token)
+		if !strings.HasPrefix(got, want) || !strings.HasSuffix(got, ansiReset) {
+			t.Errorf("paintCell(%q) = %q, want prefix %q + reset", token, got, want)
 		}
 	}
+	// The deliberate retint: info is NEVER the old cyan 36 at the floor.
+	if strings.Contains(w.paintCell("building", "building"), "\033[36m") {
+		t.Error("info still paints cyan 36 at the 16 floor; must be blue 34")
+	}
+	// Unknown token → unpainted, no escapes.
+	if got := w.paintCell("banana", "banana"); got != "banana" {
+		t.Errorf("unknown token painted: %q", got)
+	}
+}
+
+// TestPaintCellLifecycleTealTrueColor proves the headline Decision-4 behaviour: a
+// `done` cell routes to its LIFECYCLE teal hue, NOT the ok status green tone, and
+// `in_progress` to its token blue — all as 24-bit SGR. Compared against the SAME
+// lipgloss pipeline (not literal RGB) so termenv's hex round-trip can't flake it;
+// the load-bearing claim is teal != green AND done == teal.
+func TestPaintCellLifecycleTealTrueColor(t *testing.T) {
+	var so, se bytes.Buffer
+	w := coloredWriter(&so, &se, pdrender.TrueColor, true) // dark → the Dark hex side
+	done := w.paintCell("done", "done")
+
+	doneHue, _ := semrole.LifecycleColor("done")
+	okTone, _ := semrole.RoleColor("ok")
+	wantTeal := w.cellStyler().Foreground(doneHue).Render("done")
+	wantGreen := w.cellStyler().Foreground(okTone).Render("done")
+
+	if done != wantTeal {
+		t.Errorf("done did not paint the lifecycle teal hue:\n got %q\nwant %q", done, wantTeal)
+	}
+	if done == wantGreen {
+		t.Errorf("done painted the ok status green instead of lifecycle teal: %q", done)
+	}
+	if !strings.Contains(done, "\x1b[38;2;") {
+		t.Errorf("truecolor profile did not emit 24-bit SGR: %q", done)
+	}
+
+	ip := w.paintCell("in_progress", "in_progress")
+	ipHue, _ := semrole.LifecycleColor("in_progress")
+	if want := w.cellStyler().Foreground(ipHue).Render("in_progress"); ip != want {
+		t.Errorf("in_progress did not paint its token blue hue:\n got %q\nwant %q", ip, want)
+	}
+}
+
+// TestPaintCellANSI256Downsample proves the middle rung is 8-bit indexed SGR
+// (termenv's 24-bit→256 downsample), never 24-bit truecolor.
+func TestPaintCellANSI256Downsample(t *testing.T) {
+	var so, se bytes.Buffer
+	w := coloredWriter(&so, &se, pdrender.ANSI256, true)
+	got := w.paintCell("failed", "failed")
+	if !strings.Contains(got, "\x1b[38;5;") {
+		t.Errorf("ANSI256 profile did not emit 8-bit indexed SGR: %q", got)
+	}
+	if strings.Contains(got, "38;2;") {
+		t.Errorf("ANSI256 leaked 24-bit truecolor SGR: %q", got)
+	}
+}
+
+// TestBPColorEnvHatch pins the BP_COLOR escape hatch onto the paper --profile alias
+// vocabulary, and that NO_COLOR still wins over it.
+func TestBPColorEnvHatch(t *testing.T) {
+	build := func() *writer {
+		var so, se bytes.Buffer
+		w := newWriter(&so, &se)
+		w.color = true
+		w.isTTY = true
+		return w
+	}
+	t.Run("truecolor", func(t *testing.T) {
+		t.Setenv("BP_COLOR", "truecolor")
+		w := build()
+		w.resolveColorProfile()
+		if w.colorProfile != pdrender.TrueColor {
+			t.Fatalf("BP_COLOR=truecolor → %v, want TrueColor", w.colorProfile)
+		}
+	})
+	t.Run("16", func(t *testing.T) {
+		t.Setenv("BP_COLOR", "16")
+		w := build()
+		w.resolveColorProfile()
+		if w.colorProfile != pdrender.ANSI16 {
+			t.Fatalf("BP_COLOR=16 → %v, want ANSI16", w.colorProfile)
+		}
+	})
+	t.Run("none disables colour", func(t *testing.T) {
+		t.Setenv("BP_COLOR", "none")
+		w := build()
+		w.resolveColorProfile()
+		if w.color {
+			t.Fatal("BP_COLOR=none must disable colour")
+		}
+	})
+	t.Run("empty falls through to auto tty → 256", func(t *testing.T) {
+		t.Setenv("BP_COLOR", "")
+		w := build()
+		w.resolveColorProfile()
+		if w.colorProfile != pdrender.ANSI256 {
+			t.Fatalf("auto over a tty → %v, want ANSI256 (safe)", w.colorProfile)
+		}
+	})
+	t.Run("NO_COLOR beats BP_COLOR", func(t *testing.T) {
+		t.Setenv("NO_COLOR", "1")
+		t.Setenv("BP_COLOR", "truecolor")
+		var so, se bytes.Buffer
+		w := newWriter(&so, &se)
+		w.color = true
+		w.isTTY = true
+		w.applyGlobals(globals{}) // noColorEnv() forces colour off; resolveColorProfile early-returns
+		if w.color {
+			t.Fatal("NO_COLOR must beat BP_COLOR=truecolor")
+		}
+		if w.colorProfile != pdrender.NoColor {
+			t.Fatalf("NO_COLOR left colorProfile = %v, want NoColor", w.colorProfile)
+		}
+	})
 }
 
 const statusTablePayload = `{"documents":[{"id":"1","title":"A","status":"live"},{"id":"2","title":"B","status":"failed"}]}`
@@ -94,14 +236,15 @@ func TestRenderTableNoColorByteIdentity(t *testing.T) {
 }
 
 // TestRenderTableColorInjectsAnsi: with color ON the status cells are painted by
-// role — green for "live", red for "failed" — and NOTHING else changes: strip
-// the ANSI and right-trim and the layout is exactly the color-off table. Header
-// and non-status cells stay unpainted.
+// role — green for "live", red for "failed" — and NOTHING else changes: strip the
+// ANSI and right-trim and the layout is exactly the color-off table. Header and
+// non-status cells stay unpainted. Pinned to the ANSI16 floor so the SGR bytes are
+// the deterministic semrole.GenANSI16 codes (32/31), not a background-dependent
+// truecolor render.
 func TestRenderTableColorInjectsAnsi(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	w := newWriter(&stdout, &stderr)
+	w := coloredWriter(&stdout, &stderr, pdrender.ANSI16, true)
 	w.output = "table"
-	w.color = true
 	renderTable(w, []byte(statusTablePayload))
 	got := stdout.String()
 

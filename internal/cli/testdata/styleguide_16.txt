@@ -1,0 +1,28 @@
+Barkpark - CLI/TUI style tokens
+rendered from internal/semrole + generated design tokens (tokens_gen.go)
+
+Status roles
+  [92m██[0m  ok
+  [94m██[0m  info
+  [93m██[0m  warn
+  [91m██[0m  danger
+
+Lifecycle glyphs
+  [94m⠋[0m  in_progress  info
+  [93m![0m  blocked      warn
+  [96m✓[0m  done         ok
+  [96m✓[0m  closed       ok
+  [94m✕[0m  cancelled    -
+  [96m○[0m  ready        -
+  [94m○[0m  open         -
+
+Priority severity
+  [91mP0[0m  danger
+  [91mP1[0m  danger
+  [93mP2[0m  warn
+  [2mP3[0m  dim
+  [2mP4[0m  dim
+
+Spinner
+  frames: ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+  still:  ⠿

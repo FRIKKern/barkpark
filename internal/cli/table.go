@@ -238,28 +238,13 @@ func joinColsPainted(out *writer, cells []string, widths []int) string {
 	return strings.TrimRight(strings.Join(parts, "  "), " ")
 }
 
-// ansiReset closes an SGR color span opened by ansiForRole.
+// ansiReset closes an SGR colour span. It is emitted directly only by paintCell's
+// ANSI-16 floor (the pinned semrole.GenANSI16 codes); the 256/truecolor rungs emit
+// their own reset through lipgloss. The four roles' hues no longer live here — they
+// are sourced from the generated design-token artifact (internal/semrole) so a
+// `bp` status cell and the SPA's --ok/--info/--warn/--danger can never drift
+// (charter decisions 3, 4, 12).
 const ansiReset = "\033[0m"
-
-// ansiForRole maps a semantic status role to its terminal SGR foreground color,
-// or "" for a role that gets no color. The four roles are exactly the cloud
-// SPA's --ok/--info/--warn/--danger design tokens (charter decisions 9 and 12),
-// so a status cell in a `bp` table and a status dot in the dashboard carry the
-// same meaning — "one product, two surfaces" made visible in a terminal.
-func ansiForRole(role string) string {
-	switch role {
-	case "ok":
-		return "\033[32m" // green
-	case "info":
-		return "\033[36m" // cyan
-	case "warn":
-		return "\033[33m" // yellow
-	case "danger":
-		return "\033[31m" // red
-	default:
-		return ""
-	}
-}
 
 // statusRole maps a status-like cell value to its semantic color role
 // (ok|info|warn|danger), or "" when the value is not a recognised status token.
