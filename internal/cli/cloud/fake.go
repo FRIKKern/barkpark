@@ -1,10 +1,14 @@
 package cloud
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 )
 
 // FakeProvider is the in-memory CloudProvider every provisioning test runs
@@ -16,14 +20,15 @@ import (
 // NewFakeProvider returns a ready instance; the zero value also works (the map
 // is lazily created on first Create).
 type FakeProvider struct {
-	mu      sync.Mutex
-	servers map[string]Server
-	next    int // counter feeding the deterministic id/IP
+	mu       sync.Mutex
+	servers  map[string]Server
+	archives map[string][]Archive // fqdn → recorded archives, oldest→newest (append order)
+	next     int                  // counter feeding the deterministic id/IP
 }
 
 // NewFakeProvider returns an empty in-memory provider.
 func NewFakeProvider() *FakeProvider {
-	return &FakeProvider{servers: map[string]Server{}}
+	return &FakeProvider{servers: map[string]Server{}, archives: map[string][]Archive{}}
 }
 
 // Create records a server under spec.Name, assigning a deterministic id and IP.
@@ -168,14 +173,24 @@ func (f *FakeProvider) Catalog(context.Context) (Catalog, error) {
 	}, nil
 }
 
-// Archive (Archiver) returns a synthetic resurrection-bearing archive
-// for target. It does not mutate the map (snapshotting leaves the box running);
-// an empty target is an error so a test can assert that guard.
+// Archive (Archiver) returns a synthetic resurrection-bearing archive for
+// target AND records it in the archives map so a later Resurrect has a newest
+// archive to rebuild from. It stays BOX-AGNOSTIC — archiving does not require a
+// live server (snapshotting an fqdn the fake never created is fine), so the
+// unseeded-box lifecycle test keeps passing. An empty target is an error so a
+// test can assert that guard.
 func (f *FakeProvider) Archive(_ context.Context, target string) (Archive, error) {
 	if target == "" {
 		return Archive{}, fmt.Errorf("cloud: fake Archive requires a non-empty target")
 	}
-	return Archive{ID: "fake-archive-" + target, FQDN: target, Provider: ProviderFake}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.archives == nil {
+		f.archives = map[string][]Archive{}
+	}
+	a := Archive{ID: "fake-archive-" + target, FQDN: target, Provider: ProviderFake, Created: time.Now().UTC()}
+	f.archives[target] = append(f.archives[target], a)
+	return a, nil
 }
 
 // Decommission (Decommissioner) tears the box down — the in-memory analogue
@@ -190,9 +205,17 @@ func (f *FakeProvider) Decommission(_ context.Context, target string) error {
 	return nil
 }
 
-// Resurrect (Resurrector) rebuilds an instance for fqdn from its (implied
-// newest) archive — modelled as a fresh Create under the fqdn name.
+// Resurrect (Resurrector) rebuilds an instance for fqdn from its NEWEST recorded
+// archive — modelled as a fresh Create under the fqdn name. With no archive on
+// record it is an honest not-found error (nothing to restore), so the fake
+// mirrors the real path where resurrect refuses an fqdn no snapshot carries.
 func (f *FakeProvider) Resurrect(ctx context.Context, fqdn string) (Server, error) {
+	f.mu.Lock()
+	has := len(f.archives[fqdn]) > 0
+	f.mu.Unlock()
+	if !has {
+		return Server{}, fmt.Errorf("cloud: fake has no archive for %q — archive it first", fqdn)
+	}
 	return f.Create(ctx, ServerSpec{Name: fqdn})
 }
 
@@ -253,3 +276,76 @@ var (
 	_ Pauser             = (*FakeProvider)(nil)
 	_ Authenticator      = (*FakeProvider)(nil)
 )
+
+// ── FakeBundleStore ──────────────────────────────────────────────────────────
+// The in-memory BundleStore every bundle test writes/reads through — the
+// object-store analogue of FakeProvider: no S3, no spend, deterministic. It
+// ships as a public constructor (like NewFakeProvider) so any package building
+// on the bundle library can round-trip a bundle in a unit test.
+
+// FakeBundleStore is a concurrency-safe, in-memory object store keyed by full
+// object key. It honours the whole BundleStore seam (PutLarge/Get/List/Delete)
+// against a map so a bundle can be written and re-read with zero network.
+type FakeBundleStore struct {
+	mu      sync.Mutex
+	objects map[string][]byte
+}
+
+// NewFakeBundleStore returns an empty in-memory store.
+func NewFakeBundleStore() *FakeBundleStore {
+	return &FakeBundleStore{objects: map[string][]byte{}}
+}
+
+// PutLarge drains r fully and records it under key — the in-memory analogue of
+// a multipart upload. A re-put overwrites, matching S3's last-write-wins.
+func (s *FakeBundleStore) PutLarge(_ context.Context, key string, r io.Reader) error {
+	b, err := io.ReadAll(r)
+	if err != nil {
+		return fmt.Errorf("cloud: fake bundle store read body for %s: %w", key, err)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.objects == nil {
+		s.objects = map[string][]byte{}
+	}
+	s.objects[key] = b
+	return nil
+}
+
+// Get returns a reader over the recorded bytes for key, or a not-found error so a
+// test can assert the missing-object path.
+func (s *FakeBundleStore) Get(_ context.Context, key string) (io.ReadCloser, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("cloud: fake bundle store: object %q not found", key)
+	}
+	return io.NopCloser(bytes.NewReader(b)), nil
+}
+
+// List returns every recorded object key under prefix, sorted for deterministic
+// assertions.
+func (s *FakeBundleStore) List(_ context.Context, prefix string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, 0)
+	for k := range s.objects {
+		if strings.HasPrefix(k, prefix) {
+			out = append(out, k)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// Delete removes key. Deleting an absent key is a no-op — S3 DELETE is
+// idempotent by contract, and the objstore adapter honours the same.
+func (s *FakeBundleStore) Delete(_ context.Context, key string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.objects, key)
+	return nil
+}
+
+var _ BundleStore = (*FakeBundleStore)(nil)
