@@ -106,6 +106,7 @@ defmodule Barkpark.StudioChat do
       status: s.status,
       summary: s.summary,
       message_count: s.message_count,
+      pending_approvals: s.pending_approvals,
       input_tokens: s.input_tokens,
       output_tokens: s.output_tokens,
       total_cost_usd: s.total_cost_usd,
@@ -279,7 +280,11 @@ defmodule Barkpark.StudioChat do
   # bump activity but never clobber the preview.
   @summary_roles ~w(user assistant)
   defp bump_on_append(session_id, %Message{source_markdown: md, role: role}, now) do
-    updates = [inc: [message_count: 1], set: [last_active_at: now, updated_at: now]]
+    # An appended approval row is an ask — always pending at creation — so it
+    # raises the denormalised pending counter. The −1 lands when it resolves
+    # (`update_approval_status/3`) or is force-canceled (`cancel_pending_approvals/1`).
+    inc = if role == "approval", do: [message_count: 1, pending_approvals: 1], else: [message_count: 1]
+    updates = [inc: inc, set: [last_active_at: now, updated_at: now]]
 
     updates =
       case role in @summary_roles && summary_preview(md) do
@@ -365,6 +370,109 @@ defmodule Barkpark.StudioChat do
       {:error, :not_found} -> :noop
       other -> other
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # approvals (charter D11/D14 — persisted lifecycle, denormalised pending count)
+  # ---------------------------------------------------------------------------
+
+  # An approval message carries its lifecycle in `metadata.approval_status`:
+  # "pending" → one of the terminal states below. The row's markdown/tool_name
+  # let the reopened terminal-state card render without a live subprocess.
+  @approval_terminal ~w(allowed denied canceled)
+
+  @doc """
+  Resolve ONE approval to a terminal state (`allowed | denied | canceled`),
+  addressed by its `request_id`. Updates the message row's
+  `metadata.approval_status` and, if the row was still `pending`, decrements the
+  session's denormalised `pending_approvals` (guarded ≥ 0) in the same
+  transaction.
+
+  Returns `{:ok, %Message{}}`, `{:error, :not_found}` (no such pending/known
+  approval), or `{:error, :bad_status}` for an unknown terminal state.
+  """
+  @spec update_approval_status(String.t(), String.t(), String.t()) ::
+          {:ok, Message.t()} | {:error, :not_found | :bad_status}
+  def update_approval_status(_session_id, _request_id, status)
+      when status not in @approval_terminal,
+      do: {:error, :bad_status}
+
+  def update_approval_status(session_id, request_id, status) do
+    Repo.transaction(fn ->
+      case find_approval(session_id, request_id) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Message{} = message ->
+          was_pending? = approval_pending?(message)
+          meta = Map.put(message.metadata || %{}, "approval_status", status)
+
+          {:ok, updated} =
+            message |> Ecto.Changeset.change(metadata: meta) |> Repo.update()
+
+          if was_pending?, do: dec_pending(session_id)
+          updated
+      end
+    end)
+    |> case do
+      {:ok, message} -> {:ok, message}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Force-cancel EVERY still-pending approval for a session — the shared teardown
+  path (a port crash / a reopen with no live control channel) can never deliver
+  a decision, so a dangling ask is `canceled`, honestly, not left hanging. Flips
+  each pending row's `metadata.approval_status` to `"canceled"` and zeroes the
+  session's `pending_approvals`. Returns the number of approvals canceled.
+  """
+  @spec cancel_pending_approvals(String.t()) :: non_neg_integer()
+  def cancel_pending_approvals(session_id) do
+    Repo.transaction(fn ->
+      pending =
+        Message
+        |> where([m], m.session_id == ^session_id and m.role == "approval")
+        |> where([m], fragment("?->>'approval_status' = 'pending'", m.metadata))
+        |> Repo.all()
+
+      Enum.each(pending, fn message ->
+        meta = Map.put(message.metadata || %{}, "approval_status", "canceled")
+        message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
+      end)
+
+      Session
+      |> where([s], s.id == ^session_id)
+      |> Repo.update_all(set: [pending_approvals: 0, updated_at: DateTime.utc_now()])
+
+      length(pending)
+    end)
+    |> case do
+      {:ok, count} -> count
+      _ -> 0
+    end
+  end
+
+  # The approval message for a request_id (unique per ask). Newest wins if a
+  # request_id were ever reused; never raises on 0/N rows.
+  defp find_approval(session_id, request_id) do
+    Message
+    |> where([m], m.session_id == ^session_id and m.role == "approval")
+    |> where([m], fragment("?->>'request_id' = ?", m.metadata, ^request_id))
+    |> order_by([m], desc: m.seq)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp approval_pending?(%Message{metadata: meta}),
+    do: Map.get(meta || %{}, "approval_status") == "pending"
+
+  # Guarded decrement — the counter never underflows if a resolve races a
+  # cancel-all that already zeroed it.
+  defp dec_pending(session_id) do
+    Session
+    |> where([s], s.id == ^session_id and s.pending_approvals > 0)
+    |> Repo.update_all(inc: [pending_approvals: -1], set: [updated_at: DateTime.utc_now()])
   end
 
   # ---------------------------------------------------------------------------

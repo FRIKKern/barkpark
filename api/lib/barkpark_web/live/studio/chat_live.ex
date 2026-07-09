@@ -438,22 +438,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_info({:claude_chat_permission, ask}, socket) do
     id = socket.assigns.next_id
+    text = ask.title || tool_line(ask.tool_name, ask.input)
 
     message = %{
       id: id,
       role: :approval,
-      text: ask.title || tool_line(ask.tool_name, ask.input),
+      text: text,
       html: nil,
       request_id: ask.request_id,
       tool_name: ask.tool_name,
       approval_status: :pending
     }
 
+    # Persist the ask as a "pending" approval row (D11) so it SURVIVES a crash
+    # or a tab close: on reopen the terminal-state card renders from the store.
+    # Appending bumps the session's `pending_approvals`, so `refresh_sessions`
+    # raises the "needs you" sidebar pill.
+    socket = persist_approval_ask(socket, ask, text)
+
     {:noreply,
-     assign(socket,
+     socket
+     |> assign(
        messages: socket.assigns.messages ++ [message],
        next_id: id + 1
-     )}
+     )
+     |> refresh_sessions()}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -669,7 +678,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 </form>
               <% else %>
                 <.link patch={"/studio/chat/#{s.id}"} class="bp-chat-session-link">
-                  <% {pill_class, pill_text} = session_pill(s.status) %>
+                  <% {pill_class, pill_text} = session_pill(s) %>
                   <div style="display: flex; align-items: center; gap: 6px; padding-right: 22px;">
                     <span class={"badge #{pill_class}"} style="height: 18px; padding: 0 7px; font-size: 10px;">
                       <%= pill_text %>
@@ -1130,6 +1139,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp load_stored_session(socket, session) do
     if pid = socket.assigns[:session], do: ClaudeChat.close(pid)
 
+    # Reopen has no live control channel, so any approval left "pending" is dead:
+    # persist the cancellation BEFORE replay so the store agrees with what the
+    # screen shows (canceled) and the sidebar pending pill drops (D11).
+    StudioChat.cancel_pending_approvals(session.id)
+
     messages = replay_messages(session.id)
 
     assign(socket,
@@ -1229,6 +1243,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           m -> m
         end)
 
+      # Persist the cancellation too (D21): the store row must not stay
+      # "pending" forever — a reopen would otherwise revive a dead card. Zeroes
+      # the denormalised pending count so the sidebar "needs you" pill drops.
+      if store_id = socket.assigns[:store_session_id],
+        do: StudioChat.cancel_pending_approvals(store_id)
+
       mark_session_exited(socket.assigns[:store_session_id])
 
       socket
@@ -1277,6 +1297,28 @@ defmodule BarkparkWeb.Studio.ChatLive do
       end
 
     refresh_sessions(socket)
+  end
+
+  # Persist an approval ask as a "pending" row. String metadata keys mirror the
+  # jsonb round-trip, so replay reads them back verbatim (request_id + tool_name
+  # rebuild the terminal-state card; approval_status carries the lifecycle).
+  defp persist_approval_ask(socket, ask, text) do
+    persist_store_logged(
+      socket,
+      %{
+        role: "approval",
+        source_markdown: text,
+        metadata: %{
+          "request_id" => ask.request_id,
+          "tool_name" => ask.tool_name,
+          "input" => ask.input,
+          "approval_status" => "pending"
+        }
+      },
+      "approval"
+    )
+
+    socket
   end
 
   defp persist_assistant_blocks(socket, blocks) do
@@ -1377,17 +1419,44 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp replay_messages(session_id) do
     session_id
     |> StudioChat.list_messages()
-    |> Enum.map(fn m ->
-      role = replay_role(m.role)
-
-      html =
-        if role == :assistant and is_binary(m.source_markdown) and
-             String.trim(m.source_markdown) != "",
-           do: render_paper_html(m.source_markdown)
-
-      %{id: m.seq, role: role, text: m.source_markdown, html: html}
-    end)
+    |> Enum.map(&replay_message/1)
   end
+
+  # An approval row rebuilds its card from metadata (request_id + tool_name +
+  # lifecycle). A dangling "pending" approval can NEVER be resolved on reopen —
+  # there is no live control channel — so it renders as the honest terminal
+  # state, canceled (the persisted flip is done separately in load_stored_session
+  # so the store agrees with the screen).
+  defp replay_message(%{role: "approval", seq: seq, source_markdown: md, metadata: meta}) do
+    meta = meta || %{}
+
+    %{
+      id: seq,
+      role: :approval,
+      text: md,
+      html: nil,
+      request_id: Map.get(meta, "request_id"),
+      tool_name: Map.get(meta, "tool_name"),
+      approval_status: replay_approval_status(Map.get(meta, "approval_status"))
+    }
+  end
+
+  defp replay_message(m) do
+    role = replay_role(m.role)
+
+    html =
+      if role == :assistant and is_binary(m.source_markdown) and
+           String.trim(m.source_markdown) != "",
+         do: render_paper_html(m.source_markdown)
+
+    %{id: m.seq, role: role, text: m.source_markdown, html: html}
+  end
+
+  defp replay_approval_status("allowed"), do: :allowed
+  defp replay_approval_status("denied"), do: :denied
+  # pending (dangling) OR an unknown value → canceled: an unresolvable ask is
+  # never shown as a live card on reopen.
+  defp replay_approval_status(_), do: :canceled
 
   # A stored role must never make a session unopenable: map the known roles and
   # degrade anything else (a future wave's vocabulary) to a system line.
@@ -1430,7 +1499,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           m -> m
         end)
 
-      assign(socket, messages: messages)
+      # Persist the decision (D11) and drop the pending count so the sidebar
+      # "needs you" pill clears on the next sidebar refresh.
+      if store_id = socket.assigns[:store_session_id],
+        do: StudioChat.update_approval_status(store_id, request_id, Atom.to_string(status))
+
+      socket |> assign(messages: messages) |> refresh_sessions()
     else
       socket
     end
@@ -1609,12 +1683,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # ── sidebar helpers ─────────────────────────────────────────────────────
 
-  # Store status → tokenized pill. Priority read is Working > idle(active) >
-  # offline(exited); PendingApproval elevation is live-only (approval state is
-  # per-mount, not persisted this wave) and is an S4 follow-up.
-  defp session_pill("working"), do: {"badge-chat-working", "working"}
-  defp session_pill("exited"), do: {"badge-chat-offline", "offline"}
-  defp session_pill(_), do: {"badge-chat-idle", "idle"}
+  # Session → tokenized pill. Precedence (charter D14): PendingApproval > Working
+  # > Exited > Idle. A session with a persisted pending approval outranks every
+  # status — it is the one row that needs the admin RIGHT NOW, so it wears the
+  # warn-toned "needs you" pill even mid-turn.
+  defp session_pill(%{pending_approvals: n}) when is_integer(n) and n > 0,
+    do: {"badge-chat-approval", "needs you"}
+
+  defp session_pill(%{status: status}), do: session_pill_by_status(status)
+
+  defp session_pill_by_status("working"), do: {"badge-chat-working", "working"}
+  defp session_pill_by_status("exited"), do: {"badge-chat-offline", "offline"}
+  defp session_pill_by_status(_), do: {"badge-chat-idle", "idle"}
 
   # The active row wears the evergreen accent; the rest are transparent (hover
   # tint lives in the render <style>). All colours are emitted tokens.
