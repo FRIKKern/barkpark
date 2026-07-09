@@ -308,10 +308,23 @@ defmodule Barkpark.StudioChatTest do
 
     test "an invalid mode is rejected (validate_inclusion)" do
       s = new_session(%{mode: "plan"})
-      assert {:error, changeset} = StudioChat.set_mode(s.id, "bypassPermissions")
+      # A genuinely-invalid string — bypassPermissions is now a LEGAL persisted
+      # mode (the armed ceremony writes it), so it can no longer stand in for the
+      # invalid example (charter D48).
+      assert {:error, changeset} = StudioChat.set_mode(s.id, "wideOpen")
       assert %{mode: _} = errors_on(changeset)
       # the row is untouched
       assert StudioChat.get_session(s.id).mode == "plan"
+    end
+
+    test "bypassPermissions IS a legal persisted mode (armed-ceremony write)" do
+      s = new_session(%{mode: "plan"})
+      # The store validates inclusion so the armed ceremony can persist bypass;
+      # the FAIL-CLOSED guard is upstream (ClaudeChat.normalize_mode never yields
+      # it), not here.
+      assert {:ok, switched} = StudioChat.set_mode(s.id, "bypassPermissions")
+      assert switched.mode == "bypassPermissions"
+      assert StudioChat.bypass_armed?(s.id)
     end
 
     test "set_mode on a missing session is honest" do
@@ -806,6 +819,68 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  # Charter D49 — the plan-paper stamp seam. A request_id-keyed metadata merge
+  # onto a needs-you (plan) row, distinct from update_approval_status (which
+  # writes ONLY approval_status) and merge_tool_metadata (keyed on tool_use_id,
+  # which plan rows lack). The publishing Task stamps {paper_id, paper_url} here
+  # so a reopened plan card links to its Paper forever.
+  describe "merge_approval_metadata/3 (D49)" do
+    defp plan_ask(session, request_id) do
+      {:ok, m} =
+        StudioChat.append_message(session, %{
+          role: "plan",
+          source_markdown: "# The plan\n\nDo it.",
+          metadata: %{
+            "request_id" => request_id,
+            "tool_name" => "ExitPlanMode",
+            "input" => %{"plan" => "# The plan\n\nDo it."},
+            "approval_status" => "allowed"
+          }
+        })
+
+      m
+    end
+
+    test "merges the patch WITHOUT clobbering the row's existing metadata keys" do
+      s = new_session()
+      plan_ask(s, "p-1")
+
+      assert {:ok, m} =
+               StudioChat.merge_approval_metadata(s.id, "p-1", %{
+                 "paper_id" => "chat-plan-abc",
+                 "paper_url" => "/papers/chat-plan-abc"
+               })
+
+      # the new keys landed…
+      assert m.metadata["paper_id"] == "chat-plan-abc"
+      assert m.metadata["paper_url"] == "/papers/chat-plan-abc"
+      # …and every pre-existing key is preserved (request_id, tool_name, input,
+      # approval_status all survive the merge)
+      assert m.metadata["request_id"] == "p-1"
+      assert m.metadata["tool_name"] == "ExitPlanMode"
+      assert m.metadata["approval_status"] == "allowed"
+      assert m.metadata["input"] == %{"plan" => "# The plan\n\nDo it."}
+    end
+
+    test "a later merge overwrites only its own keys, keeping earlier stamps" do
+      s = new_session()
+      plan_ask(s, "p-2")
+
+      {:ok, _} = StudioChat.merge_approval_metadata(s.id, "p-2", %{"paper_id" => "chat-plan-1"})
+
+      {:ok, m} =
+        StudioChat.merge_approval_metadata(s.id, "p-2", %{"paper_url" => "/papers/chat-plan-1"})
+
+      assert m.metadata["paper_id"] == "chat-plan-1"
+      assert m.metadata["paper_url"] == "/papers/chat-plan-1"
+    end
+
+    test "an unmatched request_id is a clean :noop, never a raise" do
+      s = new_session()
+      assert :noop == StudioChat.merge_approval_metadata(s.id, "nope", %{"paper_id" => "x"})
+    end
+  end
+
   describe "set_draft/2 — sticky composer draft (charter D36c)" do
     test "persists and restores a draft on the FULL struct" do
       s = new_session()
@@ -874,6 +949,66 @@ defmodule Barkpark.StudioChatTest do
     end
   end
 
+  describe "effort_choice — the exact mirror of model_choice (charter D48)" do
+    test "set_effort_choice persists the tier and is read back on reopen" do
+      s = new_session()
+      {:ok, updated} = StudioChat.set_effort_choice(s.id, "high")
+      assert updated.effort_choice == "high"
+      assert StudioChat.get_session(s.id).effort_choice == "high"
+    end
+
+    test "set_effort_choice on a missing session is honest" do
+      assert {:error, :not_found} = StudioChat.set_effort_choice(Ecto.UUID.generate(), "high")
+    end
+
+    test "recent_effort_choice returns the most-recently-active NON-default tier" do
+      older = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(older.id, "low")
+      newer = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(newer.id, "xhigh")
+
+      assert StudioChat.recent_effort_choice() == "xhigh"
+    end
+
+    test "recent_effort_choice ignores nil and literal \"default\"" do
+      a = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(a.id, "medium")
+      b = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(b.id, "default")
+
+      assert StudioChat.recent_effort_choice() == "medium"
+    end
+
+    test "nil when no session ever picked an effort tier" do
+      _ = new_session()
+      assert StudioChat.recent_effort_choice() == nil
+    end
+
+    test "list_sessions never selects effort_choice (dedicated-query law)" do
+      s = new_session()
+      {:ok, _} = StudioChat.set_effort_choice(s.id, "high")
+      # The sidebar select omits :effort_choice — a listed row reads the struct
+      # default (nil), which is exactly why recent_effort_choice/0 is dedicated.
+      listed = Enum.find(StudioChat.list_sessions(), &(&1.id == s.id))
+      assert listed.effort_choice == nil
+    end
+  end
+
+  describe "bypass_armed?/1 — persisted-mode gate (charter D48)" do
+    test "true only when the PERSISTED mode is bypassPermissions" do
+      s = new_session(%{mode: "plan"})
+      refute StudioChat.bypass_armed?(s.id)
+
+      {:ok, _} = StudioChat.set_mode(s.id, "bypassPermissions")
+      assert StudioChat.bypass_armed?(s.id)
+    end
+
+    test "false (fail-closed) for a missing session" do
+      refute StudioChat.bypass_armed?(Ecto.UUID.generate())
+      refute StudioChat.bypass_armed?(nil)
+    end
+  end
+
   describe "schema wiring" do
     test "known statuses, title sources, and modes are enumerable" do
       assert "working" in Session.statuses()
@@ -889,6 +1024,132 @@ defmodule Barkpark.StudioChatTest do
       loaded = StudioChat.get_session_with_messages(s.id)
       assert Enum.map(loaded.messages, & &1.role) == ["user", "assistant"]
       assert %Message{} = hd(loaded.messages)
+    end
+  end
+
+  describe "agents rail: signature + pure folds (charter D47)" do
+    test "set_rail_snapshot round-trips the jsonb column and get_session carries it" do
+      s = new_session()
+      rail = %{"t" => %{"row" => %{"description" => "run"}, "status" => "running"}}
+      {:ok, _} = StudioChat.set_rail_snapshot(s.id, rail)
+      assert StudioChat.get_session(s.id).rail_snapshot == rail
+    end
+
+    test "rail_signature ignores token/usage churn but reflects structure + state" do
+      base = %{
+        "t" => %{
+          "row" => %{"task_type" => "local_workflow", "description" => "run"},
+          "status" => "running",
+          "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 10}]
+        }
+      }
+
+      # only tokens + usage advanced ⇒ SAME signature (change-only guard)
+      token_tick =
+        put_in(base, ["t", "workflow"], [
+          %{"type" => "workflow_agent", "label" => "explorer", "state" => "running", "tokens" => 9_000}
+        ])
+        |> put_in(["t", "usage"], %{"total_tokens" => 9_000})
+
+      assert StudioChat.rail_signature(base) == StudioChat.rail_signature(token_tick)
+
+      # a STATE flip ⇒ different signature
+      state_flip = put_in(base, ["t", "status"], "completed")
+      refute StudioChat.rail_signature(base) == StudioChat.rail_signature(state_flip)
+
+      # a NEW row ⇒ different signature
+      row_added = Map.put(base, "u", %{"row" => %{"description" => "another"}, "status" => "running"})
+      refute StudioChat.rail_signature(base) == StudioChat.rail_signature(row_added)
+    end
+
+    test "rail_apply_background upserts live rows and completes the vanished" do
+      rail =
+        StudioChat.rail_apply_background(%{}, %{
+          "tasks" => [
+            %{"task_id" => "a", "task_type" => "local_workflow", "description" => "one"},
+            %{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}
+          ]
+        })
+
+      assert rail["a"]["status"] == "running"
+      assert rail["b"]["status"] == "running"
+
+      # "a" drops from the snapshot ⇒ completed; entries are never deleted
+      rail2 =
+        StudioChat.rail_apply_background(rail, %{
+          "tasks" => [%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}]
+        })
+
+      assert rail2["a"]["status"] == "completed"
+      assert rail2["b"]["status"] == "running"
+    end
+
+    test "rail_apply_background never resurrects an interrupted entry" do
+      rail = %{"a" => %{"status" => "interrupted", "seq" => 1, "row" => %{"description" => "x"}}}
+      # "a" is absent from the new snapshot — it stays interrupted, not completed
+      out = StudioChat.rail_apply_background(rail, %{"tasks" => []})
+      assert out["a"]["status"] == "interrupted"
+    end
+
+    test "rail_capture_progress only touches the rail with a tree or existing entry" do
+      # bare heartbeat for an unknown task ⇒ no noise
+      assert StudioChat.rail_capture_progress(%{}, %{"task_id" => "ghost"}) == %{}
+
+      rail =
+        StudioChat.rail_capture_progress(%{}, %{
+          "task_id" => "t",
+          "workflow_progress" => [%{"type" => "workflow_phase", "title" => "Plan"}],
+          "usage" => %{"total_tokens" => 5}
+        })
+
+      assert rail["t"]["workflow"] == [%{"type" => "workflow_phase", "title" => "Plan"}]
+      assert rail["t"]["usage"]["total_tokens"] == 5
+    end
+
+    test "rail_stamp_status only stamps a task that already has an entry" do
+      assert StudioChat.rail_stamp_status(%{}, "ghost", "completed") == %{}
+
+      rail = %{"t" => %{"status" => "running", "row" => %{"description" => "x"}}}
+      out = StudioChat.rail_stamp_status(rail, "t", "completed")
+      assert out["t"]["status"] == "completed"
+      assert out["t"]["row"]["description"] == "x"
+    end
+
+    test "the rail caps at 20, pruning oldest-terminal first and never a runner" do
+      # 21 terminal entries + 1 running; the running one must survive the cap
+      tasks =
+        for i <- 1..21 do
+          %{"task_id" => "done-#{i}", "task_type" => "local_workflow", "description" => "d#{i}"}
+        end
+
+      # seed all as running, then drain all but keep one running
+      rail = StudioChat.rail_apply_background(%{}, %{"tasks" => tasks})
+      rail = StudioChat.rail_stamp_status(rail, "done-1", "running")
+
+      # everything vanishes except done-1 ⇒ 20 complete, done-1 stays running
+      rail =
+        StudioChat.rail_apply_background(rail, %{
+          "tasks" => [%{"task_id" => "done-1", "task_type" => "local_workflow", "description" => "d1"}]
+        })
+
+      assert map_size(rail) <= 20
+      assert rail["done-1"]["status"] == "running"
+    end
+
+    test "interrupt_running_tasks/1 flips running rail entries to interrupted, sparing the rest" do
+      s = new_session()
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "live" => %{"status" => "running", "row" => %{"description" => "a"}},
+          "done" => %{"status" => "completed", "row" => %{"description" => "b"}}
+        })
+
+      StudioChat.interrupt_running_tasks(s.id)
+
+      rail = StudioChat.get_session(s.id).rail_snapshot
+      assert rail["live"]["status"] == "interrupted"
+      assert rail["done"]["status"] == "completed"
     end
   end
 end

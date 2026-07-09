@@ -17,7 +17,9 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
+  alias Barkpark.Content
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.PlanPapers
   alias BarkparkWeb.Studio.ClaudeChat
 
   @admin_token "chat-admin-test-token"
@@ -1227,10 +1229,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       pid_before = session_pid(view)
       refute pid_before == nil
 
-      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
       # the mode change is recorded honestly with the friendly label…
-      assert html =~ "Permission mode → ask to act"
-      assert html =~ "ask to act"
+      assert html =~ "Permission mode → accept edits"
+      assert html =~ "accept edits"
       # …and the session is steered in place, never respawned or torn down —
       # the old context-destroying respawn path is gone (charter D12).
       refute html =~ "New session started"
@@ -1239,18 +1241,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
 
     test "mode change with no live session just updates the selector", %{view: view} do
-      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      html = render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
       refute html =~ "New session started"
-      assert html =~ "ask to act"
+      assert html =~ "accept edits"
       assert session_pid(view) == nil
     end
 
-    test "mode selector clamps junk to plan (no-op when already plan)", %{view: view} do
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+    # Picking bypassPermissions NEVER persists on the select alone (charter D48
+    # fail-closed law) — it opens the loud type-to-confirm arm panel and leaves
+    # the mode untouched.
+    test "picking bypass opens the arm panel and never steers on the select alone",
+         %{view: view} do
+      html =
+        render_change(element(view, ~s(form[phx-change=set-mode])), %{
+          "mode" => "bypassPermissions"
+        })
 
-      html = render(view)
+      # the arm ceremony opened, but no mode change was announced or persisted
+      assert html =~ "Type"
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
       refute html =~ "Permission mode → bypass"
-      assert html =~ "plan (read-only)"
+      assert lv_assigns(view)[:mode] == "plan"
     end
 
     # ── honest turn outcomes (scc-w1-honest-turns) ───────────────────────
@@ -1468,18 +1479,18 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "a confirmed mode echo keeps the switch and posts no revert line", %{view: view} do
       spawn_silent_session(view)
 
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
       rid = pending_mode_req(view)
       # the CLI echoes back exactly the mode we asked for → confirmed
-      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "default"}})
+      send(view.pid, {:claude_chat_control, :set_mode, rid, %{"mode" => "acceptEdits"}})
 
       html = render(view)
-      assert html =~ "ask to act"
+      assert html =~ "accept edits"
       refute html =~ "Couldn't switch permission mode"
       # confirmed = persisted: the store's mode is the ACKED value (D23), and the
       # pending marker is cleared.
       assert lv_assigns(view)[:pending_mode] == nil
-      assert StudioChat.get_session(store_id(view)).mode == "default"
+      assert StudioChat.get_session(store_id(view)).mode == "acceptEdits"
     end
 
     test "an empty mode echo reverts the optimistic selector + posts an honest line",
@@ -1490,7 +1501,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       html =
         render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
 
-      assert html =~ "auto-accept edits"
+      assert html =~ "accept edits"
       rid = pending_mode_req(view)
 
       # …but the CLI's ack carries an EMPTY response (the silent-no-op trap, D12):
@@ -1520,28 +1531,28 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
          %{view: view} do
       spawn_silent_session(view)
 
-      # rapid double switch: acceptEdits (req A) then default (req B) before any ack
+      # rapid double switch: acceptEdits (req A) then auto (req B) before any ack
       render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "acceptEdits"})
       rid_a = pending_mode_req(view)
-      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "default"})
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "auto"})
       rid_b = pending_mode_req(view)
       refute rid_a == rid_b
 
       # req A's ack lands LATE echoing acceptEdits. Value-matching (the wave-2 bug)
-      # would see echo "acceptEdits" != current "default" and MIS-REVERT. By
-      # request_id it is stale (B superseded it) → ignored, mode stays default.
+      # would see echo "acceptEdits" != current "auto" and MIS-REVERT. By
+      # request_id it is stale (B superseded it) → ignored, mode stays auto.
       send(view.pid, {:claude_chat_control, :set_mode, rid_a, %{"mode" => "acceptEdits"}})
       html = render(view)
-      assert html =~ "ask to act"
+      assert html =~ "auto-run"
       refute html =~ "Couldn't switch permission mode"
 
-      # req B's ack then confirms default honestly.
-      send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "default"}})
+      # req B's ack then confirms auto honestly.
+      send(view.pid, {:claude_chat_control, :set_mode, rid_b, %{"mode" => "auto"}})
       html = render(view)
-      assert html =~ "ask to act"
+      assert html =~ "auto-run"
       refute html =~ "Couldn't switch permission mode"
       assert lv_assigns(view)[:pending_mode] == nil
-      assert StudioChat.get_session(store_id(view)).mode == "default"
+      assert StudioChat.get_session(store_id(view)).mode == "auto"
     end
 
     # ── compaction is visible, not a silent ring reset (scc-w3, D27) ──────────
@@ -2433,8 +2444,10 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       )
 
       html = render(view)
-      # the selector adopts the observed mode…
-      assert html =~ "ask to act"
+      # the selector adopts the observed mode — the CLI's real post-plan mode is
+      # `default`, which now surfaces as the "ask (legacy)" option (charter D48:
+      # observe reflects CLI reality; a persisted default still spawns verbatim).
+      assert html =~ "ask (legacy)"
       assert lv_assigns(view).mode == "default"
       # …and it is PERSISTED, so a reopen and the next --resume carry it
       assert StudioChat.get_session(sid).mode == "default"
@@ -2488,6 +2501,165 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert html =~ "Half-made plan"
       refute has_element?(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-hang]))
       refute has_element?(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-hang]))
+    end
+  end
+
+  describe "plans as papers (charter D49)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view, conn: conn}
+    end
+
+    # reuses the module-level plan_ask/2 helper from the proposed-plan describe
+    @d49_plan_md "# Ship the migration\n\nSteps:\n\n1. Inventory\n2. Port\n3. Delete the shim"
+
+    test "approving a plan publishes a real published Paper and the card links to it",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      send(view.pid, plan_ask("plan-pub", @d49_plan_md))
+      render(view)
+
+      # the approve is synchronous — the card flips immediately, never waiting on
+      # the async projection
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-pub])))
+
+      assert html =~ "✓ plan approved"
+
+      slug = PlanPapers.slug_for(sid, "plan-pub")
+
+      # the fire-and-forget Task publishes a real, PUBLISHED paper at the
+      # deterministic slug (shared-mode sandbox lets the Task reach the DB)
+      await(fn ->
+        case Content.get_paper(slug, "production") do
+          %{status: "published", type: "paper"} -> true
+          _ -> false
+        end
+      end)
+
+      # …and the {:plan_paper} broadcast converges back onto this tab: the plan
+      # card grows its "→ published as Paper" link pointing at /papers/:slug
+      await(fn -> render(view) =~ "published as Paper" end)
+      assert render(view) =~ ~s(href="/papers/#{slug}")
+    end
+
+    test "the {:plan_paper} broadcast stamps the link on a co-viewing tab (converge)",
+         %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-conv", @d49_plan_md))
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-conv])))
+
+      assert html =~ "✓ plan approved"
+
+      # a co-viewing tab (or this one) receives the projection outcome over the
+      # session topic — the handler stamps the row deterministically, no async
+      send(
+        view.pid,
+        {:plan_paper, "plan-conv",
+         %{paper_id: "chat-plan-xyz", paper_url: "/papers/chat-plan-xyz"}}
+      )
+
+      html = render(view)
+      assert html =~ "published as Paper"
+      assert html =~ ~s(href="/papers/chat-plan-xyz")
+    end
+
+    test "keep planning creates NO paper — a rejected plan stays chat ephemera",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+      send(view.pid, plan_ask("plan-keep2", @d49_plan_md))
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-keep][phx-value-rid=plan-keep2])))
+
+      assert html =~ "✗ kept planning"
+
+      # give any (wrongly-scheduled) async work a chance to land, then prove none did
+      Process.sleep(60)
+      assert Content.get_paper(PlanPapers.slug_for(sid, "plan-keep2"), "production") == nil
+      refute render(view) =~ "published as Paper"
+    end
+
+    test "an ordinary tool approval creates NO paper (only :plan projects)",
+         %{view: view} do
+      spawn_silent_session(view)
+      sid = store_id(view)
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "appr-1",
+           tool_name: "Write",
+           input: %{"file_path" => "/opt/x"},
+           title: "Claude wants to write /opt/x",
+           decision_reason: nil
+         }}
+      )
+
+      render(view)
+      render_click(element(view, ~s(button[phx-click=approve][phx-value-rid=appr-1])))
+
+      Process.sleep(60)
+      assert Content.get_paper(PlanPapers.slug_for(sid, "appr-1"), "production") == nil
+      refute render(view) =~ "published as Paper"
+    end
+
+    test "a publish failure renders an honest system line and leaves the plan approved",
+         %{view: view} do
+      spawn_silent_session(view)
+      send(view.pid, plan_ask("plan-fail", @d49_plan_md))
+      render(view)
+
+      html =
+        render_click(element(view, ~s(button[phx-click=plan-approve][phx-value-rid=plan-fail])))
+
+      # the approve already succeeded on the wire — the card is approved
+      assert html =~ "✓ plan approved"
+
+      # the projection failed; the failure is honest, not silent, and never a lie
+      send(view.pid, {:plan_paper_failed, "plan-fail"})
+      html = render(view)
+      assert html =~ "Couldn&#39;t publish the approved plan as a Paper"
+      # the plan STAYS approved — no link, but the approval is untouched
+      assert html =~ "✓ plan approved"
+      refute html =~ "published as Paper"
+    end
+
+    test "the Paper link survives reopen — replayed from persisted metadata",
+         %{conn: conn} do
+      id = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: id, cwd: "/tmp", mode: "plan"})
+      {:ok, _} = StudioChat.append_message(id, %{role: "user", source_markdown: "make a plan"})
+
+      {:ok, _} =
+        StudioChat.append_message(id, %{
+          role: "plan",
+          source_markdown: "# Reopened plan\n\nStep one.",
+          metadata: %{
+            "request_id" => "plan-replay",
+            "tool_name" => "ExitPlanMode",
+            "input" => %{"plan" => "# Reopened plan\n\nStep one."},
+            "approval_status" => "allowed",
+            "paper_id" => "chat-plan-reopen",
+            "paper_url" => "/papers/chat-plan-reopen"
+          }
+        })
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{id}")
+
+      assert html =~ "✓ plan approved"
+      assert html =~ "Reopened plan"
+      # the link is threaded from persisted metadata — durable across reopen
+      assert html =~ "published as Paper"
+      assert html =~ ~s(href="/papers/chat-plan-reopen")
     end
   end
 
@@ -3241,6 +3413,167 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
+  describe "agents rail — mission control below the composer (charter D47)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    defp bg_changed(tasks),
+      do:
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed", "tasks" => tasks}}
+
+    defp wf_progress(task_id, workflow, usage),
+      do:
+        {:claude_chat_event,
+         %{
+           "type" => "system",
+           "subtype" => "task_progress",
+           "task_id" => task_id,
+           "workflow_progress" => workflow,
+           "usage" => usage
+         }}
+
+    test "background_tasks_changed renders a live rail row below the composer",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "t", "task_type" => "local_workflow", "description" => "Build the rail"}
+        ])
+      )
+
+      html = render(view)
+      assert html =~ ~s(data-role="agents-rail")
+      assert html =~ ~s(data-rail-task="t")
+      assert html =~ ~s(data-rail-status="running")
+      assert html =~ "Build the rail"
+    end
+
+    test "a workflow row expands into its phase→agent tree with model + token counts",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [
+            %{"type" => "workflow_phase", "title" => "Explore"},
+            %{"type" => "workflow_agent", "label" => "explorer", "model" => "fable", "state" => "running", "tokens" => 128}
+          ],
+          %{"total_tokens" => 128}
+        )
+      )
+
+      # collapsed by default → the phase→agent tree is hidden
+      refute render(view) =~ "explorer"
+
+      render_click(element(view, ~s([phx-click="rail-toggle"][phx-value-id="t"])))
+      html = render(view)
+      assert html =~ "Explore"
+      assert html =~ "explorer"
+      assert html =~ "fable"
+      assert html =~ "128 tok"
+    end
+
+    test "a token-only workflow tick does NOT re-render the rail; a state flip does",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "t", "task_type" => "local_workflow", "description" => "wf"}])
+      )
+
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 10}],
+          %{"total_tokens" => 10}
+        )
+      )
+
+      sig1 = lv_assigns(view)[:rail_sig]
+
+      # identical structure, only tokens advanced ⇒ value-equality no-op
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "running", "tokens" => 9_999}],
+          %{"total_tokens" => 9_999}
+        )
+      )
+
+      assert lv_assigns(view)[:rail_sig] == sig1
+
+      # a state flip is structural ⇒ the signature (and render) changes
+      send_frame(
+        sid,
+        wf_progress(
+          "t",
+          [%{"type" => "workflow_agent", "label" => "a", "state" => "completed", "tokens" => 9_999}],
+          %{}
+        )
+      )
+
+      refute lv_assigns(view)[:rail_sig] == sig1
+    end
+
+    test "a vanished task flips its rail row to done, keeping the entry",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        bg_changed([
+          %{"task_id" => "a", "task_type" => "local_workflow", "description" => "one"},
+          %{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}
+        ])
+      )
+
+      send_frame(
+        sid,
+        bg_changed([%{"task_id" => "b", "task_type" => "local_workflow", "description" => "two"}])
+      )
+
+      html = render(view)
+      # "a" is gone from the wire but its row survives as done
+      assert html =~ ~s(data-rail-task="a")
+      assert lv_assigns(view)[:rail]["a"]["status"] == "completed"
+    end
+
+    test "replay hydrates the rail; a reopened interrupted entry shows no running row",
+         %{conn: conn} do
+      {:ok, s} = StudioChat.create_session(%{id: Ecto.UUID.generate(), mode: "plan"})
+
+      {:ok, _} =
+        StudioChat.set_rail_snapshot(s.id, %{
+          "t" => %{
+            "row" => %{"task_type" => "local_workflow", "description" => "was running"},
+            "status" => "interrupted",
+            "seq" => 1,
+            "workflow" => [%{"type" => "workflow_agent", "label" => "explorer", "state" => "running"}]
+          }
+        })
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{s.id}")
+      html = render(view)
+
+      assert html =~ ~s(data-rail-task="t")
+      assert html =~ ~s(data-rail-status="interrupted")
+      assert html =~ "interrupted"
+      assert html =~ "was running"
+      # the honest last-known rail: NOTHING renders as a live running row
+      refute html =~ ~s(data-rail-status="running")
+    end
+  end
+
   describe "model picker (wave 5)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -3289,6 +3622,127 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       render_patch(view, "/studio/chat/#{sid}")
       html = render(view)
       assert html =~ ~s(value="sonnet" selected)
+    end
+  end
+
+  describe "effort picker (wave 9, charter D48)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view}
+    end
+
+    test "the picker renders every tier composed with the model (Fable · high)",
+         %{view: view} do
+      html = render(view)
+      assert html =~ "effort: default"
+      # every allowlisted tier is offered
+      for e <- ~w(low medium high xhigh max), do: assert(html =~ ~s(value="#{e}"))
+      # composed as one group with the model select (the dim "·" separator)
+      assert html =~ "·"
+    end
+
+    test "picking a tier persists it and confirms honestly", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+
+      html = render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "high"})
+
+      # mid-session (a live session is up) → the honest next-resume line
+      assert html =~ "Effort → high (applies from the next resume)."
+      assert StudioChat.get_session(sid).effort_choice == "high"
+    end
+
+    test "an unknown tier fail-closes to the CLI default", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+
+      html = render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "ludicrous"})
+
+      assert html =~ "Effort → the CLI default"
+      assert StudioChat.get_session(sid).effort_choice == nil
+    end
+
+    test "a stored tier reloads with the session", %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hello"})
+      sid = store_id(view)
+      render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "max"})
+
+      render_patch(view, "/studio/chat")
+      render_patch(view, "/studio/chat/#{sid}")
+      assert render(view) =~ ~s(value="max" selected)
+    end
+  end
+
+  describe "bypass arm ceremony UI (wave 9, charter D48)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      {:ok, view: view}
+    end
+
+    test "the arm panel is hidden until bypass is picked", %{view: view} do
+      refute has_element?(view, ~s(button[phx-click=arm-bypass]))
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+    end
+
+    test "the Arm button is disabled until the exact word is typed", %{view: view} do
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      assert has_element?(view, ~s(button[phx-click=arm-bypass][disabled]))
+
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      refute has_element?(view, ~s(button[phx-click=arm-bypass][disabled]))
+    end
+
+    test "arming persists bypass and posts the honest, non-live line (no set_mode steer)",
+         %{view: view} do
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hi"})
+      send(view.pid, {:claude_chat_event, %{"type" => "result", "subtype" => "success"}})
+      sid = store_id(view)
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      html = render_click(element(view, ~s(button[phx-click=arm-bypass])))
+
+      # persisted on the row (the only road to a persisted bypass)
+      assert StudioChat.get_session(sid).mode == "bypassPermissions"
+      # honest: it does NOT steer the running turn, it arms the next resume
+      assert html =~ "ARMED"
+      assert html =~ "next resume"
+      # NEVER a pending set_mode steer for bypass (unlike the other five modes)
+      assert lv_assigns(view)[:pending_mode] == nil
+    end
+
+    test "cancel closes the panel and never arms", %{view: view} do
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+
+      render_click(element(view, ~s(button[phx-click=cancel-arm-bypass])))
+      refute has_element?(view, ~s(button[phx-click=arm-bypass]))
+      assert lv_assigns(view)[:mode] == "plan"
+    end
+
+    # Enter in the confirm input must ARM (phx-submit), never fall through to a
+    # native form submit that navigates the LiveView away — and the submit path
+    # rides the SAME server-side exact-word guard as the button.
+    test "Enter in the confirm input arms via phx-submit, word-guarded", %{view: view} do
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+
+      # wrong word: submit never arms, panel stays open for another try
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "nope"})
+      render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "nope"})
+      assert lv_assigns(view)[:mode] == "plan"
+      assert has_element?(view, ~s(button[phx-click=arm-bypass]))
+
+      # exact word: Enter arms without touching the button
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      html = render_submit(element(view, ~s(form[phx-submit=arm-bypass])), %{"confirm" => "bypass"})
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+      assert html =~ "ARMED"
     end
   end
 
@@ -3552,6 +4006,85 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       assert argv =~ sid
       refute argv =~ "--resume"
     end
+
+    # ── effort rides the spawn end-to-end (charter D48) ──────────────────────
+
+    test "a chosen effort rides the FRESH spawn as --effort", %{conn: conn, marker: marker} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_change(element(view, ~s(form[phx-change=set-effort])), %{"effort" => "high"})
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "brand new"})
+
+      argv = read_marker(marker)
+      assert argv =~ "--effort"
+      assert argv =~ "high"
+    end
+
+    test "effort persists and rides the RESUME spawn too", %{conn: conn, marker: marker} do
+      sid = seed_session_with_history()
+      {:ok, _} = StudioChat.set_effort_choice(sid, "xhigh")
+
+      {:ok, view, _html} = live(conn, "/studio/chat/#{sid}")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "continue"})
+
+      argv = read_marker(marker)
+      assert argv =~ "--resume"
+      assert argv =~ "--effort"
+      assert argv =~ "xhigh"
+    end
+
+    # ── bypass arming end-to-end (charter D48 — the ceremony IS the only road) ─
+
+    test "an ARMED bypass spawns with both the mode and the danger flag",
+         %{conn: conn, marker: marker} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      # pick bypass → opens the arm panel (mode still plan, nothing persisted)
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      assert lv_assigns(view)[:mode] == "plan"
+
+      # type the confirm word, then arm
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "bypass"})
+      render_click(element(view, ~s(button[phx-click=arm-bypass])))
+      assert lv_assigns(view)[:mode] == "bypassPermissions"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go wild"})
+
+      argv = read_marker(marker)
+      assert argv =~ "bypassPermissions"
+      assert argv =~ "--allow-dangerously-skip-permissions"
+    end
+
+    test "a bypass pick WITHOUT arming spawns fail-closed (plan, no danger flag)",
+         %{conn: conn, marker: marker} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      # pick bypass but NEVER complete the ceremony
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "no arming"})
+
+      argv = read_marker(marker)
+      assert argv =~ "--permission-mode"
+      assert argv =~ "plan"
+      refute argv =~ "bypassPermissions"
+      refute argv =~ "--allow-dangerously-skip-permissions"
+    end
+
+    test "typing the wrong confirm word never arms (Arm is a no-op)",
+         %{conn: conn, marker: marker} do
+      {:ok, view, _html} = live(conn, "/studio/chat")
+
+      render_change(element(view, ~s(form[phx-change=set-mode])), %{"mode" => "bypassPermissions"})
+      render_change(element(view, ~s(form[phx-change=bypass-confirm])), %{"confirm" => "yes"})
+      # the button is disabled client-side; a FORGED event by name still hits the
+      # server guard, which refuses to arm on the wrong word (defense in depth).
+      render_click(view, "arm-bypass", %{})
+      assert lv_assigns(view)[:mode] == "plan"
+
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "still safe"})
+      argv = read_marker(marker)
+      refute argv =~ "--allow-dangerously-skip-permissions"
+    end
   end
 
   # ── send is instant and never loses your words (optimistic echo, D24) ──────
@@ -3679,24 +4212,27 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert html =~ ~s(id="chat-slash-menu")
       assert html =~ ~s(role="combobox")
-      # The three control builtins are the hard floor, always offered.
+      # The two control builtins are the hard floor (charter D48 retired /default).
       assert html =~ "/plan"
-      assert html =~ "/default"
       assert html =~ "/model"
     end
 
-    test "a /default slash submit switches permission mode WITHOUT sending a turn",
+    test "the retired /default builtin is gone from the floor", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/studio/chat")
+      refute html =~ "/default"
+    end
+
+    test "a /default submit is NO LONGER a builtin — it rides as user text (D48)",
          %{conn: conn} do
       {:ok, view, _html} = live(conn, "/studio/chat")
       assert lv_assigns(view)[:mode] == "plan"
 
       render_submit(element(view, "form[phx-submit=send]"), %{"message" => "/default"})
 
-      assert lv_assigns(view)[:mode] == "default"
-      # No turn started, no user bubble — a builtin never reaches the model.
-      refute turn_active_status?(view)
-      assert session_pid(view) == nil
-      refute render(view) =~ ~s(data-role="user")
+      # the retired builtin no longer steers the mode — it is ordinary text, so a
+      # session spawns and the words reach the model
+      assert lv_assigns(view)[:mode] == "plan"
+      assert session_pid(view) != nil
     end
 
     test "a /model opus slash submit switches the model WITHOUT sending a turn",
@@ -3804,6 +4340,307 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
       assert lv_assigns(view)[:model_choice] == "opus"
     end
+  end
+
+  # ══ gutter geometry matrix — rendered-HTML flush-text assertions (D50) ══════
+  #
+  # Three alignment bugs shipped this week — #1844 (pre-wrap template whitespace),
+  # #1849 (paper first-block margin), and the tool-row wrap — from ONE blind spot:
+  # nothing asserted rendered-HTML GEOMETRY. The existing #1844/#1849 regression
+  # tests are string-presence proxies (#1849's passes with zero matching elements;
+  # #1844's fires on the setup's user row). This matrix closes the class:
+  #
+  #   (1) a generic flush guard (`assert_flush_gutter_text/1`) over every
+  #       `data-gutter-text` carrier — a gutter TEXT node that MUST begin flush
+  #       after its opening tag. The #1844 defect lived in the SERIALIZED bytes
+  #       (an interpolation on its own indented template line baked a leading
+  #       "\n<indent>" INTO a pre-wrap text node), so the RAW render string is
+  #       more faithful here than a normalizing parser.
+  #   (2) a first-block structural check (`assert_first_block_flush_rule/1`) at
+  #       the honest ceiling — computed margin-top is unobservable from static
+  #       HTML (no headless browser), so we assert what IS observable: the
+  #       `.bp-paper-surface.bp-chat-md > :first-child` EXISTS and is a block
+  #       element the #1849 rule targets, plus the rule text is present.
+  #       Rule-presence-and-structure, NOT computed geometry — documented as such.
+  #   (3) each gutter ROW TYPE × the content shapes it actually renders, driven
+  #       by fixture frames through the REAL Recorder (or the live-chrome path
+  #       for streaming/thinking) — a new row type inherits the guard by adding
+  #       one line, never a bespoke assertion.
+  describe "gutter geometry matrix — flush-text assertions (charter D50)" do
+    setup %{conn: conn} do
+      enable_fake_chat()
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, "/studio/chat")
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "go"})
+      {:ok, view: view, sid: store_id(view), conn: conn}
+    end
+
+    # ── ❯ user prompt × real prose shapes ────────────────────────────────────
+    test "❯ user rows render flush for every shape (plain / multiline / wrapped / long-word)",
+         %{conn: conn} do
+      sid = Ecto.UUID.generate()
+      {:ok, _} = StudioChat.create_session(%{id: sid, cwd: "/tmp", mode: "plan"})
+      long_word = String.duplicate("z", 90)
+
+      for md <- [
+            "a plain single-line prompt",
+            "first line\nsecond line\nthird line",
+            String.duplicate("wrap ", 45),
+            "before-#{long_word}-after"
+          ] do
+        {:ok, _} = StudioChat.append_message(sid, %{role: "user", source_markdown: md})
+      end
+
+      {:ok, _view, html} = live(conn, "/studio/chat/#{sid}")
+
+      assert html =~ "a plain single-line prompt"
+      assert html =~ "second line"
+      assert html =~ long_word
+      # the ❯ glyph pairs with a flush pre-wrap text node — no leading newline
+      # baked into any user prompt (the #1844 class), across all four shapes
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ● assistant paper-html × (heading-first / paragraph / multiline) ──────
+    test "● assistant heading-first bubble: the first block is a rule-targeted block element, flush",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [%{"type" => "text", "text" => "# Big heading\n\nThen a paragraph."}]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Big heading"
+      # #1849: the bubble's first block starts flush with the ● glyph — rule text
+      # present AND the first child is a block element the rule targets (an <h1>)
+      assert_first_block_flush_rule(html, "h1")
+      assert_flush_gutter_text(html)
+    end
+
+    test "● assistant paragraph-first and multiline bubbles keep the first-block rule",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "Just prose, no heading.\n\nA second paragraph too."}
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "Just prose, no heading."
+      assert html =~ "A second paragraph too."
+      # a paragraph-first bubble's first child is a <p> the same rule targets
+      assert_first_block_flush_rule(html, "p")
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ● tool row + ⎿ output (inline single-line + multiline <pre>) ──────────
+    test "● tool row + ⎿ multiline output render flush (the pre carries no template indent)",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_gm",
+                 "name" => "Bash",
+                 "input" => %{"command" => "mix test"}
+               }
+             ]
+           }
+         }}
+      )
+
+      send_frame(
+        sid,
+        {:claude_chat_event,
+         %{
+           "type" => "user",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_result",
+                 "tool_use_id" => "toolu_gm",
+                 "content" => "line one\nline two\nline three"
+               }
+             ]
+           }
+         }}
+      )
+
+      html = render(view)
+      # the ● tool row (a plain, non-spawn label) and its ⎿ multiline <pre>
+      assert html =~ "Bash"
+      assert html =~ "⎿"
+      assert html =~ "line one"
+      assert html =~ "line three"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ✻ thinking (the live pulse) ──────────────────────────────────────────
+    test "✻ thinking pulse renders the cumulative counter and keeps every carrier flush",
+         %{view: view} do
+      send(view.pid, {:claude_chat_event, thinking_tokens(42)})
+      send(view.pid, {:claude_chat_event, thinking_tokens(128)})
+
+      html = render(view)
+      assert html =~ "✻" or html =~ "bp-chat-spinner"
+      assert html =~ "128"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── todo card (☐ / ◐ / ☒) ────────────────────────────────────────────────
+    test "the todo card items render flush across the three statuses",
+         %{view: view, sid: sid} do
+      send_frame(
+        sid,
+        todo_frame("toolu_todo", [
+          %{"content" => "explore the tree", "status" => "completed"},
+          %{"content" => "write the matrix", "status" => "in_progress", "activeForm" => "Writing"},
+          %{"content" => "run the gate", "status" => "pending"}
+        ])
+      )
+
+      html = render(view)
+      assert html =~ "Update todos"
+      assert html =~ "explore the tree"
+      assert html =~ "write the matrix"
+      assert html =~ "run the gate"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── agent drill-down block (header + running line + ⎿ report) ─────────────
+    test "the agent block header, running line, nested child, and ⎿ report render flush",
+         %{view: view, sid: sid} do
+      send_frame(sid, spawn_frame("toolu_ag", "Task", "Audit the recorder"))
+      send_frame(sid, task_started("toolu_ag", "task_gm"))
+      send_frame(sid, task_progress("toolu_ag", "reading recorder.ex"))
+      send_frame(sid, agent_child("toolu_ag", "toolu_ag_kid", "grep -rn task_started"))
+      send_frame(sid, tool_result_frame("toolu_ag", "subreport line one\nsubreport line two"))
+
+      html = render(view)
+      assert html =~ "Agent(explore — Audit the recorder)"
+      assert html =~ "Running: reading recorder.ex"
+      # the nested child (rendered byte-identically via message_body) AND the ⎿
+      # multiline report <pre> both carry the gutter-text guard
+      assert html =~ ~s(data-parent="toolu_ag")
+      assert html =~ "grep -rn task_started"
+      assert html =~ "⎿"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── plan body via its .bp-paper-surface.bp-chat-md class (D50 forbids ─────
+    #    touching the :plan branch — S3 owns it; here we only ASSERT geometry) ─
+    test "the proposed-plan card body shares the .bp-chat-md first-block rule",
+         %{view: view} do
+      # a live ExitPlanMode ask paints the pending plan card; its body renders the
+      # plan markdown through the SAME paper engine + .bp-chat-md class, so the
+      # #1849 first-child rule covers it too (asserted, never re-broken here)
+      render_submit(element(view, "form[phx-submit=send]"), %{"message" => "plan it"})
+
+      send(
+        view.pid,
+        {:claude_chat_permission,
+         %{
+           request_id: "gm-plan",
+           tool_name: "ExitPlanMode",
+           input: %{"plan" => "# Plan heading\n\nStep one.\n\nStep two."},
+           title: nil,
+           decision_reason: nil
+         }}
+      )
+
+      html = render(view)
+      assert html =~ "proposed plan"
+      assert html =~ "Plan heading"
+      # the plan body's first block is a rule-targeted <h1>, flush like any bubble
+      assert_first_block_flush_rule(html, "h1")
+      assert_flush_gutter_text(html)
+    end
+
+    # ── ⧗ queued mid-turn ❯ row ───────────────────────────────────────────────
+    test "a mid-turn queued ❯ row renders flush with its badge", %{view: view} do
+      # the setup's "go" turn is still live (cat never sends a result), so a second
+      # send is mid-turn → an echoed ❯ row wearing the ⧗ queued badge
+      html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "queued prompt"})
+      assert html =~ "queued prompt"
+      assert html =~ "⧗ queued"
+      assert_flush_gutter_text(html)
+    end
+
+    # ── live-chrome: the streaming tail (charter D37/D41) ─────────────────────
+    test "the live streaming tail (live-chrome) renders flush", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("streaming prose with no leading indent")})
+
+      html = render(view)
+      assert html =~ "streaming prose with no leading indent"
+      assert_flush_gutter_text(html)
+    end
+  end
+
+  # ── D50 generic assertions (module-scope; shared by the matrix above) ───────
+
+  # Block-level tags the #1849 `.bp-paper-surface.bp-chat-md > :first-child`
+  # margin rule can meaningfully target. A gutter bubble's first child is always
+  # one of these; an inline/text first child would mean the paper engine changed
+  # shape and the rule silently stopped applying.
+  @gutter_block_tags ~w(h1 h2 h3 h4 h5 h6 p ul ol pre blockquote table div)
+
+  # Every `data-gutter-text` node is a gutter TEXT node — the text paired with a
+  # ❯/●/✻/⎿ glyph, which MUST render flush after its opening tag. This refutes the
+  # #1844 class (a leading template newline/indent baked into the serialized text)
+  # for the whole class in one pass; it is deliberately raw-string, not parsed,
+  # because the defect lives in the bytes a normalizing parser would swallow.
+  defp assert_flush_gutter_text(html) do
+    assert html =~ "data-gutter-text",
+           "expected at least one data-gutter-text carrier in the render (guard would be vacuous)"
+
+    refute html =~ ~r/data-gutter-text[^>]*>\s*\n/,
+           "a data-gutter-text node begins with template whitespace — the #1844 alignment-bug class"
+
+    html
+  end
+
+  # The #1849 first-block check at the HONEST CEILING. Computed margin-top is not
+  # observable from static HTML, so this proves (a) the rule TEXT is present and
+  # (b) the `.bp-paper-surface.bp-chat-md > :first-child` element EXISTS and is a
+  # block element the rule targets, pinned to the expected tag. This is
+  # rule-presence-AND-structure, NOT geometry — no headless browser, by design.
+  defp assert_first_block_flush_rule(html, expected_tag) do
+    assert html =~ ".bp-paper-surface.bp-chat-md > :first-child",
+           "the #1849 first-child margin rule text is missing"
+
+    assert html =~ "margin-top: 0", "the #1849 margin-top:0 declaration is missing"
+
+    first = html |> LazyHTML.from_fragment() |> LazyHTML.query(".bp-paper-surface.bp-chat-md > :first-child")
+
+    assert Enum.count(first) >= 1,
+           "no .bp-paper-surface.bp-chat-md > :first-child element — the #1849 rule targets nothing"
+
+    [tag | _] = LazyHTML.tag(first)
+
+    assert tag in @gutter_block_tags,
+           "the bubble's first child is <#{tag}>, not a block element the margin rule can target"
+
+    assert tag == expected_tag, "expected first block <#{expected_tag}>, got <#{tag}>"
+
+    html
   end
 
   # Is the on-screen chat in a turn-active state (thinking/interrupting)?

@@ -34,6 +34,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
+  alias Barkpark.StudioChat.PlanPapers
   alias Barkpark.StudioChat.Recorder
   alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
@@ -94,8 +95,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # runs and collapsed once terminal; a manual toggle always wins. Never
          # broadcast (a co-viewer's expand is their own), reset on session load.
          agent_expanded: %{},
+         # The agents rail (charter D47): the task_id-keyed mission-control
+         # snapshot rendered below the composer, Claude-Code-TUI style. `rail` is
+         # the live map (hydrated from `rail_snapshot` on reopen, folded by the
+         # background_tasks_changed / task_progress / task_* frames); `rail_sig`
+         # caches its structural signature so a token-only tick is a no-op render
+         # (D46 value-equality). `rail_expanded` is the per-tab expand override
+         # (task_id => bool) for a workflow row's phase→agent tree — never
+         # broadcast, reset on session load (agent_expanded precedent).
+         rail: %{},
+         rail_sig: [],
+         rail_expanded: %{},
          mode: "plan",
          model_choice: "default",
+         # Reasoning-effort intent (charter D48), the exact mirror of model_choice.
+         effort_choice: "default",
+         # Bypass arm ceremony (charter D48): `arming_bypass` opens the loud
+         # type-to-confirm panel; `bypass_confirm` tracks the typed word so the
+         # Arm button only enables on an exact "bypass". Both socket-local, reset
+         # on every session load — a bypass is never armed by a select alone.
+         arming_bypass: false,
+         bypass_confirm: "",
          status: :new,
          init: nil,
          messages: [],
@@ -226,8 +246,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
     text = String.trim(text)
     has_attachments? = socket.assigns.uploads.attachments.entries != []
 
-    # A leading-slash BUILTIN (charter D36b) never reaches the model: /plan and
-    # /default steer the permission mode, /model switches the brain. Routing them
+    # A leading-slash BUILTIN (charter D36b) never reaches the model: /plan
+    # steers the permission mode, /model switches the brain. Routing them
     # here (server-side, on submit) keeps the JS slash menu a pure insert widget
     # and makes the routing testable. Advertised (non-builtin) slash commands
     # fall through as plain user text — the CLI executes them itself.
@@ -353,8 +373,58 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # or revert — a stale ack from a superseded rapid switch is ignored, never a
   # mis-revert. With no live session there is no ack to wait on, so we persist
   # immediately and the next lazy `--resume` spawn carries the mode.
+  # Picking bypassPermissions in the footer NEVER steers on the select alone
+  # (charter D48 fail-closed law): it opens the loud type-to-confirm arm panel.
+  # The mode is unchanged until the ceremony completes — a plain select can't
+  # arm dangerous bypass.
+  def handle_event("set-mode", %{"mode" => "bypassPermissions"}, socket) do
+    {:noreply, assign(socket, arming_bypass: true, bypass_confirm: "")}
+  end
+
   def handle_event("set-mode", %{"mode" => mode}, socket) do
-    {:noreply, change_mode(socket, ClaudeChat.normalize_mode(mode))}
+    {:noreply,
+     socket
+     |> assign(arming_bypass: false, bypass_confirm: "")
+     |> change_mode(ClaudeChat.normalize_mode(mode))}
+  end
+
+  # Track the confirm word as it's typed so the Arm button only enables on an
+  # exact "bypass" (net-new UX — a data-confirm dialog is NOT enough, charter D48).
+  def handle_event("bypass-confirm", %{"confirm" => text}, socket) do
+    {:noreply, assign(socket, bypass_confirm: text)}
+  end
+
+  # Arm bypass — the ONLY road that persists mode == bypassPermissions. Guarded
+  # server-side on the exact typed word (never trust the client's button-enabled
+  # state). Persists the mode (so the next spawn's build_args, gated on the
+  # PERSISTED row, emits --allow-dangerously-skip-permissions) and posts an
+  # honest line: bypass takes effect on the NEXT spawn, never the running turn —
+  # the live process was started without the arming flag, so we send NO
+  # set_permission_mode steer for it (unlike the other five modes).
+  def handle_event("arm-bypass", _params, socket) do
+    if String.trim(socket.assigns[:bypass_confirm] || "") == "bypass" do
+      if sid = socket.assigns[:store_session_id], do: StudioChat.set_mode(sid, "bypassPermissions")
+
+      line =
+        if socket.assigns[:session],
+          do:
+            "⚠ Bypass permissions ARMED — it takes effect on the next resume, not the running turn.",
+          else: "⚠ Bypass permissions ARMED — it takes effect when this chat next runs."
+
+      socket =
+        socket
+        |> assign(mode: "bypassPermissions", arming_bypass: false, bypass_confirm: "")
+        |> append_message(:system, line)
+
+      {:noreply, socket}
+    else
+      # Word mismatch — never arm; keep the panel open for another try.
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel-arm-bypass", _params, socket) do
+    {:noreply, assign(socket, arming_bypass: false, bypass_confirm: "")}
   end
 
   # Pick the brain (wave 5). The choice persists on the session row (intent)
@@ -364,6 +434,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # the answering model as fact, rendered beside the picker.
   def handle_event("set-model", %{"model" => raw}, socket) do
     {:noreply, change_model(socket, ClaudeChat.normalize_model(raw))}
+  end
+
+  # Pick the reasoning-effort tier (charter D48). Intent-only: it persists on the
+  # row and rides the NEXT spawn as --effort. There is NO set_effort control verb
+  # (the four control subtypes are closed), so a mid-session change never steers
+  # the running turn — we post an honest "applies from the next resume" line.
+  def handle_event("set-effort", %{"effort" => raw}, socket) do
+    {:noreply, change_effort(socket, ClaudeChat.normalize_effort(raw))}
   end
 
   def handle_event("approve", %{"rid" => request_id}, socket) do
@@ -427,6 +505,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
     else
       {:noreply, socket}
     end
+  end
+
+  # Expand/collapse a rail workflow row's phase→agent tree (charter D47). The
+  # per-tab `rail_expanded` map is keyed by task_id; default collapsed, a manual
+  # toggle flips it. Never broadcast — a co-viewer's expand is their own.
+  def handle_event("rail-toggle", %{"id" => id}, socket) do
+    current = Map.get(socket.assigns.rail_expanded, id, false)
+    {:noreply, assign(socket, rail_expanded: Map.put(socket.assigns.rail_expanded, id, not current))}
   end
 
   # ── AskUserQuestion answer form (charter D31/D32) ────────────────────────
@@ -567,8 +653,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # ── composer command routing (charter D36b) — shared by the selectors and
   #    the slash builtins, kept OUT of the handle_event group ─────────────────
 
-  # Switch permission mode — shared by the header selector and the /plan ·
-  # /default slash builtins. See the `set_mode` ack handler for the ack-driven
+  # Switch permission mode — shared by the header selector and the /plan slash
+  # builtin. See the `set_mode` ack handler for the ack-driven
   # persistence contract (D23): a live switch persists only the confirmed value.
   defp change_mode(socket, mode) do
     cond do
@@ -607,16 +693,33 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> append_message(:system, "Model → #{label}.")
   end
 
+  # Pick the reasoning-effort tier (charter D48) — shared by the footer selector.
+  # Intent-only: persist on the row (rides the next spawn as --effort) and post an
+  # honest line. There is NO live steer (no set_effort control verb exists), so a
+  # mid-session change applies from the next resume, never the running turn.
+  defp change_effort(socket, choice) do
+    if sid = socket.assigns[:store_session_id], do: StudioChat.set_effort_choice(sid, choice)
+
+    socket
+    |> assign(effort_choice: choice || "default")
+    |> append_message(:system, effort_line(choice, socket.assigns[:session]))
+  end
+
+  defp effort_line(choice, nil), do: "Effort → #{choice || "the CLI default"}."
+
+  defp effort_line(choice, _live),
+    do: "Effort → #{choice || "the CLI default"} (applies from the next resume)."
+
   # Classify a submitted composer line as a BUILTIN slash command (charter D36b)
   # or `:none` (send it to the model as-is). Only EXACT builtins route — a
   # `/plan` with trailing prose is ambiguous, so it falls through as user text.
-  # The floor is /plan · /default · /model; session-mutating CLI commands
+  # The floor is /plan · /model (the retired /default builtin is gone, charter
+  # D48 — `default` is no longer an offered mode); session-mutating CLI commands
   # (/compact, /clear) are NOT builtins — they ride through as plain user text
   # so the CLI handles them itself, and our store identity is pinned by
   # `--session-id`/`--resume` regardless of what a slash-turn result echoes (D8;
   # spot-check assumption per D36b — we never scrape ids off frames).
   defp builtin_command("/plan"), do: {:set_mode, "plan"}
-  defp builtin_command("/default"), do: {:set_mode, "default"}
   defp builtin_command("/model"), do: :model_usage
 
   defp builtin_command(text) when is_binary(text) do
@@ -1102,13 +1205,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
     )
   end
 
-  # A progress heartbeat: the latest "Running: …" line. The wire field is
-  # `description` (never `line`). Keeps the block running so the breathing line
-  # shows even if task_started was missed.
+  # A progress heartbeat: the latest "Running: …" line AND the rail's phase→agent
+  # tree (charter D46/D47). The wire field is `description` (never `line`). Keeps
+  # the block running so the breathing line shows even if task_started was missed.
   def handle_info(
         {:claude_chat_event, %{"type" => "system", "subtype" => "task_progress"} = ev},
         socket
       ) do
+    socket = fold_rail(socket, StudioChat.rail_capture_progress(socket.assigns.rail, ev))
+
     merge_task_row(
       socket,
       by_tool_use_id(ev["tool_use_id"]),
@@ -1117,11 +1222,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   # Completion notification (tool_use_id aboard): flip to the terminal status so
-  # the block collapses to its ⎿ report and the spinner stops.
+  # the block collapses to its ⎿ report and the spinner stops; the rail entry
+  # settles to the same status (charter D47).
   def handle_info(
         {:claude_chat_event, %{"type" => "system", "subtype" => "task_notification"} = ev},
         socket
       ) do
+    socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], ev["status"]))
+
     merge_task_row(
       socket,
       by_tool_use_id(ev["tool_use_id"]),
@@ -1137,11 +1245,24 @@ defmodule BarkparkWeb.Studio.ChatLive do
       ) do
     case get_in(ev, ["patch", "status"]) do
       status when is_binary(status) ->
+        socket = fold_rail(socket, StudioChat.rail_stamp_status(socket.assigns.rail, ev["task_id"], status))
         merge_task_row(socket, by_task_id(ev["task_id"]), %{task_status: status})
 
       _ ->
         {:noreply, socket}
     end
+  end
+
+  # The agents rail's row set (charter D47): a task_id-keyed snapshot that adds
+  # rows on launch and empties on completion. Folded into the mission-control
+  # rail below the composer — this is the frame the user's Workflow emitted that
+  # the catch-all below silently dropped. Value-equality guarded (fold_rail).
+  def handle_info(
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "background_tasks_changed"} = ev},
+        socket
+      ) do
+    {:noreply, fold_rail(socket, StudioChat.rail_apply_background(socket.assigns.rail, ev))}
   end
 
   def handle_info({:claude_chat_event, _event}, socket), do: {:noreply, socket}
@@ -1204,6 +1325,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
      |> assign(messages: messages)
      |> clear_question_form(request_id)
      |> refresh_sessions()}
+  end
+
+  # D49: an approved plan's Paper landed — stamp the in-memory plan row so its
+  # "→ published as Paper" link appears in EVERY co-viewing tab at once (the
+  # approver's own tab is subscribed too, so it converges here, not inline). The
+  # metadata was already persisted by the publishing Task, so replay is durable.
+  def handle_info({:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}, socket) do
+    messages = stamp_plan_paper(socket.assigns.messages, request_id, paper_id, paper_url)
+    {:noreply, assign(socket, messages: messages)}
+  end
+
+  # D49 failure honesty: the approve already succeeded on the wire; only the Paper
+  # projection failed. Render a live-only honest system line — never a lie, never a
+  # crash, and the plan stays approved.
+  def handle_info({:plan_paper_failed, _request_id}, socket) do
+    {:noreply,
+     append_message(
+       socket,
+       :system,
+       "Couldn't publish the approved plan as a Paper — the plan is still approved."
+     )}
   end
 
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
@@ -1289,6 +1431,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <div
               class="text-sm"
               style="white-space: pre-wrap; overflow-wrap: anywhere; font-weight: 550; padding-top: 1px;"
+              data-gutter-text
             >{@message.text}</div>
           </div>
           <%!-- Queue-honest badge (charter D43): a mid-turn send lands
@@ -1324,6 +1467,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               :if={@message.html == nil}
               class="text-sm"
               style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+              data-gutter-text
             >{@message.text}</div>
           </div>
         </div>
@@ -1337,13 +1481,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <div :if={@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
           <span style="color: var(--primary); flex: none;">●</span>
           <span style="min-width: 0; overflow-wrap: anywhere;">
-            <span style="font-weight: 650;">{@message[:spawn_label] || @message.text}</span>
+            <span style="font-weight: 650;" data-gutter-text>{@message[:spawn_label] || @message.text}</span>
             <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
           </span>
         </div>
         <div :if={!@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
           <span style="color: var(--primary); flex: none;">●</span>
-          <span style="min-width: 0; overflow-wrap: anywhere;">{@message.text}</span>
+          <span style="min-width: 0; overflow-wrap: anywhere;" data-gutter-text>{@message.text}</span>
         </div>
         <%!-- D38: a file-mutating tool call renders as a real colored
               diff (dispatch on input SHAPE, not tool name) beneath the
@@ -1366,7 +1510,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 ⎿ <%= tool_output_head(@message.output) %>
                 <span style="opacity: 0.7;">… +<%= tool_output_lines(@message.output) - 1 %> lines</span>
               </summary>
-              <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= @message.output %></pre>
+              <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;" data-gutter-text><%= @message.output %></pre>
             </details>
           <% else %>
             ⎿ <%= tool_output_head(@message.output) %>
@@ -1497,6 +1641,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
           style="overflow-wrap: anywhere;"
         >
           <%= plan_outcome_label(@message.approval_status) %> — <%= @message.title %>
+          <a
+            :if={@message[:paper_url]}
+            href={@message.paper_url}
+            target="_blank"
+            rel="noopener"
+            style="margin-left: 6px; text-decoration: none; color: var(--accent);"
+          >
+            → published as Paper
+          </a>
         </div>
       <% :thinking -> %>
         <%!-- Settled thinking bout (charter D41): dim mono ✻, no text
@@ -1587,7 +1740,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               ⎿ <%= tool_output_head(@agent.output) %>
               <span style="opacity: 0.7;">… +<%= tool_output_lines(@agent.output) - 1 %> lines</span>
             </summary>
-            <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;"><%= @agent.output %></pre>
+            <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;" data-gutter-text><%= @agent.output %></pre>
           </details>
         <% else %>
           ⎿ <%= tool_output_head(@agent.output) %>
@@ -1983,7 +2136,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <span :if={@thinking_pulse.text in [nil, ""]}>
               thinking… ~<%= @thinking_pulse.tokens %> tokens
             </span>
-            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;">{@thinking_pulse.text}</span>
+            <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
 
           <div :if={@streaming} style="opacity: 0.92;">
@@ -1996,12 +2149,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
             </div>
             <%= case classify_tail(streaming_tail(@streaming)) do %>
               <% {:text, tail} -> %>
-                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;">{tail}<span class="text-dim">▌</span></div>
+                <div class="text-sm" style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;" data-gutter-text>{tail}<span class="text-dim">▌</span></div>
               <% {:component, kind, prose} -> %>
                 <div
                   :if={String.trim(prose) != ""}
                   class="text-sm"
                   style="white-space: pre-wrap; overflow-wrap: anywhere; padding: 2px 0;"
+                  data-gutter-text
                 >{prose}</div>
                 <.skeleton kind={kind} />
             <% end %>
@@ -2143,8 +2297,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <select
                   name="mode"
                   class="text-xs text-dim"
+                  aria-label="Permission mode"
                   style="background: transparent; color: inherit; border: none; border-radius: 6px; padding: 2px 4px; cursor: pointer;"
                 >
+                  <%!-- The retired middle mode surfaces ONLY while THIS session still
+                        carries it (charter D48) — a legacy row keeps spawning it
+                        verbatim, but it is never an offered choice for a fresh pick. --%>
+                  <option :if={@mode == "default"} value="default" selected>
+                    <%= mode_label("default") %>
+                  </option>
                   <option :for={m <- ClaudeChat.modes()} value={m} selected={m == @mode}>
                     <%= mode_label(m) %>
                   </option>
@@ -2176,6 +2337,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 >
                   <%= @init.model %>
                 </span>
+              </form>
+              <%!-- Effort picker (wave 9, charter D48): composed with the model as
+                    one "Fable · high" group — the dim "·" reads them as a pair. It
+                    is intent-only (rides the next spawn as `--effort`); a mid-session
+                    change never steers the running turn (no set_effort control verb). --%>
+              <span class="text-xs text-dim" aria-hidden="true">·</span>
+              <form phx-change="set-effort" style="display: inline-flex; align-items: center;">
+                <select
+                  name="effort"
+                  class="text-xs"
+                  aria-label="Reasoning effort"
+                  style="background: transparent; color: var(--primary); border: none; border-radius: 6px; padding: 2px 4px; font-weight: 600; cursor: pointer;"
+                >
+                  <option value="default" selected={@effort_choice == "default"}>
+                    effort: default
+                  </option>
+                  <option :for={e <- ClaudeChat.efforts()} value={e} selected={e == @effort_choice}>
+                    <%= effort_label(e) %>
+                  </option>
+                </select>
               </form>
             </div>
             <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
@@ -2218,6 +2399,63 @@ defmodule BarkparkWeb.Studio.ChatLive do
               </button>
             </div>
         </div>
+        <%!-- Bypass ARM panel (charter D48): opened only when the user picks
+              bypassPermissions. Loud via --danger tokens, type-the-word-"bypass"
+              + an explicit Arm button — a select alone can NEVER arm dangerous
+              bypass. Arming persists the mode (the next spawn's build_args, gated
+              on the persisted row, emits --allow-dangerously-skip-permissions);
+              it does NOT steer the running turn. --%>
+        <div
+          :if={@arming_bypass}
+          role="alertdialog"
+          aria-label="Arm bypass permissions"
+          style="max-width: 860px; margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--danger); border-radius: 8px; background: hsl(var(--danger-hsl) / 0.08);"
+        >
+          <p class="text-xs" style="color: var(--danger); font-weight: 600; margin: 0 0 4px;">
+            ⚠ Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.
+          </p>
+          <p class="text-xs text-dim" style="margin: 0 0 8px;">
+            Type <strong>bypass</strong> to confirm, then Arm. It takes effect on the next spawn, not the running turn.
+          </p>
+          <%!-- phx-submit rides along so Enter in the confirm input ARMS (server-guarded
+                on the exact word) instead of falling through to a native form submit
+                that would navigate the whole LiveView away. --%>
+          <form
+            phx-change="bypass-confirm"
+            phx-submit="arm-bypass"
+            style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"
+          >
+            <input
+              type="text"
+              name="confirm"
+              value={@bypass_confirm}
+              autocomplete="off"
+              placeholder="bypass"
+              aria-label="Type bypass to confirm"
+              class="text-xs"
+              style="flex: 0 1 160px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-family: var(--font-mono);"
+            />
+            <button
+              type="button"
+              phx-click="arm-bypass"
+              disabled={String.trim(@bypass_confirm || "") != "bypass"}
+              class="btn"
+              aria-label="Arm bypass permissions"
+              style={"padding: 4px 12px; font-weight: 600; color: var(--danger); border-color: var(--danger);" <> if(String.trim(@bypass_confirm || "") != "bypass", do: " opacity: 0.5; cursor: not-allowed;", else: "")}
+            >
+              Arm bypass
+            </button>
+            <button
+              type="button"
+              phx-click="cancel-arm-bypass"
+              class="btn text-xs text-dim"
+              aria-label="Cancel"
+              style="padding: 4px 10px;"
+            >
+              Cancel
+            </button>
+          </form>
+        </div>
         <p :if={@last_result && @last_result.cost_usd} class="text-xs text-dim" style="max-width: 860px; margin: 6px auto 0; font-family: var(--font-mono);">
           <%= @mode %> ⏵ <%= (@init && @init.model) || @model_choice %> · <%= format_duration(@last_result.duration_ms) %> · $<%= :erlang.float_to_binary(@last_result.cost_usd / 1, decimals: 4) %>
         </p>
@@ -2227,7 +2465,113 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <p class="text-xs text-dim" style="max-width: 860px; margin: 4px auto 0; font-family: var(--font-mono); opacity: 0.7;">
           esc interrupt · / commands · ↵ send
         </p>
+
+        <%!-- Agents rail (charter D47): the Claude-Code-TUI mission-control view,
+              directly below the composer. One row per background task; a workflow
+              row expands (per-tab) into its phase→agent tree with breathing state
+              glyphs, models, and token counts. Hydrated from `rail_snapshot` on
+              reopen; a dead "running" entry reads "interrupted", never a spinner. --%>
+        <.agents_rail :if={map_size(@rail) > 0} rail={@rail} rail_expanded={@rail_expanded} />
       </div>
+      </div>
+    </div>
+    """
+  end
+
+  # The agents rail (charter D47) — mission control below the composer. Distinct
+  # from the D45/D46 transcript spawn rows BY DESIGN (this is live state, that is
+  # history); no dedup. All chrome via emitted tokens.
+  attr :rail, :map, required: true
+  attr :rail_expanded, :map, required: true
+
+  defp agents_rail(assigns) do
+    ~H"""
+    <div
+      data-role="agents-rail"
+      style="max-width: 860px; margin: 10px auto 0; border-top: 1px solid var(--border-muted); padding-top: 8px; font-family: var(--font-mono);"
+    >
+      <div class="text-xs text-dim" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: 0.75;">
+        <span aria-hidden="true">▚</span>
+        <span>agents · <%= map_size(@rail) %></span>
+      </div>
+
+      <div
+        :for={entry <- rail_rows(@rail)}
+        data-rail-task={entry["task_id"]}
+        data-rail-status={entry["status"]}
+        style="padding: 3px 0;"
+      >
+        <div class="text-xs" style="display: flex; align-items: baseline; gap: 6px;">
+          <span
+            aria-hidden="true"
+            class={rail_running?(entry) && "bp-chat-agent-run"}
+            style={"flex: none; color: #{if rail_running?(entry), do: "var(--primary)", else: "var(--text-dim)"};"}
+          >
+            <%= rail_glyph_type(entry) %>
+          </span>
+          <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
+            <span style="font-weight: 600;"><%= rail_label(entry) %></span>
+            <span
+              class="text-dim"
+              style={"margin-left: 6px; opacity: 0.75; color: #{rail_status_color(entry["status"])};"}
+            >
+              · <%= rail_status_label(entry["status"]) %>
+            </span>
+            <span :if={rail_tokens(entry)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+              · <%= rail_tokens(entry) %> tok
+            </span>
+          </span>
+          <button
+            :if={rail_workflow_nodes(entry) != []}
+            type="button"
+            class="btn text-xs"
+            phx-click="rail-toggle"
+            phx-value-id={entry["task_id"]}
+            aria-expanded={to_string(Map.get(@rail_expanded, entry["task_id"], false))}
+            style="flex: none; padding: 1px 8px; opacity: 0.8;"
+          >
+            <%= if Map.get(@rail_expanded, entry["task_id"], false), do: "collapse", else: "expand" %>
+          </button>
+        </div>
+
+        <%!-- The phase→agent tree, per-tab expandable (charter D47). Phase nodes
+              head a group; agent nodes indent beneath with model + breathing
+              state glyph + token count. --%>
+        <div
+          :if={Map.get(@rail_expanded, entry["task_id"], false) and rail_workflow_nodes(entry) != []}
+          style="padding-left: 16px; margin-top: 2px;"
+        >
+          <div
+            :for={node <- rail_workflow_nodes(entry)}
+            data-rail-node={node["type"]}
+            class="text-xs"
+            style="display: flex; align-items: baseline; gap: 6px; padding: 1px 0; overflow-wrap: anywhere;"
+          >
+            <%= case node["type"] do %>
+              <% "workflow_phase" -> %>
+                <span style="font-weight: 600; color: var(--text);">
+                  <%= node["title"] || node["label"] || "phase" %>
+                </span>
+              <% _ -> %>
+                <span
+                  aria-hidden="true"
+                  class={rail_node_running?(node) && "bp-chat-agent-run"}
+                  style={"flex: none; color: #{if rail_node_running?(node), do: "var(--primary)", else: "var(--text-dim)"};"}
+                >
+                  ●
+                </span>
+                <span style="min-width: 0; flex: 1;">
+                  <%= node["label"] || node["title"] || "agent" %>
+                  <span :if={node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+                    <%= node["model"] %>
+                  </span>
+                  <span :if={rail_node_tokens(node)} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
+                    · <%= rail_node_tokens(node) %> tok
+                  </span>
+                </span>
+            <% end %>
+          </div>
+        </div>
       </div>
     </div>
     """
@@ -2375,7 +2719,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
              session_id: store_id,
              mode: socket.assigns.mode,
              resume: resume?,
-             model: ClaudeChat.normalize_model(socket.assigns[:model_choice])
+             model: ClaudeChat.normalize_model(socket.assigns[:model_choice]),
+             effort: ClaudeChat.normalize_effort(socket.assigns[:effort_choice]),
+             # Armed strictly off the PERSISTED row (charter D48), never a live
+             # assign — build_args needs BOTH mode == bypassPermissions AND this.
+             bypass_armed: StudioChat.bypass_armed?(store_id)
            }),
          {:ok, session} <- Recorder.session_pid(recorder) do
       StudioChat.update_status(store_id, "working")
@@ -2495,6 +2843,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       session_id: session.id,
       mode: session.mode || "plan",
       model_choice: session.model_choice || "default",
+      effort_choice: session.effort_choice || "default",
+      # A reopen resets any in-flight arm ceremony — arming is never carried
+      # across a session load (charter D48).
+      arming_bypass: false,
+      bypass_confirm: "",
       status: status,
       init: replay_init(session),
       messages: messages,
@@ -2533,6 +2886,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Agent drill-down overrides reset on reopen (charter D46): a replayed
       # terminal agent starts collapsed to its report, a mid-run one open.
       agent_expanded: %{},
+      # Rail replay parity (charter D47): hydrate the mission-control rail from
+      # the stored `rail_snapshot` so a reopened session shows its last-known
+      # agents. `interrupt_running_tasks/1` already flipped any dead "running"
+      # entry to "interrupted" on teardown, so this never shows a fake spinner.
+      rail: session.rail_snapshot || %{},
+      rail_sig: StudioChat.rail_signature(session.rail_snapshot || %{}),
+      rail_expanded: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -2587,6 +2947,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # non-default model you picked, via a DEDICATED query (list_sessions omits
       # model_choice — seeding off it reads nil forever). nil → "default".
       model_choice: StudioChat.recent_model_choice() || "default",
+      # Sticky effort default (charter D48), the exact mirror — a dedicated query,
+      # never list_sessions (which omits effort_choice). nil → "default".
+      effort_choice: StudioChat.recent_effort_choice() || "default",
+      arming_bypass: false,
+      bypass_confirm: "",
       status: :new,
       init: nil,
       messages: [],
@@ -2607,6 +2972,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
       open_menu_session: nil,
       plan_expanded: MapSet.new(),
       agent_expanded: %{},
+      # A new chat has no background agents yet (charter D47).
+      rail: %{},
+      rail_sig: [],
+      rail_expanded: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -2695,8 +3064,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # carry the post-plan mode. Skipped while a user-initiated switch is in flight
   # (its ack owns the mode, charter D17/D23) and for any unknown/echoed-same
   # value, so a routine init never churns the selector.
+  # Adopt the mode the CLI actually reports off an init frame. `default` STAYS
+  # adoptable here (charter D34: approving a plan flips the CLI's OWN mode plan →
+  # default — observe reflects that REALITY, and a persisted `default` spawns
+  # verbatim). Only bypassPermissions is excluded — the fail-closed law (D48):
+  # an echoed frame is an untrusted string and must never arm dangerous bypass.
   defp observe_permission_mode(socket, mode)
-       when is_binary(mode) and mode in ~w(plan default acceptEdits) do
+       when is_binary(mode) and mode in ~w(plan default acceptEdits auto dontAsk manual) do
     if mode != socket.assigns.mode and is_nil(socket.assigns[:pending_mode]) do
       if store_id = socket.assigns[:store_session_id], do: StudioChat.set_mode(store_id, mode)
       assign(socket, mode: mode)
@@ -2937,7 +3311,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
       seq,
       Map.get(meta, "request_id"),
       input,
-      replay_approval_status(Map.get(meta, "approval_status"), live?)
+      replay_approval_status(Map.get(meta, "approval_status"), live?),
+      meta
     )
   end
 
@@ -3174,6 +3549,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       broadcast_resolution(socket, request_id, status)
 
+      # D49: an APPROVED ExitPlanMode plan grows up into a real published Paper.
+      # Fire-and-forget so the approve (already on the wire above) never blocks or
+      # fails on a publish error; the result converges every co-viewing tab via
+      # the session topic. Deny/keep-planning and ordinary approvals never touch
+      # Papers — the gate is role :plan AND an allow decision.
+      maybe_publish_plan(socket, request_id, decision)
+
       socket
       |> assign(messages: messages)
       |> clear_question_form(request_id)
@@ -3183,12 +3565,95 @@ defmodule BarkparkWeb.Studio.ChatLive do
     end
   end
 
+  # Project an approved plan into a Paper (charter D49). Gated on the matched
+  # row being a :plan card AND an allow decision; only then does a fire-and-forget
+  # Task publish + stamp + broadcast. The Task NEVER touches the socket — it talks
+  # to the session topic every tab (this one included) is subscribed to. A tab
+  # with no store session or no topic (a brand-new chat) has nothing to project.
+  defp maybe_publish_plan(socket, request_id, decision) do
+    with true <- plan_allow?(decision),
+         %{role: :plan} = m <- find_message_by_rid(socket, request_id),
+         sid when is_binary(sid) <- socket.assigns[:store_session_id],
+         topic when is_binary(topic) <- socket.assigns[:subscribed_topic] do
+      markdown = to_string(m[:plan_markdown] || "")
+
+      # Fire-and-forget under Barkpark.TaskSupervisor (same pattern as the AI
+      # title, D13) — supervised, `$callers`-scoped so the sandbox connection is
+      # inherited under test, and drained on test exit. The Task never touches
+      # the socket; it talks to the session topic.
+      Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+        publish_plan_paper(sid, request_id, markdown, topic)
+      end)
+    end
+
+    :ok
+  end
+
+  defp plan_allow?(:allow), do: true
+  defp plan_allow?({:allow, _}), do: true
+  defp plan_allow?(_), do: false
+
+  # The fire-and-forget body: publish the Paper, stamp its id/url onto the plan
+  # row's metadata (replay-durable, D49), and broadcast the outcome to the session
+  # topic so all tabs converge. A publish failure is honest, not silent, and never
+  # re-raises — the approve already succeeded.
+  defp publish_plan_paper(session_id, request_id, markdown, topic) do
+    # A RAISE inside publish (malformed markdown through FromMarkdown, an upsert
+    # invariant) must degrade to the SAME honest failure broadcast as an
+    # `{:error, _}` return — a crashed fire-and-forget Task is silent, and the
+    # promised "couldn't publish" line would never appear. Scoped to the publish
+    # call only: a raise AFTER a successful publish must not lie "couldn't
+    # publish" about a Paper that exists.
+    result =
+      try do
+        PlanPapers.publish(session_id, request_id, markdown)
+      rescue
+        e -> {:error, e}
+      catch
+        kind, reason -> {:error, {kind, reason}}
+      end
+
+    case result do
+      {:ok, %{paper_id: paper_id, paper_url: paper_url}} ->
+        StudioChat.merge_approval_metadata(session_id, request_id, %{
+          "paper_id" => paper_id,
+          "paper_url" => paper_url
+        })
+
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic,
+          {:plan_paper, request_id, %{paper_id: paper_id, paper_url: paper_url}}
+        )
+
+      {:error, _reason} ->
+        Phoenix.PubSub.broadcast(
+          Barkpark.PubSub,
+          topic,
+          {:plan_paper_failed, request_id}
+        )
+    end
+  end
+
   # Flip every card matching a request_id to a terminal status (idempotent over
   # already-terminal rows — the guard only rewrites the matched request_id).
   defp flip_card(messages, request_id, status) do
     Enum.map(messages, fn
       %{role: role, request_id: ^request_id} = m when role in @needs_you_roles ->
         %{m | approval_status: status}
+
+      m ->
+        m
+    end)
+  end
+
+  # Stamp a plan row's Paper id/url in memory (charter D49) so its "→ published
+  # as Paper" link renders. Idempotent and request_id-scoped; leaves every other
+  # row untouched.
+  defp stamp_plan_paper(messages, request_id, paper_id, paper_url) do
+    Enum.map(messages, fn
+      %{role: :plan, request_id: ^request_id} = m ->
+        %{m | paper_id: paper_id, paper_url: paper_url}
 
       m ->
         m
@@ -3481,7 +3946,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # `plan_input` so Approve can echo it back verbatim (a bare allow fails the
   # tool). The body is the FULL plan through the paper engine — never truncated;
   # only its RENDERED height is clamped in CSS.
-  defp build_plan_message(id, request_id, input, status) do
+  # `paper` carries a prior projection (charter D49) — the persisted metadata on
+  # replay, `%{}` for a fresh live ask. Its keys stay nil until an approve lands a
+  # Paper, so the "→ published as Paper" link only ever shows once one exists.
+  defp build_plan_message(id, request_id, input, status, paper \\ %{}) do
     plan = plan_markdown(input)
 
     %{
@@ -3493,7 +3961,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       plan_markdown: plan,
       title: plan_title(plan),
       html: render_paper_html(plan),
-      approval_status: status
+      approval_status: status,
+      paper_id: paper["paper_id"],
+      paper_url: paper["paper_url"]
     }
   end
 
@@ -3819,6 +4289,78 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp drop_nil(map), do: :maps.filter(fn _k, v -> not is_nil(v) end, map)
 
+  # ── agents rail (charter D47) ──────────────────────────────────────────────
+
+  # Apply a folded rail with the SAME structural change-only guard the Recorder
+  # persists on: a token-only progress tick (same rows/tree/states, only tokens
+  # advanced) yields an equal signature and is a no-op — `@messages`/the rail are
+  # a flat comprehension, so every reassign is an O(n) render per tab, and the
+  # guard turns the hot workflow_progress heartbeat into render-on-change.
+  defp fold_rail(socket, new_rail) do
+    sig = StudioChat.rail_signature(new_rail)
+
+    if sig == socket.assigns.rail_sig,
+      do: socket,
+      else: assign(socket, rail: new_rail, rail_sig: sig)
+  end
+
+  # Rail entries in stable insertion order (seq), for a deterministic render.
+  defp rail_rows(rail) do
+    rail
+    |> Enum.sort_by(fn {_tid, entry} -> StudioChat.rail_seq(entry) end)
+    |> Enum.map(fn {tid, entry} -> Map.put(entry, "task_id", tid) end)
+  end
+
+  defp rail_running?(entry), do: entry["status"] == "running"
+
+  # The row's one-line label: the background task's description, else its type.
+  defp rail_label(entry) do
+    row = entry["row"] || %{}
+    row["description"] || row["task_type"] || "agent"
+  end
+
+  defp rail_glyph_type(entry) do
+    case (entry["row"] || %{})["task_type"] do
+      "local_workflow" -> "⚙"
+      t when is_binary(t) -> "◆"
+      _ -> "◆"
+    end
+  end
+
+  # A rail workflow tree normalized to ordered nodes for render: phase headers and
+  # the agent rows beneath them. Tolerant of a nil/absent tree.
+  defp rail_workflow_nodes(entry) do
+    case entry["workflow"] do
+      nodes when is_list(nodes) -> Enum.filter(nodes, &is_map/1)
+      _ -> []
+    end
+  end
+
+  defp rail_node_running?(node), do: node["state"] in ["running", "in_progress", "active"]
+
+  defp rail_status_label("completed"), do: "done"
+  defp rail_status_label("interrupted"), do: "interrupted"
+  defp rail_status_label(_), do: "running"
+
+  defp rail_status_color("completed"), do: "var(--ok)"
+  defp rail_status_color("interrupted"), do: "var(--warn)"
+  defp rail_status_color(_), do: "var(--primary)"
+
+  # The rail entry's last-known token total (charter D47), or nil.
+  defp rail_tokens(entry) do
+    case entry["usage"] do
+      %{"total_tokens" => n} when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
+  defp rail_node_tokens(node) do
+    case node["tokens"] do
+      n when is_integer(n) -> n
+      _ -> nil
+    end
+  end
+
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"
   defp model_label("opus"), do: "Opus — powerful"
@@ -3826,9 +4368,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp model_label(m), do: m
 
   defp mode_label("plan"), do: "plan (read-only)"
-  defp mode_label("default"), do: "ask to act"
-  defp mode_label("acceptEdits"), do: "auto-accept edits"
+  defp mode_label("acceptEdits"), do: "accept edits"
+  defp mode_label("auto"), do: "auto-run"
+  defp mode_label("dontAsk"), do: "don't ask"
+  defp mode_label("manual"), do: "manual approve"
+  defp mode_label("bypassPermissions"), do: "bypass · dangerous"
+  # The retired middle mode: shown ONLY while a legacy session still carries it.
+  defp mode_label("default"), do: "ask (legacy)"
   defp mode_label(other), do: other
+
+  # Effort tiers render verbatim in the picker (charter D48 — "Fable · high").
+  defp effort_label(nil), do: "default"
+  defp effort_label("default"), do: "default"
+  defp effort_label(e), do: e
 
   # The "(was ~N tokens)" tail on a compaction line — only when the CLI reports a
   # pre-compaction size, so we never invent a number we don't have.
@@ -3886,12 +4438,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       "argumentHint" => nil,
       "builtin" => true
     },
-    %{
-      "name" => "/default",
-      "description" => "Default mode — the agent asks approval before acting",
-      "argumentHint" => nil,
-      "builtin" => true
-    },
+    # The /default builtin is RETIRED (charter D48) — `default` is no longer an
+    # offered mode; the picker's six modes + the armed bypass ceremony are the
+    # surface. /plan is the only mode builtin left.
     %{
       "name" => "/model",
       "description" => "Switch the model for this session",

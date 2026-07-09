@@ -383,7 +383,7 @@ defmodule Barkpark.StudioChat do
     with %Session{} = session <- get_session(session_id) do
       session
       |> Ecto.Changeset.change(mode: mode, last_active_at: DateTime.utc_now())
-      |> Ecto.Changeset.validate_inclusion(:mode, Session.modes())
+      |> Ecto.Changeset.validate_inclusion(:mode, Session.persistable_modes())
       |> Repo.update()
     else
       nil -> {:error, :not_found}
@@ -539,6 +539,53 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Persist the user's picked reasoning-effort tier (nil = CLI default). The exact
+  mirror of `set_model_choice/2` (charter D48): choice is intent — it rides the
+  next spawn as `--effort`. There is no observed-effort fact, so nothing else
+  writes this column.
+  """
+  def set_effort_choice(session_id, choice) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(effort_choice: choice, last_active_at: DateTime.utc_now())
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  The most-recently-active session's `effort_choice` — the seed for a NEW chat's
+  effort picker, so "high" stays sticky across new chats. The exact mirror of
+  `recent_model_choice/0`, and a DEDICATED query for the SAME reason: `list_sessions`
+  selects sidebar fields and OMITS `effort_choice`, so seeding off a listed row
+  reads `nil` forever (the vacuous-green trap). Returns the tier string or `nil`.
+  """
+  @spec recent_effort_choice() :: String.t() | nil
+  def recent_effort_choice do
+    Session
+    |> where([s], not is_nil(s.effort_choice) and s.effort_choice != "default")
+    |> order_by([s], desc: s.last_active_at, desc: s.inserted_at)
+    |> limit(1)
+    |> select([s], s.effort_choice)
+    |> Repo.one()
+  end
+
+  @doc """
+  True when this session's PERSISTED mode is `bypassPermissions` — the ONLY
+  signal that the dangerous `--allow-dangerously-skip-permissions` flag may ride
+  its spawn (charter D48). Derived from the stored row, NEVER a live event param:
+  bypass reaches the mode column solely through the armed ceremony
+  (`ClaudeChat.normalize_mode` fails every untrusted string closed to plan), so a
+  persisted `bypassPermissions` is itself the proof of arming. Fail-closed on a
+  missing row.
+  """
+  @spec bypass_armed?(String.t() | nil) :: boolean()
+  def bypass_armed?(session_id) do
+    match?(%Session{mode: "bypassPermissions"}, get_session(session_id))
+  end
+
+  @doc """
   Persist the sticky composer draft (charter D36c). `draft` is the unsent text
   (nil/`""` clears it). Deliberately does NOT bump `last_active_at` — leaving a
   draft must not reorder the sidebar. Restored on reopen from the full session
@@ -564,6 +611,210 @@ defmodule Barkpark.StudioChat do
       "" -> nil
       _ -> draft
     end
+  end
+
+  # ---------------------------------------------------------------------------
+  # agents rail (charter D47 — the mission-control snapshot below the composer)
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Persist the agents-rail snapshot (charter D47) — the task_id-keyed map the
+  Recorder maintains as background Workflow agents run. SET in place (the whole
+  jsonb column), so a reopened session replays its last-known rail. Deliberately
+  does NOT bump `last_active_at`: rail churn is background telemetry and must not
+  reorder the sidebar (mirrors `set_draft/2`). Returns `{:ok, session}` or
+  `{:error, :not_found}`.
+  """
+  @spec set_rail_snapshot(String.t(), map()) ::
+          {:ok, Session.t()} | {:error, :not_found}
+  def set_rail_snapshot(session_id, rail) when is_binary(session_id) and is_map(rail) do
+    with %Session{} = session <- get_session(session_id) do
+      session
+      |> Ecto.Changeset.change(rail_snapshot: rail)
+      |> Repo.update()
+    else
+      nil -> {:error, :not_found}
+    end
+  end
+
+  @doc """
+  The token/usage-stripped STRUCTURAL fingerprint of a rail snapshot (charter
+  D47) — the ONE shared change-only signature both the Recorder (persist-or-skip)
+  and ChatLive (re-render-or-skip) compute, so they never diverge. A structural
+  or state change (a row added/removed, a status flip, a phase/agent title,
+  model, or state change) yields a different term; a token-only progress tick —
+  same tree structure, only `tokens`/`usage` advanced — yields the SAME term, so
+  the hot heartbeat becomes render-on-change (D46 value-equality + wave-5
+  change-only precedents).
+  """
+  @spec rail_signature(map()) :: term()
+  def rail_signature(rail) when is_map(rail) do
+    rail
+    |> Enum.map(fn {tid, entry} -> {tid, rail_entry_signature(entry)} end)
+    |> Enum.sort()
+  end
+
+  def rail_signature(_), do: []
+
+  defp rail_entry_signature(entry) when is_map(entry) do
+    %{
+      "row" => entry["row"],
+      "status" => entry["status"],
+      "tree" => strip_workflow(entry["workflow"])
+    }
+  end
+
+  defp rail_entry_signature(_), do: %{}
+
+  # Keep only the STRUCTURE of a workflow tree — the phase titles, agent labels,
+  # models, and states — and drop the token/usage churn that ticks every frame.
+  defp strip_workflow(nodes) when is_list(nodes), do: Enum.map(nodes, &strip_workflow_node/1)
+  defp strip_workflow(_), do: nil
+
+  defp strip_workflow_node(node) when is_map(node),
+    do: Map.take(node, ["type", "title", "label", "model", "state"])
+
+  defp strip_workflow_node(other), do: other
+
+  @rail_cap 20
+
+  @doc """
+  Fold a `background_tasks_changed` SNAPSHOT into the rail (charter D47). The
+  frame is a task_id-keyed list with NO tool_use_id: (a) upsert a live "running"
+  row for every listed task; (b) any task_id that VANISHED from the snapshot
+  flips to `"completed"` UNLESS already terminal (a `"interrupted"` is never
+  resurrected). Entries are NEVER deleted (replay shows the last-known rail),
+  only capped. PURE — the Recorder and ChatLive fold identically off this.
+  """
+  @spec rail_apply_background(map(), map()) :: map()
+  def rail_apply_background(rail, ev) when is_map(rail) and is_map(ev) do
+    tasks = if is_list(ev["tasks"]), do: ev["tasks"], else: []
+    live_ids = tasks |> Enum.map(& &1["task_id"]) |> Enum.filter(&is_binary/1) |> MapSet.new()
+
+    rail =
+      Enum.reduce(tasks, rail, fn task, rail ->
+        case task["task_id"] do
+          tid when is_binary(tid) ->
+            entry =
+              rail
+              |> rail_entry(tid)
+              |> Map.put("row", %{
+                "task_type" => task["task_type"],
+                "description" => task["description"]
+              })
+              |> Map.put("status", "running")
+
+            Map.put(rail, tid, entry)
+
+          _ ->
+            rail
+        end
+      end)
+
+    rail
+    |> Map.new(fn {tid, entry} ->
+      if MapSet.member?(live_ids, tid) or rail_terminal?(entry),
+        do: {tid, entry},
+        else: {tid, Map.put(entry, "status", "completed")}
+    end)
+    |> cap_rail()
+  end
+
+  def rail_apply_background(rail, _ev), do: rail
+
+  @doc """
+  Capture a `task_progress` frame's `workflow_progress` phase→agent tree and
+  last-known usage into the task_id-keyed rail entry (charter D47). Only touches
+  the rail when the frame carries a workflow tree or the task already has an
+  entry — a bare heartbeat for an unknown task adds no noise. PURE.
+  """
+  @spec rail_capture_progress(map(), map()) :: map()
+  def rail_capture_progress(rail, ev) when is_map(rail) and is_map(ev) do
+    tid = ev["task_id"]
+    wf = ev["workflow_progress"]
+
+    cond do
+      not is_binary(tid) ->
+        rail
+
+      not is_list(wf) and not Map.has_key?(rail, tid) ->
+        rail
+
+      true ->
+        entry =
+          rail
+          |> rail_entry(tid)
+          |> rail_put_workflow(wf)
+          |> rail_put_usage(ev["usage"])
+
+        rail |> Map.put(tid, entry) |> cap_rail()
+    end
+  end
+
+  def rail_capture_progress(rail, _ev), do: rail
+
+  @doc """
+  Stamp a terminal/transition status onto a rail entry — but ONLY when the
+  task_id already has one (charter D47). A lifecycle frame for a task the rail
+  never listed leaves the map untouched. PURE.
+  """
+  @spec rail_stamp_status(map(), any(), any()) :: map()
+  def rail_stamp_status(rail, tid, status)
+      when is_map(rail) and is_binary(tid) and is_binary(status) do
+    case Map.get(rail, tid) do
+      entry when is_map(entry) -> Map.put(rail, tid, Map.put(entry, "status", status))
+      _ -> rail
+    end
+  end
+
+  def rail_stamp_status(rail, _tid, _status), do: rail
+
+  # Existing entry, or a fresh one seeded "running" with the next insertion seq
+  # (the cap prunes oldest-terminal by seq).
+  defp rail_entry(rail, tid) do
+    case Map.get(rail, tid) do
+      entry when is_map(entry) -> entry
+      _ -> %{"status" => "running", "seq" => next_rail_seq(rail)}
+    end
+  end
+
+  defp rail_put_workflow(entry, wf) when is_list(wf), do: Map.put(entry, "workflow", wf)
+  defp rail_put_workflow(entry, _), do: entry
+
+  defp rail_put_usage(entry, usage) when is_map(usage), do: Map.put(entry, "usage", usage)
+  defp rail_put_usage(entry, _), do: entry
+
+  @doc "True when a rail entry has reached a terminal status (charter D47)."
+  @spec rail_terminal?(any()) :: boolean()
+  def rail_terminal?(%{"status" => s}), do: s in ["completed", "interrupted"]
+  def rail_terminal?(_), do: false
+
+  @doc "A rail entry's insertion seq (0 when absent) — the cap/order key."
+  @spec rail_seq(any()) :: integer()
+  def rail_seq(entry) when is_map(entry), do: entry["seq"] || 0
+  def rail_seq(_), do: 0
+
+  defp next_rail_seq(rail) do
+    rail
+    |> Map.values()
+    |> Enum.reduce(0, fn e, acc -> max(acc, rail_seq(e)) end)
+    |> Kernel.+(1)
+  end
+
+  # Cap the rail at @rail_cap entries (bloat guard, charter D47), pruning the
+  # OLDEST TERMINAL entries first (lowest seq) — a still-running agent is never
+  # dropped from the mission-control view.
+  defp cap_rail(rail) when map_size(rail) <= @rail_cap, do: rail
+
+  defp cap_rail(rail) do
+    drop_ids =
+      rail
+      |> Enum.filter(fn {_id, e} -> rail_terminal?(e) end)
+      |> Enum.sort_by(fn {_id, e} -> rail_seq(e) end)
+      |> Enum.take(map_size(rail) - @rail_cap)
+      |> Enum.map(&elem(&1, 0))
+
+    Map.drop(rail, drop_ids)
   end
 
   @doc """
@@ -661,12 +912,16 @@ defmodule Barkpark.StudioChat do
 
   @doc """
   Force every still-`running` agent task for a session to `interrupted` (charter
-  D45) — the death-path teardown flip. When the subprocess exits (crash, idle
+  D45/D47) — the death-path teardown flip. When the subprocess exits (crash, idle
   reap, clean exit), an in-flight sub-agent can never report its result, so its
-  spawn row must NOT keep claiming "running" forever on reopen. Flips each row's
-  `metadata.task_status` from `"running"` to `"interrupted"`; every OTHER key
-  (task_id, the last progress line, the spawn's input) is preserved. Mirrors
-  `cancel_pending_approvals/1`. Returns the number of tasks interrupted.
+  spawn row must NOT keep claiming "running" forever on reopen. Flips each
+  transcript row's `metadata.task_status` from `"running"` to `"interrupted"`
+  AND, in the SAME transaction (charter D47), flips every `"running"` entry of
+  the session's `rail_snapshot` to `"interrupted"` — a reopened mid-run session
+  shows the honest last-known rail, never a fake live spinner. Every OTHER key
+  (task_id, the last progress line, the spawn's input, the rail's workflow tree /
+  usage) is preserved. Mirrors `cancel_pending_approvals/1`. Returns the number
+  of transcript rows interrupted (the rail flip rides along, uncounted).
   """
   @spec interrupt_running_tasks(String.t()) :: non_neg_integer()
   def interrupt_running_tasks(session_id) do
@@ -682,11 +937,66 @@ defmodule Barkpark.StudioChat do
         message |> Ecto.Changeset.change(metadata: meta) |> Repo.update!()
       end)
 
+      interrupt_rail_entries(session_id)
+
       length(running)
     end)
     |> case do
       {:ok, count} -> count
       _ -> 0
+    end
+  end
+
+  # Flip every still-"running" rail entry to "interrupted" (charter D47). Runs
+  # inside interrupt_running_tasks/1's transaction — a single update_all writes
+  # the mutated jsonb map back, and only when something actually changed.
+  defp interrupt_rail_entries(session_id) do
+    case get_session(session_id) do
+      %Session{rail_snapshot: rail} when is_map(rail) and map_size(rail) > 0 ->
+        flipped =
+          Map.new(rail, fn
+            {tid, %{"status" => "running"} = entry} ->
+              {tid, Map.put(entry, "status", "interrupted")}
+
+            {tid, entry} ->
+              {tid, entry}
+          end)
+
+        if flipped != rail do
+          Session
+          |> where([s], s.id == ^session_id)
+          |> Repo.update_all(set: [rail_snapshot: flipped, updated_at: DateTime.utc_now()])
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc """
+  Merge a patch into a needs-you row's metadata, keyed by `request_id` (charter
+  D49 — the plan-paper stamp seam). Reuses `find_approval/2` (already inclusive
+  of the `"plan"` role) + `Map.merge` + `Repo.update`, so the row's existing
+  metadata (request_id, tool_name, input, approval_status, …) is preserved and
+  only the patched keys are added/overwritten.
+
+  Exists because neither prior seam fits a plan row: `merge_tool_metadata/3`
+  keys on `tool_use_id` (which plan rows lack), and `update_approval_status/3`
+  writes only `approval_status` (and rejects non-terminal writes). `:noop` when
+  no row matches — a stamp for a request_id we never persisted must not raise.
+  """
+  @spec merge_approval_metadata(String.t(), String.t(), map()) ::
+          {:ok, Message.t()} | {:error, term()} | :noop
+  def merge_approval_metadata(session_id, request_id, patch)
+      when is_binary(session_id) and is_binary(request_id) and is_map(patch) do
+    case find_approval(session_id, request_id) do
+      nil ->
+        :noop
+
+      %Message{} = m ->
+        m
+        |> Ecto.Changeset.change(metadata: Map.merge(m.metadata || %{}, patch))
+        |> Repo.update()
     end
   end
 
