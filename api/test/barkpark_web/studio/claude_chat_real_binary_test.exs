@@ -277,6 +277,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatRealBinaryTest do
     @describetag :probe_postplan_mode
 
     test "the next system/init after a plan approval reports a known permissionMode" do
+      # The approved plan really executes: the model creates hello.txt in the
+      # CLI cwd (api/). Reap the artifact so the money lane never litters the
+      # repo — an untracked hello.txt after a probe run was wave-10 review debris.
+      on_exit(fn -> File.rm(Path.join(ClaudeChat.cwd(), "hello.txt")) end)
+
       {:ok, s} =
         ClaudeChat.start_session(%{
           sink: self(),
