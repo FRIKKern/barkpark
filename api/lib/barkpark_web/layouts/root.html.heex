@@ -42,29 +42,22 @@
       font-weight: 100 900; font-style: normal; font-display: swap;
     }
 
-    /* ── Source Serif 4 — self-hosted (TTFs in priv/static/fonts/,
-       served at /fonts/ by Plug.Static; "fonts" is in static_paths).
-       The Beta editor "paper" surface uses this as its body face;
-       `font-display: swap` accepts a brief Georgia FOUT on cold cache. */
+    /* ── Source Serif 4 — self-hosted variable woff2 (Roman + Italic in
+       priv/static/fonts/, served at /fonts/ by Plug.Static; "fonts" is in
+       static_paths). Two files carry the full wght 200–900 axis (was four
+       static TTFs @ 400/700 — unified-aesthetic S9). The Beta editor "paper"
+       surface uses this as its body face; `font-display: swap` accepts a
+       brief Georgia FOUT on cold cache. Source Serif 4, SIL OFL 1.1 — see
+       fonts/SourceSerif4-OFL.txt. */
     @font-face {
       font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Regular.ttf') format('truetype');
-      font-weight: 400; font-style: normal; font-display: swap;
+      src: url('/fonts/SourceSerif4Variable-Roman.woff2') format('woff2');
+      font-weight: 200 900; font-style: normal; font-display: swap;
     }
     @font-face {
       font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Italic.ttf') format('truetype');
-      font-weight: 400; font-style: italic; font-display: swap;
-    }
-    @font-face {
-      font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-Bold.ttf') format('truetype');
-      font-weight: 700; font-style: normal; font-display: swap;
-    }
-    @font-face {
-      font-family: 'Source Serif 4';
-      src: url('/fonts/SourceSerif4-BoldItalic.ttf') format('truetype');
-      font-weight: 700; font-style: italic; font-display: swap;
+      src: url('/fonts/SourceSerif4Variable-Italic.woff2') format('woff2');
+      font-weight: 200 900; font-style: italic; font-display: swap;
     }
 
     /* ── shadcn/radix inspired design tokens ──────────────────────────── */
