@@ -923,9 +923,127 @@
         metaLine +
       "</div>" +
       (row.resurrectCommand
-        ? '<div class="archive-resurrect">' + cliChipHtml(row.resurrectCommand) + "</div>"
+        ? '<div class="archive-resurrect">' +
+            '<button class="btn btn-primary btn-sm archive-resurrect-btn" type="button" data-resurrect-ref="' +
+              esc(row.bundleRef) + '">Resurrect</button>' +
+            cliChipHtml(row.resurrectCommand) +
+          "</div>"
         : "") +
     "</div>";
+  }
+
+  // ---- Resurrect flow pure helpers (azh-w7) — node-pinned via __bpTestHook ----
+
+  // The POST /v1/resurrect body for a row + chosen provider. name = the archive
+  // slug (what the CLI resurrect names too); bundle_ref = THIS row's bundle; the
+  // provider rides only when known so a source-less bundle falls back to the
+  // server default. Portable by design — provider may differ from the source.
+  function resurrectRequestBody(row, provider) {
+    row = row || {};
+    var body = { name: String(row.slug || ""), bundle_ref: String(row.bundleRef || "") };
+    var p = String(provider || row.providerKind || "");
+    if (p) body.provider = p;
+    return body;
+  }
+
+  // Map the /v1/resurrect response to the next action. A 202 hands off to the
+  // /new step feed; a provider_not_connected 422 surfaces the SERVER remediation
+  // in-sheet (D19 — friendly() drops .remediation, so read it first); anything
+  // else is a plain error sentence. Pure + total.
+  function resurrectOutcome(r) {
+    r = r || {};
+    var d = r.data || {};
+    if (r.status === 202 && d.id) return { action: "progress", id: String(d.id) };
+    if (r.status === 422 && d.error === "provider_not_connected") {
+      return { action: "remediate", message: remediationCopy(d) || friendly(d, "Connect that provider first.") };
+    }
+    return { action: "error", message: friendly(d, "Couldn't resurrect — please try again.") };
+  }
+
+  // The resurrect sheet body: a portable-provider picker (launch tab strip,
+  // default = source provider), a destroy-tier typed echo (proof of attention —
+  // a resurrect bills a real box), and a server-owned inline error slot for the
+  // 422 remediation. The Resurrect button ships disabled; the typed echo arms it.
+  function resurrectModalHtml(row, activeProvider) {
+    row = row || {};
+    var slug = String(row.slug || "");
+    var tabs = launchProviderTabsHtml(activeProvider || row.providerKind || "");
+    var picker = tabs
+      ? '<div class="field"><span class="label">Resurrect onto</span>' +
+          '<div class="seg" role="group" aria-label="Target provider" data-resurrect-tabs>' + tabs + "</div>" +
+          '<p class="dim resurrect-portable">Portable bundle — restore onto Hetzner or Azure.</p></div>'
+      : "";
+    return '<h2 class="modal-title" id="modal-title">Resurrect ' + esc(slug) + "?</h2>" +
+      '<p class="modal-sub">Stands up a NEW instance from this archive bundle. The restored box bills like any other.</p>' +
+      picker +
+      '<div class="field cm-typed-field">' +
+        '<label class="label" for="resurrect-typed">Type <span class="cm-name">' + esc(slug) + "</span> to confirm</label>" +
+        '<input class="form-input" id="resurrect-typed" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" /></div>' +
+      '<div class="cm-error" id="resurrect-error" role="alert" hidden><p class="cm-error-msg" id="resurrect-error-msg"></p></div>' +
+      '<div class="modal-actions"><button class="btn" type="button" data-close>Cancel</button>' +
+        '<button class="btn btn-primary" type="button" id="resurrect-go" disabled>Resurrect</button></div>';
+  }
+
+  // DOM wrapper (browser-verified). Opens the sheet, tracks the picked provider,
+  // drives the typed-echo gate through the pure confirmModal reducer, POSTs THIS
+  // row's bundle_ref, and routes the outcome: 202 → the /new step feed; a
+  // provider_not_connected 422 → the server remediation IN the sheet (never a
+  // toast); any other error → an inline retry.
+  function openResurrectModal(row) {
+    if (!row || !row.bundleRef) return;
+    var avail = PROVIDERS.filter(function (p) { return p.available; });
+    var provider = (avail.filter(function (p) { return p.kind === row.providerKind; })[0] ||
+      avail[0] || {}).kind || row.providerKind || "";
+    openModal(resurrectModalHtml(row, provider));
+    var go = $("#resurrect-go");
+    if (!go) return;
+    var typed = $("#resurrect-typed");
+    var errBox = $("#resurrect-error");
+    var errMsg = $("#resurrect-error-msg");
+    var state = confirmModalInit({ tier: "destroy", resourceName: String(row.slug || ""), confirmLabel: "Resurrect" });
+    var bodyEl = $("#modal-body");
+    var tabsWrap = bodyEl ? bodyEl.querySelector("[data-resurrect-tabs]") : null;
+    if (tabsWrap) {
+      tabsWrap.querySelectorAll(".seg-btn").forEach(function (b) {
+        b.addEventListener("click", function () {
+          provider = b.getAttribute("data-kind") || provider;
+          tabsWrap.querySelectorAll(".seg-btn").forEach(function (x) {
+            x.setAttribute("aria-pressed", x === b ? "true" : "false");
+          });
+        });
+      });
+    }
+    function arm() { go.disabled = !confirmModalArmed(state); }
+    if (typed) {
+      typed.addEventListener("input", function () {
+        state = confirmModalReduce(state, { type: "type", value: typed.value });
+        arm();
+      });
+    }
+    go.addEventListener("click", function () {
+      if (!confirmModalArmed(state)) return;
+      state = confirmModalReduce(state, { type: "confirm" });
+      go.disabled = true;
+      go.textContent = "Resurrecting…";
+      if (errBox) errBox.hidden = true;
+      api("POST", "/v1/resurrect", resurrectRequestBody(row, provider)).then(function (r) {
+        var out = resurrectOutcome(r);
+        if (out.action === "progress") {
+          closeModal();
+          // Fresh progress screen — clear any stale /new template so the header
+          // reads the neutral "Setting up your Barkpark", then jump to the feed.
+          newState = null;
+          showNewScreen();
+          newStartProgress(out.id);
+          return;
+        }
+        state = confirmModalReduce(state, { type: "fail", message: out.message });
+        go.disabled = false;
+        go.textContent = "Resurrect";
+        if (errMsg) setText(errMsg, out.message);
+        if (errBox) errBox.hidden = false;
+      });
+    });
   }
 
   // The whole panel body from the model — loading / error+Retry / empty / rows.
@@ -2274,9 +2392,24 @@
     api("GET", "/v1/archives").then(function (r) {
       // The route emits {ok, archives|error} in the body on BOTH 200 and 502;
       // api() surfaces that body as r.data, so the model reads it uniformly.
-      panel.innerHTML = archivesPanelHtml(archivesModel(r.data));
+      var model = archivesModel(r.data);
+      panel.innerHTML = archivesPanelHtml(model);
       var retry = panel.querySelector("[data-archives-retry]");
       if (retry) retry.addEventListener("click", loadArchives);
+      wireArchiveResurrect(panel, model);
+    });
+  }
+
+  // Wire each row's Resurrect button to its model row (keyed by bundle_ref, the
+  // unique S3 key) so a click opens the typed-confirm sheet for THAT bundle.
+  function wireArchiveResurrect(panel, model) {
+    var byRef = {};
+    (model && model.rows || []).forEach(function (row) {
+      if (row && row.bundleRef) byRef[row.bundleRef] = row;
+    });
+    panel.querySelectorAll(".archive-resurrect-btn").forEach(function (btn) {
+      var row = byRef[btn.getAttribute("data-resurrect-ref")];
+      if (row) btn.addEventListener("click", function () { openResurrectModal(row); });
     });
   }
 
@@ -9207,6 +9340,11 @@
       // (loadArchives) is browser-verified.
       archivesModel: archivesModel, archiveRowHtml: archiveRowHtml,
       archivesPanelHtml: archivesPanelHtml,
+      // azh-w7: the console Resurrect flow. Only the pure request/outcome/sheet
+      // builders are node-pinned; the modal mount (openResurrectModal) + its
+      // hand-off to the /new step feed are browser-verified.
+      resurrectRequestBody: resurrectRequestBody, resurrectOutcome: resurrectOutcome,
+      resurrectModalHtml: resurrectModalHtml,
       // Liveness chip (OC6): topbar SSE health dot + honest "as of" freshness.
       // Pure state helpers + the DOM seams (fake-DOM smoke drives the mount/paint,
       // the same way mountInstanceTimeline is exercised — real browser is live).
