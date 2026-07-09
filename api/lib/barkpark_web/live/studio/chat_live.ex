@@ -230,15 +230,18 @@ defmodule BarkparkWeb.Studio.ChatLive do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; background: var(--bg);">
       <style>
-        @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.75; } }
+        @keyframes bp-skel-pulse { 0%, 100% { opacity: 0.22; } 50% { opacity: 0.55; } }
+        /* Primary (evergreen) fill, NOT --border-muted: the dark theme's border
+           tone is an 11%-lightness gray on a dark bg — the shapes rendered
+           invisible. Primary reads in both schemes; the pulse keeps it a ghost. */
         .bp-chat-skel .bp-skel-shape {
-          background: var(--border-muted);
+          background: var(--primary);
           border-radius: 4px;
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
         .bp-chat-skel .bp-skel-dot {
           width: 7px; height: 7px; border-radius: 50%;
-          background: var(--accent, #2f6b4f);
+          background: var(--primary);
           animation: bp-skel-pulse 1.2s ease-in-out infinite;
         }
       </style>
@@ -311,7 +314,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <div
                   :if={message.approval_status == :pending}
                   data-approval={message.request_id}
-                  style="border: 1px solid var(--border-muted); border-left: 3px solid var(--accent, #2f6b4f); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
+                  style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px;"
                 >
                   <div style="flex: 1; min-width: 0;">
                     <div class="text-sm" style="font-weight: 600;">
@@ -414,7 +417,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     <div
       class="bp-chat-skel"
       data-skel={@kind}
-      style="border: 1px dashed var(--border-muted); border-radius: 8px; padding: 10px 12px; margin: 6px 0;"
+      style="border: 1px dashed hsl(var(--primary-hsl) / 0.45); border-radius: 8px; padding: 10px 12px; margin: 6px 0;"
     >
       <div
         class="text-xs text-dim"

@@ -195,6 +195,31 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       end
     end
 
+    test "at most ONE skeleton renders at a time, even with multiple fence starts", %{view: view} do
+      # a completed mini-fence followed by an open one: fence count is odd, the
+      # classifier keys on the LAST fence — exactly one skeleton may render
+      send(
+        view.pid,
+        {:claude_chat_event, stream_delta("```elixir\n:ok\n```\n```mermaid\ngraph TD\n")}
+      )
+
+      html = render(view)
+      occurrences = html |> String.split("data-skel=") |> length() |> Kernel.-(1)
+      assert occurrences == 1, "expected exactly one skeleton, got #{occurrences}"
+      assert html =~ ~s(data-skel="diagram")
+    end
+
+    test "skeleton shapes use the primary fill, never the invisible border tone", %{view: view} do
+      send(view.pid, {:claude_chat_event, stream_delta("```mermaid\ngraph")})
+      html = render(view)
+      assert html =~ "bp-skel-shape"
+      # regression: dark-theme --border-muted is an 11%-lightness gray — shapes
+      # filled with it are invisible. The stylesheet must key on the primary
+      # token (no literal fallback — the studio-literal-check gate forbids it).
+      assert html =~ "background: var(--primary"
+      refute html =~ "background: var(--border-muted"
+    end
+
     test "prose before a forming component still streams as text", %{view: view} do
       send(
         view.pid,
