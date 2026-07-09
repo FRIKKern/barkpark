@@ -350,6 +350,202 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     ~s|<svg class="bp-stat__spark" viewBox="0 0 #{w} #{h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="#{pts}"/></svg>|
   end
 
+  # ── email variants (gp-w3 email view) ────────────────────────────────────────
+  #
+  # The article emitters above lean on paper-surface.css classes and SVG strokes
+  # — in a stylesheet-less email client the classed SVG paints as BLACK FILLED
+  # BLOBS (no fill:none rule). These variants are the inline-styled, email-safe
+  # reads: stat cells as styled divs, the grid as a real <table>, the heatmap as
+  # bgcolor cells (intensity mixed into the accent IN ELIXIR), and the chart as
+  # an honest per-series summary box — never a broken picture.
+
+  @email_ink "#15211d"
+  @email_muted "#55635e"
+  @email_accent "#1e5347"
+  @email_ground "#eaf1ee"
+  @email_border "#dde7e2"
+
+  @doc "Email-safe stat cell: inline-styled value/bar/label, no SVG."
+  def stat_email_html(block) when is_map(block) do
+    value = block |> get("value") |> display_string()
+
+    if value == "" do
+      empty_email("stat")
+    else
+      label = block |> get("label") |> display_string()
+      max = numeric(get(block, "max"))
+
+      bar =
+        if max != nil and max > 0 do
+          pct =
+            case numeric(value) do
+              nil -> 0.0
+              v -> clamp(v / max, 0.0, 1.0)
+            end
+
+          ~s|<div style="height:6px;border-radius:3px;background:#{@email_border};margin-bottom:6px"><div style="height:6px;border-radius:3px;width:#{fmt(pct * 100)}%;background:#{@email_accent}"></div></div>|
+        else
+          ""
+        end
+
+      label_html =
+        if label == "",
+          do: "",
+          else:
+            ~s|<div style="font-size:12px;color:#{@email_muted};margin-top:2px">#{escape_html(label)}</div>|
+
+      ~s|<div style="display:inline-block;min-width:120px;background:#{@email_ground};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
+        bar <>
+        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{@email_ink};line-height:1.1">#{escape_html(value)}</div>| <>
+        label_html <> "</div>"
+    end
+  end
+
+  def stat_email_html(_), do: empty_email("stat")
+
+  @doc "Email-safe KPI grid: one row of stat cells."
+  def stats_email_html(block) when is_map(block) do
+    items = block |> get("items") |> as_list() |> Enum.filter(&is_map/1)
+
+    case items do
+      [] -> empty_email("stats")
+      _ -> ~s|<div>| <> Enum.map_join(items, "", &stat_email_html/1) <> "</div>"
+    end
+  end
+
+  def stats_email_html(_), do: empty_email("stats")
+
+  @doc "Email-safe heatmap: a real <table>, intensity baked into bgcolor."
+  def heatmap_email_html(block) when is_map(block) do
+    grid =
+      block
+      |> get("cells")
+      |> as_list()
+      |> Enum.map(fn row -> row |> as_list() |> Enum.map(&(numeric(&1) || 0.0)) end)
+      |> Enum.reject(&(&1 == []))
+
+    if grid == [] do
+      empty_email("heatmap")
+    else
+      max_val =
+        case numeric(get(block, "max")) do
+          m when is_float(m) and m > 0 -> m
+          _ -> grid |> List.flatten() |> Enum.max(fn -> 1.0 end) |> max(1.0e-9)
+        end
+
+      row_labels = block |> get("rowLabels") |> string_list()
+      col_labels = block |> get("colLabels") |> string_list()
+      cols = grid |> Enum.map(&length/1) |> Enum.max(fn -> 0 end)
+
+      label_td =
+        ~s|style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{@email_muted};padding:2px 8px 2px 0;text-align:right"|
+
+      head =
+        if col_labels == [] do
+          ""
+        else
+          corner = if row_labels == [], do: "", else: "<td></td>"
+
+          "<tr>" <>
+            corner <>
+            Enum.map_join(0..(cols - 1), "", fn j ->
+              ~s|<td style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{@email_muted};padding:2px 3px;text-align:center">#{escape_html(Enum.at(col_labels, j) || "")}</td>|
+            end) <> "</tr>"
+        end
+
+      body =
+        grid
+        |> Enum.with_index()
+        |> Enum.map_join("", fn {row, i} ->
+          label =
+            if row_labels == [],
+              do: "",
+              else: ~s|<td #{label_td}>#{escape_html(Enum.at(row_labels, i) || "")}</td>|
+
+          "<tr>" <>
+            label <>
+            Enum.map_join(0..(cols - 1), "", fn j ->
+              v = Enum.at(row, j) || 0.0
+
+              ~s|<td style="width:22px;height:18px;border-radius:3px;background:#{mix_hex(clamp(v / max_val, 0.0, 1.0))}" title="#{fmt(v)}"></td>|
+            end) <> "</tr>"
+        end)
+
+      ~s|<div style="display:inline-block;background:#ffffff;border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+        ~s|<table cellspacing="3" cellpadding="0" style="border-collapse:separate">| <>
+        head <> body <> "</table></div>"
+    end
+  end
+
+  def heatmap_email_html(_), do: empty_email("heatmap")
+
+  @doc """
+  Email-safe chart: an honest per-series summary (label · min→max · last) —
+  a broken SVG is worse than no picture; the live chart is one click away in
+  the reader.
+  """
+  def chart_email_html(block) when is_map(block) do
+    series =
+      block
+      |> get("series")
+      |> as_list()
+      |> Enum.map(fn s ->
+        %{
+          label: s |> get("label") |> display_string(),
+          points: s |> get("points") |> number_list()
+        }
+      end)
+      |> Enum.filter(&(&1.points != []))
+
+    case series do
+      [] ->
+        empty_email("chart")
+
+      _ ->
+        caption = block |> get("caption") |> display_string()
+
+        cap_html =
+          if caption == "",
+            do: "",
+            else:
+              ~s|<div style="font-size:13px;font-weight:600;color:#{@email_ink};margin-bottom:6px">#{escape_html(caption)}</div>|
+
+        rows =
+          series
+          |> Enum.with_index()
+          |> Enum.map_join("", fn {s, si} ->
+            label = if s.label == "", do: "series #{si + 1}", else: s.label
+            last = List.last(s.points)
+
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{@email_muted};margin:2px 0"><span style="display:inline-block;width:12px;height:3px;border-radius:2px;background:#{@email_accent};margin-right:8px;vertical-align:middle"></span>#{escape_html(label)} · #{tick(Enum.min(s.points))} → #{tick(Enum.max(s.points))} · now #{tick(last)}</div>|
+          end)
+
+        ~s|<div style="background:#{@email_ground};border:1px solid #{@email_border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
+          cap_html <>
+          rows <>
+          ~s|<div style="font-size:11px;color:#{@email_muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
+    end
+  end
+
+  def chart_email_html(_), do: empty_email("chart")
+
+  # accent mixed over the ground at intensity t, computed here because email
+  # has no color-mix() — the same read the stylesheet gives the reader.
+  defp mix_hex(t) do
+    {ar, ag, ab} = {0x1E, 0x53, 0x47}
+    {gr, gg, gb} = {0xEA, 0xF1, 0xEE}
+    mix = fn a, g -> round(a * t + g * (1 - t)) end
+
+    "#" <>
+      Enum.map_join([mix.(ar, gr), mix.(ag, gg), mix.(ab, gb)], "", fn c ->
+        c |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(2, "0")
+      end)
+  end
+
+  defp empty_email(kind),
+    do:
+      ~s|<div style="border:1px dashed #{@email_border};border-radius:10px;padding:10px 13px;color:#{@email_muted};font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;margin:12px 0">#{escape_html(kind)} — no data</div>|
+
   # ── small helpers (Components conventions) ───────────────────────────────────
 
   defp empty(kind),

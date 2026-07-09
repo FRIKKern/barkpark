@@ -22,11 +22,11 @@ defmodule Barkpark.PortableDoc.Render.DocumentTest do
 
       # Byte-exact envelope. Email clients strip <style>, so this MUST stay a
       # bare inline document forever — a diff here means the :email path grew a
-      # stylesheet/class it must not have. The bg literal (#f9fafb) is frozen
+      # stylesheet/class it must not have. The bg literal (#eaf1ee) is frozen
       # too so a palette change is caught.
       expected =
         "<!doctype html><html><head><meta charset=\"utf-8\"></head>" <>
-          "<body style=\"background:#f9fafb;margin:0;padding:0;\">" <>
+          "<body style=\"background:#eaf1ee;margin:0;padding:0;\">" <>
           body <>
           "</body></html>"
 
@@ -52,7 +52,7 @@ defmodule Barkpark.PortableDoc.Render.DocumentTest do
         "<!doctype html><html><head><meta charset=\"utf-8\"><style>" <>
           Stylesheet.css() <>
           "</style></head>" <>
-          "<body class=\"bp-paper-surface\" style=\"background:var(--paper-bg-deep, #f5f2e9);margin:0;padding:0;\">" <>
+          "<body class=\"bp-paper-surface\" style=\"background:var(--paper-bg-deep, #eaf1ee);margin:0;padding:0;\">" <>
           body <>
           "</body></html>"
 

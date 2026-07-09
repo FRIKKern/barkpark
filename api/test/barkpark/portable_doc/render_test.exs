@@ -17,13 +17,13 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "wraps the body in a full document by default" do
       html = Render.render_html(%{"kind" => "PdHr"})
       assert String.starts_with?(html, "<!doctype html><html><head>")
-      assert String.contains?(html, ~s(<body style="background:#f9fafb;margin:0;padding:0;">))
+      assert String.contains?(html, ~s(<body style="background:#eaf1ee;margin:0;padding:0;">))
       assert String.ends_with?(html, "</body></html>")
     end
 
     test "emits only the body fragment when doctype: false" do
       html = Render.render_html(%{"kind" => "PdHr"}, %{doctype: false})
-      assert html == ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
     end
   end
 
@@ -34,7 +34,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       node = %{"kind" => "PdContainer", "maxWidth" => 400, "children" => []}
       # default width 600, maxWidth 400 → clamps to 400
       assert Render.render_html(node, @opts) ==
-               ~s(<div style="max-width:400px;margin:0 auto;padding:24px;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;color:#111827;background:#ffffff"></div>)
+               ~s(<div style="max-width:400px;margin:0 auto;padding:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;background:#ffffff"></div>)
     end
 
     test "PdContainer clamps to the smaller container budget when maxWidth exceeds it" do
@@ -86,7 +86,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert Render.render_html(node, @opts) ==
                ~s(<span style="font-weight:bold;text-decoration:underline;color:#ff0000">plain ) <>
-                 ~s(<code style="background:#f3f4f6;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">x</code></span>)
+                 ~s(<code style="background:#eaf1ee;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">x</code></span>)
     end
 
     test "PdLink escapes string children and uses safe href" do
@@ -97,14 +97,14 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://example.com" style="color:#1d4ed8;text-decoration:underline">click &lt;here&gt;</a>)
+               ~s(<a href="https://example.com" style="color:#1e5347;text-decoration:underline">click &lt;here&gt;</a>)
     end
 
     test "PdInlineCode escapes its value" do
       node = %{"kind" => "PdInlineCode", "value" => "a & b"}
 
       assert Render.render_html(node, @opts) ==
-               ~s(<code style="background:#f3f4f6;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a &amp; b</code>)
+               ~s(<code style="background:#eaf1ee;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a &amp; b</code>)
     end
 
     test "strikethrough / underline inline WRAPPER nodes compose + render to text-decoration" do
@@ -325,7 +325,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
+               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
     end
 
     test "PdButton secondary uses brand border" do
@@ -337,12 +337,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;border:2px solid #4f46e5;color:#4f46e5;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
+               ~s(<a href="https://x.test" style="display:inline-block;padding:10px 20px;border:2px solid #1e5347;color:#1e5347;text-decoration:none;font-weight:bold;border-radius:0">Go</a>)
     end
 
     test "PdHr respects thickness, defaults to 1" do
       assert Render.render_html(%{"kind" => "PdHr", "thickness" => 2}, @opts) ==
-               ~s(<hr style="border:none;border-top:2px solid #e5e7eb;margin:16px 0">)
+               ~s(<hr style="border:none;border-top:2px solid #dde7e2;margin:16px 0">)
     end
 
     test "PdImage emits dims and escapes alt; safe src" do
@@ -371,8 +371,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert Render.render_html(node, @opts) ==
                ~s(<table role="presentation" style="border-collapse:collapse;width:100%">) <>
-                 ~s(<tr><td style="border:1px solid #e5e7eb;padding:8px 12px;vertical-align:top"><span>A</span></td>) <>
-                 ~s(<td style="border:1px solid #e5e7eb;padding:8px 12px;vertical-align:top"><span>B</span></td></tr></table>)
+                 ~s(<tr><td style="border:1px solid #dde7e2;padding:8px 12px;vertical-align:top"><span>A</span></td>) <>
+                 ~s(<td style="border:1px solid #dde7e2;padding:8px 12px;vertical-align:top"><span>B</span></td></tr></table>)
     end
 
     test "PdCallout uses tone palette and optional title" do
@@ -384,7 +384,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<div style="border-left:4px solid #92400e;background:#fffbeb;padding:16px;color:#92400e"><strong>Heads up</strong> <span>body</span></div>)
+               ~s(<div style="border-left:4px solid #8a6420;background:#f7f0df;padding:16px;color:#8a6420"><strong>Heads up</strong> <span>body</span></div>)
     end
   end
 
@@ -407,7 +407,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
   describe "render_block/1 — portable-doc block → fragment (Wave 4)" do
     test "heading composes to a bold span" do
       block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
-      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+      assert Render.render_block(block) == ~s(<h1 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.1;margin:0;font-weight:600;font-size:32px">Title</h1>)
     end
 
     test "paragraph with plain text composes to a span" do
@@ -417,12 +417,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "Hello"}]
       }
 
-      assert Render.render_block(block) == "<span>Hello</span>"
+      assert Render.render_block(block) == "<p>Hello</p>"
     end
 
     test "divider composes to an hr" do
       assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
-               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
     end
 
     test "callout uses tone palette and title (matches fixture block shape)" do
@@ -435,7 +435,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<div style="border-left:4px solid #92400e;background:#fffbeb;padding:16px;color:#92400e">) <>
+               ~s(<div style="border-left:4px solid #8a6420;background:#f7f0df;padding:16px;color:#8a6420">) <>
                  ~s(<strong>Degraded</strong> <span>API latency is elevated.</span></div>)
     end
 
@@ -449,7 +449,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<a href="https://example.com/notes" style="display:inline-block;padding:10px 20px;background:#4f46e5;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read more</a>)
+               ~s(<a href="https://example.com/notes" style="display:inline-block;padding:10px 20px;background:#1e5347;color:#ffffff;text-decoration:none;font-weight:bold;border-radius:0">Read more</a>)
     end
 
     test "section wraps children between leading/trailing hr rules" do
@@ -468,9 +468,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_block(block)
       # Leading + trailing hr from the composed section sub-tree.
-      assert html =~ ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+      assert html =~ ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
       assert html =~ ~s(<span style="font-weight:bold">Highlights</span>)
-      assert html =~ "<span>Body.</span>"
+      assert html =~ "<p>Body.</p>"
     end
 
     test "render_blocks concatenates a list in order" do
@@ -480,7 +480,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       ]
 
       assert Render.render_blocks(blocks) ==
-               ~s(<span style="font-weight:bold">A</span><span>B</span>)
+               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.2;margin:0;font-weight:600;font-size:24px">A</h2><p>B</p>)
     end
 
     # Flat-dialect ProseMirror text nodes carry a `marks` array (e.g.
@@ -495,7 +495,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<span><span style="font-weight:bold">hi</span></span>)
+               ~s(<p><span style="font-weight:bold">hi</span></p>)
     end
 
     test "stacked bold + italic marks nest outer→inner in list order" do
@@ -513,7 +513,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       # First mark is the outermost wrapper.
       assert Render.render_block(block) ==
-               ~s(<span><span style="font-weight:bold"><span style="font-style:italic">x</span></span></span>)
+               ~s(<p><span style="font-weight:bold"><span style="font-style:italic">x</span></span></p>)
     end
 
     test "code mark wraps the value as PdInlineCode" do
@@ -524,7 +524,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<span><code style="background:#f3f4f6;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a&amp;b</code></span>)
+               ~s(<p><code style="background:#eaf1ee;padding:2px 6px;font-family:ui-monospace,Menlo,monospace;font-size:0.95em">a&amp;b</code></p>)
     end
 
     test "link mark reads href from attrs and emits a PdLink" do
@@ -541,7 +541,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<span><a href="https://x.test" style="color:#1d4ed8;text-decoration:underline">click</a></span>)
+               ~s(<p><a href="https://x.test" style="color:#1e5347;text-decoration:underline">click</a></p>)
     end
 
     test "unknown marks pass through with no wrapper" do
@@ -551,7 +551,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "x", "marks" => [%{"type" => "wat"}]}]
       }
 
-      assert Render.render_block(block) == "<span>x</span>"
+      assert Render.render_block(block) == "<p>x</p>"
     end
 
     test "empty marks list parity with no-marks (no wrapping)" do
@@ -561,7 +561,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
         "content" => [%{"type" => "text", "value" => "x", "marks" => []}]
       }
 
-      assert Render.render_block(block) == "<span>x</span>"
+      assert Render.render_block(block) == "<p>x</p>"
     end
   end
 
@@ -635,7 +635,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # The asset-less image contributes nothing; the heading + paragraph render in
       # order with no empty <img> between them.
       assert Render.render_blocks(blocks) ==
-               ~s(<span style="font-weight:bold">A</span><span>B</span>)
+               ~s(<h2 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.2;margin:0;font-weight:600;font-size:24px">A</h2><p>B</p>)
 
       refute Render.render_blocks(blocks) =~ "<img"
     end
@@ -712,7 +712,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       # Wave 2 slice 6: :article render_html is now a self-contained export — the
       # canonical paper-surface stylesheet is embedded in <head>, so the accent
-      # token (`--paper-accent: #a23925`) and the serif stack legitimately live in
+      # token (`--paper-accent: #1e5347`) and the serif stack legitimately live in
       # that <style> block (covered by the ":article document wrapper" describe).
       # These guards are about the BODY carrying no INLINE theme, so scope to it.
       body = html |> String.split("</head>", parts: 2) |> List.last()
@@ -721,7 +721,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # lives in `.bp-paper-surface .bp-button--primary` (single-sourced from
       # `var(--paper-accent)`), so no accent hex rides the button inline anymore.
       assert body =~ ~s(class="bp-button bp-button--primary")
-      refute body =~ "#a23925"
+      refute body =~ "#1e5347"
       # Stage 2: the article container is bare of ink/bg/font — the
       # `.bp-paper-surface` root owns the serif family (single-sourced from
       # `--paper-font-serif`). No serif stack rides the container inline anymore.
@@ -740,7 +740,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # stylesheet in <head> and tags <body class="bp-paper-surface">, so the
       # export styles itself from the single source.
       assert html =~
-               ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #f5f2e9);|
+               ~s|<body class="bp-paper-surface" style="background:var(--paper-bg-deep, #eaf1ee);|
 
       assert html =~ "<style>" <> Barkpark.PortableDoc.Render.Stylesheet.css() <> "</style>"
     end
@@ -748,10 +748,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "email/default mode output is unchanged for an existing block" do
       # The Wave 4 expectation for a heading block must still hold byte-for-byte.
       block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
-      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+      assert Render.render_block(block) == ~s(<h1 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.1;margin:0;font-weight:600;font-size:32px">Title</h1>)
 
       assert Render.render_block(block, %{style: :email}) ==
-               ~s(<span style="font-weight:bold">Title</span>)
+               ~s(<h1 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.1;margin:0;font-weight:600;font-size:32px">Title</h1>)
     end
 
     test "heading level 1/2/3 emit distinct BARE tags — sizing lives in the surface CSS" do
@@ -854,7 +854,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "The control flow."
       # Article figure chrome: parchment card.
       assert html =~ "<figure"
-      assert html =~ "background:var(--paper-bg-deep, #f5f2e9)"
+      assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
     end
 
     test "email/default mode degrades — no pre.mermaid, source as a code block" do
@@ -1007,20 +1007,11 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_block(block, %{style: :article}) =~ ~r/<h2[ >]/
     end
 
-    test "email heading output is byte-unchanged (regression)" do
-      block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
-      # Default (email) and explicit :email — both the original bold span.
-      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
-
-      assert Render.render_block(block, %{style: :email}) ==
-               ~s(<span style="font-weight:bold">Title</span>)
-
-      # Levels 2 and 3 in email are also the plain bold span (no <hN>).
-      assert Render.render_block(%{"type" => "heading", "level" => 2, "text" => "T"}, %{
-               style: :email
-             }) == ~s(<span style="font-weight:bold">T</span>)
-
-      refute Render.render_block(%{"type" => "heading", "level" => 2, "text" => "T"}) =~ "<h2"
+    test "email heading is the inline-styled semantic element (gp-w3 email view)" do
+      html = Render.render_block(%{"type" => "heading", "level" => 2, "text" => "T"}, %{style: :email})
+      assert html =~ ~r/^<h2 style="/
+      assert html =~ ">T</h2>"
+      assert html =~ "#15211d"
     end
   end
 
@@ -1033,10 +1024,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ "<pre"
       # Parchment background, terracotta left-border, horizontal scroll —
       # now emitted through `var(--paper-*, hex)` for dark-mode theming.
-      assert html =~ "background:var(--paper-bg-deep, #f5f2e9)"
+      assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
       # S9: geometry is now token-bound (--bp-codeblock-*), accent colour still
       # binds --paper-accent for dark-mode theming.
-      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #a23925)"
+      assert html =~ "border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-accent, #1e5347)"
       assert html =~ "font-size:var(--bp-codeblock-size, 0.9rem)"
       assert html =~ "overflow-x:auto"
       # The value is escaped inside the single <pre> (no per-line <code> chips).
@@ -1048,7 +1039,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@code, %{style: :email})
       refute html =~ "<pre"
       # Per-line PdInlineCode chips on the email/default palette bg.
-      assert html =~ ~s(<code style="background:#f3f4f6)
+      assert html =~ ~s(<code style="background:#eaf1ee)
     end
   end
 
@@ -1095,7 +1086,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Stage 2 wave 2: body cells are class-driven (`.bp-table__td` owns the
       # warm rule colour); no inline theme, and never the email gray.
       assert html =~ ~s(<td class="bp-table__td">)
-      refute html =~ "#e5e7eb"
+      refute html =~ "#dde7e2"
     end
 
     test "article mode emits a <thead>/<th> band when an explicit head row is supplied" do
@@ -1130,7 +1121,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@table, %{style: :email})
       refute html =~ "<thead>"
       refute html =~ "<th "
-      assert html =~ ~s(<td style="border:1px solid #e5e7eb)
+      assert html =~ ~s(<td style="border:1px solid #dde7e2)
     end
   end
 
@@ -1166,7 +1157,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "article mode renders the § glyph straddling a hairline rule" do
       html = Render.render_block(@divider, %{style: :article})
       assert html =~ "§"
-      assert html =~ "border-top:1px solid var(--paper-rule, #e6e2d8)"
+      assert html =~ "border-top:1px solid var(--paper-rule, #dde7e2)"
       refute html =~ "<hr"
     end
 
@@ -1174,7 +1165,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@divider, %{style: :email})
 
       assert html ==
-               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
 
       refute html =~ "§"
     end
@@ -1382,12 +1373,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
   describe "regression — existing block email output byte-unchanged (P4)" do
     test "divider email output is byte-identical" do
       assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
-               ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
     end
 
     test "bold heading email output is byte-identical" do
       block = %{"id" => "h1", "type" => "heading", "level" => 1, "text" => "Title"}
-      assert Render.render_block(block) == ~s(<span style="font-weight:bold">Title</span>)
+      assert Render.render_block(block) == ~s(<h1 style="font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.1;margin:0;font-weight:600;font-size:32px">Title</h1>)
     end
   end
 

@@ -6,14 +6,9 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
   alias Barkpark.PortableDoc.Render.Compose
 
   describe "compose_block/1 (email/default style)" do
-    test "heading emits a bold PdText span (email mode)" do
-      b = %{"type" => "heading", "text" => "Hello", "level" => 1}
-
-      assert Compose.compose_block(b) == %{
-               "kind" => "PdText",
-               "weight" => "bold",
-               "children" => ["Hello"]
-             }
+    test "heading emits a semantic PdHeading in every style (email included)" do
+      b = %{"type" => "heading", "level" => 1, "text" => "Hello"}
+      assert Compose.compose_block(b) == %{"kind" => "PdHeading", "level" => 1, "children" => ["Hello"]}
     end
 
     test "heading level defaults to 2 for unknown level" do

@@ -20,12 +20,15 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
   # Font names are wrapped in single quotes inside CSS so the surrounding
   # double-quoted style attribute stays valid HTML. (Embedding `"SF Pro Text"`
   # directly would terminate the attribute at the first `"`.)
-  @font_body "-apple-system,'SF Pro Text',system-ui,sans-serif"
+  @font_body "'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif"
   @font_mono "ui-monospace,Menlo,monospace"
-  @brand "#4f46e5"
+  # Evergreen profile (design/tokens.json primary: 163 46% 22%) — the same
+  # brand the reader, Studio, TUI and web carry. The email surface was the last
+  # holdout on stock indigo/Tailwind grays.
+  @brand "#1e5347"
   @brand_text "#ffffff"
-  @rule "#e5e7eb"
-  @page_bg "#f9fafb"
+  @rule "#dde7e2"
+  @page_bg "#eaf1ee"
 
   @default_width 600
 
@@ -53,12 +56,12 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       width: @default_width,
       bg: @page_bg,
       paper: "#ffffff",
-      text: "#111827",
-      muted: "#6b7280",
+      text: "#15211d",
+      muted: "#55635e",
       rule: @rule,
       accent: @brand,
-      link_color: "#1d4ed8",
-      code_bg: "#f3f4f6"
+      link_color: @brand,
+      code_bg: "#eaf1ee"
     }
   end
 
@@ -88,14 +91,14 @@ defmodule Barkpark.PortableDoc.Render.Palettes do
       font_heading:
         "'Iowan Old Style','Palatino Linotype',Palatino,Charter,Georgia,'Source Serif 4',serif",
       width: 680,
-      bg: "var(--paper-bg-deep, #f5f2e9)",
+      bg: "var(--paper-bg-deep, #eaf1ee)",
       paper: "var(--paper-bg, #ffffff)",
-      text: "var(--paper-ink, #1a1a1a)",
-      muted: "var(--paper-ink-soft, #6a6a6a)",
-      rule: "var(--paper-rule, #e6e2d8)",
-      accent: "var(--paper-accent, #a23925)",
-      link_color: "var(--paper-accent, #a23925)",
-      code_bg: "var(--paper-bg-deep, #f5f2e9)"
+      text: "var(--paper-ink, #15211d)",
+      muted: "var(--paper-ink-soft, #55635e)",
+      rule: "var(--paper-rule, #dde7e2)",
+      accent: "var(--paper-accent, #1e5347)",
+      link_color: "var(--paper-accent, #1e5347)",
+      code_bg: "var(--paper-bg-deep, #eaf1ee)"
     }
   end
 

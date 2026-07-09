@@ -14,7 +14,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   describe "render_body/3 — PdHr" do
     test "emits hr with default thickness 1 and palette rule colour" do
       html = Walk.render_body(%{"kind" => "PdHr"}, @width, @email)
-      assert html == ~s(<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:16px 0">)
     end
 
     test "respects explicit thickness" do
@@ -123,7 +123,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       # The accent link colour stays inline (the same --paper-accent token the
       # CSS rule resolves — data-adjacent, no drift).
       assert html ==
-               ~s|<a href="https://example.com" style="color:var(--paper-accent, #a23925)">go</a>|
+               ~s|<a href="https://example.com" style="color:var(--paper-accent, #1e5347)">go</a>|
     end
 
     test "javascript: href is sanitised by safe_url (returns # sentinel)" do
@@ -763,8 +763,8 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
 
       assert html ==
                ~s(<ul style="margin:0 0 24px;padding-left:24px;) <>
-                 ~s(font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;) <>
-                 ~s(color:#111827;line-height:1.7">) <>
+                 ~s(font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;) <>
+                 ~s(color:#15211d;line-height:1.7">) <>
                  ~s(<li style="margin:4pt 0 0"><span>x</span></li></ul>)
     end
   end

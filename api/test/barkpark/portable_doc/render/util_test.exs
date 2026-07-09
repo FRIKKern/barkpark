@@ -124,31 +124,31 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
 
   describe "tone_palette/1" do
     test "returns correct colours for success" do
-      assert Util.tone_palette("success") == %{bg: "#ecfdf5", fg: "#047857"}
+      assert Util.tone_palette("success") == %{bg: "#e7f2ec", fg: "#1e6b52"}
     end
 
     test "returns correct colours for warning" do
-      assert Util.tone_palette("warning") == %{bg: "#fffbeb", fg: "#92400e"}
+      assert Util.tone_palette("warning") == %{bg: "#f7f0df", fg: "#8a6420"}
     end
 
     test "returns correct colours for danger" do
-      assert Util.tone_palette("danger") == %{bg: "#fef2f2", fg: "#b91c1c"}
+      assert Util.tone_palette("danger") == %{bg: "#f7e9e6", fg: "#a63a2e"}
     end
 
     test "returns correct colours for info" do
-      assert Util.tone_palette("info") == %{bg: "#eff6ff", fg: "#1d4ed8"}
+      assert Util.tone_palette("info") == %{bg: "#e9eff7", fg: "#2d5e8f"}
     end
 
     test "returns correct colours for neutral" do
-      assert Util.tone_palette("neutral") == %{bg: "#f3f4f6", fg: "#374151"}
+      assert Util.tone_palette("neutral") == %{bg: "#edf0ee", fg: "#4a544f"}
     end
 
     test "falls back to info palette for unknown tones" do
-      assert Util.tone_palette("unknown") == %{bg: "#eff6ff", fg: "#1d4ed8"}
+      assert Util.tone_palette("unknown") == %{bg: "#e9eff7", fg: "#2d5e8f"}
     end
 
     test "falls back to info palette for nil" do
-      assert Util.tone_palette(nil) == %{bg: "#eff6ff", fg: "#1d4ed8"}
+      assert Util.tone_palette(nil) == %{bg: "#e9eff7", fg: "#2d5e8f"}
     end
   end
 end

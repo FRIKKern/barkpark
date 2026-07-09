@@ -80,10 +80,15 @@ defmodule Barkpark.PortableDoc.Render.Util do
   defp protocol_relative?(s), do: Regex.match?(~r|^/[/\\]|, s)
 
   @doc "Background / foreground palette for a callout tone."
-  def tone_palette("success"), do: %{bg: "#ecfdf5", fg: "#047857"}
-  def tone_palette("warning"), do: %{bg: "#fffbeb", fg: "#92400e"}
-  def tone_palette("danger"), do: %{bg: "#fef2f2", fg: "#b91c1c"}
-  def tone_palette("info"), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
-  def tone_palette("neutral"), do: %{bg: "#f3f4f6", fg: "#374151"}
-  def tone_palette(_), do: %{bg: "#eff6ff", fg: "#1d4ed8"}
+  # Light tone tints, harmonized to the evergreen paper ground (#f6faf9) —
+  # semantic hues kept (info blue / success green / warning amber / danger
+  # red), saturation pulled toward the profile so a toned callout sits IN the
+  # page instead of on it. Success is evergreen-kin by design. Mirrored by the
+  # `--bp-tone-*` light block in paper-surface.css — change both together.
+  def tone_palette("success"), do: %{bg: "#e7f2ec", fg: "#1e6b52"}
+  def tone_palette("warning"), do: %{bg: "#f7f0df", fg: "#8a6420"}
+  def tone_palette("danger"), do: %{bg: "#f7e9e6", fg: "#a63a2e"}
+  def tone_palette("info"), do: %{bg: "#e9eff7", fg: "#2d5e8f"}
+  def tone_palette("neutral"), do: %{bg: "#edf0ee", fg: "#4a544f"}
+  def tone_palette(_), do: %{bg: "#e9eff7", fg: "#2d5e8f"}
 end

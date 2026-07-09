@@ -442,6 +442,10 @@
       transition: background 0.15s, color 0.15s, transform 0.08s;
     }
     .bp-view-toggle:hover { transform: translateY(-1px); }
+    /* The email link stacks above the TUI pill (same chrome, no state dot
+       color change) and never shows inside the TUI view itself. */
+    .bp-view-toggle--email { bottom: 62px; text-decoration: none; }
+    body.bp-tui .bp-view-toggle--email { display: none; }
     .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
     .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
     /* hide the toggle when there is no article paper on the page */
@@ -544,6 +548,17 @@
     <span class="bp-vt-dot" aria-hidden="true"></span>
     <span class="bp-vt-label">TUI view</span>
   </button>
+  <a
+    class="bp-view-toggle bp-view-toggle--email"
+    href="#"
+    target="_blank"
+    rel="noopener"
+    aria-label="Open this paper as it renders in email"
+    onclick="this.href = location.pathname.replace(/\/+$/, '') + '/email'; return true;"
+  >
+    <span class="bp-vt-dot" aria-hidden="true"></span>
+    <span class="bp-vt-label">Email view</span>
+  </a>
   <script>
     (function () {
       var KEY = "bp-paper-view";

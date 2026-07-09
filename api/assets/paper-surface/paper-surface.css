@@ -96,11 +96,11 @@ html[data-theme="dark"] .bp-paper-body {
      Util.tone_palette/1 (util.ex): unknown tone falls back to info there, and
      the `bp-callout--info` modifier is the emitted default here too. Dark
      companions live in the html[data-theme="dark"] block above. */
-  --bp-tone-info-bg:    #eff6ff; --bp-tone-info-fg:    #1d4ed8;
-  --bp-tone-success-bg: #ecfdf5; --bp-tone-success-fg: #047857;
-  --bp-tone-warning-bg: #fffbeb; --bp-tone-warning-fg: #92400e;
-  --bp-tone-danger-bg:  #fef2f2; --bp-tone-danger-fg:  #b91c1c;
-  --bp-tone-neutral-bg: #f3f4f6; --bp-tone-neutral-fg: #374151;
+  --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
+  --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
+  --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
+  --bp-tone-danger-bg:  #f7e9e6; --bp-tone-danger-fg:  #a63a2e;
+  --bp-tone-neutral-bg: #edf0ee; --bp-tone-neutral-fg: #4a544f;
 }
 
 /* ── Paper TYPOGRAPHY tokens (Stage-1 single-source — Goal editor-parity).

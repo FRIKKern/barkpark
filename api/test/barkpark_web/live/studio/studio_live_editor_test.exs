@@ -190,11 +190,12 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
 
       # The `post` schema carries an explicit Expectation layout, so the
       # document is stored via the portable-doc path: the plain `body` string
-      # lands in the body REGION as a free block with an `html` render
-      # (`<span>…</span>`), and the text-fallback textarea shows that HTML
-      # escaped. (The layout-less `page` schema below keeps the bare string —
-      # see "page editor mounts".)
-      assert html =~ ">&lt;span&gt;the quick brown fox&lt;/span&gt;</textarea>"
+      # lands in the body REGION as a free block with an `html` render — a
+      # semantic `<p>…</p>` since the gp-w3 email-view wave (paragraphs compose
+      # to PdParagraph in every style) — and the text-fallback textarea shows
+      # that HTML escaped. (The layout-less `page` schema below keeps the bare
+      # string — see "page editor mounts".)
+      assert html =~ ">&lt;p&gt;the quick brown fox&lt;/p&gt;</textarea>"
 
       # ── richText clause: bp-rich-text-editor Web Component bridged via
       # hidden input + BarkparkFieldBridge hook (Task #11 WI4) ───────────────
