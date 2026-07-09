@@ -35,7 +35,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
+  alias BarkparkWeb.Studio.ChatToolRenderer
   alias BarkparkWeb.Studio.ClaudeChat
+
+  # Spawn-row heuristics + labels for the nested agent trace (charter D40) — pure
+  # helpers shared by the live render and the store-replay path.
+  import BarkparkWeb.Studio.ChatToolRenderer, only: [spawn?: 2, spawn_label: 2]
 
   # How long a Stop may sit in `:interrupting` before we force-close a wedged
   # CLI (charter D18). Config-overridable so tests can drive the timeout fast.
@@ -88,6 +93,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
          init: nil,
          messages: [],
          next_id: 0,
+         # The in-memory id of THIS turn's TodoWrite living-checklist card
+         # (charter D39). The turn's first TodoWrite appends a :todo card and
+         # records its id here; every later TodoWrite supersedes that card in
+         # place. Reset to nil on the broadcast `system/init` (the per-turn
+         # boundary) and on every session load.
+         todo_card_id: nil,
          streaming: nil,
          # The live extended-thinking pulse (charter D41): nil, or
          # %{tokens: N, text: ""}. Driven by `system/thinking_tokens` frames — the
@@ -700,7 +711,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
     {:noreply,
      socket
-     |> assign(init: init, status: status)
+     # A new turn is starting: forget the previous turn's checklist card so this
+     # turn's first TodoWrite starts a fresh living card (charter D39).
+     |> assign(init: init, status: status, todo_card_id: nil)
      |> observe_permission_mode(observed)}
   end
 
@@ -778,7 +791,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_info(
-        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}}},
+        {:claude_chat_event, %{"type" => "assistant", "message" => %{"content" => blocks}} = ev},
         socket
       )
       when is_list(blocks) do
@@ -786,20 +799,46 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # so its ✻ row lands just before the tool row, matching the persisted order.
     socket = settle_thinking(socket)
 
+    # A sub-agent's frames carry a top-level parent_tool_use_id (charter D40);
+    # every row this frame produces inherits it so children indent under the
+    # spawn row. Top-level frames leave it nil (no indent).
+    parent_id = ev["parent_tool_use_id"]
+
     socket =
       Enum.reduce(blocks, socket, fn
         %{"type" => "text", "text" => text}, acc when is_binary(text) ->
           if String.trim(text) == "" do
             acc
           else
-            append_message(acc, :assistant, text, html: render_paper_html(text))
+            append_message(acc, :assistant, text,
+              html: render_paper_html(text),
+              parent_tool_use_id: parent_id
+            )
           end
 
         %{"type" => "tool_use", "name" => name} = block, acc ->
-          append_message(acc, :tool, tool_line(name, block["input"]),
-            tool_use_id: block["id"],
-            output: nil
-          )
+          input = block["input"]
+
+          if StudioChat.todo_shaped?(input) and is_nil(parent_id) do
+            # A TOP-LEVEL TodoWrite-shaped call becomes the turn's ONE living
+            # checklist card (D39) instead of a generic tool row. A sub-agent's
+            # TodoWrite must never hijack the main turn's card — it stays a
+            # plain (indented) tool row below its spawn (D40).
+            apply_todo_block(acc, input)
+          else
+            # Thread the FULL input + tool name so the diff renderer (D38) can
+            # dispatch on input SHAPE; the store already persists both verbatim
+            # (recorder.ex), so live and replay render the identical diff.
+            append_message(acc, :tool, tool_line(name, input),
+              tool_use_id: block["id"],
+              output: nil,
+              tool: name,
+              input: input,
+              parent_tool_use_id: parent_id,
+              spawn?: spawn?(name, input),
+              spawn_label: spawn_label(name, input)
+            )
+          end
 
         _block, acc ->
           acc
@@ -1458,7 +1497,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-hook="PaperMermaid"
             style="display: flex; flex-direction: column; gap: 10px;"
           >
-            <div :for={message <- @messages} data-role={message.role}>
+            <div
+              :for={message <- @messages}
+              data-role={message.role}
+              data-parent={message[:parent_tool_use_id]}
+              style={message[:parent_tool_use_id] && trace_child_style()}
+            >
             <%= case message.role do %>
               <% :user -> %>
                 <%!-- Terminal anatomy: the user's prompt wears the ❯ gutter,
@@ -1522,10 +1566,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   </div>
                 </div>
               <% :tool -> %>
-                <div class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                <%!-- A Task/agent spawn (charter D40) gets a headline row: the
+                      ● gutter plus the sub-agent's description; the frames it
+                      emits interleave below, indented under it. A plain tool row
+                      keeps the terse mono line. --%>
+                <div :if={message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
+                  <span style="color: var(--primary);">●</span>
+                  <span style="font-weight: 650;"><%= message[:spawn_label] || message.text %></span>
+                  <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+                </div>
+                <div :if={!message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
                   <span style="color: var(--primary);">●</span>
                   <span><%= message.text %></span>
                 </div>
+                <%!-- D38: a file-mutating tool call renders as a real colored
+                      diff (dispatch on input SHAPE, not tool name) beneath the
+                      ● header; a non-diff shape renders nothing here and keeps
+                      the generic ⎿ row below. --%>
+                <ChatToolRenderer.tool_diff
+                  :if={ChatToolRenderer.diff?(message[:input])}
+                  input={message.input}
+                />
                 <%!-- The terminal's ⎿ result line: first line inline; multi-
                       line outputs expand on click (details/summary). --%>
                 <div
@@ -1545,6 +1606,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     ⎿ <%= tool_output_head(message.output) %>
                   <% end %>
                 </div>
+              <% :todo -> %>
+                <%!-- The living checklist card (charter D39): one ☐/◐/☒ card the
+                      Recorder collapsed + the reducer superseded, so it renders
+                      the turn's LATEST todo state whether live or replayed. --%>
+                <ChatToolRenderer.todo_card todos={message.todos} />
               <% :approval -> %>
                 <div
                   :if={message.approval_status == :pending}
@@ -2140,6 +2206,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Strictly past every replayed id (seqs are 1-based), so a live append
       # never collides with a replayed message's id.
       next_id: Enum.reduce(messages, 0, &max(&1.id, &2)) + 1,
+      # A reopen starts no turn — the next live TodoWrite opens a fresh card
+      # (charter D39). A replayed todo row is already the final collapsed state.
+      todo_card_id: nil,
       streaming: nil,
       thinking_pulse: nil,
       interrupt_requested: false,
@@ -2216,6 +2285,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       init: nil,
       messages: [],
       next_id: 0,
+      todo_card_id: nil,
       streaming: nil,
       thinking_pulse: nil,
       # A new chat has no runtime yet, so no advertised commands — the slash menu
@@ -2567,14 +2637,43 @@ defmodule BarkparkWeb.Studio.ChatLive do
     %{id: seq, role: :user, text: md, html: nil, images: replay_images(meta)}
   end
 
-  # A tool row replays with its captured output so the ⎿ line survives reopen.
+  # A todo row replays as ONE final-state living checklist (charter D39): the
+  # Recorder collapsed every TodoWrite of the turn into this single row's
+  # metadata.input, so parsing it here reconstructs exactly the last state.
+  defp replay_message(%{role: "todo", seq: seq, metadata: meta}, _live?) do
+    input = Map.get(meta || %{}, "input") || %{}
+
+    %{
+      id: seq,
+      role: :todo,
+      text: "Update todos",
+      html: nil,
+      todos: ChatToolRenderer.parse_todos(input)
+    }
+  end
+
+  # A tool row replays with its captured output so the ⎿ line survives reopen,
+  # its input + tool name so the diff renderer (D38) reproduces the identical
+  # colored diff, and the spawn heuristics + nested-trace parentage (D40) so a
+  # reopened transcript shows the same ● spawn row and indented children the
+  # live tab drew — replay parity is first-class.
   defp replay_message(%{role: "tool", seq: seq, source_markdown: md, metadata: meta}, _live?) do
+    meta = meta || %{}
+    name = Map.get(meta, "tool")
+    input = Map.get(meta, "input")
+
     %{
       id: seq,
       role: :tool,
       text: md,
       html: nil,
-      output: Map.get(meta || %{}, "output")
+      output: Map.get(meta, "output"),
+      tool: name,
+      input: input,
+      tool_use_id: Map.get(meta, "tool_use_id"),
+      parent_tool_use_id: Map.get(meta, "parent_tool_use_id"),
+      spawn?: spawn?(name, input),
+      spawn_label: spawn_label(name, input)
     }
   end
 
@@ -2595,7 +2694,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
            String.trim(m.source_markdown) != "",
          do: render_paper_html(m.source_markdown)
 
-    %{id: m.seq, role: role, text: m.source_markdown, html: html}
+    %{
+      id: m.seq,
+      role: role,
+      text: m.source_markdown,
+      html: html,
+      parent_tool_use_id: Map.get(m.metadata || %{}, "parent_tool_use_id")
+    }
   end
 
   # Rebuild the inline image list from a user row's metadata attachment pointers.
@@ -2671,6 +2776,35 @@ defmodule BarkparkWeb.Studio.ChatLive do
     case ev["estimated_tokens"] do
       n when is_integer(n) and n > 0 -> n
       _ -> 0
+    end
+  end
+
+  # A TodoWrite-shaped tool_use is ONE living checklist card per turn (charter
+  # D39). The turn's first TodoWrite appends a :todo card and records its id;
+  # every later one supersedes that card's list IN PLACE (never appends). The
+  # tracked id resets on the broadcast `system/init` (per-turn boundary), so a
+  # mid-turn joiner — whose id is nil — appends one latest-state card (accepted;
+  # reopen converges to the single persisted row). The existence guard keeps a
+  # stale id (from a session we just left) from silently dropping the card.
+  defp apply_todo_block(socket, input) do
+    todos = ChatToolRenderer.parse_todos(input)
+    tracked = socket.assigns[:todo_card_id]
+
+    if is_integer(tracked) and
+         Enum.any?(socket.assigns.messages, &(&1.id == tracked and &1.role == :todo)) do
+      messages =
+        Enum.map(socket.assigns.messages, fn
+          %{id: ^tracked} = m -> %{m | todos: todos}
+          m -> m
+        end)
+
+      assign(socket, messages: messages)
+    else
+      id = socket.assigns.next_id
+
+      socket
+      |> append_message(:todo, "Update todos", todos: todos)
+      |> assign(todo_card_id: id)
     end
   end
 
@@ -3224,18 +3358,31 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp tool_output_lines(out) when is_binary(out),
     do: out |> String.split("\n") |> Enum.count(&(String.trim(&1) != ""))
 
+  # A diff-shaped call (Edit/Write/MultiEdit by SHAPE) renders its content as a
+  # colored diff right below the header (D38) — the header shows only the path,
+  # terminal style (`● Update(path)`), never a duplicate old/new-string preview.
   defp tool_line(name, input) when is_map(input) do
-    preview =
-      input
-      |> Enum.filter(fn {_k, v} -> is_binary(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
-      |> Enum.take(2)
-      |> Enum.join(" · ")
+    if ChatToolRenderer.diff?(input) do
+      "#{name} — #{input["file_path"]}"
+    else
+      preview =
+        input
+        |> Enum.filter(fn {_k, v} -> is_binary(v) end)
+        |> Enum.map(fn {k, v} -> "#{k}: #{String.slice(v, 0, 80)}" end)
+        |> Enum.take(2)
+        |> Enum.join(" · ")
 
-    if preview == "", do: name, else: "#{name} — #{preview}"
+      if preview == "", do: name, else: "#{name} — #{preview}"
+    end
   end
 
   defp tool_line(name, _input), do: name
+
+  # A sub-agent's rows (charter D40) indent under their spawn row with a
+  # connecting evergreen gutter — the nested-trace feel of the terminal. Tokens
+  # only (no color literals): the gate stays green.
+  defp trace_child_style,
+    do: "margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--primary);"
 
   defp model_label("haiku"), do: "Haiku — fastest"
   defp model_label("sonnet"), do: "Sonnet — balanced"

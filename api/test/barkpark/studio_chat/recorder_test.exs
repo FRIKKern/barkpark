@@ -280,13 +280,233 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
   end
 
+  # A TodoWrite-shaped assistant frame (dispatch on shape, not name — the cmux
+  # binary lacks TodoWrite, so we synthesize the shape). Each call is a FRESH
+  # tool_use id, exactly as the real binary emits per TodoWrite.
+  defp todo_frame(id, todos) do
+    {:claude_chat_event,
+     %{
+       "type" => "assistant",
+       "message" => %{
+         "content" => [
+           %{
+             "type" => "tool_use",
+             "id" => id,
+             "name" => "TodoWrite",
+             "input" => %{"todos" => todos}
+           }
+         ]
+       }
+     }}
+  end
+
+  describe "TodoWrite living checklist collapse (charter D39)" do
+    test "a SUB-AGENT's TodoWrite never hijacks the top-level card — it persists as a plain child tool row (D39×D40)",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      # top-level TodoWrite opens the turn's living card
+      frame(
+        recorder,
+        todo_frame("toolu_main", [%{"content" => "main plan", "status" => "in_progress"}])
+      )
+
+      # a sub-agent frame carrying a TodoWrite-shaped tool_use
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_sub",
+                 "name" => "TodoWrite",
+                 "input" => %{"todos" => [%{"content" => "sub plan", "status" => "pending"}]}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      # the main card is untouched…
+      [todo] = Enum.filter(rows, &(&1.role == "todo"))
+      assert todo.metadata["tool_use_id"] == "toolu_main"
+      assert [%{"content" => "main plan"} | _] = todo.metadata["input"]["todos"]
+
+      # …and the sub-agent's todo landed as a plain, parent-stamped tool row
+      sub = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_sub"))
+      assert sub.role == "tool"
+      assert sub.metadata["parent_tool_use_id"] == "toolu_spawn"
+    end
+
+    test "two TodoWrites in ONE turn collapse to a single todo row with the latest input",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+
+      frame(
+        recorder,
+        todo_frame("toolu_todo_1", [
+          %{"content" => "read charter", "status" => "in_progress", "activeForm" => "reading"}
+        ])
+      )
+
+      # A FRESH tool_use id (as the real binary emits) — must NOT append a 2nd row.
+      frame(
+        recorder,
+        todo_frame("toolu_todo_2", [
+          %{"content" => "read charter", "status" => "completed"},
+          %{"content" => "write code", "status" => "in_progress", "activeForm" => "writing"}
+        ])
+      )
+
+      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(todos) == 1
+
+      [row] = todos
+      # The persisted input is the LATEST state; replay reconstructs one card.
+      items = row.metadata["input"]["todos"]
+      assert length(items) == 2
+      assert Enum.at(items, 0)["status"] == "completed"
+      assert Enum.at(items, 1)["status"] == "in_progress"
+      # The row keeps the FIRST TodoWrite's tool_use_id (updated in place).
+      assert row.metadata["tool_use_id"] == "toolu_todo_1"
+    end
+
+    test "a new turn (init resets the tracker) starts a SEPARATE todo row",
+         %{sid: sid, recorder: recorder} do
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, todo_frame("toolu_a", [%{"content" => "step", "status" => "pending"}]))
+
+      # Second turn.
+      frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
+      frame(recorder, todo_frame("toolu_b", [%{"content" => "step", "status" => "completed"}]))
+
+      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      assert length(rows) == 2
+    end
+
+    test "a non-todo tool_use is unaffected — still a plain tool row",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "t1",
+                 "name" => "Bash",
+                 "input" => %{"command" => "ls"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+      assert Enum.any?(rows, &(&1.role == "tool"))
+      assert Enum.filter(rows, &(&1.role == "todo")) == []
+    end
+  end
+
+  describe "nested agent traces (charter D40)" do
+    test "a child frame stamps parent_tool_use_id on every row; a top-level frame omits it",
+         %{sid: sid, recorder: recorder} do
+      # Top-level: a Task spawn (its own frame has NO parent_tool_use_id).
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "message" => %{
+             "content" => [
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_spawn",
+                 "name" => "Task",
+                 "input" => %{
+                   "description" => "Explore the recorder",
+                   "prompt" => "audit it",
+                   "subagent_type" => "explore"
+                 }
+               }
+             ]
+           }
+         }}
+      )
+
+      # A frame emitted BY the sub-agent: top-level parent_tool_use_id set, and it
+      # carries both a text block and a tool_use — BOTH rows must inherit it.
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "toolu_spawn",
+           "message" => %{
+             "content" => [
+               %{"type" => "text", "text" => "child is thinking"},
+               %{
+                 "type" => "tool_use",
+                 "id" => "toolu_child",
+                 "name" => "Bash",
+                 "input" => %{"command" => "grep -rn foo"}
+               }
+             ]
+           }
+         }}
+      )
+
+      rows = StudioChat.list_messages(sid)
+
+      spawn_row = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_spawn"))
+      refute spawn_row.metadata["parent_tool_use_id"]
+
+      child_text =
+        Enum.find(rows, &(&1.role == "assistant" and &1.source_markdown == "child is thinking"))
+
+      assert child_text.metadata["parent_tool_use_id"] == "toolu_spawn"
+
+      child_tool = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_child"))
+      assert child_tool.metadata["parent_tool_use_id"] == "toolu_spawn"
+    end
+
+    test "an empty-string parent_tool_use_id is treated as top-level (no stamp)",
+         %{sid: sid, recorder: recorder} do
+      frame(
+        recorder,
+        {:claude_chat_event,
+         %{
+           "type" => "assistant",
+           "parent_tool_use_id" => "",
+           "message" => %{"content" => [%{"type" => "text", "text" => "top level"}]}
+         }}
+      )
+
+      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "top level"))
+      refute row.metadata["parent_tool_use_id"]
+    end
+  end
+
   describe "thinking pulse persistence (charter D41)" do
     defp thinking_tokens(n),
-      do: {:claude_chat_event, %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}}
+      do:
+        {:claude_chat_event,
+         %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => n}}
 
     defp assistant_text(text) do
       {:claude_chat_event,
-       %{"type" => "assistant", "message" => %{"content" => [%{"type" => "text", "text" => text}]}}}
+       %{
+         "type" => "assistant",
+         "message" => %{"content" => [%{"type" => "text", "text" => text}]}
+       }}
     end
 
     test "a thinking bout flushes a 'thinking' row BEFORE the turn's assistant blocks",
@@ -357,7 +577,11 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, thinking_tokens(12))
 
       assert_receive {:claude_chat_event,
-                      %{"type" => "system", "subtype" => "thinking_tokens", "estimated_tokens" => 12}}
+                      %{
+                        "type" => "system",
+                        "subtype" => "thinking_tokens",
+                        "estimated_tokens" => 12
+                      }}
     end
   end
 

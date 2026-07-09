@@ -419,6 +419,53 @@ defmodule Barkpark.StudioChat do
   end
 
   @doc """
+  Replace the persisted `input` on a tool/todo row, matched by its metadata
+  `tool_use_id` (charter D39). This is the living-checklist collapse: a later
+  TodoWrite in the SAME turn updates the turn's first todo row IN PLACE instead
+  of appending a fresh row, so replay reconstructs ONE final-state card. Clones
+  `attach_tool_result/3` (find by tool_use_id, changeset the metadata, update)
+  but writes `metadata.input` rather than `metadata.output`. `:noop` when no row
+  matches — an update for a row we never persisted must not raise.
+  """
+  def update_tool_input(session_id, tool_use_id, input)
+      when is_binary(session_id) and is_binary(tool_use_id) do
+    row =
+      Repo.one(
+        from(m in Message,
+          where:
+            m.session_id == ^session_id and
+              fragment("?->>'tool_use_id' = ?", m.metadata, ^tool_use_id),
+          limit: 1
+        )
+      )
+
+    case row do
+      nil ->
+        :noop
+
+      %Message{} = m ->
+        m
+        |> Ecto.Changeset.change(metadata: Map.put(m.metadata || %{}, "input", input))
+        |> Repo.update()
+    end
+  end
+
+  @doc """
+  True when a tool_use `input` is TodoWrite-shaped (charter D39): a non-empty
+  `todos` list where every item is a map carrying a `content` and a `status`.
+  Dispatch on SHAPE, never a tool NAME — names are host-binary-dependent (the
+  cmux binary lacks TodoWrite entirely, vanilla has it). Tolerant of both the
+  modern `{content, status, activeForm}` and legacy `{content, status, priority,
+  id}` item shapes.
+  """
+  @spec todo_shaped?(any()) :: boolean()
+  def todo_shaped?(%{"todos" => todos}) when is_list(todos) and todos != [] do
+    Enum.all?(todos, fn t -> is_map(t) and is_binary(t["content"]) and is_binary(t["status"]) end)
+  end
+
+  def todo_shaped?(_), do: false
+
+  @doc """
   Persist the user's picked model alias (nil = CLI default). Choice is intent
   (rides the next spawn as `--model`); the `model` column stays the observed
   answering model off the result frame.
