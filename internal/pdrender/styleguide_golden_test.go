@@ -38,6 +38,21 @@ func styleguideGolden(t *testing.T, name, got string) {
 	}
 }
 
+// adaptiveOf pulls the {light,dark} channels out of a resolved TerminalColor,
+// failing the test if it is not an AdaptiveColor. It is the load-bearing assert
+// of this golden: colors are read back OUT of the live styles the Theme builds,
+// so a thread onto the WRONG token (or a revert to a hand literal) moves the
+// rendered channels here — the only guard on pdrender's chrome/code/rule/terra/
+// label wiring, since every full-document golden is Ascii-stripped.
+func adaptiveOf(t *testing.T, label string, c lipgloss.TerminalColor) lipgloss.AdaptiveColor {
+	t.Helper()
+	ac, ok := c.(lipgloss.AdaptiveColor)
+	if !ok {
+		t.Fatalf("%s color is %T, want lipgloss.AdaptiveColor", label, c)
+	}
+	return ac
+}
+
 // TestPdrenderTokensGolden renders the status tones the Theme actually paints
 // plus the reading tokens. The tone colors are pulled back OUT of a live
 // Theme.Callout — not read straight from GenTone* — so this golden guards the
@@ -57,15 +72,40 @@ func TestPdrenderTokensGolden(t *testing.T) {
 		{"ok", "success"},
 		{"warn", "warning"},
 		{"danger", "danger"},
+		{"neutral", "neutral"},
 	}
 	for _, tone := range tones {
 		bar, _ := th.Callout(tone.callTo)
-		c, ok := bar.GetForeground().(lipgloss.AdaptiveColor)
-		if !ok {
-			t.Fatalf("callout %q bar foreground is %T, want lipgloss.AdaptiveColor", tone.callTo, bar.GetForeground())
-		}
+		c := adaptiveOf(t, "callout "+tone.callTo+" bar", bar.GetForeground())
 		b.WriteString(fmt.Sprintf("%-8s %-10s %s\n", tone.name, c.Light, c.Dark))
 	}
+
+	// Chrome / code / rule / terra / label — the ts-w2b threaded roles, read back
+	// out of the live styles the Theme builds. Each row proves the pd* var landed
+	// on the intended emitted token (chrome ink/dim are the zinc cliChrome set,
+	// NOT the warmer reading family — the decoy guard is checkable here).
+	b.WriteString("\npdrender chrome/reading roles (threaded onto tokens_gen.go)\n")
+	b.WriteString("role         light      dark\n")
+	b.WriteString("----------   -------    -------\n")
+	rows := []struct {
+		name string
+		c    lipgloss.TerminalColor
+	}{
+		{"accent", th.Accent},
+		{"ink", th.Heading[0].GetForeground()},   // pdInk
+		{"body", th.Body.GetForeground()},        // pdBody
+		{"dim", th.Dim.GetForeground()},          // pdDim
+		{"rule", th.Rule.GetForeground()},        // pdRule
+		{"code-fg", th.InlineCode.GetForeground()},
+		{"code-bg", th.InlineCode.GetBackground()},
+		{"terra", th.PullquoteBar.GetForeground()}, // pdTerra
+		{"label", th.FieldLabel.GetForeground()},   // pdLabel
+	}
+	for _, r := range rows {
+		c := adaptiveOf(t, "role "+r.name, r.c)
+		b.WriteString(fmt.Sprintf("%-12s %-10s %s\n", r.name, c.Light, c.Dark))
+	}
+
 	b.WriteString("\nreading tokens\n")
 	b.WriteString(fmt.Sprintf("font stack:     %s\n", GenReadingFontStack))
 	b.WriteString(fmt.Sprintf("heading weight: %d\n", GenReadingHeadingWeight))

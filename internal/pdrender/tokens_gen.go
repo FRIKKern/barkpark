@@ -13,6 +13,9 @@ var (
 	GenToneDanger = lipgloss.AdaptiveColor{Light: "#b42222", Dark: "#ef6161"}
 )
 
+// Generated neutral callout tone (design/tokens.json color.cliCalloutNeutral).
+var GenToneNeutral = lipgloss.AdaptiveColor{Light: "#374151", Dark: "#9ca3af"}
+
 // Generated chrome + reading-accent tokens (design/tokens.json color.* → hex).
 var (
 	GenPrimary       = lipgloss.AdaptiveColor{Light: "#1e5243", Dark: "#75c7ac"}
@@ -21,6 +24,16 @@ var (
 	GenDim           = lipgloss.AdaptiveColor{Light: "#71717a", Dark: "#a1a1aa"}
 	GenRule          = lipgloss.AdaptiveColor{Light: "#e4e4e7", Dark: "#27272a"}
 	GenReadingAccent = lipgloss.AdaptiveColor{Light: "#a23925", Dark: "#d98a6a"}
+)
+
+// Generated CLI-chrome tokens (design/tokens.json color.cliChrome → hex).
+// pdrender's own copy (it can't import internal/semrole); threaded by
+// theme.go's pdAccent/pdInk/pdBody/pdDim chrome vars.
+var (
+	GenChromeAccent        = lipgloss.AdaptiveColor{Light: "#1d4ed8", Dark: "#60a5fa"}
+	GenChromeInk           = lipgloss.AdaptiveColor{Light: "#18181b", Dark: "#e4e4e7"}
+	GenChromeTextSecondary = lipgloss.AdaptiveColor{Light: "#3f3f46", Dark: "#a1a1aa"}
+	GenChromeDim           = lipgloss.AdaptiveColor{Light: "#a1a1aa", Dark: "#52525b"}
 )
 
 // Generated code-block tones (design/tokens.json color.code → hex).
