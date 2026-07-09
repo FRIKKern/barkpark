@@ -12,7 +12,8 @@ import {
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
-import { readFileSync } from "node:fs";
+import { derive, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -380,6 +381,179 @@ if (failed === failedBeforeE)
     `  ok   ${ledgerRows.length} ledgered surface(s), ${ledgerActualTotal} hand-stamped ` +
     `literal(s) frozen — none grew, none silently shrank`
   );
+
+// ── Part F: theme compiler characterization (charter D12/D13/D14/D21) ─────────
+// The non-negotiable gate that guards the whole theme system: the compiler
+// (design/derive.mjs) fed the authored evergreen skin (design/themes/evergreen.json)
+// must reproduce design/tokens.json's theme-varying color slots BYTE-FOR-BYTE. A
+// compiler that retints evergreen to fit its own math has FAILED — so the acceptance
+// is exact identity, with every byte a formula can't hit PINNED in the theme's
+// `overrides` (each carrying a one-line reason) and the override COUNT frozen exactly
+// like Part E freezes literal counts: growth reds (a formula silently regressed),
+// shrink requires updating the frozen count in the SAME diff (a pin was retired).
+//
+//   • schema gate  — every themes/*.json is well-formed {bg,ink,accent}×mode, its
+//                     override keys are real slots with reasons, and its passthrough
+//                     declaration stays within the theme-INVARIANT family list (D21).
+//   • no-hole gate — derive's SLOTS contract === tokens' theme-varying leaf set, so a
+//                     new color family can't slip in underived (w4 must not find a hole).
+//   • byte gate    — derive(evergreen)[slot] === tokens[slot] for all ~146 leaves,
+//                     across HSL-triplet / #hex / rgba() / var(--role) formats.
+//   • ratchet      — the override count is frozen; evergreen derives MORE natively than
+//                     it pins (fit-first, D14 — a mostly-overrides compiler is vacuous).
+console.log("\ndesign/check.mjs — Part F: theme compiler characterization (derive(evergreen) === tokens)");
+const failedBeforeF = failed;
+
+// Frozen override counts, per theme. GROWTH reds (a formula regressed and now needs a
+// pin — fix the formula, don't grow the pin block); SHRINK requires lowering this in
+// the SAME diff (a pin was retired to a native derivation — the ratchet must follow).
+const OVERRIDE_COUNT_FROZEN = { evergreen: 56 };
+
+// tokens-side leaf reader: every theme-varying family lives under tokens.color
+// (ts-w3c moved paperEmail/paperCallout there — #1707).
+const tokenSlot = (path) =>
+  path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), tokens.color);
+
+// Collect every theme-varying color LEAF actually present in tokens.json (color.*
+// families minus declared passthroughs, plus the two top-level paper families) — the
+// ground truth the SLOTS contract is asserted against.
+function collectTokenLeaves() {
+  const PASS = new Set(PASSTHROUGH_FAMILIES);
+  const out = [];
+  const walk = (prefix, obj) => {
+    for (const [k, v] of Object.entries(obj)) {
+      if (k.startsWith("_")) continue;
+      const p = prefix ? `${prefix}.${k}` : k;
+      if (typeof v === "string") out.push(p);
+      else if (v && typeof v === "object") walk(p, v);
+    }
+  };
+  for (const [fam, v] of Object.entries(tokens.color)) {
+    if (fam.startsWith("_") || PASS.has(fam)) continue;
+    if (v && typeof v === "object") walk(fam, v);
+  }
+  return out;
+}
+
+const themesDir = join(here, "themes");
+const SLOT_SET = new Set(SLOTS);
+const PASS_SET = new Set(PASSTHROUGH_FAMILIES);
+
+// (1) schema-gate every committed theme file.
+let themeFiles = [];
+try { themeFiles = readdirSync(themesDir).filter((f) => f.endsWith(".json")); }
+catch (e) { fail(`  Part F FAIL: cannot read design/themes/ — ${e.message}`); }
+if (themeFiles.length === 0) fail("  Part F FAIL: no design/themes/*.json — the theme system has no authored theme");
+
+const themeCache = {};
+for (const f of themeFiles) {
+  let theme;
+  try { theme = JSON.parse(readFileSync(join(themesDir, f), "utf8")); }
+  catch (e) { fail(`  Part F FAIL: ${f} is not valid JSON — ${e.message}`); continue; }
+  themeCache[f] = theme;
+  const name = theme.name || f.replace(/\.json$/, "");
+
+  for (const m of ["light", "dark"]) {
+    const md = theme.modes && theme.modes[m];
+    if (!md || typeof md.bg !== "string" || typeof md.ink !== "string" || typeof md.accent !== "string")
+      fail(`  Part F FAIL: ${f} mode "${m}" must author {bg,ink,accent} as HSL strings`);
+  }
+  const overrides = theme.overrides || {};
+  const reasons = theme._overrideReasons || {};
+  for (const k of Object.keys(overrides)) {
+    if (!SLOT_SET.has(k))
+      fail(`  Part F FAIL: ${f} overrides an UNKNOWN slot "${k}" — not a derive SLOTS contract member (typo, or a slot the compiler doesn't emit)`);
+    if (!reasons[k])
+      fail(`  Part F FAIL: ${f} override "${k}" has no _overrideReasons entry — every pin must carry a one-line reason (why the formula can't hit it)`);
+  }
+  for (const p of theme.passthrough || []) {
+    if (!PASS_SET.has(p))
+      fail(`  Part F FAIL: ${f} declares passthrough "${p}" which is NOT a theme-invariant family (D21) — a derivable family cannot opt out of characterization`);
+  }
+  console.log(`  ok   schema: ${name} — {bg,ink,accent}×2 modes, ${Object.keys(overrides).length} reasoned override(s), ${(theme.passthrough || []).length} declared passthrough(s)`);
+}
+
+// (2) no-hole gate: the SLOTS contract must EXACTLY equal tokens' theme-varying leaf
+// set. A family present in tokens but absent from SLOTS = an underived hole (w4 would
+// discover it); a SLOT with no tokens leaf = a phantom contract entry. Also assert
+// every non-passthrough color family in tokens is covered by SLOTS (undeclared family).
+{
+  const leaves = collectTokenLeaves();
+  const leafSet = new Set(leaves);
+  const missing = leaves.filter((s) => !SLOT_SET.has(s));            // in tokens, not derived
+  const phantom = SLOTS.filter((s) => !leafSet.has(s));              // derived, not in tokens
+  if (missing.length)
+    fail(`  Part F FAIL: ${missing.length} tokens color leaf(s) are NOT in derive's SLOTS contract (undeclared/underived): ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? " …" : ""}`);
+  if (phantom.length)
+    fail(`  Part F FAIL: ${phantom.length} derive SLOTS entr(y/ies) have no tokens leaf (phantom contract): ${phantom.slice(0, 8).join(", ")}${phantom.length > 8 ? " …" : ""}`);
+  if (!missing.length && !phantom.length)
+    console.log(`  ok   contract: derive SLOTS (${SLOTS.length}) === tokens theme-varying leaves (${leaves.length}) — no underived hole, no phantom slot`);
+}
+
+// (3) byte gate + (4) override-count ratchet — evergreen is the shipped palette.
+const evergreenFile = themeFiles.find((f) => (themeCache[f]?.name || f) === "evergreen" || f === "evergreen.json");
+if (!evergreenFile) {
+  fail("  Part F FAIL: design/themes/evergreen.json is missing — evergreen IS the characterized shipped palette");
+} else {
+  const evergreen = themeCache[evergreenFile];
+  let result;
+  try { result = derive(evergreen); }
+  catch (e) { fail(`  Part F FAIL: derive(evergreen) threw — ${e.message}`); result = null; }
+  if (result) {
+    const { values, native, pinned } = result;
+    let byteMiss = 0, firstMiss = null;
+    for (const slot of SLOTS) {
+      const want = tokenSlot(slot);
+      const got = values[slot];
+      if (want === undefined) { fail(`  Part F FAIL: ${slot} — no tokens value to characterize against`); continue; }
+      if (got === undefined) { fail(`  Part F FAIL: ${slot} — derive produced no value (neither a formula nor an override covers it)`); continue; }
+      if (want !== got) {
+        byteMiss++;
+        if (!firstMiss) firstMiss = slot;
+        fail(`  Part F FAIL: ${slot} DRIFT — tokens ${JSON.stringify(want)} ≠ derive ${JSON.stringify(got)}. ` +
+          `The compiler retinted a shipped byte. Fix the formula OR pin it in evergreen.json overrides (with a reason) and raise the frozen count.`);
+      }
+    }
+    if (byteMiss === 0)
+      console.log(`  ok   bytes: derive(evergreen) reproduces all ${SLOTS.length} tokens slots exactly (HSL/hex/rgba/var formats)`);
+
+    // (4) override-count ratchet
+    const frozen = OVERRIDE_COUNT_FROZEN.evergreen;
+    if (pinned.length !== frozen) {
+      const dir = pinned.length > frozen ? "GREW" : "SHRANK";
+      fail(
+        `  Part F FAIL: evergreen override count ${dir} ${frozen} → ${pinned.length}. ` +
+        (pinned.length > frozen
+          ? "A formula regressed and now needs a pin — FIX THE FORMULA (or, if genuinely un-derivable, RAISE OVERRIDE_COUNT_FROZEN.evergreen in check.mjs IN THIS SAME DIFF with a note)."
+          : "A pin was retired to a native derivation (good!) — LOWER OVERRIDE_COUNT_FROZEN.evergreen to " + pinned.length + " IN THIS SAME DIFF so the ratchet holds.")
+      );
+    } else {
+      console.log(`  ok   ratchet: evergreen override count frozen at ${frozen} (${native.length} native / ${pinned.length} pinned = ${(100 * native.length / SLOTS.length).toFixed(1)}% native)`);
+    }
+
+    // fit-first floor (D14): the compiler must derive MORE than it pins, or it is
+    // vacuous. Applies to the shipped flagship only.
+    if (native.length <= pinned.length)
+      fail(`  Part F FAIL: evergreen is ${native.length} native / ${pinned.length} pinned — a majority-pinned compiler is vacuous (charter D13/D14). Derive more slots natively.`);
+
+    // per-family native/pinned tally (the PR-body table).
+    if (failed === failedBeforeF) {
+      const fam = (s) => (s.startsWith("paper.surface") ? "paper.surface" : s.startsWith("paper.reader") ? "paper.reader" : s.split(".")[0]);
+      const tally = {};
+      for (const s of SLOTS) { const k = fam(s); (tally[k] ||= { n: 0, p: 0 }); }
+      for (const s of native) tally[fam(s)].n++;
+      for (const s of pinned) tally[fam(s)].p++;
+      const pad = (x, n) => String(x).padEnd(n);
+      const w = Math.max(6, ...Object.keys(tally).map((k) => k.length));
+      console.log(`  ${pad("family", w)}  native  pinned`);
+      for (const k of Object.keys(tally))
+        console.log(`  ${pad(k, w)}  ${pad(tally[k].n, 6)}  ${tally[k].p}`);
+    }
+  }
+}
+
+if (failed === failedBeforeF)
+  console.log("  ok   Part F PASS — the theme compiler reproduces evergreen byte-for-byte; adding theme N+1 is one more design/themes/*.json.");
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {
